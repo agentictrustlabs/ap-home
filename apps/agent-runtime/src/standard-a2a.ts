@@ -67,7 +67,7 @@ export interface StandardMountDeps {
   /** Verifies a Home session token → the person's SA. */
   verifySession: (token: string) => Promise<{ ok: true; sa: Address } | { ok: false; status: number; error: string }>;
   /** Spec 372 S3c — the chain checks behind an AGENT's session wire. Absent ⇒ only people are admitted. */
-  wire?: Pick<SessionWirePrincipalDeps, 'enforcers' | 'verifyDelegationSig' | 'isRevoked'>;
+  wire?: Pick<SessionWirePrincipalDeps, 'enforcers' | 'verifyDelegationSig' | 'isRevoked' | 'verifyAgentSignature'>;
   /** Spec 372 S3c — spend a caller's assertion once, at the addressed agent's own object. */
   claimAssertion?: (agent: Address, digest: string, expiresAtMs: number) => Promise<boolean>;
   /** Spec 372 S4 — forward a 1.0 request to the agent's own object, where the delegation-authorized
@@ -178,7 +178,10 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           if (!message) { await ctx.reject([{ text: 'Say what you would like this agent to do — the message carried no text.' }]); return; }
           await ctx.working();
           const asked = await deps.askAsAgent({ agent: ctx.principal.agent as Address, addressee: agent, ask: message, runRef: `svc-${ctx.task.id}` });
-          const words = asked.spoken || asked.reply.text || '';
+          // THE WRITTEN REPLY, not the spoken one. `spoken` is rendered for a voice — it says "alice2 dot
+          // treasury" — and an A2A peer reading that gets a mangled name it cannot resolve (seen live,
+          // 2026-09-08). A voice surface asks for `spoken`; this wire wants what was written.
+          const words = asked.reply.text || asked.spoken || '';
           if (asked.reply.kind === 'answer' || asked.reply.kind === 'done') { await ctx.complete([{ text: words || 'Done.' }]); return; }
           if (asked.reply.kind === 'prompt') { await ctx.inputRequired([{ text: asked.reply.prompt?.prompt ?? words }, { data: asked.reply.prompt ?? {} }]); return; }
           if (asked.reply.kind === 'authority_required') { await ctx.authRequired([{ text: words || 'This needs a mandate no one has granted.' }]); return; }
@@ -200,7 +203,8 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
         if (!env || env.ok === false || !env.reply) { await ctx.fail([{ text: [env?.error ?? `the ask answered ${res.status}`, env?.detail].filter(Boolean).join(': ') }]); return; }
         const r = env.reply;
         ctx.task.metadata = { ...(ctx.task.metadata ?? {}), ...(r.runRef ? { runRef: r.runRef } : {}), ...(r.prompt?.stepRef ? { promptStepRef: r.prompt.stepRef } : {}) };
-        const said = env.spoken || r.text || r.summary || '';
+        // Written first, for the same reason: this is a wire, not a speaker.
+        const said = r.text || r.summary || env.spoken || '';
         switch (r.kind) {
           case 'answer': {
             if (r.results?.length) await ctx.artifact({ name: 'results', parts: [{ data: r.results }] });

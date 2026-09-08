@@ -1078,6 +1078,13 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
           address: dm, abi: IS_REVOKED_ABI_FOR_STANDING, functionName: 'isRevoked',
           args: [hashDelegation(d, chainId, dm)],
         })) === true,
+        // An agent that holds its own credential proves itself directly (spec 372 S4) — the same
+        // ERC-1271 read the retired `caller` + `signature` params used, now over an assertion that
+        // also binds the method, the body, the host and the moment.
+        verifyAgentSignature: async (who, digest, signature) => (await deps.readContract({
+          address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig',
+          args: [who, digest, signature],
+        })) === true,
       },
     } : {}),
     askAsAgent: (input) => runAgentAsk(c.env, input),

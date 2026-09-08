@@ -48,9 +48,11 @@ import {
   buildA2aGrantCaveats,
   skillSelector,
   hashA2aMessage,
-  hashA2aTaskRequest,
   type A2aEnforcers,
 } from '@agenticprimitives/a2a';
+import {
+  callerAssertionDigest, delegatedInputPart, requestBodyHash, sessionAuthorizationHeader, withDelegatedTask,
+} from '@agenticprimitives/a2a/standard';
 import {
   namehash,
   buildSubregistryRegisterCall,
@@ -104,18 +106,44 @@ async function relayer(path: string, body: unknown): Promise<any> {
   if (!r.ok) throw new Error(`POST ${path} → HTTP ${r.status}: ${text.slice(0, 400)}`);
   return j;
 }
-/** message/send + tasks/* go to the EDGE (admission), addressed by B's handle. CSRF-exempt. */
-async function edgeRpc(handle: string, method: string, params: unknown): Promise<any> {
-  const r = await fetch(`${EDGE_BASE}/api/a2a/${handle}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  });
+/**
+ * The A2A 1.0 wire, at the EDGE (admission), addressed by the target's handle (spec 372 S4 — the fold).
+ *
+ * `signAs` proves WHO IS CALLING: the caller signs an assertion over `{agent, method, bodyHash, issuedAt,
+ * audience}` and presents it in the `Authorization` header. That replaced `caller` + `signature` params on
+ * the read/control methods, and binds strictly more than the old digest did. Sending a delegated task needs
+ * no header — the envelope inside the extension is signed — but presenting one is free and honest.
+ */
+async function edgeRpc(handle: string, method: string, params: unknown, signAs?: { agent: Address; sign: (d: Hex) => Promise<Hex> }): Promise<any> {
+  const url = `${EDGE_BASE}/api/a2a/${handle}`;
+  const raw = JSON.stringify({ jsonrpc: '2.0', id: 1, method, params });
+  const headers: Record<string, string> = { 'content-type': 'application/json', 'a2a-version': '1.0' };
+  if (signAs) {
+    const base = { agent: signAs.agent, method, bodyHash: requestBodyHash(raw), issuedAt: Math.floor(Date.now() / 1000), audience: new URL(url).origin };
+    headers.authorization = sessionAuthorizationHeader({ ...base, signature: await signAs.sign(callerAssertionDigest(base)) });
+  }
+  const r = await fetch(url, { method: 'POST', headers, body: raw });
   const text = await r.text();
   let j: any;
   try { j = JSON.parse(text); } catch { j = { _raw: text, _status: r.status }; }
   return j;
 }
+
+/** A delegation-authorized task as a 1.0 `SendMessage` (spec 372 S4): the grant and the signed envelope
+ *  ride the delegated-task extension, and the input is the message's data part. */
+const delegatedSend = (p: { delegation: unknown; requester: Address; message: { messageId: Hex; sender: Address; skill: string; bodyRef: unknown; bodyHash: Hex; signature: Hex; createdAt: number }; input: unknown }) => ({
+  message: withDelegatedTask(
+    { messageId: p.message.messageId, role: 'ROLE_USER' as const, parts: [delegatedInputPart(p.input)] },
+    {
+      delegation: p.delegation as never, requester: p.requester, skill: p.message.skill, sender: p.message.sender,
+      bodyHash: p.message.bodyHash, bodyRef: p.message.bodyRef as never, signature: p.message.signature, createdAt: p.message.createdAt,
+    },
+  ),
+});
+/** The 1.0 task, read the way this script cares about it. */
+const stateOf = (t: any): string => String(t?.status?.state ?? '').replace(/^TASK_STATE_/, '').toLowerCase().replace('_', '-');
+const artifactsOf = (t: any): unknown[] => t?.artifacts ?? [];
+
 const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
 const rand32 = (): Hex => toHex(randomBytes(32));
 const now = () => Math.floor(Date.now() / 1000);
@@ -355,16 +383,16 @@ async function runRail(name: string): Promise<{ name: string; ok: boolean; detai
   // replica the resolver hits — a -32004 "no Smart Agent" right after deploy is propagation lag, not a miss.
   let send: any;
   for (let i = 0; i < 10; i++) {
-    send = await edgeRpc(B.label, 'message/send', { delegation, requester: A, message, input });
+    send = await edgeRpc(B.label, 'SendMessage', delegatedSend({ delegation, requester: A, message, input }));
     if (!(send.error?.code === -32004)) break;
     process.stdout.write(`  … awaiting name propagation (attempt ${i + 1})\r`);
     await sleep(3000);
   }
   console.log('');
-  if (send.error || !send.result?.taskId) {
+  if (send.error || !send.result?.task?.id) {
     return { name, ok: false, detail: `message/send rejected: ${JSON.stringify(send).slice(0, 500)}` };
   }
-  const taskId = send.result.taskId as Hex;
+  const taskId = send.result.task.id as Hex;
   console.log(`  ✓ authorized — taskId=${taskId} (1271 delegation + 1271 message + allowedTargets=B + allowedMethods=orchestrate + budget OK)`);
 
   // poll tasks/get (A-signed caller-proof) until terminal
@@ -372,30 +400,29 @@ async function runRail(name: string): Promise<{ name: string; ok: boolean; detai
   let task: any = null;
   for (let i = 0; i < 30; i++) {
     await sleep(2000);
-    const sig = await rail.signDigest(hashA2aTaskRequest({ method: 'tasks/get', taskId, agentSA: B.sa, chainId: D.chainId }));
-    const got = await edgeRpc(B.label, 'tasks/get', { taskId, caller: A, signature: sig });
-    if (got.error) { console.log(`  … tasks/get error: ${JSON.stringify(got.error).slice(0, 200)}`); continue; }
+    const got = await edgeRpc(B.label, 'GetTask', { id: taskId }, { agent: A, sign: (d) => rail.signDigest(d) });
+    if (got.error) { console.log(`  … GetTask error: ${JSON.stringify(got.error).slice(0, 200)}`); continue; }
     task = got.result;
-    process.stdout.write(`  … state=${task?.state}\r`);
-    if (task && TERMINAL.has(task.state)) break;
+    process.stdout.write(`  … state=${stateOf(task)}\r`);
+    if (task && TERMINAL.has(stateOf(task))) break;
   }
   console.log('');
   if (!task) return { name, ok: false, detail: 'tasks/get never returned a task' };
 
-  const artifacts = task.artifactRefs ?? [];
+  const artifacts = artifactsOf(task);
   const taskErr = task.error ?? task.status?.message ?? task.statusMessage ?? null;
-  console.log(`  task state=${task.state} · artifacts=${artifacts.length}${taskErr ? ` · error=${JSON.stringify(taskErr).slice(0, 160)}` : ''}`);
+  console.log(`  task state=${stateOf(task)} · artifacts=${artifacts.length}${taskErr ? ` · error=${JSON.stringify(taskErr).slice(0, 160)}` : ''}`);
   // The canonical spine is PROVEN by: taskId returned (full authority gate) + a terminal state (dispatch +
   // orchestrate + MCP composition ran). 'completed' = data returned; 'failed' on a fresh unbound principal =
   // fail-closed at the data layer (expected) — still proves the path reached MCP.
-  const spineProven = TERMINAL.has(task.state);
-  const gold = task.state === 'completed';
+  const spineProven = TERMINAL.has(stateOf(task));
+  const gold = stateOf(task) === 'completed';
   return {
     name,
     ok: spineProven,
     detail: gold
       ? `taskId issued + COMPLETED + ${artifacts.length} artifact(s) — B read A's PII under A's delegation`
-      : `taskId issued + state=${task.state}${artifacts.length ? ` + ${artifacts.length} artifact(s)` : ''}${taskErr ? ` (${String(taskErr).slice(0, 80)})` : ''}`,
+      : `taskId issued + state=${stateOf(task)}${artifacts.length ? ` + ${artifacts.length} artifact(s)` : ''}${taskErr ? ` (${String(taskErr).slice(0, 80)})` : ''}`,
   };
 }
 
@@ -476,14 +503,14 @@ async function runCrossPrincipal(name: string): Promise<{ name: string; ok: bool
   console.log(`  → POST message/send to EDGE /api/a2a/${aliceLabel}  (Alice signed the grant · Bob signs the message)`);
   let send: any;
   for (let i = 0; i < 10; i++) {
-    send = await edgeRpc(aliceLabel, 'message/send', { delegation, requester: bob, message, input });
+    send = await edgeRpc(aliceLabel, 'SendMessage', delegatedSend({ delegation, requester: bob, message, input }));
     if (!(send.error?.code === -32004)) break;
     process.stdout.write(`  … awaiting Alice name propagation (attempt ${i + 1})\r`);
     await sleep(3000);
   }
   console.log('');
-  if (send.error || !send.result?.taskId) return { name: label, ok: false, detail: `message/send rejected: ${JSON.stringify(send).slice(0, 500)}` };
-  const taskId = send.result.taskId as Hex;
+  if (send.error || !send.result?.task?.id) return { name: label, ok: false, detail: `SendMessage rejected: ${JSON.stringify(send).slice(0, 500)}` };
+  const taskId = send.result.task.id as Hex;
   console.log(`  ✓ authorized — taskId=${taskId}`);
   console.log(`    gate: delegate(Bob)==requester · allowedTargets=Alice's agent · 1271(Alice signed grant) · 1271(Bob signed msg) · principal=Alice`);
 
@@ -491,21 +518,20 @@ async function runCrossPrincipal(name: string): Promise<{ name: string; ok: bool
   let task: any = null;
   for (let i = 0; i < 30; i++) {
     await sleep(2000);
-    // tasks/get caller-proof signed by BOB (the caller), over the request bound to Alice's agent.
-    const sig = await bobRail.signDigest(hashA2aTaskRequest({ method: 'tasks/get', taskId, agentSA: alice, chainId: D.chainId }));
-    const got = await edgeRpc(aliceLabel, 'tasks/get', { taskId, caller: bob, signature: sig });
-    if (got.error) { console.log(`  … tasks/get error: ${JSON.stringify(got.error).slice(0, 200)}`); continue; }
+    // The caller-proof is the Authorization header now, signed by BOB and bound to this very request.
+    const got = await edgeRpc(aliceLabel, 'GetTask', { id: taskId }, { agent: bob, sign: (d) => bobRail.signDigest(d) });
+    if (got.error) { console.log(`  … GetTask error: ${JSON.stringify(got.error).slice(0, 200)}`); continue; }
     task = got.result;
     process.stdout.write(`  … state=${task?.state}\r`);
-    if (task && TERMINAL.has(task.state)) break;
+    if (task && TERMINAL.has(stateOf(task))) break;
   }
   console.log('');
   if (!task) return { name: label, ok: false, detail: 'tasks/get never returned a task' };
   const artifacts = task.artifactRefs ?? [];
   const taskErr = task.error ?? task.status?.message ?? task.statusMessage ?? null;
-  console.log(`  task state=${task.state} · artifacts=${artifacts.length}${taskErr ? ` · error=${JSON.stringify(taskErr).slice(0, 160)}` : ''}`);
-  const spineProven = TERMINAL.has(task.state);
-  const gold = task.state === 'completed';
+  console.log(`  task state=${stateOf(task)} · artifacts=${artifacts.length}${taskErr ? ` · error=${JSON.stringify(taskErr).slice(0, 160)}` : ''}`);
+  const spineProven = TERMINAL.has(stateOf(task));
+  const gold = stateOf(task) === 'completed';
 
   // spec 291-A — having proven the cross-principal spine, demonstrate FIELD-SCOPING: a DATA_SCOPE'd grant
   // restricts what Bob reads. (Only meaningful once demo-mcp with the scoping change is deployed.)
@@ -519,7 +545,7 @@ async function runCrossPrincipal(name: string): Promise<{ name: string; ok: bool
     name: label, ok: spineProven,
     detail: gold
       ? `taskId issued + COMPLETED — Bob (delegate) read Alice's PII via Alice's grant; principal=Alice, terminated at Alice's agent/MCP${scopeNote}`
-      : `taskId issued + state=${task.state}${artifacts.length ? ` + ${artifacts.length} artifact(s)` : ''}${taskErr ? ` (${String(taskErr).slice(0, 80)})` : ''}`,
+      : `taskId issued + state=${stateOf(task)}${artifacts.length ? ` + ${artifacts.length} artifact(s)` : ''}${taskErr ? ` (${String(taskErr).slice(0, 80)})` : ''}`,
   };
 }
 
