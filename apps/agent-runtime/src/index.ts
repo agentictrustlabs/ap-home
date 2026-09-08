@@ -118,6 +118,8 @@ import { toErrorCode } from './harness-workflow-core.js';
 export { HarnessApprovalWorkflow };
 import { claimableBy, receiptEvidence } from './endeavor-authority-steps.js';
 import { internalHeaders, isInternalCall } from './internal-marker.js';
+import { isStandardA2aMethod, standardServerFor, withStandardCardFields } from './standard-a2a.js';
+import type { AgentCardV1 } from '@agenticprimitives/a2a/standard';
 import { chainStewardshipCheck, deriveStanding } from '@agenticprimitives/context';
 import { charteredAgentsReader, charteredOwnerReader } from './chartered-agents.js';
 import { relationshipRows } from '@agenticprimitives/context';
@@ -1038,6 +1040,29 @@ async function liveCardFor(env: Env, ctx: AgentHostContext): Promise<Record<stri
   return buildA2aAgentCard(ctx, Number(env.CHAIN_ID), skills, env.DEMO_EDGE_URL?.trim() || undefined, !!env.SKILLS_CORPUS_URL?.trim());
 }
 
+/** Spec 372 S2 — the live card with its A2A 1.0 fields (interface version, modes, named skills, the
+ *  bearer scheme). The message url is the one the Worker already advertises. */
+function standardCardFor(live: Record<string, unknown>): Record<string, unknown> {
+  const iface = (Array.isArray(live.supportedInterfaces) ? live.supportedInterfaces[0] : null) as { url?: string } | null;
+  return withStandardCardFields(live, { messageUrl: iface?.url ?? '' });
+}
+
+/** Spec 372 S2 — a 1.0 method on `/api/a2a` is served by the standard surface mounted for this agent: the
+ *  bearer is the Home session, the executor is the ask, in-process. The profile's methods pass through. */
+async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostContext, raw: string): Promise<Response> {
+  // The agent was resolved by the ROUTE (subdomain Host or the edge's `/api/a2a/<handle>` path) — never
+  // re-derived from the Host here, which on the edge path is the edge's own hostname (a 500 on 2026-09-08).
+  const agent = ctx.agent as Address;
+  const host = new URL(ctx.publicOrigin).host;
+  const card = standardCardFor(await liveCardFor(c.env, ctx)) as unknown as AgentCardV1;
+  const server = standardServerFor(agent, card, host, {
+    env: c.env as never,
+    appFetch: async (req, env) => app.fetch(req, env as Env, c.executionCtx),
+    verifySession: (token) => verifyHomeSession(token, c.env),
+  });
+  return server.handle(new Request(c.req.url, { method: 'POST', headers: c.req.raw.headers, body: raw }));
+}
+
 /** A2A AgentCard discovery — agent-bound when a subdomain resolves, else generic. */
 async function serveAgentCard(c: Context<{ Bindings: Env }>): Promise<Response> {
   const reqOrigin = new URL(c.req.url).origin;
@@ -1056,7 +1081,7 @@ async function serveAgentCard(c: Context<{ Bindings: Env }>): Promise<Response> 
       return new Response(entry.bytes, { headers: { 'content-type': 'application/json; charset=utf-8', etag: `"${entry.digest}"`, 'x-ap-card-digest': entry.digest, 'x-ap-card-release': entry.releaseId, 'x-ap-card-source': 'released' } });
     }
   }
-  const live = await liveCardFor(c.env, ctx);
+  const live = standardCardFor(await liveCardFor(c.env, ctx));
   // Live-truth card (ADR-0059): digest over the RFC 8785 canonical bytes (signatures stripped), so a
   // released card's digest and this one are comparable without either side re-implementing anything.
   const digest = cardContentDigest(live as { signatures?: unknown });
@@ -2524,6 +2549,7 @@ app.post('/api/a2a', async (c) => {
   if (!ctx.agent) {
     return c.json({ jsonrpc: '2.0', id: null, error: { code: -32004, message: `no Smart Agent for ${ctx.name}` } }, 404);
   }
+  if (isStandardA2aMethod(raw)) return serveStandardA2a(c, ctx, raw);
   return forwardA2aTask(c, ctx.agent, raw);
 });
 
@@ -2537,6 +2563,7 @@ app.post('/api/a2a/:handle', async (c) => {
   if (!ctx.agent) {
     return c.json({ jsonrpc: '2.0', id: null, error: { code: -32004, message: `no Smart Agent for ${ctx.name ?? c.req.param('handle')}` } }, 404);
   }
+  if (isStandardA2aMethod(raw)) return serveStandardA2a(c, ctx, raw);
   return forwardA2aTask(c, ctx.agent, raw);
 });
 

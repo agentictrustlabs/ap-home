@@ -59,6 +59,10 @@ proxies selected MCP requests during local demos.
   as itself with no mandate; an act parks open to stewards; `POST /harness/triggers` + `/triggers/fire` (stewards).
   **Spec 371:** reads declare `answers`/`answer`; `balance-read.ts` (`treasury.balance.read`) renders
   "alice2.treasury holds 190.1 USDC."; question admission + a question-fidelity check on the composer.
+  **Spec 372 S2 (`standard-a2a.ts`):** `POST /api/a2a` serves the A2A **1.0** PascalCase methods too — the
+  Home session as a bearer is the principal, the executor is `/harness/ask` in-process, the reply kind is
+  the task state (`prompt` → INPUT_REQUIRED, `authority_required` → AUTH_REQUIRED). The live card gains the
+  1.0 fields; a released card is untouched. A door, never a grant.
 
 ## What this app does not own
 
