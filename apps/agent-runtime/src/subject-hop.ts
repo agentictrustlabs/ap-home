@@ -16,8 +16,11 @@ import { AP_SUBJECT_ASK_EXTENSION_URI, validateSubjectAsk, type SubjectAskV1, ty
 import type { AgentCardV1, MessageV1, TaskV1 } from '@agenticprimitives/a2a/standard';
 
 /** The A2A 1.0 JSON-RPC endpoint a card publishes, or null when it publishes none. */
-export function a2aEndpointOf(card: Pick<AgentCardV1, 'supportedInterfaces'> | null | undefined): string | null {
-  const hit = (card?.supportedInterfaces ?? []).find((i) => i.protocolBinding === 'JSONRPC' && /^1\./.test(String(i.protocolVersion ?? '')) && typeof i.url === 'string' && /^https:\/\//.test(i.url));
+export function a2aEndpointOf(card: (Pick<AgentCardV1, 'supportedInterfaces'> & { protocolVersion?: string }) | null | undefined): string | null {
+  // A RELEASED card (the Studio's, signed) states the protocol version ONCE at the top; the live card
+  // states it per interface. Either says 1.x or the interface is not one this hop can use.
+  const top = /^1\./.test(String(card?.protocolVersion ?? ''));
+  const hit = (card?.supportedInterfaces ?? []).find((i) => i.protocolBinding === 'JSONRPC' && (/^1\./.test(String(i.protocolVersion ?? '')) || (i.protocolVersion === undefined && top)) && typeof i.url === 'string' && /^https:\/\//.test(i.url));
   return hit?.url ?? null;
 }
 

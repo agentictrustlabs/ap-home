@@ -56,7 +56,7 @@ export interface HarnessRunCheckpointV1 {
   /** What the run is waiting for, for a surface that lists pending work. `expiresAt` (spec 370 P1) is
    *  when waiting stops being resumable: a signature or confirmation is asked against a mandate minted
    *  for minutes, and a run past its window reads EXPIRED rather than pending forever. */
-  awaiting?: { kind: 'data' | 'signature' | 'confirmation' | 'commitment'; prompt: string; stepRef: string; expiresAt?: number;
+  awaiting?: { kind: 'data' | 'signature' | 'confirmation' | 'commitment' | 'authority'; prompt: string; stepRef: string; expiresAt?: number;
     /** Spec 374 — when `kind` is `commitment`: what another agent owes this run, and where it waits. */
     commitment?: CommitmentRefV1 };
   /**
@@ -78,6 +78,9 @@ export interface HarnessRunCheckpointV1 {
    *  is DELIVERED to the creditor's agent, which resumes the run that asked. The correlation is the
    *  creditor's (spec 366 R2), echoed so the creditor can match it to exactly one suspended step. */
   routedFrom?: { creditor: Address; correlation: { operationId: string; runRef: string; stepRef: string } };
+  /** Spec 374 W2 — where each ROUTED step of this run waits at the subject's agent, so a resume carries the
+   *  asker's mandate or answer to THAT run as a continuation rather than asking the subject afresh. */
+  routedAt?: Record<string, { agent: Address; name?: string; runRef: string }>;
   /** Spec 370 P1 tail — when this run stops being resumable, whatever it waits for. An authority request
    *  waits for a mandate minted for THIS request, minutes not days; 240 of them listed as "unfinished"
    *  was a day's asks a person had simply walked away from. Absent on older rows ⇒ `updatedAt`-based. */
@@ -195,7 +198,7 @@ export function mergeTurn(
 /** How long a wait stays resumable (spec 370 P1). A signature or a confirmation answers a mandate minted
  *  for the request — minutes, not days — so half an hour is generous; a data question (which Nathan?)
  *  has no mandate yet and may wait two hours — after that the person has moved on, and asking again costs less than a list of ghosts. */
-export const AWAIT_WINDOW_MS: Record<'data' | 'signature' | 'confirmation' | 'commitment', number> = { data: 2 * 3600_000, signature: 30 * 60_000, confirmation: 30 * 60_000,
+export const AWAIT_WINDOW_MS: Record<'data' | 'signature' | 'confirmation' | 'commitment' | 'authority', number> = { data: 2 * 3600_000, signature: 30 * 60_000, confirmation: 30 * 60_000, authority: 30 * 60_000,
   // Spec 374 — a commitment waits on ANOTHER agent's steward, on that agent's clock; a day is the outer bound here.
   commitment: 24 * 3600_000 };
 

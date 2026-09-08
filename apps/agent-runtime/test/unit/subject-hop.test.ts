@@ -56,6 +56,9 @@ describe('the wire shape', () => {
     expect(a2aEndpointOf(card)).toBe(`https://${HOST}/api/a2a`);
     expect(a2aEndpointOf({ supportedInterfaces: [{ url: 'https://x/grpc', protocolBinding: 'GRPC', protocolVersion: '1.0' }] })).toBeNull();
     expect(a2aEndpointOf({ supportedInterfaces: [{ url: 'http://x/api', protocolBinding: 'JSONRPC', protocolVersion: '1.0' }] })).toBeNull();
+    // A released card says the version once, at the top (missio-nexus.org's, live): the interface inherits it.
+    expect(a2aEndpointOf({ protocolVersion: '1.0', supportedInterfaces: [{ url: 'https://edge.example/api/a2a/x.org', protocolBinding: 'JSONRPC' } as never] })).toBe('https://edge.example/api/a2a/x.org');
+    expect(a2aEndpointOf({ protocolVersion: '0.3', supportedInterfaces: [{ url: 'https://edge.example/api/a2a/x.org', protocolBinding: 'JSONRPC' } as never] })).toBeNull();
   });
   it('the message carries the profile as metadata and declares the extension; it reads back validated', () => {
     const m = subjectAskMessage(profile);

@@ -767,7 +767,7 @@ export interface HarnessDeps {
    * with no standing there gets the same refusal by either route. Absent ⇒ the step is refused in words
    * (never a local read of the other agent's records — ADR-0013, one mechanism).
    */
-  askSubjectAgent?: (input: { subject: Address; toolId: string; args: Record<string, unknown>; goal: string; asker?: Address; session?: string; correlation: { operationId: string; runRef: string; stepRef: string; intentDigest: string } }) => Promise<SubjectAnswerV1>;
+  askSubjectAgent?: (input: { subject: Address; toolId: string; args: Record<string, unknown>; goal: string; asker?: Address; session?: string; correlation: { operationId: string; runRef: string; stepRef: string; intentDigest: string }; /** Spec 374 W2 — continue the receiver's parked run with what this turn presented/supplied. */ continue?: { runRef: string; presented?: unknown[]; supplied?: unknown[] } }) => Promise<SubjectAnswerV1>;
   /** Reverse name lookup for an address (public directory, ADR-0040). Names roster rows; best-effort. */
   nameOf?: (address: string) => Promise<string | null>;
   /** Spec 366 R2/R3 — set by the receiver of a ROUTED ask, once per request: the wires the asker presented
@@ -810,6 +810,9 @@ export interface SubjectAnswerV1 {
    *  where it waits, `said` is its words. An act on this becomes a commitment; a read relays the words. */
   needs?: boolean;
   said?: string;
+  /** Spec 374 W2 — WHAT the receiver needs, whole: its authority request (requirement, delegator, …) or
+   *  its prompt, so a steward asker can be asked for it here and carry it back. */
+  needsWhat?: unknown;
 }
 
 /**
@@ -854,7 +857,7 @@ export interface AskReplyEnvelopeV1 {
  * prompt it raised, an authority it needs) — never retried, never guessed. Reading `kind` off the
  * ENVELOPE instead of `reply` made every real answer read as "needs more" (caught live 2026-09-07).
  */
-export function readSubjectReply(envelope: (AskReplyEnvelopeV1 & { subjectAnswer?: SubjectAnswerProfileV1 }) | null, toolId: string, who: string, status: number): { ok: boolean; result?: unknown; refused?: string; needs?: boolean; said?: string; runRef?: string; receipts?: Array<{ stepRef: string; capability?: string; status: string }> } {
+export function readSubjectReply(envelope: (AskReplyEnvelopeV1 & { subjectAnswer?: SubjectAnswerProfileV1 }) | null, toolId: string, who: string, status: number): { ok: boolean; result?: unknown; refused?: string; needs?: boolean; said?: string; needsWhat?: unknown; runRef?: string; receipts?: Array<{ stepRef: string; capability?: string; status: string }> } {
   if (!envelope) return { ok: false, refused: `${who} answered with something that was not a reply (${status})` };
   // THE PROFILE ANSWER, when the receiver speaks it (spec 366 R2): typed outcome, the receiver's own run and
   // receipts naming our request. A receiver that does not speak the profile answers with the plain reply.
@@ -865,7 +868,7 @@ export function readSubjectReply(envelope: (AskReplyEnvelopeV1 & { subjectAnswer
     // Spec 374 — `needs` from the receiver means it PARKED the act for its own steward (or asked the
     // asker something); the run reference is where it waits, and the caller decides whether that is a
     // commitment (an act) or a relayed question (a read).
-    return { ok: false, refused: `${who} ${sa.outcome === 'refused' ? 'refused' : sa.outcome === 'needs' ? 'needs more before it can answer —' : 'could not answer:'} ${sa.said ?? ''}`.trim(), ...(sa.outcome === 'needs' ? { needs: true, said: sa.said ?? '' } : {}), runRef: sa.run?.runRef, receipts };
+    return { ok: false, refused: `${who} ${sa.outcome === 'refused' ? 'refused' : sa.outcome === 'needs' ? 'needs more before it can answer —' : 'could not answer:'} ${sa.said ?? ''}`.trim(), ...(sa.outcome === 'needs' ? { needs: true, said: sa.said ?? '', ...(sa.result !== undefined ? { needsWhat: sa.result } : {}) } : {}), runRef: sa.run?.runRef, receipts };
   }
   if (envelope.ok === false || envelope.error) return { ok: false, refused: `${who} refused: ${envelope.error ?? status}` };
   const reply = envelope.reply;
@@ -1726,6 +1729,8 @@ export interface HarnessRunInput {
   onProgress?: (line: Omit<ProgressLineV1, 'seq' | 'at'>) => void;
   /** Spec 370 P6 — REPLAY a recorded run: its plan is the plan, its observations answer every step, and
    *  every gate runs again against the world as it is now. Nothing executes. */
+  /** Spec 374 W2 — where each routed step of this run waits, from the checkpoint (a resume continues THAT run). */
+  routedAt?: Record<string, { agent: Address; name?: string; runRef: string }>;
   replayOf?: RunRecordV1;
   /** Spec 370 P7 — the asker's own recent turns (their vault's `conversation.recent`). Shown to the
    *  planner as words, handed to the resolver for pronouns and repeated names. NEVER part of the intent:
@@ -1939,6 +1944,9 @@ export type AskReplyVariant =
        */
       results?: Array<{ toolId: string; result: unknown }> }
   | { kind: 'authority_required'; runRef: string; requirement: MandateRequirementV1; delegate: Address; delegator: Address; capability: string; stepRef: string; summary: string;
+      /** Spec 374 W2 — this authority is the SUBJECT'S request, relayed: the step waits at that agent, and
+       *  the mandate the asker grants travels there on resume. Absent ⇒ a local step. */
+      routedAt?: { agent: Address; name?: string; runRef: string };
       /** What the ASKER is to the delegator, derived (spec 353 S5). Absent when nothing could read it —
        *  which is not "no standing", so a surface must not render absence as a refusal. */
       standing?: Standing; note?: string;
@@ -1957,6 +1965,8 @@ export type AskReplyVariant =
    *  delivered answer moves it. `on` is where the act actually waits; `commitment` is the record. */
   | { kind: 'waiting'; runRef: string; stepRef: string; text: string; on: { agent: Address; name?: string; runRef: string }; commitment: CommitmentRefV1 }
   | { kind: 'done'; runRef: string; result: unknown; receipts: RunResult['receipts']; skillProvenance?: Record<string, unknown>;
+      /** Spec 366/374 — which steps were DONE BY ANOTHER AGENT (a routed act): the subject, how it was reached, its run. */
+      routed?: RoutedStepV1[];
       /** Spec 367 §6 — what the acted step ESTABLISHED, in its outcome class's words; a surface says no more than this. */
       fulfillment?: { capability: string; established: OutcomeClass; evidence?: string; words: string };
       /** Spec 361 — where the outcome LIVES: the acted capability's contract-declared binding, so a surface
@@ -3027,6 +3037,18 @@ async function askReplyForInner(env: HarnessEnv, input: {
         };
       }
     }
+    if (r.prompt.kind === 'authority') {
+      // Spec 374 W2 — the subject's authority request, as this asker's own. Delegator, delegate and the
+      // requirement are the RECEIVER's words (it minted them; its verifier judges the mandate); `routedAt`
+      // is where the step waits, so the resume carries the mandate there.
+      const a = r.prompt.authority as { requirement: MandateRequirementV1; delegator: Address; delegate: Address; capability?: string; alsoApprove?: unknown[]; standing?: Standing; summary?: string; note?: string; parties?: ResolvedParty[] };
+      return {
+        kind: 'authority_required', runRef: r.runRef, requirement: a.requirement, delegator: a.delegator, delegate: a.delegate,
+        capability: a.capability ?? r.prompt.toolId, stepRef: r.prompt.stepRef, summary: a.summary ?? `${a.capability ?? r.prompt.toolId} on ${a.delegator}`,
+        ...(a.alsoApprove ? { alsoApprove: a.alsoApprove as never } : {}), ...(a.standing ? { standing: a.standing } : {}), ...(a.note ? { note: a.note } : {}), ...(a.parties ? { parties: a.parties } : {}),
+        routedAt: r.prompt.at,
+      } as AskReply;
+    }
     if (r.prompt.kind === 'commitment') {
       const cm = r.prompt.commitment;
       const name = cm.at.name ?? cm.at.agent;
@@ -3085,7 +3107,7 @@ async function askReplyForInner(env: HarnessEnv, input: {
           ? `${CAPABILITY_WORDS[actedCap] ?? actedCap}: submitted and recorded — the outcome is not established until the other party acts`
           : `${CAPABILITY_WORDS[actedCap] ?? actedCap}: done${res.txHash ? ', on chain' : ''}`) + mail,
       } : undefined;
-      return withProv({ kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts, ...(fulfillment ? { fulfillment } : {}), ...(next ? { next } : {}), ...(effects.length ? { effects } : {}), ...(decided.length ? { decisions: decided } : {}), ...(ix ? { interaction: { ...(ix.result ? { result: ix.result } : {}), ...(ix.navigationTarget ? { navigationTarget: ix.navigationTarget } : {}) } } : {}) });
+      return withProv({ kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts, ...(fulfillment ? { fulfillment } : {}), ...(next ? { next } : {}), ...(routedStepsOf(r.steps).length ? { routed: routedStepsOf(r.steps) } : {}), ...(effects.length ? { effects } : {}), ...(decided.length ? { decisions: decided } : {}), ...(ix ? { interaction: { ...(ix.result ? { result: ix.result } : {}), ...(ix.navigationTarget ? { navigationTarget: ix.navigationTarget } : {}) } } : {}) });
     }
     const raw = typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? null);
     const evidence = askEvidence(r.steps);
@@ -3823,10 +3845,17 @@ be emitted together; the runtime runs them side by side.`;
         }
         return { refused: `${whoName} ${delivered.outcome === 'refused' ? 'refused' : 'could not finish'}: ${delivered.said ?? ''}`.trim(), via, note: `${whoName}'s own agent decided this; relay its words.` };
       }
+      // Spec 374 W2 — A CONTINUATION. This step already waits at the subject's agent (the checkpoint says
+      // where); what this turn presented or supplied goes to THAT run, not to a fresh ask. The receiver
+      // resumes its own run under its own gates.
+      const at = input.routedAt?.[stepRef];
+      const presentedNow = input.presented ? (Array.isArray(input.presented) ? input.presented : [input.presented]) : [];
+      const cont = at ? { runRef: at.runRef, ...(presentedNow.length ? { presented: presentedNow } : {}), ...(inputsFor(ctx.supplied, stepRef).length ? { supplied: inputsFor(ctx.supplied, stepRef) } : {}) } : undefined;
       const answer = await deps.askSubjectAgent({
         subject, toolId, args, goal: input.intent.goal, ...(input.person ? { asker: input.person } : {}), ...(input.session ? { session: input.session } : {}),
         // R: this step's stable operation identity, for the receiver to name in S (spec 367 §8).
         correlation: { operationId: `${input.runRef ?? 'run'}:${stepRef}`, runRef: input.runRef ?? 'run', stepRef, intentDigest },
+        ...(cont ? { continue: cont } : {}),
       });
       const who = answer.via.name ? `${answer.via.name} (${subject})` : subject;
       if (!answer.ok) {
@@ -3835,6 +3864,27 @@ be emitted together; the runtime runs them side by side.`;
         // A READ that came back `needs` is a question relayed in the subject's words, as before.
         if (answer.needs && answer.via.runRef && !tool?.answers) {
           const name = answer.via.name ?? subjectName ?? subject;
+          // Spec 374 W2 — THE STEWARD SHAPE. The subject's agent asked for ITS mandate (or a signature) and
+          // this asker STEWARDS it (the receiver derived that from the wire they presented): the request is
+          // relayed as the asker's own, their Home mints it exactly as for a local step, and the resume
+          // carries it to the subject's parked run. The asker signs as the organization's custodian;
+          // this agent relays and never signs.
+          const nw = (answer.needsWhat && typeof answer.needsWhat === 'object') ? (answer.needsWhat as { kind?: string; standing?: { relation?: string }; requirement?: unknown; prompt?: { kind?: string; prompt?: string; digest?: string; signer?: string; payload?: unknown } }) : null;
+          const stewardHere = nw?.standing?.relation === 'steward';
+          if (nw?.kind === 'authority_required' && nw.requirement && stewardHere) {
+            throw new InputRequired({
+              kind: 'authority', stepRef, toolId,
+              prompt: `${name} asks for its own mandate for this — you steward it, so it is yours to grant.`,
+              authority: nw as Record<string, unknown>,
+              at: { agent: subject, ...(answer.via.name ? { name: answer.via.name } : {}), runRef: answer.via.runRef },
+            });
+          }
+          if (nw?.kind === 'prompt' && nw.prompt?.kind === 'signature' && nw.prompt.digest && nw.prompt.signer && stewardHere) {
+            // The receiver's own signature prompt, relayed: the digest and signer are its words; the
+            // answer travels back as this step's supplied input.
+            input.routedAt = { ...(input.routedAt ?? {}), [stepRef]: { agent: subject, ...(answer.via.name ? { name: answer.via.name } : {}), runRef: answer.via.runRef } };
+            throw new InputRequired({ kind: 'signature', stepRef, toolId, prompt: `${name}: ${nw.prompt.prompt ?? 'sign this'}`, digest: nw.prompt.digest, signer: nw.prompt.signer, ...(nw.prompt.payload !== undefined ? { payload: nw.prompt.payload } : {}) });
+          }
           throw new InputRequired({
             kind: 'commitment', stepRef, toolId,
             prompt: `Waiting on ${name}'s steward — ${answer.said || 'they have to finish this at their own agent'}.`,

@@ -2347,6 +2347,14 @@ app.post('/harness/ask', async (c) => {
     if (!step || body.plan!.steps.length !== 1 || step.toolId !== sa.request.capability) return c.json({ ok: false, error: 'subject-ask profile: the plan is not the request' }, 400);
     inResponseTo = { agent: sa.asker.agent.toLowerCase() as Address, operationId: sa.correlation.operationId, runRef: sa.correlation.runRef, stepRef: sa.correlation.stepRef };
     routedStanding = { presented: sa.asker.presented ?? [], routed: true };
+    // Spec 374 W2 — A CONTINUATION of this agent's own parked run: the steward asker now presents the
+    // mandate this agent asked for (or supplies the answer). It is a resume of THAT run, under every gate
+    // a resume runs; the profile only names which run and carries what the asker holds.
+    if (sa.continue) {
+      body.runRef = sa.continue.runRef;
+      if (sa.continue.presented?.length) body.presented = sa.continue.presented as never;
+      if (sa.continue.supplied?.length) body.supplied = sa.continue.supplied as never;
+    }
   }
 
   // ── spec 350 W3 — the durable run. A resume names the runRef; everything the person already said and
@@ -2414,6 +2422,7 @@ app.post('/harness/ask', async (c) => {
       ...(body.plan ?? stored?.plan ? { plan: body.plan ?? stored?.plan } : {}),
       // Spec 370 P1 — what already ran, replayed; what has not, attempted. The planner is not asked again.
       ...(stored?.executed ? { resume: stored.executed } : {}),
+      ...(stored?.routedAt ? { routedAt: stored.routedAt } : {}),
       ...(body.surface ? { surface: body.surface } : {}),
       ...(body.approvals ? { approvals: body.approvals } : {}), ...(turn.supplied.length ? { supplied: turn.supplied } : {}),
       // The informational half of an Ask: the PUBLIC agent directory, read-only, through discovery
@@ -2544,6 +2553,10 @@ app.post('/harness/ask', async (c) => {
           ...(stored?.openToStewards ? { openToStewards: true } : {}),
           ...(stored?.outsider ? { outsider: stored.outsider } : {}),
           ...(stored?.routedFrom ? { routedFrom: stored.routedFrom } : {}),
+          // Spec 374 W2 — where a routed step waits, kept across turns so the resume continues THAT run.
+          ...((stored?.routedAt || (reply.kind === 'authority_required' && reply.routedAt))
+            ? { routedAt: { ...(stored?.routedAt ?? {}), ...(reply.kind === 'authority_required' && reply.routedAt ? { [reply.stepRef]: reply.routedAt } : {}) } }
+            : {}),
           ...routedAct,
           ...(reply.kind === 'prompt' ? { awaiting: { kind: reply.prompt.kind, prompt: reply.prompt.prompt, stepRef: reply.prompt.stepRef, expiresAt: now + AWAIT_WINDOW_MS[reply.prompt.kind] } } : {}),
           // Spec 374 — waiting on another agent's steward: the commitment is the record, and only the
@@ -2637,6 +2650,12 @@ app.post('/harness/ask', async (c) => {
       outcome: reply.kind === 'answer' ? (toolRefusal ? 'refused' : 'answer') : reply.kind === 'refused' ? 'refused' : reply.kind === 'prompt' || reply.kind === 'authority_required' ? 'needs' : 'error',
       ...(reply.kind === 'answer' && !toolRefusal ? { result: routedResult } : {}),
       ...(toolRefusal ? { said: toolRefusal } : reply.kind === 'refused' ? { said: reply.error } : reply.kind === 'prompt' ? { said: reply.prompt.prompt } : reply.kind === 'authority_required' ? { said: reply.summary } : {}),
+      // Spec 374 W2 — WHAT this agent needs, whole, so a steward asker can be asked for it at home and
+      // carry it back: the authority request (requirement, delegator, delegate, alsoApprove, standing) or
+      // the prompt. The asker's agent relays; this agent's verifier judges what comes back.
+      ...(reply.kind === 'authority_required'
+        ? { result: { kind: 'authority_required', requirement: reply.requirement, delegator: reply.delegator, delegate: reply.delegate, capability: reply.capability, stepRef: reply.stepRef, summary: reply.summary, ...(reply.alsoApprove ? { alsoApprove: reply.alsoApprove } : {}), ...(reply.standing ? { standing: reply.standing } : {}), ...(reply.note ? { note: reply.note } : {}), ...(reply.parties ? { parties: reply.parties } : {}) } }
+        : reply.kind === 'prompt' ? { result: { kind: 'prompt', prompt: reply.prompt } } : {}),
       run: { runRef, receipts: result.receipts.map((rc) => ({ stepRef: rc.stepRef, ...(rc.capability?.id ? { capability: rc.capability.id } : {}), status: rc.status, ...(rc.binding ? { binding: rc.binding } : {}) })) },
     }) : undefined;
     // Spec 370 P5 — the agent's schedule follows its playbook: every ask re-syncs the trigger rows (cheap,
@@ -3685,7 +3704,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
   // in-process through the same handler the public URL reaches (chosen by a fact known before the call,
   // never by watching a request fail — ADR-0013). Anything else is a network call. Either way the
   // receiver is the subject's serving handler, and the answer says which wire it came over.
-  deps.askSubjectAgent = async ({ subject, toolId, args, goal, session, asker, correlation }) => {
+  deps.askSubjectAgent = async ({ subject, toolId, args, goal, session, asker, correlation, continue: cont }) => {
     const name = await deps.nameOf?.(subject).catch(() => null) ?? null;
     if (!session) return { ok: false, via: { agent: subject, name, observedVia: 'serving-handler' }, refused: 'a routed ask carries the asker’s session, and this run has none' };
     const served = a2aBaseDomains(env);
@@ -3709,6 +3728,9 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       request: { capability: toolId, args, goal },
       asker: { agent: (asker ?? subject) as Address, credential: { kind: 'home-session', token: session }, ...(presented.length ? { presented } : {}) },
       correlation,
+      // Spec 374 W2 — a continuation of the receiver's own parked run: what this turn presented or
+      // supplied goes to THAT run. Forwarded whole; the receiver resumes it under its own gates.
+      ...(cont ? { continue: cont } : {}),
     });
     const via = { agent: subject, name, host, observedVia: (inProcess ? 'serving-handler' : 'network') as 'serving-handler' | 'network' };
     let envelope: AskReplyEnvelopeV1 | null;
@@ -3738,7 +3760,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     console.log(`[subject-ask] ${subject} (${name ?? '?'}) via ${via.observedVia} ${host} → ${status} ${JSON.stringify(envelope).slice(0, 600)}`);
     const read = readSubjectReply(envelope, toolId, name ?? subject, status);
     const viaRun = { ...via, ...(read.runRef ? { runRef: read.runRef } : {}), ...(read.receipts?.length ? { receipts: read.receipts } : {}) };
-    return read.ok ? { ok: true, via: viaRun, result: read.result } : { ok: false, via: viaRun, refused: read.refused ?? `${name ?? subject} did not answer`, ...(read.needs ? { needs: true, said: read.said ?? '' } : {}) };
+    return read.ok ? { ok: true, via: viaRun, result: read.result } : { ok: false, via: viaRun, refused: read.refused ?? `${name ?? subject} did not answer`, ...(read.needs ? { needs: true, said: read.said ?? '', ...(read.needsWhat !== undefined ? { needsWhat: read.needsWhat } : {}) } : {}) };
   };
   return deps;
 }
