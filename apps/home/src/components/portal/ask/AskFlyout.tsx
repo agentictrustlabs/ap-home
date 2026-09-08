@@ -24,7 +24,7 @@ import { agentClassOf } from '../../../lib/agent-class';
 import { nameLabel } from '../../../lib/domain';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
 import { useVoice, blobToBase64 } from './useVoice';
-import { yesNo, matchChoice, listenAfter, plainSpeech, navigationTarget, closestOption } from './voice-text';
+import { yesNo, matchChoice, listenAfter, plainSpeech, navigationIntent, closestOption } from './voice-text';
 import { ask, hear, warmHearing, readProgress, type ProgressLine, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField } from '../../../home/ask';
 import type { AskSelection } from '../../../home/ask-selection';
 import { resolveNavigationTarget } from '../../../lib/interaction-registry';
@@ -66,10 +66,16 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   ];
   /** "Switch to X": a SURFACE act, never sent to an agent. Returns true when the words were that. */
   const navigate = (text: string, spoken: boolean): boolean => {
-    const target = navigationTarget(text);
-    if (!target) return false;
+    const intent = navigationIntent(text);
+    if (!intent) return false;
+    const { target, explicit } = intent;
     const opts = rooms();
     const hit = closestOption(target, opts);
+    // A LOOSE PHRASING THAT NAMES NO ROOM IS NOT A MOVE. "ask carol for a way to pay their treasury so I
+    // can send 1.66 usdc" begins with `ask`, and answering it with a list of rooms swallowed the one
+    // sentence the person had been handed to send (2026-09-08). Only "switch to X" earns the "I don't
+    // have anywhere called X" reply; everything else falls through to the agent.
+    if (!hit && !explicit) return false;
     if (hit) {
       setThread((t) => [...t, { role: 'you', text: spoken ? `🎙 ${text}` : text }, { role: 'agent', text: `Now asking ${hit.label}.` }]);
       router.push(hit.href);

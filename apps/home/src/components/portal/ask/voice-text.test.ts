@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { yesNo, matchChoice, listenAfter, plainSpeech, navigationTarget, closestOption } from './voice-text';
+import { yesNo, matchChoice, listenAfter, plainSpeech, navigationTarget, navigationIntent, closestOption } from './voice-text';
 import { pickVoice, speechChunks } from './useVoice';
 import type { AskReply } from '../../../home/ask';
 
@@ -71,6 +71,17 @@ describe('moving between agents by name', () => {
     expect(navigationTarget("let's go to the workspace for missio nexus")).toBe('missio nexus');
     expect(navigationTarget('talk to missio nexus organization')).toBe('missio nexus organization');
     expect(navigationTarget('send alice 10 dollars')).toBeNull();
+    // TWO CONFIDENCES (2026-09-08). "switch to X" can only be a move, so an unmatched X is worth saying;
+    // "ask X …" is also how a request starts, and the surface must let those through to the agent.
+    expect(navigationIntent('switch to missio nexus')?.explicit).toBe(true);
+    expect(navigationIntent('back to me')?.explicit).toBe(true);
+    expect(navigationIntent('ask missio nexus')?.explicit).toBe(false);
+    expect(navigationIntent('talk to missio nexus organization')?.explicit).toBe(false);
+    // The sentence the payment refusal hands a person to send. It begins with `ask`, and it is a request:
+    // matching it as a move answered with a list of rooms and lost the ask.
+    const request = navigationIntent('ask carol for a way to pay their treasury so I can send 1.66 usdc');
+    expect(request?.explicit).toBe(false);
+    expect(request?.target).toBe('carol for a way to pay their treasury so I can send 1.66 usdc');
     expect(navigationTarget('open the door for bob')).toBe('the door for bob'); // a surface may still find nothing
   });
   it('finds the closest option, the kind word dropped; two equally close is a question', () => {

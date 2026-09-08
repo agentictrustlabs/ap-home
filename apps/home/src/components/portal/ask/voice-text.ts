@@ -95,15 +95,34 @@ export function nameWords(said: string): string[] {
   return named.length ? named : body;
 }
 
-/** "switch to X" / "go to X" / "open X" / "change to X" / "back to me" → X; null when it is not that. */
+/**
+ * "switch to X" / "go to X" / "open X" / "back to me" → X; null when it is not that.
+ *
+ * TWO CONFIDENCES, and the difference matters (2026-09-08). `switch to X` can only be a move: if no room
+ * answers to X, saying so is the useful reply. `ask X` is a move ONLY when X is a room — "ask carol for a
+ * way to pay their treasury so I can send 1.66 usdc" is a REQUEST, and matching it here swallowed the
+ * sentence and answered with a list of rooms. So a loose phrasing navigates only when it hits, and
+ * otherwise the words belong to the agent.
+ */
 export function navigationTarget(said: string): string | null {
+  return navigationIntent(said)?.target ?? null;
+}
+
+export interface NavigationIntentV1 {
+  target: string;
+  /** True when the words can ONLY be a move ("switch to X"). False for `open`/`ask`/`talk to`, which are
+   *  also how a person starts a request — those navigate only when the target names a room. */
+  explicit: boolean;
+}
+
+export function navigationIntent(said: string): NavigationIntentV1 | null {
   // "please", "can you", "let's", "I want to", "now" — the ways a sentence starts before it says what.
   const s = said.trim().replace(/^(?:(?:please|now|ok|okay|hey)[,\s]+)?(?:(?:can|could|would)\s+you\s+(?:please\s+)?|let'?s\s+|i(?:'d| would)?\s+(?:want|like)\s+to\s+|please\s+)?/i, '');
-  const m = /^(?:switch|change|go|move|jump|take\s+(?:me|us)|back|get\s+(?:me|us))\s+(?:me\s+|us\s+)?(?:over\s+|back\s+)?(?:to|into)\s+(.+?)\s*[.!?]*$/i.exec(s)
-    ?? /^(?:open|ask|address|talk\s+to|speak\s+to|switch)\s+(.+?)\s*[.!?]*$/i.exec(s);
+  const moved = /^(?:switch|change|go|move|jump|take\s+(?:me|us)|back|get\s+(?:me|us))\s+(?:me\s+|us\s+)?(?:over\s+|back\s+)?(?:to|into)\s+(.+?)\s*[.!?]*$/i.exec(s);
+  const m = moved ?? /^(?:open|ask|address|talk\s+to|speak\s+to|switch)\s+(.+?)\s*[.!?]*$/i.exec(s);
   if (!m) return null;
   const target = m[1]!.trim().replace(/^(?:the\s+)?(?:workspace|realm|room)\s+(?:of|for)\s+/i, '');
-  return target ? target : null;
+  return target ? { target, explicit: Boolean(moved) } : null;
 }
 
 const bigrams = (s: string): string[] => { const out: string[] = []; for (let i = 0; i + 1 < s.length; i++) out.push(s.slice(i, i + 2)); return out; };

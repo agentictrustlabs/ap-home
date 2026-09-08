@@ -58,7 +58,7 @@ const deliver = (over: Record<string, unknown> = {}) => {
 const sentParams = (rec: { calls: { request: { params?: unknown } }[] }) => {
   const params = rec.calls[0]!.request.params as { message: { metadata?: Record<string, never>; parts: { data?: unknown }[] } };
   const ext = (params.message.metadata?.[AP_DELEGATED_TASK_EXTENSION] ?? {}) as Record<string, never>;
-  return { ...ext, message: ext, input: params.message.parts[0]?.data } as Record<string, never>;
+  return { ...ext, message: ext, input: params.message.parts[0]?.data } as unknown as Record<string, never>;
 };
 
 describe('the call is an ordinary SendMessage on the A2A 1.0 wire', () => {
