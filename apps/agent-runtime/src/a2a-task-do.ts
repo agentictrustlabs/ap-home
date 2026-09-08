@@ -848,10 +848,13 @@ export class A2aTaskDO {
         if (!body?.runRef || !body.line || !body.asker) return Response.json({ ok: false, error: 'runRef, asker and line required' }, { status: 400 });
         const cur = (await this.state.storage.get<{ asker: string; at: number; lines: unknown[] }>(pkey(body.runRef))) ?? { asker: body.asker, at: Date.now(), lines: [] };
         if (cur.asker !== body.asker) return Response.json({ ok: false, error: 'this run belongs to someone else' }, { status: 403 });
-        if (cur.lines.length < 200) cur.lines.push(body.line);
+        // ONE SEQUENCE PER RUN, assigned here. A run is several turns and every turn narrates from its
+        // start; a reader keeps its cursor across turns, so a seq that restarted per turn re-read the
+        // earlier turns' lines ("checking your authority…" three times over).
+        if (cur.lines.length < 400) cur.lines.push({ ...body.line, seq: cur.lines.length + 1 });
         cur.at = Date.now();
         await this.state.storage.put(pkey(body.runRef), cur);
-        return Response.json({ ok: true });
+        return Response.json({ ok: true, seq: cur.lines.length });
       }
       if (op === 'progress-read') {
         if (!body?.runRef || !body.asker) return Response.json({ ok: false, error: 'runRef and asker required' }, { status: 400 });
@@ -859,7 +862,9 @@ export class A2aTaskDO {
         if (!cur) return Response.json({ ok: true, known: false, lines: [], terminal: false });
         if (cur.asker !== body.asker) return Response.json({ ok: false, error: 'this run belongs to someone else' }, { status: 403 });
         const after = Number(body.after ?? 0);
-        return Response.json({ ok: true, known: true, lines: cur.lines.filter((l) => l.seq > after), terminal: cur.lines.some((l) => l.terminal) });
+        // Terminal = the LAST line says so: a new turn's lines after a reply make the run live again.
+        const last = cur.lines[cur.lines.length - 1];
+        return Response.json({ ok: true, known: true, lines: cur.lines.filter((l) => l.seq > after), terminal: !!last?.terminal });
       }
       if (op === 'save') {
         const cp = body?.checkpoint;

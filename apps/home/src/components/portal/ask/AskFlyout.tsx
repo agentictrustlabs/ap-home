@@ -171,13 +171,15 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
     // show the latest line where the busy label was; the voice reads each new one. Stops with the reply.
     let polling = true;
     setProgress([]);
+    // The cursor survives across the turns of one run — the agent numbers a run's lines once — and starts
+    // over for a new run.
+    if (progressCursor.current.runRef !== state.runRef) progressCursor.current = { runRef: state.runRef, after: 0 };
     void (async () => {
-      let after = 0;
       while (polling) {
         try {
-          const got = await readProgress(session, state.addressee, state.runRef, after);
+          const got = await readProgress(session, state.addressee, state.runRef, progressCursor.current.after);
           if (!polling) break;
-          if (got.lines.length) { after = got.lines[got.lines.length - 1]!.seq; setProgress((p) => [...p, ...got.lines]); }
+          if (got.lines.length) { progressCursor.current.after = got.lines[got.lines.length - 1]!.seq; setProgress((p) => [...p, ...got.lines]); }
           if (got.terminal) break;
           if (!got.lines.length) await new Promise((r) => setTimeout(r, 400));
         } catch { await new Promise((r) => setTimeout(r, 1_000)); }
@@ -386,6 +388,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   // Spec 370 P2 — what the agent has said about this turn so far; the last line is the busy text.
   const [progress, setProgress] = useState<ProgressLine[]>([]);
   const progressSpoken = useRef(0);
+  const progressCursor = useRef<{ runRef: string; after: number }>({ runRef: '', after: 0 });
 
   // A turn takes as long as it takes (a plan, chain reads, sometimes a userOp). Silence for ten seconds
   // sounds like a dead line: the agent's own progress lines are read as they arrive; "one moment" only
@@ -400,6 +403,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
     if (!voice.enabled) { progressSpoken.current = progress.length; return; }
     // The step lines are worth hearing (checking authority, doing, done); the plan bookkeeping is not.
     const SAID = new Set(['StepProposed', 'MandateChecked', 'MandateDenied', 'ToolInvoked', 'StepReplayed', 'ApprovalRequested', 'RunFailed']);
+    if (progress.length < progressSpoken.current) progressSpoken.current = 0; // a new turn's list
     const fresh = progress.slice(progressSpoken.current).filter((l) => SAID.has(l.type) && !l.terminal);
     progressSpoken.current = progress.length;
     if (fresh.length) voice.speak(fresh.map((l) => l.said).join(' '), undefined, { append: true });
