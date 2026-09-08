@@ -47,6 +47,16 @@ export function subjectAskOf(message: Pick<MessageV1, 'metadata'>): { ask: Subje
 
 export const SUBJECT_ANSWER_ARTIFACT = 'subject-answer';
 
+/**
+ * Appendix M8 — THE RECEIVER'S RUN, NAMED BY THE SENDER. A routed step's run at the subject's agent is
+ * addressable before it answers, so the sender can read its progress while it runs and its record can
+ * cite it by reference. Derived from the correlation the sender minted; the receiver adopts it for a
+ * fresh ask (a resume names the run it continues instead).
+ */
+export function routedRunRefFor(correlation: { runRef: string; stepRef: string }): string {
+  return `routed-${correlation.runRef}-${correlation.stepRef}`.replace(/[^A-Za-z0-9._:-]/g, '_');
+}
+
 /** The receiver's `/harness/ask` envelope, as the task's `subject-answer` artifact carries it. */
 export function subjectEnvelopeOf(task: Pick<TaskV1, 'artifacts'> | null | undefined): Record<string, unknown> | null {
   const art = (task?.artifacts ?? []).find((a) => a.name === SUBJECT_ANSWER_ARTIFACT);

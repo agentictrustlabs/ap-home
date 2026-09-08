@@ -17,7 +17,10 @@ export interface ProgressLineV1 {
   /** Monotonic within the run, assigned by the route as events arrive. */
   seq: number;
   at: number;
-  type: RunEvent['type'] | 'ReplyReady';
+  type: RunEvent['type'] | 'ReplyReady' | 'Relayed';
+  /** Spec 374 / appendix M8 — a line RELAYED from the subject agent's own run (a routed step): the words
+   *  are the receiver's, prefixed with its name; `from` says whose. */
+  from?: { agent: string; name?: string };
   stepRef?: string;
   toolId?: string;
   /** One sentence for a screen or a voice. */
@@ -35,7 +38,14 @@ const cap = (s: string): string => (s ? s[0]!.toUpperCase() + s.slice(1) : s);
 export function toolWords(tool: ToolSpec | undefined, words: (capabilityId: string) => string | undefined): string {
   if (!tool) return 'the next step';
   const w = tool.capability?.id ? words(tool.capability.id) : undefined;
-  return w ?? tool.description ?? tool.id;
+  if (w) return w;
+  // A READ has no capability words. Its `answer`/`answers` say what it answers ("who belongs to an
+  // organization"); failing that, the first clause of its description — never the whole description,
+  // which once put a paragraph of planner guidance into a progress line a voice then read out.
+  const q = tool.answer ?? tool.answers?.[0];
+  if (q) return q.replace(/[?.]+$/, '').toLowerCase();
+  const d = (tool.description ?? '').replace(/^ANSWERS A QUESTION:\s*/i, '').split(/\s[—–]\s|\.\s|:\s/)[0]?.trim() ?? '';
+  return d ? (d.length > 72 ? `${d.slice(0, 69)}…` : d) : tool.id;
 }
 
 /** One sentence per loop event. `null` for events that say nothing a person needs mid-turn. */

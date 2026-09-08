@@ -767,7 +767,10 @@ export interface HarnessDeps {
    * with no standing there gets the same refusal by either route. Absent ⇒ the step is refused in words
    * (never a local read of the other agent's records — ADR-0013, one mechanism).
    */
-  askSubjectAgent?: (input: { subject: Address; toolId: string; args: Record<string, unknown>; goal: string; asker?: Address; session?: string; correlation: { operationId: string; runRef: string; stepRef: string; intentDigest: string }; /** Spec 374 W2 — continue the receiver's parked run with what this turn presented/supplied. */ continue?: { runRef: string; presented?: unknown[]; supplied?: unknown[] } }) => Promise<SubjectAnswerV1>;
+  askSubjectAgent?: (input: { subject: Address; toolId: string; args: Record<string, unknown>; goal: string; asker?: Address; session?: string; /** Appendix M8 — the run ref the receiver is to adopt for a fresh ask (named by the sender). */ runRef?: string; correlation: { operationId: string; runRef: string; stepRef: string; intentDigest: string }; /** Spec 374 W2 — continue the receiver's parked run with what this turn presented/supplied. */ continue?: { runRef: string; presented?: unknown[]; supplied?: unknown[] } }) => Promise<SubjectAnswerV1>;
+  /** Appendix M8 — READ the subject agent's own progress lines for a routed run, under the asker's session,
+   *  while the hop is in flight. The receiver's DO answers; nothing is copied but the sentences. */
+  readSubjectProgress?: (input: { subject: Address; runRef: string; session: string; after: number; wait?: number }) => Promise<{ lines: Array<{ seq: number; said: string; stepRef?: string; terminal?: boolean }>; terminal: boolean; known: boolean }>;
   /** Reverse name lookup for an address (public directory, ADR-0040). Names roster rows; best-effort. */
   nameOf?: (address: string) => Promise<string | null>;
   /** Spec 366 R2/R3 — set by the receiver of a ROUTED ask, once per request: the wires the asker presented
@@ -3851,12 +3854,42 @@ be emitted together; the runtime runs them side by side.`;
       const at = input.routedAt?.[stepRef];
       const presentedNow = input.presented ? (Array.isArray(input.presented) ? input.presented : [input.presented]) : [];
       const cont = at ? { runRef: at.runRef, ...(presentedNow.length ? { presented: presentedNow } : {}), ...(inputsFor(ctx.supplied, stepRef).length ? { supplied: inputsFor(ctx.supplied, stepRef) } : {}) } : undefined;
+      const correlation = { operationId: `${input.runRef ?? 'run'}:${stepRef}`, runRef: input.runRef ?? 'run', stepRef, intentDigest };
+      // Appendix M8 — THE RECEIVER'S RUN IS NAMED BEFORE IT ANSWERS, so its progress can be read while it
+      // runs and this run's record can cite it. A continuation reads the run it continues.
+      const receiverRunRef = cont ? cont.runRef : `routed-${correlation.runRef}-${stepRef}`.replace(/[^A-Za-z0-9._:-]/g, '_');
+      // Appendix M8 — THE SUBJECT'S OWN LINES, RELAYED. While the hop is in flight, the receiver's progress
+      // is read under the asker's session and each sentence lands in THIS run's stream, prefixed with
+      // the receiver's name: "missio-nexus.org: Reading who belongs…". Words only — its record stays its own.
+      let stopRelay = false;
+      const relayName = subjectName ?? subject;
+      const relay = input.onProgress && input.session && deps.readSubjectProgress
+        ? (async () => {
+            let after = 0;
+            const read = deps.readSubjectProgress!;
+            const session = input.session!;
+            const emit = input.onProgress!;
+            while (!stopRelay) {
+              let got: Awaited<ReturnType<typeof read>>;
+              try { got = await read({ subject, runRef: receiverRunRef, session, after, wait: 1500 }); } catch { break; }
+              for (const line of got.lines) {
+                after = Math.max(after, line.seq);
+                if (line.terminal) continue;
+                emit({ type: 'Relayed', said: `${relayName}: ${line.said}`, from: { agent: subject, ...(subjectName ? { name: subjectName } : {}) }, ...(line.stepRef ? { stepRef: line.stepRef } : {}) });
+              }
+              if (got.terminal) break;
+              if (!got.lines.length) await new Promise((r) => setTimeout(r, 300));
+            }
+          })().catch(() => undefined)
+        : Promise.resolve();
       const answer = await deps.askSubjectAgent({
         subject, toolId, args, goal: input.intent.goal, ...(input.person ? { asker: input.person } : {}), ...(input.session ? { session: input.session } : {}),
+        ...(cont ? {} : { runRef: receiverRunRef }),
         // R: this step's stable operation identity, for the receiver to name in S (spec 367 §8).
-        correlation: { operationId: `${input.runRef ?? 'run'}:${stepRef}`, runRef: input.runRef ?? 'run', stepRef, intentDigest },
+        correlation,
         ...(cont ? { continue: cont } : {}),
-      });
+      }).finally(() => { stopRelay = true; });
+      await relay;
       const who = answer.via.name ? `${answer.via.name} (${subject})` : subject;
       if (!answer.ok) {
         // Spec 374 — AN ACT THE SUBJECT PARKED FOR ITS OWN STEWARD. The subject's agent took the request

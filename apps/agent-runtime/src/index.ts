@@ -804,7 +804,11 @@ app.use('*', async (c, next) => {
   // re-verified by `verifyHomeSession`, and the standing the receiver derives against its own records) —
   // no ambient cookie authority to forge, the same rationale as /interactions/*. A browser POST to the
   // same path has no marker and keeps CSRF.
-  if (c.req.path === '/harness/ask' && isInternalCall(c.req.raw, c.env)) return next();
+  // Appendix M8 / spec 374 §4 — the same in-Worker hop reads the subject's PROGRESS (`readSubjectProgress`,
+  // session-carried like the ask) and delivers a finished routed act to the creditor over the standard
+  // mount (`/api/a2a`, whose caller is named by the marker). Same posture: body/header-carried authority,
+  // no ambient cookie to forge; a browser POST without the marker keeps CSRF.
+  if ((c.req.path === '/harness/ask' || c.req.path === '/harness/progress' || c.req.path === '/api/a2a') && isInternalCall(c.req.raw, c.env)) return next();
   // /invite/decline — "not interested", from an emailed link. The credential is possession of the emailed
   // token; the effect is a status on that one invitation, nothing else. A browser form post, no session.
   if (c.req.path === '/invite/decline') return next();
@@ -1631,7 +1635,14 @@ app.post('/harness/replay', async (c) => {
     const because = b?.authority?.decision.decision === 'deny' ? b.authority.decision.reasons.map((x) => `${x.code}: ${x.message}`).join('; ') : b?.status === 'authority-required' ? 'no live mandate on the replay' : undefined;
     return { stepRef, toolId: a?.toolId ?? b?.toolId ?? '', recorded, replayed, changed: recorded !== replayed, ...(because ? { because } : {}) };
   });
-  return c.json({ ok: true, runRef: rec.runRef, recordedOutcome: rec.outcome, outcome: result.outcome, verdicts, steps: result.steps.map((o) => ({ stepRef: o.stepRef, toolId: o.step.toolId, ok: o.ok, replayed: true })) });
+  // Appendix M8 — BOTH SIDES on replay: a routed step's recorded result cites the subject agent's run and
+  // the status of its receipts (`via`); the replay hands that reference back exactly as recorded. The
+  // receiver's record stays on the receiver's object — this is a citation, never a copy.
+  const viaOf = (o: { result?: unknown }) => {
+    const v = (o.result && typeof o.result === 'object' ? (o.result as { via?: { agent?: string; name?: string; runRef?: string; observedVia?: string; receipts?: unknown[] } }).via : undefined);
+    return v?.agent ? { agent: v.agent, ...(v.name ? { name: v.name } : {}), ...(v.runRef ? { runRef: v.runRef } : {}), ...(v.observedVia ? { observedVia: v.observedVia } : {}), receipts: Array.isArray(v.receipts) ? v.receipts.length : 0 } : undefined;
+  };
+  return c.json({ ok: true, runRef: rec.runRef, recordedOutcome: rec.outcome, outcome: result.outcome, verdicts, steps: result.steps.map((o) => ({ stepRef: o.stepRef, toolId: o.step.toolId, ok: o.ok, replayed: true, ...(viaOf(o) ? { via: viaOf(o) } : {}) })) });
 });
 
 // POST /harness/progress { session, addressee, runRef, after?, wait? } — spec 370 P2. The run's progress
@@ -3704,7 +3715,20 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
   // in-process through the same handler the public URL reaches (chosen by a fact known before the call,
   // never by watching a request fail — ADR-0013). Anything else is a network call. Either way the
   // receiver is the subject's serving handler, and the answer says which wire it came over.
-  deps.askSubjectAgent = async ({ subject, toolId, args, goal, session, asker, correlation, continue: cont }) => {
+  // Appendix M8 — the subject agent's own progress, read in-process under the asker's session (the same
+  // route the flyout long-polls), so the sender can relay it while the hop runs.
+  deps.readSubjectProgress = async ({ subject, runRef, session, after, wait }) => {
+    const name = await deps.nameOf?.(subject).catch(() => null) ?? null;
+    const parents = (env.AGENT_NAME_PARENTS ?? env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
+    const host = name ? hostForName(name, a2aCanonicalDomain(env), parents) : null;
+    if (!host || !a2aBaseDomains(env).some((d) => host === d || host.endsWith(`.${d}`))) return { lines: [], terminal: true, known: false };
+    const req = new Request(`https://${host}/harness/progress`, { method: 'POST', headers: internalHeaders(env, { 'content-type': 'application/json', accept: 'application/json' }), body: JSON.stringify({ session, addressee: subject, runRef, after, wait: wait ?? 1500 }) });
+    const res = await app.fetch(req, env, executionContextFor(opts.executionCtx));
+    const body = (await res.json().catch(() => null)) as { ok?: boolean; lines?: Array<{ seq: number; said: string; stepRef?: string; terminal?: boolean }>; terminal?: boolean; known?: boolean } | null;
+    if (!body?.ok) return { lines: [], terminal: true, known: false };
+    return { lines: body.lines ?? [], terminal: !!body.terminal, known: !!body.known };
+  };
+  deps.askSubjectAgent = async ({ subject, toolId, args, goal, session, asker, correlation, continue: cont, runRef: receiverRunRef }) => {
     const name = await deps.nameOf?.(subject).catch(() => null) ?? null;
     if (!session) return { ok: false, via: { agent: subject, name, observedVia: 'serving-handler' }, refused: 'a routed ask carries the asker’s session, and this run has none' };
     const served = a2aBaseDomains(env);
@@ -3736,7 +3760,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     let envelope: AskReplyEnvelopeV1 | null;
     let status: number;
     if (inProcess) {
-      const body = JSON.stringify({ session, addressee: subject, message: goal, plan: { steps: [{ toolId, args }] }, subjectAsk: profile });
+      const body = JSON.stringify({ session, addressee: subject, message: goal, plan: { steps: [{ toolId, args }] }, subjectAsk: profile, ...(receiverRunRef && !cont ? { runRef: receiverRunRef } : {}) });
       const req = new Request(url, { method: 'POST', headers: internalHeaders(env, { 'content-type': 'application/json', accept: 'application/json' }), body });
       let res: Response;
       try {

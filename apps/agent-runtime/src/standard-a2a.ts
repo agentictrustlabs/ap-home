@@ -24,7 +24,7 @@ import {
 } from '@agenticprimitives/a2a/standard';
 import type { SuppliedInputV1 } from '@agenticprimitives/orchestration';
 import { internalHeaders, isInternalCall, type InternalMarkerEnv } from './internal-marker.js';
-import { subjectAskOf, subjectAnswerOf, SUBJECT_ANSWER_ARTIFACT } from './subject-hop.js';
+import { subjectAskOf, subjectAnswerOf, routedRunRefFor, SUBJECT_ANSWER_ARTIFACT } from './subject-hop.js';
 import type { SubjectAnswerV1 } from '@agenticprimitives/a2a';
 
 /** The runtime mints 32-byte hex task ids; this server's own conversational tasks are uuids. That is how a
@@ -243,7 +243,7 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           if (!session) { await ctx.reject([{ text: 'a routed ask carries the asker’s Home session as the bearer; this one carried none' }]); return; }
           if (ctx.principal?.agent) ctx.task.metadata = { ...(ctx.task.metadata ?? {}), asker: ctx.principal.agent };
           const ask = routed.ask;
-          const body = JSON.stringify({ session, addressee: agent, message: ask.request.goal, plan: { steps: [{ toolId: ask.request.capability, args: ask.request.args }] }, subjectAsk: ask });
+          const body = JSON.stringify({ session, addressee: agent, message: ask.request.goal, plan: { steps: [{ toolId: ask.request.capability, args: ask.request.args }] }, subjectAsk: ask, ...(ask.continue ? {} : { runRef: routedRunRefFor(ask.correlation) }) });
           await ctx.working();
           const res = await deps.appFetch(new Request(`https://${host}/harness/ask`, { method: 'POST', headers: internalHeaders(deps.env, { 'content-type': 'application/json', accept: 'application/json' }), body }), deps.env);
           const envelope = (await res.json().catch(() => null)) as (AskEnvelope & { subjectAnswer?: { outcome?: string; said?: string } }) | null;
