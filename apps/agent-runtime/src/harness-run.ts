@@ -69,7 +69,7 @@ import type { ResolvedParty } from '@agenticprimitives/context';
 import { MEMBERSHIP_LIST_TOOL, membershipListInvoker, AFFILIATIONS_LIST_TOOL, affiliationsListInvoker, INVITATIONS_LIST_TOOL, invitationsListInvoker, relationshipRows } from '@agenticprimitives/context';
 import { RESOLUTION_REQUEST_TOOL } from './resolution-invitation.js';
 import { actionLink, resolutionRequestInvoker } from './resolution-request.js';
-import { partyRole, suffixesFor, COUNTERPARTY_ARGS, PARTY_ROLES, SUFFIX_FOR_CLASS, fanOutBindingFor } from '@agenticprimitives/ontology';
+import { partyRole, suffixesFor, COUNTERPARTY_ARGS, PARTY_ROLES, SUFFIX_FOR_CLASS, CLASS_FOR_SUFFIX, fanOutBindingFor } from '@agenticprimitives/ontology';
 import { decodePaymentTerms } from '@agenticprimitives/delegation';
 import { preconditionRefusal } from './capability-preconditions.js';
 import { AUTHORITY_BEARING_CAPABILITIES } from './endeavor-authority-steps.js';
@@ -106,12 +106,17 @@ export const CHILD_AGENT_KINDS = [
   { capability: 'treasury.create', tld: 'treasury', noun: 'treasury', parentNoun: 'a person or an organization' },
   // Spec 368 — the family's own agent, chartered under a person; its members are the household.
   { capability: 'household.create', tld: 'household', noun: 'household', parentNoun: 'a person (their own realm)' },
+  // Spec 372 S3 — the Smart Agent an OUTSIDE RUNTIME acts as (Claude Code, Goose, a bot): a Service-class
+  // agent chartered under a person or an organization. Chartering grants it nothing; a delegation does.
+  { capability: 'service.create', tld: 'svc', noun: 'service agent', parentNoun: 'a person or an organization' },
 ] as const;
 
 /** The KIND a created agent is recorded as in its owner's tree. Usually the noun; a treasury is named for
  *  WHOSE it is, because that is how the Home lists it (`person-treasury` under you, `org-treasury` inside
  *  the organization) — recording a bare "treasury" would put it in neither. */
 export function recordedKind(noun: string, parent: string, person?: string): string {
+  // The Home's tree kinds (`AgentKind`): a service agent is recorded as `service`, whatever the prose says.
+  if (noun === 'service agent') return 'service';
   if (noun !== 'treasury') return noun;
   return person && parent.toLowerCase() === person.toLowerCase() ? 'person-treasury' : 'org-treasury';
 }
@@ -541,7 +546,7 @@ export const CHILD_LABEL_PATTERN = '^[a-z0-9-]{3,63}$';
 export function labelFromName(raw: string, noun: string, tld: string): string {
   const s = raw.trim().toLowerCase();
   if (new RegExp(CHILD_LABEL_PATTERN).test(s)) return s;
-  const kindWords = [noun, tld, `${noun}s`, ...(noun === 'organization' ? ['organisation', 'org'] : [])];
+  const kindWords = [noun, tld, `${noun}s`, ...(noun === 'organization' ? ['organisation', 'org'] : []), ...(noun === 'service agent' ? ['service', 'agent', 'bot', 'runtime'] : [])];
   const words = s.replace(/[’']/g, '').split(/[^a-z0-9]+/).filter(Boolean);
   const kept = words.filter((w, i) => !kindWords.includes(w) && !(i === 0 && (w === 'the' || w === 'a' || w === 'an')));
   return (kept.length ? kept : words).join('-').replace(/-{2,}/g, '-').replace(/^-|-$/g, '');
@@ -1764,6 +1769,7 @@ export const CAPABILITY_WORDS: Record<string, string> = {
   'organization.team.create': 'create teams',
   'organization.create': 'create organizations',
   'household.create': 'create a household',
+  'service.create': 'charter service agents',
   'treasury.create': 'create treasuries',
   'organization.membership.invite': 'invite members',
   'coordination.endeavor.list': 'see what the organization is working on',
@@ -2124,6 +2130,10 @@ export async function resolveStepArgs(
      *  from the party role's declared classes — never from "the first one available". */
     addressee?: string;
     realmKind?: string;
+    /** The realm's TYPED suffix (`treasury`, `org`, `household`, `me`) when known — from the surface's kind
+     *  or, absent a surface, from the addressee's own typed name. Finer than `realmKind` (an org-class
+     *  realm may be a household, whose parent role differs from an organization's). */
+    realmSuffix?: string;
     /** Spec 361 I6 — the on-screen selection the surface declared (entity + its kind). */
     selection?: { entity?: string; kind?: string; label?: string };
   },
@@ -2226,7 +2236,7 @@ export async function resolveStepArgs(
     // Acting as yourself is the only reading of "send alice a message"; acting as the room you stand in is
     // the only reading of "invite carol" said inside it. Declared classes decide, never proximity.
     if (!current) {
-      const realmSuffix = where.realmKind ? ({ person: 'me', org: 'org', service: 'svc' } as Record<string, string>)[where.realmKind] : undefined;
+      const realmSuffix = where.realmSuffix ?? (where.realmKind ? ({ person: 'me', org: 'org', service: 'svc' } as Record<string, string>)[where.realmKind] : undefined);
       const typesHere = partyTypesFor(where.capabilityId ?? where.toolId, arg) ?? [];
       if (where.addressee && realmSuffix && typesHere.includes(realmSuffix) && where.addressee.toLowerCase() !== where.subject.toLowerCase()) {
         out[arg] = where.addressee.toLowerCase();
@@ -2366,11 +2376,11 @@ export async function resolveStepArgs(
   // `context`-side party role whose declared classes admit the realm's class takes the addressee, and
   // the binding says it came from context. Nothing else is guessed: a realm whose class the role does not
   // admit fills nothing, and the person is asked.
-  if (where && (where.selection?.entity || (where.addressee && where.realmKind))) {
+  if (where && (where.selection?.entity || (where.addressee && (where.realmKind || where.realmSuffix)))) {
     // TWO SOURCES OF VALIDATED CONTEXT, most specific first: the entity SELECTED on the screen (spec 361
     // I6 — a member on the roster, a team, a treasury), then the realm the person stands in. A selection is
     // a reference the app checked before it declared it; it is never a sentence the model wrote.
-    const realmSuffix = where.realmKind ? ({ person: 'me', org: 'org', service: 'svc' } as Record<string, string>)[where.realmKind] : undefined;
+    const realmSuffix = where.realmSuffix ?? (where.realmKind ? ({ person: 'me', org: 'org', service: 'svc' } as Record<string, string>)[where.realmKind] : undefined);
     const sel = where.selection?.entity && /^0x[0-9a-f]{40}$/i.test(where.selection.entity) ? where.selection : undefined;
     const selSuffix = sel?.kind ? ((KIND_SUFFIX as Record<string, string>)[sel.kind.toLowerCase()] ?? sel.kind.toLowerCase()) : undefined;
     const candidates: Array<{ agent: string; suffix: string; hint: string; side: readonly string[] }> = [
@@ -3085,6 +3095,7 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'organization.team.create': ['signature'],        // the child's genesis
   'organization.create': ['signature'],
   'household.create': ['signature'],
+  'service.create': ['signature'],
   'treasury.create': ['signature'],
   'organization.membership.invite': ['signature'],  // the org signs the invitation grant
   'coordination.endeavor.request': ['signature'],   // the mandate — asking as you is an act of yours
@@ -3675,6 +3686,15 @@ be emitted together; the runtime runs them side by side.`;
       ...(input.inResponseTo ? { correlation: { inResponseTo: input.inResponseTo } } : {}),
     };
   };
+  // THE REALM'S TYPED SUFFIX, whether or not a surface declared it (spec 367 §7 / 371 §2.1). A person's
+  // own agent is `me`; any other addressee's typed name says what it is. Without this a probe or a peer
+  // that sends no `surface` left "create a service agent" asking "who is the parent?" inside the person's
+  // own realm, while the same words with the Home's surface filled it — one fill, one answer.
+  const realmSuffix: string | undefined = input.person && input.addressee && input.addressee.toLowerCase() === input.person.toLowerCase()
+    ? 'me'
+    : input.addressee && deps.nameOf
+      ? ((await deps.nameOf(input.addressee).catch(() => null)) ?? '').split('.').pop() || undefined
+      : undefined;
   const result = await runIntent(input.intent, {
     planner, tools, bindingFor,
     ...(input.resume ? { resume: input.resume } : {}),
@@ -3739,6 +3759,7 @@ be emitted together; the runtime runs them side by side.`;
       // Spec 367 §7 / 361 I6 — the validated application context a party may be filled from.
       ...(input.addressee ? { addressee: input.addressee } : {}),
       ...(input.surface?.realm?.kind ? { realmKind: input.surface.realm.kind } : {}),
+      ...(realmSuffix && realmSuffix in CLASS_FOR_SUFFIX ? { realmSuffix } : {}),
       ...(input.surface?.selection ? { selection: input.surface.selection } : {}),
       // The tool's OWN declaration of what it cannot work without — asked for, never inferred.
       required: (tool.inputSchema as { required?: string[] } | undefined)?.required ?? [],

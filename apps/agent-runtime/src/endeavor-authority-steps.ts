@@ -42,6 +42,8 @@ export const AUTHORITY_BEARING_CAPABILITIES: readonly string[] = [
   // A household is an organization of kin (spec 368 — HouseholdAgent ⊑ OrganizationAgent): chartering one
   // is the same class of step as chartering an organization or a team.
   'household.create',
+  // Spec 372 S3 — a service agent (the identity an outside runtime acts as) is chartered the same way.
+  'service.create',
   'organization.membership.invite',
   'treasury.create',
   'treasury.payment.execute',
