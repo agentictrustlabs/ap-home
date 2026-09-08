@@ -91,18 +91,26 @@ workers_dev = true
 # Infura) doesn't end up in the tracked wrangler.toml. Configure with:
 #   echo "<rpc-url>" | wrangler secret put RPC_URL --env production
 CHAIN_ID = "84532"
-# ADR-0044 / spec 327 — the Ring-0 orchestration loop plans with the Anthropic LLM planner when BOTH
-# this mode flag AND the ANTHROPIC_API_KEY secret are present (selectPlanner requires both — with the
-# secret absent the deterministic rule-based planner runs, a config choice, not a fallback). Committed
-# here (not a --var) so it survives targeted deploys. Key: `wrangler secret put ANTHROPIC_API_KEY
-# --env production`. Optional ORCHESTRATION_MODEL overrides the planner default model.
+# ADR-0044 / spec 327 / spec 375 — the models the Ring-0 orchestration loop plans and composes with: a
+# comma-separated ORDERED allowlist of providers; the FIRST is the default, and the Home Ask's picker may
+# name another per conversation. Each listed provider needs its own secret, and a provider that is listed
+# and keyless is a thrown configuration error, never a fallback (ADR-0013):
+#   wrangler secret put ANTHROPIC_API_KEY --env production
+#   wrangler secret put GROQ_API_KEY --env production      (set BEFORE deploying a toml that lists groq)
+# Optional ORCHESTRATION_MODEL overrides the Anthropic model; ORCHESTRATION_GROQ_MODEL and
+# ORCHESTRATION_GROQ_BASE_URL the Groq ones (defaults in src/orchestration.ts GROQ_DEFAULTS:
+# openai/gpt-oss-120b at https://api.groq.com/openai/v1). Committed here (not a --var) so it survives
+# targeted deploys.
 # DRIFT HAZARD (observed 2026-08-02). This flag was committed 2026-07-17 as a production flag
 # (spec 327 / ADR-0044) and was still NOT on the live Worker after a 2026-08-01 deploy — it only
 # went live when a subsequent deploy re-sent the full var set. It is NOT in `a2aVars` in
 # scripts/deploy-cloudflare.ts, so its liveness depends on toml inheritance surviving whatever
 # `--var` flags that deploy passes. If the LLM planner is unexpectedly off, CHECK THE LIVE WORKER
-# rather than this file: `wrangler versions view <id> --env production --json`.
-ORCHESTRATION_LLM = "anthropic"
+# rather than this file: `wrangler versions view <id> --env production --json`. The same hazard
+# applies to the optional ORCHESTRATION_GROQ_* vars.
+ORCHESTRATION_LLM = "anthropic,groq"
+# ORCHESTRATION_GROQ_MODEL = "openai/gpt-oss-20b"
+# ORCHESTRATION_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 # spec 327 — org/inbox assistant dispatch bound (defaults 6 per 10 min per topic, in code). Raised
 # here because there are NO production users of this deployment: its actual load is people building
 # against it, and a dropped assistant turn is silent to the poster by design (audited, never queued),
@@ -376,7 +384,9 @@ EMAIL_FROM_NAME = "faithnet"
 # spec 346 migration — the faithnet estate moved persons to `.me` (2026-08-29); legacy `.impact` homes still resolve.
 AGENT_NAME_PARENTS = "me,impact"
 CHAIN_ID = "34348"
-ORCHESTRATION_LLM = "anthropic"
+# Spec 375 — ordered allowlist; first = default. Needs ANTHROPIC_API_KEY and GROQ_API_KEY secrets on this env
+# (`wrangler secret put GROQ_API_KEY --env faithnet`). See the [env.production.vars] comment for the rules.
+ORCHESTRATION_LLM = "anthropic,groq"
 ASSISTANT_RATE_MAX = "60"
 ASSISTANT_RATE_WINDOW_MS = "600000"
 GATHER_RECORD_CLIP = "60000"

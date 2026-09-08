@@ -117,6 +117,8 @@ export type AskReplyVariant =
 /** Spec 367 wave 1 — what the planner actually received on this turn (mirror of the a2a `PlannerTraceV1`). Display only. */
 export interface PlannerTrace {
   planner: string;
+  /** Spec 375 — the concrete model that planned (`openai/gpt-oss-120b`), when a model did. */
+  model?: string;
   toolsExposed: string[];
   playbook: { archetypeId: string; archetypeVersion: string; digest: string } | null;
   promptDigest: string;
@@ -124,8 +126,13 @@ export interface PlannerTrace {
   admission: Array<{ refused: Array<{ code: string; message: string; stepIndex?: number; toolId?: string }>; replanned: boolean }>;
   plan: Array<{ toolId: string; args: Record<string, unknown> }>;
   bindings: Array<{ arg: string; raw: string; agent: string; label?: string; source: string; because?: string }>;
-  surface?: { realm?: string; capabilities?: number };
+  surface?: { realm?: string; capabilities?: number; channel?: 'text' | 'voice' };
+  recalledTurns?: number;
 }
+
+/** Spec 375 — one model the agent OFFERS for an Ask: the provider id a turn names, the words the picker
+ *  shows, the concrete model behind it, and whether it is the one a turn gets when it names none. */
+export interface AskModelOption { id: string; label: string; model: string; free: boolean; default: boolean }
 export type AskReply = AskReplyVariant & {
   plannerTrace?: PlannerTrace;
   /** Spec 369 — what a VOICE says for this reply, decided by the agent (markdown stripped, addresses named;
@@ -200,20 +207,36 @@ export interface AskVocabularyEntry { id: string; description?: string; riskTier
  * has not said what it can do is not narrowed by its silence), so a fetch failure costs honesty, never
  * function.
  */
-const vocabularyMemo = new Map<string, { at: number; caps: AskVocabularyEntry[] }>();
+const vocabularyMemo = new Map<string, { at: number; caps: AskVocabularyEntry[]; models: AskModelOption[] }>();
 const VOCABULARY_TTL_MS = 5 * 60_000;
+
+/** One read of the vocabulary endpoint, memoised: the capabilities AND the models offered ride together. */
+async function readVocabulary(agent?: string): Promise<{ caps: AskVocabularyEntry[]; models: AskModelOption[] } | null> {
+  const memoKey = (agent ?? '').toLowerCase();
+  const cached = vocabularyMemo.get(memoKey);
+  if (cached && Date.now() - cached.at < VOCABULARY_TTL_MS) return cached;
+  try {
+    const r = await fetch(`/a2a/harness/vocabulary${memoKey ? `?agent=${memoKey}` : ''}`);
+    if (!r.ok) return null;
+    const body = (await r.json()) as { capabilities?: AskVocabularyEntry[]; models?: AskModelOption[] };
+    if (body.capabilities) {
+      const entry = { at: Date.now(), caps: body.capabilities, models: Array.isArray(body.models) ? body.models : [] };
+      vocabularyMemo.set(memoKey, entry);
+      return entry;
+    }
+  } catch { /* no vocabulary ⇒ no commands to offer; the sentence path still works */ }
+  return null;
+}
 
 /** The agent's published vocabulary entries (with command fields), memoised like `homeScope`. */
 export async function homeVocabulary(agent?: string): Promise<AskVocabularyEntry[]> {
-  const memoKey = (agent ?? '').toLowerCase();
-  const cached = vocabularyMemo.get(memoKey);
-  if (cached && Date.now() - cached.at < 5 * 60_000) return cached.caps;
-  try {
-    const r = await fetch(`/a2a/harness/vocabulary${memoKey ? `?agent=${memoKey}` : ''}`);
-    const body = (await r.json()) as { capabilities?: AskVocabularyEntry[] };
-    if (body.capabilities) { vocabularyMemo.set(memoKey, { at: Date.now(), caps: body.capabilities }); return body.capabilities; }
-  } catch { /* no vocabulary ⇒ no commands to offer; the sentence path still works */ }
-  return [];
+  return (await readVocabulary(agent))?.caps ?? [];
+}
+
+/** Spec 375 — the models the agent OFFERS for an Ask. Empty ⇒ the agent names none (the picker is not
+ *  shown and a turn names no model; the deployment default runs). Shares the vocabulary read. */
+export async function homeModels(agent?: string): Promise<AskModelOption[]> {
+  return (await readVocabulary(agent))?.models ?? [];
 }
 
 export async function homeScope(
@@ -238,15 +261,13 @@ export async function homeScope(
       const renders = new Set<string>(ceremonies);
       return { ...surface, capabilities: fresh.filter((c) => (c.ceremonies ?? []).every((x) => renders.has(x))).map((c) => c.id) };
     }
-    const r = await fetch(`/a2a/harness/vocabulary${memoKey ? `?agent=${memoKey}` : ''}`);
-    if (!r.ok) return surface;
-    const body = (await r.json()) as { capabilities?: AskVocabularyEntry[] };
-    if (body.capabilities) vocabularyMemo.set(memoKey, { at: Date.now(), caps: body.capabilities });
+    const read = await readVocabulary(agent);
+    if (!read) return surface;
     const renders = new Set<string>(ceremonies);
-    const usable = (body.capabilities ?? []).filter((c) => (c.ceremonies ?? []).every((x) => renders.has(x)));
+    const usable = read.caps.filter((c) => (c.ceremonies ?? []).every((x) => renders.has(x)));
     // An empty intersection is a real answer and must not read as "no scope declared": send the empty
     // list, and the agent offers nothing rather than everything.
-    return usable.length || body.capabilities?.length ? { ...surface, capabilities: usable.map((c) => c.id) } : surface;
+    return usable.length || read.caps.length ? { ...surface, capabilities: usable.map((c) => c.id) } : surface;
   } catch {
     return surface;
   }
@@ -266,6 +287,9 @@ export interface AskTurnState {
   supplied: SuppliedInput[];
   /** Set once the agent has checkpointed this run: later turns send the runRef and the new answers only. */
   resumable?: boolean;
+  /** Spec 375 — the provider the person chose for this conversation (`AskModelOption.id`). Sent on EVERY
+   *  turn of a run so a resume composes with it too. Absent ⇒ the agent's default. */
+  model?: string;
 }
 
 /** An unfinished run on the agent being asked, that this person may pick up (spec 350 W3). A handle and
@@ -348,6 +372,7 @@ export async function ask(session: { token: string }, state: AskTurnState): Prom
     ...(state.plan ? { plan: state.plan } : {}),
     ...(state.presented ? { presented: state.presented } : {}),
     ...(state.channel ? { channel: state.channel } : {}),
+    ...(state.model ? { model: state.model } : {}),
     supplied: state.supplied,
   });
   if (!res.ok || !res.reply) {

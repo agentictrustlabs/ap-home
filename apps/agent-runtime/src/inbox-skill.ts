@@ -15,7 +15,7 @@
 // config choice, not a fallback path (ADR-0013). Message bodies are DATA to the planner; the tool
 // below is the total capability surface, and the invoker enforces at-most-one reply per turn.
 import { runIntent, createRuleBasedPlanner, type Planner, type ToolSpec, type RunResult } from '@agenticprimitives/orchestration';
-import { selectPlanner, type PlannerEnv, llmConfigured as isLlmConfigured } from './orchestration.js';
+import { selectPlanner, type PlannerEnv, type PlannerKind, llmConfigured as isLlmConfigured } from './orchestration.js';
 
 export interface InboxRespondInput {
   principal: string;
@@ -85,7 +85,7 @@ export async function handleInboxRespond(
   env: PlannerEnv,
   input: InboxRespondInput,
   io: InboxIo,
-): Promise<{ result: RunResult; plannerKind: 'anthropic' | 'rule-based'; posted: boolean; messageId?: string }> {
+): Promise<{ result: RunResult; plannerKind: PlannerKind; posted: boolean; messageId?: string }> {
   // Harness context pre-fetch (LLM turns only — the template ignores it). Best-effort ENRICHMENT,
   // not authority and not a second mechanism: a failed read just means a trigger-only goal and the
   // default playbook. Also carries the archetype's compiled INSTRUCTIONS (spec 354 K3), which open the
@@ -111,7 +111,7 @@ export async function handleInboxRespond(
       args: { bodyText: `${input.displayName}'s assistant here — thanks for your message. ${input.displayName} will follow up with you soon.` },
     },
   ]);
-  const effective = kind === 'anthropic' ? planner : deterministic;
+  const effective = kind !== 'rule-based' ? planner : deterministic;
 
   let posted = false;
   let messageId: string | undefined;

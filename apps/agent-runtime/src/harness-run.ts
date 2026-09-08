@@ -52,7 +52,7 @@ import { RELATIONSHIP_TYPE, ROLE } from '@agenticprimitives/agent-relationships'
 import type { AuditSink } from '@agenticprimitives/audit';
 import { enforcersFromEnv } from './org-wire.js';
 import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a';
-import { selectPlanner, selectComposer } from './orchestration.js';
+import { selectPlanner, selectComposer, type LlmProvider } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from '@agenticprimitives/context';
 import { structuredCallFor } from './context-wiring.js';
 import type { DefinitionToolV1 } from '@agenticprimitives/capability-claims';
@@ -1783,6 +1783,9 @@ export interface HarnessRunInput {
   surface?: AskScopeV1;
   /** Spec 369 — the words arrived by voice (the transcript the agent itself produced). Trace only. */
   channel?: 'text' | 'voice';
+  /** Spec 375 — the provider this turn plans, composes and looks things up with. Absent ⇒ the deployment
+   *  default. Validated by the caller against what the deployment offers; never a gate input. */
+  provider?: LlmProvider;
   /** The agent being asked. Informational tools that read an organization's own records default to it —
    *  "who are the members" asked OF an organization means that one. */
   addressee?: Address;
@@ -1997,7 +2000,10 @@ export type AskReplyVariant =
  */
 export interface PlannerTraceV1 {
   /** Who proposed the plan: the screen (supplied), a compiled one-correct-plan shape, or the model. */
-  planner: 'supplied' | 'compiled' | 'anthropic' | 'rule-based' | string;
+  planner: 'supplied' | 'compiled' | 'anthropic' | 'groq' | 'rule-based' | string;
+  /** Spec 375 — the concrete model the planner ran (`openai/gpt-oss-120b`, `claude-sonnet-4-6`). Absent
+   *  for supplied / compiled / rule-based plans. Display only. */
+  model?: string;
   /** The tool ids the planner could choose from — a capability absent here was never an option. */
   toolsExposed: string[];
   /** The playbook this run was admitted under (digest-pinned), or null for the bare harness. */
@@ -3152,8 +3158,13 @@ async function askReplyForInner(env: HarnessEnv, input: {
         if (violations.length) text = groundedFallback(evidence);
       }
       return withEvidence(text);
-    } catch {
-      return withEvidence(raw);
+    } catch (e) {
+      // THE FLOOR, AND WHY IT IS THE FLOOR. The evidence stated plainly is the honest reply when no sentence
+      // could be composed — but a floor reached in silence reads as the agent's answer. A provider that
+      // refused (a free tier's rate limit, spec 375) is named here, so the person knows to wait or to pick
+      // another model; nothing here retries on a different one (ADR-0013).
+      const why = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, ' ').slice(0, 240);
+      return withEvidence(`${raw}\n\n(The answer could not be put into words — ${why} — so the evidence is shown as it was found.)`);
     }
   }
   return withProv({ kind: 'refused', runRef: r.runRef, outcome: r.outcome, error: r.error ?? 'the run did not complete', receipts: r.receipts });
@@ -3717,7 +3728,7 @@ be emitted together; the runtime runs them side by side.`;
   // is rendered (an archetype with no examples plans from descriptions, as before).
   const examples = playbook ? utteranceExamples(Object.values(playbook.tools ?? {})) : '';
   const withPlaybook = playbook ? `${playbook.instructions}\n\n---\n\n${fanOutPrompt}${examples}` : fanOutPrompt;
-  const selected = selectPlanner(env as never, { systemPrompt: withPlaybook });
+  const selected = selectPlanner(env as never, { systemPrompt: withPlaybook, ...(input.provider ? { provider: input.provider } : {}) });
   // The compiler answers for the shapes it claims; the model answers for the rest. Not a fallback pair
   // (ADR-0013): the match is deterministic and decided BEFORE any planner runs, the way a rule-based
   // planner rule would be.
@@ -3742,7 +3753,7 @@ be emitted together; the runtime runs them side by side.`;
       };
   const kind = input.plan ? 'supplied' : selected.kind;
   const trace: PlannerTraceV1 = {
-    planner: plannerUsed, toolsExposed: [], recalledTurns: input.conversation?.turns.length ?? 0, playbook: playbook ? { archetypeId: playbook.archetypeId, archetypeVersion: playbook.archetypeVersion, digest: playbook.digest } : null,
+    planner: plannerUsed, ...(selected.model ? { model: selected.model } : {}), toolsExposed: [], recalledTurns: input.conversation?.turns.length ?? 0, playbook: playbook ? { archetypeId: playbook.archetypeId, archetypeVersion: playbook.archetypeVersion, digest: playbook.digest } : null,
     promptDigest: keccak256(toBytes(withPlaybook)), examplesRendered: (examples.match(/^- /gm) ?? []).length,
     admission: [], plan: [], bindings: [],
     ...(input.surface || input.channel ? { surface: { ...(input.surface?.realm?.kind ? { realm: input.surface.realm.kind } : {}), ...(input.surface?.capabilities ? { capabilities: input.surface.capabilities.length } : {}), ...(input.channel ? { channel: input.channel } : {}) } } : {}),
@@ -3762,10 +3773,10 @@ be emitted together; the runtime runs them side by side.`;
   // keyword search instead would answer a different question than the one it advertised (ADR-0013).
   const tools = [
     ...scopedActionTools(input.surface, playbook), ...ASK_DISCOVERY_TOOLS,
-    ...(kbQuestionAvailable({ call: structuredCallFor(env as never) }) ? [KB_QUESTION_TOOL] : []),
+    ...(kbQuestionAvailable({ call: structuredCallFor(env as never, input.provider) }) ? [KB_QUESTION_TOOL] : []),
     // The asker's OWN records (spec 356 W2). Needs a model to choose from the survey AND the survey seam
     // itself — absent either, it is not listed rather than listed and broken.
-    ...(vaultQuestionAvailable({ call: structuredCallFor(env as never) }, deps) ? [VAULT_QUESTION_TOOL] : []),
+    ...(vaultQuestionAvailable({ call: structuredCallFor(env as never, input.provider) }, deps) ? [VAULT_QUESTION_TOOL] : []),
     MEMBERSHIP_LIST_TOOL,
     // What became of an organization's invitations — accepted, waiting, declined, expired.
     ...(deps.survey && deps.readRecords ? [INVITATIONS_LIST_TOOL] : []),

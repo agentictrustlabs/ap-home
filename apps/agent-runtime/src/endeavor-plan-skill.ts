@@ -9,7 +9,7 @@
 // Authority is unchanged (ADR-0041): drafting composes no MCP tools and grants nothing.
 import { runIntent, createRuleBasedPlanner, type Planner, type ToolSpec, type RunResult } from '@agenticprimitives/orchestration';
 import { AUTHORITY_BEARING_CAPABILITIES } from './endeavor-authority-steps.js';
-import { selectPlanner, withPlaybook, type PlannerEnv } from './orchestration.js';
+import { selectPlanner, withPlaybook, type PlannerEnv, type PlannerKind } from './orchestration.js';
 
 export interface EndeavorPlanDraftInput {
   principal: string;
@@ -158,7 +158,7 @@ function sanitize(raw: unknown): DraftStep[] {
 export async function draftEndeavorPlan(
   env: PlannerEnv,
   input: EndeavorPlanDraftInput,
-): Promise<{ steps: DraftStep[]; plannerKind: 'anthropic' | 'rule-based' }> {
+): Promise<{ steps: DraftStep[]; plannerKind: PlannerKind }> {
   const { planner, kind } = selectPlanner(env, { systemPrompt: withPlaybook(input.playbook, PLAN_CONTRACT) });
 
   let captured: DraftStep[] = [];
@@ -178,7 +178,7 @@ export async function draftEndeavorPlan(
   const deterministic: Planner = createRuleBasedPlanner([
     { match: () => true, toolId: 'draft_plan', args: { steps: deterministicSteps(input.goal) } },
   ]);
-  const effective = kind === 'anthropic' ? planner : deterministic;
+  const effective = kind !== 'rule-based' ? planner : deterministic;
 
   let result: RunResult;
   try {

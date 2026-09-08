@@ -22,7 +22,7 @@ import {
   type ConsultRequestV1,
 } from '@agenticprimitives/fabric/messaging';
 import type { CanonicalAgentId } from '@agenticprimitives/types';
-import { selectPlanner, type PlannerEnv, llmConfigured as isLlmConfigured } from './orchestration.js';
+import { selectPlanner, type PlannerEnv, type PlannerKind, llmConfigured as isLlmConfigured } from './orchestration.js';
 
 export const CONSULT_TOOLS: ToolSpec[] = [
   {
@@ -85,7 +85,7 @@ export async function handleConsultRespond(
   env: PlannerEnv,
   args: { member: CanonicalAgentId; request: ConsultRequestV1; orgLabel?: string },
   io: ConsultIo,
-): Promise<{ result: RunResult; plannerKind: 'anthropic' | 'rule-based'; answer: ConsultAnswerV1 | null; error?: string }> {
+): Promise<{ result: RunResult; plannerKind: PlannerKind; answer: ConsultAnswerV1 | null; error?: string }> {
   const { request } = args;
   const llmConfigured = isLlmConfigured(env);
   let playbook = DEFAULT_CONSULT_SKILL_MD;
@@ -114,7 +114,7 @@ export async function handleConsultRespond(
       },
     },
   ]);
-  const effective = kind === 'anthropic' ? planner : deterministic;
+  const effective = kind !== 'rule-based' ? planner : deterministic;
 
   let posted = false;
   let answer: ConsultAnswerV1 | null = null;

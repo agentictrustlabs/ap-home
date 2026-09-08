@@ -26,7 +26,7 @@
 // The SKILL.md is a HARNESS READ on the recipient's side, never carried in the request. A caller
 // that could supply the specialist's instructions would be writing its own reviewer.
 import { runIntent, createRuleBasedPlanner, type Planner, type ToolSpec, type RunResult } from '@agenticprimitives/orchestration';
-import { selectPlanner, withPlaybook, type PlannerEnv } from './orchestration.js';
+import { selectPlanner, withPlaybook, type PlannerEnv, type PlannerKind } from './orchestration.js';
 import { EVIDENCE_MAX } from './endeavors.js';
 
 /**
@@ -487,7 +487,7 @@ export interface ArchetypeTurnResult {
   /** What actually answered — which skills composed the role, and which it declared but could not
    *  load. Worth reporting: a specialist missing half its skills gives a plausible, weaker answer. */
   bundle?: { skills: string[]; missing: string[] };
-  plannerKind: 'anthropic' | 'rule-based';
+  plannerKind: PlannerKind;
   result: RunResult;
   error?: string;
 }
@@ -548,7 +548,7 @@ export async function runArchetypeTurn(
   };
 
   const goal = archetypeGoal(args.input);
-  if (kind !== 'anthropic') {
+  if (kind === 'rule-based') {
     // No model on this deployment. A specialist that cannot think does NOT emit a plausible-looking
     // deliverable — it declines, so the requester sees "nobody did this" rather than filler that
     // reads like ontology work and would be merged.

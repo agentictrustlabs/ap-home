@@ -10,7 +10,7 @@
 // a text artifact the agent authored, recorded as evidence; any real-world effect still flows through
 // an explicit, separately-authorized capability, never inferred from this note.
 import { runIntent, createRuleBasedPlanner, type Planner, type ToolSpec, type RunResult } from '@agenticprimitives/orchestration';
-import { selectPlanner, withPlaybook, type PlannerEnv } from './orchestration.js';
+import { selectPlanner, withPlaybook, type PlannerEnv, type PlannerKind } from './orchestration.js';
 import { QUERY_PUBLIC_GRAPH_TOOL, runPublicSparql, digestRows, type PublicGraphEnv } from './public-graph.js';
 // The log's inline ceiling — shared so the clip here can never be tighter than what the log stores.
 import { EVIDENCE_MAX } from './endeavors.js';
@@ -78,7 +78,7 @@ export async function gatherReferenceContext(
   const orgReadsOn = !!input.readOrgRecord;
   if (!graphOn && !orgReadsOn) return '';
   const { planner, kind } = selectPlanner(env, { systemPrompt: withPlaybook(input.playbook, GATHER_CONTRACT), maxTokens: 1500 });
-  if (kind !== 'anthropic') return ''; // only the LLM can author a query / pick a record; the template cannot.
+  if (kind === 'rule-based') return ''; // only the LLM can author a query / pick a record; the template cannot.
 
   const tools: ToolSpec[] = [];
   if (graphOn) tools.push(QUERY_PUBLIC_GRAPH_TOOL);
@@ -212,9 +212,9 @@ const ANSWER_CONTRACT =
 /** Honest step fallback when no deliverable could be produced. The reason distinguishes "no model
  *  configured" from "the model calls failed" (rate limits) — the old text claimed the former in
  *  both cases, which misled operators on keyed deployments. */
-function deterministicOutput(input: EndeavorStepWorkInput, kind: 'anthropic' | 'rule-based', lastError?: string): string {
+function deterministicOutput(input: EndeavorStepWorkInput, kind: PlannerKind, lastError?: string): string {
   const d = input.stepDescription.trim().replace(/\.$/, '');
-  const why = kind === 'anthropic'
+  const why = kind !== 'rule-based'
     ? `The agent's model calls failed for this step${lastError ? ` (${lastError})` : ''} — recorded as picked up; re-run auto-work or refine by hand.`
     : 'No model configured on this deployment — recorded as an agent-completed step; a human can refine the deliverable.';
   return `Handled by the agent for the goal "${input.goal}": ${d}. (${why})`;
@@ -267,9 +267,9 @@ async function runSingleToolTurn(
     argKey: string;
     goal: string;
     context: Record<string, unknown>;
-    fallback: (kind: 'anthropic' | 'rule-based', lastError?: string) => string;
+    fallback: (kind: PlannerKind, lastError?: string) => string;
   },
-): Promise<{ output: string; plannerKind: 'anthropic' | 'rule-based'; fellBack: boolean }> {
+): Promise<{ output: string; plannerKind: PlannerKind; fellBack: boolean }> {
   // The deliverable/answer rides INSIDE the tool call's input, so the output budget must cover the
   // WHOLE artifact. This has now been raised twice for the same reason: the planner's 1024 default
   // cut long answers mid-emit (an empty capture with no error, reported as "model calls failed"),
@@ -291,7 +291,7 @@ async function runSingleToolTurn(
     return { ok: true, length: captured.length, truncated: clipped.truncated };
   };
 
-  if (kind !== 'anthropic') {
+  if (kind === 'rule-based') {
     const fallbackText = opts.fallback(kind);
     const deterministic: Planner = createRuleBasedPlanner([
       { match: () => true, toolId: opts.toolId, args: { [opts.argKey]: fallbackText } },
@@ -340,7 +340,7 @@ function clipPrior(outputs: Array<{ description: string; output: string }>): str
 export async function executeEndeavorStep(
   env: PlannerEnv,
   input: EndeavorStepWorkInput,
-): Promise<{ output: string; plannerKind: 'anthropic' | 'rule-based'; fellBack: boolean }> {
+): Promise<{ output: string; plannerKind: PlannerKind; fellBack: boolean }> {
   const priorText = clipPrior(input.priorOutputs ?? []);
   const refs = (input.references ?? '').trim();
   return runSingleToolTurn(env, {
@@ -364,12 +364,12 @@ export async function executeEndeavorStep(
 export async function synthesizeEndeavorOutcome(
   env: PlannerEnv,
   input: { principal: string; endeavorId: string; goal: string; deliverables: Array<{ description: string; output: string }>; playbook?: string; references?: string },
-): Promise<{ answer: string; plannerKind: 'anthropic' | 'rule-based'; fellBack: boolean }> {
+): Promise<{ answer: string; plannerKind: PlannerKind; fellBack: boolean }> {
   const body = input.deliverables
     .map((d, i) => `Step ${i + 1} — ${d.description}\n${d.output}`)
     .join('\n\n');
-  const fallback = (kind: 'anthropic' | 'rule-based', err?: string): string =>
-    kind === 'anthropic'
+  const fallback = (kind: PlannerKind, err?: string): string =>
+    kind !== 'rule-based'
       ? `The agent completed all ${input.deliverables.length} plan step(s) for "${input.goal}" (see the per-step ` +
         `results), but its model calls failed while writing the final answer${err ? ` (${err})` : ''}. ` +
         'The step deliverables contain the substance — a person can read them for the answer, or re-run the request.'

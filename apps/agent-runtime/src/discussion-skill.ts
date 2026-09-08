@@ -29,7 +29,7 @@ import {
   type ConsultCandidateV1,
   type ConsultOutcomeV1,
 } from '@agenticprimitives/fabric/messaging';
-import { selectPlanner, type PlannerEnv, llmConfigured as isLlmConfigured } from './orchestration.js';
+import { selectPlanner, defaultProvider, type PlannerEnv, type PlannerKind, llmConfigured as isLlmConfigured } from './orchestration.js';
 import { gatherReferenceContext } from './endeavor-work-skill.js';
 import type { PublicGraphEnv } from './public-graph.js';
 
@@ -206,7 +206,7 @@ export async function handleDiscussionRespond(
   input: DiscussionRespondInput,
   io: DiscussionIo,
   routing?: DiscussionRoutingOpts,
-): Promise<{ result: RunResult; plannerKind: 'anthropic' | 'rule-based'; posted: boolean; messageId?: string; asked: Array<{ memberSA: string; displayName: string; taskId: string }>; degraded?: DiscussionTurnDegraded }> {
+): Promise<{ result: RunResult; plannerKind: PlannerKind; posted: boolean; messageId?: string; asked: Array<{ memberSA: string; displayName: string; taskId: string }>; degraded?: DiscussionTurnDegraded }> {
   // Harness context pre-fetch (LLM turns only — the template ignores it). Best-effort ENRICHMENT,
   // not authority and not a second mechanism: a failed read just means the goal carries only the
   // trigger message and the default playbook. Also carries the org's steward-authored PLAYBOOK
@@ -283,7 +283,7 @@ export async function handleDiscussionRespond(
 
   /** One runIntent pass — routed (ask_member offered, candidates in the goal) or plain spec-327
    *  (single tool; `tool_choice: any` + the invoker guarantee the post structurally). */
-  const runTurn = async (withRouting: boolean): Promise<{ result: RunResult; kind: 'anthropic' | 'rule-based' }> => {
+  const runTurn = async (withRouting: boolean): Promise<{ result: RunResult; kind: PlannerKind }> => {
     const { planner, kind } = selectPlanner(env, {
       systemPrompt: playbook + DISCUSSION_CONTRACT + (withRouting ? ROUTING_CONTRACT : ''),
     });
@@ -307,7 +307,7 @@ export async function handleDiscussionRespond(
           },
         ];
     const deterministic: Planner = createRuleBasedPlanner([{ match: () => true, steps: deterministicSteps }]);
-    const effective = kind === 'anthropic' ? planner : deterministic;
+    const effective = kind !== 'rule-based' ? planner : deterministic;
     const candidateBlock = withRouting && routingOn
       ? `\nCandidate members you may consult (ranked; fan-out limit ${routing.maxFanout}). Match ` +
         "the question against each candidate's ORG ROLE first (\"role: …\" — a question that " +
@@ -346,7 +346,7 @@ export async function handleDiscussionRespond(
   // in flight, else the plain spec-327 turn. Only a failure of the PLAIN turn (posting itself
   // broken) surfaces to the caller as an error. ──
   let degraded: DiscussionTurnDegraded | undefined;
-  let last: { result: RunResult; kind: 'anthropic' | 'rule-based' } | undefined;
+  let last: { result: RunResult; kind: PlannerKind } | undefined;
   if (routingOn) {
     let outcome: { outcome: 'completed' | 'failed'; error?: string };
     try {
@@ -390,7 +390,7 @@ export async function handleDiscussionRespond(
   const finalResult: RunResult = last?.result ?? { outcome: 'failed', plan: { steps: [] }, steps: [], receipts: [], runRef: 'no-run', error: 'no turn ran' };
   return {
     result: finalResult,
-    plannerKind: (last?.kind ?? (llmConfigured ? 'anthropic' : 'rule-based')),
+    plannerKind: (last?.kind ?? (llmConfigured ? (defaultProvider(env) ?? 'rule-based') : 'rule-based')),
     posted,
     asked,
     ...(messageId ? { messageId } : {}),
@@ -427,7 +427,7 @@ export async function handleConsultSynthesis(
   env: PlannerEnv,
   input: ConsultSynthesisInput,
   io: DiscussionIo,
-): Promise<{ result: RunResult; plannerKind: 'anthropic' | 'rule-based'; posted: boolean; messageId?: string }> {
+): Promise<{ result: RunResult; plannerKind: PlannerKind; posted: boolean; messageId?: string }> {
   const llmConfigured = isLlmConfigured(env);
   let playbook = NO_PLAYBOOK_NOTICE('missing');
   let topicContext = '';
@@ -443,7 +443,7 @@ export async function handleConsultSynthesis(
   const deterministic: Planner = createRuleBasedPlanner([
     { match: () => true, toolId: 'post_topic_message', args: { bodyText: deterministicSynthesisBody(input.question, input.outcomes) } },
   ]);
-  const effective = kind === 'anthropic' ? planner : deterministic;
+  const effective = kind !== 'rule-based' ? planner : deterministic;
 
   let posted = false;
   let messageId: string | undefined;

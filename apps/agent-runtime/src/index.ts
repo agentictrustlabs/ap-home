@@ -110,7 +110,7 @@ import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker, householdMembers, ownAgent
 import { KB_QUESTION_TOOL, kbQuestionInvoker } from '@agenticprimitives/context';
 import { discoveryFetchFor, structuredCallFor } from './context-wiring.js';
 import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@agenticprimitives/context';
-import { selectComposer } from './orchestration.js';
+import { selectComposer, resolveProvider, availableModels } from './orchestration.js';
 import { loadRun, saveRun, dropRun, listRuns, mergeTurn, type HarnessRunCheckpointV1, completedStepsOf, isExpired, AWAIT_WINDOW_MS, expiryFor } from './harness-runs.js';
 import { buildGenesisPlanes, type GenesisPlaneWires } from './genesis-planes.js';
 import { bindHarnessAttempt, HarnessApprovalWorkflow, type HarnessWorkflowParams } from './harness-workflow.js';
@@ -277,13 +277,18 @@ export interface Env {
    */
   DEMO_EDGE_URL?: string;
   /**
-   * ADR-0044 / spec 293-adjacent — the Ring-0 `orchestrate` skill's planner selection. When
-   * `ORCHESTRATION_LLM === 'anthropic'` AND `ANTHROPIC_API_KEY` is set, the agent plans intents with the
-   * Anthropic LLM planner (`@agenticprimitives/orchestration-anthropic`); otherwise it uses the deterministic
-   * rule-based planner (the live default — no model, no creds). `ORCHESTRATION_MODEL` overrides the model.
+   * ADR-0044 / spec 375 — which models this deployment plans and composes with. A comma-separated ORDERED
+   * allowlist of providers (`anthropic`, `groq`); the first is the default, and a turn may name another (the
+   * Home Ask's picker). Each listed provider needs its own key (`ANTHROPIC_API_KEY`, `GROQ_API_KEY`) — listed
+   * and keyless is a thrown configuration error, never a fallback (ADR-0013). Unset ⇒ the deterministic
+   * rule-based planner (no model, no creds). `ORCHESTRATION_MODEL` overrides the Anthropic model;
+   * `ORCHESTRATION_GROQ_MODEL` / `ORCHESTRATION_GROQ_BASE_URL` the Groq ones (defaults in `orchestration.ts`).
    */
   ORCHESTRATION_LLM?: string;
   ANTHROPIC_API_KEY?: string;
+  GROQ_API_KEY?: string;
+  ORCHESTRATION_GROQ_MODEL?: string;
+  ORCHESTRATION_GROQ_BASE_URL?: string;
   /** Spec 365 — the display name system mail (a sign-in code) goes out under. */
   EMAIL_FROM_NAME?: string;
   ORCHESTRATION_MODEL?: string;
@@ -1944,7 +1949,10 @@ app.get('/harness/vocabulary', async (c) => {
     rules: d.rules.map((r) => ({ id: r.id, basis: r.basis.property, cardinality: r.basis.cardinality, because: r.because })),
     whenNoneApply: 'the question is asked',
   }));
-  return c.json({ ok: true, capabilities: (() => { const fields = commandFieldsFor(playbook as never); return askVocabulary(playbook).map((cap) => ({ ...cap, ...(fields[cap.id]?.length ? { fields: fields[cap.id] } : {}) })); })(), decisions });
+  // Spec 375 — the models this deployment OFFERS a surface (allowlisted AND credentialed), the default marked.
+  // Read without a session for the same reason the capability list is. A listed-but-keyless provider is
+  // omitted here and throws on the turn that names it — the surface never shows a choice it cannot serve.
+  return c.json({ ok: true, capabilities: (() => { const fields = commandFieldsFor(playbook as never); return askVocabulary(playbook).map((cap) => ({ ...cap, ...(fields[cap.id]?.length ? { fields: fields[cap.id] } : {}) })); })(), decisions, models: availableModels(c.env) });
 });
 
 // GET /resolution/requests — what people have asked THIS person for a way to reach (spec 338 §7).
@@ -2388,6 +2396,9 @@ app.post('/harness/ask', async (c) => {
     subjectAsk?: unknown;
     /** Spec 369 — how the words arrived (recorded on the trace; the words themselves are the person's). */
     channel?: 'text' | 'voice';
+    /** Spec 375 — the provider the person chose for this conversation (`anthropic`, `groq`). Absent ⇒ the
+     *  deployment default. A provider this agent does not offer is a 400, never a swap. */
+    model?: string;
   } | null;
   if (!body?.session || !body.addressee || !(body.message?.trim() || body.runRef)) {
     return c.json({ ok: false, error: 'session, addressee and either a message or the runRef of a run to resume are required' }, 400);
@@ -2395,6 +2406,12 @@ app.post('/harness/ask', async (c) => {
   const who = await verifyHomeSession(body.session, c.env);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   if (!c.env.HARNESS_AGENT_SA) return c.json({ ok: false, error: 'HARNESS_AGENT_SA not configured' }, 503);
+  // Spec 375 — which model this turn runs on, decided BEFORE any run state is touched. A listed-but-keyless
+  // provider throws here (a configuration error, loud), an unoffered one is refused with the offer named.
+  const chosen = resolveProvider(c.env, body.model);
+  if (!chosen.ok) return c.json({ ok: false, error: chosen.error }, 400);
+  const provider = chosen.provider ?? undefined;
+  const structuredCall = structuredCallFor(c.env, provider);
   const addressee = body.addressee.toLowerCase() as Address;
   // ── Spec 366 R2 — A ROUTED REQUEST UNDER THE SUBJECT-ASK PROFILE. Validated structurally, then checked for
   // CONSISTENCY with what this receiver verifies for itself: the credential in the profile is the session
@@ -2489,6 +2506,7 @@ app.post('/harness/ask', async (c) => {
       conversation: conversation && conversation.type === 'ap.context.conversation-memory.v1' ? conversation : null,
       ...(inResponseTo ? { inResponseTo } : {}),
       ...(body.channel === 'voice' ? { channel: 'voice' as const } : {}),
+      ...(provider ? { provider } : {}),
       ...(body.plan ?? stored?.plan ? { plan: body.plan ?? stored?.plan } : {}),
       // Spec 370 P1 — what already ran, replayed; what has not, attempted. The planner is not asked again.
       ...(stored?.executed ? { resume: stored.executed } : {}),
@@ -2502,11 +2520,11 @@ app.post('/harness/ask', async (c) => {
       mcpInvoke: async (toolId, args, ctx) => {
         // The generated-query read (spec 357 W3) — same tier, same rules: public data, no authority, and
         // the query it ran comes back with the answer.
-        if (toolId === KB_QUESTION_TOOL.id) return kbQuestionInvoker({ fetchDiscovery: discoveryFetchFor(c.env), ...(structuredCallFor(c.env) ? { call: structuredCallFor(c.env)! } : {}) })(toolId, args, ctx);
+        if (toolId === KB_QUESTION_TOOL.id) return kbQuestionInvoker({ fetchDiscovery: discoveryFetchFor(c.env), ...(structuredCall ? { call: structuredCall } : {}) })(toolId, args, ctx);
         // Their OWN records (spec 356 W2). The subject is the connected person, from the session — never
         // an argument, so a question cannot name somebody else's vault.
         if (toolId === VAULT_QUESTION_TOOL.id) {
-          return vaultQuestionInvoker({ ...(structuredCallFor(c.env) ? { call: structuredCallFor(c.env)! } : {}) }, askDeps, who.sa as string, askDeps.resolveName)(toolId, args, ctx);
+          return vaultQuestionInvoker({ ...(structuredCall ? { call: structuredCall } : {}) }, askDeps, who.sa as string, askDeps.resolveName)(toolId, args, ctx);
         }
         // WHO CAN READ MY RECORDS (spec 341 §4.3). The subject is the CONNECTED person, from the
         // session — never an argument, so this cannot be pointed at anyone else's grants. It runs no
@@ -2578,7 +2596,7 @@ app.post('/harness/ask', async (c) => {
       },
     });
     const reply = await askReplyFor(c.env as unknown as HarnessEnv, {
-      intent, result, addressee, composer: selectComposer(c.env), deps: askDeps, interactionFor, plannerTrace: trace, tools: offeredTools,
+      intent, result, addressee, composer: selectComposer(c.env, provider ? { provider } : undefined), deps: askDeps, interactionFor, plannerTrace: trace, tools: offeredTools,
       ...(body.plan ?? stored?.plan ? { suppliedPlan: true } : {}),
       ...(body.surface ? { surface: body.surface } : {}),
       resolveName: (name) => askDeps.resolveName?.(name) ?? Promise.resolve(null),

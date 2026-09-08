@@ -25,9 +25,12 @@ import { nameLabel } from '../../../lib/domain';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
 import { useVoice, blobToBase64 } from './useVoice';
 import { yesNo, matchChoice, listenAfter, plainSpeech, navigationIntent, closestOption } from './voice-text';
-import { ask, hear, warmHearing, readProgress, type ProgressLine, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField } from '../../../home/ask';
+import { ask, hear, warmHearing, readProgress, type ProgressLine, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, homeModels, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField, type AskModelOption } from '../../../home/ask';
 import type { AskSelection } from '../../../home/ask-selection';
 import { resolveNavigationTarget } from '../../../lib/interaction-registry';
+
+/** Spec 375 — where this browser remembers which model the person picked for the Ask. */
+const MODEL_PREF_KEY = 'ask.model';
 import { BusyButton } from '../../shared/BusyButton';
 import { XIcon } from '../../shared/Icons';
 import { AgentName } from '../../shared/AgentName';
@@ -192,7 +195,9 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
       }
     })();
     try {
-      const { reply, resumable, waiting, unfinishedRuns, unfinishedTotal: total } = await ask(session, state).finally(() => { polling = false; });
+      // Spec 375 — the person's model pick rides EVERY turn of a run (a resume composes with it too); this is
+      // the one place all turns pass through, so it is the one place it is attached.
+      const { reply, resumable, waiting, unfinishedRuns, unfinishedTotal: total } = await ask(session, { ...state, ...(model ? { model } : {}) }).finally(() => { polling = false; });
       // Recorded for EVERY turn, answer or not: a run that asked for authority, or was refused, is exactly
       // the run somebody wants to look at afterwards.
       setDiag((d) => [...d, {
@@ -452,9 +457,27 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   // (no model re-derives it), and a form is not a second path.
   const [commands, setCommands] = useState<AskVocabularyEntry[]>([]);
   const [command, setCommand] = useState<AskVocabularyEntry | null>(null);
+  // Spec 375 — WHICH MODEL PROPOSES, chosen by the person. The agent publishes what it offers with its
+  // vocabulary; the pick is remembered per browser and sent on every turn. It changes who proposes, never
+  // what is permitted — authority is unchanged whichever is picked (369's rule for voice, applied here).
+  const [models, setModels] = useState<AskModelOption[]>([]);
+  const [model, setModelState] = useState<string | null>(null);
+  const setModel = (id: string) => {
+    setModelState(id);
+    try { localStorage.setItem(MODEL_PREF_KEY, id); } catch { /* private mode */ }
+  };
   useEffect(() => {
     let cancelled = false;
     void homeVocabulary(addressee).then((caps) => { if (!cancelled) setCommands(caps.filter((c) => c.fields?.length)); });
+    void homeModels(addressee).then((offered) => {
+      if (cancelled) return;
+      setModels(offered);
+      // The remembered pick, if the agent still offers it; else the agent's default; else nothing named.
+      let remembered: string | null = null;
+      try { remembered = localStorage.getItem(MODEL_PREF_KEY); } catch { /* private mode */ }
+      const pick = offered.find((m) => m.id === remembered) ?? offered.find((m) => m.default) ?? offered[0] ?? null;
+      setModelState(pick?.id ?? null);
+    });
     return () => { cancelled = true; };
   }, [addressee]);
   // Spec 361 I5 — a DRAFT being edited: the run the form was opened from. Submitting resumes THAT run with
@@ -564,6 +587,17 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
           >
             Voice {voice.enabled ? 'on' : 'off'}
           </button>
+        )}
+        {models.length > 0 && (
+          <select
+            data-testid="ask-model" aria-label="Model" className="btn ghost"
+            title="Which model plans and answers this conversation. Authority is unchanged whichever you pick."
+            style={{ fontSize: 11, padding: '2px 8px', marginRight: 6 }}
+            value={model ?? ''} disabled={models.length === 1 || !!busy}
+            onChange={(e) => setModel(e.target.value)}
+          >
+            {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
         )}
         <button
           type="button" className="btn ghost" data-testid="ask-diagnostics-toggle"
@@ -882,7 +916,7 @@ function PlannerTraceView({ trace }: { trace: PlannerTrace }) {
   return (
     <div className="muted" style={{ marginTop: 6, fontSize: 11, lineHeight: 1.5 }}>
       <div>
-        <strong>planner</strong> {trace.planner}
+        <strong>planner</strong> {trace.planner}{trace.model ? `(${trace.model})` : ''}
         {' · '}<strong>playbook</strong> {trace.playbook ? `${trace.playbook.archetypeId.replace(/^skill:archetypes\//, '')} v${trace.playbook.archetypeVersion} ${short(trace.playbook.digest)}` : 'none (bare harness)'}
         {' · '}<strong>examples</strong> {trace.examplesRendered}
         {' · '}<strong>tools</strong> {trace.toolsExposed.length}

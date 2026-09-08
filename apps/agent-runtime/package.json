@@ -38,6 +38,7 @@
     "@agenticprimitives/ontology": "workspace:*",
     "@agenticprimitives/orchestration": "workspace:*",
     "@agenticprimitives/orchestration-anthropic": "workspace:*",
+    "@agenticprimitives/orchestration-openai-compat": "workspace:*",
     "@agenticprimitives/rate-control-cloudflare": "workspace:*",
     "@agenticprimitives/registry-kit": "workspace:*",
     "@agenticprimitives/related-agents": "workspace:*",
