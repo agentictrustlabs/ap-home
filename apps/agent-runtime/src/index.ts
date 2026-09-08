@@ -2379,18 +2379,25 @@ app.post('/harness/ask', async (c) => {
       ...(reply.kind === 'refused' ? { said: reply.error } : reply.kind === 'prompt' ? { said: reply.prompt.prompt } : reply.kind === 'authority_required' ? { said: reply.summary } : {}),
       run: { runRef, receipts: result.receipts.map((rc) => ({ stepRef: rc.stepRef, ...(rc.capability?.id ? { capability: rc.capability.id } : {}), status: rc.status, ...(rc.binding ? { binding: rc.binding } : {}) })) },
     }) : undefined;
-    // Spec 369 — WHAT IS SAID, decided by the agent: markdown stripped, addresses named. A voice reads this.
-    const spoken = await spokenFor(reply as never, async (a) => askDeps.nameOf?.(a) ?? null, (id) => CAPABILITY_WORDS[id] ?? id).catch(() => '');
     // Spec 370 P5 — the agent's schedule follows its playbook: every ask re-syncs the trigger rows (cheap,
     // idempotent, and the only moment the Worker sees which playbook the agent holds).
     c.executionCtx.waitUntil(syncTriggers(c.env as never, addressee, askedPlaybook).catch((e: unknown) => console.warn('[triggers] sync failed:', e instanceof Error ? e.message : String(e))));
     // Spec 370 P7 — REMEMBER THE TURN in the asker's own vault: the words, what they came to, and what
     // each party word resolved to, so the next ask can say "him". A write that fails costs a recall.
+    // The write LANDS BEFORE THE REPLY LEAVES: a next ask one second later once read the record without
+    // this turn and recalled an older, wrong one. It runs beside the spoken-line rendering, not after it.
+    let kept: Promise<void> = Promise.resolve();
     if (askDeps.writeSubjectRecord) {
-      const parties = [...resolved.values()].filter((r) => /^0x[0-9a-f]{40}$/i.test(r.agent) && r.raw && !/^0x/i.test(r.raw)).map((r) => ({ arg: r.arg, raw: r.raw, agent: r.agent.toLowerCase(), ...(r.label ? { label: r.label } : {}) }));
+      // ONLY what the PERSON'S WORDS resolved. A decision point's answer (the payer they marked, cited
+      // by a rule) carries the ROLE'S word as `raw` ("paying from"), and remembered as a party it once made
+      // "send him 2 USDC" pay alice's own treasury — "him" matched "paying from". A pronoun recalls words.
+      const parties = [...resolved.values()].filter((r) => /^0x[0-9a-f]{40}$/i.test(r.agent) && r.raw && !/^0x/i.test(r.raw) && !r.ruleId && !r.pointId).map((r) => ({ arg: r.arg, raw: r.raw, agent: r.agent.toLowerCase(), ...(r.label ? { label: r.label } : {}) }));
       const next = rememberTurn(conversation?.type === 'ap.context.conversation-memory.v1' ? conversation : null, { at: new Date().toISOString(), runRef, addressee, said: turn.message, kind: reply.kind, parties });
-      c.executionCtx.waitUntil(askDeps.writeSubjectRecord(String(who.sa).toLowerCase(), CONVERSATION_RECORD, next).then((r) => { if (!r.ok) console.warn('[harness/ask] conversation not kept:', r.error); }).catch(() => undefined));
+      kept = askDeps.writeSubjectRecord(String(who.sa).toLowerCase(), CONVERSATION_RECORD, next).then((r) => { if (!r.ok) console.warn('[harness/ask] conversation not kept:', r.error); }).catch(() => undefined);
     }
+    // Spec 369 — WHAT IS SAID, decided by the agent: markdown stripped, addresses named. A voice reads this.
+    const spoken = await spokenFor(reply as never, async (a) => askDeps.nameOf?.(a) ?? null, (id) => CAPABILITY_WORDS[id] ?? id).catch(() => '');
+    await kept;
     // Spec 370 P6 — THE RUN RECORD: what this turn observed, decided and received, kept a week on the
     // agent's own object for looking back and replaying (verdicts re-derived, tools never re-run). The
     // mandates ride along ONLY there; a listing strips them. Fire-and-forget: a record that failed to land

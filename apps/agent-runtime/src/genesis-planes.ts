@@ -42,6 +42,8 @@ export const GENESIS_INTERACTIONS_SCOPES: ReadonlyArray<{ resources: string[]; o
     'vault:coordination.index', 'vault:coordination.endeavor:*', 'vault:content.*',
     'vault:resolution.requests', 'vault:resolution.grants', 'vault:archetype.assignment', 'vault:payment.receipt:*',
     'vault:household.data',
+    // Spec 370 P7 — the person's own recent asks, so "him" can mean whom they just meant.
+    'vault:conversation.recent',
   ], ops: ['read', 'write'] },
   { resources: ['vault:archetype.assignment'], ops: ['read', 'write', 'delete'] },
   { resources: ['vault:message.body:dm:*'], ops: ['read'] },
