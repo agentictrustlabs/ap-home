@@ -36,10 +36,14 @@ import { OnboardingProgress } from '../shared/OnboardingProgress';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
+import { NewMemberSetup } from './NewMemberSetup';
+import { newMemberPlan, planIsEmpty, withProfileNameConsent } from '../../lib/new-member';
 
 export type JourneyVariant = 'enroll-new' | 'enroll-existing' | 'self-serve';
 
-type Screen = 'arrival' | 'overview' | 'key-ready' | 'securing' | 'receipts' | 'vault-activate' | 'grant' | 'connected' | 'error' | 'contact';
+// 'new-member' — first-connect provisioning the relying app declared (`new_member`), between the
+// setup receipts and the permission consent. Skipped entirely when the app declared nothing.
+type Screen = 'arrival' | 'overview' | 'key-ready' | 'securing' | 'receipts' | 'vault-activate' | 'grant' | 'connected' | 'error' | 'contact' | 'new-member';
 
 export function OnboardingJourney({
   variant,
@@ -86,6 +90,23 @@ export function OnboardingJourney({
   const [contactKind, setContactKind] = useState<'email' | 'phone'>('email');
   const failBack = useRef<Screen>('overview');
 
+  // ── First-connect provisioning (whitelabel `new_member`) ────────────────────────────────────
+  // Only a NEW home in a relying-app enroll qualifies: `enroll-existing` is someone who already
+  // has a home (and possibly a treasury and a name), and self-serve has no app to declare anything.
+  //
+  // It also needs a HOME SESSION, because creating an agent and writing to the member's own vault
+  // are both authorized by one. The email/phone leg of this journey has one (the OTP cards open it
+  // themselves); the passkey/wallet leg deliberately does NOT open a session before the grant, and
+  // manufacturing one here would cost a second device prompt in the middle of a ceremony that
+  // already has two. So that leg falls through to the consent unchanged — see the report/README
+  // note: those members claimed a handle on the way in (the named journey requires one), so they
+  // are not the "shows as a truncated address" case, and /treasuries remains the way to open an
+  // account by hand.
+  const relyingPlan = newMemberPlan(relyingApp);
+  const setupToken = session?.token ?? readSsoCookie()?.token ?? '';
+  const newMemberNext = (): Screen =>
+    variant === 'enroll-new' && !planIsEmpty(relyingPlan) && setupToken ? 'new-member' : 'grant';
+
   useEffect(() => {
     if (!hasApp || screen !== 'contact' || !session?.token) return;
     let cancelled = false;
@@ -97,7 +118,9 @@ export function OnboardingJourney({
         if (cancelled) return;
         setHome({ address: addr as Address, name: profile?.name || name });
         setVia(contactKind);
-        setScreen('grant');
+        // The OTP card just bootstrapped (or resolved) this home and opened the session, so this is
+        // the one moment in this journey where the new-member gate has everything it needs.
+        setScreen(newMemberNext());
       } catch (e) {
         if (!cancelled) fail(e, 'contact');
       }
@@ -198,7 +221,7 @@ export function OnboardingJourney({
   // After the receipts: relying-app → permission consent; self-serve → activate your private vault.
   async function onContinue() {
     if (hasApp) {
-      setScreen('grant');
+      setScreen(newMemberNext());
       return;
     }
     if (!home) return;
@@ -639,8 +662,29 @@ export function OnboardingJourney({
     );
   }
 
-  if (screen === 'grant' && api?.enroll) {
-    const tpl = whitelabel.delegationTemplates[api.enroll.template] ?? { canDo: [], cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'] };
+  if (screen === 'new-member' && home && setupToken) {
+    // Renders nothing and advances immediately when the member already has what the app asked for,
+    // so this can only ever DELAY the consent, never replace it.
+    return (
+      <NewMemberSetup
+        person={home.address}
+        token={setupToken}
+        via={via}
+        appName={appName}
+        plan={relyingPlan}
+        onDone={() => setScreen('grant')}
+      />
+    );
+  }
+
+  // `new-member` falls through to HERE when the session that authorized it has gone (the only way
+  // to lose `setupToken` mid-flow). Losing a setup screen must never mean losing the consent — the
+  // member connects, and the next connect asks again.
+  if ((screen === 'grant' || screen === 'new-member') && api?.enroll) {
+    const tpl = withProfileNameConsent(
+      whitelabel.delegationTemplates[api.enroll.template] ?? { canDo: [], cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'] },
+      relyingApp,
+    );
     return (
       <Frame wide>
         <OnboardingProgress total={3} current={3} label="Give permission" />

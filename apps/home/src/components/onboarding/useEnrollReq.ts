@@ -12,6 +12,8 @@ import type { Address } from '@agenticprimitives/types';
 // once via /connect/client-info and then answer synchronously too (src/lib/relying-clients.ts).
 import { knownRelyingClient, primeRelyingClient, relyingOriginAllowed } from '../../lib/relying-clients';
 import { writePendingEnroll } from './pending-enroll';
+import { sharesProfileName } from '../../lib/new-member';
+import { profileNameForConnect } from '../../lib/connect-profile-name';
 
 export interface EnrollReq {
   aud: string; // = client_id
@@ -127,6 +129,13 @@ export async function beginEnrollmentGrant(
   enroll: EnrollReq,
   resolvedName: string,
 ): Promise<{ grant_id: string; delegate: Address }> {
+  // The member's HUMAN name, for a client the REGISTRY scopes for `profile`. This is the one place
+  // every grant path passes through — the journey, the recognized fast path, the social resume and
+  // org-create all call it — so reading it here is what makes "the app gets a name" true for every
+  // credential family instead of whichever one someone remembered to wire.
+  //
+  // Costs nothing for an unscoped client: `sharesProfileName` is false, and no read happens at all.
+  const profileName = sharesProfileName(knownRelyingClient(enroll.aud)) ? await profileNameForConnect() : '';
   const r = await fetch('/oidc/authorize-grant', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -137,6 +146,7 @@ export async function beginEnrollmentGrant(
       code_challenge: enroll.codeChallenge,
       code_challenge_method: 'S256',
       agent_name: resolvedName,
+      ...(profileName ? { profile_name: profileName } : {}),
       delegation_template: enroll.template,
     }),
   });

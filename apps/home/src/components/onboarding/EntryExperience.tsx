@@ -31,6 +31,8 @@ import { ConsentSheet } from '../shared/ConsentSheet';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { HomeResolvedView } from './HomeResolvedView';
 import { RequiredNameGate } from './RequiredNameGate';
+import { NewMemberSetup } from './NewMemberSetup';
+import { isNewHomeMoment, newMemberPlan, planIsEmpty, type NewMemberPlan } from '../../lib/new-member';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
 
 interface NameInfo { exists?: boolean; agent?: Address; deployed?: boolean; hasEoa?: boolean; hasPasskey?: boolean; connectionKind?: string | null; connectionAddress?: string | null; passkeySigningAvailable?: boolean | null }
@@ -131,6 +133,10 @@ type View =
   | { k: 'enroll-entry' } // spec 257 §11 — credential-first entry for a NAME-DEFERRED relying-app enroll
   | { k: 'enroll-recognized' } // already-authenticated member (ap_sso cookie) → one-tap authorize (ADR-0032)
   | { k: 'enroll-require-name'; agent: Address; token: string; via: Via }
+  // First-connect provisioning declared by the relying app (`new_member`). Sits exactly where
+  // 'enroll-require-name' sits — after the credential resolved a home, before the consent — because
+  // both answer the same question: what does this app need to exist before it can be connected to.
+  | { k: 'enroll-new-member'; agent: Address; token: string; via: Via; plan: NewMemberPlan }
   | { k: 'enroll-name'; reason?: 'passkey' | 'wallet' } // "Use my Impact name" within a name-deferred enroll → the named journey
   | { k: 'name'; reason?: 'passkey' | 'wallet' }
   | { k: 'journey'; variant: 'enroll-new' | 'self-serve'; name: string }
@@ -206,9 +212,28 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
           return;
         }
       }
+      // First-connect provisioning, for the OTP families (email / phone) and anything else that
+      // signs in on this front door: the cards open the session themselves, so this is the one
+      // place the freshly-bootstrapped home is visible before the grant runs.
+      //
+      // GATED ON THE APP'S OWN DECLARATION AND NOTHING ELSE. An app with no `new_member` never gets
+      // past the first line — no profile read, no agent-tree read, no screen — which is what makes
+      // this byte-identical for every app in the registry but the one that opted in.
+      const plan = newMemberPlan(clientCfg);
+      if (!planIsEmpty(plan)) {
+        const profile = await fetchProfile(session.token).catch(() => null);
+        const addr = addressOf(profile?.agent);
+        // `linkingCredential: false` — this front door only ever SIGNS IN. Adding a phone/email to
+        // an existing account is the `status: 'linked'` branch inside the OTP cards, which returns
+        // before any session is opened and never reaches an enroll view at all.
+        if (profile && addr && isNewHomeMoment({ deployed: profile.deployed !== false, hasSession: true, linkingCredential: false })) {
+          setView({ k: 'enroll-new-member', agent: addr, token: session.token, via: resolveVia(profile.credential, session.via), plan });
+          return;
+        }
+      }
       setView({ k: 'enroll-recognized' });
     })();
-  }, [mode, api.enroll, requiresNamedAgent, session, view.k]);
+  }, [mode, api.enroll, requiresNamedAgent, session, view.k, clientCfg]);
 
   // Enroll mode: resolve the requested name → new vs existing vs org-create.
   useEffect(() => {
@@ -413,6 +438,20 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
         via={view.via}
         appName={appName}
         onClaimed={() => setView({ k: 'enroll-recognized' })}
+      />
+    );
+  }
+  if (view.k === 'enroll-new-member') {
+    // `onDone` fires on success, on skip, and immediately when the member already has everything —
+    // so this can only ever DELAY the recognized path, never replace it.
+    return (
+      <NewMemberSetup
+        person={view.agent}
+        token={view.token}
+        via={view.via}
+        appName={appName}
+        plan={view.plan}
+        onDone={() => setView({ k: 'enroll-recognized' })}
       />
     );
   }

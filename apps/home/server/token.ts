@@ -19,6 +19,7 @@ import { clientAllowsRedirect } from '../src/lib/oidc-clients';
 import { resolveClient, isAllowedRelyingOriginAsync } from './_lib/oidc-registry';
 import { CHAIN_ID } from '../src/lib/chain';
 import { idTokenTtl } from './_lib/session-ttl';
+import { nameClaimForIdToken } from '../src/lib/new-member';
 
 
 interface TokenBody {
@@ -84,7 +85,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       // accepting an unknown delegation.
       return jsonCors({ error: 'no enrollment binding for this delegation; re-enroll required' }, request, 401);
     }
-    const bind = JSON.parse(bindRaw) as { client_id: string; agent_name?: string };
+    const bind = JSON.parse(bindRaw) as { client_id: string; agent_name?: string; profile_name?: string };
     if (bind.client_id !== body.client_id) {
       return jsonCors({ error: 'delegation was issued for a different client; re-enroll required' }, request, 401);
     }
@@ -96,7 +97,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         iss,
         sub: toCanonicalAgentId(CHAIN_ID, body.delegation.delegator),
         aud: body.client_id,
-        agentName: body.agent_name ?? bind.agent_name,
+        // Same rule as /oidc/grant: the `<label>.me` handle when there is one, the member's human
+        // profile name when there isn't, nothing when there is neither.
+        agentName: nameClaimForIdToken(body.agent_name ?? bind.agent_name, bind.profile_name),
         ttlSeconds: ttl,
       },
       signer,
@@ -104,7 +107,18 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // Refresh the binding window so a steadily-used delegation doesn't fall off the
     // cliff mid-session (same TTL semantics as the id_token).
     await env.AUTH_CODES.put(bindKey, bindRaw, { expirationTtl: ttl });
-    return jsonCors({ id_token: idToken, token_type: 'Bearer', expires_in: ttl, delegation: body.delegation }, request);
+    return jsonCors(
+      {
+        id_token: idToken,
+        token_type: 'Bearer',
+        expires_in: ttl,
+        delegation: body.delegation,
+        // Same distinct field the authorization_code branch returns, so an app reads the human name
+        // the same way on a refresh as on the first connect.
+        ...(bind.profile_name ? { profile_name: bind.profile_name } : {}),
+      },
+      request,
+    );
   }
 
   // ── OIDC authorization_code grant (spec 230) ──
@@ -126,6 +140,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       treasury?: string | null;
       selfVaultGrant?: unknown;
       org: unknown;
+      /** The member's human profile name, when the client is registry-scoped for `profile`. */
+      profile_name?: string;
       code_challenge: string;
       client_id: string;
       redirect_uri: string;
@@ -146,6 +162,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         pullDelegation: grant.pullDelegation ?? undefined, // spec 272 recurring — standing subscription pull mandate
         settlementHash: grant.settlementHash ?? undefined, // spec 272 — first-charge settlement (ceremony)
         selfVaultGrant: grant.selfVaultGrant ?? undefined, // spec 345 — the person's own scoped vault grant
+        // The member's HUMAN name (what they are called), for a client the registry scopes for
+        // `profile`. Present as its own field so an app can tell it apart from the `agent_name`
+        // CLAIM, which carries the `<label>.me` handle when there is one and falls back to this
+        // name when there isn't (see /oidc/grant). Omitted entirely for every unscoped client.
+        ...(grant.profile_name ? { profile_name: grant.profile_name } : {}),
         // PRIVACY: the person-treasury ADDRESS is intentionally NOT returned to the relying app. The home
         // owns the treasury question during a purchase; the app gates on access/subscription, not the wallet.
         ...(grant.org ? { org: grant.org } : {}),

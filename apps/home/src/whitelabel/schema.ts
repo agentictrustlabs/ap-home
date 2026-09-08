@@ -92,6 +92,55 @@ export interface RelyingApp {
   serviceAgentConfig?: {
     a2aBase: string;
   };
+  /** What a member of THIS app is set up with the first time they connect — see {@link NewMemberOnboarding}.
+   *
+   *  ABSENT MEANS TODAY'S BEHAVIOUR, EXACTLY. Every app that does not carry this field runs the same
+   *  ceremony it ran before the field existed: nothing extra is deployed, nothing extra is asked. That
+   *  is deliberate and it is the safety property of the whole feature — this is the Home's onboarding
+   *  path, shared by every member of the platform, so a new provisioning step has to be something an
+   *  app OPTS INTO rather than something every app suddenly inherits. */
+  new_member?: NewMemberOnboarding;
+}
+
+/**
+ * First-connect provisioning a relying app declares for its members (the "what does a person need
+ * before this app is usable" contract, stated by the app and honoured by the Home).
+ *
+ * The Home owns the ceremony; the app owns the requirement. A card room needs a player with a money
+ * account and a name to show at the table, so it asks for both; a read-only directory app asks for
+ * neither and is not touched. The app never gets to run the ceremony itself — declaring it here is
+ * the only way to ask, which is what keeps "the app made me an account" impossible.
+ *
+ * EVERY field is optional and every omission means "don't". A `{}` here is the same as no field.
+ */
+export interface NewMemberOnboarding {
+  /** Deploy the member's OWN personal treasury (`kind: 'person-treasury'`, custodied by their own
+   *  credential, parented to their person SA) as part of first account creation, and record it so
+   *  `/connect/related-orgs` discovery finds it.
+   *
+   *  NAMELESS BY DEFAULT, always — no label is claimed. A treasury's address is its canonical id
+   *  (MAM-D4 name deferral), a label is globally unique per subregistry, and this runs for every new
+   *  member of an app that asks for it: claiming here would mean racing thousands of people for the
+   *  same obvious labels, and a failed claim must never cost someone the account itself. They can
+   *  name it later from /treasuries.
+   *
+   *  The Home CREATES and CUSTODIES the account. It does NOT fund it — putting money in is the
+   *  relying app's business (the card room tops any treasury it sees up to its floor), and a Home
+   *  that mints play money is the wrong shape. */
+  personal_treasury?: boolean;
+  /** Ask the member for their human name (what a person is CALLED — "Rich Pedersen"), stored as the
+   *  first/last name on their private profile. Omit and they are never asked, which is today's
+   *  behaviour: a phone or Google sign-up ends up with no name at all and renders as a truncated
+   *  address everywhere, which is exactly the complaint this exists to fix.
+   *
+   *  This is NOT the `<label>.me` handle. The handle is a globally-unique on-chain name in the agent
+   *  naming service and claiming one is a separate, deliberate act the member takes in their own
+   *  home (see `requireNamedAgent` for the app-level version of THAT). Accounts made through this
+   *  path stay nameless in the naming service on purpose.
+   *
+   *  'required' — the member must give a name before the connect continues.
+   *  'optional' — the field is offered with a way past it. */
+  collect_name?: 'required' | 'optional';
 }
 
 /** Human-readable consent disclosure for a delegation template. The caveats themselves are

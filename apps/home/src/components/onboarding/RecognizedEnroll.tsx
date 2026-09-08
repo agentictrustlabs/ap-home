@@ -38,6 +38,7 @@ import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
 import { CeremonyProgress } from './CeremonyProgress';
+import { withProfileNameConsent } from '../../lib/new-member';
 import { OrgChooser, type OrgChoice } from './OrgChooser';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
 import { knownRelyingClient } from '../../lib/relying-clients';
@@ -648,11 +649,17 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
   }
 
   // consent — recognized; one tap to authorize as yourself (no re-login).
-  const tpl =
+  // spec: `profile` scope — an app registered to receive the member's human name says so HERE, in
+  // the same list as everything else it can do. The setup screen discloses it to a member who is
+  // typing the name now; this is what a RETURNING member (whose name is already on file, and who
+  // never sees that screen) gets to read before authorizing. No-op for every unscoped app.
+  const tpl = withProfileNameConsent(
     whitelabel.delegationTemplates[enroll.template] ?? {
       canDo: [],
       cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'],
-    };
+    },
+    relyingApp,
+  );
   return (
     <div className="onboarding-screen">
       <div className="onboarding-card wide">

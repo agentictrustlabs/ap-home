@@ -22,6 +22,8 @@ import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
 import { RequiredNameGate } from './RequiredNameGate';
+import { NewMemberSetup } from './NewMemberSetup';
+import { newMemberPlan, planIsEmpty, withProfileNameConsent } from '../../lib/new-member';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
 import {
   clearPendingEnroll,
@@ -32,7 +34,9 @@ import {
 
 export { readPendingEnroll } from './pending-enroll';
 
-type Phase = 'securing' | 'mismatch' | 'name' | 'consent' | 'granting' | 'connected' | 'error';
+// 'new-member' — first-connect provisioning the relying app declared (`new_member`). Only a
+// BRAND-NEW home passes through it; a returning Google member goes straight to consent.
+type Phase = 'securing' | 'mismatch' | 'name' | 'new-member' | 'consent' | 'granting' | 'connected' | 'error';
 
 export function GoogleEnrollResume() {
   const { session, agentAddress, agentName, agentDeployed } = useSession();
@@ -51,6 +55,13 @@ export function GoogleEnrollResume() {
   const appDomain = displayAppDomain(appHost);
   const requiresNamedAgent = !!(enroll?.requireNamedAgent || relyingApp?.requireNamedAgent);
   const token = session?.token ?? '';
+  // What this app declared its new members need. Empty for every app that declared nothing, which
+  // makes `afterHome()` return 'consent' and this whole path identical to what it was.
+  const plan = newMemberPlan(relyingApp);
+  // Did THIS resume deploy the home, or find one already on chain? Only the former is a sign-up —
+  // a returning nameless Google member must not be walked through account-creation setup again.
+  const freshHome = useRef(false);
+  const afterHome = (): Phase => (freshHome.current && !planIsEmpty(plan) ? 'new-member' : 'consent');
 
   const fail = (e: unknown) => {
     setError(e instanceof Error ? e.message : typeof e === 'string' ? e : 'Something went wrong');
@@ -104,8 +115,9 @@ export function GoogleEnrollResume() {
       // enroll's `pending.name` ('' on the name-deferred path) is NOT consumed here.
       const res = await secureHomeNoName({ token });
       if (!res.ok) return fail(res.error);
+      freshHome.current = true; // this resume created the account — the sign-up case
       setHome(res.home);
-      setPhase(requiresNamedAgent ? 'name' : 'consent');
+      setPhase(requiresNamedAgent ? 'name' : afterHome());
     })();
   }, [pending, token, agentName, agentAddress, requiresNamedAgent]);
 
@@ -246,9 +258,22 @@ export function GoogleEnrollResume() {
         appName={appName}
         onClaimed={(name) => {
           setHome({ ...home, name });
-          setPhase('consent');
+          setPhase(afterHome());
         }}
         onCancel={onDecline}
+      />
+    );
+  }
+
+  if (phase === 'new-member' && home) {
+    return (
+      <NewMemberSetup
+        person={home.address}
+        token={token}
+        via="google"
+        appName={appName}
+        plan={plan}
+        onDone={() => setPhase('consent')}
       />
     );
   }
@@ -288,11 +313,17 @@ export function GoogleEnrollResume() {
   }
 
   // consent
-  const tpl =
+  // spec: `profile` scope — an app registered to receive the member's human name says so HERE, in
+  // the same list as everything else it can do. The setup screen discloses it to a member who is
+  // typing the name now; this is what a RETURNING member (whose name is already on file, and who
+  // never sees that screen) gets to read before authorizing. No-op for every unscoped app.
+  const tpl = withProfileNameConsent(
     whitelabel.delegationTemplates[enroll.template] ?? {
       canDo: [],
       cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'],
-    };
+    },
+    relyingApp,
+  );
   return (
     <div className="onboarding-screen">
       <div className="onboarding-card wide">

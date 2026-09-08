@@ -300,7 +300,14 @@ const faithImpact: WhiteLabelConfig = {
       client_id: 'pokernight',
       name: 'Poker Night',
       redirect_uris: ['https://poker.faithnet.io/', 'http://localhost:5173/'],
-      allowed_scopes: ['openid', 'agent'],
+      // `profile` — the scope that lets this app receive the player's HUMAN name (what they are
+      // called, not a `<label>.me` handle). It is an already-advertised scope
+      // (`.well-known/openid-configuration`) that nothing consumed until now; the Home puts the
+      // name on the id_token's `agent_name` claim for scoped clients whose account is nameless, so
+      // a table can label a seat instead of rendering `0x1234…abcd`. Registry-gated on purpose: a
+      // `scope=` request parameter is attacker-supplied, this entry is curated (same rule as the
+      // app's name and logo at consent).
+      allowed_scopes: ['openid', 'profile', 'agent'],
       allowed_delegation_templates: ['site-login', 'poker-buyin'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
       // The caps the ceremony binds into the mandate. `payee` is the Poker Site Treasury on
@@ -322,6 +329,26 @@ const faithImpact: WhiteLabelConfig = {
         maxRedemptionsPerWindow: 5,
         windowSeconds: 86400,
         mode: 'pull',
+      },
+      // What a player needs to exist BEFORE the card room can do anything with them — declared here
+      // so the Home sets it up during account creation instead of sending them on an errand.
+      //
+      //   personal_treasury: a buy-in is USDC out of the player's own account and a cash-out goes
+      //     back into it, so a player with no money account can be dealt in but cannot sit down. The
+      //     `poker-buyin` mandate above literally has nowhere to point without one — the connect
+      //     silently skipped the payment leg for anyone who hadn't already made a treasury by hand.
+      //     It is created NAMELESS: nothing at a poker table needs a global handle for it.
+      //   collect_name: a table shows who is sitting at it. A phone sign-up otherwise arrives with
+      //     no name of any kind and shows as `0x1234…abcd` to the other players, which is the
+      //     complaint. `required` because the seat label is not optional at a card table — the
+      //     player types a name once, here, and every app that reads their profile has it after.
+      //
+      // NOTE for whoever adds the next app: this is the ONLY entry in this registry that carries
+      // `new_member`. Leaving the field off is not an oversight anywhere else — it is what keeps
+      // those apps' onboarding byte-identical to what it was.
+      new_member: {
+        personal_treasury: true,
+        collect_name: 'required',
       },
     },
     {
@@ -697,4 +724,4 @@ export function fmt(template: string, vars: Record<string, string | undefined> =
   return template.replace(/\{(\w+)\}/g, (m, k: string) => vars[k] ?? m);
 }
 
-export type { WhiteLabelConfig, WhiteLabelCopy, RelyingApp, ManageableAgent, DelegationTemplate } from './schema';
+export type { WhiteLabelConfig, WhiteLabelCopy, RelyingApp, ManageableAgent, DelegationTemplate, NewMemberOnboarding } from './schema';

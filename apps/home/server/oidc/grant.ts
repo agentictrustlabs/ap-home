@@ -26,6 +26,7 @@ import { verifyDelegation, type IncomingDelegation } from '../_lib/verify-delega
 import { CHAIN_ID } from '../../src/lib/chain';
 import type { StoredEnrollmentGrant } from './authorize-grant';
 import { idTokenTtl } from '../_lib/session-ttl';
+import { nameClaimForIdToken } from '../../src/lib/new-member';
 
 const CODE_TTL_MS = 300_000; // 5 min PKCE exchange window
 
@@ -119,15 +120,29 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   }
 
   // Mint the id_token bound to the grant's client + nonce + agent_name.
+  //
+  // NAME ON THE TOKEN, for an account that has no handle. `agent_name` is the `<label>.me` name
+  // from the naming service, and `mintIdToken` omits the claim entirely when it is empty — which is
+  // exactly what a nameless account produces, and why players show up as `0x1a2b…9f0e`. Accounts
+  // created through first-connect setup are nameless ON PURPOSE (a handle is globally unique and
+  // claiming one for everybody who signs up is the wrong trade), so the name they DO have is the
+  // human one on their private profile, carried here by the home SPA at /oidc/authorize-grant and
+  // already gated there on the client's registered `profile` scope.
+  //
+  // It fills in ONLY when there is no handle. A member with a real `<label>.me` name keeps it on
+  // the claim, so nothing an app resolves today changes meaning; the substitution can only turn an
+  // ABSENT claim into a present one. The distinct `profile_name` on the /token response below says
+  // which of the two an app received, for anything that needs to tell them apart.
   const sub = toCanonicalAgentId(CHAIN_ID, body.delegation.delegator);
   const { signer } = await getServer(env);
+  const profileName = (grant.profile_name ?? '').trim();
   const idToken = await mintIdToken(
     {
       iss,
       sub,
       aud: grant.client_id,
       nonce: grant.nonce || undefined,
-      agentName: grant.agent_name,
+      agentName: nameClaimForIdToken(grant.agent_name, profileName),
       ttlSeconds: ttl,
     },
     signer,
@@ -139,7 +154,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // mint id_tokens for a DIFFERENT relying app.
   await env.AUTH_CODES.put(
     `oidc-deleg:${v.digest.toLowerCase()}`,
-    JSON.stringify({ client_id: grant.client_id, agent_name: grant.agent_name }),
+    // The profile name rides the binding too: /token's SILENT RE-AUTH mints from this record, not
+    // from a grant, so without it a nameless member would have a name on their first token and none
+    // on every one after — the seat label would vanish the moment the app refreshed its session.
+    JSON.stringify({ client_id: grant.client_id, agent_name: grant.agent_name, profile_name: profileName }),
     { expirationTtl: ttl },
   );
 
@@ -216,6 +234,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       treasury: body.treasury ?? null,
       selfVaultGrant: body.selfVaultGrant ?? null,
       org: body.org ?? null,
+      // Returned verbatim by /token so an app can read the HUMAN name explicitly rather than
+      // inferring it from `agent_name`. '' (never absent) when the client isn't `profile`-scoped.
+      profile_name: profileName,
       code_challenge: grant.code_challenge,
       client_id: grant.client_id,
       redirect_uri: grant.redirect_uri,

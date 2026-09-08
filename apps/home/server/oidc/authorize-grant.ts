@@ -27,6 +27,7 @@ import { getServer, json, resolveOrigin, type FnContext } from '../_lib/server-b
 import { clientAllowsRedirect, clientAllowsTemplate, getClientDelegate } from '../../src/lib/oidc-clients';
 // Curated white-label entries AND member-registered ones, in that order (server/_lib/oidc-registry.ts).
 import { resolveClient, isAllowedRelyingOriginAsync } from '../_lib/oidc-registry';
+import { sharesProfileName } from '../../src/lib/new-member';
 
 const GRANT_TTL_SEC = 600; // 10 min — covers ceremony + one retry
 
@@ -38,6 +39,12 @@ interface AuthorizeGrantBody {
   code_challenge?: string;
   code_challenge_method?: string;
   nonce?: string;
+  /** The member's HUMAN name ("Rich Pedersen") off their own private profile, read by the home SPA
+   *  over their session — the server cannot read it, the record is sealed under the member's KEK.
+   *  Honoured ONLY for a client the REGISTRY scopes for `profile` (see below); silently dropped
+   *  otherwise, so a tampered SPA cannot hand a member's name to an app that was never permitted
+   *  it. This is not a handle: accounts on this path stay nameless in the naming service. */
+  profile_name?: string;
 }
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
@@ -89,6 +96,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       client_id: body.client_id,
       redirect_uri: body.redirect_uri,
       agent_name: body.agent_name ?? '',
+      // spec: `profile` scope. The gate is the CURATED registry entry, not a `scope=` request
+      // parameter: request scopes are attacker-supplied and this broker parses none today, so
+      // deriving permission from one would let any origin that can form a URL ask for a member's
+      // name. Same rule as the app's name and logo at consent — registry, never the URL.
+      profile_name: sharesProfileName(client) ? (body.profile_name ?? '').trim().slice(0, 80) : '',
       // SEC-001 anti-spoof: the delegate this grant binds to is taken FROM THE REGISTRY,
       // not from the request. The SPA reads this back in the response and uses it when
       // constructing the delegation; /oidc/grant verifies the supplied delegation's
@@ -117,6 +129,8 @@ export interface StoredEnrollmentGrant {
   client_id: string;
   redirect_uri: string;
   agent_name: string;
+  /** The member's human profile name, when the client is registry-scoped for `profile`. '' otherwise. */
+  profile_name?: string;
   delegate: `0x${string}`;
   code_challenge: string;
   nonce: string;
