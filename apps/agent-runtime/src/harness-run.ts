@@ -1910,6 +1910,8 @@ export interface PlannerTraceV1 {
   bindings: Array<{ arg: string; raw: string; agent: string; label?: string; source: 'said' | 'context' | 'decision' | 'memory' | 'resolver' | 'disclosed'; because?: string }>;
   /** What the surface declared (spec 353): the realm kind and how many capabilities it offered. */
   surface?: { realm?: string; capabilities?: number; channel?: 'text' | 'voice' };
+  /** Spec 370 P7 — how many recent turns the resolver could recall for this ask (0 = no memory read). */
+  recalledTurns?: number;
 }
 
 export type AskReply = AskReplyVariant & { plannerTrace?: PlannerTraceV1 };
@@ -3609,7 +3611,7 @@ be emitted together; the runtime runs them side by side.`;
       };
   const kind = input.plan ? 'supplied' : selected.kind;
   const trace: PlannerTraceV1 = {
-    planner: plannerUsed, toolsExposed: [], playbook: playbook ? { archetypeId: playbook.archetypeId, archetypeVersion: playbook.archetypeVersion, digest: playbook.digest } : null,
+    planner: plannerUsed, toolsExposed: [], recalledTurns: input.conversation?.turns.length ?? 0, playbook: playbook ? { archetypeId: playbook.archetypeId, archetypeVersion: playbook.archetypeVersion, digest: playbook.digest } : null,
     promptDigest: keccak256(toBytes(withPlaybook)), examplesRendered: (examples.match(/^- /gm) ?? []).length,
     admission: [], plan: [], bindings: [],
     ...(input.surface || input.channel ? { surface: { ...(input.surface?.realm?.kind ? { realm: input.surface.realm.kind } : {}), ...(input.surface?.capabilities ? { capabilities: input.surface.capabilities.length } : {}), ...(input.channel ? { channel: input.channel } : {}) } } : {}),
