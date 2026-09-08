@@ -31,6 +31,7 @@
 // the service SA executes `execute(DM, 0, redeem…)` and the DM calls back into the payer SA. No key for
 // the payer is ever held here; the mandate is the only authority, and it is checked per step, on chain
 // AND off.
+import { progressLine, type ProgressLineV1 } from './harness-progress.js';
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
 import { type Plan, type Planner,
   runIntent, InputRequired, dataFor, signatureFor,
@@ -1609,6 +1610,9 @@ export interface HarnessRunInput {
   /** Spec 370 P1 — the checkpoint's record of what ran: the admitted plan and the completed steps. The
    *  loop replays the completed steps and plans nothing anew; the remaining steps are verified afresh. */
   resume?: { plan: Plan; completed: ReadonlyArray<{ stepRef: string; result?: unknown; receipt?: StepReceipt }> };
+  /** Spec 370 P2 — one sentence per loop event, as the run goes, for a surface to show or say. Composed
+   *  here because the tools' words are known here; what the caller does with it is its business. */
+  onProgress?: (line: Omit<ProgressLineV1, 'seq' | 'at'>) => void;
   /** The mandate(s) the caller presents. `null` is legitimate on an ASK: the run then reports the
    *  authority it would need (`authority-required`) instead of failing — and grants nothing. A LIST is
    *  the spec 358 W4 keyring: a fanned-out plan needs a mandate per item, and each step is judged under
@@ -3630,6 +3634,10 @@ fanned out.`;
       events: (e) => {
         if (e.type === 'PlanRefused') trace.admission.push({ refused: e.violations, replanned: e.replanning });
         else if (e.type === 'PlanCreated') trace.admission.push({ refused: [], replanned: false });
+        if (input.onProgress) {
+          const line = progressLine(e, tools, (id) => CAPABILITY_WORDS[id]);
+          if (line) input.onProgress(line);
+        }
       },
       mandateVerifier: verifier, policyEvaluator: policy,
       approvalPort: suppliedApprovalsPort(deps, env, input.approvals ?? [], input.supplied, input.person), receiptSink,

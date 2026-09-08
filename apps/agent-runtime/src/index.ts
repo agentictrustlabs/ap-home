@@ -7,6 +7,7 @@ import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 // State is held in a Durable Object (SessionStoreDO); see ./session-store-do.ts.
 // Env bindings come from c.env (typed via the Bindings interface below).
 
+import { appendProgress, readProgress, type ProgressLineV1 } from './harness-progress.js';
 import { Hono, type Context } from 'hono';
 import { setCookie, getCookie } from 'hono/cookie';
 import { cors } from 'hono/cors';
@@ -1292,6 +1293,28 @@ app.post('/harness/runs', async (c) => {
   return c.json({ ok: true, runs: runs.sort((a, b) => b.updatedAt - a.updatedAt) });
 });
 
+// POST /harness/progress { session, addressee, runRef, after?, wait? } — spec 370 P2. The run's progress
+// lines after `after`, LONG-POLLED: the request is held up to `wait` ms (≤ 4 s) until a new line lands or
+// the run reaches its reply, so a surface sees each step within a few hundred milliseconds of it without
+// hammering. Read by the asker only; a runRef for a run this person did not start reads as unknown.
+app.post('/harness/progress', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; runRef?: string; after?: number; wait?: number } | null;
+  if (!body?.session || !body.addressee || !body.runRef) return c.json({ ok: false, error: 'session, addressee and runRef are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const addressee = body.addressee.toLowerCase() as Address;
+  const asker = String(who.sa).toLowerCase() as Address;
+  const after = Math.max(0, Number(body.after ?? 0));
+  const deadline = Date.now() + Math.min(4_000, Math.max(0, Number(body.wait ?? 3_000)));
+  for (;;) {
+    let got: Awaited<ReturnType<typeof readProgress>>;
+    try { got = await readProgress(c.env as never, addressee, body.runRef, asker, after); }
+    catch (e) { return c.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, 403); }
+    if (got.lines.length || got.terminal || Date.now() >= deadline) return c.json({ ok: true, ...got });
+    await new Promise((r) => setTimeout(r, 250));
+  }
+});
+
 // POST /harness/durable { session, addressee, intent, presented, plan?, approvalTimeoutMs? } — spec 362.
 // Start a run the ENGINE advances: attempt → durable approval wait → attempt. The instance id IS the
 // runRef (A2aTaskDO stays the record; the workflow is its execution handle), and the checkpoint pins
@@ -2018,8 +2041,21 @@ app.post('/harness/ask', async (c) => {
   const audit = buildAuditSink(c.env);
   const askDeps = harnessDeps(c.env, audit);
   try {
+    // Spec 370 P2 — the run narrates itself; each sentence lands on the task DO as it happens, and the
+    // surface long-polls them while this request is in flight. Fire-and-forget under waitUntil: a line
+    // that fails to land costs a progress line, never the run.
+    let progressSeq = 0;
+    let progressChain: Promise<void> = Promise.resolve();
+    const askerSa = String(who.sa).toLowerCase() as Address;
+    const progress = (line: Omit<ProgressLineV1, 'seq' | 'at'>) => {
+      const full: ProgressLineV1 = { ...line, seq: ++progressSeq, at: Date.now() };
+      // Serialised: a reader advances its cursor to the newest seq it saw, so a line landing out of order
+      // would be a line never shown.
+      progressChain = progressChain.then(() => appendProgress(c.env as never, addressee, runRef, askerSa, full)).catch(() => undefined);
+      c.executionCtx.waitUntil(progressChain);
+    };
     const { result, resolved, interactionFor, trace } = await runUnderMandate(c.env as unknown as HarnessEnv, askDeps, {
-      intent, presented: turn.presented, person: who.sa as Address, session: body.session, runRef, addressee,
+      intent, presented: turn.presented, person: who.sa as Address, session: body.session, runRef, addressee, onProgress: progress,
       ...(inResponseTo ? { inResponseTo } : {}),
       ...(body.channel === 'voice' ? { channel: 'voice' as const } : {}),
       ...(body.plan ?? stored?.plan ? { plan: body.plan ?? stored?.plan } : {}),
@@ -2208,6 +2244,8 @@ app.post('/harness/ask', async (c) => {
     }) : undefined;
     // Spec 369 — WHAT IS SAID, decided by the agent: markdown stripped, addresses named. A voice reads this.
     const spoken = await spokenFor(reply as never, async (a) => askDeps.nameOf?.(a) ?? null, (id) => CAPABILITY_WORDS[id] ?? id).catch(() => '');
+    // The reply is ready: the last line, so a poller stops without waiting out its window.
+    progress({ type: 'ReplyReady', said: spoken || 'Done.', terminal: true });
     return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt, ...(isExpired(r) ? { expired: true } : {}) })), unfinishedTotal: otherRuns.length } : {}) });
   } catch (e) {
     return c.json({ ok: false, error: 'ask_failed', detail: e instanceof Error ? e.message : String(e) }, 500);

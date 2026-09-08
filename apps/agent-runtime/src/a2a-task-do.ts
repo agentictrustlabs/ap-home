@@ -838,8 +838,29 @@ export class A2aTaskDO {
     if (url.pathname.startsWith('/internal/harness-run/')) {
       if (!isInternalCall(req, this.env)) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
       const op = url.pathname.slice('/internal/harness-run/'.length);
-      const body = (await req.json().catch(() => null)) as { runRef?: string; checkpoint?: { runRef?: string } } | null;
+      const body = (await req.json().catch(() => null)) as { runRef?: string; checkpoint?: { runRef?: string }; asker?: string; line?: Record<string, unknown> & { seq?: number; terminal?: boolean }; after?: number } | null;
       const key = (ref: string) => `harness:run:${ref}`;
+      // Spec 370 P2 — the run's PROGRESS LINES: a short list per run, appended by the ask route as the loop
+      // narrates itself, long-polled by the surface. Rebuildable, TTL'd, and read only by the asker whose
+      // run it is (recorded on the first append — a runRef is a client-chosen string).
+      const pkey = (ref: string) => `harness:progress:${ref}`;
+      if (op === 'progress-append') {
+        if (!body?.runRef || !body.line || !body.asker) return Response.json({ ok: false, error: 'runRef, asker and line required' }, { status: 400 });
+        const cur = (await this.state.storage.get<{ asker: string; at: number; lines: unknown[] }>(pkey(body.runRef))) ?? { asker: body.asker, at: Date.now(), lines: [] };
+        if (cur.asker !== body.asker) return Response.json({ ok: false, error: 'this run belongs to someone else' }, { status: 403 });
+        if (cur.lines.length < 200) cur.lines.push(body.line);
+        cur.at = Date.now();
+        await this.state.storage.put(pkey(body.runRef), cur);
+        return Response.json({ ok: true });
+      }
+      if (op === 'progress-read') {
+        if (!body?.runRef || !body.asker) return Response.json({ ok: false, error: 'runRef and asker required' }, { status: 400 });
+        const cur = await this.state.storage.get<{ asker: string; at: number; lines: Array<{ seq: number; terminal?: boolean }> }>(pkey(body.runRef));
+        if (!cur) return Response.json({ ok: true, known: false, lines: [], terminal: false });
+        if (cur.asker !== body.asker) return Response.json({ ok: false, error: 'this run belongs to someone else' }, { status: 403 });
+        const after = Number(body.after ?? 0);
+        return Response.json({ ok: true, known: true, lines: cur.lines.filter((l) => l.seq > after), terminal: cur.lines.some((l) => l.terminal) });
+      }
       if (op === 'save') {
         const cp = body?.checkpoint;
         if (!cp?.runRef) return Response.json({ ok: false, error: 'checkpoint.runRef required' }, { status: 400 });
@@ -881,7 +902,9 @@ export class A2aTaskDO {
           const { presented: _presented, ...rest } = run;
           live.push(rest);
         }
-        if (expired.length) await this.state.storage.delete(expired);
+        // Progress lines outlive their run by an hour at most (a surface reads the tail after the reply).
+        const stale = [...(await this.state.storage.list<{ at?: number }>({ prefix: 'harness:progress:' }))].filter(([, v]) => now - Number(v?.at ?? 0) > 3600_000).map(([k]) => k);
+        if (expired.length || stale.length) await this.state.storage.delete([...expired, ...stale]);
         live.sort((a, b) => Number((b as { updatedAt?: number }).updatedAt ?? 0) - Number((a as { updatedAt?: number }).updatedAt ?? 0));
         return Response.json({ ok: true, runs: live, expired: expired.length });
       }

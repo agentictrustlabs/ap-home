@@ -316,6 +316,17 @@ async function postA2a(path: string, body: unknown): Promise<Record<string, unkn
   return (await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }))) as never;
 }
 
+/** Spec 370 P2 — one sentence the agent said about its own progress, as the run went. */
+export interface ProgressLine { seq: number; at: number; type: string; stepRef?: string; toolId?: string; said: string; terminal?: boolean }
+
+/** The run's progress lines after `after`, held by the agent for up to ~3 s until there is something new
+ *  (a long poll). `known:false` = nothing recorded yet for this runRef. */
+export async function readProgress(session: { token: string }, addressee: Address, runRef: string, after: number): Promise<{ lines: ProgressLine[]; terminal: boolean; known: boolean }> {
+  const res = await postA2a('/a2a/harness/progress', { session: session.token, addressee: addressee.toLowerCase(), runRef, after, wait: 3_000 }) as { ok?: boolean; lines?: ProgressLine[]; terminal?: boolean; known?: boolean };
+  if (!res.ok) return { lines: [], terminal: false, known: false };
+  return { lines: res.lines ?? [], terminal: !!res.terminal, known: res.known !== false };
+}
+
 /** Ask once. The first turn carries only the sentence; later turns carry what the agent asked for. */
 export async function ask(session: { token: string }, state: AskTurnState): Promise<{ reply: AskReply; resumable: boolean; waiting?: string; unfinishedRuns?: UnfinishedRun[]; unfinishedTotal?: number }> {
   // What is NEW goes up; what the agent already holds does not. Once a run is checkpointed the question

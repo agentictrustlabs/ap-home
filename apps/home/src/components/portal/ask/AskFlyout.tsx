@@ -25,7 +25,7 @@ import { nameLabel } from '../../../lib/domain';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
 import { useVoice, blobToBase64 } from './useVoice';
 import { yesNo, matchChoice, listenAfter, plainSpeech, navigationTarget, closestOption } from './voice-text';
-import { ask, hear, warmHearing, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField } from '../../../home/ask';
+import { ask, hear, warmHearing, readProgress, type ProgressLine, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField } from '../../../home/ask';
 import type { AskSelection } from '../../../home/ask-selection';
 import { resolveNavigationTarget } from '../../../lib/interaction-registry';
 import { BusyButton } from '../../shared/BusyButton';
@@ -167,8 +167,24 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
     setErr(null);
     setBusy(label);
     const startedAt = Date.now();
+    // Spec 370 P2 — while the turn is in flight, read what the agent says about its own progress and
+    // show the latest line where the busy label was; the voice reads each new one. Stops with the reply.
+    let polling = true;
+    setProgress([]);
+    void (async () => {
+      let after = 0;
+      while (polling) {
+        try {
+          const got = await readProgress(session, state.addressee, state.runRef, after);
+          if (!polling) break;
+          if (got.lines.length) { after = got.lines[got.lines.length - 1]!.seq; setProgress((p) => [...p, ...got.lines]); }
+          if (got.terminal) break;
+          if (!got.lines.length) await new Promise((r) => setTimeout(r, 400));
+        } catch { await new Promise((r) => setTimeout(r, 1_000)); }
+      }
+    })();
     try {
-      const { reply, resumable, waiting, unfinishedRuns, unfinishedTotal: total } = await ask(session, state);
+      const { reply, resumable, waiting, unfinishedRuns, unfinishedTotal: total } = await ask(session, state).finally(() => { polling = false; });
       // Recorded for EVERY turn, answer or not: a run that asked for authority, or was refused, is exactly
       // the run somebody wants to look at afterwards.
       setDiag((d) => [...d, {
@@ -367,14 +383,27 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   };
   const listenRef = useRef(listen); listenRef.current = listen;
   const [voiceNote, setVoiceNote] = useState<string | null>(null);
+  // Spec 370 P2 — what the agent has said about this turn so far; the last line is the busy text.
+  const [progress, setProgress] = useState<ProgressLine[]>([]);
+  const progressSpoken = useRef(0);
 
   // A turn takes as long as it takes (a plan, chain reads, sometimes a userOp). Silence for ten seconds
-  // sounds like a dead line; one "one moment" after three says the agent is still there.
+  // sounds like a dead line: the agent's own progress lines are read as they arrive; "one moment" only
+  // when three seconds pass with nothing said.
   useEffect(() => {
     if (!voice.enabled || !busy || busy === 'Hearing…' || busy === 'Listening…') return;
+    if (progress.length) return;
     const t = setTimeout(() => voice.speak('One moment.', undefined, { append: true }), 3_000);
     return () => clearTimeout(t);
-  }, [busy, voice.enabled]);
+  }, [busy, voice.enabled, progress.length]);
+  useEffect(() => {
+    if (!voice.enabled) { progressSpoken.current = progress.length; return; }
+    // The step lines are worth hearing (checking authority, doing, done); the plan bookkeeping is not.
+    const SAID = new Set(['StepProposed', 'MandateChecked', 'MandateDenied', 'ToolInvoked', 'StepReplayed', 'ApprovalRequested', 'RunFailed']);
+    const fresh = progress.slice(progressSpoken.current).filter((l) => SAID.has(l.type) && !l.terminal);
+    progressSpoken.current = progress.length;
+    if (fresh.length) voice.speak(fresh.map((l) => l.said).join(' '), undefined, { append: true });
+  }, [progress, voice.enabled]);
 
   // SPEAK what the agent said, once per entry, from the agent's own spoken rendering; after an answer the
   // mic reopens once (a dialog). Prompts and authority are spoken by the pending effect below.
@@ -617,7 +646,16 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
             onAnswer={() => answer(pending.reply as never, pending.state)} onCancel={() => setPending(null)}
           />
         )}
-        {busy && !pending && <div className="muted" data-testid="ask-busy" style={{ fontSize: 12 }}><span className="spinner" /> {busy}</div>}
+        {busy && !pending && (
+          <div className="muted" data-testid="ask-busy" style={{ fontSize: 12 }}>
+            <span className="spinner" /> {progress.length && !progress[progress.length - 1]!.terminal ? progress[progress.length - 1]!.said : busy}
+            {progress.length > 1 && (
+              <div data-testid="ask-progress" style={{ marginTop: 4, opacity: 0.7, fontSize: 11 }}>
+                {progress.filter((l) => !l.terminal).slice(0, -1).map((l) => <div key={l.seq}>· {l.said}</div>)}
+              </div>
+            )}
+          </div>
+        )}
         {err && <div className="ask-err" role="alert">{err}</div>}
         <div ref={endRef} />
       </div>
