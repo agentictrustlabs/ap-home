@@ -31,6 +31,7 @@
 // the service SA executes `execute(DM, 0, redeem…)` and the DM calls back into the payer SA. No key for
 // the payer is ever held here; the mandate is the only authority, and it is checked per step, on chain
 // AND off.
+import { CONTACT_FIELDS, CONTACT_FIELD_ARGS } from '@agenticprimitives/ontology';
 import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
@@ -436,20 +437,20 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     // `low` and NOT informational: it writes. A receipt records it, and the ladder does not ask a second
     // party to approve somebody correcting their own phone number.
     id: PROFILE_UPDATE_CAPABILITY,
-    verbs: ['update my', 'change my', 'set my', 'edit my'],
+    // "set street address to …" opens with "set" and names no "my": the verbs are the bare imperatives too.
+    verbs: ['update my', 'change my', 'set my', 'edit my', 'set', 'update', 'change', 'edit', 'correct', 'record my'],
+    // THE FIELDS ARE THE RECORD'S (spec 371 §2.2): every argument comes from the ontology's one list, so an
+    // address is as editable as a name and described the same way everywhere.
     description:
-      'Change this person\'s own contact profile — the PRIVATE record. Args: any of firstName, lastName, '
-      + 'email, phone, organizationName, organizationCountry, city, country. Only the fields given are '
-      + 'changed; the rest are left alone. Use for "my email is x@y.z", "set my name to …", "I work at …". '
+      'Change this person\'s own contact profile — the PRIVATE record. Args: any of '
+      + CONTACT_FIELDS.map((f) => `${f.arg} (${f.label})`).join(', ')
+      + '. Only the fields given are changed; the rest are left alone. A postal address is split into its fields '
+      + '(street, city, region, postalCode, country — infer the country when the region makes it certain). '
+      + 'Use for "my email is x@y.z", "set my name to …", "set street address to …", "I work at …". '
       + 'This is NOT the public directory listing or the agent\'s public name.',
     inputSchema: {
       type: 'object',
-      properties: {
-        firstName: { type: 'string' }, lastName: { type: 'string' },
-        email: { type: 'string' }, phone: { type: 'string' },
-        organizationName: { type: 'string' }, organizationCountry: { type: 'string' },
-        city: { type: 'string' }, country: { type: 'string' },
-      },
+      properties: Object.fromEntries(CONTACT_FIELDS.map((f) => [f.arg, { type: 'string', description: f.hint }])),
     },
     // `execute`, not `update`: the ACTION is read from the contract's mandate requirement, and this
     // capability has none to read (no mandate, no caveat encodes an action), so the compiler's neutral
@@ -1385,11 +1386,21 @@ export function profileUpdateInvoker(deps: HarnessDeps, person: Address | undefi
     const stepRef = ctx.step.id ?? `s${ctx.index}`;
     if (!person) throw new Error('a profile is changed as you, and there is no signed-in person on this run');
     if (!deps.mergeProfile) throw new Error('the profile record is not reachable from this agent');
-    const FIELDS = ['firstName', 'lastName', 'email', 'phone', 'organizationName', 'organizationCountry', 'city', 'country'] as const;
     const fields: Record<string, string> = {};
-    for (const f of FIELDS) {
+    for (const f of CONTACT_FIELD_ARGS) {
       const v = String(args[f] ?? '').trim();
       if (v) fields[f] = v;
+    }
+    // AN ADDRESS NEEDS ITS COUNTRY (the record's own rule: the coarsest precision is required for any
+    // finer one). A street with no country anywhere — not given, not already recorded — is asked for,
+    // not guessed: "Colorado" makes it certain and the planner fills it; "Erie" alone does not.
+    const givesLocation = CONTACT_FIELDS.some((f) => f.location && f.arg !== 'country' && fields[f.arg]);
+    if (givesLocation && !fields.country && deps.readSubjectRecord) {
+      const current = (await deps.readSubjectRecord(person.toLowerCase(), 'impact-profile').catch(() => null)) as { contact?: { location?: { country?: string }; country?: string } } | null;
+      const known = current?.contact?.location?.country || current?.contact?.country;
+      if (!known) {
+        throw new InputRequired({ kind: 'data', stepRef, toolId, prompt: 'Which country is that address in?', fields: [{ name: 'country', label: 'Country', type: 'text', required: true }] });
+      }
     }
     if (!Object.keys(fields).length) {
       throw new InputRequired({

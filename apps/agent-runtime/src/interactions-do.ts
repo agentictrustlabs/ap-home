@@ -17,6 +17,7 @@
 //   replay    = monotonic publishedAt per subject + tombstones honored by the gate.
 // The VAULT enforces scopes only — never membership (stated so nobody optimizes this gate away).
 // Audit: D1 (spec 322 §7), before commit.
+import { CONTACT_FIELD_ARGS, contactField, precisionOf } from '@agenticprimitives/ontology';
 import { createPublicClient, http, decodeAbiParameters, type Address, type Hex } from 'viem';
 import { chainFor } from './chain';
 import { kinTermFor, householdRoleFor } from '@agenticprimitives/ontology';
@@ -2045,7 +2046,9 @@ export class InteractionsDO {
         // PII, and the person's OWN: the DO is addressed at their SA and reachable only in-Worker,
         // which is the same footing every other internal read here stands on.
         if (op === 'internal.profile.merge') {
-          const ALLOWED = new Set(['firstName', 'lastName', 'email', 'phone', 'organizationName', 'organizationCountry', 'country', 'city']);
+          // THE ALLOW-LIST IS THE RECORD'S SHAPE, read from the ontology's one field list (spec 371 §2.2) —
+          // the same list the Ask's edit tool and the contract derive from, so the three cannot disagree.
+          const ALLOWED = new Set(CONTACT_FIELD_ARGS);
           const patch = (body.fields ?? {}) as Record<string, unknown>;
           const clean: Record<string, string> = {};
           const refused: string[] = [];
@@ -2069,7 +2072,26 @@ export class InteractionsDO {
             // read each other as empty. One record, one shape (spec 356's binding rule applied where the
             // record is actually written).
             const current = (await this.readDoc<Record<string, unknown>>(g, 'impact-profile', null as never)) ?? {};
-            const contact = { ...((current.contact ?? {}) as Record<string, unknown>), ...clean };
+            const prior = (current.contact ?? {}) as Record<string, unknown>;
+            // Location fields land NESTED, as the Home's form writes them (`contact.location.*` with the
+            // precision the filled fields imply), and the legacy aliases `city`/`country` follow — one
+            // record, one shape, whichever door the edit came through.
+            const scalar: Record<string, string> = {};
+            const loc: Record<string, string> = { ...((prior.location ?? {}) as Record<string, string>) };
+            let touchedLocation = false;
+            for (const [k, v] of Object.entries(clean)) {
+              const f = contactField(k);
+              if (f?.location) { loc[f.path.split('.').pop()!] = v; touchedLocation = true; }
+              else scalar[k] = v;
+            }
+            const contact: Record<string, unknown> = { ...prior, ...scalar };
+            if (touchedLocation) {
+              const country = loc.country || String(prior.country ?? '');
+              const location: Record<string, string> = { ...loc, ...(country ? { country } : {}), precision: precisionOf(loc) };
+              contact.location = location;
+              if (location.locality) contact.city = location.locality;
+              if (country) contact.country = country;
+            }
             const next = { ...current, v: 1, contact };
             await this.writeDoc(g, 'impact-profile', next);
             await profileAudit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.profile.merge', outcome: 'success', actor: { type: 'user', id: principal }, subject: { type: 'record', id: 'impact-profile' } }).catch(() => undefined);
