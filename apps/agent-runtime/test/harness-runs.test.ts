@@ -111,10 +111,10 @@ describe('the executed record and the wait window (spec 370 P1)', () => {
     ];
     expect(completedStepsOf({ steps, receipts })).toEqual([{ stepRef: 's0', result: { members: 2 }, receipt: { stepRef: 's0', status: 'executed' } }]);
   });
-  it('a signature waits half an hour, a question a day; past the window the run is expired', () => {
+  it('a signature waits half an hour, a question two hours; past the window the run is expired', () => {
     const now = 1_000_000;
     expect(AWAIT_WINDOW_MS.signature).toBe(30 * 60_000);
-    expect(AWAIT_WINDOW_MS.data).toBe(24 * 3600_000);
+    expect(AWAIT_WINDOW_MS.data).toBe(2 * 3600_000);
     expect(isExpired({ awaiting: { kind: 'signature', prompt: 'sign', stepRef: 's1', expiresAt: now + 1 } }, now)).toBe(false);
     expect(isExpired({ awaiting: { kind: 'signature', prompt: 'sign', stepRef: 's1', expiresAt: now - 1 } }, now)).toBe(true);
     expect(isExpired({ awaiting: { kind: 'data', prompt: 'who?', stepRef: 's1' } }, now)).toBe(false); // no window ⇒ the day prune only
@@ -126,9 +126,9 @@ describe('the executed record and the wait window (spec 370 P1)', () => {
 import { expiryFor } from '../src/harness-runs.js';
 describe('a run stops being resumable (P1 tail)', () => {
   const now = 10_000_000;
-  it('an authority request keeps the signature window; a data question keeps a day', () => {
+  it('an authority request keeps the signature window; a data question keeps two hours', () => {
     expect(expiryFor(undefined, now)).toBe(now + 30 * 60_000);
-    expect(expiryFor({ kind: 'data', prompt: 'who?', stepRef: 's0' }, now)).toBe(now + 24 * 3600_000);
+    expect(expiryFor({ kind: 'data', prompt: 'who?', stepRef: 's0' }, now)).toBe(now + 2 * 3600_000);
   });
   it('a top-level window expires a run; an old row with no window expires by age unless it waits on data', () => {
     expect(isExpired({ expiresAt: now - 1, updatedAt: now - 5 }, now)).toBe(true);

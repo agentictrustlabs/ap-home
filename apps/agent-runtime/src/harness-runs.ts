@@ -181,8 +181,8 @@ export function mergeTurn(
 
 /** How long a wait stays resumable (spec 370 P1). A signature or a confirmation answers a mandate minted
  *  for the request — minutes, not days — so half an hour is generous; a data question (which Nathan?)
- *  has no mandate yet and may wait a day, which is also when the listing prunes it. */
-export const AWAIT_WINDOW_MS: Record<'data' | 'signature' | 'confirmation', number> = { data: 24 * 3600_000, signature: 30 * 60_000, confirmation: 30 * 60_000 };
+ *  has no mandate yet and may wait two hours — after that the person has moved on, and asking again costs less than a list of ghosts. */
+export const AWAIT_WINDOW_MS: Record<'data' | 'signature' | 'confirmation', number> = { data: 2 * 3600_000, signature: 30 * 60_000, confirmation: 30 * 60_000 };
 
 /** Past its window: resumable no longer. Absent window ⇒ the day prune is the only expiry. */
 export function isExpired(cp: Pick<HarnessRunCheckpointV1, 'awaiting' | 'expiresAt' | 'updatedAt'>, now = Date.now()): boolean {
