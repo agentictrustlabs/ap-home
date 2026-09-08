@@ -235,7 +235,11 @@ describe('composing the answer (spec 350 §3.7)', () => {
     const none = await askReplyFor(env2, { intent, addressee: WORKSPACE as `0x${string}`, result: readRun(observations) });
     expect(none).toMatchObject({ kind: 'answer', text: '{"agents":[{"name":"outreach.team"}]}' });
     const broken = await askReplyFor(env2, { intent, addressee: WORKSPACE as `0x${string}`, result: readRun(observations), composer: { compose: async () => { throw new Error('down'); } } });
-    expect(broken).toMatchObject({ kind: 'answer', text: '{"agents":[{"name":"outreach.team"}]}' });
+    // Spec 377 — a composer that FAILED says so beside the evidence ("could not be put into words"); the
+    // evidence itself is still the raw result, first and unchanged.
+    expect(broken.kind).toBe('answer');
+    expect((broken as { text?: string }).text?.startsWith('{"agents":[{"name":"outreach.team"}]}')).toBe(true);
+    expect((broken as { text?: string }).text).toMatch(/could not be put into words/);
   });
 });
 
