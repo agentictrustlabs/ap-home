@@ -809,6 +809,9 @@ app.use('*', async (c, next) => {
   // mount (`/api/a2a`, whose caller is named by the marker). Same posture: body/header-carried authority,
   // no ambient cookie to forge; a browser POST without the marker keeps CSRF.
   if ((c.req.path === '/harness/ask' || c.req.path === '/harness/progress' || c.req.path === '/api/a2a') && isInternalCall(c.req.raw, c.env)) return next();
+  // Spec 375 — the WEBHOOK door is called by external systems; its admission is the row's bearer token
+  // (header-carried, per agent, per trigger), so there is no ambient cookie authority for CSRF to protect.
+  if (c.req.path.startsWith('/harness/hooks/')) return next();
   // /invite/decline — "not interested", from an emailed link. The credential is possession of the emailed
   // token; the effect is a status on that one invitation, nothing else. A browser form post, no session.
   if (c.req.path === '/invite/decline') return next();
@@ -1432,6 +1435,7 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
   presentedRefs: string[];
 }> {
   const deps = harnessDeps(env, buildAuditSink(env));
+  deps.addresseeKind = await deps.agentTypeOf?.(input.addressee).catch(() => null) ?? null;
   const intent = { goal: input.ask, context: { addressee: input.addressee, asker: input.agent, ...(input.context ?? {}) } };
   const { result, interactionFor, trace, tools, events, presentedRefs } = await runUnderMandate(env as unknown as HarnessEnv, deps, {
     intent, presented: input.resume?.presented ?? null, person: input.agent, runRef: input.runRef, addressee: input.addressee,
@@ -1581,10 +1585,12 @@ export async function fireTriggersAt(env: Env, agent: Address, source: TriggerSo
  */
 export async function fireEndeavorEventTriggers(env: Env, principal: Address, endeavorId: string, events: ReadonlyArray<Record<string, unknown>>): Promise<void> {
   for (const ev of events) {
-    const type = String(ev.type ?? '');
+    // The Endeavor log names its events by `kind` (`EndeavorRequestSubmitted`, `ContributionCommitted`, …).
+    const type = String(ev.kind ?? ev.type ?? '');
     if (!type) continue;
+    const nested = (ev.request && typeof ev.request === 'object' ? (ev.request as Record<string, unknown>) : {});
     const named = ['participant', 'requester', 'actor', 'proposer', 'by', 'assignee', 'steward']
-      .map((k) => ev[k]).filter((v): v is string => typeof v === 'string' && /^0x[0-9a-fA-F]{40}$/.test(v)).map((v) => v.toLowerCase() as Address);
+      .flatMap((k) => [ev[k], nested[k]]).filter((v): v is string => typeof v === 'string' && /^0x[0-9a-fA-F]{40}$/.test(v)).map((v) => v.toLowerCase() as Address);
     const at = [...new Set([principal.toLowerCase() as Address, ...named])];
     const pub = Object.fromEntries(Object.entries(ev).filter(([, v]) => typeof v !== 'object' || v === null || Array.isArray(v)));
     for (const agent of at) {
@@ -2459,6 +2465,9 @@ app.post('/harness/ask', async (c) => {
   const audit = buildAuditSink(c.env);
   const askDeps = harnessDeps(c.env, audit, { executionCtx: c.executionCtx });
   if (routedStanding) askDeps.standingContext = routedStanding;
+  // Spec 375 — what KIND of agent is asked, once per ask, so a read knows whether "no subject" means
+  // "which one?" (a person) or "me" (an organization asking itself). Unreadable ⇒ null ⇒ the person reading.
+  askDeps.addresseeKind = await askDeps.agentTypeOf?.(addressee).catch(() => null) ?? null;
   try {
     // Spec 370 P2 — the run narrates itself; each sentence lands on the task DO as it happens, and the
     // surface long-polls them while this request is in flight. Fire-and-forget under waitUntil: a line

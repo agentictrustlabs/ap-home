@@ -107,8 +107,8 @@ const isAddr = (s: string) => /^0x[0-9a-fA-F]{40}$/.test(s);
  * (spec 366 R3, `subjectOfRead`): another agent's endeavors are read at that agent; a person's own agent
  * asked about no organization asks which one.
  */
-function orgOf(args: Record<string, unknown>, addressee: Address, principal: Address | undefined, toolId: string, stepRef?: string): { org: Address } | { refused: string } {
-  const sub = subjectOfRead(args, addressee, principal, { toolId, arg: 'org', noun: 'organization or team', stepRef });
+function orgOf(args: Record<string, unknown>, addressee: Address, principal: Address | undefined, toolId: string, stepRef?: string, selfKind?: string | null): { org: Address } | { refused: string } {
+  const sub = subjectOfRead(args, addressee, principal, { toolId, arg: 'org', noun: 'organization or team', stepRef, selfKind });
   return 'refused' in sub ? sub : { org: sub.subject };
 }
 
@@ -126,7 +126,7 @@ async function stewardshipWireFor(deps: StandingDeps, person: Address, org: Addr
  */
 export function endeavorReadInvoker(deps: CoordinationDeps, addressee: Address, person?: Address): ToolInvoker {
   return async (toolId, args, ctx) => {
-    const o = orgOf(args, addressee, person, toolId, ctx?.step?.id);
+    const o = orgOf(args, addressee, person, toolId, ctx?.step?.id, deps.addresseeKind);
     if ('refused' in o) return { endeavors: [], count: 0, refused: o.refused };
     if (!person) return { endeavors: [], count: 0, refused: 'this agent does not know who is asking' };
     // `deps` is StandingDeps-shaped: the harness maps the routed context (what the asker presented, that
@@ -166,7 +166,7 @@ export function endeavorReadInvoker(deps: CoordinationDeps, addressee: Address, 
  */
 export function endeavorActInvoker(deps: CoordinationDeps, addressee: Address, person: Address | undefined, session: string | undefined): ToolInvoker {
   return async (toolId, args, ctx) => {
-    const o = orgOf(args, addressee, person, toolId, ctx?.step?.id);
+    const o = orgOf(args, addressee, person, toolId, ctx?.step?.id, deps.addresseeKind);
     if ('refused' in o) throw new Error(o.refused);
     if (!person || !session) throw new Error('this act needs the person\'s own session');
     if (!deps.interactionsOp) throw new Error('coordination acts are not wired on this agent');

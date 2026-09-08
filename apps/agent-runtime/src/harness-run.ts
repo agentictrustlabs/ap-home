@@ -767,6 +767,9 @@ export interface HarnessDeps {
    * with no standing there gets the same refusal by either route. Absent ⇒ the step is refused in words
    * (never a local read of the other agent's records — ADR-0013, one mechanism).
    */
+  /** Spec 375 — the kind of the agent being asked (`person` | `org` | `team` | `treasury` | …), read on chain once
+   *  per ask. A read consults it to know whether "no subject" means "which one?" (a person) or "me". */
+  addresseeKind?: string | null;
   askSubjectAgent?: (input: { subject: Address; toolId: string; args: Record<string, unknown>; goal: string; asker?: Address; session?: string; /** Appendix M8 — the run ref the receiver is to adopt for a fresh ask (named by the sender). */ runRef?: string; correlation: { operationId: string; runRef: string; stepRef: string; intentDigest: string }; /** Spec 374 W2 — continue the receiver's parked run with what this turn presented/supplied. */ continue?: { runRef: string; presented?: unknown[]; supplied?: unknown[] } }) => Promise<SubjectAnswerV1>;
   /** Appendix M8 — READ the subject agent's own progress lines for a routed run, under the asker's session,
    *  while the hop is in flight. The receiver's DO answers; nothing is copied but the sentences. */

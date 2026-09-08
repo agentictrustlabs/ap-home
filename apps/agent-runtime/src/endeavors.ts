@@ -627,6 +627,9 @@ export async function handleEndeavorOp(
       const row: CoordinationRequestRowV1 = { request: event.request, event, status: 'pending' };
       doc.rows = [...doc.rows, row].slice(-REQUESTS_CAP);
       await deps.writeDoc(COORDINATION_REQUESTS_RESOURCE, doc);
+      // Spec 375 — a request is RECORDED before any log exists (adoption seeds the log with this very
+      // event); the recording is the commit that fires `EndeavorRequestSubmitted` triggers.
+      try { deps.onCommitted?.(event.requestId, [event], initialCoordinationState()); } catch (e) { console.warn('[endeavor] onCommitted threw:', e instanceof Error ? e.message : String(e)); }
       return json({ ok: true, requestId: event.requestId });
     });
   }
@@ -780,6 +783,7 @@ export async function handleEndeavorOp(
       await deps.writeAudit('interactions.endeavor.create', { type: 'endeavor', id: endeavorId }, now);
       await deps.writeDoc(coordinationEventsResource(endeavorId), [row.event, ...r.events]);
       await deps.writeDoc(coordinationStateResource(endeavorId), next);
+      try { deps.onCommitted?.(endeavorId, [row.event, ...r.events], next); } catch (e) { console.warn('[endeavor] onCommitted threw:', e instanceof Error ? e.message : String(e)); }
       const entry = indexEntryFromState(next, now);
       if (entry) {
         const index = await deps.readDoc<CoordinationIndexDocV1>(COORDINATION_INDEX_RESOURCE, { version: 1, endeavors: {} });
@@ -842,6 +846,7 @@ export async function handleEndeavorOp(
       await deps.writeAudit('interactions.endeavor.proposePlan', { type: 'coordination-plan', id: `${planId}@${maxRevision + 1}` }, now);
       await deps.writeDoc(coordinationEventsResource(endeavorId), [...log, ...r.events]);
       await deps.writeDoc(coordinationStateResource(endeavorId), next);
+      try { deps.onCommitted?.(endeavorId, r.events, next); } catch (e) { console.warn('[endeavor] onCommitted threw:', e instanceof Error ? e.message : String(e)); }
       const entry = indexEntryFromState(next, now);
       if (entry) {
         const index = await deps.readDoc<CoordinationIndexDocV1>(COORDINATION_INDEX_RESOURCE, { version: 1, endeavors: {} });
@@ -911,6 +916,7 @@ export async function handleEndeavorOp(
       await deps.writeAudit('interactions.endeavor.propose', { type: 'contribution-proposal', id: proposalId }, now);
       await deps.writeDoc(coordinationEventsResource(endeavorId), [...log, ...r.events]);
       await deps.writeDoc(coordinationStateResource(endeavorId), next);
+      try { deps.onCommitted?.(endeavorId, r.events, next); } catch (e) { console.warn('[endeavor] onCommitted threw:', e instanceof Error ? e.message : String(e)); }
       const entry = indexEntryFromState(next, now);
       if (entry) {
         const index = await deps.readDoc<CoordinationIndexDocV1>(COORDINATION_INDEX_RESOURCE, { version: 1, endeavors: {} });
