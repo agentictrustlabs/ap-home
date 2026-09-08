@@ -1088,6 +1088,25 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
       },
     } : {}),
     askAsAgent: (input) => runAgentAsk(c.env, input),
+    // Spec 372 N1 — the outsider's unfinished run, on the addressee's own object, open to its stewards.
+    // The same checkpoint a trigger leaves (P5): no mandate presented, nothing supplied, a window after
+    // which it reads expired rather than pending forever. Claiming it grants nothing — a steward resumes
+    // under their own session and is asked for their own mandate.
+    parkRun: async (p) => {
+      const now = Date.now();
+      const kind = (p.reply.prompt?.kind ?? 'data') as 'data' | 'signature' | 'confirmation';
+      const awaiting = p.reply.kind === 'prompt' && p.reply.prompt
+        ? { awaiting: { kind, prompt: p.reply.prompt.prompt, stepRef: p.reply.prompt.stepRef, expiresAt: now + (AWAIT_WINDOW_MS[kind] ?? AWAIT_WINDOW_MS.data) } }
+        : {};
+      await saveRun(c.env as never, {
+        runRef: p.runRef, message: p.ask, addressee: p.addressee, asker: p.asker, presented: [], supplied: [],
+        openToStewards: true, outsider: { agent: p.asker, surface: 'a2a-standard' },
+        ...awaiting,
+        ...(p.result ? { executed: { plan: p.result.plan as never, completed: [] } } : {}),
+        expiresAt: now + (p.reply.kind === 'prompt' ? (AWAIT_WINDOW_MS[kind] ?? AWAIT_WINDOW_MS.data) : AWAIT_WINDOW_MS.signature),
+        createdAt: now, updatedAt: now,
+      } as never);
+    },
     // Spec 372 S4 — the delegation-authorized runtime lives on the agent's own object. The authenticated
     // caller travels with the request; the object re-runs every gate regardless.
     delegatedRpc: async (who, rpc, principal) => {

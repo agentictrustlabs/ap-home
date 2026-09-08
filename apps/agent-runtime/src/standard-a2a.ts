@@ -77,7 +77,12 @@ export interface StandardMountDeps {
   askAsAgent?: (input: { agent: Address; addressee: Address; ask: string; runRef: string }) => Promise<{
     reply: { kind: string; text?: string; prompt?: { kind: string; prompt: string; stepRef: string }; error?: string };
     spoken: string;
+    result?: { plan: unknown };
   }>;
+  /** Spec 372 N1 — an outsider's act or question PARKS, open to the addressee's stewards, exactly as a
+   *  trigger's does (P5): listed among their unfinished runs, finished by one of them under their own
+   *  session and their own mandate. The A2A task is the runtime's handle; this is the stewards'. */
+  parkRun?: (input: { runRef: string; ask: string; addressee: Address; asker: Address; reply: { kind: string; prompt?: { kind: string; prompt: string; stepRef: string } }; result?: { plan: unknown } }) => Promise<void>;
 }
 
 interface AskEnvelope {
@@ -177,14 +182,22 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
         if (!session && ctx.principal?.kind === 'agent' && deps.askAsAgent) {
           if (!message) { await ctx.reject([{ text: 'Say what you would like this agent to do — the message carried no text.' }]); return; }
           await ctx.working();
-          const asked = await deps.askAsAgent({ agent: ctx.principal.agent as Address, addressee: agent, ask: message, runRef: `svc-${ctx.task.id}` });
+          const runRef = `svc-${ctx.task.id}`;
+          const asked = await deps.askAsAgent({ agent: ctx.principal.agent as Address, addressee: agent, ask: message, runRef });
           // THE WRITTEN REPLY, not the spoken one. `spoken` is rendered for a voice — it says "alice2 dot
           // treasury" — and an A2A peer reading that gets a mangled name it cannot resolve (seen live,
           // 2026-09-08). A voice surface asks for `spoken`; this wire wants what was written.
           const words = asked.reply.text || asked.spoken || '';
           if (asked.reply.kind === 'answer' || asked.reply.kind === 'done') { await ctx.complete([{ text: words || 'Done.' }]); return; }
+          // WHAT THE OUTSIDER CANNOT FINISH, A STEWARD CAN (spec 372 N1). The task parks for the caller; the
+          // same run parks open to the addressee's stewards, who see it where they see every other
+          // unfinished run and finish it with their own signature — the runtime never holds that pen.
+          if (asked.reply.kind === 'prompt' || asked.reply.kind === 'authority_required') {
+            ctx.task.metadata = { ...(ctx.task.metadata ?? {}), runRef, openToStewards: true };
+            await deps.parkRun?.({ runRef, ask: message, addressee: agent, asker: ctx.principal.agent as Address, reply: asked.reply, ...(asked.result ? { result: asked.result } : {}) }).catch((e: unknown) => console.warn('[standard-a2a] park failed:', e instanceof Error ? e.message : String(e)));
+          }
           if (asked.reply.kind === 'prompt') { await ctx.inputRequired([{ text: asked.reply.prompt?.prompt ?? words }, { data: asked.reply.prompt ?? {} }]); return; }
-          if (asked.reply.kind === 'authority_required') { await ctx.authRequired([{ text: words || 'This needs a mandate no one has granted.' }]); return; }
+          if (asked.reply.kind === 'authority_required') { await ctx.authRequired([{ text: words || 'This needs a mandate no one has granted.' }, { data: { runRef, openToStewards: true } }]); return; }
           await ctx.reject([{ text: words || asked.reply.error || 'Refused.' }]);
           return;
         }

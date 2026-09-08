@@ -68,6 +68,10 @@ export interface HarnessRunCheckpointV1 {
   /** Spec 370 P5 — this run was started by a TRIGGER of the agent's playbook, not by a person: the asker
    *  is the agent, nothing was presented, and a steward finishes it. Display and audit; no gate reads it. */
   trigger?: { id: string; playbookDigest: string };
+  /** Spec 372 N1 — this run was started by an OUTSIDE runtime on the standard A2A surface, calling as the
+   *  agent named: it presented no mandate and cannot sign one, so a steward finishes it. Display and audit;
+   *  no gate reads it — the asker is `asker`, verified at the door, and that is what `claimableBy` reads. */
+  outsider?: { agent: Address; surface: 'a2a-standard' };
   /** Spec 370 P1 tail — when this run stops being resumable, whatever it waits for. An authority request
    *  waits for a mandate minted for THIS request, minutes not days; 240 of them listed as "unfinished"
    *  was a day's asks a person had simply walked away from. Absent on older rows ⇒ `updatedAt`-based. */

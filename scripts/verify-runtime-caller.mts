@@ -16,7 +16,11 @@
  */
 import { createPublicClient, http, encodeAbiParameters, toHex, type Address, type Hex } from 'viem';
 import { privateKeyToAccount, sign as signRaw, generatePrivateKey } from 'viem/accounts';
-import { hashDelegation, type Delegation } from '../packages/delegation/src/index.js';
+import {
+  hashDelegation, buildRevokeDelegationCall, paymentHandler, registerDefaultSubsetHandlers, buildDigestBindingCaveat, ROOT_AUTHORITY,
+  type Delegation, type MandateRequirementV1,
+} from '../packages/delegation/src/index.js';
+import { encodeFunctionData } from 'viem';
 import { skillSelector } from '../packages/a2a/src/grant.js';
 import { wrapSessionSignature } from '../packages/a2a/src/session-wire.js';
 import {
@@ -25,6 +29,14 @@ import {
 } from '../packages/a2a/src/standard/caller.js';
 
 const HOME = 'https://www.faithnet.me';
+registerDefaultSubsetHandlers();
+const HARNESS_SA = '0xD34c3Fbc89706dd57d426546DCEBD3bA926eDE35' as Address;
+const ENFORCERS = {
+  delegationManager: '0x710cb1bF08C234Df397e0910331e0A29710EF4F7', timestamp: '0x73A7B878168b7DE48677617179A8bE894f0Dfe96',
+  allowedTargets: '0x2156311097A936de1916a878bF53Bfd43c7b5715', allowedMethods: '0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41',
+  value: '0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975', digestBinding: '0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1',
+  payment: process.env.PAYMENT_ENFORCER ?? '',
+} as const;
 const RPC = 'https://a2a.faithnet.io/rpc';
 const CHAIN = 34348;
 const DM = '0x710cb1bF08C234Df397e0910331e0A29710EF4F7' as Address;
@@ -74,7 +86,7 @@ async function mintWire(skill: string, validUntil = nowSec() + 3600): Promise<{ 
   return { wire: { ...d, salt: salt.toString() }, ref, delegation: d };
 }
 
-const { wire, ref } = await mintWire(STANDARD_SURFACE_SKILL);
+const { wire, ref, delegation: wireDelegation } = await mintWire(STANDARD_SURFACE_SKILL);
 console.log(`session wire ${ref}\n  ${SVC} → ${runtimeKey.address}, pinned to "${STANDARD_SURFACE_SKILL}", 1 h`);
 
 // ── A call, signed by the runtime's own key ──
@@ -138,4 +150,76 @@ const lapsedRaw = body('what can you tell me');
 if ((await call(lapsedRaw, await assertionFor(lapsedRaw, lapsed.wire), 'wire past its window')).status !== 401) throw new Error('a lapsed wire must be refused');
 
 console.log(`\n✓ spec 372 S3c: the runtime is admitted by its own agent's session wire and by nothing else — no credential, another body, another skill, a replay, a stale moment and a lapsed wire are each refused.`);
-console.log(`  Revocation: the third leg the surface checks per request (\`isRevoked\` at ${DM}) is unit-tested in packages/a2a; revoking live needs a UserOp from the agent's custodian, which this script does not drive.`);
+
+// ── N1.a — WHAT THE OUTSIDER CANNOT FINISH, A STEWARD CAN ───────────────────────────────────────────
+//
+// The runtime asks alice's agent to pay. It holds no mandate and cannot sign one: the act parks —
+// AUTH_REQUIRED on its task, and the same run open to alice's stewards among their unfinished runs. Alice
+// picks it up under HER session, is asked for HER mandate, grants it, and the act completes. The runtime
+// never held the pen.
+console.log('\n── N1.a: the outsider\'s act parks, and a steward finishes it ──');
+const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
+const csrf = (await j(csrfRes)) as { token?: string };
+const cookie = (csrfRes.headers.get('set-cookie') ?? '').split(';')[0];
+const H = { 'content-type': 'application/json', origin: HOME, cookie, 'x-csrf-token': csrf.token ?? '' };
+const ALICE = String(signin.agent).toLowerCase() as Address;
+
+const payRaw = body('send nathan 0.01 usdc');
+const parked = await call(payRaw, await assertionFor(payRaw), 'runtime asks alice to pay');
+// The runtime asks AS ITSELF, so the first thing the harness wants is the runtime's own payer — it has
+// none, and that is a question. A question parks the same way an authority request does (P5's rule:
+// an act OR a question, open to the stewards); alice picking it up re-derives everything as HER ask.
+if (parked.state !== 'TASK_STATE_AUTH_REQUIRED' && parked.state !== 'TASK_STATE_INPUT_REQUIRED') throw new Error(`expected the act to park, got ${JSON.stringify(parked)}`);
+const runsBefore = await j(await fetch(`${HOME}/a2a/harness/runs`, { method: 'POST', headers: H, body: JSON.stringify({ session: token, addressee: ALICE }) })) as { runs?: Array<{ runRef: string; asker: string; outsider?: unknown; message: string }> };
+const mine = (runsBefore.runs ?? []).find((r) => r.asker.toLowerCase() === SVC && r.message === 'send nathan 0.01 usdc');
+console.log(`  alice's unfinished runs list it: ${mine ? `✓ ${mine.runRef} (asker ${mine.asker.slice(0, 10)}…, outsider ${JSON.stringify(mine.outsider)})` : '✗ not listed'}`);
+if (!mine) throw new Error('the parked run is not in the steward\'s unfinished list');
+
+// Alice resumes it: the authority card is re-derived for HER, never carried over from the runtime.
+const pickUp = await j(await fetch(`${HOME}/a2a/harness/ask`, { method: 'POST', headers: H, body: JSON.stringify({ session: token, addressee: ALICE, runRef: mine.runRef }) })) as { reply?: { kind?: string; requirement?: MandateRequirementV1; delegator?: Address; error?: string } };
+console.log(`  alice picks it up → ${pickUp.reply?.kind}${pickUp.reply?.delegator ? ` (delegator ${pickUp.reply.delegator.slice(0, 10)}…)` : ''}${pickUp.reply?.error ? ` ${pickUp.reply.error}` : ''}`);
+if (pickUp.reply?.kind !== 'authority_required' || !pickUp.reply.requirement || !pickUp.reply.delegator) throw new Error(`expected alice to be asked for her own mandate: ${JSON.stringify(pickUp).slice(0, 400)}`);
+if (!ENFORCERS.payment) { console.log('  (PAYMENT_ENFORCER not set — stopping before the mandate; the parked run and the re-derived card are the gate)'); }
+else {
+  const req = pickUp.reply.requirement;
+  const salt2 = BigInt(toHex(crypto.getRandomValues(new Uint8Array(16))));
+  const m: Delegation = {
+    delegator: pickUp.reply.delegator, delegate: HARNESS_SA, authority: ROOT_AUTHORITY,
+    caveats: [...paymentHandler.toCaveats(req, ENFORCERS as never), buildDigestBindingCaveat(ENFORCERS.digestBinding, 'intent', req.intentDigest)],
+    salt: salt2, signature: '0x',
+  };
+  m.signature = await custodianSign(hashDelegation(m, CHAIN, DM));
+  type AskReply = { reply?: { kind?: string; error?: string; receipt?: unknown; prompt?: { kind?: string; stepRef?: string; digest?: Hex; signer?: string; prompt?: string } } };
+  let done = await j(await fetch(`${HOME}/a2a/harness/ask`, { method: 'POST', headers: H, body: JSON.stringify({ session: token, addressee: ALICE, runRef: mine.runRef, presented: { ...m, salt: salt2.toString() } }) })) as AskReply;
+  console.log(`  alice grants → ${done.reply?.kind}${done.reply?.error ? ` ${done.reply.error}` : ''}${done.reply?.prompt?.kind ? ` (${done.reply.prompt.kind}: ${done.reply.prompt.prompt?.slice(0, 70)}…)` : ''}`);
+  // THE PAYMENT POLICY'S OWN OBLIGATION: a second-party approval signature over the step's digest
+  // (spec 350 ApprovalPort). The steward signs it too — the obligation is the policy's, the pen is hers.
+  if (done.reply?.kind === 'prompt' && done.reply.prompt?.kind === 'signature' && done.reply.prompt.digest) {
+    const p = done.reply.prompt;
+    const supplied = [{ stepRef: p.stepRef ?? 's0', signature: { digest: p.digest, signer: ALICE, signature: await custodianSign(p.digest) } }];
+    done = await j(await fetch(`${HOME}/a2a/harness/ask`, { method: 'POST', headers: H, body: JSON.stringify({ session: token, addressee: ALICE, runRef: mine.runRef, supplied }) })) as AskReply;
+    console.log(`  alice approves → ${done.reply?.kind}${done.reply?.error ? ` ${done.reply.error}` : ''}`);
+  }
+  if (done.reply?.kind !== 'done') throw new Error(`the steward could not finish the parked act: ${JSON.stringify(done).slice(0, 500)}`);
+}
+
+// ── N1.b — THE REVOCATION TWIN, LIVE ────────────────────────────────────────────────────────────────
+//
+// The custodian revokes the wire on chain (a UserOp from the service agent, signed by alice, its
+// custodian). The very next wire-signed request is refused — everywhere, with no list to update. This
+// is the property the whole design rests on, and it is shown rather than argued.
+console.log('\n── N1.b: the custodian revokes the wire; the next request is refused ──');
+const EXECUTE = [{ type: 'function', name: 'execute', stateMutability: 'nonpayable', inputs: [{ type: 'address' }, { type: 'uint256' }, { type: 'bytes' }], outputs: [] }] as const;
+const revoke = buildRevokeDelegationCall(wireDelegation, DM);
+const callData = encodeFunctionData({ abi: EXECUTE, functionName: 'execute', args: [revoke.to, 0n, revoke.data] });
+const built = await j(await fetch(`${HOME}/a2a/account/build-call-userop`, { method: 'POST', headers: H, body: JSON.stringify({ sender: SVC, callData }) })) as { ok?: boolean; userOpHash?: Hex; userOp?: Record<string, unknown>; error?: string; detail?: string };
+if (!built.ok || !built.userOpHash) throw new Error(`build-call-userop: ${built.error ?? ''} ${built.detail ?? ''}`);
+const opSig = await custodianSign(built.userOpHash);
+const submitted = await j(await fetch(`${HOME}/a2a/account/submit-call-userop`, { method: 'POST', headers: H, body: JSON.stringify({ userOp: { ...built.userOp, signature: opSig } }) })) as { ok?: boolean; transactionHash?: string; status?: string; error?: string; detail?: string };
+console.log(`  revokeDelegationByOwner from ${SVC.slice(0, 10)}… → ${submitted.ok ? `✓ ${submitted.transactionHash} (${submitted.status})` : `✗ ${submitted.error ?? ''} ${submitted.detail ?? ''}`}`);
+if (!submitted.ok) throw new Error('the revocation did not land');
+const afterRaw = body('what can you tell me');
+const after = await call(afterRaw, await assertionFor(afterRaw), 'the same wire, after revocation');
+if (after.status !== 401) throw new Error('a revoked wire must be refused at the next request');
+
+console.log(`\n✓ spec 372 N1: an outsider's act parks open to the stewards and a steward finishes it under their own mandate; the custodian's revocation kills the wire at the next request.`);
