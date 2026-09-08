@@ -14,6 +14,8 @@ import { useAskSelection, setAskSelection } from '../../home/ask-selection';
 import { useRegisteredName } from '../../lib/reverse-name';
 import { PortalTopbar } from './PortalTopbar';
 import { AskFlyout } from './ask/AskFlyout';
+import { HuddleProvider } from './huddle/HuddleProvider';
+import { HuddleDock } from './huddle/HuddleDock';
 import { askIsAvailable } from '../../home/ask';
 import { PortalSidebar } from './PortalSidebar';
 import { PortalBottomNav } from './PortalBottomNav';
@@ -86,9 +88,19 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
   // Where that is not deployed (Base Sepolia today), there is no Ask — not a button that fails when
   // pressed. One signal, read from the deployment this build targets.
   const canAsk = !!session && !!askAddressee && askIsAvailable();
+  // Spec 378 — the dock lives here, above everything, so a call survives navigation; a huddle is STARTED
+  // where a team already talks (its discussion topics, `OrgDiscussionsView`), each topic its own room.
+  const nameOfAgent = (a: string): string | undefined => {
+    const hit = agents.find((x) => x.agent.toLowerCase() === a.toLowerCase());
+    if (hit?.name) return nameLabel(hit.name);
+    if (agentAddress && a.toLowerCase() === agentAddress.toLowerCase()) return agentName ? nameLabel(agentName) : 'you';
+    return undefined;
+  };
   return (
+    <HuddleProvider>
     <div className="portal-root">
       <PortalTopbar brandName={whitelabel.brand.name} {...(canAsk ? { askOpen, onToggleAsk: () => setAskOpen((v) => !v) } : {})} />
+      <HuddleDock nameOf={nameOfAgent} />
       <div className="portal-body">
         <PortalSidebar groups={groups} panes={panes} workspaceName={workspaceName} />
         <main className="portal-main">
@@ -123,5 +135,6 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
         />
       )}
     </div>
+    </HuddleProvider>
   );
 }

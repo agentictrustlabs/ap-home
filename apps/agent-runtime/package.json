@@ -47,7 +47,8 @@
     "@agenticprimitives/vault": "workspace:*",
     "@agenticprimitives/verification-receipts": "workspace:*",
     "hono": "^4.12.33",
-    "viem": "^2.52.2"
+    "viem": "^2.52.2",
+    "@agenticprimitives/collaboration": "workspace:*"
   },
   "devDependencies": {
     "@agenticprimitives/provenance": "workspace:*",

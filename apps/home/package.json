@@ -12,16 +12,17 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@agenticprimitives/a2a": "workspace:*",
     "@agenticprimitives/agent-account": "workspace:*",
     "@agenticprimitives/agent-naming": "workspace:*",
     "@agenticprimitives/agent-profile": "workspace:*",
     "@agenticprimitives/agent-relationships": "workspace:*",
+    "@agenticprimitives/agent-resolution": "workspace:*",
     "@agenticprimitives/audit": "workspace:*",
-    "@agenticprimitives/connect": "workspace:*",
     "@agenticprimitives/capability-claims": "workspace:*",
+    "@agenticprimitives/connect": "workspace:*",
     "@agenticprimitives/connect-auth": "workspace:*",
     "@agenticprimitives/contracts": "workspace:*",
-    "@agenticprimitives/a2a": "workspace:*",
     "@agenticprimitives/delegation": "workspace:*",
     "@agenticprimitives/fabric": "workspace:*",
     "@agenticprimitives/fedcm-idp": "workspace:*",
@@ -37,6 +38,7 @@
     "@agenticprimitives/types": "workspace:*",
     "@agenticprimitives/vault": "workspace:*",
     "@agenticprimitives/verifiable-credentials": "workspace:*",
+    "@cloudflare/realtimekit-react": "0.1.0",
     "@upstash/redis": "^1.34.0",
     "@xyflow/react": "^12.4.4",
     "mermaid": "^11.6.0",
@@ -45,8 +47,7 @@
     "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "viem": "^2.52.2",
-    "@agenticprimitives/agent-resolution": "workspace:*"
+    "viem": "^2.52.2"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

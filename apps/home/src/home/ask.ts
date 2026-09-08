@@ -321,7 +321,7 @@ export function warmHearing(session: { token: string }, addressee: string): void
   void postA2a('/a2a/harness/hear', { session: session.token, addressee: addressee.toLowerCase(), warm: true }).catch(() => undefined);
 }
 
-async function postA2a(path: string, body: unknown): Promise<Record<string, unknown>> {
+export async function postA2a(path: string, body: unknown): Promise<Record<string, unknown>> {
   const send = async () => {
     await ensureCsrfToken();
     return fetch(path, {

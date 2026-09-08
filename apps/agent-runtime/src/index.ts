@@ -138,6 +138,7 @@ import { loadPlaybook } from './playbook.js';
 import { runUnderMandate, askReplyFor, readSubjectReply, type AskReplyEnvelopeV1, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { subjectAsk, subjectAnswer, validateSubjectAsk, handoff, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
+import { realtimeKitConfigured, verifyRealtimeKitWebhook, readRealtimeKitWebhook } from './realtimekit.js';
 import { sendSubjectAskOverWire, subjectAnswerMessage, subjectEnvelopeOf, handoffMessage, routedRunRefFor } from './subject-hop.js';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
@@ -203,6 +204,7 @@ export function buildAuditSink(env: Env): AuditSink {
 export { SessionStoreDO };
 export { A2aTaskDO } from './a2a-task-do.js';
 export { InteractionsDO } from './interactions-do.js';
+export { HuddleRoomDO } from './huddle-room-do.js';
 
 export interface Env {
   /** Spec 369 — Workers AI, for HEARING (`/harness/hear`, Whisper). Optional: unbound ⇒ 503 and the
@@ -217,6 +219,16 @@ export interface Env {
   // Per-agent A2A Task runtime (spec 269 W5) — sharded idFromName(agentSA).
   A2A_TASKS: DurableObjectNamespace;
   INTERACTIONS: DurableObjectNamespace;
+  /** Spec 378 — one huddle room per scope key. */
+  HUDDLES?: DurableObjectNamespace;
+  REALTIMEKIT_ACCOUNT_ID?: string;
+  REALTIMEKIT_APP_ID?: string;
+  REALTIMEKIT_API_TOKEN?: string;
+  REALTIMEKIT_PRESET_HOST?: string;
+  REALTIMEKIT_PRESET_PARTICIPANT?: string;
+  HUDDLE_MAX_MS?: string;
+  HUDDLE_EMPTY_GRACE_MS?: string;
+  HUDDLE_INVITE_TTL_MS?: string;
   // Spec 290 §8 — the per-SA hard-budget store, bound CROSS-SCRIPT to demo-mcp's SmartAgentBudgetDO so the
   // A2A + MCP paths share ONE budget authority per SA (§9). Optional: when unbound, the A2A runtime skips
   // the Stage-3 budget (authority + single-use message-id still apply).
@@ -817,6 +829,8 @@ app.use('*', async (c, next) => {
   // Spec 375 — the WEBHOOK door is called by external systems; its admission is the row's bearer token
   // (header-carried, per agent, per trigger), so there is no ambient cookie authority for CSRF to protect.
   if (c.req.path.startsWith('/harness/hooks/')) return next();
+  // Spec 378 — the media provider's webhook is signed (`rtk-signature` over the raw body); no cookie.
+  if (c.req.path === '/huddles/webhook') return next();
   // /invite/decline — "not interested", from an emailed link. The credential is possession of the emailed
   // token; the effect is a status on that one invitation, nothing else. A browser form post, no session.
   if (c.req.path === '/invite/decline') return next();
@@ -1634,6 +1648,111 @@ app.post('/harness/hooks/:agent/:triggerId', async (c) => {
   const fired = await fireTriggersAt(c.env, agent as Address, { kind: 'webhook', triggerId, token, payload });
   if (!fired.length) return c.json({ ok: false, error: 'unauthorized' }, 401);
   return c.json({ ok: true, agent, fired });
+});
+
+// ── HUDDLES — spec 378. Authority decides; the provider carries; Home presents. ────────────────────────
+//
+// `POST /huddles/<op>` { session, scope: { kind, principal, id? }, … }. The caller is the Home session
+// (verified as every route verifies it); their STANDING at the scope is derived here — steward / member /
+// party / none — never asserted by the client. The scope's own object judges the operation and, for a
+// join, hands back the provider token ONCE: it goes to this browser and nowhere else (not a log, not a
+// receipt, not a model). Unconfigured provider ⇒ 503 `huddles_not_configured`, never a fallback.
+type HuddleScopeIn = { kind?: string; principal?: string; id?: string };
+function huddleScopeOf(raw: HuddleScopeIn | undefined): { kind: 'conversation' | 'topic' | 'org' | 'team' | 'workspace'; principal: Address; id?: string } | null {
+  const kind = String(raw?.kind ?? '');
+  const principal = String(raw?.principal ?? '').toLowerCase();
+  if (!['conversation', 'topic', 'org', 'team', 'workspace'].includes(kind) || !/^0x[0-9a-f]{40}$/.test(principal)) return null;
+  const id = raw?.id ? String(raw.id).slice(0, 200) : undefined;
+  if ((kind === 'conversation' || kind === 'topic') && !id) return null;
+  return { kind: kind as 'conversation' | 'topic' | 'org' | 'team' | 'workspace', principal: principal as Address, ...(id ? { id } : {}) };
+}
+/** The caller's standing AT THE SCOPE (spec 378 §2): for an organization-class scope, derived from records
+ *  the organization keeps (spec 366); for a conversation, whether the caller is one of its parties. */
+async function huddleStandingFor(env: Env, caller: Address, scope: NonNullable<ReturnType<typeof huddleScopeOf>>): Promise<'steward' | 'member' | 'party' | 'none'> {
+  if (scope.kind === 'conversation') {
+    const parties: string[] = (scope.id ?? '').toLowerCase().match(/0x[0-9a-f]{40}/g) ?? [];
+    return parties.includes(caller.toLowerCase()) || scope.principal === caller.toLowerCase() ? 'party' : 'none';
+  }
+  if (scope.principal === caller.toLowerCase()) return 'steward';
+  const askDeps = harnessDeps(env, buildAuditSink(env));
+  const standing = await deriveStanding({
+    ...(askDeps.readSubjectRecord ? { readSubjectRecord: askDeps.readSubjectRecord } : {}),
+    verifyStewardship: chainStewardshipCheck({
+      readContract: ((args: never) => askDeps.readContract(args)) as never,
+      chainId: Number(env.CHAIN_ID), delegationManager: env.DELEGATION_MANAGER as Address,
+      allowedTargetsEnforcer: env.ALLOWED_TARGETS_ENFORCER, vaultRecordScopeEnforcer: VAULT_RECORD_SCOPE_ENFORCER,
+      isRevokedAbi: IS_REVOKED_ABI_FOR_STANDING, validatorAbi: universalSignatureValidatorAbi,
+      ...(env.UNIVERSAL_SIGNATURE_VALIDATOR ? { validator: env.UNIVERSAL_SIGNATURE_VALIDATOR as Address } : {}),
+    }),
+  }, { principal: caller, subject: scope.principal }).catch(() => null);
+  return standing?.relation === 'steward' || standing?.relation === 'self' ? 'steward' : standing?.relation === 'member' ? 'member' : 'none';
+}
+async function huddleRoom(env: Env, scope: NonNullable<ReturnType<typeof huddleScopeOf>>, body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }> {
+  if (!env.HUDDLES) return { status: 503, body: { ok: false, error: 'huddles_not_configured' } };
+  const key = `${scope.kind}:${scope.principal}${scope.id ? `:${scope.id}` : ''}`;
+  const stub = env.HUDDLES.get(env.HUDDLES.idFromName(key));
+  const res = await stub.fetch(new Request('https://huddle-room/', { method: 'POST', headers: internalHeaders(env, { 'content-type': 'application/json' }), body: JSON.stringify(body) }));
+  return { status: res.status, body: (await res.json().catch(() => ({ ok: false, error: `room answered ${res.status}` }))) as Record<string, unknown> };
+}
+app.post('/huddles/webhook', async (c) => {
+  const raw = await c.req.text();
+  if (!(await verifyRealtimeKitWebhook(raw, c.req.header('rtk-signature') ?? null))) return c.json({ ok: false, error: 'bad signature' }, 401);
+  let payload: Record<string, unknown> | null = null;
+  try { payload = JSON.parse(raw) as Record<string, unknown>; } catch { return c.json({ ok: false, error: 'not json' }, 400); }
+  const ev = readRealtimeKitWebhook(payload);
+  if (!ev) return c.json({ ok: true, ignored: 'no meeting in the event' });
+  const key = await c.env.BRIDGE_NONCES?.get(`huddle:meeting:${ev.meetingId}`);
+  if (!key || !c.env.HUDDLES) return c.json({ ok: true, ignored: 'no room for that meeting' });
+  const stub = c.env.HUDDLES.get(c.env.HUDDLES.idFromName(key));
+  const res = await stub.fetch(new Request('https://huddle-room/', { method: 'POST', headers: internalHeaders(c.env, { 'content-type': 'application/json' }), body: JSON.stringify({ op: 'webhook', event: ev }) }));
+  return c.json(await res.json().catch(() => ({ ok: true })));
+});
+app.post('/huddles/:op', async (c) => {
+  const op = String(c.req.param('op') ?? '');
+  if (!['start', 'join', 'get', 'leave', 'end', 'invite', 'removeParticipant'].includes(op)) return c.json({ ok: false, error: 'unknown huddle operation' }, 404);
+  if (!realtimeKitConfigured(c.env) || !c.env.HUDDLES) return c.json({ ok: false, error: 'huddles_not_configured' }, 503);
+  const body = (await c.req.json().catch(() => null)) as { session?: string; scope?: HuddleScopeIn; represented?: string; displayName?: string; invitee?: string; target?: string; key?: string } | null;
+  if (!body?.session) return c.json({ ok: false, error: 'session required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const actor = String(who.sa).toLowerCase() as Address;
+  const scope = huddleScopeOf(body.scope);
+  if (!scope) return c.json({ ok: false, error: 'scope { kind: conversation|org|team|workspace, principal, id? } required' }, 400);
+  const standing = await huddleStandingFor(c.env, actor, scope);
+  // A represented principal is a CLAIM the caller makes; it is honoured only when the caller stewards it.
+  let represented: Address | undefined;
+  if (body.represented && /^0x[0-9a-fA-F]{40}$/.test(body.represented) && body.represented.toLowerCase() !== actor) {
+    const r = body.represented.toLowerCase() as Address;
+    const st = await huddleStandingFor(c.env, actor, { kind: 'org', principal: r });
+    if (st !== 'steward') return c.json({ ok: false, error: `you do not steward ${r} — you take part as yourself` }, 403);
+    represented = r;
+  }
+  const displayName = (body.displayName ?? '').toString().trim().slice(0, 80) || (await harnessDeps(c.env, buildAuditSink(c.env)).nameOf?.(actor).catch(() => null)) || actor.slice(0, 10);
+  const key = (body.key ?? '').toString().slice(0, 120) || `${op}:${actor}:${Date.now()}`;
+  const req: Record<string, unknown> = { op, actor, standing, scope, displayName, key, ...(represented ? { represented } : {}) };
+  if (op === 'invite') {
+    const invitee = String(body.invitee ?? '').toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(invitee)) return c.json({ ok: false, error: 'invitee (an agent address) required' }, 400);
+    req.invitee = invitee; req.inviteeStanding = await huddleStandingFor(c.env, invitee as Address, scope);
+  }
+  if (op === 'removeParticipant') {
+    const target = String(body.target ?? '').toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(target)) return c.json({ ok: false, error: 'target (an agent address) required' }, 400);
+    req.target = target;
+  }
+  const out = await huddleRoom(c.env, scope, req);
+  // Spec 378 — A TOPIC HUDDLE IS SAID IN ITS TOPIC. The organization posts one line where its members
+  // already talk: that a huddle started (join from the bar), or that it ended. A system line, as the
+  // organization, through the same pipeline its assistant answers on — never a second conversation.
+  if (scope.kind === 'topic' && scope.id && out.status === 200 && (op === 'start' || op === 'end')) {
+    const run = out.body.run as { runId?: string; roster?: Array<{ joined: boolean }>; startedAt?: number; endedAt?: number } | undefined;
+    const fresh = op === 'start' && run?.roster?.filter((r) => r.joined).length === 1;
+    const line = op === 'start'
+      ? (fresh ? `${displayName} started a huddle in this topic — open the Huddle bar above to join.` : null)
+      : `The huddle ended${run?.startedAt && run.endedAt ? ` after ${Math.max(1, Math.round((run.endedAt - run.startedAt) / 60_000))} min` : ''}.`;
+    if (line) c.executionCtx.waitUntil(callInteractionsInternal(c.env, scope.principal, 'internal.channels.post', { channelId: scope.id, bodyText: line }).catch((e: unknown) => console.warn('[huddle] topic line not posted:', e instanceof Error ? e.message : String(e))));
+  }
+  return c.json(out.body, out.status as 200);
 });
 
 app.post('/harness/triggers', async (c) => {

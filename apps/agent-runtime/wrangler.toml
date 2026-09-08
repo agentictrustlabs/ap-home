@@ -23,6 +23,7 @@ bindings = [
   { name = "SESSIONS", class_name = "SessionStoreDO" },
   { name = "A2A_TASKS", class_name = "A2aTaskDO" },
   { name = "INTERACTIONS", class_name = "InteractionsDO" },
+  { name = "HUDDLES", class_name = "HuddleRoomDO" },
 ]
 
 [[migrations]]
@@ -97,6 +98,9 @@ CHAIN_ID = "84532"
 # and keyless is a thrown configuration error, never a fallback (ADR-0013):
 #   wrangler secret put ANTHROPIC_API_KEY --env production
 #   wrangler secret put GROQ_API_KEY --env production      (set BEFORE deploying a toml that lists groq)
+# Spec 378 huddles (Cloudflare RealtimeKit) — per env: REALTIMEKIT_ACCOUNT_ID, REALTIMEKIT_APP_ID, REALTIMEKIT_API_TOKEN
+#   (optional REALTIMEKIT_PRESET_HOST / REALTIMEKIT_PRESET_PARTICIPANT, default group_call_host / group_call_participant).
+#   Unset ⇒ every /huddles/* answers 503 huddles_not_configured; never a fallback.
 # Optional ORCHESTRATION_MODEL overrides the Anthropic model; ORCHESTRATION_GROQ_MODEL and
 # ORCHESTRATION_GROQ_BASE_URL the Groq ones (defaults in src/orchestration.ts GROQ_DEFAULTS:
 # openai/gpt-oss-120b at https://api.groq.com/openai/v1). Committed here (not a --var) so it survives
@@ -296,6 +300,7 @@ bindings = [
   { name = "SESSIONS", class_name = "SessionStoreDO" },
   { name = "A2A_TASKS", class_name = "A2aTaskDO" },
   { name = "INTERACTIONS", class_name = "InteractionsDO" },
+  { name = "HUDDLES", class_name = "HuddleRoomDO" },
   # spec 290 §8/§9 — CROSS-SCRIPT binding to demo-mcp's SmartAgentBudgetDO so the A2A + MCP paths share
   # ONE hard-budget authority per Smart Agent. demo-mcp owns the class + migration; demo-a2a only binds.
   { name = "SA_BUDGET", class_name = "SmartAgentBudgetDO", script_name = "demo-mcp-production" },
@@ -347,6 +352,11 @@ service = "demo-discovery-mcp"
 [[migrations]]
 tag = "v3"
 new_sqlite_classes = ["InteractionsDO"]
+
+# Spec 378 — one huddle room per scope key: the current call's run and its provider binding (serving-plane).
+[[migrations]]
+tag = "v4"
+new_sqlite_classes = ["HuddleRoomDO"]
 
 # ── FAITHNET (Azure faithchain 34348) — gcp-kms custody, Home on faithnet.me, backend on faithnet.io ──
 [env.faithnet]
@@ -479,6 +489,7 @@ bindings = [
   { name = "SESSIONS", class_name = "SessionStoreDO" },
   { name = "A2A_TASKS", class_name = "A2aTaskDO" },
   { name = "INTERACTIONS", class_name = "InteractionsDO" },
+  { name = "HUDDLES", class_name = "HuddleRoomDO" },
   { name = "SA_BUDGET", class_name = "SmartAgentBudgetDO", script_name = "demo-mcp-faithnet" },
 ]
 

@@ -5,6 +5,7 @@
 // NOTE: the internal transport keys (`/connect/channels`, `channelId`, `communityId`, CSS `channels-*`) are
 // unchanged pending the W6 record-key migration; only the user-facing vocabulary is Discussions/Topics here.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { HuddleAffordance } from './huddle/HuddleDock';
 import type { Address } from '@agenticprimitives/types';
 import type { MessageEnvelopeV1 } from '@agenticprimitives/fabric/messaging';
 import { useSession } from '../../context/session';
@@ -762,6 +763,9 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                 />
                 <div>
                   <strong># {channel.title}</strong>
+                  {/* Spec 378 — this topic's huddle: start it here, or join the one already running. Each
+                      topic of each team is its own room, judged by standing at this organization. */}
+                  <span style={{ marginLeft: '.6rem' }}><HuddleAffordance scope={{ kind: 'topic', principal: org.toLowerCase(), id: channel.descriptor.id }} scopeName={`# ${channel.title}`} /></span>
                   <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
                     {channel.participationPolicy === 'restricted'
                       ? `Restricted · ${(participants ?? []).length} participants · ${channel.messages.length} messages`
