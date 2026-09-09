@@ -14,6 +14,7 @@ import { AgentNamingClient } from '../packages/agent-naming/src/index.js';
 import { buildExecuteBatchCallData } from '../packages/agent-account/src/index.js';
 import { agentProfileResolverAbi, buildRegisterProfileCall, hashAgentCard } from '../packages/agent-profile/src/index.js';
 import { buildRegisterEntryCall, hashBindingProofBody, type RegistryId, type RegistryEntryId } from '../packages/registry-kit/src/index.js';
+import { urnToBytes32 } from '../packages/registry-kit/src/index.js';
 import { CONTRACTS } from '../packages/contracts/dist/deployments/faithchain.js';
 import { createPublicClient, http, keccak256, toBytes, parseAbi, type Address, type Hex } from 'viem';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -27,7 +28,7 @@ const NOTE = 'demo/ligonier.faithnet.json';
 const note = JSON.parse(readFileSync(NOTE, 'utf8')) as { org: { name: string; sa: Address }; service: { name: string; sa: Address } };
 const SA = note.service.sa.toLowerCase() as Address;
 const NAME = note.service.name;
-const HOST = `${NAME.replace(/\.(svc)$/, '-$1')}.faithnet.io`; // ligonier.svc → ligonier-svc.faithnet.io (spec 346 §5)
+const HOST = `${NAME.replace(/\.(svc)$/, '-$1')}.faithnet.ai`; // ligonier.svc → ligonier-svc.faithnet.ai (spec 346 §5; the canonical zone's wildcard route)
 
 const FACETS = {
   displayName: 'Ligonier Ministries',
@@ -35,7 +36,7 @@ const FACETS = {
   capabilities: 'gc:CFnDiscipleshipCurricula',
   focusAreas: 'justification,reformed theology,discipleship curricula,bible study',
   languages: 'en',
-  a2aEndpoint: `https://${HOST}`,
+  a2aEndpoint: `https://${HOST}`, // the *.faithnet.ai wildcard serves every typed host; no custom domain needed
   siteUrl: 'https://www.ligonier.org',
 };
 
@@ -76,7 +77,10 @@ const entryId = `urn:ap:registry-entry:${NAME}` as RegistryEntryId;
 const issuedAt = new Date().toISOString();
 const cardHash = hashAgentCard({ type: 'service', displayName: FACETS.displayName } as never);
 const bindingProofHash = await hashBindingProofBody({ registryId: REGISTRY_URN, entryId, subjectAgent: SA, cardHash, claimHashes: [], issuedAt, chainId: CHAIN_ID, registryAddress: registry } as never);
-const REGISTERED = (process.env.SKIP_REGISTRY ?? '') !== '1';
+// Idempotent: an entry already active in the registry is left alone (a second registerEntry reverts EntryExists).
+const alreadyRegistered = (await pc.readContract({ address: registry, abi: parseAbi(['function isActive(bytes32,bytes32) view returns (bool)']), functionName: 'isActive', args: [urnToBytes32(REGISTRY_URN), urnToBytes32(entryId)] }).catch(() => false)) as boolean;
+if (alreadyRegistered) console.log(`  · registry entry ${entryId} already active`);
+const REGISTERED = !alreadyRegistered && (process.env.SKIP_REGISTRY ?? '') !== '1';
 if (REGISTERED) calls.push((({ to, value, data }) => ({ to, value, data }))(buildRegisterEntryCall({ registry, registryId: REGISTRY_URN, entryId, subjectAgent: SA, cardHash, bindingProofHash, claimHashes: [], expiresAt: 0 })));
 console.log(`${NAME} ${SA} · profile ${registered ? 'registered' : 'to register'} · ${calls.length} call(s)${skipped.length ? ` · NOT written (predicate inactive on this chain): ${skipped.join(', ')}` : ''}`);
 
