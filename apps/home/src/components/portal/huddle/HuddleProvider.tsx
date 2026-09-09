@@ -25,6 +25,8 @@ interface HuddleCtx {
   error: string | null;
   micOn: boolean;
   screenOn: boolean;
+  /** Remote participants currently sharing a screen. */
+  remoteScreens: number;
   /** Start (or join the one already running) at a scope, as the person or as a principal they steward. */
   start: (scope: HuddleScope, scopeName: string, represented?: string) => Promise<void>;
   join: (scope: HuddleScope, scopeName: string, represented?: string) => Promise<void>;
@@ -101,8 +103,22 @@ export function HuddleProvider({ children }: { children: ReactNode }) {
     } finally { setBusy(null); }
   }, [session, current, leave]);
 
-  const toggleMic = useCallback(async () => { const m = meetingRef.current; if (!m) return; try { if (m.self.audioEnabled) await m.self.disableAudio(); else await m.self.enableAudio(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } }, []);
-  const toggleScreen = useCallback(async () => { const m = meetingRef.current; if (!m) return; try { if (m.self.screenShareEnabled) await m.self.disableScreenShare(); else await m.self.enableScreenShare(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } }, []);
+  // After a toggle the SDK's own flag is the truth (an event may lag or a permission prompt may be
+  // refused): read it back rather than assuming the click succeeded.
+  const toggleMic = useCallback(async () => { const m = meetingRef.current; if (!m) return; try { if (m.self.audioEnabled) await m.self.disableAudio(); else await m.self.enableAudio(); } catch (e) { setError(e instanceof Error ? `Microphone: ${e.message}` : String(e)); } finally { setMicOn(!!meetingRef.current?.self.audioEnabled); } }, []);
+  const toggleScreen = useCallback(async () => { const m = meetingRef.current; if (!m) return; try { if (m.self.screenShareEnabled) await m.self.disableScreenShare(); else await m.self.enableScreenShare(); } catch (e) { setError(e instanceof Error ? `Screen: ${e.message}` : String(e)); } finally { setScreenOn(!!meetingRef.current?.self.screenShareEnabled); } }, []);
+  // How many remote participants are sharing — the dock opens its panel when anyone is.
+  const [remoteScreens, setRemoteScreens] = useState(0);
+  useEffect(() => {
+    if (!meeting) { setRemoteScreens(0); return; }
+    const count = () => setRemoteScreens(meeting.participants.joined.toArray().filter((p) => p.screenShareEnabled).length);
+    count();
+    const onUpdate = () => count();
+    meeting.participants.joined.on('screenShareUpdate', onUpdate);
+    meeting.participants.joined.on('participantJoined', onUpdate);
+    meeting.participants.joined.on('participantLeft', onUpdate);
+    return () => { meeting.participants.joined.off('screenShareUpdate', onUpdate); meeting.participants.joined.off('participantJoined', onUpdate); meeting.participants.joined.off('participantLeft', onUpdate); };
+  }, [meeting]);
 
   const refresh = useCallback(async () => {
     if (!session || !current) return;
@@ -117,9 +133,9 @@ export function HuddleProvider({ children }: { children: ReactNode }) {
   const peek = useCallback(async (scope: HuddleScope) => { if (!session) return null; const r = await huddles.get(session, scope).catch(() => null); return r && r.ok ? r.run : null; }, [session]);
 
   const value = useMemo<HuddleCtx>(() => ({
-    current, meeting, busy, error, micOn, screenOn,
+    current, meeting, busy, error, micOn, screenOn, remoteScreens,
     start: (s, n, r) => enter('start', s, n, r), join: (s, n, r) => enter('join', s, n, r), leave, end, toggleMic, toggleScreen, refresh, peek, dismissError: () => setError(null),
-  }), [current, meeting, busy, error, micOn, screenOn, enter, leave, end, toggleMic, toggleScreen, refresh, peek]);
+  }), [current, meeting, busy, error, micOn, screenOn, remoteScreens, enter, leave, end, toggleMic, toggleScreen, refresh, peek]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

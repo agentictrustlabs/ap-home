@@ -4,6 +4,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRealtimeKitSelector, RealtimeKitProvider } from '@cloudflare/realtimekit-react';
 import { useHuddle } from './HuddleProvider';
+import { RemoteAudio, SharedScreens } from './HuddleMedia';
 
 const short = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
 
@@ -29,9 +30,12 @@ export function HuddleDock({ nameOf }: { nameOf?: (address: string) => string | 
   if (!h.current || !h.meeting) return h.error ? <div className="huddle-dock huddle-dock-error" role="status">{h.error} <button className="huddle-link" onClick={h.dismissError}>dismiss</button></div> : null;
   const c = h.current;
   const canEnd = c.role === 'host';
+  const anyScreen = h.screenOn || h.remoteScreens > 0;
   return (
     <RealtimeKitProvider value={h.meeting}>
-      <div className={`huddle-dock${open ? ' open' : ''}`} role="region" aria-label="Huddle">
+      {/* The media itself: remote audio always; a shared screen opens the panel. */}
+      <RemoteAudio />
+      <div className={`huddle-dock${open || anyScreen ? ' open' : ''}`} role="region" aria-label="Huddle">
         <div className="huddle-dock-row">
           <button className="huddle-title" onClick={() => setOpen((o) => !o)} title="Expand">
             <span className="huddle-live" aria-hidden />
@@ -46,8 +50,9 @@ export function HuddleDock({ nameOf }: { nameOf?: (address: string) => string | 
             {canEnd && <button className="huddle-btn end" onClick={() => { if (confirm('End this huddle for everyone?')) void h.end(); }} disabled={!!h.busy} title="End for everyone">End</button>}
           </div>
         </div>
-        {open && (
+        {(open || anyScreen) && (
           <div className="huddle-panel">
+            <SharedScreens />
             <div className="huddle-panel-list">
               {c.run.roster.map((r) => (
                 <div key={r.actor} className="huddle-panel-row">
