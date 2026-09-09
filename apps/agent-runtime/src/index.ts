@@ -1529,7 +1529,7 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
    *  this intent, so the run must be admitted against it and not a rebuilt one. */
   intent?: { goal: string; context?: Record<string, unknown> };
 }): Promise<{
-  reply: { kind: string; text?: string; prompt?: { kind: string; prompt: string; stepRef: string }; error?: string; runRef?: string };
+  reply: { kind: string; text?: string; prompt?: { kind: string; prompt: string; stepRef: string }; error?: string; runRef?: string; capability?: string; stepRef?: string };
   spoken: string;
   result: { plan: unknown; receipts?: unknown[] };
   events: RunEvent[];
@@ -1661,7 +1661,11 @@ export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef:
     await saveRun(env as never, {
       runRef, message: row.ask, addressee: agent, asker: agent, presented: [], supplied: [],
       openToStewards: true, trigger: { id: row.triggerId, playbookDigest: row.playbookDigest },
-      ...(reply.kind === 'prompt' ? { awaiting: { kind: reply.prompt!.kind, prompt: reply.prompt!.prompt, stepRef: reply.prompt!.stepRef, expiresAt: now + (row.everyMs ?? AWAIT_WINDOW_MS.data) } } : {}),
+      ...(reply.kind === 'prompt'
+        ? { awaiting: { kind: reply.prompt!.kind, prompt: reply.prompt!.prompt, stepRef: reply.prompt!.stepRef, expiresAt: now + (row.everyMs ?? AWAIT_WINDOW_MS.data) } }
+        // An act the run reached waits on a STEWARD'S MANDATE — said so, where the stewards read it (spec 375
+        // W2: a drafted reply parked as "waiting on ?"). The window is the trigger's, not a signature's 30 min.
+        : { awaiting: { kind: 'signature', prompt: `${CAPABILITY_WORDS[reply.capability ?? ''] ?? reply.capability ?? 'this act'} — needs a steward's mandate`, stepRef: reply.stepRef ?? 's0', expiresAt: now + (row.everyMs ?? AWAIT_WINDOW_MS.data) } }),
       executed: { plan: (result as { plan: unknown }).plan, completed: completedStepsOf(result as never) },
       // A parked schedule run waits until the trigger would fire again — then a fresh one replaces it. A
       // run fired by an event, a webhook or a message waits the ordinary window (spec 375).

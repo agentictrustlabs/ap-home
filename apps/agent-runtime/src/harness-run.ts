@@ -1633,6 +1633,10 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
           // joined by invite never published a listing, and reading listings alone hides them.
           ...(deps.survey ? { survey: deps.survey } : {}),
           ...(deps.readRecords ? { readRecords: deps.readRecords } : {}),
+          // WHAT KIND OF AGENT IS ASKING ITSELF (spec 375): without this the self-only rule read every
+          // unattended run as a person's, and a team's own message trigger parked on "Which organization?"
+          // while standing in the organization it meant. The kind is the on-chain record, read once per run.
+          ...(deps.addresseeKind !== undefined ? { addresseeKind: deps.addresseeKind } : {}),
         },
         (addressee ?? person ?? ('0x' as Address)), person,
       )(toolId, args, ctx);
@@ -1646,6 +1650,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
           ...(deps.survey ? { survey: deps.survey } : {}),
           ...(deps.readRecords ? { readRecords: deps.readRecords } : {}),
           ...(deps.nameOf ? { nameOf: deps.nameOf } : {}),
+          ...(deps.addresseeKind !== undefined ? { addresseeKind: deps.addresseeKind } : {}),
         },
         (addressee ?? person ?? ('0x' as Address)), person,
       )(toolId, args, ctx);

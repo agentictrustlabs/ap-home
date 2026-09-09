@@ -82,3 +82,24 @@ describe('firing', () => {
     expect(state.get('on-commitment')?.lastSaid).toBe('planner down');
   });
 });
+
+describe('a message fires after admission (spec 375 W2)', () => {
+  const env = { id: 'msg-1', from: 'eip155:34348:0xB0D11CE19B756A682E78B4904CD8D832303B3D11', subject: 'meeting' };
+  it('a direct message becomes a dm source with the sender, the subject and bounded text', async () => {
+    const { messageTriggerSource } = await import('../../src/triggers.js');
+    const src = messageTriggerSource(env, 'messaging.deliver', 'x'.repeat(5000), 'alice.me');
+    expect(src).toMatchObject({ kind: 'message', message: { id: 'msg-1', from: '0xb0d11ce19b756a682e78b4904cd8d832303b3d11', fromName: 'alice.me', profile: 'dm', subject: 'meeting' } });
+    expect((src as { message: { text: string } }).message.text).toHaveLength(2000);
+    expect(matchingTriggers(rows, src!).map((r) => r.triggerId)).toEqual(['on-dm']);
+  });
+  it('a response and a credential are their own profiles — the dm row does not fire for them', async () => {
+    const { messageTriggerSource } = await import('../../src/triggers.js');
+    expect(messageTriggerSource(env, 'interactions.respond', 'ok')?.message.profile).toBe('response');
+    expect(messageTriggerSource(env, 'interactions.deliverCredential', '')?.message.profile).toBe('credential');
+    expect(matchingTriggers(rows, messageTriggerSource(env, 'interactions.respond', 'ok')!)).toEqual([]);
+  });
+  it('an agent-authored notice fires nothing — two playbooks must not chatter', async () => {
+    const { messageTriggerSource } = await import('../../src/triggers.js');
+    expect(messageTriggerSource({ ...env, actor: env.from }, 'messaging.deliver', 'done')).toBeNull();
+  });
+});

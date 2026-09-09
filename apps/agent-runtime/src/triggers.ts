@@ -79,7 +79,7 @@ export function advanced(row: TriggerScheduleV1, outcome: TriggerScheduleV1['las
 export type TriggerSource =
   | { kind: 'event'; event: { type: string; endeavorId: string; at?: string } & Record<string, unknown> }
   | { kind: 'webhook'; triggerId: string; token: string; payload: unknown }
-  | { kind: 'message'; message: { id: string; from: string; profile: string; text?: string } };
+  | { kind: 'message'; message: { id: string; from: string; fromName?: string; profile: string; subject?: string; text?: string } };
 
 /** The rows a source fires. A webhook must name its row AND carry that row's token — nothing else matches;
  *  an event matches by type; a message by profile. */
@@ -89,6 +89,34 @@ export function matchingTriggers(rows: readonly TriggerScheduleV1[], source: Tri
     if (source.kind === 'webhook') return r.kind === 'webhook' && r.triggerId === source.triggerId && !!r.token && r.token === source.token;
     return r.kind === 'message' && r.on?.profile === source.message.profile;
   });
+}
+
+/**
+ * Spec 375 W2 — WHAT AN ADMITTED MESSAGE FIRES. Built by the recipient's inbox gateway AFTER the exchange is
+ * in the recipient's vault (admission first; a trigger never admits anything). The profile is the rail the
+ * message came in on: a direct message (`dm`), a response to something this agent asked (`response`), a
+ * credential delivered to it (`credential`). Agent-authored notices (`actor` set — a coordinator's "your
+ * request is complete") fire nothing, the same convention the inbox auto-reply keeps: two agents whose
+ * playbooks each react to the other's notices would otherwise chatter until a steward noticed. The text
+ * rides as context for the planner, bounded; it is never an argument the planner may forge into an act.
+ * `null` ⇒ nothing fires.
+ */
+export function messageTriggerSource(
+  envelope: { id: string; from: string; actor?: string; subject?: string },
+  admittedBy: string,
+  bodyText: string | undefined,
+  /** The sender's registered NAME, when the gateway could read one: the words a run's plan may name the
+   *  reply's recipient by. The planner is told never to lift an ADDRESS out of its context into an act
+   *  (it is who is asking, not who is meant) — a name is the person's own word for the party, and the
+   *  resolver still settles it in the agent's own tier like any other. */
+  fromName?: string | null,
+): TriggerSource | null {
+  if (envelope.actor) return null;
+  const from = (envelope.from.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+  if (!from) return null;
+  const profile = admittedBy === 'interactions.respond' ? 'response' : admittedBy === 'interactions.deliverCredential' ? 'credential' : 'dm';
+  const text = (bodyText ?? '').trim().slice(0, 2_000);
+  return { kind: 'message', message: { id: envelope.id, from, ...(fromName ? { fromName } : {}), profile, ...(envelope.subject ? { subject: envelope.subject } : {}), ...(text ? { text } : {}) } };
 }
 
 /** The context a fired run receives — the source's public facts, for the planner; no verifier reads it. */

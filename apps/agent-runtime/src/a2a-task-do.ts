@@ -93,8 +93,8 @@ import {
 // FR-3.4 — deliver artifacts into a principal's demo-mcp vault over their delegation. The value import is
 // cyclic with index.ts, but safe: `callMcpToolViaDelegation` is a hoisted function used only at request
 // time (never at module-init), and `Env`/`IncomingDelegation` are type-only.
-import { buildAuditSink, callMcpToolWithProof, interactionsSessionAccount, runUnattendedAsk, harnessDeps, probeSenderFor, candidateSourceFor, type Env, type IncomingDelegation } from './index.js';
-import { dueNow, advanced, type TriggerScheduleV1 } from './triggers.js';
+import { buildAuditSink, callMcpToolWithProof, interactionsSessionAccount, runUnattendedAsk, fireTriggersAt, harnessDeps, probeSenderFor, candidateSourceFor, type Env, type IncomingDelegation } from './index.js';
+import { dueNow, advanced, messageTriggerSource, type TriggerScheduleV1 } from './triggers.js';
 import { ERC1271_MAGIC_VALUE as ERC1271_MAGIC } from '@agenticprimitives/types';
 
 /** How long an unfinished harness run stays resumable. A day is well past the point: the mandate a
@@ -804,7 +804,7 @@ export class A2aTaskDO {
           const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
           if (!resp.ok || !out.ok) throw new Error(out.error ?? `application append failed (${resp.status})`);
         }),
-        ...makeMessagingSkills(agentSA, async (recipient, envelope, body) => {
+        ...makeMessagingSkills(agentSA, async (recipient, envelope, body, admitted) => {
         // spec 323 W3.2 — the recipient's InteractionsDO does BOTH admissions with its OWN held
         // delivery wire: the body (internal.dm.body.put) then the inbox.data merge (internal.deliver).
         const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(recipient.toLowerCase()));
@@ -818,6 +818,19 @@ export class A2aTaskDO {
         };
         await call('internal.dm.body.put', { resource: body.resource, data: body.stored });
         await call('internal.deliver', { envelope });
+        // Spec 375 W2 — ADMITTED, so now the playbook may hear about it: the recipient's own `message`
+        // triggers fire one unattended run each, this agent as the asker holding nothing (P5). Detached from
+        // the delivery: the sender's receipt says "admitted", never "reacted to", and a run that takes a
+        // planner's time must not hold the sender's delivery open. An inbound message never performs an act
+        // (spec 365): the run may draft the reply, which parks for a steward.
+        const senderAddr = (envelope.from.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+        const fromName = admitted && senderAddr ? await harnessDeps(this.env, buildAuditSink(this.env)).nameOf?.(senderAddr).catch(() => null) ?? null : null;
+        const source = admitted ? messageTriggerSource(envelope, admitted.skill, admitted.bodyText, fromName) : null;
+        if (source) {
+          void fireTriggersAt(this.env, recipient.toLowerCase() as Address, source)
+            .then((fired) => { if (fired.length) console.log(`[triggers] message ${envelope.id} fired at ${recipient}: ${fired.map((f) => `${f.triggerId}→${f.outcome}`).join(', ')}`); })
+            .catch((e: unknown) => console.warn('[triggers] message firing failed:', e instanceof Error ? e.message : String(e)));
+        }
       })], vault, mcp, hashBody, budget,
       // spec 303 W3 — mint verification receipts at the message/send +
       // resubmit terminals; the accept receipt rides the send result so the

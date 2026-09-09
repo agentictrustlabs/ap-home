@@ -44,6 +44,9 @@ export type DeliverDocFn = (
   recipient: string,
   envelope: MessageEnvelopeV1,
   body: { resource: string; stored: { b64: string; contentType: string; bodyHash: string } },
+  /** Spec 375 W2 — which skill admitted it and the transported text, so the recipient's gateway can fire the
+   *  playbook's `message` triggers AFTER admission. Context for a run; never authority. */
+  admitted?: { skill: string; bodyText: string },
 ) => Promise<void>;
 
 interface MessagingDeliverInput {
@@ -100,7 +103,7 @@ function makeDeliverHandler(recipientSA: string, skill: string, receiptKind: str
       await deliverDoc(recipient, envelope, {
         resource: envelope.body.resource,
         stored: { b64: btoa(bin), contentType: envelope.bodyContentType ?? 'text/plain', bodyHash: envelope.bodyHash },
-      });
+      }, { skill, bodyText: (envelope.bodyContentType ?? 'text/plain').startsWith('text/') ? payload.bodyText : '' });
 
       const receiptId = await ctx.emitArtifact({
         artifactKind: receiptKind,
