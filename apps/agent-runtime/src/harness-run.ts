@@ -34,7 +34,8 @@
 import { CONTACT_FIELDS, CONTACT_FIELD_ARGS } from '@agenticprimitives/ontology';
 import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
-import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1 } from '@agenticprimitives/orchestration';
+import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
+import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly } from '@agenticprimitives/orchestration';
 import { recentParties, conversationForPrompt, type ConversationMemoryV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
@@ -781,6 +782,9 @@ export interface HarnessDeps {
   /** Spec 376 — HAND ONE STEP to another agent under a child mandate. The executor's harness runs it with
    *  the chain presented; what comes back is read like a routed answer (an answer, a refusal, a need). */
   handoffTo?: (input: { executor: Address; intent: { goal: string; context?: Record<string, unknown> }; plan: { steps: Array<{ toolId: string; args: Record<string, unknown>; id?: string }> }; presented: unknown[]; supplied?: SuppliedInputV1[]; parent: { agent: Address; runRef: string; stepRef: string; operationId: string; childRef: string } }) => Promise<SubjectAnswerV1>;
+  /** Spec 379 — whether an agent address is served by THIS deployment (its harness runs here). Absent ⇒ every
+   *  address is treated as served, so only a card URL counts as outside. */
+  isServedHere?: (agent: string) => boolean;
   askSubjectAgent?: (input: { subject: Address; toolId: string; args: Record<string, unknown>; goal: string; asker?: Address; session?: string; /** Appendix M8 — the run ref the receiver is to adopt for a fresh ask (named by the sender). */ runRef?: string; correlation: { operationId: string; runRef: string; stepRef: string; intentDigest: string }; /** Spec 374 W2 — continue the receiver's parked run with what this turn presented/supplied. */ continue?: { runRef: string; presented?: unknown[]; supplied?: unknown[] } }) => Promise<SubjectAnswerV1>;
   /** Appendix M8 — READ the subject agent's own progress lines for a routed run, under the asker's session,
    *  while the hop is in flight. The receiver's DO answers; nothing is copied but the sentences. */
@@ -3838,6 +3842,8 @@ be emitted together; the runtime runs them side by side.`;
   const tools = [
     ...scopedActionTools(input.surface, playbook), ...ASK_DISCOVERY_TOOLS,
     ...(kbQuestionAvailable({ call: structuredCallFor(env as never, input.provider) }) ? [KB_QUESTION_TOOL] : []),
+    // Spec 379 — an outside A2A 1.0 agent may ANSWER inside a run; its words are an observation.
+    EXTERNAL_AGENT_TOOL,
     // The asker's OWN records (spec 356 W2). Needs a model to choose from the survey AND the survey seam
     // itself — absent either, it is not listed rather than listed and broken.
     ...(vaultQuestionAvailable({ call: structuredCallFor(env as never, input.provider) }, deps) ? [VAULT_QUESTION_TOOL] : []),
@@ -4134,6 +4140,9 @@ be emitted together; the runtime runs them side by side.`;
       // an agent the asker KNOWS (their own links — private tier, never the directory). Refused ⇒ one
       // re-plan told why ⇒ refused in words. The verifier still judges every admitted step.
       planAdmission: planAdmission([
+        // Spec 379 — a step aimed at an OUTSIDE executor (a card URL, or an address this deployment does not
+        // serve) may run only a read; an act there is refused before anything is spent.
+        externalExecutorsReadOnly((ex) => /^https:\/\//.test(ex) || (/^0x[0-9a-fA-F]{40}$/.test(ex) && !!deps.isServedHere && !deps.isServedHere(ex))),
         instructionNeedsAct,
         noPlaceholders,
         dependenciesProvided,

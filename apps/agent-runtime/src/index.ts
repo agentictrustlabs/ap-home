@@ -140,6 +140,7 @@ import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { subjectAsk, subjectAnswer, validateSubjectAsk, handoff, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
 import { realtimeKitConfigured, verifyRealtimeKitWebhook, readRealtimeKitWebhook } from './realtimekit.js';
 import { sendSubjectAskOverWire, subjectAnswerMessage, subjectEnvelopeOf, handoffMessage, routedRunRefFor } from './subject-hop.js';
+import { EXTERNAL_AGENT_TOOL, externalAgentInvoker } from './external-agent.js';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
@@ -2652,6 +2653,8 @@ app.post('/harness/ask', async (c) => {
       mcpInvoke: async (toolId, args, ctx) => {
         // The generated-query read (spec 357 W3) — same tier, same rules: public data, no authority, and
         // the query it ran comes back with the answer.
+        // Spec 379 — an outside agent's answer: fetched by its card over the network, graded as an observation.
+        if (toolId === EXTERNAL_AGENT_TOOL.id) return externalAgentInvoker({ timeoutMs: 20_000 })(toolId, args, ctx);
         if (toolId === KB_QUESTION_TOOL.id) return kbQuestionInvoker({ fetchDiscovery: discoveryFetchFor(c.env), ...(structuredCall ? { call: structuredCall } : {}) })(toolId, args, ctx);
         // Their OWN records (spec 356 W2). The subject is the connected person, from the session — never
         // an argument, so a question cannot name somebody else's vault.
