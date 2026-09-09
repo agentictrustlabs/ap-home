@@ -108,6 +108,8 @@ export type AskReplyVariant =
       effects?: Array<{ produces: string; ok: boolean; error?: string }>;
       /** Spec 363 W6 — what was DECIDED for the person on the way here, and on what basis. */
       decisions?: Array<{ point: string; ruleId: string; arg: string; chose: string; because: string }>;
+      /** Spec 366/376 — steps another agent did: routed to its subject, or HANDED to a specialist under a child mandate. */
+      routed?: Array<{ agent: string; name?: string | null; observedVia?: string; runRef?: string; childRef?: string }>;
       /** Spec 368 §3 — what MAY FOLLOW: a compiled command the agent proposes (e.g. "invite Bob to your
        *  household as spouse" after a household note). A proposal only — confirming it runs a new turn
        *  that asks for its own authority. */

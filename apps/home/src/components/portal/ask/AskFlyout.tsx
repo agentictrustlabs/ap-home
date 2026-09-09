@@ -1033,6 +1033,13 @@ function ReplyView({ reply, realm, addressee, onNext }: { reply: AskReply; realm
             {r?.txHash ? short(r.txHash) : ''}
           </div>
         )}
+        {/* Spec 376 W2 — HANDED TO A SPECIALIST: the step ran at another agent under a child mandate attenuated
+            from the one this person signed. Said here because "Done" alone reads as "your agent did it". */}
+        {(reply.routed ?? []).filter((x) => x.observedVia === 'handoff').map((x, i) => (
+          <div key={`handoff-${i}`} className="muted" style={{ fontSize: 11.5, marginTop: 3 }} data-testid="ask-handed-to">
+            Handed to {x.name ? <span title={x.agent}>{x.name}</span> : <AgentName address={x.agent} />} — it ran there under a child mandate cut from yours{x.runRef ? ` (its run ${x.runRef.slice(0, 18)}…)` : ''}.
+          </div>
+        ))}
         {/* Spec 363 W6 — WHAT WAS DECIDED FOR THEM, after the fact. A person who was never asked which
             account paid should still be able to see which one did and why: before the act the authority
             card says it, and afterwards this does, because by then the card is gone and "why did it use

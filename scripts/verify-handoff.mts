@@ -32,12 +32,15 @@ const post = async (path: string, body: unknown) => j(await fetch(`${A2A}${path}
 const sign = async (digest: Hex): Promise<Hex> => { const b = await j(await fetch(`${HOME}/connect/persona-sign`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${alice.homeSession}` }, body: JSON.stringify({ digest }) })); if (!b.signature) throw new Error(`persona-sign refused: ${JSON.stringify(b).slice(0, 120)}`); return b.signature; };
 
 const nonce = Date.now().toString(36);
-const goal = `pay nathan.treasury 1 usdc (handoff ${nonce})`;
+// SENTENCE=1 (spec 376 W2): no plan is supplied — the ask itself names who is to do it, the planner sets the
+// step's executor from those words, and the harness resolves the name in alice's own tier. Same chain after.
+const SENTENCE = process.env.SENTENCE === '1';
+const goal = SENTENCE ? `have runtime-c3s0.svc pay nathan.treasury 1 usdc for handoff ${nonce}` : `pay nathan.treasury 1 usdc (handoff ${nonce})`;
 // LOCAL=1 runs the same plan with no executor — the single-mandate path through the same invoker, as a regression.
 const LOCAL = process.env.LOCAL === '1';
 const plan = { steps: [{ toolId: 'treasury.payment.execute', args: { payee: 'nathan.treasury', usdc: '1', memo: `${LOCAL ? 'local' : 'handoff'} ${nonce}` }, id: 's0', ...(LOCAL ? {} : { executor: RUNTIME }) }] };
 console.log(`alice ${ALICE} → step executor runtime-c3s0.svc ${RUNTIME}`);
-let r1 = await post('/harness/ask', { session: alice.homeSession, addressee: ALICE, message: goal, plan });
+let r1 = await post('/harness/ask', { session: alice.homeSession, addressee: ALICE, message: goal, ...(SENTENCE ? {} : { plan }) });
 let rep = r1.reply as { kind?: string; error?: string; text?: string; runRef?: string; requirement?: MandateRequirementV1; delegator?: Address; delegate?: Address; routed?: Array<{ agent: string; name?: string; observedVia: string; runRef?: string; childRef?: string; receipts?: number }> } | undefined;
 console.log(`  ask → ${rep?.kind}${rep?.error ? ` ${rep.error}` : ''}${rep?.delegator ? ` (delegator ${rep.delegator.slice(0, 10)}…)` : ''}`);
 if (rep?.kind !== 'authority_required' || !rep.requirement || !rep.delegator || !rep.delegate) throw new Error(`expected the PARENT mandate to be asked of alice first: ${JSON.stringify(r1).slice(0, 500)}`);
@@ -72,4 +75,4 @@ if (via?.observedVia !== 'handoff' || via.agent.toLowerCase() !== RUNTIME || !vi
 const receipt = (rep as { receipts?: Array<{ stepRef: string; status: string; binding?: { correlation?: { delegatedTo?: { agent: string; runRef: string } } } }> }).receipts?.find((x) => x.stepRef === 's0');
 console.log(`  parent receipt: ${receipt ? `${receipt.status}, delegatedTo ${JSON.stringify(receipt.binding?.correlation?.delegatedTo)}` : 'none'}`);
 if (receipt?.binding?.correlation?.delegatedTo?.agent?.toLowerCase() !== RUNTIME) throw new Error('the parent receipt does not link to the specialist\'s run');
-console.log(`\n✓ spec 376 W1: the step ran at runtime-c3s0.svc under a child mandate alice's harness attenuated from hers and redeemed as a chain; her receipt names the specialist's run and its child.`);
+console.log(`\n✓ spec 376 ${SENTENCE ? 'W2 (sentence form — the executor came from alice\'s words, resolved in her own tier)' : 'W1'}: the step ran at runtime-c3s0.svc under a child mandate alice's harness attenuated from hers and redeemed as a chain; her receipt names the specialist's run and its child.`);

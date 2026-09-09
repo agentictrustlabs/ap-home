@@ -2304,6 +2304,43 @@ export function plannerDoctrineOf(instructions: string): { text: string; chars: 
 }
 
 /**
+ * Spec 376 W2 — THE PLAYBOOK'S SPECIALISTS applied to a plan: a step of a capability the playbook hands to a
+ * specialist gets that executor, BY NAME (resolved in the agent's own tier before it runs). A step that
+ * already names one keeps it — the person's words outrank the rule. Nothing here is authority: the parent
+ * mandate is asked of the person as always, the child minted from it, the specialist's gate judges the child.
+ */
+export function withSpecialists(plan: Plan, specialists: ReadonlyArray<{ capability: string; executor: string }> | undefined, tools: ReadonlyArray<ToolSpec>): Plan {
+  if (!specialists?.length) return plan;
+  const byCap = new Map(specialists.map((s) => [s.capability, s.executor]));
+  return {
+    ...plan,
+    steps: plan.steps.map((st) => {
+      if (st.executor) return st;
+      const tool = tools.find((t) => t.id === st.toolId);
+      const executor = byCap.get(tool?.capability?.id ?? st.toolId);
+      return executor ? { ...st, executor } : st;
+    }),
+  };
+}
+
+/**
+ * Spec 376 W2 — "HAVE X DO IT", parsed once. A sentence that opens by naming who is to act ("have
+ * runtime-c3s0.svc pay nathan.treasury 1 usdc", "ask alice2.treasury to fund …") splits into the executor
+ * — a TYPED name only, so "have a look" names nobody — and the ask that remains, which the compiled shapes
+ * and the planner see as they always did. Without this the payment compiler read the whole sentence as a
+ * payee. The name is words; the harness resolves it in the asker's own tier before the step runs.
+ */
+export function executorPrefixOf(goal: string): { executor?: string; rest: string } {
+  const m = goal.trim().match(/^(?:have|ask|tell|get|let)\s+([a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)+)\s+(?:to\s+)?(.+)$/i);
+  return m ? { executor: m[1]!.toLowerCase(), rest: m[2]! } : { rest: goal };
+}
+
+/** Every step of a plan handed to one executor (the sentence form of spec 376 W2). */
+export function withExecutor(plan: Plan, executor: string): Plan {
+  return { ...plan, steps: plan.steps.map((st) => (st.executor ? st : { ...st, executor })) };
+}
+
+/**
  * Spec 367 W2 — the few-shot block rendered from the playbook's contracts. One line per example, the
  * positive ones as the exact tool call, the negative ones as what NOT to choose and why. Deterministic
  * (same definition ⇒ same block), so the receipt's playbook digest covers what the planner was taught.
@@ -3949,7 +3986,11 @@ ${conversationForPrompt(input.conversation, String(input.addressee ?? ''), conve
 A step that should happen ONLY IF an earlier read found something adds {"$when": {"ref": "<name>.<path>",
 "exists": true}} (or "exists": false for the other branch) to its arguments — the runtime takes or skips
 it from that result; do not plan two alternatives and hope. Reads that need nothing from each other may
-be emitted together; the runtime runs them side by side.`;
+be emitted together; the runtime runs them side by side.
+
+When the ask says WHO is to do a step — "have runtime-c3s0.svc pay …", "ask the treasury bot to fund it" —
+add {"$executor": "<that agent, exactly as said>"} to THAT step's arguments: the words, never an address. The
+step is then handed to that agent under authority the person grants; leave it out when nobody is named.`;
   const fanOutPrompt = contractFor(4);
   // The playbook's own words lead: an agent set to an archetype is TOLD what it is before the rules of
   // asking. Rendered from the compiled definition (spec 354) — versioned and receipted, never a silent
@@ -3984,17 +4025,20 @@ be emitted together; the runtime runs them side by side.`;
     ? { plan: async () => ({ steps: input.plan!.steps }) }
     : {
         plan: async (pin) => {
-          const compiled = compiledConsult(pin.intent.goal) ?? compiledRead(pin.intent.goal) ?? compiledFanOut(pin.intent.goal) ?? compiledPayment(pin.intent.goal);
-          if (compiled) { plannerUsed = 'compiled'; return compiled; }
+          // Spec 376 W2 — "have X …": the executor is peeled off first, and the ask that remains is what the
+          // compiled shapes match. A model-planned ask keeps the whole sentence: the planner is taught `$executor`.
+          const { executor: named, rest } = executorPrefixOf(pin.intent.goal);
+          const compiled = compiledConsult(rest) ?? compiledRead(rest) ?? compiledFanOut(rest) ?? compiledPayment(rest);
+          if (compiled) { plannerUsed = 'compiled'; return withSpecialists(named ? withExecutor(compiled, named) : compiled, playbook?.specialists, pin.tools); }
           plannerUsed = selected.kind;
           if (budget !== null && selected.kind !== 'rule-based') {
             const fitted = fitPlannerPrompt({ doctrine: doctrine?.text ?? null, contract: contractFor, examples: examplesFor }, pin.tools, `Goal: ${pin.intent.goal}\nContext: ${JSON.stringify(pin.intent.context ?? {})}`, budget);
             trace.promptBudget = { tokens: budget, estimated: fitted.estimated, trimmed: fitted.trimmed };
             trace.promptDigest = keccak256(toBytes(fitted.text));
             trace.examplesRendered = (fitted.text.match(/^- /gm) ?? []).length;
-            return selectPlanner(env as never, { systemPrompt: fitted.text, maxTokens: ASK_PLANNER_MAX_TOKENS, ...(input.provider ? { provider: input.provider } : {}) }).planner.plan(pin);
+            return withSpecialists(await selectPlanner(env as never, { systemPrompt: fitted.text, maxTokens: ASK_PLANNER_MAX_TOKENS, ...(input.provider ? { provider: input.provider } : {}) }).planner.plan(pin), playbook?.specialists, pin.tools);
           }
-          return selected.planner.plan(pin);
+          return withSpecialists(await selected.planner.plan(pin), playbook?.specialists, pin.tools);
         },
       };
   // Spec 384 W3 — the campaign's selection binds the planned step to its provider and offer, whoever planned it.
@@ -4284,6 +4328,16 @@ be emitted together; the runtime runs them side by side.`;
     // judging "alice2.treasury" against an allowlist of addresses.
     // The stepRef is a placeholder: the loop stamps the real one onto any question this raises, because
     // only the loop knows which step it was normalising for.
+    // Spec 376 W2 — WHO IS TO DO IT, from the plan's words to an agent in the asker's own tier. The same
+    // resolver every party goes through: a name several agents answer to is a question, never a guess;
+    // the choice is recorded on the trace as the `executor` binding. An executor that is this agent runs here.
+    resolveExecutor: async ({ step, tool }) => {
+      const named = String(step.executor ?? '').trim();
+      if (!named) return undefined;
+      const agent = await resolveParty(named, { ...deps, ...(input.session ? { session: input.session } : {}), onResolved: (r: ResolvedParty) => { const key = `${r.arg}:${r.agent}`; if (r.label || !resolved.has(key)) resolved.set(key, r); } } as never,
+        { stepRef: 'pending', toolId: tool.id, ...(tool.capability?.id ? { capabilityId: tool.capability.id } : {}), argName: 'executor', what: 'the agent to do it', ...(input.person ? { subject: input.person } : {}) });
+      return agent.toLowerCase() === String(input.addressee ?? '').toLowerCase() ? undefined : agent;
+    },
     normalizeArgs: ({ toolId, tool, args }) => resolveStepArgs(args, env, { ...deps, ...(input.session ? { session: input.session } : {}),
       // Spec 370 P7 — what recent asks resolved, for a pronoun or a repeated name. The same addressee's turns first.
       ...(input.conversation ? { recentParties: async () => recentParties(input.conversation, { addressee: String(input.addressee ?? '') }) } : {}),
