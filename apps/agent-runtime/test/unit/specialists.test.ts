@@ -18,6 +18,11 @@ describe('withSpecialists', () => {
     const plan = { steps: [{ toolId: 'treasury.payment.execute', args: {}, executor: 'other.svc' }] };
     expect(withSpecialists(plan, [{ capability: 'treasury.payment.execute', executor: 'runtime-c3s0.svc' }], tools).steps[0]?.executor).toBe('other.svc');
   });
+  it('a supplied (screen) plan is handed the same way — the rule is the agent’s behaviour, not the screen’s interpretation', () => {
+    const supplied = { steps: [{ toolId: 'treasury.payment.execute', args: { payee: 'nathan.treasury', usdc: '1' }, id: 's0' }] };
+    const out = withSpecialists(supplied, [{ capability: 'treasury.payment.execute', executor: 'runtime-c3s0.svc' }], tools);
+    expect(out.steps[0]).toEqual({ ...supplied.steps[0], executor: 'runtime-c3s0.svc' });
+  });
   it('no specialists ⇒ the plan is returned as is', () => {
     const plan = { steps: [{ toolId: 'org.members', args: {} }] };
     expect(withSpecialists(plan, undefined, tools)).toBe(plan);

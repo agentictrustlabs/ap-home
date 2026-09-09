@@ -4045,7 +4045,9 @@ step is then handed to that agent under authority the person grants; leave it ou
     // The screen's plan verbatim — interpretation is what Ask ADDS in front of the same boundary, not a
     // toll every caller pays. One-shot: a failed supplied step is the caller's to correct, not a model's
     // to re-plan around (re-planning a click would act on something nobody clicked).
-    ? { plan: async () => ({ steps: input.plan!.steps }) }
+    // Spec 376 W2 — the playbook's SPECIALISTS apply to every plan, a screen's included: who does the work is
+    // the agent's behaviour, not the screen's interpretation; a step that names its own executor keeps it.
+    ? { plan: async (pin) => withSpecialists({ steps: input.plan!.steps }, playbook?.specialists, pin.tools) }
     : {
         plan: async (pin) => {
           // Spec 376 W2 — "have X …": the executor is peeled off first, and the ask that remains is what the
