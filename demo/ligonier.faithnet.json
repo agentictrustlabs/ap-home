@@ -1,0 +1,27 @@
+{
+  "purpose": "spec 386 fixture — the Ligonier service agent in the faithnet estate (an operator note, not a persona)",
+  "chainId": 34348,
+  "org": {
+    "name": "globalchurch.org",
+    "sa": "0x6f9c3b34f639dd45bbff0b8343c65d206208d065",
+    "steward": "alice"
+  },
+  "service": {
+    "name": "ligonier.svc",
+    "sa": "0x38b502cd2902f2d91ca24032e0f2076fc2749347",
+    "charteredUnder": "globalchurch.org",
+    "host": "ligonier-svc.faithnet.io",
+    "facets": {
+      "displayName": "Ligonier Ministries",
+      "description": "Reformed teaching from Ligonier Ministries: series, messages, articles and study plans on justification, sanctification and the doctrines of grace, with discipleship curricula and Reformation Study Bible tools.",
+      "capabilities": "gc:CFnDiscipleshipCurricula",
+      "focusAreas": "justification,reformed theology,discipleship curricula,bible study",
+      "languages": "en",
+      "a2aEndpoint": "https://ligonier-svc.faithnet.io",
+      "siteUrl": "https://www.ligonier.org"
+    },
+    "registry": "urn:ap:registry:faithnet-agents",
+    "facetsAt": "2026-09-09T18:33:34.992Z"
+  },
+  "charteredAt": "2026-09-09T18:28:20.964Z"
+}
