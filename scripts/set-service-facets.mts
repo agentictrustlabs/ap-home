@@ -56,7 +56,9 @@ const registered = (await pc.readContract({ address: profile, abi: agentProfileR
 const current = async (name: string) => String(await pc.readContract({ address: profile, abi: agentProfileResolverAbi, functionName: 'getStringProperty', args: [SA, pred(name)] }).catch(() => ''));
 const calls = [] as Array<{ to: Address; value: bigint; data: Hex }>;
 if (!registered) calls.push(buildRegisterProfileCall({ profileResolver: profile, agent: SA, displayName: FACETS.displayName, description: FACETS.description }));
-for (const [name, value] of [['atl:capabilities', FACETS.capabilities], ['atl:focusAreas', FACETS.focusAreas], ['atl:languages', FACETS.languages], ['atl:description', FACETS.description]] as const) {
+// atl:displayName on the PROFILE (SA-keyed) is what the KB projects as approf:displayName — the ARD entry's
+// displayName; the name record's displayName is the name's, a different fact (G8).
+for (const [name, value] of [['atl:displayName', FACETS.displayName], ['atl:capabilities', FACETS.capabilities], ['atl:focusAreas', FACETS.focusAreas], ['atl:languages', FACETS.languages], ['atl:description', FACETS.description]] as const) {
   if (!(await active(name))) { skipped.push(name); continue; }
   if ((await current(name)) === value) { console.log(`  · ${name} already set`); continue; }
   const { encodeFunctionData } = await import('viem');
