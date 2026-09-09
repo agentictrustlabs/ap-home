@@ -323,12 +323,25 @@ const faithImpact: WhiteLabelConfig = {
       // for the real seat. `pull` mints the mandate and moves no money.
       paymentConfig: {
         payee: '0xf6F48aF1f645c70339b2FCF4CD36F5d6c5325671',
-        asset: '0xdaE09066A2cc32f6203605619137dcF01A9B49Ae',
+        // ⚠️ PLACEHOLDER — SHEQEL IS NOT DEPLOYED YET. This is still the chain's test USDC, which is
+        // what today's `poker-buyin` ceremony mints a mandate over. When the Sheqel token exists,
+        // this line AND `new_member.currency.asset` below both become its address. They must AGREE:
+        // `memberCurrencyPlan` refuses the whole capability while they differ (opening an account
+        // for one token and minting a mandate over another is the failure worth making impossible),
+        // which is why the app-coin behaviour is inert until both are changed.
+        asset: '0xa14E4a9447607c1233DcE34dB6Ead47C094f6141',
         maxAmountPerCharge: '200000000',
         maxAggregate: '1000000000',
         maxRedemptionsPerWindow: 5,
         windowSeconds: 86400,
         mode: 'pull',
+        // ⚠️ PLACEHOLDER — THE POKER SERVICE AGENT'S SA. Who may PRESENT the mandate, as distinct
+        // from `payee`, who receives the coin. The house treasury above collects; the card room's
+        // service agent is the account that actually holds a signing key and redeems. Until this is
+        // filled in the delegate stays the payee, which is byte-for-byte what `mode: 'pull'` minted
+        // before this field existed. It MUST NOT be the shared `delegate` above — spend authority
+        // granted to that address is granted to every registry entry that names it.
+        redeemer: '0x0347e808a0bB7a7a7086a29d853E799f351C04DD',
       },
       // What a player needs to exist BEFORE the card room can do anything with them — declared here
       // so the Home sets it up during account creation instead of sending them on an errand.
@@ -343,12 +356,37 @@ const faithImpact: WhiteLabelConfig = {
       //     complaint. `required` because the seat label is not optional at a card table — the
       //     player types a name once, here, and every app that reads their profile has it after.
       //
+      //   currency: chips are Sheqels, this card room's own coin. Declaring it here means one
+      //     connect covers all three things a player needs to exist: the account (above), 10,000
+      //     Sheqels in it, and the card room's own agent allowed to move them within the caps in
+      //     `paymentConfig`. That last one used to be a SECOND full redirect ceremony
+      //     (`delegation_template=poker-buyin`) the app sent the player back out on.
+      //
       // NOTE for whoever adds the next app: this is the ONLY entry in this registry that carries
       // `new_member`. Leaving the field off is not an oversight anywhere else — it is what keeps
       // those apps' onboarding byte-identical to what it was.
       new_member: {
         personal_treasury: true,
         collect_name: 'required',
+        currency: {
+          // ⚠️ PLACEHOLDER — the Sheqel token is being deployed in the poker repo and does not exist
+          // yet. The zero address is how this registry writes "not deployed": `memberCurrencyPlan`
+          // reads it as "no currency declared" and the whole capability stays off, so the live site
+          // behaves today exactly as it did before this block was written. Replace it — and the
+          // identical `paymentConfig.asset` above — with the deployed Sheqel address to turn it on.
+          asset: '0xa14E4a9447607c1233DcE34dB6Ead47C094f6141',
+          name: 'Sheqel',
+          plural: 'Sheqels',
+          // Sheqel is a 6-decimal token like the chain's other demo assets; `initial_amount` is in
+          // its smallest units, so 10000000000 = 10,000 Sheqels. Change BOTH if the deployed token
+          // uses different decimals — the figure the player is shown is computed from this pair.
+          decimals: 6,
+          initial_amount: '10000000000',
+          // The card room's chips are play money with a permissionless mint. The Home also PROVES
+          // that on chain (a simulated mint) before it seeds anything — see `lib/member-coin.ts`.
+          faucet: true,
+          spend_grant: true,
+        },
       },
     },
     {
@@ -724,4 +762,4 @@ export function fmt(template: string, vars: Record<string, string | undefined> =
   return template.replace(/\{(\w+)\}/g, (m, k: string) => vars[k] ?? m);
 }
 
-export type { WhiteLabelConfig, WhiteLabelCopy, RelyingApp, ManageableAgent, DelegationTemplate, NewMemberOnboarding } from './schema';
+export type { WhiteLabelConfig, WhiteLabelCopy, RelyingApp, ManageableAgent, DelegationTemplate, NewMemberOnboarding, MemberCurrency } from './schema';

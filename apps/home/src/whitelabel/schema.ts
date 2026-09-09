@@ -75,6 +75,21 @@ export interface RelyingApp {
     maxRedemptionsPerWindow?: number;
     windowSeconds?: number;
     mode?: 'push' | 'pull';
+    /** OPTIONAL — WHO MAY PRESENT THE MANDATE, when that is not the payee.
+     *
+     *  `mode` answers WHEN money moves; it was also being made to answer WHO may collect, because the
+     *  mandate's delegate was derived from it alone (`pull ? payee : OPEN`). Those are two questions.
+     *  A card room's coin lands in the house treasury (the payee) but the account that PRESENTS the
+     *  mandate is the app's service agent — it holds the signing key, the house treasury does not —
+     *  and there was no way for that app to say so: naming its service agent as the payee would have
+     *  sent the money to the wrong account, and leaving it as the payee produced a mandate nobody
+     *  could redeem. So the collecting account and the redeeming account get their own fields.
+     *
+     *  DEFAULTS TO THE PAYEE (i.e. exactly today's `pull` behaviour) and is ignored on `push`, whose
+     *  delegate is OPEN by construction — so every existing entry is unaffected. MUST be the app's
+     *  DEDICATED service SA, never the shared registry `delegate`: spend authority granted to that
+     *  address is granted to every entry that names it (same rule as `operational_delegate`). */
+    redeemer?: `0x${string}`;
   };
   /** spec 272 recurring — for an OWNER app (e.g. demo-corpus) with the `subscription-collect` template:
    *  where the owner-online collection ceremony redeems DUE subscribers' pull mandates. `treasury` is the
@@ -124,9 +139,9 @@ export interface NewMemberOnboarding {
    *  same obvious labels, and a failed claim must never cost someone the account itself. They can
    *  name it later from /treasuries.
    *
-   *  The Home CREATES and CUSTODIES the account. It does NOT fund it — putting money in is the
-   *  relying app's business (the card room tops any treasury it sees up to its floor), and a Home
-   *  that mints play money is the wrong shape. */
+   *  The Home CREATES and CUSTODIES the account. Whether it also puts anything IN it is a separate,
+   *  separately-gated question — see {@link MemberCurrency}. With no `currency` declared the account
+   *  is opened empty, which is what this field alone has always meant. */
   personal_treasury?: boolean;
   /** Ask the member for their human name (what a person is CALLED — "Rich Pedersen"), stored as the
    *  first/last name on their private profile. Omit and they are never asked, which is today's
@@ -141,6 +156,73 @@ export interface NewMemberOnboarding {
    *  'required' — the member must give a name before the connect continues.
    *  'optional' — the field is offered with a way past it. */
   collect_name?: 'required' | 'optional';
+  /** THE APP'S OWN COIN — what its members hold, what they start with, and the authority its service
+   *  agent needs to move it. Declaring this folds three acts into the ONE connect the member already
+   *  makes. See {@link MemberCurrency}. Omit and none of them happen. */
+  currency?: MemberCurrency;
+}
+
+/**
+ * The currency a relying app's members transact in — the generic form of "this app has its own coin".
+ *
+ * WHY THIS IS A PLATFORM CAPABILITY AND NOT A CARD-ROOM FEATURE. An app with a service type and an
+ * app-specific coin is a shape, not a special case: a card room's chips, a co-op's credits, a game's
+ * tokens. Every one of them needs the same three things to exist before the app is usable — an
+ * account that can hold the coin, some of the coin in it, and permission for the app's own agent to
+ * move it — and every one of them was making the member run a SECOND ceremony to get the third.
+ * Declaring the currency here means the member approves all three once, in the connect they were
+ * already making, and the next app to want this writes a registry entry rather than a code path.
+ *
+ * WHAT IS DECLARED HERE AND WHAT IS DECLARED IN `paymentConfig`. The coin and the opening balance are
+ * this app's currency and live here. The CAPS and the collecting account are a payment and live in
+ * `paymentConfig`, which already carries exactly those and already has a ceremony that mints them —
+ * so the spend grant is the existing payment mandate (`issuePaymentDelegation`), moved to the first
+ * connect, not a second grant path beside it.
+ *
+ * THE ONE INVARIANT: `asset` here and `paymentConfig.asset` MUST be the same token. An app whose
+ * registry entry disagrees with itself about which coin it deals in is a misconfiguration, and the
+ * Home treats it as one — the whole capability switches OFF and says so, rather than opening an
+ * account for one token and minting a mandate over another. (`memberCurrencyPlan` in
+ * `lib/new-member.ts` is where that is enforced, and it is tested against the live registry.)
+ *
+ * EVERY FIELD BUT `asset` AND `name` IS OPTIONAL, and every omission means "don't".
+ */
+export interface MemberCurrency {
+  /** The ERC-20 this app's members transact in. MUST equal `paymentConfig.asset` (see above); a
+   *  disagreement, a missing `paymentConfig`, the zero address or anything that is not a 20-byte hex
+   *  address all switch the capability off rather than guessing. */
+  asset: `0x${string}`;
+  /** What the member is told they have — "Sheqel". BRANDABLE, so it is config and never a literal in
+   *  a component: the next app's coin is called something else and no code should have to change. */
+  name: string;
+  /** The plural, when it is not `name` + "s" ("Sheqels" is fine; "Pence" is not). */
+  plural?: string;
+  /** Atomic-unit decimals of `asset` — how `initial_amount` and the caps become the figures a person
+   *  reads. Declared rather than read from the token because this is a CURATED registry and a display
+   *  string should not depend on a network round trip that can fail mid-sign-up. */
+  decimals: number;
+  /** Atomic units placed in a member's account when it holds NONE of this coin. Omit for no seeding —
+   *  the account is opened empty and the app funds it however it likes.
+   *
+   *  ONLY EVER PLAY MONEY. The Home can put coin in an account only by MINTING it, which is possible
+   *  at all only for a token anyone may mint. So seeding requires `faucet: true` below AND the Home
+   *  proving on chain that the token really is open-mint before it tries. A real asset fails both and
+   *  the Home refuses loudly rather than half-doing it. */
+  initial_amount?: string;
+  /** THE APP SAYING, OUT LOUD AND IN A CURATED FILE, THAT THIS COIN IS PLAY MONEY — an ERC-20 with a
+   *  permissionless `mint(address,uint256)`, deployed for a demo. It is a declaration of intent, not
+   *  a proof: the Home also simulates the mint on chain and refuses if it reverts. Both must hold.
+   *  Without this, `initial_amount` is ignored and the account is opened empty. */
+  faucet?: boolean;
+  /** Mint the `paymentConfig` mandate in THIS connect, so the app's service agent can move the
+   *  member's coin without sending them through a second ceremony.
+   *
+   *  It rides the plain sign-in the member is already making, on the SAME credential and in the SAME
+   *  signature batch as the site grant, and it moves no money — it is a ceiling, and the app spends
+   *  against it later. The delegate is `paymentConfig.redeemer ?? payee`, the caps are
+   *  `paymentConfig`'s, and all of it is disclosed at consent (`withCurrencyConsent`). Omit and the
+   *  app keeps whatever payment ceremony it runs today. */
+  spend_grant?: boolean;
 }
 
 /** Human-readable consent disclosure for a delegation template. The caveats themselves are

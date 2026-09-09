@@ -36,6 +36,7 @@ import type { ConnectionKind } from '@agenticprimitives/agent-naming';
 import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
 import { writePendingEnrollJson } from '../components/onboarding/pending-enroll';
 import { nameLabel } from '../lib/domain';
+import { mandateDelegate } from '../lib/new-member';
 import { connectWallet, personalSign } from '../lib/wallet';
 import { isDemoCustodyHome, demoCustodySignHash } from '../lib/persona-custody';
 import { writeOrganizationMembership } from '../lib/membership-write';
@@ -830,6 +831,11 @@ export async function givePermission(
     maxRedemptionsPerWindow?: number;
     windowSeconds?: number;
     mode?: 'push' | 'pull';
+    /** WHO MAY PRESENT the mandate, when that is not the payee — the app's own service agent (see
+     *  `paymentConfig.redeemer` and `lib/new-member.ts#mandateDelegate`). Ignored on `push`, whose
+     *  delegate is OPEN by construction; defaults to the payee on `pull`, which is what every
+     *  ceremony minted before this field existed. */
+    redeemer?: Address;
     /** spec 272 — also CHARGE the first/top-up payment in THIS ceremony (all-custodian via signHash):
      *  the person SA redeems the push delegation → `chargeAmount` USDC moves person-treasury → payee.
      *  The relying app verifies the returned settlementHash on-chain and mints a `reads`-read pass. */
@@ -886,7 +892,11 @@ export async function givePermission(
     const payDeleg = payment
       ? await issuePaymentDelegation(
           payment.treasury,
-          payment.mode === 'pull' ? payment.payee : OPEN_DELEGATION,
+          // WHEN money moves and WHO may collect it are two questions; this line used to answer both
+          // from `mode` alone, which left an app whose redeeming agent is not its payee unable to
+          // state either truthfully. `mandateDelegate` is the one place that is decided now, and it
+          // returns the identical delegate for every config that predates `redeemer`.
+          mandateDelegate(payment) ?? OPEN_DELEGATION,
           payment.payee,
           signHash,
           {

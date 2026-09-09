@@ -32,27 +32,44 @@
 //     decision is subtractive), and the portal's own /treasuries and /profile pages remain the
 //     ordinary way to do either by hand.
 //
-//   NO MINTING. The Home creates and custodies the account. It does not put money in it. Funding
-//     is the relying app's business — the card room tops any treasury it can see up to its floor —
-//     and a Home that mints play money is the wrong shape.
+//   PLAY MONEY ONLY. The Home now DOES put coin in the account it opens, when the app declared one
+//     (`new_member.currency`) — that was a deliberate reversal, and it comes with the gate that
+//     makes it safe. The Home can put coin anywhere only by MINTING it, which is possible at all
+//     only for a token anyone may mint, which is only ever true of a test token. So seeding needs
+//     the app to declare `faucet: true` AND the chain to confirm it (a simulated mint,
+//     `lib/member-coin.ts`), and a real asset is refused loudly rather than half-attempted. It is
+//     also not a new power: the portal's Fund button has always minted demo USDC into a treasury
+//     through this same rail, in the member's own name. This is that act, at the one moment the
+//     account exists and a credential is in the room.
 //
-// The ceremony itself is NOT reimplemented: the treasury goes through `createAgentWithBirthrights`
-// (the same call `/choose-treasury` and the portal's create form use, which records the agent to
-// `/connect/related-orgs` so discovery can find it), and the name goes through
-// `seedImpactProfileFields` (the same fill-only-empty vault write the phone bootstrap already uses
-// to seed a verified number).
+// The ceremonies themselves are NOT reimplemented — every one of the four effects is a call the
+// portal already makes:
+//   the account       → `createAgentWithBirthrights` (the /choose-treasury + portal create form,
+//                       which records the agent to /connect/related-orgs so an app can find it)
+//   the name          → `seedImpactProfileFields` (the fill-only-empty vault write the phone
+//                       bootstrap uses to seed a verified number)
+//   the opening coin  → `fundThroughHarness` → `treasury.fund` (the portal's Fund button)
+//   the spend grant   → NOT here at all. It is the ordinary payment mandate
+//                       (`issuePaymentDelegation`), minted in the grant leg of the connect a moment
+//                       later, so it travels back to the app on the token exchange like every other
+//                       mandate. See `lib/new-member.ts#coinMandateLeg`.
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { listManagedAgents, signsWithoutPrompt } from '../../connect-client';
+import { listManagedAgents, personSignHash, signsWithoutPrompt } from '../../connect-client';
 import { activateVaultIfNeeded, type Via } from '../../home/onboarding';
+import { fundThroughHarness } from '../../home/fund-harness';
 import { loadImpactProfile, seedImpactProfileFields, VaultKeyUnauthorizedError } from '../../profile-store';
 import { createAgentWithBirthrights } from '../portal/ManagedAgents';
+import { coinBalanceOf, isOpenMintToken } from '../../lib/member-coin';
 import {
+  coinAmount,
+  currencyConsentLines,
   newMemberWork,
   personDisplayName,
   planIsEmpty,
   splitPersonName,
   workIsEmpty,
+  type MemberState,
   type NewMemberPlan,
   type NewMemberWork,
 } from '../../lib/new-member';
@@ -63,13 +80,17 @@ import { BusyButton } from '../shared/BusyButton';
 /** Read what the member already has. Both branches FAIL CLOSED — an unreadable answer is treated as
  *  "they have it", because the cost of skipping is one more prompt at the next connect and the cost
  *  of guessing wrong the other way is a duplicate on-chain account. */
-async function readMemberState(person: Address, token: string): Promise<{ hasTreasury: boolean; hasProfileName: boolean }> {
-  const [hasTreasury, hasProfileName] = await Promise.all([
+async function readMemberState(
+  person: Address,
+  token: string,
+  plan: NewMemberPlan,
+): Promise<MemberState & { treasury: Address | null }> {
+  const [tre, hasProfileName] = await Promise.all([
     listManagedAgents(token)
-      .then((agents) => agents.some((a) => a.kind === 'person-treasury'))
+      .then((agents) => ({ found: true, agent: (agents.find((a) => a.kind === 'person-treasury')?.agent as Address) ?? null }))
       .catch((e) => {
         console.warn('[new-member] agent tree unreadable — assuming a treasury exists (no duplicate):', e);
-        return true;
+        return { found: false, agent: null as Address | null };
       }),
     loadImpactProfile(person)
       .then((p) => personDisplayName(p.contact) !== '')
@@ -82,7 +103,14 @@ async function readMemberState(person: Address, token: string): Promise<{ hasTre
         return true;
       }),
   ]);
-  return { hasTreasury, hasProfileName };
+  // An unreadable tree means "they have one" (no duplicate) even though we hold no address for it —
+  // which also means no balance to read, which means no seeding. Both halves fail closed together.
+  const hasTreasury = tre.found ? tre.agent !== null : true;
+  // The coin read happens ONLY for an app that declared one, and only when there is an account to
+  // ask about. Every other app makes no extra request — the byte-identical guarantee is a guarantee
+  // about network traffic too, not only about outcomes.
+  const coinBalance = plan.currency && tre.agent ? await coinBalanceOf(plan.currency.asset, tre.agent) : null;
+  return { hasTreasury, hasProfileName, coinBalance, treasury: tre.agent };
 }
 
 export function NewMemberSetup({
@@ -115,6 +143,9 @@ export function NewMemberSetup({
   // Whether THIS session signs without a device prompt. `null` until known — the note says nothing
   // rather than guessing, the same rule the treasury chooser and the funding form follow.
   const [promptless, setPromptless] = useState<boolean | null>(null);
+  // The account the coin goes into: the one they already had, or the one this screen makes. Held in
+  // a ref rather than state because the seeding step reads it in the same tick it is written.
+  const treasury = useRef<Address | null>(null);
   const read = useRef(false);
 
   // ONE read, guarded against React's double-invoked effects: two passes here would be two
@@ -124,7 +155,8 @@ export function NewMemberSetup({
     read.current = true;
     void (async () => {
       if (planIsEmpty(plan)) { onDone(); return; }
-      const state = await readMemberState(person, token);
+      const state = await readMemberState(person, token, plan);
+      treasury.current = state.treasury;
       const w = newMemberWork(plan, state);
       if (workIsEmpty(w)) { onDone(); return; } // returning member — no screen, no flash
       setWork(w);
@@ -133,11 +165,11 @@ export function NewMemberSetup({
   }, []);
 
   useEffect(() => {
-    if (!work?.treasury) return;
+    if (!work?.treasury && !work?.seed) return;
     let live = true;
     void signsWithoutPrompt(via, token).then((v) => { if (live) setPromptless(v); }).catch(() => { if (live) setPromptless(null); });
     return () => { live = false; };
-  }, [work?.treasury, via, token]);
+  }, [work?.treasury, work?.seed, via, token]);
 
   const typed = name.trim();
   const nameMissing = !!work?.name && plan.name === 'required' && typed.length === 0;
@@ -170,9 +202,22 @@ export function NewMemberSetup({
     // custodied by this member's own credential, gas sponsored, recorded to /connect/related-orgs so
     // an app can discover it. NAMELESS — no label is claimed (see the schema for why).
     if (work.treasury) {
-      const res = await createAgentWithBirthrights(
-        { kind: 'person-treasury', label: undefined, parent: person, person, via }, token, setStep,
-      );
+      // WRAPPED, and this is a bug fix rather than defensive dressing. `createAgentWithBirthrights`
+      // does not only return failures, it THROWS them — an aborted request, a dropped socket, a
+      // bundler that never answers — and an unhandled rejection here left `busy` stuck true: the
+      // screen sat on "Deploying your agent…" for ever, with no error, no retry and no way past,
+      // and the person could not finish signing in. That is precisely the outcome the NON-FATAL
+      // rule at the top of this file exists to forbid, so a throw is turned into the same failure
+      // the `!ok` branch already routes into: an error, a retry, and the skip beside it.
+      let res: Awaited<ReturnType<typeof createAgentWithBirthrights>>;
+      try {
+        res = await createAgentWithBirthrights(
+          { kind: 'person-treasury', label: undefined, parent: person, person, via }, token, setStep,
+        );
+      } catch (e) {
+        console.warn('[new-member] treasury create threw:', e);
+        res = { ok: false, error: e instanceof Error ? e.message : 'Could not open the account just now.' };
+      }
       if (!res.ok) {
         // The one failure worth stopping on, because there is something to retry. `onDone` is still
         // one click away and still finishes the connect.
@@ -180,13 +225,70 @@ export function NewMemberSetup({
         setErr(res.error);
         return;
       }
+      treasury.current = res.result.agent as Address;
     }
+
+    // THE OPENING BALANCE. Through the SAME rail the portal's Fund button uses — a faucet mint made
+    // in the member's own name, through the harness, leaving the ordinary funding receipt — so there
+    // is one implementation of "put coin in an account" and not a private one for sign-up.
+    //
+    // BEST-EFFORT, ALWAYS. An account with nothing in it is a recoverable state (the app can fund
+    // it, the member can fund it, the next connect tries again because the decision is a balance
+    // check); an account they could not finish signing in to is not. So every failure here is a
+    // console warning and nothing else — no error screen, no block.
+    if (work.seed && plan.currency && treasury.current) {
+      const coin = plan.currency;
+      const into = treasury.current;
+      try {
+        setStep(`Adding your ${coin.plural}…`);
+        // THE GATE. The registry saying `faucet: true` is the app's claim; this is the chain's
+        // answer. A token that is not open-mint is refused here, loudly, before the member is asked
+        // to sign anything — the Home must never try to conjure a real asset.
+        if (!(await isOpenMintToken(coin.asset, person, into, coin.initialAmount))) {
+          throw new Error('the declared coin is not an open-mint test token');
+        }
+        const sign = await personSignHash(person, via, token);
+        if (typeof sign !== 'function') throw new Error(sign.error);
+        const funded = await fundThroughHarness({
+          treasury: into,
+          amount: coin.initialAmount,
+          asset: coin.asset,
+          display: coinAmount(coin, coin.initialAmount),
+          session: { token },
+          signHash: sign,
+        });
+        if (!funded.ok) throw new Error(funded.error);
+      } catch (e) {
+        console.warn(`[new-member] opening balance not added (their account is empty — ${appName} can fund it, and the next connect tries again):`, e);
+      }
+    }
+
     setBusy(false);
     onDone();
   }
 
   // Nothing to do (or still deciding): render nothing. `onDone` has already fired in the first case.
   if (!work) return null;
+
+  const coin = plan.currency;
+  // WHAT WE ARE ABOUT TO DO TO THEIR MONEY, as one sentence built from the work that is actually
+  // left. The four cases are: a new account with coin in it, a new empty account, coin into an
+  // account they already had, and nothing at all.
+  const opening = coin && work.seed ? coinAmount(coin, coin.initialAmount) : '';
+  const accountSentence =
+    work.treasury && opening
+      ? `We’ll open a money account that’s yours to keep and put ${opening} in it to start you off. Your ${brand} home keeps the key to it.`
+      : work.treasury
+        ? `We’ll open a money account that’s yours to keep — it holds your funds, and your ${brand} home keeps the key to it.`
+        : opening
+          ? `We’ll put ${opening} into your money account to start you off.`
+          : '';
+  const nameSentence = work.name
+    ? `${appName} will show you to other people by this name. It isn’t a login, and you can change it later.`
+    : '';
+  // Shown to everyone this screen renders for, INCLUDING a member who needs no account and no coin:
+  // the mandate is minted for them too, a moment later, in the same connect.
+  const grantLines = coin?.spendGrant ? currencyConsentLines(coin, appName) : null;
 
   if (busy) {
     return (
@@ -204,16 +306,29 @@ export function NewMemberSetup({
     <Shell>
       <BrandShield size={56} />
       <h1 className="onboarding-h1">{work.name ? 'What should we call you?' : 'One more thing'}</h1>
-      {/* THE HONEST LINE. What they are actually getting, in the register the rest of onboarding
-          uses — and, for the name, who will see it. A person handing over their name is entitled to
-          know where it goes at the moment they type it, not only in the consent list afterwards. */}
-      <p className="onboarding-sub">
-        {work.name && work.treasury
-          ? `${appName} will show you to other people by this name — and we’ll open a money account that’s yours to keep.`
-          : work.name
-            ? `${appName} will show you to other people by this name. It isn’t a login, and you can change it later.`
-            : `We’ll open a money account that’s yours to keep — it holds your funds, and your ${brand} home keeps the key to it.`}
-      </p>
+      {/* THE HONEST LINES. Everything that is about to happen to them, before it happens, in the
+          register the rest of onboarding uses — a person handing over their name or being given an
+          account is entitled to know where both go at the moment it happens, not only in the consent
+          list afterwards. Assembled from what is ACTUALLY left to do, so a member who already has an
+          account is not told one is being opened. */}
+      {nameSentence && <p className="onboarding-sub">{nameSentence}</p>}
+      {accountSentence && <p className="onboarding-sub">{accountSentence}</p>}
+
+      {/* WHAT THE APP MAY DO WITH THE COIN, with the ceilings, before they agree to it — the same
+          sentences the consent sheet shows a moment later (`currencyConsentLines`), so the two
+          screens cannot describe the same permission two different ways. */}
+      {grantLines && (
+        <div className="onboarding-note" data-testid="new-member-coin-grant">
+          <p style={{ margin: '0 0 .35rem' }}><strong>{appName} will be able to:</strong></p>
+          <ul style={{ margin: 0, paddingLeft: '1.1rem' }}>
+            {grantLines.canDo.map((l) => <li key={l}>{l}</li>)}
+          </ul>
+          <p style={{ margin: '.45rem 0 .35rem' }}><strong>It will not be able to:</strong></p>
+          <ul style={{ margin: 0, paddingLeft: '1.1rem' }}>
+            {grantLines.cannotDo.map((l) => <li key={l}>{l}</li>)}
+          </ul>
+        </div>
+      )}
 
       {work.name && (
         <>
@@ -255,8 +370,14 @@ export function NewMemberSetup({
         </button>
       )}
 
-      {work.treasury && promptless === false && (
-        <p className="onboarding-note">Your wallet will ask you to confirm opening the account. Gas is sponsored.</p>
+      {/* Say what THIS session will actually ask of them, and how many times. Opening the account is
+          one confirmation and putting the coin in is a second, so a wallet home that was promised
+          "a confirmation" and met two would rightly wonder what the extra one was for. Silent when
+          we don't know (`null`) rather than guessing — the same rule the funding form follows. */}
+      {(work.treasury || work.seed) && promptless === false && (
+        <p className="onboarding-note">
+          Your wallet will ask you to confirm{work.treasury && work.seed ? ' twice — once to open the account, once to put the money in' : work.treasury ? ' opening the account' : ' putting the money in'}. Gas is sponsored.
+        </p>
       )}
     </Shell>
   );

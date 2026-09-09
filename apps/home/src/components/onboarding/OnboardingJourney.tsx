@@ -37,7 +37,7 @@ import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
 import { NewMemberSetup } from './NewMemberSetup';
-import { newMemberPlan, planIsEmpty, withProfileNameConsent } from '../../lib/new-member';
+import { coinMandateLeg, grantsCoinAtConnect, newMemberPlan, planIsEmpty, withCurrencyConsent, withProfileNameConsent } from '../../lib/new-member';
 
 export type JourneyVariant = 'enroll-new' | 'enroll-existing' | 'self-serve';
 
@@ -282,9 +282,8 @@ export function OnboardingJourney({
       // Resolve it via the member's own agent tree, then sign `treasury → lbsb-treasury` in the SAME
       // ceremony (same credential). If they have no treasury yet, connect proceeds without payment —
       // they create a personal treasury in their home and reconnect.
-      let payment:
-        | { treasury: Address; payee: Address; asset: Address; maxAmountPerCharge: bigint; maxAggregate: bigint; maxRedemptionsPerWindow?: number; windowSeconds?: number; mode?: 'push' | 'pull'; chargeNow?: boolean; chargeAmount?: bigint; edition?: string; subscription?: { periodSeconds: number; periods?: number } }
-        | undefined;
+      // Derived from `givePermission` rather than restated — see the matching note in RecognizedEnroll.
+      let payment: Parameters<typeof givePermission>[5];
       const pc = relyingApp?.paymentConfig;
       // The member's person-treasury (if any), surfaced to the relying app so it can gate financial ops.
       // Resolved only on the x402-pay path here (it opens the home anyway); for plain site-login the
@@ -323,6 +322,24 @@ export function OnboardingJourney({
               subscription: api.enroll!.subPeriod ? { periodSeconds: api.enroll!.subPeriod } : undefined,
             };
           }
+        }
+      }
+      // THE APP'S OWN COIN (`new_member.currency.spend_grant`), minted in this same plain sign-in.
+      //
+      // A SEPARATE BRANCH from the x402 one above because it answers a different question about a
+      // different member: that one needs an EXISTING member with an existing account (`existingAgent`),
+      // because a first-run member had none. This one runs for a member the new-member setup screen
+      // JUST opened an account for — which is the whole point of folding the grant into the first
+      // connect — so it reads the tree with the session that screen used rather than guarding on
+      // having met them before.
+      if (!payment && grantsCoinAtConnect(relyingApp) && setupToken) {
+        try {
+          const tre = (await listManagedAgents(setupToken)).find((a) => a.kind === 'person-treasury');
+          treasuryAddr = (tre?.agent as Address) ?? treasuryAddr;
+          payment = coinMandateLeg(relyingApp, treasuryAddr) ?? undefined;
+        } catch (e) {
+          // No mandate is a recoverable state (the app asks for one later); a failed connect is not.
+          console.warn('[connect] app-coin mandate skipped — account unreadable:', e);
         }
       }
       // spec 270 v4 W2 — sign the DEL-001 leaf for the relying app's session-key address (from the
@@ -681,9 +698,13 @@ export function OnboardingJourney({
   // to lose `setupToken` mid-flow). Losing a setup screen must never mean losing the consent — the
   // member connects, and the next connect asks again.
   if ((screen === 'grant' || screen === 'new-member') && api?.enroll) {
-    const tpl = withProfileNameConsent(
-      whitelabel.delegationTemplates[api.enroll.template] ?? { canDo: [], cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'] },
+    const tpl = withCurrencyConsent(
+      withProfileNameConsent(
+        whitelabel.delegationTemplates[api.enroll.template] ?? { canDo: [], cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'] },
+        relyingApp,
+      ),
       relyingApp,
+      appName,
     );
     return (
       <Frame wide>

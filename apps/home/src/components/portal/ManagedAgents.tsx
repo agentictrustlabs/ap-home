@@ -140,7 +140,15 @@ export function FundForm({
     setStep('Granting the funding authority…');
     const sign = await personSignHash(person as `0x${string}`, via, token);
     if (typeof sign !== 'function') { setBusy(false); setErr(sign.error); return; }
-    const res = await fundThroughHarness({ treasury: treasury as `0x${string}`, usdc: n, session: { token }, signHash: sign });
+    // Whole USDC → the 6-decimal atomic figure the rail now takes for every coin. Same number the
+    // caller used to hand over; the conversion just moved to the one place that knows the decimals.
+    const res = await fundThroughHarness({
+      treasury: treasury as `0x${string}`,
+      amount: BigInt(Math.round(n * 1_000_000)),
+      display: `${n} usdc`,
+      session: { token },
+      signHash: sign,
+    });
     setBusy(false);
     if (!res.ok) { setErr(res.error); return; }
     setOpen(false);

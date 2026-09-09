@@ -23,7 +23,7 @@ import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
 import { RequiredNameGate } from './RequiredNameGate';
 import { NewMemberSetup } from './NewMemberSetup';
-import { newMemberPlan, planIsEmpty, withProfileNameConsent } from '../../lib/new-member';
+import { coinMandateLeg, grantsCoinAtConnect, newMemberPlan, planIsEmpty, withCurrencyConsent, withProfileNameConsent } from '../../lib/new-member';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
 import {
   clearPendingEnroll,
@@ -135,7 +135,9 @@ export function GoogleEnrollResume() {
       let payment: Parameters<typeof givePermission>[5];
       let treasuryAddr: `0x${string}` | null = null;
       const pc = relyingApp?.paymentConfig;
-      if (isPaymentTemplate(enroll.template) && pc) {
+      // The account is resolved for BOTH reasons an app can need one: a payment-template ceremony,
+      // and an app whose declared currency wants its spend mandate minted in this plain sign-in.
+      if ((isPaymentTemplate(enroll.template) || grantsCoinAtConnect(relyingApp)) && pc) {
         try {
           treasuryAddr = ((await listManagedAgents(token)).find((a) => a.kind === 'person-treasury')?.agent as `0x${string}`) ?? null;
         } catch (e) { console.warn('[google-resume] listManagedAgents failed:', e); }
@@ -143,7 +145,7 @@ export function GoogleEnrollResume() {
           treasuryAddr = await resolveTreasuryByConvention(home.name);
           if (treasuryAddr) console.warn('[google-resume] person-treasury reconciled from ANS:', treasuryAddr);
         }
-        if (treasuryAddr) {
+        if (treasuryAddr && isPaymentTemplate(enroll.template)) {
           const cap = BigInt(pc.maxAmountPerCharge);
           const req = enroll.payAmount ? BigInt(enroll.payAmount) : cap;
           payment = {
@@ -153,6 +155,11 @@ export function GoogleEnrollResume() {
             chargeNow: true, chargeAmount: req < cap ? req : cap, edition: 'lbsb',
             subscription: enroll.subPeriod ? { periodSeconds: enroll.subPeriod } : undefined,
           };
+        } else if (treasuryAddr) {
+          // The app's own coin, minted in the plain sign-in — see the matching branch in
+          // RecognizedEnroll. This path is the terminal leg of every social re-auth, so leaving it
+          // out is how the last payment feature spent months silently doing nothing here.
+          payment = coinMandateLeg(relyingApp, treasuryAddr) ?? undefined;
         }
       }
       // spec 345 — a self-vault grant rides this SAME plain sign-in when the client declares one.
@@ -317,12 +324,16 @@ export function GoogleEnrollResume() {
   // the same list as everything else it can do. The setup screen discloses it to a member who is
   // typing the name now; this is what a RETURNING member (whose name is already on file, and who
   // never sees that screen) gets to read before authorizing. No-op for every unscoped app.
-  const tpl = withProfileNameConsent(
-    whitelabel.delegationTemplates[enroll.template] ?? {
-      canDo: [],
-      cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'],
-    },
+  const tpl = withCurrencyConsent(
+    withProfileNameConsent(
+      whitelabel.delegationTemplates[enroll.template] ?? {
+        canDo: [],
+        cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'],
+      },
+      relyingApp,
+    ),
     relyingApp,
+    appName,
   );
   return (
     <div className="onboarding-screen">

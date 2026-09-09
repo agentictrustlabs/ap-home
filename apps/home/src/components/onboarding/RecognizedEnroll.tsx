@@ -38,7 +38,7 @@ import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
 import { CeremonyProgress } from './CeremonyProgress';
-import { withProfileNameConsent } from '../../lib/new-member';
+import { coinMandateLeg, grantsCoinAtConnect, withCurrencyConsent, withProfileNameConsent } from '../../lib/new-member';
 import { OrgChooser, type OrgChoice } from './OrgChooser';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
 import { knownRelyingClient } from '../../lib/relying-clients';
@@ -458,9 +458,10 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         // spec 272/243 — x402-pay: a recognized member already has a home session `token` in hand, so
         // resolve their PRE-CREATED person-treasury (approach A) and authorize a capped `treasury →
         // lbsb-treasury` payment delegation in the SAME ceremony. No treasury → connect without payment.
-        let payment:
-          | { treasury: Address; payee: Address; asset: Address; maxAmountPerCharge: bigint; maxAggregate: bigint; maxRedemptionsPerWindow?: number; windowSeconds?: number; mode?: 'push' | 'pull'; chargeNow?: boolean; chargeAmount?: bigint; edition?: string; subscription?: { periodSeconds: number; periods?: number } }
-          | undefined;
+        // Derived from `givePermission` rather than restated, so a new field on the payment leg (the
+        // `redeemer` this connect needs) cannot be added in one of the three connect surfaces and
+        // silently dropped in the other two.
+        let payment: Parameters<typeof givePermission>[5];
         const pc = relyingApp?.paymentConfig;
         // Resolve the member's PRE-CREATED person-treasury only for apps that declare financial ops
         // (a paymentConfig). Surfaced to the relying app as `treasury` so it can gate them up front —
@@ -468,6 +469,9 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         // no-ops. Apps with no paymentConfig have no financial ops, so the connect skips the lookup.
         let treasuryAddr: Address | null = null;
         if (pc) {
+          // The projection is re-read here, AFTER the new-member setup screen has run: a member who
+          // just had an account opened for them is in it (the create invalidates the shared read),
+          // which is what lets the spend mandate below name the account they were given moments ago.
           treasuryAddr = ((await managedPromise).find((a) => a.kind === 'person-treasury')?.agent as Address) ?? null;
           // Projection miss → reconcile from the authoritative naming registry (`<label>-treasury.<tld>`).
           if (!treasuryAddr) {
@@ -500,6 +504,13 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
             // spec 272 recurring — a SUBSCRIPTION connect (sub_period set): also mint a standing pull mandate.
             subscription: enroll.subPeriod ? { periodSeconds: enroll.subPeriod } : undefined,
           };
+        } else if (grantsCoinAtConnect(relyingApp)) {
+          // THE APP'S OWN COIN, granted in the PLAIN sign-in (`new_member.currency.spend_grant`).
+          // Same mandate, same `issuePaymentDelegation`, same return trip to the app on the token
+          // exchange — the only thing that changed is that the member no longer has to come back for
+          // a second ceremony to authorize it. `null` (no account, or no currency declared) simply
+          // leaves `payment` undefined and the connect runs exactly as it did before.
+          payment = coinMandateLeg(relyingApp, treasuryAddr) ?? undefined;
         }
         // spec 345 — a self-vault grant rides this SAME plain sign-in when the client declares one.
         const selfVaultScope = whitelabel.relyingApps.find((a) => a.client_id === enroll.aud)?.self_vault_grant;
@@ -653,12 +664,16 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
   // the same list as everything else it can do. The setup screen discloses it to a member who is
   // typing the name now; this is what a RETURNING member (whose name is already on file, and who
   // never sees that screen) gets to read before authorizing. No-op for every unscoped app.
-  const tpl = withProfileNameConsent(
-    whitelabel.delegationTemplates[enroll.template] ?? {
-      canDo: [],
-      cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'],
-    },
+  const tpl = withCurrencyConsent(
+    withProfileNameConsent(
+      whitelabel.delegationTemplates[enroll.template] ?? {
+        canDo: [],
+        cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'],
+      },
+      relyingApp,
+    ),
     relyingApp,
+    appName,
   );
   return (
     <div className="onboarding-screen">
