@@ -20,6 +20,7 @@
 // it happened. A reader of the endeavor can tell the difference, which is the whole point.
 import type { HarnessRunCheckpointV1 } from './harness-runs.js';
 import type { Address } from 'viem';
+import { selectedProviderClause, type SelectedOfferBindingV1 } from './engagement-campaign.js';
 
 /**
  * The capability ids a PLAN STEP may be taken to exercise. Kept as a list rather than derived from the
@@ -121,20 +122,37 @@ export function askForStep(step: WorkStep, goal: string, capability?: string, pr
  *  up yet. `openToStewards` says so — see `claimableBy`. */
 export function checkpointForStep(input: {
   runRef: string; principal: Address; endeavorId: string; step: WorkStep; goal: string; now?: number;
+  /** Spec 384 W3 — a campaign selected a provider: the step is handed to it and the mandate must name its offer. */
+  engagement?: SelectedOfferBindingV1 | null;
 }): HarnessRunCheckpointV1 {
   const now = input.now ?? Date.now();
+  const ask = askForStep(input.step, input.goal, authorityCapabilityOf(input.step) ?? undefined, input.principal);
   return {
     runRef: input.runRef,
-    message: askForStep(input.step, input.goal, authorityCapabilityOf(input.step) ?? undefined, input.principal),
+    message: input.engagement ? `${ask} ${selectedProviderClause(input.engagement)}` : ask,
     addressee: input.principal,
     asker: input.principal,
     presented: [],
     supplied: [],
     openToStewards: true,
-    origin: { endeavorId: input.endeavorId, stepId: input.step.stepId, principal: input.principal },
+    origin: { endeavorId: input.endeavorId, stepId: input.step.stepId, principal: input.principal, ...(input.engagement ? { engagement: input.engagement } : {}) },
     createdAt: now,
     updatedAt: now,
   };
+}
+
+/**
+ * Spec 384 W3 — DOES THIS STEP ENGAGE ANOTHER PARTY? Two facts decide it, both modelled, neither guessed:
+ *   - the plan made the step an INTERACTION (`kind: 'interaction'` — a p-plan step that is an exchange with
+ *     another agent, not a contribution the organization makes itself); or
+ *   - the capability is outside the organization's OWN offer set (its compiled playbook, else the bare harness:
+ *     the same set the Ask sees and the probe answerer decides from), so it cannot keep the step itself.
+ * A `contribution` the organization can do stays its own: parked to its stewards as before.
+ */
+export function engagesProvider(step: WorkStep, capability: string, ownOffers: ReadonlySet<string>): 'interaction-step' | 'not-in-own-offer-set' | null {
+  if (step.kind === 'interaction') return 'interaction-step';
+  if (!ownOffers.has(capability)) return 'not-in-own-offer-set';
+  return null;
 }
 
 /**
@@ -179,12 +197,15 @@ export function receiptEvidence(input: {
   capability: string; runRef: string; mandateRef?: string | null; txHash?: string | null; summary: string;
   /** Spec 382 — the signed commitment this run fulfilled, when the step was a participant's. */
   commitmentRef?: string | null;
+  /** Spec 384 W3 — the provider's offer the mandate named, when a campaign selected one. */
+  offerDigest?: string | null;
 }): { note: string; refs: string[] } {
   const refs = [
     `urn:ap:receipt:run:${input.runRef}`,
     ...(input.mandateRef ? [`urn:ap:receipt:mandate:${input.mandateRef}`] : []),
     ...(input.txHash ? [`urn:ap:receipt:tx:${input.txHash}`] : []),
     ...(input.commitmentRef ? [`urn:ap:receipt:commitment:${input.commitmentRef}`] : []),
+    ...(input.offerDigest ? [`urn:ap:receipt:offer:${input.offerDigest}`] : []),
   ];
   const note = [
     input.summary.trim(),

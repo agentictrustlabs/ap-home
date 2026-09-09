@@ -19,6 +19,7 @@
 // re-applied and the approval re-checked — every turn, exactly as the first. The checkpoint holds only
 // what the person already gave us; it grants nothing and it decides nothing.
 import type { SuppliedInputV1, Plan, StepReceipt, CommitmentRefV1 } from '@agenticprimitives/orchestration';
+import type { SelectedOfferBindingV1 } from './engagement-campaign.js';
 import type { Address } from 'viem';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { internalHeaders } from './internal-marker.js';
@@ -91,7 +92,10 @@ export interface HarnessRunCheckpointV1 {
   /** The plan step this run exists to satisfy. When it completes, the step's evidence is its RECEIPT. */
   origin?: { endeavorId: string; stepId: string; principal: Address;
     /** Spec 382 — the signed commitment this run fulfils and the adopted plan hash it was compiled from. */
-    commitmentRef?: string; planHash?: string };
+    commitmentRef?: string; planHash?: string;
+    /** Spec 384 W3 — the campaign's selection: the provider the step is handed to and the offer the mandate must
+     *  name. Shapes the plan (`bindSelectedOffer`); no verifier reads it — the verifier reads the mandate. */
+    engagement?: SelectedOfferBindingV1 };
   /** spec 362 — WHICH ENGINE advances this run. `client` (the flyout re-drives it — the default) or
    *  `workflow` (a Cloudflare Workflows instance owns it). ONE executor per run, never a fallback pair:
    *  the other entry path refuses to advance a run it does not own, because two engines discovering the

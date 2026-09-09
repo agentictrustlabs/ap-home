@@ -143,7 +143,9 @@ import { realtimeKitConfigured, verifyRealtimeKitWebhook, readRealtimeKitWebhook
 import { sendSubjectAskOverWire, subjectAnswerMessage, subjectEnvelopeOf, handoffMessage, routedRunRefFor } from './subject-hop.js';
 import { EXTERNAL_AGENT_TOOL, externalAgentInvoker } from './external-agent.js';
 import { MEMBER_CONSULT_TOOL, memberConsultInvoker } from './member-consult.js';
-import { ENGAGEMENT_PROBE_TOOL, engagementProbeInvoker } from './engagement-probe.js';
+import { ENGAGEMENT_PROBE_TOOL, engagementProbeInvoker, type ProbeDeps } from './engagement-probe.js';
+import { discoveryCandidateSource } from './engagement-candidates.js';
+import type { CandidateSource } from '@agenticprimitives/intent-engagement';
 import { answerProbe } from './engagement-answer.js';
 import type { MessageV1 } from '@agenticprimitives/a2a/standard';
 import { signAsAgent } from './consult-rail.js';
@@ -2724,6 +2726,8 @@ app.post('/harness/ask', async (c) => {
       ...(body.channel === 'voice' ? { channel: 'voice' as const } : {}),
       ...(provider ? { provider } : {}),
       ...(body.plan ?? stored?.plan ? { plan: body.plan ?? stored?.plan } : {}),
+      // Spec 384 W3 — a campaign selected a provider for this step: the plan is bound to it and to its offer.
+      ...(stored?.origin?.engagement ? { engagement: stored.origin.engagement } : {}),
       // Spec 370 P1 — what already ran, replayed; what has not, attempted. The planner is not asked again.
       ...(stored?.executed ? { resume: stored.executed } : {}),
       ...(stored?.routedAt ? { routedAt: stored.routedAt } : {}),
@@ -2745,18 +2749,7 @@ app.post('/harness/ask', async (c) => {
           const requester = String(who.sa).toLowerCase() as Address;
           return engagementProbeInvoker({
             requester, resolveName: askDeps.resolveName, nameOf: askDeps.nameOf,
-            sendProbe: async (candidate, message) => {
-              const name = await askDeps.nameOf?.(candidate).catch(() => null) ?? null;
-              const parents = (c.env.AGENT_NAME_PARENTS ?? c.env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
-              const host = name ? hostForName(name, a2aCanonicalDomain(c.env), parents) : null;
-              if (!host || !a2aBaseDomains(c.env).some((d) => host === d || host.endsWith(`.${d}`))) return { ok: false, refused: `${name ?? candidate} is not served here — probing across deployments is spec 384 W3` };
-              const req = new Request(`https://${host}/api/a2a`, { method: 'POST', headers: internalHeaders(c.env, { 'content-type': 'application/json', accept: 'application/json', 'a2a-version': '1.0', 'x-ap-internal-agent': requester }), body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'SendMessage', params: { message } }) });
-              const res = await app.fetch(req, c.env, c.executionCtx);
-              const body = (await res.json().catch(() => null)) as { result?: { message?: MessageV1; task?: unknown }; error?: { message?: string } } | null;
-              if (!body || body.error) return { ok: false, refused: body?.error?.message ?? `${name ?? candidate} answered ${res.status}` };
-              if (!body.result?.message) return { ok: false, refused: `${name ?? candidate} answered with a task, not a response — it does not speak the engagement profile` };
-              return { ok: true, message: body.result.message };
-            },
+            sendProbe: probeSenderFor(c.env, requester, c.executionCtx),
           })(toolId, args, ctx);
         }
         if (toolId === KB_QUESTION_TOOL.id) return kbQuestionInvoker({ fetchDiscovery: discoveryFetchFor(c.env), ...(structuredCall ? { call: structuredCall } : {}) })(toolId, args, ctx);
@@ -2929,6 +2922,7 @@ app.post('/harness/ask', async (c) => {
             runRef, mandateRef: acted?.authority?.presentedRef ?? null, txHash: r?.txHash ?? null,
             summary: r?.name ? `${r.name} (${r.agent ?? ''})` : 'Done.',
             ...(stored.origin.commitmentRef ? { commitmentRef: stored.origin.commitmentRef } : {}),
+            ...(stored.origin.engagement ? { offerDigest: stored.origin.engagement.offerDigest } : {}),
           });
           // Spec 382 — a PARTICIPANT's committed step is recorded BY THE PARTICIPANT (the reducer admits an
           // active participant); the organization's own parked step is recorded as the organization.
@@ -3699,6 +3693,29 @@ function executionContextFor(ctx?: ExecutionContext): ExecutionContext {
     waitUntil: (p: Promise<unknown>) => { void p.catch((e) => console.warn('[in-process] background work failed:', e instanceof Error ? e.message : String(e))); },
     passThroughOnException: () => undefined,
   } as unknown as ExecutionContext;
+}
+
+/** Spec 384 W2/W3 — SEND ONE PROBE to a candidate served here, in-process as the requester (a Worker cannot fetch
+ *  its own hostnames); the reply is the candidate's message. A candidate served elsewhere is refused by name. */
+export function probeSenderFor(env: Env, requester: Address, executionCtx?: ExecutionContext): ProbeDeps['sendProbe'] {
+  const deps = harnessDeps(env, buildAuditSink(env), { ...(executionCtx ? { executionCtx } : {}) });
+  return async (candidate, message) => {
+    const name = await deps.nameOf?.(candidate).catch(() => null) ?? null;
+    const parents = (env.AGENT_NAME_PARENTS ?? env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
+    const host = name ? hostForName(name, a2aCanonicalDomain(env), parents) : null;
+    if (!host || !a2aBaseDomains(env).some((d) => host === d || host.endsWith(`.${d}`))) return { ok: false, refused: `${name ?? candidate} is not served here — probing across deployments is spec 384 W4+` };
+    const req = new Request(`https://${host}/api/a2a`, { method: 'POST', headers: internalHeaders(env, { 'content-type': 'application/json', accept: 'application/json', 'a2a-version': '1.0', 'x-ap-internal-agent': requester }), body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'SendMessage', params: { message } }) });
+    const res = await app.fetch(req, env, executionContextFor(executionCtx));
+    const body = (await res.json().catch(() => null)) as { result?: { message?: MessageV1; task?: unknown }; error?: { message?: string } } | null;
+    if (!body || body.error) return { ok: false, refused: body?.error?.message ?? `${name ?? candidate} answered ${res.status}` };
+    if (!body.result?.message) return { ok: false, refused: `${name ?? candidate} answered with a task, not a response — it does not speak the engagement profile` };
+    return { ok: true, message: body.result.message };
+  };
+}
+
+/** Spec 384 W3 — candidates from the public tier for a campaign run by `requester` (never itself). */
+export function candidateSourceFor(env: Env, requester: Address): CandidateSource {
+  return discoveryCandidateSource(discoveryFetchFor(env), { exclude: [requester] });
 }
 
 export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: ExecutionContext } = {}): HarnessDeps {
@@ -8388,6 +8405,7 @@ bindHarnessAttempt(async (envIn, p, _approvalRefs) => {
     presented: (stored.presented ?? []) as never,
     person: stored.asker as Address, runRef: p.runRef, addressee: p.addressee as Address,
     ...(stored.plan ? { plan: stored.plan } : {}),
+    ...(stored.origin?.engagement ? { engagement: stored.origin.engagement } : {}),
     ...(stored.supplied?.length ? { supplied: stored.supplied } : {}),
     // A durable run advances a GOVERNED ACTION through its approval. The discovery/question tools are
     // conversation-shaped and have no place inside an approval wait — refusing them here keeps the

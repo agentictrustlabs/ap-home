@@ -48,7 +48,10 @@ import { parseSessionWrappedSignature, verifySessionWrappedSignature, wrapSessio
 import { internalHeaders, internalMarker, isInternalCall } from './internal-marker.js';
 import { memberConsultGrant, readConsultArtifact, readDelegatedTask, signAsOrg, submitConsult, submitDelegatedTask } from './consult-rail.js';
 import { recordRetention } from './run-export.js';
-import { authorityCapabilityOf, checkpointForStep, awaitingAuthorityNote } from './endeavor-authority-steps.js';
+import { authorityCapabilityOf, checkpointForStep, awaitingAuthorityNote, engagesProvider } from './endeavor-authority-steps.js';
+import { runEngagementCampaign, campaignNote } from './engagement-campaign.js';
+import { loadPlaybook } from './playbook.js';
+import { scopedActionTools } from './harness-run.js';
 import { messagingScopeCovers, messagingScopeDepsFromEnv } from './messaging-scope.js';
 import { fetchDiscoveryFacets } from './discovery-facets.js';
 import { makeMessagingSkills, makeOrgApplySkill } from './messaging-skills.js';
@@ -89,7 +92,7 @@ import {
 // FR-3.4 — deliver artifacts into a principal's demo-mcp vault over their delegation. The value import is
 // cyclic with index.ts, but safe: `callMcpToolViaDelegation` is a hoisted function used only at request
 // time (never at module-init), and `Env`/`IncomingDelegation` are type-only.
-import { buildAuditSink, callMcpToolWithProof, interactionsSessionAccount, runUnattendedAsk, type Env, type IncomingDelegation } from './index.js';
+import { buildAuditSink, callMcpToolWithProof, interactionsSessionAccount, runUnattendedAsk, harnessDeps, probeSenderFor, candidateSourceFor, type Env, type IncomingDelegation } from './index.js';
 import { dueNow, advanced, type TriggerScheduleV1 } from './triggers.js';
 import { ERC1271_MAGIC_VALUE as ERC1271_MAGIC } from '@agenticprimitives/types';
 
@@ -1487,11 +1490,38 @@ export class A2aTaskDO {
       const needsAuthority = authorityCapabilityOf(step);
       if (needsAuthority) {
         const runRef = `run-${crypto.randomUUID()}`;
-        const checkpoint = checkpointForStep({ runRef, principal: principal as Address, endeavorId, step, goal });
+        // Spec 384 W3 — A STEP THE ORGANIZATION ENGAGES ANOTHER PARTY FOR. The plan made it an interaction, or the
+        // capability is outside this agent's own offer set (its playbook, else the bare harness — the same set the
+        // Ask sees). Then candidates are found in the public tier, each probed once as the organization within a
+        // disclosure budget, the offers judged by named rules, the selection RECORDED on the endeavor, and the run
+        // parked bound to the selected provider and its offer: the steward's mandate must NAME that offer. No
+        // offer ⇒ the step still parks, open, and the note says who was asked and what each said.
+        let engagement: Awaited<ReturnType<typeof runEngagementCampaign>> | null = null;
+        let because: ReturnType<typeof engagesProvider> = null;
+        try {
+          const deps = harnessDeps(this.env, buildAuditSink(this.env));
+          const playbook = await loadPlaybook(deps.readSubjectRecord, principal).catch(() => null);
+          const own = new Set(scopedActionTools(undefined, playbook).map((t) => t.capability?.id ?? t.id));
+          because = engagesProvider(step, needsAuthority, own);
+          if (because) {
+            engagement = await runEngagementCampaign(
+              { requester: principal as Address, source: candidateSourceFor(this.env, principal as Address), sendProbe: probeSenderFor(this.env, principal as Address), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) },
+              { campaignId: `camp_${runRef}`, capability: needsAuthority, words: step.description.trim(), budget: { maxCandidates: 5, offersWanted: 1, deadlineMs: 10 * 60_000 } },
+            );
+            console.log(`[endeavor step] ${endeavorId} ${step.stepId}: campaign for ${needsAuthority} (${because}) asked ${engagement.campaign.candidates.length}, selected ${engagement.selection?.selected.provider ?? 'nobody'}`);
+          }
+        } catch (e) {
+          // The campaign failed to run: the step still parks to the stewards, and the endeavor is told why.
+          console.error('[endeavor step] campaign failed:', endeavorId, step.stepId, e);
+          await this.interactionsInternal(principal, 'internal.endeavor.post', { endeavorId, bodyText: `[agent] could not ask other agents about "${step.description}" — ${e instanceof Error ? e.message : String(e)}` }).catch(() => undefined);
+        }
+        const checkpoint = checkpointForStep({ runRef, principal: principal as Address, endeavorId, step, goal, ...(engagement?.binding ? { engagement: engagement.binding } : {}) });
         try {
           await this.state.storage.put(`harness:run:${runRef}`, checkpoint);
           await this.interactionsInternal(principal, 'internal.endeavor.post', {
-            endeavorId, bodyText: awaitingAuthorityNote({ capability: needsAuthority, principal: principal as Address, runRef, step }),
+            endeavorId, bodyText: engagement && because
+              ? campaignNote({ capability: needsAuthority, principal: principal as Address, outcome: engagement, runRef, stepDescription: step.description, because })
+              : awaitingAuthorityNote({ capability: needsAuthority, principal: principal as Address, runRef, step }),
           });
         } catch (e) {
           console.error('[endeavor step] could not park an authority-bearing step:', endeavorId, step.stepId, e);

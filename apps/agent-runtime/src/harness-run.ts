@@ -32,6 +32,7 @@
 // the payer is ever held here; the mandate is the only authority, and it is checked per step, on chain
 // AND off.
 import { CONTACT_FIELDS, CONTACT_FIELD_ARGS } from '@agenticprimitives/ontology';
+import { bindSelectedOffer, type SelectedOfferBindingV1 } from './engagement-campaign.js';
 import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
 import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
@@ -1847,6 +1848,10 @@ export interface HarnessRunInput {
    * offer fails the loop's own unknown-tool gate.
    */
   plan?: { steps: Array<{ toolId: string; args: Record<string, unknown>; id?: string }> };
+  /** Spec 384 W3 — a campaign selected a provider for this run's step: every step exercising that capability is
+   *  handed to the provider and carries the offer's digest (`bindSelectedOffer`), so the requirement names the
+   *  offer and a mandate that does not is refused. Shapes the plan; no gate reads it. */
+  engagement?: SelectedOfferBindingV1 | null;
   /** Spec 367 §8 — when this run answers ANOTHER agent's routed request: the request it responds to, pinned
    *  onto every receipt's binding (`correlation.inResponseTo`) so the causal chain R → S is on the record. */
   inResponseTo?: { agent: Address; operationId: string; runRef: string; stepRef: string };
@@ -3866,6 +3871,10 @@ be emitted together; the runtime runs them side by side.`;
           plannerUsed = selected.kind; return selected.planner.plan(pin);
         },
       };
+  // Spec 384 W3 — the campaign's selection binds the planned step to its provider and offer, whoever planned it.
+  const boundPlanner: Planner = input.engagement
+    ? { plan: async (pin) => { const p = await planner.plan(pin); return { ...p, ...bindSelectedOffer(p, input.engagement) }; } }
+    : planner;
   const kind = input.plan ? 'supplied' : selected.kind;
   const trace: PlannerTraceV1 = {
     planner: plannerUsed, ...(selected.model ? { model: selected.model } : {}), toolsExposed: [], recalledTurns: input.conversation?.turns.length ?? 0, playbook: playbook ? { archetypeId: playbook.archetypeId, archetypeVersion: playbook.archetypeVersion, digest: playbook.digest } : null,
@@ -3956,7 +3965,7 @@ be emitted together; the runtime runs them side by side.`;
     ? (((await deps.nameOf(input.addressee).catch(() => null)) ?? '').split('.').pop() || undefined)
     : undefined;
   const result = await runIntent(input.intent, {
-    planner, tools, bindingFor,
+    planner: boundPlanner, tools, bindingFor,
     ...(input.resume ? { resume: input.resume } : {}),
 
     // Spec 366 R1 — a step ABOUT ANOTHER AGENT is answered by that agent. The tool declares which argument
@@ -4169,7 +4178,11 @@ be emitted together; the runtime runs them side by side.`;
       ...(input.person ? { subject: input.person } : {}),
       // Spec 367 §7 / 361 I6 — the validated application context a party may be filled from.
       ...(input.addressee ? { addressee: input.addressee } : {}),
-      ...(input.surface?.realm?.kind ? { realmKind: input.surface.realm.kind } : {}),
+      // The surface's realm kind; absent a surface, the addressee's ON-CHAIN kind (ADR-0046 — the record, of which
+      // a typed suffix is only a projection). A steward claiming an organization's parked step from a script
+      // sent no surface, the organization's name carries a legacy root, and the payer fell to the steward's own
+      // treasury: the organization's step, paid with the steward's money (spec 384 W3, live).
+      ...(input.surface?.realm?.kind ? { realmKind: input.surface.realm.kind } : deps.addresseeKind ? { realmKind: deps.addresseeKind } : {}),
       ...(realmSuffix && realmSuffix in CLASS_FOR_SUFFIX ? { realmSuffix } : {}),
       ...(input.surface?.selection ? { selection: input.surface.selection } : {}),
       // The tool's OWN declaration of what it cannot work without — asked for, never inferred.

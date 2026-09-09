@@ -4,7 +4,7 @@
 // the vault), and answers with one of the six kinds. Offers come back as documents with their digests; nothing
 // here accepts one. Acceptance is the person's mandate naming the offer (`offerDigest` on the act's step),
 // which the verifier requires (spec 384: `offer-not-bound`).
-import type { Address } from 'viem';
+import type { Address, Hex } from 'viem';
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import { engagementProbeMessage, engagementOf } from '@agenticprimitives/a2a';
 import type { MessageV1 } from '@agenticprimitives/a2a/standard';
@@ -50,6 +50,56 @@ export interface ProbeRow {
   reason?: string; question?: unknown; referral?: Address; until?: string; refused?: string;
 }
 
+/** What one probe round produced: the rows a person reads, and the situations the reducer holds. */
+export interface ProbeRound { rows: ProbeRow[]; situations: EngagementSituationV1[] }
+
+/**
+ * PROBE EACH CANDIDATE ONCE — shared by the `engagement.probe` read tool (W2) and the campaign (W3). One
+ * engagement per candidate; a projection audience-bound to that candidate carrying the capability and the
+ * words and nothing the vault holds; the reducer stepping each conversation; the answer recorded as the
+ * kind it is. Nothing here accepts an offer.
+ */
+export async function probeCandidates(deps: ProbeDeps, input: { campaignId: string; intentId: string; intentDigest: Hex; capability: string; words: string; candidates: ReadonlyArray<Address>; replyByMs?: number }): Promise<ProbeRound> {
+  const nowMs = (deps.now ?? Date.now)();
+  const rows: ProbeRow[] = [];
+  const situations: EngagementSituationV1[] = [];
+  for (const agent of input.candidates) {
+    const name = await deps.nameOf?.(agent).catch(() => null) ?? null;
+    const engagementId = `eng_${crypto.randomUUID()}`;
+    let s: EngagementSituationV1 = initialEngagement({ engagementId, campaignId: input.campaignId, requester: deps.requester, candidate: agent, now: new Date(nowMs).toISOString() });
+    // THE PROJECTION — audience-bound to this candidate; the capability and the words, nothing the vault holds.
+    const projection: IntentProjectionV1 = { type: 'ap.intent-projection.v1', kind: 'engagement', intentId: input.intentId, intentVersion: 1, intentDigest: input.intentDigest, audience: agent, purpose: 'quote', fields: { capability: input.capability, words: input.words }, withholds: ['parties by address', 'the asker\'s records'] };
+    const { withholds: _w, ...wire } = projection;
+    const probe: EngagementProbeV1 = {
+      type: 'ap.engagement-probe.v1', probeId: `probe_${crypto.randomUUID()}`, engagementId, campaignId: input.campaignId, requester: deps.requester, candidate: agent,
+      projection: wire, projectionDigest: projectionDigest(projection), intentDigest: input.intentDigest, objective: 'firm-offer',
+      interaction: { clarification: 'structured-only', humanChannels: ['external-url'], maxRounds: 1 }, processing: 'direct-message',
+      replyBy: new Date(nowMs + (input.replyByMs ?? 10 * 60_000)).toISOString(), probeNonce: crypto.randomUUID(), issuedAt: new Date(nowMs).toISOString(),
+    };
+    const sent = stepEngagement(s, { kind: 'SendProbe', probe, intentDigest: input.intentDigest, idempotencyKey: `${probe.probeId}:sent`, now: probe.issuedAt });
+    if (!sent.ok) { rows.push({ agent, name, engagementId, state: s.state, refused: `${sent.code}: ${sent.reason}` }); situations.push(s); continue; }
+    s = sent.state;
+    const out = await deps.sendProbe(agent, engagementProbeMessage(probe as never));
+    if (!out.ok) { rows.push({ agent, name, engagementId, state: s.state, refused: out.refused }); situations.push(s); continue; }
+    const doc = engagementOf(out.message);
+    if (!doc || 'errors' in doc || !('response' in doc)) { rows.push({ agent, name, engagementId, state: s.state, refused: doc && 'errors' in doc ? doc.errors.join('; ') : 'answered with something that was not an engagement response' }); situations.push(s); continue; }
+    const response = doc.response as unknown as EngagementResponseV1;
+    const got = stepEngagement(s, { kind: 'ReceiveResponse', response, idempotencyKey: `${response.responseId}:got`, now: new Date((deps.now ?? Date.now)()).toISOString() });
+    if (!got.ok) { rows.push({ agent, name, engagementId, state: s.state, kind: response.content.kind, refused: `${got.code}: ${got.reason}` }); situations.push(s); continue; }
+    s = got.state;
+    const c = response.content;
+    const row: ProbeRow = { agent, name, engagementId, state: s.state, kind: c.kind };
+    if (c.kind === 'offer' && c.offer.type === 'ap.fulfillment-offer.v1') row.offer = { offerId: c.offer.offerId, offerDigest: offerDigest(c.offer), expiresAt: c.offer.expiresAt, terms: c.offer.terms, requirement: c.offer.requirement, provider: c.offer.provider };
+    if (c.kind === 'decline') row.reason = c.detail ? `${c.reason}: ${c.detail}` : c.reason;
+    if (c.kind === 'needs-clarification') row.question = c.questions;
+    if (c.kind === 'referral') row.referral = c.to;
+    if (c.kind === 'temporarily-unavailable') row.until = c.until;
+    rows.push(row);
+    situations.push(s);
+  }
+  return { rows, situations };
+}
+
 export function engagementProbeInvoker(deps: ProbeDeps): ToolInvoker {
   return async (_toolId, args, ctx) => {
     const capability = String(args.capability ?? '').trim();
@@ -58,46 +108,19 @@ export function engagementProbeInvoker(deps: ProbeDeps): ToolInvoker {
     if (!capability) return { refused: 'capability is required', interpretation: 'no capability named' };
     if (!candidatesRaw.length) return { refused: 'name at least one agent to ask', interpretation: 'no candidates' };
     if (candidatesRaw.length > 5) return { refused: 'every probe is a disclosure to one more party — five candidates at most', interpretation: 'too many candidates' };
-    const nowMs = (deps.now ?? Date.now)();
     const runRef = String((ctx.intent.context as { runRef?: unknown } | undefined)?.runRef ?? 'run');
     const campaignId = `camp_${runRef}:${ctx.step.id ?? `s${ctx.index}`}`;
     const intentDigest = digestOf(ctx.intent);
     const rows: ProbeRow[] = [];
+    const resolved: Address[] = [];
     for (const raw of candidatesRaw) {
       const agent = (/^0x[0-9a-fA-F]{40}$/.test(raw) ? raw.toLowerCase() : (await deps.resolveName?.(raw.toLowerCase()).catch(() => null) ?? null)) as Address | null;
-      const name = raw.includes('.') && !/^0x/.test(raw) ? raw.toLowerCase() : (agent ? await deps.nameOf?.(agent).catch(() => null) ?? null : null);
+      const name = raw.includes('.') && !/^0x/.test(raw) ? raw.toLowerCase() : null;
       if (!agent) { rows.push({ agent: raw as Address, name, engagementId: '', state: 'not-resolved', refused: `no agent holds the name "${raw}"` }); continue; }
-      const engagementId = `eng_${crypto.randomUUID()}`;
-      let s: EngagementSituationV1 = initialEngagement({ engagementId, campaignId, requester: deps.requester, candidate: agent, now: new Date(nowMs).toISOString() });
-      // THE PROJECTION — audience-bound to this candidate; the capability and the words, nothing the vault holds.
-      const projection: IntentProjectionV1 = { type: 'ap.intent-projection.v1', kind: 'engagement', intentId: runRef, intentVersion: 1, intentDigest, audience: agent, purpose: 'quote', fields: { capability, words }, withholds: ['parties by address', 'the asker\'s records'] };
-      const { withholds: _w, ...wire } = projection;
-      const probe: EngagementProbeV1 = {
-        type: 'ap.engagement-probe.v1', probeId: `probe_${crypto.randomUUID()}`, engagementId, campaignId, requester: deps.requester, candidate: agent,
-        projection: wire, projectionDigest: projectionDigest(projection), intentDigest, objective: 'firm-offer',
-        interaction: { clarification: 'structured-only', humanChannels: ['external-url'], maxRounds: 1 }, processing: 'direct-message',
-        replyBy: new Date(nowMs + 10 * 60_000).toISOString(), probeNonce: crypto.randomUUID(), issuedAt: new Date(nowMs).toISOString(),
-      };
-      const sent = stepEngagement(s, { kind: 'SendProbe', probe, intentDigest, idempotencyKey: `${probe.probeId}:sent`, now: probe.issuedAt });
-      if (!sent.ok) { rows.push({ agent, name, engagementId, state: s.state, refused: `${sent.code}: ${sent.reason}` }); continue; }
-      s = sent.state;
-      const out = await deps.sendProbe(agent, engagementProbeMessage(probe as never));
-      if (!out.ok) { rows.push({ agent, name, engagementId, state: s.state, refused: out.refused }); continue; }
-      const doc = engagementOf(out.message);
-      if (!doc || 'errors' in doc || !('response' in doc)) { rows.push({ agent, name, engagementId, state: s.state, refused: doc && 'errors' in doc ? doc.errors.join('; ') : 'answered with something that was not an engagement response' }); continue; }
-      const response = doc.response as unknown as EngagementResponseV1;
-      const got = stepEngagement(s, { kind: 'ReceiveResponse', response, idempotencyKey: `${response.responseId}:got`, now: new Date((deps.now ?? Date.now)()).toISOString() });
-      if (!got.ok) { rows.push({ agent, name, engagementId, state: s.state, kind: response.content.kind, refused: `${got.code}: ${got.reason}` }); continue; }
-      s = got.state;
-      const c = response.content;
-      const row: ProbeRow = { agent, name, engagementId, state: s.state, kind: c.kind };
-      if (c.kind === 'offer' && c.offer.type === 'ap.fulfillment-offer.v1') row.offer = { offerId: c.offer.offerId, offerDigest: offerDigest(c.offer), expiresAt: c.offer.expiresAt, terms: c.offer.terms, requirement: c.offer.requirement, provider: c.offer.provider };
-      if (c.kind === 'decline') row.reason = c.detail ? `${c.reason}: ${c.detail}` : c.reason;
-      if (c.kind === 'needs-clarification') row.question = c.questions;
-      if (c.kind === 'referral') row.referral = c.to;
-      if (c.kind === 'temporarily-unavailable') row.until = c.until;
-      rows.push(row);
+      resolved.push(agent);
     }
+    const round = await probeCandidates(deps, { campaignId, intentId: runRef, intentDigest, capability, words, candidates: resolved });
+    rows.push(...round.rows);
     const offers = rows.filter((r) => r.offer).length;
     const summary = rows.map((r) => `${r.name ?? r.agent.slice(0, 10)}: ${r.kind ?? r.state}${r.reason ? ` (${r.reason})` : ''}${r.refused ? ` — ${r.refused}` : ''}`).join('; ');
     return {

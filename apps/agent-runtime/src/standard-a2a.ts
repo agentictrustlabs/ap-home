@@ -25,7 +25,7 @@ import {
 import type { SuppliedInputV1 } from '@agenticprimitives/orchestration';
 import { internalHeaders, isInternalCall, type InternalMarkerEnv } from './internal-marker.js';
 import { subjectAskOf, subjectAnswerOf, handoffOf, routedRunRefFor, SUBJECT_ANSWER_ARTIFACT } from './subject-hop.js';
-import { engagementOf, engagementResponseMessage, type HandoffV1 } from '@agenticprimitives/a2a';
+import { engagementOf, engagementResponseMessage, ENGAGEMENT_CARD_EXTENSION, AP_ENGAGEMENT_EXTENSION_URI, type HandoffV1 } from '@agenticprimitives/a2a';
 import type { SubjectAnswerV1 } from '@agenticprimitives/a2a';
 
 /** The runtime mints 32-byte hex task ids; this server's own conversational tasks are uuids. That is how a
@@ -50,8 +50,11 @@ export function withStandardCardFields(live: Record<string, unknown>, opts: { me
       ...caps, streaming: true, pushNotifications: true, extendedAgentCard: false,
       // The card SAYS how to authorize a task, so a peer learns it before calling rather than by failing.
       extensions: [
-        ...((caps.extensions as Array<{ uri: string }> | undefined) ?? []).filter((e) => e.uri !== AP_DELEGATED_TASK_EXTENSION),
+        ...((caps.extensions as Array<{ uri: string }> | undefined) ?? []).filter((e) => e.uri !== AP_DELEGATED_TASK_EXTENSION && e.uri !== AP_ENGAGEMENT_EXTENSION_URI),
         { ...DELEGATED_TASK_CARD_EXTENSION },
+        // Spec 384 W2/W3 — every agent served here answers a probe (an offer, a decline, a question, a referral,
+        // an unavailability, or "a human channel is required"), so a candidate source can see who to ask.
+        { ...ENGAGEMENT_CARD_EXTENSION },
       ],
     },
     defaultInputModes: ['text/plain', 'application/json'],
