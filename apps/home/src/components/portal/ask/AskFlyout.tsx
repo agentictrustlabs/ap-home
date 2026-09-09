@@ -25,7 +25,7 @@ import { nameLabel } from '../../../lib/domain';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
 import { useVoice, blobToBase64 } from './useVoice';
 import { yesNo, matchChoice, listenAfter, plainSpeech, navigationIntent, closestOption } from './voice-text';
-import { ask, hear, warmHearing, readProgress, type ProgressLine, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, homeModels, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField, type AskModelOption, listConfirmations, forgetConfirmation, type RememberedChoice } from '../../../home/ask';
+import { ask, hear, warmHearing, readProgress, fetchSpans, type SpanRow, type ProgressLine, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, homeModels, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField, type AskModelOption, listConfirmations, forgetConfirmation, type RememberedChoice } from '../../../home/ask';
 import type { AskSelection } from '../../../home/ask-selection';
 import { resolveNavigationTarget } from '../../../lib/interaction-registry';
 
@@ -225,6 +225,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
         evidence: (reply as { evidence?: AskEvidence[] }).evidence ?? [],
         ...(reply.kind === 'refused' ? { error: reply.error } : {}),
         ...(reply.plannerTrace ? { trace: reply.plannerTrace } : {}),
+        ...(reply.runRef ? { runRef: reply.runRef, addressee: state.addressee } : {}),
       }]);
       // Once the agent holds this run, later turns carry the runRef and the new answers only — the
       // mandate stops living here between turns.
@@ -738,7 +739,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
         <div ref={endRef} />
       </div>
 
-      {showDiag && <DiagnosticsPane entries={diag} onClose={() => setShowDiag(false)} />}
+      {showDiag && <DiagnosticsPane entries={diag} token={session?.token ?? ""} onClose={() => setShowDiag(false)} />}
 
       {command && <CommandForm command={command} realm={realm} addressee={addressee} addresseeLabel={addresseeLabel} selection={selection ?? undefined} initial={draftRun?.initial} draftOf={draftRun?.message} onSubmit={(args) => void doCommand(command, args)} onCancel={() => { setCommand(null); setDraftRun(null); }} />}
       {commands.length > 0 && !command && !pending && (
@@ -886,6 +887,9 @@ interface DiagEntry {
   error?: string;
   /** Spec 367 wave 1 — what the planner received: planner, tools, playbook, admission, plan, bindings. */
   trace?: PlannerTrace;
+  /** Spec 381 W3 — the run this turn belonged to, and whose agent ran it: what "what my agent did" reads back. */
+  runRef?: string;
+  addressee?: Address;
 }
 
 /**
@@ -900,7 +904,7 @@ interface DiagEntry {
  * question, and the query it actually sent. Copyable, because a query worth showing is one somebody will
  * want to paste somewhere.
  */
-function DiagnosticsPane({ entries, onClose }: { entries: DiagEntry[]; onClose: () => void }) {
+function DiagnosticsPane({ entries, token, onClose }: { entries: DiagEntry[]; token: string; onClose: () => void }) {
   return (
     <div data-testid="ask-diagnostics" style={{ borderTop: '1px solid var(--c-border, rgba(127,127,127,.25))', padding: '8px 12px', maxHeight: '45vh', overflowY: 'auto', fontSize: 11.5 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -925,6 +929,7 @@ function DiagnosticsPane({ entries, onClose }: { entries: DiagEntry[]; onClose: 
           {/* A turn with no tool step is not a defect — a refusal or an authority request reads nothing. */}
           {e.evidence.length === 0 && !e.error && <div className="muted">No tool read anything on this turn.</div>}
           {e.trace && <PlannerTraceView trace={e.trace} />}
+          {e.runRef && e.addressee && <ProvenanceView token={token} addressee={e.addressee} runRef={e.runRef} />}
           {e.evidence.map((ev, k) => (
             <div key={k} style={{ marginTop: 4 }}>
               <div className="muted">
@@ -1000,6 +1005,50 @@ function PlannerTraceView({ trace }: { trace: PlannerTrace }) {
           )}
           <div>tools exposed: {trace.toolsExposed.join(', ')}</div>
           {refusals.map((a, i) => a.refused.map((v, k) => <div key={`${i}-${k}`}>· {v.message}</div>))}
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * WHAT MY AGENT DID — spec 381 W3. The run's provenance read back from the vault as spans: each step, what it
+ * was, how long it took, whether it ended well, and the hand-offs it links to. Offered as a download so the
+ * person can carry it (the same bytes an OTLP exporter would). Read on demand; nothing is fetched for a turn
+ * nobody looks behind.
+ */
+function ProvenanceView({ token, addressee, runRef }: { token: string; addressee: Address; runRef: string }) {
+  const [state, setState] = useState<{ status: 'idle' | 'loading' | 'ready' | 'error'; spans: SpanRow[]; error?: string; exporter?: string }>({ status: 'idle', spans: [] });
+  const load = async () => {
+    setState((s) => ({ ...s, status: 'loading' }));
+    const out = await fetchSpans({ token }, addressee, runRef);
+    if ('error' in out) setState({ status: 'error', spans: [], error: out.error });
+    else setState({ status: 'ready', spans: out.spans, ...(out.exporter ? { exporter: out.exporter } : {}) });
+  };
+  const download = () => {
+    const blob = new Blob([JSON.stringify({ runRef, spans: state.spans }, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = `${runRef}.spans.json`; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const short = (v: string) => (v.length > 14 ? `${v.slice(0, 10)}…` : v);
+  const named = (sp: SpanRow) => Object.entries(sp.attributes).filter(([k]) => /^ap\.(step\.(ref|status)|capability\.id|risk|authority\.decision|run\.outcome|trace\.origin|error\.class|link\.kind)$/.test(k)).map(([k, v]) => `${k.replace(/^ap\./, '')}=${short(String(v))}`).join(' ');
+  return (
+    <div className="muted" style={{ marginTop: 4, fontSize: 11, lineHeight: 1.5 }}>
+      {state.status === 'idle' && <button type="button" className="btn ghost" style={{ fontSize: 10, padding: '0 6px', minHeight: 0 }} onClick={load}>what my agent did (spans)</button>}
+      {state.status === 'loading' && <span>reading the run back…</span>}
+      {state.status === 'error' && <span style={{ color: 'var(--c-danger, #dc2626)' }}>{state.error}</span>}
+      {state.status === 'ready' && (
+        <>
+          <div>
+            <strong>provenance</strong> {state.spans.length} span{state.spans.length === 1 ? '' : 's'}{state.exporter && state.exporter !== 'none' ? ` · exported via ${state.exporter}` : ''}
+            {' '}<button type="button" className="btn ghost" style={{ fontSize: 10, padding: '0 6px', minHeight: 0 }} onClick={download}>download JSON</button>
+          </div>
+          {state.spans.map((sp) => (
+            <div key={sp.spanId} style={{ paddingLeft: sp.parentSpanId ? 12 : 0 }}>
+              {sp.name} · {Math.max(0, sp.endMs - sp.startMs)}ms · {sp.status}{sp.links?.length ? ` · links ${sp.links.map((l) => short(l.spanId)).join(', ')}` : ''}{named(sp) ? ` · ${named(sp)}` : ''}
+            </div>
+          ))}
         </>
       )}
     </div>

@@ -368,6 +368,22 @@ export async function postA2a(path: string, body: unknown): Promise<Record<strin
 /** Spec 350 W3 — the runs parked on an agent that this person may pick up, with what each waits for and where it
  *  came from (a committed step names its endeavor and step). Never the mandates. */
 export interface ParkedRun { runRef: string; message: string; awaiting?: { kind: string; prompt: string; stepRef: string } | null; updatedAt: number; origin?: { endeavorId?: string; stepId?: string; principal?: string; commitmentRef?: string } }
+/** Spec 381 W3 — one span of a run's provenance, as the Worker exports it after the firewall (ids and named
+ *  attributes only; no bodies, no keys). A link names a span of ANOTHER run in the same trace (a hand-off). */
+export interface SpanRow {
+  traceId: string; spanId: string; parentSpanId?: string; name: string; kind: string;
+  startMs: number; endMs: number; status: string; attributes: Record<string, string | number | boolean>;
+  links?: Array<{ traceId: string; spanId: string; attributes?: Record<string, string | number | boolean> }>;
+}
+export interface RunProvenance { spans: SpanRow[]; retention?: unknown; exporter?: string; export?: unknown }
+
+/** Spec 381 W3 — WHAT MY AGENT DID, from the vault: the spans of one run the person asked for, read back under
+ *  their session (the Worker refuses a run that was not theirs). The same bytes an OTLP exporter would carry. */
+export async function fetchSpans(session: { token: string }, addressee: Address, runRef: string): Promise<RunProvenance | { error: string }> {
+  const out = (await postA2a('/a2a/harness/spans', { session: session.token, addressee, runRef })) as { ok?: boolean; error?: string } & Partial<RunProvenance>;
+  return out.ok ? { spans: out.spans ?? [], retention: out.retention, ...(out.exporter ? { exporter: out.exporter } : {}), export: out.export ?? null } : { error: out.error ?? 'the run could not be read back' };
+}
+
 export async function listRuns(session: { token: string }, addressee: Address): Promise<ParkedRun[]> {
   const out = (await postA2a('/a2a/harness/runs', { session: session.token, addressee })) as { ok?: boolean; runs?: ParkedRun[] };
   return out.ok ? out.runs ?? [] : [];
