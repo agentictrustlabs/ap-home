@@ -131,6 +131,8 @@ export { AP_DELEGATED_TASK_EXTENSION };
 export interface SubmitConsultArgs {
   org: string; orgWire: IncomingDelegation; grant: IncomingDelegation; memberSA: string; question: string;
   topicId: string; questionId: string; topicTitle?: string; tail?: Array<{ author: string; bodyText: string }>;
+  /** Spec 380 W2 — what the organization is asking for, carried to the member's agent as context. */
+  purpose?: string;
   signRaw?: RawSigner;
 }
 
@@ -139,6 +141,7 @@ export async function submitConsult(env: Env, args: SubmitConsultArgs): Promise<
   const request = buildConsultRequest({
     question: args.question, orgSA: args.org, topicId: args.topicId, questionId: args.questionId,
     ...(args.topicTitle ? { topicTitle: args.topicTitle } : {}), ...(args.tail?.length ? { tail: args.tail } : {}),
+    ...(args.purpose ? { purpose: args.purpose } : {}),
   });
   const sent = await submitDelegatedTask(env, { org: args.org, orgWire: args.orgWire, grant: args.grant, target: args.memberSA, skill: CONSULT_SKILL_ID, input: request, ...(args.signRaw ? { signRaw: args.signRaw } : {}) });
   return { taskId: sent.taskId, messageId: sent.messageId };

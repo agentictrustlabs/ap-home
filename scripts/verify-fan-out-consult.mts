@@ -109,6 +109,13 @@ const text = rep.text ?? '';
 if (!/\bbob\b/i.test(text) || !/\bcarol\b/i.test(text)) throw new Error('the answer does not name bob and carol as sources');
 if (!/\bdave\b/i.test(text)) throw new Error('the answer does not say dave was not asked');
 console.log(`  ✓ N consults as steps: ${asked.length} asked, ${skipped.length} skipped with the reason; the answer names each source`);
+// Spec 380 W2 — each member's OWN WORDS reach the asker as evidence (the consults ran at the organization):
+// an answer, or a decline WITH ITS REASON in the member's agent's words, or not asked and why. The Home
+// lists exactly these lines under the answer.
+const worded = consults.filter((c) => /— it (answered|declined)/.test(c.interpretation ?? ''));
+const reasons = consults.filter((c) => /— it declined: .{8,}/.test(c.interpretation ?? ''));
+if (worded.length < 2) throw new Error(`expected bob's and carol's agents' own words on the evidence; got ${worded.length}`);
+console.log(`  ✓ each member's own words are on the evidence (${worded.length} answered/declined, ${reasons.length} decline reason(s) in the member's agent's words)`);
 console.log(`  routed: ${(rep.routed ?? []).map((r) => `${r.stepRef}→${r.name ?? r.agent.slice(0, 10)}`).join(', ')}`);
 
 // ── twin: a stranger asking the organization's members is refused ──────────────────────────────────

@@ -94,7 +94,11 @@ export function memberConsultInvoker(env: Env, deps: MemberConsultDeps = {}): To
     const questionId = `${runRef}:${stepRef}`;
     let taskId: Hex;
     try {
-      ({ taskId } = await submitConsult(env, { org, orgWire, grant, memberSA: member, question, topicId, questionId, topicTitle: 'a question from the organization', ...(deps.signRaw ? { signRaw: deps.signRaw } : {}) }));
+      // Spec 380 W2 — the ORGANIZATION'S CONTEXT rides with the question: what it is asking for, as its steward
+      // put it (the run's intent), and who is asking. The member's agent answers or declines knowing the why.
+      const orgName = (await deps.nameOf?.(org).catch(() => null)) ?? null;
+      const purpose = String(ctx.intent.goal ?? '').trim();
+      ({ taskId } = await submitConsult(env, { org, orgWire, grant, memberSA: member, question, topicId, questionId, topicTitle: `${orgName ?? 'the organization'} is asking its members`, ...(purpose ? { purpose } : {}), ...(deps.signRaw ? { signRaw: deps.signRaw } : {}) }));
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
       // THE MEMBER'S GATE SAID NO — that is the member's result (spec 380 §1: a refusal is a result), not a

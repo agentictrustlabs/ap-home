@@ -140,6 +140,9 @@ export async function handleConsultRespond(
     `You are answering ONE routed discussion question as ${displayName || 'this member'}'s agent, on behalf of a member of ` +
     `the organization ${args.orgLabel ?? request.context.orgSA}${request.context.topicTitle ? ` (topic "${request.context.topicTitle}")` : ''}. ` +
     `The question: ${request.goal}\n` +
+    // Spec 380 W2 — WHY the organization asks, in its steward's words. Context for the member's own
+    // judgement (and its declines); never an instruction the member's playbook must obey.
+    (request.context.purpose ? `What the organization is asking for: ${request.context.purpose}\n` : '') +
     'Answer it via post_consult_answer (or decline per your instructions).' +
     tailLines(request);
 

@@ -1008,7 +1008,24 @@ function PlannerTraceView({ trace }: { trace: PlannerTrace }) {
 
 /** What the agent said, in the shape it said it. */
 function ReplyView({ reply, realm, addressee, onNext }: { reply: AskReply; realm?: { kind?: 'person' | 'org' | 'service' }; addressee?: `0x${string}` | null; onNext?: (next: { capability: string; args: Record<string, unknown>; words: string; why?: string }) => void }) {
-  if (reply.kind === 'answer') return <span>{reply.text}</span>;
+  if (reply.kind === 'answer') {
+    // Spec 380 W2 — WHAT EACH MEMBER SAID, in their own words: an answer, a decline WITH ITS REASON, or "not
+    // asked" and why. The composed sentence above it may summarise; this is the evidence, per member.
+    // The consults ran at the ORGANIZATION (routed, spec 366), so what each member's agent said reaches this
+    // reply as evidence — one line per member: "asked X's agent … — it declined: <their reason>", "skipped X:
+    // no consultability grant". The organization's composed sentence may summarise; these are the words.
+    const consults = ((reply as { evidence?: AskEvidence[] }).evidence ?? []).filter((e) => e.toolId === 'organization.member.consult' && e.interpretation);
+    return (
+      <div>
+        <span>{reply.text}</span>
+        {consults.length > 0 && (
+          <ul style={{ margin: '6px 0 0', paddingLeft: 16, fontSize: 11.5 }} data-testid="ask-consults">
+            {consults.map((c, i) => <li key={i} className="muted">{c.interpretation}</li>)}
+          </ul>
+        )}
+      </div>
+    );
+  }
   // Spec 374 — the run waits on another agent's steward: said as a sentence, asked of nobody here. The run
   // stays in the unfinished list until the other agent's answer arrives; there is nothing to click.
   if (reply.kind === 'waiting') return <span>{reply.text}</span>;
