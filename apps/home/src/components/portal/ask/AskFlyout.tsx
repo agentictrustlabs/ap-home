@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useRouter } from 'next/navigation';
 import { useSession } from '../../../context/session';
+import { RunTimeline } from '../runs/RunTimeline';
 import { useManagedAgents } from '../ManagedAgents';
 import { orgHref, serviceHref } from '../../../lib/workspace';
 import { agentClassOf } from '../../../lib/agent-class';
@@ -25,7 +26,7 @@ import { nameLabel } from '../../../lib/domain';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
 import { useVoice, blobToBase64 } from './useVoice';
 import { yesNo, matchChoice, listenAfter, plainSpeech, navigationIntent, closestOption } from './voice-text';
-import { ask, hear, warmHearing, readProgress, fetchSpans, type SpanRow, type ProgressLine, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, homeModels, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField, type AskModelOption, listConfirmations, forgetConfirmation, type RememberedChoice } from '../../../home/ask';
+import { ask, hear, warmHearing, readProgress, type ProgressLine, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, homeModels, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField, type AskModelOption, listConfirmations, forgetConfirmation, type RememberedChoice } from '../../../home/ask';
 import type { AskSelection } from '../../../home/ask-selection';
 import { resolveNavigationTarget } from '../../../lib/interaction-registry';
 
@@ -929,7 +930,7 @@ function DiagnosticsPane({ entries, token, onClose }: { entries: DiagEntry[]; to
           {/* A turn with no tool step is not a defect — a refusal or an authority request reads nothing. */}
           {e.evidence.length === 0 && !e.error && <div className="muted">No tool read anything on this turn.</div>}
           {e.trace && <PlannerTraceView trace={e.trace} />}
-          {e.runRef && e.addressee && <ProvenanceView token={token} addressee={e.addressee} runRef={e.runRef} />}
+          {e.runRef && e.addressee && <RunTimeline token={token} addressee={e.addressee} runRef={e.runRef} />}
           {e.evidence.map((ev, k) => (
             <div key={k} style={{ marginTop: 4 }}>
               <div className="muted">
@@ -1005,50 +1006,6 @@ function PlannerTraceView({ trace }: { trace: PlannerTrace }) {
           )}
           <div>tools exposed: {trace.toolsExposed.join(', ')}</div>
           {refusals.map((a, i) => a.refused.map((v, k) => <div key={`${i}-${k}`}>· {v.message}</div>))}
-        </>
-      )}
-    </div>
-  );
-}
-
-/**
- * WHAT MY AGENT DID — spec 381 W3. The run's provenance read back from the vault as spans: each step, what it
- * was, how long it took, whether it ended well, and the hand-offs it links to. Offered as a download so the
- * person can carry it (the same bytes an OTLP exporter would). Read on demand; nothing is fetched for a turn
- * nobody looks behind.
- */
-function ProvenanceView({ token, addressee, runRef }: { token: string; addressee: Address; runRef: string }) {
-  const [state, setState] = useState<{ status: 'idle' | 'loading' | 'ready' | 'error'; spans: SpanRow[]; error?: string; exporter?: string }>({ status: 'idle', spans: [] });
-  const load = async () => {
-    setState((s) => ({ ...s, status: 'loading' }));
-    const out = await fetchSpans({ token }, addressee, runRef);
-    if ('error' in out) setState({ status: 'error', spans: [], error: out.error });
-    else setState({ status: 'ready', spans: out.spans, ...(out.exporter ? { exporter: out.exporter } : {}) });
-  };
-  const download = () => {
-    const blob = new Blob([JSON.stringify({ runRef, spans: state.spans }, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `${runRef}.spans.json`; a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
-  const short = (v: string) => (v.length > 14 ? `${v.slice(0, 10)}…` : v);
-  const named = (sp: SpanRow) => Object.entries(sp.attributes).filter(([k]) => /^ap\.(step\.(ref|status)|capability\.id|risk|authority\.decision|run\.outcome|trace\.origin|error\.class|link\.kind)$/.test(k)).map(([k, v]) => `${k.replace(/^ap\./, '')}=${short(String(v))}`).join(' ');
-  return (
-    <div className="muted" style={{ marginTop: 4, fontSize: 11, lineHeight: 1.5 }}>
-      {state.status === 'idle' && <button type="button" className="btn ghost" style={{ fontSize: 10, padding: '0 6px', minHeight: 0 }} onClick={load}>what my agent did (spans)</button>}
-      {state.status === 'loading' && <span>reading the run back…</span>}
-      {state.status === 'error' && <span style={{ color: 'var(--c-danger, #dc2626)' }}>{state.error}</span>}
-      {state.status === 'ready' && (
-        <>
-          <div>
-            <strong>provenance</strong> {state.spans.length} span{state.spans.length === 1 ? '' : 's'}{state.exporter && state.exporter !== 'none' ? ` · exported via ${state.exporter}` : ''}
-            {' '}<button type="button" className="btn ghost" style={{ fontSize: 10, padding: '0 6px', minHeight: 0 }} onClick={download}>download JSON</button>
-          </div>
-          {state.spans.map((sp) => (
-            <div key={sp.spanId} style={{ paddingLeft: sp.parentSpanId ? 12 : 0 }}>
-              {sp.name} · {Math.max(0, sp.endMs - sp.startMs)}ms · {sp.status}{sp.links?.length ? ` · links ${sp.links.map((l) => short(l.spanId)).join(', ')}` : ''}{named(sp) ? ` · ${named(sp)}` : ''}
-            </div>
-          ))}
         </>
       )}
     </div>

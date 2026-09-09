@@ -377,6 +377,19 @@ export interface SpanRow {
 }
 export interface RunProvenance { spans: SpanRow[]; retention?: unknown; exporter?: string; export?: unknown }
 
+/** Spec 381 W3 — one finished run of an agent, as the record listing carries it (no mandates, no events). */
+export interface RunRecordRow {
+  runRef: string; at: number; outcome: string; steps: number; receipts: number;
+  intent: { goal: string; context?: Record<string, unknown> };
+  export?: { ok?: boolean; where?: string; error?: string } | null;
+}
+
+/** Spec 381 W3 — the runs this person asked of an agent (theirs to look back on; the Worker refuses others'). */
+export async function listRunRecords(session: { token: string }, addressee: Address): Promise<{ records: RunRecordRow[]; retention?: unknown }> {
+  const out = (await postA2a('/a2a/harness/records', { session: session.token, addressee })) as { ok?: boolean; records?: RunRecordRow[]; retention?: unknown };
+  return out.ok ? { records: out.records ?? [], retention: out.retention } : { records: [] };
+}
+
 /** Spec 381 W3 — WHAT MY AGENT DID, from the vault: the spans of one run the person asked for, read back under
  *  their session (the Worker refuses a run that was not theirs). The same bytes an OTLP exporter would carry. */
 export async function fetchSpans(session: { token: string }, addressee: Address, runRef: string): Promise<RunProvenance | { error: string }> {

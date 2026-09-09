@@ -11,6 +11,7 @@ import { SectionShell } from '../../components/portal/SectionShell';
 import { useManagedAgents } from '../../components/portal/ManagedAgents';
 import { listControlEvents, toManagedAgentEntry } from '../../home/control-plane';
 import { AddressChip } from '../../components/shared/AddressChip';
+import { RunHistory } from './runs/RunHistory';
 
 const EVENT_COPY: Record<HomeControlEventV1['eventType'], string> = {
   'grant-issued': 'Delegation granted',
@@ -116,6 +117,8 @@ export function ActivityTimeline({ agent }: { agent?: string } = {}) {
           })}
         </div>
       )}
+      {/* Spec 381 W3 — the runs this person asked of this agent, from the agent's own records; opened, a timeline. */}
+      {session && (agent ?? agentAddress) && <RunHistory token={session.token} addressee={(agent ?? agentAddress) as `0x${string}`} />}
     </SectionShell>
   );
 }

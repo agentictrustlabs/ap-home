@@ -1,6 +1,7 @@
 # What the A2A harness still needs — a prioritized feature program from a deep read of the field
 
-**Status:** maintained (2026-09-05).
+**Status:** maintained (2026-09-09; prior snapshot 2026-09-05). Refreshed at the end of every harness wave — a
+changed verdict lands here, in the competitive scorecard and in spec 351's layer table in the same change.
 **Reads:** LangGraph 1.x OSS, LangSmith (Observability · Evaluation · Deployment/Agent Server · Engine ·
 Fleet · Studio), Deep Agents, Microsoft Agent Framework (+ DurableTask extension, Foundry evaluators),
 Dapr Agents ([deep dive](product-comparison/dapr-agents.md)), Buzz.xyz (assessed in spec 359 §3). The
@@ -18,36 +19,27 @@ layer table in the same change; priorities here never run ahead of spec 359's de
 
 ---
 
-## 0. Where we stand (honest snapshot, 2026-09-05)
+## 0. Where we stand (honest snapshot, 2026-09-09)
 
-The A2A harness now runs with: archetype-derived behavior from `~/skills` (`archetype-skill.ts`), and —
-as of the evening of 2026-09-05 — **the playbook compiler loop's two ends built and proven** (spec 354
-K1–K2): the Ring-0 schemas (`SkillExecutionContractV1`, `AgentHarnessDefinitionV1`,
-`ArchetypeAssignmentV1` in `capability-claims` via the `agent-skills` shim) whose validator *refuses* any
-signature, delegator or caveat in a playbook body — the "behavior ≠ authority" invariant as a tripwire —
-and `@skills/archetype-compiler`, which compiles the design-time `AgentArchetype` (skills · ADR-0051
-capabilities · covered knowledge classes · kind) into a definition whose digest matches the Ring-0
-validator byte for byte, with capabilities carrying their authority shape from one profile and unprofiled
-capabilities failing safe to informational. `archetypes/treasury-steward` compiles to the same shape as
-the hand-built treasury Ask (`applicableAgentTypes=[treasury]`, payment tool at `risk=high`). What is
-**not** built: K3 (Home fetches the definition, previews the diff, writes `ArchetypeAssignmentV1` to the
-agent's vault pinned to the digest — editor ≠ approver ≠ writer) and K4 (run admission loads by digest
-and builds the harness from the definition instead of the hand-built tool list). Two honest tails: the
-compiler mirrors the schema until `capability-claims` publishes past alpha.19, and the Treasury archetype
-is proven locally, not yet seeded into live GraphDB. Memory and records are held in MCP vaults, read
-through the **semantic context plane** (specs 355–358, W1–W6 shipped: ontology-compiled party
-resolution, class-bound vault records, generated SPARQL over the public KB, `AskEvidence` in every
-reply); intent-driven **Endeavors** (specs 332–334) with authority steps; a planner + orchestration loop
-whose every consequential step is gated by delegation · entitlement · caveat · per-step on-chain verify
-(350 W1–W2, live); a checkpoint in the asked agent's `A2aTaskDO` (350 W3 — *resume exists, durability
-does not*: a 4-payment ask took 13 client-held turns); a `provenance` package that projects runs and
-exchanges into a PROV-O / P-Plan A-box with a fail-closed public firewall — **present but not yet the
-run's system of record**; an `evaluation` package with the truth-case contract (358 W2) and
-`check:ask-truth`.
+The 2026-09-05 snapshot said "resume exists, durability does not", "provenance present but not the run's
+system of record", "no trigger model", "K3–K4 not wired". All four are stale. Between 2026-09-06 and
+2026-09-09: spec 370 P1–P8 shipped and were gated live on faithnet; specs 371–385 landed (fifteen specs,
+most with W1–W2 live); spec 354 K4 is mostly live and K3 is live on the org, service and person pages;
+and spec 366 R4/R5 put a **second deployment** live (`demo-a2a-faithnet` ↔ `demo-a2a-faithnet-b`, an
+agent placed there by its name's records, never by a subdomain convention).
 
-Spec 358's verdict frames everything below: **the authority plane held in every incident; every defect
-was the knowledge plane telling a plausible falsehood.** The moat is authority. The exposure is truth,
-durability, and the ability to *see* what a run did — which is exactly where the field's leaders spend.
+**Durable runs, triggers, provenance, streamed progress, memory, operators and external runtimes are all
+live (370 P1–P8). The multi-agent rail is the differentiator (366–384): routed asks and writes across
+Homes, hand-off as a child delegation, external A2A agents as steps, fan-out consult, committed steps run
+at the participant, probe → offer → mandate.** Two Homes exist. The exposure is context management for
+long runs, and the recurring-failure view.
+
+Two honest corrections to "two Homes exist": the second Worker is live and the cross-Home routed read and
+act are proven (spec 366 R5 gate), but B cannot read the shared vault until the key-custody pilot's
+operator issues it a caller token, so a routed read that lands there answers "could not be read" — in B's
+words, correctly — and the hand-off across deployments (376 W3) needs the parent agent's own session wire,
+which no Worker holds yet. Spec 358's verdict still frames everything: **the authority plane held in every
+incident; every defect was the knowledge plane telling a plausible falsehood.**
 
 ## 1. The deep read — what each product actually ships (relevant subset)
 
@@ -88,61 +80,73 @@ Dapr: durable approval timer race, activity-output replay, resiliency policies �
 [deep dive](product-comparison/dapr-agents.md). Buzz: triggers (message/reaction/schedule/webhook),
 external runtimes as members via ACP, in-thread review — spec 359 §3.
 
-## 2. Feature families — theirs, ours, verdict
+## 2. Feature families — theirs, ours, verdict (revised 2026-09-09)
 
-| Family | Field reference | Ours today | Verdict |
+| Family | Field reference | Ours now | Verdict (was → is) |
 | --- | --- | --- | --- |
-| Authority (mandate, per-step verify, revocation, attenuation, intent binding) | policy hooks / interventions / ACLs | live on chain | **ahead** — unchanged |
-| Playbooks / skills | Deep Agents SKILL.md progressive load; Context Hub | schemas + compiler shipped (354 K1–K2); Treasury archetype compiles clean; assignment ceremony + run admission (K3–K4) not wired | **ahead in design, one wave from live** — the multiplier exists, agents don't run under it yet (359 §1) |
-| Durable runs | LangGraph checkpointer; MAF DurableTask; Dapr | checkpoint exists; state client-held per turn | **behind** — the scorecard's biggest "behind" |
-| **Traceability / provenance** | LangSmith run trees; MAF DTS timelines; OTEL GenAI semconv | `provenance` pkg (PROV-O/P-Plan) + `AskEvidence`; not wired to every run; no exporter; no timeline UI data | **behind on ops, ahead in potential** — nobody else has standards-based, queryable, evidential provenance (§4) |
-| Long-term memory | LangGraph Store (namespaces, semantic search); Deep Agents `/memories/`, AGENTS.md | vault-resident memory shipped (358 W5: `apctx:LearnedPreference` class-bound records in the OWNER's vault, read through the same selector, shown in evidence, owner-deletable); no acting-context namespacing or standing-instructions record yet | **at par on doctrine, contract half-built** |
-| Context management | Deep Agents summarization/offload/subagent isolation; prompt caching | none beyond the planner's menu | **behind** — bites on long Endeavors |
-| Evaluation | LangSmith datasets/experiments/Engine; Foundry evaluators | truth cases + `check:ask-truth`; authority twins as scripts | **at par in kind, thin in coverage** |
-| Composition operators | deferred nodes, node caching, subgraphs, `Command.goto` | ontology-compiled fan-out live for payments (358 W4 + W4-tail 2026-09-05: "pay each member 21 usdc" settles s1#1..#4; the identical re-ask completes `done` because idempotency is the on-chain single-use nonce, not a client id); no join / map-reduce / caching / sub-plan operators | **behind on generality, ahead on idempotency** |
-| Triggers / background | LangSmith cron + webhooks; Buzz triggers | `A2aTaskDO` alarms; no trigger model | **behind** (359 F5a) |
-| Control plane / deployment | Agent Server (queue workers, MCP endpoint per agent) | per-agent Workers/DOs | different substrate; **deliberately no run UI in Ring 0** |
-| Semantic knowledge grounding | RAG add-ons; opaque context providers | ontology-bound records, grounded SPARQL, evidence in reply | **ahead** (358 §1) |
+| Authority | policy hooks / ACLs | per-step on-chain verify; chain-first verifier (`verifyAuthorityChain`, 383); child mandates single-use (376); value rail treasury-to-treasury (373) | ahead → **further ahead**: the chain is now on the receipt |
+| Playbooks / skills | Deep Agents SKILL.md, Context Hub | K4 mostly live (definition by digest narrows offers, `skillRef` stamped); K3 ceremony live on org/service/person pages; specialists rule from archetype frontmatter (376 W2, live) | one wave from live → **live**; open: onboarding auto-assign, provenance manifest, K5 Ask ∩ definition |
+| Durable runs | LangGraph checkpointer, MAF DurableTask, Dapr | P1: the checkpoint carries the admitted plan + completed steps; resume replays receipts and re-verifies only unrun steps; 30-min expiry; `DurableStepPort` + Workflows binding (362) | behind → **at par**, with the twist (resume re-verifies) |
+| Traceability / provenance | LangSmith run trees, MAF timelines, OTEL | P6 + 381: `RunRecordV1`, replay re-derives verdicts, GenAI-semconv spans with an attribute firewall, OTLP export, `run.provenance:<runRef>` in the acting agent's vault, retention stated; **381 W3: the Home's Activities page lists an agent's runs and draws each as a timeline (steps, duration, authority decision, hand-off links), with a JSON download** | behind on ops → **at par on ops, ahead on evidence** |
+| Streamed progress | LangGraph streams, A2A SSE | P2: run lines long-polled by the surface; cross-hop relay (M8) | **at par**; SSE deliberately not used |
+| Long-term memory | LangGraph Store, Deep Agents `/memories/` | P7 `ConversationMemoryV1` in the vault; 385 scoped confirmation memory (pick-then-remember, context-scoped, correctable in the open); 358 W5 learned preferences | half-built → **at par**; open: standing-instructions record, acting-context namespacing beyond confirmations |
+| Composition operators | deferred nodes, Send, subgraphs | P3: independent read-only steps batched, authority steps run alone; declared branches; fan-out consult (380, and the topic turn runs through it — W3); hand-off as child delegation (376) | behind → **at par on what matters**; no node caching, no sub-plans (deliberate, §5) |
+| Triggers | LangSmith cron/webhooks, Buzz | P5 + 375: schedule / message / webhook / on-commitment fired live; authority steps suspend on the mandate | behind → **at par** |
+| Multi-agent | MAF handoff/group chat, ADK RemoteA2aAgent, ACP | routed asks + writes across Homes (366, 374 W1–2), hand-off (376), external A2A agents as steps (379 W1–2), fan-out consult (380), committed steps at the participant (382), engagement probe → offer → mandate (384), outsiders as members + TCK green (372) | not scored before → **ahead in kind**; the field has no revocable, chain-verified hop |
+| Context management | Deep Agents summarization/offload, prompt caching | none in harness/orchestration (the topic turn's own clipping only) | **behind** — the one row unchanged |
+| Evaluation | LangSmith datasets/Engine, Foundry evaluators | truth cases + `check:ask-truth`; every wave has a live verify script + an authority twin | **at par in kind, thin**; no CI replay, no recurring-failure clustering |
+| Model plane | MAF providers | 377: a second model behind the same planner port, Home picker, prompt budget fitted and traced | new row, **at par** |
+| Semantic grounding | RAG add-ons | ontology-compiled plans, class-bound records, the answer answers the question (371) | **ahead**, unchanged |
 
-## 3. The prioritized program
+### Where the gaps actually are now
 
-Tiered, with owner, framework analog, and the twist that keeps each item ours. Tier 0 is spec 359's
-chain as written plus the two items this read adds to it (provenance, semantic events) because they are
-cheap now and expensive later.
+Ordered by what the field has and we don't, not by what is unfinished:
 
-### Tier 0 — now (sequence is a dependency chain)
+1. **Context management for long runs** (Deep Agents, LangGraph summarization). No offload of large tool
+   results to vault records, no history summarization at checkpoints, no isolated sub-run. Old Tier 1.3,
+   now the biggest genuine "behind". The twist stands: a sub-run is a child delegation (376 gives the
+   mechanism), an offloaded artifact is a receipted vault record.
+2. **Recurring-failure detection** (LangSmith Engine). Nothing clusters refusals or truth-case failures
+   across runs. Old 1.7, untouched.
+3. **CI replay of the verify scripts** — every wave has a live script and an authority twin; nothing runs
+   them as one suite or samples live asks.
+4. **Second-deployment W3s**, half unblocked (B needs its caller token): 374 W3 routed write delivery
+   across Homes, 376 W3 hand-off across deployments + live revocation twin, 383 W3 bilateral bindings,
+   379 W2 positive REACH twin (a registered outside name — Ligonier is the candidate), 379 W3 reverse.
+5. **Playbook tails**: onboarding auto-assign, K5, provenance manifest.
+6. **Endeavor conformance** (382 W3: decisions by declared approvers wait on spec 333's `RecordDecision`;
+   the Coordinator driving offers and allocations through the Ask as a live twin; milestones ✅).
 
-| # | Feature | Owner | Analog | Our twist / gate |
-| --- | --- | --- | --- | --- |
-| **0.1** | **Playbook compiler loop — close it.** K1–K2 ✅ (schemas with the authority-refusal validator; `@skills/archetype-compiler`; Treasury archetype validated cross-repo, digest byte-identical). **Next: K3** — Home fetches `GET …/archetypes/:aid/definition` via `skills-a2a`, previews the diff (skills gained/lost, tools exposed, mandate types the agent would start asking for), and writes `ArchetypeAssignmentV1` to the agent's vault pinned to the digest, editor ≠ approver ≠ writer; **then K4** — the a2a worker reads the assignment, verifies the commitment, builds the harness from the definition instead of the hand-built tool list; `skillRef` on receipts; **K5** Ask ∩ definition. Tails: seed treasury-steward into live GraphDB; direct schema import once `capability-claims` publishes; corpus leaf for compiled definitions | `capability-claims`/`agent-skills` ✅, `~/skills` ✅, **Home + `demo-a2a` (K3–K4 next)** | Deep Agents SKILL.md progressive load + Context Hub; Pydantic deferred skills | playbook ≠ authority — now *enforced by the validator*, not asserted (354 §1); gate for K3–K4 = Treasury→Bookkeeper reassignment removes the *offer* while every mandate gate stays identical |
-| **0.2** | **Durable runs on `A2aTaskDO`** — plan · refs · keyring mandates · supplied answers · receipts on the DO; per-step checkpoint; **resume-with-recheck**; durable approvals via alarm race; `runRef` as the only handle (turn N sends only what is new) | `a2a`, `harness`, `demo-a2a` | LangGraph checkpointer + `Command(resume)`; MAF DurableTask per-step checkpoint; Dapr `when_any` race | effects replay from receipts, **verdicts re-derive** (351 P1.5); a checkpoint is never authority; gate = the 4-payment fan-out in ≤ N short turns |
-| **0.3** | **Run provenance as the system of record** — every harness run projects to the PROV-O/P-Plan A-box via `provenance.projectRunProvenance` and lands in the *asker's vault*; the run is `prov:Activity`, steps are sub-activities, `prov:qualifiedAssociation/hadPlan` = the playbook version (`skillRef`), `prov:used` = mandate + context records read, `prov:generated` = receipts/artifacts, `prov:actedOnBehalfOf` = the delegator SA. Queryable through the 356 selector like any class-bound record. Home's "How" pane (358) becomes a **"How and why" timeline** fed from it | `provenance`, `harness`, `demo-mcp`, Home | LangSmith run trees; MAF DTS executor timelines | standards-based (W3C PROV), **queryable** (SPARQL over the private A-box), **evidential** (the receipt and the trace are the same graph), firewalled from the public KB (S1). §4 details |
-| **0.4** | **Semantic `RunEvent` emission + Ring-1 OTEL exporter** — emit 350 §9's vocabulary (AskReceived · EntityResolved · MandateVerified/Denied · ApprovalRequested · ToolInvoked · CheckpointSaved · ReceiptCreated · RunCompleted…) with run/step/intent/mandate refs on every event; exporter maps to GenAI semconv + MAF-style workflow spans | `audit`, `demo-a2a`; exporter in a sibling repo (ADR-0037) | MAF OTEL spans; LangSmith traces; Agent Server Prometheus metrics | events are derived from the provenance projection (one source), never a second story; the exporter is glue, the vocabulary is Ring 0 |
-| **0.5** | **Evaluation coverage** — every incident → a truth case (358 rule, enforced); the authority twins (351 §7.9) as replayed cases in CI; online sampling of live asks against the truth probes | `evaluation`, `demo-a2a` scripts | LangSmith datasets/experiments + online evals; Foundry groundedness/tool-call-accuracy | deterministic judges only (358: "no model judges a model here"); the interesting rows are authority properties |
+## 3. The prioritized program (re-cut 2026-09-09)
 
-### Tier 1 — next (after 0.1–0.2 land; 359 #4–6 plus what this read adds)
+### Tier 0 — now
 
-| # | Feature | Owner | Analog | Our twist |
-| --- | --- | --- | --- | --- |
-| **1.1** | **Work & Planning as a compiled playbook** — Coordinator archetype; "what am I working on / propose a plan / allocate / mark milestone"; **no new invoker code** (359 §2 gate) | `~/skills`, `coordination`, `demo-a2a` | MAF/Buzz task surfaces | between-agent stays coordination plane (ADR-0054) |
-| **1.2** | **Long-term memory contract** — memory = class-bound vault records under delegation, namespaced by *acting context* (person / org / workspace), retrieved with evidence, with retention/forget rules; an always-loaded per-agent "standing instructions" record (the AGENTS.md idea) as part of the compiled definition | `context`, `demo-mcp`, `agent-skills` | LangGraph Store namespaces + semantic search; Deep Agents `/memories/` + AGENTS.md | memory informs phrasing and planning, **never authority** (352 §7); cross-tier leakage is a defect (ADR-0025) |
-| **1.3** | **Context management for long runs** — offload large tool results to vault records (not the DO), summarize run history at checkpoint boundaries, isolate heavy sub-work (a sub-run with its own child mandate, results only) | `harness`, `orchestration`, `demo-mcp` | Deep Agents summarization/offloading/subagent isolation; prompt caching | offloaded artifacts are receipted vault records; a sub-run is a **child delegation**, never an in-process subagent with inherited authority |
-| **1.4** | **Triggers (F5a)** — playbook-declared automations (on message / schedule / webhook) as a definition field + `A2aTaskDO` alarm; informational steps run free, authority-bearing steps suspend on their mandate | `agent-skills`, `a2a`, `demo-a2a` | LangSmith cron/webhooks; Buzz triggers | needs 0.2 first; a trigger never carries a standing mandate for value-moving steps |
-| **1.5** | **Composition operators** — parallel fan-out + join (deferred-node semantics), map-reduce over resolved parties, **node caching for informational steps only**, sub-plans | `orchestration` | LangGraph deferred nodes, node caching, subgraphs | each operator receipted + authority-checked; caching is forbidden for side-effecting steps (a substituted result needs a receipt saying so) |
-| **1.6** | **Replay / fork from a checkpoint** — fork a run at step N with re-derived verdicts; diff two runs | `evaluation`, `provenance` | LangGraph time travel; MAF time travel | replay re-runs the verifier against recorded state; verdicts are never replayed |
-| **1.7** | **Recurring-failure detection** — cluster refusals, `ask.unsupported` picks and truth-case failures across runs; surface as candidate cases and playbook fixes | `evaluation`; UI in the UX repo | LangSmith Engine | deterministic clustering over provenance facts (tool id, refusal code, capability), no model judge |
+| # | Feature | Analog | Our twist / gate |
+| --- | --- | --- | --- |
+| **0.1** | **Context management for long runs** (was 1.3) — large tool results become receipted vault records and the plan carries a reference; run history summarized at checkpoints; heavy sub-work runs as a child hand-off (376) so it never pollutes the parent's context | Deep Agents offload/summarize/subagent | spec first: it defines what a checkpoint holds |
+| **0.2** | **CI replay of the verify scripts + authority twins** (was 0.5) — one job, the negative twin beside every positive | LangSmith Engine (in kind) | protects the lead while features keep landing |
+| ~~0.3~~ | ~~Home "How and why" timeline from `run.provenance`~~ — **✅ 2026-09-09 (381 W3)**: Activities lists the runs, each opens as a timeline, JSON download | LangSmith trace UI, MAF DTS dashboard | done |
+
+### Tier 1 — next
+
+| # | Feature | Note |
+| --- | --- | --- |
+| **1.1** | The second-deployment W3s as ONE wave on one fixture (faithnet-b): 374 W3, 376 W3 + live revocation twin, 383 W3, 379 W2/W3 | after B's AKCS caller token (pilot operator) |
+| **1.2** | Playbook tails: onboarding auto-assign, K5 Ask ∩ definition, provenance manifest | housekeeping |
+| **1.3** | Endeavor conformance: decisions by declared approvers (needs 333's `RecordDecision`), the Coordinator's offers/allocations through the Ask as a live twin | 382 W3 rolling |
 
 ### Tier 2 — later
 
-| # | Feature | Analog | Note |
-| --- | --- | --- | --- |
-| 2.1 | External runtimes as admitted members (F5b, ACP) | Buzz | Ring 1 protocol half; Ring 0 contributes admission + delegation (359 §6) |
-| 2.2 | A2A streaming + resubscribe for long runs; reconnect in Home | LangGraph `reconnectOnMount`; Mastra | 351 P0.9 TCK work |
-| 2.3 | Model routing / fallback / prompt caching | MAF providers; Deep Agents | confined to `orchestration-anthropic` |
-| 2.4 | Deployment control-plane parity (queue workers, background runs at scale) | LangSmith Agent Server | measure DO economics first (Dapr deep dive G7); `durable-executor` ports Wave G |
-| 2.5 | No-code playbook authoring | LangSmith Fleet | the `~/skills` web app is the seat; out of Ring 0 |
+| # | Feature | Note |
+| --- | --- | --- |
+| 2.1 | Recurring-failure clustering — deterministic, over `RunProvenanceV1` | old 1.7 |
+| 2.2 | Standing-instructions memory record; acting-context namespacing beyond confirmations | after 385 |
+| 2.3 | DO economics for background runs at scale | unchanged |
+| 2.4 | No-code playbook authoring | unchanged; the `~/skills` web app is the seat |
 
 ## 4. Traceability and provenance — why PROV-O is the lever, not just a nicety
+
+> **2026-09-09:** the "gap is wiring, not design" paragraph below is done — `provenanceOf` runs after every recorded run and lands in the acting agent's vault, and the Home renders it (381 W3). The remaining gap is querying it for failure clusters.
 
 Every framework in §1 answers "what happened" with a **trace**: spans, inputs/outputs, a timeline —
 ops-facing, vendor-shaped, and detached from authority. We already hold the pieces to answer four
@@ -196,10 +200,13 @@ we will need to explain.
 - **Client-held approvals** as the boundary — approvals are signed records + obligations.
 - **A run UI or workflow vendor in Ring 0** (351 §9) — data and events here; rendering and engines outside.
 - **Group chat / swarm parity** — coordination plane or not at all (ADR-0054).
+- **Node caching for side-effecting steps** — a receipt is the record of a step that ran; re-running is a new run.
+- **SSE for progress** — long-poll chosen; the surface reads run lines, the Worker holds nothing open.
 
 ## 6. Sequencing, restated as one line each
 
-0.1 compiler (K1–K2 done → K3 ceremony → K4 run admission) → 0.2 durable runs → 0.3 provenance record + 0.4 events (cheap now, before domains multiply)
-→ 0.5 eval coverage as the acceptance gate → 1.1 Work & Planning playbook → 1.2–1.3 memory + context
-management → 1.4 triggers (needs durable runs) → 1.5–1.7 operators, replay, failure detection → Tier 2.
-Same chain as spec 359, with provenance and events inserted where they are cheapest.
+0.1 context management (spec, then offload + summarize + child sub-runs) → 0.2 CI replay of the verify
+scripts and their authority twins → 1.1 the four second-deployment W3s as one wave once B holds its
+caller token → 1.2 playbook tails → 1.3 the rest of Endeavor conformance → Tier 2. The "run well" gap is
+closed; what remains is to handle long runs without drowning in context, lock the gains down, and finish
+the cross-Home proofs the second deployment made possible.
