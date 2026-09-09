@@ -394,9 +394,13 @@ EMAIL_FROM_NAME = "faithnet"
 # spec 346 migration — the faithnet estate moved persons to `.me` (2026-08-29); legacy `.impact` homes still resolve.
 AGENT_NAME_PARENTS = "me,impact"
 CHAIN_ID = "34348"
-# Spec 377 — ordered allowlist; first = default. Needs ANTHROPIC_API_KEY and GROQ_API_KEY secrets on this env
+# Spec 377 — ordered allowlist; first = default. Needs a key secret per listed provider
 # (`wrangler secret put GROQ_API_KEY --env faithnet`). See the [env.production.vars] comment for the rules.
-ORCHESTRATION_LLM = "anthropic,groq"
+# 2026-09-09: Groq only — Anthropic is OFF on this estate for now (the user's call); its key secret stays set,
+# so listing it again is the whole re-enable. Groq's free plan meters 8k tokens/minute per model: the planner
+# prompt is fitted to `ORCHESTRATION_GROQ_PROMPT_BUDGET` (default 6500, see plannerPromptBudget) and a 429's
+# retry-after ≤30s is waited out once — roughly one ask a minute until the Groq plan is upgraded.
+ORCHESTRATION_LLM = "groq"
 ASSISTANT_RATE_MAX = "60"
 ASSISTANT_RATE_WINDOW_MS = "600000"
 GATHER_RECORD_CLIP = "60000"

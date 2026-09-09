@@ -308,8 +308,42 @@ const faithImpact: WhiteLabelConfig = {
       // `scope=` request parameter is attacker-supplied, this entry is curated (same rule as the
       // app's name and logo at consent).
       allowed_scopes: ['openid', 'profile', 'agent'],
-      allowed_delegation_templates: ['site-login', 'poker-buyin'],
+      // CLUBS (pokernight `docs/WORKSPACES.md`). A poker night belongs to a group, and that group is
+      // a `.workspace` Smart Agent the host custodies — the same shape Field and Gather27 use, and
+      // chosen over `.circle` for the same reason: a workspace is what the estate uses when a
+      // relying app holds a roster in an agent's vault and gates its own calls on it.
+      //
+      //   workspace-create        the host charters the club under their own name
+      //   workspace-member-invite / workspace-join   the two legs of the single-use membership
+      //                           handoff at /connect/workspace-invite
+      //   service-agent-wire      the club authorizes the card room's KMS key as its DELEGATE, so
+      //                           the club's own agent can act between sessions (the weekly
+      //                           invitation goes out when nobody is looking). A wire, never custody.
+      //
+      // All four are curated-only — `SELF_SERVICE_TEMPLATES` is `['site-login','org-create']` — which
+      // is why this entry exists rather than the self-registration the card room started with.
+      allowed_delegation_templates: [
+        'site-login',
+        'poker-buyin',
+        'workspace-create',
+        'workspace-member-invite',
+        'workspace-join',
+        'service-agent-wire',
+      ],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      // Where the `service-agent-wire` ceremony reads the card room's signing key and hands back the
+      // signed wire (`/admin/signer-address`, `/admin/service-wire`). The TABLES worker, because that
+      // is the thing that holds the key and reads the club's vault — pokernight has no separate a2a
+      // worker, and inventing one to match another app's layout would be shape-matching, not design.
+      //
+      // NOTE there is deliberately no `operational_delegate` here. That field mints an org→agent
+      // OPERATIONAL INTENT grant at org-create so an app can submit endeavor intents; the card room
+      // submits none, and a grant nobody redeems is authority sitting there for no reason. The wire
+      // above is the rail this app actually needs, and it names its delegate at ceremony time from
+      // the service's own answer rather than from this file.
+      serviceAgentConfig: {
+        a2aBase: process.env.NEXT_PUBLIC_POKERNIGHT_A2A_BASE || 'https://tables.faithnet.io',
+      },
       // The caps the ceremony binds into the mandate. `payee` is the Poker Site Treasury on
       // faithchain; `asset` is the chain's test USDC (6dp). A buy-in is at most 200 USDC, a night at
       // most 1000 across at most 5 buy-ins, and the window is a day — a session, not a standing
@@ -323,12 +357,11 @@ const faithImpact: WhiteLabelConfig = {
       // for the real seat. `pull` mints the mandate and moves no money.
       paymentConfig: {
         payee: '0xf6F48aF1f645c70339b2FCF4CD36F5d6c5325671',
-        // ⚠️ PLACEHOLDER — SHEQEL IS NOT DEPLOYED YET. This is still the chain's test USDC, which is
-        // what today's `poker-buyin` ceremony mints a mandate over. When the Sheqel token exists,
-        // this line AND `new_member.currency.asset` below both become its address. They must AGREE:
-        // `memberCurrencyPlan` refuses the whole capability while they differ (opening an account
-        // for one token and minting a mandate over another is the failure worth making impossible),
-        // which is why the app-coin behaviour is inert until both are changed.
+        // THE SHEQEL, deployed on faithchain — the card room's own coin and the only currency it
+        // settles in (`contracts/src/Sheqel.sol` in the pokernight repo). This line and
+        // `new_member.currency.asset` below MUST AGREE: `memberCurrencyPlan` refuses the whole
+        // capability while they differ, because opening an account for one token and minting a
+        // mandate over another is the failure worth making impossible.
         asset: '0xa14E4a9447607c1233DcE34dB6Ead47C094f6141',
         maxAmountPerCharge: '200000000',
         maxAggregate: '1000000000',
@@ -369,11 +402,12 @@ const faithImpact: WhiteLabelConfig = {
         personal_treasury: true,
         collect_name: 'required',
         currency: {
-          // ⚠️ PLACEHOLDER — the Sheqel token is being deployed in the poker repo and does not exist
-          // yet. The zero address is how this registry writes "not deployed": `memberCurrencyPlan`
-          // reads it as "no currency declared" and the whole capability stays off, so the live site
-          // behaves today exactly as it did before this block was written. Replace it — and the
-          // identical `paymentConfig.asset` above — with the deployed Sheqel address to turn it on.
+          // The deployed Sheqel, identical to `paymentConfig.asset` above and checked against it.
+          // This block used to carry the zero address, which is how this registry writes "not
+          // deployed" — `memberCurrencyPlan` reads it as "no currency declared" and the whole
+          // capability stays off. The token exists now, so the capability is ON for this one app,
+          // and the registry tests in `lib/new-member.test.ts` assert that it is on here and off
+          // everywhere else.
           asset: '0xa14E4a9447607c1233DcE34dB6Ead47C094f6141',
           name: 'Sheqel',
           plural: 'Sheqels',
@@ -630,14 +664,19 @@ const faithImpact: WhiteLabelConfig = {
     // player re-authorizes next time. The cap the player approves covers the buy-in plus any rebuys
     // they allow; chips still at the table when they leave are returned to the same treasury.
     'poker-buyin': {
+      // NAMES NO CURRENCY. It used to say "Move USDC", which stopped being true the day the card room
+      // cut over to its own coin — and a consent screen that names the wrong money at the moment
+      // somebody approves spending is the worst place in the product to be out of date. The amounts
+      // and the coin come from `currencyConsentLines`, generated from `new_member.currency`, so
+      // there is now exactly one place that says how much and in what.
       canDo: [
-        'Move USDC from the treasury you pick to the card room’s treasury, up to the amount you approve',
+        'Take from the money account you pick, up to the amount you approve, to put chips on the table',
         'Do that again for a rebuy, within that same approved total',
-        'Return your remaining chips to the treasury you picked when you leave the table',
+        'Put your remaining chips back into the same account when you leave the table',
       ],
       cannotDo: [
-        'Move more than the total you approved, or keep charging after tonight’s window closes',
-        'Send funds to any treasury other than the card room’s',
+        'Take more than the total you approved, or keep taking it after tonight’s window closes',
+        'Send it anywhere but the card room',
         'Touch your sign-in methods or recovery',
       ],
       expiryDays: 1,

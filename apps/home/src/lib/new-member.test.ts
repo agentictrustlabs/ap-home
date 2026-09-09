@@ -57,11 +57,15 @@ describe('newMemberPlan — absent config means today’s behaviour', () => {
   it('is declared by exactly one app in the live registry, and that app is pokernight', () => {
     const declared = whitelabel.relyingApps.filter((a) => !planIsEmpty(newMemberPlan(a)));
     expect(declared.map((a) => a.client_id)).toEqual(['pokernight']);
-    // …and its CURRENCY is still off, because the Sheqel token is a documented placeholder (the
-    // zero address). This is the assertion that guarantees the live site behaves today exactly as it
-    // did before the app-coin capability existed — and the one that will fail, on purpose, the day
-    // someone fills the address in without meaning to turn it on.
-    expect(newMemberPlan(declared[0])).toEqual({ treasury: true, name: 'required', currency: null });
+    // …and its CURRENCY IS NOW ON. This assertion used to say the opposite, and said it would fail
+    // "on purpose, the day someone fills the address in without meaning to turn it on". The address
+    // was filled in — the Sheqel is deployed on faithchain — so it fired exactly as designed, and
+    // this is that decision being made rather than silenced. What the guard still guarantees is
+    // below: no OTHER app gains a coin without somebody changing this file.
+    const plan = newMemberPlan(declared[0]);
+    expect(plan.treasury).toBe(true);
+    expect(plan.name).toBe('required');
+    expect(plan.currency?.plural).toBe('Sheqels');
   });
 
   it('leaves every other registered app on the empty plan', () => {
@@ -357,16 +361,23 @@ describe('memberCurrencyPlan — absent or half-written config means today’s b
   });
 
   // The live registry, not a fixture — the same guarantee the `new_member` block above asserts.
-  it('is declared by no app in the live registry today (the Sheqel token is a placeholder)', () => {
+  it('is declared by pokernight, and by nobody else', () => {
     const withCoin = whitelabel.relyingApps.filter((a) => memberCurrencyPlan(a) !== null);
-    expect(withCoin.map((a) => a.client_id)).toEqual([]);
+    expect(withCoin.map((a) => a.client_id)).toEqual(['pokernight']);
   });
 
-  it('leaves every live app on today’s connect — no spend mandate rides any plain sign-in', () => {
+  it('rides pokernight’s connect and NO other app’s', () => {
     for (const app of whitelabel.relyingApps) {
+      if (app.client_id === 'pokernight') continue;
       expect(grantsCoinAtConnect(app), app.client_id).toBe(false);
       expect(coinMandateLeg(app, HOUSE), app.client_id).toBeNull();
     }
+    const poker = whitelabel.relyingApps.find((a) => a.client_id === 'pokernight')!;
+    // One connect covers all three things a player needs to exist: the account, the coin in it, and
+    // the card room allowed to move it within the caps. That is the whole point of the capability,
+    // and it is on for exactly one app.
+    expect(grantsCoinAtConnect(poker)).toBe(true);
+    expect(coinMandateLeg(poker, HOUSE)).not.toBeNull();
   });
 });
 
@@ -388,12 +399,21 @@ describe('mandateDelegate — WHO may present a mandate, separately from WHEN mo
     expect(mandateDelegate({ payee: HOUSE, mode: 'pull', redeemer: SERVICE })).toBe(SERVICE);
   });
 
-  it('leaves every live registry entry’s delegate exactly where it was', () => {
+  it('leaves every live registry entry that declares no redeemer exactly where it was', () => {
     for (const app of whitelabel.relyingApps) {
       const pc = app.paymentConfig;
-      if (!pc) continue;
+      if (!pc || pc.redeemer) continue;
       expect(mandateDelegate(pc), app.client_id).toBe(pc.mode === 'pull' ? pc.payee : null);
     }
+  });
+
+  it('sends pokernight’s mandate to its service agent, not to the house treasury that collects', () => {
+    const pc = whitelabel.relyingApps.find((a) => a.client_id === 'pokernight')!.paymentConfig!;
+    // The two accounts are different on purpose: the house treasury RECEIVES the buy-in, and the
+    // card room's service agent — the one that actually holds a signing key — PRESENTS the mandate.
+    expect(pc.redeemer).toBeDefined();
+    expect(pc.redeemer).not.toBe(pc.payee);
+    expect(mandateDelegate(pc)).toBe(pc.redeemer);
   });
 });
 
@@ -545,8 +565,18 @@ describe('the words the member is shown before they agree', () => {
     const tpl = { canDo: ['Sign in as you'], cannotDo: ['Move your funds'] };
     expect(withCurrencyConsent(tpl, undefined)).toBe(tpl);
     for (const app of whitelabel.relyingApps) {
+      if (app.client_id === 'pokernight') continue;
       expect(withCurrencyConsent(tpl, app), app.client_id).toBe(tpl);
     }
+  });
+
+  it('adds the coin disclosure to pokernight’s, in Sheqels', () => {
+    const tpl = { canDo: ['Sign in as you'], cannotDo: ['Move your funds'] };
+    const poker = whitelabel.relyingApps.find((a) => a.client_id === 'pokernight')!;
+    const out = withCurrencyConsent(tpl, poker);
+    expect(out).not.toBe(tpl);
+    expect(out.canDo.some((l) => /Sheqels/.test(l))).toBe(true);
+    expect(out.cannotDo.some((l) => /stop them/.test(l))).toBe(true);
   });
 
   it('adds the disclosure for an app that will be able to move the coin', () => {

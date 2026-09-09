@@ -24,7 +24,7 @@ const handle = process.argv[2] ?? 'alice';
 /** Words two or more of alice's org-class agents answer to (teams, circles, organizations she stewards). The
  *  rolling conversation window (spec 370 P7, 12 turns) settles a word it saw settled before — correctly, and
  *  BEFORE any question — so a repeatable gate must ask a word the window does not currently hold. */
-const ROTATION = ['somali corridor team', 'rich', 'thompson'];
+const ROTATION = ['somali corridor team', 'rich', 'thompson', 'xyz', 'voice test'];
 let word = (process.argv[3] ?? '').toLowerCase();
 // THREE DIFFERENT SENTENCES for the same act: re-sending the SAME question re-enters the unfinished run
 // (spec 350 W3), whose supplied choice then rides the checkpoint — that would prove the checkpoint, not the

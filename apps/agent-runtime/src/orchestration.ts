@@ -89,7 +89,7 @@ const RULE_BASED_PLANNER: Planner = createRuleBasedPlanner([
 ]);
 
 /** The env subset the planner selection needs. */
-export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | 'ORCHESTRATION_MODEL' | 'GROQ_API_KEY' | 'ORCHESTRATION_GROQ_MODEL' | 'ORCHESTRATION_GROQ_BASE_URL'>;
+export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | 'ORCHESTRATION_MODEL' | 'GROQ_API_KEY' | 'ORCHESTRATION_GROQ_MODEL' | 'ORCHESTRATION_GROQ_BASE_URL' | 'ORCHESTRATION_GROQ_PROMPT_BUDGET'>;
 
 // ── WHICH MODEL PROPOSES — spec 377 ──────────────────────────────────────────────────────────────────────
 //
@@ -128,6 +128,24 @@ export function llmAllowlist(env: PlannerEnv): LlmProvider[] {
 /** The provider a turn gets when it names none. `null` ⇒ no model is configured (a configuration, not a fallback). */
 export function defaultProvider(env: PlannerEnv): LlmProvider | null {
   return llmAllowlist(env)[0] ?? null;
+}
+
+/**
+ * A PROVIDER'S PROMPT BUDGET, in tokens — the most one planner request may carry, or `null` for no bound.
+ *
+ * Groq's free plan meters 8k tokens per minute per model, and a single request above that is refused
+ * outright (HTTP 413), not queued: the ask fails. Every tool-calling model on that plan carries the same 8k
+ * (the 70k compound systems accept no user-defined tools), so the bound is the plan's, not a model's. The
+ * default leaves room for the tokenizer's variance over a chars-per-token estimate; `ORCHESTRATION_GROQ_PROMPT_BUDGET`
+ * raises it on a paid tier. Anthropic's context is not the binding constraint and is left unbounded.
+ * What the budget DROPS, and in what order, is `fitPlannerPrompt`'s documented contract — recorded on the
+ * trace — never a silent truncation.
+ */
+export const GROQ_FREE_PLAN_PROMPT_BUDGET = 6500;
+export function plannerPromptBudget(env: PlannerEnv, provider: LlmProvider | null): number | null {
+  if (provider !== 'groq') return null;
+  const raw = Number(env.ORCHESTRATION_GROQ_PROMPT_BUDGET);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : GROQ_FREE_PLAN_PROMPT_BUDGET;
 }
 
 /** The concrete model a provider runs — reported on the trace, never re-derived there. */

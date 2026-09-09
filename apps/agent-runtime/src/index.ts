@@ -312,6 +312,8 @@ export interface Env {
   GROQ_API_KEY?: string;
   ORCHESTRATION_GROQ_MODEL?: string;
   ORCHESTRATION_GROQ_BASE_URL?: string;
+  /** The most tokens one Groq planner request may carry (default: the free plan's, see `plannerPromptBudget`). */
+  ORCHESTRATION_GROQ_PROMPT_BUDGET?: string;
   /** Spec 365 — the display name system mail (a sign-in code) goes out under. */
   EMAIL_FROM_NAME?: string;
   ORCHESTRATION_MODEL?: string;

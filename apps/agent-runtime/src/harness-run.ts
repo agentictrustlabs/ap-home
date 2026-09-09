@@ -61,7 +61,7 @@ import { RELATIONSHIP_TYPE, ROLE } from '@agenticprimitives/agent-relationships'
 import type { AuditSink } from '@agenticprimitives/audit';
 import { enforcersFromEnv } from './org-wire.js';
 import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a';
-import { selectPlanner, selectComposer, type LlmProvider } from './orchestration.js';
+import { selectPlanner, selectComposer, defaultProvider, plannerPromptBudget, type LlmProvider } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from '@agenticprimitives/context';
 import { structuredCallFor } from './context-wiring.js';
 import type { DefinitionToolV1 } from '@agenticprimitives/capability-claims';
@@ -2064,7 +2064,10 @@ export type AskReplyVariant =
   | { kind: 'prompt'; runRef: string; resumeToken: string; prompt: NonNullable<RunResult['prompt']> }
   /** Spec 374 — the run waits on ANOTHER agent's steward. Not resumable by the asker: only the debtor's
    *  delivered answer moves it. `on` is where the act actually waits; `commitment` is the record. */
-  | { kind: 'waiting'; runRef: string; stepRef: string; text: string; on: { agent: Address; name?: string; runRef: string }; commitment: CommitmentRefV1 }
+  | { kind: 'waiting'; runRef: string; stepRef: string; text: string; on: { agent: Address; name?: string; runRef: string }; commitment: CommitmentRefV1;
+      /** How THIS run resolved the words the parked act names — cited (a remembered choice, the last ask), so the
+       *  person waiting can see which "xyz" they are waiting on and say otherwise. Display; decides nothing. */
+      parties?: ResolvedParty[] }
   | { kind: 'done'; runRef: string; result: unknown; receipts: RunResult['receipts']; skillProvenance?: Record<string, unknown>;
       /** Spec 366/374 — which steps were DONE BY ANOTHER AGENT (a routed act): the subject, how it was reached, its run. */
       routed?: RoutedStepV1[];
@@ -2104,6 +2107,12 @@ export interface PlannerTraceV1 {
   promptDigest: Hex;
   /** How many contract examples were rendered into that prompt. */
   examplesRendered: number;
+  /** How much of the playbook's instructions the planner was shown: the doctrine (`chars`) of the whole
+   *  (`of`). The per-act execution bodies are not rendered — see `plannerDoctrineOf`. */
+  instructionsRendered?: { chars: number; of: number };
+  /** A provider's prompt budget and how the prompt was made to fit it: the estimate the request was judged
+   *  by and every drop taken, in order (`fitPlannerPrompt`). Absent ⇒ no budget applied. */
+  promptBudget?: { tokens: number; estimated: number; trimmed: string[] };
   /** Every admission verdict, in order — a refused plan shows what was proposed and why it was refused. */
   admission: Array<{ refused: Array<{ code: string; message: string; stepIndex?: number; toolId?: string }>; replanned: boolean }>;
   /** The plan that ran (or was refused last), as the executor received it BEFORE argument resolution. */
@@ -2262,20 +2271,97 @@ export function paymentAskOf(goal: string): { payee?: string; usdc?: string; mem
 }
 
 /**
+ * THE PLANNER'S SHARE OF THE PLAYBOOK — the doctrine, not the act bodies.
+ *
+ * The ~/skills compiler renders an archetype's instructions as the archetype's own doctrine (who the agent
+ * is, whose records, what needs authority, how it answers) followed by ONE SECTION PER ACT under the heading
+ * below — each act's SKILL.md body, verbatim (`packages/archetype-compiler/src/index.ts`, the `acts` block).
+ * For the person steward that tail is 24k of the 31k characters, and the planner is the only consumer of
+ * the instructions field at all: it was reading every act's execution contract in order to pick a tool,
+ * while the same contracts' `description`, `inputSchema` and `utterances` — the parts written FOR
+ * selection — were already beside it as tools and examples. Live, that was a 13.6k-token request; a free
+ * planner tier caps at 8k, and every planner paid the latency.
+ *
+ * The split is STRUCTURAL, on the compiler's heading, never a character budget: nothing is cut mid-sentence
+ * and nothing is dropped silently — the trace records the share (`instructionsRendered`), and an
+ * instructions document without the heading is rendered whole. The digest covers exactly what was shown.
+ */
+export const ACT_SECTIONS_HEADING = '\n## How each act is done\n';
+/** The ask planner's completion budget — a tool call, never an artifact. */
+export const ASK_PLANNER_MAX_TOKENS = 512;
+export function plannerDoctrineOf(instructions: string): { text: string; chars: number; of: number } {
+  const at = instructions.indexOf(ACT_SECTIONS_HEADING);
+  const text = at >= 0 ? instructions.slice(0, at).trimEnd() : instructions;
+  return { text, chars: text.length, of: instructions.length };
+}
+
+/**
  * Spec 367 W2 — the few-shot block rendered from the playbook's contracts. One line per example, the
  * positive ones as the exact tool call, the negative ones as what NOT to choose and why. Deterministic
  * (same definition ⇒ same block), so the receipt's playbook digest covers what the planner was taught.
  */
-export function utteranceExamples(tools: ReadonlyArray<{ id: string; utterances?: ReadonlyArray<{ says: string; args?: Record<string, string>; isNot?: string }> }>): string {
+export function utteranceExamples(tools: ReadonlyArray<{ id: string; utterances?: ReadonlyArray<{ says: string; args?: Record<string, string>; isNot?: string }> }>,
+  /** Under a prompt budget: at most this many POSITIVE examples per tool (the negatives always render —
+   *  "what not to choose" is the rarer lesson). `undefined` ⇒ every example the author wrote. */
+  positivesPerTool?: number): string {
   const lines: string[] = [];
   for (const t of tools) {
+    let positives = 0;
     for (const u of t.utterances ?? []) {
       if (u.isNot !== undefined) lines.push(`- "${u.says}" → NOT ${t.id}: ${u.isNot}`);
-      else lines.push(`- "${u.says}" → ${t.id} ${JSON.stringify(u.args ?? {})}`);
+      else if (positivesPerTool === undefined || positives++ < positivesPerTool) lines.push(`- "${u.says}" → ${t.id} ${JSON.stringify(u.args ?? {})}`);
     }
   }
   if (!lines.length) return '';
   return `\n\nEXAMPLES FROM THE PLAYBOOK (the domain author's own; follow their shape exactly — arguments are the person's WORDS, never addresses):\n${lines.join('\n')}`;
+}
+
+/**
+ * FIT THE PLANNER PROMPT TO A PROVIDER'S BUDGET — by dropping WHOLE, NAMED parts in a fixed order, never by
+ * cutting text mid-way, and recording every drop on the trace (`promptBudget.trimmed`).
+ *
+ * The estimate is chars-per-token (prose ≈ 4, tool JSON ≈ 3.5 — measured against Groq's own count of a
+ * 33k-char request at 8.1k tokens). The order is what a planner can best do without:
+ *   1. `examples:one-positive-per-tool` — the domain author's negatives stay; positives beyond one per tool go.
+ *   2. `conversation:2-turns`           — the last two recalled asks instead of four.
+ *   3. `doctrine:opening-only`          — the archetype's opening paragraph(s), not its sections.
+ *   4. `examples:negatives-only`        — no positive examples at all.
+ * When even that does not fit, the smallest form is sent and `over-budget` is recorded — the provider's
+ * refusal then says the exact count; nothing here pretends to have fitted.
+ */
+export function estimatePromptTokens(system: string, tools: ReadonlyArray<Pick<ToolSpec, 'id' | 'description' | 'inputSchema'>>, user: string): number {
+  const toolChars = tools.reduce((n, t) => n + JSON.stringify({ name: t.id, description: t.description, parameters: t.inputSchema ?? {} }).length, 0);
+  return Math.ceil((system.length + user.length) / 4 + toolChars / 3.5);
+}
+export function fitPlannerPrompt(
+  parts: { doctrine: string | null; contract: (conversationTurns: number) => string; examples: (positivesPerTool?: number) => string },
+  tools: ReadonlyArray<Pick<ToolSpec, 'id' | 'description' | 'inputSchema'>>,
+  user: string,
+  budgetTokens: number,
+): { text: string; estimated: number; trimmed: string[] } {
+  const opening = (d: string) => { const at = d.indexOf('\n## '); return at >= 0 ? d.slice(0, at).trimEnd() : d; };
+  const render = (o: { positives?: number; turns: number; doctrineOpening: boolean }) => {
+    const d = parts.doctrine === null ? null : o.doctrineOpening ? opening(parts.doctrine) : parts.doctrine;
+    const body = `${parts.contract(o.turns)}${parts.examples(o.positives)}`;
+    return d ? `${d}\n\n---\n\n${body}` : body;
+  };
+  const steps: Array<{ name: string | null; o: { positives?: number; turns: number; doctrineOpening: boolean } }> = [
+    { name: null, o: { turns: 4, doctrineOpening: false } },
+    { name: 'examples:one-positive-per-tool', o: { positives: 1, turns: 4, doctrineOpening: false } },
+    { name: 'conversation:2-turns', o: { positives: 1, turns: 2, doctrineOpening: false } },
+    { name: 'doctrine:opening-only', o: { positives: 1, turns: 2, doctrineOpening: true } },
+    { name: 'examples:negatives-only', o: { positives: 0, turns: 2, doctrineOpening: true } },
+  ];
+  const trimmed: string[] = [];
+  let last = { text: '', estimated: 0 };
+  for (const st of steps) {
+    if (st.name) trimmed.push(st.name);
+    const text = render(st.o);
+    last = { text, estimated: estimatePromptTokens(text, tools, user) };
+    if (last.estimated <= budgetTokens) return { ...last, trimmed };
+  }
+  trimmed.push('over-budget');
+  return { ...last, trimmed };
 }
 
 /** Selection kinds a screen declares → the typed-name suffix a party role admits (ADR-0061). */
@@ -3177,8 +3263,10 @@ async function askReplyForInner(env: HarnessEnv, input: {
       // The receiver's own words travel in the prompt ("Waiting on X — <what it said>"): a person reading
       // "waiting" deserves to know what the other agent is waiting FOR.
       const said = r.prompt.prompt.replace(/^Waiting on [^—]+—\s*/, '').replace(/\.$/, '');
+      const parties = [...(input.resolved?.values() ?? [])];
       return { kind: 'waiting', runRef: r.runRef, stepRef: r.prompt.stepRef, on: { agent: cm.at.agent as Address, ...(cm.at.name ? { name: cm.at.name } : {}), runRef: cm.at.runRef }, commitment: cm,
-        text: `${name}'s steward has to finish this — ${said || 'it has been asked and is waiting on them'}. It will finish here when they do; nothing was signed for them.` };
+        text: `${name}'s steward has to finish this — ${said || 'it has been asked and is waiting on them'}. It will finish here when they do; nothing was signed for them.`,
+        ...(parties.length ? { parties } : {}) };
     }
     return { kind: 'prompt', runRef: r.runRef, resumeToken: r.resumeToken ?? r.prompt.stepRef, prompt: r.prompt };
   }
@@ -3836,7 +3924,7 @@ The person has ALREADY granted authority to ${holding} for this exact ask. That 
   // SAFETY is not delegated to the model: the loop refuses a forEach over anything the producing tool
   // does not declare enumerable, the ontology binding caps the count, and every item re-enters the
   // verifier — a mandate per payment, exactly as if the person had asked N times.
-  const fanOutPrompt = `${systemPrompt}
+  const contractFor = (conversationTurns: number) => `${systemPrompt}
 
 FOR EVERY / FOR EACH asks ("pay every member of X 2 usdc") are the ONE case where you emit TWO tool
 calls, BOTH IN THIS SAME RESPONSE, in order:
@@ -3848,21 +3936,31 @@ yourself, do NOT emit one call per member, and never fan out over anything excep
 enumerates. "Choose the tool" above means one CAPABILITY — this two-call form is still one capability,
 fanned out.
 
-${conversationForPrompt(input.conversation, String(input.addressee ?? ''))}
+${conversationForPrompt(input.conversation, String(input.addressee ?? ''), conversationTurns)}
 
 A step that should happen ONLY IF an earlier read found something adds {"$when": {"ref": "<name>.<path>",
 "exists": true}} (or "exists": false for the other branch) to its arguments — the runtime takes or skips
 it from that result; do not plan two alternatives and hope. Reads that need nothing from each other may
 be emitted together; the runtime runs them side by side.`;
+  const fanOutPrompt = contractFor(4);
   // The playbook's own words lead: an agent set to an archetype is TOLD what it is before the rules of
   // asking. Rendered from the compiled definition (spec 354) — versioned and receipted, never a silent
   // prompt edit.
   // Spec 367 W2 — THE SKILL'S OWN EXAMPLES teach the planner. Each contract's utterances, positive and
   // negative, rendered once as few-shot; the same fixtures are the scenario eval set. Absent ⇒ nothing
   // is rendered (an archetype with no examples plans from descriptions, as before).
-  const examples = playbook ? utteranceExamples(Object.values(playbook.tools ?? {})) : '';
-  const withPlaybook = playbook ? `${playbook.instructions}\n\n---\n\n${fanOutPrompt}${examples}` : fanOutPrompt;
-  const selected = selectPlanner(env as never, { systemPrompt: withPlaybook, ...(input.provider ? { provider: input.provider } : {}) });
+  const examplesFor = (positivesPerTool?: number) => playbook ? utteranceExamples(Object.values(playbook.tools ?? {}), positivesPerTool) : '';
+  const examples = examplesFor();
+  const doctrine = playbook ? plannerDoctrineOf(playbook.instructions) : null;
+  const withPlaybook = doctrine ? `${doctrine.text}\n\n---\n\n${fanOutPrompt}${examples}` : fanOutPrompt;
+  // A provider with a prompt budget (Groq's free plan) is served the same prompt made to FIT — whole parts
+  // dropped in a fixed order and each drop recorded — decided at plan time, when the tools it rides with are
+  // known. The digest on the trace is of what was actually sent.
+  const budget = plannerPromptBudget(env as never, input.provider ?? defaultProvider(env as never));
+  // A plan is one tool call with a handful of words, or the two-call fan-out: a few hundred tokens at most.
+  // The adapters' 1024 default is for turns that emit an artifact; a planner budget that size counts against
+  // a provider's per-minute limit as if it were spent (Groq's on-demand tier meters max_tokens up front).
+  const selected = selectPlanner(env as never, { systemPrompt: withPlaybook, maxTokens: ASK_PLANNER_MAX_TOKENS, ...(input.provider ? { provider: input.provider } : {}) });
   // The compiler answers for the shapes it claims; the model answers for the rest. Not a fallback pair
   // (ADR-0013): the match is deterministic and decided BEFORE any planner runs, the way a rule-based
   // planner rule would be.
@@ -3882,7 +3980,15 @@ be emitted together; the runtime runs them side by side.`;
         plan: async (pin) => {
           const compiled = compiledConsult(pin.intent.goal) ?? compiledRead(pin.intent.goal) ?? compiledFanOut(pin.intent.goal) ?? compiledPayment(pin.intent.goal);
           if (compiled) { plannerUsed = 'compiled'; return compiled; }
-          plannerUsed = selected.kind; return selected.planner.plan(pin);
+          plannerUsed = selected.kind;
+          if (budget !== null && selected.kind !== 'rule-based') {
+            const fitted = fitPlannerPrompt({ doctrine: doctrine?.text ?? null, contract: contractFor, examples: examplesFor }, pin.tools, `Goal: ${pin.intent.goal}\nContext: ${JSON.stringify(pin.intent.context ?? {})}`, budget);
+            trace.promptBudget = { tokens: budget, estimated: fitted.estimated, trimmed: fitted.trimmed };
+            trace.promptDigest = keccak256(toBytes(fitted.text));
+            trace.examplesRendered = (fitted.text.match(/^- /gm) ?? []).length;
+            return selectPlanner(env as never, { systemPrompt: fitted.text, maxTokens: ASK_PLANNER_MAX_TOKENS, ...(input.provider ? { provider: input.provider } : {}) }).planner.plan(pin);
+          }
+          return selected.planner.plan(pin);
         },
       };
   // Spec 384 W3 — the campaign's selection binds the planned step to its provider and offer, whoever planned it.
@@ -3893,6 +3999,7 @@ be emitted together; the runtime runs them side by side.`;
   const trace: PlannerTraceV1 = {
     planner: plannerUsed, ...(selected.model ? { model: selected.model } : {}), toolsExposed: [], recalledTurns: input.conversation?.turns.length ?? 0, playbook: playbook ? { archetypeId: playbook.archetypeId, archetypeVersion: playbook.archetypeVersion, digest: playbook.digest } : null,
     promptDigest: keccak256(toBytes(withPlaybook)), examplesRendered: (examples.match(/^- /gm) ?? []).length,
+    ...(doctrine ? { instructionsRendered: { chars: doctrine.chars, of: doctrine.of } } : {}),
     admission: [], plan: [], bindings: [],
     ...(input.surface || input.channel ? { surface: { ...(input.surface?.realm?.kind ? { realm: input.surface.realm.kind } : {}), ...(input.surface?.capabilities ? { capabilities: input.surface.capabilities.length } : {}), ...(input.channel ? { channel: input.channel } : {}) } } : {}),
   };
