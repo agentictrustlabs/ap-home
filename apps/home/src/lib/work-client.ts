@@ -71,6 +71,8 @@ export interface PlanRow {
   /** Who proposed this revision — the ORG address itself means the org agent's suggested draft. */
   proposedBy?: string;
   steps: PlanStepRow[];
+  /** Spec 382 W3 — the milestones the plan defines (achievements are the detail's `milestones`). */
+  milestones?: Array<{ milestoneId: string; title: string; criteria?: Array<{ criterionId: string }> }>;
 }
 
 export interface ParticipationRow {
@@ -178,6 +180,8 @@ export interface WorkDetailResponse {
   allocations?: AllocationRow[];
   commitments?: CommitmentRow[];
   decisions?: DecisionRow[];
+  /** Spec 382 W3 — milestone achievements recorded in the endeavor's log. */
+  milestones?: Array<{ milestoneId: string; evidenceRefs?: unknown[]; recordedBy?: string; occurredAt?: string }>;
   events?: EndeavorEventRow[];
 }
 
@@ -270,8 +274,9 @@ export async function proposePlan(
   org: string,
   endeavorId: string,
   steps: Array<{ stepId: string; kind: string; description: string }>,
+  milestones?: Array<{ milestoneId: string; title: string; criteria?: Array<{ criterionId: string }> }>,
 ): Promise<{ planId?: string; revision?: number; contentHash?: string }> {
-  return postWork(token, { action: 'proposePlan', org: org.toLowerCase(), endeavorId, planSteps: steps }) as Promise<{
+  return postWork(token, { action: 'proposePlan', org: org.toLowerCase(), endeavorId, planSteps: steps, ...(milestones?.length ? { milestones } : {}) }) as Promise<{
     planId?: string; revision?: number; contentHash?: string;
   }>;
 }
@@ -373,6 +378,11 @@ export async function markStepDone(
   evidence: string,
 ): Promise<void> {
   await postWork(token, { action: 'satisfyStep', org: org.toLowerCase(), endeavorId, stepId, evidence });
+}
+
+/** Spec 382 W3 — record a milestone of the adopted plan as achieved (endeavor.milestone.achieve), with evidence. */
+export async function achieveMilestone(token: string, org: string, endeavorId: string, milestoneId: string, evidence: string): Promise<void> {
+  await postWork(token, { action: 'achieveMilestone', org: org.toLowerCase(), endeavorId, milestoneId, evidence });
 }
 
 /** Mark the whole endeavor complete (endeavor.satisfy) — coordinator/steward act. */

@@ -22,6 +22,7 @@ import {
   completeEndeavor,
   fetchWorkDetail,
   markStepDone,
+  achieveMilestone,
   offerContribution,
   proposePlan,
   recordDecision,
@@ -208,6 +209,17 @@ export function OrgWorkEndeavorDetail({ org, endeavorId }: { org: Address; endea
     await markStepDone(session.token, communityId, endeavorId, stepId, note);
     setDoneFor(null); setDoneNote('');
   }), [run, session, communityId, endeavorId, doneNote]);
+
+  // Spec 382 W3 — a milestone reached: the plan names it, the note is the criteria evidence.
+  const [milestoneFor, setMilestoneFor] = useState<string | null>(null);
+  const [milestoneNote, setMilestoneNote] = useState('');
+  const achieve = useCallback((milestoneId: string) => run(`milestone:${milestoneId}`, async () => {
+    if (!session) return;
+    const note = milestoneNote.trim();
+    if (!note) throw new Error('Say briefly how the criteria were met — it becomes the achievement evidence.');
+    await achieveMilestone(session.token, communityId, endeavorId, milestoneId, note);
+    setMilestoneFor(null); setMilestoneNote('');
+  }), [run, session, communityId, endeavorId, milestoneNote]);
 
   const complete = useCallback(() => run('complete', async () => {
     if (!session) return;
@@ -468,6 +480,38 @@ export function OrgWorkEndeavorDetail({ org, endeavorId }: { org: Address; endea
                   </div>
                 );
               })}
+              {(detail.plan.milestones ?? []).length > 0 && (
+                <div style={{ marginTop: '0.6rem' }}>
+                  <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.04em', opacity: 0.6, marginBottom: '0.25rem' }}>Milestones</div>
+                  {(detail.plan.milestones ?? []).map((m) => {
+                    const hit = (detail.milestones ?? []).find((a) => a.milestoneId === m.milestoneId);
+                    const canAchieve = !hit && phase === 'execution' && isSteward;
+                    return (
+                      <div key={m.milestoneId} style={{ padding: '0.35rem 0', borderBottom: '1px solid var(--color-border)' }}>
+                        <div style={{ display: 'flex', gap: '0.55rem', alignItems: 'baseline', fontSize: '0.84rem' }}>
+                          <span aria-hidden style={{ flex: 'none', width: 16, textAlign: 'center', color: hit ? 'var(--color-sage-700, #047857)' : 'var(--color-text-muted)' }}>{hit ? '◆' : '◇'}</span>
+                          <span style={{ flex: 1, ...(hit ? { opacity: 0.7 } : {}) }}>{m.title}</span>
+                          <span style={{ flex: 'none', fontSize: '0.72rem', color: hit ? 'var(--color-sage-700, #047857)' : 'var(--color-text-muted)' }}>
+                            {hit ? `Achieved${hit.occurredAt ? ` · ${new Date(hit.occurredAt).toLocaleDateString()}` : ''}` : 'Not yet'}
+                          </span>
+                          {canAchieve && milestoneFor !== m.milestoneId && (
+                            <button type="button" className="ghost" style={{ flex: 'none', fontSize: '0.74rem' }} onClick={() => { setMilestoneFor(m.milestoneId); setMilestoneNote(''); }}>
+                              Mark achieved
+                            </button>
+                          )}
+                        </div>
+                        {canAchieve && milestoneFor === m.milestoneId && (
+                          <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem', alignItems: 'center' }}>
+                            <input autoFocus placeholder="How were the criteria met? (recorded as achievement evidence)" value={milestoneNote} onChange={(ev) => setMilestoneNote(ev.target.value)} style={{ flex: 1, fontSize: '0.8rem', padding: '0.32rem 0.5rem', border: '1px solid var(--color-border)', borderRadius: 6 }} />
+                            <BusyButton busy={busyId === `milestone:${m.milestoneId}`} busyLabel="Saving…" className="btn-primary" style={{ width: 'auto' }} onClick={() => void achieve(m.milestoneId)}>Achieved</BusyButton>
+                            <button type="button" className="ghost" onClick={() => setMilestoneFor(null)}>Cancel</button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {phase === 'execution' && Object.values(offerSteps).some(Boolean) && (
                 <div style={{ marginTop: '0.55rem' }}>
                   <BusyButton busy={busyId === 'offer'} busyLabel="Offering…" className="btn-primary" style={{ width: 'auto' }} onClick={() => void offer()}>

@@ -86,6 +86,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         signature?: { signer: string; scheme: string; signature: string };
         /** proposePlan: full step records (the DO validates stepId/kind/description). */
         planSteps?: Array<{ stepId: string; kind: string; description: string }>;
+        /** Spec 382 W3 — proposePlan: the milestones the plan defines; achieveMilestone: which one was reached. */
+        milestones?: Array<{ milestoneId: string; title: string; criteria?: Array<{ criterionId: string }> }>;
+        milestoneId?: string;
         proposalRef?: string;
         note?: string;
         stepId?: string;
@@ -138,6 +141,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       session: who.token,
       endeavorId: body.endeavorId,
       steps: body.planSteps,
+      ...(Array.isArray(body.milestones) && body.milestones.length ? { milestones: body.milestones } : {}),
       ...(stewardship ? { stewardship } : {}),
     });
     return jsonCors(r.body, request, r.status);
@@ -207,6 +211,18 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
 
   // Execution (spec 332 §6): mark ONE step done with completion evidence — recorded by the
   // managing principal or an active participant (the reducer's gate, not ours).
+  // Spec 382 W3 — a milestone of the adopted plan, recorded achieved with evidence (the reducer's gate).
+  if (body.action === 'achieveMilestone') {
+    if (!body.endeavorId?.trim() || !body.milestoneId?.trim() || !body.evidence?.trim()) {
+      return jsonCors({ error: 'endeavorId, milestoneId, evidence required' }, request, 400);
+    }
+    const r = await callInteractions(env, org, 'endeavor.milestone.achieve', {
+      session: who.token, endeavorId: body.endeavorId, milestoneId: body.milestoneId, evidence: body.evidence,
+      ...(stewardship ? { stewardship } : {}),
+    });
+    return jsonCors(r.body, request, r.status);
+  }
+
   if (body.action === 'satisfyStep') {
     if (!body.endeavorId?.trim() || !body.stepId?.trim() || !body.evidence?.trim()) {
       return jsonCors({ error: 'endeavorId, stepId, evidence required' }, request, 400);

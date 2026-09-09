@@ -26,6 +26,8 @@ export const ENDEAVOR_REQUEST_CAPABILITY = 'coordination.endeavor.request' as co
 export const CONTRIBUTION_PROPOSE_CAPABILITY = 'coordination.contribution.propose' as const;
 export const CONTRIBUTION_ALLOCATE_CAPABILITY = 'coordination.contribution.allocate' as const;
 export const ENDEAVOR_SATISFY_CAPABILITY = 'coordination.endeavor.satisfy' as const;
+/** Spec 382 W3 (M6 milestones) — a milestone the adopted plan defines, recorded achieved with criteria evidence. */
+export const MILESTONE_ACHIEVE_CAPABILITY = 'coordination.milestone.achieve' as const;
 
 const ORG_ARG = { org: { type: 'string', description: 'The organization, team, circle or church whose work this is — its address or its name. Defaults to the agent being asked when it is one.' } };
 
@@ -91,8 +93,19 @@ export const ENDEAVOR_SATISFY_TOOL: ToolSpec = {
   establishes: 'authoritative',
 };
 
+/** A milestone reached — the adopted plan names it; the evidence says how its criteria were met. */
+export const MILESTONE_ACHIEVE_TOOL: ToolSpec = {
+  id: MILESTONE_ACHIEVE_CAPABILITY,
+  verbs: ['milestone reached', 'reached the milestone', 'mark milestone', 'milestone achieved', 'hit the milestone', 'record the milestone'],
+  description: 'Record a milestone of an endeavor\'s adopted plan as ACHIEVED, with a note of how its criteria were met. Args: org, endeavorId, milestoneId (from the plan), note. The organization\'s act by a steward, or the participant\'s own; the record refuses a milestone the plan does not define or one already achieved.',
+  inputSchema: { type: 'object', properties: { ...ORG_ARG, endeavorId: { type: 'string' }, milestoneId: { type: 'string', description: 'The milestone id from the adopted plan.' }, note: { type: 'string', description: 'How the criteria were met, in a sentence — the achievement evidence.' } }, required: ['org', 'endeavorId', 'milestoneId'] },
+  capability: { id: MILESTONE_ACHIEVE_CAPABILITY, action: 'achieve', resourceArg: 'org', authorityArg: 'org' },
+  risk: 'medium',
+  establishes: 'authoritative',
+};
+
 export const COORDINATION_READ_TOOLS: ToolSpec[] = [ENDEAVOR_LIST_TOOL, ENDEAVOR_GET_TOOL];
-export const COORDINATION_ACTION_TOOLS: ToolSpec[] = [ENDEAVOR_REQUEST_TOOL, CONTRIBUTION_PROPOSE_TOOL, CONTRIBUTION_ALLOCATE_TOOL, ENDEAVOR_SATISFY_TOOL];
+export const COORDINATION_ACTION_TOOLS: ToolSpec[] = [ENDEAVOR_REQUEST_TOOL, CONTRIBUTION_PROPOSE_TOOL, CONTRIBUTION_ALLOCATE_TOOL, ENDEAVOR_SATISFY_TOOL, MILESTONE_ACHIEVE_TOOL];
 export const COORDINATION_CAPABILITY_IDS = new Set<string>([...COORDINATION_READ_TOOLS, ...COORDINATION_ACTION_TOOLS].map((t) => t.id));
 
 export interface CoordinationDeps extends StandingDeps {
@@ -198,6 +211,11 @@ export function endeavorActInvoker(deps: CoordinationDeps, addressee: Address, p
       case ENDEAVOR_SATISFY_CAPABILITY: {
         const r = await deps.interactionsOp(o.org, 'endeavor.satisfy', { ...common, endeavorId: String(args.endeavorId ?? ''), ...(args.note ? { note: String(args.note) } : {}) });
         return { org: o.org, endeavorId: r.endeavorId, lifecycle: r.lifecycle };
+      }
+      case MILESTONE_ACHIEVE_CAPABILITY: {
+        const milestoneId = String(args.milestoneId ?? '').trim();
+        const r = await deps.interactionsOp(o.org, 'endeavor.milestone.achieve', { ...common, endeavorId: String(args.endeavorId ?? ''), milestoneId, ...(args.note ? { evidence: String(args.note) } : {}) });
+        return { org: o.org, endeavorId: String(args.endeavorId ?? ''), milestoneId: r.milestoneId ?? milestoneId, note: 'Recorded as achieved in the endeavor\'s log, with the evidence given.' };
       }
       default: throw new Error(`${toolId} is not a coordination act`);
     }

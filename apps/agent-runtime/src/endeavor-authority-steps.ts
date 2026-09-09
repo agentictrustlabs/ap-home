@@ -60,6 +60,7 @@ export const NOT_PLAN_STEPS: readonly string[] = [
   'coordination.contribution.propose',
   'coordination.contribution.allocate',
   'coordination.endeavor.satisfy',
+  'coordination.milestone.achieve',
   'treasury.fund',
   'messaging.direct.send',
   'resolution.invitation.request',

@@ -362,6 +362,35 @@ describe('endeavor.* serving plane', () => {
     expect(events.find((e) => e.type === 'EndeavorSatisfied')?.summary).toBe('Report published');
   });
 
+  // ── spec 382 W3 (M6 milestones): achieved only with evidence, only what the adopted plan defines, once ──
+  it('records a milestone the adopted plan defines as achieved, with evidence, once', async () => {
+    const h = makeHarness();
+    const req = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.request', { goal: 'Run the spring retreat', entryPoint: 'home-request' }));
+    const created = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.create', { requestId: req.requestId, decision: 'adopt', title: 'Spring retreat' }));
+    const endeavorId = String(created.endeavorId);
+    const proposed = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.proposePlan', {
+      endeavorId,
+      steps: [{ stepId: 'step_venue', kind: 'contribution', description: 'Book the venue' }],
+      milestones: [{ milestoneId: 'ms_venue', title: 'Venue booked', criteria: [{ criterionId: 'crit_contract' }] }],
+    }));
+    expect(proposed.ok).toBe(true);
+    const planRef = { planId: proposed.planId, revision: Number(proposed.revision), hash: proposed.contentHash };
+    expect((await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.adoptPlan', { endeavorId, planRef }))).ok).toBe(true);
+    const detail = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.get', { endeavorId }));
+    expect((detail.plan as { milestones?: Array<{ milestoneId: string }> }).milestones?.map((m) => m.milestoneId)).toEqual(['ms_venue']);
+
+    const noEvidence = await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.milestone.achieve', { endeavorId, milestoneId: 'ms_venue' });
+    expect(noEvidence.status).toBe(400);
+    const unknown = await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.milestone.achieve', { endeavorId, milestoneId: 'ms_nope', evidence: 'signed' });
+    expect(unknown.status).toBeGreaterThanOrEqual(400);
+    const done = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.milestone.achieve', { endeavorId, milestoneId: 'ms_venue', evidence: 'Contract signed with the lodge' }));
+    expect(done.ok).toBe(true);
+    const again = await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.milestone.achieve', { endeavorId, milestoneId: 'ms_venue', evidence: 'twice' });
+    expect(again.status).toBeGreaterThanOrEqual(400);
+    const after = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.get', { endeavorId }));
+    expect((after.milestones as Array<{ milestoneId: string }>).map((m) => m.milestoneId)).toEqual(['ms_venue']);
+  });
+
   it('rejects satisfyStep from a non-participant session', async () => {
     const h = makeHarness();
     const { endeavorId } = await driveToAllocation(h);

@@ -217,6 +217,8 @@ function planProjection(state: CoordinationStateV1): {
      *  looked exactly like a plan that never wanted a specialist. */
     capabilityRequirements?: CapabilityRequirementRef[];
   }>;
+  /** Spec 382 W3 — the milestones the plan defines; achievements are the detail's own `milestones`. */
+  milestones: Array<{ milestoneId: string; title: string; criteria: Array<{ criterionId: string }> }>;
 } | null {
   const adoptedRef = state.endeavor?.adoptedPlanRef;
   const all = Object.values(state.plans);
@@ -241,6 +243,7 @@ function planProjection(state: CoordinationStateV1): {
         ...(done ? { evidence: decodeEvidenceNote(done.evidenceRefs) } : {}),
       };
     }),
+    milestones: (plan.milestones ?? []).map((m) => ({ milestoneId: m.milestoneId, title: m.title, criteria: (m.criteria ?? []).map((c) => ({ criterionId: c.criterionId })) })),
   };
 }
 
@@ -1101,6 +1104,32 @@ export async function handleEndeavorOp(
 
   // ── endeavor.satisfy — mark the whole endeavor complete (outcome validated). Managing principal
   //    or sponsor/coordinator only (reducer-gated). ──
+  // ── endeavor.milestone.achieve — spec 382 W3 (M6 milestones): a milestone the ADOPTED plan defines is
+  //    recorded achieved with criteria evidence (a note, or typed receipt refs). The reducer decides what
+  //    counts (in the plan, not yet achieved, evidence present); a steward's act is the organization's,
+  //    a participant's is their own. Nothing is inferred from a step being done. ──
+  if (op === 'endeavor.milestone.achieve') {
+    const endeavorId = parseEndeavorId(body.endeavorId);
+    if (!endeavorId) return json({ error: 'endeavorId required' }, 400);
+    const milestoneId = String(body.milestoneId ?? '').trim();
+    if (!milestoneId) return json({ error: 'milestoneId required' }, 400);
+    const evidenceRefs = [...typedReceiptRefs(body.evidenceRefs), ...parseEvidenceRefs(body.evidence)];
+    if (evidenceRefs.length === 0) return json({ error: 'evidence (a short note of how the criteria were met) is required to record a milestone as achieved' }, 400);
+    const command: CoordinationCommandV1 = {
+      kind: 'RecordMilestoneAchieved',
+      actor: (await deps.isSteward()) ? principal : viewer,
+      issuedAt: new Date().toISOString(),
+      endeavorId: endeavorId as `end_${string}`,
+      milestoneId,
+      evidenceRefs,
+    };
+    return deps.serialize(async () => {
+      const r = await appendToEndeavorLog(deps, 'endeavor.milestone.achieve', endeavorId, command, { type: 'milestone', id: milestoneId });
+      if (!r.ok) return r.response;
+      return json({ ok: true, milestoneId });
+    });
+  }
+
   if (op === 'endeavor.satisfy') {
     const endeavorId = parseEndeavorId(body.endeavorId);
     if (!endeavorId) return json({ error: 'endeavorId required' }, 400);
