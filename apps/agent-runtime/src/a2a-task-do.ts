@@ -913,6 +913,19 @@ export class A2aTaskDO {
         await this.state.storage.put(tkey(row.triggerId), row);
         return Response.json({ ok: true });
       }
+      // Spec 375 W3 — ROTATE a webhook row's token: the old one stops opening the door the moment the new one
+      // is minted. Admission, never authority (375 §4), so rotating it revokes nothing else. Webhooks only:
+      // no other kind carries a token.
+      if (op === 'trigger-rotate') {
+        const triggerId = String((body as { triggerId?: string } | null)?.triggerId ?? '');
+        const row = (await this.state.storage.get(tkey(triggerId))) as { kind?: string; token?: string } | undefined;
+        if (!triggerId || !row) return Response.json({ ok: false, error: 'no such trigger' }, { status: 404 });
+        if (row.kind !== 'webhook') return Response.json({ ok: false, error: 'only a webhook trigger carries a token' }, { status: 400 });
+        const token = `0x${[...crypto.getRandomValues(new Uint8Array(24))].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+        const next = { ...row, token };
+        await this.state.storage.put(tkey(triggerId), next);
+        return Response.json({ ok: true, row: next });
+      }
       // Spec 370 P6 — THE RUN RECORD: what a finished run observed, decided and received, kept for a week
       // on the agent's own object for looking back and replaying. Listed WITHOUT its mandates.
       const rkey = (ref: string) => `harness:record:${ref}`;

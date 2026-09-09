@@ -365,6 +365,45 @@ export async function postA2a(path: string, body: unknown): Promise<Record<strin
   return (await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }))) as never;
 }
 
+/** Spec 370 P5 / 375 — one row of the agent's schedule: what its playbook asks on its own, fired by what, and
+ *  what the last firing reached. A webhook row carries its bearer token (admission, never authority). */
+export interface TriggerRow {
+  triggerId: string; kind?: 'schedule' | 'event' | 'webhook' | 'message'; ask: string;
+  every?: string; nextAt?: number; on?: { event?: string; profile?: string }; token?: string;
+  lastAt?: number; lastRunRef?: string; lastOutcome?: 'answered' | 'parked' | 'failed'; lastSaid?: string;
+}
+
+/** What fires a row, in words — the source a steward reads beside the ask. Pure; display only. */
+export function triggerSourceLabel(row: TriggerRow, hookUrl?: string): string {
+  switch (row.kind ?? 'schedule') {
+    case 'event': return `when ${row.on?.event ?? 'an Endeavor event'} is committed on this agent's log`;
+    case 'message': return `when a ${row.on?.profile === 'dm' ? 'direct message' : row.on?.profile ?? 'message'} is admitted into this agent's inbox`;
+    case 'webhook': return hookUrl ? `when ${hookUrl} is called with this row's token` : 'when its hook is called with this row\'s token';
+    default: return row.every ? `every ${row.every.replace(/^P(T)?/, '').toLowerCase().replace('24h', 'day').replace('7d', 'week').replace(/(\d+)h$/, '$1 hours').replace(/(\d+)d$/, '$1 days')}` : 'on a schedule';
+  }
+}
+
+/** The agent's schedule (stewards only): the rows its playbook declares. */
+export async function listTriggers(session: { token: string }, addressee: Address): Promise<TriggerRow[]> {
+  const out = (await postA2a('/a2a/harness/triggers', { session: session.token, addressee })) as { ok?: boolean; triggers?: TriggerRow[]; error?: string };
+  if (!out.ok) throw new Error(out.error ?? 'the schedule could not be read');
+  return out.triggers ?? [];
+}
+
+/** Run one trigger now, as its source would. Returns what the firing reached. */
+export async function fireTrigger(session: { token: string }, addressee: Address, triggerId: string): Promise<{ outcome: string; said?: string; runRef: string }> {
+  const out = (await postA2a('/a2a/harness/triggers/fire', { session: session.token, addressee, triggerId })) as { ok?: boolean; outcome?: string; said?: string; runRef?: string; error?: string };
+  if (!out.ok) throw new Error(out.error ?? 'the trigger did not fire');
+  return { outcome: out.outcome ?? 'unknown', ...(out.said ? { said: out.said } : {}), runRef: out.runRef ?? '' };
+}
+
+/** Spec 375 W3 — mint a webhook row a new token; the old one stops opening the door. */
+export async function rotateTrigger(session: { token: string }, addressee: Address, triggerId: string): Promise<TriggerRow> {
+  const out = (await postA2a('/a2a/harness/triggers/rotate', { session: session.token, addressee, triggerId })) as { ok?: boolean; trigger?: TriggerRow; error?: string };
+  if (!out.ok || !out.trigger) throw new Error(out.error ?? 'the token was not rotated');
+  return out.trigger;
+}
+
 /** Spec 370 P2 — one sentence the agent said about its own progress, as the run went. */
 export interface ProgressLine { seq: number; at: number; type: string; stepRef?: string; toolId?: string; said: string; terminal?: boolean }
 

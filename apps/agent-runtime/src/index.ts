@@ -11,7 +11,7 @@ import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, forgetConfirma
 import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
 import { recordOf, replayingInvoker, type Plan, type SuppliedInputV1, type RunEvent } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
-import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource } from './triggers.js';
+import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken } from './triggers.js';
 import { appendProgress, readProgress, type ProgressLineV1 } from './harness-progress.js';
 import { Hono, type Context } from 'hono';
 import { setCookie, getCookie } from 'hono/cookie';
@@ -1895,6 +1895,23 @@ app.post('/harness/triggers/fire', async (c) => {
   if (!row) return c.json({ ok: false, error: `no trigger "${body.triggerId}" on this agent — ask it something first so its schedule syncs, or check its playbook` }, 404);
   const out = await runUnattendedAsk(c.env, row, `trigger-${row.triggerId}-${Date.now().toString(36)}`);
   return c.json({ ok: true, addressee, triggerId: row.triggerId, ...out });
+});
+
+// POST /harness/triggers/rotate { session, addressee, triggerId } — spec 375 W3. A webhook row's token is
+// minted afresh; whoever held the old one is shut out from the next call. Stewards only.
+app.post('/harness/triggers/rotate', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; triggerId?: string } | null;
+  if (!body?.session || !body.addressee || !body.triggerId) return c.json({ ok: false, error: 'session, addressee and triggerId are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const addressee = body.addressee.toLowerCase() as Address;
+  if (!(await mayDriveTriggers(c.env, String(who.sa).toLowerCase() as Address, addressee))) return c.json({ ok: false, error: 'only a steward of this agent may rotate its tokens' }, 403);
+  try {
+    const row = await rotateTriggerToken(c.env as never, addressee, body.triggerId);
+    return c.json({ ok: true, addressee, trigger: row });
+  } catch (e) {
+    return c.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, 404);
+  }
 });
 
 // POST /harness/records { session, addressee, runRef? } — spec 370 P6. The agent's run records (a week): with a

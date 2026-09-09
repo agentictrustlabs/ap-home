@@ -130,7 +130,7 @@ export function triggerContext(source: TriggerSource): Record<string, unknown> {
 
 export interface TriggerStoreEnv { A2A_TASKS: DurableObjectNamespace }
 
-async function call(env: TriggerStoreEnv, agent: Address, op: 'trigger-sync' | 'trigger-list' | 'trigger-advance', body: unknown): Promise<Record<string, unknown>> {
+async function call(env: TriggerStoreEnv, agent: Address, op: 'trigger-sync' | 'trigger-list' | 'trigger-advance' | 'trigger-rotate', body: unknown): Promise<Record<string, unknown>> {
   const stub = env.A2A_TASKS.get(env.A2A_TASKS.idFromName(agent.toLowerCase()));
   const res = await stub.fetch(new Request(`https://a2a-task-do/internal/harness-run/${op}`, { method: 'POST', headers: internalHeaders(env as never), body: JSON.stringify(body) }));
   const out = (await res.json().catch(() => ({}))) as Record<string, unknown> & { ok?: boolean; error?: string };
@@ -149,6 +149,12 @@ export async function syncTriggers(env: TriggerStoreEnv, agent: Address, playboo
 export async function listTriggers(env: TriggerStoreEnv, agent: Address): Promise<TriggerScheduleV1[]> {
   const out = await call(env, agent, 'trigger-list', {});
   return (out.rows as TriggerScheduleV1[] | undefined) ?? [];
+}
+
+/** Spec 375 W3 — mint a webhook row a new token; the old one stops opening the door. Stewards only (the route). */
+export async function rotateTriggerToken(env: TriggerStoreEnv, agent: Address, triggerId: string): Promise<TriggerScheduleV1> {
+  const out = await call(env, agent, 'trigger-rotate', { triggerId });
+  return out.row as TriggerScheduleV1;
 }
 
 /** Record a firing on its row (spec 375 — sources other than the clock fire from outside the DO's alarm). */

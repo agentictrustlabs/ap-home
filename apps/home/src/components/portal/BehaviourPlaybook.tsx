@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import type { AgentHarnessDefinitionV1 } from '@agenticprimitives/capability-claims';
 import { useSession } from '../../context/session';
+import { TriggersPanel } from './TriggersPanel';
 import { validateAgentHarnessDefinition, definitionDigest } from '@agenticprimitives/capability-claims';
 import { catalogForKind, type CatalogArchetype } from '../../lib/archetype-catalog';
 import { registryArchetypesFor, type RegistryArchetype } from '../../lib/skills-registry';
@@ -344,6 +345,8 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
           )}
         </>
       )}
+      {/* Spec 375 W3 — the schedule the assigned playbook keeps, beside the playbook itself. */}
+      <TriggersPanel agent={agent} />
     </div>
   );
 }
