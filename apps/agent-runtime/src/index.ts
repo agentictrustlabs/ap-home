@@ -142,6 +142,7 @@ import { subjectAsk, subjectAnswer, validateSubjectAsk, handoff, type SubjectAns
 import { realtimeKitConfigured, verifyRealtimeKitWebhook, readRealtimeKitWebhook } from './realtimekit.js';
 import { sendSubjectAskOverWire, subjectAnswerMessage, subjectEnvelopeOf, handoffMessage, routedRunRefFor } from './subject-hop.js';
 import { EXTERNAL_AGENT_TOOL, externalAgentInvoker } from './external-agent.js';
+import { subjectAddress, nameRecordsReader, servesUnpublishedNames, type SubjectAddressEnv } from './subject-address.js';
 import { MEMBER_CONSULT_TOOL, memberConsultInvoker } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL, engagementProbeInvoker, type ProbeDeps } from './engagement-probe.js';
 import { discoveryCandidateSource } from './engagement-candidates.js';
@@ -299,6 +300,9 @@ export interface Env {
    * agent THROUGH the edge. Unset (edge-less deployments) ⇒ the card advertises the direct subdomain endpoint.
    */
   DEMO_EDGE_URL?: string;
+  /** Does this deployment serve names that publish no `a2aEndpoint`/`cardUri` record? The estate's default
+   *  deployment says "true" (or nothing); a second deployment says "false" and routes to such names nowhere. */
+  A2A_SERVES_UNPUBLISHED_NAMES?: string;
   /**
    * ADR-0044 / spec 377 — which models this deployment plans and composes with. A comma-separated ORDERED
    * allowlist of providers (`anthropic`, `groq`); the first is the default, and a turn may name another (the
@@ -2813,13 +2817,7 @@ app.post('/harness/ask', async (c) => {
         // Spec 379 — an outside agent's answer: fetched by its card over the network, graded as an observation.
         if (toolId === EXTERNAL_AGENT_TOOL.id) return externalAgentInvoker({ timeoutMs: 20_000,
           // Spec 379 W2 — a registry NAME resolves through its own on-chain records to a card, pinned by `atl:cardDigest`.
-          nameRecords: async (name) => {
-            if (!c.env.AGENT_NAME_REGISTRY || !c.env.AGENT_NAME_UNIVERSAL_RESOLVER) return null;
-            const client = new AgentNamingClient({ rpcUrl: c.env.RPC_URL, chainId: Number(c.env.CHAIN_ID), registry: c.env.AGENT_NAME_REGISTRY as Address, universalResolver: c.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address, ...(c.env.PROFILE_RESOLVER ? { profileResolver: c.env.PROFILE_RESOLVER as Address } : {}) });
-            const r = await client.getRecords(name).catch(() => null);
-            if (!r) return null;
-            return { ...(r.a2aEndpoint ? { a2aEndpoint: r.a2aEndpoint } : {}), ...(r.cardUri ? { cardUri: r.cardUri } : {}), ...(r.cardDigest ? { cardDigest: r.cardDigest } : {}) };
-          } })(toolId, args, ctx);
+          nameRecords: nameRecordsReader(c.env) ?? (async () => null) })(toolId, args, ctx);
         // Spec 380 — one member asked through the consult rail, at the organization; skipped without their opt-in.
         if (toolId === MEMBER_CONSULT_TOOL.id) return memberConsultInvoker(c.env, { ...(askDeps.nameOf ? { nameOf: askDeps.nameOf } : {}) })(toolId, args, ctx);
         // Spec 384 W2 — probe candidates for offers, each in-process as the asker's own agent (a Worker cannot fetch its own hostnames).
@@ -4196,16 +4194,24 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     if (!acct.sign) throw new Error('the interactions-session account cannot sign a raw digest');
     return acct.sign({ hash: digest });
   };
+  // WHERE A SUBJECT IS ASKED (spec 366 R4) — its name's records, read once per name per minute; never a host
+  // derived from the name's spelling. `subject-address.ts` says here / wire / nowhere.
+  const nameRecordsOf = nameRecordsReader(env) ?? (async () => null);
+  const parents = (e: Env): string[] => (e.AGENT_NAME_PARENTS ?? e.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
+  const subjectAddressEnv = (e: Env): SubjectAddressEnv => ({ ownIngress: e.DEMO_EDGE_URL?.trim() || undefined, ownDomains: a2aBaseDomains(e), parents: parents(e), servesUnpublished: servesUnpublishedNames(e) });
   // Spec 376 — HAND ONE STEP to another agent, in-process inside this deployment (a Worker cannot fetch
   // its own account's hostnames), the caller named by the in-Worker marker as the PARENT agent. The
   // specialist answers with the same artifact a routed ask does; it is read with the same reader.
   deps.handoffTo = async ({ executor, intent, plan, presented, supplied, parent }) => {
     const name = await deps.nameOf?.(executor).catch(() => null) ?? null;
-    const parents = (env.AGENT_NAME_PARENTS ?? env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
-    const host = name ? hostForName(name, a2aCanonicalDomain(env), parents) : null;
+    const at = subjectAddress(name, name ? await nameRecordsOf(name) : null, subjectAddressEnv(env));
+    const host = name ? hostForName(name, a2aCanonicalDomain(env), parents(env)) : null;
     const via = { agent: executor, name, ...(host ? { host } : {}), observedVia: 'serving-handler' as const };
-    if (!host) return { ok: false, via, refused: `${executor} publishes no endpoint this agent can hand a step to` };
-    if (!a2aBaseDomains(env).some((d) => host === d || host.endsWith(`.${d}`))) return { ok: false, via, refused: `${name} is served elsewhere — a hand-off across deployments is spec 376 W3` };
+    if (at.where === 'nowhere') return { ok: false, via, refused: `${name ?? executor} cannot be handed a step: ${at.refused}` };
+    // Spec 376 W3 — a hand-off across deployments is a call the PARENT agent makes as itself over the wire
+    // (an `A2A-Session` assertion its own custodian delegated); this Worker holds no such wire for it.
+    if (at.where === 'wire') return { ok: false, via, refused: `${name} is served elsewhere (its card at ${at.cardUrl}) — a hand-off across deployments needs the parent's own session wire, which this deployment does not hold (spec 376 W3)` };
+    if (!host) return { ok: false, via, refused: `${name ?? executor} is served here but has no host this deployment can address in-process` };
     const h = handoff({ intent, plan, presented, ...(supplied?.length ? { supplied } : {}), parent });
     const rpc = { jsonrpc: '2.0', id: 1, method: 'SendMessage', params: { message: handoffMessage(h) } };
     const req = new Request(`https://${host}/api/a2a`, {
@@ -4228,9 +4234,10 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
   // route the flyout long-polls), so the sender can relay it while the hop runs.
   deps.readSubjectProgress = async ({ subject, runRef, session, after, wait }) => {
     const name = await deps.nameOf?.(subject).catch(() => null) ?? null;
-    const parents = (env.AGENT_NAME_PARENTS ?? env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
-    const host = name ? hostForName(name, a2aCanonicalDomain(env), parents) : null;
-    if (!host || !a2aBaseDomains(env).some((d) => host === d || host.endsWith(`.${d}`))) return { lines: [], terminal: true, known: false };
+    const at = subjectAddress(name, name ? await nameRecordsOf(name) : null, subjectAddressEnv(env));
+    const host = name ? hostForName(name, a2aCanonicalDomain(env), parents(env)) : null;
+    // A run served elsewhere is read when its answer arrives (the hop is one call); only a run here is tailed.
+    if (at.where !== 'here' || !host) return { lines: [], terminal: true, known: false };
     const req = new Request(`https://${host}/harness/progress`, { method: 'POST', headers: internalHeaders(env, { 'content-type': 'application/json', accept: 'application/json' }), body: JSON.stringify({ session, addressee: subject, runRef, after, wait: wait ?? 1500 }) });
     const res = await app.fetch(req, env, executionContextFor(opts.executionCtx));
     const body = (await res.json().catch(() => null)) as { ok?: boolean; lines?: Array<{ seq: number; said: string; stepRef?: string; terminal?: boolean }>; terminal?: boolean; known?: boolean } | null;
@@ -4240,12 +4247,13 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
   deps.askSubjectAgent = async ({ subject, toolId, args, goal, session, asker, correlation, continue: cont, runRef: receiverRunRef }) => {
     const name = await deps.nameOf?.(subject).catch(() => null) ?? null;
     if (!session) return { ok: false, via: { agent: subject, name, observedVia: 'serving-handler' }, refused: 'a routed ask carries the asker’s session, and this run has none' };
-    const served = a2aBaseDomains(env);
-    const parents = (env.AGENT_NAME_PARENTS ?? env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
-    const host = name ? hostForName(name, a2aCanonicalDomain(env), parents) : null;
-    if (!host) return { ok: false, via: { agent: subject, name, observedVia: 'serving-handler' }, refused: `${name ?? subject} publishes no endpoint this agent can ask` };
+    // WHERE IT IS ASKED is what its name publishes (`subject-address.ts`): here, over the wire, or nowhere.
+    const at = subjectAddress(name, name ? await nameRecordsOf(name) : null, subjectAddressEnv(env));
+    if (at.where === 'nowhere') return { ok: false, via: { agent: subject, name, observedVia: 'serving-handler' }, refused: `${name ?? subject} cannot be asked: ${at.refused}` };
+    const inProcess = at.where === 'here';
+    const host = inProcess ? hostForName(name!, a2aCanonicalDomain(env), parents(env)) : new URL(at.cardUrl).hostname;
+    if (!host) return { ok: false, via: { agent: subject, name, observedVia: 'serving-handler' }, refused: `${name} is served here but has no host this deployment can address in-process` };
     const url = `https://${host}/harness/ask`;
-    const inProcess = served.some((d) => host === d || host.endsWith(`.${d}`));
     // Spec 366 R2 — the SUBJECT-ASK PROFILE: the externally meaningful delegated request and its causal
     // correlation, typed and versioned, beside the supplied plan the receiver's harness already understands.
     // Spec 366 R2 — WHAT THE ASKER HOLDS, PRESENTED. Their stewardship wire for this subject travels with
@@ -4284,7 +4292,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       // S4) as a `SendMessage` with the profile in the metadata; the reply is the receiver's envelope,
       // returned verbatim as the task's `subject-answer` artifact. Unreachable, or no 1.0 endpoint on the
       // card ⇒ said so, in the receiver's words where it has any — never read locally instead (R3).
-      const hop = await sendSubjectAskOverWire({ cardUrl: `https://${host}/.well-known/agent-card.json`, profile, session, fetch: (u, init) => fetch(u, init) });
+      const hop = await sendSubjectAskOverWire({ cardUrl: (at as { cardUrl: string }).cardUrl, ...((at as { pinnedDigest?: string }).pinnedDigest ? { pinnedDigest: (at as { pinnedDigest?: string }).pinnedDigest! } : {}), profile, session, fetch: (u, init) => fetch(u, init) });
       if (!hop.ok) return { ok: false, via, refused: `${name ?? subject} could not be asked over the wire — ${hop.refused}` };
       envelope = hop.envelope as unknown as AskReplyEnvelopeV1;
       status = 200;

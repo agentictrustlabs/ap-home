@@ -68,6 +68,9 @@ export interface SubjectHopInput {
   /** Where the subject's card is served (`https://<host>/.well-known/agent-card.json`). */
   cardUrl: string;
   profile: SubjectAskV1;
+  /** `atl:cardDigest` from the subject's name records — the sha256 of the released card's bytes. When the
+   *  name pins one, a served card that differs is refused: the pin is the name's word about its card. */
+  pinnedDigest?: string;
   /** The asker's Home session — the `Authorization` bearer, which is also the credential the profile names. */
   session: string;
   fetch: (input: string, init: RequestInit) => Promise<Response>;
@@ -86,7 +89,12 @@ export async function sendSubjectAskOverWire(input: SubjectHopInput): Promise<Su
   try {
     const res = await input.fetch(input.cardUrl, { method: 'GET', headers: { accept: 'application/json' } });
     if (!res.ok) return { ok: false, refused: `its card at ${input.cardUrl} answered ${res.status}`, status: res.status };
-    card = (await res.json()) as AgentCardV1;
+    const text = await res.text();
+    if (input.pinnedDigest) {
+      const served = `0x${[...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+      if (served !== input.pinnedDigest.toLowerCase()) return { ok: false, refused: `the card served at ${input.cardUrl} is not the one its name pins (atl:cardDigest ${input.pinnedDigest.slice(0, 12)}…, served ${served.slice(0, 12)}…)` };
+    }
+    card = JSON.parse(text) as AgentCardV1;
   } catch (e) {
     return { ok: false, refused: `its card at ${input.cardUrl} could not be read: ${e instanceof Error ? e.message : String(e)}` };
   }
