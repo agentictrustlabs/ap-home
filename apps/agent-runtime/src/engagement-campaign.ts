@@ -9,6 +9,8 @@ import type { Address, Hex } from 'viem';
 import type { Plan } from '@agenticprimitives/orchestration';
 import { openCampaign, selectOffer, digestOf, type CandidateSource, type CandidateV1, type EngagementCampaignV1, type OfferSelectionV1, type OfferEvaluationV1 } from '@agenticprimitives/intent-engagement';
 import { probeCandidates, type ProbeDeps, type ProbeRow } from './engagement-probe.js';
+import { trustGraphRead, type TrustGraphReadV1 } from './engagement-trust.js';
+import type { DiscoveryFetch } from '@agenticprimitives/context';
 
 /** What a parked run carries from a campaign: WHO the step is handed to and WHICH offer the mandate must name.
  *  Display and plan-shaping only — no verifier reads it; the verifier reads the mandate's own offer binding. */
@@ -26,6 +28,8 @@ export interface SelectedOfferBindingV1 {
 export interface CampaignDeps extends Omit<ProbeDeps, 'requester'> {
   requester: Address;
   source: CandidateSource;
+  /** Spec 384 W4 — the public trust fabric, read for each firm-offering provider. Evidence, never a score. */
+  fetchDiscovery?: DiscoveryFetch;
   now?: () => number;
 }
 
@@ -38,6 +42,8 @@ export interface CampaignOutcome {
   evaluations: OfferEvaluationV1[];
   selection: OfferSelectionV1 | null;
   binding: SelectedOfferBindingV1 | null;
+  /** Spec 384 W4 — the trust-graph read beside each provider that made a firm offer, by address. */
+  trust: Record<string, TrustGraphReadV1>;
 }
 
 /** The intent a campaign binds: the step's own words as the organization will ask them. The parked run is
@@ -52,13 +58,31 @@ export async function runEngagementCampaign(deps: CampaignDeps, input: { campaig
   const campaign = openCampaign({ campaignId: input.campaignId, intentId: input.campaignId, intentDigest, requester: deps.requester, budget: { maxCandidates: input.budget.maxCandidates, offersWanted: input.budget.offersWanted, deadline: new Date(nowMs + input.budget.deadlineMs).toISOString() }, candidates: found.map((c) => c.agent) });
   const candidates = found.filter((c) => campaign.candidates.some((a) => a.toLowerCase() === c.agent.toLowerCase()));
   const round = await probeCandidates({ ...deps, requester: deps.requester }, { campaignId: campaign.campaignId, intentId: campaign.intentId, intentDigest, capability: input.capability, words: input.words, candidates: campaign.candidates, replyByMs: input.budget.deadlineMs });
-  const decided = selectOffer({ campaign: { ...campaign, engagements: round.situations.map((s) => s.engagementId) }, situations: round.situations, candidates, capability: input.capability, now: new Date((deps.now ?? Date.now)()).toISOString() });
+  // Spec 384 W4 — the trust fabric BESIDE each firm offer, before the selection reads relationships. The
+  // requester↔provider edge the fabric holds fills the candidate's `relationship`, so the selection's
+  // relationship rule rests on the read and cites it; the attestation and prior-receipt counts are evidence
+  // the note carries and NOTHING sums. A provider that made no firm offer is not read (nothing to weigh).
+  const trust: Record<string, TrustGraphReadV1> = {};
+  const offerers = new Set(round.rows.filter((r) => r.offer).map((r) => r.agent.toLowerCase()));
+  const enriched = candidates.map((c) => ({ ...c }));
+  if (deps.fetchDiscovery) {
+    for (const c of enriched) {
+      if (!offerers.has(c.agent.toLowerCase())) continue;
+      const read = await trustGraphRead(deps.fetchDiscovery, deps.requester, c.agent).catch(() => null);
+      if (!read) continue;
+      trust[c.agent.toLowerCase()] = read;
+      // The FABRIC's edge is the authority on the requester↔provider relationship — not the row's own count.
+      if (read.relationship) c.relationship = { kind: read.relationship.relationshipType ?? 'relationship', source: 'trust-fabric' };
+      else delete c.relationship;
+    }
+  }
+  const decided = selectOffer({ campaign: { ...campaign, engagements: round.situations.map((s) => s.engagementId) }, situations: round.situations, candidates: enriched, capability: input.capability, now: new Date((deps.now ?? Date.now)()).toISOString() });
   const sel = decided.selection;
   const winnerRow = sel ? round.rows.find((r) => r.agent.toLowerCase() === sel.selected.provider.toLowerCase()) : null;
   const binding: SelectedOfferBindingV1 | null = sel && winnerRow?.offer
     ? { type: 'ap.selected-offer-binding.v1', campaignId: campaign.campaignId, capability: input.capability, provider: sel.selected.provider, providerName: winnerRow.name ?? null, offerId: sel.selected.offerId, offerDigest: sel.selected.offerDigest, expiresAt: winnerRow.offer.expiresAt }
     : null;
-  return { campaign: decided.campaign, candidates, rows: round.rows, evaluations: decided.evaluations, selection: sel, binding };
+  return { campaign: decided.campaign, candidates: enriched, rows: round.rows, evaluations: decided.evaluations, selection: sel, binding, trust };
 }
 
 /**
@@ -90,7 +114,11 @@ export function campaignNote(input: { capability: string; principal: Address; ou
   const { outcome } = input;
   const why = input.because === 'interaction-step' ? 'the plan made this step an interaction with another party' : `${input.principal} does not do ${input.capability} itself`;
   const asked = outcome.rows.length
-    ? outcome.rows.map((r) => `- ${r.name ?? r.agent}: ${r.kind ?? r.state}${r.reason ? ` (${r.reason})` : ''}${r.refused ? ` — ${r.refused}` : ''}${r.offer ? ` — offer ${r.offer.offerId}, expires ${r.offer.expiresAt}` : ''}`).join('\n')
+    ? outcome.rows.map((r) => {
+        const t = outcome.trust[r.agent.toLowerCase()];
+        const trustLine = r.offer && t ? `\n  - trust: ${t.lines.join('; ')}` : '';
+        return `- ${r.name ?? r.agent}: ${r.kind ?? r.state}${r.reason ? ` (${r.reason})` : ''}${r.refused ? ` — ${r.refused}` : ''}${r.offer ? ` — offer ${r.offer.offerId}, expires ${r.offer.expiresAt}` : ''}${trustLine}`;
+      }).join('\n')
     : '- nobody: discovery found no candidate to ask';
   const sel = outcome.selection;
   const decided = sel

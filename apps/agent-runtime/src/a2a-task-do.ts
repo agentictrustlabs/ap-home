@@ -51,6 +51,7 @@ import { recordRetention } from './run-export.js';
 import { authorityCapabilityOf, checkpointForStep, awaitingAuthorityNote, engagesProvider } from './endeavor-authority-steps.js';
 import { runEngagementCampaign, campaignNote } from './engagement-campaign.js';
 import { loadPlaybook } from './playbook.js';
+import { discoveryFetchFor } from './context-wiring.js';
 import { scopedActionTools } from './harness-run.js';
 import { messagingScopeCovers, messagingScopeDepsFromEnv } from './messaging-scope.js';
 import { fetchDiscoveryFacets } from './discovery-facets.js';
@@ -1505,7 +1506,7 @@ export class A2aTaskDO {
           because = engagesProvider(step, needsAuthority, own);
           if (because) {
             engagement = await runEngagementCampaign(
-              { requester: principal as Address, source: candidateSourceFor(this.env, principal as Address), sendProbe: probeSenderFor(this.env, principal as Address), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) },
+              { requester: principal as Address, source: candidateSourceFor(this.env, principal as Address), sendProbe: probeSenderFor(this.env, principal as Address), fetchDiscovery: discoveryFetchFor(this.env), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) },
               { campaignId: `camp_${runRef}`, capability: needsAuthority, words: step.description.trim(), budget: { maxCandidates: 5, offersWanted: 1, deadlineMs: 10 * 60_000 } },
             );
             console.log(`[endeavor step] ${endeavorId} ${step.stepId}: campaign for ${needsAuthority} (${because}) asked ${engagement.campaign.candidates.length}, selected ${engagement.selection?.selected.provider ?? 'nobody'}`);

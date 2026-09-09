@@ -102,6 +102,13 @@ try {
   const PROVIDER = eng.provider.toLowerCase();
   console.log(`  ✓ ${selection.notSelected.length} candidate(s) recorded as not selected, each with its reason; ${note.includes('score') ? '⚠ the note mentions a score' : 'no score anywhere'}`);
   if (/\bscore\b/i.test(note)) throw new Error('the selection carries a score');
+  // ── W4: the trust-graph read is cited beside the offer, and NOTHING is a score ──
+  const trustLine = note.split('\n').find((l) => l.trim().startsWith('- trust:'));
+  if (!trustLine) throw new Error('the offer carries no trust-graph evidence line (W4)');
+  console.log(`  trust beside the offer:${trustLine.replace(/^\s*- trust:/, '')}`);
+  if (!/no prior receipts recorded/i.test(trustLine)) throw new Error('the trust read does not state prior receipts');
+  if (/\b(score|rating|rank|weight)\b/i.test(trustLine)) throw new Error('the trust read carries a score');
+  console.log('  ✓ a firm offer from a provider with no relationship and no prior receipts is STILL an offer (evidence, never a filter)');
 
   // ── 3. alice claims the run: the mandate must NAME the offer; the provider runs it ─────────────────
   type Reply = { kind?: string; error?: string; runRef?: string; text?: string; resumeToken?: string; requirement?: MandateRequirementV1 & { offerDigest?: Hex }; delegator?: Address; delegate?: Address; capability?: string; routed?: Array<{ agent: string; observedVia: string }>;
@@ -163,7 +170,8 @@ try {
   console.log(`  step_venue satisfied=${st?.satisfied} evidence="${(st?.evidence ?? '').slice(0, 200)}"`);
   if (!st?.satisfied) throw new Error('the step is not satisfied on the endeavor');
   if (!/urn:ap:receipt:run:/.test(st.evidence ?? '') || !new RegExp(`urn:ap:receipt:offer:${OFFER}`, 'i').test(st.evidence ?? '')) throw new Error('the evidence does not cite the run and the offer');
-  console.log('  ✓ satisfied by a receipt citing run, mandate, tx and the OFFER the mandate named');
+  if (!/urn:ap:receipt:fulfillment:0x[0-9a-f]{64}/i.test(st.evidence ?? '')) throw new Error('the closed step cites no FULFILLMENT receipt (W4)');
+  console.log('  ✓ satisfied by a receipt citing run, mandate, tx, the OFFER, and the FULFILLMENT receipt that closes the engagement');
 
   // ── 5. twin: the same step with a mandate that names NO offer ─────────────────────────────────────
   const plan = { steps: [{ toolId: CAP, args: { payee: 'nathan.treasury', usdc: '1', memo: `twin ${nonce}`, offerDigest: OFFER }, id: 's0', executor: PROVIDER }] };
@@ -177,7 +185,7 @@ try {
   if (trep2?.kind === 'done' || trep2?.kind === 'prompt') throw new Error('a mandate naming no offer was accepted for a step that fulfils one');
   if (!/offer-not-bound|names no offer/i.test(trep2?.error ?? '')) throw new Error(`refused for another reason: ${JSON.stringify(t2).slice(0, 400)}`);
   console.log('  ✓ an offer never becomes a commitment without the signature that names it');
-  console.log('\nspec 384 W3 live: an interaction step → candidates from the public tier → probed as the organization → the selection recorded with every reason → the steward\'s mandate names the offer → the provider ran it → the receipt cites the offer. ✓');
+  console.log('\nspec 384 W3+W4 live: an interaction step → candidates from the public tier → probed as the organization → the trust fabric read beside each offer (evidence, never a score) → the selection recorded with every reason → the steward\'s mandate names the offer → the provider ran it → the step closed on a fulfillment receipt citing the offer. ✓');
 } finally {
   await restore();
 }

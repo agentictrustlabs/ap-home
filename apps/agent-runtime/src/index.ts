@@ -145,6 +145,7 @@ import { EXTERNAL_AGENT_TOOL, externalAgentInvoker } from './external-agent.js';
 import { MEMBER_CONSULT_TOOL, memberConsultInvoker } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL, engagementProbeInvoker, type ProbeDeps } from './engagement-probe.js';
 import { discoveryCandidateSource } from './engagement-candidates.js';
+import { fulfillmentReceipt, digestOf as engagementDigestOf, receiptDigest as engagementReceiptDigest } from '@agenticprimitives/intent-engagement';
 import type { CandidateSource } from '@agenticprimitives/intent-engagement';
 import { answerProbe } from './engagement-answer.js';
 import type { MessageV1 } from '@agenticprimitives/a2a/standard';
@@ -2917,12 +2918,33 @@ app.post('/harness/ask', async (c) => {
           satisfied = { stepId: stored.origin.stepId, ok: false };
           const r = reply.result as { txHash?: string; name?: string; agent?: string } | null;
           const acted = reply.receipts.find((x) => x.status === 'executed' && x.risk !== 'informational');
+          // Spec 384 W4 — a campaign-fulfilled step CLOSES ON A FULFILLMENT RECEIPT: the engagement's own
+          // document (which intent, which offer, which mandate, what ran, the on-chain tx), signed by the
+          // organization recording the closure. Its digest is cited on the endeavor beside the run and the
+          // offer, so a reader can check the closure against the offer that was accepted.
+          let fulfillmentDigest: string | null = null;
+          if (stored.origin.engagement && acted?.authority?.presentedRef) {
+            try {
+              const receipt = fulfillmentReceipt({
+                receiptId: `frcpt_${runRef}`, engagementId: stored.origin.engagement.campaignId,
+                intentDigest: engagementDigestOf({ goal: stored.intent?.goal ?? stored.message }),
+                offerDigest: stored.origin.engagement.offerDigest as `0x${string}`, mandateRef: acted.authority.presentedRef as `0x${string}`,
+                executingAgent: (r?.agent?.toLowerCase() ?? stored.origin.engagement.provider) as `0x${string}`,
+                action: acted?.capability?.id ?? 'treasury.payment.execute', outcome: 'completed',
+                evidenceRefs: [`urn:ap:receipt:run:${runRef}`, ...(r?.txHash ? [`urn:ap:receipt:tx:${r.txHash}`] : [])],
+                issuedAt: new Date().toISOString(),
+                sign: () => '0x', // the digest is signature-independent; the org's seal is minted by recordFulfillment (W4 tail)
+              });
+              fulfillmentDigest = engagementReceiptDigest(receipt);
+            } catch (e) { console.warn('[harness/ask] fulfillment receipt not assembled:', e); }
+          }
           const ev = receiptEvidence({
             capability: acted?.capability?.id ?? 'the requested capability',
             runRef, mandateRef: acted?.authority?.presentedRef ?? null, txHash: r?.txHash ?? null,
             summary: r?.name ? `${r.name} (${r.agent ?? ''})` : 'Done.',
             ...(stored.origin.commitmentRef ? { commitmentRef: stored.origin.commitmentRef } : {}),
             ...(stored.origin.engagement ? { offerDigest: stored.origin.engagement.offerDigest } : {}),
+            ...(fulfillmentDigest ? { fulfillmentDigest } : {}),
           });
           // Spec 382 — a PARTICIPANT's committed step is recorded BY THE PARTICIPANT (the reducer admits an
           // active participant); the organization's own parked step is recorded as the organization.

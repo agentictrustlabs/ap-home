@@ -199,6 +199,8 @@ export function receiptEvidence(input: {
   commitmentRef?: string | null;
   /** Spec 384 W3 — the provider's offer the mandate named, when a campaign selected one. */
   offerDigest?: string | null;
+  /** Spec 384 W4 — the fulfillment receipt that closes the engagement, by digest. */
+  fulfillmentDigest?: string | null;
 }): { note: string; refs: string[] } {
   const refs = [
     `urn:ap:receipt:run:${input.runRef}`,
@@ -206,6 +208,7 @@ export function receiptEvidence(input: {
     ...(input.txHash ? [`urn:ap:receipt:tx:${input.txHash}`] : []),
     ...(input.commitmentRef ? [`urn:ap:receipt:commitment:${input.commitmentRef}`] : []),
     ...(input.offerDigest ? [`urn:ap:receipt:offer:${input.offerDigest}`] : []),
+    ...(input.fulfillmentDigest ? [`urn:ap:receipt:fulfillment:${input.fulfillmentDigest}`] : []),
   ];
   const note = [
     input.summary.trim(),

@@ -142,7 +142,7 @@ describe('the parked run and the receipt', () => {
         candidates: [], evaluations: [],
         rows: [{ agent: SVC, name: 'runtime-c3s0.svc', engagementId: 'e', state: 'offer-selected', kind: 'offer', offer: { offerId: o.offerId, offerDigest: offerDigest(o), expiresAt: o.expiresAt, terms: o.terms, requirement: o.requirement, provider: SVC } }, { agent: OTHER, name: 'pay.svc', engagementId: 'e2', state: 'closed-declined', kind: 'decline', reason: 'unsupported-intent-type' }],
         selection: { type: 'ap.offer-selection.v1', campaignId: 'camp_1', selected: { offerId: o.offerId, offerDigest: offerDigest(o), provider: SVC }, because: ['the only firm offer received'], notSelected: [{ offerId: '', provider: OTHER, because: 'declined: unsupported-intent-type' }], decidedAt: '2026-09-08T10:02:00Z' },
-        binding: { ...binding, offerId: o.offerId, offerDigest: offerDigest(o) },
+        binding: { ...binding, offerId: o.offerId, offerDigest: offerDigest(o) }, trust: {},
       },
     });
     expect(note).toMatch(/the plan made this step an interaction with another party/);
