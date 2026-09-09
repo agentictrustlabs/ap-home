@@ -29,6 +29,25 @@ const modelField = MODEL ? { model: MODEL } : {};
 
 const j = async (r: Response): Promise<Record<string, unknown>> => { const t = await r.text(); try { return JSON.parse(t) as Record<string, unknown>; } catch { return { _raw: t.slice(0, 200), _status: r.status }; } };
 
+/**
+ * ONE LIVE ASK, PACED TO THE PLANNER'S METER. A free-plan model meters tokens per MINUTE; asking the whole
+ * set back to back turns every second utterance into "retry after 43s", which the agent rightly refuses
+ * rather than stalling a person for a minute (the client waits out ≤30s once). A judge is not a person:
+ * it waits the named seconds and asks the SAME sentence again, up to three times, so a rate limit is never
+ * scored as a planning failure — and a real refusal still is.
+ */
+async function askLive(headers: Record<string, string>, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  for (let attempt = 0; ; attempt++) {
+    const r = await j(await fetch(`${HOME}/a2a/harness/ask`, { method: 'POST', headers, body: JSON.stringify(body) }));
+    const err = String(((r.reply ?? {}) as { error?: string }).error ?? r.error ?? '');
+    const m = /HTTP 429, retry after (\d+)s/.exec(err);
+    if (!m || attempt >= 3) return r;
+    const wait = Number(m[1]) + 2;
+    process.stdout.write(`    (rate-limited — waiting ${wait}s and asking again)\n`);
+    await new Promise((res) => setTimeout(res, wait * 1000));
+  }
+}
+
 
 // ── Spec 367 §7 exit gate — PARITY: the same command, filled by a screen (a supplied plan with the person's
 // words) and by a sentence, must reach the same bound operation: same reply kind, same tool, same resolved
@@ -36,8 +55,8 @@ const j = async (r: Response): Promise<Record<string, unknown>> => { const t = a
 async function parityOf(H2: Record<string, string>, session: string, agent: string, t: DefinitionToolV1, u: { says: string; args?: Record<string, string> }) {
   // Both carry the realm the Home would send: a context-side party (a parent) is filled from it on either path.
   const surface = { ceremonies: ['data', 'confirmation', 'signature'], realm: { kind: 'person' } };
-  const asSentence = await j(await fetch(`${HOME}/a2a/harness/ask`, { method: 'POST', headers: H2, body: JSON.stringify({ session, addressee: agent, ...modelField, message: u.says, surface }) }));
-  const asCommand = await j(await fetch(`${HOME}/a2a/harness/ask`, { method: 'POST', headers: H2, body: JSON.stringify({ session, addressee: agent, ...modelField, message: u.says, surface, plan: { steps: [{ toolId: t.id, args: u.args ?? {} }] } }) }));
+  const asSentence = await askLive(H2, { session, addressee: agent, ...modelField, message: u.says, surface });
+  const asCommand = await askLive(H2, { session, addressee: agent, ...modelField, message: u.says, surface, plan: { steps: [{ toolId: t.id, args: u.args ?? {} }] } });
   const pick = (r: Record<string, unknown>) => {
     const reply = (r.reply ?? {}) as { kind?: string; plannerTrace?: { plan?: Array<{ toolId: string }>; bindings?: Array<{ arg: string; agent: string }> } };
     return { kind: reply.kind, tool: reply.plannerTrace?.plan?.[0]?.toolId, parties: (reply.plannerTrace?.bindings ?? []).map((b) => `${b.arg}=${b.agent}`).sort().join(',') };
@@ -100,7 +119,7 @@ for (const archetype of ARCHETYPES) {
         else fail(`parity "${first.says}" — sentence → ${p.sentence.kind} ${p.sentence.tool} [${p.sentence.parties}] but command → ${p.command.kind} ${p.command.tool} [${p.command.parties}]`);
       }
       for (const u of t.utterances ?? []) {
-        const r = await j(await fetch(`${HOME}/a2a/harness/ask`, { method: 'POST', headers: H, body: JSON.stringify({ session, addressee: agent, ...modelField, message: u.says }) }));
+        const r = await askLive(H, { session, addressee: agent, ...modelField, message: u.says });
         const reply = (r.reply ?? {}) as { kind?: string; capability?: string; prompt?: { toolId?: string }; evidence?: Array<{ toolId?: string }>; receipts?: Array<{ capability?: { id?: string } }>; error?: string; text?: string };
         const named = reply.capability === t.id || reply.prompt?.toolId === t.id || (reply.evidence ?? []).some((e) => e.toolId === t.id) || (reply.receipts ?? []).some((x) => x.capability?.id === t.id) || (reply.kind === 'answer' && !t.capability && String(reply.text ?? '').length > 0 && (reply.evidence ?? []).length === 0 && t.id === 'organization.membership.list');
         if (u.isNot === undefined ? named : !named) pass(`live "${u.says}" → ${reply.kind}${reply.capability ? ` ${reply.capability}` : ''}${reply.prompt?.toolId ? ` ${reply.prompt.toolId}` : ''}`);
@@ -122,7 +141,7 @@ if (LIVE) {
   const session = String(s.homeSession); const agent = String(s.agent).toLowerCase();
   for (const c of held.cases) {
     cases++;
-    const r = await j(await fetch(`${HOME}/a2a/harness/ask`, { method: 'POST', headers: H, body: JSON.stringify({ session, addressee: agent, ...modelField, message: c.says }) }));
+    const r = await askLive(H, { session, addressee: agent, ...modelField, message: c.says });
     const reply = (r.reply ?? {}) as { kind?: string; capability?: string; prompt?: { toolId?: string }; evidence?: Array<{ toolId?: string }>; plannerTrace?: { plan?: Array<{ toolId: string }> } };
     const planned = reply.plannerTrace?.plan?.map((p) => p.toolId) ?? [];
     const named = planned.includes(c.tool) || reply.capability === c.tool || reply.prompt?.toolId === c.tool || (reply.evidence ?? []).some((e) => e.toolId === c.tool);

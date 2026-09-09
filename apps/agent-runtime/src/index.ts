@@ -110,7 +110,7 @@ import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker, householdMembers, ownAgent
 import { KB_QUESTION_TOOL, kbQuestionInvoker } from '@agenticprimitives/context';
 import { discoveryFetchFor, structuredCallFor } from './context-wiring.js';
 import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@agenticprimitives/context';
-import { selectComposer, resolveProvider, availableModels } from './orchestration.js';
+import { selectComposer, resolveProvider, availableModels, plannerPromptBudget, defaultProvider } from './orchestration.js';
 import { loadRun, saveRun, dropRun, listRuns, mergeTurn, type HarnessRunCheckpointV1, completedStepsOf, isExpired, AWAIT_WINDOW_MS, expiryFor } from './harness-runs.js';
 import { buildGenesisPlanes, type GenesisPlaneWires } from './genesis-planes.js';
 import { bindHarnessAttempt, HarnessApprovalWorkflow, type HarnessWorkflowParams } from './harness-workflow.js';
@@ -2805,7 +2805,12 @@ app.post('/harness/ask', async (c) => {
         // Their OWN records (spec 356 W2). The subject is the connected person, from the session — never
         // an argument, so a question cannot name somebody else's vault.
         if (toolId === VAULT_QUESTION_TOOL.id) {
-          return vaultQuestionInvoker({ ...(structuredCall ? { call: structuredCall } : {}) }, askDeps, who.sa as string, askDeps.resolveName)(toolId, args, ctx);
+          // The inventory listing is bounded by the provider's prompt budget (spec 377): a steward of fifty
+          // agents holds hundreds of keys, and listed whole they were one request over a metered host's limit.
+          const inventoryBudget = plannerPromptBudget(c.env, provider ?? defaultProvider(c.env));
+          return vaultQuestionInvoker({ ...(structuredCall ? { call: structuredCall } : {}), // Keys and timestamps tokenize DENSE (≈2.5 chars/token, measured: 18k chars of keys was a 9,996-token
+          // request), and the head, rules, tool schema and question take ~2.5k tokens of the budget themselves.
+          ...(inventoryBudget !== null ? { inventoryBudgetChars: Math.max(2_000, Math.floor((inventoryBudget - 2_500) * 2.5)) } : {}) }, askDeps, who.sa as string, askDeps.resolveName)(toolId, args, ctx);
         }
         // WHO CAN READ MY RECORDS (spec 341 §4.3). The subject is the CONNECTED person, from the
         // session — never an argument, so this cannot be pointed at anyone else's grants. It runs no

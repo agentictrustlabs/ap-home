@@ -196,7 +196,11 @@ export function availableModels(env: PlannerEnv): Array<{ id: LlmProvider; label
 }
 
 function groqClient(env: PlannerEnv): OpenAiCompatLike {
-  return createFetchOpenAiCompatClient({ apiKey: env.GROQ_API_KEY!, baseUrl: env.ORCHESTRATION_GROQ_BASE_URL || GROQ_DEFAULTS.baseUrl });
+  // A records question is TWO large calls in one turn (the planner, then the chooser over the inventory) and
+  // together they exceed one minute of the free plan's 8k; the host then asks for ~35s. Waiting that out once
+  // is the difference between the question answering slowly and never — so the bound is a minute here, not
+  // the adapter's 30s. A longer wait, or a second 429, still surfaces as the refusal it is.
+  return createFetchOpenAiCompatClient({ apiKey: env.GROQ_API_KEY!, baseUrl: env.ORCHESTRATION_GROQ_BASE_URL || GROQ_DEFAULTS.baseUrl, waitOn429UpToSeconds: 60 });
 }
 
 /** spec 327 §4b / 334 §6 — prepend the org's steward-authored playbook AS CONTEXT, keeping the
@@ -267,6 +271,8 @@ export function selectPlanner(env: PlannerEnv, opts?: { systemPrompt?: string; m
       client: groqClient(env), model: modelFor(env, 'groq'), label: 'groq',
       ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
       ...(opts?.maxTokens ? { maxTokens: opts.maxTokens } : {}),
+      // gpt-oss reasons in the completion; a planner turn is one tool choice and gets the low setting.
+      reasoningEffort: 'low',
     });
     return { planner, kind: 'groq', model: modelFor(env, 'groq') };
   }

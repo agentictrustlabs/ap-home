@@ -607,16 +607,24 @@ const faithImpact: WhiteLabelConfig = {
       cannotDo: ['Change organization access', 'Add members or move funds', 'Act outside this permission'],
       expiryDays: 365,
     },
+    // NAMES NO APP. These lines are rendered VERBATIM by `ConsentSheet` — `fmt` is not applied to
+    // `canDo` / `cannotDo` — so a product name written here is shown to every app that requests the
+    // template. It said "Create a Field Workspace" and "Authorize Field to act as that workspace",
+    // which is what a Poker Night host was shown while chartering their poker club: the wrong
+    // product named on the one screen whose whole job is to say who is being trusted with what.
+    //
+    // "this app" is correct for all of them, and the sheet already shows the asking app's name and
+    // domain directly above these bullets, so nothing is lost by not repeating it here.
     'workspace-create': {
       canDo: [
-        'Create a Field Workspace under your name',
+        'Create a workspace under your name',
         'Hold its shared roster and associations in its own vault',
-        'Authorize Field to act as that workspace, revocably',
+        'Authorize this app to act as that workspace, revocably',
       ],
       cannotDo: [
         'Take custody of the workspace agent away from you',
         'Move funds, or touch your sign-in methods or recovery',
-        'Copy field records out of steward vaults',
+        'Copy records out of steward vaults',
       ],
       expiryDays: 365,
     },

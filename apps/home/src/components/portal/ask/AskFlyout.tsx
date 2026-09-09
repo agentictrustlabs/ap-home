@@ -987,6 +987,17 @@ function PlannerTraceView({ trace }: { trace: PlannerTrace }) {
       {open && (
         <>
           <div>prompt {short(trace.promptDigest)}</div>
+          {/* Spec 377 — what the planner was SHOWN of the playbook, and what a provider's budget made it do
+              without. A drop the person cannot see is a drop they cannot account for when a plan is worse. */}
+          {trace.instructionsRendered && (
+            <div>playbook shown: {trace.instructionsRendered.chars.toLocaleString()} of {trace.instructionsRendered.of.toLocaleString()} chars (the doctrine; the per-act bodies ride as tools)</div>
+          )}
+          {trace.promptBudget && (
+            <div>
+              prompt budget: ~{trace.promptBudget.estimated.toLocaleString()} of {trace.promptBudget.tokens.toLocaleString()} tokens
+              {trace.promptBudget.trimmed.length ? ` — fitted by ${trace.promptBudget.trimmed.join(', ')}` : ' — nothing dropped'}
+            </div>
+          )}
           <div>tools exposed: {trace.toolsExposed.join(', ')}</div>
           {refusals.map((a, i) => a.refused.map((v, k) => <div key={`${i}-${k}`}>· {v.message}</div>))}
         </>

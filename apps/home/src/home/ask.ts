@@ -128,6 +128,10 @@ export interface PlannerTrace {
   bindings: Array<{ arg: string; raw: string; agent: string; label?: string; source: string; because?: string }>;
   surface?: { realm?: string; capabilities?: number; channel?: 'text' | 'voice' };
   recalledTurns?: number;
+  /** How much of the playbook's instructions the planner was shown (the doctrine of the whole). */
+  instructionsRendered?: { chars: number; of: number };
+  /** A provider's prompt budget and every named part dropped to meet it, in order (spec 377). */
+  promptBudget?: { tokens: number; estimated: number; trimmed: string[] };
 }
 
 /** Spec 377 — one model the agent OFFERS for an Ask: the provider id a turn names, the words the picker

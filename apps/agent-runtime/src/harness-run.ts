@@ -2287,8 +2287,11 @@ export function paymentAskOf(goal: string): { payee?: string; usdc?: string; mem
  * instructions document without the heading is rendered whole. The digest covers exactly what was shown.
  */
 export const ACT_SECTIONS_HEADING = '\n## How each act is done\n';
-/** The ask planner's completion budget — a tool call, never an artifact. */
-export const ASK_PLANNER_MAX_TOKENS = 512;
+/** The ask planner's completion budget. A tool call is a few hundred tokens, but a REASONING model (Groq's
+ *  gpt-oss) thinks inside the completion first: at 512 it thought for 30s and called nothing. Groq does not
+ *  meter `max_tokens` against its per-minute limit (measured: −54 tokens for −512), so the budget costs nothing
+ *  to keep at the adapters' default. */
+export const ASK_PLANNER_MAX_TOKENS = 1024;
 export function plannerDoctrineOf(instructions: string): { text: string; chars: number; of: number } {
   const at = instructions.indexOf(ACT_SECTIONS_HEADING);
   const text = at >= 0 ? instructions.slice(0, at).trimEnd() : instructions;
@@ -3957,9 +3960,7 @@ be emitted together; the runtime runs them side by side.`;
   // dropped in a fixed order and each drop recorded — decided at plan time, when the tools it rides with are
   // known. The digest on the trace is of what was actually sent.
   const budget = plannerPromptBudget(env as never, input.provider ?? defaultProvider(env as never));
-  // A plan is one tool call with a handful of words, or the two-call fan-out: a few hundred tokens at most.
-  // The adapters' 1024 default is for turns that emit an artifact; a planner budget that size counts against
-  // a provider's per-minute limit as if it were spent (Groq's on-demand tier meters max_tokens up front).
+  // The completion budget is named so the fitted re-selection below uses the same one (see ASK_PLANNER_MAX_TOKENS).
   const selected = selectPlanner(env as never, { systemPrompt: withPlaybook, maxTokens: ASK_PLANNER_MAX_TOKENS, ...(input.provider ? { provider: input.provider } : {}) });
   // The compiler answers for the shapes it claims; the model answers for the rest. Not a fallback pair
   // (ADR-0013): the match is deterministic and decided BEFORE any planner runs, the way a rule-based
