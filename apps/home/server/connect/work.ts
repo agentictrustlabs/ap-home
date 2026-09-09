@@ -89,7 +89,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         proposalRef?: string;
         note?: string;
         stepId?: string;
-        evidence?: string;
+        evidence?: string; commitmentId?: string;
       }
     | null;
   if (!body?.action) return jsonCors({ error: 'action required' }, request, 400);
@@ -216,6 +216,24 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       endeavorId: body.endeavorId,
       stepId: body.stepId,
       evidence: body.evidence,
+      ...(stewardship ? { stewardship } : {}),
+    });
+    return jsonCors(r.body, request, r.status);
+  }
+
+  // Spec 382 W2 — a participant withdraws their commitment (the reducer admits only them); a steward
+  // reallocates a commitment to another participant as a NEW allocation they must commit to.
+  if (body.action === 'withdraw') {
+    if (!body.endeavorId?.trim() || !body.commitmentId?.trim()) return jsonCors({ error: 'endeavorId, commitmentId required' }, request, 400);
+    const r = await callInteractions(env, org, 'endeavor.withdrawCommitment', {
+      session: who.token, endeavorId: body.endeavorId, commitmentId: body.commitmentId, ...(body.reason ? { reason: body.reason } : {}),
+    });
+    return jsonCors(r.body, request, r.status);
+  }
+  if (body.action === 'reallocate') {
+    if (!body.endeavorId?.trim() || !body.commitmentId?.trim() || !body.participant?.trim()) return jsonCors({ error: 'endeavorId, commitmentId, participant required' }, request, 400);
+    const r = await callInteractions(env, org, 'endeavor.reallocate', {
+      session: who.token, endeavorId: body.endeavorId, commitmentId: body.commitmentId, participant: body.participant,
       ...(stewardship ? { stewardship } : {}),
     });
     return jsonCors(r.body, request, r.status);

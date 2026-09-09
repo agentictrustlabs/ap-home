@@ -549,6 +549,19 @@ function parseEndeavorId(raw: unknown): string | null {
 // this was the last 64k cap in the chain.
 export const EVIDENCE_MAX = 256_000;
 
+/** Spec 382 W2 — typed receipt refs a satisfied step may carry: the receipt namespace only, deduplicated, bounded. */
+export function typedReceiptRefs(refs: unknown): EntityRef[] {
+  if (!Array.isArray(refs)) return [];
+  const seen = new Set<string>();
+  const out: EntityRef[] = [];
+  for (const r of refs.slice(0, 16)) {
+    const iri = String(r ?? '').trim();
+    if (!/^urn:ap:receipt:(run|mandate|tx|commitment|offer|fulfillment):[A-Za-z0-9._:-]{1,200}$/.test(iri) || seen.has(iri)) continue;
+    seen.add(iri); out.push({ kind: 'resource', iri });
+  }
+  return out;
+}
+
 function parseEvidenceRefs(note: unknown): EntityRef[] {
   const text = String(note ?? '').trim();
   if (!text) return [];
@@ -1065,7 +1078,10 @@ export async function handleEndeavorOp(
     if (!endeavorId) return json({ error: 'endeavorId required' }, 400);
     const stepId = String(body.stepId ?? '');
     if (!stepId.startsWith('step_') || stepId.length <= 5) return json({ error: 'stepId (step_*) required' }, 400);
-    const evidenceRefs = parseEvidenceRefs(body.evidence);
+    // Spec 382 W2 — the receipt refs ride TYPED (`urn:ap:receipt:run:…`, `mandate:…`, `tx:…`, `commitment:…`),
+    // each its own EntityRef, beside the note. A reader that wants the run or the transaction gets a ref,
+    // not a sentence to parse. Refs are bounded to the receipt namespace: a step is not satisfied by prose.
+    const evidenceRefs = [...typedReceiptRefs(body.evidenceRefs), ...parseEvidenceRefs(body.evidence)];
     if (evidenceRefs.length === 0) return json({ error: 'evidence (a short note of what was done) is required to mark a step done' }, 400);
     const command: CoordinationCommandV1 = {
       kind: 'RecordStepSatisfied',
@@ -1172,5 +1188,45 @@ export async function handleEndeavorOp(
     });
   }
 
+  // ── endeavor.withdrawCommitment — spec 382 W2. The committed participant takes their promise back; the
+  //    step returns to the pool. Only the participant (the reducer's gate); a reason is theirs to give. ──
+  if (op === 'endeavor.withdrawCommitment') {
+    const endeavorId = parseEndeavorId(body.endeavorId);
+    if (!endeavorId) return json({ error: 'endeavorId required' }, 400);
+    const commitmentId = String(body.commitmentId ?? '');
+    if (!commitmentId.startsWith('commit_')) return json({ error: 'commitmentId (commit_*) required' }, 400);
+    const reason = typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim().slice(0, 400) : undefined;
+    const command: CoordinationCommandV1 = {
+      kind: 'WithdrawCommitment', actor: viewer, issuedAt: new Date().toISOString(),
+      endeavorId: endeavorId as `end_${string}`, commitmentId: commitmentId as `commit_${string}`, ...(reason ? { reason } : {}),
+    };
+    return deps.serialize(async () => {
+      const r = await appendToEndeavorLog(deps, 'endeavor.withdrawCommitment', endeavorId, command, { type: 'commitment', id: commitmentId });
+      if (!r.ok) return r.response;
+      return json({ ok: true, commitmentId });
+    });
+  }
+  // ── endeavor.reallocate — spec 382 W2. A steward moves a committed (or withdrawn) contribution to another
+  //    participant: a NEW allocation for them to commit to. Nothing is granted; the new participant's
+  //    commitment is signed by them, as ever. ──
+  if (op === 'endeavor.reallocate') {
+    if (!(await deps.isSteward())) return json({ error: 'only the organization custodian may reallocate contributions' }, 403);
+    const endeavorId = parseEndeavorId(body.endeavorId);
+    if (!endeavorId) return json({ error: 'endeavorId required' }, 400);
+    const commitmentId = String(body.commitmentId ?? '');
+    if (!commitmentId.startsWith('commit_')) return json({ error: 'commitmentId (commit_*) required' }, 400);
+    const participant = String(body.participant ?? '').toLowerCase();
+    if (!ADDR_RE.test(participant)) return json({ error: 'participant (0x address) required' }, 400);
+    const allocationId = makeAllocationId(crypto.randomUUID());
+    const command: CoordinationCommandV1 = {
+      kind: 'ReallocateContribution', actor: principal, issuedAt: new Date().toISOString(),
+      endeavorId: endeavorId as `end_${string}`, commitmentId: commitmentId as `commit_${string}`, allocationId, participant: participant as Address,
+    };
+    return deps.serialize(async () => {
+      const r = await appendToEndeavorLog(deps, 'endeavor.reallocate', endeavorId, command, { type: 'allocation', id: allocationId });
+      if (!r.ok) return r.response;
+      return json({ ok: true, allocationId, commitmentId });
+    });
+  }
   return json({ error: 'unknown endeavor op' }, 404);
 }

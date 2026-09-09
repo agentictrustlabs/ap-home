@@ -26,6 +26,7 @@ import {
   proposePlan,
   recordDecision,
   type WorkDetailResponse,
+  reallocateContribution,
 } from '../../../lib/work-client';
 import { useOrgMemberNames } from './useWork';
 import { EVENT_LABEL, LIFECYCLE_LABEL, STEP_KIND_LABEL, StatusPillStyle } from './labels';
@@ -131,6 +132,14 @@ export function OrgWorkEndeavorDetail({ org, endeavorId }: { org: Address; endea
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusyId(null); }
   }, [session, load]);
+
+  // Spec 382 W2 — reallocate a commitment to another participant (steward only; the reducer re-gates).
+  const [reallocTo, setReallocTo] = useState<Record<string, string>>({});
+  const reallocate = useCallback((commitmentId: string, participant: string) => run(`realloc:${commitmentId}`, async () => {
+    if (!session || !participant) return;
+    await reallocateContribution(session.token, communityId, endeavorId, commitmentId, participant);
+    setReallocTo((m) => ({ ...m, [commitmentId]: '' }));
+  }), [run, session, communityId, endeavorId]);
 
   const commit = useCallback((allocationId: string, steps: string[]) => run(allocationId, async () => {
     if (!session || !agentAddress || !detail?.plan) throw new Error('no adopted plan to commit against');
@@ -586,6 +595,21 @@ export function OrgWorkEndeavorDetail({ org, endeavorId }: { org: Address; endea
                       {' '}· {c.steps.length} step{c.steps.length === 1 ? '' : 's'} · {c.status}
                       {c.bounds?.deadline ? ` · due ${new Date(c.bounds.deadline).toLocaleDateString()}` : ''}
                     </span>
+                    {/* Spec 382 W2 — a steward moves a commitment to another participant: a NEW allocation they
+                        must commit to themselves. The original participant's promise is what changes; no authority does. */}
+                    {isSteward && (c.status === 'active' || c.status === 'withdrawn') && (
+                      <span style={{ marginLeft: '0.5rem' }}>
+                        <select aria-label="Reallocate to" value={reallocTo[c.commitmentId] ?? ''} onChange={(ev) => setReallocTo((m) => ({ ...m, [c.commitmentId]: ev.target.value }))} style={{ fontSize: '0.75rem' }}>
+                          <option value="">Reallocate to…</option>
+                          {(detail.participations ?? []).filter((p) => p.participant.toLowerCase() !== c.participant.toLowerCase()).map((p) => (
+                            <option key={p.participant} value={p.participant}>{label(p.participant)}</option>
+                          ))}
+                        </select>
+                        <BusyButton busy={busyId === `realloc:${c.commitmentId}`} busyLabel="Reallocating…" className="btn-ghost" style={{ width: 'auto', fontSize: '0.75rem', marginLeft: '0.3rem' }} disabled={!reallocTo[c.commitmentId] || !!busyId} onClick={() => void reallocate(c.commitmentId, reallocTo[c.commitmentId] ?? '')}>
+                          Reallocate
+                        </BusyButton>
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>

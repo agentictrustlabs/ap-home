@@ -11,6 +11,7 @@ import type { Address } from '@agenticprimitives/types';
 import type { HomeContributionEntryV1, HomeDecisionCardV1 } from '@agenticprimitives/home';
 import { validateHomeContributionEntry, validateHomeDecisionCard } from '@agenticprimitives/home';
 import { useSession } from '../../../context/session';
+import { listRuns, type ParkedRun } from '../../../home/ask';
 import { SectionShell } from '../SectionShell';
 import { BusyButton } from '../../shared/BusyButton';
 import { Loading } from '../../shared/Loading';
@@ -25,6 +26,7 @@ import {
   type AllocationRow,
   type EndeavorRequestRow,
   type EndeavorRow,
+  withdrawCommitment,
 } from '../../../lib/work-client';
 import { NewRequestComposer } from './NewRequestComposer';
 import { useRelatedOrgsState, useReEnableInteractions } from './useWork';
@@ -136,6 +138,24 @@ export function MyWorkView() {
   }, [reEnable, load]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Spec 382 W2 — the runs parked on this person's agent, so a commitment can show the ask it became.
+  const [parked, setParked] = useState<ParkedRun[]>([]);
+  useEffect(() => {
+    if (!session || !agentAddress) return;
+    let live = true;
+    void listRuns(session, agentAddress as Address).then((rs) => { if (live) setParked(rs.filter((r) => r.origin?.endeavorId)); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [session?.token, agentAddress, bundles]);
+
+  const withdraw = useCallback(async (bundle: OrgWorkBundle, entry: HomeContributionEntryV1) => {
+    if (!session || !entry.commitmentId) return;
+    const reason = typeof window !== 'undefined' ? (window.prompt('Why are you withdrawing? (optional — the organization sees it)') ?? undefined) : undefined;
+    setBusyId(`withdraw:${entry.commitmentId}`); setError(null);
+    try { await withdrawCommitment(session.token, bundle.org, entry.endeavorId, entry.commitmentId, reason?.trim() || undefined); await load(); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusyId(null); }
+  }, [session, load]);
 
   const commit = useCallback(async (bundle: OrgWorkBundle, entry: HomeContributionEntryV1) => {
     if (!session || !agentAddress) return;
@@ -328,9 +348,29 @@ export function MyWorkView() {
             </p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
-              {active.map(({ b, e }) => (
-                <EntryCard key={`${b.org}:${e.commitmentId ?? e.allocationId}`} entry={e} {...(b.orgName ? { orgName: b.orgName } : {})} />
-              ))}
+              {active.map(({ b, e }) => {
+                // Spec 382 W2 — the committed step is a run parked on THIS person's agent: shown beside the
+                // commitment, opened in the Ask (it asks for their mandate there), or taken back here.
+                const run = parked.find((r) => r.origin?.endeavorId === e.endeavorId && e.stepIds.includes(r.origin?.stepId ?? ''));
+                return (
+                  <EntryCard key={`${b.org}:${e.commitmentId ?? e.allocationId}`} entry={e} {...(b.orgName ? { orgName: b.orgName } : {})}
+                    action={(
+                      <span style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        {run ? (
+                          <a href={`/ask?seed=${encodeURIComponent(run.message)}`} className="btn-ghost" style={{ fontSize: '0.75rem' }} data-testid="committed-run-open" title={run.runRef}>
+                            Your agent holds it — open in Ask{run.awaiting ? ` (waiting on ${run.awaiting.kind === 'signature' ? 'your mandate' : run.awaiting.kind === 'data' ? 'an answer' : run.awaiting.kind})` : ''}
+                          </a>
+                        ) : <span style={{ fontSize: '0.72rem', opacity: 0.6 }}>no parked run on your agent yet</span>}
+                        {e.commitmentId && (
+                          <BusyButton busy={busyId === `withdraw:${e.commitmentId}`} busyLabel="Withdrawing…" className="btn-ghost" style={{ width: 'auto', fontSize: '0.75rem' }} onClick={() => void withdraw(b, e)} disabled={!!busyId}>
+                            Withdraw
+                          </BusyButton>
+                        )}
+                      </span>
+                    )}
+                  />
+                );
+              })}
             </div>
           )}
         </>

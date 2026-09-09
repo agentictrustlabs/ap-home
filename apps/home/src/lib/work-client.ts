@@ -355,6 +355,16 @@ export async function commitContribution(
 
 /** Mark ONE plan step done (endeavor.satisfyStep) — evidence note required; recorded by the
  *  managing principal or an active participant (re-gated by the reducer). */
+/** Spec 382 W2 — take back a commitment (only the committed participant may). The step returns to the pool. */
+export async function withdrawCommitment(token: string, org: string, endeavorId: string, commitmentId: string, reason?: string): Promise<void> {
+  await postWork(token, { action: 'withdraw', org: org.toLowerCase(), endeavorId, commitmentId, ...(reason ? { reason } : {}) });
+}
+
+/** Spec 382 W2 — a steward moves a commitment to another participant: a new allocation for them to commit to. */
+export async function reallocateContribution(token: string, org: string, endeavorId: string, commitmentId: string, participant: string): Promise<{ allocationId?: string }> {
+  return postWork(token, { action: 'reallocate', org: org.toLowerCase(), endeavorId, commitmentId, participant }) as Promise<{ allocationId?: string }>;
+}
+
 export async function markStepDone(
   token: string,
   org: string,

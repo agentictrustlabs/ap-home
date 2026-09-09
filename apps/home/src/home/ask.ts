@@ -365,6 +365,14 @@ export async function postA2a(path: string, body: unknown): Promise<Record<strin
   return (await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }))) as never;
 }
 
+/** Spec 350 W3 — the runs parked on an agent that this person may pick up, with what each waits for and where it
+ *  came from (a committed step names its endeavor and step). Never the mandates. */
+export interface ParkedRun { runRef: string; message: string; awaiting?: { kind: string; prompt: string; stepRef: string } | null; updatedAt: number; origin?: { endeavorId?: string; stepId?: string; principal?: string; commitmentRef?: string } }
+export async function listRuns(session: { token: string }, addressee: Address): Promise<ParkedRun[]> {
+  const out = (await postA2a('/a2a/harness/runs', { session: session.token, addressee })) as { ok?: boolean; runs?: ParkedRun[] };
+  return out.ok ? out.runs ?? [] : [];
+}
+
 /** Spec 370 P5 / 375 — one row of the agent's schedule: what its playbook asks on its own, fired by what, and
  *  what the last firing reached. A webhook row carries its bearer token (admission, never authority). */
 export interface TriggerRow {

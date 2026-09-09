@@ -3033,7 +3033,7 @@ app.post('/harness/ask', async (c) => {
           const asParticipant = stored.origin.principal.toLowerCase() !== addressee.toLowerCase();
           try {
             await callInteractionsInternal(c.env, stored.origin.principal, 'internal.endeavor.satisfyStep', {
-              endeavorId: stored.origin.endeavorId, stepId: stored.origin.stepId, evidence: `${ev.note} ${ev.refs.join(' ')}`,
+              endeavorId: stored.origin.endeavorId, stepId: stored.origin.stepId, evidence: ev.note, evidenceRefs: ev.refs,
               ...(asParticipant ? { actor: addressee } : {}),
             });
             satisfied = { stepId: stored.origin.stepId, ok: true };

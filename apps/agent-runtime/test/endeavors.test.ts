@@ -521,3 +521,44 @@ describe('parsePlanSteps — capability requirements', () => {
     expect(parsePlanSteps([{ ...step(), kind: 'invented' }])).toBeNull();
   });
 });
+
+describe('spec 382 W2 — withdraw, reallocate, and typed receipt refs', () => {
+  it('only the committed participant withdraws; a steward reallocates to a NEW allocation; satisfied steps carry typed refs', async () => {
+    const { typedReceiptRefs } = await import('../src/endeavors.js');
+    expect(typedReceiptRefs(['urn:ap:receipt:run:run-1', 'urn:ap:receipt:tx:0xabc', 'urn:ap:receipt:run:run-1', 'not-a-ref', 'urn:ap:evidence:note']).map((r) => (r as { iri: string }).iri))
+      .toEqual(['urn:ap:receipt:run:run-1', 'urn:ap:receipt:tx:0xabc']);
+    const h = makeHarness();
+    const { endeavorId, planRef, allocationId } = await driveToAllocation(h);
+    const digest = await commitmentPayloadDigest({ endeavorId, allocationRef: allocationId, planRef, steps: ['step_draft'] });
+    await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.commit', { endeavorId, allocationRef: allocationId, planRef, steps: ['step_draft'], signature: { payloadHash: digest, signer: STEWARD, scheme: 'erc1271', signature: '0xdeadbeef' } }));
+    const commitmentId = Object.keys(reduceEventLog(h.docs.get(coordinationEventsResource(endeavorId)) as CoordinationEventV1[]).commitments)[0]!;
+    // A stranger may not withdraw somebody else's commitment.
+    const stranger = await handleEndeavorOp(h.as(REQUESTER), 'endeavor.withdrawCommitment', { endeavorId, commitmentId, reason: 'not mine' });
+    expect(stranger.status).toBeGreaterThanOrEqual(400);
+    // The participant withdraws, with a reason.
+    const wr = await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.withdrawCommitment', { endeavorId, commitmentId, reason: 'travelling that week' });
+    if (wr.status >= 400) console.log('WITHDRAW', wr.status, await wr.clone().text());
+    const w = await out(wr);
+    expect(w.ok).toBe(true);
+    let state = reduceEventLog(h.docs.get(coordinationEventsResource(endeavorId)) as CoordinationEventV1[]);
+    expect(state.commitments[commitmentId]?.status).toBe('withdrawn');
+    // A steward reallocates the withdrawn contribution to another participant — a NEW allocation for them.
+    // To a stranger: refused by the reducer (a reallocation names a participant or invitee, never anyone).
+    const toStranger = await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.reallocate', { endeavorId, commitmentId, participant: REQUESTER });
+    expect(toStranger.status).toBe(409);
+    // To a participant: a NEW allocation for them to commit to (here the same participant, re-offered).
+    const rr = await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.reallocate', { endeavorId, commitmentId, participant: STEWARD });
+    if (rr.status >= 400) console.log('REALLOC', rr.status, await rr.clone().text());
+    const re = await out(rr);
+    expect(re.ok).toBe(true);
+    state = reduceEventLog(h.docs.get(coordinationEventsResource(endeavorId)) as CoordinationEventV1[]);
+    expect(Object.values(state.allocations).some((a) => a.allocationId === re.allocationId && a.participant.toLowerCase() === STEWARD.toLowerCase())).toBe(true);
+    // A satisfied step carries the receipt refs typed, beside the note.
+    const dr = await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.satisfyStep', { endeavorId, stepId: 'step_draft', evidence: 'drafted', evidenceRefs: ['urn:ap:receipt:run:run-9', 'urn:ap:receipt:tx:0x99'] });
+    if (dr.status >= 400) console.log('SATISFY', dr.status, await dr.clone().text());
+    const done = await out(dr);
+    expect(done.ok).toBe(true);
+    const ev = (h.docs.get(coordinationEventsResource(endeavorId)) as CoordinationEventV1[]).find((e) => e.kind === 'PlanStepSatisfied') as { evidenceRefs: Array<{ iri: string }> };
+    expect(ev.evidenceRefs.map((r) => r.iri)).toEqual(['urn:ap:receipt:run:run-9', 'urn:ap:receipt:tx:0x99', expect.stringMatching(/^urn:ap:evidence:drafted$/)]);
+  });
+});
