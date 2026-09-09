@@ -1491,6 +1491,17 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
     resolveName: (name: string) => deps.resolveName?.(name) ?? Promise.resolve(null),
   } as never);
   const spoken = await spokenFor(reply as never, async (a) => deps.nameOf?.(a) ?? null, (id) => CAPABILITY_WORDS[id] ?? id).catch(() => '');
+  // Spec 383 — A RUN ANOTHER AGENT ASKED FOR IS STILL THIS AGENT'S RUN. The specialist's, the subject's and
+  // the trigger's runs left no record: the receipts that name the chain (the child, the parent, who acted for
+  // whom) were returned to the asker and kept nowhere, so a three-hop story could be read from one end only.
+  // Recorded like the ask route's (spec 370 P6) and exported like it (381); a record that fails to land costs
+  // a look-back, never the run.
+  try {
+    const record = recordOf({ runRef: input.runRef, intent, result: result as never, events, presented: (input.resume?.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })) });
+    await putRecord(env as never, input.addressee, record);
+    await exportRun(env, { writeSubjectRecord: deps.writeSubjectRecord }, input.addressee, record)
+      .then((r) => putRecord(env as never, input.addressee, { ...record, export: r })).catch(() => undefined);
+  } catch (e) { console.warn('[runAgentAsk] record not kept:', e instanceof Error ? e.message : String(e)); }
   return { reply: reply as never, spoken, result: result as never, events, presentedRefs };
 }
 

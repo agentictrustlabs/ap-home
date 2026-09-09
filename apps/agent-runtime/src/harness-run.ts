@@ -3661,6 +3661,8 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   const verifier = delegationMandateVerifier({
     actor: (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address,
     enforcers,
+    // Spec 383 — every wire this turn presented, so a child is verified with its parents or refused.
+    presentedAll: () => (input.presented == null ? [] : Array.isArray(input.presented) ? input.presented : [input.presented]).map((w) => w as unknown as Delegation),
     checks: {
       delegationDigest: (d) => hashDelegation(d, chainId, dm),
       isRevoked: async (d) => (await deps.readContract({ address: dm, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [hashDelegation(d, chainId, dm)] })) as boolean,
@@ -3915,6 +3917,8 @@ be emitted together; the runtime runs them side by side.`;
       ...((input.inResponseTo || handedOff.get(rs.stepRef))
         ? { correlation: { ...(input.inResponseTo ? { inResponseTo: input.inResponseTo } : {}), ...(handedOff.get(rs.stepRef) ? { delegatedTo: { agent: handedOff.get(rs.stepRef)!.agent, runRef: handedOff.get(rs.stepRef)!.runRef } } : {}) } }
         : {}),
+      // Spec 383 — the actor context of this hop (ADR-0052): for whom, who started it, whose harness ran it.
+      ...(input.addressee ? { actor: { ...(input.person ? { rootPrincipal: input.person.toLowerCase() } : {}), ...(input.inResponseTo?.agent ? { originatingAgent: input.inResponseTo.agent.toLowerCase() } : input.person ? { originatingAgent: input.person.toLowerCase() } : {}), actingAgent: input.addressee.toLowerCase() } } : {}),
     };
   };
   // THE REALM'S TYPED SUFFIX, whether or not a surface declared it (spec 367 §7 / 371 §2.1). A person's
