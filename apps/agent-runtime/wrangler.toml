@@ -396,13 +396,12 @@ AGENT_NAME_PARENTS = "me,impact"
 CHAIN_ID = "34348"
 # Spec 377 — ordered allowlist; first = default. Needs a key secret per listed provider
 # (`wrangler secret put GROQ_API_KEY --env faithnet`). See the [env.production.vars] comment for the rules.
-# 2026-09-09 (later): the Anthropic account reached its monthly usage limit ("regain access on 2026-10-01"), so
-# Groq is the default until that limit is raised in the Anthropic console; Anthropic stays OFFERED and becomes
-# the default again by listing it first. Groq's free plan meters 8k tokens/minute per model: the planner prompt is fitted
+# 2026-09-09: Anthropic default (the user raised the account's usage limit); Groq stays OFFERED in the picker.
+# Groq alone ("groq") turns Anthropic off; Groq first ("groq,anthropic") is the fallback while a limit bites. Groq's free plan meters 8k tokens/minute per model: the planner prompt is fitted
 # to `ORCHESTRATION_GROQ_PROMPT_BUDGET` (default 6500, see plannerPromptBudget) and a 429's retry-after <=60s is
 # waited out once - roughly one ask a minute on it until the Groq plan is upgraded. Listing "groq" alone turns
 # Anthropic off (its key secret stays set either way).
-ORCHESTRATION_LLM = "groq,anthropic"
+ORCHESTRATION_LLM = "anthropic,groq"
 ASSISTANT_RATE_MAX = "60"
 ASSISTANT_RATE_WINDOW_MS = "600000"
 GATHER_RECORD_CLIP = "60000"

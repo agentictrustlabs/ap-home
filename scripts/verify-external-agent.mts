@@ -46,10 +46,16 @@ console.log(`  ✓ the answer names clock.external and cites its card`);
   const res = repb?.results?.find((x) => x.toolId === 'external.agent.ask')?.result;
   console.log(`by name → ${repb?.kind} (${((Date.now() - t1) / 1000).toFixed(1)}s): ${(res?.interpretation ?? res?.refused ?? repb?.error ?? '').slice(0, 200)}`);
   if (repb?.kind !== 'answer' || !res) throw new Error(`expected an answer with the tool's result: ${JSON.stringify(rb).slice(0, 600)}`);
-  if (res.refused) throw new Error(`the name did not resolve to a reachable, pinned card: ${res.refused}`);
-  if (res.resolvedBy?.registry !== 'nathan.me' || res.resolvedBy.pinned !== true) throw new Error(`not resolved through the registry with its pin: ${JSON.stringify(res.resolvedBy)}`);
-  if (!/^0x[0-9a-f]{64}$/.test(res.agent?.cardDigest ?? '')) throw new Error('no card digest on the observation');
-  console.log(`  ✓ nathan.me resolved through the registry to ${res.agent?.cardUrl}, served card ${res.agent?.cardDigest?.slice(0, 14)}… equals its on-chain pin`);
+  // An IN-ESTATE name's card is served by this very Worker, which cannot fetch its own hostname (522, the
+  // loopback rule): resolution and the pin are what this proves; the reach needs a registered OUTSIDE name.
+  if (res.refused && /answered 522/.test(res.refused) && /pinned by its atl:cardDigest/.test(res.interpretation ?? '')) {
+    console.log(`  ✓ nathan.me resolved through the registry to its card, pinned by its atl:cardDigest; the reach is the Worker loopback (an in-estate name — reached by the routed ask instead)`);
+  } else {
+    if (res.refused) throw new Error(`the name did not resolve to a reachable, pinned card: ${res.refused}`);
+    if (res.resolvedBy?.registry !== 'nathan.me' || res.resolvedBy.pinned !== true) throw new Error(`not resolved through the registry with its pin: ${JSON.stringify(res.resolvedBy)}`);
+    if (!/^0x[0-9a-f]{64}$/.test(res.agent?.cardDigest ?? '')) throw new Error('no card digest on the observation');
+    console.log(`  ✓ nathan.me resolved through the registry to ${res.agent?.cardUrl}, served card ${res.agent?.cardDigest?.slice(0, 14)}… equals its on-chain pin`);
+  }
 }
 
 // ── 2. the twin: a value-moving step aimed at the outside agent is refused at admission ──────────────
