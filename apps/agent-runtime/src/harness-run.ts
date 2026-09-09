@@ -35,6 +35,7 @@ import { CONTACT_FIELDS, CONTACT_FIELD_ARGS } from '@agenticprimitives/ontology'
 import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
 import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
+import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly } from '@agenticprimitives/orchestration';
 import { recentParties, conversationForPrompt, type ConversationMemoryV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
@@ -3755,6 +3756,25 @@ The person has ALREADY granted authority to ${holding} for this exact ask. That 
     };
   };
 
+  // FAN-OUT CONSULT (spec 380) — compiled BEFORE the roster read, because its sentence contains a roster
+  // sentence ("member of Missio Nexus"): matched second, the consult never existed and admission refused an
+  // instruction whose only step was a lookup. "ask each member of Missio Nexus whether they are available on Saturday" has
+  // one correct shape — enumerate the members, then the consult once per member — and the same reason as
+  // the payment fan-out for compiling it: a model given N members emitted one call and the composer promised
+  // the rest. The organization phrase and the question clause are read from the sentence; who each member
+  // is comes from the roster, and whether they are asked at all from their own opt-in, at the step.
+  const compiledConsult = (goal: string): Plan | null => {
+    const c = consultAskOf(goal);
+    if (!c) return null;
+    return {
+      steps: [
+        { toolId: MEMBERSHIP_LIST_TOOL.id, args: c.org ? { org: c.org } : {}, ref: 'roster', id: 's0' },
+        { toolId: MEMBER_CONSULT_TOOL.id, args: { ...(c.org ? { org: c.org } : {}), respondent: { $item: 'agent' }, question: c.question }, id: 's1', forEach: { ref: 'roster.members' } },
+      ],
+      rationale: 'compiled: per-member consult (spec 380)',
+    };
+  };
+
   // ONE PAYMENT, one correct plan (spec 355: compile, don't interpret). "send 10 usdc to David" is the
   // payment capability with the payee's WORDS and the amount as said — and live, a model given a bare
   // first name chose the household lookup instead (a read that ends with "nothing was sent"), despite
@@ -3814,7 +3834,7 @@ be emitted together; the runtime runs them side by side.`;
     ? { plan: async () => ({ steps: input.plan!.steps }) }
     : {
         plan: async (pin) => {
-          const compiled = compiledRead(pin.intent.goal) ?? compiledFanOut(pin.intent.goal) ?? compiledPayment(pin.intent.goal);
+          const compiled = compiledConsult(pin.intent.goal) ?? compiledRead(pin.intent.goal) ?? compiledFanOut(pin.intent.goal) ?? compiledPayment(pin.intent.goal);
           if (compiled) { plannerUsed = 'compiled'; return compiled; }
           plannerUsed = selected.kind; return selected.planner.plan(pin);
         },
@@ -3844,6 +3864,8 @@ be emitted together; the runtime runs them side by side.`;
     ...(kbQuestionAvailable({ call: structuredCallFor(env as never, input.provider) }) ? [KB_QUESTION_TOOL] : []),
     // Spec 379 — an outside A2A 1.0 agent may ANSWER inside a run; its words are an observation.
     EXTERNAL_AGENT_TOOL,
+    // Spec 380 — one member of an organization, asked through their own agent (fan-out over the roster).
+    MEMBER_CONSULT_TOOL,
     // The asker's OWN records (spec 356 W2). Needs a model to choose from the survey AND the survey seam
     // itself — absent either, it is not listed rather than listed and broken.
     ...(vaultQuestionAvailable({ call: structuredCallFor(env as never, input.provider) }, deps) ? [VAULT_QUESTION_TOOL] : []),

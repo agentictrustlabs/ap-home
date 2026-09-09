@@ -19,12 +19,10 @@ import { buildArchetypeCatalog, chooseArchetypeRoute, resolveArchetypeMethod, ty
 import {
   createA2aAgent,
   hashA2aMessage,
-  hashA2aTaskRequest,
   type A2aAgent,
   type A2aBudgetPort,
   type OnChainChecks,
   type VaultClient,
-  type VaultRef,
   type McpClient,
   type SkillHandler,
 } from '@agenticprimitives/a2a';
@@ -48,6 +46,7 @@ import { handleConsultRespond } from './consult-skill.js';
 import { parseSessionWrappedSignature, verifySessionWrappedSignature, wrapSessionSignature } from './session-wire.js';
 // spec 341 §7 — the in-Worker marker, split off the custody secret.
 import { internalHeaders, internalMarker, isInternalCall } from './internal-marker.js';
+import { memberConsultGrant, readConsultArtifact, readDelegatedTask, signAsOrg, submitConsult, submitDelegatedTask } from './consult-rail.js';
 import { authorityCapabilityOf, checkpointForStep, awaitingAuthorityNote } from './endeavor-authority-steps.js';
 import { messagingScopeCovers, messagingScopeDepsFromEnv } from './messaging-scope.js';
 import { fetchDiscoveryFacets } from './discovery-facets.js';
@@ -550,7 +549,6 @@ function normalizeDelegation(d: Record<string, unknown>): Delegation {
 }
 
 /** Methods whose `params.delegation.salt` arrives as a JSON string and must become a bigint. */
-const DELEGATION_METHODS = new Set(['message/send', 'tasks/resubmit']);
 
 // spec 289 §5 — the resilient chain-read authority port for the A2A verify gate (revocation + the
 // delegation/message/caller ERC-1271 signature reads), symmetric with demo-mcp's baseConfig. The viem
@@ -1605,11 +1603,8 @@ export class A2aTaskDO {
 
   /** Session-wrapped org signature over a consult-rail digest (§3.1): the interactions-session
    *  KMS key signs; the steward-minted org wire authorizes. No raw key at rest. */
-  private async signAsOrg(orgWire: IncomingDelegation, digest: Hex): Promise<Hex> {
-    const signer = await interactionsSessionAccount(this.env);
-    const signRaw = signer.sign;
-    if (!signRaw) throw new Error('interactions-session KMS account lacks raw-digest sign');
-    return wrapSessionSignature(orgWire, await signRaw({ hash: digest }));
+  private signAsOrg(orgWire: IncomingDelegation, digest: Hex): Promise<Hex> {
+    return signAsOrg(this.env, orgWire, digest);
   }
 
   /** Methods this agent advertises for the archetypes its library defines. Last good value: a
@@ -1824,37 +1819,17 @@ export class A2aTaskDO {
     host: Address;
     taskId: Hex;
   }): Promise<string> {
-    const issuedAt = Math.floor(Date.now() / 1000);
-    const digest = hashA2aTaskRequest({
-      method: 'tasks/get', taskId: args.taskId, agentSA: args.host,
-      chainId: Number(this.env.CHAIN_ID ?? 84532), issuedAt,
-    });
-    const signature = await this.signAsOrg(args.orgWire, digest);
     const host = args.host.toLowerCase();
-    const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(host));
-    const resp = await stub.fetch(new Request(`https://a2a-task-do/rpc?agent=${host}`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0', id: args.taskId, method: 'tasks/get',
-        params: { taskId: args.taskId, caller: args.org, signature, issuedAt },
-      }),
-    }));
-    const out = (await resp.json().catch(() => ({}))) as {
-      result?: { state?: string; error?: string; artifactRefs?: Array<{ recordType?: string }> };
-      error?: { message?: string };
-    };
-    if (out.error) throw new Error(`archetype tasks/get refused by ${host}: ${out.error.message ?? 'unknown'}`);
-
-    const state = out.result?.state;
+    // The folded wire (spec 372 S4): GetTask as the org — a party to the task — not a signed poll.
+    const read = await readDelegatedTask(this.env, { org: args.org, target: host, taskId: args.taskId });
+    const state = read.state;
     if (state === 'failed' || state === 'rejected' || state === 'canceled') {
       // Terminal on the host's side — surfaced with ITS reason, so "the specialist declined" does
       // not read as "we could not reach it".
-      throw new Error(`archetype task ${state} on ${host}${out.result?.error ? `: ${out.result.error}` : ''}`);
+      throw new Error(`archetype task ${state} on ${host}${read.error ? `: ${read.error}` : ''}`);
     }
     if (state !== 'completed') throw new Error(`archetype task not finished yet (${state ?? 'unknown'}) — collecting next window`);
-
-    const ref = (out.result?.artifactRefs ?? []).find((r) => r.recordType?.startsWith('a2a:artifact:'));
-    const artifactId = ref?.recordType?.slice('a2a:artifact:'.length);
+    const artifactId = read.artifactIds[0];
     if (!artifactId) throw new Error('archetype task completed with no artifact to read');
 
     const body = (await this.readConsultArtifact(host, args.taskId, args.org, artifactId)) as
@@ -1900,31 +1875,14 @@ export class A2aTaskDO {
     }
     const method = `archetype.${args.archetype}`;
     const body = { ...args.input, version: 'ap.archetype.work.v1', archetype: args.archetype };
-
-    const idBytes = new Uint8Array(32);
-    crypto.getRandomValues(idBytes);
-    const messageId = (`0x${Array.from(idBytes, (b) => b.toString(16).padStart(2, '0')).join('')}`) as Hex;
-    const createdAt = Math.floor(Date.now() / 1000);
-    const bodyHash = hashBody(body);
-    const digest = hashA2aMessage({ messageId, sender: args.org, skill: method, bodyHash, createdAt });
-    const signature = await this.signAsOrg(args.orgWire, digest);
-    const message = {
-      messageId, sender: args.org, skill: method,
-      bodyRef: { owner: args.host, recordType: 'pending' }, bodyHash, createdAt, signature,
-    };
-    const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(args.host.toLowerCase()));
-    const resp = await stub.fetch(new Request(`https://a2a-task-do/rpc?agent=${args.host.toLowerCase()}`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0', id: messageId, method: 'message/send',
-        params: { delegation: grantResp.wire, requester: args.org, message, input: body },
-      }),
-    }));
-    const out = (await resp.json().catch(() => ({}))) as { result?: { taskId?: Hex }; error?: { message?: string } };
-    if (out.error) throw new Error(`archetype dispatch rejected by ${args.host}: ${out.error.message ?? 'unknown'}`);
-    const taskId = out.result?.taskId;
-    if (!taskId) throw new Error('archetype dispatch returned no taskId');
-    return { taskId };
+    // The folded wire (spec 372 S4): SendMessage carrying the delegated-task extension, signed as the org.
+    let sent: { taskId: Hex };
+    try {
+      sent = await submitDelegatedTask(this.env, { org: args.org, orgWire: args.orgWire, grant: grantResp.wire, target: args.host, skill: method, input: body });
+    } catch (e) {
+      throw new Error(`archetype dispatch rejected by ${args.host}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return { taskId: sent.taskId };
   }
 
   /**
@@ -1940,38 +1898,18 @@ export class A2aTaskDO {
   }): Promise<{ taskId: string }> {
     const audit = buildAuditSink(this.env);
     const memberSA = args.memberSA.toLowerCase();
-    const grantResp = (await this.interactionsInternal(args.org, 'internal.consult.grant', { member: memberSA })) as { wire?: IncomingDelegation | null };
-    if (!grantResp.wire) {
-      await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.consultSent', outcome: 'denied', actor: { type: 'service', id: args.org }, subject: { type: 'consult', id: `${args.questionId}:${memberSA}` }, reason: 'consult grant absent at send time (revoked?)' }).catch(() => undefined);
+    const denied = (reason: string) => audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.consultSent', outcome: 'denied', actor: { type: 'service', id: args.org }, subject: { type: 'consult', id: `${args.questionId}:${memberSA}` }, reason });
+    const grant = await memberConsultGrant(this.env, args.org, memberSA);
+    if (!grant) {
+      await denied('grant absent at send');
       throw new Error('member consult grant is not present (revoked?) — not asking');
     }
-    const request = buildConsultRequest({
-      question: args.question, orgSA: args.org, topicId: args.channelId, questionId: args.questionId,
-      ...(args.topicTitle ? { topicTitle: args.topicTitle } : {}), ...(args.tail?.length ? { tail: args.tail } : {}),
-    });
-    const idBytes = new Uint8Array(32);
-    crypto.getRandomValues(idBytes);
-    const messageId = (`0x${Array.from(idBytes, (b) => b.toString(16).padStart(2, '0')).join('')}`) as Hex;
-    const createdAt = Math.floor(Date.now() / 1000);
-    const bodyHash = hashBody(request);
-    const digest = hashA2aMessage({ messageId, sender: args.org as Address, skill: CONSULT_SKILL_ID, bodyHash, createdAt });
-    const signature = await this.signAsOrg(args.orgWire, digest);
-    const message = {
-      messageId, sender: args.org, skill: CONSULT_SKILL_ID,
-      bodyRef: { owner: memberSA, recordType: 'pending' }, bodyHash, createdAt, signature,
-    };
-    const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(memberSA));
-    const resp = await stub.fetch(new Request(`https://a2a-task-do/rpc?agent=${memberSA}`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0', id: messageId, method: 'message/send',
-        params: { delegation: grantResp.wire, requester: args.org, message, input: request },
-      }),
-    }));
-    const out = (await resp.json().catch(() => ({}))) as { result?: { taskId?: string }; error?: { message?: string } };
-    if (!out.result?.taskId) {
-      await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.consultSent', outcome: 'denied', actor: { type: 'service', id: args.org }, subject: { type: 'consult', id: `${args.questionId}:${memberSA}` }, reason: out.error?.message ?? 'message/send rejected' }).catch(() => undefined);
-      throw new Error(out.error?.message ?? 'consult message/send was rejected by the member\'s gate');
+    let sent: { taskId: Hex };
+    try {
+      sent = await submitConsult(this.env, { org: args.org, orgWire: args.orgWire, grant, memberSA, question: args.question, topicId: args.channelId, questionId: args.questionId, ...(args.topicTitle ? { topicTitle: args.topicTitle } : {}), ...(args.tail?.length ? { tail: args.tail } : {}) });
+    } catch (e) {
+      await denied(e instanceof Error ? e.message : String(e));
+      throw e;
     }
     // spec 329 §5 — the ConsultationIntent DESCRIPTION record (expressed at send; the spine
     // describes, the task rail executes). DO-side custody (the W1 §2.1 deviation's rationale:
@@ -1980,21 +1918,14 @@ export class A2aTaskDO {
       consultationIntentKey(args.questionId, memberSA),
       buildConsultationIntentRecord({ questionId: args.questionId, orgSA: args.org, memberSA, topicId: args.channelId }),
     );
-    await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.consultSent', outcome: 'success', actor: { type: 'service', id: args.org }, subject: { type: 'consult', id: `${args.questionId}:${memberSA}` } }).catch(() => undefined);
-    return { taskId: out.result.taskId };
+    await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.consultSent', outcome: 'success', actor: { type: 'service', id: args.org }, subject: { type: 'consult', id: `${args.questionId}:${memberSA}` } });
+    return { taskId: sent.taskId };
   }
 
   /** Read one completed consult's answer artifact from the MEMBER's runtime (marker-gated body
    *  fetch AFTER the signed tasks/get proved sender-ship — see /internal/consult-artifact). */
-  private async readConsultArtifact(memberSA: string, taskId: Hex, org: string, artifactId: string): Promise<unknown> {
-    const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(memberSA));
-    const resp = await stub.fetch(new Request(`https://a2a-task-do/internal/consult-artifact?agent=${memberSA}`, {
-      method: 'POST', headers: internalHeaders(this.env),
-      body: JSON.stringify({ taskId, caller: org, artifactId }),
-    }));
-    const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; body?: unknown; error?: string };
-    if (!resp.ok || out.ok !== true) throw new Error(out.error ?? `consult artifact read failed (${resp.status})`);
-    return out.body ?? null;
+  private readConsultArtifact(memberSA: string, taskId: Hex, org: string, artifactId: string): Promise<unknown> {
+    return readConsultArtifact(this.env, memberSA, taskId, org, artifactId);
   }
 
   /**
@@ -2039,19 +1970,11 @@ export class A2aTaskDO {
       for (const m of pending.members) {
         if (m.status !== 'sent') continue;
         try {
-          const issuedAt = Math.floor(now / 1000);
-          const digest = hashA2aTaskRequest({ method: 'tasks/get', taskId: m.taskId, agentSA: m.memberSA as Address, chainId: Number(this.env.CHAIN_ID ?? 84532), issuedAt });
-          const signature = await this.signAsOrg(orgWire, digest);
-          const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(m.memberSA));
-          const resp = await stub.fetch(new Request(`https://a2a-task-do/rpc?agent=${m.memberSA}`, {
-            method: 'POST', headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ jsonrpc: '2.0', id: m.taskId, method: 'tasks/get', params: { taskId: m.taskId, caller: orgSA, signature, issuedAt } }),
-          }));
-          const out = (await resp.json().catch(() => ({}))) as { result?: { state?: string; artifactRefs?: VaultRef[] }; error?: { message?: string } };
-          const state = out.result?.state;
+          // The folded wire (spec 372 S4): GetTask as the org, a party to the task.
+          const read = await readDelegatedTask(this.env, { org: orgSA, target: m.memberSA, taskId: m.taskId });
+          const state = read.state;
           if (state === 'completed') {
-            const ref = (out.result?.artifactRefs ?? []).find((r) => r.recordType?.startsWith('a2a:artifact:'));
-            const artifactId = ref?.recordType?.slice('a2a:artifact:'.length);
+            const artifactId = read.artifactIds[0];
             if (!artifactId) m.status = 'failed';
             else {
               const body = (await this.readConsultArtifact(m.memberSA, m.taskId, orgSA, artifactId)) as ConsultAnswerV1 | null;
