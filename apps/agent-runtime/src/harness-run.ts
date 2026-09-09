@@ -861,15 +861,20 @@ export interface SubjectAnswerProfileV1 { extension: string; version: 1; agent: 
 /** One step another agent answered (spec 366): who, reached how, under which of its runs, with what receipts. */
 export interface RoutedStepV1 { stepRef: string; toolId: string; agent: string; name?: string; observedVia: string; runRef?: string; receipts?: number;
   /** Spec 376 — the child mandate a handed-off step ran under (its delegation hash). */
-  childRef?: string }
+  childRef?: string;
+  /** Spec 383 W2 — the standing the receiver's receipt names: for whom, by whom, under which steward wire (digest). */
+  standing?: { relation: string; subject: string; principal: string; because: string; wireRef?: string } }
 
 /** The routed steps of a run, read from each observation's `via` — the sender's record of the hop. */
 export function routedStepsOf(steps: ReadonlyArray<{ step: { id?: string; toolId: string }; result?: unknown }>): RoutedStepV1[] {
   const out: RoutedStepV1[] = [];
   steps.forEach((o, i) => {
-    const via = (o.result as { via?: { agent?: string; name?: string | null; observedVia?: string; runRef?: string; receipts?: unknown[]; childRef?: string } } | null | undefined)?.via;
+    const via = (o.result as { via?: { agent?: string; name?: string | null; observedVia?: string; runRef?: string; receipts?: Array<{ binding?: { standing?: RoutedStepV1['standing'] } }>; childRef?: string } } | null | undefined)?.via;
     if (!via?.agent) return;
-    out.push({ stepRef: o.step.id ?? `s${i}`, toolId: o.step.toolId, agent: via.agent, ...(via.name ? { name: via.name } : {}), observedVia: via.observedVia ?? 'unknown', ...(via.runRef ? { runRef: via.runRef } : {}), ...(via.receipts?.length ? { receipts: via.receipts.length } : {}) , ...(via.childRef ? { childRef: via.childRef } : {}) });
+    // Spec 383 W2 — the receiver's receipt names the standing the hop ran under; lifted so the asker's reply
+    // (and the Home) can say "for Missio Nexus, under steward wire 0x…" without shipping the receipts whole.
+    const standing = (via.receipts ?? []).map((r) => r?.binding?.standing).find((sd) => sd && sd.relation !== 'none');
+    out.push({ stepRef: o.step.id ?? `s${i}`, toolId: o.step.toolId, agent: via.agent, ...(via.name ? { name: via.name } : {}), observedVia: via.observedVia ?? 'unknown', ...(via.runRef ? { runRef: via.runRef } : {}), ...(via.receipts?.length ? { receipts: via.receipts.length } : {}), ...(via.childRef ? { childRef: via.childRef } : {}), ...(standing ? { standing } : {}) });
   });
   return out;
 }
@@ -4100,6 +4105,20 @@ step is then handed to that agent under authority the person grants; leave it ou
   const intentDigest = keccak256(toBytes(JSON.stringify({ goal: input.intent.goal, addressee: input.addressee ?? null, asker: input.person ?? null })));
   // Spec 376 — which steps were HANDED OFF, and to whose run: the receipt's `delegatedTo`.
   const handedOff = new Map<string, { agent: Address; runRef: string; childRef: string }>();
+  // Spec 383 W2 — THE STANDING THIS RUN ACTS UNDER, derived once and named on every receipt: for whom, by
+  // whom, and — for a steward — the stewardship wire the receiver verified, by digest. A routed act's
+  // receipt at the organization then says "for Missio Nexus, under steward wire 0x…" without anyone
+  // trusting the asker's word for it. Evidence only: the mandate chain is what the verifier judged.
+  const chainIdForWire = Number(env.CHAIN_ID); const dmForWire = env.DELEGATION_MANAGER as Address | undefined;
+  const wireRefOf = (wire: unknown): Hex | null => { try { return dmForWire ? hashDelegation(wireToDelegation(wire as never), chainIdForWire, dmForWire) : null; } catch { return null; } };
+  const standingOnce: Promise<ExecutionBindingV1['standing'] | undefined> | null = input.person && input.addressee && deps.readSubjectRecord
+    ? deriveStanding({ readSubjectRecord: deps.readSubjectRecord, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}), wireRefOf },
+        { principal: input.person, subject: input.addressee })
+      .then((st) => ({ relation: st.relation, subject: st.subject, principal: input.person!.toLowerCase(), because: st.because, ...(st.wireRef ? { wireRef: st.wireRef } : {}) }))
+      .catch(() => undefined)
+    : null;
+  let standingLink: ExecutionBindingV1['standing'] | undefined;
+  if (standingOnce) standingLink = await standingOnce;
   const bindingFor = (rs: ResolvedStep): ExecutionBindingV1 => {
     const sourceOf = (v: unknown): NonNullable<ExecutionBindingV1['argSources']>[string] => {
       const low = String(v ?? '').toLowerCase();
@@ -4120,6 +4139,7 @@ step is then handed to that agent under authority the person grants; leave it ou
       ...((input.inResponseTo || handedOff.get(rs.stepRef))
         ? { correlation: { ...(input.inResponseTo ? { inResponseTo: input.inResponseTo } : {}), ...(handedOff.get(rs.stepRef) ? { delegatedTo: { agent: handedOff.get(rs.stepRef)!.agent, runRef: handedOff.get(rs.stepRef)!.runRef } } : {}) } }
         : {}),
+      ...(standingLink ? { standing: standingLink } : {}),
       // Spec 383 — the actor context of this hop (ADR-0052): for whom, who started it, whose harness ran it.
       ...(input.addressee ? { actor: { ...(input.person ? { rootPrincipal: input.person.toLowerCase() } : {}), ...(input.inResponseTo?.agent ? { originatingAgent: input.inResponseTo.agent.toLowerCase() } : input.person ? { originatingAgent: input.person.toLowerCase() } : {}), actingAgent: input.addressee.toLowerCase() } } : {}),
     };

@@ -1040,6 +1040,16 @@ function ReplyView({ reply, realm, addressee, onNext }: { reply: AskReply; realm
             Handed to {x.name ? <span title={x.agent}>{x.name}</span> : <AgentName address={x.agent} />} — it ran there under a child mandate cut from yours{x.runRef ? ` (its run ${x.runRef.slice(0, 18)}…)` : ''}.
           </div>
         ))}
+        {/* Spec 383 W2 — THE CHAIN ON THE RECEIPT, in words: a routed step ran at another agent, and that agent's
+            receipt names the standing it ran under — for whom, and under which steward wire, by digest. */}
+        {(reply.routed ?? []).filter((x) => x.observedVia !== 'handoff').flatMap((x, i) => {
+          const st = x.standing && x.standing.relation !== 'none' ? x.standing : undefined;
+          return st ? [
+            <div key={`standing-${i}`} className="muted" style={{ fontSize: 11.5, marginTop: 3 }} data-testid="ask-standing-link">
+              Done by {x.name ? <span title={x.agent}>{x.name}</span> : <AgentName address={x.agent} />}’s agent — {st.relation === 'self' ? 'its own' : st.relation === 'steward' ? `for it, under a steward wire${st.wireRef ? ` ${short(st.wireRef)}` : ''} held by ${short(st.principal)}` : `as a ${st.relation}`}: {st.because}.
+            </div>,
+          ] : [];
+        })}
         {/* Spec 363 W6 — WHAT WAS DECIDED FOR THEM, after the fact. A person who was never asked which
             account paid should still be able to see which one did and why: before the act the authority
             card says it, and afterwards this does, because by then the card is gone and "why did it use

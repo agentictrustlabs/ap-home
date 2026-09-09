@@ -109,7 +109,7 @@ export type AskReplyVariant =
       /** Spec 363 W6 — what was DECIDED for the person on the way here, and on what basis. */
       decisions?: Array<{ point: string; ruleId: string; arg: string; chose: string; because: string }>;
       /** Spec 366/376 — steps another agent did: routed to its subject, or HANDED to a specialist under a child mandate. */
-      routed?: Array<{ agent: string; name?: string | null; observedVia?: string; runRef?: string; childRef?: string }>;
+      routed?: Array<{ agent: string; name?: string | null; observedVia?: string; runRef?: string; childRef?: string; receipts?: number; /** Spec 383 W2 — the standing the receiver's receipt names: for whom, by whom, under which steward wire (digest). */ standing?: { relation: string; subject: string; principal: string; because: string; wireRef?: string } }>;
       /** Spec 368 §3 — what MAY FOLLOW: a compiled command the agent proposes (e.g. "invite Bob to your
        *  household as spouse" after a household note). A proposal only — confirming it runs a new turn
        *  that asks for its own authority. */
