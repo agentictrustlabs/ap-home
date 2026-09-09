@@ -39,7 +39,7 @@ import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
 import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
 import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly } from '@agenticprimitives/orchestration';
-import { recentParties, conversationForPrompt, type ConversationMemoryV1 } from '@agenticprimitives/context';
+import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
 
@@ -2650,6 +2650,8 @@ export async function resolveStepArgs(
       }
       out[key] = await resolveParty(raw, lookups, {
         stepRef: where.stepRef, toolId: where.toolId, argName: key, what: partyWord(key),
+        // Spec 385 — the capability the resolution is FOR, so a scoped confirmation memory keys on it.
+        ...(where.capabilityId ? { capabilityId: where.capabilityId } : {}),
         // Which questions this capability lets the substrate answer for the person (spec 363 W5).
         ...(where.consults?.length ? { consults: where.consults } : {}),
         // WHOSE tier: the person asking. Without a subject the private providers are skipped and the
@@ -2859,6 +2861,8 @@ export async function resolveStepArgs(
       }
       out[key] = await resolveParty(raw, lookups, {
         stepRef: where.stepRef, toolId: where.toolId, argName: key, what: partyWord(key),
+        // Spec 385 — the capability the resolution is FOR, so a scoped confirmation memory keys on it.
+        ...(where.capabilityId ? { capabilityId: where.capabilityId } : {}),
         // WHOSE tier: the person asking. Without a subject the private providers are skipped and the
         // answer is an honest "unknown" — never a widening to a public search.
         ...(where.subject ? { subject: where.subject } : {}),
@@ -4160,6 +4164,13 @@ be emitted together; the runtime runs them side by side.`;
     normalizeArgs: ({ toolId, tool, args }) => resolveStepArgs(args, env, { ...deps, ...(input.session ? { session: input.session } : {}),
       // Spec 370 P7 — what recent asks resolved, for a pronoun or a repeated name. The same addressee's turns first.
       ...(input.conversation ? { recentParties: async () => recentParties(input.conversation, { addressee: String(input.addressee ?? '') }) } : {}),
+      // Spec 385 — the person's DURABLE scoped confirmation memory (their own vault), consulted before the
+      // rolling window; revalidated against the candidates the resolver found. Evidence, never a grant.
+      ...(deps.readSubjectRecord && input.person ? { preferredChoice: async (scope: { word: string; capability: string; arg: string }, candidates: ReadonlyArray<{ agent: string }>) => {
+        const prefs = (await deps.readSubjectRecord!(String(input.person).toLowerCase(), CONFIRMATION_RECORD).catch(() => null)) as ConfirmationPreferencesV1 | null;
+        const hit = pickPreferred(prefs, scope, candidates);
+        return hit ? { agent: hit.agent, ...(hit.label ? { label: hit.label } : {}) } : null;
+      } } : {}),
       onResolved: (r) => {
       // The SAME party can be reported twice — once resolved from words or from the asker's own tree, and
       // once again as the plain address it now is. Keep whichever knows its name: overwriting a labelled

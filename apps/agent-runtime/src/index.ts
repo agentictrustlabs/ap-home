@@ -7,7 +7,7 @@ import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 // State is held in a Durable Object (SessionStoreDO); see ./session-store-do.ts.
 // Env bindings come from c.env (typed via the Bindings interface below).
 
-import { rememberTurn, CONVERSATION_RECORD, type ConversationMemoryV1 } from '@agenticprimitives/context';
+import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, CONFIRMATION_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1 } from '@agenticprimitives/context';
 import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
 import { recordOf, replayingInvoker, type Plan, type SuppliedInputV1, type RunEvent } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
@@ -2879,7 +2879,7 @@ app.post('/harness/ask', async (c) => {
             ? { routedAt: { ...(stored?.routedAt ?? {}), ...(reply.kind === 'authority_required' && reply.routedAt ? { [reply.stepRef]: reply.routedAt } : {}) } }
             : {}),
           ...routedAct,
-          ...(reply.kind === 'prompt' ? { awaiting: { kind: reply.prompt.kind, prompt: reply.prompt.prompt, stepRef: reply.prompt.stepRef, expiresAt: now + AWAIT_WINDOW_MS[reply.prompt.kind] } } : {}),
+          ...(reply.kind === 'prompt' ? { awaiting: { kind: reply.prompt.kind, prompt: reply.prompt.prompt, stepRef: reply.prompt.stepRef, expiresAt: now + AWAIT_WINDOW_MS[reply.prompt.kind], ...((reply.prompt as { scope?: { word: string; capability: string; arg: string } }).scope ? { scope: (reply.prompt as { scope: { word: string; capability: string; arg: string } }).scope } : {}) } } : {}),
           // Spec 374 — waiting on another agent's steward: the commitment is the record, and only the
           // debtor's delivered answer moves this run (the asker cannot resume it).
           ...(reply.kind === 'waiting' ? { awaiting: { kind: 'commitment' as const, prompt: reply.text, stepRef: reply.stepRef, expiresAt: now + AWAIT_WINDOW_MS.commitment, commitment: reply.commitment } } : {}),
@@ -3021,6 +3021,24 @@ app.post('/harness/ask', async (c) => {
       const parties = [...resolved.values()].filter((r) => /^0x[0-9a-f]{40}$/i.test(r.agent) && r.raw && !/^0x/i.test(r.raw) && !r.ruleId && !r.pointId).map((r) => ({ arg: r.arg, raw: r.raw, agent: r.agent.toLowerCase(), ...(r.label ? { label: r.label } : {}) }));
       const next = rememberTurn(conversation?.type === 'ap.context.conversation-memory.v1' ? conversation : null, { at: new Date().toISOString(), runRef, addressee, said: turn.message, kind: reply.kind, parties });
       kept = askDeps.writeSubjectRecord(String(who.sa).toLowerCase(), CONVERSATION_RECORD, next).then((r) => { if (!r.ok) console.warn('[harness/ask] conversation not kept:', r.error); }).catch(() => undefined);
+      // Spec 385 — REMEMBER A CONFIRMED CHOICE. The trusted event: a PRIOR turn raised an ambiguity choice
+      // scoped to (word, capability, arg), and THIS turn supplied the answer (`body.supplied`). The resolved
+      // agent for that arg IS the person's confirmation — recorded scoped, correctable, revalidated on the
+      // next read, and NEVER a grant (ADR-0041). A model asserting "the user confirmed" writes nothing.
+      const scope = stored?.awaiting?.scope;
+      const answeredScope = scope && (body.supplied ?? []).some((sup) => sup.stepRef === stored?.awaiting?.stepRef && sup.data && scope.arg in sup.data);
+      if (answeredScope) {
+        const chose = [...resolved.values()].find((r) => r.arg === scope!.arg && /^0x[0-9a-f]{40}$/i.test(r.agent));
+        if (chose) {
+          c.executionCtx.waitUntil(
+            askDeps.readSubjectRecord!(String(who.sa).toLowerCase(), CONFIRMATION_RECORD).catch(() => null)
+              .then((prev) => askDeps.writeSubjectRecord!(String(who.sa).toLowerCase(), CONFIRMATION_RECORD,
+                rememberConfirmation(prev as ConfirmationPreferencesV1 | null, { word: scope!.word, capability: scope!.capability, arg: scope!.arg, agent: chose.agent, ...(chose.label ? { label: chose.label } : {}), runRef })))
+              .then((r) => { if (r && !r.ok) console.warn('[harness/ask] confirmation not kept:', r.error); })
+              .catch((e) => console.warn('[harness/ask] confirmation not kept:', e instanceof Error ? e.message : String(e))),
+          );
+        }
+      }
     }
     // Spec 369 — WHAT IS SAID, decided by the agent: markdown stripped, addresses named. A voice reads this.
     const spoken = await spokenFor(reply as never, async (a) => askDeps.nameOf?.(a) ?? null, (id) => CAPABILITY_WORDS[id] ?? id).catch(() => '');

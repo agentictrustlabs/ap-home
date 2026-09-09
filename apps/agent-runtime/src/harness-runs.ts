@@ -59,7 +59,10 @@ export interface HarnessRunCheckpointV1 {
    *  for minutes, and a run past its window reads EXPIRED rather than pending forever. */
   awaiting?: { kind: 'data' | 'signature' | 'confirmation' | 'commitment' | 'authority'; prompt: string; stepRef: string; expiresAt?: number;
     /** Spec 374 — when `kind` is `commitment`: what another agent owes this run, and where it waits. */
-    commitment?: CommitmentRefV1 };
+    commitment?: CommitmentRefV1;
+    /** Spec 385 — when this prompt was an AMBIGUITY choice, the scope it confirms (word + capability + arg),
+     *  so the resume that answers it can be remembered as a scoped preference. Display/memory only. */
+    scope?: { word: string; capability: string; arg: string } };
   /**
    * Spec 370 P1 — WHAT RAN. The plan the run was admitted with (fan-out already expanded) and the steps
    * that completed, each with what it returned and the receipt that recorded it. A resume hands these
