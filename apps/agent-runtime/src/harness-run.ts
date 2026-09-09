@@ -2575,7 +2575,7 @@ export async function resolveStepArgs(
     // Acting as yourself is the only reading of "send alice a message"; acting as the room you stand in is
     // the only reading of "invite carol" said inside it. Declared classes decide, never proximity.
     if (!current) {
-      const realmSuffix = where.realmSuffix ?? (where.realmKind ? ({ person: 'me', org: 'org', service: 'svc' } as Record<string, string>)[where.realmKind] : undefined);
+      const realmSuffix = where.realmSuffix ?? (where.realmKind ? KIND_SUFFIX[where.realmKind] : undefined);
       const typesHere = partyTypesFor(where.capabilityId ?? where.toolId, arg) ?? [];
       if (where.addressee && realmSuffix && typesHere.includes(realmSuffix) && where.addressee.toLowerCase() !== where.subject.toLowerCase()) {
         out[arg] = where.addressee.toLowerCase();
@@ -2586,9 +2586,18 @@ export async function resolveStepArgs(
     }
     const types = partyTypesFor(where.capabilityId ?? where.toolId, arg);
     const isAsker = String(out[arg] ?? '').toLowerCase() === where.subject.toLowerCase();
+    // AN AGENT ASKING ITSELF that IS the kind the role wants — a team's coordinator allocating on its own
+    // endeavor (a trigger's run, spec 375) — is the party: its own kind (the realm's, from the chain) is in
+    // the role's types. Searching "its tree" for an organization asked a team which organization it should
+    // be. The realm mapping is `KIND_SUFFIX`: a `team`, a `church`, a `treasury` — not only the three roots.
+    const selfSuffix = where.addressee && where.addressee.toLowerCase() === where.subject.toLowerCase()
+      ? (where.realmSuffix ?? (where.realmKind ? KIND_SUFFIX[where.realmKind] : undefined)) : undefined;
+    if (types?.length && isAsker && selfSuffix && types.includes(selfSuffix)) {
+      lookups.onResolved?.({ arg, raw: partyWord(arg), agent: where.subject.toLowerCase(), hint: 'this agent itself — it is of the kind the role names', via: 'context' });
+    }
     // A person is not a treasury. When the capability acts on a kind the asker's own SA is not, find the
     // one of THEIR agents that is — the typed suffix already says which. Never a widening: their tree only.
-    if (types?.length && isAsker && !types.includes('me')) {
+    else if (types?.length && isAsker && !types.includes('me')) {
       let found = false;
       for (const type of types) {
         const mine = await ownAgentsOfType(where.subject, type, lookups);
@@ -2719,7 +2728,7 @@ export async function resolveStepArgs(
     // TWO SOURCES OF VALIDATED CONTEXT, most specific first: the entity SELECTED on the screen (spec 361
     // I6 — a member on the roster, a team, a treasury), then the realm the person stands in. A selection is
     // a reference the app checked before it declared it; it is never a sentence the model wrote.
-    const realmSuffix = where.realmSuffix ?? (where.realmKind ? ({ person: 'me', org: 'org', service: 'svc' } as Record<string, string>)[where.realmKind] : undefined);
+    const realmSuffix = where.realmSuffix ?? (where.realmKind ? KIND_SUFFIX[where.realmKind] : undefined);
     const sel = where.selection?.entity && /^0x[0-9a-f]{40}$/i.test(where.selection.entity) ? where.selection : undefined;
     const selSuffix = sel?.kind ? ((KIND_SUFFIX as Record<string, string>)[sel.kind.toLowerCase()] ?? sel.kind.toLowerCase()) : undefined;
     const candidates: Array<{ agent: string; suffix: string; hint: string; side: readonly string[] }> = [
@@ -2877,9 +2886,18 @@ export async function resolveStepArgs(
     if (!current) out[arg] = where.subject.toLowerCase();
     const types = partyTypesFor(where.capabilityId ?? where.toolId, arg);
     const isAsker = String(out[arg] ?? '').toLowerCase() === where.subject.toLowerCase();
+    // AN AGENT ASKING ITSELF that IS the kind the role wants — a team's coordinator allocating on its own
+    // endeavor (a trigger's run, spec 375) — is the party: its own kind (the realm's, from the chain) is in
+    // the role's types. Searching "its tree" for an organization asked a team which organization it should
+    // be. The realm mapping is `KIND_SUFFIX`: a `team`, a `church`, a `treasury` — not only the three roots.
+    const selfSuffix = where.addressee && where.addressee.toLowerCase() === where.subject.toLowerCase()
+      ? (where.realmSuffix ?? (where.realmKind ? KIND_SUFFIX[where.realmKind] : undefined)) : undefined;
+    if (types?.length && isAsker && selfSuffix && types.includes(selfSuffix)) {
+      lookups.onResolved?.({ arg, raw: partyWord(arg), agent: where.subject.toLowerCase(), hint: 'this agent itself — it is of the kind the role names', via: 'context' });
+    }
     // A person is not a treasury. When the capability acts on a kind the asker's own SA is not, find the
     // one of THEIR agents that is — the typed suffix already says which. Never a widening: their tree only.
-    if (types?.length && isAsker && !types.includes('me')) {
+    else if (types?.length && isAsker && !types.includes('me')) {
       let found = false;
       for (const type of types) {
         const mine = await ownAgentsOfType(where.subject, type, lookups);
