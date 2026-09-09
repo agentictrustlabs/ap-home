@@ -36,6 +36,7 @@ import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
 import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
 import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
+import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
 import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly } from '@agenticprimitives/orchestration';
 import { recentParties, conversationForPrompt, type ConversationMemoryV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
@@ -51,7 +52,7 @@ import { type Plan, type Planner,
   type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
 import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep } from '@agenticprimitives/harness';
 import {
-  hashDelegation, intentDigest, encodeDigestBindingArgs, decodeTimestampTerms, buildCaveat, buildVaultRecordScopeCaveat,
+  hashDelegation, intentDigest, encodeDigestBindingArgs, decodeDigestBindingTerms, decodeTimestampTerms, buildCaveat, buildVaultRecordScopeCaveat,
   encodeTimestampTerms, encodeValueTerms, ROOT_AUTHORITY, CAPABILITY_RAR_TYPE, PAYMENT_RAR_TYPE,
   type Caveat, type Delegation, type EnforcerAddresses, type MandateRequirementV1, methodSelector, deriveMandate, readMandate, readDigestBindings, registerDefaultSubsetHandlers } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
@@ -1156,6 +1157,26 @@ async function refuseUnlessTreasury(deps: HarnessDeps, agent: string, end: strin
     : `${label} has no agent type recorded on chain, so this agent cannot tell it is a treasury — money only moves between treasuries, and nothing was paid.`);
 }
 
+/**
+ * Spec 384 — THE REDEEM-TIME ARGUMENT FOR A DIGEST-BINDING CAVEAT, by the caveat's own KIND. A mandate may bind
+ * the intent AND the offer it fulfils (and a projection); the enforcer compares each caveat's bound digest to the
+ * one PRESENTED for that kind. Feeding the intent digest to every binding caveat reverted `DigestMismatch` on
+ * chain the first time a mandate carried an offer binding (live, 2026-09-08) — after the verifier had already
+ * admitted the step. The step's own digests are what is presented; a kind the step cannot present is refused
+ * here, before a transaction is sent.
+ */
+function digestBindingArgsFor(c: Caveat, digests: { intent: Hex; offer?: Hex; projection?: Hex }): Hex {
+  const { kind } = decodeDigestBindingTerms(c.terms as Hex);
+  const presented = kind === 'intent' ? digests.intent : kind === 'offer' ? digests.offer : digests.projection;
+  if (!presented) throw new Error(`the mandate binds ${kind === 'offer' ? 'an offer' : 'a projection'} this step does not name — nothing was redeemed`);
+  return encodeDigestBindingArgs(presented);
+}
+const stepDigests = (args: Record<string, unknown>, intent: Hex): { intent: Hex; offer?: Hex; projection?: Hex } => ({
+  intent,
+  ...(typeof args.offerDigest === 'string' && /^0x[0-9a-fA-F]{64}$/.test(args.offerDigest) ? { offer: args.offerDigest as Hex } : {}),
+  ...(typeof args.projectionDigest === 'string' && /^0x[0-9a-fA-F]{64}$/.test(args.projectionDigest) ? { projection: args.projectionDigest as Hex } : {}),
+});
+
 async function partyAddress(value: unknown, deps: HarnessDeps, what: string): Promise<Address> {
   const raw = String(value ?? '').trim();
   if (/^0[xX][0-9a-fA-F]{40}$/.test(raw)) return raw.toLowerCase() as Address;
@@ -1208,7 +1229,7 @@ export function fundInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Manda
     const amount = fundingAmount(args);
     const digest = intentDigest(ctx.intent);
     const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === harnessEnforcers(env).digestBinding.toLowerCase()
-      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: encodeDigestBindingArgs(digest) }
+      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest)) }
       : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
     const mint = encodeFunctionData({ abi: MINT_ABI, functionName: 'mint', args: [treasury, amount] });
     const redeem = encodeFunctionData({ abi: REDEEM_ABI, functionName: 'redeemDelegation', args: [[{ delegator: wire.delegator, delegate: wire.delegate, authority: wire.authority as Hex, caveats, salt: wire.salt, signature: wire.signature as Hex }], asset, 0n, mint] });
@@ -1305,7 +1326,7 @@ export function primaryPayeeInvoker(deps: HarnessDeps, env: HarnessEnv, presente
     const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
     const digest = intentDigest(ctx.intent);
     const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === harnessEnforcers(env).digestBinding.toLowerCase()
-      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: encodeDigestBindingArgs(digest) }
+      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest)) }
       : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
     const txHashes: string[] = [];
     for (const call of calls) {
@@ -1373,7 +1394,7 @@ export function accessRevokeInvoker(deps: HarnessDeps, env: HarnessEnv, presente
     const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
     const digest = intentDigest(ctx.intent);
     const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === harnessEnforcers(env).digestBinding.toLowerCase()
-      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: encodeDigestBindingArgs(digest) }
+      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest)) }
       : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
     // The person's own SA makes the call (the DelegationManager only lets the owner revoke), reached by
     // redeeming their mandate — the same shape a payment uses, with the target being the manager itself.
@@ -1718,7 +1739,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     const caveats = wire.caveats.map((c) => {
       const e = c.enforcer.toLowerCase();
       if (e === enforcers.payment!.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: paymentArgs };
-      if (e === enforcers.digestBinding.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: encodeDigestBindingArgs(digest) };
+      if (e === enforcers.digestBinding.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest)) };
       return { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex };
     });
     // Again, at the moment of acting: the balance may have moved since the preview, and a revert with no
@@ -1738,7 +1759,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
       const linkCaveats = link.caveats.map((c) => {
         const e = c.enforcer.toLowerCase();
         if (e === enforcers.payment!.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: encodeAbiParameters([{ type: 'bytes32' }, { type: 'bytes32' }, { type: 'bytes32' }], [bound, nonce, keccak256(toBytes(`${hashDelegation(link, Number(env.CHAIN_ID), dm)}:${stepRef}`))]) };
-        if (e === enforcers.digestBinding.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: encodeDigestBindingArgs(bound) };
+        if (e === enforcers.digestBinding.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, bound)) };
         return { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex };
       });
       chain.push({ delegator: link.delegator, delegate: link.delegate, authority: link.authority as Hex, caveats: linkCaveats, salt: link.salt, signature: link.signature as Hex });
@@ -3872,6 +3893,8 @@ be emitted together; the runtime runs them side by side.`;
     EXTERNAL_AGENT_TOOL,
     // Spec 380 — one member of an organization, asked through their own agent (fan-out over the roster).
     MEMBER_CONSULT_TOOL,
+    // Spec 384 — ask other agents whether they would take this work, and on what terms (an offer is never accepted here).
+    ENGAGEMENT_PROBE_TOOL,
     // The asker's OWN records (spec 356 W2). Needs a model to choose from the survey AND the survey seam
     // itself — absent either, it is not listed rather than listed and broken.
     ...(vaultQuestionAvailable({ call: structuredCallFor(env as never, input.provider) }, deps) ? [VAULT_QUESTION_TOOL] : []),

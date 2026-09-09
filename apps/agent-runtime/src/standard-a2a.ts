@@ -25,7 +25,7 @@ import {
 import type { SuppliedInputV1 } from '@agenticprimitives/orchestration';
 import { internalHeaders, isInternalCall, type InternalMarkerEnv } from './internal-marker.js';
 import { subjectAskOf, subjectAnswerOf, handoffOf, routedRunRefFor, SUBJECT_ANSWER_ARTIFACT } from './subject-hop.js';
-import type { HandoffV1 } from '@agenticprimitives/a2a';
+import { engagementOf, engagementResponseMessage, type HandoffV1 } from '@agenticprimitives/a2a';
 import type { SubjectAnswerV1 } from '@agenticprimitives/a2a';
 
 /** The runtime mints 32-byte hex task ids; this server's own conversational tasks are uuids. That is how a
@@ -94,6 +94,9 @@ export interface StandardMountDeps {
   /** Spec 376 — RUN ONE HANDED-OFF STEP at this agent under the chain the parent sent, the parent agent as
    *  the asker (an agent holding a mandate). Returns the `/harness/ask`-shaped envelope the parent reads. */
   runHandoff?: (input: { executor: Address; parent: Address; handoff: HandoffV1 }) => Promise<Record<string, unknown>>;
+  /** Spec 384 W2 — answer an engagement probe AS this agent (an offer, a decline, a question…). The reply is a
+   *  MESSAGE, never a task (336 §5). Absent ⇒ probes are not answered here. */
+  answerProbe?: (input: { agent: Address; probe: Record<string, unknown>; caller: Principal | null }) => Promise<Record<string, unknown>>;
 }
 
 interface AskEnvelope {
@@ -147,8 +150,22 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
     tasks,
     push: st.push,
     // A delegated task is the runtime's — it keeps its id, and this server never makes a second one.
-    ...(deps.delegatedRpc ? {
+    // Spec 384 W2 — an engagement PROBE is answered with a MESSAGE and no task (336 §5): the reply is the
+    // provider's own document, signed when it is an offer. Refused unless the caller is known.
+    ...(deps.delegatedRpc || deps.answerProbe ? {
       beforeSend: async ({ message, configuration }, principal) => {
+        const eng = engagementOf(message as MessageV1);
+        if (eng && 'errors' in eng) throw Object.assign(new Error(`the engagement document is malformed: ${eng.errors.join('; ')}`), { code: -32602, name: 'A2aError' });
+        if (eng && 'probe' in eng) {
+          if (!deps.answerProbe) throw Object.assign(new Error('this agent does not answer engagement probes here'), { code: -32601, name: 'A2aError' });
+          if (!principal) throw Object.assign(new Error('a probe names its requester, and the caller must be known'), { code: -32001, name: 'A2aError' });
+          if (String(eng.probe.requester).toLowerCase() !== principal.agent.toLowerCase()) throw Object.assign(new Error('the probe names a requester other than its caller'), { code: -32602, name: 'A2aError' });
+          if (String(eng.probe.candidate).toLowerCase() !== agent.toLowerCase()) throw Object.assign(new Error('the probe is addressed to another agent'), { code: -32602, name: 'A2aError' });
+          const response = await deps.answerProbe({ agent, probe: eng.probe, caller: principal });
+          return { message: engagementResponseMessage(response as never) };
+        }
+        if (eng && 'response' in eng) throw Object.assign(new Error('an engagement response is read by the requester that probed, not sent to it as a new message'), { code: -32602, name: 'A2aError' });
+        if (!deps.delegatedRpc) return null;
         const ext = readDelegatedTask(message as MessageV1);
         if (ext === null) return null;
         const r = await deps.delegatedRpc!(agent, {
@@ -159,7 +176,7 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
         return (r.result as { task?: TaskV1; message?: MessageV1 }) ?? null;
       },
       onCancel: async (task, principal) => {
-        if (!isRuntimeTaskId(task.id)) return null;
+        if (!isRuntimeTaskId(task.id) || !deps.delegatedRpc) return null;
         const r = await deps.delegatedRpc!(agent, { jsonrpc: '2.0', id: 1, method: 'CancelTask', params: { id: task.id } }, principal);
         if (r.error) throw Object.assign(new Error(r.error.message), { code: r.error.code, name: 'A2aError' });
         return (r.result as TaskV1) ?? null;

@@ -42,6 +42,16 @@ export async function signAsOrg(env: Env, orgWire: IncomingDelegation, digest: H
   return wrapSessionSignature(orgWire, await sign({ hash: digest }));
 }
 
+/** Spec 384 W2 — sign a digest AS an agent served here, under its own DEL-001 session leaf (principal → the
+ *  interactions-session key). The result verifies ERC-1271 against the agent. Null when the agent holds no
+ *  leaf in this deployment — then it cannot sign as itself, and a firm offer is not minted for it. */
+export async function signAsAgent(env: Env, agent: string, digest: Hex, signRaw?: RawSigner): Promise<Hex | null> {
+  let leaf: IncomingDelegation | null = null;
+  try { leaf = ((await interactionsInternal(env, agent, 'internal.session.leaf', {})) as { leaf?: IncomingDelegation | null }).leaf ?? null; } catch { return null; }
+  if (!leaf?.signature) return null;
+  return signAsOrg(env, leaf, digest, signRaw);
+}
+
 /** The org's own consult wire, or null when the routing ceremony has not minted one. */
 export async function orgConsultWire(env: Env, org: string): Promise<IncomingDelegation | null> {
   const r = (await interactionsInternal(env, org, 'internal.consult.orgWire', {})) as { wire?: IncomingDelegation | null };

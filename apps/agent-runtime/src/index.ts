@@ -143,6 +143,10 @@ import { realtimeKitConfigured, verifyRealtimeKitWebhook, readRealtimeKitWebhook
 import { sendSubjectAskOverWire, subjectAnswerMessage, subjectEnvelopeOf, handoffMessage, routedRunRefFor } from './subject-hop.js';
 import { EXTERNAL_AGENT_TOOL, externalAgentInvoker } from './external-agent.js';
 import { MEMBER_CONSULT_TOOL, memberConsultInvoker } from './member-consult.js';
+import { ENGAGEMENT_PROBE_TOOL, engagementProbeInvoker } from './engagement-probe.js';
+import { answerProbe } from './engagement-answer.js';
+import type { MessageV1 } from '@agenticprimitives/a2a/standard';
+import { signAsAgent } from './consult-rail.js';
 import { exportRun, firewalledSpans, recordRetention } from './run-export.js';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
@@ -1128,6 +1132,12 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
       },
     } : {}),
     askAsAgent: (input) => runAgentAsk(c.env, input),
+    // Spec 384 W2 — answer a probe AS this agent: decided from its playbook and its on-chain kind, signed under its
+    // own session leaf when it is an offer. A person's agent says a human channel is required.
+    answerProbe: async ({ agent: who, probe }) => {
+      const d = harnessDeps(c.env, buildAuditSink(c.env));
+      return answerProbe({ agentTypeOf: d.agentTypeOf, readSubjectRecord: d.readSubjectRecord, signAsAgent: (a, digest) => signAsAgent(c.env, a, digest) }, who, probe as never) as never;
+    },
     // Spec 374 §4 — a delivered answer resumes the run that asked, and only that run.
     resumeFromCommitment: (input) => resumeFromCommitment(c.env, input),
     // Spec 376 — run one handed-off step here, the parent agent as the asker, the chain presented.
@@ -2730,6 +2740,25 @@ app.post('/harness/ask', async (c) => {
         if (toolId === EXTERNAL_AGENT_TOOL.id) return externalAgentInvoker({ timeoutMs: 20_000 })(toolId, args, ctx);
         // Spec 380 — one member asked through the consult rail, at the organization; skipped without their opt-in.
         if (toolId === MEMBER_CONSULT_TOOL.id) return memberConsultInvoker(c.env, { ...(askDeps.nameOf ? { nameOf: askDeps.nameOf } : {}) })(toolId, args, ctx);
+        // Spec 384 W2 — probe candidates for offers, each in-process as the asker's own agent (a Worker cannot fetch its own hostnames).
+        if (toolId === ENGAGEMENT_PROBE_TOOL.id) {
+          const requester = String(who.sa).toLowerCase() as Address;
+          return engagementProbeInvoker({
+            requester, resolveName: askDeps.resolveName, nameOf: askDeps.nameOf,
+            sendProbe: async (candidate, message) => {
+              const name = await askDeps.nameOf?.(candidate).catch(() => null) ?? null;
+              const parents = (c.env.AGENT_NAME_PARENTS ?? c.env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p) => p.trim()).filter(Boolean);
+              const host = name ? hostForName(name, a2aCanonicalDomain(c.env), parents) : null;
+              if (!host || !a2aBaseDomains(c.env).some((d) => host === d || host.endsWith(`.${d}`))) return { ok: false, refused: `${name ?? candidate} is not served here — probing across deployments is spec 384 W3` };
+              const req = new Request(`https://${host}/api/a2a`, { method: 'POST', headers: internalHeaders(c.env, { 'content-type': 'application/json', accept: 'application/json', 'a2a-version': '1.0', 'x-ap-internal-agent': requester }), body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'SendMessage', params: { message } }) });
+              const res = await app.fetch(req, c.env, c.executionCtx);
+              const body = (await res.json().catch(() => null)) as { result?: { message?: MessageV1; task?: unknown }; error?: { message?: string } } | null;
+              if (!body || body.error) return { ok: false, refused: body?.error?.message ?? `${name ?? candidate} answered ${res.status}` };
+              if (!body.result?.message) return { ok: false, refused: `${name ?? candidate} answered with a task, not a response — it does not speak the engagement profile` };
+              return { ok: true, message: body.result.message };
+            },
+          })(toolId, args, ctx);
+        }
         if (toolId === KB_QUESTION_TOOL.id) return kbQuestionInvoker({ fetchDiscovery: discoveryFetchFor(c.env), ...(structuredCall ? { call: structuredCall } : {}) })(toolId, args, ctx);
         // Their OWN records (spec 356 W2). The subject is the connected person, from the session — never
         // an argument, so a question cannot name somebody else's vault.
