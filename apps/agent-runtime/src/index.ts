@@ -1525,6 +1525,12 @@ app.post('/harness/confirmations/forget', async (c) => {
  * door. This function is handed one, and asserts nothing about how it was established.
  */
 export async function runAgentAsk(env: Env, input: { agent: Address; addressee: Address; ask: string; runRef: string; context?: Record<string, unknown>;
+  /** Spec 380 W3 — a plan the caller supplies (the routed topic turn: one consult step per ranked member). */
+  plan?: Plan;
+  /** Spec 380 W3 — guidance the asker's context supplies to the COMPOSER (a topic's steward-written assistant
+   *  document): tone and emphasis for one conversation, appended to the composer's own doctrine. Read by no
+   *  verifier; it never widens what the run may do. */
+  guidance?: string;
   /** Spec 374 §4 — RESUME a checkpointed run with what was delivered: the plan it was admitted with, the
    *  steps that completed (replayed), the wires it presented (re-verified), and the supplied inputs now
    *  including the debtor's answer for the step that waited. No session: the run finishes as the agent. */
@@ -1544,15 +1550,20 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
   const intent = input.intent ?? { goal: input.ask, context: { addressee: input.addressee, asker: input.agent, ...(input.context ?? {}) } };
   const { result, interactionFor, trace, tools, events, presentedRefs } = await runUnderMandate(env as unknown as HarnessEnv, deps, {
     intent, presented: input.resume?.presented ?? null, person: input.agent, runRef: input.runRef, addressee: input.addressee,
-    ...(input.resume?.plan ? { plan: input.resume.plan } : {}),
+    ...(input.resume?.plan ? { plan: input.resume.plan } : input.plan ? { plan: input.plan } : {}),
     ...(input.resume?.executed ? { resume: input.resume.executed } : {}),
     ...(input.resume?.supplied?.length ? { supplied: input.resume.supplied } : {}),
     // An unattended run has no person's session behind it: the public directory and the vault questions
     // are a person's reads. The playbook's own tools (the work reads, the acts) do not come this way.
-    mcpInvoke: async (toolId) => ({ refused: `${toolId} is not available to an unattended run — a person asks that` }),
+    // Spec 380 W3 — the one exception is the organization consulting ITS OWN members as itself: a read under
+    // its consult wire, each member's gate deciding; the routed topic turn is made of exactly these steps.
+    mcpInvoke: async (toolId, args, ctx) => {
+      if (toolId === MEMBER_CONSULT_TOOL.id) return memberConsultInvoker(env, { ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) })(toolId, args, ctx);
+      return { refused: `${toolId} is not available to an unattended run — a person asks that` };
+    },
   });
   const reply = await askReplyFor(env as unknown as HarnessEnv, {
-    intent, result, addressee: input.addressee, composer: selectComposer(env), deps, interactionFor, plannerTrace: trace, tools,
+    intent, result, addressee: input.addressee, composer: selectComposer(env, input.guidance ? { systemPrompt: input.guidance } : undefined), deps, interactionFor, plannerTrace: trace, tools,
     resolveName: (name: string) => deps.resolveName?.(name) ?? Promise.resolve(null),
   } as never);
   const spoken = await spokenFor(reply as never, async (a) => deps.nameOf?.(a) ?? null, (id) => CAPABILITY_WORDS[id] ?? id).catch(() => '');

@@ -38,7 +38,7 @@ import { createViemChainProvider } from '@agenticprimitives/chain-state-viem';
 // behind the Planner port (the chain-state-viem pattern), selected by env at request time.
 import { runOrchestration } from './orchestration.js';
 import { endeavorRequestFromA2aTask, parseEndeavorRequestInput, parseEndeavorStateInput, ENDEAVOR_REQUEST_SKILL_ID, ENDEAVOR_STATE_SKILL_ID } from './endeavor-intake.js';
-import { handleDiscussionRespond, handleConsultSynthesis, type DiscussionRespondInput, type DiscussionRoutingOpts } from './discussion-skill.js';
+import { handleDiscussionRespond, topicReplyGuidance, type DiscussionRespondInput } from './discussion-skill.js';
 import { draftEndeavorPlan } from './endeavor-plan-skill.js';
 import { executeEndeavorStep, synthesizeEndeavorOutcome, gatherReferenceContext } from './endeavor-work-skill.js';
 import { handleInboxRespond, type InboxRespondInput } from './inbox-skill.js';
@@ -55,6 +55,7 @@ import { discoveryFetchFor } from './context-wiring.js';
 import { scopedActionTools } from './harness-run.js';
 import { messagingScopeCovers, messagingScopeDepsFromEnv } from './messaging-scope.js';
 import { fetchDiscoveryFacets } from './discovery-facets.js';
+import { MEMBER_CONSULT_TOOL } from './member-consult.js';
 import { makeMessagingSkills, makeOrgApplySkill } from './messaging-skills.js';
 import { skillProvenanceMetadata } from './skill-provenance.js';
 import { buildA2aReceiptsConfig } from './receipts.js';
@@ -67,9 +68,6 @@ import {
   ROUTING_RATE_MAX,
   ROUTING_RATE_WINDOW_MS,
   buildConsultRequest,
-  buildConsultProvenance,
-  buildConsultationIntentRecord,
-  consultationIntentKey,
   fixedWindowAllow,
   generateConversationId,
   generateMessageId,
@@ -77,12 +75,8 @@ import {
   parseConsultRequest,
   rankConsultCandidates,
   routedConsultationContextRef,
-  routingPendingKey,
   sha256Hex32,
-  validateConsultAnswer,
   validateMessageEnvelope,
-  type ConsultAnswerV1,
-  type ConsultOutcomeV1,
   type ConsultationIntentV1,
   type EligibleConsultMemberV1,
   type FixedWindowState,
@@ -93,7 +87,7 @@ import {
 // FR-3.4 — deliver artifacts into a principal's demo-mcp vault over their delegation. The value import is
 // cyclic with index.ts, but safe: `callMcpToolViaDelegation` is a hoisted function used only at request
 // time (never at module-init), and `Env`/`IncomingDelegation` are type-only.
-import { buildAuditSink, callMcpToolWithProof, interactionsSessionAccount, runUnattendedAsk, fireTriggersAt, harnessDeps, probeSenderFor, candidateSourceFor, type Env, type IncomingDelegation } from './index.js';
+import { buildAuditSink, callMcpToolWithProof, interactionsSessionAccount, runUnattendedAsk, runAgentAsk, fireTriggersAt, harnessDeps, probeSenderFor, candidateSourceFor, type Env, type IncomingDelegation } from './index.js';
 import { dueNow, advanced, messageTriggerSource, type TriggerScheduleV1 } from './triggers.js';
 import { ERC1271_MAGIC_VALUE as ERC1271_MAGIC } from '@agenticprimitives/types';
 
@@ -415,29 +409,6 @@ function consultMemberDeadlineMs(env: { CONSULT_MEMBER_DEADLINE_MS?: string }): 
 }
 /** Per-topic routing bucket key (spec 329 §4 — 3 routed questions / 10 min, on top of 327's). */
 const ROUTING_RATE_KEY = (channelId: string): string => `routing.rate:${channelId}`;
-
-/** One consulted member's slot in the pending ring. `status:'sent'` until a terminal outcome. */
-interface PendingConsultMemberV1 {
-  memberSA: string;
-  displayName: string;
-  taskId: Hex;
-  sentAt: number;
-  deadlineAt: number;
-  status: 'sent' | ConsultOutcomeV1['status'];
-  answer?: ConsultAnswerV1;
-}
-/** The `routing.pending:<topicId>:<questionId>` record (spec 329 §4.1 — org DO storage; DO-side
- *  custody like the W1 grant-store deviation: no deployed vault scope covers routing.*). */
-interface PendingRoutingV1 {
-  channelId: string;
-  questionId: string;
-  question: string;
-  topicTitle: string;
-  displayName: string;
-  members: PendingConsultMemberV1[];
-  createdAt: number;
-  synthesisAttempts?: number;
-}
 
 // ── spec 329 §3 — the `discussion.consult` skill on PERSON agents ────────────────────────────────────
 /** Member-side per-org consult rate bucket key (DO storage; fixed window 12/hour/org). */
@@ -1050,15 +1021,31 @@ export class A2aTaskDO {
       // depth-1 guard is structural: this dispatch only fires for human-authored triggers
       // (assistantTrigger skips actor-marked + org-authored posts), and the consult skill's
       // handler has NO routing tools.
-      let routing: DiscussionRoutingOpts | undefined;
-      let askCount = 0; // consults actually sent — the status post carries the contextRef iff > 0
       const audit = buildAuditSink(this.env);
+      const io = {
+        readTopic: () => call('internal.channels.read', { channelId: p.channelId }),
+        // spec 334 §6 gather phase for the @ask turn: read ONE of the org's OWN records owner-self
+        // through the read-only coordination grant (recordType OPAQUE — the org's playbook names
+        // the domain records, never this platform). Non-throwing: a scope-denied / unenabled read
+        // maps to { ok:false } so the gather sub-turn degrades gracefully to no reference data.
+        readOrgRecord: (recordType: string) =>
+          call('internal.coordination.vaultRead', { recordType })
+            .then((r) => ({ ok: r.ok === true, data: (r as { data?: unknown }).data, error: (r as { error?: string }).error, needsEnable: (r as { needsEnable?: boolean }).needsEnable }))
+            .catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) })),
+        post: async (bodyText: string, contextRefs?: unknown[]) => (await call('internal.channels.post', {
+          channelId: p.channelId, bodyText, ...(contextRefs?.length ? { contextRefs } : {}),
+        })) as { messageId?: string },
+      };
+      // Spec 380 W3 — THE ROUTED TOPIC TURN IS ONE HARNESS RUN AT THE ORGANIZATION. Eligibility and the
+      // 329 ranking still decide WHO (the harness-computed, discovery-ranked, opt-in set); the chosen
+      // members become the supplied plan's respondents, one `organization.member.consult` step each. The
+      // loop runs them as one batch, each member's own gate re-verifies its grant, and the composer's
+      // reply — which names every member's words and every skip — is posted ONCE with the
+      // routed-consultation contextRef. No pending record, no alarm, no second turn: a member who has
+      // not answered within the step's deadline is said to have not answered.
       try {
         const elig = (await call('internal.consult.eligible', { channelId: p.channelId })) as { enabled?: boolean; maxFanout?: number; members?: EligibleConsultMemberV1[] };
         if (elig.enabled === true && (elig.members?.length ?? 0) > 0) {
-          // Per-topic routing bucket (spec 329 §4: 3 routed questions / 10 min, on top of 327's
-          // dispatch bucket). Consumed only when a routed question actually starts; exceed ⇒ the
-          // turn runs WITHOUT routing tools (audited, never queued).
           const rateKey = ROUTING_RATE_KEY(p.channelId);
           const prev = (await this.state.storage.get(rateKey)) as FixedWindowState | undefined;
           const rate = fixedWindowAllow(prev, Date.now(), { windowMs: ROUTING_RATE_WINDOW_MS, max: ROUTING_RATE_MAX });
@@ -1069,86 +1056,47 @@ export class A2aTaskDO {
             if (wireResp.wire) {
               await this.state.storage.put(rateKey, rate.next);
               const questionId = `q_${crypto.randomUUID()}`;
-              // W2 — discovery enrichment + spec-281 ranking (fail-open to fewer signals: an
-              // unreachable discovery yields the un-enriched eligible set, never more candidates).
               const facets = await fetchDiscoveryFacets(this.env, elig.members!.map((m) => m.memberSA));
               const ranking = rankConsultCandidates({ eligible: elig.members!, facets, need: p.triggerBody, max: 5 });
               const evidenceHash = await sha256Hex32(new TextEncoder().encode(JSON.stringify(ranking.candidates)));
-              await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.decision', outcome: 'success', actor: { type: 'service', id: p.principal }, subject: { type: 'routing-question', id: questionId }, reason: `candidates=${ranking.candidates.length} enriched=${ranking.enriched} droppedByMandates=${ranking.droppedByMandates} evidenceHash=${evidenceHash}` });
+              console.log(`[discussion-respond] routing decision ${questionId}: ${ranking.candidates.length} candidate(s), evidence ${evidenceHash.slice(0, 18)}…`);
+              await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.decision', outcome: 'success', actor: { type: 'service', id: p.principal }, subject: { type: 'routing-question', id: questionId } });
               if (ranking.candidates.length > 0) {
-                // Clipped topic tail for the routed context (spec 329 §2.3) — one bounded read.
-                let tail: Array<{ author: string; bodyText: string }> = [];
-                try {
-                  const topicRead = (await call('internal.channels.read', { channelId: p.channelId, limit: 8 })) as { messages?: Array<{ authorName?: string; bodyText?: string }> };
-                  tail = (topicRead.messages ?? []).map((m) => ({ author: m.authorName ?? 'member', bodyText: m.bodyText ?? '' }));
-                } catch { /* trigger-only context */ }
                 const maxFanout = Math.min(Math.max(Number(elig.maxFanout ?? 3) || 3, 1), 5);
-                routing = {
-                  questionId,
-                  candidates: ranking.candidates,
-                  maxFanout,
-                  ask: async (memberSA, question) => {
-                    const r = await this.submitConsult({
-                      org: p.principal.toLowerCase(), orgWire: wireResp.wire!, memberSA, question,
-                      channelId: p.channelId, questionId, topicTitle: p.topicTitle, tail,
-                    });
-                    askCount++;
-                    return r;
-                  },
-                };
+                const chosen = ranking.candidates.slice(0, maxFanout);
+                const org = p.principal.toLowerCase() as Address;
+                const runRef = `topic-${questionId}`;
+                let topicGuidance = '';
+                try { topicGuidance = String(((await io.readTopic()) as { skillMarkdown?: string }).skillMarkdown ?? '').trim(); } catch { /* the org's playbook alone */ }
+                const run = await runAgentAsk(this.env, {
+                  agent: org, addressee: org, ask: p.triggerBody, runRef,
+                  context: { channelId: p.channelId, topicTitle: p.topicTitle, triggerAuthor: p.triggerAuthor, questionId },
+                  plan: { steps: chosen.map((c, i) => ({ toolId: MEMBER_CONSULT_TOOL.id, args: { org, respondent: c.memberSA, question: p.triggerBody }, id: `s1#${i + 1}` })) },
+                  guidance: topicReplyGuidance(p, topicGuidance),
+                });
+                const text = String(run.reply.text ?? '').trim();
+                if (text) {
+                  const posted = await io.post(text, [routedConsultationContextRef(p.principal, p.channelId, questionId)]);
+                  return Response.json({ ok: true, messageId: posted.messageId, plannerKind: 'harness', asked: chosen.length, runRef });
+                }
+                await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.degraded', outcome: 'error', actor: { type: 'service', id: p.principal }, subject: { type: 'routing-question', id: questionId } });
               }
             }
           }
         }
-      } catch { /* fail-open: the plain 327 turn (the org answers alone) */ }
+      } catch (e) {
+        // fail-open: the plain 327 turn (the org answers alone). Audited, never retried into another mechanism.
+        await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.degraded', outcome: 'error', actor: { type: 'service', id: p.principal }, subject: { type: 'channel', id: p.channelId } }).catch(() => undefined);
+      }
 
       try {
-        const turn = await handleDiscussionRespond(this.env, p, {
-          readTopic: () => call('internal.channels.read', { channelId: p.channelId }),
-          // spec 334 §6 gather phase for the @ask turn: read ONE of the org's OWN records owner-self
-          // through the read-only coordination grant (recordType OPAQUE — the org's playbook names
-          // the domain records, never this platform). Non-throwing: a scope-denied / unenabled read
-          // maps to { ok:false } so the gather sub-turn degrades gracefully to no reference data.
-          readOrgRecord: (recordType: string) =>
-            call('internal.coordination.vaultRead', { recordType })
-              .then((r) => ({ ok: r.ok === true, data: (r as { data?: unknown }).data, error: (r as { error?: string }).error, needsEnable: (r as { needsEnable?: boolean }).needsEnable }))
-              .catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) })),
-          post: async (bodyText) => (await call('internal.channels.post', {
-            channelId: p.channelId, bodyText,
-            // The turn-1 status post carries the routed-consultation contextRef iff asks went out
-            // (a routed-tools turn that consulted no one is a plain 327 answer — no chip).
-            ...(routing && askCount > 0 ? { contextRefs: [routedConsultationContextRef(p.principal, p.channelId, routing.questionId)] } : {}),
-          })) as { messageId?: string },
-        }, routing);
-        // W3 — pending ring + alarm-driven turn 2 (spec 329 §4.1). Recorded AFTER the status post
-        // committed; a turn that asked no one leaves nothing pending (exact 327 behavior).
-        if (routing && turn.asked.length > 0) {
-          const nowMs = Date.now();
-          const pending: PendingRoutingV1 = {
-            channelId: p.channelId, questionId: routing.questionId, question: p.triggerBody,
-            topicTitle: p.topicTitle, displayName: p.displayName, createdAt: nowMs,
-            members: turn.asked.map((a) => ({
-              memberSA: a.memberSA, displayName: a.displayName, taskId: a.taskId as Hex,
-              sentAt: nowMs, deadlineAt: nowMs + consultMemberDeadlineMs(this.env), status: 'sent' as const,
-            })),
-          };
-          await this.state.storage.put(routingPendingKey(p.channelId, routing.questionId), pending);
-          await this.state.storage.put(AGENT_SA_KEY, p.principal.toLowerCase()); // alarm() rehydration
-          await this.state.storage.setAlarm(Date.now() + ROUTING_POLL_MS);
-        }
-        // RESILIENCE INVARIANT (2026-07-17 live 502): a routing-extension failure degrades the turn
-        // (audited below) — it never kills the base reply. Success ⇔ a reply was POSTED; the only
-        // 502 left is the base turn itself failing to post, and that is never silent again.
-        if (turn.degraded) {
-          console.error(`[discussion-respond] routing degraded (step=${turn.degraded.step}): ${turn.degraded.cause}`);
-          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.degraded', outcome: 'error', actor: { type: 'service', id: p.principal }, subject: routing ? { type: 'routing-question', id: routing.questionId } : { type: 'channel', id: p.channelId }, reason: `${turn.degraded.step}: ${turn.degraded.cause}`.slice(0, 500) }).catch(() => undefined);
-        }
+        const turn = await handleDiscussionRespond(this.env, p, io);
         if (!turn.posted) {
           const cause = turn.result.error ?? 'assistant turn completed without posting a reply';
           console.error(`[discussion-respond] 502 — no reply posted (step=turn outcome=${turn.result.outcome} planner=${turn.plannerKind}): ${cause}`);
           return Response.json({ ok: false, error: cause, plannerKind: turn.plannerKind }, { status: 502 });
         }
-        return Response.json({ ok: true, messageId: turn.messageId, plannerKind: turn.plannerKind, asked: turn.asked.length, ...(turn.degraded ? { degraded: true } : {}) });
+        return Response.json({ ok: true, messageId: turn.messageId, plannerKind: turn.plannerKind, asked: 0 });
       } catch (e) {
         console.error(`[discussion-respond] 502 — dispatch threw (step=dispatch): ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`);
         return Response.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 502 });
@@ -1384,18 +1332,8 @@ export class A2aTaskDO {
     if (!agentSA) return;
     const agent = this.build(agentSA as Address);
     await agent.processDue();
-    // spec 329 §4.1 turn 2 — advance the org's pending consult fan-outs (poll → collect →
-    // synthesize). Isolated from task processing: a routing failure never stalls the task loop.
-    let routingRemain = false;
-    try {
-      routingRemain = await this.processRoutingDue(agentSA.toLowerCase());
-    } catch {
-      // A total failure of the poll must NOT strand a pending fan-out: re-arm as long as any
-      // routed question is still pending, so the next alarm retries (the poll is idempotent).
-      try {
-        routingRemain = (await this.state.storage.list({ prefix: 'routing.pending:', limit: 1 })).size > 0;
-      } catch { routingRemain = false; }
-    }
+    // Spec 380 W3 — a routed topic turn is one harness run; there are no pending fan-outs to advance here.
+    const routingRemain = false;
     // If anything remains due (e.g. auth-required→resubmit just landed), re-arm.
     const store = createDurableObjectTaskStore(this.state.storage);
     if ((await store.listDue(Date.now())).length > 0) await this.state.storage.setAlarm(Date.now() + ALARM_DELAY_MS);
@@ -1953,174 +1891,10 @@ export class A2aTaskDO {
     return { taskId: sent.taskId };
   }
 
-  /**
-   * `ask_member`'s executor: SEND-TIME grant re-read (member revoke is immediate — no grant, no
-   * consult, no exception), the bounded ConsultRequest, the org-signed `message/send` to the
-   * member's A2A endpoint (the shared demo-a2a host: every agent's endpoint terminates at its own
-   * A2aTaskDO — the same dispatch `/api/a2a` performs after Host resolution), and the
-   * ConsultationIntent description record. The member's gate re-verifies EVERYTHING on-chain.
-   */
-  private async submitConsult(args: {
-    org: string; orgWire: IncomingDelegation; memberSA: string; question: string;
-    channelId: string; questionId: string; topicTitle?: string; tail?: Array<{ author: string; bodyText: string }>;
-  }): Promise<{ taskId: string }> {
-    const audit = buildAuditSink(this.env);
-    const memberSA = args.memberSA.toLowerCase();
-    const denied = (reason: string) => audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.consultSent', outcome: 'denied', actor: { type: 'service', id: args.org }, subject: { type: 'consult', id: `${args.questionId}:${memberSA}` }, reason });
-    const grant = await memberConsultGrant(this.env, args.org, memberSA);
-    if (!grant) {
-      await denied('grant absent at send');
-      throw new Error('member consult grant is not present (revoked?) — not asking');
-    }
-    let sent: { taskId: Hex };
-    try {
-      sent = await submitConsult(this.env, { org: args.org, orgWire: args.orgWire, grant, memberSA, question: args.question, topicId: args.channelId, questionId: args.questionId, ...(args.topicTitle ? { topicTitle: args.topicTitle } : {}), ...(args.tail?.length ? { tail: args.tail } : {}) });
-    } catch (e) {
-      await denied(e instanceof Error ? e.message : String(e));
-      throw e;
-    }
-    // spec 329 §5 — the ConsultationIntent DESCRIPTION record (expressed at send; the spine
-    // describes, the task rail executes). DO-side custody (the W1 §2.1 deviation's rationale:
-    // no deployed vault scope covers routing.* and widening forces a fleet re-enable).
-    await this.state.storage.put(
-      consultationIntentKey(args.questionId, memberSA),
-      buildConsultationIntentRecord({ questionId: args.questionId, orgSA: args.org, memberSA, topicId: args.channelId }),
-    );
-    await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.consultSent', outcome: 'success', actor: { type: 'service', id: args.org }, subject: { type: 'consult', id: `${args.questionId}:${memberSA}` } });
-    return { taskId: sent.taskId };
-  }
-
   /** Read one completed consult's answer artifact from the MEMBER's runtime (marker-gated body
    *  fetch AFTER the signed tasks/get proved sender-ship — see /internal/consult-artifact). */
   private readConsultArtifact(memberSA: string, taskId: Hex, org: string, artifactId: string): Promise<unknown> {
     return readConsultArtifact(this.env, memberSA, taskId, org, artifactId);
   }
 
-  /**
-   * Advance every pending routed question (alarm-driven — spec 329 §4.1 turn 2). Per member:
-   * SIGNED `tasks/get` on their runtime (the §3.1 wire authorizes the caller signature) →
-   * completed ⇒ artifact read + ConsultAnswer validation + mid-flight-revoke re-check; terminal
-   * failure ⇒ failed; past deadline ⇒ timedOut. When all resolve, run the ONE synthesis turn
-   * (single tool, attribution + PROV + routed-consultation contextRef) and clear the entry.
-   * Returns whether anything remains pending (the alarm re-arms on true).
-   */
-  private async processRoutingDue(orgSA: string): Promise<boolean> {
-    const pendingMap = await this.state.storage.list({ prefix: 'routing.pending:' });
-    if (pendingMap.size === 0) return false;
-    const audit = buildAuditSink(this.env);
-    // Steward disable is immediate: an absent wire (or one cleared mid-flight) cancels everything.
-    // BUT a wire READ can also fail TRANSIENTLY (a DO-to-DO hiccup), and this poll re-reads the wire
-    // on EVERY cadence tick — a long fan-out (3 slow member turns held for the full deadline) runs
-    // dozens of ticks, so a single transient read failure treated as "wire absent" would wrongly
-    // CANCEL the whole routed question and no synthesis would ever post (observed live: N=2 finishes
-    // in ~12 ticks and synthesizes; N=3 ran ~60 ticks and stalled). So DISTINGUISH a genuine absence
-    // (read succeeded, wire null ⇒ steward disabled ⇒ cancel) from a transient read failure (retry
-    // next tick, never cancel). Fail-OPEN toward the in-flight consult; steward disable still cancels.
-    let orgWire: IncomingDelegation | null = null;
-    let wireReadOk = true;
-    try {
-      orgWire = ((await this.interactionsInternal(orgSA, 'internal.consult.orgWire', {})) as { wire?: IncomingDelegation | null }).wire ?? null;
-    } catch { wireReadOk = false; }
-    let remain = false;
-    for (const [key, value] of pendingMap) {
-      const pending = value as PendingRoutingV1;
-      if (!wireReadOk) {
-        // Transient wire-read failure — do NOT cancel; keep the entry and re-poll on the next alarm.
-        remain = true;
-        continue;
-      }
-      if (!orgWire) {
-        await this.state.storage.delete(key);
-        await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.cancelled', outcome: 'success', actor: { type: 'service', id: orgSA }, subject: { type: 'routing-pending', id: key }, reason: 'org consult wire absent (routing disabled)' }).catch(() => undefined);
-        continue;
-      }
-      const now = Date.now();
-      for (const m of pending.members) {
-        if (m.status !== 'sent') continue;
-        try {
-          // The folded wire (spec 372 S4): GetTask as the org, a party to the task.
-          const read = await readDelegatedTask(this.env, { org: orgSA, target: m.memberSA, taskId: m.taskId });
-          const state = read.state;
-          if (state === 'completed') {
-            const artifactId = read.artifactIds[0];
-            if (!artifactId) m.status = 'failed';
-            else {
-              const body = (await this.readConsultArtifact(m.memberSA, m.taskId, orgSA, artifactId)) as ConsultAnswerV1 | null;
-              const valid = !!body && validateConsultAnswer(body).length === 0
-                && body.questionId === pending.questionId
-                && body.orgSA === orgSA
-                && String(body.actor).toLowerCase().endsWith(m.memberSA);
-              if (!valid) m.status = 'failed';
-              else {
-                // Mid-flight revoke (spec 329 W4 rule): grant gone between turn 1 and now ⇒ the
-                // answer is DISCARDED and the attribution says so.
-                let grantStill = false;
-                try { grantStill = !!((await this.interactionsInternal(orgSA, 'internal.consult.grant', { member: m.memberSA })) as { wire?: unknown }).wire; } catch { grantStill = false; }
-                if (!grantStill) m.status = 'revoked';
-                else { m.status = body.declined === true ? 'declined' : 'answered'; m.answer = body; }
-              }
-            }
-          } else if (state === 'failed' || state === 'rejected' || state === 'canceled') {
-            m.status = 'failed';
-          } else if (now > m.deadlineAt) {
-            m.status = 'timedOut';
-          }
-        } catch {
-          // Transient poll failure — retry until the deadline, then time out honestly.
-          if (now > m.deadlineAt) m.status = 'timedOut';
-        }
-        if (m.status !== 'sent') {
-          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.consultResolved', outcome: m.status === 'answered' || m.status === 'declined' ? 'success' : 'error', actor: { type: 'service', id: orgSA }, subject: { type: 'consult', id: `${pending.questionId}:${m.memberSA}` }, reason: m.status }).catch(() => undefined);
-        }
-      }
-      const allDone = pending.members.every((m) => m.status !== 'sent');
-      if (!allDone) {
-        await this.state.storage.put(key, pending);
-        remain = true;
-        continue;
-      }
-      // ── TURN 2 — the synthesis turn (tolerates partial failure: whatever resolved is used). ──
-      try {
-        const outcomes: ConsultOutcomeV1[] = pending.members.map((m) => ({
-          memberSA: m.memberSA, displayName: m.displayName, status: m.status as ConsultOutcomeV1['status'],
-          ...(m.answer && m.status !== 'revoked' ? { answer: m.answer } : {}),
-        }));
-        const ctxRef = routedConsultationContextRef(orgSA, pending.channelId, pending.questionId);
-        const prov = buildConsultProvenance(pending.questionId, outcomes);
-        const turn = await handleConsultSynthesis(this.env, {
-          principal: orgSA, channelId: pending.channelId, topicTitle: pending.topicTitle,
-          displayName: pending.displayName, question: pending.question, questionId: pending.questionId, outcomes,
-        }, {
-          readTopic: () => this.interactionsInternal(orgSA, 'internal.channels.read', { channelId: pending.channelId }),
-          post: async (bodyText) => (await this.interactionsInternal(orgSA, 'internal.channels.post', { channelId: pending.channelId, bodyText, contextRefs: [ctxRef], prov })) as { messageId?: string },
-        });
-        if (turn.result.outcome !== 'completed' || !turn.posted) throw new Error(turn.result.error ?? 'synthesis turn completed without posting');
-        // Spine lifecycle (spec 329 §5): fulfilled for contributing consults, abandoned otherwise.
-        for (const o of outcomes) {
-          const ikey = consultationIntentKey(pending.questionId, o.memberSA);
-          const rec = (await this.state.storage.get(ikey)) as ConsultationIntentV1 | undefined;
-          if (rec) {
-            await this.state.storage.put(ikey, {
-              ...rec,
-              status: o.status === 'answered' ? 'fulfilled' as const : 'abandoned' as const,
-              object: o.status === 'answered' ? ikey : rec.object,
-            });
-          }
-        }
-        await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.synthesisPost', outcome: 'success', actor: { type: 'service', id: orgSA }, subject: { type: 'channel-post', id: turn.messageId ?? pending.questionId } }).catch(() => undefined);
-        await this.state.storage.delete(key);
-      } catch (e) {
-        const attempts = (pending.synthesisAttempts ?? 0) + 1;
-        if (attempts >= ROUTING_SYNTHESIS_MAX_ATTEMPTS) {
-          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.routing.synthesisPost', outcome: 'error', actor: { type: 'service', id: orgSA }, subject: { type: 'routing-pending', id: key }, reason: `dropped after ${attempts} attempts: ${e instanceof Error ? e.message : String(e)}` }).catch(() => undefined);
-          await this.state.storage.delete(key);
-        } else {
-          pending.synthesisAttempts = attempts;
-          await this.state.storage.put(key, pending);
-          remain = true;
-        }
-      }
-    }
-    return remain;
-  }
 }
