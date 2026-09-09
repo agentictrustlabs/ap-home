@@ -7,7 +7,7 @@ import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 // State is held in a Durable Object (SessionStoreDO); see ./session-store-do.ts.
 // Env bindings come from c.env (typed via the Bindings interface below).
 
-import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, CONFIRMATION_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1 } from '@agenticprimitives/context';
+import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, forgetConfirmation, CONFIRMATION_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1 } from '@agenticprimitives/context';
 import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
 import { recordOf, replayingInvoker, type Plan, type SuppliedInputV1, type RunEvent } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
@@ -1453,6 +1453,52 @@ app.post('/harness/runs', async (c) => {
   // person could not resume is a run they are not shown.
   const runs = (await listRuns(c.env as never, addressee)).filter((r) => claimableBy(r, caller));
   return c.json({ ok: true, runs: runs.sort((a, b) => b.updatedAt - a.updatedAt) });
+});
+
+/**
+ * Spec 385 W2 — THE PERSON'S REMEMBERED CHOICES, in the open. What their agent kept when they picked one
+ * "David" over another: the word, the capability it was for, the argument it filled, whom they chose. Read
+ * from THEIR OWN vault under their own grant, for the session-holder only — there is no listing of anyone
+ * else's confirmations, and no addressee: a preference belongs to the person, not to the room they asked in.
+ *
+ * It is shown so it can be corrected. A memory nobody can see is a memory nobody can say "no" to, and the
+ * whole reason a remembered choice is evidence rather than authority is that the person can overrule it —
+ * by choosing differently (a new confirmation replaces the old) or by clearing it here.
+ */
+const confirmationEntries = (prefs: unknown) => {
+  const entries = prefs && typeof prefs === 'object' && (prefs as ConfirmationPreferencesV1).type === 'ap.context.confirmation-preferences.v1'
+    ? (prefs as ConfirmationPreferencesV1).entries : [];
+  return entries.map((e) => ({ ...e, capabilityWords: CAPABILITY_WORDS[e.capability] ?? e.capability }));
+};
+app.post('/harness/confirmations', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string } | null;
+  if (!body?.session) return c.json({ ok: false, error: 'session is required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  if (!deps.readSubjectRecord) return c.json({ ok: false, error: 'the private tier is not configured' }, 503);
+  const prefs = await deps.readSubjectRecord(String(who.sa).toLowerCase(), CONFIRMATION_RECORD).catch(() => null);
+  return c.json({ ok: true, entries: confirmationEntries(prefs) });
+});
+
+/** Clear ONE remembered scope. The next ask of that word, in that place, asks again — and what the
+ *  person answers then is what is remembered. The write is the person's own agent writing their own
+ *  vault, exactly as the memory was written; nothing here is a grant, so nothing here is revoked. */
+app.post('/harness/confirmations/forget', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; scope?: { word?: string; capability?: string; arg?: string } } | null;
+  if (!body?.session) return c.json({ ok: false, error: 'session is required' }, 400);
+  const scope = body.scope;
+  if (!scope?.word || !scope.capability || !scope.arg) return c.json({ ok: false, error: 'scope { word, capability, arg } is required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  if (!deps.readSubjectRecord || !deps.writeSubjectRecord) return c.json({ ok: false, error: 'the private tier is not configured' }, 503);
+  const me = String(who.sa).toLowerCase();
+  const prev = (await deps.readSubjectRecord(me, CONFIRMATION_RECORD).catch(() => null)) as ConfirmationPreferencesV1 | null;
+  const next = forgetConfirmation(prev, { word: String(scope.word), capability: String(scope.capability), arg: String(scope.arg) });
+  const wrote = await deps.writeSubjectRecord(me, CONFIRMATION_RECORD, next);
+  if (!wrote.ok) return c.json({ ok: false, error: wrote.error ?? 'the preference could not be cleared' }, 502);
+  return c.json({ ok: true, entries: confirmationEntries(next) });
 });
 
 /**
@@ -3030,10 +3076,14 @@ app.post('/harness/ask', async (c) => {
       if (answeredScope) {
         const chose = [...resolved.values()].find((r) => r.arg === scope!.arg && /^0x[0-9a-f]{40}$/i.test(r.agent));
         if (chose) {
+          // The surface answers with an ADDRESS (the choice's value), so the resolver reports no label for
+          // it; the memory names the agent anyway — the person reads "somali-corridor-team.impact" in
+          // their remembered choices, not 0x1659…, and the next citation says whom they chose.
+          const labelled = chose.label ? Promise.resolve(chose.label) : Promise.resolve(askDeps.nameOf?.(chose.agent) ?? null).catch(() => null);
           c.executionCtx.waitUntil(
-            askDeps.readSubjectRecord!(String(who.sa).toLowerCase(), CONFIRMATION_RECORD).catch(() => null)
-              .then((prev) => askDeps.writeSubjectRecord!(String(who.sa).toLowerCase(), CONFIRMATION_RECORD,
-                rememberConfirmation(prev as ConfirmationPreferencesV1 | null, { word: scope!.word, capability: scope!.capability, arg: scope!.arg, agent: chose.agent, ...(chose.label ? { label: chose.label } : {}), runRef })))
+            Promise.all([askDeps.readSubjectRecord!(String(who.sa).toLowerCase(), CONFIRMATION_RECORD).catch(() => null), labelled])
+              .then(([prev, label]) => askDeps.writeSubjectRecord!(String(who.sa).toLowerCase(), CONFIRMATION_RECORD,
+                rememberConfirmation(prev as ConfirmationPreferencesV1 | null, { word: scope!.word, capability: scope!.capability, arg: scope!.arg, agent: chose.agent, ...(label ? { label } : {}), runRef })))
               .then((r) => { if (r && !r.ok) console.warn('[harness/ask] confirmation not kept:', r.error); })
               .catch((e) => console.warn('[harness/ask] confirmation not kept:', e instanceof Error ? e.message : String(e))),
           );

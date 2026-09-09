@@ -14,7 +14,7 @@
 //
 // The addressee comes from the workspace switcher's active scope, not from a second picker — one source
 // of truth for "where am I", exactly as the sidebar uses.
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useRouter } from 'next/navigation';
 import { useSession } from '../../../context/session';
@@ -25,7 +25,7 @@ import { nameLabel } from '../../../lib/domain';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
 import { useVoice, blobToBase64 } from './useVoice';
 import { yesNo, matchChoice, listenAfter, plainSpeech, navigationIntent, closestOption } from './voice-text';
-import { ask, hear, warmHearing, readProgress, type ProgressLine, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, homeModels, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField, type AskModelOption } from '../../../home/ask';
+import { ask, hear, warmHearing, readProgress, type ProgressLine, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, homeModels, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField, type AskModelOption, listConfirmations, forgetConfirmation, type RememberedChoice } from '../../../home/ask';
 import type { AskSelection } from '../../../home/ask-selection';
 import { resolveNavigationTarget } from '../../../lib/interaction-registry';
 
@@ -110,6 +110,25 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   const [unfinishedTotal, setUnfinishedTotal] = useState(0);
   // COLLAPSED BY DEFAULT. This is a note beside the conversation, never a competitor to it.
   const [showUnfinished, setShowUnfinished] = useState(false);
+  // Spec 385 W2 — WHAT THE AGENT REMEMBERS THEY CHOSE ("the Somali Corridor Team you meant when inviting"),
+  // in the open so it can be cleared. The person's own, whichever room they ask in; refreshed after every
+  // turn because the turn that answered a "which one?" is the one that wrote it.
+  const [remembered, setRemembered] = useState<RememberedChoice[]>([]);
+  const [showRemembered, setShowRemembered] = useState(false);
+  const refreshRemembered = useCallback(async () => {
+    if (!session) return;
+    try { setRemembered(await listConfirmations(session)); } catch { /* a listing that failed is an empty note, never an error in the thread */ }
+  }, [session?.token]);
+  useEffect(() => { void refreshRemembered(); }, [refreshRemembered]);
+  const forget = async (r: RememberedChoice) => {
+    if (!session) return;
+    setBusy(`forget:${r.word}:${r.capability}:${r.arg}`);
+    try {
+      const out = await forgetConfirmation(session, { word: r.word, capability: r.capability, arg: r.arg });
+      if (out.ok) setRemembered(out.entries);
+      else setThread((t) => [...t, { role: 'agent', text: `I could not clear that: ${out.error}` }]);
+    } finally { setBusy(null); }
+  };
   const [busy, setBusy] = useState<string | null>(null);
   // WHAT THE AGENT ACTUALLY DID, kept for the whole conversation rather than the last answer. A generated
   // query is the one piece of evidence a reader cannot reconstruct from the reply, and "the directory does
@@ -233,6 +252,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
       if (waiting) setWaiting(waiting);
       setUnfinished(unfinishedRuns ?? []);
       setUnfinishedTotal(total ?? unfinishedRuns?.length ?? 0);
+      void refreshRemembered();
       // An agent's creation finishes HERE: the chain has the SA, its name and its stewardship; the person's
       // private vault gets the link that puts it in their tree (ADR-0025). Without this the agent is real,
       // named, and invisible in its owner's own home.
@@ -661,6 +681,31 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
                 …and {unfinishedTotal - unfinished.length} more. Unfinished asks expire after a day.
               </div>
             )}
+          </div>
+        )}
+        {/* Spec 385 W2 — remembered choices. A memory nobody can see is a memory nobody can say "no" to:
+            each line names the word, the place it was decided in, and whom it settled on, with a way to
+            clear it. Clearing grants and revokes nothing — the mandate was asked and signed regardless. */}
+        {remembered.length > 0 && (
+          <div className="ask-msg agent" data-testid="ask-remembered" style={{ fontSize: 12, opacity: 0.9 }}>
+            <button
+              type="button"
+              data-testid="ask-remembered-toggle"
+              onClick={() => setShowRemembered((v) => !v)}
+              style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer', textDecoration: 'underline' }}
+            >
+              {remembered.length === 1 ? 'I remember 1 choice you made' : `I remember ${remembered.length} choices you made`}
+              {showRemembered ? ' — hide' : ' — show'}
+            </button>
+            {showRemembered && remembered.map((r) => {
+              const key = `forget:${r.word}:${r.capability}:${r.arg}`;
+              return (
+                <div key={key} style={{ marginTop: 4 }} data-testid="ask-remembered-row">
+                  “{r.word}” means {r.label ? <span title={r.agent}>{r.label}</span> : <AgentName address={r.agent} />} as the {r.arg} when you {r.capabilityWords}
+                  <button type="button" className="btn ghost" data-testid={`ask-remembered-forget-${r.word}`} style={{ fontSize: 10, padding: '0 6px', minHeight: 0, marginLeft: 6 }} disabled={busy === key} onClick={() => void forget(r)}>{busy === key ? 'Clearing…' : 'Forget'}</button>
+                </div>
+              );
+            })}
           </div>
         )}
         {pending?.reply.kind === 'authority_required' && (

@@ -368,7 +368,9 @@ const RESOLUTION_GRANTS_RESOURCE = 'resolution.grants';
  *  not own. A prefix list, not a wildcard: this op's whole safety is that it cannot be pointed anywhere. */
 // Spec 370 P7 — the person's own conversation memory rides the same in-Worker door: their agent, writing
 // what it resolved for them into their own vault. Memory, never a general write path.
-const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run.provenance:'] as const;
+// Spec 385 — the scoped confirmation memory is the same kind of thing: the person's agent writing what THEY
+// chose into their own vault, from the resume that supplied the choice; and clearing it when they say so.
+const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run.provenance:', 'confirmation.preferences'] as const;
 
 const CAPABILITY_RECORDS = new Set(['impact-profile', 'capabilities.data', 'skills.data', 'home.manifest', 'control-events.data', 'archetype.assignment']);
 const CONTROL_EVENTS_RESOURCE = 'control-events.data';

@@ -3157,7 +3157,17 @@ async function askReplyForInner(env: HarnessEnv, input: {
       return {
         kind: 'authority_required', runRef: r.runRef, requirement: a.requirement, delegator: a.delegator, delegate: a.delegate,
         capability: a.capability ?? r.prompt.toolId, stepRef: r.prompt.stepRef, summary: a.summary ?? `${a.capability ?? r.prompt.toolId} on ${a.delegator}`,
-        ...(a.alsoApprove ? { alsoApprove: a.alsoApprove as never } : {}), ...(a.standing ? { standing: a.standing } : {}), ...(a.note ? { note: a.note } : {}), ...(a.parties ? { parties: a.parties } : {}),
+        ...(a.alsoApprove ? { alsoApprove: a.alsoApprove as never } : {}), ...(a.standing ? { standing: a.standing } : {}), ...(a.note ? { note: a.note } : {}),
+        // THE ASKER'S OWN RESOLUTION SURVIVES THE RELAY. The receiver was handed addresses, so its parties
+        // say "0x1659… — said"; but it was THIS run that turned "somali corridor team" into that address —
+        // from the person's links, from a remembered choice (spec 385), from the last ask (370 P7) — and
+        // that citation is the one thing the person needs in order to say "no, the other one". Where this
+        // run resolved the same agent, its record (words, label, hint) is kept; the receiver's fills the rest.
+        ...(() => {
+          const mine = [...(input.resolved?.values() ?? [])];
+          const merged = (a.parties ?? []).map((p) => mine.find((m) => m.arg === p.arg && m.agent.toLowerCase() === p.agent.toLowerCase() && !/^0x[0-9a-f]{40}$/i.test(m.raw)) ?? p);
+          return merged.length ? { parties: merged } : {};
+        })(),
         routedAt: r.prompt.at,
       } as AskReply;
     }
@@ -4310,7 +4320,10 @@ be emitted together; the runtime runs them side by side.`;
   trace.bindings = [...resolved.values()].map((r) => ({
     arg: r.arg, raw: r.raw, agent: r.agent, ...(r.label ? { label: r.label } : {}),
     source: r.via === 'context' ? 'context' : r.ruleId ? 'decision' : r.hint?.startsWith('remembered') ? 'memory' : r.ownedBy ? 'disclosed' : /^0x[0-9a-f]{40}$/i.test(r.raw) ? 'said' : 'resolver',
-    ...(r.because ? { because: r.because } : {}),
+    // A memory's citation rides the binding: an ANSWER carries no parties, so the How pane is the only place
+    // a person reading "who is in rich" can see that "rich" was settled from what they chose last time
+    // (spec 370 P7) or confirmed before (spec 385) — and say otherwise.
+    ...(r.because ? { because: r.because } : r.hint?.startsWith('remembered') ? { because: r.hint } : {}),
   }));
   return { result, plannerKind: kind, resolved, interactionFor, trace, tools, events, presentedRefs: presentedList.map((p) => p.ref), playbook: playbook ? { digest: playbook.digest, ...(playbook.triggers?.length ? { triggers: playbook.triggers } : {}) } : null };
 }
