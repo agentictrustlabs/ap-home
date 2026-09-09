@@ -47,6 +47,7 @@ import { parseSessionWrappedSignature, verifySessionWrappedSignature, wrapSessio
 // spec 341 §7 — the in-Worker marker, split off the custody secret.
 import { internalHeaders, internalMarker, isInternalCall } from './internal-marker.js';
 import { memberConsultGrant, readConsultArtifact, readDelegatedTask, signAsOrg, submitConsult, submitDelegatedTask } from './consult-rail.js';
+import { recordRetention } from './run-export.js';
 import { authorityCapabilityOf, checkpointForStep, awaitingAuthorityNote } from './endeavor-authority-steps.js';
 import { messagingScopeCovers, messagingScopeDepsFromEnv } from './messaging-scope.js';
 import { fetchDiscoveryFacets } from './discovery-facets.js';
@@ -911,12 +912,15 @@ export class A2aTaskDO {
       if (op === 'record-list') {
         const rows = [...(await this.state.storage.list<Record<string, unknown>>({ prefix: 'harness:record:' })).values()];
         const now = Date.now();
-        const stale = rows.filter((r) => now - Number(r.at ?? 0) > 7 * 24 * 3600_000).map((r) => rkey(String(r.runRef)));
+        // Spec 381 — THE RETENTION POLICY, declared: the DO copy lives `HARNESS_RECORD_RETENTION_DAYS` (7 by
+        // default) and is swept on listing; the run's provenance is in the acting agent's vault for good.
+        const ttl = recordRetention(this.env).doDays * 24 * 3600_000;
+        const stale = rows.filter((r) => now - Number(r.at ?? 0) > ttl).map((r) => rkey(String(r.runRef)));
         if (stale.length) await this.state.storage.delete(stale);
-        const live = rows.filter((r) => now - Number(r.at ?? 0) <= 7 * 24 * 3600_000)
+        const live = rows.filter((r) => now - Number(r.at ?? 0) <= ttl)
           .map(({ presented: _p, events: _e, ...rest }): Record<string, unknown> => ({ ...rest, steps: (rest.steps as unknown[] | undefined)?.length ?? 0, receipts: (rest.receipts as unknown[] | undefined)?.length ?? 0 }))
           .sort((a, b) => Number(b.at ?? 0) - Number(a.at ?? 0));
-        return Response.json({ ok: true, records: live });
+        return Response.json({ ok: true, records: live, retention: recordRetention(this.env) });
       }
       if (op === 'progress-append') {
         if (!body?.runRef || !body.line || !body.asker) return Response.json({ ok: false, error: 'runRef, asker and line required' }, { status: 400 });

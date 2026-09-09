@@ -44,6 +44,8 @@ export const GENESIS_INTERACTIONS_SCOPES: ReadonlyArray<{ resources: string[]; o
     'vault:household.data',
     // Spec 370 P7 — the person's own recent asks, so "him" can mean whom they just meant.
     'vault:conversation.recent',
+    // Spec 381 — a run's provenance, kept where the authority was spent (the DO copy is the rebuild).
+    'vault:run.provenance:*',
   ], ops: ['read', 'write'] },
   { resources: ['vault:archetype.assignment'], ops: ['read', 'write', 'delete'] },
   { resources: ['vault:message.body:dm:*'], ops: ['read'] },

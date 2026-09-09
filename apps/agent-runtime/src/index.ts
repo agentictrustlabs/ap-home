@@ -142,6 +142,7 @@ import { realtimeKitConfigured, verifyRealtimeKitWebhook, readRealtimeKitWebhook
 import { sendSubjectAskOverWire, subjectAnswerMessage, subjectEnvelopeOf, handoffMessage, routedRunRefFor } from './subject-hop.js';
 import { EXTERNAL_AGENT_TOOL, externalAgentInvoker } from './external-agent.js';
 import { MEMBER_CONSULT_TOOL, memberConsultInvoker } from './member-consult.js';
+import { exportRun, firewalledSpans, recordRetention } from './run-export.js';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
@@ -314,6 +315,10 @@ export interface Env {
    * without a redeploy.
    */
   CONSULT_MEMBER_DEADLINE_MS?: string;
+  /** Spec 381 — where a run's spans go (an OTLP/HTTP traces endpoint), its headers, and the DO record's life in days. */
+  OTEL_EXPORTER_OTLP_ENDPOINT?: string;
+  OTEL_EXPORTER_OTLP_HEADERS?: string;
+  HARNESS_RECORD_RETENTION_DAYS?: string;
   /**
    * R5.10 / PKG-CONNECT-AUTH-003 — canonical origin of THIS broker.
    * Used as `iss` (and currently `aud`, until spec 227 splits them)
@@ -1537,7 +1542,10 @@ async function resumeFromCommitment(env: Env, input: { addressee: Address; debto
     await dropRun(env as never, input.addressee, hit.runRef).catch(() => undefined);
     // The record of the run, the way the ask route keeps one: what was asked, what ran, what it came to.
     const intent = { goal: hit.message, context: { addressee: input.addressee, asker: hit.asker } };
-    await putRecord(env as never, input.addressee, recordOf({ runRef: hit.runRef, intent, result: result as never, events, presented: (hit.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })) })).catch((e: unknown) => console.warn('[commitment] record not kept:', e instanceof Error ? e.message : String(e)));
+    const record = recordOf({ runRef: hit.runRef, intent, result: result as never, events, presented: (hit.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })) });
+    await putRecord(env as never, input.addressee, record).catch(() => undefined);
+    await exportRun(env, { writeSubjectRecord: harnessDeps(env, buildAuditSink(env)).writeSubjectRecord }, input.addressee, record)
+      .then((r) => putRecord(env as never, input.addressee, { ...record, export: r })).catch(() => undefined);
   }
   return { ok: true, runRef: hit.runRef, said: spoken || reply.text || '' };
 }
@@ -1800,7 +1808,29 @@ app.post('/harness/records', async (c) => {
     return c.json({ ok: true, record: shown });
   }
   const records = (await listRecords(c.env as never, addressee)).filter((r) => String(((r.intent as { context?: { asker?: string } } | undefined)?.context?.asker) ?? '').toLowerCase() === caller);
-  return c.json({ ok: true, records });
+  // Spec 381 — the retention is part of the listing: how long the object keeps these, and where the durable half lives.
+  return c.json({ ok: true, records, retention: recordRetention(c.env) });
+});
+
+// POST /harness/spans { session, addressee, runRef } — spec 381. The run as a firewalled trace: step names,
+// verdicts, receipt digests, timings — never a payee, an argument or the words. What a collector receives.
+app.post('/harness/spans', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; runRef?: string } | null;
+  if (!body?.session || !body.addressee || !body.runRef) return c.json({ ok: false, error: 'session, addressee and runRef are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const addressee = body.addressee.toLowerCase() as Address;
+  const rec = await getRecord(c.env as never, addressee, body.runRef);
+  if (!rec) return c.json({ ok: false, error: 'no such record' }, 404);
+  if (String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()) return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
+  try {
+    const spans = await firewalledSpans(rec);
+    return c.json({ ok: true, spans, retention: recordRetention(c.env), exporter: c.env.OTEL_EXPORTER_OTLP_ENDPOINT ? 'otlp-http' : 'none', export: rec.export ?? null });
+  } catch (e) {
+    // A firewall failure is a bug in the projection, and the answer is a refusal that names it — never a
+    // span with the leak in it.
+    return c.json({ ok: false, error: `export refused: ${e instanceof Error ? e.message : String(e)}` }, 500);
+  }
 });
 
 // POST /harness/replay { session, addressee, runRef } — spec 370 P6. Replay a record: the same plan, the
@@ -2907,7 +2937,16 @@ app.post('/harness/ask', async (c) => {
     // agent's own object for looking back and replaying (verdicts re-derived, tools never re-run). The
     // mandates ride along ONLY there; a listing strips them. Fire-and-forget: a record that failed to land
     // costs a replay, never the run.
-    c.executionCtx.waitUntil(putRecord(c.env as never, addressee, recordOf({ runRef, intent, result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })) })).catch((e: unknown) => console.warn('[harness/ask] record not kept:', e instanceof Error ? e.message : String(e))));
+    {
+      const record = recordOf({ runRef, intent, result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })) });
+      c.executionCtx.waitUntil(putRecord(c.env as never, addressee, record).catch((e) => console.warn('[harness/ask] record not kept:', e instanceof Error ? e.message : String(e))));
+      // Spec 381 — THE EXPORT: the durable half into the acting agent's vault, the spans to a collector when
+      // one is named. Off the run's path; a failed export is logged, never a failed ask.
+      // The report goes back ONTO the record: whether the provenance landed is read from it, never guessed.
+      c.executionCtx.waitUntil(exportRun(c.env, { writeSubjectRecord: askDeps.writeSubjectRecord }, addressee, record)
+        .then((r) => putRecord(c.env as never, addressee, { ...record, export: r }))
+        .catch((e) => console.warn('[harness/ask] export:', e instanceof Error ? e.message : String(e))));
+    }
     // The reply is ready: the last line, so a poller stops without waiting out its window.
     progress({ type: 'ReplyReady', said: spoken || 'Done.', terminal: true });
     return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(routedDelivery ? { routedDelivery } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt, ...(isExpired(r) ? { expired: true } : {}) })), unfinishedTotal: otherRuns.length } : {}) });

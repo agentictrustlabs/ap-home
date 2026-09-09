@@ -1,0 +1,57 @@
+// THE RUN, EXPORTED — the app's half (spec 381): provenance through the vault door, spans to a collector
+// only when one is named, a declared retention, and a firewall failure that refuses instead of leaking.
+import { describe, expect, it } from 'vitest';
+import type { RunRecordV1 } from '@agenticprimitives/orchestration';
+import { exportRun, recordRetention, firewalledSpans, DEFAULT_RECORD_RETENTION_DAYS } from '../../src/run-export.js';
+
+const ALICE = '0xb0d11ce19b756a682e78b4904cd8d832303b3d11';
+const record: RunRecordV1 = {
+  type: 'ap.run-record.v1', runRef: 'run-x', at: 1_788_920_800_000,
+  intent: { goal: 'pay nathan.treasury 1 usdc', context: { addressee: ALICE, asker: ALICE } },
+  plan: { steps: [{ toolId: 'treasury.payment.execute', args: { payee: 'nathan.treasury', usdc: '1' }, id: 's0' }] },
+  steps: [{ stepRef: 's0', toolId: 'treasury.payment.execute', args: { payee: 'nathan.treasury', usdc: '1' }, ok: true, result: { txHash: '0x' + 'cd'.repeat(32) } }],
+  receipts: [{ runRef: 'run-x', stepRef: 's0', index: 0, toolId: 'treasury.payment.execute', capability: { id: 'treasury.payment.execute', action: 'execute' }, risk: 'high', status: 'completed', startedAt: 1_788_920_700, completedAt: 1_788_920_790, authority: { presentedRef: '0x' + '11'.repeat(32), decision: { decision: 'allow', reasons: [] }, afterApproval: true }, inputDigest: 'json:{"payee":"nathan.treasury","usdc":"1"}' } as never],
+  events: [], outcome: 'completed',
+};
+
+describe('exportRun', () => {
+  it('writes the provenance through the agent\'s own door and sends nothing when no collector is named', async () => {
+    const writes: Array<{ subject: string; recordType: string; record: unknown }> = [];
+    let fetched = 0;
+    const r = await exportRun({}, { writeSubjectRecord: async (subject, recordType, rec) => { writes.push({ subject, recordType, record: rec }); return { ok: true }; }, fetch: (async () => { fetched++; return new Response('{}'); }) as never }, ALICE, record);
+    expect(r.provenance).toEqual({ written: true, recordType: 'run.provenance:run-x' });
+    expect(writes[0]!.subject).toBe(ALICE);
+    const prov = writes[0]!.record as { type: string; steps: Array<{ txHash?: string; inputDigest?: string }> };
+    expect(prov.type).toBe('ap.run-provenance.v1');
+    expect(prov.steps[0]!.txHash).toBe('0x' + 'cd'.repeat(32));
+    expect(prov.steps[0]!.inputDigest).toMatch(/^0x[0-9a-f]{64}$/); // the json: form was hashed, not carried
+    expect(JSON.stringify(prov)).not.toContain('nathan');
+    expect(r.spans).toEqual({ count: 2, sent: false });
+    expect(fetched).toBe(0);
+  });
+  it('posts an OTLP body to the named collector with its headers; a refused write is reported, not thrown', async () => {
+    let got: { url: string; headers: Record<string, string>; body: unknown } | null = null;
+    const r = await exportRun({ OTEL_EXPORTER_OTLP_ENDPOINT: 'https://collector.example/v1/traces', OTEL_EXPORTER_OTLP_HEADERS: 'x-api-key=abc, x-dataset=runs' }, {
+      writeSubjectRecord: async () => ({ ok: false, error: 'record_scope_denied' }),
+      fetch: (async (url: string, init: RequestInit) => { got = { url, headers: init.headers as Record<string, string>, body: JSON.parse(String(init.body)) }; return new Response('{}', { status: 200 }); }) as never,
+    }, ALICE, record);
+    expect(r.provenance).toEqual({ written: false, recordType: 'run.provenance:run-x', error: 'record_scope_denied' });
+    expect(r.spans).toEqual({ count: 2, sent: true });
+    expect(got!.url).toBe('https://collector.example/v1/traces');
+    expect(got!.headers['x-api-key']).toBe('abc');
+    expect(got!.headers['x-dataset']).toBe('runs');
+    const body = got!.body as { resourceSpans: Array<{ scopeSpans: Array<{ spans: Array<{ name: string }> }> }> };
+    expect(body.resourceSpans[0]!.scopeSpans[0]!.spans.map((s) => s.name)).toEqual(['invoke_agent', 'execute_tool treasury.payment.execute']);
+    expect(JSON.stringify(body)).not.toContain('nathan');
+  });
+  it('declares the retention, from the deployment or the default', () => {
+    expect(recordRetention({})).toEqual({ doDays: DEFAULT_RECORD_RETENTION_DAYS, vaultRecord: 'run.provenance:<runRef>' });
+    expect(recordRetention({ HARNESS_RECORD_RETENTION_DAYS: '30' }).doDays).toBe(30);
+    expect(recordRetention({ HARNESS_RECORD_RETENTION_DAYS: 'x' }).doDays).toBe(7);
+  });
+  it('the served spans are the firewalled ones', async () => {
+    const spans = await firewalledSpans(record);
+    expect(spans[1]!.attributes['ap.receipt.digest']).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(JSON.stringify(spans)).not.toContain('nathan');
+  });
+});
