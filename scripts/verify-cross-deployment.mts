@@ -46,7 +46,7 @@ if (!org) fail(`dave does not steward ${ORG_NAME}`);
 const ORG = org!.orgAgent.toLowerCase() as Address;
 const card = await j(await fetch(`https://${B_HOST}/.well-known/agent-card.json`));
 console.log(`dave ${ME} · ${ORG_NAME} ${ORG} · served by B as "${card?.name}" at ${(card?.supportedInterfaces ?? [])[0]?.url ?? '?'}`);
-if (String(card?.agentAddress ?? '').toLowerCase() !== ORG) fail(`B does not serve ${ORG_NAME} at ${B_HOST}`);
+if ((process.env.EXPECT_VIA ?? 'network') === 'network' && String(card?.agentAddress ?? '').toLowerCase() !== ORG) fail(`B does not serve ${ORG_NAME} at ${B_HOST}`);
 
 // ── 1. the routed READ, over the wire ──
 console.log(`\n── 1. dave asks his agent (A) who is in ${ORG_NAME} (B) ──`);
@@ -58,7 +58,8 @@ console.log(`  → ${rep1?.kind} (${((Date.now() - t1) / 1000).toFixed(1)}s) ${J
 console.log(`  routed: ${via1 ? `${via1.name ?? via1.agent} via ${via1.observedVia}${via1.host ? ` at ${via1.host}` : ''}${via1.runRef ? `, run ${via1.runRef.slice(0, 22)}…` : ''}${via1.standing ? `, standing ${via1.standing.relation} (${via1.standing.because})${via1.standing.wireRef ? ` wire ${via1.standing.wireRef.slice(0, 12)}…` : ''}` : ''}` : 'none'}`);
 if (process.env.DUMP) console.log(`  results: ${JSON.stringify(rep1?.results ?? []).slice(0, 900)}`);
 if (rep1?.kind !== 'answer' || !via1) fail(`the read did not route: ${JSON.stringify(r1).slice(0, 600)}`);
-if (via1!.observedVia !== 'network') fail(`the hop was ${via1!.observedVia}, not over the wire — the records say B`);
+const EXPECT_VIA = process.env.EXPECT_VIA ?? 'network';
+if (via1!.observedVia !== EXPECT_VIA) fail(`the hop was ${via1!.observedVia}, expected ${EXPECT_VIA} — the records decide`);
 if (via1!.standing?.relation !== 'steward') console.log('  (no steward standing recorded on the routed step)');
 if (!via1!.standing?.wireRef) console.log('  (383 W3: no wireRef on the routed step)');
 
