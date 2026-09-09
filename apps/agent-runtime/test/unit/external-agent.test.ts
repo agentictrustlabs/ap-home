@@ -56,3 +56,15 @@ describe('admission: an outside executor answers, never acts', () => {
     expect(local).toEqual([]);
   });
 });
+
+describe('an instruction that opens with "ask" is discharged by the outside-agent read (spec 379)', () => {
+  it('admits "ask the clock …" with only the read in the plan, while "ask bob to join" still needs the act', async () => {
+    const { instructionNeedsAct } = await import('@agenticprimitives/orchestration');
+    const invite: ToolSpec = { id: 'resolution.invitation.request', description: 'invite', inputSchema: { type: 'object', properties: {} }, capability: { id: 'resolution.invitation.request', action: 'request' }, verbs: ['ask', 'invite'] };
+    const tools = [EXTERNAL_AGENT_TOOL, invite];
+    const read = await instructionNeedsAct({ intent: { goal: 'ask the agent at https://clock.example/card what time it is' }, plan: { steps: [{ toolId: EXTERNAL_AGENT_TOOL.id, args: {} }] }, tools });
+    expect(read).toEqual([]);
+    const act = await instructionNeedsAct({ intent: { goal: 'ask bob to join the team' }, plan: { steps: [{ toolId: 'person.lookup', args: {} }] }, tools: [...tools, { id: 'person.lookup', description: 'who', inputSchema: { type: 'object', properties: {} } }] });
+    expect(act.map((v) => v.code)).toEqual(['OUTCOME_NOT_ESTABLISHED']);
+  });
+});

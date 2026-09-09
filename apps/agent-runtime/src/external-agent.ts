@@ -11,6 +11,8 @@ export const EXTERNAL_AGENT_CAPABILITY = 'external.agent.ask' as const;
 export const EXTERNAL_AGENT_TOOL: ToolSpec = {
   id: EXTERNAL_AGENT_CAPABILITY,
   answers: ['what an outside agent says', 'what does an outside agent say'],
+  // The imperatives that name a consultation (spec 379): an instruction opening with one is discharged by this read.
+  verbs: ['ask', 'consult'],
   description:
     'ANSWERS A QUESTION BY ASKING AN OUTSIDE AGENT — any A2A 1.0 agent published at a card URL (https://…/agent-card.json). '
     + 'Use it when the ask names an outside agent or a card URL to consult. Its answer is an observation with its source '
