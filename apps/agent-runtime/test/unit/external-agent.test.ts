@@ -68,3 +68,27 @@ describe('an instruction that opens with "ask" is discharged by the outside-agen
     expect(act.map((v) => v.code)).toEqual(['OUTCOME_NOT_ESTABLISHED']);
   });
 });
+
+describe('a registry NAME reaches its card through the name\'s records (spec 379 W2)', () => {
+  const records = async (name: string) => name === 'clock.svc'
+    ? { a2aEndpoint: 'https://clock.example/a2a', cardUri: 'https://clock.example/card', cardDigest: await (async () => { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(cardText)); return `0x${[...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('')}`; })() }
+    : name === 'stale.svc' ? { cardUri: 'https://clock.example/card', cardDigest: `0x${'ab'.repeat(32)}` }
+    : name === 'mute.svc' ? { description: 'no endpoint' } as never
+    : null;
+  it('resolves the name to its card, pinned by atl:cardDigest, and says so in the interpretation', async () => {
+    const out = await externalAgentInvoker({ fetch: fetchImpl, nameRecords: records })('external.agent.ask', { agent: 'clock.svc', question: 'what time is it' }, {} as never) as Record<string, unknown>;
+    expect(out.observation).toBeTruthy();
+    expect(out.resolvedBy).toEqual({ registry: 'clock.svc', pinned: true });
+    expect(String(out.interpretation)).toMatch(/resolved through the registry.*pinned by its atl:cardDigest/);
+  });
+  it('a name whose pin no longer matches the served card is REFUSED — the pin exists for exactly this', async () => {
+    const out = await externalAgentInvoker({ fetch: fetchImpl, nameRecords: records })('external.agent.ask', { agent: 'stale.svc', question: 'now?' }, {} as never) as Record<string, unknown>;
+    expect(String(out.refused)).toMatch(/not the one pinned/);
+    expect(String(out.interpretation)).toMatch(/pinned by its atl:cardDigest/);
+  });
+  it('an unknown name, and a name with no endpoint, are refused by name — never guessed at', async () => {
+    const inv = externalAgentInvoker({ fetch: fetchImpl, nameRecords: records });
+    expect(String(((await inv('external.agent.ask', { agent: 'nobody.svc', question: 'x' }, {} as never)) as { refused: string }).refused)).toMatch(/names no agent/);
+    expect(String(((await inv('external.agent.ask', { agent: 'mute.svc', question: 'x' }, {} as never)) as { refused: string }).refused)).toMatch(/publishes no A2A endpoint/);
+  });
+});

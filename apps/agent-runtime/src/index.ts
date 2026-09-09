@@ -2794,7 +2794,15 @@ app.post('/harness/ask', async (c) => {
         // The generated-query read (spec 357 W3) — same tier, same rules: public data, no authority, and
         // the query it ran comes back with the answer.
         // Spec 379 — an outside agent's answer: fetched by its card over the network, graded as an observation.
-        if (toolId === EXTERNAL_AGENT_TOOL.id) return externalAgentInvoker({ timeoutMs: 20_000 })(toolId, args, ctx);
+        if (toolId === EXTERNAL_AGENT_TOOL.id) return externalAgentInvoker({ timeoutMs: 20_000,
+          // Spec 379 W2 — a registry NAME resolves through its own on-chain records to a card, pinned by `atl:cardDigest`.
+          nameRecords: async (name) => {
+            if (!c.env.AGENT_NAME_REGISTRY || !c.env.AGENT_NAME_UNIVERSAL_RESOLVER) return null;
+            const client = new AgentNamingClient({ rpcUrl: c.env.RPC_URL, chainId: Number(c.env.CHAIN_ID), registry: c.env.AGENT_NAME_REGISTRY as Address, universalResolver: c.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address, ...(c.env.PROFILE_RESOLVER ? { profileResolver: c.env.PROFILE_RESOLVER as Address } : {}) });
+            const r = await client.getRecords(name).catch(() => null);
+            if (!r) return null;
+            return { ...(r.a2aEndpoint ? { a2aEndpoint: r.a2aEndpoint } : {}), ...(r.cardUri ? { cardUri: r.cardUri } : {}), ...(r.cardDigest ? { cardDigest: r.cardDigest } : {}) };
+          } })(toolId, args, ctx);
         // Spec 380 — one member asked through the consult rail, at the organization; skipped without their opt-in.
         if (toolId === MEMBER_CONSULT_TOOL.id) return memberConsultInvoker(c.env, { ...(askDeps.nameOf ? { nameOf: askDeps.nameOf } : {}) })(toolId, args, ctx);
         // Spec 384 W2 — probe candidates for offers, each in-process as the asker's own agent (a Worker cannot fetch its own hostnames).
