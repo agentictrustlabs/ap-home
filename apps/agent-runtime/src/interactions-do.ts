@@ -83,7 +83,7 @@ import type { Vault } from '@agenticprimitives/vault';
 import { caip10, verifyHomeSession, verifyRelyingIdToken } from './custody-oidc.js';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
 // Hoisted-function import from index.js — the documented safe cycle (see a2a-task-do.ts:38).
-import { buildAuditSink, callMcpToolBound, interactionsSessionAccount, interactionsSessionKeyConfigured, fireEndeavorEventTriggers, type Env, type IncomingDelegation } from './index.js';
+import { buildAuditSink, callMcpToolBound, interactionsSessionAccount, interactionsSessionKeyConfigured, fireEndeavorEventTriggers, afterEndeavorCommit, type Env, type IncomingDelegation } from './index.js';
 import { checkSessionWireShape } from './session-wire.js';
 import { handleEndeavorOp, reduceEventLog, coordinationEventsResource, COORDINATION_REQUESTS_RESOURCE, type CoordinationRequestsDocV1, type EndeavorOpDeps } from './endeavors.js';
 import type { CoordinationEventV1 } from '@agenticprimitives/coordination';
@@ -583,20 +583,24 @@ export class InteractionsDO {
   /** EndeavorOpDeps for the principal's OWN agent acting at an internal door (the internal `x-ap-internal`
    *  marker is the authorization; the reducer's actor gate is the real authority). `steward:true` lets
    *  it take steward-gated ops (adopt request/plan) as the org acting on itself. */
-  private endeavorSelfDeps(g: IncomingDelegation, principal: string, opts?: { steward?: boolean }): EndeavorOpDeps {
+  private endeavorSelfDeps(g: IncomingDelegation, principal: string, opts?: { steward?: boolean;
+    /** Spec 382 — the PARTICIPANT whose finished run records its own step (in-Worker, marker-gated; the
+     *  reducer still re-gates: only the managing principal or an active participant may satisfy a step). */
+    actor?: string }): EndeavorOpDeps {
     const chainId = Number(this.env.CHAIN_ID ?? 84532);
     const doorAudit = buildAuditSink(this.env);
+    const actor = (opts?.actor && /^0x[0-9a-fA-F]{40}$/.test(opts.actor) ? opts.actor : principal).toLowerCase();
     return {
       principal,
       // Spec 375 — the events a commit appends fire the participants' triggers, off the mutex.
-      onCommitted: (endeavorId, events) => { this.state.waitUntil(fireEndeavorEventTriggers(this.env, principal as Address, endeavorId, events as never).catch(() => undefined)); },
+      onCommitted: (endeavorId, events, state) => { this.state.waitUntil(afterEndeavorCommit(this.env, principal as Address, endeavorId, events as never, state).catch(() => undefined)); },
       principalCaip: caip10(chainId, principal as Address),
-      sessionSa: principal,
-      sessionCaip: caip10(chainId, principal as Address),
+      sessionSa: actor,
+      sessionCaip: caip10(chainId, actor as Address),
       readDoc: <T,>(resource: string, empty: T): Promise<T> => this.readDoc<T>(g, resource, empty),
       writeDoc: (resource: string, data: unknown): Promise<void> => this.writeDoc(g, resource, data),
       serialize: <T,>(fn: () => Promise<T>): Promise<T> => this.serialize(fn),
-      memberName: async () => 'Organization agent',
+      memberName: async () => (actor === principal.toLowerCase() ? 'Organization agent' : 'Participant agent'),
       isSteward: async () => opts?.steward ?? false,
       verifySignature: (account, digest, signature) => this.erc1271(account as Address, digest as Hex, signature as Hex),
       writeAudit: (action, subject, timestamp) =>
@@ -703,7 +707,25 @@ export class InteractionsDO {
       const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
       const leaf = st.sessionLeaf;
       if (leaf && leaf.delegator.toLowerCase() === grant.delegator.toLowerCase()) {
-        return callMcpToolBound({ env, toolName, grant, sessionLeaf: leaf, toolArgs });
+        // ONE THROTTLE MECHANISM FOR EVERY VAULT TOOL (spec 382, found live). demo-mcp's stage-2 soft
+        // limiter (120 verified calls / 60 s per principal) rejects with the same opaque 401 as a credential
+        // failure; the read/write adapters retried it, the getMany call sites did not, and a busy
+        // organization — its own work turns spending its budget beside a steward's ops — surfaced
+        // "auth failed" for what was a throttle. The retry lives HERE now, under every tool, bounded and
+        // honouring the limiter's own retryAfterMs (capped), and a throttle that persists is SAID to be one.
+        let last: Response | null = null;
+        for (let attempt = 0; attempt < 4; attempt++) {
+          const resp = await callMcpToolBound({ env, toolName, grant, sessionLeaf: leaf, toolArgs });
+          if (resp.status !== 401 && resp.status !== 429) return resp;
+          const peek = resp.clone();
+          const out = (await peek.json().catch(() => ({}))) as { code?: string; retryAfterMs?: number };
+          if (out.code !== 'rate-limited') return resp;
+          last = resp;
+          if (attempt === 3) break;
+          const wait = Math.min(Math.max(Number(out.retryAfterMs ?? 0) || 0, InteractionsDO.VAULT_THROTTLE_BACKOFF_MS * (attempt + 1)), 2_500);
+          await new Promise((r) => setTimeout(r, wait));
+        }
+        return new Response(JSON.stringify({ ok: false, code: 'rate-limited', error: InteractionsDO.vaultThrottledError(toolName).message }), { status: last?.status ?? 429, headers: { 'Content-Type': 'application/json' } });
       }
       // CRIT-2 W4 — the interactions-session key IS configured but this principal has NO custodied leaf
       // (it enabled before leaf-signing shipped). FAIL-CLOSED (ADR-0013 one-mechanism): require a
@@ -1218,20 +1240,49 @@ export class InteractionsDO {
       listingName || steward
         ? false
         : await this.hasMemberAccess(principal, sessionSa, body.memberAccess as IncomingDelegation | undefined);
-    if (!listingName && !steward && !memberAccess) {
+    // Spec 382 — THE ORGANIZATION'S OWN MEMBERSHIP RECORD is the fourth proof. `org.membership:member:<sa>`
+    // is what the roster answers from (aporg:OrganizationMembership, written by the member for themselves
+    // with the grant that materializes it); a member the organization lists and the roster names was
+    // still refused at this door for want of a listing or an org→member grant — members admitted by the
+    // harness's invitation, or before the directory wave, hold neither. Read back, the record is checked
+    // against the chain: the member's grant must still be theirs and unrevoked.
+    const recordedName = listingName || steward || memberAccess ? null : await this.recordedMemberName(grant, principal, sessionSa);
+    if (!listingName && !steward && !memberAccess && !recordedName) {
       return { admitted: false, steward: false, listed: false, you: null };
     }
     const names = await this.readLocalNames(grant);
     const local = names[sessionSa.toLowerCase()];
     const localName = typeof local === 'string' && local.trim() ? local.trim() : null;
     let publicName: string | null = null;
-    if (!localName && !listingName && !steward) {
+    if (!localName && !listingName && !recordedName && !steward) {
       const resolved = await this.resolvePublicNames([sessionSa]);
       const hit = resolved[sessionSa.toLowerCase()];
       publicName = typeof hit === 'string' && hit.trim() ? hit.trim() : null;
     }
-    const you = localName ?? listingName ?? publicName ?? (steward ? 'Steward' : null);
+    const you = localName ?? listingName ?? recordedName ?? publicName ?? (steward ? 'Steward' : null);
     return { admitted: true, steward, listed: !!listingName, you };
+  }
+
+  /** Spec 382 — the organization's own record that this session's principal is a CURRENT member, its grant
+   *  re-checked against the chain. The display name it records, or null. Never authority (ADR-0041). */
+  private async recordedMemberName(grant: IncomingDelegation, principal: string, sessionSa: Address): Promise<string | null> {
+    const me = sessionSa.toLowerCase();
+    type MembershipRec = { type?: string; memberAgent?: string; organizationAgent?: string; displayName?: string; endedAt?: string; roleAssignment?: { materializedByDelegation?: IncomingDelegation } };
+    let rec: MembershipRec | null = null;
+    try { rec = await this.readDoc<MembershipRec | null>(grant, `org.membership:member:${me}`, null); } catch { return null; }
+    if (!rec || rec.type !== 'ap.org.membership.v1' || rec.endedAt) return null;
+    if (String(rec.memberAgent ?? '').toLowerCase() !== me || String(rec.organizationAgent ?? '').toLowerCase() !== principal.toLowerCase()) return null;
+    const wire = rec.roleAssignment?.materializedByDelegation;
+    if (!wire || String(wire.delegator ?? '').toLowerCase() !== me || String(wire.delegate ?? '').toLowerCase() !== principal.toLowerCase()) return null;
+    try {
+      const d: Delegation = { ...wire, salt: BigInt(wire.salt), caveats: (wire.caveats ?? []).map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
+      const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+      if (!(await this.erc1271(me as Address, digest, wire.signature as Hex))) return null;
+      const revoked = (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [digest] })) as boolean;
+      if (revoked) return null;
+    } catch { return null; } // unverifiable is not verified (ADR-0013)
+    const name = String(rec.displayName ?? '').trim();
+    return name || 'Member';
   }
 
   /**
@@ -2687,7 +2738,7 @@ export class InteractionsDO {
           const res = await handleEndeavorOp({
             principal,
             // Spec 375 — the events a commit appends fire the participants' triggers, off the mutex.
-            onCommitted: (endeavorId, events) => { this.state.waitUntil(fireEndeavorEventTriggers(this.env, principal as Address, endeavorId, events as never).catch(() => undefined)); },
+            onCommitted: (endeavorId, events, state) => { this.state.waitUntil(afterEndeavorCommit(this.env, principal as Address, endeavorId, events as never, state).catch(() => undefined)); },
             principalCaip: caip10(chainId, principal as Address),
             sessionSa: requester,
             sessionCaip: caip10(chainId, requester as Address),
@@ -2723,7 +2774,7 @@ export class InteractionsDO {
           return handleEndeavorOp({
             principal,
             // Spec 375 — the events a commit appends fire the participants' triggers, off the mutex.
-            onCommitted: (endeavorId, events) => { this.state.waitUntil(fireEndeavorEventTriggers(this.env, principal as Address, endeavorId, events as never).catch(() => undefined)); },
+            onCommitted: (endeavorId, events, state) => { this.state.waitUntil(afterEndeavorCommit(this.env, principal as Address, endeavorId, events as never, state).catch(() => undefined)); },
             principalCaip: caip10(chainId, principal as Address),
             sessionSa: principal,
             sessionCaip: caip10(chainId, principal as Address),
@@ -2830,6 +2881,8 @@ export class InteractionsDO {
             requester: state.request?.record.requester?.toLowerCase() ?? null,
             adoptedPlanRef: adoptedRef,
             latestPlan: latest ? { planId: latest.planId, revision: latest.revision, contentHash: latest.contentHash, proposedBy: latest.proposedBy.toLowerCase() } : null,
+            // Spec 382 — the ACTIVE commitments, so the work turn knows which steps are somebody else's promise.
+            commitments: Object.values(state.commitments).filter((c) => c.status === 'active').map((c) => ({ commitmentId: c.commitmentId, participant: c.participant.toLowerCase(), steps: c.steps, planRef: c.planRef, allocationRef: c.allocationRef })),
             plan: plan
               ? {
                   planId: plan.planId,
@@ -2867,7 +2920,8 @@ export class InteractionsDO {
           return handleEndeavorOp(this.endeavorSelfDeps(g, principal, { steward: true }), 'endeavor.adoptPlan', body);
         }
         if (op === 'internal.endeavor.satisfyStep') {
-          return handleEndeavorOp(this.endeavorSelfDeps(g, principal), 'endeavor.satisfyStep', body);
+          // Spec 382 — a participant's finished run records ITS step as the participant (the reducer re-gates).
+          return handleEndeavorOp(this.endeavorSelfDeps(g, principal, { ...(typeof body.actor === 'string' ? { actor: body.actor } : {}) }), 'endeavor.satisfyStep', body);
         }
         if (op === 'internal.endeavor.satisfy') {
           return handleEndeavorOp(this.endeavorSelfDeps(g, principal), 'endeavor.satisfy', body);
@@ -3490,14 +3544,16 @@ export class InteractionsDO {
           const res = await handleEndeavorOp({
           principal,
           // Spec 375 — the events a commit appends fire the participants' triggers, off the mutex.
-          onCommitted: (endeavorId, events) => { this.state.waitUntil(fireEndeavorEventTriggers(this.env, principal as Address, endeavorId, events as never).catch(() => undefined)); },
+          onCommitted: (endeavorId, events, state) => { this.state.waitUntil(afterEndeavorCommit(this.env, principal as Address, endeavorId, events as never, state).catch(() => undefined)); },
           principalCaip: caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address),
           sessionSa,
           sessionCaip,
           readDoc: <T,>(resource: string, empty: T): Promise<T> => this.readDoc<T>(grant, resource, empty),
           writeDoc: (resource: string, data: unknown): Promise<void> => this.writeDoc(grant, resource, data),
           serialize: <T,>(fn: () => Promise<T>): Promise<T> => this.serialize(fn),
-          memberName: () => this.memberName(grant, principal, sessionCaip),
+          // Spec 382 — membership at the endeavor door is the SAME presence the channels use: a current listing,
+          // an org→member grant, stewardship, or the organization's own membership record (chain-checked).
+          memberName: async () => { const p = await this.communityPresence(grant, principal, sessionSa, sessionCaip, body); return p.admitted ? (p.you ?? 'Member') : null; },
           isSteward: () => this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined),
           verifySignature: (account, digest, signature) => this.erc1271(account as Address, digest as Hex, signature as Hex),
           writeAudit: (action, subject, timestamp) =>

@@ -116,7 +116,8 @@ import { buildGenesisPlanes, type GenesisPlaneWires } from './genesis-planes.js'
 import { bindHarnessAttempt, HarnessApprovalWorkflow, type HarnessWorkflowParams } from './harness-workflow.js';
 import { toErrorCode } from './harness-workflow-core.js';
 export { HarnessApprovalWorkflow };
-import { claimableBy, receiptEvidence } from './endeavor-authority-steps.js';
+import { claimableBy, receiptEvidence, checkpointForCommittedStep, committedStepNote } from './endeavor-authority-steps.js';
+import { parkableCommittedSteps } from './endeavor-committed-steps.js';
 import { internalHeaders, isInternalCall } from './internal-marker.js';
 import { standardServerFor, withStandardCardFields } from './standard-a2a.js';
 import type { AgentCardV1 } from '@agenticprimitives/a2a/standard';
@@ -1642,6 +1643,36 @@ export async function fireEndeavorEventTriggers(env: Env, principal: Address, en
   }
 }
 
+/**
+ * Spec 382 (appendix M6 W1) — AFTER AN ENDEAVOR COMMAND COMMITS: the events fire the participants' triggers
+ * (spec 375), and a ContributionCommitted hands the committed step to the participant who promised it — a
+ * run parked on THEIR agent's task object, finished by THEIR mandate, recorded on the endeavor from their
+ * receipt. Allocation and commitment grant nothing; they say who has promised what.
+ */
+export async function afterEndeavorCommit(env: Env, principal: Address, endeavorId: string, events: ReadonlyArray<Record<string, unknown>>, state?: unknown): Promise<void> {
+  await fireEndeavorEventTriggers(env, principal, endeavorId, events).catch((e: unknown) => console.warn('[endeavor] triggers:', e instanceof Error ? e.message : String(e)));
+  if (state && events.some((e) => e.kind === 'ContributionCommitted')) {
+    await parkCommittedSteps(env, principal, endeavorId, events as never, state as never).catch((e: unknown) => console.warn('[endeavor] parking committed steps:', e instanceof Error ? e.message : String(e)));
+  }
+}
+
+export async function parkCommittedSteps(env: Env, principal: Address, endeavorId: string, events: ReadonlyArray<{ kind?: string; commitmentId?: string }>, state: Parameters<typeof parkableCommittedSteps>[0]): Promise<Array<{ participant: Address; stepId: string; runRef: string }>> {
+  const { steps, reason } = parkableCommittedSteps(state, events, principal);
+  if (reason) console.warn(`[endeavor] committed steps not parked on ${endeavorId}: ${reason}`);
+  const parked: Array<{ participant: Address; stepId: string; runRef: string }> = [];
+  const deps = harnessDeps(env, buildAuditSink(env));
+  for (const item of steps) {
+    const runRef = `run-${crypto.randomUUID()}`;
+    const checkpoint = checkpointForCommittedStep({ runRef, participant: item.participant, principal, endeavorId, step: item.step, goal: item.goal, commitmentRef: item.commitmentRef, planHash: item.planHash });
+    await saveRun(env as never, checkpoint);
+    const name = await deps.nameOf?.(item.participant).catch(() => null) ?? null;
+    await callInteractionsInternal(env, principal, 'internal.endeavor.post', { endeavorId, bodyText: committedStepNote({ participant: item.participant, name, runRef, step: item.step, commitmentRef: item.commitmentRef }) }).catch((e: unknown) => console.warn('[endeavor] note not posted:', e instanceof Error ? e.message : String(e)));
+    parked.push({ participant: item.participant, stepId: item.step.stepId, runRef });
+    console.log(`[endeavor] ${endeavorId} ${item.step.stepId} parked at ${item.participant} as ${runRef} (commitment ${item.commitmentRef})`);
+  }
+  return parked;
+}
+
 // POST /harness/hooks/:agent/:triggerId — spec 375, the WEBHOOK door. `Authorization: Bearer <row token>` is
 // admission for exactly one row of one agent; it is never a session and never a mandate, and the payload is
 // context the run may read, never an argument it trusts. No row, wrong token ⇒ 401 and nothing starts.
@@ -2857,10 +2888,15 @@ app.post('/harness/ask', async (c) => {
             capability: acted?.capability?.id ?? 'the requested capability',
             runRef, mandateRef: acted?.authority?.presentedRef ?? null, txHash: r?.txHash ?? null,
             summary: r?.name ? `${r.name} (${r.agent ?? ''})` : 'Done.',
+            ...(stored.origin.commitmentRef ? { commitmentRef: stored.origin.commitmentRef } : {}),
           });
+          // Spec 382 — a PARTICIPANT's committed step is recorded BY THE PARTICIPANT (the reducer admits an
+          // active participant); the organization's own parked step is recorded as the organization.
+          const asParticipant = stored.origin.principal.toLowerCase() !== addressee.toLowerCase();
           try {
             await callInteractionsInternal(c.env, stored.origin.principal, 'internal.endeavor.satisfyStep', {
               endeavorId: stored.origin.endeavorId, stepId: stored.origin.stepId, evidence: `${ev.note} ${ev.refs.join(' ')}`,
+              ...(asParticipant ? { actor: addressee } : {}),
             });
             satisfied = { stepId: stored.origin.stepId, ok: true };
           } catch (e) {

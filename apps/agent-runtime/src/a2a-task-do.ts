@@ -1413,6 +1413,8 @@ export class A2aTaskDO {
       adoptedPlanRef: { planId: string; revision: number; hash: string } | null;
       latestPlan: { planId: string; revision: number; contentHash: string } | null;
       plan: { planId: string; revision: number; contentHash: string; steps: PlanStep[] } | null;
+      /** Spec 382 — active commitments: a step somebody else promised is theirs to run, not this turn's. */
+      commitments?: Array<{ commitmentId: string; participant: string; steps: string[] }>;
     };
     let state = (await this.interactionsInternal(principal, 'internal.endeavor.state', { endeavorId })) as StateOut & { ok?: boolean };
     if (state.lifecycle !== 'adopted' && state.lifecycle !== 'active') return { adopted: false, stepsDone: 0, satisfied: state.lifecycle === 'satisfied' };
@@ -1471,6 +1473,11 @@ export class A2aTaskDO {
     let firstTurn = true;
     for (const step of plan.steps.slice(0, 12)) {
       if (step.satisfied) continue;
+      // Spec 382 — A COMMITTED STEP IS THE PARTICIPANT'S. Somebody signed a promise to do this one; it was
+      // handed to their agent when they committed (`parkCommittedSteps`) and it is finished with THEIR
+      // mandate. The organization running it for them would be allocation acting as authority.
+      const promised = (state.commitments ?? []).find((c) => c.steps.includes(step.stepId) && c.participant.toLowerCase() !== principal.toLowerCase());
+      if (promised) { console.log(`[endeavor step] ${endeavorId} ${step.stepId} is committed to ${promised.participant} (${promised.commitmentId}) — theirs to run`); continue; }
       if (!firstTurn) await pace();
       firstTurn = false;
       // AUTHORITY BEFORE WORK. A step that names a capability this substrate can exercise is not a

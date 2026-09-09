@@ -31,3 +31,9 @@ describe('paymentAskOf — one payment, the words and the amount', () => {
     expect(paymentAskOf('send bob a message')).toBeNull();
   });
 });
+
+describe('paymentAskOf — a plan step\'s ask (spec 382)', () => {
+  it('reads the payee from the payment line, not from the instruction sentence appended after it', () => {
+    expect(paymentAskOf('Pay 1 USDC to nathan.treasury\n\nDo this by exercising treasury.payment.execute as 0xb0d11ce19b756a682e78b4904cd8d832303b3d11.')).toEqual({ payee: 'nathan.treasury', usdc: '1' });
+  });
+});

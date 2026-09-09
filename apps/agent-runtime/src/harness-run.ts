@@ -2225,7 +2225,11 @@ export function paymentAskOf(goal: string): { payee?: string; usdc?: string; mem
   if (/\b(each|every|all)\b[\s\S]{0,40}\bmembers?\b/i.test(g)) return null; // the fan-out shape
   if (!/\busdc\b/i.test(g)) return null; // only money we know the unit of; "send a message" is not this
   const amount = g.match(/(\d+(?:\.\d+)?)\s*usdc/i)?.[1];
-  let rest = g.replace(/(\d+(?:\.\d+)?)\s*usdc/i, ' ').replace(/\b(send|pay|transfer)\b/i, ' ').replace(/\bfrom\b[\s\S]*$/i, ' ');
+  // THE PAYEE IS ON THE PAYMENT'S OWN LINE. A plan step's ask carries a second sentence after a blank line
+  // ("Do this by exercising treasury.payment.execute as 0x…", spec 350 W3) and the payee capture ran to the
+  // end of the message — "nathan.treasury\n\nDo this by exercising…" was looked up as a name (spec 382, live).
+  const firstLine = g.split(/\n\s*\n/)[0] ?? g;
+  let rest = firstLine.replace(/(\d+(?:\.\d+)?)\s*usdc/i, ' ').replace(/\b(send|pay|transfer)\b/i, ' ').replace(/\bfrom\b[\s\S]*$/i, ' ');
   const to = rest.match(/\bto\s+(.+?)\s*$/i)?.[1];
   const payee = (to ?? rest).replace(/^(to|please|now)\s+/i, '').replace(/[.!?]+$/, '').trim();
   return { ...(payee ? { payee } : {}), ...(amount ? { usdc: amount } : {}), ...(memo ? { memo } : {}) };

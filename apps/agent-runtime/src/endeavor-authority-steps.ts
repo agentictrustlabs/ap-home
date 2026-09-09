@@ -177,15 +177,62 @@ export function awaitingAuthorityNote(input: { capability: string; principal: Ad
  */
 export function receiptEvidence(input: {
   capability: string; runRef: string; mandateRef?: string | null; txHash?: string | null; summary: string;
+  /** Spec 382 — the signed commitment this run fulfilled, when the step was a participant's. */
+  commitmentRef?: string | null;
 }): { note: string; refs: string[] } {
   const refs = [
     `urn:ap:receipt:run:${input.runRef}`,
     ...(input.mandateRef ? [`urn:ap:receipt:mandate:${input.mandateRef}`] : []),
     ...(input.txHash ? [`urn:ap:receipt:tx:${input.txHash}`] : []),
+    ...(input.commitmentRef ? [`urn:ap:receipt:commitment:${input.commitmentRef}`] : []),
   ];
   const note = [
     input.summary.trim(),
     `Authorized: ${input.capability}${input.mandateRef ? ` under mandate ${input.mandateRef.slice(0, 18)}…` : ''}${input.txHash ? `, on chain in ${input.txHash.slice(0, 18)}…` : ''}.`,
   ].join(' ');
   return { note, refs };
+}
+
+// ── Spec 382 (appendix M6) — A COMMITTED STEP RUNS AT THE PARTICIPANT ────────────────────────────────
+//
+// A signed ContributionCommitment is a promise, never authority (spec 332 §9 rule 1). So the step a
+// participant committed to is not run by the organization: it becomes a run WAITING ON THAT PARTICIPANT,
+// on their own agent's task object, finished by them presenting their own mandate — the same shape as a
+// step awaiting a steward's authority (`checkpointForStep`), addressed to the person who promised it.
+
+/** The checkpoint a committed step becomes at the participant. `asker` IS the participant: it is theirs
+ *  to finish and nobody else's (`claimableBy`); the organization's only part was to record the promise. */
+export function checkpointForCommittedStep(input: {
+  runRef: string; participant: Address; principal: Address; endeavorId: string; step: WorkStep; goal: string;
+  commitmentRef: string; planHash: string; now?: number;
+}): HarnessRunCheckpointV1 {
+  const now = input.now ?? Date.now();
+  const capability = authorityCapabilityOf(input.step) ?? undefined;
+  return {
+    runRef: input.runRef,
+    // The capability is exercised AS THE PARTICIPANT — their treasury, their invitation — never as the
+    // organization: that is what "committed to" means, and it is why allocation grants nothing.
+    message: askForStep(input.step, input.goal, capability, input.participant),
+    addressee: input.participant,
+    asker: input.participant,
+    presented: [],
+    supplied: [],
+    openToStewards: false,
+    origin: { endeavorId: input.endeavorId, stepId: input.step.stepId, principal: input.principal, commitmentRef: input.commitmentRef, planHash: input.planHash },
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+/** What the endeavor is told when a committed step is handed to its participant. */
+export function committedStepNote(input: { participant: Address; name?: string | null; runRef: string; step: WorkStep; commitmentRef: string }): string {
+  const who = input.name ? `${input.name} (${input.participant})` : input.participant;
+  return [
+    `**${who}** committed to this step (commitment \`${input.commitmentRef}\`) — it now waits on their own agent as \`${input.runRef}\`.`,
+    '',
+    `“${input.step.description.trim()}”`,
+    '',
+    'They finish it by asking their agent to do it and granting the mandate it asks for; the step is recorded done from their receipt.',
+    'A commitment is a promise, never authority: the organization does not run it for them, and the step stays open until they do.',
+  ].join('\n');
 }

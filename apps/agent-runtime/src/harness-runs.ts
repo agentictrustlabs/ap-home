@@ -89,7 +89,9 @@ export interface HarnessRunCheckpointV1 {
    *  and any steward who can mint the mandate may claim it (`endeavor-authority-steps.claimableBy`). */
   openToStewards?: boolean;
   /** The plan step this run exists to satisfy. When it completes, the step's evidence is its RECEIPT. */
-  origin?: { endeavorId: string; stepId: string; principal: Address };
+  origin?: { endeavorId: string; stepId: string; principal: Address;
+    /** Spec 382 — the signed commitment this run fulfils and the adopted plan hash it was compiled from. */
+    commitmentRef?: string; planHash?: string };
   /** spec 362 — WHICH ENGINE advances this run. `client` (the flyout re-drives it — the default) or
    *  `workflow` (a Cloudflare Workflows instance owns it). ONE executor per run, never a fallback pair:
    *  the other entry path refuses to advance a run it does not own, because two engines discovering the

@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   authorityCapabilityOf, askForStep, checkpointForStep, claimableBy, awaitingAuthorityNote, receiptEvidence,
-  AUTHORITY_BEARING_CAPABILITIES, type WorkStep,
+  AUTHORITY_BEARING_CAPABILITIES, checkpointForCommittedStep, committedStepNote, type WorkStep,
 } from '../src/endeavor-authority-steps.js';
 
 const PRINCIPAL = '0x3b99f2b452766de5df0dbcdfc676f27257151333' as const;
@@ -126,5 +126,36 @@ describe('AUTHORITY_BEARING_CAPABILITIES stays honest about the harness', () => 
   it('the two lists do not overlap — a capability is one or the other', () => {
     const both = AUTHORITY_BEARING_CAPABILITIES.filter((id) => NOT_PLAN_STEPS.includes(id));
     expect(both).toEqual([]);
+  });
+});
+
+// Spec 382 (appendix M6 W1) — a COMMITTED step is the participant's run, not the organization's.
+describe('the run a committed step becomes, at the participant', () => {
+  const cp = checkpointForCommittedStep({
+    runRef: 'run-9', participant: OTHER, principal: PRINCIPAL, endeavorId: 'end_x', goal: 'kick off the corridor', now: 5,
+    step: step({ description: 'Pay the venue deposit of 1 USDC to nathan.treasury', capabilityRequirements: [{ capabilityIri: 'urn:ap:cap:treasury.payment.execute' }] }),
+    commitmentRef: 'commit_b', planHash: '0x' + 'ab'.repeat(32),
+  });
+  it('is the participant\'s own run: addressed to them, asked by them, open to nobody else', () => {
+    expect(cp).toMatchObject({ addressee: OTHER, asker: OTHER, openToStewards: false, presented: [], supplied: [] });
+    expect(claimableBy(cp, OTHER)).toBe(true);
+    expect(claimableBy(cp, STEWARD)).toBe(false);
+  });
+  it('exercises the capability AS THE PARTICIPANT, and remembers the commitment and the plan hash it was compiled from', () => {
+    expect(cp.message).toContain('treasury.payment.execute');
+    expect(cp.message).toContain(`as ${OTHER}`);
+    expect(cp.message).not.toContain(PRINCIPAL);
+    expect(cp.origin).toEqual({ endeavorId: 'end_x', stepId: 'step_1', principal: PRINCIPAL, commitmentRef: 'commit_b', planHash: '0x' + 'ab'.repeat(32) });
+  });
+  it('tells the endeavor whose promise it is and that the organization will not run it for them', () => {
+    const note = committedStepNote({ participant: OTHER, name: 'bob', runRef: 'run-9', step: step(), commitmentRef: 'commit_b' });
+    expect(note).toContain('bob');
+    expect(note).toContain('commit_b');
+    expect(note).toContain('run-9');
+    expect(note).toMatch(/never authority/);
+  });
+  it('the receipt evidence cites the commitment it fulfilled', () => {
+    const ev = receiptEvidence({ capability: 'treasury.payment.execute', runRef: 'run-9', mandateRef: '0x' + '11'.repeat(32), txHash: null, summary: 'Paid.', commitmentRef: 'commit_b' });
+    expect(ev.refs).toContain('urn:ap:receipt:commitment:commit_b');
   });
 });

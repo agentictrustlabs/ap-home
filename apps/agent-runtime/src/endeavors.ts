@@ -829,7 +829,8 @@ export async function handleEndeavorOp(
       }
       const command: CoordinationCommandV1 = {
         kind: 'ProposePlan',
-        actor: viewer,
+        // Spec 382 — A STEWARD ACTS AS THE ORGANIZATION (the stewardship wire proves it), as adoption already does: when the org auto-adopted, no steward is a participant, and the reducer rightly refuses a plan from a non-participant.
+      actor: steward ? principal : viewer,
         issuedAt: new Date().toISOString(),
         endeavorId: endeavorId as `end_${string}`,
         planId: planId as `plan_${string}`,
@@ -868,7 +869,8 @@ export async function handleEndeavorOp(
     if (!planRef) return json({ error: 'planRef { planId, revision, hash } required' }, 400);
     const command: CoordinationCommandV1 = {
       kind: 'AdoptPlan',
-      actor: viewer,
+      // Spec 382 — steward-gated: the steward acts AS THE ORGANIZATION (its own endeavor), proven by the wire.
+      actor: principal,
       issuedAt: new Date().toISOString(),
       endeavorId: endeavorId as `end_${string}`,
       planRef,
@@ -908,15 +910,33 @@ export async function handleEndeavorOp(
         steps,
         ...(note ? { note } : {}),
       };
-      const r = validateCoordinationCommand(state, command);
-      if (!r.ok) return json({ error: r.reason }, commandRejectStatus(r.reason));
+      // Spec 382 — A MEMBER'S OFFER IS ADMITTED AT THE ORGANIZATION'S OWN DOOR. The reducer admits a proposal
+      // only from a participant or invitee, and adoption asserted only the coordinator: a member who
+      // offered was refused for want of a participation nobody could give them (no invite op existed). A
+      // member is already standing at the organization's door (the directory listing is what let them in);
+      // the organization invites them as a contributor and their offer accepts it — three commands, one
+      // append, each validated by the reducer in turn. Nothing here is authority (spec 332 §9 rule 1).
+      const pre: CoordinationCommandV1[] = [];
+      if (!hasParticipation(state, viewer) && (name || steward)) {
+        const participationId = makeParticipationId(crypto.randomUUID());
+        const issuedAt = new Date().toISOString();
+        pre.push(
+          { kind: 'InviteParticipant', actor: principal, issuedAt, endeavorId: endeavorId as `end_${string}`, participationId, participant: viewer, role: 'contributor' },
+          { kind: 'AcceptParticipation', actor: viewer, issuedAt, endeavorId: endeavorId as `end_${string}`, participationId },
+        );
+      }
       let next = state;
-      for (const e of r.events) next = applyCoordinationEvent(next, e);
+      const appended: CoordinationEventV1[] = [];
+      for (const c of [...pre, command]) {
+        const r = validateCoordinationCommand(next, c);
+        if (!r.ok) return json({ error: r.reason }, commandRejectStatus(r.reason));
+        for (const e of r.events) { next = applyCoordinationEvent(next, e); appended.push(e); }
+      }
       const now = new Date().toISOString();
       await deps.writeAudit('interactions.endeavor.propose', { type: 'contribution-proposal', id: proposalId }, now);
-      await deps.writeDoc(coordinationEventsResource(endeavorId), [...log, ...r.events]);
+      await deps.writeDoc(coordinationEventsResource(endeavorId), [...log, ...appended]);
       await deps.writeDoc(coordinationStateResource(endeavorId), next);
-      try { deps.onCommitted?.(endeavorId, r.events, next); } catch (e) { console.warn('[endeavor] onCommitted threw:', e instanceof Error ? e.message : String(e)); }
+      try { deps.onCommitted?.(endeavorId, appended, next); } catch (e) { console.warn('[endeavor] onCommitted threw:', e instanceof Error ? e.message : String(e)); }
       const entry = indexEntryFromState(next, now);
       if (entry) {
         const index = await deps.readDoc<CoordinationIndexDocV1>(COORDINATION_INDEX_RESOURCE, { version: 1, endeavors: {} });
@@ -942,7 +962,8 @@ export async function handleEndeavorOp(
     const allocationId = makeAllocationId(crypto.randomUUID());
     const command: CoordinationCommandV1 = {
       kind: 'AllocateContribution',
-      actor: viewer,
+      // Spec 382 — steward-gated: the steward acts AS THE ORGANIZATION (its own endeavor), proven by the wire.
+      actor: principal,
       issuedAt: new Date().toISOString(),
       endeavorId: endeavorId as `end_${string}`,
       allocationId,
@@ -1019,6 +1040,10 @@ export async function handleEndeavorOp(
       await deps.writeAudit('interactions.endeavor.commit', { type: 'commitment', id: commitmentId }, now);
       await deps.writeDoc(coordinationEventsResource(endeavorId), [...log, ...r.events]);
       await deps.writeDoc(coordinationStateResource(endeavorId), next);
+      // Spec 382 — THE COMMITMENT IS THE ONE EVENT THAT HANDS WORK TO SOMEBODY, and this op alone never told
+      // anyone it had committed: the participants' `on-commitment` triggers (375) never fired and no run
+      // was parked. Same hook, same shape as every other op.
+      try { deps.onCommitted?.(endeavorId, r.events, next); } catch (e) { console.warn('[endeavor] onCommitted threw:', e instanceof Error ? e.message : String(e)); }
       const entry = indexEntryFromState(next, now);
       if (entry) {
         const index = await deps.readDoc<CoordinationIndexDocV1>(COORDINATION_INDEX_RESOURCE, { version: 1, endeavors: {} });
@@ -1044,7 +1069,8 @@ export async function handleEndeavorOp(
     if (evidenceRefs.length === 0) return json({ error: 'evidence (a short note of what was done) is required to mark a step done' }, 400);
     const command: CoordinationCommandV1 = {
       kind: 'RecordStepSatisfied',
-      actor: viewer,
+      // Spec 382 — a steward records as the organization; a participant records as themselves (the reducer re-gates both).
+      actor: (await deps.isSteward()) ? principal : viewer,
       issuedAt: new Date().toISOString(),
       endeavorId: endeavorId as `end_${string}`,
       stepId: stepId as PlanStepId,
@@ -1065,7 +1091,8 @@ export async function handleEndeavorOp(
     const note = String(body.note ?? '').trim() || 'Outcome confirmed by the coordinator';
     const command: CoordinationCommandV1 = {
       kind: 'SatisfyEndeavor',
-      actor: viewer,
+      // Spec 382 — a steward records as the organization; a participant records as themselves (the reducer re-gates both).
+      actor: (await deps.isSteward()) ? principal : viewer,
       issuedAt: new Date().toISOString(),
       endeavorId: endeavorId as `end_${string}`,
       outcomeValidationRef: { kind: 'resource', iri: `urn:ap:outcome:${encodeURIComponent(note.slice(0, EVIDENCE_MAX))}` },
