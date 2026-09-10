@@ -11,6 +11,8 @@ const ATTR = {
   step: 'ap.step.ref', status: 'ap.step.status', capability: 'ap.capability.id', risk: 'ap.risk',
   decision: 'ap.authority.verdict', presented: 'ap.authority.mandate.ref', chain: 'ap.authority.chain.depth',
   outcome: 'ap.run.outcome', origin: 'ap.trace.origin', error: 'ap.error.class', link: 'ap.link.kind',
+  // Spec 390 W3 — the stage spans: which model planned or composed, and why the route put it there.
+  model: 'gen_ai.request.model', provider: 'gen_ai.provider.name', route: 'ap.route.because', standing: 'ap.standing.relation', tx: 'ap.action.tx_hash',
 } as const;
 const short = (v: unknown, n = 14): string => { const t = String(v ?? ''); return t.length > n ? `${t.slice(0, n - 4)}…${t.slice(-3)}` : t; };
 const fmtMs = (ms: number): string => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.max(0, Math.round(ms))}ms`);
@@ -57,6 +59,7 @@ export function RunTimeline({ token, addressee, runRef, open }: { token: string;
           {ordered(state.spans).map(({ span: sp, depth }) => {
             const step = attr(sp, ATTR.step); const status = attr(sp, ATTR.status); const cap = attr(sp, ATTR.capability); const risk = attr(sp, ATTR.risk);
             const decision = attr(sp, ATTR.decision); const presented = attr(sp, ATTR.presented); const outcome = attr(sp, ATTR.outcome); const origin = attr(sp, ATTR.origin); const err = attr(sp, ATTR.error);
+            const provider = attr(sp, ATTR.provider); const route = attr(sp, ATTR.route); const standing = attr(sp, ATTR.standing); const tx = attr(sp, ATTR.tx);
             const bad = sp.status === 'ERROR' || status === 'refused' || status === 'failed';
             return (
               <div key={sp.spanId} style={{ display: 'flex', gap: 8, paddingLeft: depth * 14, alignItems: 'baseline' }}>
@@ -67,6 +70,7 @@ export function RunTimeline({ token, addressee, runRef, open }: { token: string;
                   {cap ? ` · ${cap}` : ''}{risk ? ` (${risk})` : ''}
                   {status ? ` · ${status}` : outcome ? ` · ${outcome}` : ''}
                   {decision ? ` · authority ${decision}${presented ? ` under ${short(presented)}` : ''}` : ''}
+                  {provider ? ` · ${provider}` : ''}{route ? ` · ${route}` : ''}{standing ? ` · standing ${standing}` : ''}{tx ? ` · tx ${short(tx)}` : ''}
                   {origin ? ` · for run ${short(origin, 18)}` : ''}
                   {err ? ` · ${err}` : ''}
                   {sp.links?.length ? ` · ${sp.links.map((l) => `${String(l.attributes?.[ATTR.link] ?? 'linked')} ${short(l.spanId)}`).join(', ')}` : ''}

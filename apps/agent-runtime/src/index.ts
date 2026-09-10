@@ -9,7 +9,7 @@ import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 
 import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, forgetConfirmation, CONFIRMATION_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1 } from '@agenticprimitives/context';
 import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
-import { recordOf, replayingInvoker, traceContextOf, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent } from '@agenticprimitives/orchestration';
+import { recordOf, replayingInvoker, traceContextOf, type RunPlannerSummaryV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
 import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken } from './triggers.js';
 import { appendProgress, readProgress, type ProgressLineV1 } from './harness-progress.js';
@@ -132,7 +132,7 @@ import { admitInboundEmail, emailZones, emailSender, isEmailAddress, type EmailE
 import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
-import { askVocabulary, commandFieldsFor, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY, HOUSEHOLD_READ_CAPABILITY, CAPABILITY_WORDS } from './harness-run.js';
+import { askVocabulary, commandFieldsFor, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY, HOUSEHOLD_READ_CAPABILITY, CAPABILITY_WORDS, type PlannerTraceV1 } from './harness-run.js';
 import { workersAiTranscriber, repairTranscript, hearingVocabulary, spokenFor } from './voice.js';
 import { DECISION_POINTS } from '@agenticprimitives/ontology';
 import { loadPlaybook } from './playbook.js';
@@ -1552,6 +1552,19 @@ app.post('/harness/confirmations/forget', async (c) => {
  * open to stewards, listed among their unfinished runs, finished by one of them granting the mandate.
  * A trigger adds a clock, never authority (the user's decision, 2026-09-08: the agent, no mandate).
  */
+/** Spec 390 W3 — the run's model calls for the record: the planner kind, the model, the provider and the route's
+ *  reasons (spec 388: provider names and token counts). Names and numbers only; the span projection reads it. */
+function plannerSummaryOf(trace: PlannerTraceV1 | undefined): RunPlannerSummaryV1 | null {
+  if (!trace) return null;
+  const r = trace.route;
+  return {
+    kind: trace.planner,
+    ...(trace.model ? { model: trace.model } : {}),
+    ...(r?.planner?.provider ? { provider: r.planner.provider } : {}),
+    ...(r ? { route: { policy: r.policy, ...(r.planner ? { planner: { provider: r.planner.provider, because: r.planner.because } } : {}), ...(r.composer ? { composer: { provider: r.composer.provider, because: r.composer.because } } : {}) } } : {}),
+  };
+}
+
 /**
  * AN AGENT ASKS, AS ITSELF — spec 370 P5 (a trigger firing) and spec 372 S3c (an outside runtime speaking
  * on the standard surface). One shape for both, because they are one thing: a run with NO person's session
@@ -1565,6 +1578,8 @@ app.post('/harness/confirmations/forget', async (c) => {
 export async function runAgentAsk(env: Env, input: { agent: Address; addressee: Address; ask: string; runRef: string; context?: Record<string, unknown>;
   /** Spec 390 W2 — the W3C Trace Context the caller's request carried; recorded, never read by a gate. */
   traceContext?: TraceContextV1 | null;
+  /** Spec 390 W3 — when the caller's request arrived (ms), for the `receive_request` span. */
+  receivedAt?: number;
   /** Spec 380 W3 — a plan the caller supplies (the routed topic turn: one consult step per ranked member). */
   plan?: Plan;
   /** Spec 380 W3 — guidance the asker's context supplies to the COMPOSER (a topic's steward-written assistant
@@ -1614,7 +1629,7 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
   // Recorded like the ask route's (spec 370 P6) and exported like it (381); a record that fails to land costs
   // a look-back, never the run.
   try {
-    const record = recordOf({ runRef: input.runRef, intent, result: result as never, events, presented: (input.resume?.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), ...(input.traceContext ? { traceContext: input.traceContext } : {}) });
+    const record = recordOf({ runRef: input.runRef, intent, result: result as never, events, presented: (input.resume?.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), ...(input.traceContext ? { traceContext: input.traceContext } : {}), planner: plannerSummaryOf(trace), ...(input.receivedAt ? { receivedAt: input.receivedAt } : {}) });
     await putRecord(env as never, input.addressee, record);
     await exportRun(env, { writeSubjectRecord: deps.writeSubjectRecord }, input.addressee, record)
       .then((r) => putRecord(env as never, input.addressee, { ...record, export: r })).catch(() => undefined);
@@ -2729,6 +2744,7 @@ app.get('/harness/run', async (c) => {
 });
 
 app.post('/harness/ask', async (c) => {
+  const receivedAt = Date.now(); // Spec 390 W3 — the request's arrival, on the record: what came before the loop is one honest span
   const body = (await c.req.json().catch(() => null)) as {
     session?: string; addressee?: Address; message?: string; presented?: DelegationWireV1 | DelegationWireV1[] | null;
     supplied?: HarnessRunInput['supplied']; approvals?: HarnessRunInput['approvals']; runRef?: string;
@@ -3194,7 +3210,7 @@ app.post('/harness/ask', async (c) => {
     {
       // Spec 390 W2 — the W3C Trace Context the request arrived with joins this run's spans to the caller's
       // trace. Recorded here and read by nothing else: correlation, never trust.
-      const record = recordOf({ runRef, intent, result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), traceContext: traceContextOf(c.req.raw.headers) });
+      const record = recordOf({ runRef, intent, result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), traceContext: traceContextOf(c.req.raw.headers), planner: plannerSummaryOf(trace), receivedAt });
       c.executionCtx.waitUntil(putRecord(c.env as never, addressee, record).catch((e) => console.warn('[harness/ask] record not kept:', e instanceof Error ? e.message : String(e))));
       // Spec 381 — THE EXPORT: the durable half into the acting agent's vault, the spans to a collector when
       // one is named. Off the run's path; a failed export is logged, never a failed ask.

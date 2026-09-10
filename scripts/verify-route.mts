@@ -37,3 +37,21 @@ if (!route!.planner) fail('no planner decision on the trace');
 if (!(route!.structured ?? []).length) console.log('  (no structured call ran — the planner did not choose a question tool; vary ASK)');
 if (rep!.kind !== 'answer') fail(`the ask did not answer: ${rep!.kind} ${rep!.error ?? ''}`);
 console.log(`\n✓ spec 388: every model call on this ask names its provider and the numbers it was routed by.`);
+
+// Spec 390 W3 — THE SAME RUN AS A SPAN TREE: the authority stages, the planner's call and the outcome projected
+// from the record's stamped events. Read under alice's session (her own run), names and durations only.
+const runRef = (r as { runRef?: string }).runRef;
+if (runRef) {
+  await new Promise((res) => setTimeout(res, 1500)); // the record lands off the run's path
+  const sp = await j(await fetch(`${HOME}/a2a/harness/spans`, { method: 'POST', headers: H, body: JSON.stringify({ session: si.homeSession, addressee: String(si.agent).toLowerCase(), runRef }) })) as { ok?: boolean; spans?: Array<{ name: string; spanId: string; parentSpanId?: string; startMs: number; endMs: number; status: string; attributes: Record<string, unknown> }>; error?: string };
+  if (!sp.ok || !sp.spans) fail(`spans: ${sp.error ?? 'none'}`);
+  const spans = sp.spans!;
+  const t0 = Math.min(...spans.map((x) => x.startMs));
+  const kids = (id?: string) => spans.filter((x) => x.parentSpanId === id).sort((a, b) => a.startMs - b.startMs);
+  const walk = (id: string | undefined, depth: number) => { for (const x of kids(id)) { const a = x.attributes; console.log(`  ${'  '.repeat(depth)}${x.name.padEnd(46 - depth * 2)} +${String(x.startMs - t0).padStart(6)}ms ${String(x.endMs - x.startMs).padStart(6)}ms${a['gen_ai.provider.name'] ? ` · ${a['gen_ai.provider.name']}` : ''}${a['ap.authority.verdict'] ? ` · ${a['ap.authority.verdict']}` : ''}${a['ap.route.because'] ? ` · ${String(a['ap.route.because']).slice(0, 60)}…` : ''}`); walk(x.spanId, depth + 1); } };
+  console.log(`\n── the run as spans (${spans.length}) ──`);
+  walk(undefined, 0);
+  const names = new Set(spans.map((x) => x.name.split(' ')[0]));
+  for (const need of ['invoke_agent', 'plan', 'issue_outcome']) if (!names.has(need)) fail(`no ${need} span — the record's events are not stamped, or the stage projection did not run`);
+  console.log(`\n✓ spec 390 W3: the run reads as a tree — the planner's call, each step, its verification, the outcome — with nothing the run was about.`);
+}

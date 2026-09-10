@@ -93,7 +93,7 @@ export interface StandardMountDeps {
    *  runtime lives. Returns the JSON-RPC response verbatim. */
   delegatedRpc?: (agent: Address, rpc: unknown, principal: Principal | null) => Promise<{ result?: unknown; error?: { code: number; message: string } }>;
   /** Spec 372 S3c — an agent asking as itself: no session, no mandate, its own standing. */
-  askAsAgent?: (input: { agent: Address; addressee: Address; ask: string; runRef: string; /** Spec 390 W2 — the caller's W3C Trace Context, kept on the run's record. */ traceContext?: import('@agenticprimitives/orchestration').TraceContextV1 | null }) => Promise<{
+  askAsAgent?: (input: { agent: Address; addressee: Address; ask: string; runRef: string; /** Spec 390 W2 — the caller's W3C Trace Context, kept on the run's record. */ traceContext?: import('@agenticprimitives/orchestration').TraceContextV1 | null; /** Spec 390 W3 — when the request arrived. */ receivedAt?: number }) => Promise<{
     reply: { kind: string; text?: string; prompt?: { kind: string; prompt: string; stepRef: string }; error?: string };
     spoken: string;
     result?: { plan: unknown };
@@ -296,7 +296,7 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           } else {
             if (!message) { await ctx.reject([{ text: 'Say what you would like this agent to do — the message carried no text.' }]); return; }
             await ctx.working();
-            asked = await deps.askAsAgent({ agent: caller, addressee: agent, ask: message, runRef, traceContext: traceContextOf(ctx.headers) });
+            asked = await deps.askAsAgent({ agent: caller, addressee: agent, ask: message, runRef, traceContext: traceContextOf(ctx.headers), receivedAt: startedAt });
           }
           // Spec 387 W2 — THE TRACE RIDES WITH THE TASK: what admitted the run, what was offered and chosen, each
           // step's outcome and output summary, in order. Evidence of what ran; nothing in it is authority or private.
