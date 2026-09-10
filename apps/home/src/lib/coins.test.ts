@@ -50,3 +50,23 @@ describe('which balances get printed', () => {
     expect(shown([{ coin: usdc, amount: null }, { coin: shq, amount: null }]).map((b) => b.coin.symbol)).toEqual(['USDC']);
   });
 });
+
+describe('the list a build ships with', () => {
+  it('shows the card room’s coin on faithchain without anybody configuring anything', async () => {
+    // The point of the built-in table. Told twice to set an environment variable, the person's Home
+    // still read "0.00 USDC" over a treasury holding ten thousand Sheqels — so the working default
+    // matters more than the tidy one.
+    const { COINS } = await import('./coins');
+    // This test build targets whatever chain.ts resolves; assert the SHAPE that makes it work.
+    expect(COINS[0]?.primary).toBe(true);
+    expect(COINS.every((c) => /^0x[0-9a-fA-F]{40}$/.test(c.address))).toBe(true);
+    expect(new Set(COINS.map((c) => c.address.toLowerCase())).size).toBe(COINS.length);
+  });
+
+  it('lets a configured list win outright over the built-in one', () => {
+    // A deployment that names its coins means THAT list — not that list plus whatever this build
+    // happened to ship believing about the chain.
+    const configured = parseAppCoins('[{"address":"0x1111111111111111111111111111111111111111","symbol":"ONE"}]');
+    expect(configured.map((c) => c.symbol)).toEqual(['ONE']);
+  });
+});

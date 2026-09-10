@@ -6,19 +6,30 @@
 // the app that uses it — read "Balance: 0.00 USDC" here, and its owner reasonably concluded their
 // money was gone. The number was never wrong. The label was.
 //
-// WHAT THIS DOES NOT DO is teach Home about any particular app. A relying app's currency is a fact
-// about a deployment, not about this codebase, so the extra coins are configuration:
+// WHERE THE LIST COMES FROM. An ERC-20 balance is not enumerable from an address — you cannot ask an
+// account what it holds — so a candidate list is unavoidable. Two sources, in order:
 //
 //   NEXT_PUBLIC_APP_COINS  a JSON array of { address, symbol, decimals? }, decimals defaulting to 6
-//                          (the rail's figure for every coin). Example, one line:
-//                          [{"address":"0xa14E…6141","symbol":"SHQ"}]
+//                          (the rail's figure for every coin). Set, it is the whole answer.
+//                          Example, one line: [{"address":"0xa14E…6141","symbol":"SHQ"}]
+//
+//   KNOWN_APP_COINS        otherwise, what this build already knows exists on the chain it targets.
+//
+// The built-in table is here deliberately, and it is the same KIND of fact this app already keeps:
+// `chain.ts` holds a per-chain contract table and a per-chain RPC default, because THIS APP IS A
+// DEPLOYMENT rather than a reusable package. "On faithchain there is also a coin called SHQ" belongs
+// beside "on faithchain the name registry is at 0x…". It stays out of `packages/`, where hardcoding a
+// relying app's address genuinely would be wrong.
+//
+// A stale entry costs nothing visible: an address that no longer holds anything reads zero, and a
+// non-primary coin at zero is not shown at all.
 //
 // Bad entries are dropped rather than throwing: a malformed coin should cost that coin's row, not the
 // whole Treasuries page. An unparseable list throws at build time, like every other NEXT_PUBLIC_ here,
 // because that one is a typo somebody wants told about.
 
 import type { Address } from '@agenticprimitives/types';
-import { CONTRACTS } from './chain';
+import { CHAIN_ID, CONTRACTS } from './chain';
 
 export interface Coin {
   address: Address;
@@ -60,11 +71,29 @@ export function parseAppCoins(raw: string | undefined): Coin[] {
   return out;
 }
 
-/** Every coin this Home can show a balance for. The primary first, then whatever is configured. */
-export const COINS: Coin[] = [
-  { address: CONTRACTS.mockUsdc, symbol: 'USDC', decimals: 6, primary: true },
-  ...parseAppCoins(process.env.NEXT_PUBLIC_APP_COINS).filter((c) => c.address.toLowerCase() !== CONTRACTS.mockUsdc.toLowerCase()),
-];
+/**
+ * Coins this build knows exist on a given chain, beside the one this Home itself funds.
+ *
+ * Keyed by chain id, so a build pointed at another chain gets none of them rather than a list of
+ * addresses that mean nothing there.
+ */
+const KNOWN_APP_COINS: Record<number, Coin[]> = {
+  // faithchain — Sheqel, the Poker Night card room's own currency (`AppCurrency`). A treasury that has
+  // played there holds these, and a Home that could not see them told its owner their money was gone.
+  34348: [{ address: '0xa14E4a9447607c1233DcE34dB6Ead47C094f6141' as Address, symbol: 'SHQ', decimals: 6 }],
+};
+
+/** Every coin this Home can show a balance for. The primary first, then the rest. */
+export const COINS: Coin[] = (() => {
+  const configured = parseAppCoins(process.env.NEXT_PUBLIC_APP_COINS);
+  // Configured wins outright when present — a deployment that names its coins means that list, not
+  // that list plus whatever this build happened to ship believing.
+  const extra = configured.length > 0 ? configured : (KNOWN_APP_COINS[CHAIN_ID] ?? []);
+  return [
+    { address: CONTRACTS.mockUsdc, symbol: 'USDC', decimals: 6, primary: true },
+    ...extra.filter((c) => c.address.toLowerCase() !== CONTRACTS.mockUsdc.toLowerCase()),
+  ];
+})();
 
 /**
  * Which balances to PRINT for one account.
