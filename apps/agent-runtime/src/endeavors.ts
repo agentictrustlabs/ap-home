@@ -103,6 +103,31 @@ export interface EndeavorIndexEntryV1 {
    *  for 47 endeavors, 9.5 s, two listings a minute before the organization's vault budget refused). Absent on a
    *  row indexed before this field existed ⇒ the log is read, as before; `endeavor.index.rebuild` backfills. */
   parties?: string[];
+  /** Spec 396 W2 — THE MY WORK SLICE of the endeavor's state, carried on the index so a listing answers a viewer's
+   *  allocations, commitments and decisions from ONE read (the index) instead of one log per endeavor. Derived,
+   *  rebuildable, never authority: the same facts `mineAcross` reduced from the log, written where the index is.
+   *  Absent on a row indexed before the field existed ⇒ the log is read; `endeavor.index.rebuild` backfills. */
+  work?: WorkSliceV1;
+}
+/** The facts My Work is projected from — a projection of the reduced state, per endeavor. */
+export interface WorkSliceV1 {
+  managingPrincipal: string;
+  adoptedPlanRef?: PlanRevisionRef;
+  allocations: CoordinationStateV1['allocations'][string][];
+  commitments: CoordinationStateV1['commitments'][string][];
+  decisionRequests: CoordinationStateV1['decisionRequests'];
+  decisions: CoordinationStateV1['decisions'];
+}
+export function workSliceOf(state: CoordinationStateV1): WorkSliceV1 | null {
+  if (!state.endeavor) return null;
+  return {
+    managingPrincipal: state.endeavor.managingPrincipal.toLowerCase(),
+    ...(state.endeavor.adoptedPlanRef ? { adoptedPlanRef: state.endeavor.adoptedPlanRef } : {}),
+    allocations: Object.values(state.allocations),
+    commitments: Object.values(state.commitments),
+    decisionRequests: state.decisionRequests,
+    decisions: state.decisions,
+  };
 }
 export interface CoordinationIndexDocV1 { version: 1; endeavors: Record<string, EndeavorIndexEntryV1> }
 
@@ -207,6 +232,7 @@ export function indexEntryFromState(state: CoordinationStateV1, updatedAt: strin
     // The organization is a participation of EVERY endeavor of its own (it adopts as coordinator), so it is not
     // a stake here — a steward's listing would otherwise open every log again. It is a party only where a
     // DECISION names it (an approver), which is the one My Work item a steward reads as the organization.
+    ...(workSliceOf(state) ? { work: workSliceOf(state)! } : {}),
     parties: [...new Set([
       ...Object.values(state.participations).map((p) => p.participant.toLowerCase()).filter((a) => a !== endeavor.managingPrincipal.toLowerCase()),
       ...Object.values(state.allocations).map((a) => a.participant.toLowerCase()),
@@ -324,9 +350,9 @@ export function eventTrail(events: CoordinationEventV1[]): Array<{ type: string;
  *  is the address THIS VIEWER would decide under when they may (named directly, or the organization named and
  *  the viewer its steward — the door then acts as the organization); otherwise the first declared approver.
  *  `mayDecide` says it plainly; `approvers` carries the whole requirement. */
-export function decisionRowsOf(state: CoordinationStateV1, viewer: string, steward: boolean, endeavorTitle?: string): Array<Record<string, unknown>> {
+export function decisionRowsOf(state: Pick<WorkSliceV1, 'managingPrincipal' | 'decisionRequests' | 'decisions'>, viewer: string, steward: boolean, endeavorTitle?: string): Array<Record<string, unknown>> {
   const me = viewer.toLowerCase();
-  const org = state.endeavor?.managingPrincipal.toLowerCase();
+  const org = state.managingPrincipal.toLowerCase();
   return Object.values(state.decisionRequests).map((req) => {
     const approvers = req.requirement.approvers.map((a) => a.toLowerCase());
     const named = approvers.includes(me);
@@ -382,13 +408,19 @@ async function mineAcross(
   // slowest single read, not their sum. Ordering is preserved by mapping then concatenating.
   const perEntry = await Promise.all(
     entries.map(async (entry) => {
-      const log = await deps.readDoc<CoordinationEventV1[]>(coordinationEventsResource(entry.endeavorId), []);
-      if (log.length === 0) return { allocations: [] as unknown[], commitments: [] as unknown[], decisions: [] as unknown[] };
-      const state = reduceEventLog(log);
-      const adoptedRef = state.endeavor?.adoptedPlanRef;
+      // Spec 396 W2 — the index carries the slice; a row indexed before it did is read from its log, as before.
+      let slice: WorkSliceV1 | null = entry.work ?? null;
+      if (!slice) {
+        const log = await deps.readDoc<CoordinationEventV1[]>(coordinationEventsResource(entry.endeavorId), []);
+        if (log.length === 0) return { allocations: [] as unknown[], commitments: [] as unknown[], decisions: [] as unknown[] };
+        slice = workSliceOf(reduceEventLog(log));
+        if (!slice) return { allocations: [] as unknown[], commitments: [] as unknown[], decisions: [] as unknown[] };
+      }
+      const state = slice;
+      const adoptedRef = state.adoptedPlanRef;
       const a2: unknown[] = [];
       const c2: unknown[] = [];
-      for (const a of Object.values(state.allocations)) {
+      for (const a of state.allocations) {
         if (a.participant.toLowerCase() !== viewer || a.status !== 'allocated') continue;
         a2.push({
           allocationId: a.allocationId,
@@ -399,7 +431,7 @@ async function mineAcross(
           ...(adoptedRef ? { planRef: adoptedRef } : {}),
         });
       }
-      for (const c of Object.values(state.commitments)) {
+      for (const c of state.commitments) {
         if (c.participant.toLowerCase() !== viewer) continue;
         c2.push({
           commitmentId: c.commitmentId,
@@ -819,7 +851,7 @@ export async function handleEndeavorOp(
         ...(state.endeavor?.adoptedPlanRef ? { planRef: state.endeavor.adoptedPlanRef } : {}),
       })),
       commitments: Object.values(state.commitments),
-      decisions: decisionRowsOf(state, viewer, steward, state.endeavor?.title),
+      decisions: workSliceOf(state) ? decisionRowsOf(workSliceOf(state)!, viewer, steward, state.endeavor?.title) : [],
       satisfiedSteps: Object.values(state.satisfiedSteps),
       milestones: Object.values(state.milestones),
       events: eventTrail(log),

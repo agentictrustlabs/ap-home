@@ -1,8 +1,8 @@
 # The A2A harness against the field — the defensible position, the provenance audit, and what goes next
 
-**Status:** maintained (re-audited 2026-09-09 evening; prior snapshots 2026-09-05, 2026-09-09 noon). Refreshed at
-the end of every harness wave — a changed verdict lands here, in the competitive scorecard and in spec 351's
-layer table in the same change.
+**Status:** maintained (**2026-09-10: the final gap list before the transition to UX and developer tools — §3**;
+prior snapshots 2026-09-05, 2026-09-09 noon, 2026-09-09 evening). Refreshed at the end of every harness wave — a
+changed verdict lands here, in the competitive scorecard and in spec 351's layer table in the same change.
 **Reads:** LangGraph 1.x OSS, LangSmith (Observability · Evaluation · Deployment/Agent Server · Engine ·
 Fleet · Studio), Deep Agents, Microsoft Agent Framework (+ DurableTask extension, Foundry evaluators),
 Dapr Agents ([deep dive](product-comparison/dapr-agents.md)), Buzz.xyz (assessed in spec 359 §3), Google ADK,
@@ -54,9 +54,26 @@ vault until the key-custody pilot's operator issues it a caller token (a routed 
 agent's own session wire, which no Worker holds yet.
 
 Spec 358's verdict still frames everything: **the authority plane held in every incident; every defect was the
-knowledge plane telling a plausible falsehood.** The exposure is context management for long runs, the
-recurring-failure view, and — this audit's finding — a provenance record that is PROV-*shaped* but not yet
-PROV-*serialized*, *validated* or *queryable* (§4).
+knowledge plane telling a plausible falsehood.**
+
+**2026-09-10 — the evening audit's Tier 0 and most of Tiers 1–2 closed in one day.** Spec 389 (provenance
+unification, W1–W3, complete): the run's vault record IS the PROV graph — one projector
+(`projectHarnessRunProvenance`) emits the same `ProvenanceRecordV1` an Endeavor leaves; SHACL R1–R6 run in CI;
+every reply, spans reply and A2A task names where its provenance is (PROV-AQ `hasProvenance`);
+`POST /harness/provenance` serves JSON-LD or PROV-N; a routed run reads as two bundles joined from either side.
+Spec 390 (OpenTelemetry as the tracing substrate, W1–W4, complete): every span names the PROV activity it is
+and every activity names its span; W3C Trace Context in and out; authority stages, planner calls and the outcome
+as spans; span events and four metrics; status semantics per the GenAI conformance rules. Spec 391 (context
+management, W1–W3, complete): a result past the threshold leaves the run for the acting agent's vault as a
+receipted `run.artifact` (`apexec:RunArtifact`), the plan carries a reference, a re-plan sees shapes. Spec 392
+W1: every wave's verify script with its authority twin runs nightly as one ledger. Spec 393 (decisions by
+declared approvers, W1–W2, live). Spec 354 K5 (composition root in Ring 0), the provenance manifest, and
+born-with-playbook onboarding. Spec 394 W1 (standing instructions), 395 W1 (public provenance projection through
+the S1 firewall — one `AnchoredOutcome` row per step that left a transaction), 396 W1 (DO economics measured:
+every op reports its vault-call bill; the finding — `endeavor.list` cost one vault call per endeavor — fixed).
+Spec 388 W3: a third provider, the minute counted deployment-wide.
+
+The §4.3 finding is resolved. What remains is §3.
 
 ## 1. The defensible position — how this harness is better, stated so it can be checked
 
@@ -105,16 +122,16 @@ without becoming a different kind of system.
 | --- | --- | --- | --- |
 | Authority | policy hooks / ACLs / middleware | per-step on-chain verify; chain-first verifier (383); child mandates single-use (376); value rail treasury-to-treasury (373) | **ahead** — contract-enforced (C1) |
 | Identity & custody | config objects; service-held keys | SA is the agent; runtime `actedOnBehalfOf`; delegate wires, never custody; model routed under the same identity (377/388) | **ahead** (C2) |
-| Playbooks / skills | Deep Agents SKILL.md, Context Hub | K4 mostly live (definition by digest narrows offers, `skillRef` stamped); K3 ceremony live; specialists rule from archetype frontmatter (376 W2) | **live**; open: onboarding auto-assign, provenance manifest, K5 |
+| Playbooks / skills | Deep Agents SKILL.md, Context Hub | K3 ceremony live; K4 live (definition by digest, `skillRef`, provenance manifest on the task rail); K5 live (`harness/compose.ts` is the composition root); every onboarding path born with its playbook; specialists rule from archetype frontmatter (376 W2) | **ahead** — the playbook is compiled, digest-pinned and cited on every receipt, and grants nothing (354 §1) |
 | Durable runs | LangGraph checkpointer, MAF DurableTask, Dapr | P1: checkpoint carries the admitted plan + completed steps; resume replays receipts and re-verifies only unrun steps; 30-min expiry; `DurableStepPort` + Workflows binding (362); 387 W3 continue a task from the host on the same checkpoint | **at par**, with the twist |
-| Traceability / provenance | LangSmith run trees, MAF timelines, OTel GenAI spans | P6 `RunRecordV1` + replay; 381 GenAI-semconv spans with an attribute firewall, OTLP export, `run.provenance:<runRef>` in the acting agent's vault, retention stated, W3 timeline on the Home; cross-hop trace links (routed_to / delegated_to) | **at par on ops, ahead on evidence (C3)**; **behind our own design on PROV** — record-form only, see §4.3 |
+| Traceability / provenance | LangSmith run trees, MAF timelines, OTel GenAI spans | P6 `RunRecordV1` + replay; 381 firewalled spans + OTLP + timeline; **389: the vault record IS the PROV-O/P-Plan graph (JSON-LD, PROV-N), SHACL R1–R6 in CI, `hasProvenance` on every reply/task, cross-Home bundles joined; 390: span ↔ PROV activity ids both ways, W3C Trace Context on the wire, authority stages as spans, span events + metrics; 395 W1: anchored outcomes projected to the public KB through S1** | **ahead** — at par on ops, and the only harness whose run is a W3C PROV graph a third party can load and validate (C3, §4) |
 | Streamed progress | LangGraph streams, A2A SSE | P2 run lines long-polled; cross-hop relay (M8); flow trace on every outside-in hop (387) | **at par**; SSE deliberately not used |
-| Long-term memory | LangGraph Store, Deep Agents `/memories/` | P7 `ConversationMemoryV1`; 385 scoped confirmation memory; 358 W5 learned preferences — all vault-resident | **at par**; open: standing-instructions record, acting-context namespacing beyond confirmations |
+| Long-term memory | LangGraph Store, Deep Agents `/memories/` | P7 `ConversationMemoryV1`; 385 scoped confirmation memory; 358 W5 learned preferences; 394 W1 standing instructions (a declared default per room + act + argument, kept only from the person's yes) — all vault-resident | **at par**; the acting-context twin (394 W2) is the one open correctness gate |
 | Composition operators | deferred nodes, Send, subgraphs | P3 independent read-only steps batched, authority steps alone; declared branches; fan-out consult (380 W1–3); hand-off (376) | **at par on what matters**; no node caching / sub-plans (deliberate, §5) |
 | Triggers | LangSmith cron/webhooks, Buzz | P5 + 375 schedule / message / webhook / on-commitment fired live; triggers panel on the Home | **at par** |
 | Multi-agent | MAF handoff/group chat, ADK RemoteA2aAgent, ACP | 366, 374 W1–2, 376 W1–2, 379 W1–2, 380, 382, 383 W1–2, 384, 372 outsiders + TCK; the outside-in path (386/387) | **ahead in kind** (C4) |
 | Context management | Deep Agents summarization/offload, prompt caching | **spec 391 W1 (2026-09-10):** a step result past the threshold leaves the record for the acting agent's vault as a receipted artifact (`run.artifact:`), a reference + deterministic summary stands in everywhere the run is kept after the turn; a resume rehydrates only what a `$ref` reaches; the composer's evidence is FITTED with every drop on the trace (the silent `slice` is gone) | **at par**, with the twist (the artifact is the agent's record under its grant; the summary is a shape, never a model's) |
-| Evaluation | LangSmith datasets/Engine, Foundry evaluators | truth cases + `check:ask-truth`; every wave has a live verify script + an authority twin | **at par in kind, thin**; no CI replay, no recurring-failure clustering |
+| Evaluation | LangSmith datasets/Engine, Foundry evaluators | truth cases + `check:ask-truth`; 392 W1: every wave's verify script with its authority twin runs nightly as one ledger, each script judging itself | **at par in kind**; the recurring-failure view (392 W2) is time-gated on a week of reports |
 | Model plane | MAF providers | 377 second model behind the same port; 388 budget route decided before the call, recorded with its reason | **at par**, with the twist (a route, never a fallback) |
 | Semantic grounding | RAG add-ons | ontology-compiled plans, class-bound records, the answer answers the question (371) | **ahead** (C5) |
 
@@ -145,7 +162,7 @@ Tier 0 is what protects the position in §1; the rest is what the field would no
 | --- | --- | --- |
 | 2.1 ✅ W1 2026-09-10 | Standing-instructions memory record; acting-context namespacing beyond confirmations — **[spec 394](../../specs/394-standing-instructions.md)**: `standing.instructions` (a declared default per room + capability + argument, kept only from the person's yes to the read-back, revalidated, cited `standing`, never a grant); confirmations carry their room; Ask `context.instruction.declare`; Home lists + clears; nightly `verify-standing-instruction`. W2: the acting-context twin live (a choice made for one organization not read at home) | 394 W2 |
 | 2.2 ✅ W1 2026-09-10 | Public provenance projection through the S1 firewall (anchored digests only) so a counterparty can verify a receipt's provenance without the vault — **[spec 395](../../specs/395-public-provenance-projection.md)**: `projectPublicProvenance` (one `AnchoredOutcome` row per step that left a transaction — run/step IRIs, tx as `anchoredBy`, receipt/chain/intent digests, playbook commitment, capability, completion; every row through `isPublicProjectionSafe` + an address scan; the rest refused by name), `POST /provenance/public { agent, runRef }` with no session, `hasProvenance.public` on every reply; nightly `verify-public-provenance`. Not the KB (the indexer stays its only writer); ADR-0040 line unchanged | 395 W2 (timeline badge; a recompute-and-verify script for a held receipt) |
-| 2.3 ✅ W1 2026-09-10 | DO economics for background runs at scale — **[spec 396](../../specs/396-do-economics-measured.md)**: MEASURED first (every InteractionsDO op reports its vault-call bill on its headers; `scripts/measure-do-economics.mts`, advisory nightly). The finding: `endeavor.list` cost one vault call per endeavor — 51 calls, 9.6 s, two listings a minute before the organization's vault budget (120/min) refused — and every live gate this week hit that wall. The lever: the index names everyone with a stake, so a listing opens only those logs (51 → 28 steward, 46 → 22 member; the organization is not its own stake). W2: a per-viewer projection maintained on write (`1 + 1`), the harness run's own bill on the record and the 390 metrics | 396 W2 |
+| 2.3 ✅ W1 2026-09-10 | DO economics for background runs at scale — **[spec 396](../../specs/396-do-economics-measured.md)**: MEASURED first (every InteractionsDO op reports its vault-call bill on its headers; `scripts/measure-do-economics.mts`, advisory nightly). The finding: `endeavor.list` cost one vault call per endeavor — 51 calls, 9.6 s, two listings a minute before the organization's vault budget (120/min) refused — and every live gate this week hit that wall. The lever: the index names everyone with a stake, so a listing opens only those logs (51 → 28 steward, 46 → 22 member; the organization is not its own stake); **W2 ✅**: the My Work slice rides the index — **51 → 4 calls, 9.6 s → 3.6 s, two listings a minute → thirty**. W3: the harness run's own bill on the record and the 390 metrics | 396 W3 |
 | 2.4 | No-code playbook authoring | unchanged; the `~/skills` web app is the seat |
 
 ## 4. Traceability and provenance — the standards, where we stand on each, the lever

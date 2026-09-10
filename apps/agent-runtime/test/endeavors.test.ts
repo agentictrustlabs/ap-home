@@ -310,8 +310,14 @@ describe('endeavor.* serving plane', () => {
     expect((strangerList.mine as { allocations: unknown[] }).allocations).toEqual([]);
     // the index read only — no endeavor log was opened for a viewer with no stake
     expect(h.reads.slice(reads).filter((r) => r.startsWith('coordination.endeavor:events:'))).toEqual([]);
-    // a row without parties is read as before, and a rebuild gives it the field
+    // spec 396 W2 — the slice rides the index: even a PARTY's listing opens no log
+    const stewardReads = h.reads.length;
+    const stewardList = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.list', {}));
+    expect((stewardList.mine as { allocations: Array<{ allocationId: string }> }).allocations).toHaveLength(1);
+    expect(h.reads.slice(stewardReads).filter((r) => r.startsWith('coordination.endeavor:events:'))).toEqual([]);
+    // a row indexed before the fields existed is read as before, and a rebuild gives it both
     delete index.endeavors[endeavorId]!.parties;
+    delete index.endeavors[endeavorId]!.work;
     h.docs.set(COORDINATION_INDEX_RESOURCE, index);
     const before = h.reads.length;
     await out(await handleEndeavorOp(h.as(STRANGER, { member: 'stranger' }), 'endeavor.list', {}));
@@ -319,6 +325,7 @@ describe('endeavor.* serving plane', () => {
     const rebuilt = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.index.rebuild', {}));
     expect(rebuilt).toMatchObject({ ok: true, rebuilt: 1 });
     expect((h.docs.get(COORDINATION_INDEX_RESOURCE) as CoordinationIndexDocV1).endeavors[endeavorId]!.parties).toContain(STEWARD);
+    expect((h.docs.get(COORDINATION_INDEX_RESOURCE) as CoordinationIndexDocV1).endeavors[endeavorId]!.work?.allocations).toHaveLength(1);
   });
 
   it('the organization named as approver is decided AS the organization by a steward; a stranger may not raise one', async () => {
