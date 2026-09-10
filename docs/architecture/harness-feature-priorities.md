@@ -1,178 +1,184 @@
-# What the A2A harness still needs — a prioritized feature program from a deep read of the field
+# The A2A harness against the field — the defensible position, the provenance audit, and what goes next
 
-**Status:** maintained (2026-09-09; prior snapshot 2026-09-05). Refreshed at the end of every harness wave — a
-changed verdict lands here, in the competitive scorecard and in spec 351's layer table in the same change.
+**Status:** maintained (re-audited 2026-09-09 evening; prior snapshots 2026-09-05, 2026-09-09 noon). Refreshed at
+the end of every harness wave — a changed verdict lands here, in the competitive scorecard and in spec 351's
+layer table in the same change.
 **Reads:** LangGraph 1.x OSS, LangSmith (Observability · Evaluation · Deployment/Agent Server · Engine ·
 Fleet · Studio), Deep Agents, Microsoft Agent Framework (+ DurableTask extension, Foundry evaluators),
-Dapr Agents ([deep dive](product-comparison/dapr-agents.md)), Buzz.xyz (assessed in spec 359 §3). The
-Web3 / trust-substrate peers (Lit Vincent, ERC-8273/8001/8183, Inrupt, PROV-AGENT, AGNTCY…) are read in
-[product-comparison/web3-agent-substrate-landscape.md](product-comparison/web3-agent-substrate-landscape.md);
-its §4 takes feed Tier 0.3/0.4 (PROV alignment, OTel projection, hash-chained receipts) and spec 351's
-contracts (`DigestBindingEnforcer` vs ERC-8273).
-**Grounds:** [spec 359](../../specs/359-focus-program-playbooks-domains-durability.md) (the focus order
-this document keeps), [spec 358](../../specs/358-semantic-context-plane.md) (semantic context plane; the
-"knowledge plane lied" verdict), [spec 354](../../specs/354-archetype-driven-agent-behavior.md)
-(playbooks), [spec 350](../../specs/350-authority-aware-agent-harness.md)/[351](../../specs/351-agentic-primitives-substrate-program.md),
-[competitive analysis](agentic-framework-competitive-analysis.md).
-**Update discipline:** a changed verdict updates the scorecard in the competitive analysis and spec 351's
-layer table in the same change; priorities here never run ahead of spec 359's dependency chain.
+Dapr Agents ([deep dive](product-comparison/dapr-agents.md)), Buzz.xyz (assessed in spec 359 §3), Google ADK,
+OpenAI Agents SDK, Mastra, Strands (per-framework standing in the
+[competitive analysis](agentic-framework-competitive-analysis.md) §2). The Web3 / trust-substrate peers (Lit
+Vincent, ERC-8273/8001/8183, Inrupt, PROV-AGENT, AGNTCY…) are read in
+[product-comparison/web3-agent-substrate-landscape.md](product-comparison/web3-agent-substrate-landscape.md).
+The eight-area parity ledger with per-wave evidence is
+[product-comparison/harness-parity-gap-analysis.md](product-comparison/harness-parity-gap-analysis.md) (spec 370).
+**Standards read for §4:** W3C PROV family (PROV-DM, PROV-O, PROV-N, PROV-CONSTRAINTS, PROV-AQ, PROV-Links/bundles),
+P-Plan, EP-Plan, OPMW, PROV-AGENT (2025), OpenTelemetry GenAI semantic conventions (agent + framework spans,
+status *Development* as of 2026-09), W3C Trace Context, OTLP, VC Data Integrity, in-toto/SLSA attestations, C2PA.
+**Grounds:** [spec 359](../../specs/359-focus-program-playbooks-domains-durability.md), [spec 358](../../specs/358-semantic-context-plane.md),
+[spec 354](../../specs/354-archetype-driven-agent-behavior.md), [spec 350](../../specs/350-authority-aware-agent-harness.md)/[351](../../specs/351-agentic-primitives-substrate-program.md),
+[spec 381](../../specs/381-run-export-spans-retention-provenance.md), [spec 383](../../specs/383-the-chain-on-the-receipt.md),
+[spec 316 §6](../../specs/316-agentic-interaction-fabric.md) (PROV-O / P-Plan grounding + SHACL S1–S5).
 
 ---
 
 ## 0. Where we stand (honest snapshot, 2026-09-09)
 
-The 2026-09-05 snapshot said "resume exists, durability does not", "provenance present but not the run's
-system of record", "no trigger model", "K3–K4 not wired". All four are stale. Between 2026-09-06 and
-2026-09-09: spec 370 P1–P8 shipped and were gated live on faithnet; specs 371–385 landed (fifteen specs,
-most with W1–W2 live); spec 354 K4 is mostly live and K3 is live on the org, service and person pages;
-and spec 366 R4/R5 put a **second deployment** live (`demo-a2a-faithnet` ↔ `demo-a2a-faithnet-b`, an
-agent placed there by its name's records, never by a subdomain convention).
+Between 2026-09-06 and 2026-09-09: spec 370 P1–P8 shipped and were gated live on faithnet; specs 371–388
+landed (eighteen specs, most with W1–W2 live); spec 354 K4 is mostly live and K3 is live on the org, service
+and person pages; spec 366 R4/R5 put a **second deployment** live (`demo-a2a-faithnet` ↔ `demo-a2a-faithnet-b`,
+an agent placed there by its name's records, never by a subdomain convention); spec 381 W3 put the run
+timeline on the Home; specs 386/387 put the first **outside-in** path live end to end (Claude.ai → the
+Global.Church gateway connector → the registry → Ligonier's own A2A agent → the content MCP its name record
+points at → a six-week study as the task's artifact), instrumented with a flow trace on every hop
+([outside-in-flow-claude-gateway-a2a-catalog.md](outside-in-flow-claude-gateway-a2a-catalog.md)); spec 388
+put budget-routed model selection live (a route decided before the call and recorded with its reason);
+388 W3 (later 2026-09-10) made the minute a deployment-wide fact (`ProviderMeterDO`, read-and-charge in one
+step, named on the trace) and wired a third provider — OpenAI `gpt-5-mini` between the free tier and Haiku —
+which the first live call proved is refused with `credit_balance_exhausted` until that account is funded, and
+the route surfaced rather than skipped (ADR-0013): it is off the live offer, one var from on.
 
 **Durable runs, triggers, provenance, streamed progress, memory, operators and external runtimes are all
-live (370 P1–P8). The multi-agent rail is the differentiator (366–384): routed asks and writes across
-Homes, hand-off as a child delegation, external A2A agents as steps, fan-out consult, committed steps run
-at the participant, probe → offer → mandate.** Two Homes exist. The exposure is context management for
-long runs, and the recurring-failure view.
+live (370 P1–P8). The multi-agent rail is the differentiator (366–384): routed asks and writes across Homes,
+hand-off as a child delegation, external A2A agents as steps, fan-out consult, committed steps run at the
+participant, probe → offer → mandate.** Two Homes exist, with two honest corrections: B cannot read the shared
+vault until the key-custody pilot's operator issues it a caller token (a routed read that lands there answers
+"could not be read", in B's words, correctly), and the hand-off across deployments (376 W3) needs the parent
+agent's own session wire, which no Worker holds yet.
 
-**2026-09-10 — the first outside-in product path is live end to end (specs 386/387):** Claude.ai → the
-Global.Church gateway connector (MCP) → the registry → Ligonier's own A2A agent → the content MCP its
-name record (`atl:mcpEndpoint`) points at → a six-week study with 20 linked items as the task's
-artifact. The harness gained one generic capability family (`catalog.*`, bound by records, fail-closed
-when a name publishes none) and the ecosystem side gained a profile (`ap-content-catalog/v1`) a
-publisher implements with no code of ours. It is the multi-agent rail used by an outsider: discovery
-→ card → admitted A2A task → the agent's own playbook → its own tools — nothing of ours reads the
-ministry's content. Instrumented the same day: a flow trace on every tool result and task (`docs/architecture/outside-in-flow-claude-gateway-a2a-catalog.md`) — its first run caught the Anthropic account out of credit at the planner hop. Spec 388 (same day): budget-routed model selection — Groq for what its budget carries, Haiku for the rest, decided before the call and recorded with its reason; a route, never a fallback. Spec 387 W3 (same day): a prompted task continued from the host on the same task, resumed from its checkpoint for exactly that caller; the discovery referral on every invoke. Spec 388 W2: the structured calls routed too; one ask ran its planner on Haiku and its query and composer on Groq, each decision with its numbers on the trace.
+Spec 358's verdict still frames everything: **the authority plane held in every incident; every defect was the
+knowledge plane telling a plausible falsehood.** The exposure is context management for long runs, the
+recurring-failure view, and — this audit's finding — a provenance record that is PROV-*shaped* but not yet
+PROV-*serialized*, *validated* or *queryable* (§4).
 
-Two honest corrections to "two Homes exist": the second Worker is live and the cross-Home routed read and
-act are proven (spec 366 R5 gate), but B cannot read the shared vault until the key-custody pilot's
-operator issues it a caller token, so a routed read that lands there answers "could not be read" — in B's
-words, correctly — and the hand-off across deployments (376 W3) needs the parent agent's own session wire,
-which no Worker holds yet. Spec 358's verdict still frames everything: **the authority plane held in every
-incident; every defect was the knowledge plane telling a plausible falsehood.**
+## 1. The defensible position — how this harness is better, stated so it can be checked
 
-## 1. The deep read — what each product actually ships (relevant subset)
+"Better" is not a scorecard total. The frameworks in §2 are better than us at several things (§1.2). The
+position that holds is narrower and stronger: **on the properties that decide whether an agent can be trusted
+to act, this harness is contract-enforced where every other framework is policy code — and each property
+comes with a test a skeptic can run.** Five claims, each with its evidence and the experiment that would
+falsify it.
 
-### 1.1 LangGraph (OSS runtime)
-Checkpointers at **super-step boundaries** with durability modes (`sync` / `async` / `exit`); nodes
-re-run from their start on resume, so idempotency is the author's job; `interrupt()` + `Command(resume=
-…, goto=…, graph=PARENT)` for HITL and control flow; **Store** — cross-thread long-term memory with
-namespaces and semantic search, separate from thread checkpoints; **node caching** (`key_func`, `ttl`);
-**deferred nodes** (wait for all upstream branches — map-reduce/consensus); subgraphs with their own
-checkpoint namespaces; time travel (fork from any checkpoint via thread history); typed streaming with
-`reconnectOnMount`.
+### 1.1 Five claims
 
-### 1.2 LangSmith (the control plane)
-**Observability**: run trees, latency/cost/token, trace → local debugging in Studio. **Evaluation**:
-datasets, experiments, online evaluators, production-trace promotion. **Deployment / Agent Server**:
-assistants · threads · runs, durable run queue (Redis hot path + Postgres), stateless queue workers,
-cron, webhooks, and — notable — **every deployed agent auto-exposed as an MCP endpoint**. **Engine**:
-detects *recurring* failures across traces and proposes root causes. **Fleet**: no-code agent authoring.
-OTEL/Prometheus metrics incl. rate-limit gauges.
+| # | Claim | What the field does instead | Our evidence (shipped) | The falsifier — how a skeptic checks it |
+| --- | --- | --- | --- | --- |
+| **C1** | **Authority is a verified fact per step, not a branch in policy code.** Every consequential step presents a mandate (a delegation + intent-digest caveat) that is verified on chain, single-use, attenuable, revocable — before the step, and again after a human approval. | MAF/LangGraph/Strands: `interrupt()`, middleware, hooks, allow-lists — checked in the process that also runs the model; nothing outside the runtime can revoke a step in flight | 350 W1–W2 live; P1 resume re-verifies only unrun steps; 383 chain-first verifier (`verifyAuthorityChain`); 376 child mandates single-use; 373 value rail | Revoke the mandate on chain mid-run: the next step is denied and the receipt says why. Present a forged child without its parent: `chain-parent-missing` before any caveat is read. Both are live scripts (`verify-authority-chain.mts`, `verify-handoff.mts`) |
+| **C2** | **Identity survives the runtime.** The agent IS a Smart Agent address; the runtime (`apexec:AgentRuntime ⊑ prov:SoftwareAgent`) `actedOnBehalfOf` it; the model is swappable without changing who is answerable; a service signs as an identity only through a revocable delegate wire (never custodying it). | Identity = a config object inside the framework; a runtime restart or a vendor change is an identity change; keys live with the service | ADR-0010/0046; service-agent signing rule (ADR-0019); 372 S4 one wire; 377/388 model swapped and routed under the same agent, the route on the trace | Rotate the model provider (377) or the credential (spec 221): every prior delegation still verifies and every receipt still attributes to the same address |
+| **C3** | **Every consequential step leaves evidence a third party can verify without trusting the agent.** Receipt digest, input/output digests, the mandate by reference, the chain digest, and — for value — the tx hash; the run's provenance lands in the acting agent's own vault, with a stated retention. | Traces in a vendor platform (LangSmith, Foundry): rich, but readable only by the operator and evidential only if you trust the operator | 370 P6 `RunRecordV1` + replay re-deriving verdicts; 381 spans with an attribute firewall, OTLP export, `run.provenance:<runRef>`; 381 W3 timeline on the Home | Take a receipt and its tx hash to a chain explorer and the delegation registry: the payer, the mandate, and the revocation state are checkable with none of our code running |
+| **C4** | **A hop between agents is a governed act, not a function call.** A routed ask re-derives standing at the receiver under *its* playbook and record; a hand-off is a child delegation cut from the parent mandate; an outside A2A agent's answer is an observation, never authority; the chain on the receipt names every actor and grant. | MAF handoff / ADK `RemoteA2aAgent` / OpenAI handoffs: control transfer with inherited context; the callee trusts the caller's process | 366 R0–R5 live across two Homes; 374 W1–2; 376 W1–2; 379 W1–2; 380; 382; 383 W1–2; 384 W1–4 | Ask the org's agent for its roster from a person with no standing: refused *by the receiver*. Hand a step to a specialist and re-present the same child for a second step: denied (single use) |
+| **C5** | **Knowledge is ontology-bound and the answer states its evidence.** Domain shape lives in the T-box and is bound by IRI (`check:ontology-bindings`); vault questions compile to selectors, KB questions to grounded SPARQL; every reply carries `AskEvidence` naming what was read and from which tier. | Prompt-resident domain rules and RAG add-ons; grounding is a model's claim | specs 355–358 W1–W6; 371 (the answer answers the question); `check:ask-truth` | Ask a question whose answer is not in either tier: the reply says so and names the tiers it read, instead of a plausible falsehood |
 
-### 1.3 Deep Agents (the harness)
-Virtual filesystem with pluggable backends (state · store · disk · sandbox · **composite routing**, e.g.
-`/memories/` durable, everything else thread-scoped); **AGENTS.md memory always loaded**; **SKILL.md
-progressive loading**; `write_todos` planning; `task` subagents for **context isolation**; automatic
-**summarization + offloading of large tool results**; prompt caching; `FilesystemPermission`
-allow/deny/interrupt; `interrupt_on` per tool; Context Hub (agent repo + linked skill repos).
+The claims compose: C1 without C2 is a policy engine; C3 without C1 is a trace; C4 without C3 is a swarm; C5
+without C3 is RAG. Together they are one property — **a run whose authority, identity, evidence, hops and
+knowledge are all facts a third party can verify** — and no framework in §2 has all five, or claims to.
 
-### 1.4 Microsoft Agent Framework
-Graph workflows (sequential/concurrent/handoff/group) with checkpointing + time travel; **DurableTask
-extension**: checkpoint after each step, distributed executors, days-long runs, a **dashboard with per-
-executor timelines and step inputs/outputs**; native OTEL — GenAI semconv plus workflow spans
-(`workflow.build`, `workflow.session`, `executor.process`, `edge_group.process`, `message.send`);
-`AIContextProvider` + memory providers; Foundry evaluators (groundedness, tool-call accuracy, task
-completion, safety) with production monitoring + alerts.
+### 1.2 Where they are better, and how the position survives it
 
-### 1.5 Dapr Agents · Buzz
-Dapr: durable approval timer race, activity-output replay, resiliency policies — see the
-[deep dive](product-comparison/dapr-agents.md). Buzz: triggers (message/reaction/schedule/webhook),
-external runtimes as members via ACP, in-thread review — spec 359 §3.
-
-## 2. Feature families — theirs, ours, verdict (revised 2026-09-09)
-
-| Family | Field reference | Ours now | Verdict (was → is) |
+| They lead on | Who | Our honest state | How we argue it (and what we build) |
 | --- | --- | --- | --- |
-| Authority | policy hooks / ACLs | per-step on-chain verify; chain-first verifier (`verifyAuthorityChain`, 383); child mandates single-use (376); value rail treasury-to-treasury (373) | ahead → **further ahead**: the chain is now on the receipt |
-| Playbooks / skills | Deep Agents SKILL.md, Context Hub | K4 mostly live (definition by digest narrows offers, `skillRef` stamped); K3 ceremony live on org/service/person pages; specialists rule from archetype frontmatter (376 W2, live) | one wave from live → **live**; open: onboarding auto-assign, provenance manifest, K5 Ask ∩ definition |
-| Durable runs | LangGraph checkpointer, MAF DurableTask, Dapr | P1: the checkpoint carries the admitted plan + completed steps; resume replays receipts and re-verifies only unrun steps; 30-min expiry; `DurableStepPort` + Workflows binding (362) | behind → **at par**, with the twist (resume re-verifies) |
-| Traceability / provenance | LangSmith run trees, MAF timelines, OTEL | P6 + 381: `RunRecordV1`, replay re-derives verdicts, GenAI-semconv spans with an attribute firewall, OTLP export, `run.provenance:<runRef>` in the acting agent's vault, retention stated; **381 W3: the Home's Activities page lists an agent's runs and draws each as a timeline (steps, duration, authority decision, hand-off links), with a JSON download** | behind on ops → **at par on ops, ahead on evidence** |
-| Streamed progress | LangGraph streams, A2A SSE | P2: run lines long-polled by the surface; cross-hop relay (M8) | **at par**; SSE deliberately not used |
-| Long-term memory | LangGraph Store, Deep Agents `/memories/` | P7 `ConversationMemoryV1` in the vault; 385 scoped confirmation memory (pick-then-remember, context-scoped, correctable in the open); 358 W5 learned preferences | half-built → **at par**; open: standing-instructions record, acting-context namespacing beyond confirmations |
-| Composition operators | deferred nodes, Send, subgraphs | P3: independent read-only steps batched, authority steps run alone; declared branches; fan-out consult (380, and the topic turn runs through it — W3); hand-off as child delegation (376) | behind → **at par on what matters**; no node caching, no sub-plans (deliberate, §5) |
-| Triggers | LangSmith cron/webhooks, Buzz | P5 + 375: schedule / message / webhook / on-commitment fired live; authority steps suspend on the mandate | behind → **at par** |
-| Multi-agent | MAF handoff/group chat, ADK RemoteA2aAgent, ACP | routed asks + writes across Homes (366, 374 W1–2), hand-off (376), external A2A agents as steps (379 W1–2), fan-out consult (380), committed steps at the participant (382), engagement probe → offer → mandate (384), outsiders as members + TCK green (372) | not scored before → **ahead in kind**; the field has no revocable, chain-verified hop |
-| Context management | Deep Agents summarization/offload, prompt caching | none in harness/orchestration (the topic turn's own clipping only) | **behind** — the one row unchanged |
+| Context management for long runs | Deep Agents (offload, summarize, subagent isolation), LangGraph | none in `harness`/`orchestration` | Not a trust property; adopt the mechanisms with the twist (offloaded artifact = receipted vault record; sub-run = child delegation). **P1 below.** |
+| Developer experience, ecosystem, examples | LangGraph, Mastra, OpenAI SDK | small; one estate; TypeScript only | A consequence of being a substrate, not a framework; the outside-in path (386/387) is the first "consume it from a third-party host" proof |
+| Evaluation platforms with model judges | LangSmith, Foundry | deterministic truth cases only; no CI replay of the live scripts | Deliberate for authority (no model judges a model); the gap that matters is coverage and CI, **P2** |
+| Ops at scale, queue workers, run UIs | LangSmith Agent Server, MAF DTS dashboard | per-agent Workers/DOs; the Home timeline (381 W3) | Different substrate; the run UI in Ring 0 is a non-goal (351 §9); measure DO economics before copying |
+| Tracing ergonomics (Studio, live debugging) | LangSmith, Logfire | spans + OTLP, firewalled; timeline on the Home | We export to *their* tools; the standard we add (PROV) they do not have — §4 |
+| Protocol conformance breadth | ADK (A2A-native, multi-language) | TCK green (372); one A2A 1.0 client + server | Enough; breadth is the sibling repos' job (ADR-0037) |
+
+### 1.3 The one paragraph to say out loud
+
+*Intelligence may be probabilistic. Authority must not be.* Every framework we read treats "may this step run"
+as a policy question the runtime answers about itself. We treat it as a fact verified against a chain the
+runtime does not control, and we leave behind a receipt whose provenance a third party can check. That is
+the whole position. Everything in §1.2 is a feature we can adopt; nothing in §1.1 is a feature they can adopt
+without becoming a different kind of system.
+
+## 2. Feature families — theirs, ours, verdict (revised 2026-09-09 evening)
+
+| Family | Field reference | Ours now | Verdict |
+| --- | --- | --- | --- |
+| Authority | policy hooks / ACLs / middleware | per-step on-chain verify; chain-first verifier (383); child mandates single-use (376); value rail treasury-to-treasury (373) | **ahead** — contract-enforced (C1) |
+| Identity & custody | config objects; service-held keys | SA is the agent; runtime `actedOnBehalfOf`; delegate wires, never custody; model routed under the same identity (377/388) | **ahead** (C2) |
+| Playbooks / skills | Deep Agents SKILL.md, Context Hub | K4 mostly live (definition by digest narrows offers, `skillRef` stamped); K3 ceremony live; specialists rule from archetype frontmatter (376 W2) | **live**; open: onboarding auto-assign, provenance manifest, K5 |
+| Durable runs | LangGraph checkpointer, MAF DurableTask, Dapr | P1: checkpoint carries the admitted plan + completed steps; resume replays receipts and re-verifies only unrun steps; 30-min expiry; `DurableStepPort` + Workflows binding (362); 387 W3 continue a task from the host on the same checkpoint | **at par**, with the twist |
+| Traceability / provenance | LangSmith run trees, MAF timelines, OTel GenAI spans | P6 `RunRecordV1` + replay; 381 GenAI-semconv spans with an attribute firewall, OTLP export, `run.provenance:<runRef>` in the acting agent's vault, retention stated, W3 timeline on the Home; cross-hop trace links (routed_to / delegated_to) | **at par on ops, ahead on evidence (C3)**; **behind our own design on PROV** — record-form only, see §4.3 |
+| Streamed progress | LangGraph streams, A2A SSE | P2 run lines long-polled; cross-hop relay (M8); flow trace on every outside-in hop (387) | **at par**; SSE deliberately not used |
+| Long-term memory | LangGraph Store, Deep Agents `/memories/` | P7 `ConversationMemoryV1`; 385 scoped confirmation memory; 358 W5 learned preferences — all vault-resident | **at par**; open: standing-instructions record, acting-context namespacing beyond confirmations |
+| Composition operators | deferred nodes, Send, subgraphs | P3 independent read-only steps batched, authority steps alone; declared branches; fan-out consult (380 W1–3); hand-off (376) | **at par on what matters**; no node caching / sub-plans (deliberate, §5) |
+| Triggers | LangSmith cron/webhooks, Buzz | P5 + 375 schedule / message / webhook / on-commitment fired live; triggers panel on the Home | **at par** |
+| Multi-agent | MAF handoff/group chat, ADK RemoteA2aAgent, ACP | 366, 374 W1–2, 376 W1–2, 379 W1–2, 380, 382, 383 W1–2, 384, 372 outsiders + TCK; the outside-in path (386/387) | **ahead in kind** (C4) |
+| Context management | Deep Agents summarization/offload, prompt caching | none in harness/orchestration (the topic turn's own clipping only) | **behind** — the one row unchanged since 09-05 |
 | Evaluation | LangSmith datasets/Engine, Foundry evaluators | truth cases + `check:ask-truth`; every wave has a live verify script + an authority twin | **at par in kind, thin**; no CI replay, no recurring-failure clustering |
-| Model plane | MAF providers | 377: a second model behind the same planner port, Home picker, prompt budget fitted and traced | new row, **at par** |
-| Semantic grounding | RAG add-ons | ontology-compiled plans, class-bound records, the answer answers the question (371) | **ahead**, unchanged |
+| Model plane | MAF providers | 377 second model behind the same port; 388 budget route decided before the call, recorded with its reason | **at par**, with the twist (a route, never a fallback) |
+| Semantic grounding | RAG add-ons | ontology-compiled plans, class-bound records, the answer answers the question (371) | **ahead** (C5) |
 
-### Where the gaps actually are now
+## 3. The prioritized program (re-cut 2026-09-09 evening)
 
-Ordered by what the field has and we don't, not by what is unfinished:
-
-1. **Context management for long runs** (Deep Agents, LangGraph summarization). No offload of large tool
-   results to vault records, no history summarization at checkpoints, no isolated sub-run. Old Tier 1.3,
-   now the biggest genuine "behind". The twist stands: a sub-run is a child delegation (376 gives the
-   mechanism), an offloaded artifact is a receipted vault record.
-2. **Recurring-failure detection** (LangSmith Engine). Nothing clusters refusals or truth-case failures
-   across runs. Old 1.7, untouched.
-3. **CI replay of the verify scripts** — every wave has a live script and an authority twin; nothing runs
-   them as one suite or samples live asks.
-4. **Second-deployment W3s**, half unblocked (B needs its caller token): 374 W3 routed write delivery
-   across Homes, 376 W3 hand-off across deployments + live revocation twin, 383 W3 bilateral bindings,
-   379 W2 positive REACH twin (a registered outside name — Ligonier is the candidate), 379 W3 reverse.
-5. **Playbook tails**: onboarding auto-assign, K5, provenance manifest.
-6. **Endeavor conformance** (382 W3: decisions by declared approvers wait on spec 333's `RecordDecision`;
-   the Coordinator driving offers and allocations through the Ask as a live twin; milestones ✅).
-
-## 3. The prioritized program (re-cut 2026-09-09)
+Tier 0 is what protects the position in §1; the rest is what the field would notice.
 
 ### Tier 0 — now
 
 | # | Feature | Analog | Our twist / gate |
 | --- | --- | --- | --- |
-| **0.1** | **Context management for long runs** (was 1.3) — large tool results become receipted vault records and the plan carries a reference; run history summarized at checkpoints; heavy sub-work runs as a child hand-off (376) so it never pollutes the parent's context | Deep Agents offload/summarize/subagent | spec first: it defines what a checkpoint holds |
-| **0.2** | **CI replay of the verify scripts + authority twins** (was 0.5) — one job, the negative twin beside every positive | LangSmith Engine (in kind) | protects the lead while features keep landing |
-| ~~0.3~~ | ~~Home "How and why" timeline from `run.provenance`~~ — **✅ 2026-09-09 (381 W3)**: Activities lists the runs, each opens as a timeline, JSON download | LangSmith trace UI, MAF DTS dashboard | done |
+| **P0** | **Provenance unification — one PROV graph, serialized, validated, addressable** (§4.4). The harness run projects through the Ring-0 `provenance` package (PROV-O + P-Plan + EP-Plan bundle), not a second record shape; the vault record is JSON-LD with a published `@context` (`prov`, `p-plan`, `apexec`, `apvr`); every field bound by IRI in `vault-records.ts`; SHACL S1–S5 run on every record in CI; a receipt and a task artifact link to their provenance (PROV-AQ `hasProvenance`); a routed or handed-off run is a bundle `prov:wasInformedBy` the sender's, so a cross-Home run is one graph | none — the field emits traces, not PROV | provenance is EVIDENCE, never an authorization input (execution.ttl header); the S1 firewall stays fail-closed; the twin: a forged provenance record fails SHACL and its receipt digest does not match |
+| **P1** | **Context management for long runs** (was 0.1) — large tool results become receipted vault records and the plan carries a reference; run history summarized at checkpoints; heavy sub-work runs as a child hand-off (376) | Deep Agents offload/summarize/subagent | spec first: it defines what a checkpoint holds; an offloaded artifact is a `prov:Entity` the step `generated` |
+| **P2** | **CI replay of the verify scripts + authority twins, and OTel GenAI conformance** (was 0.2) — one job, the negative twin beside every positive; the exported spans checked against the GenAI semconv conformance rules (span names, `gen_ai.tool.call.id`, status UNSET on success) | LangSmith Engine (in kind); OTel weaver scenarios | protects the lead while features keep landing |
 
 ### Tier 1 — next
 
 | # | Feature | Note |
 | --- | --- | --- |
-| **1.1** | The second-deployment W3s as ONE wave on one fixture (faithnet-b): 374 W3, 376 W3 + live revocation twin, 383 W3, 379 W2/W3 | after B's AKCS caller token (pilot operator) |
-| **1.2** | Playbook tails: onboarding auto-assign, K5 Ask ∩ definition, provenance manifest | housekeeping |
-| **1.3** | Endeavor conformance: decisions by declared approvers (needs 333's `RecordDecision`), the Coordinator's offers/allocations through the Ask as a live twin | 382 W3 rolling |
+| **1.1** | The second-deployment W3s as ONE wave on one fixture (faithnet-b): 374 W3, 376 W3 + live revocation twin, 383 W3 bilateral bindings, 379 W2/W3 | after B's AKCS caller token (pilot operator) and a Worker-held parent session wire |
+| **1.2** | Recurring-failure detection over the provenance graph (was 2.1) — deterministic clustering by capability × refusal class × playbook version, computed as a selector over the owner's own records (spec 356: never SPARQL over decrypted vault copies in a shared engine) | needs P0's uniform shape |
+| **1.3** | Playbook tails: onboarding auto-assign, K5 Ask ∩ definition, provenance manifest | housekeeping |
+| **1.4** | Endeavor conformance: decisions by declared approvers (needs 333's `RecordDecision`), the Coordinator's offers/allocations through the Ask as a live twin | 382 W3 rolling |
 
 ### Tier 2 — later
 
 | # | Feature | Note |
 | --- | --- | --- |
-| 2.1 | Recurring-failure clustering — deterministic, over `RunProvenanceV1` | old 1.7 |
-| 2.2 | Standing-instructions memory record; acting-context namespacing beyond confirmations | after 385 |
+| 2.1 | Standing-instructions memory record; acting-context namespacing beyond confirmations | after 385 |
+| 2.2 | Public provenance projection through the S1 firewall (anchored digests only) so a counterparty can verify a receipt's provenance without the vault | after P0; ADR-0040 line unchanged |
 | 2.3 | DO economics for background runs at scale | unchanged |
 | 2.4 | No-code playbook authoring | unchanged; the `~/skills` web app is the seat |
 
-## 4. Traceability and provenance — why PROV-O is the lever, not just a nicety
+## 4. Traceability and provenance — the standards, where we stand on each, the lever
 
-> **2026-09-09:** the "gap is wiring, not design" paragraph below is done — `provenanceOf` runs after every recorded run and lands in the acting agent's vault, and the Home renders it (381 W3). The remaining gap is querying it for failure clusters.
+### 4.1 Two different questions, two different standards families
 
-Every framework in §1 answers "what happened" with a **trace**: spans, inputs/outputs, a timeline —
-ops-facing, vendor-shaped, and detached from authority. We already hold the pieces to answer four
-questions no trace answers, in one W3C-standard graph:
+**Tracing** answers *what did the software do, when, how long, with what error* — for the operator, in the
+operator's platform. **Provenance** answers *what was done, by which agent, on whose behalf, following which
+plan, using and generating which things* — for anyone, as a graph with defined semantics. The frameworks in
+§2 all do the first and none do the second. We do both, and the second is the lever, because it is the form
+in which C3 (evidence a third party can verify) becomes machine-checkable rather than a PDF.
+
+| Standard | What it fixes | Status (2026-09) | Ours |
+| --- | --- | --- | --- |
+| **OpenTelemetry GenAI semantic conventions** — agent + framework spans (`invoke_agent`, `execute_tool`, `invoke_workflow`, `plan`, `create_agent`), attribute registry (`gen_ai.*`), opt-in content capture | vendor-neutral trace shape for agents; the thing LangSmith, MAF, Logfire, Foundry ingest | **Development**, not stable; moved to its own repo; conformance test rules exist (span name format, `gen_ai.tool.call.id`, status UNSET on success, no `gen_ai.system`) | `spansOf` emits `invoke_agent` + one `execute_tool` per step with `gen_ai.operation.name`, `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.type`, `gen_ai.conversation.id`; `ap.*` for what the substrate adds; W3C-sized ids derived from `runRef`; span links `routed_to` / `delegated_to`; OTLP JSON body; **an attribute allowlist that throws on anything carrying an address, the intent's words or a step argument** (381 §2) |
+| **W3C Trace Context** | trace/span id propagation | Recommendation | ids derived, not propagated as `traceparent` on A2A hops (the hop is linked by derived ids instead — 381 W2) |
+| **W3C PROV-DM / PROV-O** | the data model and OWL ontology: Entity, Activity, Agent; used / generated / wasAssociatedWith / actedOnBehalfOf / wasInformedBy / wasDerivedFrom; qualified patterns | Recommendation (2013), stable | T-box `apexec:` ⊑ PROV (`ServiceExecution`, `SkillExecution`, `AgentRuntime ⊑ prov:SoftwareAgent`, `endedAt ⊑ prov:endedAtTime`, `receiptDigest`); `provenance` package types (`ProvActivity`, `ProvEntity`, `ProvAgentRef`) used by fabric exchanges and Endeavors |
+| **P-Plan** (+ **EP-Plan**) | plans and their steps as `prov:Plan` / `p-plan:Step`; `correspondsToStep`; execution-trace bundles | community ontologies, widely used in workflow provenance (OPMW, ProvONE) | `PPlanPlan`/`PPlanStep` in `provenance`; Endeavor graphs use `correspondsToStep`, plan `wasRevisionOf` chains, `ep-plan:ExecutionTraceBundle`; the harness run's `hadPlan` = the playbook by `skillRef` digest |
+| **PROV-N / PROV-JSON / JSON-LD** | serializations for interchange | PROV-N Recommendation; PROV-JSON W3C Note; JSON-LD via PROV-O | **none** — the run record is a bespoke JSON shape (§4.3) |
+| **PROV-CONSTRAINTS** (+ SHACL) | what makes a provenance graph *valid* (an activity ends after it starts; a generation precedes use…) | Recommendation | SHACL S1–S5 exist for fabric provenance (`cbox/fabric-provenance-shapes.shacl.ttl`); **not run on harness run records** |
+| **PROV-AQ** (access & query) | how to find the provenance of a thing: `hasProvenance` link, provenance service, `prov:Bundle` | W3C Note | **none** — a receipt does not say where its provenance is; the timeline finds it by convention (`run.provenance:<runRef>`) |
+| **PROV-AGENT** (2025) | PROV-O extension for AI agents: model, prompt, tool use as first-class | research proposal | overlaps `apexec:`; we model the *authority* it lacks (`used` the mandate, chain on the receipt); take its model/prompt entity pattern when we record which model planned (388 already records the route) |
+| **VC Data Integrity / in-toto / SLSA attestations** | a signed statement about an artifact's production | stable in their domains | receipts are signed and digest-bound; the run provenance is not itself signed as an attestation |
+| **C2PA** | content provenance for media | industry standard | out of scope; relevant only if a content publisher's catalog (386/387) carries C2PA manifests — pass through, never re-sign |
+
+### 4.2 What a PROV graph answers that a trace cannot
 
 | Question | PROV-O shape | Source we already have |
 | --- | --- | --- |
-| *What was done, in what order?* | `prov:Activity` (run) ⟶ sub-activities (steps), `prov:wasInformedBy` | orchestration step model |
-| *Under whose authority?* | `prov:actedOnBehalfOf` (harness runtime → delegator SA), `prov:used` the mandate | delegation + `apexec:AuthorityDecision` |
+| *What was done, in what order?* | `prov:Activity` (run) ⟶ sub-activities (steps), `prov:wasInformedBy` | orchestration step model, `RunRecordV1` |
+| *Under whose authority?* | `prov:actedOnBehalfOf` (harness runtime → delegator SA), `prov:used` the mandate; the chain's links as qualified usage | delegation + `apexec:AuthorityDecision`; 383 `evidence.chain` |
 | *Following what procedure, which version?* | `prov:qualifiedAssociation` / `prov:hadPlan` = the compiled playbook, pinned by `skillRef` digest | 354 K4, `skill-provenance/v1` |
-| *What did it read, and what did it produce?* | `prov:used` context records (with tier); `prov:generated` receipts, artifacts, vault writes | 356/358 `AskEvidence`, receipts |
+| *What did it read, and what did it produce?* | `prov:used` context records (with tier); `prov:generated` receipts, artifacts, vault writes, the tx | 356/358 `AskEvidence`, receipts, effects |
+| *Who acted for whom across hops?* | bundles per run, `wasInformedBy` between them, `actedOnBehalfOf` per hop, `hadRole` = actor role | 383 `binding.actor`, 381 W2 links |
 
 ```mermaid
 graph LR
     D["nathan.me (delegator SA)\nprov:Agent"]
     R["Harness runtime\napexec:AgentRuntime ⊑ prov:SoftwareAgent"]
-    RUN["Run r-…\nprov:Activity"]
+    RUN["Run r-…\napexec:ServiceExecution ⊑ prov:Activity"]
     S1["Step: resolve alice\nprov:Activity"]
     S2["Step: payment\nprov:Activity"]
     M["Mandate (delegation)\nprov:Entity"]
@@ -188,22 +194,62 @@ graph LR
     S2 -- generated --> RC
 ```
 
-What this buys that a trace cannot: the same graph is **the audit** (who/why/what-version), **the debug
-view** (Home timeline), **the eval substrate** (truth probes and authority twins query it), and **the
-evidence** (receipts are nodes in it, anchorable). It is private by default (asker's vault) and only
-crosses to the public KB through the S1 firewall (on-chain-anchored, no attribution, no plaintext) —
-the ADR-0040 line, already enforced in `provenance/firewall.ts`.
+What this buys that a trace cannot: the same graph is **the audit** (who/why/what-version), **the debug view**
+(the Home timeline, 381 W3), **the eval substrate** (truth probes and authority twins query it), and **the
+evidence** (receipts are nodes in it, anchorable). It is private by default (the acting agent's vault) and
+crosses to the public KB only through the S1 firewall (on-chain-anchored, no attribution, no plaintext) —
+the ADR-0040 line, enforced in `provenance/firewall.ts`.
 
-The gap is wiring, not design: `projectRunProvenance` exists and is not called by `harness-run.ts`;
-`AskEvidence` is a flat slice rather than a projection of the graph; there is no exporter. Tier 0.3 and
-0.4 close it, and they should land **before** the compiler multiplies the number of domains whose runs
-we will need to explain.
+### 4.3 The audit finding — PROV-shaped, not PROV
+
+The noon snapshot said "the gap is wiring, not design — done." Half right. `provenanceOf` runs after every
+recorded run and lands in the acting agent's vault, and the Home renders it. But look at what lands:
+
+- **Two shapes, one meaning.** The harness writes `RunProvenanceV1` (`packages/orchestration/src/spans.ts`,
+  "the PROV-O A-box in record form") — a bespoke JSON object. The Ring-0 `provenance` package's
+  `projectRunProvenance` (PROV-O + P-Plan types, `ep-plan:ExecutionTraceBundle`) is called by fabric
+  exchanges and Endeavors, **not by the harness**. Endeavor provenance and run provenance therefore do not
+  join, and the run's graph is not the one spec 316 §6 grounds.
+- **Three IRIs bound of ~twenty fields.** `vault-records.ts` binds `run.provenance:` to
+  `apexec:ServiceExecution` with `endedAt` and `receiptDigest`; `agent`, `asker`, `playbook`, `authority`,
+  `actor`, `delegatedTo`, `txHash`, `effects` carry no IRI. The vault-records-are-ontology-shaped rule holds
+  by prefix, not by field.
+- **No serialization.** Not PROV-JSON, not JSON-LD with a `@context`. A reviewer cannot load a run into any
+  PROV tool; the "W3C-standard graph" claim is true of the T-box and false of the record.
+- **No validity check.** SHACL S1–S5 guard fabric provenance; nothing runs on a run record. A record with a
+  step that ended before it started, or a `generated` receipt with no digest, is accepted.
+- **Not addressable.** A receipt, a task artifact, a reply do not say where their provenance is (PROV-AQ).
+  The timeline finds it by the `run.provenance:<runRef>` convention.
+- **Cross-agent by link, not by graph.** A routed or handed-off run joins the sender's *trace* by derived ids
+  (381 W2) and the receipt names `delegatedTo` / `wasInformedBy`; the two provenance records are separate
+  objects with no bundle relation.
+- **Span status.** `spansOf` sets `OK` on success; the GenAI conformance rules reserve OK for application
+  code and require instrumentation to leave success UNSET. Cosmetic, but it is exactly what a conformance
+  check would flag first.
+
+None of this weakens C3 — the receipt digests, tx hashes and chain digests are the evidence, and they are
+right. It weakens the *claim in §4.2*: today the graph is drawable from the record, not present in it.
+
+### 4.4 P0 — what "provenance unification" delivers, and its gates
+
+| Piece | Delivers | Gate |
+| --- | --- | --- |
+| One projector | the harness calls `projectRunProvenance` (extended for authority: `used` the mandate and each chain link by reference, `hadPlan` the playbook by digest, `hadRole` the actor role, `generated` the receipt/tx/effect entities); `RunProvenanceV1` becomes a *view* of that record or is retired | Endeavor step ↔ harness run join on `correspondsToStep`; one graph for a committed step run at a participant (382) |
+| Serialization | the vault record is JSON-LD under a published `@context` (`prov`, `p-plan`, `ep-plan`, `apexec`, `apvr`); PROV-N export beside the JSON download on the Home | a run loads into a stock PROV tool unchanged |
+| Binding | every field of the record bound by IRI in `vault-records.ts`; `check:ontology-bindings` fails on an unbound field | the gate, not a review |
+| Validity | SHACL for run provenance (temporal order, generation-before-use, mandate present on every capability step, receipt digest on every completed step) run in CI over the verify scripts' records | a forged or truncated record fails; the twin is in CI |
+| Addressability | receipts, task artifacts and the `done` reply carry `hasProvenance` (the record key + the agent); PROV-AQ style, no new transport | a counterparty holding a receipt can ask the agent for its provenance and get the record or a refusal |
+| Cross-agent | each run is a `prov:Bundle`; a routed / handed-off run's bundle `wasInformedBy` the sender's; the actor context on every hop | a two-Home run reads as one graph from either side, each side holding only its own bundle |
+| Conformance | span status semantics fixed; the OTel GenAI conformance rules run in CI over exported spans | P2 shares this job |
+
+Boundaries that do not move: provenance is evidence, never an authorization input (no gate reads `apexec:`);
+the S1 firewall stays fail-closed for anything public; the record never carries arguments, results or words.
 
 ## 5. What we deliberately do not adopt
 
 - **Agent-as-MCP-endpoint** (LangSmith Deployment's default). MCP is our *private* capability interface;
-  the public peer surface is A2A with a signed, SA-bound card (ADR-0057, spec 347). Recorded so the
-  convenience doesn't drift in.
+  the public peer surface is A2A with a signed, SA-bound card (ADR-0057, spec 347). The 387 gateway is an MCP
+  façade over A2A *client* primitives acting as its own agent — the opposite direction, and admitted.
 - **Filesystem permissions or tool allowlists as authority** (Deep Agents `FilesystemPermission`,
   `interrupt_on`). Ours are honesty/scope; the mandate is authority (spec 353 §4).
 - **Client-held approvals** as the boundary — approvals are signed records + obligations.
@@ -211,11 +257,15 @@ we will need to explain.
 - **Group chat / swarm parity** — coordination plane or not at all (ADR-0054).
 - **Node caching for side-effecting steps** — a receipt is the record of a step that ran; re-running is a new run.
 - **SSE for progress** — long-poll chosen; the surface reads run lines, the Worker holds nothing open.
+- **A trust score anywhere in provenance or discovery** — the graph is read in context; a number that blends
+  reputation with authority is how a registry becomes a gatekeeper (spec 346 §8.3).
+- **Model judges over authority properties** — deterministic checks only; a model may grade prose, never a verdict.
 
 ## 6. Sequencing, restated as one line each
 
-0.1 context management (spec, then offload + summarize + child sub-runs) → 0.2 CI replay of the verify
-scripts and their authority twins → 1.1 the four second-deployment W3s as one wave once B holds its
-caller token → 1.2 playbook tails → 1.3 the rest of Endeavor conformance → Tier 2. The "run well" gap is
-closed; what remains is to handle long runs without drowning in context, lock the gains down, and finish
-the cross-Home proofs the second deployment made possible.
+P0 provenance unification (one projector → JSON-LD + IRIs → SHACL in CI → `hasProvenance` → cross-agent
+bundles) → P1 context management (spec, then offload + summarize + child sub-runs) → P2 CI replay of the
+verify scripts and their twins + OTel conformance → 1.1 the second-deployment W3s as one wave once B holds
+its caller token and a Worker holds the parent wire → 1.2 failure clustering over the unified graph → 1.3
+playbook tails → 1.4 the rest of Endeavor conformance → Tier 2. The "run well" gap is closed and the position
+in §1 holds; P0 is what makes the position *checkable by others* rather than asserted by us.
