@@ -56,7 +56,7 @@ the only party that is not ours.
 | 4 | gateway → agent | A2A 1.x JSON-RPC `SendMessage` over the edge | **gateway.svc** (its own estate agent), signed by the Worker's key under a session wire the custodian (alice) signed, pinned to `harness.ask` | the edge admits the signature + wire (ADR-0057); the wire is revocable on chain | the task: status, words, artifacts |
 | 5 | agent run | in-process (`standard-a2a.ts` → `runAgentAsk`) | ligonier.svc, for an outside principal (unattended: no session, no vault, no acts) | the playbook narrows what is OFFERED; a read runs no gate; an act would park for a steward (spec 372 N1) | reply + events + planner trace |
 | 6 | agent → catalog | MCP `POST /mcp tools/call` at the name record `atl:mcpEndpoint` | anonymous (public metadata) | nothing — the catalog decides nothing about anyone | `{total, resources[], types, filters}` |
-| 7 | composer | LLM call (provider = the deployment's default) | — | grounded on the step evidence (spec 358 W3) | the words |
+| 7 | composer | LLM call (provider routed per call under spec 388: the cheapest offered one whose budget carries the evidence) | — | grounded on the step evidence (spec 358 W3) | the words |
 
 Two rules the table encodes. **Records first:** hops 3, 4 and 6 go where the NAME's published records say —
 `atl:cardUri`/`a2aEndpoint` for the card and the A2A endpoint, `atl:mcpEndpoint` for the catalog — never a
@@ -92,6 +92,7 @@ joins the logs:
   exact query, results, cards), `gateway.inspect` (card URL, name, endpoint, `cardMatchesPin`),
   `gateway.card` (the re-read before sending), `gateway.invoke` (endpoint, `as`, method, chars →
   taskId, state, artifact names, chars, needs).
+- **Which model, and why** (spec 388): `agent.run.planner.route` carries the routing policy and, for the planner and the composer, the provider chosen with its reason and the numbers it was judged by (`estimate 5700 ≤ budget 6500 and 5700+0 ≤ 8000/min`). A route, never a fallback.
 - **The agent's hop** (`agent.run`, the task's `trace` artifact lifted into the same list — `ap.flow-trace.v1`):
   `runRef`, `playbook {archetypeId, digest}`, `planner {kind, model, toolsExposed, plan, admission}`,
   `steps[{toolId, ok, args, output}]`, `reply {kind, chars, artifacts}`, `events[]` (the run's `RunEvent`s

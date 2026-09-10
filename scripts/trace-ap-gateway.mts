@@ -52,6 +52,8 @@ for (const h of out.trace?.hops ?? []) {
   console.log(`  ├─ agent.run        ${String(a.ms).padStart(6)} ms  run ${a.runRef} at ${a.agent} (flow echoed: ${a.flowId === FLOW})`);
   console.log(`  │    playbook  ${a.playbook ? `${a.playbook.archetypeId} ${String(a.playbook.digest).slice(0, 12)}…` : 'none (bare harness)'}`);
   console.log(`  │    planner   ${a.planner?.kind ?? '-'}${a.planner?.model ? ` (${a.planner.model})` : ''} · offered ${a.planner?.toolsExposed.length ?? 0} tools [${(a.planner?.toolsExposed ?? []).filter((t) => t.startsWith('catalog.')).join(', ')} …] · plan ${short(a.planner?.plan ?? [], 200)}`);
+  const route = (a.planner as { route?: { policy?: string; planner?: { because: string }; composer?: { because: string } } } | null)?.route;
+  if (route) console.log(`  │    route     policy ${route.policy ?? '-'}\n  │      planner  ${route.planner?.because ?? '-'}\n  │      composer ${route.composer?.because ?? '-'}`);
   for (const st of a.steps) {
     const src = st.output?.source as { tool?: string; catalog?: string; ms?: number } | undefined;
     console.log(`  │    step      ${st.toolId} ${st.ok ? 'ok' : 'FAILED'} args ${short(st.args ?? {}, 120)}`);

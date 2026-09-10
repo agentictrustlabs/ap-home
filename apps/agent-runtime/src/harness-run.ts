@@ -61,7 +61,7 @@ import { RELATIONSHIP_TYPE, ROLE } from '@agenticprimitives/agent-relationships'
 import type { AuditSink } from '@agenticprimitives/audit';
 import { enforcersFromEnv } from './org-wire.js';
 import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a';
-import { selectPlanner, selectComposer, defaultProvider, plannerPromptBudget, type LlmProvider } from './orchestration.js';
+import { routeProvider, routePolicy, selectPlanner, selectComposer, defaultProvider, plannerPromptBudget, type LlmProvider, type RoutePolicy, type RouteDecision, type RouteNeed } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from '@agenticprimitives/context';
 import { structuredCallFor } from './context-wiring.js';
 import type { DefinitionToolV1 } from '@agenticprimitives/capability-claims';
@@ -2130,6 +2130,8 @@ export interface PlannerTraceV1 {
   /** A provider's prompt budget and how the prompt was made to fit it: the estimate the request was judged
    *  by and every drop taken, in order (`fitPlannerPrompt`). Absent ⇒ no budget applied. */
   promptBudget?: { tokens: number; estimated: number; trimmed: string[] };
+  /** Spec 388 — which provider carried the planner and the composer, and why (the numbers beside the reason). */
+  route?: { policy: RoutePolicy; planner?: RouteDecision; composer?: RouteDecision };
   /** Every admission verdict, in order — a refused plan shows what was proposed and why it was refused. */
   admission: Array<{ refused: Array<{ code: string; message: string; stepIndex?: number; toolId?: string }>; replanned: boolean }>;
   /** The plan that ran (or was refused last), as the executor received it BEFORE argument resolution. */
@@ -3151,6 +3153,8 @@ async function askReplyForInner(env: HarnessEnv, input: {
   /** What the surface said it can render — a prompt it never declared is refused, not stranded. */
   surface?: AskScopeV1;
   composer?: AnswerComposer | null;
+  /** Spec 388 — the composer chosen for THIS reply by the evidence it must carry; the route is recorded on the trace. */
+  composerFor?: (need: RouteNeed) => { composer: AnswerComposer | null; route: RouteDecision };
   /** Read-only checks that spare a person a ceremony whose outcome is already knowable (spec 352 §2).
    *  Absent ⇒ no early refusal; the chain still decides. */
   deps?: HarnessDeps;
@@ -3419,17 +3423,25 @@ async function askReplyForInner(env: HarnessEnv, input: {
       const rendered = readSteps.map((o) => renderAnswer(offered.find((t) => t.id === o.step.toolId)!.answer!, o.result));
       if (rendered.every((x): x is string => typeof x === 'string' && x.length > 0)) return withEvidence(rendered.join(' '));
     }
-    if (!input.composer) return withEvidence(raw);
+    let composer = input.composer ?? null;
+    if (input.composerFor) {
+      // The evidence is what the composer carries (chars/4, plus its own doctrine); the route names who carries it.
+      const need: RouteNeed = { call: 'composer', estimatedTokens: Math.ceil(JSON.stringify(r.steps).length / 4) + 800 };
+      const routed = input.composerFor(need);
+      composer = routed.composer;
+      if (input.plannerTrace) input.plannerTrace.route = { ...(input.plannerTrace.route ?? { policy: 'first' }), composer: routed.route };
+    }
+    if (!composer) return withEvidence(raw);
     try {
       // GROUNDED COMPOSITION — spec 358 W3. Every real gate ran before the invoker; this is the one
       // stage that was ungoverned, and it is where the week's false sentences were written. The prose is
       // checked against the evidence it will be shown WITH: one recompose carrying the governor's own
       // corrections, then the floor — the evidence stated plainly, because after two ungrounded
       // compositions the person gets the observations, not a third guess.
-      let text = await input.composer.compose({ intent: input.intent, observations: r.steps });
+      let text = await composer.compose({ intent: input.intent, observations: r.steps });
       let violations = checkGroundedComposition(text, evidence, input.intent.goal);
       if (violations.length) {
-        text = await input.composer.compose({
+        text = await composer.compose({
           intent: input.intent, observations: r.steps,
           corrections: violations.map((v) => v.correction),
         });
@@ -4039,9 +4051,10 @@ step is then handed to that agent under authority the person grants; leave it ou
   // A provider with a prompt budget (Groq's free plan) is served the same prompt made to FIT — whole parts
   // dropped in a fixed order and each drop recorded — decided at plan time, when the tools it rides with are
   // known. The digest on the trace is of what was actually sent.
-  const budget = plannerPromptBudget(env as never, input.provider ?? defaultProvider(env as never));
-  // The completion budget is named so the fitted re-selection below uses the same one (see ASK_PLANNER_MAX_TOKENS).
+  // Spec 388 — under ORCHESTRATION_ROUTE=budget the provider is chosen per call, at plan time, from the prompt's
+  // estimate (see `plan` below); `selected` is the deployment's default, kept for the rule-based case.
   const selected = selectPlanner(env as never, { systemPrompt: withPlaybook, maxTokens: ASK_PLANNER_MAX_TOKENS, ...(input.provider ? { provider: input.provider } : {}) });
+  let plannerModel = selected.model;
   // The compiler answers for the shapes it claims; the model answers for the rest. Not a fallback pair
   // (ADR-0013): the match is deterministic and decided BEFORE any planner runs, the way a rule-based
   // planner rule would be.
@@ -4067,14 +4080,25 @@ step is then handed to that agent under authority the person grants; leave it ou
           const compiled = compiledConsult(rest) ?? compiledRead(rest) ?? compiledFanOut(rest) ?? compiledPayment(rest);
           if (compiled) { plannerUsed = 'compiled'; return withSpecialists(named ? withExecutor(compiled, named) : compiled, playbook?.specialists, pin.tools); }
           plannerUsed = selected.kind;
-          if (budget !== null && selected.kind !== 'rule-based') {
-            const fitted = fitPlannerPrompt({ doctrine: doctrine?.text ?? null, contract: contractFor, examples: examplesFor }, pin.tools, `Goal: ${pin.intent.goal}\nContext: ${JSON.stringify(pin.intent.context ?? {})}`, budget);
+          if (selected.kind === 'rule-based') return withSpecialists(await selected.planner.plan(pin), playbook?.specialists, pin.tools);
+          // Spec 388 — THE ROUTE, decided here where the prompt is whole and the tools are known: the full
+          // prompt's estimate against each offered provider's budget and this minute's spend. A provider that
+          // carries the whole prompt gets it untrimmed; only when none does is the first one served a fitted prompt.
+          const user = `Goal: ${pin.intent.goal}\nContext: ${JSON.stringify(pin.intent.context ?? {})}`;
+          const route = routeProvider(env as never, input.provider, { call: 'planner', estimatedTokens: estimatePromptTokens(withPlaybook, pin.tools, user) });
+          trace.route = { ...(trace.route ?? { policy: routePolicy(env as never) }), planner: route };
+          const provider = route.provider ?? undefined;
+          const chosen = provider && provider !== selected.kind ? selectPlanner(env as never, { systemPrompt: withPlaybook, maxTokens: ASK_PLANNER_MAX_TOKENS, provider }) : selected;
+          plannerUsed = chosen.kind; plannerModel = chosen.model;
+          const budget = plannerPromptBudget(env as never, provider ?? null);
+          if (budget !== null) {
+            const fitted = fitPlannerPrompt({ doctrine: doctrine?.text ?? null, contract: contractFor, examples: examplesFor }, pin.tools, user, budget);
             trace.promptBudget = { tokens: budget, estimated: fitted.estimated, trimmed: fitted.trimmed };
             trace.promptDigest = keccak256(toBytes(fitted.text));
             trace.examplesRendered = (fitted.text.match(/^- /gm) ?? []).length;
-            return withSpecialists(await selectPlanner(env as never, { systemPrompt: fitted.text, maxTokens: ASK_PLANNER_MAX_TOKENS, ...(input.provider ? { provider: input.provider } : {}) }).planner.plan(pin), playbook?.specialists, pin.tools);
+            return withSpecialists(await selectPlanner(env as never, { systemPrompt: fitted.text, maxTokens: ASK_PLANNER_MAX_TOKENS, ...(provider ? { provider } : {}) }).planner.plan(pin), playbook?.specialists, pin.tools);
           }
-          return withSpecialists(await selected.planner.plan(pin), playbook?.specialists, pin.tools);
+          return withSpecialists(await chosen.planner.plan(pin), playbook?.specialists, pin.tools);
         },
       };
   // Spec 384 W3 — the campaign's selection binds the planned step to its provider and offer, whoever planned it.
@@ -4539,6 +4563,8 @@ step is then handed to that agent under authority the person grants; leave it ou
   const interactionFor: Record<string, NonNullable<ToolSpec['interaction']>> = {};
   for (const t of tools) if (t.interaction) interactionFor[t.capability?.id ?? t.id] = t.interaction;
   trace.planner = plannerUsed;
+  // Spec 388 — the model is the ROUTED provider's, not the default's the trace was opened with.
+  if (plannerModel) trace.model = plannerModel; else delete trace.model;
   trace.plan = result.plan.steps.map((s) => ({ toolId: s.toolId, args: s.args }));
   trace.bindings = [...resolved.values()].map((r) => ({
     arg: r.arg, raw: r.raw, agent: r.agent, ...(r.label ? { label: r.label } : {}),

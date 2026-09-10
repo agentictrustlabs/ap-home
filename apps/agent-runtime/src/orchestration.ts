@@ -89,7 +89,7 @@ const RULE_BASED_PLANNER: Planner = createRuleBasedPlanner([
 ]);
 
 /** The env subset the planner selection needs. */
-export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | 'ORCHESTRATION_MODEL' | 'GROQ_API_KEY' | 'ORCHESTRATION_GROQ_MODEL' | 'ORCHESTRATION_GROQ_BASE_URL' | 'ORCHESTRATION_GROQ_PROMPT_BUDGET'> & { COMPOSER_MAX_TOKENS?: string };
+export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | 'ORCHESTRATION_MODEL' | 'GROQ_API_KEY' | 'ORCHESTRATION_GROQ_MODEL' | 'ORCHESTRATION_GROQ_BASE_URL' | 'ORCHESTRATION_GROQ_PROMPT_BUDGET'> & { COMPOSER_MAX_TOKENS?: string; ORCHESTRATION_ROUTE?: string; ORCHESTRATION_GROQ_TPM?: string };
 
 // ── WHICH MODEL PROPOSES — spec 377 ──────────────────────────────────────────────────────────────────────
 //
@@ -146,6 +146,75 @@ export function plannerPromptBudget(env: PlannerEnv, provider: LlmProvider | nul
   if (provider !== 'groq') return null;
   const raw = Number(env.ORCHESTRATION_GROQ_PROMPT_BUDGET);
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : GROQ_FREE_PLAN_PROMPT_BUDGET;
+}
+
+// ── WHICH PROVIDER CARRIES THIS CALL — spec 388 (budget-routed selection) ────────────────────────
+//
+// `ORCHESTRATION_ROUTE="budget"`: the first OFFERED provider whose declared budget carries the call gets it —
+// decided BEFORE the request from facts we measure (the fitted prompt's token estimate, the evidence size,
+// what this isolate has already sent the metered provider this minute), and recorded on the trace with its
+// reason. This is a ROUTE, not a fallback (ADR-0013): a provider chosen this way that then fails has failed —
+// nothing re-sends to the next one. Unset (or "first") keeps spec 377's rule: the first offered provider.
+export type RoutePolicy = 'first' | 'budget';
+export function routePolicy(env: PlannerEnv): RoutePolicy {
+  const raw = String(env.ORCHESTRATION_ROUTE ?? '').trim().toLowerCase();
+  if (!raw || raw === 'first') return 'first';
+  if (raw === 'budget') return 'budget';
+  throw new Error(`ORCHESTRATION_ROUTE must be "first" or "budget", got ${JSON.stringify(raw)}`);
+}
+export interface RouteNeed { call: 'planner' | 'composer'; estimatedTokens: number }
+export interface RouteDecision {
+  provider: LlmProvider | null;
+  /** Why, in words a trace reader can check against the numbers beside it. */
+  because: string;
+  considered: Array<{ provider: LlmProvider; budget: number | null; spentThisMinute?: number; fits: boolean }>;
+}
+/** Groq's free plan meters tokens per MINUTE per model; the per-request budget above is derived from it. */
+export const GROQ_FREE_PLAN_TPM = 8000;
+export function providerTpm(env: PlannerEnv, p: LlmProvider): number | null {
+  if (p !== 'groq') return null;
+  const raw = Number(env.ORCHESTRATION_GROQ_TPM);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : GROQ_FREE_PLAN_TPM;
+}
+// What THIS ISOLATE sent a metered provider in the last minute, by estimate. Honest about its scope: one
+// Worker isolate, not the account — a second isolate does not see it. It spares the common case (planner +
+// composer in one turn) the meter's 30-60 s wait, which is the case that actually happens.
+const SPEND_WINDOW_MS = 60_000;
+const spend = new Map<LlmProvider, Array<{ at: number; tokens: number }>>();
+export function spentThisMinute(p: LlmProvider, now = Date.now()): number {
+  const rows = (spend.get(p) ?? []).filter((r) => now - r.at < SPEND_WINDOW_MS);
+  spend.set(p, rows);
+  return rows.reduce((n, r) => n + r.tokens, 0);
+}
+export function recordSpend(p: LlmProvider, tokens: number, now = Date.now()): void {
+  spend.set(p, [...(spend.get(p) ?? []), { at: now, tokens }]);
+}
+/** Test seam. */
+export function resetSpend(): void { spend.clear(); }
+
+export function routeProvider(env: PlannerEnv, requested: LlmProvider | undefined, need: RouteNeed, now = Date.now()): RouteDecision {
+  if (requested) { providerConfigured(env, requested); return { provider: requested, because: `${requested}: named by the turn`, considered: [] }; }
+  const offered = llmAllowlist(env);
+  if (!offered.length) return { provider: null, because: 'no model offered', considered: [] };
+  if (routePolicy(env) === 'first') { providerConfigured(env, offered[0]!); return { provider: offered[0]!, because: `${offered[0]}: first offered (ORCHESTRATION_ROUTE=first)`, considered: [] }; }
+  const considered: RouteDecision['considered'] = [];
+  for (const p of offered) {
+    providerConfigured(env, p); // listed and keyless THROWS here too — a route may not quietly skip a misconfiguration
+    const budget = plannerPromptBudget(env, p);
+    const tpm = providerTpm(env, p);
+    const spent = tpm !== null ? spentThisMinute(p, now) : undefined;
+    const fits = (budget === null || need.estimatedTokens <= budget) && (tpm === null || need.estimatedTokens + (spent ?? 0) <= tpm);
+    considered.push({ provider: p, budget, ...(spent !== undefined ? { spentThisMinute: spent } : {}), fits });
+    if (fits) {
+      if (tpm !== null) recordSpend(p, need.estimatedTokens, now);
+      const why = budget === null ? 'no budget' : `estimate ${need.estimatedTokens} ≤ budget ${budget}${spent !== undefined ? ` and ${need.estimatedTokens}+${spent} ≤ ${tpm}/min` : ''}`;
+      return { provider: p, because: `${p} for the ${need.call}: ${why}${considered.length > 1 ? ` (${considered.slice(0, -1).map((c) => `${c.provider} would not: ${c.budget !== null && need.estimatedTokens > c.budget ? `estimate ${need.estimatedTokens} > ${c.budget}` : `${need.estimatedTokens}+${c.spentThisMinute ?? 0} > ${providerTpm(env, c.provider)}/min`}`).join('; ')})` : ''}`, considered };
+    }
+  }
+  // Nothing carries it: the first offered provider takes it, made to fit (the prompt fitter records every drop).
+  const first = offered[0]!;
+  if (providerTpm(env, first) !== null) recordSpend(first, need.estimatedTokens, now);
+  return { provider: first, because: `${first} for the ${need.call}: no offered provider carries ${need.estimatedTokens} tokens (${considered.map((c) => `${c.provider} budget ${c.budget ?? '∞'}${c.spentThisMinute !== undefined ? `, spent ${c.spentThisMinute}` : ''}`).join('; ')}) — first offered, prompt fitted`, considered };
 }
 
 /** The concrete model a provider runs — reported on the trace, never re-derived there. */
@@ -270,6 +339,13 @@ export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string; 
     ...maxTokens,
     ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
   });
+}
+
+/** Spec 388 — the composer for THIS reply, chosen by what it must carry (the evidence), with the reason recorded. */
+export function selectComposerRouted(env: PlannerEnv, opts: { systemPrompt?: string; provider?: LlmProvider; need: RouteNeed }): { composer: AnswerComposer | null; route: RouteDecision } {
+  const route = routeProvider(env, opts.provider, opts.need);
+  if (route.provider === null) return { composer: null, route };
+  return { composer: selectComposer(env, { ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}), provider: route.provider }), route };
 }
 
 export function selectPlanner(env: PlannerEnv, opts?: { systemPrompt?: string; maxTokens?: number; provider?: LlmProvider }): { planner: Planner; kind: PlannerKind; model?: string } {

@@ -24,7 +24,7 @@ export interface FlowTraceV1 {
   agent: string;
   asker: string;
   playbook: { archetypeId: string; archetypeVersion: string; digest: string } | null;
-  planner: { kind: string; model?: string; toolsExposed: string[]; plan: Array<{ toolId: string; args: Record<string, unknown> }>; admission?: unknown[] } | null;
+  planner: { kind: string; model?: string; toolsExposed: string[]; plan: Array<{ toolId: string; args: Record<string, unknown> }>; admission?: unknown[]; /** Spec 388 — which provider carried the planner and the composer, and why. */ route?: unknown } | null;
   steps: FlowStepV1[];
   reply: { kind: string; chars: number; artifacts: string[] };
   events: Array<{ type: string; stepRef?: string; toolId?: string; ok?: boolean; because?: string; error?: string }>;
@@ -51,7 +51,7 @@ export function summarizeOutput(result: unknown): Record<string, unknown> | unde
 
 export function buildFlowTrace(input: {
   flowId: string | null; runRef: string; agent: string; asker: string; startedAt: number;
-  reply: { kind: string; text?: string; plannerTrace?: { planner?: string; model?: string; toolsExposed?: string[]; plan?: Array<{ toolId: string; args: Record<string, unknown> }>; playbook?: FlowTraceV1['playbook']; admission?: unknown[] }; results?: Array<{ toolId: string; result: unknown }> };
+  reply: { kind: string; text?: string; plannerTrace?: { planner?: string; model?: string; toolsExposed?: string[]; plan?: Array<{ toolId: string; args: Record<string, unknown> }>; playbook?: FlowTraceV1['playbook']; admission?: unknown[]; route?: unknown }; results?: Array<{ toolId: string; result: unknown }> };
   events?: RunEvent[]; artifacts: string[];
 }): FlowTraceV1 {
   const events = input.events ?? [];
@@ -69,7 +69,7 @@ export function buildFlowTrace(input: {
   return {
     kind: 'ap.flow-trace.v1', hop: 'agent', flowId: input.flowId, runRef: input.runRef, agent: input.agent, asker: input.asker,
     playbook: pt?.playbook ?? null,
-    planner: pt ? { kind: pt.planner ?? 'unknown', ...(pt.model ? { model: pt.model } : {}), toolsExposed: pt.toolsExposed ?? [], plan: pt.plan ?? [], ...(pt.admission?.length ? { admission: pt.admission } : {}) } : null,
+    planner: pt ? { kind: pt.planner ?? 'unknown', ...(pt.model ? { model: pt.model } : {}), toolsExposed: pt.toolsExposed ?? [], plan: pt.plan ?? [], ...(pt.admission?.length ? { admission: pt.admission } : {}), ...(pt.route ? { route: pt.route } : {}) } : null,
     steps,
     reply: { kind: input.reply.kind, chars: (input.reply.text ?? '').length, artifacts: input.artifacts },
     events: events.map((e) => ({ type: e.type, ...('stepRef' in e ? { stepRef: e.stepRef } : {}), ...('toolId' in e ? { toolId: e.toolId } : {}), ...('ok' in e ? { ok: e.ok } : {}), ...('because' in e ? { because: e.because } : {}), ...('error' in e ? { error: e.error } : {}) })),

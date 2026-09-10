@@ -409,6 +409,10 @@ CHAIN_ID = "34348"
 # 2026-09-10: the Anthropic account is OUT OF CREDIT (HTTP 400 "credit balance is too low", surfaced by the spec 387 flow trace) — Groq
 # leads until credits are added; Anthropic stays offered. Restore "anthropic,groq" when billing is fixed.
 ORCHESTRATION_LLM = "groq,anthropic"
+# Spec 388 — the cheapest OFFERED provider that carries each call, decided before the request from the prompt estimate, the
+# per-request budget and this minute's spend; recorded on the trace with its reason. A route, never a fallback (ADR-0013).
+ORCHESTRATION_ROUTE = "budget"
+ORCHESTRATION_GROQ_TPM = "8000"
 # 2026-09-10 — the cheaper Anthropic model, named here so a targeted deploy keeps it (the package default is the same).
 ORCHESTRATION_MODEL = "claude-haiku-4-5-20251001"
 # Spec 387 W2 — a composition over evidence (a six-week study with a link per item) needs more than the composers' 700-token default.

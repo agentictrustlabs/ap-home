@@ -110,7 +110,7 @@ import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker, householdMembers, ownAgent
 import { KB_QUESTION_TOOL, kbQuestionInvoker } from '@agenticprimitives/context';
 import { discoveryFetchFor, structuredCallFor } from './context-wiring.js';
 import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@agenticprimitives/context';
-import { selectComposer, resolveProvider, availableModels, plannerPromptBudget, defaultProvider } from './orchestration.js';
+import { selectComposer, selectComposerRouted, resolveProvider, availableModels, plannerPromptBudget, defaultProvider, type RouteNeed } from './orchestration.js';
 import { loadRun, saveRun, dropRun, listRuns, mergeTurn, type HarnessRunCheckpointV1, completedStepsOf, isExpired, AWAIT_WINDOW_MS, expiryFor } from './harness-runs.js';
 import { buildGenesisPlanes, type GenesisPlaneWires } from './genesis-planes.js';
 import { bindHarnessAttempt, HarnessApprovalWorkflow, type HarnessWorkflowParams } from './harness-workflow.js';
@@ -1563,7 +1563,7 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
     },
   });
   const reply = await askReplyFor(env as unknown as HarnessEnv, {
-    intent, result, addressee: input.addressee, composer: selectComposer(env, input.guidance ? { systemPrompt: input.guidance } : undefined), deps, interactionFor, plannerTrace: trace, tools,
+    intent, result, addressee: input.addressee, composerFor: (need: RouteNeed) => selectComposerRouted(env, { ...(input.guidance ? { systemPrompt: input.guidance } : {}), need }), deps, interactionFor, plannerTrace: trace, tools,
     resolveName: (name: string) => deps.resolveName?.(name) ?? Promise.resolve(null),
   } as never);
   const spoken = await spokenFor(reply as never, async (a) => deps.nameOf?.(a) ?? null, (id) => CAPABILITY_WORDS[id] ?? id).catch(() => '');
@@ -2920,7 +2920,7 @@ app.post('/harness/ask', async (c) => {
       },
     });
     const reply = await askReplyFor(c.env as unknown as HarnessEnv, {
-      intent, result, addressee, composer: selectComposer(c.env, provider ? { provider } : undefined), deps: askDeps, interactionFor, plannerTrace: trace, tools: offeredTools,
+      intent, result, addressee, composerFor: (need: RouteNeed) => selectComposerRouted(c.env, { ...(provider ? { provider } : {}), need }), deps: askDeps, interactionFor, plannerTrace: trace, tools: offeredTools,
       ...(body.plan ?? stored?.plan ? { suppliedPlan: true } : {}),
       ...(body.surface ? { surface: body.surface } : {}),
       resolveName: (name) => askDeps.resolveName?.(name) ?? Promise.resolve(null),
