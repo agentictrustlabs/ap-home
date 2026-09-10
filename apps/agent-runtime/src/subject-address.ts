@@ -22,7 +22,7 @@ import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { hostForName } from './host-context.js';
 import type { Address } from 'viem';
 
-export interface NameRecordsLite { a2aEndpoint?: string; cardUri?: string; cardDigest?: string }
+export interface NameRecordsLite { a2aEndpoint?: string; cardUri?: string; cardDigest?: string; /** Spec 387 W2 — the agent's content catalog (AP content-catalog profile v1). */ mcpEndpoint?: string }
 
 export interface SubjectAddressEnv {
   /** The ingress this deployment advertises on the cards it serves (`DEMO_EDGE_URL`); absent ⇒ none. */
@@ -90,7 +90,7 @@ export function nameRecordsReader(env: NameRecordsEnv): ((name: string) => Promi
     if (hit && Date.now() - hit.at < RECORDS_TTL_MS) return hit.records;
     const r = await client.getRecords(key).catch(() => null);
     const records: NameRecordsLite | null = r
-      ? { ...(r.a2aEndpoint ? { a2aEndpoint: r.a2aEndpoint } : {}), ...(r.cardUri ? { cardUri: r.cardUri } : {}), ...(r.cardDigest ? { cardDigest: r.cardDigest } : {}) }
+      ? { ...(r.a2aEndpoint ? { a2aEndpoint: r.a2aEndpoint } : {}), ...(r.cardUri ? { cardUri: r.cardUri } : {}), ...(r.cardDigest ? { cardDigest: r.cardDigest } : {}), ...(r.mcpEndpoint ? { mcpEndpoint: r.mcpEndpoint } : {}) }
       : null;
     recent.set(key, { at: Date.now(), records });
     return records;

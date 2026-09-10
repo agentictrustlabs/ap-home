@@ -66,6 +66,7 @@ import { ASK_DISCOVERY_TOOLS } from '@agenticprimitives/context';
 import { structuredCallFor } from './context-wiring.js';
 import type { DefinitionToolV1 } from '@agenticprimitives/capability-claims';
 import { loadPlaybook } from './playbook.js';
+import { CATALOG_TOOLS, catalogBindingFor, catalogInvoker, isCatalogTool } from './catalog-tools.js';
 import { playbookProvenanceFromReceipts } from './skill-provenance.js';
 import { declaredEffectSink } from './declared-effects.js';
 import { checkGroundedComposition, groundedFallback } from '@agenticprimitives/context';
@@ -794,6 +795,8 @@ export interface HarnessDeps {
   readSubjectProgress?: (input: { subject: Address; runRef: string; session: string; after: number; wait?: number }) => Promise<{ lines: Array<{ seq: number; said: string; stepRef?: string; terminal?: boolean }>; terminal: boolean; known: boolean }>;
   /** Reverse name lookup for an address (public directory, ADR-0040). Names roster rows; best-effort. */
   nameOf?: (address: string) => Promise<string | null>;
+  /** Spec 387 W2 — what a NAME publishes on chain (its `atl:mcpEndpoint` binds the catalog reads). Records first, never a convention. */
+  readNameRecords?: (name: string) => Promise<{ a2aEndpoint?: string; mcpEndpoint?: string } | null>;
   /** Spec 366 R2/R3 — set by the receiver of a ROUTED ask, once per request: the wires the asker presented
    *  for standing, and that their own tree is not this agent's to read. Every standing derivation in this
    *  run inherits it (`StandingDeps.context`). */
@@ -1690,6 +1693,9 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (toolId === ACCESS_REVOKE_CAPABILITY) return accessRevokeInvoker(deps, env, presented!, person)(toolId, args, ctx);
     if (toolId === PROFILE_UPDATE_CAPABILITY) return profileUpdateInvoker(deps, person)(toolId, args, ctx);
     if (toolId === HOUSEHOLD_RECORD_CAPABILITY) return householdRecordInvoker(deps, person)(toolId, args, ctx);
+    // Spec 387 W2 — the addressee's own catalog: bound by ITS name's records at call time (cached by the reader),
+    // so an unattended run at a service (a gateway's task, a routed ask) reads it exactly as a person's does.
+    if (isCatalogTool(toolId)) return catalogInvoker(await catalogBindingFor(deps, addressee ? String(addressee) : undefined))(toolId, args, ctx);
     if (toolId !== 'treasury.payment.execute') return mcpInvoke(toolId, args, ctx);
     const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
     // THE KEY THAT WAS JUDGED IS THE KEY THAT REDEEMS (spec 358 W4). With several presented, pick by the
@@ -3397,9 +3403,11 @@ async function askReplyForInner(env: HarnessEnv, input: {
     // A SCREEN'S OWN PLAN gets its rows back; a person gets the sentence. Only for a supplied plan, and
     // only the informational steps — nothing here is a second copy of an ACT's result, which lives on the
     // receipt where it can be checked.
-    const results = input.suppliedPlan
-      ? r.steps.filter((o) => o.ok && o.result && typeof o.result === 'object').map((o) => ({ toolId: o.step.toolId, result: o.result }))
-      : [];
+    // Spec 387 W2 — a CATALOG read's items are the deliverable itself (a resource set the caller acts on, each
+    // item with its link), so they ride back as rows for any caller, not only a screen's supplied plan.
+    const results = r.steps
+      .filter((o) => o.ok && o.result && typeof o.result === 'object' && (input.suppliedPlan || isCatalogTool(o.step.toolId)))
+      .map((o) => ({ toolId: o.step.toolId, result: o.result }));
     const routed = routedStepsOf(r.steps);
     const withEvidence = (text: string): AskReply => withProv({ kind: 'answer', runRef: r.runRef, text, ...(evidence.length ? { evidence } : {}), ...(results.length ? { results } : {}), ...(routed.length ? { routed } : {}) });
     // RENDERED, NOT COMPOSED (spec 371 §2). When every read that ran carries the author's `answer`
@@ -4094,8 +4102,13 @@ step is then handed to that agent under authority the person grants; leave it ou
   // `kb.question` is offered only where a model can write the query (spec 357 W3). Listing a tool the
   // agent cannot run would have the planner pick it and the step fail — and a tool that degraded to a
   // keyword search instead would answer a different question than the one it advertised (ADR-0013).
+  // Spec 387 W2 — THE ADDRESSEE'S OWN CATALOG, when its name records publish one (`atl:mcpEndpoint`). Listed
+  // only then (fail closed), described by the playbook's contract when it has one, and answered by the
+  // catalog itself: public metadata with a named source, never a record of ours.
+  const catalog = await catalogBindingFor(deps, input.addressee ? String(input.addressee) : undefined);
+  const catalogTools = catalog ? CATALOG_TOOLS.map((t) => mergeContractTool(t, playbook?.tools?.[t.id])) : [];
   const tools = [
-    ...scopedActionTools(input.surface, playbook), ...ASK_DISCOVERY_TOOLS,
+    ...scopedActionTools(input.surface, playbook), ...catalogTools, ...ASK_DISCOVERY_TOOLS,
     ...(kbQuestionAvailable({ call: structuredCallFor(env as never, input.provider) }) ? [KB_QUESTION_TOOL] : []),
     // Spec 379 — an outside A2A 1.0 agent may ANSWER inside a run; its words are an observation.
     EXTERNAL_AGENT_TOOL,

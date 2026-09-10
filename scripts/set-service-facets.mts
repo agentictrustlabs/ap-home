@@ -38,6 +38,9 @@ const FACETS = {
   languages: 'en',
   a2aEndpoint: `https://${HOST}`, // the *.faithnet.ai wildcard serves every typed host; no custom domain needed
   siteUrl: 'https://www.ligonier.org',
+  // Spec 387 W2 — the content catalog beside the agent (AP content-catalog profile v1); the harness binds its
+  // catalog.* reads to THIS record, never to a hostname convention.
+  mcpEndpoint: 'https://gc-ligonier-catalog.r-pedersen.workers.dev/mcp',
 };
 
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 250), _status: r.status }; } };
@@ -68,6 +71,7 @@ const naming = new AgentNamingClient({ rpcUrl: RPC, chainId: CHAIN_ID, registry:
 const before = await naming.getRecords(NAME);
 const records: Record<string, string> = {};
 if (before.a2aEndpoint !== FACETS.a2aEndpoint) records.a2aEndpoint = FACETS.a2aEndpoint;
+if (before.mcpEndpoint !== FACETS.mcpEndpoint) records.mcpEndpoint = FACETS.mcpEndpoint;
 if (before.siteUrl !== FACETS.siteUrl) { if (await active('atl:siteUrl')) records.siteUrl = FACETS.siteUrl; else skipped.push('atl:siteUrl (name record)'); }
 if (before.description !== FACETS.description) records.description = FACETS.description;
 if (before.displayName !== FACETS.displayName) records.displayName = FACETS.displayName;

@@ -1,6 +1,8 @@
 /**
- * Spec 387 W1 — THE GATEWAY AS AN A2A CLIENT, live: discover an agent through the registry, then ask it over A2A
- * as the gateway's own agent (gateway.svc), through the MCP surface an assistant would use.
+ * Spec 387 W1+W2 — THE GATEWAY AS AN A2A CLIENT, live: discover an agent through the registry, then ask it over A2A
+ * as the gateway's own agent (gateway.svc), through the MCP surface an assistant would use. W2: the agent answers
+ * from ITS OWN catalog (its name record atl:mcpEndpoint → the content MCP), and the items ride back as the task's
+ * `results` artifact — each with its link — beside the agent's words.
  *
  *   GATEWAY=https://gc-discovery-connector.r-pedersen.workers.dev npx tsx scripts/verify-ap-gateway.mts
  */
@@ -23,8 +25,20 @@ console.log(`  ${insp.refused ?? `${insp.card?.name} · skills ${(insp.card?.ski
 
 console.log('\n── invoke_agent (as gateway.svc, over A2A) ──');
 const t1 = Date.now();
-const out = await call('invoke_agent', { target: hit!.target, message: 'what do you offer on justification?' }) as { task?: { taskId: string | null; state: string; text: string; artifacts: unknown[]; needs?: string }; refused?: string; agent?: { name: string } };
+const ASK = process.env.ASK ?? 'Build me a six-week study on justification from your catalog — one session a week, each naming its items with links.';
+const out = await call('invoke_agent', { target: hit!.target, message: ASK }) as { task?: { taskId: string | null; state: string; text: string; artifacts: unknown[]; needs?: string }; refused?: string; agent?: { name: string } };
 console.log(`  ${((Date.now() - t1) / 1000).toFixed(1)}s · ${out.refused ? `refused: ${out.refused}` : `${out.agent?.name} task ${out.task?.taskId} ${out.task?.state}${out.task?.needs ? ` (needs ${out.task.needs})` : ''}\n  said: ${JSON.stringify(out.task?.text ?? '').slice(0, 400)}\n  artifacts: ${out.task?.artifacts.length ?? 0}`}`);
 if (out.refused) fail(out.refused);
 if (!out.task?.state) fail('no task came back');
-console.log(`\n✓ spec 387 W1: discovered through the registry, then asked over A2A as the gateway's own agent — the target ran it as its own task (${out.task!.state}).`);
+console.log(`  said: ${String(out.task?.text ?? '').replace(/\s+/g, ' ').slice(0, 900)}`);
+// W2 — the catalog items are an ARTIFACT of the task, not a sentence to re-parse.
+type Step = { toolId: string; result?: { count?: number; total?: number; resources?: Array<{ title: string; url: string }>; source?: { agent?: string; catalog?: string }; error?: string; refused?: string } };
+const results = ((out.task?.artifacts ?? []) as Array<{ name?: string; data?: unknown }>).find((a) => a.name === 'results')?.data as Step[] | undefined;
+const search = (results ?? []).find((r) => r.toolId === 'catalog.resource.search');
+console.log(`  artifacts: ${(out.task?.artifacts ?? []).map((a) => (a as { name?: string }).name ?? '?').join(', ') || 'none'}${search ? ` · catalog.resource.search → ${search.result?.count ?? 0} of ${search.result?.total ?? '?'} item(s) from ${search.result?.source?.catalog ?? '?'}` : ''}`);
+for (const r of (search?.result?.resources ?? []).slice(0, 6)) console.log(`    · ${r.title} — ${r.url}`);
+if (!search) fail(`the task carried no catalog.resource.search result (steps: ${(results ?? []).map((r) => r.toolId).join(', ') || 'none'})`);
+if (search.result?.error || search.result?.refused) fail(`the catalog read failed: ${search.result.error ?? search.result.refused}`);
+if (!(search.result?.resources?.length)) fail('the catalog read returned no items');
+if (!search.result.resources.every((r) => /^https:\/\//.test(r.url))) fail('an item came back without a link');
+console.log(`\n✓ spec 387 W2: discovered through the registry, asked over A2A as the gateway's own agent, answered from the agent's OWN catalog (${search.result.source?.agent} → ${search.result.source?.catalog}) — ${search.result.resources.length} linked item(s) as the task's results artifact (${out.task!.state}).`);

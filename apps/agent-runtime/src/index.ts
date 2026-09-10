@@ -3859,6 +3859,8 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     readContract: (a) => pub.readContract(a as never) as Promise<unknown>,
     audit,
     teamGenesis: teamGenesisDeps(env, audit),
+    // Spec 387 W2 — a name's published records (the catalog binding reads `atl:mcpEndpoint`); one 60s-cached reader.
+    ...((): Record<string, unknown> => { const r = nameRecordsReader(env); return r ? { readNameRecords: r } : {}; })(),
     resolveName: async (name: string) => {
       if (!env.AGENT_NAME_REGISTRY || !env.AGENT_NAME_UNIVERSAL_RESOLVER) return null;
       const client = new AgentNamingClient({ rpcUrl: env.RPC_URL, chainId: Number(env.CHAIN_ID), registry: env.AGENT_NAME_REGISTRY as Address, universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as Address });

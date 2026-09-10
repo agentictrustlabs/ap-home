@@ -34,6 +34,15 @@ Homes, hand-off as a child delegation, external A2A agents as steps, fan-out con
 at the participant, probe → offer → mandate.** Two Homes exist. The exposure is context management for
 long runs, and the recurring-failure view.
 
+**2026-09-10 — the first outside-in product path is live end to end (specs 386/387):** Claude.ai → the
+Global.Church gateway connector (MCP) → the registry → Ligonier's own A2A agent → the content MCP its
+name record (`atl:mcpEndpoint`) points at → a six-week study with 20 linked items as the task's
+artifact. The harness gained one generic capability family (`catalog.*`, bound by records, fail-closed
+when a name publishes none) and the ecosystem side gained a profile (`ap-content-catalog/v1`) a
+publisher implements with no code of ours. It is the multi-agent rail used by an outsider: discovery
+→ card → admitted A2A task → the agent's own playbook → its own tools — nothing of ours reads the
+ministry's content.
+
 Two honest corrections to "two Homes exist": the second Worker is live and the cross-Home routed read and
 act are proven (spec 366 R5 gate), but B cannot read the shared vault until the key-custody pilot's
 operator issues it a caller token, so a routed read that lands there answers "could not be read" — in B's

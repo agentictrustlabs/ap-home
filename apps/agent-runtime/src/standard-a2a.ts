@@ -260,7 +260,13 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           // treasury" — and an A2A peer reading that gets a mangled name it cannot resolve (seen live,
           // 2026-09-08). A voice surface asks for `spoken`; this wire wants what was written.
           const words = asked.reply.text || asked.spoken || '';
-          if (asked.reply.kind === 'answer' || asked.reply.kind === 'done') { await ctx.complete([{ text: words || 'Done.' }]); return; }
+          if (asked.reply.kind === 'answer' || asked.reply.kind === 'done') {
+            // Spec 387 W2 — WHAT THE STEPS RETURNED rides beside the words, as the routed reply's does below: a
+            // catalog search's items (each with its link) are an artifact the caller can act on, not a sentence to re-parse.
+            const results = (asked.reply as { results?: Array<{ toolId: string; result: unknown }> }).results;
+            if (results?.length) await ctx.artifact({ name: 'results', parts: [{ data: results }] });
+            await ctx.complete([{ text: words || 'Done.' }]); return;
+          }
           // WHAT THE OUTSIDER CANNOT FINISH, A STEWARD CAN (spec 372 N1). The task parks for the caller; the
           // same run parks open to the addressee's stewards, who see it where they see every other
           // unfinished run and finish it with their own signature — the runtime never holds that pen.
