@@ -13,7 +13,7 @@
 //   POST { action:'request', target, goal }                 → endeavor.request (any authenticated session)
 //   POST { action:'adopt'|'decline', org, requestId, … }    → endeavor.create (steward triage — adopt or decline, audited, never silent)
 //   POST { action:'commit', org, … , signature }            → endeavor.commit (participant-signed; binds exact plan revision hash)
-//   POST { action:'decide', org, endeavorId, decisionId, …} → endeavor.decide (declared approver only)
+//   POST { action:'decide', org, endeavorId, decisionId, …} → endeavor.decide (declared approver only; a steward as the organization when it is named — spec 393)
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
@@ -280,6 +280,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       decisionId: body.decisionId,
       outcome: body.outcome,
       ...(body.reason ? { reason: body.reason } : {}),
+      // Spec 393 — a steward decides AS the organization, which counts only when the organization was named.
+      ...(stewardship ? { stewardship } : {}),
     });
     return jsonCors(r.body, request, r.status);
   }

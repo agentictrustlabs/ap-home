@@ -28,6 +28,9 @@ export const CONTRIBUTION_ALLOCATE_CAPABILITY = 'coordination.contribution.alloc
 export const ENDEAVOR_SATISFY_CAPABILITY = 'coordination.endeavor.satisfy' as const;
 /** Spec 382 W3 (M6 milestones) — a milestone the adopted plan defines, recorded achieved with criteria evidence. */
 export const MILESTONE_ACHIEVE_CAPABILITY = 'coordination.milestone.achieve' as const;
+/** Spec 393 — a decision raised for DECLARED approvers, and recorded by one of them (immutable). */
+export const DECISION_REQUEST_CAPABILITY = 'coordination.decision.request' as const;
+export const DECISION_RECORD_CAPABILITY = 'coordination.decision.record' as const;
 
 const ORG_ARG = { org: { type: 'string', description: 'The organization, team, circle or church whose work this is — its address or its name. Defaults to the agent being asked when it is one.' } };
 
@@ -104,8 +107,30 @@ export const MILESTONE_ACHIEVE_TOOL: ToolSpec = {
   establishes: 'authoritative',
 };
 
+/** Raise a decision for the people who may make it — the approvers are named up front; the record is theirs alone. */
+export const DECISION_REQUEST_TOOL: ToolSpec = {
+  id: DECISION_REQUEST_CAPABILITY,
+  verbs: ['ask for a decision', 'request a decision', 'needs approval', 'ask to approve', 'raise a decision', 'get sign-off', 'put to'],
+  description: 'Raise a DECISION on an endeavor for named approvers — who may decide is declared now, and only they can record it. Args: org, endeavorId, title (what is being decided), approvers (the resolved agent addresses who may decide — the organization\'s own address names the organization, decided by a steward as it), decisionKind (plan-change, spend, go-no-go …), summary, stepIds (the plan steps it concerns), dueAt. The organization\'s act by a steward, or an active participant\'s own.',
+  inputSchema: { type: 'object', properties: { ...ORG_ARG, endeavorId: { type: 'string' }, title: { type: 'string', description: 'What is being decided, as a question or a short statement.' }, approvers: { type: 'array', items: { type: 'string' }, description: 'The agent addresses that may decide (resolve people first; the organization\'s address names the organization).' }, decisionKind: { type: 'string' }, summary: { type: 'string' }, stepIds: { type: 'array', items: { type: 'string' } }, dueAt: { type: 'string', description: 'ISO timestamp; a record after it is refused as expired.' } }, required: ['org', 'endeavorId', 'title', 'approvers'] },
+  capability: { id: DECISION_REQUEST_CAPABILITY, action: 'request', resourceArg: 'org', authorityArg: 'org' },
+  risk: 'medium',
+  establishes: 'authoritative',
+};
+
+/** Record a decision — admitted only for a declared approver; approved/rejected close it, deferred keeps it open. */
+export const DECISION_RECORD_TOOL: ToolSpec = {
+  id: DECISION_RECORD_CAPABILITY,
+  verbs: ['approve', 'reject the decision', 'decide', 'sign off', 'defer the decision', 'record my decision', 'i approve', 'i reject'],
+  description: 'Record a decision on a pending decision request of an endeavor — approved, rejected or deferred, with the reason. Only a DECLARED approver may record it (a steward records as the organization only when the organization was named); approved and rejected close the request for good, deferred leaves it pending. Args: org, endeavorId, decisionId, outcome, reason.',
+  inputSchema: { type: 'object', properties: { ...ORG_ARG, endeavorId: { type: 'string' }, decisionId: { type: 'string', description: 'The dec_* id from the endeavor\'s decisions.' }, outcome: { type: 'string', enum: ['approved', 'rejected', 'deferred'] }, reason: { type: 'string', description: 'Why — kept as the record\'s rationale.' } }, required: ['org', 'endeavorId', 'decisionId', 'outcome', 'reason'] },
+  capability: { id: DECISION_RECORD_CAPABILITY, action: 'record', resourceArg: 'org', authorityArg: 'org' },
+  risk: 'medium',
+  establishes: 'authoritative',
+};
+
 export const COORDINATION_READ_TOOLS: ToolSpec[] = [ENDEAVOR_LIST_TOOL, ENDEAVOR_GET_TOOL];
-export const COORDINATION_ACTION_TOOLS: ToolSpec[] = [ENDEAVOR_REQUEST_TOOL, CONTRIBUTION_PROPOSE_TOOL, CONTRIBUTION_ALLOCATE_TOOL, ENDEAVOR_SATISFY_TOOL, MILESTONE_ACHIEVE_TOOL];
+export const COORDINATION_ACTION_TOOLS: ToolSpec[] = [ENDEAVOR_REQUEST_TOOL, CONTRIBUTION_PROPOSE_TOOL, CONTRIBUTION_ALLOCATE_TOOL, ENDEAVOR_SATISFY_TOOL, MILESTONE_ACHIEVE_TOOL, DECISION_REQUEST_TOOL, DECISION_RECORD_TOOL];
 export const COORDINATION_CAPABILITY_IDS = new Set<string>([...COORDINATION_READ_TOOLS, ...COORDINATION_ACTION_TOOLS].map((t) => t.id));
 
 export interface CoordinationDeps extends StandingDeps {
@@ -216,6 +241,19 @@ export function endeavorActInvoker(deps: CoordinationDeps, addressee: Address, p
         const milestoneId = String(args.milestoneId ?? '').trim();
         const r = await deps.interactionsOp(o.org, 'endeavor.milestone.achieve', { ...common, endeavorId: String(args.endeavorId ?? ''), milestoneId, ...(args.note ? { evidence: String(args.note) } : {}) });
         return { org: o.org, endeavorId: String(args.endeavorId ?? ''), milestoneId: r.milestoneId ?? milestoneId, note: 'Recorded as achieved in the endeavor\'s log, with the evidence given.' };
+      }
+      case DECISION_REQUEST_CAPABILITY: {
+        const approvers = (Array.isArray(args.approvers) ? args.approvers : typeof args.approvers === 'string' ? args.approvers.split(/[,\s]+/) : []).map((a) => String(a).trim()).filter(Boolean);
+        const unresolved = approvers.find((a) => !isAddr(a));
+        if (unresolved) throw new Error(`an approver must be a resolved agent, not “${unresolved}”`);
+        const stepIds = Array.isArray(args.stepIds) ? args.stepIds.map(String) : [];
+        const r = await deps.interactionsOp(o.org, 'endeavor.decision.request', { ...common, endeavorId: String(args.endeavorId ?? ''), title: String(args.title ?? '').trim(), approvers: approvers.map((a) => a.toLowerCase()), ...(args.decisionKind ? { decisionKind: String(args.decisionKind) } : {}), ...(args.summary ? { summary: String(args.summary) } : {}), ...(stepIds.length ? { stepIds } : {}), ...(args.dueAt ? { dueAt: String(args.dueAt) } : {}) });
+        return { org: o.org, endeavorId: String(args.endeavorId ?? ''), decisionId: r.decisionId, approvers: r.approvers ?? approvers, status: r.status ?? 'pending', note: 'Raised. It waits on the named approvers; nobody else can record it.' };
+      }
+      case DECISION_RECORD_CAPABILITY: {
+        const decisionId = String(args.decisionId ?? '').trim();
+        const r = await deps.interactionsOp(o.org, 'endeavor.decide', { ...common, endeavorId: String(args.endeavorId ?? ''), decisionId, outcome: String(args.outcome ?? ''), reason: String(args.reason ?? '') });
+        return { org: o.org, endeavorId: String(args.endeavorId ?? ''), decisionId: r.decisionId ?? decisionId, outcome: r.outcome, decidedBy: r.decidedBy, status: r.status, note: r.status === 'pending' ? 'Deferred — the request stays open.' : 'Recorded. The request is closed; a reversal would be a new request.' };
       }
       default: throw new Error(`${toolId} is not a coordination act`);
     }

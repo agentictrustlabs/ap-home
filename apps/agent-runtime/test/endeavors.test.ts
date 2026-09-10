@@ -255,11 +255,55 @@ describe('endeavor.* serving plane', () => {
     expect(res.status).toBe(403);
   });
 
-  // Rule 2c — no RecordDecision command ships yet: honest 501, never a faked record.
-  it('endeavor.decide returns 501 until the spec 333 wave', async () => {
+  // Spec 393 — a decision is raised for DECLARED approvers; only they record it; the record is immutable.
+  it('endeavor.decision.request + endeavor.decide: the named approver decides once; a stranger and an UN-NAMED steward are refused; My Work lists it pending only for the approver, only while pending', async () => {
     const h = makeHarness();
-    const res = await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.decide', {});
-    expect(res.status).toBe(501);
+    const { endeavorId } = await driveToAllocation(h);
+    const raised = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.decision.request', { endeavorId, title: 'Book the lodge?', decisionKind: 'go-no-go', approvers: [REQUESTER], stepIds: ['step_draft'] }));
+    expect(raised.ok).toBe(true);
+    const decisionId = String(raised.decisionId);
+    expect(decisionId.startsWith('dec_')).toBe(true);
+    // pending for the approver's My Work — and for nobody else
+    const mine = await out(await handleEndeavorOp(h.as(REQUESTER, { member: 'requester' }), 'endeavor.list', {}));
+    expect(((mine.mine as { decisions: Array<Record<string, unknown>> }).decisions).map((d) => [d.decisionId, d.status, d.approver])).toEqual([[decisionId, 'pending', REQUESTER]]);
+    const stewardMine = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.list', {}));
+    expect((stewardMine.mine as { decisions: unknown[] }).decisions).toEqual([]);
+    // the twins
+    const stranger = await handleEndeavorOp(h.as(STRANGER), 'endeavor.decide', { endeavorId, decisionId, outcome: 'approved', reason: 'sure' });
+    expect(stranger.status).toBe(403);
+    expect(String((await out(stranger)).error)).toContain('not a declared approver');
+    const steward = await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.decide', { endeavorId, decisionId, outcome: 'approved', reason: 'as steward' });
+    expect(steward.status).toBe(403);
+    expect(String((await out(steward)).error)).toContain('steward standing never substitutes');
+    const noReason = await handleEndeavorOp(h.as(REQUESTER), 'endeavor.decide', { endeavorId, decisionId, outcome: 'approved' });
+    expect(noReason.status).toBe(400);
+    // the approver decides
+    const decided = await out(await handleEndeavorOp(h.as(REQUESTER), 'endeavor.decide', { endeavorId, decisionId, outcome: 'approved', reason: 'within budget' }));
+    expect(decided).toMatchObject({ ok: true, outcome: 'approved', decidedBy: REQUESTER, status: 'decided' });
+    // immutable
+    const again = await handleEndeavorOp(h.as(REQUESTER), 'endeavor.decide', { endeavorId, decisionId, outcome: 'rejected', reason: 'changed my mind' });
+    expect(again.status).toBe(409);
+    // the detail carries the record; My Work no longer lists it
+    const detail = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.get', { endeavorId }));
+    expect(detail.decisions).toEqual([expect.objectContaining({ decisionId, status: 'recorded', outcome: 'approved', decidedBy: REQUESTER, rationale: 'within budget', stepIds: ['step_draft'], mayDecide: false })]);
+    const after = await out(await handleEndeavorOp(h.as(REQUESTER, { member: 'requester' }), 'endeavor.list', {}));
+    expect((after.mine as { decisions: unknown[] }).decisions).toEqual([]);
+    expect(h.audits).toEqual(expect.arrayContaining(['interactions.endeavor.decision.request', 'interactions.endeavor.decide']));
+  });
+
+  it('the organization named as approver is decided AS the organization by a steward; a stranger may not raise one', async () => {
+    const h = makeHarness();
+    const { endeavorId } = await driveToAllocation(h);
+    const refused = await handleEndeavorOp(h.as(STRANGER), 'endeavor.decision.request', { endeavorId, title: 'x', approvers: [ORG] });
+    expect(refused.status).toBe(403);
+    const raised = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.decision.request', { endeavorId, title: 'Spend the reserve?', approvers: [ORG] }));
+    const decisionId = String(raised.decisionId);
+    const mine = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.list', {}));
+    expect(((mine.mine as { decisions: Array<Record<string, unknown>> }).decisions).map((d) => [d.decisionId, d.approver, d.decidesAs])).toEqual([[decisionId, ORG, ORG]]);
+    const deferred = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.decide', { endeavorId, decisionId, outcome: 'deferred', reason: 'treasurer is away' }));
+    expect(deferred).toMatchObject({ ok: true, outcome: 'deferred', decidedBy: ORG, status: 'pending' });
+    const decided = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.decide', { endeavorId, decisionId, outcome: 'rejected', reason: 'not this quarter' }));
+    expect(decided).toMatchObject({ ok: true, outcome: 'rejected', decidedBy: ORG, status: 'decided' });
   });
 
   // Rule 2d — conversation never mutates state: post writes fabric only, endeavor-ref-linked.

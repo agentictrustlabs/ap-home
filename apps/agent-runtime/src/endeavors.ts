@@ -24,6 +24,7 @@ import {
   makeAllocationId,
   makeCommitmentId,
   makeCoordinationPlanId,
+  makeDecisionId,
   makeEndeavorId,
   makeEndeavorRequestId,
   makeParticipationId,
@@ -32,6 +33,7 @@ import {
   type CoordinationCommandV1,
   type CoordinationEventV1,
   type CoordinationStateV1,
+  type DecisionId,
   type EndeavorEntryPoint,
   type EndeavorLifecycle,
   type EndeavorRequestV1,
@@ -303,15 +305,51 @@ export function eventTrail(events: CoordinationEventV1[]): Array<{ type: string;
   });
 }
 
+/** Spec 393 — one decision row per request, in the shape the Home's cards render (`DecisionRow`). `approver`
+ *  is the address THIS VIEWER would decide under when they may (named directly, or the organization named and
+ *  the viewer its steward — the door then acts as the organization); otherwise the first declared approver.
+ *  `mayDecide` says it plainly; `approvers` carries the whole requirement. */
+export function decisionRowsOf(state: CoordinationStateV1, viewer: string, steward: boolean, endeavorTitle?: string): Array<Record<string, unknown>> {
+  const me = viewer.toLowerCase();
+  const org = state.endeavor?.managingPrincipal.toLowerCase();
+  return Object.values(state.decisionRequests).map((req) => {
+    const approvers = req.requirement.approvers.map((a) => a.toLowerCase());
+    const named = approvers.includes(me);
+    const asOrg = !named && steward && !!org && approvers.includes(org);
+    const record = state.decisions[req.decisionId];
+    return {
+      decisionId: req.decisionId,
+      endeavorId: req.endeavorId,
+      ...(endeavorTitle ? { endeavorTitle } : {}),
+      decisionKind: req.decisionKind,
+      title: req.title,
+      ...(req.summary ? { summary: req.summary } : {}),
+      requestedBy: req.requestedBy,
+      approvers,
+      ...(req.requirement.quorum ? { quorum: req.requirement.quorum } : {}),
+      approver: named ? me : asOrg ? org : approvers[0],
+      mayDecide: req.status === 'pending' && (named || asOrg),
+      ...(asOrg ? { decidesAs: org } : {}),
+      status: req.status === 'pending' ? 'pending' : 'recorded',
+      ...(record ? { outcome: record.outcome, decidedBy: record.actor, decidedAs: record.principal, rationale: record.rationale, decidedAt: record.decidedAt } : {}),
+      ...(req.scope.stepIds?.length ? { stepIds: req.scope.stepIds } : {}),
+      requestedAt: req.requestedAt,
+      ...(req.dueAt ? { dueAt: req.dueAt } : {}),
+    };
+  });
+}
+
 /** The caller's own coordination facts across the given endeavors — allocations awaiting their
- *  commitment + their commitments (spec 334 §7 My Work; decisions ship with the 333 wave). */
+ *  commitment + their commitments + the decisions pending for them (spec 334 §7 My Work; spec 393). */
 async function mineAcross(
   deps: EndeavorOpDeps,
   entries: EndeavorIndexEntryV1[],
   viewer: string,
+  steward: boolean,
 ): Promise<{ allocations: unknown[]; commitments: unknown[]; decisions: unknown[] }> {
   const allocations: unknown[] = [];
   const commitments: unknown[] = [];
+  const decisions: unknown[] = [];
   // PARALLEL per-endeavor reads (was a sequential for-await, so wall-time was the SUM of every
   // endeavor's log read — the dominant cost of endeavor.list, and doubly so through the /work
   // cross-org fan-out). The vault reads are independent, so fan them out: wall-time is now the
@@ -319,7 +357,7 @@ async function mineAcross(
   const perEntry = await Promise.all(
     entries.map(async (entry) => {
       const log = await deps.readDoc<CoordinationEventV1[]>(coordinationEventsResource(entry.endeavorId), []);
-      if (log.length === 0) return { allocations: [] as unknown[], commitments: [] as unknown[] };
+      if (log.length === 0) return { allocations: [] as unknown[], commitments: [] as unknown[], decisions: [] as unknown[] };
       const state = reduceEventLog(log);
       const adoptedRef = state.endeavor?.adoptedPlanRef;
       const a2: unknown[] = [];
@@ -349,11 +387,13 @@ async function mineAcross(
           ...(c.bounds ? { bounds: c.bounds } : {}),
         });
       }
-      return { allocations: a2, commitments: c2 };
+      // Spec 393 — the requests PENDING FOR THIS VIEWER: named directly, or the organization named and the viewer a steward.
+      const d2 = decisionRowsOf(state, viewer, steward, entry.title).filter((d) => d.mayDecide === true);
+      return { allocations: a2, commitments: c2, decisions: d2 };
     }),
   );
-  for (const r of perEntry) { allocations.push(...r.allocations); commitments.push(...r.commitments); }
-  return { allocations, commitments, decisions: [] };
+  for (const r of perEntry) { allocations.push(...r.allocations); commitments.push(...r.commitments); decisions.push(...r.decisions); }
+  return { allocations, commitments, decisions };
 }
 
 /** Canonical commitment payload digest — deterministic JSON (sorted keys) over the fields the
@@ -376,7 +416,7 @@ export function commitmentPayloadDigest(payload: {
 /** Command validation rejects map to HTTP: actor-gate rejects ("only the …") are 403; state
  *  conflicts (stale hash, wrong status, duplicates) are 409. Never a weaker retry path. */
 export function commandRejectStatus(reason: string): number {
-  return /^only /i.test(reason) || /must be (recorded|proposed) by/i.test(reason) || /proposer must be/i.test(reason) ? 403 : 409;
+  return /^only /i.test(reason) || /must be (recorded|proposed) by/i.test(reason) || /proposer must be/i.test(reason) || /not a declared approver/i.test(reason) ? 403 : 409;
 }
 
 // ── Fail-closed wire parsing (shape pinning — junk never reaches the log) ──
@@ -678,7 +718,7 @@ export async function handleEndeavorOp(
         };
       });
     // §7 My Work: the caller's own allocations/commitments across VISIBLE endeavors only.
-    const mine = await mineAcross(deps, endeavors, viewer);
+    const mine = await mineAcross(deps, endeavors, viewer, steward);
     return json({ ok: true, endeavors, requests: requestRows, mine, steward, member: !!name, you: viewer });
   }
 
@@ -733,7 +773,7 @@ export async function handleEndeavorOp(
         ...(state.endeavor?.adoptedPlanRef ? { planRef: state.endeavor.adoptedPlanRef } : {}),
       })),
       commitments: Object.values(state.commitments),
-      decisions: [],
+      decisions: decisionRowsOf(state, viewer, steward, state.endeavor?.title),
       satisfiedSteps: Object.values(state.satisfiedSteps),
       milestones: Object.values(state.milestones),
       events: eventTrail(log),
@@ -1070,9 +1110,6 @@ export async function handleEndeavorOp(
     });
   }
 
-  // ── endeavor.decide — spec 333 wave. @agenticprimitives/coordination ships NO RecordDecision
-  //    command yet (`/decisions` is a reserved stub), so this op fails honestly rather than faking
-  //    a decision record outside the reducer (ADR-0013: one mechanism, no imitation path). ──
   // ── endeavor.satisfyStep — record a plan step as satisfied with completion evidence. Gated by
   //    the reducer to the managing principal or an active participant (execution is done by the
   //    people doing the work, not only the steward). ──
@@ -1169,8 +1206,77 @@ export async function handleEndeavorOp(
     });
   }
 
+  // ── endeavor.decision.request — spec 393: a decision raised for its DECLARED approvers. The organization
+  //    (a steward acting as it) or an active participant raises it; the approvers are addresses — the
+  //    organization's own names the organization (a steward then decides AS it). The reducer gates. ──
+  if (op === 'endeavor.decision.request') {
+    const endeavorId = parseEndeavorId(body.endeavorId);
+    if (!endeavorId) return json({ error: 'endeavorId required' }, 400);
+    const title = String(body.title ?? '').trim();
+    if (!title) return json({ error: 'title (what is being decided) required' }, 400);
+    const rawApprovers = Array.isArray(body.approvers) ? body.approvers : typeof body.approvers === 'string' ? body.approvers.split(/[,\s]+/) : [];
+    const approvers = rawApprovers.map((a) => String(a).trim().toLowerCase()).filter(Boolean);
+    if (approvers.length === 0) return json({ error: 'approvers (at least one agent address) required' }, 400);
+    const bad = approvers.find((a) => !ADDR_RE.test(a));
+    if (bad) return json({ error: `approver ${bad} is not an agent address — resolve the person first` }, 400);
+    const stepIds = body.stepIds === undefined ? null : parseStepIds(body.stepIds);
+    if (body.stepIds !== undefined && !stepIds) return json({ error: 'stepIds must be step_* ids' }, 400);
+    const dueAt = body.dueAt === undefined ? undefined : String(body.dueAt);
+    if (dueAt !== undefined && Number.isNaN(Date.parse(dueAt))) return json({ error: 'dueAt must be an ISO timestamp' }, 400);
+    const quorum = body.quorum === undefined ? undefined : Number(body.quorum);
+    const decisionId = makeDecisionId(crypto.randomUUID());
+    const command: CoordinationCommandV1 = {
+      kind: 'RaiseDecisionRequest',
+      actor: (await deps.isSteward()) ? principal : viewer,
+      issuedAt: new Date().toISOString(),
+      endeavorId: endeavorId as `end_${string}`,
+      decisionId,
+      decisionKind: String(body.decisionKind ?? '').trim() || 'decision',
+      title,
+      ...(String(body.summary ?? '').trim() ? { summary: String(body.summary).trim().slice(0, EVIDENCE_MAX) } : {}),
+      approvers: approvers as Address[],
+      ...(quorum !== undefined ? { quorum } : {}),
+      ...(stepIds?.length ? { stepIds } : {}),
+      ...(dueAt !== undefined ? { dueAt } : {}),
+    };
+    return deps.serialize(async () => {
+      const r = await appendToEndeavorLog(deps, 'endeavor.decision.request', endeavorId, command, { type: 'decision', id: decisionId });
+      if (!r.ok) return r.response;
+      return json({ ok: true, decisionId, approvers, status: 'pending' });
+    });
+  }
+
+  // ── endeavor.decide — spec 393: the DECLARED approver records the decision, once; the record is immutable.
+  //    A steward's session acts as the organization (which counts only when the organization was NAMED);
+  //    anyone else acts as themselves. Standing is this door's question; naming is the reducer's — an
+  //    un-named steward is refused there, in those words. ──
   if (op === 'endeavor.decide') {
-    return json({ error: 'decision recording ships with the spec 333 wave — @agenticprimitives/coordination has no RecordDecision command yet' }, 501);
+    const endeavorId = parseEndeavorId(body.endeavorId);
+    if (!endeavorId) return json({ error: 'endeavorId required' }, 400);
+    const decisionId = String(body.decisionId ?? '').trim();
+    if (!decisionId.startsWith('dec_') || decisionId.length <= 4) return json({ error: 'decisionId (dec_*) required' }, 400);
+    const outcome = body.outcome === 'approved' || body.outcome === 'approve' ? 'approved' : body.outcome === 'rejected' || body.outcome === 'reject' || body.outcome === 'deny' || body.outcome === 'denied' ? 'rejected' : body.outcome === 'deferred' || body.outcome === 'defer' ? 'deferred' : null;
+    if (!outcome) return json({ error: 'outcome must be approved, rejected or deferred' }, 400);
+    const rationale = String(body.reason ?? body.rationale ?? '').trim().slice(0, EVIDENCE_MAX);
+    if (!rationale) return json({ error: 'reason (why) is required — a decision carries its rationale' }, 400);
+    const steward = await deps.isSteward();
+    const command: CoordinationCommandV1 = {
+      kind: 'RecordDecision',
+      actor: steward ? principal : viewer,
+      ...(steward ? { principal } : {}),
+      issuedAt: new Date().toISOString(),
+      endeavorId: endeavorId as `end_${string}`,
+      decisionId: decisionId as DecisionId,
+      outcome,
+      rationale,
+      evidenceRefs: typedReceiptRefs(body.evidenceRefs),
+    };
+    return deps.serialize(async () => {
+      const r = await appendToEndeavorLog(deps, 'endeavor.decide', endeavorId, command, { type: 'decision', id: decisionId });
+      if (!r.ok) return r.response;
+      const req = r.state.decisionRequests[decisionId];
+      return json({ ok: true, decisionId, outcome, decidedBy: command.actor, status: req?.status ?? 'decided' });
+    });
   }
 
   // ── endeavor.post — conversation about the endeavor. Fabric message ONLY, context-linked with

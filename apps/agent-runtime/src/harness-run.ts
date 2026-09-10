@@ -1981,6 +1981,8 @@ export const CAPABILITY_WORDS: Record<string, string> = {
   'coordination.contribution.allocate': 'allocate plan steps',
   'coordination.endeavor.satisfy': 'close an endeavor as done',
   'coordination.milestone.achieve': 'record a milestone as achieved',
+  'coordination.decision.request': 'raise a decision for named approvers',
+  'coordination.decision.record': 'record a decision on a pending request',
   'treasury.payment.execute': 'make payments',
   'treasury.fund': 'fund a treasury with demo USDC',
   'messaging.direct.send': 'send direct messages',
@@ -2164,6 +2166,8 @@ const RESOURCE_ARG_FOR: Record<string, string> = {
   'coordination.contribution.allocate': 'org',
   'coordination.endeavor.satisfy': 'org',
   'coordination.milestone.achieve': 'org',
+  'coordination.decision.request': 'org',
+  'coordination.decision.record': 'org',
   // The CALL's target: the relationship record. See the pin in `resolveStepArgs` for why the treasury,
   // which is what the statement is ABOUT, cannot be the caveat's location.
   'treasury.primary.declare': 'record',
@@ -3535,6 +3539,8 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'coordination.contribution.allocate': ['signature'],  // the org's decision, under a steward's signature
   'coordination.endeavor.satisfy': ['signature'],
   'coordination.milestone.achieve': ['signature'],
+  'coordination.decision.request': ['signature'],
+  'coordination.decision.record': ['signature'],
   'treasury.payment.execute': ['signature'],        // the mandate, and the ladder's second party
   'treasury.fund': ['signature'],                   // the mandate
   'messaging.direct.send': ['signature'],           // the mandate — sending as you is acting as you
