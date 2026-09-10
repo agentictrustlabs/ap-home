@@ -5,7 +5,7 @@
 // its own effect-write door, and the spans to an OTLP/HTTP collector when this deployment names one.
 // Neither is on the run's path — a record that failed to export costs an export, never the run.
 import { assertFirewalled, assertMetricsFirewalled, otlpTracesOf, otlpMetricsOf, metricsOf, provenanceOf, runProvenanceRecordKey, spansOf, type RunRecordV1, type RunExportReportV1, type RunMetricsV1, type SpanV1 } from '@agenticprimitives/orchestration';
-import { projectHarnessRunProvenance, toJsonLd, toProvN, type ProvenanceRecordV1 } from '@agenticprimitives/provenance';
+import { projectHarnessRunProvenance, toJsonLd, toProvN, type ProvenanceRecordV1, projectPublicProvenance, type PublicProvenanceProjection } from '@agenticprimitives/provenance';
 import { RUN_PROVENANCE_CONTEXT } from '@agenticprimitives/ontology';
 
 export interface RunExportEnv {
@@ -50,8 +50,17 @@ export async function provenanceProvNOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, age
 }
 /** Spec 389 W3 — WHERE A RUN'S PROVENANCE IS (PROV-AQ `hasProvenance`): the agent whose vault holds it and the
  *  record key. A reference, never the record: resolving it takes that agent's grant (ADR-0055). */
-export function hasProvenanceRef(agent: string, runRef: string): { agent: string; recordType: string } {
-  return { agent: agent.toLowerCase(), recordType: runProvenanceRecordKey(runRef) };
+export function hasProvenanceRef(agent: string, runRef: string): { agent: string; recordType: string; public: { route: string; agent: string; runRef: string } } {
+  // Spec 395 — where ANYONE may read the run's ANCHORED OUTCOMES (digests and ids through the S1 firewall): the
+  // acting agent's own public route. A holder of a receipt verifies by recomputation; nothing private is served.
+  return { agent: agent.toLowerCase(), recordType: runProvenanceRecordKey(runRef), public: { route: '/provenance/public', agent: agent.toLowerCase(), runRef } };
+}
+
+/** Spec 395 — the run's anchored outcomes, safe for anyone: one row per step that left a chain transaction, every
+ *  row through the S1 firewall; the rest refused by name. Served without a session; the private graph is not. */
+export async function publicProvenanceOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, agent: string, record: RunRecordV1): Promise<PublicProvenanceProjection> {
+  const { graph } = await provenanceRecordOf(env, agent, record);
+  return projectPublicProvenance(graph);
 }
 
 /** Spec 390 W4 — the firewalled metrics of a record: four instruments, one delta point each per attribute set. */

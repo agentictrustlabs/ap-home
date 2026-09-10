@@ -121,6 +121,16 @@
       "required": true,
       "paced": false,
       "timeoutSec": 240
+    },
+    {
+      "id": "verify-public-provenance",
+      "script": "scripts/verify-public-provenance.mts",
+      "spec": "395 W1",
+      "proves": "a run's anchored outcomes are readable by anyone with no session — digests and ids through the S1 firewall, the receipt digest equal to the private graph's, the transaction as the anchor",
+      "twin": "no address and nothing the run was about in the rows; a run with no transaction projects nothing (every step refused by name); an unknown run is 404",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 240
     }
   ]
 }

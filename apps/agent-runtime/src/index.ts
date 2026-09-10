@@ -152,7 +152,7 @@ import type { CandidateSource } from '@agenticprimitives/intent-engagement';
 import { answerProbe } from './engagement-answer.js';
 import type { MessageV1 } from '@agenticprimitives/a2a/standard';
 import { signAsAgent } from './consult-rail.js';
-import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, firewalledMetrics } from './run-export.js';
+import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, firewalledMetrics, publicProvenanceOf } from './run-export.js';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
@@ -771,7 +771,8 @@ app.use('*', async (c, next) => {
   // unusable by exactly the callers it is for, and the allowlist buys nothing here: the endpoint takes
   // no credentials and returns only this Worker's own public identity. So: open CORS, and
   // `credentials: false` — nothing about this request should ever carry a cookie.
-  if (c.req.path === '/peer-attest') {
+  // Spec 395 — the public provenance projection is for ANY counterparty: open CORS, no credentials, same as the attestation.
+  if (c.req.path === '/peer-attest' || c.req.path === '/provenance/public') {
     return cors({ origin: '*', allowMethods: ['POST', 'OPTIONS'], allowHeaders: ['content-type'] })(c, next);
   }
   const match = buildAllowedOriginMatcher(c.env);
@@ -884,7 +885,8 @@ app.use('*', async (c, next) => {
   // parties it is FOR: other agents' clients, cross-origin by definition.
   //
   // It is not a signing oracle: one canonical body, never a caller-supplied digest.
-  if (c.req.path === '/peer-attest') return next();
+  // Spec 395 — the public provenance projection takes no credentials and returns only anchored digests: no CSRF, like the attestation.
+  if (c.req.path === '/peer-attest' || c.req.path === '/provenance/public') return next();
   // Federated-token custody (spec 265) — server-to-server from the Connect broker / MCP, bridge-HMAC
   // authenticated (no browser cookie).
   if (c.req.path === '/custody/youversion/store-token') return next();
@@ -2084,6 +2086,24 @@ app.post('/harness/provenance', async (c) => {
   const ref = hasProvenanceRef(addressee, body.runRef);
   if (body.format === 'prov-n') return c.json({ ok: true, hasProvenance: ref, provN: await provenanceProvNOf(c.env, addressee, rec), export: rec.export?.provenance ?? null });
   return c.json({ ok: true, hasProvenance: ref, provenance: await provenanceGraphOf(c.env, addressee, rec), export: rec.export?.provenance ?? null });
+});
+
+// POST /provenance/public { agent, runRef } — spec 395. THE PUBLIC PROJECTION: the run's ANCHORED OUTCOMES, digests
+// and ids only, every row through the S1 firewall; a step that left no transaction is refused by name. No session:
+// a counterparty holding a receipt verifies by recomputation (the receipt hashes to the digest named; the transaction
+// is on the chain). Nothing of what the run was ABOUT is here, and no gate reads a row. The private graph stays behind
+// /harness/provenance for the asker alone.
+app.post('/provenance/public', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { agent?: string; runRef?: string } | null;
+  if (!body?.agent || !body.runRef || !/^0x[0-9a-fA-F]{40}$/.test(body.agent)) return c.json({ ok: false, error: 'agent (an address) and runRef are required' }, 400);
+  const agent = body.agent.toLowerCase() as Address;
+  const rec = await getRecord(c.env as never, agent, body.runRef);
+  if (!rec) return c.json({ ok: false, error: 'no such record' }, 404);
+  const projection = await publicProvenanceOf(c.env, agent, rec);
+  return c.json({
+    ok: true, agent, runRef: body.runRef, ...projection,
+    verify: { receiptDigest: 'sha256 over the canonical step receipt you hold must equal the row\'s receiptDigest', anchoredBy: 'the transaction hash must exist on the chain the agent lives on', run: 'the row\'s run IRI is derived from the runRef your receipt\'s hasProvenance named' },
+  });
 });
 
 // POST /harness/replay { session, addressee, runRef } — spec 370 P6. Replay a record: the same plan, the
