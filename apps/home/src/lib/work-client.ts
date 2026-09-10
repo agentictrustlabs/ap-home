@@ -405,14 +405,15 @@ export async function closeEndeavor(
   await postWork(token, { action: 'abandon', org: org.toLowerCase(), endeavorId, ...(reason ? { reason } : {}) });
 }
 
-/** Record a decision (endeavor.decide) — only the declared approver's session passes the DO gate. */
+/** Record a decision (endeavor.decide) — only a DECLARED approver's session passes the reducer's gate (spec 393);
+ *  the reason is the record's rationale and is required. */
 export async function recordDecision(
   token: string,
   org: string,
   endeavorId: string,
   decisionId: string,
-  outcome: 'approved' | 'rejected',
-  reason?: string,
+  outcome: 'approved' | 'rejected' | 'deferred',
+  reason: string,
 ): Promise<void> {
   await postWork(token, {
     action: 'decide',
@@ -420,7 +421,7 @@ export async function recordDecision(
     endeavorId,
     decisionId,
     outcome,
-    ...(reason ? { reason } : {}),
+    reason,
   });
 }
 

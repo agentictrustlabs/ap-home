@@ -316,7 +316,9 @@ export function decisionRowsOf(state: CoordinationStateV1, viewer: string, stewa
     const approvers = req.requirement.approvers.map((a) => a.toLowerCase());
     const named = approvers.includes(me);
     const asOrg = !named && steward && !!org && approvers.includes(org);
-    const record = state.decisions[req.decisionId];
+    const records = state.decisions[req.decisionId] ?? [];
+    const record = records[records.length - 1];
+    const recordedByMe = records.some((r) => r.outcome !== 'deferred' && r.actor.toLowerCase() === (named ? me : org));
     return {
       decisionId: req.decisionId,
       endeavorId: req.endeavorId,
@@ -328,10 +330,14 @@ export function decisionRowsOf(state: CoordinationStateV1, viewer: string, stewa
       approvers,
       ...(req.requirement.quorum ? { quorum: req.requirement.quorum } : {}),
       approver: named ? me : asOrg ? org : approvers[0],
-      mayDecide: req.status === 'pending' && (named || asOrg),
+      mayDecide: req.status === 'pending' && (named || asOrg) && !recordedByMe,
       ...(asOrg ? { decidesAs: org } : {}),
       status: req.status === 'pending' ? 'pending' : 'recorded',
-      ...(record ? { outcome: record.outcome, decidedBy: record.actor, decidedAs: record.principal, rationale: record.rationale, decidedAt: record.decidedAt } : {}),
+      // the request's resolution once closed; until then the latest record's outcome (a deferral shows as one)
+      ...(req.outcome ? { outcome: req.outcome } : record ? { outcome: record.outcome } : {}),
+      ...(record ? { decidedBy: record.actor, decidedAs: record.principal, rationale: record.rationale, decidedAt: record.decidedAt } : {}),
+      approvals: records.filter((r) => r.outcome === 'approved').length,
+      records: records.map((r) => ({ actor: r.actor, principal: r.principal, outcome: r.outcome, rationale: r.rationale, decidedAt: r.decidedAt })),
       ...(req.scope.stepIds?.length ? { stepIds: req.scope.stepIds } : {}),
       requestedAt: req.requestedAt,
       ...(req.dueAt ? { dueAt: req.dueAt } : {}),

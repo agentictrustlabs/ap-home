@@ -101,6 +101,16 @@
       "required": true,
       "paced": false,
       "timeoutSec": 300
+    },
+    {
+      "id": "verify-endeavor-offer-allocate-ask",
+      "script": "scripts/verify-endeavor-offer-allocate-ask.mts",
+      "spec": "393 W2",
+      "proves": "a member's offer and the steward's allocation go through the Ask with supplied plans — the offer under the OFFERER's own mandate, the allocation under the organization's granted by its steward; the endeavor carries one allocation",
+      "twin": "an outsider's offer, under their own mandate, refused at the organization's member gate; a member's allocation cannot be authorized — the organization's mandate is not theirs to give",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 420
     }
   ]
 }

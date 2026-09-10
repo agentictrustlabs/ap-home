@@ -177,16 +177,20 @@ export function MyWorkView() {
     } finally { setBusyId(null); }
   }, [session, agentAddress, homeProfile?.credential, load]);
 
+  // Spec 393 — the record carries its rationale; a decision without a reason is refused by the door.
+  const [reasons, setReasons] = useState<Record<string, string>>({});
   const decide = useCallback(async (bundle: OrgWorkBundle, card: HomeDecisionCardV1, outcome: 'approved' | 'rejected') => {
     if (!session) return;
+    const reason = (reasons[card.decisionId] ?? '').trim();
+    if (!reason) { setError('Say why — the reason is kept as the decision\'s record.'); return; }
     setBusyId(card.decisionId); setError(null);
     try {
-      await recordDecision(session.token, bundle.org, card.endeavorId, card.decisionId, outcome);
+      await recordDecision(session.token, bundle.org, card.endeavorId, card.decisionId, outcome, reason);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setBusyId(null); }
-  }, [session, load]);
+  }, [session, load, reasons]);
 
   const { awaiting, active, decisions, myRequests } = useMemo(() => {
     const all = bundles ?? [];
@@ -273,7 +277,14 @@ export function MyWorkView() {
                         {c.dueAt ? ` · due ${new Date(c.dueAt).toLocaleDateString()}` : ''}
                       </div>
                     </div>
-                    <span style={{ display: 'flex', gap: '0.4rem' }}>
+                    <span style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <input
+                        value={reasons[c.decisionId] ?? ''}
+                        onChange={(e) => setReasons((r) => ({ ...r, [c.decisionId]: e.target.value }))}
+                        placeholder="Why? (kept as the record)"
+                        aria-label="Reason for the decision"
+                        style={{ fontSize: '0.8rem', padding: '0.3rem 0.5rem', minWidth: '12rem' }}
+                      />
                       {c.allowedActions.map((a) => (
                         <BusyButton
                           key={a.actionId}

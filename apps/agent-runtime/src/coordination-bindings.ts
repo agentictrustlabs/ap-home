@@ -68,8 +68,12 @@ export const CONTRIBUTION_PROPOSE_TOOL: ToolSpec = {
   id: CONTRIBUTION_PROPOSE_CAPABILITY,
   verbs: ['volunteer', 'offer', 'take', 'i will do', "i'll do", 'sign me up'],
   description: 'Offer to carry out steps of an endeavor\'s adopted plan. Args: org, endeavorId, steps (the step ids offered, from the plan), note (optional). A PROPOSAL: the steward decides who is allocated.',
-  inputSchema: { type: 'object', properties: { ...ORG_ARG, endeavorId: { type: 'string' }, steps: { type: 'array', items: { type: 'string' }, description: 'Plan step ids (step_…).' }, note: { type: 'string' } }, required: ['org', 'endeavorId', 'steps'] },
-  capability: { id: CONTRIBUTION_PROPOSE_CAPABILITY, action: 'propose', resourceArg: 'org' },
+  inputSchema: { type: 'object', properties: { ...ORG_ARG, endeavorId: { type: 'string' }, steps: { type: 'array', items: { type: 'string' }, description: 'Plan step ids (step_…).' }, note: { type: 'string' }, proposer: { type: 'string', description: 'Who offers — the person asking, always; never set to the organization.' } }, required: ['org', 'endeavorId', 'steps'] },
+  // AN OFFER IS THE OFFERER'S ACT (spec 393 W2). Asked AT the organization, the harness's default — "whose
+  // authority: the declared one, else the resource acted on" — asked for the ORGANIZATION's mandate to make a
+  // member's offer, which a member cannot grant and a steward should not. The acting party is declared: the
+  // proposer, resolved to the asker (ontology party role, never the room they stand in).
+  capability: { id: CONTRIBUTION_PROPOSE_CAPABILITY, action: 'propose', resourceArg: 'org', authorityArg: 'proposer' },
   risk: 'medium',
   establishes: 'submission',
 };

@@ -285,7 +285,7 @@ describe('endeavor.* serving plane', () => {
     expect(again.status).toBe(409);
     // the detail carries the record; My Work no longer lists it
     const detail = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.get', { endeavorId }));
-    expect(detail.decisions).toEqual([expect.objectContaining({ decisionId, status: 'recorded', outcome: 'approved', decidedBy: REQUESTER, rationale: 'within budget', stepIds: ['step_draft'], mayDecide: false })]);
+    expect(detail.decisions).toEqual([expect.objectContaining({ decisionId, status: 'recorded', outcome: 'approved', decidedBy: REQUESTER, rationale: 'within budget', stepIds: ['step_draft'], mayDecide: false, approvals: 1, records: [expect.objectContaining({ actor: REQUESTER, outcome: 'approved' })] })]);
     const after = await out(await handleEndeavorOp(h.as(REQUESTER, { member: 'requester' }), 'endeavor.list', {}));
     expect((after.mine as { decisions: unknown[] }).decisions).toEqual([]);
     expect(h.audits).toEqual(expect.arrayContaining(['interactions.endeavor.decision.request', 'interactions.endeavor.decide']));

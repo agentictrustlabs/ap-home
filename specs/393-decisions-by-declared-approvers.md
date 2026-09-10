@@ -1,6 +1,6 @@
 # Spec 393 — Decisions by declared approvers, and the coordinator's offers and allocations through the Ask
 
-**Status:** W1 ✅ 2026-09-10 (live on faithnet: `verify-endeavor-decision` in the nightly ledger) · W2 open · **Kind:** Endeavor conformance (priorities Tier 1.4; the decisions half of spec 333 §3) — reducer commands + events, three T-box classes, two serving-plane doors, two Ask capabilities with their contracts, the Home's already-built cards lit · **Grounds:** [spec 333 §3](333-coordination-decisions-profiles-rules.md) (`DecisionRequest` / `DecisionRecord` / `ApprovalRequirement`; "actor satisfies the ApprovalRequirement — quorum verified by the gate, not the reducer; record immutable"), [spec 332 §9](332-coordination-endeavor-core.md) rule 1 (nothing coordination-shaped is authority), [spec 382](382-committed-steps-run-at-the-participant.md) (the conformance-wave pattern: one reducer rule, one door, one Ask capability, one live twin), [spec 334 §7](334-coordination-work-surface.md) (My Work), [ADR-0054](../docs/architecture/decisions/0054-coordination-endeavor-doctrine.md), the coverage ledger row `approvals-decisions` (`specified` → `implemented`)
+**Status:** W1 ✅ · W2 ✅ 2026-09-10 (live on faithnet: `verify-endeavor-decision` + `verify-endeavor-offer-allocate-ask` in the nightly ledger) · **Kind:** Endeavor conformance (priorities Tier 1.4; the decisions half of spec 333 §3) — reducer commands + events, three T-box classes, two serving-plane doors, two Ask capabilities with their contracts, the Home's already-built cards lit · **Grounds:** [spec 333 §3](333-coordination-decisions-profiles-rules.md) (`DecisionRequest` / `DecisionRecord` / `ApprovalRequirement`; "actor satisfies the ApprovalRequirement — quorum verified by the gate, not the reducer; record immutable"), [spec 332 §9](332-coordination-endeavor-core.md) rule 1 (nothing coordination-shaped is authority), [spec 382](382-committed-steps-run-at-the-participant.md) (the conformance-wave pattern: one reducer rule, one door, one Ask capability, one live twin), [spec 334 §7](334-coordination-work-surface.md) (My Work), [ADR-0054](../docs/architecture/decisions/0054-coordination-endeavor-doctrine.md), the coverage ledger row `approvals-decisions` (`specified` → `implemented`)
 
 ## 0. The gap
 
@@ -52,11 +52,12 @@ decision was made; what any step may then DO is still its mandate at its gate.
 - **The reducer never reads standing.** Whether a session may act as the organization is the door's
   question (the stewardship wire, verified on chain); the reducer sees an actor address and a request.
 - **Immutable.** No `UpdateDecision`. A closed request is closed; the record is the record.
-- **Quorum is organization/custody machinery** (333 §10 rule 3). W1 records `quorum` and admits the first
-  approver's record; counting toward a quorum > 1 is W2 and stays outside the reducer's vote-free design.
-- **A decision satisfies nothing by itself.** A decision-kind plan step is satisfied by the coordinator
-  citing the record (`urn:ap:decision:<id>`) as evidence, through `endeavor.satisfyStep`, exactly as any
-  step. No auto-satisfaction (W2 may add it as a declared consequence).
+- **Quorum is organization/custody machinery** (333 §10 rule 3). The reducer COUNTS — distinct approvers who
+  approved reach `quorum` → approved; the approvals still possible cannot reach it → rejected; a deferral counts
+  for nothing; one approver records once — it never votes, weights or elects. Every record stays on the request.
+- **A decision satisfies only a DECISION-kind step, as a declared consequence** (W2, spec 360): an approval
+  emits `PlanStepSatisfied` for the decision-kind steps the request was scoped to, citing the record
+  (`urn:ap:decision:<id>`); a contribution step is someone's work and is never satisfied by a vote.
 - **An approval is not a mandate** — the same sentence as 382 §3.
 
 ## 4. Waves + gates
@@ -64,7 +65,7 @@ decision was made; what any step may then DO is still its mandate at its gate.
 | Wave | Delivers | Gate |
 | --- | --- | --- |
 | **W1** ✅ | the types, commands, events, reducer rules; the three T-box classes; the two doors and both projections; the two Ask tools + contracts + registration; the coverage-ledger row → `implemented` | unit (`reducer.test.ts`): raise by a steward; record by a declared approver → `DecisionRecorded`; a non-approver refused; an un-named steward refused; a second record on a closed request refused; deferred keeps it pending; approved closes it; the request id must be unused. **Live (no model)** `scripts/verify-endeavor-decision.mts` on Missio Nexus: alice (steward) raises a request naming carol → carol decides `approved` → bob refused (not named) → alice refused (steward, not named) → carol again refused (closed) → the detail's `decisions[]` shows the request decided by carol; carol's My Work listed it pending before and nothing after |
-| **W2** | the coordinator's offers and allocations THROUGH THE ASK as a live twin: carol says *I'll take the flyer step* (propose), alice says *allocate the flyer step to carol* (allocate); the twins — a non-member's offer refused at the member gate, a member's allocation refused as not the organization's steward. Quorum > 1 counted. A decision-kind step auto-satisfied by its approval as a declared consequence (360) | `scripts/verify-endeavor-offer-allocate-ask.mts` (four asks, two refusals) |
+| **W2** ✅ | the coordinator's offers and allocations THROUGH THE ASK as a live twin: carol says *I'll take the flyer step* (propose), alice says *allocate the flyer step to carol* (allocate); the twins — a non-member's offer refused at the member gate, a member's allocation refused as not the organization's steward. Quorum > 1 counted. A decision-kind step auto-satisfied by its approval as a declared consequence (360) | `scripts/verify-endeavor-offer-allocate-ask.mts` (four asks, two refusals) |
 
 ## 5. Not this
 
@@ -88,3 +89,22 @@ declared, and a late record is refused by the reducer once `dueAt` has passed (W
 - Ask: `coordination.decision.request` / `coordination.decision.record` (bindings + harness tables + `NOT_PLAN_STEPS`); contracts `org-endeavor-decision-request` / `org-endeavor-decide` published and attached to `coordinator` + `org-steward` (`~/skills/scripts/register-endeavor-decision.mjs`).
 - Ontology: `apcoord:ApprovalRequirement/DecisionRequest/DecisionRecord` in the T-box and `packages/ontology/src/index.ts`; ledger row `approvals-decisions` → `implemented`.
 - Found on the way: Missio Nexus's own interactions grant had gone stale (every non-steward read `auth failed — mcp`); re-issued with `scripts/reissue-service-grant.mts`. The live script pauses auto-work and reads `endeavor.list` sparingly — one list is a read of every endeavor's log, and the organization's vault budget (120 verified calls/min) is what fails first.
+
+## W2 as shipped (2026-09-10)
+
+- **Quorum counted** in the reducer (`RecordDecision`): `state.decisions` is now EVERY record per request in order; the
+  `DecisionRecorded` event carries `resolution` when the record closed the request; `DecisionRequestV1.outcome` is set on
+  close. One approver records once (*already recorded — a reversal is a new request*). `decisionRowsOf` projects `approvals`,
+  `records[]`, and `mayDecide` false once the viewer has recorded.
+- **A decision-kind step auto-satisfied** by its approval, citing `urn:ap:decision:<id>` — never a contribution step.
+- **The Home's cards carry a reason** (the record's rationale is required); the decide forward carries the stewardship wire.
+- **Offers and allocations through the Ask** — `verify-endeavor-offer-allocate-ask.mts`: carol's offer under HER OWN
+  mandate, alice's allocation under the organization's, the outsider refused at the member gate after their own mandate,
+  carol unable to allocate (the organization's mandate is not hers). Two things found on the way: `org-steward` did not
+  carry `coordination.contribution.propose/.allocate` (only `coordinator` did), so an ask at an organization answered
+  `unknown_tool` — attached (`~/skills/scripts/attach-contribution-acts-to-steward.mjs`) and both demo organizations
+  re-pinned (`assign-org-archetype.mts`); and the offer's ACTING PARTY was undeclared, so the harness's default asked for
+  the ORGANIZATION's mandate to make a member's offer — `authorityArg: 'proposer'` on the tool, bound as an ontology party
+  role (`party-roles.ts`, any agent, acting side), and the contract says the same. An offer is the offerer's act.
+- Not changed: `coordination.endeavor.request` still spends the addressed organization's mandate by the harness's default
+  (its contract says "as the person") — the same fix applies and is noted for the next Endeavor conformance pass.

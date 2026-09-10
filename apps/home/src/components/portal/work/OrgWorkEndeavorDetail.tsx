@@ -196,11 +196,15 @@ export function OrgWorkEndeavorDetail({ org, endeavorId }: { org: Address; endea
       await allocateContribution(session.token, communityId, endeavorId, proposalId, participant, steps);
     }), [run, session, communityId, endeavorId]);
 
+  // Spec 393 — the record carries its rationale; a decision without a reason is refused by the door.
+  const [reasons, setReasons] = useState<Record<string, string>>({});
   const decide = useCallback((decisionId: string, outcome: 'approved' | 'rejected') =>
     run(decisionId, async () => {
       if (!session) return;
-      await recordDecision(session.token, communityId, endeavorId, decisionId, outcome);
-    }), [run, session, communityId, endeavorId]);
+      const reason = (reasons[decisionId] ?? '').trim();
+      if (!reason) throw new Error('Say why — the reason is kept as the decision\'s record.');
+      await recordDecision(session.token, communityId, endeavorId, decisionId, outcome, reason);
+    }), [run, session, communityId, endeavorId, reasons]);
 
   const markDone = useCallback((stepId: string) => run(`done:${stepId}`, async () => {
     if (!session) return;
@@ -380,7 +384,14 @@ export function OrgWorkEndeavorDetail({ org, endeavorId }: { org: Address; endea
               {myPendingDecisions.map((d) => (
                 <div key={d.decisionId} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center', padding: '0.45rem 0' }}>
                   <span style={{ fontSize: '0.83rem' }}>{d.title ?? d.decisionKind ?? 'Decision requested'}</span>
-                  <span style={{ display: 'flex', gap: '0.4rem' }}>
+                  <span style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input
+                      value={reasons[d.decisionId] ?? ''}
+                      onChange={(e) => setReasons((r) => ({ ...r, [d.decisionId]: e.target.value }))}
+                      placeholder="Why? (kept as the record)"
+                      aria-label="Reason for the decision"
+                      style={{ fontSize: '0.8rem', padding: '0.3rem 0.5rem', minWidth: '12rem' }}
+                    />
                     <BusyButton busy={busyId === d.decisionId} busyLabel="…" className="btn-primary" style={{ width: 'auto' }} onClick={() => void decide(d.decisionId, 'approved')}>Approve</BusyButton>
                     <BusyButton busy={busyId === d.decisionId} busyLabel="…" className="btn-danger" style={{ width: 'auto' }} onClick={() => void decide(d.decisionId, 'rejected')}>Reject</BusyButton>
                   </span>
