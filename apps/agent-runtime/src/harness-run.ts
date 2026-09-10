@@ -38,7 +38,7 @@ import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderA
 import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
 import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
-import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly } from '@agenticprimitives/orchestration';
+import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1 } from '@agenticprimitives/orchestration';
 import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
@@ -789,7 +789,7 @@ export interface HarnessDeps {
   /** Spec 379 — whether an agent address is served by THIS deployment (its harness runs here). Absent ⇒ every
    *  address is treated as served, so only a card URL counts as outside. */
   isServedHere?: (agent: string) => boolean;
-  askSubjectAgent?: (input: { subject: Address; toolId: string; args: Record<string, unknown>; goal: string; asker?: Address; session?: string; /** Appendix M8 — the run ref the receiver is to adopt for a fresh ask (named by the sender). */ runRef?: string; correlation: { operationId: string; runRef: string; stepRef: string; intentDigest: string }; /** Spec 374 W2 — continue the receiver's parked run with what this turn presented/supplied. */ continue?: { runRef: string; presented?: unknown[]; supplied?: unknown[] } }) => Promise<SubjectAnswerV1>;
+  askSubjectAgent?: (input: { subject: Address; toolId: string; args: Record<string, unknown>; goal: string; asker?: Address; session?: string; /** Spec 390 W2 — W3C Trace Context for the hop: this run's trace, the routed step as the parent span. */ trace?: { traceparent: string; tracestate?: string }; /** Appendix M8 — the run ref the receiver is to adopt for a fresh ask (named by the sender). */ runRef?: string; correlation: { operationId: string; runRef: string; stepRef: string; intentDigest: string }; /** Spec 374 W2 — continue the receiver's parked run with what this turn presented/supplied. */ continue?: { runRef: string; presented?: unknown[]; supplied?: unknown[] } }) => Promise<SubjectAnswerV1>;
   /** Appendix M8 — READ the subject agent's own progress lines for a routed run, under the asker's session,
    *  while the hop is in flight. The receiver's DO answers; nothing is copied but the sentences. */
   readSubjectProgress?: (input: { subject: Address; runRef: string; session: string; after: number; wait?: number }) => Promise<{ lines: Array<{ seq: number; said: string; stepRef?: string; terminal?: boolean }>; terminal: boolean; known: boolean }>;
@@ -1830,6 +1830,9 @@ const IS_NONCE_USED_ABI = [{
 }] as const;
 
 export interface HarnessRunInput {
+  /** Spec 390 W2 — the W3C Trace Context the request arrived with, so a routed hop this run makes carries the
+   *  SAME trace outbound (the caller's, not one derived here). Recorded on the run record; read by no gate. */
+  traceContext?: TraceContextV1 | null;
   intent: { goal: string; constraints?: Record<string, unknown>; context?: Record<string, unknown> };
   /** Spec 370 P1 — the checkpoint's record of what ran: the admitted plan and the completed steps. The
    *  loop replays the completed steps and plans nothing anew; the remaining steps are verified afresh. */
@@ -4345,8 +4348,12 @@ step is then handed to that agent under authority the person grants; leave it ou
             }
           })().catch(() => undefined)
         : Promise.resolve();
+      // Spec 390 W2 — the hop rides under THIS run's trace (the caller's when one arrived, else derived from
+      // the run reference — the same rule `traceIdFor` applies to the record) with the routed step as parent.
+      const hopTrace = { traceparent: formatTraceparent(input.traceContext?.traceId ?? await traceIdOf(correlation.runRef), await spanIdOf(correlation.runRef, correlation.stepRef)), ...(input.traceContext?.tracestate ? { tracestate: input.traceContext.tracestate } : {}) };
       const answer = await deps.askSubjectAgent({
         subject, toolId, args, goal: input.intent.goal, ...(input.person ? { asker: input.person } : {}), ...(input.session ? { session: input.session } : {}),
+        trace: hopTrace,
         ...(cont ? {} : { runRef: receiverRunRef }),
         // R: this step's stable operation identity, for the receiver to name in S (spec 367 §8).
         correlation,

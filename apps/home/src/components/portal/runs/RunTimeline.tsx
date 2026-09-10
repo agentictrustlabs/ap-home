@@ -9,7 +9,7 @@ import { fetchSpans, type SpanRow } from '../../../home/ask';
 
 const ATTR = {
   step: 'ap.step.ref', status: 'ap.step.status', capability: 'ap.capability.id', risk: 'ap.risk',
-  decision: 'ap.authority.decision', presented: 'ap.authority.presented.ref', chain: 'ap.authority.chain.depth',
+  decision: 'ap.authority.verdict', presented: 'ap.authority.mandate.ref', chain: 'ap.authority.chain.depth',
   outcome: 'ap.run.outcome', origin: 'ap.trace.origin', error: 'ap.error.class', link: 'ap.link.kind',
 } as const;
 const short = (v: unknown, n = 14): string => { const t = String(v ?? ''); return t.length > n ? `${t.slice(0, n - 4)}…${t.slice(-3)}` : t; };

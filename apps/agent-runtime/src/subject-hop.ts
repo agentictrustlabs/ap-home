@@ -65,6 +65,9 @@ export function subjectEnvelopeOf(task: Pick<TaskV1, 'artifacts'> | null | undef
 }
 
 export interface SubjectHopInput {
+  /** Spec 390 W2 — W3C Trace Context for the hop: the sender's trace, the routed step as the parent span. */
+  traceparent?: string;
+  tracestate?: string;
   /** Where the subject's card is served (`https://<host>/.well-known/agent-card.json`). */
   cardUrl: string;
   profile: SubjectAskV1;
@@ -105,7 +108,7 @@ export async function sendSubjectAskOverWire(input: SubjectHopInput): Promise<Su
   try {
     res = await input.fetch(endpoint, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json', 'a2a-version': '1.0', authorization: `Bearer ${input.session}` },
+      headers: { 'content-type': 'application/json', accept: 'application/json', 'a2a-version': '1.0', authorization: `Bearer ${input.session}`, ...(input.traceparent ? { traceparent: input.traceparent } : {}), ...(input.tracestate ? { tracestate: input.tracestate } : {}) },
       body: JSON.stringify(rpc),
     });
   } catch (e) {

@@ -20,6 +20,8 @@ export interface FlowTraceV1 {
   kind: 'ap.flow-trace.v1';
   hop: 'agent';
   flowId: string | null;
+  /** Spec 390 W2 — the W3C trace id this run's spans belong to (the caller's `traceparent`), or null when it derived its own. */
+  traceId?: string | null;
   runRef: string;
   agent: string;
   asker: string;
@@ -65,6 +67,8 @@ export function buildFlowTrace(input: {
   flowId: string | null; runRef: string; agent: string; asker: string; startedAt: number;
   reply: { kind: string; text?: string; plannerTrace?: { planner?: string; model?: string; toolsExposed?: string[]; plan?: Array<{ toolId: string; args: Record<string, unknown> }>; playbook?: FlowTraceV1['playbook']; admission?: unknown[]; route?: unknown }; results?: Array<{ toolId: string; result: unknown }> };
   events?: RunEvent[]; artifacts: string[]; referral?: ReferralV1; continued?: boolean;
+  /** Spec 390 W2 — the W3C trace id the request arrived with (the caller's), when one did. Correlation only. */
+  traceId?: string | null;
 }): FlowTraceV1 {
   const events = input.events ?? [];
   const byTool = new Map<string, unknown>();
@@ -79,7 +83,7 @@ export function buildFlowTrace(input: {
   }
   const pt = input.reply.plannerTrace;
   return {
-    kind: 'ap.flow-trace.v1', hop: 'agent', flowId: input.flowId, runRef: input.runRef, agent: input.agent, asker: input.asker,
+    kind: 'ap.flow-trace.v1', hop: 'agent', flowId: input.flowId, traceId: input.traceId ?? null, runRef: input.runRef, agent: input.agent, asker: input.asker,
     playbook: pt?.playbook ?? null,
     planner: pt ? { kind: pt.planner ?? 'unknown', ...(pt.model ? { model: pt.model } : {}), toolsExposed: pt.toolsExposed ?? [], plan: pt.plan ?? [], ...(pt.admission?.length ? { admission: pt.admission } : {}), ...(pt.route ? { route: pt.route } : {}) } : null,
     steps,

@@ -49,7 +49,12 @@ if (out.refused) fail(out.refused);
 for (const h of out.trace?.hops ?? []) {
   if (h.hop !== 'agent.run') { hopLine(h); continue; }
   const a = h as Hop & { agent: string; runRef: string; playbook: { archetypeId: string; digest: string } | null; planner: { kind: string; model?: string; toolsExposed: string[]; plan: Array<{ toolId: string; args: Record<string, unknown> }> } | null; steps: Array<{ toolId: string; ok: boolean; args?: unknown; output?: Record<string, unknown> }>; reply: { kind: string; chars: number; artifacts: string[] }; events: Array<{ type: string }> };
-  console.log(`  ├─ agent.run        ${String(a.ms).padStart(6)} ms  run ${a.runRef} at ${a.agent} (flow echoed: ${a.flowId === FLOW})`);
+  // Spec 390 W2 — ONE W3C TRACE across Claude → gateway → agent: the gateway minted `traceparent` from the flow id
+  // and the agent's run recorded it. Correlation only; the run admitted on the signed caller assertion.
+  const gwTrace = (out.trace as { traceId?: string } | undefined)?.traceId;
+  const runTrace = (a as { traceId?: string | null }).traceId ?? null;
+  console.log(`  ├─ agent.run        ${String(a.ms).padStart(6)} ms  run ${a.runRef} at ${a.agent} (flow echoed: ${a.flowId === FLOW}; trace ${runTrace ? `${runTrace.slice(0, 12)}… ${runTrace === gwTrace ? '= the gateway\'s' : `≠ the gateway\'s ${String(gwTrace).slice(0, 12)}…`}` : 'none recorded'})`);
+  if (!gwTrace || runTrace !== gwTrace) fail(`the run did not join the gateway's trace (gateway ${gwTrace ?? 'none'}, run ${runTrace ?? 'none'})`);
   console.log(`  │    playbook  ${a.playbook ? `${a.playbook.archetypeId} ${String(a.playbook.digest).slice(0, 12)}…` : 'none (bare harness)'}`);
   console.log(`  │    planner   ${a.planner?.kind ?? '-'}${a.planner?.model ? ` (${a.planner.model})` : ''} · offered ${a.planner?.toolsExposed.length ?? 0} tools [${(a.planner?.toolsExposed ?? []).filter((t) => t.startsWith('catalog.')).join(', ')} …] · plan ${short(a.planner?.plan ?? [], 200)}`);
   const route = (a.planner as { route?: { policy?: string; planner?: { because: string }; composer?: { because: string } } } | null)?.route;
@@ -73,4 +78,4 @@ console.log(`\n── what Claude.ai receives ──\n  words: ${text.length} ch
 if (process.env.FULL) console.log(`\n${text}`);
 if (!items.length) fail('no catalog items in the results artifact');
 if (weeks.length < 6) fail(`the study is not complete (${weeks.join(' ')}) — raise COMPOSER_MAX_TOKENS`);
-console.log(`\n✓ flow ${FLOW}: every hop visible with its output — registry → card → A2A task → run → catalog MCP → composer → artifacts; all six weeks present.`);
+console.log(`\n✓ flow ${FLOW}: every hop visible with its output — registry → card → A2A task → run → catalog MCP → composer → artifacts; all six weeks present; one W3C trace from the gateway to the run.`);

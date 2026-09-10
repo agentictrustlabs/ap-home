@@ -71,8 +71,8 @@ const spans = sp.spans as Array<{ name: string; parentSpanId?: string; attribute
 console.log(`spans → ${spans.length}: ${spans.map((s) => s.name).join(' · ')} (retention ${sp.retention?.doDays}d on the object, vault ${sp.retention?.vaultRecord}; exporter ${sp.exporter})`);
 const pay = spans.find((s) => s.attributes['gen_ai.tool.name'] === 'treasury.payment.execute');
 if (!pay) throw new Error('no payment span');
-console.log(`  payment span: decision=${pay.attributes['ap.authority.decision']} receipt=${String(pay.attributes['ap.receipt.digest']).slice(0, 14)}… status=${pay.attributes['ap.step.status']} playbook=${pay.attributes['ap.playbook.id'] ?? '-'}`);
-if (pay.attributes['ap.authority.decision'] !== 'allow') throw new Error('the payment span does not carry the allow');
+console.log(`  payment span: decision=${pay.attributes['ap.authority.verdict']} receipt=${String(pay.attributes['ap.receipt.digest']).slice(0, 14)}… status=${pay.attributes['ap.step.status']} playbook=${pay.attributes['ap.agent.archetype'] ?? '-'}`);
+if (pay.attributes['ap.authority.verdict'] !== 'allow') throw new Error('the payment span does not carry the allow');
 if (!/^0x[0-9a-f]{64}$/.test(String(pay.attributes['ap.receipt.digest']))) throw new Error('the payment span carries no receipt digest');
 const text = JSON.stringify(spans).toLowerCase();
 if (text.includes(payee)) throw new Error('a span carries the payee\'s address');

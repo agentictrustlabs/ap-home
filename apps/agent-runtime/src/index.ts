@@ -9,7 +9,7 @@ import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 
 import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, forgetConfirmation, CONFIRMATION_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1 } from '@agenticprimitives/context';
 import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
-import { recordOf, replayingInvoker, type Plan, type SuppliedInputV1, type RunEvent } from '@agenticprimitives/orchestration';
+import { recordOf, replayingInvoker, traceContextOf, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
 import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken } from './triggers.js';
 import { appendProgress, readProgress, type ProgressLineV1 } from './harness-progress.js';
@@ -1563,6 +1563,8 @@ app.post('/harness/confirmations/forget', async (c) => {
  * door. This function is handed one, and asserts nothing about how it was established.
  */
 export async function runAgentAsk(env: Env, input: { agent: Address; addressee: Address; ask: string; runRef: string; context?: Record<string, unknown>;
+  /** Spec 390 W2 — the W3C Trace Context the caller's request carried; recorded, never read by a gate. */
+  traceContext?: TraceContextV1 | null;
   /** Spec 380 W3 — a plan the caller supplies (the routed topic turn: one consult step per ranked member). */
   plan?: Plan;
   /** Spec 380 W3 — guidance the asker's context supplies to the COMPOSER (a topic's steward-written assistant
@@ -1588,6 +1590,7 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
   const intent = input.intent ?? { goal: input.ask, context: { addressee: input.addressee, asker: input.agent, ...(input.context ?? {}) } };
   const { result, interactionFor, trace, tools, events, presentedRefs } = await runUnderMandate(env as unknown as HarnessEnv, deps, {
     intent, presented: input.resume?.presented ?? null, person: input.agent, runRef: input.runRef, addressee: input.addressee,
+    ...(input.traceContext ? { traceContext: input.traceContext } : {}),
     ...(input.resume?.plan ? { plan: input.resume.plan } : input.plan ? { plan: input.plan } : {}),
     ...(input.resume?.executed ? { resume: input.resume.executed } : {}),
     ...(input.resume?.supplied?.length ? { supplied: input.resume.supplied } : {}),
@@ -1611,7 +1614,7 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
   // Recorded like the ask route's (spec 370 P6) and exported like it (381); a record that fails to land costs
   // a look-back, never the run.
   try {
-    const record = recordOf({ runRef: input.runRef, intent, result: result as never, events, presented: (input.resume?.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })) });
+    const record = recordOf({ runRef: input.runRef, intent, result: result as never, events, presented: (input.resume?.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), ...(input.traceContext ? { traceContext: input.traceContext } : {}) });
     await putRecord(env as never, input.addressee, record);
     await exportRun(env, { writeSubjectRecord: deps.writeSubjectRecord }, input.addressee, record)
       .then((r) => putRecord(env as never, input.addressee, { ...record, export: r })).catch(() => undefined);
@@ -2848,6 +2851,7 @@ app.post('/harness/ask', async (c) => {
       c.executionCtx.waitUntil(progressChain);
     };
     const { result, resolved, interactionFor, trace, tools: offeredTools, events: runEvents, presentedRefs, playbook: askedPlaybook } = await runUnderMandate(c.env as unknown as HarnessEnv, askDeps, {
+      traceContext: traceContextOf(c.req.raw.headers),
       intent, presented: turn.presented, person: who.sa as Address, session: body.session, runRef, addressee, onProgress: progress,
       conversation: conversation && conversation.type === 'ap.context.conversation-memory.v1' ? conversation : null,
       ...(inResponseTo ? { inResponseTo } : {}),
@@ -3188,7 +3192,9 @@ app.post('/harness/ask', async (c) => {
     // mandates ride along ONLY there; a listing strips them. Fire-and-forget: a record that failed to land
     // costs a replay, never the run.
     {
-      const record = recordOf({ runRef, intent, result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })) });
+      // Spec 390 W2 — the W3C Trace Context the request arrived with joins this run's spans to the caller's
+      // trace. Recorded here and read by nothing else: correlation, never trust.
+      const record = recordOf({ runRef, intent, result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), traceContext: traceContextOf(c.req.raw.headers) });
       c.executionCtx.waitUntil(putRecord(c.env as never, addressee, record).catch((e) => console.warn('[harness/ask] record not kept:', e instanceof Error ? e.message : String(e))));
       // Spec 381 — THE EXPORT: the durable half into the acting agent's vault, the spans to a collector when
       // one is named. Off the run's path; a failed export is logged, never a failed ask.
@@ -4302,7 +4308,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     if (!body?.ok) return { lines: [], terminal: true, known: false };
     return { lines: body.lines ?? [], terminal: !!body.terminal, known: !!body.known };
   };
-  deps.askSubjectAgent = async ({ subject, toolId, args, goal, session, asker, correlation, continue: cont, runRef: receiverRunRef }) => {
+  deps.askSubjectAgent = async ({ subject, toolId, args, goal, session, asker, correlation, continue: cont, runRef: receiverRunRef, trace }) => {
     const name = await deps.nameOf?.(subject).catch(() => null) ?? null;
     if (!session) return { ok: false, via: { agent: subject, name, observedVia: 'serving-handler' }, refused: 'a routed ask carries the asker’s session, and this run has none' };
     // WHERE IT IS ASKED is what its name publishes (`subject-address.ts`): here, over the wire, or nowhere.
@@ -4336,7 +4342,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     let status: number;
     if (inProcess) {
       const body = JSON.stringify({ session, addressee: subject, message: goal, plan: { steps: [{ toolId, args }] }, subjectAsk: profile, ...(receiverRunRef && !cont ? { runRef: receiverRunRef } : {}) });
-      const req = new Request(url, { method: 'POST', headers: internalHeaders(env, { 'content-type': 'application/json', accept: 'application/json' }), body });
+      const req = new Request(url, { method: 'POST', headers: internalHeaders(env, { 'content-type': 'application/json', accept: 'application/json', ...(trace ? { traceparent: trace.traceparent, ...(trace.tracestate ? { tracestate: trace.tracestate } : {}) } : {}) }), body });
       let res: Response;
       try {
         res = await app.fetch(req, env, executionContextFor(opts.executionCtx));
@@ -4350,7 +4356,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       // S4) as a `SendMessage` with the profile in the metadata; the reply is the receiver's envelope,
       // returned verbatim as the task's `subject-answer` artifact. Unreachable, or no 1.0 endpoint on the
       // card ⇒ said so, in the receiver's words where it has any — never read locally instead (R3).
-      const hop = await sendSubjectAskOverWire({ cardUrl: (at as { cardUrl: string }).cardUrl, ...((at as { pinnedDigest?: string }).pinnedDigest ? { pinnedDigest: (at as { pinnedDigest?: string }).pinnedDigest! } : {}), profile, session, fetch: (u, init) => fetch(u, init) });
+      const hop = await sendSubjectAskOverWire({ ...(trace ? { traceparent: trace.traceparent, ...(trace.tracestate ? { tracestate: trace.tracestate } : {}) } : {}), cardUrl: (at as { cardUrl: string }).cardUrl, ...((at as { pinnedDigest?: string }).pinnedDigest ? { pinnedDigest: (at as { pinnedDigest?: string }).pinnedDigest! } : {}), profile, session, fetch: (u, init) => fetch(u, init) });
       if (!hop.ok) return { ok: false, via, refused: `${name ?? subject} could not be asked over the wire — ${hop.refused}` };
       envelope = hop.envelope as unknown as AskReplyEnvelopeV1;
       status = 200;

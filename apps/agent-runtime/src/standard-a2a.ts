@@ -16,6 +16,17 @@
 // Conversational task rows are a per-isolate projection (in memory); a delegated task lives in the object
 // that owns it. Nothing a person cannot rebuild is in either (ADR-0055).
 import { buildFlowTrace, flowIdOf, referralOf } from './flow-trace.js';
+import { traceContextOf } from '@agenticprimitives/orchestration';
+
+/** Spec 390 W2 — the W3C Trace Context a request arrived with, forwarded on the in-process ask so the run's
+ *  record keeps it. Ids only; the ask admits on the session and the wire, never on these. */
+const traceHeaders = (h: Headers): Record<string, string> => {
+  const out: Record<string, string> = {};
+  const tp = h.get('traceparent'); const ts = h.get('tracestate');
+  if (tp) out.traceparent = tp;
+  if (ts) out.tracestate = ts;
+  return out;
+};
 import type { RunEvent } from '@agenticprimitives/orchestration';
 import type { Address } from 'viem';
 import {
@@ -82,7 +93,7 @@ export interface StandardMountDeps {
    *  runtime lives. Returns the JSON-RPC response verbatim. */
   delegatedRpc?: (agent: Address, rpc: unknown, principal: Principal | null) => Promise<{ result?: unknown; error?: { code: number; message: string } }>;
   /** Spec 372 S3c — an agent asking as itself: no session, no mandate, its own standing. */
-  askAsAgent?: (input: { agent: Address; addressee: Address; ask: string; runRef: string }) => Promise<{
+  askAsAgent?: (input: { agent: Address; addressee: Address; ask: string; runRef: string; /** Spec 390 W2 — the caller's W3C Trace Context, kept on the run's record. */ traceContext?: import('@agenticprimitives/orchestration').TraceContextV1 | null }) => Promise<{
     reply: { kind: string; text?: string; prompt?: { kind: string; prompt: string; stepRef: string }; error?: string };
     spoken: string;
     result?: { plan: unknown };
@@ -285,13 +296,13 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           } else {
             if (!message) { await ctx.reject([{ text: 'Say what you would like this agent to do — the message carried no text.' }]); return; }
             await ctx.working();
-            asked = await deps.askAsAgent({ agent: caller, addressee: agent, ask: message, runRef });
+            asked = await deps.askAsAgent({ agent: caller, addressee: agent, ask: message, runRef, traceContext: traceContextOf(ctx.headers) });
           }
           // Spec 387 W2 — THE TRACE RIDES WITH THE TASK: what admitted the run, what was offered and chosen, each
           // step's outcome and output summary, in order. Evidence of what ran; nothing in it is authority or private.
           const reply = asked.reply as typeof asked.reply & { plannerTrace?: never; results?: Array<{ toolId: string; result: unknown }> };
           const artifactNames = [...(reply.results?.length ? ['results'] : []), 'trace'];
-          const trace = buildFlowTrace({ flowId, runRef, agent, asker: caller, startedAt, reply: reply as never, ...(asked.events ? { events: asked.events } : {}), artifacts: artifactNames, ...(referral ? { referral } : {}), ...(parkedRef ? { continued: true } : {}) });
+          const trace = buildFlowTrace({ flowId, traceId: traceContextOf(ctx.headers)?.traceId ?? null, runRef, agent, asker: caller, startedAt, reply: reply as never, ...(asked.events ? { events: asked.events } : {}), artifacts: artifactNames, ...(referral ? { referral } : {}), ...(parkedRef ? { continued: true } : {}) });
           console.log(`[flow ${flowId ?? '-'}] agent ${agent} run ${runRef}${parkedRef ? ' (continued)' : ''} ← ${caller}: ${reply.kind} · planner ${trace.planner?.kind ?? '-'} · steps ${trace.steps.map((st) => `${st.toolId}${st.ok ? '' : '✗'}`).join(',') || 'none'} · ${trace.ms}ms${referral ? ` · referral ${referral.registry}` : ''}`);
           await ctx.artifact({ name: 'trace', parts: [{ data: trace }] });
           // THE WRITTEN REPLY, not the spoken one. `spoken` is rendered for a voice — it says "alice2 dot
@@ -332,7 +343,7 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           const ask = routed.ask;
           const body = JSON.stringify({ session, addressee: agent, message: ask.request.goal, plan: { steps: [{ toolId: ask.request.capability, args: ask.request.args }] }, subjectAsk: ask, ...(ask.continue ? {} : { runRef: routedRunRefFor(ask.correlation) }) });
           await ctx.working();
-          const res = await deps.appFetch(new Request(`https://${host}/harness/ask`, { method: 'POST', headers: internalHeaders(deps.env, { 'content-type': 'application/json', accept: 'application/json' }), body }), deps.env);
+          const res = await deps.appFetch(new Request(`https://${host}/harness/ask`, { method: 'POST', headers: internalHeaders(deps.env, { 'content-type': 'application/json', accept: 'application/json', ...traceHeaders(ctx.headers) }), body }), deps.env);
           const envelope = (await res.json().catch(() => null)) as (AskEnvelope & { subjectAnswer?: { outcome?: string; said?: string } }) | null;
           if (!envelope) { await ctx.fail([{ text: `the ask answered ${res.status} with no envelope` }]); return; }
           await ctx.artifact({ name: SUBJECT_ANSWER_ARTIFACT, parts: [{ data: envelope }] });
@@ -354,7 +365,7 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
         const supplied: SuppliedInputV1[] | undefined = runRef && promptStep && data ? [{ stepRef: promptStep, data }] : undefined;
         const body = JSON.stringify({ session, addressee: agent, ...(message ? { message } : {}), ...(runRef ? { runRef } : {}), ...(supplied ? { supplied } : {}) });
         await ctx.working();
-        const res = await deps.appFetch(new Request(`https://${host}/harness/ask`, { method: 'POST', headers: internalHeaders(deps.env, { 'content-type': 'application/json', accept: 'application/json' }), body }), deps.env);
+        const res = await deps.appFetch(new Request(`https://${host}/harness/ask`, { method: 'POST', headers: internalHeaders(deps.env, { 'content-type': 'application/json', accept: 'application/json', ...traceHeaders(ctx.headers) }), body }), deps.env);
         const env = (await res.json().catch(() => null)) as AskEnvelope | null;
         if (!env || env.ok === false || !env.reply) { await ctx.fail([{ text: [env?.error ?? `the ask answered ${res.status}`, env?.detail].filter(Boolean).join(': ') }]); return; }
         const r = env.reply;
