@@ -1141,6 +1141,33 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
       },
     } : {}),
     askAsAgent: (input) => runAgentAsk(c.env, input),
+    // Spec 387 W3 — the outside agent that parked a run answers its prompt. The checkpoint decides: it must have
+    // parked for exactly this caller (`outsider.agent`), still be waiting on a data prompt, and not have expired.
+    // The answer joins the supplied inputs and the run is replayed from its checkpoint (spec 370 P1) — the
+    // same re-verification every resume gets; nothing here is a second path around the loop.
+    resumeAsAgent: async (input) => {
+      const stored = await loadRun(c.env as never, input.addressee, input.runRef).catch(() => null);
+      if (!stored) return { refused: 'no run is waiting under that task' };
+      if (String(stored.outsider?.agent ?? '').toLowerCase() !== input.agent.toLowerCase()) return { refused: 'that run is waiting on someone else' };
+      if (!stored.awaiting || stored.awaiting.kind !== 'data') return { refused: stored.awaiting ? `that run waits on ${stored.awaiting.kind === 'authority' || stored.awaiting.kind === 'signature' ? 'a steward\'s signature' : `a ${stored.awaiting.kind}`}, which an outside caller cannot supply` : 'that run is not waiting on an answer' };
+      if (isExpired(stored)) { await dropRun(c.env as never, input.addressee, input.runRef).catch(() => undefined); return { refused: 'that run\'s prompt has expired — ask again' }; }
+      const supplied = [...(stored.supplied ?? []), { stepRef: stored.awaiting.stepRef, data: input.data }];
+      const out = await runAgentAsk(c.env, {
+        agent: input.agent, addressee: input.addressee, ask: stored.message, runRef: input.runRef,
+        ...(stored.intent ? { intent: stored.intent } : {}),
+        resume: { ...(stored.plan ? { plan: stored.plan } : stored.executed?.plan ? { plan: stored.executed.plan as never } : {}), ...(stored.executed?.completed ? { executed: stored.executed } : {}), presented: [], supplied },
+        // The composer reads the ORIGINAL ask ("ask me for the id"); told nothing, it asked again after the step had run
+        // with the answer (seen live 2026-09-10). Behaviour, not authority: what was supplied is what to answer from.
+        guidance: `This run was CONTINUED: the caller already supplied what the run asked for (${Object.keys(input.data).join(', ')}) and the step has run with it. Answer from the step results now. Never ask again for what was supplied.`,
+      });
+      if (out.reply.kind === 'prompt' && out.reply.prompt) {
+        const now = Date.now();
+        await saveRun(c.env as never, { ...stored, supplied, awaiting: { kind: (out.reply.prompt.kind as 'data') ?? 'data', prompt: out.reply.prompt.prompt, stepRef: out.reply.prompt.stepRef, expiresAt: now + AWAIT_WINDOW_MS.data }, expiresAt: now + AWAIT_WINDOW_MS.data, updatedAt: now } as never).catch(() => undefined);
+      } else if (out.reply.kind !== 'authority_required') {
+        await dropRun(c.env as never, input.addressee, input.runRef).catch(() => undefined);
+      }
+      return out;
+    },
     // Spec 384 W2 — answer a probe AS this agent: decided from its playbook and its on-chain kind, signed under its
     // own session leaf when it is an offer. A person's agent says a human channel is required.
     answerProbe: async ({ agent: who, probe }) => {

@@ -37,3 +37,14 @@ describe('spec 387 W2 — the flow trace on the agent\'s task', () => {
     expect(trace.ms).toBeGreaterThanOrEqual(50);
   });
 });
+
+describe('spec 387 W3 — the referral on the trace', () => {
+  it('echoes a short registry + receipt as said, and nothing malformed', async () => {
+    const { referralOf } = await import('../src/flow-trace.js');
+    expect(referralOf({ metadata: { referral: { registry: 'https://discovery-a2a.faithnet.io/search', receipt: 'https://discovery-a2a.faithnet.io/registry/v1/receipts/ligonier.svc' } } })).toEqual({ registry: 'https://discovery-a2a.faithnet.io/search', receipt: 'https://discovery-a2a.faithnet.io/registry/v1/receipts/ligonier.svc' });
+    expect(referralOf({ metadata: { referral: { registry: 'r' } } })).toEqual({ registry: 'r' });
+    expect(referralOf({ metadata: { referral: { receipt: 'x' } } })).toBeNull();
+    expect(referralOf({ metadata: { referral: { registry: 'x'.repeat(201) } } })).toBeNull();
+    expect(referralOf(undefined)).toBeNull();
+  });
+});

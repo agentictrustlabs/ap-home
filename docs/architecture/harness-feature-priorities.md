@@ -41,7 +41,7 @@ artifact. The harness gained one generic capability family (`catalog.*`, bound b
 when a name publishes none) and the ecosystem side gained a profile (`ap-content-catalog/v1`) a
 publisher implements with no code of ours. It is the multi-agent rail used by an outsider: discovery
 → card → admitted A2A task → the agent's own playbook → its own tools — nothing of ours reads the
-ministry's content. Instrumented the same day: a flow trace on every tool result and task (`docs/architecture/outside-in-flow-claude-gateway-a2a-catalog.md`) — its first run caught the Anthropic account out of credit at the planner hop. Spec 388 (same day): budget-routed model selection — Groq for what its budget carries, Haiku for the rest, decided before the call and recorded with its reason; a route, never a fallback.
+ministry's content. Instrumented the same day: a flow trace on every tool result and task (`docs/architecture/outside-in-flow-claude-gateway-a2a-catalog.md`) — its first run caught the Anthropic account out of credit at the planner hop. Spec 388 (same day): budget-routed model selection — Groq for what its budget carries, Haiku for the rest, decided before the call and recorded with its reason; a route, never a fallback. Spec 387 W3 (same day): a prompted task continued from the host on the same task, resumed from its checkpoint for exactly that caller; the discovery referral on every invoke.
 
 Two honest corrections to "two Homes exist": the second Worker is live and the cross-Home routed read and
 act are proven (spec 366 R5 gate), but B cannot read the shared vault until the key-custody pilot's

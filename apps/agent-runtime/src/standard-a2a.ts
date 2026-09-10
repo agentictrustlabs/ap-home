@@ -15,7 +15,7 @@
 //
 // Conversational task rows are a per-isolate projection (in memory); a delegated task lives in the object
 // that owns it. Nothing a person cannot rebuild is in either (ADR-0055).
-import { buildFlowTrace, flowIdOf } from './flow-trace.js';
+import { buildFlowTrace, flowIdOf, referralOf } from './flow-trace.js';
 import type { RunEvent } from '@agenticprimitives/orchestration';
 import type { Address } from 'viem';
 import {
@@ -89,6 +89,13 @@ export interface StandardMountDeps {
     /** Spec 387 W2 — the run's events, for the `trace` artifact an outside caller reads. */
     events?: RunEvent[];
   }>;
+  /** Spec 387 W3 — CONTINUE a run this agent parked for an outside agent: the caller's answer to the prompt,
+   *  applied to the checkpoint (plan replayed, completed steps replayed, the answer supplied for the waiting
+   *  step). Refused unless the run parked for exactly this caller and is still waiting. */
+  resumeAsAgent?: (input: { agent: Address; addressee: Address; runRef: string; data: Record<string, unknown> }) => Promise<{
+    reply: { kind: string; text?: string; prompt?: { kind: string; prompt: string; stepRef: string }; error?: string };
+    spoken: string; result?: { plan: unknown }; events?: RunEvent[];
+  } | { refused: string }>;
   /** Spec 372 N1 — an outsider's act or question PARKS, open to the addressee's stewards, exactly as a
    *  trigger's does (P5): listed among their unfinished runs, finished by one of them under their own
    *  session and their own mandate. The A2A task is the runtime's handle; this is the stewards'. */
@@ -256,18 +263,36 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           return;
         }
         if (!session && ctx.principal?.kind === 'agent' && deps.askAsAgent) {
-          if (!message) { await ctx.reject([{ text: 'Say what you would like this agent to do — the message carried no text.' }]); return; }
-          await ctx.working();
-          const runRef = `svc-${ctx.task.id}`;
+          const caller = ctx.principal.agent as Address;
           const startedAt = Date.now();
           const flowId = flowIdOf(ctx.message);
-          const asked = await deps.askAsAgent({ agent: ctx.principal.agent as Address, addressee: agent, ask: message, runRef });
+          const referral = referralOf(ctx.message);
+          // Whose conversation this is: a later GetTask or a continuation from anyone else is refused (spec 372 S4).
+          ctx.task.metadata = { ...(ctx.task.metadata ?? {}), asker: caller };
+          // Spec 387 W3 — A CONTINUATION: the same caller answers the prompt the run parked on. The task's own
+          // metadata says which run; the checkpoint says which step and who may answer; the answer is the data part.
+          const parkedRef = typeof ctx.task.metadata?.runRef === 'string' && ctx.task.metadata.openToStewards === true ? ctx.task.metadata.runRef : undefined;
+          const answer = dataOf(ctx.message.parts);
+          let runRef = `svc-${ctx.task.id}`;
+          let asked: Awaited<ReturnType<NonNullable<typeof deps.askAsAgent>>>;
+          if (parkedRef && deps.resumeAsAgent) {
+            if (!answer) { await ctx.reject([{ text: 'A continuation carries the answer as a data part keyed by the prompt\'s field names.' }]); return; }
+            await ctx.working();
+            runRef = parkedRef;
+            const resumed = await deps.resumeAsAgent({ agent: caller, addressee: agent, runRef: parkedRef, data: answer });
+            if ('refused' in resumed) { await ctx.reject([{ text: resumed.refused }]); return; }
+            asked = resumed;
+          } else {
+            if (!message) { await ctx.reject([{ text: 'Say what you would like this agent to do — the message carried no text.' }]); return; }
+            await ctx.working();
+            asked = await deps.askAsAgent({ agent: caller, addressee: agent, ask: message, runRef });
+          }
           // Spec 387 W2 — THE TRACE RIDES WITH THE TASK: what admitted the run, what was offered and chosen, each
           // step's outcome and output summary, in order. Evidence of what ran; nothing in it is authority or private.
           const reply = asked.reply as typeof asked.reply & { plannerTrace?: never; results?: Array<{ toolId: string; result: unknown }> };
           const artifactNames = [...(reply.results?.length ? ['results'] : []), 'trace'];
-          const trace = buildFlowTrace({ flowId, runRef, agent, asker: ctx.principal.agent, startedAt, reply: reply as never, ...(asked.events ? { events: asked.events } : {}), artifacts: artifactNames });
-          console.log(`[flow ${flowId ?? '-'}] agent ${agent} run ${runRef} ← ${ctx.principal.agent}: ${reply.kind} · planner ${trace.planner?.kind ?? '-'} · steps ${trace.steps.map((st) => `${st.toolId}${st.ok ? '' : '✗'}`).join(',') || 'none'} · ${trace.ms}ms`);
+          const trace = buildFlowTrace({ flowId, runRef, agent, asker: caller, startedAt, reply: reply as never, ...(asked.events ? { events: asked.events } : {}), artifacts: artifactNames, ...(referral ? { referral } : {}), ...(parkedRef ? { continued: true } : {}) });
+          console.log(`[flow ${flowId ?? '-'}] agent ${agent} run ${runRef}${parkedRef ? ' (continued)' : ''} ← ${caller}: ${reply.kind} · planner ${trace.planner?.kind ?? '-'} · steps ${trace.steps.map((st) => `${st.toolId}${st.ok ? '' : '✗'}`).join(',') || 'none'} · ${trace.ms}ms${referral ? ` · referral ${referral.registry}` : ''}`);
           await ctx.artifact({ name: 'trace', parts: [{ data: trace }] });
           // THE WRITTEN REPLY, not the spoken one. `spoken` is rendered for a voice — it says "alice2 dot
           // treasury" — and an A2A peer reading that gets a mangled name it cannot resolve (seen live,
@@ -283,9 +308,10 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           // WHAT THE OUTSIDER CANNOT FINISH, A STEWARD CAN (spec 372 N1). The task parks for the caller; the
           // same run parks open to the addressee's stewards, who see it where they see every other
           // unfinished run and finish it with their own signature — the runtime never holds that pen.
+          // A prompt the CALLER can answer is also open to the caller (W3): the checkpoint names it as the outsider.
           if (asked.reply.kind === 'prompt' || asked.reply.kind === 'authority_required') {
             ctx.task.metadata = { ...(ctx.task.metadata ?? {}), runRef, openToStewards: true };
-            await deps.parkRun?.({ runRef, ask: message, addressee: agent, asker: ctx.principal.agent as Address, reply: asked.reply, ...(asked.result ? { result: asked.result } : {}) }).catch((e: unknown) => console.warn('[standard-a2a] park failed:', e instanceof Error ? e.message : String(e)));
+            if (!parkedRef) await deps.parkRun?.({ runRef, ask: message, addressee: agent, asker: caller, reply: asked.reply, ...(asked.result ? { result: asked.result } : {}) }).catch((e: unknown) => console.warn('[standard-a2a] park failed:', e instanceof Error ? e.message : String(e)));
           }
           if (asked.reply.kind === 'prompt') { await ctx.inputRequired([{ text: asked.reply.prompt?.prompt ?? words }, { data: asked.reply.prompt ?? {} }]); return; }
           if (asked.reply.kind === 'authority_required') { await ctx.authRequired([{ text: words || 'This needs a mandate no one has granted.' }, { data: { runRef, openToStewards: true } }]); return; }

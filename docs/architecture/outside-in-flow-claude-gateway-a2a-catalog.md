@@ -54,6 +54,7 @@ the only party that is not ours.
 | 2 | gateway → registry | HTTPS `POST /search` (ARD) | anonymous | nothing — the KB is world-readable by construction (ADR-0040) | entries: identifier, card URL, capabilities, `ap:*` facts, relevance score |
 | 3 | gateway → card | HTTPS GET, `/.well-known/agent-card.json` | anonymous | nothing; the card's sha256 is pinned in the handle | name, skills, A2A interface → the endpoint |
 | 4 | gateway → agent | A2A 1.x JSON-RPC `SendMessage` over the edge | **gateway.svc** (its own estate agent), signed by the Worker's key under a session wire the custodian (alice) signed, pinned to `harness.ask` | the edge admits the signature + wire (ADR-0057); the wire is revocable on chain | the task: status, words, artifacts |
+| 4b | gateway → agent, continued | A2A `SendMessage` with `taskId` + a data part (the host's answer, keyed by the prompt's fields) | gateway.svc, as in 4 | the checkpoint: the run parked for THIS caller, waits on a data prompt, unexpired; replayed with the answer supplied (spec 387 W3) | the same task, finished or re-parked |
 | 5 | agent run | in-process (`standard-a2a.ts` → `runAgentAsk`) | ligonier.svc, for an outside principal (unattended: no session, no vault, no acts) | the playbook narrows what is OFFERED; a read runs no gate; an act would park for a steward (spec 372 N1) | reply + events + planner trace |
 | 6 | agent → catalog | MCP `POST /mcp tools/call` at the name record `atl:mcpEndpoint` | anonymous (public metadata) | nothing — the catalog decides nothing about anyone | `{total, resources[], types, filters}` |
 | 7 | composer | LLM call (provider routed per call under spec 388: the cheapest offered one whose budget carries the evidence) | — | grounded on the step evidence (spec 358 W3) | the words |
@@ -92,6 +93,7 @@ joins the logs:
   exact query, results, cards), `gateway.inspect` (card URL, name, endpoint, `cardMatchesPin`),
   `gateway.card` (the re-read before sending), `gateway.invoke` (endpoint, `as`, method, chars →
   taskId, state, artifact names, chars, needs).
+- **The referral** (spec 387 W3): `metadata.referral {registry, receipt?}` on every invoke, echoed as `agent.run.referral`; `continued: true` on a turn that resumed a parked run.
 - **Which model, and why** (spec 388): `agent.run.planner.route` carries the routing policy and, for the planner and the composer, the provider chosen with its reason and the numbers it was judged by (`estimate 5700 ≤ budget 6500 and 5700+0 ≤ 8000/min`). A route, never a fallback.
 - **The agent's hop** (`agent.run`, the task's `trace` artifact lifted into the same list — `ap.flow-trace.v1`):
   `runRef`, `playbook {archetypeId, digest}`, `planner {kind, model, toolsExposed, plan, admission}`,

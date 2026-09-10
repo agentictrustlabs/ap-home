@@ -27,11 +27,23 @@ export interface FlowTraceV1 {
   planner: { kind: string; model?: string; toolsExposed: string[]; plan: Array<{ toolId: string; args: Record<string, unknown> }>; admission?: unknown[]; /** Spec 388 — which provider carried the planner and the composer, and why. */ route?: unknown } | null;
   steps: FlowStepV1[];
   reply: { kind: string; chars: number; artifacts: string[] };
+  /** Spec 387 W3 — how the caller found this agent: the registry and its receipt, as the caller said it. Evidence, never authority. */
+  referral?: ReferralV1;
+  /** Spec 387 W3 — this turn continued a parked run rather than starting one. */
+  continued?: boolean;
   events: Array<{ type: string; stepRef?: string; toolId?: string; ok?: boolean; because?: string; error?: string }>;
   ms: number;
 }
 
 const FLOW_ID = /^[A-Za-z0-9_.:-]{4,64}$/;
+export interface ReferralV1 { registry: string; receipt?: string }
+/** The caller's referral from the message metadata: which registry pointed it here and the receipt it cites — echoed as
+ *  said (short strings only), verified by nobody here: how a caller found an agent grants nothing. */
+export function referralOf(message: { metadata?: Record<string, unknown> } | undefined): ReferralV1 | null {
+  const r = message?.metadata?.referral as { registry?: unknown; receipt?: unknown } | undefined;
+  if (!r || typeof r.registry !== 'string' || !r.registry || r.registry.length > 200) return null;
+  return { registry: r.registry, ...(typeof r.receipt === 'string' && r.receipt && r.receipt.length <= 400 ? { receipt: r.receipt } : {}) };
+}
 /** The caller's flow id from the message metadata, or null — never a value we would not echo verbatim. */
 export function flowIdOf(message: { metadata?: Record<string, unknown> } | undefined): string | null {
   const v = message?.metadata?.flowId;
@@ -52,7 +64,7 @@ export function summarizeOutput(result: unknown): Record<string, unknown> | unde
 export function buildFlowTrace(input: {
   flowId: string | null; runRef: string; agent: string; asker: string; startedAt: number;
   reply: { kind: string; text?: string; plannerTrace?: { planner?: string; model?: string; toolsExposed?: string[]; plan?: Array<{ toolId: string; args: Record<string, unknown> }>; playbook?: FlowTraceV1['playbook']; admission?: unknown[]; route?: unknown }; results?: Array<{ toolId: string; result: unknown }> };
-  events?: RunEvent[]; artifacts: string[];
+  events?: RunEvent[]; artifacts: string[]; referral?: ReferralV1; continued?: boolean;
 }): FlowTraceV1 {
   const events = input.events ?? [];
   const byTool = new Map<string, unknown>();
@@ -72,6 +84,7 @@ export function buildFlowTrace(input: {
     planner: pt ? { kind: pt.planner ?? 'unknown', ...(pt.model ? { model: pt.model } : {}), toolsExposed: pt.toolsExposed ?? [], plan: pt.plan ?? [], ...(pt.admission?.length ? { admission: pt.admission } : {}), ...(pt.route ? { route: pt.route } : {}) } : null,
     steps,
     reply: { kind: input.reply.kind, chars: (input.reply.text ?? '').length, artifacts: input.artifacts },
+    ...(input.referral ? { referral: input.referral } : {}), ...(input.continued ? { continued: true } : {}),
     events: events.map((e) => ({ type: e.type, ...('stepRef' in e ? { stepRef: e.stepRef } : {}), ...('toolId' in e ? { toolId: e.toolId } : {}), ...('ok' in e ? { ok: e.ok } : {}), ...('because' in e ? { because: e.because } : {}), ...('error' in e ? { error: e.error } : {}) })),
     ms: Date.now() - input.startedAt,
   };
