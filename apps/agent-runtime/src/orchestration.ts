@@ -89,7 +89,7 @@ const RULE_BASED_PLANNER: Planner = createRuleBasedPlanner([
 ]);
 
 /** The env subset the planner selection needs. */
-export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | 'ORCHESTRATION_MODEL' | 'GROQ_API_KEY' | 'ORCHESTRATION_GROQ_MODEL' | 'ORCHESTRATION_GROQ_BASE_URL' | 'ORCHESTRATION_GROQ_PROMPT_BUDGET'>;
+export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | 'ORCHESTRATION_MODEL' | 'GROQ_API_KEY' | 'ORCHESTRATION_GROQ_MODEL' | 'ORCHESTRATION_GROQ_BASE_URL' | 'ORCHESTRATION_GROQ_PROMPT_BUDGET'> & { COMPOSER_MAX_TOKENS?: string };
 
 // ── WHICH MODEL PROPOSES — spec 377 ──────────────────────────────────────────────────────────────────────
 //
@@ -248,18 +248,26 @@ function providerFor(env: PlannerEnv, requested?: LlmProvider): LlmProvider | nu
 export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string; provider?: LlmProvider }): AnswerComposer | null {
   const p = providerFor(env, opts?.provider);
   if (p === null) return null;
+  // THE REPLY'S LENGTH IS A DEPLOYMENT SETTING, not a per-ask guess. The composers' own default (700 tokens)
+  // fits a sentence-or-paragraph answer; a composition over evidence — a six-week study from a catalog, with
+  // a link per item (spec 387 W2) — was cut off after week three at that cap, and the caller had to finish
+  // the plan from the artifact. Unset ⇒ the composer's default; a non-number is refused, never silently 700.
+  const cap = (env.COMPOSER_MAX_TOKENS ?? '').trim();
+  if (cap && !/^\d{2,5}$/.test(cap)) throw new Error(`COMPOSER_MAX_TOKENS must be a number of tokens, got ${JSON.stringify(cap)}`);
+  const maxTokens = cap ? { maxTokens: Number(cap) } : {};
   if (p === 'groq') {
     return createOpenAiCompatComposer({
       client: groqClient(env), model: modelFor(env, 'groq'), label: 'groq',
       // A smaller evidence cap than the Anthropic composer's 24k: the free tier is bounded by tokens-per-minute,
       // and the composer is the turn's largest request.
-      maxEvidenceChars: 12_000,
+      maxEvidenceChars: 12_000, ...maxTokens,
       ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
     });
   }
   return createAnthropicComposer({
     client: createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY! }),
     ...(env.ORCHESTRATION_MODEL ? { model: env.ORCHESTRATION_MODEL } : {}),
+    ...maxTokens,
     ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
   });
 }

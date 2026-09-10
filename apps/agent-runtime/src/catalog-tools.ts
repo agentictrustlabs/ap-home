@@ -114,15 +114,20 @@ export function catalogInvoker(binding: CatalogBinding | null, opts: { fetch?: t
     const mcpTool = MCP_TOOL[toolId];
     if (!mcpTool) return { refused: `${toolId} is not a catalog read` };
     if (!binding) return { refused: 'this agent publishes no content catalog in its name records (atl:mcpEndpoint) — nothing to search' };
-    const source = { agent: binding.name, catalog: binding.endpoint, profile: CATALOG_PROFILE };
+    const t0 = Date.now();
+    // The hop, on the result: which MCP tool was called with which arguments, and how long the catalog took —
+    // read by the flow trace (spec 387 W2), so the catalog's part is visible from the outside.
+    const source = { agent: binding.name, catalog: binding.endpoint, profile: CATALOG_PROFILE, tool: mcpTool, args: args ?? {}, ms: 0 };
     const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: mcpTool, arguments: args ?? {} } });
     const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), timeoutMs);
     let res: Response;
     try {
       res = await fetchImpl(binding.endpoint, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', 'mcp-protocol-version': '2025-06-18' }, body, signal: ctl.signal });
     } catch (e) {
+      source.ms = Date.now() - t0;
       return { error: `the catalog at ${binding.endpoint} did not answer (${e instanceof Error ? e.message : String(e)})`, source, interpretation: 'the agent\'s catalog could not be read — say so; nothing was searched' };
     } finally { clearTimeout(timer); }
+    source.ms = Date.now() - t0;
     const text = await res.text();
     let rpc: { result?: { structuredContent?: unknown; content?: Array<{ type?: string; text?: string }>; isError?: boolean }; error?: { message?: string } } | null = null;
     try { rpc = JSON.parse(text); } catch { rpc = null; }

@@ -404,7 +404,11 @@ CHAIN_ID = "34348"
 # to `ORCHESTRATION_GROQ_PROMPT_BUDGET` (default 6500, see plannerPromptBudget) and a 429's retry-after <=60s is
 # waited out once - roughly one ask a minute on it until the Groq plan is upgraded. Listing "groq" alone turns
 # Anthropic off (its key secret stays set either way).
-ORCHESTRATION_LLM = "anthropic,groq"
+# 2026-09-10: the Anthropic account is OUT OF CREDIT (HTTP 400 "credit balance is too low", surfaced by the spec 387 flow trace) — Groq
+# leads until credits are added; Anthropic stays offered. Restore "anthropic,groq" when billing is fixed.
+ORCHESTRATION_LLM = "groq,anthropic"
+# Spec 387 W2 — a composition over evidence (a six-week study with a link per item) needs more than the composers' 700-token default.
+COMPOSER_MAX_TOKENS = "2400"
 ASSISTANT_RATE_MAX = "60"
 ASSISTANT_RATE_WINDOW_MS = "600000"
 GATHER_RECORD_CLIP = "60000"

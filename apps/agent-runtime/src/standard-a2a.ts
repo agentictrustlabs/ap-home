@@ -15,6 +15,8 @@
 //
 // Conversational task rows are a per-isolate projection (in memory); a delegated task lives in the object
 // that owns it. Nothing a person cannot rebuild is in either (ADR-0055).
+import { buildFlowTrace, flowIdOf } from './flow-trace.js';
+import type { RunEvent } from '@agenticprimitives/orchestration';
 import type { Address } from 'viem';
 import {
   AP_DELEGATED_TASK_EXTENSION, DELEGATED_TASK_CARD_EXTENSION, createStandardA2aServer, createMemoryTaskStore,
@@ -84,6 +86,8 @@ export interface StandardMountDeps {
     reply: { kind: string; text?: string; prompt?: { kind: string; prompt: string; stepRef: string }; error?: string };
     spoken: string;
     result?: { plan: unknown };
+    /** Spec 387 W2 — the run's events, for the `trace` artifact an outside caller reads. */
+    events?: RunEvent[];
   }>;
   /** Spec 372 N1 — an outsider's act or question PARKS, open to the addressee's stewards, exactly as a
    *  trigger's does (P5): listed among their unfinished runs, finished by one of them under their own
@@ -255,7 +259,16 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           if (!message) { await ctx.reject([{ text: 'Say what you would like this agent to do — the message carried no text.' }]); return; }
           await ctx.working();
           const runRef = `svc-${ctx.task.id}`;
+          const startedAt = Date.now();
+          const flowId = flowIdOf(ctx.message);
           const asked = await deps.askAsAgent({ agent: ctx.principal.agent as Address, addressee: agent, ask: message, runRef });
+          // Spec 387 W2 — THE TRACE RIDES WITH THE TASK: what admitted the run, what was offered and chosen, each
+          // step's outcome and output summary, in order. Evidence of what ran; nothing in it is authority or private.
+          const reply = asked.reply as typeof asked.reply & { plannerTrace?: never; results?: Array<{ toolId: string; result: unknown }> };
+          const artifactNames = [...(reply.results?.length ? ['results'] : []), 'trace'];
+          const trace = buildFlowTrace({ flowId, runRef, agent, asker: ctx.principal.agent, startedAt, reply: reply as never, ...(asked.events ? { events: asked.events } : {}), artifacts: artifactNames });
+          console.log(`[flow ${flowId ?? '-'}] agent ${agent} run ${runRef} ← ${ctx.principal.agent}: ${reply.kind} · planner ${trace.planner?.kind ?? '-'} · steps ${trace.steps.map((st) => `${st.toolId}${st.ok ? '' : '✗'}`).join(',') || 'none'} · ${trace.ms}ms`);
+          await ctx.artifact({ name: 'trace', parts: [{ data: trace }] });
           // THE WRITTEN REPLY, not the spoken one. `spoken` is rendered for a voice — it says "alice2 dot
           // treasury" — and an A2A peer reading that gets a mangled name it cannot resolve (seen live,
           // 2026-09-08). A voice surface asks for `spoken`; this wire wants what was written.
