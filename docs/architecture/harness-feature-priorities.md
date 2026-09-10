@@ -37,6 +37,14 @@ put budget-routed model selection live (a route decided before the call and reco
 step, named on the trace) and wired a third provider — OpenAI `gpt-5-mini` between the free tier and Haiku —
 which the first live call proved is refused with `credit_balance_exhausted` until that account is funded, and
 the route surfaced rather than skipped (ADR-0013): it is off the live offer, one var from on.
+**Specs 389 + 390 (2026-09-10) closed most of §4.3:** the run's vault record IS the graph (389 W1 — JSON-LD under a
+published context, one `ep-plan:ExecutionTraceBundle` per run, the runtime `actedOnBehalfOf` the agent, each step
+`usedDelegation` its mandate and `used` every chain link, `generated` receipt / tx / effects / decisions, the bundle
+`wasInformedBy` the sender's; 44 fields bound by IRI; round-tripped by a stock RDF stack); validity R1–R6 in CI with
+the forged / truncated / leaking twins refused by name (389 W2); every span names its PROV activity and every activity
+its span (390 W1); W3C Trace Context in and out — Claude → gateway → Ligonier's agent recorded as one trace (390 W2).
+Still open: addressability (`hasProvenance`, `/harness/provenance` — 389 W3), the authority-stage spans (390 W3),
+events + metrics (390 W4). One correction to §4.3: the SHACL file it cited never existed.
 
 **Durable runs, triggers, provenance, streamed progress, memory, operators and external runtimes are all
 live (370 P1–P8). The multi-agent rail is the differentiator (366–384): routed asks and writes across Homes,
@@ -205,25 +213,25 @@ the ADR-0040 line, enforced in `provenance/firewall.ts`.
 The noon snapshot said "the gap is wiring, not design — done." Half right. `provenanceOf` runs after every
 recorded run and lands in the acting agent's vault, and the Home renders it. But look at what lands:
 
-- **Two shapes, one meaning.** The harness writes `RunProvenanceV1` (`packages/orchestration/src/spans.ts`,
+- **Two shapes, one meaning.** *(CLOSED — 389 W1: one projector, `RunProvenanceV1` is only the structural view.)* The harness writes `RunProvenanceV1` (`packages/orchestration/src/spans.ts`,
   "the PROV-O A-box in record form") — a bespoke JSON object. The Ring-0 `provenance` package's
   `projectRunProvenance` (PROV-O + P-Plan types, `ep-plan:ExecutionTraceBundle`) is called by fabric
   exchanges and Endeavors, **not by the harness**. Endeavor provenance and run provenance therefore do not
   join, and the run's graph is not the one spec 316 §6 grounds.
-- **Three IRIs bound of ~twenty fields.** `vault-records.ts` binds `run.provenance:` to
+- **Three IRIs bound of ~twenty fields.** *(CLOSED — 389 W1: 44 fields bound, gate-checked.)* `vault-records.ts` binds `run.provenance:` to
   `apexec:ServiceExecution` with `endedAt` and `receiptDigest`; `agent`, `asker`, `playbook`, `authority`,
   `actor`, `delegatedTo`, `txHash`, `effects` carry no IRI. The vault-records-are-ontology-shaped rule holds
   by prefix, not by field.
-- **No serialization.** Not PROV-JSON, not JSON-LD with a `@context`. A reviewer cannot load a run into any
+- **No serialization.** *(CLOSED — 389 W1: JSON-LD + PROV-N; a stock stack loads it.)* Not PROV-JSON, not JSON-LD with a `@context`. A reviewer cannot load a run into any
   PROV tool; the "W3C-standard graph" claim is true of the T-box and false of the record.
-- **No validity check.** SHACL S1–S5 guard fabric provenance; nothing runs on a run record. A record with a
+- **No validity check — and no shapes to check with.** *(Corrected: the `fabric-provenance-shapes` file cited here never existed after `apfab:` was retired; S1 lives in code, S2–S5 nowhere. CLOSED — 389 W2: `run-provenance-shapes.shacl.ttl` R1–R6 in CI, the twins refused by name.)* Previously: SHACL S1–S5 were believed to guard fabric provenance; nothing ran on a run record. A record with a
   step that ended before it started, or a `generated` receipt with no digest, is accepted.
-- **Not addressable.** A receipt, a task artifact, a reply do not say where their provenance is (PROV-AQ).
+- **Not addressable.** *(OPEN — 389 W3.)* A receipt, a task artifact, a reply do not say where their provenance is (PROV-AQ).
   The timeline finds it by the `run.provenance:<runRef>` convention.
-- **Cross-agent by link, not by graph.** A routed or handed-off run joins the sender's *trace* by derived ids
+- **Cross-agent by link, not by graph.** *(HALF CLOSED — 389 W1: a routed run's bundle `wasInformedBy` the sender's; 390 W2: one W3C trace across the hops. The two-Home live gate is 389 W3.)* A routed or handed-off run joins the sender's *trace* by derived ids
   (381 W2) and the receipt names `delegatedTo` / `wasInformedBy`; the two provenance records are separate
   objects with no bundle relation.
-- **Span status.** `spansOf` sets `OK` on success; the GenAI conformance rules reserve OK for application
+- **Span status.** *(CLOSED — 390 W1: success `UNSET`, conformance gate.)* `spansOf` sets `OK` on success; the GenAI conformance rules reserve OK for application
   code and require instrumentation to leave success UNSET. Cosmetic, but it is exactly what a conformance
   check would flag first.
 
