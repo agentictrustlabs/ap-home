@@ -57,8 +57,11 @@ export const ENDEAVOR_REQUEST_TOOL: ToolSpec = {
   id: ENDEAVOR_REQUEST_CAPABILITY,
   verbs: ['plan', 'request', 'organize', 'take on', 'get us to', 'ask the organization to'],
   description: 'Ask an organization to take on a goal as an endeavor — a request its stewards adopt or decline. Args: org (the organization asked), goal (the outcome wanted, in the person\'s words).',
-  inputSchema: { type: 'object', properties: { ...ORG_ARG, goal: { type: 'string', description: 'The goal, as the person said it.' } }, required: ['org', 'goal'] },
-  capability: { id: ENDEAVOR_REQUEST_CAPABILITY, action: 'request', resourceArg: 'org' },
+  inputSchema: { type: 'object', properties: { ...ORG_ARG, goal: { type: 'string', description: 'The goal, as the person said it.' }, requester: { type: 'string', description: 'Who asks — the person asking, always; never set to the organization.' } }, required: ['org', 'goal'] },
+  // A REQUEST IS THE REQUESTER'S ACT (spec 393 W2 tail, the same rule as the offer): asked AT the organization,
+  // the harness's default would spend the ORGANIZATION's mandate to ask the organization something. The acting
+  // party is declared — the requester, resolved to the asker (an ontology party role, never the room they stand in).
+  capability: { id: ENDEAVOR_REQUEST_CAPABILITY, action: 'request', resourceArg: 'org', authorityArg: 'requester' },
   risk: 'medium',
   establishes: 'submission',
 };

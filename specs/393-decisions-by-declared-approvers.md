@@ -106,5 +106,6 @@ declared, and a late record is refused by the reducer once `dueAt` has passed (W
   re-pinned (`assign-org-archetype.mts`); and the offer's ACTING PARTY was undeclared, so the harness's default asked for
   the ORGANIZATION's mandate to make a member's offer — `authorityArg: 'proposer'` on the tool, bound as an ontology party
   role (`party-roles.ts`, any agent, acting side), and the contract says the same. An offer is the offerer's act.
-- Not changed: `coordination.endeavor.request` still spends the addressed organization's mandate by the harness's default
-  (its contract says "as the person") — the same fix applies and is noted for the next Endeavor conformance pass.
+- **The request too** (same day): `coordination.endeavor.request` declares `authorityArg: 'requester'`, bound as an ontology
+  party role (any agent, acting side); the contract says the same. Asked at a team, the request now spends the REQUESTER's
+  own mandate (`verify-trigger-kinds` asserts it). `coordinator` republished and `playwright-demo-team` re-pinned.

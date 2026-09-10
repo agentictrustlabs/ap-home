@@ -58,6 +58,9 @@ const goal = `gate ${Date.now().toString(36)}: check that requests fire the coor
 let r1 = await post('/harness/ask', { session: alice.homeSession, addressee: TEAM, message: `ask ${team.orgName} to take on: ${goal}`, plan: { steps: [{ toolId: 'coordination.endeavor.request', args: { org: TEAM, goal } }] } });
 let rep = r1.reply as { kind?: string; error?: string; text?: string; runRef?: string; requirement?: MandateRequirementV1; delegator?: Address; delegate?: Address; alsoApprove?: Array<{ digest: Hex }> } | undefined;
 if (rep?.kind === 'authority_required' && rep.requirement && rep.delegator && rep.delegate) {
+  // Spec 393 W2 tail — A REQUEST IS THE REQUESTER'S ACT: the mandate asked is alice's own, never the team's.
+  if (rep.delegator.toLowerCase() !== String(alice.agent).toLowerCase()) throw new Error(`the request's mandate should be the requester's (alice), not ${rep.delegator}`);
+  console.log(`  the request asks for the REQUESTER's own mandate (${rep.delegator.slice(0, 10)}…)`);
   const caveats: Caveat[] = [...capabilityHandler.toCaveats(rep.requirement, ENFORCERS as never), buildDigestBindingCaveat(ENFORCERS.digestBinding, 'intent', rep.requirement.intentDigest as Hex)];
   let salt = 0n; for (const b of crypto.getRandomValues(new Uint8Array(16))) salt = (salt << 8n) | BigInt(b);
   const mandate: Delegation = { delegator: rep.delegator, delegate: rep.delegate, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
