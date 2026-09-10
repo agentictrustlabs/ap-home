@@ -96,12 +96,23 @@ export const COINS: Coin[] = (() => {
 })();
 
 /**
- * Which balances to PRINT for one account.
+ * Which balance to PRINT for one account — ONE of them.
  *
- * The primary always, so the fund button beside it has something to refer to. Everything else only
- * when there is some — a treasury that has never touched the card room should not carry a row of
- * zeroes for a currency its owner has never heard of.
+ * A treasury reads as holding a single currency, not a row of them. Two figures side by side is a
+ * question rather than an answer: somebody looking at "10000.00 USDC · 10400.00 SHQ" has to work out
+ * which one they can play with, and the two numbers are unrelated.
+ *
+ * So the coin the account ACTUALLY USES wins. A treasury holding an app's currency is a treasury
+ * being used for that app, and its own coin is the one its owner is thinking in; the demo USDC is
+ * what this Home mints and matters only until something real is in there. The primary shows when
+ * nothing else does — including at zero, so "Fund with USDC" beside it has something to refer to.
+ *
+ * NOTHING IS DELETED. The USDC is still in the account and still on the chain; it is not on this
+ * line. If a treasury ever needs to show both, this is the one function to change.
  */
 export function shown(balances: readonly { coin: Coin; amount: bigint | null }[]): { coin: Coin; amount: bigint | null }[] {
-  return balances.filter((b) => b.coin.primary || (b.amount !== null && b.amount > 0n));
+  const held = balances.filter((b) => !b.coin.primary && b.amount !== null && b.amount > 0n);
+  if (held.length > 0) return [held[0] as { coin: Coin; amount: bigint | null }];
+  const primary = balances.find((b) => b.coin.primary);
+  return primary ? [primary] : [];
 }

@@ -34,20 +34,28 @@ describe('the coins a Home can show', () => {
   });
 });
 
-describe('which balances get printed', () => {
-  it('always shows the coin this Home funds, even at nothing', () => {
-    // "Fund with USDC" sits beside it; a balance that vanishes when empty makes that button look
-    // like it is for nothing.
-    expect(shown([{ coin: usdc, amount: 0n }]).map((b) => b.coin.symbol)).toEqual(['USDC']);
+describe('which balance gets printed — one of them', () => {
+  it('shows the coin the account actually uses, and drops the demo USDC', () => {
+    // "10000.00 USDC · 10400.00 SHQ" is a question, not an answer: two unrelated numbers and no
+    // saying which one you can play with. A treasury holding an app's currency is a treasury being
+    // used for that app.
+    const rows = shown([{ coin: usdc, amount: 10_000_000_000n }, { coin: shq, amount: 10_400_000_000n }]);
+    expect(rows.map((b) => b.coin.symbol)).toEqual(['SHQ']);
   });
 
-  it('shows another coin only when there is some of it', () => {
+  it('falls back to the coin this Home funds when nothing else is held', () => {
+    // Including at zero: "Fund with USDC" sits beside it and needs something to refer to.
     expect(shown([{ coin: usdc, amount: 0n }, { coin: shq, amount: 0n }]).map((b) => b.coin.symbol)).toEqual(['USDC']);
-    expect(shown([{ coin: usdc, amount: 0n }, { coin: shq, amount: 10_000_000_000n }]).map((b) => b.coin.symbol)).toEqual(['USDC', 'SHQ']);
+    expect(shown([{ coin: usdc, amount: 5n }]).map((b) => b.coin.symbol)).toEqual(['USDC']);
   });
 
-  it('hides a coin whose balance could not be read, rather than printing a zero that is a guess', () => {
-    expect(shown([{ coin: usdc, amount: null }, { coin: shq, amount: null }]).map((b) => b.coin.symbol)).toEqual(['USDC']);
+  it('never prints two', () => {
+    const three = [{ coin: usdc, amount: 1n }, { coin: shq, amount: 1n }, { coin: { ...shq, address: '0x' + '2'.repeat(40), symbol: 'ZZZ' } as Coin, amount: 1n }];
+    expect(shown(three)).toHaveLength(1);
+  });
+
+  it('ignores a coin whose balance could not be read, rather than showing a zero that is a guess', () => {
+    expect(shown([{ coin: usdc, amount: 0n }, { coin: shq, amount: null }]).map((b) => b.coin.symbol)).toEqual(['USDC']);
   });
 });
 
