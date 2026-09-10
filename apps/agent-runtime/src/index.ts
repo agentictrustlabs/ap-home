@@ -151,7 +151,7 @@ import type { CandidateSource } from '@agenticprimitives/intent-engagement';
 import { answerProbe } from './engagement-answer.js';
 import type { MessageV1 } from '@agenticprimitives/a2a/standard';
 import { signAsAgent } from './consult-rail.js';
-import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf } from './run-export.js';
+import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, firewalledMetrics } from './run-export.js';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
@@ -2020,7 +2020,7 @@ app.post('/harness/spans', async (c) => {
   if (String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()) return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
   try {
     const spans = await firewalledSpans(rec);
-    return c.json({ ok: true, spans, retention: recordRetention(c.env), exporter: c.env.OTEL_EXPORTER_OTLP_ENDPOINT ? 'otlp-http' : 'none', export: rec.export ?? null, hasProvenance: hasProvenanceRef(addressee, body.runRef) });
+    return c.json({ ok: true, spans, metrics: firewalledMetrics(rec), retention: recordRetention(c.env), exporter: c.env.OTEL_EXPORTER_OTLP_ENDPOINT ? 'otlp-http' : 'none', export: rec.export ?? null, hasProvenance: hasProvenanceRef(addressee, body.runRef) });
   } catch (e) {
     // A firewall failure is a bug in the projection, and the answer is a refusal that names it — never a
     // span with the leak in it.

@@ -35,6 +35,8 @@ describe('exportRun', () => {
     expect(JSON.stringify(prov)).not.toContain('nathan');
     expect(JSON.stringify(prov)).not.toContain('json:');
     expect(r.spans).toEqual({ count: 2, sent: false });
+    // Spec 390 W4 — the metrics are projected (one run, one verdict, one step duration) and, with no metrics endpoint named, not sent
+    expect(r.metrics).toEqual({ points: 3, sent: false });
     expect(fetched).toBe(0);
   });
   it('posts an OTLP body to the named collector with its headers; a refused write is reported, not thrown', async () => {
@@ -45,6 +47,7 @@ describe('exportRun', () => {
     }, ALICE, record);
     expect(r.provenance).toEqual({ written: false, recordType: 'run.provenance:run-x', error: 'record_scope_denied' });
     expect(r.spans).toEqual({ count: 2, sent: true });
+    expect(r.metrics).toEqual({ points: 3, sent: false });
     expect(got!.url).toBe('https://collector.example/v1/traces');
     expect(got!.headers['x-api-key']).toBe('abc');
     expect(got!.headers['x-dataset']).toBe('runs');
@@ -78,5 +81,20 @@ describe('exportRun', () => {
     const spans = await firewalledSpans(record);
     expect(spans[1]!.attributes['ap.receipt.digest']).toMatch(/^0x[0-9a-f]{64}$/);
     expect(JSON.stringify(spans)).not.toContain('nathan');
+  });
+});
+
+describe('spec 390 W4 — the metrics body goes to the metrics endpoint when one is named', () => {
+  it('posts ExportMetricsServiceRequest with the same headers; nothing of the run in it', async () => {
+    const urls: string[] = []; let metricsBody: unknown = null;
+    const r = await exportRun({ OTEL_EXPORTER_OTLP_ENDPOINT: 'https://collector.example/v1/traces', OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: 'https://collector.example/v1/metrics', OTEL_EXPORTER_OTLP_HEADERS: 'x-api-key=abc' }, {
+      writeSubjectRecord: async () => ({ ok: true }),
+      fetch: (async (url: string, init: RequestInit) => { urls.push(url); if (url.endsWith('/v1/metrics')) metricsBody = JSON.parse(String(init.body)); return new Response('{}', { status: 200 }); }) as never,
+    }, ALICE, record);
+    expect(urls).toEqual(['https://collector.example/v1/traces', 'https://collector.example/v1/metrics']);
+    expect(r.metrics).toEqual({ points: 3, sent: true });
+    const names = (metricsBody as { resourceMetrics: Array<{ scopeMetrics: Array<{ metrics: Array<{ name: string }> }> }> }).resourceMetrics[0]!.scopeMetrics[0]!.metrics.map((m) => m.name);
+    expect(names).toEqual(['ap.harness.runs', 'ap.harness.verdicts', 'ap.harness.step.duration', 'ap.model.calls']);
+    expect(JSON.stringify(metricsBody)).not.toContain('nathan');
   });
 });

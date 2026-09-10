@@ -4,7 +4,7 @@
 // file is where they LAND, which is deployment: the provenance record into the acting agent's vault through
 // its own effect-write door, and the spans to an OTLP/HTTP collector when this deployment names one.
 // Neither is on the run's path — a record that failed to export costs an export, never the run.
-import { assertFirewalled, otlpTracesOf, provenanceOf, runProvenanceRecordKey, spansOf, type RunRecordV1, type RunExportReportV1, type SpanV1 } from '@agenticprimitives/orchestration';
+import { assertFirewalled, assertMetricsFirewalled, otlpTracesOf, otlpMetricsOf, metricsOf, provenanceOf, runProvenanceRecordKey, spansOf, type RunRecordV1, type RunExportReportV1, type RunMetricsV1, type SpanV1 } from '@agenticprimitives/orchestration';
 import { projectHarnessRunProvenance, toJsonLd, toProvN, type ProvenanceRecordV1 } from '@agenticprimitives/provenance';
 import { RUN_PROVENANCE_CONTEXT } from '@agenticprimitives/ontology';
 
@@ -13,6 +13,8 @@ export interface RunExportEnv {
   OTEL_EXPORTER_OTLP_ENDPOINT?: string;
   /** `k=v,k=v` — the collector's headers (an auth token, a dataset). Values are the deployment's secret. */
   OTEL_EXPORTER_OTLP_HEADERS?: string;
+  /** Spec 390 W4 — the collector's metrics endpoint (`https://…/v1/metrics`). Absent ⇒ metrics are projected and served, not sent. */
+  OTEL_EXPORTER_OTLP_METRICS_ENDPOINT?: string;
   /** Days a run record stays on the agent's task object before the sweep (default 7). The vault copy is the record. */
   HARNESS_RECORD_RETENTION_DAYS?: string;
   /** The chain the agents live on — the provenance graph names them the way the public KB does (spec 389 §2). */
@@ -50,6 +52,13 @@ export async function provenanceProvNOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, age
  *  record key. A reference, never the record: resolving it takes that agent's grant (ADR-0055). */
 export function hasProvenanceRef(agent: string, runRef: string): { agent: string; recordType: string } {
   return { agent: agent.toLowerCase(), recordType: runProvenanceRecordKey(runRef) };
+}
+
+/** Spec 390 W4 — the firewalled metrics of a record: four instruments, one delta point each per attribute set. */
+export function firewalledMetrics(record: RunRecordV1): RunMetricsV1 {
+  const m = metricsOf(record);
+  assertMetricsFirewalled([...m.runs, ...m.verdicts, ...m.stepDuration, ...m.modelCalls], record);
+  return m;
 }
 
 /** The firewalled spans of a record — what `/harness/spans` serves and the collector receives. */
@@ -93,5 +102,19 @@ export async function exportRun(env: RunExportEnv, deps: RunExportDeps, agent: s
       if (!res.ok) report.spans.error = `collector answered ${res.status}`;
     }
   } catch (e) { report.spans.error = e instanceof Error ? e.message : String(e); }
+  // Spec 390 W4 — the metrics, the same way: projected and firewalled, sent only where this deployment says.
+  try {
+    const m = firewalledMetrics(record);
+    const points = m.runs.length + m.verdicts.length + m.stepDuration.length + m.modelCalls.length;
+    report.metrics = { points, sent: false };
+    const endpoint = (env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT ?? '').trim();
+    if (endpoint) {
+      const headers: Record<string, string> = { 'content-type': 'application/json' };
+      for (const kv of (env.OTEL_EXPORTER_OTLP_HEADERS ?? '').split(',')) { const i = kv.indexOf('='); if (i > 0) headers[kv.slice(0, i).trim()] = kv.slice(i + 1).trim(); }
+      const res = await (deps.fetch ?? fetch)(endpoint, { method: 'POST', headers, body: JSON.stringify(otlpMetricsOf(m, { serviceName: 'demo-a2a' })) });
+      report.metrics.sent = res.ok;
+      if (!res.ok) report.metrics.error = `collector answered ${res.status}`;
+    }
+  } catch (e) { report.metrics = { points: 0, sent: false, error: e instanceof Error ? e.message : String(e) }; }
   return report;
 }
