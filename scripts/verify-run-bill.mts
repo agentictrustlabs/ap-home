@@ -34,7 +34,8 @@ if (!bill || bill.doRequests < 1) fail('the record carries no bill');
 
 const stepKeys = Object.keys(bill.byStep);
 if (!stepKeys.some((k) => k === 'plan' || /^s\d+$|^step/.test(k))) fail(`the bill's steps are not step refs: ${stepKeys.join(', ')}`);
-if (JSON.stringify(bill).match(/0x[0-9a-f]{40}|alice3|standing\.instructions|treasury\.payment/i)) fail('the bill carries content, not only numbers');
+if (JSON.stringify(bill).match(/0x[0-9a-f]{40}|alice3|nathan|usdc/i)) fail('the bill carries content — an address, a name, an argument');
+console.log(`  reads by record type: ${JSON.stringify((bill as { byRecord?: Record<string, number> }).byRecord ?? {})} · DO requests by op: ${JSON.stringify((bill as { byOp?: Record<string, number> }).byOp ?? {})}`);
 const spans = await post('/harness/spans', { addressee: ALICE, runRef });
 const names = ((spans.metrics?.vaultCalls ?? []) as Array<{ attributes: Record<string, string>; value: number }>);
 console.log(`  ap.vault.calls points: ${JSON.stringify(names)}`);

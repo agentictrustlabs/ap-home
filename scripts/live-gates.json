@@ -171,6 +171,16 @@
       "required": true,
       "paced": false,
       "timeoutSec": 240
+    },
+    {
+      "id": "verify-confirmation-room",
+      "script": "scripts/verify-confirmation-room.mts",
+      "spec": "394 W2",
+      "proves": "a confirmed choice made while addressing an organization is kept for that room and cited there on the next ask",
+      "twin": "the organization's choice is NOT read at home — the question comes back",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 420
     }
   ]
 }

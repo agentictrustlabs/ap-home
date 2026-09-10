@@ -49,10 +49,28 @@ if (endeavors[0]) {
   if (raised.decisionId) await measure('endeavor.decide (write)', 'alice', alice.homeSession, 'endeavor.decide', { endeavorId: endeavors[0].endeavorId, decisionId: raised.decisionId, outcome: 'rejected', reason: 'economics probe' });
 }
 
-if (asJson) { console.log(JSON.stringify({ org: ORG, endeavors: endeavors.length, budgetPerMin: BUDGET_PER_MIN, bills }, null, 2)); process.exit(0); }
+// ── the run's own bill (spec 396 W3): a two-turn declaration on alice's agent, read off its record, not off headers ──
+const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
+const csrf = (await j(csrfRes)) as { token?: string };
+const cookie = (csrfRes.headers.get('set-cookie') ?? '').split(';')[0];
+const home = async (path: string, body: Record<string, unknown>) => j(await fetch(`${HOME}/a2a${path}`, { method: 'POST', headers: { 'content-type': 'application/json', origin: HOME, cookie, 'x-csrf-token': csrf.token ?? '' }, body: JSON.stringify({ session: alice.homeSession, ...body }) }));
+let runBill: { vaultCalls: number; doRequests: number; byStep: Record<string, { vaultCalls: number; doRequests: number }> } | null = null;
+{
+  const ask = await home('/harness/ask', { addressee: ALICE, message: `from now on pay from alice3.treasury (economics ${Date.now().toString(36)})`, plan: { steps: [{ toolId: 'context.instruction.declare', args: { capability: 'treasury.payment.execute', value: 'alice3.treasury' } }] } });
+  const r = ask.reply as { kind?: string; runRef?: string; prompt?: { stepRef: string } } | undefined;
+  if (r?.kind === 'prompt' && r.prompt) {
+    const done = await home('/harness/ask', { addressee: ALICE, runRef: r.runRef, supplied: [{ stepRef: r.prompt.stepRef, data: { keep: 'yes' } }] });
+    const rec = await home('/harness/records', { addressee: ALICE, runRef: String(done.runRef ?? r.runRef) });
+    runBill = (rec.record?.bill as typeof runBill) ?? null;
+    await home('/harness/instructions/forget', { scope: { capability: 'treasury.payment.execute', arg: 'payer' } });
+  }
+}
+
+if (asJson) { console.log(JSON.stringify({ org: ORG, endeavors: endeavors.length, budgetPerMin: BUDGET_PER_MIN, bills, runBill }, null, 2)); process.exit(0); }
 console.log(`Missio Nexus ${ORG} · ${endeavors.length} endeavor(s) visible to a steward · vault budget ${BUDGET_PER_MIN} verified calls / min\n`);
 const w = (s: string, n: number) => s.padEnd(n);
 console.log(`${w('op', 36)}${w('who', 7)}${w('status', 8)}${w('ms', 8)}${w('vault calls', 13)}${w('throttled', 11)}${w('per minute', 12)}tools`);
 for (const b of bills) console.log(`${w(b.op, 36)}${w(b.who, 7)}${w(String(b.status), 8)}${w(String(b.ms), 8)}${w(String(b.vaultCalls), 13)}${w(String(b.throttled), 11)}${w(b.vaultCalls ? String(Math.floor(BUDGET_PER_MIN / b.vaultCalls)) : '∞', 12)}${b.tools}${b.note ? `  (${b.note})` : ''}`);
+console.log(`\na harness run's own bill (a two-turn declaration on alice's agent, off its record): ${runBill ? `${runBill.vaultCalls} vault call(s) over ${runBill.doRequests} DO request(s) · ${JSON.stringify(runBill.byStep)}` : 'no record'}`);
 const listBill = bills.find((b) => b.op === 'endeavor.list (steward)')!;
 console.log(`\nendeavor.list costs ${listBill.vaultCalls} vault calls for ${endeavors.length} endeavors (${(listBill.vaultCalls / Math.max(1, endeavors.length)).toFixed(2)} per endeavor): ${Math.floor(BUDGET_PER_MIN / Math.max(1, listBill.vaultCalls))} listings a minute before the organization's vault says "auth failed".`);

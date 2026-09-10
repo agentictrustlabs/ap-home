@@ -152,7 +152,7 @@ import type { CandidateSource } from '@agenticprimitives/intent-engagement';
 import { answerProbe } from './engagement-answer.js';
 import type { MessageV1 } from '@agenticprimitives/a2a/standard';
 import { signAsAgent } from './consult-rail.js';
-import { billed, chargeBill } from './run-bill.js';
+import { billed, chargeBill, memoRead, forgetMemo } from './run-bill.js';
 import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, firewalledMetrics, publicProvenanceOf } from './run-export.js';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
@@ -3967,7 +3967,7 @@ async function callInteractionsInternal(env: Env, principal: string, op: string,
   const res = await stub.fetch(new Request(`https://do/interactions/${principal.toLowerCase()}/${op}`, {
     method: 'POST', headers: internalHeaders(env), body: JSON.stringify(payload),
   }));
-  chargeBill(res.headers); // spec 396 W3 — the op's cost, onto the run's bill when one is open
+  chargeBill(res.headers, op); // spec 396 W3 — the op's cost, onto the run's bill when one is open
   const out = (await res.json().catch(() => ({}))) as Record<string, unknown> & { ok?: boolean; error?: string };
   if (!res.ok || out.ok === false) throw new Error(String(out.error ?? `${op} failed (${res.status})`));
   return out;
@@ -4152,10 +4152,10 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     // The asker's PRIVATE tier: their own relationships, read through their own InteractionsDO under their
     // own interactions grant, in-Worker. No client-asserted list, and nothing about who they know leaves
     // their tier (ADR-0025).
-    readSubjectRecord: async (subject: string, recordType: string) => {
+    readSubjectRecord: async (subject: string, recordType: string) => memoRead(subject, recordType, async () => {
       const out = await callInteractionsInternal(env, subject, 'internal.coordination.vaultRead', { recordType }).catch(() => null);
       return (out as { data?: unknown } | null)?.data ?? null;
-    },
+    }),
     // Spec 370 P4 — a PUBLIC op on a principal's InteractionsDO, exactly as the Home's `/connect/work`
     // route forwards it: the session (and a stewardship wire, when the act is a steward's) travel in the
     // body, and the DO derives standing, validates the command through the reducer, audits, then writes.
@@ -4172,6 +4172,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     // principal's own grant inside their own DO. Allowlisted by record type there: this cannot be
     // pointed at an arbitrary record, which is the whole reason it is safe to call for a counterparty.
     writeSubjectRecord: async (subject: string, recordType: string, record: unknown) => {
+      forgetMemo(subject, recordType); // spec 396 W4 — the run's own write drops its read memo
       try {
         const out = await callInteractionsInternal(env, subject, 'internal.coordination.vaultWrite', { recordType, record });
         return { ok: (out as { ok?: boolean }).ok === true, ...(((out as { error?: string }).error) ? { error: (out as { error?: string }).error! } : {}) };

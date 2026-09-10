@@ -68,8 +68,8 @@ const rcpt = await pub2.getTransactionReceipt({ hash: row.anchoredBy as Hex }).c
 console.log(`  chain: tx ${row.anchoredBy.slice(0, 14)}… ${rcpt!.status} in block ${rcpt!.blockNumber}`);
 if (rcpt!.status !== 'success') fail('the anchoring transaction did not succeed');
 if (mandate) {
-  const disabled = await pub2.readContract({ address: DM, abi: [{ type: 'function', name: 'disabledDelegations', stateMutability: 'view', inputs: [{ name: 'delegationHash', type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const, functionName: 'disabledDelegations', args: [mandate as Hex] }).catch((e: Error) => { fail(`the DelegationManager at ${DM} did not answer disabledDelegations: ${e.message.slice(0, 120)}`); });
-  console.log(`  chain: mandate ${mandate.slice(0, 14)}… ${disabled ? 'REVOKED' : 'not revoked'} (DelegationManager.disabledDelegations)`);
+  const disabled = await pub2.readContract({ address: DM, abi: [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ name: 'delegationHash', type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const, functionName: 'isRevoked', args: [mandate as Hex] }).catch((e: Error) => { fail(`the DelegationManager at ${DM} did not answer isRevoked: ${e.message.slice(0, 120)}`); });
+  console.log(`  chain: mandate ${mandate.slice(0, 14)}… ${disabled ? 'REVOKED' : 'not revoked'} (DelegationManager.isRevoked)`);
 } else console.log('  chain: the row names no mandate (a self-acting step) — nothing to check for revocation');
 }
 
