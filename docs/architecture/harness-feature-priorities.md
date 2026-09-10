@@ -185,7 +185,7 @@ now so the wave is not blocked when it starts.
 
 | # | Gap | Why it waits | Done when |
 | --- | --- | --- | --- |
-| **T1** | **392 W2 — the recurring-failure view.** The nightly's JSON reports clustered over time by gate × failure class (deterministic; the priorities-1.2 item) | Needs a week of nightly reports to cluster; the code is small once the artifacts exist | the first weekly report; then a developer-tools surface reads it (3.4) |
+| **T1** ◐ code shipped 09-10 | **392 W2 — the recurring-failure view.** *(the clusterer + the nightly's artifact download ship; the weekly view accrues)* The nightly's JSON reports clustered over time by gate × failure class (deterministic; the priorities-1.2 item) | Needs a week of nightly reports to cluster; the code is small once the artifacts exist | the first weekly report; then a developer-tools surface reads it (3.4) |
 | **T2** | **392 W3 — the nightly graduates to blocking** | Needs a clean fortnight | the workflow fails the build |
 | **T3** | **379 W3 — a foreign runtime (ADK `RemoteA2aAgent`) reaches one of our cards.** Conformance, not code | Needs a foreign runtime in the loop; the outside-in path (386/387) already proved the direction from an MCP host | one recorded run from a stock ADK agent against a faithnet card, added to the ledger |
 
