@@ -21,6 +21,7 @@ import { setOrgLifecycleStatus } from '../../home/org-lifecycle';
 import { orgStatusOf, STATUS_LABEL, type OrgSurface } from '../../lib/org-lifecycle';
 import type { DelegationWire } from '../../lib/delegation';
 import { vaultWriteWithDelegation } from '../../lib/vault-client';
+import { COINS, shown, type Coin } from '../../lib/coins';
 import { CONTRACTS } from '../../lib/chain';
 import { AddressChip } from '../shared/AddressChip';
 import { BuildingIcon, LandmarkIcon } from '../shared/Icons';
@@ -84,27 +85,47 @@ export function useManagedAgents(token: string | null, surface: OrgSurface = 'wo
   return { agents, loaded, version: reloadKey, reload: () => setReloadKey((k) => k + 1) };
 }
 
-/** Live USDC-balance read for a treasury SA (the demo settlement asset, 6 decimals; '—' on error).
+/** Live balance read for a treasury SA, for EVERY coin this Home knows about (`lib/coins.ts`).
+ *
+ *  It read exactly one — the demo USDC — and printed the answer as "Balance: N USDC", which is not
+ *  the balance of the account but the balance of one asset in it. A treasury holding ten thousand
+ *  Sheqels of a relying app's currency read "0.00 USDC" here, and its owner reasonably concluded the
+ *  money was gone. All the coins are read at once; one that fails costs its own row and no other.
+ *
  *  `refreshKey` forces a re-read (the address is stable, so funding wouldn't otherwise refresh it). */
-function useUsdcBalance(address?: string, refreshKey?: number): string | null {
-  const [bal, setBal] = useState<string | null>(null);
+function useCoinBalances(address?: string, refreshKey?: number): { coin: Coin; amount: bigint | null }[] {
+  const [bals, setBals] = useState<{ coin: Coin; amount: bigint | null }[]>(() => COINS.map((coin) => ({ coin, amount: null })));
   useEffect(() => {
     if (!address) return;
     let cancelled = false;
     const pub = createPublicClient({ chain: baseSepolia, transport: http('/a2a/rpc') });
-    pub.readContract({ address: CONTRACTS.mockUsdc, abi: ERC20_BALANCE_ABI, functionName: 'balanceOf', args: [address as `0x${string}`] })
-      .then((b) => { if (!cancelled) setBal(formatUnits(b as bigint, 6)); })
-      .catch(() => { if (!cancelled) setBal(null); });
+    void Promise.all(
+      COINS.map(async (coin) => {
+        try {
+          const b = await pub.readContract({ address: coin.address, abi: ERC20_BALANCE_ABI, functionName: 'balanceOf', args: [address as `0x${string}`] });
+          return { coin, amount: b as bigint };
+        } catch {
+          return { coin, amount: null };
+        }
+      }),
+    ).then((got) => { if (!cancelled) setBals(got); });
     return () => { cancelled = true; };
   }, [address, refreshKey]);
-  return bal;
+  return bals;
 }
 
 export function BalanceLine({ address, refreshKey }: { address: string; refreshKey?: number }) {
-  const bal = useUsdcBalance(address, refreshKey);
+  const bals = useCoinBalances(address, refreshKey);
+  const rows = shown(bals);
   return (
     <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>
-      Balance: <b>{bal !== null ? `${Number(bal).toFixed(2)} USDC` : '—'}</b>
+      Balance:{' '}
+      {rows.map((b, i) => (
+        <span key={b.coin.address}>
+          {i > 0 ? ' · ' : ''}
+          <b>{b.amount !== null ? `${Number(formatUnits(b.amount, b.coin.decimals)).toFixed(2)} ${b.coin.symbol}` : '—'}</b>
+        </span>
+      ))}
     </span>
   );
 }
