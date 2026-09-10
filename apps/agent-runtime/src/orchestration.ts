@@ -12,6 +12,8 @@ import { createOpenAiCompatPlanner, createOpenAiCompatComposer, createFetchOpenA
 import type { Address } from 'viem';
 // Type-only import (erased at build — no runtime cycle with index.ts).
 import type { Env } from './index.js';
+import { SpendWindow, type MeteredCandidate, type SpendReport } from './spend-window.js';
+import { internalHeaders, internalMarker, type InternalMarkerEnv } from './internal-marker.js';
 
 /** The MCP tools this agent may COMPOSE to satisfy an intent. Ids are exactly the delegation-gated demo-mcp
  *  tools (`callMcpToolViaDelegation`). The web posts a GOAL; the planner picks among THESE. */
@@ -89,7 +91,7 @@ const RULE_BASED_PLANNER: Planner = createRuleBasedPlanner([
 ]);
 
 /** The env subset the planner selection needs. */
-export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | 'ORCHESTRATION_MODEL' | 'GROQ_API_KEY' | 'ORCHESTRATION_GROQ_MODEL' | 'ORCHESTRATION_GROQ_BASE_URL' | 'ORCHESTRATION_GROQ_PROMPT_BUDGET'> & { COMPOSER_MAX_TOKENS?: string; ORCHESTRATION_ROUTE?: string; ORCHESTRATION_GROQ_TPM?: string };
+export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | 'ORCHESTRATION_MODEL' | 'GROQ_API_KEY' | 'ORCHESTRATION_GROQ_MODEL' | 'ORCHESTRATION_GROQ_BASE_URL' | 'ORCHESTRATION_GROQ_PROMPT_BUDGET' | 'OPENAI_API_KEY' | 'ORCHESTRATION_OPENAI_MODEL' | 'ORCHESTRATION_OPENAI_BASE_URL' | 'ORCHESTRATION_OPENAI_PROMPT_BUDGET'> & { COMPOSER_MAX_TOKENS?: string; ORCHESTRATION_ROUTE?: string; ORCHESTRATION_GROQ_TPM?: string; ORCHESTRATION_OPENAI_TPM?: string } & Partial<Pick<Env, 'PROVIDER_METER' | 'A2A_INTERNAL_MARKER'>>;
 
 // ── WHICH MODEL PROPOSES — spec 377 ──────────────────────────────────────────────────────────────────────
 //
@@ -99,8 +101,8 @@ export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | '
 // not credentialed throws, a provider that is named and not offered is refused, and neither lands on another.
 
 /** The providers this app knows how to construct. The id is what a turn names and the trace records. */
-export type LlmProvider = 'anthropic' | 'groq';
-export const LLM_PROVIDERS: readonly LlmProvider[] = ['anthropic', 'groq'];
+export type LlmProvider = 'anthropic' | 'groq' | 'openai';
+export const LLM_PROVIDERS: readonly LlmProvider[] = ['anthropic', 'groq', 'openai'];
 /** What `selectPlanner` reports having chosen. */
 export type PlannerKind = LlmProvider | 'rule-based';
 
@@ -110,9 +112,19 @@ export type PlannerKind = LlmProvider | 'rule-based';
  *  Llama 3.x ids were retired from it); verified live with `tool_choice: 'required'`. */
 export const GROQ_DEFAULTS = { model: 'openai/gpt-oss-120b', baseUrl: 'https://api.groq.com/openai/v1' } as const;
 
-const PROVIDER_LABEL: Record<LlmProvider, string> = { anthropic: 'Claude (Anthropic)', groq: 'GPT-OSS 120B (Groq, free)' };
-const PROVIDER_FREE: Record<LlmProvider, boolean> = { anthropic: false, groq: true };
-const PROVIDER_KEY: Record<LlmProvider, keyof PlannerEnv> = { anthropic: 'ANTHROPIC_API_KEY', groq: 'GROQ_API_KEY' };
+/** OpenAI is a SECOND configuration of the same vendor-neutral adapter — a host and a model, nothing more.
+ *  `gpt-5-mini` is the cheapest OpenAI model that plans reliably with forced tool choice (a quarter of
+ *  Haiku 4.5's input price), which is the whole reason it is offered: spec 388 routes to the cheapest
+ *  provider that carries the call, and between the free tier and Haiku there was nothing. It is a REASONING
+ *  model, so two things differ from Groq's configuration and both are the host's rule, not a preference:
+ *  the completion bound travels as `max_completion_tokens` (`max_tokens` is refused), and the bound must
+ *  leave room for the reasoning tokens the model spends before it calls a tool — hence the wider planner
+ *  ceiling in `selectPlanner`. Override with ORCHESTRATION_OPENAI_MODEL / _BASE_URL. */
+export const OPENAI_DEFAULTS = { model: 'gpt-5-mini', baseUrl: 'https://api.openai.com/v1' } as const;
+
+const PROVIDER_LABEL: Record<LlmProvider, string> = { anthropic: 'Claude (Anthropic)', groq: 'GPT-OSS 120B (Groq, free)', openai: 'GPT-5 mini (OpenAI)' };
+const PROVIDER_FREE: Record<LlmProvider, boolean> = { anthropic: false, groq: true, openai: false };
+const PROVIDER_KEY: Record<LlmProvider, keyof PlannerEnv> = { anthropic: 'ANTHROPIC_API_KEY', groq: 'GROQ_API_KEY', openai: 'OPENAI_API_KEY' };
 
 /** The ordered allowlist. An entry this app cannot construct THROWS: a typo must not silently drop a model. */
 export function llmAllowlist(env: PlannerEnv): LlmProvider[] {
@@ -143,6 +155,9 @@ export function defaultProvider(env: PlannerEnv): LlmProvider | null {
  */
 export const GROQ_FREE_PLAN_PROMPT_BUDGET = 6500;
 export function plannerPromptBudget(env: PlannerEnv, provider: LlmProvider | null): number | null {
+  // OpenAI's paid tiers bound a MINUTE, not a request, and a 400k-context model is not the binding
+  // constraint on any prompt this app builds — so no bound unless a deployment names one.
+  if (provider === 'openai') { const n = Number(env.ORCHESTRATION_OPENAI_PROMPT_BUDGET); return Number.isFinite(n) && n > 0 ? Math.floor(n) : null; }
   if (provider !== 'groq') return null;
   const raw = Number(env.ORCHESTRATION_GROQ_PROMPT_BUDGET);
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : GROQ_FREE_PLAN_PROMPT_BUDGET;
@@ -172,49 +187,132 @@ export interface RouteDecision {
 /** Groq's free plan meters tokens per MINUTE per model; the per-request budget above is derived from it. */
 export const GROQ_FREE_PLAN_TPM = 8000;
 export function providerTpm(env: PlannerEnv, p: LlmProvider): number | null {
+  // OpenAI meters a minute too, but at tier-1 volumes (hundreds of thousands of tokens) it is never the
+  // reason a call routes elsewhere. Unmetered here unless a deployment names its own ceiling.
+  if (p === 'openai') { const n = Number(env.ORCHESTRATION_OPENAI_TPM); return Number.isFinite(n) && n > 0 ? Math.floor(n) : null; }
   if (p !== 'groq') return null;
   const raw = Number(env.ORCHESTRATION_GROQ_TPM);
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : GROQ_FREE_PLAN_TPM;
 }
-// What THIS ISOLATE sent a metered provider in the last minute, by estimate. Honest about its scope: one
-// Worker isolate, not the account — a second isolate does not see it. It spares the common case (planner +
-// composer in one turn) the meter's 30-60 s wait, which is the case that actually happens.
-const SPEND_WINDOW_MS = 60_000;
-const spend = new Map<LlmProvider, Array<{ at: number; tokens: number }>>();
-export function spentThisMinute(p: LlmProvider, now = Date.now()): number {
-  const rows = (spend.get(p) ?? []).filter((r) => now - r.at < SPEND_WINDOW_MS);
-  spend.set(p, rows);
-  return rows.reduce((n, r) => n + r.tokens, 0);
+// ── WHERE THE MINUTE IS COUNTED — spec 388 W3 ────────────────────────────────────────────────────
+//
+// The route reads a rolling 60 s window of what a metered provider has already been sent. W1 kept that
+// window in this module, which made it per Worker ISOLATE: the planner and composer of ONE turn saw each
+// other, two concurrent asks did not, and on the free plan the second one paid a 429's 30-60 s wait.
+// W3 adds the SHARED window — a Durable Object, one per deployment — and the deployment's bindings choose
+// which is in use ONCE, at wiring time. That choice is configuration, never an escalation: nothing here
+// tries the object and lands on the isolate when it fails (ADR-0013). Which one served is on the trace.
+export interface SpendMeter {
+  readonly kind: 'isolate' | 'shared';
+  /** Walk the metered candidates in the route's order, take the first ELIGIBLE one whose window carries
+   *  its estimate, charge it — atomically, so two concurrent asks cannot both read an empty minute.
+   *  Reports every candidate's window as it stood when the decision was made. */
+  admit(candidates: MeteredCandidate[], now: number): Promise<SpendReport>;
+  /** Charge a provider unconditionally — the route's last resort, where nothing fit and the first offered
+   *  provider takes the call anyway. */
+  charge(provider: LlmProvider, tokens: number, now: number): Promise<void>;
 }
-export function recordSpend(p: LlmProvider, tokens: number, now = Date.now()): void {
-  spend.set(p, [...(spend.get(p) ?? []), { at: now, tokens }]);
-}
-/** Test seam. */
-export function resetSpend(): void { spend.clear(); }
 
-export function routeProvider(env: PlannerEnv, requested: LlmProvider | undefined, need: RouteNeed, now = Date.now()): RouteDecision {
+/** This isolate's own window. Honest about its scope: one Worker isolate, not the account. */
+const isolateWindow = new SpendWindow();
+export function spentThisMinute(p: LlmProvider, now = Date.now()): number { return isolateWindow.spent(p, now); }
+export function recordSpend(p: LlmProvider, tokens: number, now = Date.now()): void { isolateWindow.charge(p, tokens, now); }
+/** Test seam. */
+export function resetSpend(): void { isolateWindow.clear(); }
+
+export const ISOLATE_METER: SpendMeter = {
+  kind: 'isolate',
+  async admit(candidates, now) { return isolateWindow.admit(candidates, now); },
+  async charge(provider, tokens, now) { isolateWindow.charge(provider, tokens, now); },
+};
+
+/** The name of the one meter object a deployment keeps. The meter is an ACCOUNT-wide fact (a provider
+ *  meters the key, not the caller), so it is one object, not one per agent. */
+export const PROVIDER_METER_KEY = 'provider-meter';
+
+export function sharedMeter(ns: DurableObjectNamespace, env: InternalMarkerEnv): SpendMeter {
+  const call = async (body: unknown): Promise<SpendReport> => {
+    const stub = ns.get(ns.idFromName(PROVIDER_METER_KEY));
+    const headers = internalHeaders(env);
+    const send = () => stub.fetch('https://provider-meter.internal/', { method: 'POST', headers, body: JSON.stringify(body) });
+    let res: Response;
+    try {
+      res = await send();
+      if (!res.ok) res = await send(); // ADR-0013: one bounded retry of the SAME call, never a second mechanism
+    } catch {
+      res = await send();
+    }
+    if (!res.ok) throw new Error(`provider meter refused the ${(body as { op: string }).op} (HTTP ${res.status})`);
+    const out = (await res.json()) as { picked?: string | null; spent?: Record<string, number> };
+    return { picked: (out.picked ?? null) as string | null, spent: out.spent ?? {} };
+  };
+  return {
+    kind: 'shared',
+    async admit(candidates, now) { void now; return call({ op: 'admit', candidates }); },
+    async charge(provider, tokens, now) { void now; await call({ op: 'charge', provider, tokens }); },
+  };
+}
+
+/** The meter this deployment counts with — decided from the bindings, before any call. */
+export function meterFor(env: PlannerEnv): SpendMeter {
+  return env.PROVIDER_METER && internalMarker(env) ? sharedMeter(env.PROVIDER_METER, env) : ISOLATE_METER;
+}
+
+export async function routeProvider(
+  env: PlannerEnv,
+  requested: LlmProvider | undefined,
+  need: RouteNeed,
+  opts: { now?: number; meter?: SpendMeter } = {},
+): Promise<RouteDecision> {
+  const now = opts.now ?? Date.now();
   if (requested) { providerConfigured(env, requested); return { provider: requested, because: `${requested}: named by the turn`, considered: [] }; }
   const offered = llmAllowlist(env);
   if (!offered.length) return { provider: null, because: 'no model offered', considered: [] };
   if (routePolicy(env) === 'first') { providerConfigured(env, offered[0]!); return { provider: offered[0]!, because: `${offered[0]}: first offered (ORCHESTRATION_ROUTE=first)`, considered: [] }; }
-  const considered: RouteDecision['considered'] = [];
-  for (const p of offered) {
-    providerConfigured(env, p); // listed and keyless THROWS here too — a route may not quietly skip a misconfiguration
+
+  // Every offered provider, in order, against its per-request budget. A listed-but-keyless provider THROWS
+  // here too — a route may not quietly skip a misconfiguration.
+  const entries = offered.map((p) => {
+    providerConfigured(env, p);
     const budget = plannerPromptBudget(env, p);
-    const tpm = providerTpm(env, p);
-    const spent = tpm !== null ? spentThisMinute(p, now) : undefined;
-    const fits = (budget === null || need.estimatedTokens <= budget) && (tpm === null || need.estimatedTokens + (spent ?? 0) <= tpm);
-    considered.push({ provider: p, budget, ...(spent !== undefined ? { spentThisMinute: spent } : {}), fits });
-    if (fits) {
-      if (tpm !== null) recordSpend(p, need.estimatedTokens, now);
-      const why = budget === null ? 'no budget' : `estimate ${need.estimatedTokens} ≤ budget ${budget}${spent !== undefined ? ` and ${need.estimatedTokens}+${spent} ≤ ${tpm}/min` : ''}`;
-      return { provider: p, because: `${p} for the ${need.call}: ${why}${considered.length > 1 ? ` (${considered.slice(0, -1).map((c) => `${c.provider} would not: ${c.budget !== null && need.estimatedTokens > c.budget ? `estimate ${need.estimatedTokens} > ${c.budget}` : `${need.estimatedTokens}+${c.spentThisMinute ?? 0} > ${providerTpm(env, c.provider)}/min`}`).join('; ')})` : ''}`, considered };
-    }
+    return { provider: p, budget, tpm: providerTpm(env, p), budgetFits: budget === null || need.estimatedTokens <= budget };
+  });
+  // The walk stops at the first UNMETERED provider whose budget carries the call: it needs no meter, so
+  // nothing past it is ever consulted. Everything before it that is metered goes to the meter in one call.
+  const stop = entries.findIndex((e) => e.budgetFits && e.tpm === null);
+  const examined = stop === -1 ? entries : entries.slice(0, stop + 1);
+  const candidates: MeteredCandidate[] = examined
+    .filter((e) => e.tpm !== null)
+    .map((e) => ({ provider: e.provider, tpm: e.tpm!, tokens: need.estimatedTokens, eligible: e.budgetFits }));
+  const meter = opts.meter ?? meterFor(env);
+  const report = candidates.length ? await meter.admit(candidates, now) : { picked: null, spent: {} as Record<string, number> };
+
+  const considered: RouteDecision['considered'] = examined.map((e) => {
+    const spent = e.tpm !== null ? (report.spent[e.provider] ?? 0) : undefined;
+    return {
+      provider: e.provider,
+      budget: e.budget,
+      ...(spent !== undefined ? { spentThisMinute: spent } : {}),
+      fits: e.budgetFits && (e.tpm === null || need.estimatedTokens + (spent ?? 0) <= e.tpm),
+    };
+  });
+  const winner = (report.picked as LlmProvider | null) ?? (stop === -1 ? null : entries[stop]!.provider);
+  if (winner) {
+    const at = considered.findIndex((c) => c.provider === winner);
+    const mine = considered[at]!;
+    const before = considered.slice(0, at);
+    const why = mine.budget === null ? 'no budget' : `estimate ${need.estimatedTokens} ≤ budget ${mine.budget}${mine.spentThisMinute !== undefined ? ` and ${need.estimatedTokens}+${mine.spentThisMinute} ≤ ${providerTpm(env, winner)}/min` : ''}`;
+    const rejected = before.length ? ` (${before.map((c) => `${c.provider} would not: ${c.budget !== null && need.estimatedTokens > c.budget ? `estimate ${need.estimatedTokens} > ${c.budget}` : `${need.estimatedTokens}+${c.spentThisMinute ?? 0} > ${providerTpm(env, c.provider)}/min`}`).join('; ')})` : '';
+    return { provider: winner, because: `${winner} for the ${need.call}: ${why}${rejected}`, considered: considered.slice(0, at + 1) };
   }
   // Nothing carries it: the first offered provider takes it, made to fit (the prompt fitter records every drop).
   const first = offered[0]!;
-  if (providerTpm(env, first) !== null) recordSpend(first, need.estimatedTokens, now);
-  return { provider: first, because: `${first} for the ${need.call}: no offered provider carries ${need.estimatedTokens} tokens (${considered.map((c) => `${c.provider} budget ${c.budget ?? '∞'}${c.spentThisMinute !== undefined ? `, spent ${c.spentThisMinute}` : ''}`).join('; ')}) — first offered, prompt fitted`, considered };
+  if (providerTpm(env, first) !== null) await meter.charge(first, need.estimatedTokens, now);
+  return {
+    provider: first,
+    because: `${first} for the ${need.call}: no offered provider carries ${need.estimatedTokens} tokens (${considered.map((c) => `${c.provider} budget ${c.budget ?? '∞'}${c.spentThisMinute !== undefined ? `, spent ${c.spentThisMinute}` : ''}`).join('; ')}) — first offered, prompt fitted`,
+    considered,
+  };
 }
 
 /** Spec 388 W2 — the WIDEST prompt an offered provider carries, for sizing what a prompt may hold before it is routed
@@ -233,7 +331,9 @@ export function widestPromptBudget(env: PlannerEnv, requested?: LlmProvider): nu
 
 /** The concrete model a provider runs — reported on the trace, never re-derived there. */
 export function modelFor(env: PlannerEnv, p: LlmProvider): string {
-  return p === 'anthropic' ? (env.ORCHESTRATION_MODEL || ANTHROPIC_DEFAULT_MODEL) : (env.ORCHESTRATION_GROQ_MODEL || GROQ_DEFAULTS.model);
+  if (p === 'anthropic') return env.ORCHESTRATION_MODEL || ANTHROPIC_DEFAULT_MODEL;
+  if (p === 'openai') return env.ORCHESTRATION_OPENAI_MODEL || OPENAI_DEFAULTS.model;
+  return env.ORCHESTRATION_GROQ_MODEL || GROQ_DEFAULTS.model;
 }
 
 /**
@@ -284,6 +384,13 @@ function groqClient(env: PlannerEnv): OpenAiCompatLike {
   // is the difference between the question answering slowly and never — so the bound is a minute here, not
   // the adapter's 30s. A longer wait, or a second 429, still surfaces as the refusal it is.
   return createFetchOpenAiCompatClient({ apiKey: env.GROQ_API_KEY!, baseUrl: env.ORCHESTRATION_GROQ_BASE_URL || GROQ_DEFAULTS.baseUrl, waitOn429UpToSeconds: 60 });
+}
+
+function openAiClient(env: PlannerEnv): OpenAiCompatLike {
+  // `max_completion_tokens`: OpenAI's reasoning models REFUSE `max_tokens` outright (HTTP 400), so this is
+  // the host's rule travelling as configuration, not a preference. The 429 wait stays the adapter's default —
+  // a paid tier's minute is not the free plan's, and a long wait here would hide a real rate problem.
+  return createFetchOpenAiCompatClient({ apiKey: env.OPENAI_API_KEY!, baseUrl: env.ORCHESTRATION_OPENAI_BASE_URL || OPENAI_DEFAULTS.baseUrl, tokenLimitParam: 'max_completion_tokens' });
 }
 
 /** spec 327 §4b / 334 §6 — prepend the org's steward-authored playbook AS CONTEXT, keeping the
@@ -338,6 +445,16 @@ export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string; 
   const cap = (env.COMPOSER_MAX_TOKENS ?? '').trim();
   if (cap && !/^\d{2,5}$/.test(cap)) throw new Error(`COMPOSER_MAX_TOKENS must be a number of tokens, got ${JSON.stringify(cap)}`);
   const maxTokens = cap ? { maxTokens: Number(cap) } : {};
+  if (p === 'openai') {
+    return createOpenAiCompatComposer({
+      client: openAiClient(env), model: modelFor(env, 'openai'), label: 'openai',
+      // A reasoning model spends completion tokens thinking BEFORE it writes, and the bound covers both —
+      // so the deployment's reply cap gets the same headroom the planner gets, or a long composition ends
+      // mid-sentence with nothing said about why.
+      maxEvidenceChars: 24_000, ...(maxTokens.maxTokens ? { maxTokens: maxTokens.maxTokens + OPENAI_REASONING_HEADROOM } : {}),
+      ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
+    });
+  }
   if (p === 'groq') {
     return createOpenAiCompatComposer({
       client: groqClient(env), model: modelFor(env, 'groq'), label: 'groq',
@@ -356,14 +473,29 @@ export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string; 
 }
 
 /** Spec 388 — the composer for THIS reply, chosen by what it must carry (the evidence), with the reason recorded. */
-export function selectComposerRouted(env: PlannerEnv, opts: { systemPrompt?: string; provider?: LlmProvider; need: RouteNeed }): { composer: AnswerComposer | null; route: RouteDecision } {
-  const route = routeProvider(env, opts.provider, opts.need);
+export async function selectComposerRouted(env: PlannerEnv, opts: { systemPrompt?: string; provider?: LlmProvider; need: RouteNeed }): Promise<{ composer: AnswerComposer | null; route: RouteDecision }> {
+  const route = await routeProvider(env, opts.provider, opts.need);
   if (route.provider === null) return { composer: null, route };
   return { composer: selectComposer(env, { ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}), provider: route.provider }), route };
 }
 
+/** What a reasoning model may spend THINKING before it calls a tool. The completion bound covers reasoning
+ *  and output together, so a 1,024-token planner ceiling that is enough for Groq's gpt-oss (whose reasoning
+ *  is billed in the same completion but rarely long at `low`) can be swallowed whole by a gpt-5 turn,
+ *  leaving no tool call and a `no_plan` that looks like the planner refusing. */
+export const OPENAI_REASONING_HEADROOM = 2048;
+
 export function selectPlanner(env: PlannerEnv, opts?: { systemPrompt?: string; maxTokens?: number; provider?: LlmProvider }): { planner: Planner; kind: PlannerKind; model?: string } {
   const p = providerFor(env, opts?.provider);
+  if (p === 'openai') {
+    const planner = createOpenAiCompatPlanner({
+      client: openAiClient(env), model: modelFor(env, 'openai'), label: 'openai',
+      ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
+      maxTokens: (opts?.maxTokens ?? 1024) + OPENAI_REASONING_HEADROOM,
+      reasoningEffort: 'low',
+    });
+    return { planner, kind: 'openai', model: modelFor(env, 'openai') };
+  }
   if (p === 'groq') {
     const planner = createOpenAiCompatPlanner({
       client: groqClient(env), model: modelFor(env, 'groq'), label: 'groq',

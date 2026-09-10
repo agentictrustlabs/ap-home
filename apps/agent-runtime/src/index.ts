@@ -217,6 +217,7 @@ export { SessionStoreDO };
 export { A2aTaskDO } from './a2a-task-do.js';
 export { InteractionsDO } from './interactions-do.js';
 export { HuddleRoomDO } from './huddle-room-do.js';
+export { ProviderMeterDO } from './provider-meter-do.js';
 
 export interface Env {
   /** Spec 369 — Workers AI, for HEARING (`/harness/hear`, Whisper). Optional: unbound ⇒ 503 and the
@@ -233,6 +234,16 @@ export interface Env {
   INTERACTIONS: DurableObjectNamespace;
   /** Spec 378 — one huddle room per scope key. */
   HUDDLES?: DurableObjectNamespace;
+  /** Spec 388 W3 — the deployment's shared per-minute token meter (one object). Unbound ⇒ each isolate
+   *  counts its own minute, which is W1's behaviour and is said so on the trace. */
+  PROVIDER_METER?: DurableObjectNamespace;
+  /** Spec 388 — the third offered provider: OpenAI's cheapest tool-calling model, between the free tier
+   *  and Haiku. */
+  OPENAI_API_KEY?: string;
+  ORCHESTRATION_OPENAI_MODEL?: string;
+  ORCHESTRATION_OPENAI_BASE_URL?: string;
+  ORCHESTRATION_OPENAI_PROMPT_BUDGET?: string;
+  ORCHESTRATION_OPENAI_TPM?: string;
   REALTIMEKIT_ACCOUNT_ID?: string;
   REALTIMEKIT_APP_ID?: string;
   REALTIMEKIT_API_TOKEN?: string;

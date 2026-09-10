@@ -17,7 +17,7 @@ const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME }
 const csrf = (await j(csrfRes)) as { token?: string };
 const H = { 'content-type': 'application/json', origin: HOME, cookie: (csrfRes.headers.get('set-cookie') ?? '').split(';')[0], 'x-csrf-token': csrf.token ?? '' };
 type Decision = { provider: string | null; because: string; considered: Array<{ provider: string; budget: number | null; spentThisMinute?: number; fits: boolean }> };
-type Reply = { kind: string; text?: string; error?: string; plannerTrace?: { planner?: string; model?: string; toolsExposed?: string[]; plan?: Array<{ toolId: string }>; promptBudget?: { tokens: number; estimated: number; trimmed: string[] }; route?: { policy: string; planner?: Decision; composer?: Decision; structured?: Decision[] } } };
+type Reply = { kind: string; text?: string; error?: string; plannerTrace?: { planner?: string; model?: string; toolsExposed?: string[]; plan?: Array<{ toolId: string }>; promptBudget?: { tokens: number; estimated: number; trimmed: string[] }; route?: { policy: string; meter?: string; planner?: Decision; composer?: Decision; structured?: Decision[] } } };
 const t0 = Date.now();
 const r = await j(await fetch(`${HOME}/a2a/harness/ask`, { method: 'POST', headers: H, body: JSON.stringify({ session: si.homeSession, addressee: String(si.agent).toLowerCase(), message: ASK }) })) as { reply?: Reply; error?: string };
 const rep = r.reply;
@@ -27,7 +27,7 @@ console.log(`${HANDLE} asked: "${ASK}"\n  ${((Date.now() - t0) / 1000).toFixed(1
 console.log(`  said: ${String(rep!.text ?? '').replace(/\s+/g, ' ').slice(0, 300)}`);
 const route = tr?.route;
 if (!route) fail('the trace carries no route — is ORCHESTRATION_ROUTE set on this deployment?');
-console.log(`\n── the route (policy ${route!.policy}) ──`);
+console.log(`\n── the route (policy ${route!.policy}; the minute counted by the ${route!.meter ?? 'isolate (no meter field — pre-W3 deployment)'} meter) ──`);
 const line = (label: string, d?: Decision) => { if (!d) return; console.log(`  ${label.padEnd(12)} → ${d.provider ?? 'none'}\n  ${' '.repeat(12)}   ${d.because}`); };
 line('planner', route!.planner);
 for (const [i, d] of (route!.structured ?? []).entries()) line(`structured#${i + 1}`, d);

@@ -61,7 +61,7 @@ import { RELATIONSHIP_TYPE, ROLE } from '@agenticprimitives/agent-relationships'
 import type { AuditSink } from '@agenticprimitives/audit';
 import { enforcersFromEnv } from './org-wire.js';
 import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a';
-import { routeProvider, routePolicy, selectPlanner, selectComposer, defaultProvider, plannerPromptBudget, type LlmProvider, type RoutePolicy, type RouteDecision, type RouteNeed } from './orchestration.js';
+import { routeProvider, routePolicy, meterFor, selectPlanner, selectComposer, defaultProvider, plannerPromptBudget, type LlmProvider, type RoutePolicy, type RouteDecision, type RouteNeed } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from '@agenticprimitives/context';
 import { structuredCallFor } from './context-wiring.js';
 import type { DefinitionToolV1 } from '@agenticprimitives/capability-claims';
@@ -2112,7 +2112,7 @@ export type AskReplyVariant =
  */
 export interface PlannerTraceV1 {
   /** Who proposed the plan: the screen (supplied), a compiled one-correct-plan shape, or the model. */
-  planner: 'supplied' | 'compiled' | 'anthropic' | 'groq' | 'rule-based' | string;
+  planner: 'supplied' | 'compiled' | 'anthropic' | 'groq' | 'openai' | 'rule-based' | string;
   /** Spec 377 — the concrete model the planner ran (`openai/gpt-oss-120b`, `claude-haiku-4-5-20251001`). Absent
    *  for supplied / compiled / rule-based plans. Display only. */
   model?: string;
@@ -2131,7 +2131,7 @@ export interface PlannerTraceV1 {
    *  by and every drop taken, in order (`fitPlannerPrompt`). Absent ⇒ no budget applied. */
   promptBudget?: { tokens: number; estimated: number; trimmed: string[] };
   /** Spec 388 — which provider carried the planner and the composer, and why (the numbers beside the reason). */
-  route?: { policy: RoutePolicy; planner?: RouteDecision; composer?: RouteDecision; /** Spec 388 W2 — each structured call the run's steps made (the KB and vault choosers), in order. */ structured?: RouteDecision[] };
+  route?: { policy: RoutePolicy; /** Spec 388 W3 — where the minute was counted: this isolate's own window, or the deployment's shared meter. */ meter?: 'isolate' | 'shared'; planner?: RouteDecision; composer?: RouteDecision; /** Spec 388 W2 — each structured call the run's steps made (the KB and vault choosers), in order. */ structured?: RouteDecision[] };
   /** Every admission verdict, in order — a refused plan shows what was proposed and why it was refused. */
   admission: Array<{ refused: Array<{ code: string; message: string; stepIndex?: number; toolId?: string }>; replanned: boolean }>;
   /** The plan that ran (or was refused last), as the executor received it BEFORE argument resolution. */
@@ -3154,7 +3154,7 @@ async function askReplyForInner(env: HarnessEnv, input: {
   surface?: AskScopeV1;
   composer?: AnswerComposer | null;
   /** Spec 388 — the composer chosen for THIS reply by the evidence it must carry; the route is recorded on the trace. */
-  composerFor?: (need: RouteNeed) => { composer: AnswerComposer | null; route: RouteDecision };
+  composerFor?: (need: RouteNeed) => Promise<{ composer: AnswerComposer | null; route: RouteDecision }>;
   /** Read-only checks that spare a person a ceremony whose outcome is already knowable (spec 352 §2).
    *  Absent ⇒ no early refusal; the chain still decides. */
   deps?: HarnessDeps;
@@ -3427,7 +3427,7 @@ async function askReplyForInner(env: HarnessEnv, input: {
     if (input.composerFor) {
       // The evidence is what the composer carries (chars/4, plus its own doctrine); the route names who carries it.
       const need: RouteNeed = { call: 'composer', estimatedTokens: Math.ceil(JSON.stringify(r.steps).length / 4) + 800 };
-      const routed = input.composerFor(need);
+      const routed = await input.composerFor(need);
       composer = routed.composer;
       if (input.plannerTrace) input.plannerTrace.route = { ...(input.plannerTrace.route ?? { policy: 'first' }), composer: routed.route };
     }
@@ -4085,8 +4085,8 @@ step is then handed to that agent under authority the person grants; leave it ou
           // prompt's estimate against each offered provider's budget and this minute's spend. A provider that
           // carries the whole prompt gets it untrimmed; only when none does is the first one served a fitted prompt.
           const user = `Goal: ${pin.intent.goal}\nContext: ${JSON.stringify(pin.intent.context ?? {})}`;
-          const route = routeProvider(env as never, input.provider, { call: 'planner', estimatedTokens: estimatePromptTokens(withPlaybook, pin.tools, user) });
-          trace.route = { ...(trace.route ?? { policy: routePolicy(env as never) }), planner: route };
+          const route = await routeProvider(env as never, input.provider, { call: 'planner', estimatedTokens: estimatePromptTokens(withPlaybook, pin.tools, user) });
+          trace.route = { ...(trace.route ?? { policy: routePolicy(env as never) }), meter: meterFor(env as never).kind, planner: route };
           const provider = route.provider ?? undefined;
           const chosen = provider && provider !== selected.kind ? selectPlanner(env as never, { systemPrompt: withPlaybook, maxTokens: ASK_PLANNER_MAX_TOKENS, provider }) : selected;
           plannerUsed = chosen.kind; plannerModel = chosen.model;

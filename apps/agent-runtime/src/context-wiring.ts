@@ -6,7 +6,7 @@
 // WHICH vendor answers the one structured model call — the same provider the turn plans with (spec 377),
 // so the two adapter packages (`orchestration-anthropic`, `orchestration-openai-compat`) remain the only
 // vendor-touching ones.
-import { defaultProvider, providerConfigured, modelFor, GROQ_DEFAULTS, routePolicy, routeProvider, llmAllowlist, type PlannerEnv, type LlmProvider, type RouteDecision } from './orchestration.js';
+import { defaultProvider, providerConfigured, modelFor, GROQ_DEFAULTS, OPENAI_DEFAULTS, OPENAI_REASONING_HEADROOM, routePolicy, routeProvider, llmAllowlist, type PlannerEnv, type LlmProvider, type RouteDecision } from './orchestration.js';
 import { createFetchAnthropicClient } from '@agenticprimitives/orchestration-anthropic';
 import { createFetchOpenAiCompatClient, createOpenAiCompatStructuredCall } from '@agenticprimitives/orchestration-openai-compat';
 import type { DiscoveryFetch, StructuredCall } from '@agenticprimitives/context';
@@ -38,7 +38,7 @@ export function structuredCallFor(env: ModelEnv, provider?: LlmProvider, opts: {
     const callOn = (p: LlmProvider): StructuredCall => { let c = built.get(p); if (!c) { c = (opts.make ?? ((q: LlmProvider) => providerStructuredCall(env, q)))(p); built.set(p, c); } return c; };
     return async (input) => {
       const estimatedTokens = Math.ceil((input.system.length + input.messages.reduce((n, m) => n + m.content.length, 0)) / 4 + JSON.stringify(input.tool).length / 3.5);
-      const route = routeProvider(env, undefined, { call: 'structured', estimatedTokens });
+      const route = await routeProvider(env, undefined, { call: 'structured', estimatedTokens });
       opts.onRoute?.(route);
       if (route.provider === null) throw new Error('no model offered for the structured call');
       return callOn(route.provider)(input);
@@ -52,6 +52,12 @@ export function structuredCallFor(env: ModelEnv, provider?: LlmProvider, opts: {
 /** One provider's structured call — the vendor-touching half, unchanged from spec 358 W1. */
 function providerStructuredCall(env: ModelEnv, p: LlmProvider): StructuredCall {
   providerConfigured(env, p);
+  if (p === 'openai') {
+    return createOpenAiCompatStructuredCall({
+      client: createFetchOpenAiCompatClient({ apiKey: env.OPENAI_API_KEY!, baseUrl: env.ORCHESTRATION_OPENAI_BASE_URL || OPENAI_DEFAULTS.baseUrl, tokenLimitParam: 'max_completion_tokens' }),
+      model: modelFor(env, 'openai'), label: 'openai', reasoningEffort: 'low', maxTokens: 1500 + OPENAI_REASONING_HEADROOM,
+    });
+  }
   if (p === 'groq') {
     return createOpenAiCompatStructuredCall({
       client: createFetchOpenAiCompatClient({ apiKey: env.GROQ_API_KEY!, baseUrl: env.ORCHESTRATION_GROQ_BASE_URL || GROQ_DEFAULTS.baseUrl }),

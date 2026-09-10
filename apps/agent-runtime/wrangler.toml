@@ -24,6 +24,7 @@ bindings = [
   { name = "A2A_TASKS", class_name = "A2aTaskDO" },
   { name = "INTERACTIONS", class_name = "InteractionsDO" },
   { name = "HUDDLES", class_name = "HuddleRoomDO" },
+  { name = "PROVIDER_METER", class_name = "ProviderMeterDO" },
 ]
 
 [[migrations]]
@@ -306,6 +307,7 @@ bindings = [
   { name = "A2A_TASKS", class_name = "A2aTaskDO" },
   { name = "INTERACTIONS", class_name = "InteractionsDO" },
   { name = "HUDDLES", class_name = "HuddleRoomDO" },
+  { name = "PROVIDER_METER", class_name = "ProviderMeterDO" },
   # spec 290 §8/§9 — CROSS-SCRIPT binding to demo-mcp's SmartAgentBudgetDO so the A2A + MCP paths share
   # ONE hard-budget authority per Smart Agent. demo-mcp owns the class + migration; demo-a2a only binds.
   { name = "SA_BUDGET", class_name = "SmartAgentBudgetDO", script_name = "demo-mcp-production" },
@@ -363,6 +365,10 @@ new_sqlite_classes = ["InteractionsDO"]
 tag = "v4"
 new_sqlite_classes = ["HuddleRoomDO"]
 
+[[migrations]]
+tag = "v5"
+new_sqlite_classes = ["ProviderMeterDO"]
+
 # ── FAITHNET (Azure faithchain 34348) — gcp-kms custody, Home on faithnet.me, backend on faithnet.io ──
 [env.faithnet]
 name = "demo-a2a-faithnet"
@@ -408,6 +414,11 @@ CHAIN_ID = "34348"
 # Anthropic off (its key secret stays set either way).
 # 2026-09-10: the Anthropic account is OUT OF CREDIT (HTTP 400 "credit balance is too low", surfaced by the spec 387 flow trace) — Groq
 # leads until credits are added; Anthropic stays offered. Restore "anthropic,groq" when billing is fixed.
+# 2026-09-10 — a THIRD provider between the free tier and Haiku: OpenAI's gpt-5-mini (a quarter of Haiku's input price).
+# The offer is walked cheapest-first by the route; anthropic is reached only when named or when nothing cheaper carries the call.
+# OPENAI_API_KEY is a secret (`wrangler secret put`), never a --var; ORCHESTRATION_OPENAI_MODEL / _PROMPT_BUDGET / _TPM are optional.
+# 2026-09-10 (later): the OpenAI account has NO CREDITS (HTTP 429 credit_balance_exhausted on the first routed planner call) and the
+# route surfaces that, never skips it (ADR-0013) — so openai is OFF the offer until credits are added. Flip to "groq,openai,anthropic".
 ORCHESTRATION_LLM = "groq,anthropic"
 # Spec 388 — the cheapest OFFERED provider that carries each call, decided before the request from the prompt estimate, the
 # per-request budget and this minute's spend; recorded on the trace with its reason. A route, never a fallback (ADR-0013).
@@ -513,6 +524,7 @@ bindings = [
   { name = "A2A_TASKS", class_name = "A2aTaskDO" },
   { name = "INTERACTIONS", class_name = "InteractionsDO" },
   { name = "HUDDLES", class_name = "HuddleRoomDO" },
+  { name = "PROVIDER_METER", class_name = "ProviderMeterDO" },
   { name = "SA_BUDGET", class_name = "SmartAgentBudgetDO", script_name = "demo-mcp-faithnet" },
 ]
 
@@ -796,6 +808,7 @@ bindings = [
   { name = "A2A_TASKS", class_name = "A2aTaskDO" },
   { name = "INTERACTIONS", class_name = "InteractionsDO" },
   { name = "HUDDLES", class_name = "HuddleRoomDO" },
+  { name = "PROVIDER_METER", class_name = "ProviderMeterDO" },
   { name = "SA_BUDGET", class_name = "SmartAgentBudgetDO", script_name = "demo-mcp-faithnet" },
 ]
 
