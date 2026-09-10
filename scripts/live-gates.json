@@ -161,6 +161,16 @@
       "required": true,
       "paced": false,
       "timeoutSec": 300
+    },
+    {
+      "id": "verify-run-bill",
+      "script": "scripts/verify-run-bill.mts",
+      "spec": "396 W3",
+      "proves": "a run's record carries its own bill — vault calls and DO requests by the step that made them — and its metrics carry ap.vault.calls",
+      "twin": "the bill is numbers and step refs only — no record type, no argument, no address",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 240
     }
   ]
 }

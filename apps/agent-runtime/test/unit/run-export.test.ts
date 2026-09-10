@@ -94,7 +94,7 @@ describe('spec 390 W4 — the metrics body goes to the metrics endpoint when one
     expect(urls).toEqual(['https://collector.example/v1/traces', 'https://collector.example/v1/metrics']);
     expect(r.metrics).toEqual({ points: 3, sent: true });
     const names = (metricsBody as { resourceMetrics: Array<{ scopeMetrics: Array<{ metrics: Array<{ name: string }> }> }> }).resourceMetrics[0]!.scopeMetrics[0]!.metrics.map((m) => m.name);
-    expect(names).toEqual(['ap.harness.runs', 'ap.harness.verdicts', 'ap.harness.step.duration', 'ap.model.calls']);
+    expect(names).toEqual(['ap.harness.runs', 'ap.harness.verdicts', 'ap.harness.step.duration', 'ap.model.calls', 'ap.vault.calls']);
     expect(JSON.stringify(metricsBody)).not.toContain('nathan');
   });
 });

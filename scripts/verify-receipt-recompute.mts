@@ -11,6 +11,8 @@
  * receipt cannot borrow a real run's anchor.
  */
 import { receiptDigest, type StepReceipt } from '../packages/orchestration/src/index.js';
+import { createPublicClient, http, defineChain, type Hex } from 'viem';
+
 
 const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
 const A2A = process.env.A2A_URL ?? 'https://a2a.faithnet.io';
@@ -50,10 +52,31 @@ console.log(`  recomputed ${digest.slice(0, 14)}… → ${row ? `anchored by ${r
 if (!row) fail(`no public row anchors the recomputed digest: ${JSON.stringify(p.rows).slice(0, 300)}`);
 if (row.anchoredBy !== held.tx) fail(`the row's anchor ${row.anchoredBy} is not the transaction the holder saw (${held.tx})`);
 
+// ── the chain, with none of our services trusted: the transaction is mined and succeeded; the mandate is not revoked ──
+// A chain RPC the HOLDER trusts — any node of the chain. The estate's public gateway (rpc.faithnet.io) takes an app
+// token for rate control, so the chain half runs when this run holds an RPC (`RPC_URL`, token included) and is
+// SAID to be unchecked otherwise — never assumed. The nightly runner holds no secrets (spec 392), so there the digest
+// and anchor equality are the gate and the chain read is the operator's to run with an RPC of their own.
+const RPC = process.env.RPC_URL;
+const DM = (process.env.DELEGATION_MANAGER ?? '0x710cb1bF08C234Df397e0910331e0A29710EF4F7') as `0x${string}`;
+const mandate = (row as { mandate?: string }).mandate;
+if (!RPC) console.log(`  chain: NOT CHECKED — this run holds no chain RPC (set RPC_URL to a node of chain 34348 to confirm the transaction and the mandate's revocation state yourself)${mandate ? `; the row names mandate ${mandate.slice(0, 14)}…` : ''}`);
+else {
+const chain = defineChain({ id: 34348, name: 'faithchain', nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 }, rpcUrls: { default: { http: [RPC] } } });
+const pub2 = createPublicClient({ chain, transport: http(RPC) });
+const rcpt = await pub2.getTransactionReceipt({ hash: row.anchoredBy as Hex }).catch((e: Error) => { fail(`the anchor ${row.anchoredBy} is not on the chain at ${RPC}: ${e.message.slice(0, 120)}`); });
+console.log(`  chain: tx ${row.anchoredBy.slice(0, 14)}… ${rcpt!.status} in block ${rcpt!.blockNumber}`);
+if (rcpt!.status !== 'success') fail('the anchoring transaction did not succeed');
+if (mandate) {
+  const disabled = await pub2.readContract({ address: DM, abi: [{ type: 'function', name: 'disabledDelegations', stateMutability: 'view', inputs: [{ name: 'delegationHash', type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const, functionName: 'disabledDelegations', args: [mandate as Hex] }).catch((e: Error) => { fail(`the DelegationManager at ${DM} did not answer disabledDelegations: ${e.message.slice(0, 120)}`); });
+  console.log(`  chain: mandate ${mandate.slice(0, 14)}… ${disabled ? 'REVOKED' : 'not revoked'} (DelegationManager.disabledDelegations)`);
+} else console.log('  chain: the row names no mandate (a self-acting step) — nothing to check for revocation');
+}
+
 // ── twin: a tampered receipt matches no row ──
 const tampered: StepReceipt = { ...held.receipt, toolId: `${held.receipt.toolId}.tampered` };
 const tamperedDigest = await receiptDigest(tampered);
 const borrowed = (p.rows as Array<{ receiptDigest?: string }>).find((x) => x.receiptDigest === tamperedDigest);
 console.log(`  tampered (toolId changed) ${tamperedDigest.slice(0, 14)}… → ${borrowed ? 'MATCHED A ROW' : 'no row'}`);
 if (borrowed || tamperedDigest === digest) fail('a tampered receipt borrowed a real anchor');
-console.log(`\n✓ spec 395 W2: the holder recomputed the receipt's digest and the agent's public projection — no session — named the transaction that anchors it; a receipt changed in one field anchors nothing.`);
+console.log(`\n✓ spec 395 W2: the holder recomputed the receipt's digest; the agent's public projection — no session — named the transaction that anchors it; ${RPC ? 'the chain confirmed the transaction and the mandate\'s revocation state with none of our services trusted; ' : 'the chain half is the holder\'s to run with an RPC of their own; '}a receipt changed in one field anchors nothing.`);

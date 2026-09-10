@@ -66,7 +66,7 @@ export async function publicProvenanceOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, ag
 /** Spec 390 W4 — the firewalled metrics of a record: four instruments, one delta point each per attribute set. */
 export function firewalledMetrics(record: RunRecordV1): RunMetricsV1 {
   const m = metricsOf(record);
-  assertMetricsFirewalled([...m.runs, ...m.verdicts, ...m.stepDuration, ...m.modelCalls], record);
+  assertMetricsFirewalled([...m.runs, ...m.verdicts, ...m.stepDuration, ...m.modelCalls, ...m.vaultCalls], record);
   return m;
 }
 

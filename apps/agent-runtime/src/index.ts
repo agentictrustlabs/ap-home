@@ -9,7 +9,7 @@ import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 
 import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, forgetConfirmation, CONFIRMATION_RECORD, forgetInstruction, STANDING_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1 } from '@agenticprimitives/context';
 import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
-import { recordOf, replayingInvoker, traceContextOf, type RunPlannerSummaryV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent } from '@agenticprimitives/orchestration';
+import { recordOf, replayingInvoker, traceContextOf, type RunPlannerSummaryV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent, type RunBillV1 } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
 import { recordFormOf, rehydrateExecuted } from './artifact-store.js';
 import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken } from './triggers.js';
@@ -152,6 +152,7 @@ import type { CandidateSource } from '@agenticprimitives/intent-engagement';
 import { answerProbe } from './engagement-answer.js';
 import type { MessageV1 } from '@agenticprimitives/a2a/standard';
 import { signAsAgent } from './consult-rail.js';
+import { billed, chargeBill } from './run-bill.js';
 import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, firewalledMetrics, publicProvenanceOf } from './run-export.js';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
@@ -1644,7 +1645,7 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
   const deps = harnessDeps(env, buildAuditSink(env));
   deps.addresseeKind = await deps.agentTypeOf?.(input.addressee).catch(() => null) ?? null;
   const intent = input.intent ?? { goal: input.ask, context: { addressee: input.addressee, asker: input.agent, ...(input.context ?? {}) } };
-  const { result, interactionFor, trace, tools, events, presentedRefs } = await runUnderMandate(env as unknown as HarnessEnv, deps, {
+  const { result, interactionFor, trace, tools, events, presentedRefs, bill } = await runUnderMandateBilled(env as unknown as HarnessEnv, deps, {
     intent, presented: input.resume?.presented ?? null, person: input.agent, runRef: input.runRef, addressee: input.addressee,
     ...(input.traceContext ? { traceContext: input.traceContext } : {}),
     ...(input.resume?.plan ? { plan: input.resume.plan } : input.plan ? { plan: input.plan } : {}),
@@ -1671,7 +1672,7 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
   // a look-back, never the run.
   try {
     const kept = await recordFormOf(env, deps, input.addressee, input.runRef, result as never);
-    const record = recordOf({ runRef: input.runRef, intent, result: kept.result, events, presented: (input.resume?.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), ...(input.traceContext ? { traceContext: input.traceContext } : {}), planner: plannerSummaryOf(trace), ...(input.receivedAt ? { receivedAt: input.receivedAt } : {}), offloaded: kept.offloaded });
+    const record = recordOf({ runRef: input.runRef, intent, result: kept.result, events, presented: (input.resume?.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), ...(input.traceContext ? { traceContext: input.traceContext } : {}), planner: plannerSummaryOf(trace), ...(input.receivedAt ? { receivedAt: input.receivedAt } : {}), offloaded: kept.offloaded, bill });
     await putRecord(env as never, input.addressee, record);
     await exportRun(env, { writeSubjectRecord: deps.writeSubjectRecord }, input.addressee, record)
       .then((r) => putRecord(env as never, input.addressee, { ...record, export: r })).catch(() => undefined);
@@ -2944,7 +2945,7 @@ app.post('/harness/ask', async (c) => {
       progressChain = progressChain.then(() => appendProgress(c.env as never, addressee, runRef, askerSa, full)).catch(() => undefined);
       c.executionCtx.waitUntil(progressChain);
     };
-    const { result, resolved, interactionFor, trace, tools: offeredTools, events: runEvents, presentedRefs, playbook: askedPlaybook } = await runUnderMandate(c.env as unknown as HarnessEnv, askDeps, {
+    const { result, resolved, interactionFor, trace, tools: offeredTools, events: runEvents, presentedRefs, playbook: askedPlaybook, bill } = await runUnderMandateBilled(c.env as unknown as HarnessEnv, askDeps, {
       traceContext: traceContextOf(c.req.raw.headers),
       intent, presented: turn.presented, person: who.sa as Address, session: body.session, runRef, addressee, onProgress: progress,
       conversation: conversation && conversation.type === 'ap.context.conversation-memory.v1' ? conversation : null,
@@ -3294,7 +3295,7 @@ app.post('/harness/ask', async (c) => {
     {
       // Spec 390 W2 — the W3C Trace Context the request arrived with joins this run's spans to the caller's
       // trace. Recorded here and read by nothing else: correlation, never trust.
-      const record = recordOf({ runRef, intent, result: recordForm.result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), traceContext: traceContextOf(c.req.raw.headers), planner: plannerSummaryOf(trace), receivedAt, offloaded: recordForm.offloaded });
+      const record = recordOf({ runRef, intent, result: recordForm.result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), traceContext: traceContextOf(c.req.raw.headers), planner: plannerSummaryOf(trace), receivedAt, offloaded: recordForm.offloaded, bill });
       c.executionCtx.waitUntil(putRecord(c.env as never, addressee, record).catch((e) => console.warn('[harness/ask] record not kept:', e instanceof Error ? e.message : String(e))));
       // Spec 381 — THE EXPORT: the durable half into the acting agent's vault, the spans to a collector when
       // one is named. Off the run's path; a failed export is logged, never a failed ask.
@@ -3955,11 +3956,18 @@ function teamGenesisDeps(env: Env, audit: AuditSink): TeamGenesisDeps {
  *  conversational entry point and the programmatic one cannot drift apart. */
 /** Call an `internal.*` op on a principal's InteractionsDO from inside this Worker (spec 322 W3f — the
  *  in-Worker delivery channel; never routable from outside). Marker-gated like every internal op. */
+/** Spec 396 W3 — a run under its own bill: every DO call it makes is charged (by step) and the bill returned beside the result. */
+async function runUnderMandateBilled(env: HarnessEnv, deps: HarnessDeps, input: Parameters<typeof runUnderMandate>[2]): Promise<Awaited<ReturnType<typeof runUnderMandate>> & { bill: RunBillV1 }> {
+  const { result, bill } = await billed(() => runUnderMandate(env, deps, input));
+  return { ...result, bill };
+}
+
 async function callInteractionsInternal(env: Env, principal: string, op: string, payload: unknown): Promise<Record<string, unknown>> {
   const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(principal.toLowerCase()));
   const res = await stub.fetch(new Request(`https://do/interactions/${principal.toLowerCase()}/${op}`, {
     method: 'POST', headers: internalHeaders(env), body: JSON.stringify(payload),
   }));
+  chargeBill(res.headers); // spec 396 W3 — the op's cost, onto the run's bill when one is open
   const out = (await res.json().catch(() => ({}))) as Record<string, unknown> & { ok?: boolean; error?: string };
   if (!res.ok || out.ok === false) throw new Error(String(out.error ?? `${op} failed (${res.status})`));
   return out;
