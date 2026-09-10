@@ -62,6 +62,15 @@ export interface RelyingApp {
   /** When true, this relying app cannot authorize a nameless person Smart Agent. Empty `agent_name`
    *  requests must collect/claim a unique Impact name before granting. */
   requireNamedAgent?: boolean;
+  /** OPTIONAL — which sign-in methods the enroll screen OFFERS for this client, in the order given.
+   *  Absent means all of them, which is what every client did before this existed and still does.
+   *
+   *  This narrows the DISPLAY only. Nothing is removed from the broker: every method still works,
+   *  a home already made with a passkey still signs in, and the returning-member lane
+   *  (`SignInView`) deliberately ignores this — an email- or phone-custodied home has to be able to
+   *  get back in however it was made. Curating here is a product decision about what to put in
+   *  front of a NEW person for one app, never a statement about what the substrate supports. */
+  signInMethods?: readonly ('social' | 'email' | 'phone' | 'passkey' | 'name')[];
   /** x402 payment params for the `x402-pay` template (spec 272/243). Present only on clients that
    *  sell paid content. The home mints a `person-treasury → payee` PaymentEnforcer delegation with
    *  these caps; amounts are atomic-unit strings (plain data / JSON-serializable). `mode`: 'push'

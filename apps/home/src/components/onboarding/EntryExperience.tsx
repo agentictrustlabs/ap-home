@@ -193,6 +193,10 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
     : '';
   const appName = api.enroll ? displayAppName(clientCfg?.name, appHost) : whitelabel.brand.name;
   const requiresNamedAgent = !!(api.enroll?.requireNamedAgent || clientCfg?.requireNamedAgent);
+  // Which sign-in methods this relying app OFFERS. Absent = all of them, which is every client
+  // that has not curated. Display only: nothing is disabled in the broker, and the returning-member
+  // lane ignores this entirely so an existing home can always get back in the way it was made.
+  const signInMethods = clientCfg?.signInMethods;
 
   // spec 321 — OTP continuation for relying-app enrolls: the email/phone cards open the session
   // INTERNALLY (they never call this component's onSession), so an enroll that reaches the
@@ -400,6 +404,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
   if (view.k === 'credential') {
     return (
       <CredentialFirstStart
+        signInMethods={signInMethods}
         onUseName={(reason) => setView({ k: 'name', reason })}
         onSession={async (t, via) => { await openSession(t, via, false); }}
       />
@@ -417,6 +422,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       <CredentialFirstStart
         enrollApi={api}
         appName={appName}
+        signInMethods={signInMethods}
         onUseName={(reason) => setView({ k: 'enroll-name', reason })}
         onSession={async (t, via) => {
           await openSession(t, via, false);
@@ -666,7 +672,9 @@ function SocialConnect({ onGoogle, onYouVersion, primary }: { onGoogle: () => vo
 // resolves the home server-side with NO name (spec 235); passkeys are subdomain-isolated (RP =
 // <label>.impact-agent.me) so a discoverable assertion here only succeeds for a home reachable
 // from this origin — otherwise we route to the name path (which hops to the right subdomain).
-function CredentialFirstStart({ onUseName, onSession, enrollApi, appName }: {
+function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signInMethods }: {
+  /** Absent = offer everything (the default for every client that has not curated). */
+  signInMethods?: readonly ('social' | 'email' | 'phone' | 'passkey' | 'name')[];
   onUseName: (reason?: 'passkey' | 'wallet') => void;
   onSession: (token: string, via: string) => Promise<void>;
   // spec 257 §11 — when set, this is a NAME-DEFERRED relying-app enroll: Google stashes the enroll
@@ -795,6 +803,14 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName }: {
   }
 
   const enroll = Boolean(enrollApi);
+  // Curation applies to the ENROLL screen only — the one a relying app sends people to. The
+  // self-serve lane below has no app asking on anyone's behalf, so it keeps every method, and
+  // `SocialConnect` is shared by both branches which is why this guard is on `enrollApi` rather
+  // than on the list alone. An absent list offers everything, as every uncurated client does.
+  const curated = enrollApi ? signInMethods : undefined;
+  const offers = (m: 'social' | 'email' | 'phone' | 'passkey' | 'name') => !curated || curated.includes(m);
+  // Exactly one method, and it is email: skip the reveal button and show the field itself.
+  const soleMethod = curated?.length === 1 && curated[0] === 'email';
   return (
     <Shell compact={enroll}>
       <BrandShield size={enroll ? 40 : 56} />
@@ -804,46 +820,59 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName }: {
           ? 'Sign in, then you’ll return.'
           : `Sign in or get started. Your ${whitelabel.brand.name} name is how others find your agent — not something you need to remember to get back in.`}
       </p>
-      <SocialConnect onGoogle={onGoogle} onYouVersion={onYouVersion} primary />
+      {offers('social') && <SocialConnect onGoogle={onGoogle} onYouVersion={onYouVersion} primary />}
       {enrollApi ? (
         <>
-          <button
-            className="btn-ghost onboarding-secondary"
-            style={showEmail ? SELECTED_METHOD_STY : undefined}
-            aria-pressed={showEmail}
-            onClick={() => { setShowEmail((v) => !v); setShowPhone(false); }}
-            disabled={busy !== null}
-          >
-            {showEmail ? '● Continue with email' : 'Continue with email'}
-          </button>
-          {showEmail && (
+          {/* When a client offers email ALONE there is nothing to choose between, so the card is
+              open and the person types straight into it rather than pressing a button that only
+              reveals the one field they were always going to use. */}
+          {offers('email') && !soleMethod && (
+            <button
+              className="btn-ghost onboarding-secondary"
+              style={showEmail ? SELECTED_METHOD_STY : undefined}
+              aria-pressed={showEmail}
+              onClick={() => { setShowEmail((v) => !v); setShowPhone(false); }}
+              disabled={busy !== null}
+            >
+              {showEmail ? '● Continue with email' : 'Continue with email'}
+            </button>
+          )}
+          {offers('email') && (showEmail || soleMethod) && (
             <div style={{ margin: '.4rem 0 .2rem' }}>
               <EmailAuthCard />
             </div>
           )}
-          <button
-            className="btn-ghost onboarding-secondary"
-            style={showPhone ? SELECTED_METHOD_STY : undefined}
-            aria-pressed={showPhone}
-            onClick={() => { setShowPhone((v) => !v); setShowEmail(false); }}
-            disabled={busy !== null}
-          >
-            {showPhone ? '● Continue with phone' : 'Continue with phone'}
-          </button>
-          {showPhone && (
-            <div style={{ margin: '.4rem 0 .2rem' }}>
-              <PhoneAuthCard />
-            </div>
+          {offers('phone') && (
+            <>
+              <button
+                className="btn-ghost onboarding-secondary"
+                style={showPhone ? SELECTED_METHOD_STY : undefined}
+                aria-pressed={showPhone}
+                onClick={() => { setShowPhone((v) => !v); setShowEmail(false); }}
+                disabled={busy !== null}
+              >
+                {showPhone ? '● Continue with phone' : 'Continue with phone'}
+              </button>
+              {showPhone && (
+                <div style={{ margin: '.4rem 0 .2rem' }}>
+                  <PhoneAuthCard />
+                </div>
+              )}
+            </>
           )}
-          <button
-            className="btn-ghost onboarding-secondary"
-            onClick={() => onUseName('passkey')}
-          >
-            Continue with a passkey or wallet
-          </button>
-          <button className="btn-ghost onboarding-secondary enroll-name-link" onClick={() => onUseName()}>
-            Use my {whitelabel.brand.name} name
-          </button>
+          {offers('passkey') && (
+            <button
+              className="btn-ghost onboarding-secondary"
+              onClick={() => onUseName('passkey')}
+            >
+              Continue with a passkey or wallet
+            </button>
+          )}
+          {offers('name') && (
+            <button className="btn-ghost onboarding-secondary enroll-name-link" onClick={() => onUseName()}>
+              Use my {whitelabel.brand.name} name
+            </button>
+          )}
         </>
       ) : (
         <>

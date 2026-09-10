@@ -208,7 +208,14 @@ const faithImpact: WhiteLabelConfig = {
     // custodied by the Gather org's custodian, who runs the ceremony from Home against a2aBase.
     {
       client_id: 'gather-app',
-      name: 'Gather27',
+      // Gather's own brand is two words, and the enroll screen shows this verbatim as
+      // "Continue to <name>".
+      name: 'Gather 27',
+      // Round-4 — Gather is starting hosts on ONE door. A host arrives from a Gather registration
+      // email, so email is the method they already proved they have; offering four more is four
+      // more ways for a church admin to get stuck. Everything else still works and is one line
+      // away — see `signInMethods` in whitelabel/schema.ts.
+      signInMethods: ['email'],
       // faithnet demo (chain 34348): let a phone/Google sign-in bootstrap a KMS-custodied home
       // THROUGH the gather connect flow. Off by default so production impact-agent.me keeps the
       // login-grade posture (a relying app does not mint custody). ADR-0011 still holds: the phone
