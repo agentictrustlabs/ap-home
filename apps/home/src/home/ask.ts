@@ -317,6 +317,23 @@ export async function listConfirmations(session: { token: string }): Promise<Rem
   return out.ok ? out.entries ?? [] : [];
 }
 
+/** Spec 394 — one standing instruction: in THIS room (`any` or an organization's address), when the person does THIS act,
+ *  THIS argument defaults to THIS agent unless they say otherwise. Evidence the resolver cites (`standing`), never a
+ *  grant; shown so it can be cleared. */
+export interface StandingInstruction { context: string; capability: string; capabilityWords: string; arg: string; value: string; label?: string; saidAs?: string; at: string; runRef?: string }
+
+/** The person's own standing instructions — theirs alone, whatever room they are asking in. */
+export async function listInstructions(session: { token: string }): Promise<StandingInstruction[]> {
+  const out = (await postA2a('/a2a/harness/instructions', { session: session.token })) as { ok?: boolean; entries?: StandingInstruction[] };
+  return out.ok ? out.entries ?? [] : [];
+}
+
+/** Clear one standing instruction; the next act of that kind, in that room, asks for the argument again. */
+export async function forgetInstruction(session: { token: string }, scope: { context: string; capability: string; arg: string }): Promise<{ ok: true; entries: StandingInstruction[] } | { ok: false; error: string }> {
+  const out = (await postA2a('/a2a/harness/instructions/forget', { session: session.token, scope })) as { ok?: boolean; entries?: StandingInstruction[]; error?: string };
+  return out.ok ? { ok: true, entries: out.entries ?? [] } : { ok: false, error: out.error ?? 'the instruction could not be cleared' };
+}
+
 /** Clear one remembered scope; the next ask of that word, in that place, asks again. Returns what remains. */
 export async function forgetConfirmation(session: { token: string }, scope: { word: string; capability: string; arg: string }): Promise<{ ok: true; entries: RememberedChoice[] } | { ok: false; error: string }> {
   const out = (await postA2a('/a2a/harness/confirmations/forget', { session: session.token, scope })) as { ok?: boolean; entries?: RememberedChoice[]; error?: string };

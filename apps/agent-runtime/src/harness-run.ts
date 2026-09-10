@@ -39,7 +39,7 @@ import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
 import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
 import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence } from '@agenticprimitives/orchestration';
-import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1 } from '@agenticprimitives/context';
+import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, standingFor, declareInstruction, forgetInstruction, instructionContextOf, STANDING_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
 
@@ -157,6 +157,8 @@ export const PROFILE_READ_CAPABILITY = 'profile.contact.read' as const;
 /** WHO THEY LIVE WITH — spec 363 W4. Their own record, private tier, never published. */
 export const HOUSEHOLD_READ_CAPABILITY = 'household.roster' as const;
 export const HOUSEHOLD_RECORD_CAPABILITY = 'household.member.record' as const;
+/** Spec 394 — a STANDING INSTRUCTION: the person's declared default for one argument of one capability, per room. */
+export const STANDING_INSTRUCTION_CAPABILITY = 'context.instruction.declare' as const;
 
 /**
  * WHO I LIVE WITH — the person's own household record (spec 363 W4).
@@ -448,6 +450,38 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     risk: 'low',
     selfAuthorized: true,
     interaction: { navigationTarget: 'household' },
+  },
+  {
+    // A STANDING INSTRUCTION (spec 394): "from now on, pay from alice3.treasury". A DECLARED DEFAULT for one
+    // argument of one capability, kept in the person's own vault, scoped to the room they are standing in.
+    // Self-acting like the household record: a note about their own habits, published nowhere. IT AUTHORIZES
+    // NOTHING — the next payment still asks for its mandate; it only answers "from which account?" before
+    // the question is asked. Never over a spoken value. The invoker reads the instruction BACK and writes it
+    // only from the person's supplied yes (the 385 trusted-event rule): a planner's reading of "from now on"
+    // writes nothing.
+    id: STANDING_INSTRUCTION_CAPABILITY,
+    verbs: ['from now on', 'always', 'by default', 'default to', 'standing instruction', 'stop defaulting', 'no longer default'],
+    description:
+      'Keep a STANDING INSTRUCTION — this person\'s own default for an argument of one of their acts, in this room. '
+      + 'Args: capability (the act, as its id or as the person names it: "pay", "invite", "message"), arg (the argument '
+      + 'it fills; omit for the act\'s acting party — the payer, the sender), value (the agent to default to — a name '
+      + 'or address), forget (true to clear the default instead). "From now on pay from alice3.treasury", "always '
+      + 'invite as missio nexus", "stop defaulting my payments". It is read back before it is kept, it is theirs '
+      + 'alone, and it authorizes nothing — every act still asks for its mandate.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        capability: { type: 'string', description: 'The act the default is for — its id (treasury.payment.execute) or the person\'s word for it (pay)' },
+        arg: { type: 'string', description: 'The argument it fills (payer, sender, org). Omit for the act\'s acting party.' },
+        value: { type: 'string', description: 'The agent to default to — a name (alice3.treasury) or an address' },
+        holder: { type: 'string', description: 'Whose instruction this is — the person asking' },
+        forget: { type: 'boolean', description: 'true to clear the standing instruction for this act + argument' },
+      },
+      required: ['capability'],
+    },
+    capability: { id: STANDING_INSTRUCTION_CAPABILITY, action: 'declare', resourceArg: 'record', authorityArg: 'holder' },
+    risk: 'low',
+    selfAuthorized: true,
   },
   {
     // CHANGING YOUR OWN CONTACT DETAILS. The Home's profile form needs no signature — it is the person's
@@ -1425,6 +1459,78 @@ export function accessRevokeInvoker(deps: HarnessDeps, env: HarnessEnv, presente
  * delegation the dependent's custodian issues); recording a spouse does not open an account. The
  * household answers "who did you mean" and stops a directory search leaving the asker's own tier.
  */
+/**
+ * A STANDING INSTRUCTION, DECLARED — spec 394. Resolves the act and the argument, reads the instruction back as
+ * a question ("From now on, when you pay, pay from alice3.treasury — keep that?") and writes the record ONLY
+ * from the person's supplied yes on the resume: the trusted event, exactly as a confirmation (385) is kept
+ * from the choice the person supplied. The room is the agent addressed when it is not the person themselves.
+ * Nothing here reaches a verifier; the record fills a question before it is asked and nothing more.
+ */
+export function standingInstructionInvoker(deps: HarnessDeps, person: Address | undefined, addressee: Address | undefined): ToolInvoker {
+  return async (toolId, args, ctx) => {
+    const stepRef = ctx.step.id ?? `s${ctx.index}`;
+    if (!person) throw new Error('a standing instruction is kept as you, and there is no signed-in person on this run');
+    if (!deps.readSubjectRecord || !deps.writeSubjectRecord) throw new Error('this agent cannot keep standing instructions');
+    const me = person.toLowerCase();
+    const context = instructionContextOf(addressee && addressee.toLowerCase() !== me ? addressee : undefined);
+    // WHICH ACT: its id, or the person's word for it (a verb the tool lists, or its CAPABILITY_WORDS phrase).
+    const said = String(args.capability ?? '').trim().toLowerCase();
+    const acts = HARNESS_ACTION_TOOLS.filter((t) => t.capability?.authorityArg && t.id !== STANDING_INSTRUCTION_CAPABILITY);
+    const tool = acts.find((t) => t.id === said)
+      ?? acts.find((t) => (CAPABILITY_WORDS[t.id] ?? '').toLowerCase() === said)
+      ?? acts.find((t) => (t.verbs ?? []).some((v) => v.toLowerCase() === said || said.split(/\s+/).includes(v.toLowerCase())))
+      ?? acts.find((t) => t.id.split('.').some((part) => part === said));
+    const supplied = dataFor(ctx.supplied, stepRef);
+    const chosenAct = typeof supplied.capability === 'string' ? acts.find((t) => t.id === supplied.capability) : undefined;
+    const act = chosenAct ?? tool;
+    if (!act) {
+      throw new InputRequired({
+        kind: 'data', stepRef, toolId,
+        prompt: said ? `Which act is “${said}” — I did not recognise it.` : 'Which act is the standing instruction for?',
+        fields: [{ name: 'capability', label: 'the act', type: 'choice', required: true, choices: acts.map((t) => ({ value: t.id, label: CAPABILITY_WORDS[t.id] ?? t.id })) }],
+      });
+    }
+    const arg = String(args.arg ?? '').trim().toLowerCase() || act.capability!.authorityArg!;
+    const forget = isFlagTrue(args.forget);
+    if (forget) {
+      const prev = (await deps.readSubjectRecord(me, STANDING_RECORD).catch(() => null)) as StandingInstructionsV1 | null;
+      const wrote = await deps.writeSubjectRecord(me, STANDING_RECORD, forgetInstruction(prev, { context, capability: act.id, arg }));
+      if (!wrote.ok) throw new Error(wrote.error ?? 'the standing instruction could not be cleared');
+      return { cleared: true, capability: act.id, arg, context, tier: 'private', record: STANDING_RECORD, note: `the next time you ${CAPABILITY_WORDS[act.id] ?? act.id}, the ${arg} is asked for again` };
+    }
+    // THE DEFAULT: the resolver gave `value` an address when it could (an ontology party role, any agent); a
+    // word that did not resolve is asked for, never guessed.
+    const value = String(args.value ?? '').trim().toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(value)) {
+      throw new InputRequired({
+        kind: 'data', stepRef, toolId,
+        prompt: value ? `Which agent is “${value}”? I could not resolve it.` : `What should the ${arg} default to when you ${CAPABILITY_WORDS[act.id] ?? act.id}?`,
+        fields: [{ name: 'value', label: 'the default', type: 'text', required: true, hint: 'an agent name (alice3.treasury) or address' }],
+      });
+    }
+    const label = (await deps.nameOf?.(value).catch(() => null)) ?? undefined;
+    const sentence = `From now on, when you ${CAPABILITY_WORDS[act.id] ?? act.id}${context !== 'any' ? ` here` : ''}, the ${arg} is ${label ?? value} unless you say otherwise.`;
+    // THE READ-BACK. The person's supplied yes is the write; anything else keeps nothing.
+    const answer = String(supplied.keep ?? '').trim().toLowerCase();
+    if (!answer) {
+      throw new InputRequired({
+        kind: 'data', stepRef, toolId,
+        prompt: `${sentence} Keep that as a standing instruction?`,
+        fields: [{ name: 'keep', label: 'keep it', type: 'choice', required: true, choices: [{ value: 'yes', label: 'Yes, keep it' }, { value: 'no', label: 'No' }] }],
+      });
+    }
+    if (answer !== 'yes') return { kept: false, capability: act.id, arg, note: 'nothing was kept' };
+    const prev = (await deps.readSubjectRecord(me, STANDING_RECORD).catch(() => null)) as StandingInstructionsV1 | null;
+    const next = declareInstruction(prev, { context, capability: act.id, arg, value, ...(label ? { label } : {}), saidAs: sentence });
+    const wrote = await deps.writeSubjectRecord(me, STANDING_RECORD, next);
+    if (!wrote.ok) throw new Error(wrote.error ?? 'the standing instruction could not be kept');
+    return {
+      kept: true, capability: act.id, arg, value, ...(label ? { label } : {}), context, tier: 'private', record: STANDING_RECORD,
+      note: 'this is your own note of a default — it fills the question before it is asked and authorizes nothing; every act still asks for its mandate',
+    };
+  };
+}
+
 export function householdRecordInvoker(deps: HarnessDeps, person: Address | undefined): ToolInvoker {
   return async (toolId, args, ctx) => {
     const stepRef = ctx.step.id ?? `s${ctx.index}`;
@@ -1693,6 +1799,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (toolId === ACCESS_REVOKE_CAPABILITY) return accessRevokeInvoker(deps, env, presented!, person)(toolId, args, ctx);
     if (toolId === PROFILE_UPDATE_CAPABILITY) return profileUpdateInvoker(deps, person)(toolId, args, ctx);
     if (toolId === HOUSEHOLD_RECORD_CAPABILITY) return householdRecordInvoker(deps, person)(toolId, args, ctx);
+    if (toolId === STANDING_INSTRUCTION_CAPABILITY) return standingInstructionInvoker(deps, person, addressee)(toolId, args, ctx);
     // Spec 387 W2 — the addressee's own catalog: bound by ITS name's records at call time (cached by the reader),
     // so an unattended run at a service (a gateway's task, a routed ask) reads it exactly as a person's does.
     if (isCatalogTool(toolId)) return catalogInvoker(await catalogBindingFor(deps, addressee ? String(addressee) : undefined))(toolId, args, ctx);
@@ -1976,6 +2083,7 @@ export const CAPABILITY_WORDS: Record<string, string> = {
   'coordination.endeavor.list': 'see what the organization is working on',
   'treasury.balance.read': 'read a balance',
   'coordination.endeavor.get': 'read one endeavor',
+  'context.instruction.declare': 'keep a standing instruction',
   'coordination.endeavor.request': 'ask the organization to take on a goal',
   'coordination.contribution.propose': 'offer to do plan steps',
   'coordination.contribution.allocate': 'allocate plan steps',
@@ -2145,7 +2253,7 @@ export interface PlannerTraceV1 {
   /** The plan that ran (or was refused last), as the executor received it BEFORE argument resolution. */
   plan: Array<{ toolId: string; args: Record<string, unknown> }>;
   /** Each party binding and WHERE IT CAME FROM (spec 367 §3): the person's words, a decision rule, memory, or the resolver. */
-  bindings: Array<{ arg: string; raw: string; agent: string; label?: string; source: 'said' | 'context' | 'decision' | 'memory' | 'resolver' | 'disclosed'; because?: string }>;
+  bindings: Array<{ arg: string; raw: string; agent: string; label?: string; source: 'said' | 'context' | 'standing' | 'decision' | 'memory' | 'resolver' | 'disclosed'; because?: string }>;
   /** What the surface declared (spec 353): the realm kind and how many capabilities it offered. */
   surface?: { realm?: string; capabilities?: number; channel?: 'text' | 'voice' };
   /** Spec 370 P7 — how many recent turns the resolver could recall for this ask (0 = no memory read). */
@@ -2594,7 +2702,25 @@ export async function resolveStepArgs(
     // means that organization — "invite carol" at missio-nexus.org acts as the org), else the person asking.
     // Acting as yourself is the only reading of "send alice a message"; acting as the room you stand in is
     // the only reading of "invite carol" said inside it. Declared classes decide, never proximity.
-    if (!current) {
+    // Spec 394 — THE PERSON'S STANDING INSTRUCTION for this act's acting party, in this room ("from now on, pay
+    // from alice3.treasury"): fills the argument they did not speak — never one they did — REVALIDATED: the
+    // default must still be one of the agents they could name for the role now (their own, of its kinds), or it
+    // is ignored and the question comes back. Cited as `standing`; a verifier never sees it.
+    let standing: { value: string; label?: string; saidAs?: string } | null = null;
+    if (!current && lookups.standingInstruction) {
+      const room = where.addressee && where.addressee.toLowerCase() !== where.subject.toLowerCase() ? where.addressee.toLowerCase() : undefined;
+      const hit = await lookups.standingInstruction({ capability: where.capabilityId ?? where.toolId, arg, ...(room ? { context: room } : {}) }).catch(() => null);
+      if (hit && /^0x[0-9a-f]{40}$/.test(hit.value)) {
+        const kinds = partyTypesFor(where.capabilityId ?? where.toolId, arg) ?? [];
+        let stillMine = kinds.length === 0 || kinds.includes('me') && hit.value === where.subject.toLowerCase();
+        for (const type of kinds) { if (stillMine) break; if (type === 'me') continue; stillMine = (await ownAgentsOfType(where.subject, type, lookups)).some((c) => c.agent.toLowerCase() === hit.value); }
+        if (stillMine) standing = hit;
+      }
+    }
+    if (standing) {
+      out[arg] = standing.value;
+      lookups.onResolved?.({ arg, raw: partyWord(arg), agent: standing.value, ...(standing.label ? { label: standing.label } : {}), hint: `your standing instruction${standing.saidAs ? `: “${standing.saidAs}”` : ''}`, via: 'standing' });
+    } else if (!current) {
       const realmSuffix = where.realmSuffix ?? (where.realmKind ? KIND_SUFFIX[where.realmKind] : undefined);
       const typesHere = partyTypesFor(where.capabilityId ?? where.toolId, arg) ?? [];
       if (where.addressee && realmSuffix && typesHere.includes(realmSuffix) && where.addressee.toLowerCase() !== where.subject.toLowerCase()) {
@@ -4107,7 +4233,7 @@ step is then handed to that agent under authority the person grants; leave it ou
       const low = String(v ?? '').toLowerCase();
       const hit = [...resolved.values()].find((r) => r.agent.toLowerCase() === low);
       if (!hit) return 'said';
-      return hit.via === 'context' ? 'context' : hit.ruleId ? 'decision' : hit.hint?.startsWith('remembered') ? 'memory' : hit.ownedBy ? 'disclosed' : /^0x[0-9a-f]{40}$/i.test(hit.raw) ? 'said' : 'resolver';
+      return hit.via === 'context' ? 'context' : hit.via === 'standing' ? 'standing' : hit.ruleId ? 'decision' : hit.hint?.startsWith('remembered') ? 'memory' : hit.ownedBy ? 'disclosed' : /^0x[0-9a-f]{40}$/i.test(hit.raw) ? 'said' : 'resolver';
     };
     const parties = Object.entries(rs.args).filter(([, v]) => typeof v === 'string' && /^0x[0-9a-f]{40}$/i.test(v));
     const subjectArg = rs.tool.subject ? rs.args[rs.tool.subject] : undefined;
@@ -4352,8 +4478,17 @@ step is then handed to that agent under authority the person grants; leave it ou
       // rolling window; revalidated against the candidates the resolver found. Evidence, never a grant.
       ...(deps.readSubjectRecord && input.person ? { preferredChoice: async (scope: { word: string; capability: string; arg: string }, candidates: ReadonlyArray<{ agent: string }>) => {
         const prefs = (await deps.readSubjectRecord!(String(input.person).toLowerCase(), CONFIRMATION_RECORD).catch(() => null)) as ConfirmationPreferencesV1 | null;
-        const hit = pickPreferred(prefs, scope, candidates);
+        // Spec 394 — the room the ask is in namespaces the memory: the same room first, then the room-less entry.
+        const room = input.addressee && String(input.addressee).toLowerCase() !== String(input.person).toLowerCase() ? String(input.addressee).toLowerCase() : undefined;
+        const hit = pickPreferred(prefs, { ...scope, ...(room ? { context: room } : {}) }, candidates);
         return hit ? { agent: hit.agent, ...(hit.label ? { label: hit.label } : {}) } : null;
+      } } : {}),
+      // Spec 394 — the person's STANDING INSTRUCTIONS (their own vault): a declared default for an act's argument,
+      // read for the room the ask is in then `any`. Fills an unspoken acting party; revalidated by the resolver.
+      ...(deps.readSubjectRecord && input.person ? { standingInstruction: async (scope: { capability: string; arg: string; context?: string }) => {
+        const rec = (await deps.readSubjectRecord!(String(input.person).toLowerCase(), STANDING_RECORD).catch(() => null)) as StandingInstructionsV1 | null;
+        const hit = standingFor(rec, scope);
+        return hit ? { value: hit.value, ...(hit.label ? { label: hit.label } : {}), ...(hit.saidAs ? { saidAs: hit.saidAs } : {}) } : null;
       } } : {}),
       onResolved: (r) => {
       // The SAME party can be reported twice — once resolved from words or from the asker's own tree, and
@@ -4495,7 +4630,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   trace.plan = result.plan.steps.map((s) => ({ toolId: s.toolId, args: s.args }));
   trace.bindings = [...resolved.values()].map((r) => ({
     arg: r.arg, raw: r.raw, agent: r.agent, ...(r.label ? { label: r.label } : {}),
-    source: r.via === 'context' ? 'context' : r.ruleId ? 'decision' : r.hint?.startsWith('remembered') ? 'memory' : r.ownedBy ? 'disclosed' : /^0x[0-9a-f]{40}$/i.test(r.raw) ? 'said' : 'resolver',
+    source: r.via === 'context' ? 'context' : r.via === 'standing' ? 'standing' : r.ruleId ? 'decision' : r.hint?.startsWith('remembered') ? 'memory' : r.ownedBy ? 'disclosed' : /^0x[0-9a-f]{40}$/i.test(r.raw) ? 'said' : 'resolver',
     // A memory's citation rides the binding: an ANSWER carries no parties, so the How pane is the only place
     // a person reading "who is in rich" can see that "rich" was settled from what they chose last time
     // (spec 370 P7) or confirmed before (spec 385) — and say otherwise.

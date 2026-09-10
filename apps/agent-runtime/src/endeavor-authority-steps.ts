@@ -81,6 +81,9 @@ export const NOT_PLAN_STEPS: readonly string[] = [
   // Nor is recording who you live with: it needs no mandate at all, so a plan step for it would be a
   // step with nothing to authorize.
   'household.member.record',
+  // Spec 394 — a STANDING INSTRUCTION is the person's own note of a default: self-acting, no mandate, and
+  // never work anyone is allocated.
+  'context.instruction.declare',
 ];
 
 /** A plan step as the work loop sees it. */

@@ -50,6 +50,8 @@ export const GENESIS_INTERACTIONS_SCOPES: ReadonlyArray<{ resources: string[]; o
     'vault:run.artifact:*',
     // Spec 385 — the person's scoped confirmation memory (which "David", per word + capability + argument).
     'vault:confirmation.preferences',
+    // Spec 394 — the person's standing instructions (a declared default per room + capability + argument).
+    'vault:standing.instructions',
   ], ops: ['read', 'write'] },
   { resources: ['vault:archetype.assignment'], ops: ['read', 'write', 'delete'] },
   { resources: ['vault:message.body:dm:*'], ops: ['read'] },

@@ -26,7 +26,7 @@ import { nameLabel } from '../../../lib/domain';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
 import { useVoice, blobToBase64 } from './useVoice';
 import { yesNo, matchChoice, listenAfter, plainSpeech, navigationIntent, closestOption } from './voice-text';
-import { ask, hear, warmHearing, readProgress, type ProgressLine, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, homeModels, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField, type AskModelOption, listConfirmations, forgetConfirmation, type RememberedChoice } from '../../../home/ask';
+import { ask, hear, warmHearing, readProgress, type ProgressLine, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, homeModels, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField, type AskModelOption, listConfirmations, forgetConfirmation, type RememberedChoice, listInstructions, forgetInstruction, type StandingInstruction } from '../../../home/ask';
 import type { AskSelection } from '../../../home/ask-selection';
 import { resolveNavigationTarget } from '../../../lib/interaction-registry';
 
@@ -115,10 +115,21 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   // in the open so it can be cleared. The person's own, whichever room they ask in; refreshed after every
   // turn because the turn that answered a "which one?" is the one that wrote it.
   const [remembered, setRemembered] = useState<RememberedChoice[]>([]);
+  // Spec 394 — the person's standing instructions, listed beside their remembered choices so each can be cleared.
+  const [instructions, setInstructions] = useState<StandingInstruction[]>([]);
   const [showRemembered, setShowRemembered] = useState(false);
+  const forgetStanding = async (i: StandingInstruction) => {
+    if (!session) return;
+    const key = `forget-standing:${i.context}:${i.capability}:${i.arg}`;
+    setBusy(key);
+    try {
+      const out = await forgetInstruction(session, { context: i.context, capability: i.capability, arg: i.arg });
+      if (out.ok) setInstructions(out.entries);
+    } finally { setBusy(null); }
+  };
   const refreshRemembered = useCallback(async () => {
     if (!session) return;
-    try { setRemembered(await listConfirmations(session)); } catch { /* a listing that failed is an empty note, never an error in the thread */ }
+    try { const [r, i] = await Promise.all([listConfirmations(session), listInstructions(session)]); setRemembered(r); setInstructions(i); } catch { /* a listing that failed is an empty note, never an error in the thread */ }
   }, [session?.token]);
   useEffect(() => { void refreshRemembered(); }, [refreshRemembered]);
   const forget = async (r: RememberedChoice) => {
@@ -688,7 +699,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
         {/* Spec 385 W2 — remembered choices. A memory nobody can see is a memory nobody can say "no" to:
             each line names the word, the place it was decided in, and whom it settled on, with a way to
             clear it. Clearing grants and revokes nothing — the mandate was asked and signed regardless. */}
-        {remembered.length > 0 && (
+        {(remembered.length > 0 || instructions.length > 0) && (
           <div className="ask-msg agent" data-testid="ask-remembered" style={{ fontSize: 12, opacity: 0.9 }}>
             <button
               type="button"
@@ -696,7 +707,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
               onClick={() => setShowRemembered((v) => !v)}
               style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer', textDecoration: 'underline' }}
             >
-              {remembered.length === 1 ? 'I remember 1 choice you made' : `I remember ${remembered.length} choices you made`}
+              {[remembered.length ? (remembered.length === 1 ? '1 choice you made' : `${remembered.length} choices you made`) : '', instructions.length ? (instructions.length === 1 ? '1 standing instruction' : `${instructions.length} standing instructions`) : ''].filter(Boolean).reduce((a, b) => (a ? `I remember ${a} and ${b}` : `I remember ${b}`), '')}
               {showRemembered ? ' — hide' : ' — show'}
             </button>
             {showRemembered && remembered.map((r) => {
@@ -705,6 +716,16 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
                 <div key={key} style={{ marginTop: 4 }} data-testid="ask-remembered-row">
                   “{r.word}” means {r.label ? <span title={r.agent}>{r.label}</span> : <AgentName address={r.agent} />} as the {r.arg} when you {r.capabilityWords}
                   <button type="button" className="btn ghost" data-testid={`ask-remembered-forget-${r.word}`} style={{ fontSize: 10, padding: '0 6px', minHeight: 0, marginLeft: 6 }} disabled={busy === key} onClick={() => void forget(r)}>{busy === key ? 'Clearing…' : 'Forget'}</button>
+                </div>
+              );
+            })}
+            {/* Spec 394 — the person's standing instructions: a declared default per act + argument, per room. */}
+            {showRemembered && instructions.map((i) => {
+              const key = `forget-standing:${i.context}:${i.capability}:${i.arg}`;
+              return (
+                <div key={key} style={{ marginTop: 4 }} data-testid="ask-standing-row">
+                  When you {i.capabilityWords}{i.context !== 'any' ? <> at <AgentName address={i.context} /></> : ''}, the {i.arg} is {i.label ? <span title={i.value}>{i.label}</span> : <AgentName address={i.value} />} unless you say otherwise
+                  <button type="button" className="btn ghost" data-testid={`ask-standing-forget-${i.arg}`} style={{ fontSize: 10, padding: '0 6px', minHeight: 0, marginLeft: 6 }} disabled={busy === key} onClick={() => void forgetStanding(i)}>{busy === key ? 'Clearing…' : 'Forget'}</button>
                 </div>
               );
             })}

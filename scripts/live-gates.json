@@ -111,6 +111,16 @@
       "required": true,
       "paced": false,
       "timeoutSec": 420
+    },
+    {
+      "id": "verify-standing-instruction",
+      "script": "scripts/verify-standing-instruction.mts",
+      "spec": "394 W1",
+      "proves": "a standing instruction is kept from the person's yes to the read-back, listed, and fills an UNSPOKEN acting party cited `standing`; the payment still waits on its mandate",
+      "twin": "a spoken payer is never overridden by the instruction; once cleared, the instruction fills nothing",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 240
     }
   ]
 }

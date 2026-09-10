@@ -7,7 +7,7 @@ import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 // State is held in a Durable Object (SessionStoreDO); see ./session-store-do.ts.
 // Env bindings come from c.env (typed via the Bindings interface below).
 
-import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, forgetConfirmation, CONFIRMATION_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1 } from '@agenticprimitives/context';
+import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, forgetConfirmation, CONFIRMATION_RECORD, forgetInstruction, STANDING_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1 } from '@agenticprimitives/context';
 import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
 import { recordOf, replayingInvoker, traceContextOf, type RunPlannerSummaryV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
@@ -1546,6 +1546,42 @@ app.post('/harness/confirmations/forget', async (c) => {
   const wrote = await deps.writeSubjectRecord(me, CONFIRMATION_RECORD, next);
   if (!wrote.ok) return c.json({ ok: false, error: wrote.error ?? 'the preference could not be cleared' }, 502);
   return c.json({ ok: true, entries: confirmationEntries(next) });
+});
+
+/**
+ * Spec 394 — THE PERSON'S STANDING INSTRUCTIONS, listed and cleared. Their own vault, whatever room they ask in;
+ * shown so each can be corrected — a default nobody can see is a default nobody can say "no" to. Nothing here
+ * is a grant, so nothing here is revoked.
+ */
+const instructionEntries = (rec: unknown) => {
+  const entries = rec && typeof rec === 'object' && (rec as StandingInstructionsV1).type === 'ap.context.standing-instructions.v1' ? (rec as StandingInstructionsV1).entries : [];
+  return entries.map((e) => ({ ...e, capabilityWords: CAPABILITY_WORDS[e.capability] ?? e.capability }));
+};
+app.post('/harness/instructions', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string } | null;
+  if (!body?.session) return c.json({ ok: false, error: 'session is required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  if (!deps.readSubjectRecord) return c.json({ ok: false, error: 'the private tier is not configured' }, 503);
+  const rec = await deps.readSubjectRecord(String(who.sa).toLowerCase(), STANDING_RECORD).catch(() => null);
+  return c.json({ ok: true, entries: instructionEntries(rec) });
+});
+app.post('/harness/instructions/forget', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; scope?: { context?: string; capability?: string; arg?: string } } | null;
+  if (!body?.session) return c.json({ ok: false, error: 'session is required' }, 400);
+  const scope = body.scope;
+  if (!scope?.capability || !scope.arg) return c.json({ ok: false, error: 'scope { capability, arg, context? } is required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  if (!deps.readSubjectRecord || !deps.writeSubjectRecord) return c.json({ ok: false, error: 'the private tier is not configured' }, 503);
+  const me = String(who.sa).toLowerCase();
+  const prev = (await deps.readSubjectRecord(me, STANDING_RECORD).catch(() => null)) as StandingInstructionsV1 | null;
+  const next = forgetInstruction(prev, { ...(scope.context ? { context: String(scope.context) } : {}), capability: String(scope.capability), arg: String(scope.arg) });
+  const wrote = await deps.writeSubjectRecord(me, STANDING_RECORD, next);
+  if (!wrote.ok) return c.json({ ok: false, error: wrote.error ?? 'the instruction could not be cleared' }, 502);
+  return c.json({ ok: true, entries: instructionEntries(next) });
 });
 
 /**
@@ -3219,7 +3255,9 @@ app.post('/harness/ask', async (c) => {
           c.executionCtx.waitUntil(
             Promise.all([askDeps.readSubjectRecord!(String(who.sa).toLowerCase(), CONFIRMATION_RECORD).catch(() => null), labelled])
               .then(([prev, label]) => askDeps.writeSubjectRecord!(String(who.sa).toLowerCase(), CONFIRMATION_RECORD,
-                rememberConfirmation(prev as ConfirmationPreferencesV1 | null, { word: scope!.word, capability: scope!.capability, arg: scope!.arg, agent: chose.agent, ...(label ? { label } : {}), runRef })))
+                rememberConfirmation(prev as ConfirmationPreferencesV1 | null, { word: scope!.word, capability: scope!.capability, arg: scope!.arg, agent: chose.agent, ...(label ? { label } : {}), runRef,
+                  // Spec 394 — the room the choice was made in: the organization addressed, when it is not the person.
+                  ...(body.addressee && String(body.addressee).toLowerCase() !== String(who.sa).toLowerCase() ? { context: String(body.addressee).toLowerCase() } : {}) })))
               .then((r) => { if (r && !r.ok) console.warn('[harness/ask] confirmation not kept:', r.error); })
               .catch((e) => console.warn('[harness/ask] confirmation not kept:', e instanceof Error ? e.message : String(e))),
           );

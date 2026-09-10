@@ -184,3 +184,46 @@ describe('the asset a payment is in', () => {
     }
   });
 });
+
+// ── A STANDING INSTRUCTION FILLS THE UNSPOKEN ACTING PARTY (spec 394) ──
+describe('a standing instruction for the acting party', () => {
+  const env = { CHAIN_ID: '34348', DELEGATION_MANAGER: '0x'.padEnd(42, '1'), MOCK_USDC: '0x'.padEnd(42, '2') } as never;
+  const T2 = '0x00000000000000000000000000000000000000a2';
+  const T3 = '0x00000000000000000000000000000000000000a3';
+  const ORG = '0x00000000000000000000000000000000000000c1';
+  const rows = { orgs: { [T2]: { org: T2, agent: T2, name: 'alice2.treasury', kind: 'person-treasury', parent: '0xb0b', relationship: 'steward', updatedAt: '' }, [T3]: { org: T3, agent: T3, name: 'alice3.treasury', kind: 'person-treasury', parent: '0xb0b', relationship: 'steward', updatedAt: '' } } };
+  const where = { stepRef: 's0', toolId: 'treasury.payment.execute', capabilityId: 'treasury.payment.execute', authorityArg: 'payer', subject: '0xb0b' };
+  const lookupsWith = (standing: (scope: { capability: string; arg: string; context?: string }) => Promise<{ value: string; saidAs?: string } | null>, resolved: Array<Record<string, unknown>> = []) => ({
+    readSubjectRecord: async (_s: string, r: string) => (r === 'relationships.data' ? rows : null),
+    standingInstruction: standing,
+    onResolved: (r: Record<string, unknown>) => { resolved.push(r); },
+  }) as never;
+
+  it('fills the payer the person did not speak, and cites it as standing', async () => {
+    const resolved: Array<Record<string, unknown>> = [];
+    const asked: unknown[] = [];
+    const out = await resolveStepArgs({ payee: T2, usdc: '1' }, env, lookupsWith(async (scope) => { asked.push(scope); return { value: T3, saidAs: 'pay from alice3' }; }, resolved), where);
+    expect(out.payer).toBe(T3);
+    expect(asked).toEqual([{ capability: 'treasury.payment.execute', arg: 'payer' }]);
+    expect(resolved.find((r) => r.arg === 'payer')).toMatchObject({ agent: T3, via: 'standing' });
+  });
+
+  it('never overrides a spoken payer', async () => {
+    const out = await resolveStepArgs({ payer: T2, payee: '0x00000000000000000000000000000000000000d1', usdc: '1' }, env, lookupsWith(async () => ({ value: T3 })), where);
+    expect(out.payer).toBe(T2);
+  });
+
+  it('ignores a default that is no longer one of the person’s own treasuries (revalidated)', async () => {
+    const resolved: Array<Record<string, unknown>> = [];
+    const out = await resolveStepArgs({ payee: '0x00000000000000000000000000000000000000d1', usdc: '1' }, env, lookupsWith(async () => ({ value: '0x00000000000000000000000000000000000000ee' }), resolved), where).catch((e) => e);
+    // whatever the branch did next (a choice between her two treasuries), the stale default was not used
+    expect(out?.payer).not.toBe('0x00000000000000000000000000000000000000ee');
+    expect(resolved.some((r) => r.via === 'standing')).toBe(false);
+  });
+
+  it('asks for the ROOM it is standing in — the organization addressed — so a default for another room is never read', async () => {
+    const asked: Array<{ context?: string }> = [];
+    await resolveStepArgs({ payee: T2, usdc: '1' }, env, lookupsWith(async (scope) => { asked.push(scope); return null; }), { ...where, addressee: ORG }).catch(() => undefined);
+    expect(asked[0]?.context).toBe(ORG);
+  });
+});

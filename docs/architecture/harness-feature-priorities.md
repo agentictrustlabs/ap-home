@@ -143,7 +143,7 @@ Tier 0 is what protects the position in §1; the rest is what the field would no
 
 | # | Feature | Note |
 | --- | --- | --- |
-| 2.1 | Standing-instructions memory record; acting-context namespacing beyond confirmations | after 385 |
+| 2.1 ✅ W1 2026-09-10 | Standing-instructions memory record; acting-context namespacing beyond confirmations — **[spec 394](../../specs/394-standing-instructions.md)**: `standing.instructions` (a declared default per room + capability + argument, kept only from the person's yes to the read-back, revalidated, cited `standing`, never a grant); confirmations carry their room; Ask `context.instruction.declare`; Home lists + clears; nightly `verify-standing-instruction`. W2: the acting-context twin live (a choice made for one organization not read at home) | 394 W2 |
 | 2.2 | Public provenance projection through the S1 firewall (anchored digests only) so a counterparty can verify a receipt's provenance without the vault | after P0; ADR-0040 line unchanged |
 | 2.3 | DO economics for background runs at scale | unchanged |
 | 2.4 | No-code playbook authoring | unchanged; the `~/skills` web app is the seat |
