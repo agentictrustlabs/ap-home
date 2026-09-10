@@ -51,7 +51,7 @@ import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunction
 import { type Plan, type Planner,
   runIntent, InputRequired, dataFor, signatureFor,
   type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
-import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep } from '@agenticprimitives/harness';
+import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep, composeOfferedTools, mergeContractTool as composeMergeContractTool } from '@agenticprimitives/harness';
 import {
   hashDelegation, intentDigest, encodeDigestBindingArgs, decodeDigestBindingTerms, decodeTimestampTerms, buildCaveat, buildVaultRecordScopeCaveat,
   encodeTimestampTerms, encodeValueTerms, ROOT_AUTHORITY, CAPABILITY_RAR_TYPE, PAYMENT_RAR_TYPE,
@@ -3718,102 +3718,12 @@ export function askVocabulary(
  * this agent does not have gets nothing extra, and a realm never grants.
  */
 /** The risk ladder, ordered. Comparing by index is how "never lower" is enforced. */
-const RISK_ORDER = ['informational', 'low', 'medium', 'high', 'critical'] as const;
-const riskRank = (r: string | undefined): number => Math.max(0, RISK_ORDER.indexOf((r ?? 'informational') as never));
-
-/**
- * WHAT A SKILL.md MAY AND MAY NOT SAY ABOUT A BUILT-IN CAPABILITY.
- *
- * A contract is written by a domain author and lives in a corpus anyone with the domain can publish to.
- * The harness has a running invoker for these capabilities, with an authority shape the verifier already
- * compares against. So the boundary is not "the contract is the source" — it is:
- *
- *   THE CONTRACT MAY DESCRIBE THE ACT. IT MAY NOT WEAKEN THE GATE.
- *
- * MERGED FROM THE CONTRACT (behaviour — a wrong value costs a worse plan, never an unauthorized act):
- *   · `description` — the sentence a planner chooses BY. The single highest-value field, and the one the
- *     hand-kept copies kept going stale on.
- *   · `inputSchema` — what to ask for. `required` is UNIONED with the built-in's, so a contract can ask
- *     for more and never for less: dropping a required arg would let a step run with something missing.
- *   · `enumerates` — what a result lists. Fan-out is capped by the ontology's own binding regardless.
- *   · `risk` — RAISED ONLY. `max(built-in, contract)`. A contract that says a payment is informational
- *     does not make it one; that is the same rule `stepRiskClass` applies to plans ("a plan cannot lower
- *     a risk"), applied to playbooks, and without it a published SKILL.md could remove the mandate gate
- *     from `treasury.payment.execute` — authority laundering with a nicer name.
- *
- * NEVER TAKEN FROM THE CONTRACT (authority — the verifier compares against these):
- *   · `capability.id` / `action` — what is being exercised.
- *   · `resourceArg` / `authorityArg` — WHICH argument the mandate is bound to. Rebinding `authorityArg`
- *     from `payer` to `payee` would have the gate check the wrong party while still passing.
- *   · whether a mandate is required at all.
- *
- * A contract that disagrees on an authority field is not obeyed and not silently ignored — it is logged,
- * because a domain author who wrote it believes it is in force.
- */
+// Spec 354 K5 — THE COMPOSITION ROOT IS RING 0 (`@agenticprimitives/harness` `compose.ts`): what a SKILL.md may
+// and may not say about a built-in capability lives beside the verifier it protects, not beside the tools it
+// governs. This app keeps the name for its callers and adds the one thing Ring 0 leaves to it — where a
+// contract's disagreement on an authority field is SAID (the author believes it is in force).
 export function mergeContractTool(builtin: ToolSpec, contract: DefinitionToolV1 | undefined): ToolSpec {
-  if (!contract) return builtin;
-  const cap = builtin.capability;
-  if (cap && contract.capability) {
-    for (const [field, mine, theirs] of [
-      ['action', cap.action, contract.capability.action],
-      ['resourceArg', cap.resourceArg, contract.capability.resourceArg],
-      ['authorityArg', cap.authorityArg, contract.capability.authorityArg],
-    ] as const) {
-      if (theirs !== undefined && theirs !== mine) {
-        console.warn(`[playbook] contract for ${cap.id} declares ${field}=${String(theirs)}; the running capability binds ${String(mine)} and that is what the verifier compares — the contract's value is NOT applied`);
-      }
-    }
-  }
-  const builtinReq = ((builtin.inputSchema as { required?: string[] } | undefined)?.required) ?? [];
-  const contractReq = ((contract.inputSchema as { required?: string[] } | undefined)?.required) ?? [];
-  // PROPERTIES ARE A UNION TOO — the contract's description of an argument wins per key, but an argument
-  // it does not mention SURVIVES. Replacing the schema hid `payer` (the treasury contract's inputs name
-  // payee/asset/amount; `authorityArg: payer` is bound by the RUNNING capability) — and the loop only
-  // accepts a supplied answer for a declared argument, so "Which of your treasuries?" became
-  // unanswerable: every answer was filtered out and the identical question asked forever. Describing an
-  // act may add words; hiding an argument the capability binds is weakening the gate's resumability.
-  const builtinProps = ((builtin.inputSchema as { properties?: Record<string, unknown> } | undefined)?.properties) ?? {};
-  const contractProps = ((contract.inputSchema as { properties?: Record<string, unknown> } | undefined)?.properties) ?? {};
-  const inputSchema = contract.inputSchema
-    ? {
-        ...(builtin.inputSchema as Record<string, unknown> | undefined ?? {}),
-        ...(contract.inputSchema as Record<string, unknown>),
-        properties: { ...builtinProps, ...contractProps },
-        required: [...new Set([...builtinReq, ...contractReq])],
-      }
-    : builtin.inputSchema;
-  return {
-    ...builtin,
-    ...(contract.description ? { description: contract.description } : {}),
-    ...(inputSchema ? { inputSchema: inputSchema as never } : {}),
-    ...(contract.enumerates ? { enumerates: contract.enumerates } : {}),
-    // Spec 361 — the interaction binding is the MOST behavioural field yet: a wrong name costs a worse
-    // screen, never an unauthorized act. Merged like description; a surface with no registration for the
-    // name falls back to generic rendering.
-    ...(contract.interaction ? { interaction: contract.interaction } : {}),
-    // Spec 363 W5 — WHICH QUESTIONS this capability may answer for the person instead of asking. A
-    // domain author owns that (it is behaviour), the RULES stay in the ontology (they decide whose money
-    // moves), and a point the substrate does not publish is refused rather than silently ignored — a
-    // contract naming a decision nobody implements would read as "this asks nothing" while asking
-    // everything.
-    ...(contract.decisions?.length ? { decisions: [...contract.decisions] } : {}),
-    // Spec 367 W2 — the contract's VERBS join the built-in's (union: an act answers to every word either
-    // declares; the contract's are the domain author's). Behavioural: plan admission reads them to say an
-    // instruction must be answered by an act — never which act, never authority.
-    ...(builtin.verbs?.length || contract.verbs?.length ? { verbs: [...new Set([...(builtin.verbs ?? []), ...(contract.verbs ?? [])])] } : {}),
-    // Spec 371 — what a READ answers (union, like verbs) and how its answer reads (the contract's sentence
-    // wins: it is the domain author's). Behaviour: question admission and rendering, never a gate.
-    ...(builtin.answers?.length || contract.answers?.length ? { answers: [...new Set([...(builtin.answers ?? []), ...(contract.answers ?? [])])] } : {}),
-    ...(contract.answer ? { answer: contract.answer } : builtin.answer ? { answer: builtin.answer } : {}),
-    // Spec 367 §6 — what the step establishes: the contract's word, else the built-in's. A contract may
-    // LOWER it (authoritative → submission: "an invitation is not a membership") — that is honesty about
-    // the outcome, not authority; it may not raise a lookup into an act (a read stays a read).
-    ...(contract.establishes && (builtin.capability || contract.establishes === 'lookup') ? { establishes: contract.establishes } : builtin.establishes ? { establishes: builtin.establishes } : {}),
-    // Raised only — never lowered.
-    ...(builtin.risk || contract.risk
-      ? { risk: (riskRank(contract.risk) > riskRank(builtin.risk) ? contract.risk : builtin.risk) as never }
-      : {}),
-  };
+  return composeMergeContractTool(builtin, contract, (d) => console.warn(`[playbook] contract for ${d.capability} declares ${d.field}=${d.contract}; the running capability binds ${String(d.running)} and that is what the verifier compares — the contract's value is NOT applied`));
 }
 
 export function scopedActionTools(surface?: AskScopeV1, playbook?: { capabilityIds: Set<string>; tools?: Record<string, DefinitionToolV1> } | null): ToolSpec[] {
@@ -3824,13 +3734,10 @@ export function scopedActionTools(surface?: AskScopeV1, playbook?: { capabilityI
   // to do. Behavior honesty, not authority — a removed tool is one the planner will not pick; the mandate
   // gate is untouched. Absent playbook ⇒ no narrowing (the bare harness offers everything the surface
   // allows).
-  if (playbook) {
-    tools = tools.filter((t) => playbook.capabilityIds.has(t.capability?.id ?? t.id));
-    // …AND THE CONTRACT DESCRIBES IT. Narrowing was all a playbook could do; now the SKILL.md a domain
-    // author wrote supplies the behavioural half of each tool it kept (see `mergeContractTool` for the
-    // line between describing an act and weakening its gate).
-    tools = tools.map((t) => mergeContractTool(t, playbook.tools?.[t.capability?.id ?? t.id]));
-  }
+  // …AND THE CONTRACT DESCRIBES IT (spec 354 K5): the Ring-0 composition root narrows the built-ins to the
+  // definition and puts each kept tool under its contract — see `harness/compose.ts` for the line between
+  // describing an act and weakening its gate.
+  if (playbook) tools = composeOfferedTools(tools, playbook, (d) => console.warn(`[playbook] contract for ${d.capability} declares ${d.field}=${d.contract}; the running capability binds ${String(d.running)} — NOT applied`));
   // A person's own realm charters organizations; an organization charters what lives inside it. Offering
   // `organization.create` while standing in a service is offering a plan whose parent makes no sense.
   const kind = surface?.realm?.kind;

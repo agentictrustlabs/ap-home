@@ -305,7 +305,11 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           const artifactNames = [...(reply.results?.length ? ['results'] : []), 'trace'];
           const trace = buildFlowTrace({ flowId, traceId: traceContextOf(ctx.headers)?.traceId ?? null, runRef, agent, asker: caller, startedAt, reply: reply as never, ...(asked.events ? { events: asked.events } : {}), artifacts: artifactNames, ...(referral ? { referral } : {}), ...(parkedRef ? { continued: true } : {}) });
           console.log(`[flow ${flowId ?? '-'}] agent ${agent} run ${runRef}${parkedRef ? ' (continued)' : ''} ← ${caller}: ${reply.kind} · planner ${trace.planner?.kind ?? '-'} · steps ${trace.steps.map((st) => `${st.toolId}${st.ok ? '' : '✗'}`).join(',') || 'none'} · ${trace.ms}ms${referral ? ` · referral ${referral.registry}` : ''}`);
-          await ctx.artifact({ name: 'trace', parts: [{ data: trace }] });
+          // Spec 354 K4 — THE PLAYBOOK MANIFEST (`skill-provenance/v1`, from the run's receipts: archetype id, version,
+          // definition digest) rides on every artifact the task carries, so an outside verifier checks WHICH procedure
+          // shaped this answer against the corpus by digest. Names a procedure; grants nothing.
+          const manifest = (asked.reply as { skillProvenance?: Record<string, unknown> }).skillProvenance;
+          await ctx.artifact({ name: 'trace', parts: [{ data: trace }], ...(manifest ? { metadata: manifest } : {}) });
           // THE WRITTEN REPLY, not the spoken one. `spoken` is rendered for a voice — it says "alice2 dot
           // treasury" — and an A2A peer reading that gets a mangled name it cannot resolve (seen live,
           // 2026-09-08). A voice surface asks for `spoken`; this wire wants what was written.
@@ -314,7 +318,7 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
             // Spec 387 W2 — WHAT THE STEPS RETURNED rides beside the words, as the routed reply's does below: a
             // catalog search's items (each with its link) are an artifact the caller can act on, not a sentence to re-parse.
             const results = (asked.reply as { results?: Array<{ toolId: string; result: unknown }> }).results;
-            if (results?.length) await ctx.artifact({ name: 'results', parts: [{ data: results }] });
+            if (results?.length) await ctx.artifact({ name: 'results', parts: [{ data: results }], ...(manifest ? { metadata: manifest } : {}) });
             await ctx.complete([{ text: words || 'Done.' }]); return;
           }
           // WHAT THE OUTSIDER CANNOT FINISH, A STEWARD CAN (spec 372 N1). The task parks for the caller; the
@@ -375,7 +379,7 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
         const said = r.text || r.summary || env.spoken || '';
         switch (r.kind) {
           case 'answer': {
-            if (r.results?.length) await ctx.artifact({ name: 'results', parts: [{ data: r.results }] });
+            if (r.results?.length) await ctx.artifact({ name: 'results', parts: [{ data: r.results }], ...((r as { skillProvenance?: Record<string, unknown> }).skillProvenance ? { metadata: (r as { skillProvenance?: Record<string, unknown> }).skillProvenance } : {}) });
             await ctx.complete([{ text: said || 'Done.' }]);
             return;
           }

@@ -326,6 +326,18 @@ export async function publishSocialConnectionKindIfNeeded(agent: Address, name: 
   }
 }
 
+/** THE AGENT IS BORN WITH ITS PLAYBOOK (spec 354 §3 / K3), on EVERY onboarding path — Google, passkey, wallet, no-name.
+ *  Best-effort and last: an unassigned agent runs the bare harness, which works; failing an enrolment because a
+ *  BEHAVIOUR could not be attached would be the tail wagging the dog, and behaviour grants nothing. */
+async function bornWithPlaybook(agent: string, auth?: Auth): Promise<void> {
+  try {
+    const token = homeBearerToken(auth);
+    if (!token) { console.warn('[home-create] default archetype deferred: no session yet (assign from Behaviour → Playbook)'); return; }
+    const a = await assignDefaultArchetype(agent, 'person', token);
+    if (!a.ok) console.warn('[home-create] default archetype not assigned (the bare harness stands):', a.reason);
+  } catch (e) { console.warn('[home-create] default archetype deferred:', e); }
+}
+
 export async function secureHome(
   key: DemoPasskey | null,
   name: string,
@@ -344,13 +356,7 @@ export async function secureHome(
     // contracts a domain author wrote never reach it. Best-effort and last: an unassigned agent runs the
     // bare harness, which works — failing an enrolment because a BEHAVIOUR could not be attached would be
     // the tail wagging the dog, and behaviour grants nothing.
-    try {
-      const token = homeBearerToken(auth);
-      if (token) {
-        const a = await assignDefaultArchetype(out.agent, 'person', token);
-        if (!a.ok) console.warn('[home-create] default archetype not assigned (the bare harness stands):', a.reason);
-      }
-    } catch (e) { console.warn('[home-create] default archetype deferred:', e); }
+    await bornWithPlaybook(out.agent, auth);
     return { ok: true, home: { address: out.agent, name: out.name } };
   }
   if (via === 'wallet') {
@@ -372,6 +378,7 @@ export async function secureHome(
       try { const bound = await activateVaultIfNeeded(out.agent, via, auth); if (!bound.ok) console.warn('[home-create] vault key not activated (activate later from Security):', bound.error); }
       catch (e) { console.warn('[home-create] vault-key activation deferred:', e); }
     }
+    await bornWithPlaybook(out.agent, auth);
     return { ok: true, home: { address: out.agent, name: out.name } };
   }
   if (!key) return { ok: false, error: 'no key for this device' };
@@ -396,6 +403,7 @@ export async function secureHome(
   } else {
     await activatePersonPlanes(res.agent, via, auth);
   }
+  await bornWithPlaybook(res.agent, auth);
   return { ok: true, home: { address: res.agent, name: res.name } };
 }
 
@@ -432,6 +440,7 @@ export async function secureHomeNoName(auth?: Auth, opts: { claimPendingNameVia?
     }
   }
   await activatePersonPlanes(out.agent, opts.claimPendingNameVia ?? 'google', auth);
+  await bornWithPlaybook(out.agent, auth);
   return { ok: true, home: { address: out.agent, name: claimed } };
 }
 
