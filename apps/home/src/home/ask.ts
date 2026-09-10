@@ -409,6 +409,14 @@ export async function listRunRecords(session: { token: string }, addressee: Addr
 
 /** Spec 381 W3 — WHAT MY AGENT DID, from the vault: the spans of one run the person asked for, read back under
  *  their session (the Worker refuses a run that was not theirs). The same bytes an OTLP exporter would carry. */
+/** Spec 395 — the run's PUBLIC projection: its anchored outcomes (digests and ids through the S1 firewall), readable by
+ *  anyone with no session. What a counterparty holding a receipt can verify against; nothing the run was about. */
+export interface AnchoredOutcome { '@id': string; run: string; anchoredBy: string; assurance: string; receiptDigest?: string; chainDigest?: string; intentDigest?: string; playbook?: string; capability?: string; completionState: string; endedAt?: string }
+export async function fetchPublicProvenance(agent: Address, runRef: string): Promise<{ rows: AnchoredOutcome[]; refused: Array<{ activity: string; reason: string }> } | { error: string }> {
+  const out = (await postA2a('/a2a/provenance/public', { agent, runRef })) as { ok?: boolean; error?: string; rows?: AnchoredOutcome[]; refused?: Array<{ activity: string; reason: string }> };
+  return out.ok ? { rows: out.rows ?? [], refused: out.refused ?? [] } : { error: out.error ?? 'the public projection could not be read' };
+}
+
 /** Spec 389 W3 — THE RUN AS A PROV GRAPH: the JSON-LD document the agent's vault holds (rebuilt from the record), or
  *  PROV-N, read back under the person's session. `hasProvenance` names where the durable copy is. */
 export async function fetchProvenance(session: { token: string }, addressee: Address, runRef: string, format: 'jsonld' | 'prov-n' = 'jsonld'): Promise<{ text: string; hasProvenance?: { agent: string; recordType: string } } | { error: string }> {

@@ -141,6 +141,16 @@
       "required": false,
       "paced": false,
       "timeoutSec": 300
+    },
+    {
+      "id": "verify-receipt-recompute",
+      "script": "scripts/verify-receipt-recompute.mts",
+      "spec": "395 W2",
+      "proves": "a receipt's holder recomputes its digest and the agent's public projection, with no session, names the transaction anchoring it",
+      "twin": "a receipt changed in one field anchors nothing",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 240
     }
   ]
 }

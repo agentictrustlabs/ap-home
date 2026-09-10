@@ -5,7 +5,7 @@
 // download so the person can take them elsewhere. Read on demand; nothing is fetched for a run nobody opens.
 import { useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { fetchSpans, fetchProvenance, type SpanRow } from '../../../home/ask';
+import { fetchSpans, fetchProvenance, type SpanRow, fetchPublicProvenance, type AnchoredOutcome } from '../../../home/ask';
 
 const ATTR = {
   step: 'ap.step.ref', status: 'ap.step.status', capability: 'ap.capability.id', risk: 'ap.risk',
@@ -31,11 +31,15 @@ function ordered(spans: SpanRow[]): Array<{ span: SpanRow; depth: number }> {
 
 export function RunTimeline({ token, addressee, runRef, open }: { token: string; addressee: Address; runRef: string; open?: boolean }) {
   const [state, setState] = useState<{ status: 'idle' | 'loading' | 'ready' | 'error'; spans: SpanRow[]; error?: string; exporter?: string }>({ status: 'idle', spans: [] });
+  // Spec 395 — what of this run ANYONE can verify: its anchored outcomes, read from the public route (no session).
+  const [anchored, setAnchored] = useState<AnchoredOutcome[] | null>(null);
   const load = async () => {
     setState((s) => ({ ...s, status: 'loading' }));
     const out = await fetchSpans({ token }, addressee, runRef);
     if ('error' in out) setState({ status: 'error', spans: [], error: out.error });
     else setState({ status: 'ready', spans: out.spans, ...(out.exporter ? { exporter: out.exporter } : {}) });
+    const pub = await fetchPublicProvenance(addressee, runRef);
+    setAnchored('error' in pub ? [] : pub.rows);
   };
   if (open && state.status === 'idle') void load();
   const save = (text: string, name: string, type: string) => {
@@ -65,6 +69,12 @@ export function RunTimeline({ token, addressee, runRef, open }: { token: string;
             {' '}<button type="button" className="btn ghost" style={{ fontSize: 10.5, padding: '0 6px', minHeight: 0 }} onClick={() => void downloadProvenance('jsonld')}>PROV (JSON-LD)</button>
             {' '}<button type="button" className="btn ghost" style={{ fontSize: 10.5, padding: '0 6px', minHeight: 0 }} onClick={() => void downloadProvenance('prov-n')}>PROV-N</button>
           </div>
+          {anchored && anchored.length > 0 && (
+            <div data-testid="run-public-provenance" title="Anyone holding a receipt of this run can verify it against the agent's public projection — digests and the transaction, nothing the run was about.">
+              <strong>publicly verifiable</strong> {anchored.length} anchored outcome{anchored.length === 1 ? '' : 's'}
+              {anchored.map((a) => <span key={a['@id']}> · {a.capability ?? 'step'} → tx {a.anchoredBy.slice(0, 10)}…</span>)}
+            </div>
+          )}
           {ordered(state.spans).map(({ span: sp, depth }) => {
             const step = attr(sp, ATTR.step); const status = attr(sp, ATTR.status); const cap = attr(sp, ATTR.capability); const risk = attr(sp, ATTR.risk);
             const decision = attr(sp, ATTR.decision); const presented = attr(sp, ATTR.presented); const outcome = attr(sp, ATTR.outcome); const origin = attr(sp, ATTR.origin); const err = attr(sp, ATTR.error);

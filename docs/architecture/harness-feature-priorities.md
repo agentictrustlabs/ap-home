@@ -135,35 +135,75 @@ without becoming a different kind of system.
 | Model plane | MAF providers | 377 second model behind the same port; 388 budget route decided before the call, recorded with its reason | **at par**, with the twist (a route, never a fallback) |
 | Semantic grounding | RAG add-ons | ontology-compiled plans, class-bound records, the answer answers the question (371) | **ahead** (C5) |
 
-## 3. The prioritized program (re-cut 2026-09-09 evening)
+## 3. The final gap list before the transition to UX and developer tools (2026-09-10)
 
-Tier 0 is what protects the position in §1; the rest is what the field would notice.
+The evening-of-09-09 program is closed: P0 (389), P1 (391), P2 (392 W1 + 390), 1.3 (playbook tails), 1.4 (393),
+and the first wave of every Tier 2 item (394, 395, 396) shipped on 2026-09-10 with live gates in the nightly
+ledger. What follows is the **complete** list of what is still open in the substrate, sorted into three bins:
+what must close before the transition, what is time-gated and runs in the background during it, and what IS
+the transition (UX and developer tools) and should not be worked here.
 
-### Tier 0 — now
+### 3.1 The closed ledger (for the record)
 
-| # | Feature | Analog | Our twist / gate |
+| Item | Spec | Shipped |
+| --- | --- | --- |
+| Provenance unification — the record is the graph, SHACL R1–R6 in CI, `hasProvenance` everywhere, `POST /harness/provenance` (JSON-LD / PROV-N), cross-Home bundles | 389 W1–W3 | 09-09 → 09-10, complete |
+| OpenTelemetry as the tracing substrate — span ↔ PROV ids, W3C Trace Context on the wire, authority stages + planner calls + outcome as spans, span events + four metrics, conformance status semantics | 390 W1–W4 | 09-09 → 09-10, complete |
+| Context management for long runs — offloaded `run.artifact` records, fitted evidence, re-plan sees shapes, sub-work by the same rule | 391 W1–W3 | 09-09 → 09-10, complete |
+| Live gates nightly — every verify script with its authority twin as one ledger | 392 W1 | 09-09 |
+| Decisions by declared approvers, quorum in the reducer, offers/allocations through the Ask; a coordination act spends the ASKER's mandate unless the tool declares the organization's | 393 W1–W2 | 09-10 |
+| Playbook tails — K5 composition root in Ring 0, provenance manifest, born-with-playbook onboarding | 354 | 09-10 |
+| Standing instructions (declared default per room + act + argument) | 394 W1 | 09-10 |
+| Public provenance projection through the S1 firewall; `POST /provenance/public`; `hasProvenance.public` | 395 W1 | 09-10 |
+| DO economics measured; the `endeavor.list` finding fixed by the index naming every stake | 396 W1 | 09-10 |
+| Budget-routed model selection, a third provider, the minute counted deployment-wide | 388 W1–W3 | 09-09 |
+| The outside-in path — Claude.ai → gateway → registry → Ligonier's agent → its catalog, flow-traced | 386 / 387 W1–W3 | 09-09 |
+
+### 3.2 Must close before the transition — correctness and the position's proofs
+
+These are the gaps that would make a claim in §1 false, or leave a live behaviour that a UX would have to
+paper over. Each has a done-criterion that is a script in the nightly ledger, not a review.
+
+| # | Gap | Why it is in this bin | Done when | Depends on |
+| --- | --- | --- | --- | --- |
+| **G1** | **394 W2 — the acting-context twin.** A confirmation or standing instruction made while acting for Missio Nexus must not be read at home, and vice versa; a standing instruction declared AT an organization | A memory read in the wrong room is a knowledge-plane falsehood of exactly the kind 358 warns about, and it is a privacy line (ADR-0025). The UX will build a "your memories, by room" screen on top of this; the rule has to hold first | `verify-standing-instruction.mts --context` in the nightly: the cross-room read returns nothing, in both directions | none |
+| **G2** | **395 W2, the substrate half — a counterparty verification script.** Recompute a receipt digest from a held receipt, fetch the public anchored-outcome row, check the tx, the chain digest and the mandate's revocation state with none of our services trusted | This is C3's falsifier as code. Until it exists, "a third party can verify" is our word | `scripts/verify-receipt-as-counterparty.mts` runs against a held receipt from the nightly's payment gate and passes with only public inputs; its twin (a tampered receipt) fails on the digest | 395 W1 ✅ |
+| **G3** | **396 W2, the substrate half — the run's own bill on the record.** Vault calls per step and DO requests on `RunRecordV1`, exported as the 390 `ap.vault.calls` metric | Every developer tool that shows cost, and every UX that paces a fan-out, reads this field; without it the transition builds on estimates. The Home pacing itself is 3.4 | the bill on every record in the nightly's runs; `measure-do-economics.mts` reads it instead of headers | 396 W1 ✅ |
+| **G4** | **374 W3 — the completion event across deployments.** A routed write parked at an organization on Home B resumes the asker's run on Home A under the subject agent's session wire | The only multi-agent flow proven in-estate but not cross-Home; a UX for "waiting on Missio Nexus's steward" cannot be honest about a hop that has never completed across the wire | `verify-cross-deployment.mts` extended: park at B, approve at B, A's run resumes `done`; the twin: B's completion presented without the wire is refused at A | B's AKCS caller token (pilot operator) |
+| **G5** | **376 W3 — hand-off across deployments + the live revocation twin.** A child mandate cut on A, redeemed by a specialist on B under the parent agent's own session wire; the parent revokes the child and B is denied at its own gate | C1 and C4 are proven cross-Home only for reads and routed acts; the hand-off (the one flow where authority actually moves to another runtime) is proven in the degenerate case (376 §4). The revocation twin is the strongest single demonstration in the position | `verify-handoff.mts --cross` in the nightly, both halves | G4's token; a Worker-held parent session wire (a ceremony, not code — the custodian mints `parent SA → the Worker's session key` pinned to the hand-off selector) |
+| **G6** | **383 W3 — bilateral bindings over another deployment's wire.** `SubjectBindingV1`: both parties bind the interaction; the chain verifies when a link was minted by a delegator whose keys and vault A never sees, presented only as the wires that travel with the ask | Completes the "chain is verified whole or not at all" rule across estates; the receipt a UX shows for a cross-Home act names every actor and grant | `verify-authority-chain.mts --cross`: a three-link chain across two Homes verifies from either side; the twin: a link presented by reference only is `chain-parent-missing` | G4, G5 |
+| **G7** | **354 K3 — close it.** The status still reads "partial"; every named remainder (assignment record, ceremony on org/service/person pages, born-with-playbook) has shipped | A status that says partial for a thing that is done is a falsehood in the knowledge plane of the repo itself; the UX phase will re-skin this ceremony and needs to know it is complete | 354 status line reads K1–K5 complete with the one deliberate exclusion (durability → 362) | none — a doc change after a read-through |
+
+G4–G6 share one fixture (faithnet-b) and one prerequisite (B's caller token; for G5/G6 also the parent wire
+ceremony); they are ONE wave, run in order, not three. The token is an operator action, not code: request it
+now so the wave is not blocked when it starts.
+
+### 3.3 Time-gated — starts now, completes in the background during the transition
+
+| # | Gap | Why it waits | Done when |
 | --- | --- | --- | --- |
-| **P0** | **Provenance unification — one PROV graph, serialized, validated, addressable** (§4.4). The harness run projects through the Ring-0 `provenance` package (PROV-O + P-Plan + EP-Plan bundle), not a second record shape; the vault record is JSON-LD with a published `@context` (`prov`, `p-plan`, `apexec`, `apvr`); every field bound by IRI in `vault-records.ts`; SHACL S1–S5 run on every record in CI; a receipt and a task artifact link to their provenance (PROV-AQ `hasProvenance`); a routed or handed-off run is a bundle `prov:wasInformedBy` the sender's, so a cross-Home run is one graph | none — the field emits traces, not PROV | provenance is EVIDENCE, never an authorization input (execution.ttl header); the S1 firewall stays fail-closed; the twin: a forged provenance record fails SHACL and its receipt digest does not match |
-| **P1** ✅ 2026-09-10 (spec 391 W1–W3) | **Context management for long runs** (was 0.1) — large tool results become receipted vault records and the plan carries a reference; run history summarized at checkpoints; heavy sub-work runs as a child hand-off (376) | Deep Agents offload/summarize/subagent | spec first: it defines what a checkpoint holds; an offloaded artifact is a `prov:Entity` the step `generated` |
-| **P2** ✅ 2026-09-10 (spec 392 W1 + 390 W1) | **CI replay of the verify scripts + authority twins, and OTel GenAI conformance** (was 0.2) — one job, the negative twin beside every positive; the exported spans checked against the GenAI semconv conformance rules (span names, `gen_ai.tool.call.id`, status UNSET on success) | LangSmith Engine (in kind); OTel weaver scenarios | protects the lead while features keep landing |
+| **T1** | **392 W2 — the recurring-failure view.** The nightly's JSON reports clustered over time by gate × failure class (deterministic; the priorities-1.2 item) | Needs a week of nightly reports to cluster; the code is small once the artifacts exist | the first weekly report; then a developer-tools surface reads it (3.4) |
+| **T2** | **392 W3 — the nightly graduates to blocking** | Needs a clean fortnight | the workflow fails the build |
+| **T3** | **379 W3 — a foreign runtime (ADK `RemoteA2aAgent`) reaches one of our cards.** Conformance, not code | Needs a foreign runtime in the loop; the outside-in path (386/387) already proved the direction from an MCP host | one recorded run from a stock ADK agent against a faithnet card, added to the ledger |
 
-### Tier 1 — next
+### 3.4 IS the transition — do not work these in the substrate program
 
-| # | Feature | Note |
-| --- | --- | --- |
-| **1.1** | The second-deployment W3s as ONE wave on one fixture (faithnet-b): 374 W3, 376 W3 + live revocation twin, 383 W3 bilateral bindings, 379 W2/W3 | after B's AKCS caller token (pilot operator) and a Worker-held parent session wire |
-| **1.2** | Recurring-failure detection over the provenance graph (was 2.1) — deterministic clustering by capability × refusal class × playbook version, computed as a selector over the owner's own records (spec 356: never SPARQL over decrypted vault copies in a shared engine) | needs P0's uniform shape |
-| **1.3** ✅ 2026-09-10 | Playbook tails: onboarding auto-assign (every person path is born with its playbook), K5 (the composition root in `harness/compose.ts`; the app's assembly wraps it), provenance manifest (the task rail's artifacts carry `skill-provenance/v1`) | done; plus `scripts/reissue-service-grant.mts` for script-chartered agents' grants |
-| **1.4** | Endeavor conformance: decisions by declared approvers — **[spec 393](../../specs/393-decisions-by-declared-approvers.md) W1 ✅ 2026-09-10** (`RaiseDecisionRequest`/`RecordDecision`; the un-named steward refused in those words; the record immutable; the Home's cards lit; Ask `coordination.decision.request/.record`; nightly `verify-endeavor-decision`). **W2 ✅ 2026-09-10**: quorum counted (never a vote), decision-kind steps auto-satisfied by their approval, offers/allocations through the Ask with both twins (`verify-endeavor-offer-allocate-ask`, nightly) — the offer is the OFFERER's act (`authorityArg: proposer`, an ontology party role). `coordination.endeavor.request` fixed the same way (`requester`) — a coordination act asked AT an organization spends the ASKER's mandate unless the tool declares the organization's (`allocate`, `satisfy`, `milestone.achieve`, `decision.*`) | done |
+The UX and developer-tools phase starts from a substrate whose every behaviour has a record, a span, a PROV
+graph and a live gate. These are the first things it should build on that, and they are listed here only so
+they are not mistaken for substrate gaps:
 
-### Tier 2 — later
+- **UX:** the run timeline's "publicly verifiable" badge beside an anchored step (395 W2, Home half); "your
+  memories, by room" over 394; the fan-out `/work` pacing itself from the per-org bills (396 W2, Home half);
+  the recurring-failure view as a screen (over T1); the cross-Home hop shown as one graph from either side
+  (389 W3 already serves it); the Behaviour → Playbook ceremony re-skinned over K3–K5.
+- **Developer tools:** a Ring-1 OTel exporter package (batching, gRPC, propagators — 390 §7 names exactly
+  what stays out of Ring 0); a stock PROV toolchain walkthrough (load `POST /harness/provenance` output into
+  a PROV validator / visualizer); the counterparty verification script (G2) packaged as a CLI for outsiders;
+  the nightly ledger's reports as a dashboard; the `~/skills` web app for playbook authoring (old 2.4); the
+  gateway connector's install path for other assistant hosts (386/387).
 
-| # | Feature | Note |
-| --- | --- | --- |
-| 2.1 ✅ W1 2026-09-10 | Standing-instructions memory record; acting-context namespacing beyond confirmations — **[spec 394](../../specs/394-standing-instructions.md)**: `standing.instructions` (a declared default per room + capability + argument, kept only from the person's yes to the read-back, revalidated, cited `standing`, never a grant); confirmations carry their room; Ask `context.instruction.declare`; Home lists + clears; nightly `verify-standing-instruction`. W2: the acting-context twin live (a choice made for one organization not read at home) | 394 W2 |
-| 2.2 ✅ W1 2026-09-10 | Public provenance projection through the S1 firewall (anchored digests only) so a counterparty can verify a receipt's provenance without the vault — **[spec 395](../../specs/395-public-provenance-projection.md)**: `projectPublicProvenance` (one `AnchoredOutcome` row per step that left a transaction — run/step IRIs, tx as `anchoredBy`, receipt/chain/intent digests, playbook commitment, capability, completion; every row through `isPublicProjectionSafe` + an address scan; the rest refused by name), `POST /provenance/public { agent, runRef }` with no session, `hasProvenance.public` on every reply; nightly `verify-public-provenance`. Not the KB (the indexer stays its only writer); ADR-0040 line unchanged | 395 W2 (timeline badge; a recompute-and-verify script for a held receipt) |
-| 2.3 ✅ W1 2026-09-10 | DO economics for background runs at scale — **[spec 396](../../specs/396-do-economics-measured.md)**: MEASURED first (every InteractionsDO op reports its vault-call bill on its headers; `scripts/measure-do-economics.mts`, advisory nightly). The finding: `endeavor.list` cost one vault call per endeavor — 51 calls, 9.6 s, two listings a minute before the organization's vault budget (120/min) refused — and every live gate this week hit that wall. The lever: the index names everyone with a stake, so a listing opens only those logs (51 → 28 steward, 46 → 22 member; the organization is not its own stake); **W2 ✅**: the My Work slice rides the index — **51 → 4 calls, 9.6 s → 3.6 s, two listings a minute → thirty**. W3: the harness run's own bill on the record and the 390 metrics | 396 W3 |
-| 2.4 | No-code playbook authoring | unchanged; the `~/skills` web app is the seat |
+None of these change a verdict in §2. The substrate's job for them is what §3.2 closes: every record they
+render must already be right.
 
 ## 4. Traceability and provenance — the standards, where we stand on each, the lever
 
@@ -224,7 +264,14 @@ evidence** (receipts are nodes in it, anchorable). It is private by default (the
 crosses to the public KB only through the S1 firewall (on-chain-anchored, no attribution, no plaintext) —
 the ADR-0040 line, enforced in `provenance/firewall.ts`.
 
-### 4.3 The audit finding — PROV-shaped, not PROV
+### 4.3 The audit finding (2026-09-09 evening) — PROV-shaped, not PROV — RESOLVED 2026-09-10
+
+> **Resolved by specs 389 + 390 on 2026-09-10.** Kept as written because it is the record of what a
+> "PROV-shaped" claim hides, and the shape of the check that caught it. Every bullet below now has its
+> answer: one projector (`projectHarnessRunProvenance`, the same `ProvenanceRecordV1` an Endeavor leaves);
+> every field bound by IRI; JSON-LD and PROV-N served at `POST /harness/provenance`; SHACL R1–R6 in CI;
+> `hasProvenance` on every reply, spans reply and task; a routed run as two bundles joined from either side;
+> span status per the GenAI conformance rules, and every span naming the PROV activity it is.
 
 The noon snapshot said "the gap is wiring, not design — done." Half right. `provenanceOf` runs after every
 recorded run and lands in the acting agent's vault, and the Home renders it. But look at what lands:
@@ -254,7 +301,7 @@ recorded run and lands in the acting agent's vault, and the Home renders it. But
 None of this weakens C3 — the receipt digests, tx hashes and chain digests are the evidence, and they are
 right. It weakens the *claim in §4.2*: today the graph is drawable from the record, not present in it.
 
-### 4.4 P0 — what "provenance unification" delivers, and its gates
+### 4.4 P0 — what "provenance unification" delivers, and its gates — ✅ shipped as spec 389 (W1–W3) + 390 (W1–W4)
 
 | Piece | Delivers | Gate |
 | --- | --- | --- |
@@ -287,9 +334,10 @@ the S1 firewall stays fail-closed for anything public; the record never carries 
 
 ## 6. Sequencing, restated as one line each
 
-P0 provenance unification (one projector → JSON-LD + IRIs → SHACL in CI → `hasProvenance` → cross-agent
-bundles) → P1 context management (spec, then offload + summarize + child sub-runs) → P2 CI replay of the
-verify scripts and their twins + OTel conformance → 1.1 the second-deployment W3s as one wave once B holds
-its caller token and a Worker holds the parent wire → 1.2 failure clustering over the unified graph → 1.3
-playbook tails → 1.4 the rest of Endeavor conformance → Tier 2. The "run well" gap is closed and the position
-in §1 holds; P0 is what makes the position *checkable by others* rather than asserted by us.
+P0 → P1 → P2 → 1.3 → 1.4 → the first waves of 2.1–2.3: all closed 2026-09-09/10. What remains before the
+transition (§3.2): request B's caller token today → G1 acting-context twin → G2 counterparty verification
+script → G3 the run's bill on the record → G7 close 354's status → then G4 → G5 → G6 as one cross-Home wave on
+faithnet-b (the parent-wire ceremony minted before G5). In the background (§3.3): the nightly accumulates a
+week for T1, a fortnight for T2; T3 waits on a foreign runtime. Everything in §3.4 is the transition itself.
+The position in §1 holds today; G2, G5 and G6 are what make its three strongest claims checkable by someone
+who is not us.
