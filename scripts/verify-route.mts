@@ -54,4 +54,12 @@ if (runRef) {
   const names = new Set(spans.map((x) => x.name.split(' ')[0]));
   for (const need of ['invoke_agent', 'plan', 'issue_outcome']) if (!names.has(need)) fail(`no ${need} span — the record's events are not stamped, or the stage projection did not run`);
   console.log(`\n✓ spec 390 W3: the run reads as a tree — the planner's call, each step, its verification, the outcome — with nothing the run was about.`);
+  // Spec 389 W3 — the same run as its PROV graph, and the reply saying where the durable copy is.
+  const hp = (r as { hasProvenance?: { agent: string; recordType: string } }).hasProvenance;
+  if (!hp || hp.recordType !== `run.provenance:${runRef}`) fail(`the reply does not say where its provenance is: ${JSON.stringify(hp)}`);
+  const pv = await j(await fetch(`${HOME}/a2a/harness/provenance`, { method: 'POST', headers: H, body: JSON.stringify({ session: si.homeSession, addressee: String(si.agent).toLowerCase(), runRef }) })) as { ok?: boolean; provenance?: { id: string; graph: unknown[]; hasTraceElement: string[] }; export?: { written?: boolean; error?: string } | null; error?: string };
+  if (!pv.ok || !pv.provenance) fail(`provenance: ${pv.error ?? 'none'}`);
+  console.log(`\n── the run as a graph ──\n  ${pv.provenance!.id} · ${pv.provenance!.graph.length} nodes, ${pv.provenance!.hasTraceElement.length} members · vault copy ${pv.export ? (pv.export.written ? 'written' : `NOT written: ${pv.export.error}`) : 'not yet reported'} · hasProvenance ${hp.agent} ${hp.recordType}`);
+  if (pv.provenance!.id !== `urn:ap:prov:bundle:${runRef}`) fail(`bundle id ${pv.provenance!.id}`);
+  console.log(`\n✓ spec 389 W3: the reply names its provenance and the graph is served to its asker.`);
 }

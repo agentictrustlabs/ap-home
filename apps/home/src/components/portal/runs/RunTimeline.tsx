@@ -5,7 +5,7 @@
 // download so the person can take them elsewhere. Read on demand; nothing is fetched for a run nobody opens.
 import { useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { fetchSpans, type SpanRow } from '../../../home/ask';
+import { fetchSpans, fetchProvenance, type SpanRow } from '../../../home/ask';
 
 const ATTR = {
   step: 'ap.step.ref', status: 'ap.step.status', capability: 'ap.capability.id', risk: 'ap.risk',
@@ -38,11 +38,18 @@ export function RunTimeline({ token, addressee, runRef, open }: { token: string;
     else setState({ status: 'ready', spans: out.spans, ...(out.exporter ? { exporter: out.exporter } : {}) });
   };
   if (open && state.status === 'idle') void load();
-  const download = () => {
-    const blob = new Blob([JSON.stringify({ runRef, spans: state.spans }, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `${runRef}.spans.json`; a.click();
+  const save = (text: string, name: string, type: string) => {
+    const url = URL.createObjectURL(new Blob([text], { type }));
+    const a = document.createElement('a'); a.href = url; a.download = name; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const download = () => save(JSON.stringify({ runRef, spans: state.spans }, null, 2), `${runRef}.spans.json`, 'application/json');
+  // Spec 389 W3 — the run's PROV graph, as the vault holds it (JSON-LD) or as PROV-N: read on click, never fetched
+  // for a run nobody asks about. A stock PROV tool loads either.
+  const downloadProvenance = async (format: 'jsonld' | 'prov-n') => {
+    const out = await fetchProvenance({ token }, addressee, runRef, format);
+    if ('error' in out) { setState((s) => ({ ...s, error: out.error })); return; }
+    save(out.text, format === 'jsonld' ? `${runRef}.provenance.jsonld` : `${runRef}.provenance.provn`, format === 'jsonld' ? 'application/ld+json' : 'text/provenance-notation');
   };
   const t0 = state.spans.length ? Math.min(...state.spans.map((s) => s.startMs)) : 0;
   return (
@@ -54,7 +61,9 @@ export function RunTimeline({ token, addressee, runRef, open }: { token: string;
         <>
           <div>
             <strong>provenance</strong> {state.spans.length} span{state.spans.length === 1 ? '' : 's'}{state.exporter && state.exporter !== 'none' ? ` · exported via ${state.exporter}` : ''}
-            {' '}<button type="button" className="btn ghost" style={{ fontSize: 10.5, padding: '0 6px', minHeight: 0 }} onClick={download}>download JSON</button>
+            {' '}<button type="button" className="btn ghost" style={{ fontSize: 10.5, padding: '0 6px', minHeight: 0 }} onClick={download}>download spans</button>
+            {' '}<button type="button" className="btn ghost" style={{ fontSize: 10.5, padding: '0 6px', minHeight: 0 }} onClick={() => void downloadProvenance('jsonld')}>PROV (JSON-LD)</button>
+            {' '}<button type="button" className="btn ghost" style={{ fontSize: 10.5, padding: '0 6px', minHeight: 0 }} onClick={() => void downloadProvenance('prov-n')}>PROV-N</button>
           </div>
           {ordered(state.spans).map(({ span: sp, depth }) => {
             const step = attr(sp, ATTR.step); const status = attr(sp, ATTR.status); const cap = attr(sp, ATTR.capability); const risk = attr(sp, ATTR.risk);

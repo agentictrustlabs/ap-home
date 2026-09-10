@@ -5,7 +5,7 @@
 // its own effect-write door, and the spans to an OTLP/HTTP collector when this deployment names one.
 // Neither is on the run's path — a record that failed to export costs an export, never the run.
 import { assertFirewalled, otlpTracesOf, provenanceOf, runProvenanceRecordKey, spansOf, type RunRecordV1, type RunExportReportV1, type SpanV1 } from '@agenticprimitives/orchestration';
-import { projectHarnessRunProvenance, toJsonLd } from '@agenticprimitives/provenance';
+import { projectHarnessRunProvenance, toJsonLd, toProvN, type ProvenanceRecordV1 } from '@agenticprimitives/provenance';
 import { RUN_PROVENANCE_CONTEXT } from '@agenticprimitives/ontology';
 
 export interface RunExportEnv {
@@ -31,11 +31,25 @@ export function recordRetention(env: RunExportEnv): { doDays: number; vaultRecor
  *  by reference — never arguments, results or words), projected by the Ring-0 provenance projector into the
  *  same PROV-O / P-Plan record an Endeavor leaves, serialized as JSON-LD under the published context. What
  *  lands in the vault is a document a stock PROV tool loads unchanged. */
-export async function provenanceGraphOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, agent: string, record: RunRecordV1): Promise<Record<string, unknown>> {
+export async function provenanceRecordOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, agent: string, record: RunRecordV1): Promise<{ graph: ProvenanceRecordV1; chainId?: number }> {
   const view = await provenanceOf(record, agent);
   const chainId = Number(env.CHAIN_ID);
-  const graph = projectHarnessRunProvenance({ ...view, ...(Number.isFinite(chainId) && chainId > 0 ? { chainId } : {}) });
-  return toJsonLd(graph, { context: RUN_PROVENANCE_CONTEXT['@context'] as unknown as Record<string, unknown>, ...(Number.isFinite(chainId) && chainId > 0 ? { chainId } : {}) });
+  const known = Number.isFinite(chainId) && chainId > 0 ? { chainId } : {};
+  return { graph: projectHarnessRunProvenance({ ...view, ...known }), ...known };
+}
+export async function provenanceGraphOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, agent: string, record: RunRecordV1): Promise<Record<string, unknown>> {
+  const { graph, chainId } = await provenanceRecordOf(env, agent, record);
+  return toJsonLd(graph, { context: RUN_PROVENANCE_CONTEXT['@context'] as unknown as Record<string, unknown>, ...(chainId ? { chainId } : {}) });
+}
+/** Spec 389 W3 — the same record in PROV-N, for a reader or a tool that wants provenance and not JSON. */
+export async function provenanceProvNOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, agent: string, record: RunRecordV1): Promise<string> {
+  const { graph, chainId } = await provenanceRecordOf(env, agent, record);
+  return toProvN(graph, chainId ? { chainId } : {});
+}
+/** Spec 389 W3 — WHERE A RUN'S PROVENANCE IS (PROV-AQ `hasProvenance`): the agent whose vault holds it and the
+ *  record key. A reference, never the record: resolving it takes that agent's grant (ADR-0055). */
+export function hasProvenanceRef(agent: string, runRef: string): { agent: string; recordType: string } {
+  return { agent: agent.toLowerCase(), recordType: runProvenanceRecordKey(runRef) };
 }
 
 /** The firewalled spans of a record — what `/harness/spans` serves and the collector receives. */

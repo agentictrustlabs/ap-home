@@ -17,6 +17,7 @@
 // that owns it. Nothing a person cannot rebuild is in either (ADR-0055).
 import { buildFlowTrace, flowIdOf, referralOf } from './flow-trace.js';
 import { traceContextOf } from '@agenticprimitives/orchestration';
+import { hasProvenanceRef } from './run-export.js';
 
 /** Spec 390 W2 — the W3C Trace Context a request arrived with, forwarded on the in-process ask so the run's
  *  record keeps it. Ids only; the ask admits on the session and the wire, never on these. */
@@ -269,7 +270,7 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           // A resume that FAILED is said as such (the debtor is not a stranger and the words help); a run
           // that does not exist is not confirmed or denied.
           if (!r.ok) { await ctx.reject([{ text: r.reason.startsWith('the waiting run') ? r.reason : 'nothing this agent is waiting on matches that answer' }]); return; }
-          ctx.task.metadata = { ...(ctx.task.metadata ?? {}), runRef: r.runRef };
+          ctx.task.metadata = { ...(ctx.task.metadata ?? {}), runRef: r.runRef, hasProvenance: hasProvenanceRef(agent, r.runRef) };
           await ctx.complete([{ text: r.said || 'The waiting run finished.' }]);
           return;
         }
@@ -321,7 +322,7 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           // unfinished run and finish it with their own signature — the runtime never holds that pen.
           // A prompt the CALLER can answer is also open to the caller (W3): the checkpoint names it as the outsider.
           if (asked.reply.kind === 'prompt' || asked.reply.kind === 'authority_required') {
-            ctx.task.metadata = { ...(ctx.task.metadata ?? {}), runRef, openToStewards: true };
+            ctx.task.metadata = { ...(ctx.task.metadata ?? {}), runRef, openToStewards: true, hasProvenance: hasProvenanceRef(agent, runRef) };
             if (!parkedRef) await deps.parkRun?.({ runRef, ask: message, addressee: agent, asker: caller, reply: asked.reply, ...(asked.result ? { result: asked.result } : {}) }).catch((e: unknown) => console.warn('[standard-a2a] park failed:', e instanceof Error ? e.message : String(e)));
           }
           if (asked.reply.kind === 'prompt') { await ctx.inputRequired([{ text: asked.reply.prompt?.prompt ?? words }, { data: asked.reply.prompt ?? {} }]); return; }

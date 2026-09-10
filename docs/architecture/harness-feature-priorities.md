@@ -43,8 +43,7 @@ published context, one `ep-plan:ExecutionTraceBundle` per run, the runtime `acte
 `wasInformedBy` the sender's; 44 fields bound by IRI; round-tripped by a stock RDF stack); validity R1–R6 in CI with
 the forged / truncated / leaking twins refused by name (389 W2); every span names its PROV activity and every activity
 its span (390 W1); W3C Trace Context in and out — Claude → gateway → Ligonier's agent recorded as one trace (390 W2).
-Still open: addressability (`hasProvenance`, `/harness/provenance` — 389 W3), the authority-stage spans (390 W3),
-events + metrics (390 W4). One correction to §4.3: the SHACL file it cited never existed.
+Still open: events + metrics (390 W4). Spec 389 is complete; 390 W3 (the authority-stage spans) shipped 2026-09-10. One correction to §4.3: the SHACL file it cited never existed.
 
 **Durable runs, triggers, provenance, streamed progress, memory, operators and external runtimes are all
 live (370 P1–P8). The multi-agent rail is the differentiator (366–384): routed asks and writes across Homes,
@@ -226,9 +225,9 @@ recorded run and lands in the acting agent's vault, and the Home renders it. But
   PROV tool; the "W3C-standard graph" claim is true of the T-box and false of the record.
 - **No validity check — and no shapes to check with.** *(Corrected: the `fabric-provenance-shapes` file cited here never existed after `apfab:` was retired; S1 lives in code, S2–S5 nowhere. CLOSED — 389 W2: `run-provenance-shapes.shacl.ttl` R1–R6 in CI, the twins refused by name.)* Previously: SHACL S1–S5 were believed to guard fabric provenance; nothing ran on a run record. A record with a
   step that ended before it started, or a `generated` receipt with no digest, is accepted.
-- **Not addressable.** *(OPEN — 389 W3.)* A receipt, a task artifact, a reply do not say where their provenance is (PROV-AQ).
+- **Not addressable.** *(CLOSED — 389 W3: `hasProvenance` on every reply, spans reply and task; `POST /harness/provenance` serves JSON-LD and PROV-N to the asker; Home downloads.)* A receipt, a task artifact, a reply do not say where their provenance is (PROV-AQ).
   The timeline finds it by the `run.provenance:<runRef>` convention.
-- **Cross-agent by link, not by graph.** *(HALF CLOSED — 389 W1: a routed run's bundle `wasInformedBy` the sender's; 390 W2: one W3C trace across the hops. The two-Home live gate is 389 W3.)* A routed or handed-off run joins the sender's *trace* by derived ids
+- **Cross-agent by link, not by graph.** *(CLOSED — 389 W1/W3: a routed run's bundle `wasInformedBy` the sender's and the sender's step `wasInformedBy` the receiver's run, proven live from either side; 390 W2: one W3C trace across the hops. The two-Home form waits on B's caller token, 1.1.)* A routed or handed-off run joins the sender's *trace* by derived ids
   (381 W2) and the receipt names `delegatedTo` / `wasInformedBy`; the two provenance records are separate
   objects with no bundle relation.
 - **Span status.** *(CLOSED — 390 W1: success `UNSET`, conformance gate.)* `spansOf` sets `OK` on success; the GenAI conformance rules reserve OK for application

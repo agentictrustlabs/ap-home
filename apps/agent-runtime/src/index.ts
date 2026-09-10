@@ -151,7 +151,7 @@ import type { CandidateSource } from '@agenticprimitives/intent-engagement';
 import { answerProbe } from './engagement-answer.js';
 import type { MessageV1 } from '@agenticprimitives/a2a/standard';
 import { signAsAgent } from './consult-rail.js';
-import { exportRun, firewalledSpans, recordRetention } from './run-export.js';
+import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf } from './run-export.js';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
@@ -2020,12 +2020,30 @@ app.post('/harness/spans', async (c) => {
   if (String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()) return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
   try {
     const spans = await firewalledSpans(rec);
-    return c.json({ ok: true, spans, retention: recordRetention(c.env), exporter: c.env.OTEL_EXPORTER_OTLP_ENDPOINT ? 'otlp-http' : 'none', export: rec.export ?? null });
+    return c.json({ ok: true, spans, retention: recordRetention(c.env), exporter: c.env.OTEL_EXPORTER_OTLP_ENDPOINT ? 'otlp-http' : 'none', export: rec.export ?? null, hasProvenance: hasProvenanceRef(addressee, body.runRef) });
   } catch (e) {
     // A firewall failure is a bug in the projection, and the answer is a refusal that names it — never a
     // span with the leak in it.
     return c.json({ ok: false, error: `export refused: ${e instanceof Error ? e.message : String(e)}` }, 500);
   }
+});
+
+// POST /harness/provenance { session, addressee, runRef, format? } — spec 389 W3. THE RUN AS A PROV GRAPH, to the
+// asker: the same JSON-LD document the acting agent's vault holds (rebuilt from the run record, so it is served
+// even when the vault write failed — the export report says which), or PROV-N on request. The asker's own runs
+// only (P6's rule). Evidence, never authority: nothing here is read by a gate.
+app.post('/harness/provenance', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; runRef?: string; format?: 'jsonld' | 'prov-n' } | null;
+  if (!body?.session || !body.addressee || !body.runRef) return c.json({ ok: false, error: 'session, addressee and runRef are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const addressee = body.addressee.toLowerCase() as Address;
+  const rec = await getRecord(c.env as never, addressee, body.runRef);
+  if (!rec) return c.json({ ok: false, error: 'no such record' }, 404);
+  if (String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()) return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
+  const ref = hasProvenanceRef(addressee, body.runRef);
+  if (body.format === 'prov-n') return c.json({ ok: true, hasProvenance: ref, provN: await provenanceProvNOf(c.env, addressee, rec), export: rec.export?.provenance ?? null });
+  return c.json({ ok: true, hasProvenance: ref, provenance: await provenanceGraphOf(c.env, addressee, rec), export: rec.export?.provenance ?? null });
 });
 
 // POST /harness/replay { session, addressee, runRef } — spec 370 P6. Replay a record: the same plan, the
@@ -3221,7 +3239,7 @@ app.post('/harness/ask', async (c) => {
     }
     // The reply is ready: the last line, so a poller stops without waiting out its window.
     progress({ type: 'ReplyReady', said: spoken || 'Done.', terminal: true });
-    return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(routedDelivery ? { routedDelivery } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt, ...(isExpired(r) ? { expired: true } : {}) })), unfinishedTotal: otherRuns.length } : {}) });
+    return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, hasProvenance: hasProvenanceRef(addressee, runRef), resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(routedDelivery ? { routedDelivery } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt, ...(isExpired(r) ? { expired: true } : {}) })), unfinishedTotal: otherRuns.length } : {}) });
   } catch (e) {
     return c.json({ ok: false, error: 'ask_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }

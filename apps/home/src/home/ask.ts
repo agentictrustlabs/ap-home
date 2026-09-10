@@ -392,6 +392,14 @@ export async function listRunRecords(session: { token: string }, addressee: Addr
 
 /** Spec 381 W3 — WHAT MY AGENT DID, from the vault: the spans of one run the person asked for, read back under
  *  their session (the Worker refuses a run that was not theirs). The same bytes an OTLP exporter would carry. */
+/** Spec 389 W3 — THE RUN AS A PROV GRAPH: the JSON-LD document the agent's vault holds (rebuilt from the record), or
+ *  PROV-N, read back under the person's session. `hasProvenance` names where the durable copy is. */
+export async function fetchProvenance(session: { token: string }, addressee: Address, runRef: string, format: 'jsonld' | 'prov-n' = 'jsonld'): Promise<{ text: string; hasProvenance?: { agent: string; recordType: string } } | { error: string }> {
+  const out = (await postA2a('/a2a/harness/provenance', { session: session.token, addressee, runRef, format })) as { ok?: boolean; error?: string; provenance?: unknown; provN?: string; hasProvenance?: { agent: string; recordType: string } };
+  if (!out.ok) return { error: out.error ?? 'the provenance could not be read back' };
+  return { text: format === 'prov-n' ? String(out.provN ?? '') : JSON.stringify(out.provenance, null, 2), ...(out.hasProvenance ? { hasProvenance: out.hasProvenance } : {}) };
+}
+
 export async function fetchSpans(session: { token: string }, addressee: Address, runRef: string): Promise<RunProvenance | { error: string }> {
   const out = (await postA2a('/a2a/harness/spans', { session: session.token, addressee, runRef })) as { ok?: boolean; error?: string } & Partial<RunProvenance>;
   return out.ok ? { spans: out.spans ?? [], retention: out.retention, ...(out.exporter ? { exporter: out.exporter } : {}), export: out.export ?? null } : { error: out.error ?? 'the run could not be read back' };
