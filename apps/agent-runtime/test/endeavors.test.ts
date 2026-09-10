@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   COORDINATION_INDEX_RESOURCE,
+  type CoordinationIndexDocV1,
   COORDINATION_REQUESTS_RESOURCE,
   commitmentPayloadDigest,
   coordinationEventsResource,
@@ -31,6 +32,8 @@ interface Harness {
   docs: Map<string, unknown>;
   audits: string[];
   bodies: string[];
+  /** Every resource read, in order — spec 396 counts what a listing costs. */
+  reads: string[];
   as(session: string, opts?: { steward?: boolean; member?: string | null; verify?: boolean }): EndeavorOpDeps;
 }
 
@@ -38,18 +41,22 @@ function makeHarness(): Harness {
   const docs = new Map<string, unknown>();
   const audits: string[] = [];
   const bodies: string[] = [];
+  const reads: string[] = [];
   return {
     docs,
     audits,
     bodies,
+    reads,
     as(session, opts = {}) {
       return {
         principal: ORG,
         principalCaip: caip(ORG),
         sessionSa: session,
         sessionCaip: caip(session),
-        readDoc: async <T,>(resource: string, empty: T): Promise<T> =>
-          docs.has(resource) ? (JSON.parse(JSON.stringify(docs.get(resource))) as T) : empty,
+        readDoc: async <T,>(resource: string, empty: T): Promise<T> => {
+          reads.push(resource);
+          return docs.has(resource) ? (JSON.parse(JSON.stringify(docs.get(resource))) as T) : empty;
+        },
         writeDoc: async (resource: string, data: unknown): Promise<void> => {
           docs.set(resource, JSON.parse(JSON.stringify(data)));
         },
@@ -289,6 +296,29 @@ describe('endeavor.* serving plane', () => {
     const after = await out(await handleEndeavorOp(h.as(REQUESTER, { member: 'requester' }), 'endeavor.list', {}));
     expect((after.mine as { decisions: unknown[] }).decisions).toEqual([]);
     expect(h.audits).toEqual(expect.arrayContaining(['interactions.endeavor.decision.request', 'interactions.endeavor.decide']));
+  });
+
+  // Spec 396 — the index names everyone with a stake, so My Work reads only their endeavors' logs.
+  it('the index carries the parties (participants, allocated, committed, approvers); a stranger\'s My Work reads no log; a rebuild backfills', async () => {
+    const h = makeHarness();
+    const { endeavorId } = await driveToAllocation(h);
+    await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.decision.request', { endeavorId, title: 'x', approvers: [ORG] }));
+    const index = h.docs.get(COORDINATION_INDEX_RESOURCE) as CoordinationIndexDocV1;
+    expect(index.endeavors[endeavorId]!.parties).toEqual(expect.arrayContaining([STEWARD, ORG]));
+    const reads = h.reads.length;
+    const strangerList = await out(await handleEndeavorOp(h.as(STRANGER, { member: 'stranger' }), 'endeavor.list', {}));
+    expect((strangerList.mine as { allocations: unknown[] }).allocations).toEqual([]);
+    // the index read only — no endeavor log was opened for a viewer with no stake
+    expect(h.reads.slice(reads).filter((r) => r.startsWith('coordination.endeavor:events:'))).toEqual([]);
+    // a row without parties is read as before, and a rebuild gives it the field
+    delete index.endeavors[endeavorId]!.parties;
+    h.docs.set(COORDINATION_INDEX_RESOURCE, index);
+    const before = h.reads.length;
+    await out(await handleEndeavorOp(h.as(STRANGER, { member: 'stranger' }), 'endeavor.list', {}));
+    expect(h.reads.slice(before).some((r) => r.startsWith('coordination.endeavor:events:'))).toBe(true);
+    const rebuilt = await out(await handleEndeavorOp(h.as(STEWARD, { steward: true }), 'endeavor.index.rebuild', {}));
+    expect(rebuilt).toMatchObject({ ok: true, rebuilt: 1 });
+    expect((h.docs.get(COORDINATION_INDEX_RESOURCE) as CoordinationIndexDocV1).endeavors[endeavorId]!.parties).toContain(STEWARD);
   });
 
   it('the organization named as approver is decided AS the organization by a steward; a stranger may not raise one', async () => {

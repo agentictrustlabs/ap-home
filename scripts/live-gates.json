@@ -131,6 +131,16 @@
       "required": true,
       "paced": false,
       "timeoutSec": 240
+    },
+    {
+      "id": "measure-do-economics",
+      "script": "scripts/measure-do-economics.mts",
+      "spec": "396",
+      "proves": "every InteractionsDO op reports its vault-call bill on its headers; the listing an organization's members open most costs what the index says, not one call per endeavor",
+      "twin": "advisory — the numbers are the gate; a listing that costs more than a handful of calls per viewer is the regression to read in the morning",
+      "required": false,
+      "paced": false,
+      "timeoutSec": 300
     }
   ]
 }

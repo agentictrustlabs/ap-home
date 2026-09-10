@@ -19,6 +19,7 @@
 // Audit: D1 (spec 322 §7), before commit.
 import { CONTACT_FIELD_ARGS, contactField, precisionOf } from '@agenticprimitives/ontology';
 import { createPublicClient, http, decodeAbiParameters, type Address, type Hex } from 'viem';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { chainFor } from './chain';
 import { kinTermFor, householdRoleFor } from '@agenticprimitives/ontology';
 import { hashDelegation, decodeVaultRecordScopeTerms, vaultRecordScopeAllows, VAULT_RECORD_SCOPE_ENFORCER, type Delegation, type VaultRecordScopeGrant } from '@agenticprimitives/delegation';
@@ -419,6 +420,24 @@ interface StoredState {
 const json = (b: unknown, s = 200): Response => new Response(JSON.stringify(b), { status: s, headers: { 'content-type': 'application/json' } });
 
 /**
+ * THE COST OF AN OP, COUNTED — spec 396 (DO economics). Every vault call this object makes on behalf of one
+ * request is counted in a request-scoped store (AsyncLocalStorage — concurrent requests never share a
+ * counter) and reported on the response as headers: `x-ap-vault-calls`, `x-ap-vault-throttled`, `x-ap-ms`,
+ * `x-ap-vault-tools` (tool=n,…). Numbers, never content. The organization's vault budget (120 verified calls a
+ * minute) is the binding constraint the live gates keep hitting; a cost nobody can read is a cost nobody fixes.
+ */
+interface OpCost { calls: number; throttled: number; tools: Record<string, number> }
+const opCost = new AsyncLocalStorage<OpCost>();
+const withCost = (res: Response, cost: OpCost, ms: number): Response => {
+  const headers = new Headers(res.headers);
+  headers.set('x-ap-vault-calls', String(cost.calls));
+  headers.set('x-ap-vault-throttled', String(cost.throttled));
+  headers.set('x-ap-ms', String(ms));
+  headers.set('x-ap-vault-tools', Object.entries(cost.tools).map(([k, v]) => `${k}=${v}`).join(','));
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+};
+
+/**
  * Injected external seams (mirrors `packages/fabric`'s `GatewayDeps`).
  *
  * The DO reaches four external systems to serve a board read — broker JWKS, GCP KMS, demo-mcp and a
@@ -717,6 +736,8 @@ export class InteractionsDO {
         // honouring the limiter's own retryAfterMs (capped), and a throttle that persists is SAID to be one.
         let last: Response | null = null;
         for (let attempt = 0; attempt < 4; attempt++) {
+          const counted = opCost.getStore();
+          if (counted) { counted.calls += 1; counted.tools[toolName] = (counted.tools[toolName] ?? 0) + 1; if (attempt > 0) counted.throttled += 1; }
           const resp = await callMcpToolBound({ env, toolName, grant, sessionLeaf: leaf, toolArgs });
           if (resp.status !== 401 && resp.status !== 429) return resp;
           const peek = resp.clone();
@@ -1564,7 +1585,14 @@ export class InteractionsDO {
     };
   }
 
+  /** Spec 396 — every op runs under a fresh cost counter; the response carries the numbers as headers. */
   async fetch(request: Request): Promise<Response> {
+    const cost: OpCost = { calls: 0, throttled: 0, tools: {} };
+    const t0 = Date.now();
+    return opCost.run(cost, async () => withCost(await this.handleOp(request), cost, Date.now() - t0));
+  }
+
+  private async handleOp(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const parts = url.pathname.split('/').filter(Boolean); // interactions/<principal>/<op>
     const principal = (parts[1] ?? '').toLowerCase();

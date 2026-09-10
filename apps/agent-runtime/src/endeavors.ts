@@ -97,6 +97,12 @@ export interface EndeavorIndexEntryV1 {
   /** Adopted-plan progress (display projection only). */
   stepsTotal?: number;
   stepsSatisfied?: number;
+  /** Spec 396 — EVERYONE WITH A STAKE the My Work projection reads: participants, allocation and commitment
+   *  participants, decision approvers (lowercased). `endeavor.list` reads an endeavor's log only when the viewer
+   *  (or, for a steward, the organization) is among them — the listing was one vault call PER ENDEAVOR (51 calls
+   *  for 47 endeavors, 9.5 s, two listings a minute before the organization's vault budget refused). Absent on a
+   *  row indexed before this field existed ⇒ the log is read, as before; `endeavor.index.rebuild` backfills. */
+  parties?: string[];
 }
 export interface CoordinationIndexDocV1 { version: 1; endeavors: Record<string, EndeavorIndexEntryV1> }
 
@@ -198,6 +204,15 @@ export function indexEntryFromState(state: CoordinationStateV1, updatedAt: strin
     participants: [...new Set(Object.values(state.participations).map((p) => p.participant.toLowerCase()))],
     requester: (state.request?.record.requester ?? '').toLowerCase(),
     updatedAt,
+    // The organization is a participation of EVERY endeavor of its own (it adopts as coordinator), so it is not
+    // a stake here — a steward's listing would otherwise open every log again. It is a party only where a
+    // DECISION names it (an approver), which is the one My Work item a steward reads as the organization.
+    parties: [...new Set([
+      ...Object.values(state.participations).map((p) => p.participant.toLowerCase()).filter((a) => a !== endeavor.managingPrincipal.toLowerCase()),
+      ...Object.values(state.allocations).map((a) => a.participant.toLowerCase()),
+      ...Object.values(state.commitments).map((c) => c.participant.toLowerCase()),
+      ...Object.values(state.decisionRequests).flatMap((d) => d.requirement.approvers.map((a) => a.toLowerCase())),
+    ])],
     ...(adopted
       ? {
           stepsTotal: adopted.steps.length,
@@ -356,6 +371,11 @@ async function mineAcross(
   const allocations: unknown[] = [];
   const commitments: unknown[] = [];
   const decisions: unknown[] = [];
+  // Spec 396 — ONLY THE ENDEAVORS THE VIEWER HAS A STAKE IN are read (the index says who does); a steward also
+  // reads those where the organization is named (a decision put to it). A row without `parties` is read as before.
+  const org = deps.principal.toLowerCase();
+  const me = viewer.toLowerCase();
+  entries = entries.filter((e) => !e.parties || e.parties.includes(me) || (steward && e.parties.includes(org)));
   // PARALLEL per-endeavor reads (was a sequential for-await, so wall-time was the SUM of every
   // endeavor's log read — the dominant cost of endeavor.list, and doubly so through the /work
   // cross-org fan-out). The vault reads are independent, so fan them out: wall-time is now the
@@ -726,6 +746,26 @@ export async function handleEndeavorOp(
     // §7 My Work: the caller's own allocations/commitments across VISIBLE endeavors only.
     const mine = await mineAcross(deps, endeavors, viewer, steward);
     return json({ ok: true, endeavors, requests: requestRows, mine, steward, member: !!name, you: viewer });
+  }
+
+  // ── endeavor.index.rebuild — spec 396: the index is a PROJECTION (derived, rebuildable — ADR-0055's test); a
+  //    steward rebuilds it from every endeavor's log once, so rows indexed before `parties` existed carry it. ──
+  if (op === 'endeavor.index.rebuild') {
+    if (!(await deps.isSteward())) return json({ error: 'only the organization custodian may rebuild the index' }, 403);
+    return deps.serialize(async () => {
+      const index = await deps.readDoc<CoordinationIndexDocV1>(COORDINATION_INDEX_RESOURCE, { version: 1, endeavors: {} });
+      const now = new Date().toISOString();
+      let rebuilt = 0;
+      for (const id of Object.keys(index.endeavors)) {
+        const log = await deps.readDoc<CoordinationEventV1[]>(coordinationEventsResource(id), []);
+        if (log.length === 0) continue;
+        const entry = indexEntryFromState(reduceEventLog(log), index.endeavors[id]?.updatedAt ?? now);
+        if (entry) { index.endeavors[id] = entry; rebuilt += 1; }
+      }
+      await deps.writeDoc(COORDINATION_INDEX_RESOURCE, index);
+      await deps.writeAudit('interactions.endeavor.index.rebuild', { type: 'index', id: COORDINATION_INDEX_RESOURCE }, now);
+      return json({ ok: true, rebuilt, total: Object.keys(index.endeavors).length });
+    });
   }
 
   if (op === 'endeavor.get') {
