@@ -24,6 +24,48 @@ export function extraOrigins(plural: string | undefined, singular: string | unde
   return raw.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
+/** Gather27's non-host surfaces are hostname LABELS on the same site — see `surfaceFor` in
+ *  gather27-web/src/surface.ts, which reads exactly these. */
+const GATHER_SURFACE_LABELS = ['ops', 'find'] as const;
+
+/**
+ * Every Gather27 surface origin a deployment implies, host surface first.
+ *
+ * D14 split Gather into three websites that are three labels on ONE site: the bare hostname is the
+ * host surface, `ops.` the operator console, `find.` the public map. A deployment names its Gather
+ * site once, and all three follow from it — naming one and being blocked on the other two is the
+ * bug this closes, and it is not worth a second dashboard field that can drift out of step with the
+ * first.
+ *
+ * Deriving siblings does not widen trust to anyone new: they are labels inside a DNS zone whoever
+ * set the configured origin already controls. A deployment that names no Gather origin still gets
+ * an empty list, which is what keeps the production broker's registry unchanged.
+ *
+ * Whichever surface is configured, the same three come out — the bare host is recovered first, so
+ * setting the ops URL by mistake still registers all three in the right order.
+ */
+export function gatherSurfaceOrigins(plural: string | undefined, singular: string | undefined): string[] {
+  const out: string[] = [];
+  const add = (u: string) => { if (!out.includes(u)) out.push(u); };
+  for (const entry of extraOrigins(plural, singular)) {
+    let url: URL;
+    try { url = new URL(entry); } catch { add(entry); continue; }
+    const host = url.hostname.toLowerCase();
+    // localhost and IPs address the three surfaces by PATH, not by subdomain, and have no sibling
+    // hostnames to derive. workers.dev is a flat namespace — `ops.<name>.workers.dev` is not a
+    // thing. Register what was given and derive nothing.
+    if (host === 'localhost' || /^[0-9.]+$/.test(host) || host.endsWith('.workers.dev')) { add(url.origin + '/'); continue; }
+    const bare = GATHER_SURFACE_LABELS.reduce((h, l) => (h.startsWith(l + '.') ? h.slice(l.length + 1) : h), host);
+    // HOST surface first: several consumers take the first https URI as the app's canonical address.
+    for (const h of [bare, ...GATHER_SURFACE_LABELS.map((l) => l + '.' + bare)]) {
+      const d = new URL(url.toString());
+      d.hostname = h;
+      add(d.origin + '/');
+    }
+  }
+  return out;
+}
+
 const faithImpact: WhiteLabelConfig = {
   id: 'faith-impact',
   brand: {
@@ -250,7 +292,7 @@ const faithImpact: WhiteLabelConfig = {
         // (server/connect/org-invite-lookup.ts) and the front-channel sign-out hop. Those must reach
         // the faithnet host surface, not the workers.dev deployment below and not the ops console.
         // Same reasoning as field-app above.
-        ...extraOrigins(process.env.NEXT_PUBLIC_GATHER_ORIGINS, process.env.NEXT_PUBLIC_GATHER_ORIGIN),
+        ...gatherSurfaceOrigins(process.env.NEXT_PUBLIC_GATHER_ORIGINS, process.env.NEXT_PUBLIC_GATHER_ORIGIN),
         'https://gather27-web.richardpedersen3.workers.dev/',
         'http://localhost:5175/',
         'http://127.0.0.1:5175/',

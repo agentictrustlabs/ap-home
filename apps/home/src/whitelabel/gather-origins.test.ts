@@ -11,7 +11,7 @@
  */
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
-import { extraOrigins } from './config';
+import { extraOrigins, gatherSurfaceOrigins } from './config';
 
 const HOST = 'https://gather27.faithnet.io/';
 const OPS = 'https://ops.gather27.faithnet.io/';
@@ -89,10 +89,12 @@ describe('the gather-app registry', () => {
     expect(firstHttps).toBe(HOST);
   });
 
-  it('still honours a deployment that only sets the old single variable', async () => {
+  it('THE FIX: naming the host surface alone registers all three', async () => {
+    // This is what the deployment actually sets, and why ops sign-in was blocked before.
     const { isAllowedRelyingOrigin } = await registryWith({ NEXT_PUBLIC_GATHER_ORIGIN: HOST });
-    expect(isAllowedRelyingOrigin(HOST)).toBe(true);
-    expect(isAllowedRelyingOrigin(OPS)).toBe(false);
+    for (const uri of [HOST, OPS, FIND]) {
+      expect(isAllowedRelyingOrigin(uri), `${uri} should be allowed`).toBe(true);
+    }
   });
 
   it('BLAST RADIUS: with neither variable set, production gains no origin', async () => {
@@ -115,5 +117,41 @@ describe('the gather-app registry', () => {
     const on = await registryWith({ NEXT_PUBLIC_GATHER_ORIGINS: `${HOST},${OPS},${FIND}` });
     expect(on.others).toEqual(off.others);
     expect(on.isAllowedRelyingOrigin('https://evil.example/')).toBe(false);
+  });
+});
+
+describe('gatherSurfaceOrigins (D14 — three labels on one site)', () => {
+  it('derives ops and find from the host surface, host first', () => {
+    expect(gatherSurfaceOrigins(undefined, HOST)).toEqual([HOST, OPS, FIND]);
+  });
+
+  it('recovers the same three when the OPS url is configured by mistake', () => {
+    expect(gatherSurfaceOrigins(undefined, OPS)).toEqual([HOST, OPS, FIND]);
+    expect(gatherSurfaceOrigins(undefined, FIND)).toEqual([HOST, OPS, FIND]);
+  });
+
+  it('does not duplicate when all three are named explicitly', () => {
+    expect(gatherSurfaceOrigins(`${HOST},${OPS},${FIND}`, undefined)).toEqual([HOST, OPS, FIND]);
+  });
+
+  it('registers nothing at all when the deployment names nothing', () => {
+    expect(gatherSurfaceOrigins(undefined, undefined)).toEqual([]);
+  });
+
+  it('derives no siblings for localhost, an IP, or workers.dev', () => {
+    // localhost addresses the surfaces by PATH; workers.dev is a flat namespace.
+    expect(gatherSurfaceOrigins(undefined, 'http://localhost:5175/')).toEqual(['http://localhost:5175/']);
+    expect(gatherSurfaceOrigins(undefined, 'http://127.0.0.1:5175/')).toEqual(['http://127.0.0.1:5175/']);
+    expect(gatherSurfaceOrigins(undefined, 'https://gather27-web.richardpedersen3.workers.dev/')).toEqual([
+      'https://gather27-web.richardpedersen3.workers.dev/',
+    ]);
+  });
+
+  it('keeps a non-default port on every derived sibling', () => {
+    expect(gatherSurfaceOrigins(undefined, 'https://g27.example:8443/')).toEqual([
+      'https://g27.example:8443/',
+      'https://ops.g27.example:8443/',
+      'https://find.g27.example:8443/',
+    ]);
   });
 });
