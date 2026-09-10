@@ -275,7 +275,7 @@ async function runSingleToolTurn(
   // cut long answers mid-emit (an empty capture with no error, reported as "model calls failed"),
   // and 4096 (~16k chars) still could not carry a document. Independent of the character clip below
   // — the model stops emitting here whatever that ceiling allows, so both had to move.
-  // 16k tokens is well inside claude-sonnet-4-6's output limit; it is the artifact size that binds.
+  // 16k tokens is well inside claude-haiku-4-5-20251001's output limit; it is the artifact size that binds.
   const { planner, kind } = selectPlanner(env, { systemPrompt: opts.contract, maxTokens: 16_000 });
 
   let captured = '';

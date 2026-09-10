@@ -113,6 +113,8 @@ CHAIN_ID = "84532"
 # rather than this file: `wrangler versions view <id> --env production --json`. The same hazard
 # applies to the optional ORCHESTRATION_GROQ_* vars.
 ORCHESTRATION_LLM = "anthropic,groq"
+# 2026-09-10 — the cheaper Anthropic model, named here so a targeted deploy keeps it (the package default is the same).
+ORCHESTRATION_MODEL = "claude-haiku-4-5-20251001"
 # ORCHESTRATION_GROQ_MODEL = "openai/gpt-oss-20b"
 # ORCHESTRATION_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 # spec 327 — org/inbox assistant dispatch bound (defaults 6 per 10 min per topic, in code). Raised
@@ -407,6 +409,8 @@ CHAIN_ID = "34348"
 # 2026-09-10: the Anthropic account is OUT OF CREDIT (HTTP 400 "credit balance is too low", surfaced by the spec 387 flow trace) — Groq
 # leads until credits are added; Anthropic stays offered. Restore "anthropic,groq" when billing is fixed.
 ORCHESTRATION_LLM = "groq,anthropic"
+# 2026-09-10 — the cheaper Anthropic model, named here so a targeted deploy keeps it (the package default is the same).
+ORCHESTRATION_MODEL = "claude-haiku-4-5-20251001"
 # Spec 387 W2 — a composition over evidence (a six-week study with a link per item) needs more than the composers' 700-token default.
 COMPOSER_MAX_TOKENS = "2400"
 ASSISTANT_RATE_MAX = "60"
@@ -732,6 +736,8 @@ EMAIL_FROM_NAME = "faithnet"
 AGENT_NAME_PARENTS = "me,impact"
 CHAIN_ID = "34348"
 ORCHESTRATION_LLM = "anthropic"
+# 2026-09-10 — the cheaper Anthropic model, named here so a targeted deploy keeps it (the package default is the same).
+ORCHESTRATION_MODEL = "claude-haiku-4-5-20251001"
 ASSISTANT_RATE_MAX = "60"
 ASSISTANT_RATE_WINDOW_MS = "600000"
 GATHER_RECORD_CLIP = "60000"

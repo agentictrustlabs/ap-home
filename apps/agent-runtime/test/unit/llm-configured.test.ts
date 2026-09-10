@@ -18,7 +18,7 @@ describe('llmConfigured', () => {
   });
   it('both set ⇒ the model plans', () => {
     expect(llmConfigured({ ORCHESTRATION_LLM: 'anthropic', ANTHROPIC_API_KEY: 'k' } as never)).toBe(true);
-    expect(selectPlanner({ ORCHESTRATION_LLM: 'anthropic', ANTHROPIC_API_KEY: 'k' } as never)).toMatchObject({ kind: 'anthropic', model: 'claude-sonnet-4-6' });
+    expect(selectPlanner({ ORCHESTRATION_LLM: 'anthropic', ANTHROPIC_API_KEY: 'k' } as never)).toMatchObject({ kind: 'anthropic', model: 'claude-haiku-4-5-20251001' });
   });
 });
 
@@ -65,7 +65,7 @@ describe('the offer (spec 377)', () => {
   it('the offer names each model, marks the free one, and exactly one default', () => {
     const offer = availableModels(both);
     expect(offer).toEqual([
-      { id: 'anthropic', label: 'Claude (Anthropic)', model: 'claude-sonnet-4-6', free: false, default: true },
+      { id: 'anthropic', label: 'Claude (Anthropic)', model: 'claude-haiku-4-5-20251001', free: false, default: true },
       { id: 'groq', label: 'GPT-OSS 120B (Groq, free)', model: 'openai/gpt-oss-120b', free: true, default: false },
     ]);
     expect(offer.filter((m) => m.default)).toHaveLength(1);
