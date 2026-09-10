@@ -20,7 +20,7 @@ const DM = '0x710cb1bF08C234Df397e0910331e0A29710EF4F7' as Address;
 const ENFORCERS = { delegationManager: DM, timestamp: '0x73A7B878168b7DE48677617179A8bE894f0Dfe96', allowedTargets: '0x2156311097A936de1916a878bF53Bfd43c7b5715', allowedMethods: '0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41', value: '0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975', payment: '0x07fA0aE59FdE4B7ce8962d6fE7a1d648ec3DD5CE', digestBinding: '0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1' } as const;
 const ORG_LABEL = process.argv[2] ?? 'globalchurch';
 const SVC_LABEL = process.argv[3] ?? 'ligonier';
-const NOTE = 'demo/ligonier.faithnet.json';
+const NOTE = process.env.NOTE ?? 'demo/ligonier.faithnet.json';
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 250), _status: r.status }; } };
 const fail = (m: string): never => { console.error(`\n✗ ${m}`); process.exit(1); };
 const naming = new AgentNamingClient({ rpcUrl: 'https://a2a.faithnet.io/rpc', chainId: CHAIN, registry: '0x60E949D52660A9D4143ecB0fdA56c0457f20aED9', universalResolver: '0xF343054e046A4145ccae499ECB28197394eE0798' });
@@ -29,6 +29,9 @@ const naming = new AgentNamingClient({ rpcUrl: 'https://a2a.faithnet.io/rpc', ch
 const personaKeys = (() => { try { const env = readFileSync(resolvePath('apps/demo-sso-next/.env.local'), 'utf8'); const m = /^DEMO_PERSONA_KEYS=(.*)$/m.exec(env); return m ? JSON.parse(m[1]!.trim().replace(/^['"]|['"]$/g, '')) as Record<string, { eoaAddress?: string }> : {}; } catch { return {}; } })();
 const ALICE_EOA = (personaKeys.alice?.eoaAddress ?? '').toLowerCase();
 if (!/^0x[0-9a-f]{40}$/.test(ALICE_EOA)) fail('alice\'s custodian EOA is not in apps/demo-sso-next/.env.local (DEMO_PERSONA_KEYS)');
+// CUSTODIAN=0x… names another credential to custody what is chartered (spec 387: the gateway agent's own key).
+const CUSTODIAN = (process.env.CUSTODIAN ?? ALICE_EOA).toLowerCase();
+if (!/^0x[0-9a-f]{40}$/.test(CUSTODIAN)) fail('CUSTODIAN must be an EOA address');
 const alice = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alice', client_id: 'demo-web' }) }));
 const ME = String(alice.agent).toLowerCase() as Address;
 const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
@@ -64,7 +67,7 @@ async function act(message: string, toolId: string, args: Record<string, unknown
       const fields = rep.prompt.fields as Array<{ name: string; type?: string }>;
       const cred = fields.find((f) => f.type === 'credential');
       if (!cred || fields.length !== 1) fail(`the act asks for data a script cannot answer: ${JSON.stringify(fields).slice(0, 300)}`);
-      r = await post('/harness/ask', { session: alice.homeSession, addressee: ME, runRef: rep.runRef, supplied: [{ stepRef: rep.resumeToken ?? rep.prompt.stepRef, data: { [cred!.name]: { kind: 'eoa', address: ALICE_EOA } } }] });
+      r = await post('/harness/ask', { session: alice.homeSession, addressee: ME, runRef: rep.runRef, supplied: [{ stepRef: rep.resumeToken ?? rep.prompt.stepRef, data: { [cred!.name]: { kind: 'eoa', address: CUSTODIAN } } }] });
       rep = r.reply as Reply | undefined;
       console.log(`  custodian supplied → ${rep?.kind}${rep?.error ? ` ${rep.error}` : ''}${rep?.prompt?.prompt ? ` "${rep.prompt.prompt.slice(0, 100)}"` : ''}`);
       continue;

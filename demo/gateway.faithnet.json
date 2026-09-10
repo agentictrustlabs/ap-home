@@ -1,0 +1,15 @@
+{
+  "purpose": "spec 386 fixture — the Ligonier service agent in the faithnet estate (an operator note, not a persona)",
+  "chainId": 34348,
+  "org": {
+    "name": "globalchurch.org",
+    "sa": "0x6f9c3b34f639dd45bbff0b8343c65d206208d065",
+    "steward": "alice"
+  },
+  "service": {
+    "name": "gateway.svc",
+    "sa": "0x3d9af054981994e7e321d545139e68361873f90a",
+    "charteredUnder": "globalchurch.org"
+  },
+  "charteredAt": "2026-09-10T01:11:59.726Z"
+}
