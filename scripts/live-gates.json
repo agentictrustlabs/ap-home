@@ -151,6 +151,16 @@
       "required": true,
       "paced": false,
       "timeoutSec": 240
+    },
+    {
+      "id": "verify-standing-instruction-room",
+      "script": "scripts/verify-standing-instruction-room.mts",
+      "spec": "394 W2",
+      "proves": "the acting context is a namespace — a default declared while addressing an organization fills the payer there; one declared at home applies everywhere the person has not said otherwise",
+      "twin": "the organization's default is NOT read at home",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 300
     }
   ]
 }
