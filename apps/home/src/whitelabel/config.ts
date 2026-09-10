@@ -6,6 +6,24 @@
 import { A2A_DOMAIN, AGENT_NAME_PARENT, CONNECT_DOMAIN } from '../lib/domain';
 import type { WhiteLabelConfig } from './schema';
 
+/**
+ * The relying origins a deployment adds to a client's registry, newest shape first.
+ *
+ * Home refuses to show a sign-in screen for a `redirect_uri` whose origin is not registered for
+ * that client — the user sees "Request blocked". Gather27 is THREE websites since round-4 D14 (the
+ * host surface, the public map, the operator console) and the registry took exactly one origin, so
+ * signing in from ops or find was blocked while the host surface worked.
+ *
+ * `plural` is a comma-separated list; `singular` is the older one-value variable, kept as a
+ * fallback so a deployment that has not been updated behaves exactly as it did. Neither set means
+ * an EMPTY list, which is what keeps production's registry unchanged.
+ */
+export function extraOrigins(plural: string | undefined, singular: string | undefined): string[] {
+  const raw = plural ?? singular ?? '';
+  // Trim and drop empties: a trailing comma in a dashboard field must not register a blank origin.
+  return raw.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
 const faithImpact: WhiteLabelConfig = {
   id: 'faith-impact',
   brand: {
@@ -222,11 +240,20 @@ const faithImpact: WhiteLabelConfig = {
       // is contact-control, and C_sub (KMS), not the phone, is the on-chain custodian.
       socialCustody: process.env.NEXT_PUBLIC_GATHER_SOCIAL_CUSTODY === 'true',
       redirect_uris: [
+        // faithnet universe (chain 34348) — only present when the deploy sets it; production's list
+        // is unchanged. Round-4 D14 made Gather THREE websites, so this is a LIST: set
+        // NEXT_PUBLIC_GATHER_ORIGINS to the host surface, the ops console and the public map.
+        // Without all three, signing in from the missing one shows "Request blocked".
+        //
+        // FIRST on purpose, and the HOST surface first within the list: several consumers take the
+        // first https URI as the app's canonical address — the org-invite return URL
+        // (server/connect/org-invite-lookup.ts) and the front-channel sign-out hop. Those must reach
+        // the faithnet host surface, not the workers.dev deployment below and not the ops console.
+        // Same reasoning as field-app above.
+        ...extraOrigins(process.env.NEXT_PUBLIC_GATHER_ORIGINS, process.env.NEXT_PUBLIC_GATHER_ORIGIN),
         'https://gather27-web.richardpedersen3.workers.dev/',
         'http://localhost:5175/',
         'http://127.0.0.1:5175/',
-        // faithnet universe (chain 34348) — only present when the deploy sets it; production's list is unchanged.
-        ...(process.env.NEXT_PUBLIC_GATHER_ORIGIN ? [process.env.NEXT_PUBLIC_GATHER_ORIGIN] : []),
         // churchglobalgather27 — sibling fork of gather27-web/gather27-a2a sharing this same Home
         // (faithnet.me) for its connect flow. Fixed, known URL; present on every deploy, same as the
         // two production defaults above.
