@@ -21,11 +21,19 @@ describe('exportRun', () => {
     const r = await exportRun({}, { writeSubjectRecord: async (subject, recordType, rec) => { writes.push({ subject, recordType, record: rec }); return { ok: true }; }, fetch: (async () => { fetched++; return new Response('{}'); }) as never }, ALICE, record);
     expect(r.provenance).toEqual({ written: true, recordType: 'run.provenance:run-x' });
     expect(writes[0]!.subject).toBe(ALICE);
-    const prov = writes[0]!.record as { type: string; steps: Array<{ txHash?: string; inputDigest?: string }> };
-    expect(prov.type).toBe('ap.run-provenance.v1');
-    expect(prov.steps[0]!.txHash).toBe('0x' + 'cd'.repeat(32));
-    expect(prov.steps[0]!.inputDigest).toMatch(/^0x[0-9a-f]{64}$/); // the json: form was hashed, not carried
+    // Spec 389 — what lands is the GRAPH: a JSON-LD bundle under the published context, the run and its step
+    // as PROV activities, the transaction as a generated entity, the mandate as a used delegation.
+    const prov = writes[0]!.record as { '@context': unknown; id: string; type: string[]; graph: Array<Record<string, unknown>> };
+    expect(prov['@context']).toBeTruthy();
+    expect(prov.id).toBe('urn:ap:prov:bundle:run-x');
+    expect(prov.type).toContain('ExecutionTraceBundle');
+    const step = prov.graph.find((n) => n['id'] === 'urn:ap:prov:act:run-x:s0')!;
+    expect(step['usedDelegation']).toBe(`urn:ap:prov:mandate:0x${'11'.repeat(32)}`);
+    expect(step['authorityDecision']).toBe('allow');
+    expect(step['generated']).toContain(`urn:ap:prov:tx:0x${'cd'.repeat(32)}`);
+    expect(prov.graph.find((n) => n['id'] === 'urn:ap:prov:act:run-x')!['wasAssociatedWith']).toBe(`urn:ap:prov:runtime:urn:ap:agent:${ALICE}`);
     expect(JSON.stringify(prov)).not.toContain('nathan');
+    expect(JSON.stringify(prov)).not.toContain('json:');
     expect(r.spans).toEqual({ count: 2, sent: false });
     expect(fetched).toBe(0);
   });
@@ -48,6 +56,11 @@ describe('exportRun', () => {
     expect(recordRetention({})).toEqual({ doDays: DEFAULT_RECORD_RETENTION_DAYS, vaultRecord: 'run.provenance:<runRef>' });
     expect(recordRetention({ HARNESS_RECORD_RETENTION_DAYS: '30' }).doDays).toBe(30);
     expect(recordRetention({ HARNESS_RECORD_RETENTION_DAYS: 'x' }).doDays).toBe(7);
+  });
+  it('names agents the way the public KB does when the deployment names its chain', async () => {
+    const { provenanceGraphOf } = await import('../../src/run-export.js');
+    const doc = await provenanceGraphOf({ CHAIN_ID: '34348' }, ALICE, record) as { wasAttributedTo: string };
+    expect(doc.wasAttributedTo).toBe(`urn:ap:agent:eip155:34348:${ALICE}`);
   });
   it('the served spans are the firewalled ones', async () => {
     const spans = await firewalledSpans(record);

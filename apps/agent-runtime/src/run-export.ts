@@ -5,6 +5,8 @@
 // its own effect-write door, and the spans to an OTLP/HTTP collector when this deployment names one.
 // Neither is on the run's path — a record that failed to export costs an export, never the run.
 import { assertFirewalled, otlpTracesOf, provenanceOf, runProvenanceRecordKey, spansOf, type RunRecordV1, type RunExportReportV1, type SpanV1 } from '@agenticprimitives/orchestration';
+import { projectHarnessRunProvenance, toJsonLd } from '@agenticprimitives/provenance';
+import { RUN_PROVENANCE_CONTEXT } from '@agenticprimitives/ontology';
 
 export interface RunExportEnv {
   /** An OTLP/HTTP collector's traces endpoint (`https://…/v1/traces`). Absent ⇒ spans are not sent anywhere. */
@@ -13,6 +15,8 @@ export interface RunExportEnv {
   OTEL_EXPORTER_OTLP_HEADERS?: string;
   /** Days a run record stays on the agent's task object before the sweep (default 7). The vault copy is the record. */
   HARNESS_RECORD_RETENTION_DAYS?: string;
+  /** The chain the agents live on — the provenance graph names them the way the public KB does (spec 389 §2). */
+  CHAIN_ID?: string;
 }
 
 export const DEFAULT_RECORD_RETENTION_DAYS = 7;
@@ -21,6 +25,17 @@ export const DEFAULT_RECORD_RETENTION_DAYS = 7;
 export function recordRetention(env: RunExportEnv): { doDays: number; vaultRecord: string } {
   const n = Number(env.HARNESS_RECORD_RETENTION_DAYS);
   return { doDays: Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_RECORD_RETENTION_DAYS, vaultRecord: 'run.provenance:<runRef>' };
+}
+
+/** Spec 389 — THE RECORD AS A GRAPH: the structural view `provenanceOf` extracts (digests, verdicts, the chain
+ *  by reference — never arguments, results or words), projected by the Ring-0 provenance projector into the
+ *  same PROV-O / P-Plan record an Endeavor leaves, serialized as JSON-LD under the published context. What
+ *  lands in the vault is a document a stock PROV tool loads unchanged. */
+export async function provenanceGraphOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, agent: string, record: RunRecordV1): Promise<Record<string, unknown>> {
+  const view = await provenanceOf(record, agent);
+  const chainId = Number(env.CHAIN_ID);
+  const graph = projectHarnessRunProvenance({ ...view, ...(Number.isFinite(chainId) && chainId > 0 ? { chainId } : {}) });
+  return toJsonLd(graph, { context: RUN_PROVENANCE_CONTEXT['@context'] as unknown as Record<string, unknown>, ...(Number.isFinite(chainId) && chainId > 0 ? { chainId } : {}) });
 }
 
 /** The firewalled spans of a record — what `/harness/spans` serves and the collector receives. */
@@ -45,7 +60,7 @@ export async function exportRun(env: RunExportEnv, deps: RunExportDeps, agent: s
   // The durable half, into the vault of the agent whose authority was spent — through ITS door, under ITS grant.
   if (deps.writeSubjectRecord) {
     try {
-      const prov = await provenanceOf(record, agent);
+      const prov = await provenanceGraphOf(env, agent, record);
       const out = await deps.writeSubjectRecord(agent.toLowerCase(), recordType, prov);
       report.provenance.written = out.ok;
       if (!out.ok && out.error) report.provenance.error = out.error;
