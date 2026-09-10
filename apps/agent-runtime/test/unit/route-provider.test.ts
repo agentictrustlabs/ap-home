@@ -60,3 +60,31 @@ describe('spec 388 — routeProvider', () => {
     expect(selectComposerRouted({} as never, { need: { call: 'composer', estimatedTokens: 3_000 } })).toMatchObject({ composer: null, route: { provider: null, because: 'no model offered' } });
   });
 });
+
+describe('spec 388 W2 — the structured calls and the widest budget', () => {
+  beforeEach(() => resetSpend());
+  it('widestPromptBudget: the named provider\'s; the default\'s under first; unbounded under budget when any offered provider is', async () => {
+    const { widestPromptBudget } = await import('../../src/orchestration.js');
+    expect(widestPromptBudget(both, 'groq')).toBe(GROQ_FREE_PLAN_PROMPT_BUDGET);
+    expect(widestPromptBudget({ ...(both as object), ORCHESTRATION_ROUTE: 'first' } as never)).toBe(GROQ_FREE_PLAN_PROMPT_BUDGET);
+    expect(widestPromptBudget(both)).toBeNull();
+    expect(widestPromptBudget({ ORCHESTRATION_LLM: 'groq', GROQ_API_KEY: 'g', ORCHESTRATION_ROUTE: 'budget', ORCHESTRATION_GROQ_PROMPT_BUDGET: '9000' } as never)).toBe(9000);
+  });
+  it('a structured call is routed per request by what it carries, and each decision is reported', async () => {
+    const { structuredCallFor } = await import('../../src/context-wiring.js');
+    const routes: Array<{ provider: string | null; because: string }> = [];
+    const made: string[] = [];
+    const call = structuredCallFor(both, undefined, { onRoute: (d) => routes.push(d), make: (p) => { made.push(p); return async () => ({ on: p }); } })!;
+    const tool = { name: 't', description: 'd', input_schema: { type: 'object' } };
+    expect(await call({ system: 'x'.repeat(4_000), messages: [{ role: 'user', content: 'q' }], tool })).toEqual({ on: 'groq' });
+    expect(await call({ system: 'x'.repeat(40_000), messages: [{ role: 'user', content: 'q' }], tool })).toEqual({ on: 'anthropic' });
+    expect(routes.map((r) => r.provider)).toEqual(['groq', 'anthropic']);
+    expect(routes[1]!.because).toContain('groq would not');
+    expect(made).toEqual(['groq', 'anthropic']);
+    // a named provider is not routed; `first` is not routed
+    const named = structuredCallFor(both, 'anthropic', { make: (p) => async () => ({ on: p }) })!;
+    expect(await named({ system: 's', messages: [], tool })).toEqual({ on: 'anthropic' });
+    const first = structuredCallFor({ ...(both as object), ORCHESTRATION_ROUTE: 'first' } as never, undefined, { make: (p) => async () => ({ on: p }) })!;
+    expect(await first({ system: 'x'.repeat(40_000), messages: [], tool })).toEqual({ on: 'groq' });
+  });
+});

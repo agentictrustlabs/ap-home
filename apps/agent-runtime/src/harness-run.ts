@@ -2131,7 +2131,7 @@ export interface PlannerTraceV1 {
    *  by and every drop taken, in order (`fitPlannerPrompt`). Absent ⇒ no budget applied. */
   promptBudget?: { tokens: number; estimated: number; trimmed: string[] };
   /** Spec 388 — which provider carried the planner and the composer, and why (the numbers beside the reason). */
-  route?: { policy: RoutePolicy; planner?: RouteDecision; composer?: RouteDecision };
+  route?: { policy: RoutePolicy; planner?: RouteDecision; composer?: RouteDecision; /** Spec 388 W2 — each structured call the run's steps made (the KB and vault choosers), in order. */ structured?: RouteDecision[] };
   /** Every admission verdict, in order — a refused plan shows what was proposed and why it was refused. */
   admission: Array<{ refused: Array<{ code: string; message: string; stepIndex?: number; toolId?: string }>; replanned: boolean }>;
   /** The plan that ran (or was refused last), as the executor received it BEFORE argument resolution. */

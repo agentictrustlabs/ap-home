@@ -110,7 +110,7 @@ import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker, householdMembers, ownAgent
 import { KB_QUESTION_TOOL, kbQuestionInvoker } from '@agenticprimitives/context';
 import { discoveryFetchFor, structuredCallFor } from './context-wiring.js';
 import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@agenticprimitives/context';
-import { selectComposer, selectComposerRouted, resolveProvider, availableModels, plannerPromptBudget, defaultProvider, type RouteNeed } from './orchestration.js';
+import { selectComposer, selectComposerRouted, resolveProvider, availableModels, plannerPromptBudget, defaultProvider, widestPromptBudget, type RouteNeed, type RouteDecision } from './orchestration.js';
 import { loadRun, saveRun, dropRun, listRuns, mergeTurn, type HarnessRunCheckpointV1, completedStepsOf, isExpired, AWAIT_WINDOW_MS, expiryFor } from './harness-runs.js';
 import { buildGenesisPlanes, type GenesisPlaneWires } from './genesis-planes.js';
 import { bindHarnessAttempt, HarnessApprovalWorkflow, type HarnessWorkflowParams } from './harness-workflow.js';
@@ -2740,8 +2740,13 @@ app.post('/harness/ask', async (c) => {
   // provider throws here (a configuration error, loud), an unoffered one is refused with the offer named.
   const chosen = resolveProvider(c.env, body.model);
   if (!chosen.ok) return c.json({ ok: false, error: chosen.error }, 400);
-  const provider = chosen.provider ?? undefined;
-  const structuredCall = structuredCallFor(c.env, provider);
+  // Spec 388 — ONLY A MODEL THE TURN NAMED is "named by the turn": resolving the default here and passing it on
+  // made every call look chosen, so the route never ran and the planner prompt was trimmed to Groq's budget
+  // with Anthropic offered (seen live 2026-09-10: 7,813 tokens cut to 6,500, every drop taken, over-budget).
+  const provider = String(body.model ?? '').trim() ? chosen.provider ?? undefined : undefined;
+  // Spec 388 W2 — the structured calls route per request; each decision is collected for the trace.
+  const structuredRoutes: RouteDecision[] = [];
+  const structuredCall = structuredCallFor(c.env, provider, { onRoute: (d) => structuredRoutes.push(d) });
   const addressee = body.addressee.toLowerCase() as Address;
   // ── Spec 366 R2 — A ROUTED REQUEST UNDER THE SUBJECT-ASK PROFILE. Validated structurally, then checked for
   // CONSISTENCY with what this receiver verifies for itself: the credential in the profile is the session
@@ -2872,7 +2877,8 @@ app.post('/harness/ask', async (c) => {
         if (toolId === VAULT_QUESTION_TOOL.id) {
           // The inventory listing is bounded by the provider's prompt budget (spec 377): a steward of fifty
           // agents holds hundreds of keys, and listed whole they were one request over a metered host's limit.
-          const inventoryBudget = plannerPromptBudget(c.env, provider ?? defaultProvider(c.env));
+          // Spec 388 W2 — sized to the WIDEST offered budget: a listing that fits Anthropic whole is not trimmed to Groq's.
+          const inventoryBudget = widestPromptBudget(c.env, provider);
           return vaultQuestionInvoker({ ...(structuredCall ? { call: structuredCall } : {}), // Keys and timestamps tokenize DENSE (≈2.5 chars/token, measured: 18k chars of keys was a 9,996-token
           // request), and the head, rules, tool schema and question take ~2.5k tokens of the budget themselves.
           ...(inventoryBudget !== null ? { inventoryBudgetChars: Math.max(2_000, Math.floor((inventoryBudget - 2_500) * 2.5)) } : {}) }, askDeps, who.sa as string, askDeps.resolveName)(toolId, args, ctx);
@@ -2946,6 +2952,7 @@ app.post('/harness/ask', async (c) => {
         })(toolId, args, ctx);
       },
     });
+    if (structuredRoutes.length) trace.route = { ...(trace.route ?? { policy: 'first' as const }), structured: structuredRoutes };
     const reply = await askReplyFor(c.env as unknown as HarnessEnv, {
       intent, result, addressee, composerFor: (need: RouteNeed) => selectComposerRouted(c.env, { ...(provider ? { provider } : {}), need }), deps: askDeps, interactionFor, plannerTrace: trace, tools: offeredTools,
       ...(body.plan ?? stored?.plan ? { suppliedPlan: true } : {}),

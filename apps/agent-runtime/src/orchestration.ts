@@ -162,7 +162,7 @@ export function routePolicy(env: PlannerEnv): RoutePolicy {
   if (raw === 'budget') return 'budget';
   throw new Error(`ORCHESTRATION_ROUTE must be "first" or "budget", got ${JSON.stringify(raw)}`);
 }
-export interface RouteNeed { call: 'planner' | 'composer'; estimatedTokens: number }
+export interface RouteNeed { call: 'planner' | 'composer' | 'structured'; estimatedTokens: number }
 export interface RouteDecision {
   provider: LlmProvider | null;
   /** Why, in words a trace reader can check against the numbers beside it. */
@@ -215,6 +215,20 @@ export function routeProvider(env: PlannerEnv, requested: LlmProvider | undefine
   const first = offered[0]!;
   if (providerTpm(env, first) !== null) recordSpend(first, need.estimatedTokens, now);
   return { provider: first, because: `${first} for the ${need.call}: no offered provider carries ${need.estimatedTokens} tokens (${considered.map((c) => `${c.provider} budget ${c.budget ?? '∞'}${c.spentThisMinute !== undefined ? `, spent ${c.spentThisMinute}` : ''}`).join('; ')}) — first offered, prompt fitted`, considered };
+}
+
+/** Spec 388 W2 — the WIDEST prompt an offered provider carries, for sizing what a prompt may hold before it is routed
+ *  (the vault inventory listing): the named provider's budget when a turn named one; under `first` the default's;
+ *  under `budget` no bound if any offered provider is unbounded, else the largest. Sizing to the default's budget
+ *  trimmed an inventory the stronger provider would have carried whole. */
+export function widestPromptBudget(env: PlannerEnv, requested?: LlmProvider): number | null {
+  if (requested) return plannerPromptBudget(env, requested);
+  const offered = llmAllowlist(env);
+  if (!offered.length) return null;
+  if (routePolicy(env) === 'first') return plannerPromptBudget(env, offered[0]!);
+  let widest: number | null = 0;
+  for (const p of offered) { const b = plannerPromptBudget(env, p); if (b === null) return null; if (b > (widest ?? 0)) widest = b; }
+  return widest;
 }
 
 /** The concrete model a provider runs — reported on the trace, never re-derived there. */
