@@ -218,7 +218,8 @@ describe('composing the answer (spec 350 §3.7)', () => {
     const compose = vi.fn(async () => 'There is one: outreach.team.');
     const reply = await askReplyFor(env2, { intent, addressee: WORKSPACE as `0x${string}`, result: readRun(observations), composer: { compose } });
     expect(reply).toMatchObject({ kind: 'answer', text: 'There is one: outreach.team.' });
-    expect(compose).toHaveBeenCalledWith({ intent, observations });
+    // Spec 391 — the composer is also handed its FITTED evidence (the observations, within its budget).
+    expect(compose).toHaveBeenCalledWith(expect.objectContaining({ intent, observations }));
   });
 
   it('never paraphrases an ACTION — what happened is stated from the receipt', async () => {

@@ -38,7 +38,7 @@ import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderA
 import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
 import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
-import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1 } from '@agenticprimitives/orchestration';
+import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence } from '@agenticprimitives/orchestration';
 import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
@@ -2133,6 +2133,9 @@ export interface PlannerTraceV1 {
   /** A provider's prompt budget and how the prompt was made to fit it: the estimate the request was judged
    *  by and every drop taken, in order (`fitPlannerPrompt`). Absent ⇒ no budget applied. */
   promptBudget?: { tokens: number; estimated: number; trimmed: string[] };
+  /** Spec 391 — the composer's evidence, FITTED to its budget: how much it saw of how much there was, and every
+   *  result whose body was replaced by its summary. Never a silent slice. */
+  composerEvidence?: { chars: number; of: number; dropped: Array<{ tool: string; stepRef?: string; bytes: number }> };
   /** Spec 388 — which provider carried the planner and the composer, and why (the numbers beside the reason). */
   route?: { policy: RoutePolicy; /** Spec 388 W3 — where the minute was counted: this isolate's own window, or the deployment's shared meter. */ meter?: 'isolate' | 'shared'; planner?: RouteDecision; composer?: RouteDecision; /** Spec 388 W2 — each structured call the run's steps made (the KB and vault choosers), in order. */ structured?: RouteDecision[] };
   /** Every admission verdict, in order — a refused plan shows what was proposed and why it was refused. */
@@ -3441,11 +3444,15 @@ async function askReplyForInner(env: HarnessEnv, input: {
       // checked against the evidence it will be shown WITH: one recompose carrying the governor's own
       // corrections, then the floor — the evidence stated plainly, because after two ungrounded
       // compositions the person gets the observations, not a third guess.
-      let text = await composer.compose({ intent: input.intent, observations: r.steps });
+      // Spec 391 — the evidence is FITTED to the composer's budget here, so the drops are on the trace and the
+      // governor below judges the prose against what the model actually saw. Never a slice.
+      const fitted = fitEvidence(r.steps, composer.evidenceBudget ?? 24_000);
+      if (input.plannerTrace) input.plannerTrace.composerEvidence = { chars: fitted.chars, of: fitted.of, dropped: fitted.dropped };
+      let text = await composer.compose({ intent: input.intent, observations: r.steps, evidence: fitted.items });
       let violations = checkGroundedComposition(text, evidence, input.intent.goal);
       if (violations.length) {
         text = await composer.compose({
-          intent: input.intent, observations: r.steps,
+          intent: input.intent, observations: r.steps, evidence: fitted.items,
           corrections: violations.map((v) => v.correction),
         });
         violations = checkGroundedComposition(text, evidence, input.intent.goal);

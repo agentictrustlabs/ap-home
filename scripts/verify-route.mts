@@ -62,4 +62,19 @@ if (runRef) {
   console.log(`\n── the run as a graph ──\n  ${pv.provenance!.id} · ${pv.provenance!.graph.length} nodes, ${pv.provenance!.hasTraceElement.length} members · vault copy ${pv.export ? (pv.export.written ? 'written' : `NOT written: ${pv.export.error}`) : 'not yet reported'} · hasProvenance ${hp.agent} ${hp.recordType}`);
   if (pv.provenance!.id !== `urn:ap:prov:bundle:${runRef}`) fail(`bundle id ${pv.provenance!.id}`);
   console.log(`\n✓ spec 389 W3: the reply names its provenance and the graph is served to its asker.`);
+  // Spec 391 — what the RECORD kept of each result: a body under the threshold, or a reference to an artifact in the
+  // agent's vault (and, when the vault refused the write, the body whole with the refusal on the record).
+  const rc = await j(await fetch(`${HOME}/a2a/harness/records`, { method: 'POST', headers: H, body: JSON.stringify({ session: si.homeSession, addressee: String(si.agent).toLowerCase(), runRef }) })) as { ok?: boolean; record?: { steps: Array<{ stepRef: string; toolId: string; result?: unknown }>; offloaded?: Array<{ stepRef: string; bytes: number; recordType: string; ok: boolean; error?: string }> } };
+  if (rc.ok && rc.record) {
+    const offloaded = rc.record.offloaded ?? [];
+    console.log(`\n── the record's results ──`);
+    for (const st of rc.record.steps) {
+      const r = st.result as { $artifact?: string; recordType?: string; bytes?: number; summary?: string } | undefined;
+      const size = JSON.stringify(st.result ?? null).length;
+      console.log(`  ${st.stepRef} ${st.toolId}: ${r?.$artifact ? `→ artifact ${r.recordType} (${r.bytes} bytes; ${r.summary})` : `${size} chars kept whole`}`);
+    }
+    for (const o of offloaded) console.log(`  offload ${o.stepRef}: ${o.ok ? `written ${o.recordType} (${o.bytes} bytes)` : `REFUSED ${o.error} (${o.bytes} bytes kept whole)`}`);
+    if (!offloaded.length) console.log(`  (no result crossed the offload threshold on this ask)`);
+    if (offloaded.some((o) => !o.ok)) fail('an artifact write was refused — re-issue the agent\'s interactions grant for vault:run.artifact:* (scripts/reissue-interactions-grants.mts)');
+  }
 }

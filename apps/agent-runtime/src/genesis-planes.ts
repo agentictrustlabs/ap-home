@@ -46,6 +46,8 @@ export const GENESIS_INTERACTIONS_SCOPES: ReadonlyArray<{ resources: string[]; o
     'vault:conversation.recent',
     // Spec 381 — a run's provenance, kept where the authority was spent (the DO copy is the rebuild).
     'vault:run.provenance:*',
+    // Spec 391 — a step's raw result, too large for the run's record, kept where the run ran.
+    'vault:run.artifact:*',
     // Spec 385 — the person's scoped confirmation memory (which "David", per word + capability + argument).
     'vault:confirmation.preferences',
   ], ops: ['read', 'write'] },

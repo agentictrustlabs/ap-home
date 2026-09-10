@@ -11,6 +11,7 @@ import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, forgetConfirma
 import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
 import { recordOf, replayingInvoker, traceContextOf, type RunPlannerSummaryV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
+import { recordFormOf, rehydrateExecuted } from './artifact-store.js';
 import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken } from './triggers.js';
 import { appendProgress, readProgress, type ProgressLineV1 } from './harness-progress.js';
 import { Hono, type Context } from 'hono';
@@ -342,6 +343,8 @@ export interface Env {
   CONSULT_MEMBER_DEADLINE_MS?: string;
   /** Spec 381 — where a run's spans go (an OTLP/HTTP traces endpoint), its headers, and the DO record's life in days. */
   OTEL_EXPORTER_OTLP_ENDPOINT?: string;
+  /** Spec 391 — a step result longer than this (canonical JSON chars) leaves the run's record for the agent's vault. */
+  OFFLOAD_THRESHOLD_CHARS?: string;
   OTEL_EXPORTER_OTLP_HEADERS?: string;
   HARNESS_RECORD_RETENTION_DAYS?: string;
   /**
@@ -1607,7 +1610,7 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
     intent, presented: input.resume?.presented ?? null, person: input.agent, runRef: input.runRef, addressee: input.addressee,
     ...(input.traceContext ? { traceContext: input.traceContext } : {}),
     ...(input.resume?.plan ? { plan: input.resume.plan } : input.plan ? { plan: input.plan } : {}),
-    ...(input.resume?.executed ? { resume: input.resume.executed } : {}),
+    ...(input.resume?.executed ? { resume: await rehydrateExecuted(deps, input.resume.executed) } : {}),
     ...(input.resume?.supplied?.length ? { supplied: input.resume.supplied } : {}),
     // An unattended run has no person's session behind it: the public directory and the vault questions
     // are a person's reads. The playbook's own tools (the work reads, the acts) do not come this way.
@@ -1629,7 +1632,8 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
   // Recorded like the ask route's (spec 370 P6) and exported like it (381); a record that fails to land costs
   // a look-back, never the run.
   try {
-    const record = recordOf({ runRef: input.runRef, intent, result: result as never, events, presented: (input.resume?.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), ...(input.traceContext ? { traceContext: input.traceContext } : {}), planner: plannerSummaryOf(trace), ...(input.receivedAt ? { receivedAt: input.receivedAt } : {}) });
+    const kept = await recordFormOf(env, deps, input.addressee, input.runRef, result as never);
+    const record = recordOf({ runRef: input.runRef, intent, result: kept.result, events, presented: (input.resume?.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), ...(input.traceContext ? { traceContext: input.traceContext } : {}), planner: plannerSummaryOf(trace), ...(input.receivedAt ? { receivedAt: input.receivedAt } : {}), offloaded: kept.offloaded });
     await putRecord(env as never, input.addressee, record);
     await exportRun(env, { writeSubjectRecord: deps.writeSubjectRecord }, input.addressee, record)
       .then((r) => putRecord(env as never, input.addressee, { ...record, export: r })).catch(() => undefined);
@@ -1679,7 +1683,7 @@ async function resumeFromCommitment(env: Env, input: { addressee: Address; debto
     await saveRun(env as never, {
       ...hit, supplied: [...hit.supplied, { stepRef: hit.awaiting.stepRef, delivered }],
       ...(p ? { awaiting: { kind: p.kind as 'data' | 'signature' | 'confirmation', prompt: p.prompt, stepRef: p.stepRef, expiresAt: now + (AWAIT_WINDOW_MS[p.kind as 'data'] ?? AWAIT_WINDOW_MS.data) } } : { awaiting: undefined }),
-      executed: { plan: (result as { plan: Plan }).plan, completed: completedStepsOf(result as never) },
+      executed: await (async () => { const kept = await recordFormOf(env, harnessDeps(env, buildAuditSink(env)), input.addressee, hit.runRef, result as never); return { plan: kept.result.plan, completed: completedStepsOf(kept.result as never) }; })(),
       expiresAt: now + AWAIT_WINDOW_MS.data, updatedAt: now,
     } as never);
   } else {
@@ -1737,7 +1741,7 @@ export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef:
         // An act the run reached waits on a STEWARD'S MANDATE — said so, where the stewards read it (spec 375
         // W2: a drafted reply parked as "waiting on ?"). The window is the trigger's, not a signature's 30 min.
         : { awaiting: { kind: 'signature', prompt: `${CAPABILITY_WORDS[reply.capability ?? ''] ?? reply.capability ?? 'this act'} — needs a steward's mandate`, stepRef: reply.stepRef ?? 's0', expiresAt: now + (row.everyMs ?? AWAIT_WINDOW_MS.data) } }),
-      executed: { plan: (result as { plan: unknown }).plan, completed: completedStepsOf(result as never) },
+      executed: await (async () => { const kept = await recordFormOf(env, harnessDeps(env, buildAuditSink(env)), agent, runRef, result as never); return { plan: kept.result.plan, completed: completedStepsOf(kept.result as never) }; })(),
       // A parked schedule run waits until the trigger would fire again — then a fresh one replaces it. A
       // run fired by an event, a webhook or a message waits the ordinary window (spec 375).
       expiresAt: now + (row.everyMs ?? AWAIT_WINDOW_MS.data),
@@ -2895,7 +2899,8 @@ app.post('/harness/ask', async (c) => {
       // Spec 384 W3 — a campaign selected a provider for this step: the plan is bound to it and to its offer.
       ...(stored?.origin?.engagement ? { engagement: stored.origin.engagement } : {}),
       // Spec 370 P1 — what already ran, replayed; what has not, attempted. The planner is not asked again.
-      ...(stored?.executed ? { resume: stored.executed } : {}),
+      // Spec 391 — a referenced result a remaining step reaches comes back from the vault; the rest stay references.
+      ...(stored?.executed ? { resume: await rehydrateExecuted(askDeps, stored.executed) } : {}),
       ...(stored?.routedAt ? { routedAt: stored.routedAt } : {}),
       ...(body.surface ? { surface: body.surface } : {}),
       ...(body.approvals ? { approvals: body.approvals } : {}), ...(turn.supplied.length ? { supplied: turn.supplied } : {}),
@@ -3024,6 +3029,9 @@ app.post('/harness/ask', async (c) => {
         ...(c.env.UNIVERSAL_SIGNATURE_VALIDATOR ? { validator: c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address } : {}),
       }),
     });
+    // Spec 391 — THE RECORD FORM: large results leave for the agent's vault as artifacts; the checkpoint and the
+    // record below keep references. The reply above was built from the full result and keeps it.
+    const recordForm = await recordFormOf(c.env, askDeps, addressee, runRef, result);
     // Checkpoint what the person has given us when the run is still owed something; forget it the moment
     // it is finished or refused. A denial is terminal (ADR-0013) — a checkpoint left behind invites a
     // caller to retry a refusal as though it were weather.
@@ -3059,7 +3067,7 @@ app.post('/harness/ask', async (c) => {
           ...(reply.kind === 'waiting' ? { awaiting: { kind: 'commitment' as const, prompt: reply.text, stepRef: reply.stepRef, expiresAt: now + AWAIT_WINDOW_MS.commitment, commitment: reply.commitment } } : {}),
           // WHAT RAN (spec 370 P1): the admitted plan and the completed steps with their receipts, so the
           // next turn replays them instead of planning and executing the whole ask again.
-          executed: { plan: result.plan, completed: completedStepsOf(result) },
+          executed: { plan: recordForm.result.plan, completed: completedStepsOf(recordForm.result) },
           expiresAt: expiryFor(reply.kind === 'prompt' ? { kind: reply.prompt.kind, prompt: reply.prompt.prompt, stepRef: reply.prompt.stepRef } : reply.kind === 'waiting' ? { kind: 'commitment', prompt: reply.text, stepRef: reply.stepRef } : undefined, now),
           createdAt: stored?.createdAt ?? now, updatedAt: now,
         });
@@ -3228,7 +3236,7 @@ app.post('/harness/ask', async (c) => {
     {
       // Spec 390 W2 — the W3C Trace Context the request arrived with joins this run's spans to the caller's
       // trace. Recorded here and read by nothing else: correlation, never trust.
-      const record = recordOf({ runRef, intent, result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), traceContext: traceContextOf(c.req.raw.headers), planner: plannerSummaryOf(trace), receivedAt });
+      const record = recordOf({ runRef, intent, result: recordForm.result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), traceContext: traceContextOf(c.req.raw.headers), planner: plannerSummaryOf(trace), receivedAt, offloaded: recordForm.offloaded });
       c.executionCtx.waitUntil(putRecord(c.env as never, addressee, record).catch((e) => console.warn('[harness/ask] record not kept:', e instanceof Error ? e.message : String(e))));
       // Spec 381 — THE EXPORT: the durable half into the acting agent's vault, the spans to a collector when
       // one is named. Off the run's path; a failed export is logged, never a failed ask.
