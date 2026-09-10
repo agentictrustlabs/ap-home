@@ -62,6 +62,18 @@ describe('exportRun', () => {
     const doc = await provenanceGraphOf({ CHAIN_ID: '34348' }, ALICE, record) as { wasAttributedTo: string };
     expect(doc.wasAttributedTo).toBe(`urn:ap:agent:eip155:34348:${ALICE}`);
   });
+  it('spec 390 — the ids on the spans are the ids in the graph, both ways', async () => {
+    const { provenanceGraphOf } = await import('../../src/run-export.js');
+    const doc = await provenanceGraphOf({}, ALICE, record) as { id: string; graph: Array<Record<string, unknown>> };
+    const spans = await firewalledSpans(record);
+    for (const sp of spans) {
+      const node = doc.graph.find((n) => n['id'] === sp.attributes['ap.prov.activity.id']);
+      expect(node, `graph node for ${sp.name}`).toBeTruthy();
+      expect(node!['spanId']).toBe(sp.spanId);
+      expect(node!['traceId']).toBe(sp.traceId);
+      expect(sp.attributes['ap.prov.bundle.id']).toBe(doc.id);
+    }
+  });
   it('the served spans are the firewalled ones', async () => {
     const spans = await firewalledSpans(record);
     expect(spans[1]!.attributes['ap.receipt.digest']).toMatch(/^0x[0-9a-f]{64}$/);
