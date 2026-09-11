@@ -1,5 +1,48 @@
 # @agenticprimitives-demo/a2a
 
+## 0.0.2-alpha.26
+
+### Patch Changes
+
+- Updated dependencies
+- Updated dependencies [bff6887]
+  - @agenticprimitives/a2a@0.0.0-alpha.20
+  - @agenticprimitives/agent-account@1.0.0-alpha.23
+  - @agenticprimitives/agent-naming@1.0.0-alpha.23
+  - @agenticprimitives/agent-profile@1.0.0-alpha.23
+  - @agenticprimitives/agent-relationships@1.0.0-alpha.23
+  - @agenticprimitives/agent-resolution@0.0.0-alpha.4
+  - @agenticprimitives/audit@1.0.0-alpha.23
+  - @agenticprimitives/capability-claims@0.0.0-alpha.20
+  - @agenticprimitives/chain-state@0.0.0-alpha.2
+  - @agenticprimitives/chain-state-viem@0.0.0-alpha.4
+  - @agenticprimitives/collaboration@0.0.0-alpha.2
+  - @agenticprimitives/connect@1.0.0-alpha.23
+  - @agenticprimitives/connect-auth@1.0.0-alpha.23
+  - @agenticprimitives/content-storage@1.0.0-alpha.2
+  - @agenticprimitives/context@0.0.0-alpha.2
+  - @agenticprimitives/coordination@0.0.0-alpha.6
+  - @agenticprimitives/delegation@1.0.0-alpha.23
+  - @agenticprimitives/edge-runtime@0.0.0-alpha.5
+  - @agenticprimitives/fabric@0.0.0-alpha.12
+  - @agenticprimitives/harness@0.0.0-alpha.2
+  - @agenticprimitives/home@0.0.0-alpha.12
+  - @agenticprimitives/intent-engagement@0.0.0-alpha.2
+  - @agenticprimitives/key-custody@1.0.0-alpha.23
+  - @agenticprimitives/mcp-runtime@1.0.0-alpha.23
+  - @agenticprimitives/ontology@1.0.0-alpha.23
+  - @agenticprimitives/orchestration@0.0.0-alpha.2
+  - @agenticprimitives/orchestration-anthropic@0.0.0-alpha.3
+  - @agenticprimitives/orchestration-openai-compat@0.0.0-alpha.2
+  - @agenticprimitives/rate-control-cloudflare@0.0.0-alpha.3
+  - @agenticprimitives/registry-kit@0.0.0-alpha.11
+  - @agenticprimitives/related-agents@0.0.0-alpha.19
+  - @agenticprimitives/situations@0.0.0-alpha.7
+  - @agenticprimitives/surface-catalog@0.0.0-alpha.3
+  - @agenticprimitives/types@1.0.0-alpha.23
+  - @agenticprimitives/vault@0.0.0-alpha.3
+  - @agenticprimitives/verification-receipts@0.0.0-alpha.4
+
 ## 0.0.2-alpha.25
 
 ### Patch Changes

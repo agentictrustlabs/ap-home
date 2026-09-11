@@ -1,5 +1,37 @@
 # @agenticprimitives-demo/sso-next
 
+## 0.0.2-alpha.26
+
+### Patch Changes
+
+- Updated dependencies
+  - @agenticprimitives/a2a@0.0.0-alpha.20
+  - @agenticprimitives/agent-account@1.0.0-alpha.23
+  - @agenticprimitives/agent-naming@1.0.0-alpha.23
+  - @agenticprimitives/agent-profile@1.0.0-alpha.23
+  - @agenticprimitives/agent-relationships@1.0.0-alpha.23
+  - @agenticprimitives/agent-resolution@0.0.0-alpha.4
+  - @agenticprimitives/audit@1.0.0-alpha.23
+  - @agenticprimitives/capability-claims@0.0.0-alpha.20
+  - @agenticprimitives/connect@1.0.0-alpha.23
+  - @agenticprimitives/connect-auth@1.0.0-alpha.23
+  - @agenticprimitives/contracts@1.0.0-alpha.23
+  - @agenticprimitives/delegation@1.0.0-alpha.23
+  - @agenticprimitives/fabric@0.0.0-alpha.12
+  - @agenticprimitives/fedcm-idp@1.0.0-alpha.7
+  - @agenticprimitives/home@0.0.0-alpha.12
+  - @agenticprimitives/identity-directory@1.0.0-alpha.23
+  - @agenticprimitives/identity-directory-adapters@1.0.0-alpha.23
+  - @agenticprimitives/organization@0.0.0-alpha.7
+  - @agenticprimitives/payments@0.0.0-alpha.19
+  - @agenticprimitives/registry-kit@0.0.0-alpha.11
+  - @agenticprimitives/related-agents@0.0.0-alpha.19
+  - @agenticprimitives/situations@0.0.0-alpha.7
+  - @agenticprimitives/treasury-service-agent@0.0.0-alpha.10
+  - @agenticprimitives/types@1.0.0-alpha.23
+  - @agenticprimitives/vault@0.0.0-alpha.3
+  - @agenticprimitives/verifiable-credentials@0.0.0-alpha.20
+
 ## 0.0.2-alpha.25
 
 ### Patch Changes
