@@ -43,7 +43,8 @@ spec itself moves to `ap-home` at 399 W2 and Ring 0 keeps a pointer in `specs/IN
 
 | Section | Owner after the split | Why |
 | --- | --- | --- |
-| §1 census, §4–§6 Home Work, §8 `~/skills` fold-in (Home half), §9 Home Build, §12 gates (Home rows), §13 demonstration | **`ap-home`** | surfaces, states, ceremonies — product |
+| §1 census, §4–§6 Home Work, §8 `~/skills` fold-in (Home half), §12 gates (Home rows), §13 demonstration | **`ap-home`** ([created 2026-09-11](https://github.com/agentictrustlabs/ap-home)) | surfaces, states, ceremonies — product |
+| §9 Home Build (services + the Build route group), §12 G4 | **`ap-build`** ([created 2026-09-11](https://github.com/agentictrustlabs/ap-build)) | §9.1 stands — Build is a workspace mode, not a second identity system; the separate repository decides CODE ownership only: identity, session, nav and every authority ceremony remain Home's, and `ap-home` mounts the route group |
 | §7.2 contract additions (`idempotency`, `result.kind`, client/CLI projection, parity generation) | **Ring 0** (`capability-claims/harness-contract`, `harness`) | schema + pure projections |
 | §7 crosswalk, §3 invariants | Ring 0 (doctrine) — projected into every product repo by `ap doctor --rules` | one source |
 | §8.1/§8.4 corpus contracts, domain packs | `~/skills` (authoring) + Ring 0 Developer Kit (consumption) | 354 §7 |
