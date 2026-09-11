@@ -11,7 +11,7 @@
  */
 import { AgentNamingClient, buildRecordCalls, namehash } from '@agenticprimitives/agent-naming';
 import { buildExecuteBatchCallData } from '@agenticprimitives/agent-account';
-import { hostForName } from '../apps/demo-a2a/src/host-context.js';
+import { hostForName } from '@agenticprimitives/agent-naming';
 import { CONTRACTS } from '@agenticprimitives/contracts/deployments/faithchain';
 import type { Address, Hex } from 'viem';
 

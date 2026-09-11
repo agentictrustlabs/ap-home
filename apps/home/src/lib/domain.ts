@@ -8,7 +8,7 @@
 // `<handle>.impact-agent.io` (the demo-a2a Worker). Names live under a
 // permissionless subregistry `<label>.demo.agent`.
 
-import { parseAgentName } from '@agenticprimitives/agent-naming';
+import { parseAgentName, parseSubdomainLabel } from '@agenticprimitives/agent-naming';
 import { PERMISSIONLESS_SUBREGISTRIES } from './chain';
 
 /** Registrable Connect SSO domain — each person's home is a single-label subdomain. */
@@ -44,13 +44,7 @@ export const HOME_ORIGIN = process.env.NEXT_PUBLIC_HOME_ORIGIN || '';
 /** Single-label subdomain of `baseDomain` (alice.impact-agent.me → alice). The
  *  apex, nested labels, `www`, and non-matching hosts → null. */
 export function parseAgentSubdomain(hostname: string, baseDomain: string = CONNECT_DOMAIN): string | null {
-  const host = (hostname.split(':')[0] ?? '').toLowerCase();
-  const base = baseDomain.toLowerCase();
-  if (host === base) return null;
-  if (!host.endsWith('.' + base)) return null;
-  const label = host.slice(0, host.length - base.length - 1);
-  if (!label || label.includes('.') || label === 'www') return null;
-  return label;
+  return parseSubdomainLabel(hostname, baseDomain, ['www']);
 }
 
 /** The handle this page serves on a personal subdomain, else null (apex / pages.dev / localhost). */

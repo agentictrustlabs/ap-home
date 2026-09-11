@@ -6,6 +6,7 @@
 // shapes (`@agenticprimitives/home`) or onto steward-facing copy. Rendering only — nothing here grants
 // anything. The scope mirrors below exist so a button can say *why* it is unavailable; the server
 // re-checks every op against the presented delegation and is the only authority (design §14).
+import { hostForName } from '@agenticprimitives/agent-naming';
 import type {
   AgentCardSummaryRowV1,
   CardEditorFieldV1,
@@ -681,11 +682,17 @@ export const TRI_HELP: Record<TriState, string> = {
 // ── card URI derivation (design §6.2 — the binding names the URI the card will be served from) ────
 
 /**
- * Best-effort well-known card URI for a named agent, mirroring demo-a2a's `hostForName`: the naming zone
- * root is dropped and the remaining labels become the A2A host (`<label>.<a2aDomain>` for a person root,
- * `<label>.<type>.<a2aDomain>` for a typed suffix). The Smart Agent binding is signed BEFORE the first
- * publish, so nothing can look this up server-side yet — the value stays editable in the sign panel and
- * this is only the prefill.
+ * Best-effort well-known card URI for a named agent. The host is the PACKAGE's `hostForName`
+ * (`@agenticprimitives/agent-naming`, spec 346 §5 — the same projection the agent runtime serves, promoted in
+ * spec 399 §4 so this file no longer mirrors it by hand): a person or legacy root drops its root
+ * (`alice.me` → `alice.<zone>`), a typed suffix is hyphenated into ONE label (`field.workspace` →
+ * `field-workspace.<zone>`) so the zone's `*.<zone>` wildcard covers it. The Smart Agent binding is signed
+ * BEFORE the first publish, so nothing can look this up server-side yet — the value stays editable in the
+ * sign panel and this is only the prefill.
+ *
+ * The roots are a LIST, not one value: an estate mid-migration serves several (`me,impact`), and the runtime
+ * has always matched against all of them. A deeper legacy name (`finance.team.impact`) has no package host;
+ * the prefill keeps joining its labels so the editable field is not empty.
  */
 export function cardUriForName(
   name: string,
@@ -693,15 +700,9 @@ export function cardUriForName(
 ): string | null {
   const labels = name.trim().toLowerCase().split('.').filter(Boolean);
   if (labels.length === 0) return null;
-  // spec 346 §5 (2026-08-30): a typed agent's host is ONE label with the type hyphenated in
-  // (`field.workspace` → `field-workspace.<zone>`), so the zone's `*.<zone>` wildcard covers it; a person
-  // or legacy name drops its root entirely (`alice.me` → `alice.<zone>`). MUST match `hostForName` in
-  // demo-a2a — this only prefills the binding's card URI, but a mismatch would name the wrong endpoint.
-  //
-  // The roots are a LIST, not one value: an estate mid-migration serves several (`me,impact`), and
-  // demo-a2a has always matched against all of them. Taking only `nameParent` here meant a person on the
-  // NEW root got `alice-me.<zone>` — a host nothing serves — while `alice.<zone>` is where they answer.
   const parents = opts.nameParents?.length ? opts.nameParents : [opts.nameParent];
+  const host = labels.length === 2 ? hostForName(labels.join('.'), opts.a2aDomain, parents) : null;
+  if (host) return `https://${host}/.well-known/agent-card.json`;
   if (parents.includes(labels[labels.length - 1]!)) labels.pop();
   if (labels.length === 0) return null;
   return `https://${labels.join('-')}.${opts.a2aDomain}/.well-known/agent-card.json`;

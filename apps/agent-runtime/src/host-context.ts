@@ -12,7 +12,7 @@
 
 import { isCapabilityId } from '@agenticprimitives/capability-claims';
 import { apAuthorityExtension } from '@agenticprimitives/a2a';
-import { AgentNamingClient, allAgentTlds, isAgentTld, parseAgentName, InvalidNameError } from '@agenticprimitives/agent-naming';
+import { AgentNamingClient, parseSubdomainLabel, typedNameForLabel, parseTypedAgentHost as parseTypedHost, hostForName as hostFor, agentNameForHandle as nameForHandle } from '@agenticprimitives/agent-naming';
 import type { Address } from '@agenticprimitives/types';
 
 /** The TLD names are claimed under. `alice` → `alice.impact`. (Deployment convention — the
@@ -39,20 +39,9 @@ export function a2aCanonicalDomain(env: { A2A_PUBLIC_BASE_DOMAIN?: string }): st
   return a2aBaseDomains(env)[0]!;
 }
 
-/**
- * Extract a single-label subdomain from a hostname given the base domain.
- * `alice.impact-agent.io` + `impact-agent.io` → `alice`. The apex, nested
- * labels (`a.b.impact-agent.io`), and non-matching hosts → `null`.
- */
+/** `alice.<zone>` → `alice` (the package's `parseSubdomainLabel`; apex, nesting and non-matching hosts → null). */
 export function parseAgentSubdomain(hostname: string | undefined, baseDomain: string): string | null {
-  if (!hostname) return null;
-  const host = (hostname.split(':')[0] ?? '').toLowerCase();
-  const base = baseDomain.toLowerCase();
-  if (host === base) return null;
-  if (!host.endsWith('.' + base)) return null;
-  const label = host.slice(0, host.length - base.length - 1);
-  if (!label || label.includes('.')) return null;
-  return label;
+  return parseSubdomainLabel(hostname, baseDomain);
 }
 
 /** The `.agent` name for a subdomain label (`alice` → `alice.demo.agent`). */
@@ -60,81 +49,17 @@ export function agentNameForLabel(label: string): string {
   return `${label}.${AGENT_NAME_PARENT}`;
 }
 
-/**
- * Typed-host projection (spec 346 §5), the inverse of agent-naming's `dnsHostForHandle` for the two host
- * shapes this deployment serves under ONE base zone:
- *   `<label>.<base>`          → `<label>.<AGENT_NAME_PARENT>`  (persons / legacy — the live pattern)
- *   `<label>.<type>.<base>`   → `<label>.<type>`               (typed roots hosted under the deployment zone:
- *                                                              `northern-colorado.team.<base>`, `discovery.registry.<base>`)
- * Anything else (apex, deeper nesting, an unknown type level) → null. The type level is a projection of the
- * suffix and is NEVER authority — `resolveTyped` re-validates the suffix against the on-chain record.
- */
-/** `<label>-<type>` → the typed name it projects, or null when the label carries no known type suffix. */
-function typedFromLabel(rest: string): { label: string; name: string } | null {
-  for (const tld of allAgentTlds()) {
-    const suffix = `-${tld}`;
-    if (rest.endsWith(suffix) && rest.length > suffix.length) {
-      const label = rest.slice(0, -suffix.length);
-      return { label: `${label}.${tld}`, name: `${label}.${tld}` };
-    }
-  }
-  return null;
-}
-
+// The typed-host projection and its inverse (spec 346 §5) live in `@agenticprimitives/agent-naming` since
+// spec 399 §4 — the Home's Card Studio derives the same host and once mirrored this file by hand. What stays
+// here is THIS deployment's binding: its legacy parent (`impact`) as the default the package never names.
 export function parseTypedAgentHost(hostname: string | undefined, baseDomain: string, parent: string = AGENT_NAME_PARENT): { label: string; name: string } | null {
-  if (!hostname) return null;
-  const host = (hostname.split(':')[0] ?? '').toLowerCase();
-  const base = baseDomain.toLowerCase();
-  if (host === base || !host.endsWith('.' + base)) return null;
-  const rest = host.slice(0, host.length - base.length - 1);
-  const parts = rest.split('.');
-  if (parts.length === 1 && parts[0]) {
-    // spec 346 §5 (2026-08-30): a typed agent is ONE label, `<label>-<type>`, so the zone's existing
-    // `*.<zone>` wildcard and its certificate cover every agent. The DNS label is returned RAW: a label may
-    // read BOTH ways — `alice-home-church` is `alice-home.church` and also the legacy person/org name
-    // `alice-home-church.impact` — so the choice belongs to `resolveAgentByLabel`, which tries an ordered
-    // candidate set against the chain (one mechanism, ordered candidates — not a fallback, ADR-0013).
-    return { label: parts[0], name: typedFromLabel(parts[0])?.name ?? `${parts[0]}.${parent}` };
-  }
-  // MIGRATION: the dotted form `<label>.<type>.<base>` was the convention until 2026-08-30 and is still
-  // served, because cards published under it carry that URL in signed bytes. Nothing emits it any more
-  // (`hostForName` below); drop this arm once those releases are superseded.
-  if (parts.length === 2 && parts[0] && isAgentTld(parts[1]!)) return { label: `${parts[0]}.${parts[1]}`, name: `${parts[0]}.${parts[1]}` };
-  return null;
+  return parseTypedHost(hostname, baseDomain, parent);
 }
-
-/**
- * The inverse of `parseTypedAgentHost` (spec 346 §5): the public host this deployment serves an on-chain
- * name at. `<label>.<parent>` (parent ∈ the ordered person roots) → `<label>.<base>`; `<label>.<tld>` for
- * any other typed suffix → `<label>.<tld>.<base>`. Anything deeper or untyped → null (no host to publish at).
- * Used by the Card Studio to know WHERE a released card is served — a projection of the name, never authority.
- */
 export function hostForName(name: string, baseDomain: string, parents: readonly string[] = [AGENT_NAME_PARENT]): string | null {
-  const parts = name.trim().toLowerCase().split('.');
-  if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
-  const [label, tld] = parts as [string, string];
-  if (parents.includes(tld)) return `${label}.${baseDomain}`;
-  if (isAgentTld(tld)) return `${label}-${tld}.${baseDomain}`;
-  return null;
+  return hostFor(name, baseDomain, parents);
 }
-
-/**
- * The on-chain name for an explicit handle (the edge path `POST /api/a2a/<handle>` and the injected
- * `X-Agent-Subdomain`). A single label is the legacy `<label>.<AGENT_NAME_PARENT>`; a typed handle
- * (`x.t`, `x.t@c.u`, `c.u/x.t`) or a legacy dotted name is parsed by the agent-naming grammar. Root and
- * type-node forms name no subject → null (generic context). One grammar, no guessing (ADR-0013).
- */
 export function agentNameForHandle(handle: string, parent: string = AGENT_NAME_PARENT): string | null {
-  const h = handle.trim().toLowerCase();
-  if (!h) return null;
-  if (!h.includes('.') && !h.includes('@') && !h.includes('/')) return `${h}.${parent}`;
-  try {
-    const p = parseAgentName(h);
-    return p.kind === 'canonical' || p.kind === 'scoped' || p.kind === 'legacy' ? p.normalized : null;
-  } catch (e) {
-    if (e instanceof InvalidNameError) return null;
-    throw e;
-  }
+  return nameForHandle(handle, parent);
 }
 
 export interface AgentHostContext {
@@ -210,7 +135,7 @@ export async function resolveAgentByLabel(
   // spec 346 §5: a DNS label ending in `-<type>` reads as that typed name FIRST, then as a literal label under
   // the ordered roots — `alice-home-church` is `alice-home.church` before it is `alice-home-church.impact`.
   // Both are real names on this estate, so the host asks the chain in that order rather than guessing once.
-  const typedFirst = bare ? typedFromLabel(norm)?.name : undefined;
+  const typedFirst = bare ? typedNameForLabel(norm) ?? undefined : undefined;
   const candidates = bare ? [...(typedFirst ? [typedFirst] : []), ...parents.map((p) => `${norm}.${p}`)] : [agentNameForHandle(norm, parents[0] ?? AGENT_NAME_PARENT)].filter((n): n is string => !!n);
   if (candidates.length === 0) return { label: null, agent: null, name: null, publicOrigin };
 
