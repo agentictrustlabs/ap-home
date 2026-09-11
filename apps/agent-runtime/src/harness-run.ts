@@ -37,6 +37,7 @@ import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
 import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
 import { DISCOVERY_FIND_TOOL, ENGAGEMENT_INVOKE_TOOL, DISCOVERY_INSPECT_TOOL, DISCOVERY_FIND_CAPABILITY, ENGAGEMENT_INVOKE_CAPABILITY, discoveryFindInvoker } from './enterprise-tools.js';
+import { INVITATIONS_RECEIVED_TOOL } from './invitations-received.js';
 import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
 import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
@@ -1102,7 +1103,16 @@ export function inviteGrantForRequirement(
  * surface to store in the org's vault. It does NOT make anyone a member: the invitee redeems it on join,
  * which is the whole reason the org-side capability is the INVITATION and not the membership.
  */
-export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, person: Address | undefined, deps?: Pick<HarnessDeps, 'readContract' | 'deliverEmailInvitation'>, session?: string): ToolInvoker {
+export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, person: Address | undefined, deps?: Pick<HarnessDeps, 'readContract' | 'deliverEmailInvitation' | 'sendDirectMessage'>, session?: string): ToolInvoker {
+  /** WHAT FOLLOWS an invitation to an AGENT (spec 341 §5.1b, spec 360): the invitee is TOLD — a message from the inviter's
+   *  own agent carrying the Join reference the Home renders as the chip. An effect never fails the act; it is reported.
+   *  Without the inviter's session (a run admitted through a client) the message cannot be sent here, and that is said. */
+  const tell = async (org: Address, invitee: Address): Promise<{ ok: boolean; error?: string; messageId?: string }> => {
+    if (!person || !session || !deps?.sendDirectMessage) return { ok: false, error: person && !session ? 'the invitee was not told — telling them is a message sent as you, which needs your session (finish this at your Home, or tell them yourself)' : 'the invitee was not told — no messaging door here' };
+    try {
+      return await deps.sendDirectMessage({ sender: person, recipient: invitee, bodyText: 'You\'re invited to join this organization. Open the "Join" chip on this message to accept — you\'ll sign a listing you can revoke anytime.', session, contextRefs: [{ kind: 'org-channels', id: org.toLowerCase(), label: 'Join the organization' }] });
+    } catch (e) { return { ok: false, error: e instanceof Error ? e.message : String(e) }; }
+  };
   return async (toolId, args, ctx) => {
     const stepRef = ctx.step.id ?? `s${ctx.index}`;
     const wire = presented.wire as Delegation;
@@ -1155,7 +1165,7 @@ export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, p
         const delivered = inviteeEmail && deps?.deliverEmailInvitation && session
           ? await deps.deliverEmailInvitation({ org, email: inviteeEmail, memberAccessDelegation: approvedWire, session }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
           : undefined;
-        return { org, invitee, memberAccessDelegation: approvedWire, grantDigest, invited: true, approvedHash: true, ...(facets ? { facets } : {}), ...(inviteeEmail ? { inviteeEmail, emailDelivery: delivered ?? { ok: false, error: 'email delivery is not wired on this agent' } } : {}) };
+        return { org, invitee, memberAccessDelegation: approvedWire, grantDigest, invited: true, approvedHash: true, ...(inviteeEmail ? {} : { told: await tell(org, invitee) }), ...(facets ? { facets } : {}), ...(inviteeEmail ? { inviteeEmail, emailDelivery: delivered ?? { ok: false, error: 'email delivery is not wired on this agent' } } : {}) };
       }
     }
 
@@ -1171,7 +1181,7 @@ export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, p
     // The invitation is the SIGNED grant. Storing it is the surface's half (the org's vault); returning
     // it unsigned-but-claimed would be an invitation that verifies nowhere.
     const wireOut: DelegationWireV1 = { ...grant, salt: salt.toString(), signature: signed.signature as Hex };
-    return { org, invitee, memberAccessDelegation: wireOut, grantDigest, invited: true, ...(facets ? { facets } : {}) };
+    return { org, invitee, memberAccessDelegation: wireOut, grantDigest, invited: true, ...(facets ? { facets } : {}), told: await tell(org, invitee) };
   };
 }
 
@@ -4215,6 +4225,8 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(env.ARD_REGISTRY_ORIGIN && playbook?.tools?.[DISCOVERY_FIND_TOOL.id] ? [mergeContractTool(DISCOVERY_FIND_TOOL, playbook.tools[DISCOVERY_FIND_TOOL.id])] : []),
     ...(playbook?.tools?.[ENGAGEMENT_INVOKE_TOOL.id] ? [mergeContractTool(ENGAGEMENT_INVOKE_TOOL, playbook.tools[ENGAGEMENT_INVOKE_TOOL.id])] : []),
     ...(playbook?.tools?.[DISCOVERY_INSPECT_TOOL.id] ? [mergeContractTool(DISCOVERY_INSPECT_TOOL, playbook.tools[DISCOVERY_INSPECT_TOOL.id])] : []),
+    // Spec 397 / 341 §5.1b — what the person has been invited to, from their own inbox (their playbook offers it).
+    ...(playbook?.tools?.[INVITATIONS_RECEIVED_TOOL.id] ? [mergeContractTool(INVITATIONS_RECEIVED_TOOL, playbook.tools[INVITATIONS_RECEIVED_TOOL.id])] : []),
     // Spec 380 — one member of an organization, asked through their own agent (fan-out over the roster).
     MEMBER_CONSULT_TOOL,
     // Spec 384 — ask other agents whether they would take this work, and on what terms (an offer is never accepted here).

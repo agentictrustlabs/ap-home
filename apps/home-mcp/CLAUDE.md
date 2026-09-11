@@ -41,7 +41,7 @@ Live: `https://home-mcp-faithnet.richardpedersen3.workers.dev` (the faithnet.io 
 To rotate: generate a new key, `wrangler secret put HOME_MCP_PRIVATE_KEY --env faithnet`, set the new address as that `delegate`, push
 the Home, deploy this Worker. Nothing else: every existing connection's assertion stops recovering to its wire's delegate, her agent
 refuses it, the transport answers 401 with the challenge, the host re-authorizes and the Home mints a wire to the new key.
-Registrations and demo connects are bounded per caller and overall per hour (429); a person may hold 25 connected clients.
+Registrations and demo connects are bounded per caller and overall per hour (429); a person may hold 100 connected clients (live tokens count; expired or revoked ones do not).
 
 ## Not here
 

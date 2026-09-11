@@ -122,12 +122,14 @@ async function connectFromHome(env: Env, exchange: { id_token?: string; delegati
   const prior = await store(env).getPerson(v.claims.sub);
   // A person's clients are bounded: a registration is unprivileged, and a wire is worth guarding from being handed to
   // an unbounded number of them. Revoking at the Home ends every one; connecting again starts clean.
-  const MAX_CLIENTS_PER_PERSON = 25;
-  if (prior && !prior.client_ids.includes(clientId) && prior.client_ids.length >= MAX_CLIENTS_PER_PERSON) return { ok: false, error: `this person already has ${MAX_CLIENTS_PER_PERSON} connected clients — revoke the connection at their Home to start over` };
+  // A client counts while it holds a live token: a registration whose tokens expired or were revoked is not a connection.
+  const MAX_CLIENTS_PER_PERSON = 100;
+  const live = new Set(prior ? await store(env).liveClientsFor(v.claims.sub) : []);
+  if (prior && !live.has(clientId) && live.size >= MAX_CLIENTS_PER_PERSON) return { ok: false, error: `this person already has ${MAX_CLIENTS_PER_PERSON} connected clients — revoke the connection at their Home to start over` };
   // The person's REGISTRY NAME (alice.me) from the Home's reverse lookup — the id_token's agent_name is their display name.
   const rn = (await fetch(`${env.HOME_ORIGIN}/connect/reverse-name?address=${agent}`).then((r) => r.json()).catch(() => null)) as { name?: string | null } | null;
   const agentName = typeof rn?.name === 'string' && rn.name ? rn.name : (v.claims.agent_name ?? exchange.agent_name);
-  const row: PersonRow = { sub: v.claims.sub, agent, ...(agentName ? { agent_name: agentName } : {}), wire_enc: sealed.enc, wire_iv: sealed.iv, wire_ref: '', connected_at: Date.now(), client_ids: [...new Set([...(prior?.client_ids ?? []), clientId])] };
+  const row: PersonRow = { sub: v.claims.sub, agent, ...(agentName ? { agent_name: agentName } : {}), wire_enc: sealed.enc, wire_iv: sealed.iv, wire_ref: '', connected_at: Date.now(), client_ids: [...new Set([...live, clientId])] };
   await store(env).putPerson(row);
   return { ok: true, sub: v.claims.sub, agent };
 }

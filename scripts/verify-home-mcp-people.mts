@@ -80,8 +80,16 @@ const seen = await alice.call('ask', { addressee: ORG, message: 'who has been in
 const seenText = String(seen.out.text ?? '');
 console.log(`invitations at ${ORG} → ${seen.out.kind} · ${seenText.replace(/\s+/g, ' ').slice(0, 140)}…`);
 if (seen.out.kind !== 'answer' || !/david/i.test(seenText)) fail(`the organization does not list david's invitation: ${JSON.stringify(seen.out).slice(0, 300)}`);
-// the invitee's own view through Claude ("what invitations do I have") is not a capability yet — see the backlog.
-void david;
+// THE INVITEE'S OWN VIEW (spec 341 §5.1b's other half): the resume at her Home ran under her session, so the invitation's
+// effect — the Join message from her agent to david's — could be sent; david, through Claude, reads his own inbox.
+const told = (result as { told?: { ok?: boolean; error?: string } }).told;
+console.log(`  the invitee told → ${told?.ok ? 'yes' : `no: ${told?.error ?? 'no effect reported'}`}`);
+const mine = await david.call('ask', { message: 'what invitations do I have', plan: { steps: [{ toolId: 'person.invitations.list', args: {} }] } });
+const mineText = String(mine.out.text ?? '');
+console.log(`david, through Claude → ${mine.out.kind} · ${mineText.replace(/\s+/g, ' ').slice(0, 160)}…`);
+if (mine.out.kind !== 'answer') fail(`david's own read did not answer: ${JSON.stringify(mine.out).slice(0, 300)}`);
+if (told?.ok && !/missio/i.test(mineText)) fail('the invitee was told, but his own read does not name the organization');
+if (!told?.ok) console.log('  (the message could not be sent — the effect is reported on the act, not hidden; the invitee\'s read is honest about it)');
 
 // ── 2. her own records ──
 const hh = await alice.call('ask', { message: 'who is in my household', plan: { steps: [{ toolId: 'vault.records.query', args: { question: 'who is in my household' } }] } });

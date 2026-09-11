@@ -146,6 +146,7 @@ import { realtimeKitConfigured, verifyRealtimeKitWebhook, readRealtimeKitWebhook
 import { sendSubjectAskOverWire, subjectAnswerMessage, subjectEnvelopeOf, handoffMessage, routedRunRefFor } from './subject-hop.js';
 import { EXTERNAL_AGENT_TOOL, externalAgentInvoker } from './external-agent.js';
 import { DISCOVERY_INSPECT_CAPABILITY, discoveryInspectInvoker } from './enterprise-tools.js';
+import { INVITATIONS_RECEIVED_CAPABILITY, invitationsReceivedInvoker } from './invitations-received.js';
 import { subjectAddress, nameRecordsReader, servesUnpublishedNames, type SubjectAddressEnv } from './subject-address.js';
 import { MEMBER_CONSULT_TOOL, memberConsultInvoker } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL, engagementProbeInvoker, type ProbeDeps } from './engagement-probe.js';
@@ -3099,6 +3100,8 @@ app.post('/harness/ask', async (c) => {
         };
         // Spec 397 — the card through the name's records, at her agent (387's inspect): public facts, pinned when pinned.
         if (toolId === DISCOVERY_INSPECT_CAPABILITY) return discoveryInspectInvoker({ nameRecords: nameRecordsReader(c.env) ?? (async () => null), fetch: reachFetch })(toolId, args, ctx);
+        // Spec 397 — the invitations that reached the person, from their own inbox record.
+        if (toolId === INVITATIONS_RECEIVED_CAPABILITY) return invitationsReceivedInvoker({ ...(askDeps.readSubjectRecord ? { readSubjectRecord: askDeps.readSubjectRecord } : {}), ...(askDeps.nameOf ? { nameOf: askDeps.nameOf } : {}) }, String(who.sa).toLowerCase())(toolId, args, ctx);
         if (toolId === EXTERNAL_AGENT_TOOL.id) return externalAgentInvoker({ timeoutMs: 20_000, fetch: reachFetch,
           // Spec 379 W2 — a registry NAME resolves through its own on-chain records to a card, pinned by `atl:cardDigest`.
           nameRecords: nameRecordsReader(c.env) ?? (async () => null) })(toolId, args, ctx);

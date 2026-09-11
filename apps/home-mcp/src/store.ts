@@ -52,6 +52,7 @@ export class HomeMcpStoreDO {
       case 'token.put': { const t = row as TokenRow; this.sql.exec(`INSERT OR REPLACE INTO tokens (token_hash, row, exp) VALUES (?, ?, ?)`, key, JSON.stringify(t), t.exp); this.sql.exec(`DELETE FROM tokens WHERE exp < ?`, now); return json({ ok: true }); }
       case 'token.get': { const r = [...this.sql.exec(`SELECT row, exp FROM tokens WHERE token_hash = ?`, key)][0]; if (!r || Number(r.exp) < now) return json({ ok: true, row: null }); return json({ ok: true, row: JSON.parse(String(r.row)) }); }
       case 'token.delete': this.sql.exec(`DELETE FROM tokens WHERE token_hash = ?`, key); return json({ ok: true });
+      case 'token.clientsFor': { const r = row as { sub: string }; const ids = new Set<string>(); for (const x of [...this.sql.exec(`SELECT row, exp FROM tokens`)]) { if (Number(x.exp) < now) continue; const t = JSON.parse(String(x.row)) as TokenRow; if (t.sub === r.sub) ids.add(t.client_id); } return json({ ok: true, clients: [...ids] }); }
       case 'token.deleteFor': { const r = row as { sub: string; client_id?: string }; for (const x of [...this.sql.exec(`SELECT token_hash, row FROM tokens`)]) { const t = JSON.parse(String(x.row)) as TokenRow; if (t.sub === r.sub && (!r.client_id || t.client_id === r.client_id)) this.sql.exec(`DELETE FROM tokens WHERE token_hash = ?`, x.token_hash); } return json({ ok: true }); }
       case 'person.put': this.sql.exec(`INSERT OR REPLACE INTO persons (sub, row) VALUES (?, ?)`, key, JSON.stringify(row)); return json({ ok: true });
       case 'person.get': { const r = [...this.sql.exec(`SELECT row FROM persons WHERE sub = ?`, key)][0]; return json({ ok: true, row: r ? JSON.parse(String(r.row)) : null }); }
@@ -95,6 +96,8 @@ export class Store {
   async getToken(hash: string): Promise<TokenRow | null> { return (await this.call<{ row: TokenRow | null }>('token.get', hash)).row; }
   deleteToken(hash: string) { return this.call('token.delete', hash); }
   deleteTokensFor(sub: string, client_id?: string) { return this.call('token.deleteFor', undefined, { sub, client_id }); }
+  /** The clients that still hold a live token for this person — the ones that count against the cap. */
+  async liveClientsFor(sub: string): Promise<string[]> { return (await this.call<{ clients: string[] }>('token.clientsFor', undefined, { sub })).clients; }
   putPerson(r: PersonRow) { return this.call('person.put', r.sub, r); }
   async getPerson(sub: string): Promise<PersonRow | null> { return (await this.call<{ row: PersonRow | null }>('person.get', sub)).row; }
   deletePerson(sub: string) { return this.call('person.delete', sub); }
