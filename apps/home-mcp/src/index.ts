@@ -31,6 +31,9 @@ export interface Env {
   DEMO_CONNECT_ENABLED?: string;
   /** Where a person's agent is served, by its registry label (`https://{label}.faithnet.ai`), for its public card. */
   AGENT_HOST_PATTERN?: string;
+  /** The ask-as-me DELEGATE key (spec 397): holds no authority of its own — every wire naming it is a person's
+   *  revocable grant. A raw Worker secret today; audit home-mcp-raw-delegate-key (accepted-risk) schedules the
+   *  KMS-backed signer + the client's delegate re-registration at the Home. */
   HOME_MCP_PRIVATE_KEY?: string;
   TOKEN_SECRET?: string;
 }
