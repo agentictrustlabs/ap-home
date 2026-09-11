@@ -37,7 +37,8 @@ import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
 import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
 import { PLAYBOOK_ANSWER_TOOL, playbookAnswerAvailable, playbookAnswerInvoker, type PlaybookMaterial } from './playbook-answer.js';
-import { remembered } from './run-memo.js';
+import { memoryRecordFor } from './playbook-memory.js';
+import { remembered, forget } from './run-memo.js';
 import { DISCOVERY_FIND_TOOL, ENGAGEMENT_INVOKE_TOOL, DISCOVERY_INSPECT_TOOL, DISCOVERY_FIND_CAPABILITY, ENGAGEMENT_INVOKE_CAPABILITY, discoveryFindInvoker } from './enterprise-tools.js';
 import { INVITATIONS_RECEIVED_TOOL } from './invitations-received.js';
 import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
@@ -3987,6 +3988,23 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   const rememberedRecord = deps.readSubjectRecord
     ? (subject: string, recordType: string) => remembered(`record:${subject.toLowerCase()}:${recordType}`, () => deps.readSubjectRecord!(subject, recordType))
     : undefined;
+  // STARTED TOGETHER, AWAITED WHERE NEEDED. The playbook, the standing derivation and the catalog are three
+  // independent reads of the addressee's vault, and each cold read is seconds; run one after another they
+  // were most of a cold ask (playbook 4 s, then standing 4 s, then the model — seen live, 2026-09-11).
+  // Standing and the catalog are awaited further down, exactly where they were.
+  const chainIdForWire = Number(env.CHAIN_ID); const dmForWire = env.DELEGATION_MANAGER as Address | undefined;
+  const wireRefOf = (wire: unknown): Hex | null => { try { return dmForWire ? hashDelegation(wireToDelegation(wire as never), chainIdForWire, dmForWire) : null; } catch { return null; } };
+  // Remembered per (principal, subject) for a minute: 3.2 s of every ask went to re-deriving a relation
+  // that does not change between two hands. Standing is honesty, not authority (spec 353 §4) — it reaches
+  // no verifier — so a minute-old answer misreports nothing anybody could act on.
+  const standingPrincipal = input.person; const standingSubject = input.addressee;
+  const standingOnce: Promise<ExecutionBindingV1['standing'] | undefined> | null = standingPrincipal && standingSubject && deps.readSubjectRecord
+    ? remembered(`standing:${standingPrincipal.toLowerCase()}:${standingSubject.toLowerCase()}`, () => deriveStanding({ readSubjectRecord: deps.readSubjectRecord, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}), wireRefOf },
+        { principal: standingPrincipal, subject: standingSubject })
+      .then((st) => ({ relation: st.relation, subject: st.subject, principal: standingPrincipal.toLowerCase(), because: st.because, ...(st.wireRef ? { wireRef: st.wireRef } : {}) }))
+      .catch(() => undefined))
+    : null;
+  const catalogOnce = remembered(`catalog:${String(input.addressee ?? '').toLowerCase()}`, () => catalogBindingFor(deps, input.addressee ? String(input.addressee) : undefined));
   const playbook = await loadPlaybook(rememberedRecord, String(input.addressee ?? ''), console.log).catch(() => null);
   mark('playbook');
   const first = Array.isArray(input.presented) ? input.presented[0] ?? null : input.presented;
@@ -4206,7 +4224,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   // only then (fail closed), described by the playbook's contract when it has one, and answered by the
   // catalog itself: public metadata with a named source, never a record of ours.
   mark('planner-built');
-  const catalog = await remembered(`catalog:${String(input.addressee ?? '').toLowerCase()}`, () => catalogBindingFor(deps, input.addressee ? String(input.addressee) : undefined));
+  const catalog = await catalogOnce;
   mark('catalog');
   const catalogTools = catalog ? CATALOG_TOOLS.map((t) => mergeContractTool(t, playbook?.tools?.[t.id])) : [];
   // A QUESTION OF JUDGEMENT over material the message carried (`playbook.answer`). Listed ONLY when the
@@ -4256,8 +4274,22 @@ step is then handed to that agent under authority the person grants; leave it ou
     UNSUPPORTED_TOOL,
   ];
   const harnessLocal = harnessInvoker(deps, env, presentedList, input.mcpInvoke, input.person, input.session, input.surface, input.addressee, playbook);
+  // THE ADDRESSEE'S OWN MEMORY of a skill family, in its own vault — read for advice (memoised a minute, like
+  // its playbook), written by a review (and the memo dropped, so the next hand's advice sees this round).
+  const memoryOwner = input.addressee ? String(input.addressee).toLowerCase() : null;
+  const recall = (recordType: string) => remembered(`memory:${memoryOwner}:${recordType}`, () => deps.readSubjectRecord!(memoryOwner!, recordType).catch(() => null));
+  // STARTED NOW, READ LATER. The vault read takes most of a second and nothing between here and the answering
+  // step depends on it, so it runs beside the gates instead of after them — the clock at a card table is the
+  // asker's, and a review reads fresh anyway.
+  const prefetched = material && !/\.review$/i.test(material.skill) && memoryOwner && deps.readSubjectRecord ? { recordType: memoryRecordFor(material.skill), value: recall(memoryRecordFor(material.skill)) } : null;
+  const memory = memoryOwner && deps.readSubjectRecord && deps.writeSubjectRecord
+    ? {
+        read: (recordType: string, fresh?: boolean) => fresh ? deps.readSubjectRecord!(memoryOwner, recordType).catch(() => null) : prefetched?.recordType === recordType ? prefetched.value : recall(recordType),
+        write: async (recordType: string, record: unknown) => { const out = await deps.writeSubjectRecord!(memoryOwner, recordType, record); await forget(`memory:${memoryOwner}:${recordType}`); return out; },
+      }
+    : undefined;
   const answerInvoke = playbookAnswer.length
-    ? playbookAnswerInvoker({ call: structuredCallFor(env as never, input.provider), instructions: playbook?.instructions ?? null, material, advertised, agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null })
+    ? playbookAnswerInvoker({ call: structuredCallFor(env as never, input.provider), instructions: playbook?.instructions ?? null, material, advertised, agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null, ...(memory ? { memory } : {}) })
     : null;
   const localInvoke: ToolInvoker = async (toolId, args, ctx) => {
     mark(`invoke:${toolId}:start`);
@@ -4276,18 +4308,6 @@ step is then handed to that agent under authority the person grants; leave it ou
   // whom, and — for a steward — the stewardship wire the receiver verified, by digest. A routed act's
   // receipt at the organization then says "for Missio Nexus, under steward wire 0x…" without anyone
   // trusting the asker's word for it. Evidence only: the mandate chain is what the verifier judged.
-  const chainIdForWire = Number(env.CHAIN_ID); const dmForWire = env.DELEGATION_MANAGER as Address | undefined;
-  const wireRefOf = (wire: unknown): Hex | null => { try { return dmForWire ? hashDelegation(wireToDelegation(wire as never), chainIdForWire, dmForWire) : null; } catch { return null; } };
-  // Remembered per (principal, subject) for a minute: 3.2 s of every ask went to re-deriving a relation
-  // that does not change between two hands. Standing is honesty, not authority (spec 353 §4) — it reaches
-  // no verifier — so a minute-old answer misreports nothing anybody could act on.
-  const standingPrincipal = input.person; const standingSubject = input.addressee;
-  const standingOnce: Promise<ExecutionBindingV1['standing'] | undefined> | null = standingPrincipal && standingSubject && deps.readSubjectRecord
-    ? remembered(`standing:${standingPrincipal.toLowerCase()}:${standingSubject.toLowerCase()}`, () => deriveStanding({ readSubjectRecord: deps.readSubjectRecord, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}), wireRefOf },
-        { principal: standingPrincipal, subject: standingSubject })
-      .then((st) => ({ relation: st.relation, subject: st.subject, principal: standingPrincipal.toLowerCase(), because: st.because, ...(st.wireRef ? { wireRef: st.wireRef } : {}) }))
-      .catch(() => undefined))
-    : null;
   let standingLink: ExecutionBindingV1['standing'] | undefined;
   if (standingOnce) standingLink = await standingOnce;
   mark('standing');

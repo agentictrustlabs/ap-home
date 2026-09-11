@@ -373,7 +373,7 @@ const RESOLUTION_GRANTS_RESOURCE = 'resolution.grants';
 // what it resolved for them into their own vault. Memory, never a general write path.
 // Spec 385 — the scoped confirmation memory is the same kind of thing: the person's agent writing what THEY
 // chose into their own vault, from the resume that supplied the choice; and clearing it when they say so.
-const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run.provenance:', 'run.artifact:', 'confirmation.preferences', 'standing.instructions'] as const;
+const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run.provenance:', 'run.artifact:', 'confirmation.preferences', 'standing.instructions', 'playbook.memory:'] as const;
 
 const CAPABILITY_RECORDS = new Set(['impact-profile', 'capabilities.data', 'skills.data', 'home.manifest', 'control-events.data', 'archetype.assignment']);
 const CONTROL_EVENTS_RESOURCE = 'control-events.data';

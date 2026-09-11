@@ -47,14 +47,63 @@ describe('playbook.answer — a question of judgement, answered from the playboo
     expect(await none(PLAYBOOK_ANSWER_TOOL.id, { skill: 'poker.advise' }, ctx)).toEqual({ refused: 'the message carried no material to answer from' });
   });
 
-  it('acknowledges a review in one line and never advises on a finished round', async () => {
-    const { call, seen } = fakeCall({ say: 'You held wilds too long twice this round.' });
-    const invoke = playbookAnswerInvoker({ call, material: { ...material, skill: 'poker.review' }, advertised: ['poker.review'] });
+  it('REMEMBERS a review without a model: the round\'s counts fold into the agent\'s own vault', async () => {
+    const { call, seen } = fakeCall({ say: 'never' });
+    const vault = new Map<string, unknown>();
+    const memory = { read: async (t: string) => vault.get(t) ?? null, write: async (t: string, r: unknown) => { vault.set(t, r); return { ok: true }; } };
+    const round = (vpip: number) => ({ ...material, skill: 'poker.review', input: { seat: 0, view: {}, observation: { subjects: { 'agent:sharkbot.svc': { label: 'Sharkbot', counters: { hands: 1, vpip, pfr: vpip, foldToBetOpps: 1, foldToBet: 0 } }, me: { you: true, counters: { hands: 1, vpip: 1 } } } } } });
+    const invoke = playbookAnswerInvoker({ call, material: round(1), advertised: ['poker.review'], agentName: 'alice.me', memory });
     const out = (await invoke(PLAYBOOK_ANSWER_TOOL.id, { skill: 'poker.review' }, ctx)) as Record<string, unknown>;
-    expect(out.say).toContain('wilds');
-    expect(out.action).toBeUndefined();
-    expect(seen[0]!.tool).toBe('reviewed');
-    expect(seen[0]!.system).toContain('Do not advise');
+    expect(seen).toHaveLength(0); // no model call — arithmetic is not judgement
+    expect(out.kept).toBe(true);
+    expect(out.record).toBe('playbook.memory:poker');
+    expect(out.say).toContain('Remembered round 1');
+    expect(JSON.parse(String(out.answer))).toEqual({ say: out.say });
+    // A second round ADDS: counts accumulate, rounds count up, the label and "you" survive.
+    await playbookAnswerInvoker({ call, material: round(0), advertised: ['poker.review'], memory })(PLAYBOOK_ANSWER_TOOL.id, { skill: 'poker.review' }, ctx);
+    const mem = vault.get('playbook.memory:poker') as { rounds: number; subjects: Record<string, { rounds: number; label?: string; you?: boolean; counters: Record<string, number> }> };
+    expect(mem.rounds).toBe(2);
+    expect(mem.subjects['agent:sharkbot.svc']).toMatchObject({ rounds: 2, label: 'Sharkbot', counters: { hands: 2, vpip: 1, pfr: 1, foldToBetOpps: 2, foldToBet: 0 } });
+    expect(mem.subjects.me).toMatchObject({ you: true, counters: { hands: 2, vpip: 2 } });
+  });
+
+  it('a review with nothing to count, or no memory to keep it in, is acknowledged and costs nothing', async () => {
+    const { call, seen } = fakeCall({ say: 'never' });
+    const bare = playbookAnswerInvoker({ call, material: { ...material, skill: 'poker.review' }, advertised: ['poker.review'] });
+    const out = (await bare(PLAYBOOK_ANSWER_TOOL.id, { skill: 'poker.review' }, ctx)) as Record<string, unknown>;
+    expect(out.say).toContain('nothing to count');
+    const noVault = playbookAnswerInvoker({ call, material: { ...material, skill: 'poker.review', input: { observation: { subjects: { x: { counters: { hands: 1 } } } } } }, advertised: ['poker.review'] });
+    expect(((await noVault(PLAYBOOK_ANSWER_TOOL.id, { skill: 'poker.review' }, ctx)) as Record<string, unknown>).kept).toBe(false);
+    // A vault that refuses (a grant signed before the scope existed) is reported, never thrown.
+    const refusing = { read: async () => null, write: async () => ({ ok: false, error: 'record_scope_denied' }) };
+    const denied = playbookAnswerInvoker({ call, material: { ...material, skill: 'poker.review', input: { observation: { subjects: { x: { counters: { hands: 1 } } } } } }, advertised: ['poker.review'], memory: refusing });
+    const d = (await denied(PLAYBOOK_ANSWER_TOOL.id, { skill: 'poker.review' }, ctx)) as Record<string, unknown>;
+    expect(d.kept).toBe(false);
+    expect(d.say).toContain('record_scope_denied');
+    expect(seen).toHaveLength(0);
+  });
+
+  it('advice is shown what the agent remembers about the players AT THIS TABLE, with rates, and nobody else', async () => {
+    const { call, seen } = fakeCall({ reasoning: 'r', say: 'Raise.', because: 'He folds to bets.' });
+    const memory = {
+      read: async () => ({ type: 'ap.playbook-memory.v1', family: 'poker', rounds: 12, updatedAt: 'x', subjects: {
+        'agent:sharkbot.svc': { label: 'Sharkbot', rounds: 12, seen: '2026-09-11T00:00:00Z', counters: { hands: 12, vpip: 3, pfr: 3, foldToBetOpps: 5, foldToBet: 4 } },
+        'agent:elsewhere.svc': { label: 'Elsewhere', rounds: 12, seen: '2026-09-11T00:00:00Z', counters: { hands: 12, vpip: 12 } },
+        me: { you: true, rounds: 12, seen: '2026-09-11T00:00:00Z', counters: { hands: 12, vpip: 9 } },
+      } }),
+      write: async () => ({ ok: true }),
+    };
+    const atTable = { ...material, input: { ...(material.input as object), view: { seats: [{ seat: 0, playerId: 'me' }, { seat: 1, playerId: 'agent:sharkbot.svc' }] } } };
+    const invoke = playbookAnswerInvoker({ call, material: atTable, advertised: ['poker.advise'], memory });
+    const out = (await invoke(PLAYBOOK_ANSWER_TOOL.id, { skill: 'poker.advise' }, ctx)) as Record<string, unknown>;
+    expect(out.remembered).toEqual(['me:12', 'Sharkbot:12']);
+    const shown = seen[0]!.user;
+    expect(shown).toContain('Remembered');
+    expect(shown).toContain('"vpip":"25% of 12"');
+    expect(shown).toContain('"foldToBet":"80% of 5"');
+    expect(shown).not.toContain('Elsewhere');
+    // The raw observation never rides into an advice prompt; it is the review's, and it is already counted.
+    expect(shown).not.toContain('"observation"');
   });
 
   it('is a read that reads nothing: no capability, so no mandate is ever asked for', () => {

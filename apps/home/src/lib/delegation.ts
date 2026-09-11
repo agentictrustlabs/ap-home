@@ -381,6 +381,10 @@ export const CONFIRMATION_PREFERENCES_RESOURCE_SCOPE = 'vault:confirmation.prefe
 /** Spec 394 — the person's own STANDING INSTRUCTIONS: a declared default per (room, capability, argument). Evidence the
  *  resolver cites, never a grant. Additive: a grant signed before this scope existed denies the record until re-issued. */
 export const STANDING_INSTRUCTIONS_RESOURCE_SCOPE = 'vault:standing.instructions' as const;
+/** What the playbook REMEMBERS about the subjects of one skill family (`playbook.memory:<family>`): counts a
+ *  review folds in, advice reads back. Behaviour, never authority. Additive: a grant signed before this scope
+ *  existed denies the record until re-issued, and the review says so in its reply. */
+export const PLAYBOOK_MEMORY_RESOURCE_SCOPE = 'vault:playbook.memory:*' as const;
 /** Content-fabric records (spec 335 / ADR-0055): the person's Content Artifacts / releases, keyed
  *  `vault:content.<type>.<id>` — one namespace, read+write via the interactions grant. */
 export const CONTENT_RECORDS_RESOURCE_SCOPE = 'vault:content.*' as const;

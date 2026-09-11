@@ -21,6 +21,7 @@
 // agent answers exactly the questions it has said it answers (fail closed, ADR-0013).
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import type { StructuredCall } from '@agenticprimitives/context';
+import { foldObservation, familyOf, memoryRecordFor, observationOf, rememberedFor } from './playbook-memory.js';
 
 export const PLAYBOOK_ANSWER_CAPABILITY = 'playbook.answer';
 
@@ -70,6 +71,16 @@ export interface PlaybookAnswerDeps {
   /** Skills the addressee's card advertises. The tool answers ONLY those. */
   advertised: string[];
   maxTokens?: number;
+  /**
+   * THE AGENT'S OWN MEMORY for a skill family (`playbook.memory:<family>`), in its own vault. A review
+   * folds the round's observation in; advice reads the subjects at the table back. Absent ⇒ a review
+   * is acknowledged and nothing is kept, and advice knows only what the message carried.
+   */
+  memory?: {
+    /** `fresh` reads past any memo: a review folds into what is actually there, never into a minute-old copy. */
+    read: (recordType: string, fresh?: boolean) => Promise<unknown>;
+    write: (recordType: string, record: unknown) => Promise<{ ok: boolean; error?: string }>;
+  };
 }
 
 /** Whether the tool should be LISTED for this turn: a named, advertised skill, and a model to answer with. */
@@ -93,12 +104,6 @@ const ANSWER_SYSTEM =
   + 'shape asked for, or omitted when you would not commit to one. Never claim to know what you cannot '
   + 'see. Never perform anything — this is advice, and the person plays the move or does not.';
 
-/** A review skill (`*.review`) is told how something went; it is acknowledged in one line, never advised on. */
-const REVIEW_SYSTEM =
-  'You are this agent, being told how a finished round went for the person whose agent you are, so that '
-  + 'you can remember it. Reply in ONE sentence: what is worth remembering from it, or that nothing is. '
-  + 'Do not advise — the round is over.';
-
 export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
   return async (toolId, args) => {
     if (toolId !== PLAYBOOK_ANSWER_CAPABILITY) return { refused: `${toolId} is not playbook.answer` };
@@ -108,11 +113,22 @@ export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
     if (!deps.advertised.map((s) => s.toLowerCase()).includes(skill.toLowerCase())) {
       return { refused: `${deps.agentName ?? 'this agent'} does not advertise ${skill}` };
     }
+    // A REVIEW IS REMEMBERED, NOT ANSWERED. The round is over; there is nothing to advise and nobody
+    // reading a sentence about it. What the asker sent as an observation is folded into the agent's own
+    // memory of this skill family — counts, in its vault — and that costs no model call at all. It used
+    // to spend one on "what is worth remembering" and keep nothing (2026-09-11).
+    if (/\.review$/i.test(skill)) return reviewIntoMemory(deps, skill, m.input);
     if (!deps.call) return { refused: 'no model is available to answer with' };
-    const review = /\.review$/i.test(skill);
     const question = String(args.question ?? m.question ?? '').trim();
     const street = typeof (m.input as { read?: { street?: unknown } } | undefined)?.read?.street === 'string' ? (m.input as { read: { street: string } }).read.street : null;
-    const system = `${review ? REVIEW_SYSTEM : ANSWER_SYSTEM}\n\n---\n\n${relevantInstructions(deps.instructions, skill, street) || '(this agent has no further instructions)'}`;
+    const system = `${ANSWER_SYSTEM}\n\n---\n\n${relevantInstructions(deps.instructions, skill, street) || '(this agent has no further instructions)'}`;
+    // WHAT THIS AGENT REMEMBERS about the players in the material — its own counts from the rounds the
+    // asker reported, with the rates worked out. Only the subjects present here; a memory of somebody at
+    // another table is not this question.
+    const memoryT0 = Date.now();
+    const memory = deps.memory ? await deps.memory.read(memoryRecordFor(skill)).catch(() => null) : null;
+    const remembered = rememberedFor(memory, m.input);
+    const memoryMs = Date.now() - memoryT0;
     // THE ASKER'S OWN SHAPE, when it sent one. A card room names its game's exact action union; an answer
     // in any other shape is a move it can only refuse to draw a button for.
     const shape = m.answer && typeof m.answer === 'object'
@@ -122,22 +138,21 @@ export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
     // and sends its own rules coach's line; both are worth more to a model than the table they came
     // from, and buried in one JSON blob they were read as just more fields.
     const inp = (m.input && typeof m.input === 'object' ? m.input : {}) as Record<string, unknown>;
-    const { read, baseline, ...rest } = inp;
+    const { read, baseline, observation: _observation, ...rest } = inp;
     const user = [
       `Skill: ${skill}`,
       question ? `Question: ${question}` : 'Question: (nothing specific was asked — say what to do, and why)',
       ...(shape ? [`Answer shape, field by field:\n${shape}`] : []),
       ...(read != null ? [`Read — the facts of the spot, computed (use these numbers):\n${JSON.stringify(read)}`] : []),
       ...(baseline != null ? [`House baseline — a rules coach's line, as an observation:\n${JSON.stringify(baseline)}`] : []),
+      ...(remembered.length ? [`Remembered — your own counts on the players here, from rounds reported to you (rates are computed; small samples mean little):\n${JSON.stringify(remembered)}`] : []),
       `Material: ${JSON.stringify(rest)}`,
     ].join('\n');
     const started = Date.now();
     const out = await deps.call({
       system,
       messages: [{ role: 'user', content: user }],
-      tool: review
-        ? { name: 'reviewed', description: 'What is worth remembering.', input_schema: { type: 'object', properties: { say: { type: 'string' } }, required: ['say'] } }
-        : {
+      tool: {
             name: 'advice',
             description: 'One sentence to say, the reason, and optionally the move.',
             input_schema: {
@@ -160,12 +175,36 @@ export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
     const because = typeof out.because === 'string' ? out.because.trim() : undefined;
     const action = out.action && typeof out.action === 'object' ? out.action : undefined;
     // How long the model took, on the record: latency is a fact about the answer worth keeping beside it.
-    console.log(`[playbook.answer] ${skill} model ${Date.now() - started}ms · prompt ${system.length + user.length} chars · answer ${say.length + (because?.length ?? 0)} chars`);
-    const result = { skill, say, ...(because ? { because } : {}), ...(action ? { action } : {}), source: deps.agentName ?? 'this agent', modelMs: Date.now() - started, promptChars: system.length + user.length };
+    console.log(`[playbook.answer] ${skill} model ${Date.now() - started}ms · memory ${memoryMs}ms (${remembered.length} remembered) · prompt ${system.length + user.length} chars · answer ${say.length + (because?.length ?? 0)} chars`);
+    const result = { skill, say, ...(because ? { because } : {}), ...(action ? { action } : {}), source: deps.agentName ?? 'this agent', modelMs: Date.now() - started, memoryMs, promptChars: system.length + user.length, ...(remembered.length ? { remembered: remembered.map((r) => `${r.label ?? r.id}:${r.rounds}`) } : {}) };
     // `answer` is the rendered reply — the JSON a card room decodes, verbatim. The fields beside it are
     // the same answer as an observation, for the trace.
     return { ...result, answer: JSON.stringify({ say, ...(because ? { because } : {}), ...(action ? { action } : {}) }) };
   };
+}
+
+/**
+ * A FINISHED ROUND, INTO MEMORY. No model: the observation is counts, and adding counts is arithmetic.
+ * The reply is one line for the record; the asker does not wait for it and nobody reads it aloud.
+ */
+async function reviewIntoMemory(deps: PlaybookAnswerDeps, skill: string, input: unknown): Promise<Record<string, unknown>> {
+  const family = familyOf(skill);
+  const source = deps.agentName ?? 'this agent';
+  const obs = observationOf(input);
+  const done = (say: string, extra: Record<string, unknown> = {}) => ({ skill, say, source, ...extra, answer: JSON.stringify({ say }) });
+  if (!obs) return done('Noted; the round carried nothing to count.');
+  if (!deps.memory) return done('Noted; this agent keeps no memory here.', { kept: false });
+  const recordType = memoryRecordFor(skill);
+  const prev = await deps.memory.read(recordType, true).catch(() => null);
+  const next = foldObservation(prev, family, obs);
+  const wrote = await deps.memory.write(recordType, next).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+  if (!wrote.ok) {
+    console.warn(`[playbook.answer] ${skill} memory not kept: ${wrote.error ?? 'refused'}`);
+    return done(`Noted; the memory could not be kept (${wrote.error ?? 'refused'}).`, { kept: false, record: recordType });
+  }
+  const n = Object.keys(obs.subjects).length;
+  console.log(`[playbook.answer] ${skill} remembered round ${next.rounds} · ${n} subjects · ${Object.keys(next.subjects).length} kept`);
+  return done(`Remembered round ${next.rounds}: ${n} player${n === 1 ? '' : 's'} counted.`, { kept: true, record: recordType, rounds: next.rounds, subjects: n });
 }
 
 /**
