@@ -103,3 +103,39 @@ describe('the craft that applies, not the whole doctrine', () => {
     expect(relevantInstructions('', 'poker.advise')).toBe('');
   });
 });
+
+describe('the street selects the stage', () => {
+  const doctrine = [
+    'You are a **Person Steward**.',
+    '',
+    '## How each act is done',
+    '',
+    '### holdem-table-read — Reads a Texas Hold\'em hand from the person\'s own seat',
+    'Price first.',
+    '### holdem-preflop — Before the flop at Texas Hold\'em',
+    'The branch first.',
+    '### holdem-flop — The flop at Texas Hold\'em',
+    'Whose board is it.',
+    '### holdem-river — The river at Texas Hold\'em',
+    'Nothing left to come.',
+  ].join('\n');
+
+  it('keeps the shared craft and only the current street\'s stage', async () => {
+    const { relevantInstructions } = await import('../src/playbook-answer.js');
+    const flop = relevantInstructions(doctrine, 'poker.advise', 'flop');
+    expect(flop).toContain('Price first');
+    expect(flop).toContain('Whose board is it');
+    expect(flop).not.toContain('The branch first');
+    expect(flop).not.toContain('Nothing left to come');
+    const river = relevantInstructions(doctrine, 'poker.advise', 'river');
+    expect(river).toContain('Nothing left to come');
+    expect(river).not.toContain('Whose board is it');
+  });
+
+  it('keeps every stage when no street is known — nothing to select on', async () => {
+    const { relevantInstructions } = await import('../src/playbook-answer.js');
+    const all = relevantInstructions(doctrine, 'poker.advise', null);
+    expect(all).toContain('The branch first');
+    expect(all).toContain('Nothing left to come');
+  });
+});

@@ -111,7 +111,8 @@ export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
     if (!deps.call) return { refused: 'no model is available to answer with' };
     const review = /\.review$/i.test(skill);
     const question = String(args.question ?? m.question ?? '').trim();
-    const system = `${review ? REVIEW_SYSTEM : ANSWER_SYSTEM}\n\n---\n\n${relevantInstructions(deps.instructions, skill) || '(this agent has no further instructions)'}`;
+    const street = typeof (m.input as { read?: { street?: unknown } } | undefined)?.read?.street === 'string' ? (m.input as { read: { street: string } }).read.street : null;
+    const system = `${review ? REVIEW_SYSTEM : ANSWER_SYSTEM}\n\n---\n\n${relevantInstructions(deps.instructions, skill, street) || '(this agent has no further instructions)'}`;
     // THE ASKER'S OWN SHAPE, when it sent one. A card room names its game's exact action union; an answer
     // in any other shape is a move it can only refuse to draw a button for.
     const shape = m.answer && typeof m.answer === 'object'
@@ -176,14 +177,26 @@ export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
  * kept whole; of the act sections, only those about the skill's game are kept. A skill outside any
  * game keeps everything, because there is no basis to cut.
  */
-export function relevantInstructions(instructions: string | null | undefined, skill: string): string {
+export function relevantInstructions(instructions: string | null | undefined, skill: string, street?: string | null): string {
   const text = (instructions ?? '').trim();
   if (!text) return '';
   const game = skill.split('.')[0]?.toLowerCase() ?? '';
   const words = game === 'poker' ? /hold.?em|poker/i : game === 'canasta' ? /canasta/i : null;
   if (!words) return text;
   const [opening, ...sections] = text.split(/\n(?=### )/);
-  const kept = sections.filter((sec) => words.test(sec.split('\n')[0] ?? '') || words.test(sec.slice(0, 400)));
+  // THE STREET SELECTS THE STAGE. A skill named for a street — holdem-flop, holdem-river — is that
+  // street's craft and nobody else's; shown on the turn it is at best noise and at worst a plan for a
+  // card that has not come. Sections naming no street (the table read, the person's style) always
+  // apply. This is the selective context PokerSkill measured the gain from: the applicable procedure,
+  // not the whole essay.
+  const STREETS = ['preflop', 'flop', 'turn', 'river'];
+  const streetOf = (heading: string): string | null => { const m = /hold.?em-(preflop|flop|turn|river)\b/i.exec(heading); return m ? m[1]!.toLowerCase() : null; };
+  const kept = sections.filter((sec) => {
+    const heading = sec.split('\n')[0] ?? '';
+    if (!(words.test(heading) || words.test(sec.slice(0, 400)))) return false;
+    const st = streetOf(heading);
+    return !st || !street || !STREETS.includes(street) || st === street;
+  });
   // The compiler's "How each act is done" heading precedes the sections; keep it only with sections.
   const head = (opening ?? '').replace(/\n## How each act is done[\s\S]*$/, '').trim();
   return kept.length ? `${head}\n\n## How this is done\n\n${kept.join('\n')}` : head;
