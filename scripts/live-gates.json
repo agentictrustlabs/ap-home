@@ -1,5 +1,5 @@
 {
-  "$comment": "Spec 392 — THE LIVE GATES LEDGER. Every wave's live verify script, with the authority twin it carries, run nightly against faithnet by scripts/live-gates.mts. No secrets: the demo personas sign in openly and sign through the Home's persona-sign. `required` gates fail the run; the rest report. `paced` gates make model calls on a metered plan and are spaced out.",
+  "$comment": "Spec 392 \u2014 THE LIVE GATES LEDGER. Every wave's live verify script, with the authority twin it carries, run nightly against faithnet by scripts/live-gates.mts. No secrets: the demo personas sign in openly and sign through the Home's persona-sign. `required` gates fail the run; the rest report. `paced` gates make model calls on a metered plan and are spaced out.",
   "home": "https://www.faithnet.me",
   "gates": [
     {
@@ -7,7 +7,7 @@
       "script": "scripts/verify-route.mts",
       "spec": "388/390/389/391",
       "proves": "every model call names its provider and the numbers it was routed by; the run reads as a span tree; the reply names its provenance; a large result leaves the record for the vault",
-      "twin": "a route is decided before the call and recorded — a failed provider is a failure, never a re-send to another",
+      "twin": "a route is decided before the call and recorded \u2014 a failed provider is a failure, never a re-send to another",
       "required": true,
       "paced": true,
       "timeoutSec": 240
@@ -47,7 +47,7 @@
       "script": "scripts/verify-handoff.mts",
       "spec": "376",
       "proves": "a step handed to a specialist runs under a child mandate cut from the parent's; the child's run is cited on the receipt",
-      "twin": "the same child presented for a second step is denied — single use",
+      "twin": "the same child presented for a second step is denied \u2014 single use",
       "required": true,
       "paced": true,
       "timeoutSec": 300
@@ -75,8 +75,8 @@
     {
       "id": "verify-ap-gateway",
       "script": "scripts/verify-ap-gateway.mts",
-      "spec": "387 W1–W2",
-      "proves": "discover → inspect → invoke through the gateway; the ministry's agent answers from its own catalog",
+      "spec": "387 W1\u2013W2",
+      "proves": "discover \u2192 inspect \u2192 invoke through the gateway; the ministry's agent answers from its own catalog",
       "twin": "the invoke posts ONLY to the endpoint the handle pinned; a changed card is said, not followed",
       "required": false,
       "paced": true,
@@ -106,8 +106,8 @@
       "id": "verify-endeavor-offer-allocate-ask",
       "script": "scripts/verify-endeavor-offer-allocate-ask.mts",
       "spec": "393 W2",
-      "proves": "a member's offer and the steward's allocation go through the Ask with supplied plans — the offer under the OFFERER's own mandate, the allocation under the organization's granted by its steward; the endeavor carries one allocation",
-      "twin": "an outsider's offer, under their own mandate, refused at the organization's member gate; a member's allocation cannot be authorized — the organization's mandate is not theirs to give",
+      "proves": "a member's offer and the steward's allocation go through the Ask with supplied plans \u2014 the offer under the OFFERER's own mandate, the allocation under the organization's granted by its steward; the endeavor carries one allocation",
+      "twin": "an outsider's offer, under their own mandate, refused at the organization's member gate; a member's allocation cannot be authorized \u2014 the organization's mandate is not theirs to give",
       "required": true,
       "paced": false,
       "timeoutSec": 420
@@ -126,7 +126,7 @@
       "id": "verify-public-provenance",
       "script": "scripts/verify-public-provenance.mts",
       "spec": "395 W1",
-      "proves": "a run's anchored outcomes are readable by anyone with no session — digests and ids through the S1 firewall, the receipt digest equal to the private graph's, the transaction as the anchor",
+      "proves": "a run's anchored outcomes are readable by anyone with no session \u2014 digests and ids through the S1 firewall, the receipt digest equal to the private graph's, the transaction as the anchor",
       "twin": "no address and nothing the run was about in the rows; a run with no transaction projects nothing (every step refused by name); an unknown run is 404",
       "required": true,
       "paced": false,
@@ -137,7 +137,7 @@
       "script": "scripts/measure-do-economics.mts",
       "spec": "396",
       "proves": "every InteractionsDO op reports its vault-call bill on its headers; the listing an organization's members open most costs what the index says, not one call per endeavor",
-      "twin": "advisory — the numbers are the gate; a listing that costs more than a handful of calls per viewer is the regression to read in the morning",
+      "twin": "advisory \u2014 the numbers are the gate; a listing that costs more than a handful of calls per viewer is the regression to read in the morning",
       "required": false,
       "paced": false,
       "timeoutSec": 300
@@ -156,7 +156,7 @@
       "id": "verify-standing-instruction-room",
       "script": "scripts/verify-standing-instruction-room.mts",
       "spec": "394 W2",
-      "proves": "the acting context is a namespace — a default declared while addressing an organization fills the payer there; one declared at home applies everywhere the person has not said otherwise",
+      "proves": "the acting context is a namespace \u2014 a default declared while addressing an organization fills the payer there; one declared at home applies everywhere the person has not said otherwise",
       "twin": "the organization's default is NOT read at home",
       "required": true,
       "paced": false,
@@ -166,8 +166,8 @@
       "id": "verify-run-bill",
       "script": "scripts/verify-run-bill.mts",
       "spec": "396 W3",
-      "proves": "a run's record carries its own bill — vault calls and DO requests by the step that made them — and its metrics carry ap.vault.calls",
-      "twin": "the bill is numbers and step refs only — no record type, no argument, no address",
+      "proves": "a run's record carries its own bill \u2014 vault calls and DO requests by the step that made them \u2014 and its metrics carry ap.vault.calls",
+      "twin": "the bill is numbers and step refs only \u2014 no record type, no argument, no address",
       "required": true,
       "paced": false,
       "timeoutSec": 240
@@ -177,7 +177,7 @@
       "script": "scripts/verify-confirmation-room.mts",
       "spec": "394 W2",
       "proves": "a confirmed choice made while addressing an organization is kept for that room and cited there on the next ask",
-      "twin": "the organization's choice is NOT read at home — the question comes back",
+      "twin": "the organization's choice is NOT read at home \u2014 the question comes back",
       "required": true,
       "paced": false,
       "timeoutSec": 420
@@ -220,6 +220,16 @@
       "env": {
         "CROSS": "1"
       }
+    },
+    {
+      "id": "verify-home-mcp",
+      "script": "scripts/verify-home-mcp.mts",
+      "spec": "397 W1",
+      "proves": "an MCP client registers itself (RFC 7591), alice connects through the Home (ask-as-me), a PKCE code becomes an opaque bearer bound to /mcp, initialize \u2192 tools/list \u2192 ask answers from HER agent with HER standing under her delegation to the Home MCP's key",
+      "twin": "the bearer at her agent directly is refused; a token for another resource is refused; a second client's connection cannot resume her run; a revoked bearer is 401",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 180
     }
   ]
 }

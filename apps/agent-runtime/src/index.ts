@@ -132,6 +132,8 @@ import { RELATIONSHIP_TYPE, ROLE, ROLE_IRI } from '@agenticprimitives/agent-rela
 import { admitInboundEmail, emailZones, emailSender, isEmailAddress, type EmailEnv } from './email-channel.js';
 import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
+// Spec 397 — the wire scheme on /harness/ask (a person through a client they authorized), verified as an agent's is.
+import { sessionWirePrincipal, parseSessionAuthorization } from '@agenticprimitives/a2a/standard';
 const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
 import { askVocabulary, commandFieldsFor, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY, HOUSEHOLD_READ_CAPABILITY, CAPABILITY_WORDS, type PlannerTraceV1 } from './harness-run.js';
 import { workersAiTranscriber, repairTranscript, hearingVocabulary, spokenFor } from './voice.js';
@@ -888,6 +890,10 @@ app.use('*', async (c, next) => {
   // It is not a signing oracle: one canonical body, never a caller-supplied digest.
   // Spec 395 — the public provenance projection takes no credentials and returns only anchored digests: no CSRF, like the attestation.
   if (c.req.path === '/peer-attest' || c.req.path === '/provenance/public') return next();
+  // Spec 397 — an `A2A-Session` assertion (spec 372 S3c) is signed over the exact body, bound to this origin
+  // and spent once: there is no cookie for CSRF to defend and no ambient authority to forge. Its own
+  // verification is the gate; a Home MCP's ask reaches the harness this way, as the person, under their wire.
+  if (/^A2A-Session\s/i.test(c.req.header('authorization') ?? '')) return next();
   // Federated-token custody (spec 265) — server-to-server from the Connect broker / MCP, bridge-HMAC
   // authenticated (no browser cookie).
   if (c.req.path === '/custody/youversion/store-token') return next();
@@ -1115,6 +1121,45 @@ async function liveCardFor(env: Env, ctx: AgentHostContext): Promise<Record<stri
 function standardCardFor(live: Record<string, unknown>): Record<string, unknown> {
   const iface = (Array.isArray(live.supportedInterfaces) ? live.supportedInterfaces[0] : null) as { url?: string } | null;
   return withStandardCardFields(live, { messageUrl: iface?.url ?? '' });
+}
+
+/**
+ * Spec 397 — A PERSON, THROUGH A CLIENT THEY AUTHORIZED. The `A2A-Session` scheme (spec 372 S3c) with the PERSON
+ * as the wire's delegator: their `ask-as-me` delegation to a Home MCP's key, pinned to `harness.ask`, presented as
+ * a per-request assertion signed by that key over the exact body. Verified exactly as an agent's wire is —
+ * delegator is the agent claimed, shape bounded and pinned, signature recovers to the delegate, the wire
+ * ERC-1271-verifies against the person and is UNREVOKED on chain, the assertion spent once on the person's own
+ * object. The run then proceeds AS THE PERSON with no Home session: reads under their standing, every act
+ * parking for the mandate only they can sign. Never a fallback for a missing session (ADR-0013): the scheme
+ * token selects it, and it fails closed on its own terms.
+ */
+async function principalFromAppDelegation(c: Context<{ Bindings: Env }>, raw: string): Promise<{ ok: true; sa: Address; caip: string; app: true } | { ok: false; status: number; error: string } | null> {
+  const auth = c.req.header('authorization') ?? '';
+  if (!/^A2A-Session\s/i.test(auth)) return null;
+  const validator = c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
+  if (!validator || !c.env.TIMESTAMP_ENFORCER || !c.env.ALLOWED_METHODS_ENFORCER || !c.env.DELEGATION_MANAGER) return { ok: false, status: 503, error: 'the wire gate is not configured' };
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  const chainId = Number(c.env.CHAIN_ID);
+  const dm = c.env.DELEGATION_MANAGER as Address;
+  const principal = sessionWirePrincipal({
+    enforcers: { timestamp: c.env.TIMESTAMP_ENFORCER, allowedMethods: c.env.ALLOWED_METHODS_ENFORCER },
+    verifyDelegationSig: async (d) => (await deps.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [d.delegator, hashDelegation(d, chainId, dm), d.signature] })) === true,
+    isRevoked: async (d) => (await deps.readContract({ address: dm, abi: IS_REVOKED_ABI_FOR_STANDING, functionName: 'isRevoked', args: [hashDelegation(d, chainId, dm)] })) === true,
+    claim: async (digest, expiresAt) => {
+      const a = parseSessionAuthorization(auth);
+      const who = String(a?.agent ?? '').toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(who)) return false;
+      const stub = c.env.A2A_TASKS.get(c.env.A2A_TASKS.idFromName(who));
+      const res = await stub.fetch(new Request('https://a2a-task-do/internal/harness-run/assertion-claim', { method: 'POST', headers: internalHeaders(c.env as never, { 'content-type': 'application/json' }), body: JSON.stringify({ digest, expiresAt }) }));
+      const out = (await res.json().catch(() => ({}))) as { ok?: boolean; claimed?: boolean };
+      return out.ok === true && out.claimed === true;
+    },
+    onRefused: (reason, who) => console.warn(`[harness/ask] app delegation refused for ${who ?? '?'}: ${reason}`),
+  });
+  const p = await principal(new Request(c.req.url, { method: 'POST', headers: c.req.raw.headers, body: raw }));
+  if (!p) return { ok: false, status: 401, error: 'the app delegation did not verify' };
+  const sa = p.agent.toLowerCase() as Address;
+  return { ok: true, sa, caip: `eip155:${chainId}:${sa}`, app: true };
 }
 
 /** Spec 372 S2 — a 1.0 method on `/api/a2a` is served by the standard surface mounted for this agent: the
@@ -2824,7 +2869,8 @@ app.get('/harness/run', async (c) => {
 
 app.post('/harness/ask', async (c) => {
   const receivedAt = Date.now(); // Spec 390 W3 — the request's arrival, on the record: what came before the loop is one honest span
-  const body = (await c.req.json().catch(() => null)) as {
+  const rawAsk = await c.req.text();
+  const body = ((): Record<string, unknown> | null => { try { return JSON.parse(rawAsk) as Record<string, unknown>; } catch { return null; } })() as {
     session?: string; addressee?: Address; message?: string; presented?: DelegationWireV1 | DelegationWireV1[] | null;
     supplied?: HarnessRunInput['supplied']; approvals?: HarnessRunInput['approvals']; runRef?: string;
     surface?: HarnessRunInput['surface'];
@@ -2839,10 +2885,14 @@ app.post('/harness/ask', async (c) => {
      *  deployment default. A provider this agent does not offer is a 400, never a swap. */
     model?: string;
   } | null;
-  if (!body?.session || !body.addressee || !(body.message?.trim() || body.runRef)) {
-    return c.json({ ok: false, error: 'session, addressee and either a message or the runRef of a run to resume are required' }, 400);
+  // Spec 397 — WHO IS ASKING: the person's Home session (`session` in the body), or the person THROUGH A CLIENT
+  // they authorized (an `A2A-Session` assertion over their ask-as-me wire — no session travels). One or the other.
+  const viaApp = await principalFromAppDelegation(c, rawAsk);
+  if (viaApp && !viaApp.ok) return c.json({ ok: false, error: viaApp.error }, viaApp.status as 401);
+  if ((!body?.session && !viaApp) || !body?.addressee || !(body.message?.trim() || body.runRef)) {
+    return c.json({ ok: false, error: 'session (or an A2A-Session app delegation), addressee and either a message or the runRef of a run to resume are required' }, 400);
   }
-  const who = await verifyHomeSession(body.session, c.env);
+  const who = viaApp && viaApp.ok ? viaApp : await verifyHomeSession(String(body.session), c.env);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   if (!c.env.HARNESS_AGENT_SA) return c.json({ ok: false, error: 'HARNESS_AGENT_SA not configured' }, 503);
   // Spec 377 — which model this turn runs on, decided BEFORE any run state is touched. A listed-but-keyless

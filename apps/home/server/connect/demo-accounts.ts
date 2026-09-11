@@ -29,9 +29,9 @@ import type { Address, CredentialPrincipal, Hex } from '@agenticprimitives/types
 import { privateKeyToAccount } from 'viem/accounts';
 import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';
 import { demoCustodianAddress, demoPersonaFor, listDemoPersonas, signDigestAsDemoPersona } from '../_lib/demo-custody';
-import { issueSiteDelegation, toWire } from '../../src/lib/delegation';
+import { issueAskAsMeDelegation, issueSiteDelegation, toWire } from '../../src/lib/delegation';
 import { recordCredentialFacet } from '../../src/lib/kv-indexer';
-import { getClient } from '../../src/lib/oidc-clients';
+import { clientAllowsTemplate, getClient } from '../../src/lib/oidc-clients';
 import { CHAIN_ID, CONTRACTS } from '../../src/lib/chain';
 
 const ID_TOKEN_TTL = 3600;
@@ -86,7 +86,7 @@ export const onRequestPut = async ({ request, env }: FnContext): Promise<Respons
 };
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
-  const body = (await request.json().catch(() => null)) as { handle?: string; sa?: string; client_id?: string } | null;
+  const body = (await request.json().catch(() => null)) as { handle?: string; sa?: string; client_id?: string; delegation_template?: string } | null;
   const clientId = (body?.client_id ?? '').trim();
   const client = clientId ? getClient(clientId) : null;
   if (!client) return json({ error: 'a registered client_id is required' }, 400);
@@ -104,7 +104,13 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
 
   // The authority half: the person's own site-login delegation to THIS app's registered delegate,
   // signed by their custodian — the same artifact the consent screen produces for a real user.
-  const delegation = await issueSiteDelegation(sa, client.delegate as Address, signHash, SITE_DELEGATION_TTL);
+  // Spec 397 — a client whose registration names the `ask-as-me` template (the Home MCP) gets THAT delegation:
+  // person → the client's key, pinned to harness.ask. A template the registry does not allow the client is refused.
+  const template = (body?.delegation_template ?? '').trim();
+  if (template && !clientAllowsTemplate(client, template)) return json({ error: `delegation_template "${template}" not allowed for ${clientId}` }, 400);
+  const delegation = template === 'ask-as-me'
+    ? await issueAskAsMeDelegation(sa, client.delegate as Address, signHash)
+    : await issueSiteDelegation(sa, client.delegate as Address, signHash, SITE_DELEGATION_TTL);
   const digest = hashDelegation(delegation, CHAIN_ID, CONTRACTS.delegationManager);
 
   // The identity half. Binding the digest to this client keeps silent re-auth (/token

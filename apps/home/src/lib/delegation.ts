@@ -55,6 +55,36 @@ function siteCaveats(validUntil: number): Caveat[] {
   ];
 }
 
+/**
+ * Spec 397 — THE `ask-as-me` TEMPLATE: a person's delegation to a Home MCP's own key, pinned to `harness.ask`
+ * and nothing else, time-boxed. It is the SAME shape as an agent's session wire (spec 372 S3c), with the person as
+ * delegator: presented as `A2A-Session` at the person's agent it says "put this question to my agent as me" —
+ * and nothing more. No value, no targets, no digest binding: an ask is not an intent, and every act the ask
+ * reaches still parks for the person's own signature. Revocable on chain like every delegation of theirs.
+ */
+export function askAsMeCaveats(validUntil: number): Caveat[] {
+  return [
+    buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
+    buildCaveat(CONTRACTS.allowedMethodsEnforcer, encodeAllowedMethodsTerms([a2aSkillSelector('harness.ask')])),
+  ];
+}
+
+/** Issue `person → the Home MCP's key`, ask-as-me caveats, signed by the person's custodian (`signHash`). */
+export async function issueAskAsMeDelegation(
+  personAgent: Address,
+  delegateKey: Address,
+  signHash: SignHash,
+  validitySeconds = 60 * 60 * 24 * 30,
+): Promise<Delegation> {
+  const validUntil = Math.floor(Date.now() / 1000) + validitySeconds;
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let salt = 0n;
+  for (const b of bytes) salt = (salt << 8n) | BigInt(b);
+  const d: Delegation = { delegator: personAgent, delegate: delegateKey, authority: ROOT_AUTHORITY, caveats: askAsMeCaveats(validUntil), salt, signature: '0x' };
+  d.signature = await signHash(hashDelegation(d, CHAIN_ID, CONTRACTS.delegationManager));
+  return d;
+}
+
 /** spec 253 — the approved-hash sentinel signature. A delegation carrying this 1-byte wire
  *  signature is NOT signed off-chain; instead its delegator SA pre-approved the EIP-712 digest
  *  in the ApprovedHashRegistry (inside the delegator's own userOp), and the SA's ERC-1271

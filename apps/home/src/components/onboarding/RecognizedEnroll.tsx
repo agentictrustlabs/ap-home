@@ -22,7 +22,7 @@ import type { Address } from '@agenticprimitives/types';
 import { givePermission, createOrganization, personGrantForOrgCreate, collectDueSubscriptions, authorizeContentSigningForOwner,
   authorizeServiceAgentWire, activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded,
   isKmsVia, resolveVia, publishSocialConnectionKindIfNeeded, signHashFor, type Via, type Auth } from '../../home/onboarding';
-import { issueSiteDelegation, issueWorkspaceMembershipAccessDelegation, toWire } from '../../lib/delegation';
+import { issueAskAsMeDelegation, issueSiteDelegation, issueWorkspaceMembershipAccessDelegation, toWire } from '../../lib/delegation';
 import { MCP_SERVER_ID } from '../../lib/inbox-delivery';
 import { clearStandingGrant } from '../../lib/grant-cache';
 import type { Home } from '../../home/types';
@@ -251,6 +251,24 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         setSsoCookie(token, viaLower);
         setPhase('connected');
         setTimeout(() => deliverCollectResult(enroll, api.popupMode, { collected: 1, attempted: 1 }, 'service-agent-wire'), 900);
+        return;
+      }
+      // Spec 397 — `ask-as-me`: the Home MCP (Claude's entrance to this person's agent) asks for ONE thing — a
+      // delegation from the person to the Home MCP's key, pinned to `harness.ask` and time-boxed: the right to put
+      // a question to their agent as them, and nothing more (every act still parks for their signature). Minted
+      // and signed here by the person's own credential, bound to the server-minted grant like a site login; the
+      // relying app receives it on the token exchange and holds it, revocable on chain, in the person's name.
+      if (enroll.template === 'ask-as-me') {
+        setGrantProgress({ step: 1, total: 2, label: 'Authorizing your assistant to ask your agent as you…' });
+        const { grant_id: askGrantId, delegate: askDelegate } = await beginEnrollmentGrant(enroll, home.name);
+        const askAuth: Auth | undefined = token ? { token } : undefined;
+        const signHash = await signHashFor(viaLower as Via, home.address, askAuth);
+        const wire = await issueAskAsMeDelegation(home.address, askDelegate, signHash);
+        setGrantProgress({ step: 2, total: 2, label: 'Finishing…' });
+        const askCode = await submitEnrollGrant(askGrantId, toWire(wire));
+        setSsoCookie(token, viaLower);
+        setPhase('connected');
+        setTimeout(() => deliverEnrollCode(enroll, api.popupMode, askCode), 600);
         return;
       }
       // SEC-001: server-mint the grant FIRST; use the registry-derived delegate (anti-spoof).

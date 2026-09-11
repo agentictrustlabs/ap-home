@@ -1,0 +1,48 @@
+# Cloudflare Worker — home-mcp (spec 397). Claude.ai's entrance to a PERSON's own agent: a conformant remote MCP
+# server (Streamable HTTP) that is an OAuth 2.1 authorization server toward MCP clients and a registered relying
+# app of the Home toward the person. It holds the person's `ask-as-me` delegation to ITS OWN KEY (a secret), never
+# a bearer of theirs, and speaks to exactly one thing: the person's agent, as them, under that wire.
+name = "home-mcp"
+main = "src/index.ts"
+compatibility_date = "2026-05-19"
+compatibility_flags = ["nodejs_compat"]
+
+[dev]
+port = 8797
+
+[[durable_objects.bindings]]
+name = "STORE"
+class_name = "HomeMcpStoreDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["HomeMcpStoreDO"]
+
+[vars]
+HOME_ORIGIN = "http://localhost:5373"
+A2A_ORIGIN = "http://localhost:8787"
+AGENT_HOST_PATTERN = "http://localhost:8787"
+CLIENT_ID = "home-mcp"
+DEMO_CONNECT_ENABLED = "true"
+
+# ── FAITHNET (chain 34348) ──
+[env.faithnet]
+name = "home-mcp-faithnet"
+account_id = "5da2feaa56593839672948e16c6e809d"
+
+[[env.faithnet.durable_objects.bindings]]
+name = "STORE"
+class_name = "HomeMcpStoreDO"
+
+[env.faithnet.vars]
+# The Home that signs people in (spec 230) — the one origin that holds credentials.
+HOME_ORIGIN = "https://www.faithnet.me"
+BROKER_JWKS_URL = "https://www.faithnet.me/jwks"
+# Where a person's agent answers `/harness/ask` (the assertion's audience is this origin).
+A2A_ORIGIN = "https://a2a.faithnet.io"
+# The Home MCP's OWN registration at the Home (`whitelabel.relyingApps`); its key's address is the delegate there.
+CLIENT_ID = "home-mcp"
+# The demo personas may connect with no browser (the live gates; spec 392's rule: they sign in openly).
+DEMO_CONNECT_ENABLED = "true"
+# Secrets: HOME_MCP_PRIVATE_KEY (the key the ask-as-me wires are made to; its address is `delegate` at the Home),
+#          TOKEN_SECRET (HMAC for opaque tokens' lookup keys).

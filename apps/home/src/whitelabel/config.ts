@@ -98,6 +98,22 @@ const faithImpact: WhiteLabelConfig = {
     // them. One org per domain, deployed by the member's own credential in a single consent — the app
     // cannot mint it, which is the point. Requests arrive name-deferred (empty `agent_name`) with
     // `org_base=<domain label>`, so they route through RecognizedEnroll's org-create leg.
+    // Spec 397 — THE HOME MCP: Claude.ai's entrance to a person's own agent. A registered relying app like any
+    // other (it never runs a credential ceremony of its own); the ONE template it may request is `ask-as-me`,
+    // a delegation from the person to the Home MCP's key pinned to `harness.ask` — the right to put a question
+    // to their agent as them, revocable on chain, and nothing more. `delegate` is that key (the Worker's
+    // secret's address), the same shape as an agent's session wire.
+    {
+      client_id: 'home-mcp',
+      name: 'Claude (Home MCP)',
+      redirect_uris: [
+        'https://home-mcp-faithnet.richardpedersen3.workers.dev/oauth/callback',
+        'http://localhost:8797/oauth/callback',
+      ],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['ask-as-me'],
+      delegate: '0x2D16473370b654D75FCf9cC37649BBd86B9Aff70',
+    },
     {
       client_id: 'skills-app',
       name: 'Skills',
