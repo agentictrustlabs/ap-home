@@ -240,6 +240,16 @@
       "required": true,
       "paced": true,
       "timeoutSec": 300
+    },
+    {
+      "id": "verify-home-mcp-browser-path",
+      "script": "scripts/verify-home-mcp-browser-path.mts",
+      "spec": "397",
+      "proves": "the browser connect path replayed headlessly: /oauth/authorize \u2192 the Home's connect (client home-mcp, template ask-as-me, the Home MCP's PKCE + state) \u2192 authorize-grant \u2192 the person's ask-as-me wire signed prompt-free via persona-sign \u2192 /oidc/grant \u2192 the Home MCP callback exchanges at /token, verifies the id_token and the wire, answers the client its code \u2192 a bearer that lists tools",
+      "twin": "the Home's grant endpoint accepts only a wire to the REGISTERED delegate (SEC-001) \u2014 a wire to any other key is refused there",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 120
     }
   ]
 }
