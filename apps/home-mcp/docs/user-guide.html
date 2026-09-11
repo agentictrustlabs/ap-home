@@ -1,0 +1,296 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Your Home agent inside Claude</title><style>
+@page { size: Letter; margin: 22mm 20mm 22mm 20mm;
+  @bottom-center { content: "Your Home agent inside Claude  ·  page " counter(page) " of " counter(pages); font: 9pt "DejaVu Sans", sans-serif; color:#777; } }
+body { font-family: "DejaVu Serif", Georgia, serif; font-size: 10.5pt; line-height: 1.45; color:#1d1d1f; }
+h1 { font-family: "DejaVu Sans", sans-serif; font-size: 24pt; color:#0f3d5e; margin: 0 0 .4em; letter-spacing:-.01em; }
+h2 { font-family: "DejaVu Sans", sans-serif; font-size: 14.5pt; color:#0f3d5e; margin: 1.6em 0 .5em; padding-bottom:.2em; border-bottom: 1.5px solid #c9d8e3; page-break-after: avoid; }
+h3 { font-family: "DejaVu Sans", sans-serif; font-size: 11.5pt; color:#1f5f88; margin: 1.2em 0 .4em; page-break-after: avoid; }
+p { margin: .45em 0 .7em; }
+ol, ul { margin: .3em 0 .8em 1.2em; } li { margin: .25em 0; }
+blockquote { margin: .5em 0 .8em 0; padding: .45em .9em; background:#f2f6f9; border-left: 3px solid #1f5f88; font-family: "DejaVu Sans", sans-serif; font-size: 10pt; color:#0f3d5e; page-break-inside: avoid; }
+blockquote p { margin: 0; }
+code { font-family: "DejaVu Sans Mono", monospace; font-size: 9pt; background:#f4f4f6; padding: 0 .2em; border-radius: 2px; }
+pre { background:#f4f4f6; padding:.6em .8em; border-radius: 4px; font-size: 9.5pt; page-break-inside: avoid; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; margin: .6em 0 1em; font-size: 9.5pt; page-break-inside: auto; }
+th, td { border: 1px solid #d5dde4; padding: .4em .55em; vertical-align: top; text-align: left; }
+th { background:#e9f0f5; font-family: "DejaVu Sans", sans-serif; font-weight: 600; }
+tr { page-break-inside: avoid; }
+hr { border: 0; border-top: 1px solid #d5dde4; margin: 1.4em 0; }
+em { color:#444; }
+strong { color:#111; }
+.cover { margin-bottom: 1.2em; }
+.cover .sub { font-family: "DejaVu Sans", sans-serif; color:#555; font-size: 11.5pt; margin-top:-.2em; }
+</style></head><body><h1>Your Home agent, inside Claude</h1>
+<p>You already have an agent of your own at your Home (on Faithnet, that is <strong>www.faithnet.me</strong>). It knows your
+records, the organizations you belong to, and the way you like things done. The <strong>Home MCP connector</strong> lets you
+reach that agent from inside Claude — in a normal Claude conversation, on the web or in the desktop app — so
+Claude can ask it things <em>as you</em>, find and talk to other agents <em>through</em> it, and show you what it did.</p>
+<p>Three things stay true the whole time:</p>
+<ol>
+<li><strong>Claude never holds your keys or your sign-in.</strong> You give the connector one narrow permission — &ldquo;ask my agent as
+   me&rdquo; — by signing it at your Home. That is all it holds.</li>
+<li><strong>Anything that would <em>change</em> something waits for you.</strong> Sending money, inviting someone, publishing — your
+   agent pauses and gives you a link to your Home, where you sign. Claude cannot sign for you.</li>
+<li><strong>Every answer is your agent&rsquo;s answer, with its evidence.</strong> Claude reports it and says where it came from. Every
+   run leaves a record you can read later, in Claude or at your Home.</li>
+</ol>
+<hr />
+<h2>1. Before you start</h2>
+<ul>
+<li><strong>A Home account</strong> at www.faithnet.me with a passkey (or wallet) that you can use in your browser. If you can sign
+  in there, you are ready.</li>
+<li><strong>A Claude plan that allows custom connectors</strong> (Claude Pro, Max, Team or Enterprise). On Team and Enterprise
+  plans an administrator may need to add the connector for the organization first.</li>
+<li>The connector address:</li>
+</ul>
+<p><code>https://home-mcp-faithnet.richardpedersen3.workers.dev/mcp</code></p>
+<hr />
+<h2>2. Set up (about two minutes)</h2>
+<ol>
+<li>In Claude, open <strong>Settings → Connectors</strong>.</li>
+<li>Choose <strong>Add custom connector</strong>.</li>
+<li>Give it a name you will recognize — for example <strong>My Home agent</strong> — and paste the connector address above.</li>
+<li>Click <strong>Add</strong>, then <strong>Connect</strong>.</li>
+<li>Your browser opens <strong>www.faithnet.me</strong>. Sign in the way you always do (passkey or wallet).</li>
+<li>Your Home shows what you are about to allow: <em>let this assistant ask your agent as you</em>. Read it, then approve.
+   This writes a signed permission for this connector only. It does not let it move money, change records or act
+   for you — those still need your signature each time.</li>
+<li>You are sent back to Claude. The connector shows as connected.</li>
+<li>In a new chat, open the tools menu (the <strong>+</strong> or <strong>Search and tools</strong> control under the message box) and make sure
+   <strong>My Home agent</strong> is switched on.</li>
+</ol>
+<p><strong>Check it works.</strong> Type:</p>
+<blockquote>
+<p>What have I asked my agent for recently?</p>
+</blockquote>
+<p>Claude should come back with your recent runs (or say there are none yet) and name your agent — something like
+<em>alice.me</em> — as the one that answered.</p>
+<p><strong>Claude Desktop</strong> works the same way: the connector you add on the web is available in the desktop app once you sign
+in to the same Claude account.</p>
+<hr />
+<h2>3. What Claude can do through the connector</h2>
+<p>Claude gets a small, fixed set of abilities. In plain words:</p>
+<table>
+<thead>
+<tr>
+<th>Ability</th>
+<th>What it does</th>
+<th>Changes anything?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Ask</strong></td>
+<td>Puts your words to your own agent — about your records, your organizations, your household, your treasury — or to an organization you belong to, by name (for example <em>missio-nexus.org</em>).</td>
+<td>Reads answer at once. Acts pause for your signature.</td>
+</tr>
+<tr>
+<td><strong>Find agents</strong></td>
+<td>Searches the public registry, through your agent, for agents that do what you want — a ministry with a study on a topic, a service that offers a capability.</td>
+<td>No</td>
+</tr>
+<tr>
+<td><strong>Inspect an agent</strong></td>
+<td>Looks at one agent&rsquo;s public card before you talk to it: who it says it is, what it offers, whether the card it serves still matches its records.</td>
+<td>No</td>
+</tr>
+<tr>
+<td><strong>Engage an agent</strong></td>
+<td>Sends your words, as you, to another agent and brings back <em>its</em> answer — a study plan, what it offers, an answer from its own records. Your agent sends the message and keeps the record; the other agent sees only your message.</td>
+<td>No (the other agent decides what to do with its own things)</td>
+</tr>
+<tr>
+<td><strong>My runs</strong></td>
+<td>Lists what you have asked your agent recently — from Claude, from your Home, from anywhere — and which runs are waiting on you.</td>
+<td>No</td>
+</tr>
+<tr>
+<td><strong>Run details</strong></td>
+<td>One run in full: what you asked, the plan, each step&rsquo;s outcome, the receipts (with the transaction when a step left one), and where its provenance record is.</td>
+<td>No</td>
+</tr>
+<tr>
+<td><strong>Where to sign</strong></td>
+<td>For a run that paused for your authority: the link to the page at your Home where you sign, and nothing else.</td>
+<td>No — you do, at your Home</td>
+</tr>
+</tbody>
+</table>
+<p>There is deliberately <strong>no</strong> payment tool, no &ldquo;read the vault&rdquo; tool and no &ldquo;grant permission&rdquo; tool. What your agent
+can do is whatever its playbook says it can do; Claude only sees the door.</p>
+<hr />
+<h2>4. Things to try</h2>
+<p>Type these as you would say them. Claude decides which ability to use; you do not have to name it.</p>
+<h3>Your own records and organizations</h3>
+<blockquote>
+<p>Which organizations do I belong to, and what is my role in each?</p>
+<p>Ask Missio Nexus&rsquo;s agent who its members are.</p>
+<p>What does my household record say? Who is in it?</p>
+<p>What is the balance of my treasury?</p>
+</blockquote>
+<p>Your agent answers from your records (or the organization&rsquo;s) and tells Claude which records it read. Nothing here
+needs a signature.</p>
+<h3>Finding and talking to other agents</h3>
+<blockquote>
+<p>Find agents that offer study plans about justification.</p>
+</blockquote>
+<p>Claude asks your agent to search the registry. You get a short list — name, what each offers, how relevant it is.</p>
+<blockquote>
+<p>Before we contact Ligonier, check who ligonier.svc says it is.</p>
+</blockquote>
+<p>Claude fetches the agent&rsquo;s public card through your agent and tells you whether it still matches its records.</p>
+<blockquote>
+<p>Ask Ligonier for a four-week study plan on justification, one session a week, with links.</p>
+</blockquote>
+<p>Your agent sends your words to Ligonier&rsquo;s agent <em>as you</em>. The reply is Ligonier&rsquo;s own — made from its own catalog
+under its own rules — and Claude presents it as such, keeping every link it gave. Your agent records that the hop
+happened.</p>
+<blockquote>
+<p>Ask Missio Nexus&rsquo;s agent to find a Somali-language discipleship resource for our team.</p>
+</blockquote>
+<p>You can ask <em>at</em> an organization you belong to; the organization&rsquo;s agent answers under your standing there.</p>
+<h3>Things that need your signature</h3>
+<blockquote>
+<p>Send 20 USDC to Alice from my treasury.</p>
+<p>Invite Nathan to Missio Nexus.</p>
+<p>Charter a team called Outreach under Missio Nexus.</p>
+</blockquote>
+<p>Your agent prepares the act and stops: Claude will tell you it needs your authority and give you a link to your
+Home. Open it, review what will happen (who, how much, to whom, until when), and sign. Then say:</p>
+<blockquote>
+<p>Done — finish that run.</p>
+</blockquote>
+<p>Claude picks the run back up and your agent completes it under the permission you just signed. The receipt names
+your signature; Claude never had it.</p>
+<h3>Looking back</h3>
+<blockquote>
+<p>What did my agent do for me this week?</p>
+<p>Show me the details and receipts for the payment run.</p>
+<p>Which of my runs are still waiting on me?</p>
+</blockquote>
+<h3>Teaching your agent how you like things</h3>
+<blockquote>
+<p>From now on, when I ask about my treasury, always show amounts in USD too.</p>
+</blockquote>
+<p>That becomes a standing instruction of <em>your agent&rsquo;s</em> — not Claude&rsquo;s — so it applies at your Home and everywhere
+else too, and you can remove it at your Home whenever you like.</p>
+<hr />
+<h2>5. What the replies mean</h2>
+<p>Your agent answers in a few well-defined ways. Claude will explain them, but here is the key:</p>
+<table>
+<thead>
+<tr>
+<th>You see</th>
+<th>It means</th>
+<th>What to do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>An answer</strong></td>
+<td>A read: your agent looked at the records and told you what they say, and which ones it read.</td>
+<td>Nothing.</td>
+</tr>
+<tr>
+<td><strong>Done</strong></td>
+<td>An act finished, under a permission you signed. There is a receipt.</td>
+<td>Ask for the details if you like.</td>
+</tr>
+<tr>
+<td><strong>A question</strong></td>
+<td>Your agent needs a detail — which Alice, which account.</td>
+<td>Answer in the chat; Claude passes it on.</td>
+</tr>
+<tr>
+<td><strong>Authority required</strong></td>
+<td>The act needs your signature.</td>
+<td>Follow the link to your Home, sign, then tell Claude to finish the run.</td>
+</tr>
+<tr>
+<td><strong>Refused</strong></td>
+<td>Your agent will not do it — you do not have standing for it, it is outside your agent&rsquo;s playbook, or the request was ambiguous. The reason is stated.</td>
+<td>Rephrase, or ask at your Home. A refusal is your agent protecting you; Claude cannot argue it out of one.</td>
+</tr>
+<tr>
+<td><strong>Please reconnect</strong></td>
+<td>The permission this connector held was revoked or has expired.</td>
+<td>Reconnect from Settings → Connectors; you will sign in at your Home again.</td>
+</tr>
+</tbody>
+</table>
+<p>Two things you will never see: a reply that pretends to be Claude&rsquo;s own knowledge (it is always your agent&rsquo;s, with
+its source), and an act that happened without a signature of yours behind it.</p>
+<hr />
+<h2>6. Staying in control</h2>
+<ul>
+<li><strong>See what is connected.</strong> At your Home, open <strong>Connected apps → Connected assistants</strong>. Each entry is a
+  permission you signed; this connector is one of them.</li>
+<li><strong>Revoke at any time.</strong> Click <strong>Revoke</strong> there. The permission is disabled on chain immediately. Claude&rsquo;s next
+  request is refused and Claude asks you to reconnect. Nothing that already happened is undone — receipts stay.</li>
+<li><strong>Nothing is hidden in Claude.</strong> Every run made through Claude appears in your Home&rsquo;s <strong>Activities</strong> exactly like a
+  run you made there, marked as having come through this connector.</li>
+<li><strong>Other people&rsquo;s things stay theirs.</strong> Your agent holds your records. Another person&rsquo;s household, another
+  organization&rsquo;s roster — your agent will tell you <em>whose</em> agent holds that, not read it for you.</li>
+<li><strong>Up to 25 connectors.</strong> You can connect several assistants or devices; each gets its own permission and can be
+  revoked on its own.</li>
+</ul>
+<hr />
+<h2>7. If something does not work</h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Connect button opens your Home but you cannot sign in</td>
+<td>No passkey on this browser or device</td>
+<td>Sign in at www.faithnet.me directly first, add a passkey for this device under <strong>Security</strong>, then connect again.</td>
+</tr>
+<tr>
+<td>Claude says the connector needs to reconnect</td>
+<td>You revoked it, or the permission expired</td>
+<td>Settings → Connectors → your connector → <strong>Connect</strong>.</td>
+</tr>
+<tr>
+<td>&ldquo;No agent is registered as …&rdquo;</td>
+<td>The organization name is not its registry name</td>
+<td>Use the name as it appears at your Home (for example <em>missio-nexus.org</em>), or ask &ldquo;which organizations do I belong to&rdquo; first.</td>
+</tr>
+<tr>
+<td>An act is stuck &ldquo;waiting&rdquo;</td>
+<td>You have not signed yet</td>
+<td>Ask Claude for the link (&ldquo;where do I sign for that run?&rdquo;), sign at your Home, then &ldquo;finish that run&rdquo;.</td>
+</tr>
+<tr>
+<td>&ldquo;Refused — no standing&rdquo;</td>
+<td>You are not a member or steward of that organization</td>
+<td>Ask your own agent instead, or ask the organization&rsquo;s steward to invite you.</td>
+</tr>
+<tr>
+<td>Too many requests</td>
+<td>Rate limit</td>
+<td>Wait a minute and try again.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>8. Questions people ask</h2>
+<p><strong>Does Claude see my private records?</strong> Claude sees what your agent <em>replies</em> — the answer to your question — not
+your vault. Your agent decides what a reply may contain, the same as it would at your Home.</p>
+<p><strong>Can Claude spend my money or invite people without me?</strong> No. Those acts pause at your agent until you sign at your
+Home with your own credential. The connector&rsquo;s permission is &ldquo;ask as me&rdquo;, not &ldquo;act as me&rdquo;.</p>
+<p><strong>What if someone gets into my Claude account?</strong> They could ask your agent questions as you. They could not sign
+anything. Revoke the connector at your Home (<strong>Connected apps → Connected assistants</strong>) and it stops at once.</p>
+<p><strong>Is this the same as Claude&rsquo;s own memory?</strong> No. Standing instructions and remembered choices live with <em>your agent</em>
+and apply everywhere you use it. You manage them at your Home.</p>
+<p><strong>Where is the record of what happened?</strong> On your agent. Ask Claude for a run&rsquo;s details, or open <strong>Activities</strong> at
+your Home. Each run has a provenance record — a formal, checkable account of what was read, what was done and under
+which permission — that anyone you share it with can verify independently.</p>
+<hr />
+<p><em>Home MCP · Faithnet deployment · connector address <code>https://home-mcp-faithnet.richardpedersen3.workers.dev/mcp</code> ·
+your Home: www.faithnet.me · September 2026</em></p></body></html>

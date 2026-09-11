@@ -1717,6 +1717,7 @@ function plannerSummaryOf(trace: PlannerTraceV1 | undefined): RunPlannerSummaryV
  */
 export async function runAgentAsk(env: Env, input: { agent: Address; addressee: Address; ask: string; runRef: string; context?: Record<string, unknown>;
   /** The message's data part naming a skill — what `playbook.answer` reasons over (never part of the intent's digest). */
+  material?: Record<string, unknown> | null;
   /** Spec 390 W2 — the W3C Trace Context the caller's request carried; recorded, never read by a gate. */
   traceContext?: TraceContextV1 | null;
   /** Spec 390 W3 — when the caller's request arrived (ms), for the `receive_request` span. */
@@ -1746,6 +1747,7 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
   const intent = input.intent ?? { goal: input.ask, context: { addressee: input.addressee, asker: input.agent, ...(input.context ?? {}) } };
   const { result, interactionFor, trace, tools, events, presentedRefs, bill } = await runUnderMandateBilled(env as unknown as HarnessEnv, deps, {
     intent, presented: input.resume?.presented ?? null, person: input.agent, runRef: input.runRef, addressee: input.addressee,
+    ...(input.material ? { material: input.material } : {}),
     ...(input.traceContext ? { traceContext: input.traceContext } : {}),
     ...(input.resume?.plan ? { plan: input.resume.plan } : input.plan ? { plan: input.plan } : {}),
     ...(input.resume?.executed ? { resume: await rehydrateExecuted(deps, input.resume.executed) } : {}),
@@ -4159,6 +4161,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     // Spec 387 W2 — a name's published records (the catalog binding reads `atl:mcpEndpoint`); one 60s-cached reader.
     ...((): Record<string, unknown> => { const r = nameRecordsReader(env); return r ? { readNameRecords: r } : {}; })(),
     // What an agent PUBLICLY advertises (`atl:capabilities`): `playbook.answer` is listed only for a skill on it.
+    advertisedCapabilities: async (agent: Address) => (await readAdvertisedCapabilityIds(env, agent)).split(',').map((s) => s.trim()).filter(Boolean),
     resolveName: async (name: string) => {
       if (!env.AGENT_NAME_REGISTRY || !env.AGENT_NAME_UNIVERSAL_RESOLVER) return null;
       const client = new AgentNamingClient({ rpcUrl: env.RPC_URL, chainId: Number(env.CHAIN_ID), registry: env.AGENT_NAME_REGISTRY as Address, universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as Address });

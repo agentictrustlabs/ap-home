@@ -49,7 +49,7 @@ export interface StandardMountDeps {
    *  runtime lives. Returns the JSON-RPC response verbatim. */
   delegatedRpc?: DelegatedRpc;
   /** Spec 372 S3c — an agent asking as itself: no session, no mandate, its own standing. */
-  askAsAgent?: (input: { agent: Address; addressee: Address; ask: string; runRef: string; /** Spec 390 W2 — the caller's W3C Trace Context, kept on the run's record. */ traceContext?: import('@agenticprimitives/orchestration').TraceContextV1 | null; /** Spec 390 W3 — when the request arrived. */ receivedAt?: number }) => Promise<{
+  askAsAgent?: (input: { agent: Address; addressee: Address; ask: string; runRef: string; /** Spec 390 W2 — the caller's W3C Trace Context, kept on the run's record. */ traceContext?: import('@agenticprimitives/orchestration').TraceContextV1 | null; /** Spec 390 W3 — when the request arrived. */ receivedAt?: number; /** The message's DATA part, when it carried one naming a skill — the material `playbook.answer` reasons over. */ material?: Record<string, unknown> | null }) => Promise<{
     reply: { kind: string; text?: string; prompt?: { kind: string; prompt: string; stepRef: string }; error?: string };
     spoken: string;
     result?: { plan: unknown };
@@ -196,7 +196,8 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
             await ctx.working();
             // THE DATA PART TRAVELS TOO. A card room asks for advice with the seat's view as data and the
             // question as text; the text alone gave the planner "advise seat 0" and nothing to advise ON.
-            asked = await deps.askAsAgent({ agent: caller, addressee: agent, ask: message, runRef, traceContext: traceContextOf(ctx.headers), receivedAt: startedAt });
+            const material = partsData(ctx.message.parts);
+            asked = await deps.askAsAgent({ agent: caller, addressee: agent, ask: message, runRef, traceContext: traceContextOf(ctx.headers), receivedAt: startedAt, ...(material && typeof material.skill === 'string' ? { material } : {}) });
           }
           // Spec 387 W2 — THE TRACE RIDES WITH THE TASK: what admitted the run, what was offered and chosen, each
           // step's outcome and output summary, in order. Evidence of what ran; nothing in it is authority or private.

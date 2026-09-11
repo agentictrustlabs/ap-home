@@ -36,6 +36,7 @@ import { bindSelectedOffer, type SelectedOfferBindingV1 } from './engagement-cam
 import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
 import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
+import { PLAYBOOK_ANSWER_TOOL, playbookAnswerAvailable, playbookAnswerInvoker, type PlaybookMaterial } from './playbook-answer.js';
 import { DISCOVERY_FIND_TOOL, ENGAGEMENT_INVOKE_TOOL, DISCOVERY_INSPECT_TOOL, DISCOVERY_FIND_CAPABILITY, ENGAGEMENT_INVOKE_CAPABILITY, discoveryFindInvoker } from './enterprise-tools.js';
 import { INVITATIONS_RECEIVED_TOOL } from './invitations-received.js';
 import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
@@ -837,6 +838,7 @@ export interface HarnessDeps {
   /** Spec 387 W2 — what a NAME publishes on chain (its `atl:mcpEndpoint` binds the catalog reads). Records first, never a convention. */
   readNameRecords?: (name: string) => Promise<{ a2aEndpoint?: string; mcpEndpoint?: string } | null>;
   /** What an agent PUBLICLY advertises on its profile (`atl:capabilities`). `playbook.answer` is listed only for a skill on it. */
+  advertisedCapabilities?: (agent: Address) => Promise<string[]>;
   /** Spec 366 R2/R3 — set by the receiver of a ROUTED ask, once per request: the wires the asker presented
    *  for standing, and that their own tree is not this agent's to read. Every standing derivation in this
    *  run inherits it (`StandingDeps.context`). */
@@ -1958,6 +1960,9 @@ export interface HarnessRunInput {
    *  SAME trace outbound (the caller's, not one derived here). Recorded on the run record; read by no gate. */
   traceContext?: TraceContextV1 | null;
   intent: { goal: string; constraints?: Record<string, unknown>; context?: Record<string, unknown> };
+  /** The message's DATA part naming a skill — the material `playbook.answer` reasons over. Never in the intent: it is
+   *  what the person can already see, not what they asked, and it must not bind a mandate's digest. */
+  material?: Record<string, unknown> | null;
   /** Spec 370 P1 — the checkpoint's record of what ran: the admitted plan and the completed steps. The
    *  loop replays the completed steps and plans nothing anew; the remaining steps are verified afresh. */
   resume?: { plan: Plan; completed: ReadonlyArray<{ stepRef: string; result?: unknown; receipt?: StepReceipt }> };
@@ -4176,7 +4181,16 @@ step is then handed to that agent under authority the person grants; leave it ou
   // catalog itself: public metadata with a named source, never a record of ours.
   const catalog = await catalogBindingFor(deps, input.addressee ? String(input.addressee) : undefined);
   const catalogTools = catalog ? CATALOG_TOOLS.map((t) => mergeContractTool(t, playbook?.tools?.[t.id])) : [];
+  // A QUESTION OF JUDGEMENT over material the message carried (`playbook.answer`). Listed ONLY when the
+  // message names a skill and the addressee's profile publicly advertises it — an agent answers exactly
+  // the questions it has said it answers — and when there is a model to answer with. Neither ⇒ absent.
+  const material: PlaybookMaterial | null = input.material && typeof input.material.skill === 'string'
+    ? { skill: input.material.skill, input: input.material.input, ...(typeof (input.material.input as { question?: unknown } | undefined)?.question === 'string' ? { question: (input.material.input as { question: string }).question } : {}) }
+    : null;
+  const advertised = material && input.addressee && deps.advertisedCapabilities ? await deps.advertisedCapabilities(input.addressee).catch(() => []) : [];
+  const playbookAnswer = playbookAnswerAvailable({ call: structuredCallFor(env as never, input.provider), material, advertised }) ? [PLAYBOOK_ANSWER_TOOL] : [];
   const tools = [
+    ...playbookAnswer,
     ...scopedActionTools(input.surface, playbook), ...catalogTools, ...ASK_DISCOVERY_TOOLS,
     ...(kbQuestionAvailable({ call: structuredCallFor(env as never, input.provider) }) ? [KB_QUESTION_TOOL] : []),
     // Spec 379 — an outside A2A 1.0 agent may ANSWER inside a run; its words are an observation.
@@ -4212,7 +4226,11 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(deps.readSubjectRecord ? [PROFILE_READ_TOOL, HOUSEHOLD_READ_TOOL] : []),
     UNSUPPORTED_TOOL,
   ];
-  const localInvoke = harnessInvoker(deps, env, presentedList, input.mcpInvoke, input.person, input.session, input.surface, input.addressee, playbook);
+  const harnessLocal = harnessInvoker(deps, env, presentedList, input.mcpInvoke, input.person, input.session, input.surface, input.addressee, playbook);
+  const answerInvoke = playbookAnswer.length
+    ? playbookAnswerInvoker({ call: structuredCallFor(env as never, input.provider), instructions: playbook?.instructions ?? null, material, advertised, agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null })
+    : null;
+  const localInvoke: ToolInvoker = async (toolId, args, ctx) => (answerInvoke && toolId === PLAYBOOK_ANSWER_TOOL.id ? answerInvoke(toolId, args, ctx) : harnessLocal(toolId, args, ctx));
   trace.toolsExposed = tools.map((t) => t.id);
   // Spec 367 §5 — THE EXECUTION BINDING on every receipt: the intent digest, the person, the agent the step
   // is about, the resource and authority it names, the outcome class it was expected to establish, its
