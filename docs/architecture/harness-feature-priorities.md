@@ -216,6 +216,38 @@ render must already be right.
 (Home Work · Home Build · Developer Kit; gates G0–G5) + the
 [product brief](ux-strategy-product-brief.md). Spec 398 §12.1 maps every item in this list onto its gate.
 
+### 3.5 The Home MCP — the person's agent as an assistant's entrance (shipped 2026-09-10/11)
+
+Built in the substrate program's last days because it is the first thing the transition's hosts need: a
+conformant MCP server that is an OAuth 2.1 authorization server toward Claude.ai and a registered relying app of
+the Home toward the person ([spec 397](../../specs/397-home-mcp-claude-entrance-to-the-person-agent.md)). The
+bearer a host holds never leaves the server; what reaches her agent is her own `ask-as-me` wire, revocable at her
+Home. Twelve live gates on the nightly ledger, all green on 2026-09-11:
+
+| Gate | Proves | The twin |
+| --- | --- | --- |
+| `verify-home-mcp` | the door: DCR, PKCE, a token bound to `/mcp`, her agent answers with her standing | bearer at her agent refused; another resource refused; another client cannot resume her run; revoked bearer 401 |
+| `-browser-path` | the real connect flow, headless: authorize → the Home → grant → callback → bearer | the grant endpoint accepts only a wire to the registered delegate |
+| `-discovery` | Ligonier found by a capability WORD (349 §2 at the registry) and engaged through her agent, links back | an unknown word leaves the filter unmet — never widened |
+| `-authority` | a payment parks, `/you?run=` on her Home, she signs, Claude reads the receipt | a resume before the grant parks again; the record carries no signature |
+| `-revoke` | Connected assistants → revoked on chain → 401 with the challenge; the bearer is dead | — |
+| `-stream` | progress notifications, an elicitation answered on the same session, resources, the host record | a signature is never elicited |
+| `-instructions` | a standing instruction through Claude is her agent's | the app is not a room; forgotten at her Home for every surface |
+| `-room` | asking AT an organization by name under her standing; a room's instruction listed under that room | an unregistered name refused before anything is asked |
+| `-routed` | engagement from a room; a target's question parks her run and `ask { run, supplied }` continues the target's; the hop's progress relayed | a read's question never asks her authority |
+| `-people` | an invitation through Claude approved on the one-prompt path at her Home; her own records; a card inspected | another person's records refused without stewardship |
+
+Open, in order: the invitee's own "what invitations do I have" (no invitee-side read exists on either surface —
+the Home shows Join chips from inbox contextRefs whose origin for an agent invite is untraced); the off-deployment
+gate (faithnet-b awake, `A2A_TRUSTED_ORIGINS`); the host record (`ap://home-mcp/host`) read after a real Claude.ai
+session, which decides whether the stream and elicitation work is used or dormant.
+
+Two defects this program surfaced belong on the record: one boolean utterance argument in a contract made every
+playbook including it INVALID, and the runtime silently ran the bare harness for a day (the compiler now warns;
+[memory rule](../../specs/397-home-mcp-claude-entrance-to-the-person-agent.md) — validate and re-pin after any `~/skills` change); and Groq's composer
+evidence cap (12,000 chars) replaced a 12,890-char catalog result with a three-title summary, which the composer
+read as "nothing matched" — the route now refuses a provider whose cap would summarize the largest result body.
+
 ## 4. Traceability and provenance — the standards, where we stand on each, the lever
 
 ### 4.1 Two different questions, two different standards families
@@ -351,4 +383,4 @@ script → G3 the run's bill on the record → G7 close 354's status → then G4
 faithnet-b (the parent-wire ceremony minted before G5). In the background (§3.3): the nightly accumulates a
 week for T1, a fortnight for T2; T3 waits on a foreign runtime. Everything in §3.4 is the transition itself.
 The position in §1 holds today; G2, G5 and G6 are what make its three strongest claims checkable by someone
-who is not us.
+who is not us. The Home MCP (§3.5) is the transition's first host-facing surface, already gated end to end.
