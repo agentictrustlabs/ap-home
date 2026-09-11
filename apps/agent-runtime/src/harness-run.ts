@@ -4200,7 +4200,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   // message names a skill and the addressee's profile publicly advertises it — an agent answers exactly
   // the questions it has said it answers — and when there is a model to answer with. Neither ⇒ absent.
   const material: PlaybookMaterial | null = input.material && typeof input.material.skill === 'string'
-    ? { skill: input.material.skill, input: input.material.input, ...(typeof (input.material.input as { question?: unknown } | undefined)?.question === 'string' ? { question: (input.material.input as { question: string }).question } : {}) }
+    ? { skill: input.material.skill, input: input.material.input, ...(typeof (input.material.input as { question?: unknown } | undefined)?.question === 'string' ? { question: (input.material.input as { question: string }).question } : {}), ...(input.material.answer && typeof input.material.answer === 'object' ? { answer: input.material.answer as Record<string, string> } : {}) }
     : null;
   const advertised = material && input.addressee && deps.advertisedCapabilities ? await deps.advertisedCapabilities(input.addressee).catch(() => []) : [];
   const playbookAnswer = playbookAnswerAvailable({ call: structuredCallFor(env as never, input.provider), material, advertised }) ? [PLAYBOOK_ANSWER_TOOL] : [];

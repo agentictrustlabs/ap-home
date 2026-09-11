@@ -54,6 +54,8 @@ export interface PlaybookMaterial {
   skill: string;
   input?: unknown;
   question?: string;
+  /** How the asker wants the answer shaped, field by field — the action union of its own game, say. Honoured verbatim. */
+  answer?: Record<string, string>;
 }
 
 export interface PlaybookAnswerDeps {
@@ -104,9 +106,15 @@ export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
     const review = /\.review$/i.test(skill);
     const question = String(args.question ?? m.question ?? '').trim();
     const system = `${review ? REVIEW_SYSTEM : ANSWER_SYSTEM}\n\n---\n\n${(deps.instructions ?? '').trim() || '(this agent has no further instructions)'}`;
+    // THE ASKER'S OWN SHAPE, when it sent one. A card room names its game's exact action union; an answer
+    // in any other shape is a move it can only refuse to draw a button for.
+    const shape = m.answer && typeof m.answer === 'object'
+      ? Object.entries(m.answer).filter(([, v]) => typeof v === 'string').map(([k, v]) => `  ${k}: ${v}`).join('\n')
+      : '';
     const user = [
       `Skill: ${skill}`,
       question ? `Question: ${question}` : 'Question: (nothing specific was asked — say what to do, and why)',
+      ...(shape ? [`Answer shape, field by field:\n${shape}`] : []),
       `Material: ${JSON.stringify(m.input ?? {})}`,
     ].join('\n');
     const out = await deps.call({
