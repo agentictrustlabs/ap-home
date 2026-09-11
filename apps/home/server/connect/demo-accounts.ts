@@ -112,6 +112,15 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     ? await issueAskAsMeDelegation(sa, client.delegate as Address, signHash)
     : await issueSiteDelegation(sa, client.delegate as Address, signHash, SITE_DELEGATION_TTL);
   const digest = hashDelegation(delegation, CHAIN_ID, CONTRACTS.delegationManager);
+  // Spec 397 W4 — a person-level app wire (ask-as-me) is listed under Connected assistants like a browser-made one,
+  // so the demo persona can see and REVOKE what their assistant holds. A rebuildable pointer; the chain is the record.
+  if (template === 'ask-as-me') {
+    const key = `app-grants:${sa.toLowerCase()}`;
+    const rows = JSON.parse((await env.AUTH_CODES.get(key)) ?? '[]') as Array<{ clientId: string }>;
+    const next = rows.filter((r) => r.clientId !== clientId);
+    next.unshift({ clientId, template, delegate: client.delegate, delegation: toWire(delegation), issuedAt: Date.now() } as never);
+    await env.AUTH_CODES.put(key, JSON.stringify(next.slice(0, 50)));
+  }
 
   // The identity half. Binding the digest to this client keeps silent re-auth (/token
   // grant_type=delegation) working for the demo session exactly as it does for a real one — and

@@ -45,7 +45,10 @@ type Entry =
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
-export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose, seed, onSeedUsed}: {
+export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose, seed, onSeedUsed, resumeRun, onResumeUsed }: {
+  /** Spec 397 §6 — a parked run to pick up on open (`/you?run=`): resumed at once, every gate re-run; the person signs here. */
+  resumeRun?: string | null;
+  onResumeUsed?: () => void;
   /** Spec 361 I6 — what the screen has selected; reaches the agent as validated context. */
   selection?: AskSelection | null;
   addressee: Address; addresseeLabel: string;
@@ -98,6 +101,13 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
     setQ(seed);
     onSeedUsed?.();
   }, [seed]);
+  // Spec 397 §6 — the run an assistant parked for this person's signature: picked up exactly as an unfinished ask is
+  // (the same turn, the same gates); the requirement and the preview appear, and the signature is given here.
+  useEffect(() => {
+    if (!resumeRun || !session) return;
+    onResumeUsed?.();
+    void turn({ message: '', addressee, runRef: resumeRun, presented: null, supplied: [], resumable: true }, 'Picking up what your assistant asked…');
+  }, [resumeRun, session]);
   // WHAT THE PERSON PICKED, in this surface's own words. After choosing "nathan.me" from four Nathans the
   // answer travels as an address, so the next card would show a bare 0x… — asking someone to re-verify a
   // choice they just made, against a string that tells them nothing. This is the surface remembering its

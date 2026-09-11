@@ -1,7 +1,7 @@
 // THE TOOL SURFACE (spec 397 §5, W1): the person's own agent, reached as them. Fixed — never a per-agent tool, never
 // a vault read, never a mandate. What comes back is their agent's reply with its evidence; an act that needs their
 // authority is said as such, with the page on their Home where they sign.
-import { askAsPerson, type PersonIdentity } from './a2a.js';
+import { askAsPerson, callAsPerson, isDelegationRefusal, type PersonIdentity } from './a2a.js';
 
 export const TOOLS = [
   {
@@ -21,6 +21,18 @@ export const TOOLS = [
     description: 'Send the person\'s words, as them, to another agent — one `discover_agents` returned or one they named (ligonier.svc, missio-nexus.org) — and get that agent\'s own answer, made under ITS playbook from its own catalog or records (a study plan with links, what it offers). Their agent sends it and records the hop; the other agent sees only the message. Args: agent (name or 0x address as discovery returned it), message (the ask, complete, in the person\'s words). Present the reply as that agent\'s answer, naming it as the source and keeping every link it gave.',
     inputSchema: { type: 'object', properties: { agent: { type: 'string' }, message: { type: 'string' } }, required: ['agent', 'message'] },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  },
+  {
+    name: 'my_runs',
+    description: 'The person\'s recent runs on their own agent — what they asked (through any surface), what came of it, and which are still waiting on them (a signature at their Home, an answer). Args: limit (default 10). Read from their agent\'s own records; nothing here is a guess.',
+    inputSchema: { type: 'object', properties: { limit: { type: 'integer' } }, required: [] },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'run',
+    description: 'One run of the person\'s, by runRef: the ask, the plan, every step\'s outcome, the receipts (with the transaction when a step left one) and where its provenance is. Use it after they finished a parked run at their Home, or to answer "what did you do for me". Args: run (the runRef).',
+    inputSchema: { type: 'object', properties: { run: { type: 'string' } }, required: ['run'] },
+    annotations: { readOnlyHint: true },
   },
   {
     name: 'grant_link',
@@ -49,7 +61,15 @@ export async function askTool(env: ToolEnv, person: Person, args: Record<string,
     ...(Array.isArray(args.supplied) ? { supplied: args.supplied } : {}),
     ...(args.plan && typeof args.plan === 'object' ? { plan: args.plan } : {}),
   }, fetchImpl);
-  if (!out.ok) return { error: out.error, status: out.status };
+  if (!out.ok) {
+    if (isDelegationRefusal(out.status, out.error)) return { error: `the person's agent refused this connection's standing: ${out.error} — it was revoked or has expired at their Home; they must authorize this connection again`, reauthorize: true };
+    // Spec 397 W3 — a run named alone that is no longer waiting was FINISHED (at their Home, by them): the record is the answer.
+    if (!message && run && out.status === 404) {
+      const rec = await recordOf(env, person, run, fetchImpl);
+      if (rec) return { kind: 'done', ...rec, note: 'This run is no longer waiting — it was finished (at their Home, by them). What follows is its record.' };
+    }
+    return { error: out.error, status: out.status };
+  }
   const reply = summarize(out.reply);
   const hint = reply.kind === 'authority_required'
     ? `The person's agent needs THEIR authority for this: call grant_link with run=${String(out.runRef ?? reply.runRef ?? '')} and tell them to sign there; then ask again with that run.`
@@ -89,4 +109,46 @@ export async function engageTool(env: ToolEnv, person: Person, args: Record<stri
   const results = (out.reply.results as Array<{ toolId: string; result: Record<string, unknown> }> | undefined) ?? [];
   const hop = results.find((r) => r.toolId === 'engagement.agent.invoke')?.result ?? {};
   return { ...reply, ...(hop.refused ? { refused: hop.refused } : {}), ...(hop.via ? { via: hop.via } : {}), ...(hop.said ? { said: hop.said } : hop.text ? { said: hop.text } : {}), ...(hop.source ? { source: hop.source } : {}), ...(hop.drewOn ? { drewOn: hop.drewOn } : {}), runRef: out.runRef ?? reply.runRef, ...(out.hasProvenance ? { hasProvenance: out.hasProvenance } : {}), asked_as: person.agentName ?? person.identity.agent };
+}
+
+/** Spec 397 W3 — a run's RECORD from her agent, shaped for a host: no mandates, no keyring, the facts and the receipts. */
+async function recordOf(env: ToolEnv, person: Person, runRef: string, fetchImpl: typeof fetch): Promise<Record<string, unknown> | null> {
+  const r = await callAsPerson(person.identity, env.A2A_ORIGIN, '/harness/records', { addressee: person.identity.agent, runRef }, fetchImpl);
+  if (!r.ok) return null;
+  const rec = r.body.record as { runRef?: string; at?: number; intent?: { goal?: string }; outcome?: string; plan?: { steps?: Array<{ toolId: string; args?: unknown }> }; steps?: Array<{ stepRef?: string; toolId: string; ok?: boolean; result?: unknown }>; receipts?: Array<{ stepRef: string; toolId: string; status: string; risk?: string; binding?: { mandateRef?: string }; outputDigest?: string }>; export?: unknown } | undefined;
+  if (!rec) return null;
+  const tx = (v: unknown): string | undefined => { const o = v && typeof v === 'object' ? (v as { txHash?: unknown; facts?: { txHash?: unknown } }) : null; const t = o?.txHash ?? o?.facts?.txHash; return typeof t === 'string' ? t : undefined; };
+  return {
+    runRef: rec.runRef ?? runRef, at: rec.at, asked: rec.intent?.goal, outcome: rec.outcome,
+    steps: (rec.steps ?? []).map((s) => ({ stepRef: s.stepRef, toolId: s.toolId, ok: s.ok, ...(tx(s.result) ? { txHash: tx(s.result) } : {}), summary: JSON.stringify(s.result ?? null).slice(0, 400) })),
+    receipts: (rec.receipts ?? []).map((rc) => ({ stepRef: rc.stepRef, toolId: rc.toolId, status: rc.status, risk: rc.risk, ...(rc.binding?.mandateRef ? { mandateRef: rc.binding.mandateRef } : {}) })),
+    hasProvenance: { agent: person.identity.agent, recordType: `run.provenance:${rec.runRef ?? runRef}`, route: '/harness/provenance' },
+    asked_as: person.agentName ?? person.identity.agent,
+  };
+}
+
+export async function runTool(env: ToolEnv, person: Person, args: Record<string, unknown>, fetchImpl: typeof fetch = fetch): Promise<Record<string, unknown>> {
+  const run = String(args.run ?? '').trim();
+  if (!run) return { error: 'run (a runRef) is required' };
+  const rec = await recordOf(env, person, run, fetchImpl);
+  if (rec) return rec;
+  // Still waiting: the checkpoint says on what.
+  const waiting = await callAsPerson(person.identity, env.A2A_ORIGIN, '/harness/runs', { addressee: person.identity.agent }, fetchImpl);
+  const row = waiting.ok ? ((waiting.body.runs as Array<{ runRef: string; message?: string; awaiting?: unknown; updatedAt?: number }> | undefined) ?? []).find((x) => x.runRef === run) : undefined;
+  if (row) return { runRef: run, asked: row.message, waiting: row.awaiting ?? null, updatedAt: row.updatedAt, note: 'This run is parked on their agent — see `waiting`; a signature is given at their Home (grant_link), an answer with ask { run, supplied }.' };
+  return { error: `no run ${run} of theirs — their agent holds no record and nothing is waiting under that reference` };
+}
+
+export async function myRunsTool(env: ToolEnv, person: Person, args: Record<string, unknown>, fetchImpl: typeof fetch = fetch): Promise<Record<string, unknown>> {
+  const limit = Number.isInteger(args.limit) && (args.limit as number) > 0 ? Math.min(args.limit as number, 50) : 10;
+  const [records, waiting] = await Promise.all([
+    callAsPerson(person.identity, env.A2A_ORIGIN, '/harness/records', { addressee: person.identity.agent }, fetchImpl),
+    callAsPerson(person.identity, env.A2A_ORIGIN, '/harness/runs', { addressee: person.identity.agent }, fetchImpl),
+  ]);
+  if (!records.ok) return { error: records.error, status: records.status };
+  const rows = ((records.body.records as Array<{ runRef: string; at?: number; intent?: { goal?: string }; outcome?: string; receipts?: unknown[] }> | undefined) ?? [])
+    .sort((a, b) => (b.at ?? 0) - (a.at ?? 0)).slice(0, limit)
+    .map((r) => ({ runRef: r.runRef, at: r.at, asked: r.intent?.goal, outcome: r.outcome, receipts: (r.receipts ?? []).length }));
+  const parked = waiting.ok ? ((waiting.body.runs as Array<{ runRef: string; message?: string; awaiting?: unknown; updatedAt?: number }> | undefined) ?? []).map((x) => ({ runRef: x.runRef, asked: x.message, waiting: x.awaiting ?? null, updatedAt: x.updatedAt })) : [];
+  return { runs: rows, waitingOnThem: parked, retention: records.body.retention ?? null, asked_as: person.agentName ?? person.identity.agent };
 }

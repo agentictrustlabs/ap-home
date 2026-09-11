@@ -220,6 +220,18 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     }
   }
 
+  // Spec 397 W4 — A PERSON-LEVEL APP GRANT (the Home MCP's `ask-as-me` and any template that is the person's own wire to
+  // an app, not an organization's): indexed here by person so Connected Apps can show it and REVOKE it on chain. The
+  // wire is the record (held by the app, revocable on chain); this row is a rebuildable pointer (ADR-0055).
+  if (!body.org && body.delegation?.delegator) {
+    const person = String(body.delegation.delegator).toLowerCase();
+    const key = `app-grants:${person}`;
+    const rows = JSON.parse((await env.AUTH_CODES.get(key)) ?? '[]') as Array<{ clientId: string }>;
+    const next = rows.filter((r) => r.clientId !== grant.client_id);
+    next.unshift({ clientId: grant.client_id, template: grant.delegation_template, delegate: grant.delegate, delegation: body.delegation, issuedAt: Date.now() } as never);
+    await env.AUTH_CODES.put(key, JSON.stringify(next.slice(0, 50)));
+  }
+
   // Stash the grant under a single-use code, BOUND to the PKCE challenge + client + redirect.
   const code = newAuthCode();
   await env.AUTH_CODES.put(

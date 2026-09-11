@@ -1169,6 +1169,16 @@ async function verifyAppDelegation(env: Env, url: string, auth: string, raw: str
   return { ok: true, sa, caip: `eip155:${chainId}:${sa}`, app: true };
 }
 
+/** Spec 397 W3 — WHO IS ASKING on the ask surface's READ routes (records, runs, progress): the person's Home session
+ *  in the body, or the person THROUGH A CLIENT (an `A2A-Session` assertion over their ask-as-me wire, bound to this
+ *  exact body). One or the other, each verified on its own terms; a body naming neither is refused. */
+async function askSurfacePrincipal(c: Context<{ Bindings: Env }>, raw: string, body: { session?: string } | null): Promise<{ ok: true; sa: Address; caip: string; app?: true } | { ok: false; status: number; error: string }> {
+  const viaApp = await principalFromAppDelegation(c, raw);
+  if (viaApp) return viaApp;
+  if (!body?.session) return { ok: false, status: 400, error: 'session (or an A2A-Session app delegation) is required' };
+  return verifyHomeSession(String(body.session), c.env);
+}
+
 /** Spec 397 + 366 — a ROUTED hop whose asker came through a client: the forwarded admission evidence, verified here
  *  as the receiver (wire, assertion, freshness, audience; spent once on THIS agent's object), and checked to be the
  *  asker's own ask — the body it binds was addressed to the asker's agent by the asker. */
@@ -1566,9 +1576,10 @@ function separationOfDuties(env: Env): 'strict' | 'off' | null {
 // FOR. Resuming is `/harness/ask` with the runRef, which re-verifies everything as always — so seeing a
 // run here grants nothing, exactly as claiming one does not.
 app.post('/harness/runs', async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address } | null;
-  if (!body?.session || !body.addressee) return c.json({ ok: false, error: 'session and addressee are required' }, 400);
-  const who = await verifyHomeSession(body.session, c.env);
+  const rawRuns = await c.req.text();
+  const body = ((): { session?: string; addressee?: Address } | null => { try { return JSON.parse(rawRuns); } catch { return null; } })();
+  if (!body?.addressee) return c.json({ ok: false, error: 'session (or an app delegation) and addressee are required' }, 400);
+  const who = await askSurfacePrincipal(c, rawRuns, body);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const addressee = body.addressee.toLowerCase() as Address;
   const caller = String(who.sa).toLowerCase() as Address;
@@ -2105,9 +2116,10 @@ app.post('/harness/triggers/rotate', async (c) => {
 // runRef, one record in full minus its mandates; without, the listing. The asker's own — a run is looked
 // back on by whoever asked it.
 app.post('/harness/records', async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; runRef?: string } | null;
-  if (!body?.session || !body.addressee) return c.json({ ok: false, error: 'session and addressee are required' }, 400);
-  const who = await verifyHomeSession(body.session, c.env);
+  const rawRec = await c.req.text();
+  const body = ((): { session?: string; addressee?: Address; runRef?: string } | null => { try { return JSON.parse(rawRec); } catch { return null; } })();
+  if (!body?.addressee) return c.json({ ok: false, error: 'session (or an app delegation) and addressee are required' }, 400);
+  const who = await askSurfacePrincipal(c, rawRec, body);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const addressee = body.addressee.toLowerCase() as Address;
   const caller = String(who.sa).toLowerCase();
@@ -2222,9 +2234,10 @@ app.post('/harness/replay', async (c) => {
 // the run reaches its reply, so a surface sees each step within a few hundred milliseconds of it without
 // hammering. Read by the asker only; a runRef for a run this person did not start reads as unknown.
 app.post('/harness/progress', async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; runRef?: string; after?: number; wait?: number } | null;
-  if (!body?.session || !body.addressee || !body.runRef) return c.json({ ok: false, error: 'session, addressee and runRef are required' }, 400);
-  const who = await verifyHomeSession(body.session, c.env);
+  const rawProg = await c.req.text();
+  const body = ((): { session?: string; addressee?: Address; runRef?: string; after?: number; wait?: number } | null => { try { return JSON.parse(rawProg); } catch { return null; } })();
+  if (!body?.addressee || !body.runRef) return c.json({ ok: false, error: 'session (or an app delegation), addressee and runRef are required' }, 400);
+  const who = await askSurfacePrincipal(c, rawProg, body);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const addressee = body.addressee.toLowerCase() as Address;
   const asker = String(who.sa).toLowerCase() as Address;

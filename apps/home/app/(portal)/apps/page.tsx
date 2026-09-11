@@ -13,6 +13,7 @@ import { YouVersionData } from '../../../src/components/portal/YouVersionData';
 import { HomeManifestCard } from '../../../src/components/portal/HomeManifestCard';
 import { DirectoryListingCard } from '../../../src/components/portal/DirectoryListingCard';
 import { AppReadGrants } from '../../../src/components/portal/AppReadGrants';
+import { AppGrantsPanel } from '../../../src/components/portal/AppGrantsPanel';
 import '../../../src/components/portal/developer-apps.css';
 import { LinkIcon } from '../../../src/components/shared/Icons';
 
@@ -45,6 +46,9 @@ export default function AppsPage() {
           </p>
         </>
       )}
+
+      {/* Spec 397 W4 — assistants holding the person's OWN wire (Claude through the Home MCP), revocable on chain. */}
+      <AppGrantsPanel />
 
       {/* spec 341 §4.3 — the other half of "connected": which apps may READ, per app and per record
           family. Connecting proves identity; this authorizes access, and the two are separate yeses. */}

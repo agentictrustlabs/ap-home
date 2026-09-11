@@ -28,11 +28,15 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
    *  flyout is open, so a card deep in a page asks for it by event rather than by prop-drilling through
    *  every layer between them. Prefilled and not sent: the person still reads it and presses send. */
   const [askSeed, setAskSeed] = useState<string | null>(null);
+  /** Spec 397 §6 — a PARKED run a page wants picked up (`/you?run=`): the flyout resumes it, and the person signs there. */
+  const [askResume, setAskResume] = useState<string | null>(null);
   // Spec 361 I6 — what the current screen has selected, read here and handed to the Ask as context.
   const askSelection = useAskSelection();
   useEffect(() => {
     const onAsk = (e: Event) => {
-      const message = (e as CustomEvent<{ message?: string }>).detail?.message;
+      const detail = (e as CustomEvent<{ message?: string; resumeRun?: string }>).detail;
+      if (detail?.resumeRun) { setAskResume(detail.resumeRun); setAskOpen(true); return; }
+      const message = detail?.message;
       if (!message) return;
       setAskSeed(message);
       setAskOpen(true);
@@ -126,6 +130,8 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
         <AskFlyout
           seed={askSeed}
           onSeedUsed={() => setAskSeed(null)}
+          resumeRun={askResume}
+          onResumeUsed={() => setAskResume(null)}
           addressee={askAddressee!} addresseeLabel={askLabel}
           // The app knows where you are standing and what you are to this agent; the Ask should not have
           // to infer it from a sentence.

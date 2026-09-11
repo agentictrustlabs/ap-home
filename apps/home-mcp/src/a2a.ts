@@ -12,7 +12,13 @@ export interface PersonIdentity { agent: string; privateKey: Hex; wire: Delegati
 
 export interface AskBody { addressee: string; message?: string; runRef?: string; supplied?: unknown[]; plan?: unknown; model?: string }
 
-export async function askAsPerson(id: PersonIdentity, a2aOrigin: string, body: AskBody, fetchImpl: typeof fetch = fetch): Promise<{ ok: true; reply: Record<string, unknown>; runRef?: string; hasProvenance?: unknown } | { ok: false; status: number; error: string }> {
+/** The wire itself was refused by her agent — revoked at her Home, or expired: the person must authorize again. */
+export const isDelegationRefusal = (status: number, error: string): boolean => status === 401 && /app delegation|revoked|wire/i.test(error);
+
+/** ONE signed call at the person's agent, as them: the ask surface's routes (`/harness/ask`, `/records`, `/runs`,
+ *  `/progress`) under the same assertion + wire. The wire pins `harness.ask` — the act of asking; every route here
+ *  is a read or a turn OF that act, never a different capability. */
+export async function callAsPerson(id: PersonIdentity, a2aOrigin: string, path: string, body: Record<string, unknown>, fetchImpl: typeof fetch = fetch): Promise<{ ok: true; body: Record<string, unknown>; status: number } | { ok: false; status: number; error: string; body?: Record<string, unknown> }> {
   // `method` names the assertion's method (the receiver compares it to the body's); the route ignores the field.
   const raw = JSON.stringify({ method: STANDARD_SURFACE_SKILL, ...body });
   const base: Omit<CallerAssertionV1, 'signature'> = { agent: id.agent.toLowerCase(), method: STANDARD_SURFACE_SKILL, bodyHash: requestBodyHash(raw), issuedAt: Math.floor(Date.now() / 1000), audience: new URL(a2aOrigin).origin };
@@ -20,10 +26,17 @@ export async function askAsPerson(id: PersonIdentity, a2aOrigin: string, body: A
   const assertion: CallerAssertionV1 = { ...base, signature: wrapSessionSignature(id.wire, sig) };
   let res: Response;
   try {
-    res = await fetchImpl(`${a2aOrigin}/harness/ask`, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', authorization: sessionAuthorizationHeader(assertion) }, body: raw });
+    res = await fetchImpl(`${a2aOrigin}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', authorization: sessionAuthorizationHeader(assertion) }, body: raw });
   } catch (e) { return { ok: false, status: 502, error: `the person's agent could not be reached: ${e instanceof Error ? e.message : String(e)}` }; }
-  const out = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; reply?: Record<string, unknown>; runRef?: string; hasProvenance?: unknown } | null;
+  const out = (await res.json().catch(() => null)) as Record<string, unknown> | null;
   if (!out) return { ok: false, status: res.status, error: `the person's agent answered ${res.status} with no JSON` };
-  if (!res.ok || out.ok === false) return { ok: false, status: res.status, error: String(out.error ?? `the person's agent answered ${res.status}`) };
+  if (!res.ok || out.ok === false) return { ok: false, status: res.status, error: String(out.error ?? `the person's agent answered ${res.status}`), body: out };
+  return { ok: true, body: out, status: res.status };
+}
+
+export async function askAsPerson(id: PersonIdentity, a2aOrigin: string, body: AskBody, fetchImpl: typeof fetch = fetch): Promise<{ ok: true; reply: Record<string, unknown>; runRef?: string; hasProvenance?: unknown } | { ok: false; status: number; error: string }> {
+  const r = await callAsPerson(id, a2aOrigin, '/harness/ask', body as unknown as Record<string, unknown>, fetchImpl);
+  if (!r.ok) return { ok: false, status: r.status, error: r.error };
+  const out = r.body as { reply?: Record<string, unknown>; runRef?: string; hasProvenance?: unknown };
   return { ok: true, reply: out.reply ?? {}, ...(out.runRef ? { runRef: out.runRef } : {}), ...(out.hasProvenance ? { hasProvenance: out.hasProvenance } : {}) };
 }
