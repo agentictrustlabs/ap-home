@@ -212,6 +212,10 @@ they are not mistaken for substrate gaps:
 None of these change a verdict in §2. The substrate's job for them is what §3.2 closes: every record they
 render must already be right.
 
+**Program of record for that phase (2026-09-10):** [spec 398](../../specs/398-agentic-primitives-ux-strategy.md)
+(Home Work · Home Build · Developer Kit; gates G0–G5) + the
+[product brief](ux-strategy-product-brief.md). Spec 398 §12.1 maps every item in this list onto its gate.
+
 ## 4. Traceability and provenance — the standards, where we stand on each, the lever
 
 ### 4.1 Two different questions, two different standards families
