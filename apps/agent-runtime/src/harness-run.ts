@@ -37,6 +37,7 @@ import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
 import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
 import { PLAYBOOK_ANSWER_TOOL, playbookAnswerAvailable, playbookAnswerInvoker, type PlaybookMaterial } from './playbook-answer.js';
+import { remembered } from './run-memo.js';
 import { DISCOVERY_FIND_TOOL, ENGAGEMENT_INVOKE_TOOL, DISCOVERY_INSPECT_TOOL, DISCOVERY_FIND_CAPABILITY, ENGAGEMENT_INVOKE_CAPABILITY, discoveryFindInvoker } from './enterprise-tools.js';
 import { INVITATIONS_RECEIVED_TOOL } from './invitations-received.js';
 import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
@@ -3977,7 +3978,17 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   // The acting agent's playbook (spec 354 §4.3), loaded from ITS vault at admission and digest-verified.
   // Absent ⇒ the bare harness offers everything the surface allows; present ⇒ the Ask offers only what
   // the archetype knows how to do, and the planner is told what it IS.
-  const playbook = await loadPlaybook(deps.readSubjectRecord, String(input.addressee ?? ''), console.log).catch(() => null);
+  const phaseT0 = Date.now();
+  const phases: string[] = [];
+  const mark = (name: string) => phases.push(`${name} ${Date.now() - phaseT0}ms`);
+  // Remembered for a minute per addressee (`run-memo.ts`): the vault read was 2–3 s of every ask.
+  // The RECORD is what is remembered, not the playbook built from it: the playbook carries a Set, and
+  // a Set does not survive the cache's JSON. `loadPlaybook` rebuilds from the record every time, cheaply.
+  const rememberedRecord = deps.readSubjectRecord
+    ? (subject: string, recordType: string) => remembered(`record:${subject.toLowerCase()}:${recordType}`, () => deps.readSubjectRecord!(subject, recordType))
+    : undefined;
+  const playbook = await loadPlaybook(rememberedRecord, String(input.addressee ?? ''), console.log).catch(() => null);
+  mark('playbook');
   const first = Array.isArray(input.presented) ? input.presented[0] ?? null : input.presented;
   const holding = first ? mandateCapabilityWords(first) : null;
   const systemPrompt = holding
@@ -4194,7 +4205,9 @@ step is then handed to that agent under authority the person grants; leave it ou
   // Spec 387 W2 — THE ADDRESSEE'S OWN CATALOG, when its name records publish one (`atl:mcpEndpoint`). Listed
   // only then (fail closed), described by the playbook's contract when it has one, and answered by the
   // catalog itself: public metadata with a named source, never a record of ours.
-  const catalog = await catalogBindingFor(deps, input.addressee ? String(input.addressee) : undefined);
+  mark('planner-built');
+  const catalog = await remembered(`catalog:${String(input.addressee ?? '').toLowerCase()}`, () => catalogBindingFor(deps, input.addressee ? String(input.addressee) : undefined));
+  mark('catalog');
   const catalogTools = catalog ? CATALOG_TOOLS.map((t) => mergeContractTool(t, playbook?.tools?.[t.id])) : [];
   // A QUESTION OF JUDGEMENT over material the message carried (`playbook.answer`). Listed ONLY when the
   // message names a skill and the addressee's profile publicly advertises it — an agent answers exactly
@@ -4202,7 +4215,8 @@ step is then handed to that agent under authority the person grants; leave it ou
   const material: PlaybookMaterial | null = input.material && typeof input.material.skill === 'string'
     ? { skill: input.material.skill, input: input.material.input, ...(typeof (input.material.input as { question?: unknown } | undefined)?.question === 'string' ? { question: (input.material.input as { question: string }).question } : {}), ...(input.material.answer && typeof input.material.answer === 'object' ? { answer: input.material.answer as Record<string, string> } : {}) }
     : null;
-  const advertised = material && input.addressee && deps.advertisedCapabilities ? await deps.advertisedCapabilities(input.addressee).catch(() => []) : [];
+  const advertised = material && input.addressee && deps.advertisedCapabilities ? await remembered(`advertised:${String(input.addressee).toLowerCase()}`, () => deps.advertisedCapabilities!(input.addressee!).catch(() => [] as string[])) : [];
+  mark('advertised');
   const playbookAnswer = playbookAnswerAvailable({ call: structuredCallFor(env as never, input.provider), material, advertised }) ? [PLAYBOOK_ANSWER_TOOL] : [];
   const tools = [
     ...playbookAnswer,
@@ -4245,7 +4259,12 @@ step is then handed to that agent under authority the person grants; leave it ou
   const answerInvoke = playbookAnswer.length
     ? playbookAnswerInvoker({ call: structuredCallFor(env as never, input.provider), instructions: playbook?.instructions ?? null, material, advertised, agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null })
     : null;
-  const localInvoke: ToolInvoker = async (toolId, args, ctx) => (answerInvoke && toolId === PLAYBOOK_ANSWER_TOOL.id ? answerInvoke(toolId, args, ctx) : harnessLocal(toolId, args, ctx));
+  const localInvoke: ToolInvoker = async (toolId, args, ctx) => {
+    mark(`invoke:${toolId}:start`);
+    try { return await (answerInvoke && toolId === PLAYBOOK_ANSWER_TOOL.id ? answerInvoke(toolId, args, ctx) : harnessLocal(toolId, args, ctx)); }
+    finally { mark(`invoke:${toolId}:end`); }
+  };
+  mark('tools-listed');
   trace.toolsExposed = tools.map((t) => t.id);
   // Spec 367 §5 — THE EXECUTION BINDING on every receipt: the intent digest, the person, the agent the step
   // is about, the resource and authority it names, the outcome class it was expected to establish, its
@@ -4259,14 +4278,19 @@ step is then handed to that agent under authority the person grants; leave it ou
   // trusting the asker's word for it. Evidence only: the mandate chain is what the verifier judged.
   const chainIdForWire = Number(env.CHAIN_ID); const dmForWire = env.DELEGATION_MANAGER as Address | undefined;
   const wireRefOf = (wire: unknown): Hex | null => { try { return dmForWire ? hashDelegation(wireToDelegation(wire as never), chainIdForWire, dmForWire) : null; } catch { return null; } };
-  const standingOnce: Promise<ExecutionBindingV1['standing'] | undefined> | null = input.person && input.addressee && deps.readSubjectRecord
-    ? deriveStanding({ readSubjectRecord: deps.readSubjectRecord, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}), wireRefOf },
-        { principal: input.person, subject: input.addressee })
-      .then((st) => ({ relation: st.relation, subject: st.subject, principal: input.person!.toLowerCase(), because: st.because, ...(st.wireRef ? { wireRef: st.wireRef } : {}) }))
-      .catch(() => undefined)
+  // Remembered per (principal, subject) for a minute: 3.2 s of every ask went to re-deriving a relation
+  // that does not change between two hands. Standing is honesty, not authority (spec 353 §4) — it reaches
+  // no verifier — so a minute-old answer misreports nothing anybody could act on.
+  const standingPrincipal = input.person; const standingSubject = input.addressee;
+  const standingOnce: Promise<ExecutionBindingV1['standing'] | undefined> | null = standingPrincipal && standingSubject && deps.readSubjectRecord
+    ? remembered(`standing:${standingPrincipal.toLowerCase()}:${standingSubject.toLowerCase()}`, () => deriveStanding({ readSubjectRecord: deps.readSubjectRecord, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}), wireRefOf },
+        { principal: standingPrincipal, subject: standingSubject })
+      .then((st) => ({ relation: st.relation, subject: st.subject, principal: standingPrincipal.toLowerCase(), because: st.because, ...(st.wireRef ? { wireRef: st.wireRef } : {}) }))
+      .catch(() => undefined))
     : null;
   let standingLink: ExecutionBindingV1['standing'] | undefined;
   if (standingOnce) standingLink = await standingOnce;
+  mark('standing');
   const bindingFor = (rs: ResolvedStep): ExecutionBindingV1 => {
     const sourceOf = (v: unknown): NonNullable<ExecutionBindingV1['argSources']>[string] => {
       const low = String(v ?? '').toLowerCase();
@@ -4303,6 +4327,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   const realmSuffix: string | undefined = input.addressee && deps.nameOf
     ? (((await deps.nameOf(input.addressee).catch(() => null)) ?? '').split('.').pop() || undefined)
     : undefined;
+  mark('runIntent-start');
   const result = await runIntent(input.intent, {
     planner: boundPlanner, tools, bindingFor,
     ...(input.resume ? { resume: input.resume } : {}),
@@ -4608,6 +4633,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     ports: {
       events: (e) => {
         events.push(e);
+        mark(`event:${e.type}`);
         if (e.type === 'PlanRefused') trace.admission.push({ refused: e.violations, replanned: e.replanning });
         else if (e.type === 'PlanCreated') trace.admission.push({ refused: [], replanned: false });
         if (input.onProgress) {
@@ -4709,6 +4735,8 @@ step is then handed to that agent under authority the person grants; leave it ou
   });
   // Spec 361 I2 — the interaction bindings of the tools this run OFFERED (contract-merged), keyed by
   // capability id, so the reply can say where its outcome lives. Display data; decides nothing.
+  mark('runIntent-done');
+  if (material) console.log(`[phases ${String(input.addressee ?? '').slice(0, 10)}] ${phases.join(' · ')}`);
   const interactionFor: Record<string, NonNullable<ToolSpec['interaction']>> = {};
   for (const t of tools) if (t.interaction) interactionFor[t.capability?.id ?? t.id] = t.interaction;
   trace.planner = plannerUsed;

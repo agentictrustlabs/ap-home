@@ -63,3 +63,43 @@ describe('playbook.answer — a question of judgement, answered from the playboo
     expect(PLAYBOOK_ANSWER_TOOL.answer).toBe('{{answer}}');
   });
 });
+
+describe('the craft that applies, not the whole doctrine', () => {
+  const doctrine = [
+    'You are a **Person Steward** — the agent of one person.',
+    '',
+    'What you can do: pay, invite, read a card table.',
+    '',
+    '## How each act is done',
+    '',
+    'One section per act.',
+    '',
+    '### Execute a treasury payment — moves value out of a treasury',
+    'Payment doctrine here.',
+    '### holdem-table-read — Reads a Texas Hold\'em hand from the person\'s own seat',
+    'Price first. Then outs.',
+    '### Invite a member — asks somebody to join',
+    'Invitation doctrine here.',
+    '### canasta-style — how this person plays canasta',
+    'Never hold wilds too long.',
+  ].join('\n');
+
+  it('keeps the opening and only the sections about the skill\'s game', async () => {
+    const { relevantInstructions } = await import('../src/playbook-answer.js');
+    const poker = relevantInstructions(doctrine, 'poker.advise');
+    expect(poker).toContain('Person Steward');
+    expect(poker).toContain('Price first');
+    expect(poker).not.toContain('Payment doctrine');
+    expect(poker).not.toContain('Invitation doctrine');
+    expect(poker).not.toContain('wilds');
+    const canasta = relevantInstructions(doctrine, 'canasta.advise');
+    expect(canasta).toContain('wilds');
+    expect(canasta).not.toContain('Price first');
+  });
+
+  it('keeps everything for a skill outside any game, because there is no basis to cut', async () => {
+    const { relevantInstructions } = await import('../src/playbook-answer.js');
+    expect(relevantInstructions(doctrine, 'adv:tax-position-analysis')).toBe(doctrine);
+    expect(relevantInstructions('', 'poker.advise')).toBe('');
+  });
+});

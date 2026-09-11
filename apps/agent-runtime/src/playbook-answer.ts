@@ -81,11 +81,17 @@ export function playbookAnswerAvailable(deps: Pick<PlaybookAnswerDeps, 'call' | 
 const ANSWER_SYSTEM =
   'You are answering AS this agent, for the person whose agent you are, from the playbook below. The '
   + 'material is what the person can see themselves; you have been shown nothing they have not. Answer '
-  + 'the question of judgement it poses. Be concrete and short: `say` is ONE sentence for somebody with a '
-  + 'clock running; `because` is the reason, which is the half that teaches; `action` is the move you '
-  + 'would make, in exactly the action shape the material\'s legal moves use, or omitted when you would '
-  + 'not commit to one. Never claim to know what you cannot see. Never perform anything — this is advice, '
-  + 'and the person plays the move or does not.';
+  + 'the question of judgement it poses.\n\n'
+  + 'REASON FIRST, in `reasoning`, in the order the playbook teaches — the price, the outs, position, '
+  + 'what the board beats, the money behind — and only then decide. WHEN A READ IS GIVEN, ITS NUMBERS ARE '
+  + 'THE NUMBERS: use them and do not recompute them. When a house baseline is given it is a rules coach\'s '
+  + 'line and is right about the mechanics; start from it, and depart from it only for a reason you state '
+  + 'in `reasoning`. A move that is free (checking) is never folded. A move must be one the legal moves '
+  + 'allow.\n\n'
+  + 'Then be concrete and short: `say` is ONE sentence for somebody with a clock running; `because` is the '
+  + 'reason, which is the half that teaches; `action` is the move you would make, in exactly the action '
+  + 'shape asked for, or omitted when you would not commit to one. Never claim to know what you cannot '
+  + 'see. Never perform anything — this is advice, and the person plays the move or does not.';
 
 /** A review skill (`*.review`) is told how something went; it is acknowledged in one line, never advised on. */
 const REVIEW_SYSTEM =
@@ -105,18 +111,26 @@ export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
     if (!deps.call) return { refused: 'no model is available to answer with' };
     const review = /\.review$/i.test(skill);
     const question = String(args.question ?? m.question ?? '').trim();
-    const system = `${review ? REVIEW_SYSTEM : ANSWER_SYSTEM}\n\n---\n\n${(deps.instructions ?? '').trim() || '(this agent has no further instructions)'}`;
+    const system = `${review ? REVIEW_SYSTEM : ANSWER_SYSTEM}\n\n---\n\n${relevantInstructions(deps.instructions, skill) || '(this agent has no further instructions)'}`;
     // THE ASKER'S OWN SHAPE, when it sent one. A card room names its game's exact action union; an answer
     // in any other shape is a move it can only refuse to draw a button for.
     const shape = m.answer && typeof m.answer === 'object'
       ? Object.entries(m.answer).filter(([, v]) => typeof v === 'string').map(([k, v]) => `  ${k}: ${v}`).join('\n')
       : '';
+    // THE READ AND THE BASELINE, set apart from the raw material. A card room computes the arithmetic
+    // and sends its own rules coach's line; both are worth more to a model than the table they came
+    // from, and buried in one JSON blob they were read as just more fields.
+    const inp = (m.input && typeof m.input === 'object' ? m.input : {}) as Record<string, unknown>;
+    const { read, baseline, ...rest } = inp;
     const user = [
       `Skill: ${skill}`,
       question ? `Question: ${question}` : 'Question: (nothing specific was asked — say what to do, and why)',
       ...(shape ? [`Answer shape, field by field:\n${shape}`] : []),
-      `Material: ${JSON.stringify(m.input ?? {})}`,
+      ...(read != null ? [`Read — the facts of the spot, computed (use these numbers):\n${JSON.stringify(read)}`] : []),
+      ...(baseline != null ? [`House baseline — a rules coach's line, as an observation:\n${JSON.stringify(baseline)}`] : []),
+      `Material: ${JSON.stringify(rest)}`,
     ].join('\n');
+    const started = Date.now();
     const out = await deps.call({
       system,
       messages: [{ role: 'user', content: user }],
@@ -128,22 +142,49 @@ export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
             input_schema: {
               type: 'object',
               properties: {
+                // FIRST, on purpose: a model that has to write its reasoning before its answer gives a
+                // better answer, and the reasoning stays here — only say/because/action go back.
+                reasoning: { type: 'string', description: 'At most 60 words: the price, the outs, position, the board, the money behind — then the decision. Not shown to the person.' },
                 say: { type: 'string', description: 'One sentence, for somebody with a clock running' },
                 because: { type: 'string', description: 'The reason — the half that teaches' },
                 action: { type: 'object', description: 'The move, in the action shape the legal moves use; omit to commit to none', additionalProperties: true },
               },
-              required: ['say', 'because'],
+              required: ['reasoning', 'say', 'because'],
             },
           },
-      maxTokens: deps.maxTokens ?? 600,
+      maxTokens: deps.maxTokens ?? 700,
     });
     const say = typeof out.say === 'string' ? out.say.trim() : '';
     if (!say) return { refused: 'the playbook produced no answer' };
     const because = typeof out.because === 'string' ? out.because.trim() : undefined;
     const action = out.action && typeof out.action === 'object' ? out.action : undefined;
-    const result = { skill, say, ...(because ? { because } : {}), ...(action ? { action } : {}), source: deps.agentName ?? 'this agent' };
+    // How long the model took, on the record: latency is a fact about the answer worth keeping beside it.
+    console.log(`[playbook.answer] ${skill} model ${Date.now() - started}ms · prompt ${system.length + user.length} chars · answer ${say.length + (because?.length ?? 0)} chars`);
+    const result = { skill, say, ...(because ? { because } : {}), ...(action ? { action } : {}), source: deps.agentName ?? 'this agent', modelMs: Date.now() - started, promptChars: system.length + user.length };
     // `answer` is the rendered reply — the JSON a card room decodes, verbatim. The fields beside it are
     // the same answer as an observation, for the trace.
     return { ...result, answer: JSON.stringify({ say, ...(because ? { because } : {}), ...(action ? { action } : {}) }) };
   };
+}
+
+/**
+ * THE CRAFT THAT APPLIES, not the whole doctrine.
+ *
+ * A person steward's compiled instructions run to twenty "how each act is done" sections — payments,
+ * invitations, charters — and every one of them was in the prompt for a question about a poker hand:
+ * slower to read, and a distraction the model has to set aside. The opening (who this agent is) is
+ * kept whole; of the act sections, only those about the skill's game are kept. A skill outside any
+ * game keeps everything, because there is no basis to cut.
+ */
+export function relevantInstructions(instructions: string | null | undefined, skill: string): string {
+  const text = (instructions ?? '').trim();
+  if (!text) return '';
+  const game = skill.split('.')[0]?.toLowerCase() ?? '';
+  const words = game === 'poker' ? /hold.?em|poker/i : game === 'canasta' ? /canasta/i : null;
+  if (!words) return text;
+  const [opening, ...sections] = text.split(/\n(?=### )/);
+  const kept = sections.filter((sec) => words.test(sec.split('\n')[0] ?? '') || words.test(sec.slice(0, 400)));
+  // The compiler's "How each act is done" heading precedes the sections; keep it only with sections.
+  const head = (opening ?? '').replace(/\n## How each act is done[\s\S]*$/, '').trim();
+  return kept.length ? `${head}\n\n## How this is done\n\n${kept.join('\n')}` : head;
 }

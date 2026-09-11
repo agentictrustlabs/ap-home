@@ -147,6 +147,7 @@ import { subjectAsk, subjectAnswer, validateSubjectAsk, handoff, type SubjectAns
 import { realtimeKitConfigured, verifyRealtimeKitWebhook, readRealtimeKitWebhook } from './realtimekit.js';
 import { sendSubjectAskOverWire, subjectAnswerMessage, subjectEnvelopeOf, handoffMessage, routedRunRefFor } from '@agenticprimitives/a2a';
 import { EXTERNAL_AGENT_TOOL, externalAgentInvoker } from './external-agent.js';
+import { remembered } from './run-memo.js';
 import { DISCOVERY_INSPECT_CAPABILITY, discoveryInspectInvoker } from './enterprise-tools.js';
 import { INVITATIONS_RECEIVED_CAPABILITY, invitationsReceivedInvoker } from './invitations-received.js';
 import { subjectAddress, nameRecordsReader, servesUnpublishedNames, type SubjectAddressEnv } from './subject-address.js';
@@ -212,10 +213,20 @@ function getInMemoryNonceStore(): NonceStore {
  * critical events should be emitted through a composeFailHardSinks wrapper at
  * their call site, as on the MCP key-release path.
  */
-export function buildAuditSink(env: Env): AuditSink {
+export function buildAuditSink(env: Env, opts: { deferVia?: { waitUntil(p: Promise<unknown>): void } } = {}): AuditSink {
   const console = createConsoleAuditSink({ prefix: '[AUDIT a2a]' });
   if (env.DB) {
-    return composeSinks(console, createPiiGuardrailSink(createD1AuditSink(env.DB), { mode: 'redact' }));
+    const durable = createPiiGuardrailSink(createD1AuditSink(env.DB), { mode: 'redact' });
+    // WRITTEN AFTER THE REPLY, NOT BEFORE IT. A run writes several audit rows — step executed, receipt,
+    // run completed — and each D1 write was awaited in line before the answer could go back: about three
+    // seconds of a person waiting on a card table's clock for bookkeeping that concerns them not at all.
+    // `waitUntil` keeps the Worker alive until every row has landed; nothing is dropped, and the row is
+    // as durable as it was. Only where a caller hands over its execution context; a caller with none
+    // (an alarm, a test) waits as before.
+    const deferred: AuditSink = opts.deferVia
+      ? { write: async (event) => { opts.deferVia!.waitUntil(durable.write(event)); } }
+      : durable;
+    return composeSinks(console, deferred);
   }
   return composeSinks(console);
 }
@@ -1254,7 +1265,7 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
         })) === true,
       },
     } : {}),
-    askAsAgent: (input) => runAgentAsk(c.env, input),
+    askAsAgent: (input) => runAgentAsk(c.env, { ...input, executionCtx: c.executionCtx }),
     // Spec 387 W3 — the outside agent that parked a run answers its prompt. The checkpoint decides: it must have
     // parked for exactly this caller (`outsider.agent`), still be waiting on a data prompt, and not have expired.
     // The answer joins the supplied inputs and the run is replayed from its checkpoint (spec 370 P1) — the
@@ -1724,6 +1735,8 @@ function plannerSummaryOf(trace: PlannerTraceV1 | undefined): RunPlannerSummaryV
 export async function runAgentAsk(env: Env, input: { agent: Address; addressee: Address; ask: string; runRef: string; context?: Record<string, unknown>;
   /** The message's data part naming a skill — what `playbook.answer` reasons over (never part of the intent's digest). */
   material?: Record<string, unknown> | null;
+  /** The request's execution context, so audit rows are written after the reply rather than before it. */
+  executionCtx?: { waitUntil(p: Promise<unknown>): void };
   /** Spec 390 W2 — the W3C Trace Context the caller's request carried; recorded, never read by a gate. */
   traceContext?: TraceContextV1 | null;
   /** Spec 390 W3 — when the caller's request arrived (ms), for the `receive_request` span. */
@@ -1750,12 +1763,27 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
   /** Spec 396 W3 — what the run cost its agent's storage; a routine's budget is judged against it (398 §5.4). */
   bill?: { vaultCalls: number; doRequests: number };
 }> {
-  const deps = harnessDeps(env, buildAuditSink(env));
-  deps.addresseeKind = await deps.agentTypeOf?.(input.addressee).catch(() => null) ?? null;
+  const askT0 = Date.now();
+  const deps = harnessDeps(env, buildAuditSink(env, input.executionCtx ? { deferVia: input.executionCtx } : {}));
+  deps.addresseeKind = await remembered(`kind:${input.addressee.toLowerCase()}`, () => deps.agentTypeOf?.(input.addressee).catch(() => null) ?? Promise.resolve(null)) ?? null;
+  const tKind = Date.now() - askT0;
   const intent = input.intent ?? { goal: input.ask, context: { addressee: input.addressee, asker: input.agent, ...(input.context ?? {}) } };
+  // A NAMED, ADVERTISED SKILL IS ITS OWN PLAN. When the message's data part names a skill this agent
+  // publicly advertises, asking a model to choose `playbook.answer` from twenty-five tools is a whole
+  // planner call spent confirming the obvious — five seconds and the entire playbook doctrine as prompt,
+  // on a question that arrives on a card table's clock. The plan is supplied instead, exactly as a
+  // routed topic turn supplies its own (spec 380 W3); the answering step still runs every gate it would.
+  // Fail closed: an unadvertised skill gets no plan and the planner decides, as before.
+  const skillNamed = typeof input.material?.skill === 'string' ? input.material.skill : null;
+  const advertised = skillNamed && !input.plan && !input.resume ? await remembered(`advertised:${input.addressee.toLowerCase()}`, () => readAdvertisedCapabilityIds(env, input.addressee).then((csv) => csv.split(',').map((x) => x.trim()).filter(Boolean)).catch(() => [] as string[])).then((ids) => ids.map((x) => x.toLowerCase()).includes(skillNamed.toLowerCase())) : false;
+  const question = typeof (input.material?.input as { question?: unknown } | undefined)?.question === 'string' ? (input.material!.input as { question: string }).question : undefined;
+  const tAdvertised = Date.now() - askT0;
+  const suppliedPlan: Plan | undefined = advertised ? { steps: [{ toolId: 'playbook.answer', args: { skill: skillNamed, ...(question ? { question } : {}) } }], rationale: 'the message names a skill this agent advertises' } : undefined;
+  const tRun0 = Date.now();
   const { result, interactionFor, trace, tools, events, presentedRefs, bill } = await runUnderMandateBilled(env as unknown as HarnessEnv, deps, {
     intent, presented: input.resume?.presented ?? null, person: input.agent, runRef: input.runRef, addressee: input.addressee,
     ...(input.material ? { material: input.material } : {}),
+    ...(suppliedPlan ? { plan: suppliedPlan } : {}),
     ...(input.traceContext ? { traceContext: input.traceContext } : {}),
     ...(input.resume?.plan ? { plan: input.resume.plan } : input.plan ? { plan: input.plan } : {}),
     ...(input.resume?.executed ? { resume: await rehydrateExecuted(deps, input.resume.executed) } : {}),
@@ -1769,6 +1797,7 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
       return { refused: `${toolId} is not available to an unattended run — a person asks that` };
     },
   });
+  if (input.material) console.log(`[phases ask] agentType ${tKind}ms · advertised ${tAdvertised}ms · run ${Date.now() - tRun0}ms`);
   const reply = await askReplyFor(env as unknown as HarnessEnv, {
     intent, result, addressee: input.addressee, composerFor: (need: RouteNeed) => selectComposerRouted(env, { ...(input.guidance ? { systemPrompt: input.guidance } : {}), need }), deps, interactionFor, plannerTrace: trace, tools,
     resolveName: (name: string) => deps.resolveName?.(name) ?? Promise.resolve(null),

@@ -197,7 +197,9 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
             // THE DATA PART TRAVELS TOO. A card room asks for advice with the seat's view as data and the
             // question as text; the text alone gave the planner "advise seat 0" and nothing to advise ON.
             const material = partsData(ctx.message.parts);
+            const askT0 = Date.now();
             asked = await deps.askAsAgent({ agent: caller, addressee: agent, ask: message, runRef, traceContext: traceContextOf(ctx.headers), receivedAt: startedAt, ...(material && typeof material.skill === 'string' ? { material } : {}) });
+            if (material) console.log(`[phases surface] principal→ask ${askT0 - startedAt}ms · ask ${Date.now() - askT0}ms`);
           }
           // Spec 387 W2 — THE TRACE RIDES WITH THE TASK: what admitted the run, what was offered and chosen, each
           // step's outcome and output summary, in order. Evidence of what ran; nothing in it is authority or private.
