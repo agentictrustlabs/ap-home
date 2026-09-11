@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { subjectAsk, AP_SUBJECT_ASK_EXTENSION_URI } from '@agenticprimitives/a2a';
 import type { AgentCardV1 } from '@agenticprimitives/a2a/standard';
 import { standardServerFor } from '../../src/standard-a2a.js';
-import { sendSubjectAskOverWire, a2aEndpointOf, subjectAskOf, subjectAskMessage } from '../../src/subject-hop.js';
+import { sendSubjectAskOverWire, a2aEndpointOf, subjectAskOf, subjectAskMessage } from '@agenticprimitives/a2a';
 import { readSubjectReply } from '../../src/harness-run.js';
 
 const ALICE = '0xb0d11ce19b756a682e78b4904cd8d832303b3d11' as const;
@@ -119,7 +119,7 @@ describe('sender → receiver over one SendMessage', () => {
 });
 
 // ── Spec 374 §4 — THE DEBTOR'S ANSWER, delivered to the creditor's agent ──────────────────────────────
-import { subjectAnswerMessage, subjectAnswerOf } from '../../src/subject-hop.js';
+import { subjectAnswerMessage, subjectAnswerOf } from '@agenticprimitives/a2a';
 import { subjectAnswer } from '@agenticprimitives/a2a';
 
 const MARKER = 'test-marker-0123456789abcdef0123456789abcdef';

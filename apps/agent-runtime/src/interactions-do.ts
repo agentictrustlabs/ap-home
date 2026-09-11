@@ -19,15 +19,16 @@
 // Audit: D1 (spec 322 §7), before commit.
 import { CONTACT_FIELD_ARGS, contactField, precisionOf } from '@agenticprimitives/ontology';
 import { createPublicClient, http, decodeAbiParameters, type Address, type Hex } from 'viem';
-import { AsyncLocalStorage } from 'node:async_hooks';
 import { chainFor } from './chain';
 import { kinTermFor, householdRoleFor } from '@agenticprimitives/ontology';
 import { hashDelegation, decodeVaultRecordScopeTerms, vaultRecordScopeAllows, VAULT_RECORD_SCOPE_ENFORCER, type Delegation, type VaultRecordScopeGrant } from '@agenticprimitives/delegation';
 import { PrincipalGatewayDO } from '@agenticprimitives/fabric/cloudflare';
 import { buildMountedGatewayDeps } from './gateway-mount.js';
-import { loadPlaybook } from './playbook.js';
-import { adoptionStage, classifyDivergence, recordDivergence, shouldShadow, GATEWAY_ADOPTION, SHADOW_INTERVAL_MS, type Divergence } from './gateway-adoption.js';
-import { verifyOrgWire, enforcersFromEnv, type IncomingWire } from './org-wire.js';
+import { loadPlaybook, countedOp, countVaultCall } from '@agenticprimitives/harness';
+import { classifyDivergence, recordDivergence, shouldShadow, SHADOW_INTERVAL_MS, type Divergence } from '@agenticprimitives/fabric';
+import { gatewayStage, GATEWAY_ADOPTION } from './gateway-adoption.js';
+import { verifyDelegationWire, type DelegationWireLike } from '@agenticprimitives/a2a';
+import { enforcersFromEnv } from './org-wire.js';
 import { A2A_ANY_SKILL, decodeAllowedMethodsTerms, decodeAllowedTargetsTerms, skillSelector } from '@agenticprimitives/a2a';
 import {
   appendBoardPost,
@@ -74,7 +75,7 @@ import { inboxRevision, upsertConversation, type InboxDataV1 } from '@agenticpri
 // spec 341 §5.1b — outbound delivery, performed here because this is where the signing key is.
 import { deliverOutbound, wireTargets } from './outbound-delivery.js';
 import { messagingScopeCovers, messagingScopeDepsFromEnv } from './messaging-scope.js';
-import { wrapSessionSignature } from './session-wire.js';
+import { wrapSessionSignature } from '@agenticprimitives/a2a';
 // spec 341 §7 — the in-Worker marker, split off the custody secret.
 import { internalHeaders, internalMarker, isInternalCall } from './internal-marker.js';
 import type { A2aTransport } from '@agenticprimitives/a2a';
@@ -85,7 +86,7 @@ import { caip10, verifyHomeSession, verifyRelyingIdToken } from './custody-oidc.
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
 // Hoisted-function import from index.js — the documented safe cycle (see a2a-task-do.ts:38).
 import { buildAuditSink, callMcpToolBound, interactionsSessionAccount, interactionsSessionKeyConfigured, fireEndeavorEventTriggers, afterEndeavorCommit, type Env, type IncomingDelegation } from './index.js';
-import { checkSessionWireShape } from './session-wire.js';
+import { checkSessionWireShape } from '@agenticprimitives/a2a';
 import { handleEndeavorOp, reduceEventLog, coordinationEventsResource, COORDINATION_REQUESTS_RESOURCE, type CoordinationRequestsDocV1, type EndeavorOpDeps } from './endeavors.js';
 import type { CoordinationEventV1 } from '@agenticprimitives/coordination';
 import { ERC1271_MAGIC_VALUE as ERC1271_MAGIC } from '@agenticprimitives/types';
@@ -426,16 +427,8 @@ const json = (b: unknown, s = 200): Response => new Response(JSON.stringify(b), 
  * `x-ap-vault-tools` (tool=n,…). Numbers, never content. The organization's vault budget (120 verified calls a
  * minute) is the binding constraint the live gates keep hitting; a cost nobody can read is a cost nobody fixes.
  */
-interface OpCost { calls: number; throttled: number; tools: Record<string, number> }
-const opCost = new AsyncLocalStorage<OpCost>();
-const withCost = (res: Response, cost: OpCost, ms: number): Response => {
-  const headers = new Headers(res.headers);
-  headers.set('x-ap-vault-calls', String(cost.calls));
-  headers.set('x-ap-vault-throttled', String(cost.throttled));
-  headers.set('x-ap-ms', String(ms));
-  headers.set('x-ap-vault-tools', Object.entries(cost.tools).map(([k, v]) => `${k}=${v}`).join(','));
-  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
-};
+// The counter itself is `@agenticprimitives/harness` `op-cost.ts` (spec 399 §4 promotion): `countedOp` runs an op
+// under a fresh counter, `countVaultCall` charges one tool call to it, and the headers are stamped on the way out.
 
 /**
  * Injected external seams (mirrors `packages/fabric`'s `GatewayDeps`).
@@ -736,8 +729,7 @@ export class InteractionsDO {
         // honouring the limiter's own retryAfterMs (capped), and a throttle that persists is SAID to be one.
         let last: Response | null = null;
         for (let attempt = 0; attempt < 4; attempt++) {
-          const counted = opCost.getStore();
-          if (counted) { counted.calls += 1; counted.tools[toolName] = (counted.tools[toolName] ?? 0) + 1; if (attempt > 0) counted.throttled += 1; }
+          countVaultCall(toolName, { throttled: attempt > 0 });
           const resp = await callMcpToolBound({ env, toolName, grant, sessionLeaf: leaf, toolArgs });
           if (resp.status !== 401 && resp.status !== 429) return resp;
           const peek = resp.clone();
@@ -1066,8 +1058,8 @@ export class InteractionsDO {
    * "allowedMethods must be ABSENT" or "these terms must name the governance registries".
    */
   private async verifyWire(wire: IncomingDelegation, expectedDelegator: string, sessionSa: Address): Promise<boolean> {
-    return verifyOrgWire({
-      wire: wire as unknown as IncomingWire,
+    return verifyDelegationWire({
+      wire: wire as unknown as DelegationWireLike,
       expectedDelegator,
       expectedDelegate: sessionSa,
       enforcers: enforcersFromEnv(this.env as unknown as Record<string, string | undefined>),
@@ -1587,9 +1579,7 @@ export class InteractionsDO {
 
   /** Spec 396 — every op runs under a fresh cost counter; the response carries the numbers as headers. */
   async fetch(request: Request): Promise<Response> {
-    const cost: OpCost = { calls: 0, throttled: 0, tools: {} };
-    const t0 = Date.now();
-    return opCost.run(cost, async () => withCost(await this.handleOp(request), cost, Date.now() - t0));
+    return countedOp(() => this.handleOp(request));
   }
 
   private async handleOp(request: Request): Promise<Response> {
@@ -1847,7 +1837,7 @@ export class InteractionsDO {
           // runs after it, cannot change it, and cannot fail the request. Sampled, because this is the
           // hottest path in the app and doubling its vault reads is how a comparison harness takes down
           // the thing it was measuring. See `gateway-adoption.ts`.
-          if (adoptionStage('inbox.get', this.env) === 'shadow') this.shadowInboxGet(g, doc);
+          if (gatewayStage('inbox.get', this.env) === 'shadow') this.shadowInboxGet(g, doc);
           const revision = doc === null ? null : await inboxRevision(doc as InboxDataV1);
           const since = typeof body.sinceRev === 'string' ? body.sinceRev : undefined;
           if (revision !== null && since && since === revision) {
@@ -2363,7 +2353,7 @@ export class InteractionsDO {
           // verified `archetype.assignment` in their own vault), never a hand-typed markdown: one playbook,
           // one source, the same one every receipt cites. Absent or unverifiable ⇒ no instructions (the
           // turn keeps its built-in default — a config default, not a fallback mechanism).
-          const playbook = await loadPlaybook((_subject, recordType) => this.readDoc<unknown>(g, recordType, null), principal);
+          const playbook = await loadPlaybook((_subject, recordType) => this.readDoc<unknown>(g, recordType, null), principal, console.log);
           return json({ ok: true, displayName: cfg.displayName, messages, ...(playbook ? { playbook: playbook.instructions } : {}) });
         }
         if (op === 'internal.inbox.post') {
@@ -2622,7 +2612,7 @@ export class InteractionsDO {
         }
         if (op === 'internal.consult.context') {
           // Same source as `internal.inbox.read`: the person's compiled archetype (spec 354 K3).
-          const playbook = await loadPlaybook((_subject, recordType) => this.readDoc<unknown>(g, recordType, null), principal);
+          const playbook = await loadPlaybook((_subject, recordType) => this.readDoc<unknown>(g, recordType, null), principal, console.log);
           const cfg = await this.readDoc<PersonAssistantV1 | null>(g, PERSON_ASSISTANT_RESOURCE, null);
           return json({
             ok: true,

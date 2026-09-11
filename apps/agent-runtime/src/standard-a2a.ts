@@ -13,71 +13,26 @@
 // session wire (`caller.ts`). Nothing on this surface is a mandate: an act the ask reaches still needs the
 // mandate the harness demands, and a task parked `TASK_STATE_AUTH_REQUIRED` carries what it would need.
 //
+// WHAT IS THE PACKAGE'S, since spec 399 W0 (§4): the card's 1.0 fields, the task-id shape, the one task view
+// over the runtime's tasks and this server's, the two admission schemes, the delegated/engagement dispatch and
+// the reply-kind → state table (`@agenticprimitives/a2a/standard` `mount.ts`); the routed hop's profiles
+// (`subject-hop.ts`); the flow trace (`orchestration`). WHAT IS THIS APP'S: the ask route it calls in-process,
+// the in-Worker marker, what it parks for stewards, and which artifacts it hangs on a task.
+//
 // Conversational task rows are a per-isolate projection (in memory); a delegated task lives in the object
 // that owns it. Nothing a person cannot rebuild is in either (ADR-0055).
-import { buildFlowTrace, flowIdOf, referralOf } from './flow-trace.js';
-import { traceContextOf } from '@agenticprimitives/orchestration';
+import { buildFlowTrace, flowIdOf, referralOf, traceContextOf } from '@agenticprimitives/orchestration';
 import { hasProvenanceRef } from './run-export.js';
-
-/** Spec 390 W2 — the W3C Trace Context a request arrived with, forwarded on the in-process ask so the run's
- *  record keeps it. Ids only; the ask admits on the session and the wire, never on these. */
-const traceHeaders = (h: Headers): Record<string, string> => {
-  const out: Record<string, string> = {};
-  const tp = h.get('traceparent'); const ts = h.get('tracestate');
-  if (tp) out.traceparent = tp;
-  if (ts) out.tracestate = ts;
-  return out;
-};
-import type { RunEvent } from '@agenticprimitives/orchestration';
+import type { RunEvent, SuppliedInputV1 } from '@agenticprimitives/orchestration';
 import type { Address } from 'viem';
 import {
-  AP_DELEGATED_TASK_EXTENSION, DELEGATED_TASK_CARD_EXTENSION, createStandardA2aServer, createMemoryTaskStore,
-  createMemoryPushStore, isPartyToDelegatedTask, readDelegatedTask, sessionWirePrincipal,
-  type AgentCardV1, type ExecutionContext, type MessageV1, type PartV1, type Principal, type StandardServer,
-  type SessionWirePrincipalDeps, type StandardTaskStore, type TaskV1,
+  createStandardA2aServer, createMemoryTaskStore, createMemoryPushStore, sessionWirePrincipal,
+  runtimeBackedTaskStore, delegatedDispatch, canSeeDelegatedOrOwnTask, principalBySchemes, partsText, partsData, traceHeadersOf,
+  settlementForReplyKind, settleTask,
+  type AgentCardV1, type ExecutionContext, type Principal, type StandardServer, type SessionWirePrincipalDeps, type StandardTaskStore, type DelegatedRpc,
 } from '@agenticprimitives/a2a/standard';
-import type { SuppliedInputV1 } from '@agenticprimitives/orchestration';
 import { internalHeaders, isInternalCall, type InternalMarkerEnv } from './internal-marker.js';
-import { subjectAskOf, subjectAnswerOf, handoffOf, routedRunRefFor, SUBJECT_ANSWER_ARTIFACT } from './subject-hop.js';
-import { engagementOf, engagementResponseMessage, ENGAGEMENT_CARD_EXTENSION, AP_ENGAGEMENT_EXTENSION_URI, type HandoffV1 } from '@agenticprimitives/a2a';
-import type { SubjectAnswerV1 } from '@agenticprimitives/a2a';
-
-/** The runtime mints 32-byte hex task ids; this server's own conversational tasks are uuids. That is how a
- *  read knows which side holds it — the shape is minted, not guessed (`newTaskId` in the DO). */
-const isRuntimeTaskId = (id: unknown): boolean => typeof id === 'string' && /^0x[0-9a-fA-F]{64}$/.test(id);
-
-/**
- * The 1.0 fields a live card needs on top of what the Worker already builds: an interface with a protocol
- * version, input/output modes, skills with names, and the bearer scheme this surface admits. Additive —
- * every field the card carried stays; a released card (347 §8) is served byte-for-byte and untouched.
- */
-export function withStandardCardFields(live: Record<string, unknown>, opts: { messageUrl: string }): Record<string, unknown> {
-  const skills = (Array.isArray(live.skills) ? live.skills : []) as Array<{ id: string; name?: string; description?: string; tags?: string[] }>;
-  const caps = (live.capabilities && typeof live.capabilities === 'object' ? live.capabilities : {}) as Record<string, unknown>;
-  return {
-    ...live,
-    protocolVersion: '1.0',
-    supportedInterfaces: [{ url: opts.messageUrl, protocolBinding: 'JSONRPC', protocolVersion: '1.0' }],
-    // Honest flags: the standard server mounted here streams (SSE) and delivers push; the profile's DO
-    // runtime does neither — the flags describe the surface a 1.0 client reaches by these methods.
-    capabilities: {
-      ...caps, streaming: true, pushNotifications: true, extendedAgentCard: false,
-      // The card SAYS how to authorize a task, so a peer learns it before calling rather than by failing.
-      extensions: [
-        ...((caps.extensions as Array<{ uri: string }> | undefined) ?? []).filter((e) => e.uri !== AP_DELEGATED_TASK_EXTENSION && e.uri !== AP_ENGAGEMENT_EXTENSION_URI),
-        { ...DELEGATED_TASK_CARD_EXTENSION },
-        // Spec 384 W2/W3 — every agent served here answers a probe (an offer, a decline, a question, a referral,
-        // an unavailability, or "a human channel is required"), so a candidate source can see who to ask.
-        { ...ENGAGEMENT_CARD_EXTENSION },
-      ],
-    },
-    defaultInputModes: ['text/plain', 'application/json'],
-    defaultOutputModes: ['text/plain', 'application/json'],
-    skills: skills.map((s) => ({ id: s.id, name: s.name ?? s.id, description: s.description ?? s.name ?? s.id, tags: s.tags ?? [] })),
-    securitySchemes: { ...((live.securitySchemes as Record<string, unknown> | undefined) ?? {}), homeSession: { httpAuthSecurityScheme: { scheme: 'bearer', bearerFormat: 'home-session', description: 'A Home session presented as a bearer names the asking person; it grants nothing (spec 372 §0).' } } },
-    securityRequirements: [{ schemes: { homeSession: { list: [] } } }],
-  };
-}
+import { subjectAskOf, subjectAnswerOf, handoffOf, routedRunRefFor, SUBJECT_ANSWER_ARTIFACT, type HandoffV1, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
 
 export interface StandardMountDeps {
   env: InternalMarkerEnv & Record<string, unknown>;
@@ -92,7 +47,7 @@ export interface StandardMountDeps {
   claimAssertion?: (agent: Address, digest: string, expiresAtMs: number) => Promise<boolean>;
   /** Spec 372 S4 — forward a 1.0 request to the agent's own object, where the delegation-authorized
    *  runtime lives. Returns the JSON-RPC response verbatim. */
-  delegatedRpc?: (agent: Address, rpc: unknown, principal: Principal | null) => Promise<{ result?: unknown; error?: { code: number; message: string } }>;
+  delegatedRpc?: DelegatedRpc;
   /** Spec 372 S3c — an agent asking as itself: no session, no mandate, its own standing. */
   askAsAgent?: (input: { agent: Address; addressee: Address; ask: string; runRef: string; /** Spec 390 W2 — the caller's W3C Trace Context, kept on the run's record. */ traceContext?: import('@agenticprimitives/orchestration').TraceContextV1 | null; /** Spec 390 W3 — when the request arrived. */ receivedAt?: number }) => Promise<{
     reply: { kind: string; text?: string; prompt?: { kind: string; prompt: string; stepRef: string }; error?: string };
@@ -130,9 +85,6 @@ interface AskEnvelope {
   reply?: { kind?: string; runRef?: string; text?: string; summary?: string; results?: Array<{ toolId: string; result: unknown }>; prompt?: { kind?: string; stepRef?: string; prompt?: string; fields?: Array<{ name?: string }> }; requirement?: unknown; effects?: unknown; receipt?: unknown };
 }
 
-const textOf = (parts: PartV1[]): string => parts.map((p) => (typeof p.text === 'string' ? p.text : typeof p.data === 'string' ? p.data : '')).filter(Boolean).join('\n').trim();
-const dataOf = (parts: PartV1[]): Record<string, unknown> | null => { const d = parts.find((p) => p.data && typeof p.data === 'object' && !Array.isArray(p.data)); return d ? (d.data as Record<string, unknown>) : null; };
-
 /** The STORES persist per agent per isolate; the server is rebuilt per request so it carries that
  *  request's execution context and card (a stale context would refuse the ask route's `waitUntil`). */
 const stores = new Map<string, { tasks: ReturnType<typeof createMemoryTaskStore>; push: ReturnType<typeof createMemoryPushStore> }>();
@@ -151,93 +103,36 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
         onRefused: (reason, who) => console.warn(`[standard-a2a] wire refused for ${who ?? '?'}: ${reason}`),
       })
     : null;
-  // ONE TASK VIEW over two stores (spec 372 S4): a 32-byte hex id can only be the runtime's, so a read
-  // asks the object that owns it; anything else is a conversation this server made. A caller cannot tell,
-  // and must not have to.
-  const tasks: StandardTaskStore = deps.delegatedRpc
-    ? {
-        async get(id) {
-          if (!isRuntimeTaskId(id)) return st.tasks.get(id);
-          const r = await deps.delegatedRpc!(agent, { jsonrpc: '2.0', id: 1, method: 'GetTask', params: { id } }, null).catch(() => null);
-          return (r?.result as TaskV1 | undefined) ?? null;
-        },
-        put: (t) => st.tasks.put(t),
-        async all() {
-          const own = await st.tasks.all();
-          const r = await deps.delegatedRpc!(agent, { jsonrpc: '2.0', id: 1, method: 'ListTasks', params: {} }, null).catch(() => null);
-          const theirs = ((r?.result as { tasks?: TaskV1[] } | undefined)?.tasks ?? []);
-          return [...theirs, ...own];
-        },
-      }
-    : st.tasks;
+  // ONE TASK VIEW over two stores (spec 372 S4): the package's, bound to this agent's object.
+  const tasks: StandardTaskStore = deps.delegatedRpc ? runtimeBackedTaskStore({ local: st.tasks, agent, rpc: deps.delegatedRpc }) : st.tasks;
 
   const server = createStandardA2aServer({
     card,
     tasks,
     push: st.push,
-    // A delegated task is the runtime's — it keeps its id, and this server never makes a second one.
-    // Spec 384 W2 — an engagement PROBE is answered with a MESSAGE and no task (336 §5): the reply is the
-    // provider's own document, signed when it is an offer. Refused unless the caller is known.
-    ...(deps.delegatedRpc || deps.answerProbe ? {
-      beforeSend: async ({ message, configuration }, principal) => {
-        const eng = engagementOf(message as MessageV1);
-        if (eng && 'errors' in eng) throw Object.assign(new Error(`the engagement document is malformed: ${eng.errors.join('; ')}`), { code: -32602, name: 'A2aError' });
-        if (eng && 'probe' in eng) {
-          if (!deps.answerProbe) throw Object.assign(new Error('this agent does not answer engagement probes here'), { code: -32601, name: 'A2aError' });
-          if (!principal) throw Object.assign(new Error('a probe names its requester, and the caller must be known'), { code: -32001, name: 'A2aError' });
-          if (String(eng.probe.requester).toLowerCase() !== principal.agent.toLowerCase()) throw Object.assign(new Error('the probe names a requester other than its caller'), { code: -32602, name: 'A2aError' });
-          if (String(eng.probe.candidate).toLowerCase() !== agent.toLowerCase()) throw Object.assign(new Error('the probe is addressed to another agent'), { code: -32602, name: 'A2aError' });
-          const response = await deps.answerProbe({ agent, probe: eng.probe, caller: principal });
-          return { message: engagementResponseMessage(response as never) };
-        }
-        if (eng && 'response' in eng) throw Object.assign(new Error('an engagement response is read by the requester that probed, not sent to it as a new message'), { code: -32602, name: 'A2aError' });
-        if (!deps.delegatedRpc) return null;
-        const ext = readDelegatedTask(message as MessageV1);
-        if (ext === null) return null;
-        const r = await deps.delegatedRpc!(agent, {
-          jsonrpc: '2.0', id: 1, method: 'SendMessage',
-          params: { message, ...(configuration ? { configuration } : {}) },
-        }, principal);
-        if (r.error) throw Object.assign(new Error(r.error.message), { code: r.error.code, name: 'A2aError' });
-        return (r.result as { task?: TaskV1; message?: MessageV1 }) ?? null;
-      },
-      onCancel: async (task, principal) => {
-        if (!isRuntimeTaskId(task.id) || !deps.delegatedRpc) return null;
-        const r = await deps.delegatedRpc!(agent, { jsonrpc: '2.0', id: 1, method: 'CancelTask', params: { id: task.id } }, principal);
-        if (r.error) throw Object.assign(new Error(r.error.message), { code: r.error.code, name: 'A2aError' });
-        return (r.result as TaskV1) ?? null;
-      },
-    } : {}),
+    // A delegated task is the runtime's — it keeps its id; an engagement PROBE is answered with a MESSAGE and no
+    // task (spec 384 W2 / 336 §5). The package's dispatch; this agent's runtime and probe answerer behind it.
+    ...delegatedDispatch({ agent, ...(deps.delegatedRpc ? { rpc: deps.delegatedRpc } : {}), ...(deps.answerProbe ? { answerProbe: deps.answerProbe } : {}) }),
     // A delegated task is visible to its parties; a conversation, to whoever had it.
-    canSeeTask: (task, principal) => {
-      const delegated = (task.metadata as Record<string, unknown> | undefined)?.[AP_DELEGATED_TASK_EXTENSION] !== undefined;
-      if (delegated) return isPartyToDelegatedTask(task, principal?.agent);
-      const asker = (task.metadata as { asker?: string } | undefined)?.asker;
-      return !asker || asker === principal?.agent;
-    },
-    // TWO SCHEMES, ONE MECHANISM EACH (ADR-0013). `Bearer` is a PERSON's Home session; `A2A-Session` is an
-    // AGENT's session wire, verified on chain per request (spec 372 S3c). The scheme token selects which
-    // runs — neither is ever tried because the other failed, and each fails closed on its own terms.
-    principal: async (request): Promise<Principal | null> => {
-      // Spec 374 §4 — AN AGENT OF THIS WORKER, calling in-process. A Worker cannot fetch its own account's
-      // hostnames, so a subject agent delivering a finished act to a creditor agent served here makes the
-      // hop through this handler with the in-Worker marker (spec 341 §7) and names itself. The marker is
-      // the door; the name is checked against the run it claims to answer, never trusted beyond that.
-      const internalAgent = request.headers.get('x-ap-internal-agent');
-      if (internalAgent && /^0x[0-9a-fA-F]{40}$/.test(internalAgent)) {
+    canSeeTask: canSeeDelegatedOrOwnTask,
+    // TWO SCHEMES, ONE MECHANISM EACH (ADR-0013) — the package's selector. `first` is THIS Worker's own door:
+    // spec 374 §4 — AN AGENT OF THIS WORKER, calling in-process. A Worker cannot fetch its own account's
+    // hostnames, so a subject agent delivering a finished act to a creditor agent served here makes the
+    // hop through this handler with the in-Worker marker (spec 341 §7) and names itself. The marker is
+    // the door; the name is checked against the run it claims to answer, never trusted beyond that.
+    principal: principalBySchemes({
+      first: (request) => {
+        const internalAgent = request.headers.get('x-ap-internal-agent');
+        if (!internalAgent || !/^0x[0-9a-fA-F]{40}$/.test(internalAgent)) return undefined;
         return isInternalCall(request, deps.env) ? { kind: 'agent', agent: internalAgent.toLowerCase() } : null;
-      }
-      const auth = request.headers.get('authorization') ?? '';
-      if (/^A2A-Session\s/i.test(auth)) return byWire ? byWire(request) : null;
-      const token = /^Bearer\s+(.+)$/i.exec(auth)?.[1]?.trim();
-      if (!token) return null;
-      const who = await deps.verifySession(token).catch(() => null);
-      return who && who.ok ? { agent: who.sa.toLowerCase(), session: token } : null;
-    },
+      },
+      wire: byWire,
+      bearer: async (token) => { const who = await deps.verifySession(token); return who.ok ? { agent: who.sa.toLowerCase(), session: token } : null; },
+    }),
     executor: {
       execute: async (ctx: ExecutionContext) => {
         const session = String(ctx.principal?.session ?? '');
-        const message = textOf(ctx.message.parts);
+        const message = partsText(ctx.message.parts);
         // AN AGENT ASKING AS ITSELF (spec 372 S3c). It has no person's session and is given none: the run
         // is the same one a trigger fires — no mandate presented, reads bounded to what this agent's own
         // records say to that asker, an act suspending as AUTH_REQUIRED with what it would need.
@@ -254,8 +149,10 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           await ctx.artifact({ name: SUBJECT_ANSWER_ARTIFACT, parts: [{ data: envelope }] });
           const reply = envelope.reply as { kind?: string; text?: string; error?: string; prompt?: { prompt?: string }; summary?: string } | undefined;
           const said = reply?.text || reply?.summary || reply?.prompt?.prompt || reply?.error || '';
-          if (reply?.kind === 'done' || reply?.kind === 'answer') { await ctx.complete([{ text: said || 'Done.' }]); return; }
-          if (reply?.kind === 'prompt' || reply?.kind === 'authority_required') { await ctx.inputRequired([{ text: said || 'More is needed.' }]); return; }
+          // A hand-off's need parks as INPUT_REQUIRED either way: the parent holds the mandate, not the caller here.
+          const how = settlementForReplyKind(reply?.kind);
+          if (how === 'completed') { await ctx.complete([{ text: said || 'Done.' }]); return; }
+          if (how === 'input-required' || how === 'auth-required') { await ctx.inputRequired([{ text: said || 'More is needed.' }]); return; }
           await ctx.reject([{ text: said || 'Refused.' }]);
           return;
         }
@@ -284,7 +181,7 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           // Spec 387 W3 — A CONTINUATION: the same caller answers the prompt the run parked on. The task's own
           // metadata says which run; the checkpoint says which step and who may answer; the answer is the data part.
           const parkedRef = typeof ctx.task.metadata?.runRef === 'string' && ctx.task.metadata.openToStewards === true ? ctx.task.metadata.runRef : undefined;
-          const answer = dataOf(ctx.message.parts);
+          const answer = partsData(ctx.message.parts);
           let runRef = `svc-${ctx.task.id}`;
           let asked: Awaited<ReturnType<NonNullable<typeof deps.askAsAgent>>>;
           if (parkedRef && deps.resumeAsAgent) {
@@ -297,6 +194,8 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           } else {
             if (!message) { await ctx.reject([{ text: 'Say what you would like this agent to do — the message carried no text.' }]); return; }
             await ctx.working();
+            // THE DATA PART TRAVELS TOO. A card room asks for advice with the seat's view as data and the
+            // question as text; the text alone gave the planner "advise seat 0" and nothing to advise ON.
             asked = await deps.askAsAgent({ agent: caller, addressee: agent, ask: message, runRef, traceContext: traceContextOf(ctx.headers), receivedAt: startedAt });
           }
           // Spec 387 W2 — THE TRACE RIDES WITH THE TASK: what admitted the run, what was offered and chosen, each
@@ -353,7 +252,7 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           const wholeAsk = ask.request.capability === 'harness.ask';
           const body = JSON.stringify({ ...(session ? { session } : {}), addressee: agent, message: ask.request.goal, ...(wholeAsk ? {} : { plan: { steps: [{ toolId: ask.request.capability, args: ask.request.args }] } }), subjectAsk: ask, ...(ask.continue ? {} : { runRef: routedRunRefFor(ask.correlation) }) });
           await ctx.working();
-          const res = await deps.appFetch(new Request(`https://${host}/harness/ask`, { method: 'POST', headers: internalHeaders(deps.env, { 'content-type': 'application/json', accept: 'application/json', ...traceHeaders(ctx.headers) }), body }), deps.env);
+          const res = await deps.appFetch(new Request(`https://${host}/harness/ask`, { method: 'POST', headers: internalHeaders(deps.env, { 'content-type': 'application/json', accept: 'application/json', ...traceHeadersOf(ctx.headers) }), body }), deps.env);
           const envelope = (await res.json().catch(() => null)) as (AskEnvelope & { subjectAnswer?: { outcome?: string; said?: string } }) | null;
           if (!envelope) { await ctx.fail([{ text: `the ask answered ${res.status} with no envelope` }]); return; }
           await ctx.artifact({ name: SUBJECT_ANSWER_ARTIFACT, parts: [{ data: envelope }] });
@@ -365,7 +264,7 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           await ctx.reject([{ text: said || 'Refused.' }]);
           return;
         }
-        const data = dataOf(ctx.message.parts);
+        const data = partsData(ctx.message.parts);
         // Whose conversation this is, so a later `GetTask` from somebody else does not read it.
         if (ctx.principal?.agent) ctx.task.metadata = { ...(ctx.task.metadata ?? {}), asker: ctx.principal.agent };
         const runRef = typeof ctx.task.metadata?.runRef === 'string' ? ctx.task.metadata.runRef : undefined;
@@ -375,41 +274,24 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
         const supplied: SuppliedInputV1[] | undefined = runRef && promptStep && data ? [{ stepRef: promptStep, data }] : undefined;
         const body = JSON.stringify({ session, addressee: agent, ...(message ? { message } : {}), ...(runRef ? { runRef } : {}), ...(supplied ? { supplied } : {}) });
         await ctx.working();
-        const res = await deps.appFetch(new Request(`https://${host}/harness/ask`, { method: 'POST', headers: internalHeaders(deps.env, { 'content-type': 'application/json', accept: 'application/json', ...traceHeaders(ctx.headers) }), body }), deps.env);
+        const res = await deps.appFetch(new Request(`https://${host}/harness/ask`, { method: 'POST', headers: internalHeaders(deps.env, { 'content-type': 'application/json', accept: 'application/json', ...traceHeadersOf(ctx.headers) }), body }), deps.env);
         const env = (await res.json().catch(() => null)) as AskEnvelope | null;
         if (!env || env.ok === false || !env.reply) { await ctx.fail([{ text: [env?.error ?? `the ask answered ${res.status}`, env?.detail].filter(Boolean).join(': ') }]); return; }
         const r = env.reply;
         ctx.task.metadata = { ...(ctx.task.metadata ?? {}), ...(r.runRef ? { runRef: r.runRef } : {}), ...(r.prompt?.stepRef ? { promptStepRef: r.prompt.stepRef } : {}) };
         // Written first, for the same reason: this is a wire, not a speaker.
         const said = r.text || r.summary || env.spoken || '';
-        switch (r.kind) {
-          case 'answer': {
-            if (r.results?.length) await ctx.artifact({ name: 'results', parts: [{ data: r.results }], ...((r as { skillProvenance?: Record<string, unknown> }).skillProvenance ? { metadata: (r as { skillProvenance?: Record<string, unknown> }).skillProvenance } : {}) });
-            await ctx.complete([{ text: said || 'Done.' }]);
-            return;
-          }
-          case 'done': {
-            await ctx.artifact({ name: 'receipt', parts: [{ data: { effects: r.effects ?? null, receipt: r.receipt ?? null } }] });
-            await ctx.complete([{ text: said || 'Done.' }]);
-            return;
-          }
-          case 'prompt': {
-            await ctx.inputRequired([{ text: r.prompt?.prompt ?? said ?? 'More is needed.' }, { data: r.prompt ?? {} }]);
-            return;
-          }
-          case 'authority_required': {
-            // The mandate the plan needs, for the caller to have signed and present on the next message.
-            // The surface parks; it never signs (spec 372 §0).
-            await ctx.authRequired([{ text: said || 'This needs a mandate you have not presented.' }, { data: { requirement: r.requirement ?? null, runRef: r.runRef ?? null } }]);
-            return;
-          }
-          case 'refused': case 'denied': {
-            await ctx.reject([{ text: said || 'Refused.' }]);
-            return;
-          }
-          default: {
-            await ctx.complete([{ text: said || `Reply: ${r.kind ?? 'unknown'}` }]);
-          }
+        const how = settlementForReplyKind(r.kind);
+        if (r.kind === 'answer' && r.results?.length) await ctx.artifact({ name: 'results', parts: [{ data: r.results }], ...((r as { skillProvenance?: Record<string, unknown> }).skillProvenance ? { metadata: (r as { skillProvenance?: Record<string, unknown> }).skillProvenance } : {}) });
+        if (r.kind === 'done') await ctx.artifact({ name: 'receipt', parts: [{ data: { effects: r.effects ?? null, receipt: r.receipt ?? null } }] });
+        switch (how) {
+          case 'completed': await settleTask(ctx, how, [{ text: said || (r.kind === 'answer' || r.kind === 'done' ? 'Done.' : `Reply: ${r.kind ?? 'unknown'}`) }]); return;
+          case 'input-required': await settleTask(ctx, how, [{ text: r.prompt?.prompt ?? said ?? 'More is needed.' }, { data: r.prompt ?? {} }]); return;
+          // The mandate the plan needs, for the caller to have signed and present on the next message.
+          // The surface parks; it never signs (spec 372 §0).
+          case 'auth-required': await settleTask(ctx, how, [{ text: said || 'This needs a mandate you have not presented.' }, { data: { requirement: r.requirement ?? null, runRef: r.runRef ?? null } }]); return;
+          case 'rejected': await settleTask(ctx, how, [{ text: said || 'Refused.' }]); return;
+          case 'failed': await settleTask(ctx, how, [{ text: said || env.error || 'Failed.' }]); return;
         }
       },
     },

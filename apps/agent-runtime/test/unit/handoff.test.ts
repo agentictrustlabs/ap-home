@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { deriveMandate, paymentHandler, registerDefaultSubsetHandlers, hashDelegation, ROOT_AUTHORITY, PAYMENT_RAR_TYPE, buildDigestBindingCaveat, type Delegation, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import { handoff, validateHandoff } from '@agenticprimitives/a2a';
-import { handoffMessage, handoffOf } from '../../src/subject-hop.js';
+import { handoffMessage, handoffOf } from '@agenticprimitives/a2a';
 import { standardServerFor } from '../../src/standard-a2a.js';
 import type { AgentCardV1 } from '@agenticprimitives/a2a/standard';
 

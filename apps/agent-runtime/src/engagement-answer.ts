@@ -7,7 +7,7 @@
 import type { Address, Hex } from 'viem';
 import { offerDigest, type EngagementProbeV1, type EngagementResponseV1, type FulfillmentOfferV1, type EngagementResponseContentV1 } from '@agenticprimitives/intent-engagement';
 import { scopedActionTools, REQUIREMENT_TYPE_FOR } from './harness-run.js';
-import { loadPlaybook } from './playbook.js';
+import { loadPlaybook } from '@agenticprimitives/harness';
 
 export interface AnswerProbeDeps {
   /** The agent's on-chain kind: person | org | service (ADR-0046), or null when unreadable. */
@@ -34,7 +34,7 @@ export async function answerProbe(deps: AnswerProbeDeps, agent: Address, probe: 
   const capability = probedCapability(probe);
   if (!capability) return reply({ kind: 'decline', reason: 'unsupported-intent-type', detail: 'the projection names no capability' });
   // WHAT THIS AGENT WOULD OFFER — its playbook narrows the bare harness (spec 354 §4.4); the same set the Ask sees.
-  const playbook = await loadPlaybook(deps.readSubjectRecord, agent).catch(() => null);
+  const playbook = await loadPlaybook(deps.readSubjectRecord, agent, console.log).catch(() => null);
   const offered = new Set(scopedActionTools(undefined, playbook).map((t) => t.capability?.id ?? t.id));
   if (!offered.has(capability)) return reply({ kind: 'decline', reason: 'unsupported-intent-type', detail: `${capability} is not something this agent does` });
   // A PERSON'S AGENT NEVER COMMITS ITS PERSON FROM A SERVER: the answer must arrive through them.

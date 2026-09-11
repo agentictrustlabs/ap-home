@@ -42,7 +42,6 @@ import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
 import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
 import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence } from '@agenticprimitives/orchestration';
-import { setBillStep } from './run-bill.js';
 import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, standingFor, declareInstruction, forgetInstruction, instructionContextOf, STANDING_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
@@ -55,7 +54,9 @@ import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunction
 import { type Plan, type Planner,
   runIntent, InputRequired, dataFor, signatureFor,
   type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
-import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep, composeOfferedTools, mergeContractTool as composeMergeContractTool } from '@agenticprimitives/harness';
+import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep, composeOfferedTools, mergeContractTool as composeMergeContractTool, loadPlaybook, declaredEffectSink, setBillStep, declaredCapabilities, type AskScopeV1 } from '@agenticprimitives/harness';
+// Spec 353 — the scope schema is Ring 0 now (spec 399 §4); this app keeps exporting it for its callers.
+export type { AskScopeV1 } from '@agenticprimitives/harness';
 import {
   hashDelegation, intentDigest, encodeDigestBindingArgs, decodeDigestBindingTerms, decodeTimestampTerms, buildCaveat, buildVaultRecordScopeCaveat,
   encodeTimestampTerms, encodeValueTerms, ROOT_AUTHORITY, CAPABILITY_RAR_TYPE, PAYMENT_RAR_TYPE,
@@ -69,10 +70,8 @@ import { routeProvider, routePolicy, meterFor, selectPlanner, selectComposer, de
 import { ASK_DISCOVERY_TOOLS } from '@agenticprimitives/context';
 import { structuredCallFor } from './context-wiring.js';
 import type { DefinitionToolV1 } from '@agenticprimitives/capability-claims';
-import { loadPlaybook } from './playbook.js';
 import { CATALOG_TOOLS, catalogBindingFor, catalogInvoker, isCatalogTool } from './catalog-tools.js';
 import { playbookProvenanceFromReceipts } from './skill-provenance.js';
-import { declaredEffectSink } from './declared-effects.js';
 import { checkGroundedComposition, groundedFallback } from '@agenticprimitives/context';
 import { KB_QUESTION_TOOL, kbQuestionAvailable } from '@agenticprimitives/context';
 import { VAULT_QUESTION_TOOL, vaultQuestionAvailable } from '@agenticprimitives/context';
@@ -837,6 +836,7 @@ export interface HarnessDeps {
   nameOf?: (address: string) => Promise<string | null>;
   /** Spec 387 W2 — what a NAME publishes on chain (its `atl:mcpEndpoint` binds the catalog reads). Records first, never a convention. */
   readNameRecords?: (name: string) => Promise<{ a2aEndpoint?: string; mcpEndpoint?: string } | null>;
+  /** What an agent PUBLICLY advertises on its profile (`atl:capabilities`). `playbook.answer` is listed only for a skill on it. */
   /** Spec 366 R2/R3 — set by the receiver of a ROUTED ask, once per request: the wires the asker presented
    *  for standing, and that their own tree is not this agent's to read. Every standing derivation in this
    *  run inherits it (`StandingDeps.context`). */
@@ -3633,43 +3633,8 @@ async function askReplyForInner(env: HarnessEnv, input: {
   return withProv({ kind: 'refused', runRef: r.runRef, outcome: r.outcome, error: r.error ?? 'the run did not complete', receipts: r.receipts });
 }
 
-/**
- * WHAT THE APP CAN DO, AND WHERE THE PERSON IS STANDING — spec 353's `AskScopeV1`, the scope half of an ask.
- *
- * An Ask never happens in a vacuum: it happens inside an app, with a connected user, acting in a selected
- * context. All three are already substrate facts, and the app knows them before the harness runs.
- *
- * SCOPE IS HONESTY; THE MANDATE IS AUTHORITY. This decides what the conversation OFFERS, how it phrases
- * things and how it refuses. It decides nothing about what is permitted, and it is consumed BEFORE the
- * authority stage: it is not a parameter of `verifyMandateForStep`, of the `PolicyEvaluator`, or of any
- * gate. Threading it into a verifier is the drift to refuse (353 §4).
- *
- * WHAT IS DELIBERATELY ABSENT: roles, memberships, entitlements, policy verdicts. An app-asserted role is
- * a client-supplied authorization claim — the exact pattern ADR-0041 forbids and Pydantic warns about —
- * so standing is DERIVED here from vault and chain, never accepted from the payload. An earlier cut of
- * this carried `role: 'steward' | 'member'` from the Home; it is removed rather than ignored, because a
- * field that exists gets used.
- */
-export interface AskScopeV1 {
-  /** Capability ids this app can carry to completion. Absent ⇒ everything this agent offers. */
-  capabilities?: string[];
-  /** Prompt kinds and ceremonies this surface can actually render (350 §3.5 kinds, plus
-   *  'mandate-signature'). A run that would suspend on one the app cannot render should refuse at plan
-   *  time rather than strand (353 S4 — not yet enforced). */
-  ceremonies?: string[];
-  /** The realm the person selected, as the app understands it — the delegator candidate and the private
-   *  tier. NOT their standing in it. */
-  realm?: { kind?: 'person' | 'org' | 'service' };
-  /**
-   * Spec 361 I6 — CONTEXT PARITY: what the person has SELECTED on the screen the Ask was opened from — an
-   * entity (a member on the roster, a team, a treasury), a filter, an open draft. A screen supplies meaning
-   * through selection long before a sentence is typed; this is how that meaning reaches the Ask. It is
-   * validated application context (a reference, never only words in a prompt): a party the sentence did
-   * not name may be filled from it when the party role's declared classes admit the selection's kind, and
-   * the binding says so (`context`). It permits nothing and reaches no verifier.
-   */
-  selection?: { entity?: string; kind?: string; label?: string; filter?: Record<string, string>; draftRunRef?: string };
-}
+// `AskScopeV1` (spec 353, the scope half of an ask) lives in `@agenticprimitives/harness` `ask-scope.ts` — see the
+// re-export above. Scope is honesty; the mandate is authority; it reaches no verifier (353 §4).
 
 /**
  * WHAT EACH CAPABILITY WILL ASK A PERSON FOR — spec 353 S4.
@@ -3891,9 +3856,8 @@ export function mergeContractTool(builtin: ToolSpec, contract: DefinitionToolV1 
 }
 
 export function scopedActionTools(surface?: AskScopeV1, playbook?: { capabilityIds: Set<string>; tools?: Record<string, DefinitionToolV1> } | null): ToolSpec[] {
-  let tools = HARNESS_ACTION_TOOLS;
-  const declared = surface?.capabilities?.length ? new Set(surface.capabilities) : null;
-  if (declared) tools = tools.filter((t) => declared.has(t.capability?.id ?? t.id));
+  // An app that DECLARES its capabilities is offered only those (spec 353; the rule is Ring 0's `declaredCapabilities`).
+  let tools = declaredCapabilities(HARNESS_ACTION_TOOLS, surface);
   // THE PLAYBOOK NARROWS THE OFFER (spec 354 §4.4): only what this agent's compiled archetype knows how
   // to do. Behavior honesty, not authority — a removed tool is one the planner will not pick; the mandate
   // gate is untouched. Absent playbook ⇒ no narrowing (the bare harness offers everything the surface
@@ -3993,7 +3957,7 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   // The acting agent's playbook (spec 354 §4.3), loaded from ITS vault at admission and digest-verified.
   // Absent ⇒ the bare harness offers everything the surface allows; present ⇒ the Ask offers only what
   // the archetype knows how to do, and the planner is told what it IS.
-  const playbook = await loadPlaybook(deps.readSubjectRecord, String(input.addressee ?? '')).catch(() => null);
+  const playbook = await loadPlaybook(deps.readSubjectRecord, String(input.addressee ?? ''), console.log).catch(() => null);
   const first = Array.isArray(input.presented) ? input.presented[0] ?? null : input.presented;
   const holding = first ? mandateCapabilityWords(first) : null;
   const systemPrompt = holding
@@ -4681,7 +4645,7 @@ step is then handed to that agent under authority the person grants; leave it ou
       const authorityArg = step.tool.capability?.authorityArg;
       const actor = authorityArg ? String(step.args?.[authorityArg] ?? '') : '';
       if (/^0x[0-9a-fA-F]{40}$/.test(actor) && actor.toLowerCase() !== String(input.addressee ?? '').toLowerCase()) {
-        const theirs = await loadPlaybook(deps.readSubjectRecord, actor).catch(() => null);
+        const theirs = await loadPlaybook(deps.readSubjectRecord, actor, console.log).catch(() => null);
         if (theirs?.declaredEffects?.[capabilityId]?.length) return theirs.declaredEffects[capabilityId]!;
       }
       return playbook?.declaredEffects?.[capabilityId] ?? [];

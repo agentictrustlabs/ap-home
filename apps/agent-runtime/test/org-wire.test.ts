@@ -11,7 +11,8 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { VAULT_RECORD_SCOPE_ENFORCER, buildCaveat, encodeTimestampTerms, encodeValueTerms, encodeAllowedTargetsTerms } from '@agenticprimitives/delegation';
-import { enforcersFromEnv, toDelegation, verifyOrgWire, type IncomingWire } from '../src/org-wire.js';
+import { verifyDelegationWire, delegationOfWire, type DelegationWireLike } from '@agenticprimitives/a2a';
+import { enforcersFromEnv } from '../src/org-wire.js';
 
 const ORG = '0x1111111111111111111111111111111111111111';
 const SESSION = '0x2222222222222222222222222222222222222222';
@@ -30,7 +31,7 @@ const enforcers = enforcersFromEnv(ENV);
 const window = () => buildCaveat(ENV.TIMESTAMP_ENFORCER as never, encodeTimestampTerms(NOW - 3600, NOW + 3600));
 
 /** The real member-access shape: a vault-record-scope grant. */
-const memberWire = (over: Partial<IncomingWire> = {}): IncomingWire => ({
+const memberWire = (over: Partial<DelegationWireLike> = {}): DelegationWireLike => ({
   delegator: ORG,
   delegate: SESSION,
   authority: `0x${'00'.repeat(32)}`,
@@ -41,7 +42,7 @@ const memberWire = (over: Partial<IncomingWire> = {}): IncomingWire => ({
 });
 
 /** The real stewardship shape: the site delegation — timestamp + value + allowedTargets, no methods. */
-const stewardWire = (over: Partial<IncomingWire> = {}): IncomingWire => ({
+const stewardWire = (over: Partial<DelegationWireLike> = {}): DelegationWireLike => ({
   delegator: ORG,
   delegate: SESSION,
   authority: `0x${'00'.repeat(32)}`,
@@ -61,8 +62,8 @@ const checks = (o: { revoked?: boolean; valid?: boolean } = {}) => ({
   isRevoked: vi.fn(async () => o.revoked ?? false),
 });
 
-const verify = (wire: IncomingWire | undefined, over: Record<string, unknown> = {}) =>
-  verifyOrgWire({
+const verify = (wire: DelegationWireLike | undefined, over: Record<string, unknown> = {}) =>
+  verifyDelegationWire({
     wire,
     expectedDelegator: ORG,
     expectedDelegate: SESSION as never,
@@ -140,9 +141,9 @@ describe('malformed input never reaches the chain', () => {
   }
 });
 
-describe('toDelegation', () => {
+describe('delegationOfWire', () => {
   it('defaults absent caveat args to 0x — the cast all four copies wrote by hand', () => {
-    const d = toDelegation(memberWire());
+    const d = delegationOfWire(memberWire());
     expect(d.caveats.every((c) => c.args === '0x')).toBe(true);
     expect(d.salt).toBe(7n);
   });

@@ -1,18 +1,11 @@
 // Per-host ARD manifest (Agentic Resource Discovery v0.91) — spec 347 §8.5, docs/architecture/ard-acp-crosswalk.md.
 // A bound agent host publishes ONE entry at `/.well-known/ard.json` whose `url` is its own well-known A2A card.
-// Pure: index.ts hands it the host context + live/released card facts. Deliberately parallel to
-// apps/demo-discovery-a2a/src/ard.ts (the registry-side builder); a third consumer promotes both to the sibling
-// `agent-projections` repo (ADR-0037), never to a Ring-0 package. MCP is never an entry (ADR-0057).
+// Pure: index.ts hands it the host context + live/released card facts. The ARD vocabulary (media types, the
+// well-known path, the trust schema) is the registry projection's — `@agenticprimitives/registry-kit/projection`
+// (spec 399 §4) — imported, never restated; the per-host ENTRY shape stays this app's. MCP is never an entry (ADR-0057).
 
-export const ARD_WELL_KNOWN_PATH = '/.well-known/ard.json';
-export const ARD_CONTEXT_URL = 'https://agenticresourcediscovery.org/context/v1';
-export const ARD_A2A_CARD_TYPE = 'application/a2a-agent-card+json';
-export const AP_TRUST_SCHEMA = {
-  identifier: 'agenticprimitives-smart-agent-card-binding',
-  version: '1',
-  governanceUri: 'https://github.com/agentictrustlabs/agenticprimitives/blob/master/specs/347-a2a-agent-card-and-projection-studio.md',
-  verificationMethods: ['a2a-jws-es256', 'SmartAgentCardBindingV1', 'ap-registry-receipt'],
-} as const;
+import { ARD_WELL_KNOWN_PATH, ARD_CONTEXT_URL, ARD_A2A_CARD_TYPE, AP_TRUST_SCHEMA } from '@agenticprimitives/registry-kit/projection';
+export { ARD_WELL_KNOWN_PATH, ARD_CONTEXT_URL, ARD_A2A_CARD_TYPE, AP_TRUST_SCHEMA };
 
 export interface HostArdInput {
   /** The public host serving this agent (`alice.faithnet.io`). */

@@ -1,18 +1,17 @@
-// The adoption LADDER (ADR-0055 amendment) — the mechanism that makes the gateway transition
-// incremental, so a failure is attributable to one of five causes instead of all of them at once.
+// THIS RUNTIME'S adoption ledger (ADR-0060). The ladder's mechanics — comparison, sampling, the buffer, race
+// classification — are `@agenticprimitives/fabric`'s and tested there (spec 399 W0 promotion); what is tested
+// here is what the ledger CLAIMS about this runtime's ops, and that the comparison holds on a real inbox document.
 
 import { describe, it, expect } from 'vitest';
-import {
-  GATEWAY_ADOPTION, adoptionStage, compareServed, classifyDivergence, shouldShadow, recordDivergence,
-  SHADOW_INTERVAL_MS, DIVERGENCE_BUFFER, type Divergence,
-} from '../src/gateway-adoption.js';
+import { compareServed } from '@agenticprimitives/fabric';
+import { GATEWAY_ADOPTION, gatewayStage } from '../src/gateway-adoption.js';
 
 describe('the ledger', () => {
   it('treats an unlisted op as off', () => {
     // Opt-IN. The failure mode of opt-out is an op that moved because nobody remembered to stop it,
     // which is indistinguishable from a deliberate promotion right up until it breaks.
-    expect(adoptionStage('applications.get')).toBe('off');
-    expect(adoptionStage('literally.anything')).toBe('off');
+    expect(gatewayStage('applications.get')).toBe('off');
+    expect(gatewayStage('literally.anything')).toBe('off');
   });
 
   it('makes every listed op say what its move puts at risk', () => {
@@ -39,94 +38,17 @@ describe('the ledger', () => {
     // The ledger says how far an op has climbed; the env says whether this deployment runs the comparison.
     // Default OFF, because shadowing hangs off `inbox.get` — which every principal polls — and would
     // otherwise construct a gateway (and its tables) in every DO as a side effect of a commit landing.
-    expect(adoptionStage('inbox.get')).toBe('off');
-    expect(adoptionStage('inbox.get', {})).toBe('off');
-    expect(adoptionStage('inbox.get', { GATEWAY_SHADOW: 'on' })).toBe('shadow');
+    expect(gatewayStage('inbox.get')).toBe('off');
+    expect(gatewayStage('inbox.get', {})).toBe('off');
+    expect(gatewayStage('inbox.get', { GATEWAY_SHADOW: 'on' })).toBe('shadow');
   });
 
   it('treats an empty GATEWAY_SHADOW as unset', () => {
     // `wrangler`'s `VAR = ""` binds an empty string, which `??` sails straight past — the exact shape of
     // a previous incident where a fail-closed guard was reached with a value nobody had set.
-    expect(adoptionStage('inbox.get', { GATEWAY_SHADOW: '' })).toBe('off');
-    expect(adoptionStage('inbox.get', { GATEWAY_SHADOW: '   ' })).toBe('off');
-    expect(adoptionStage('inbox.get', { GATEWAY_SHADOW: 'ON' })).toBe('shadow'); // case is not a trap
-  });
-});
-
-describe('comparison', () => {
-  const AT = '2026-08-04T00:00:00.000Z';
-
-  it('calls identical documents equal', () => {
-    expect(compareServed('inbox.get', { a: 1, b: [1, 2] }, { a: 1, b: [1, 2] }, AT).kind).toBe('equal');
-  });
-
-  it('ignores key order', () => {
-    // Two planes serialising the same document differently is not a difference worth blocking a
-    // promotion on, and flagging it would bury the real signal under noise on the very first run.
-    expect(compareServed('inbox.get', { a: 1, b: 2 }, { b: 2, a: 1 }, AT).kind).toBe('equal');
-  });
-
-  it('catches a field that vanished', () => {
-    // The data-shape drift being watched for. `{a:1}` vs `{a:1,b:undefined}` must NOT be equal.
-    expect(compareServed('inbox.get', { a: 1, b: 2 }, { a: 1 }, AT).kind).toBe('value');
-  });
-
-  it('distinguishes null from absent', () => {
-    expect(compareServed('inbox.get', null, undefined, AT).kind).toBe('value');
-  });
-
-  it('bounds the excerpt it keeps', () => {
-    // A divergence report that embedded two whole inbox documents would put a copy of someone's mail in
-    // a diagnostic buffer — the vault doctrine defeated through the back door.
-    const big = (fill: string) => ({ envelopes: Array.from({ length: 200 }, (_, i) => ({ id: `m${i}`, body: fill })) });
-    const d = compareServed('inbox.get', big('x'), big('y'), AT);
-    expect(d.kind).toBe('value');
-    expect(d.detail!.length).toBeLessThan(200);
-  });
-});
-
-describe('sampling', () => {
-  it('always samples the first call', () => {
-    // Otherwise a low-traffic principal contributes no observation for a whole deploy, and their silence
-    // reads exactly like agreement.
-    expect(shouldShadow({ lastShadowAt: undefined, now: 1_000, intervalMs: SHADOW_INTERVAL_MS })).toBe(true);
-  });
-
-  it('refuses a second sample inside the interval', () => {
-    // The Home polls inbox.get every 5s per open tab. Shadowing each one doubles delegated vault reads on
-    // the path that already hit demo-mcp's stage-2 limiter, whose rejection once surfaced as "auth failed".
-    expect(shouldShadow({ lastShadowAt: 1_000, now: 6_000, intervalMs: SHADOW_INTERVAL_MS })).toBe(false);
-  });
-
-  it('samples again once the interval has passed', () => {
-    expect(shouldShadow({ lastShadowAt: 1_000, now: 1_000 + SHADOW_INTERVAL_MS, intervalMs: SHADOW_INTERVAL_MS })).toBe(true);
-  });
-
-  it('keeps the added load bounded regardless of poll rate', () => {
-    // The property the interval exists for, stated as a property: 5s polling for an hour must produce at
-    // most one shadow per interval — not a proportion of a rate that varies with how many tabs are open.
-    let last: number | undefined;
-    let shadows = 0;
-    for (let t = 0; t < 3_600_000; t += 5_000) {
-      if (shouldShadow({ lastShadowAt: last, now: t, intervalMs: SHADOW_INTERVAL_MS })) { shadows++; last = t; }
-    }
-    expect(shadows).toBeLessThanOrEqual(3_600_000 / SHADOW_INTERVAL_MS + 1);
-  });
-});
-
-describe('the evidence buffer', () => {
-  it('records agreement as well as difference', () => {
-    // A buffer holding only differences cannot tell "the planes agree" from "the shadow never ran", and
-    // those justify opposite decisions about promoting.
-    const buf = recordDivergence([], { op: 'inbox.get', at: 'x', kind: 'equal' });
-    expect(buf).toHaveLength(1);
-  });
-
-  it('stays bounded', () => {
-    let buf: Divergence[] = [];
-    for (let i = 0; i < DIVERGENCE_BUFFER * 3; i++) buf = recordDivergence(buf, { op: 'inbox.get', at: `t${i}`, kind: 'equal' });
-    expect(buf).toHaveLength(DIVERGENCE_BUFFER);
-    expect(buf.at(-1)!.at).toBe(`t${DIVERGENCE_BUFFER * 3 - 1}`); // keeps the NEWEST, not the first ones seen
+    expect(gatewayStage('inbox.get', { GATEWAY_SHADOW: '' })).toBe('off');
+    expect(gatewayStage('inbox.get', { GATEWAY_SHADOW: '   ' })).toBe('off');
+    expect(gatewayStage('inbox.get', { GATEWAY_SHADOW: 'ON' })).toBe('shadow'); // case is not a trap
   });
 });
 
@@ -220,36 +142,3 @@ describe('volatile fields are declared per op, not discovered', () => {
   });
 });
 
-describe('a race is not a divergence', () => {
-  const AT = '2026-08-04T00:00:00.000Z';
-  const A = { version: 1, envelopes: [{ id: 'm1' }] };
-  const B = { version: 1, envelopes: [{ id: 'm1' }, { id: 'm2' }] };
-
-  it('classifies a document that MOVED between the reads as raced', () => {
-    // A delivery landed between the serving read and the shadow read. Both planes are correct about
-    // different instants; the shadow proves nothing here and must not be counted as a difference.
-    const d = classifyDivergence({ op: 'inbox.get', served: A, shadow: B, servedAgain: B, at: AT });
-    expect(d.kind).toBe('raced');
-  });
-
-  it('still reports a REAL disagreement when the document did not move', () => {
-    // The case the whole rung exists to catch: serving is stable across both reads and the gateway
-    // disagrees. Suppressing this would make the mechanism decorative.
-    const d = classifyDivergence({ op: 'inbox.get', served: A, shadow: B, servedAgain: A, at: AT });
-    expect(d.kind).toBe('value');
-  });
-
-  it('is conservative when the document moved to a THIRD state', () => {
-    // Two deliveries landed. It might be a race — but it is not PROVABLY one, and a classifier that
-    // guessed "probably benign" would suppress exactly the signal it exists to collect.
-    const C = { version: 1, envelopes: [{ id: 'm1' }, { id: 'm2' }, { id: 'm3' }] };
-    expect(classifyDivergence({ op: 'inbox.get', served: A, shadow: B, servedAgain: C, at: AT }).kind).toBe('value');
-  });
-
-  it('does not spend the re-read when the planes already agree', () => {
-    // `equal` short-circuits before the comparison against `servedAgain`, so the common case costs
-    // nothing extra. Proven by handing it a `servedAgain` that would change the verdict if consulted.
-    const d = classifyDivergence({ op: 'inbox.get', served: A, shadow: A, servedAgain: B, at: AT });
-    expect(d.kind).toBe('equal');
-  });
-});

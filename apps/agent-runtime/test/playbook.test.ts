@@ -1,6 +1,6 @@
 // Spec 354 §4.3 — the playbook loads, verifies its digest, and narrows the offer (never the authority).
 import { describe, it, expect } from 'vitest';
-import { loadPlaybook } from '../src/playbook.js';
+import { loadPlaybook } from '@agenticprimitives/harness';
 import { scopedActionTools } from '../src/harness-run.js';
 import { definitionDigest, type AgentHarnessDefinitionV1 } from '@agenticprimitives/capability-claims';
 

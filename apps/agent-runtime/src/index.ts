@@ -120,7 +120,8 @@ export { HarnessApprovalWorkflow };
 import { claimableBy, receiptEvidence, checkpointForCommittedStep, committedStepNote } from './endeavor-authority-steps.js';
 import { parkableCommittedSteps } from './endeavor-committed-steps.js';
 import { internalHeaders, isInternalCall } from './internal-marker.js';
-import { standardServerFor, withStandardCardFields } from './standard-a2a.js';
+import { standardServerFor } from './standard-a2a.js';
+import { withStandardCardFields } from '@agenticprimitives/a2a/standard';
 import type { AgentCardV1 } from '@agenticprimitives/a2a/standard';
 import { chainStewardshipCheck, deriveStanding } from '@agenticprimitives/context';
 import { charteredAgentsReader, charteredOwnerReader } from './chartered-agents.js';
@@ -138,12 +139,12 @@ const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stat
 import { askVocabulary, commandFieldsFor, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY, HOUSEHOLD_READ_CAPABILITY, CAPABILITY_WORDS, type PlannerTraceV1 } from './harness-run.js';
 import { workersAiTranscriber, repairTranscript, hearingVocabulary, spokenFor } from './voice.js';
 import { DECISION_POINTS } from '@agenticprimitives/ontology';
-import { loadPlaybook } from './playbook.js';
+import { loadPlaybook, billed, chargeBill, memoRead, forgetMemo, projectRunState } from '@agenticprimitives/harness';
 import { runUnderMandate, askReplyFor, readSubjectReply, type AskReplyEnvelopeV1, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { subjectAsk, subjectAnswer, validateSubjectAsk, handoff, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
 import { realtimeKitConfigured, verifyRealtimeKitWebhook, readRealtimeKitWebhook } from './realtimekit.js';
-import { sendSubjectAskOverWire, subjectAnswerMessage, subjectEnvelopeOf, handoffMessage, routedRunRefFor } from './subject-hop.js';
+import { sendSubjectAskOverWire, subjectAnswerMessage, subjectEnvelopeOf, handoffMessage, routedRunRefFor } from '@agenticprimitives/a2a';
 import { EXTERNAL_AGENT_TOOL, externalAgentInvoker } from './external-agent.js';
 import { DISCOVERY_INSPECT_CAPABILITY, discoveryInspectInvoker } from './enterprise-tools.js';
 import { INVITATIONS_RECEIVED_CAPABILITY, invitationsReceivedInvoker } from './invitations-received.js';
@@ -156,7 +157,6 @@ import type { CandidateSource } from '@agenticprimitives/intent-engagement';
 import { answerProbe } from './engagement-answer.js';
 import type { MessageV1 } from '@agenticprimitives/a2a/standard';
 import { signAsAgent } from './consult-rail.js';
-import { billed, chargeBill, memoRead, forgetMemo } from './run-bill.js';
 import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, firewalledMetrics, publicProvenanceOf } from './run-export.js';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
@@ -1597,7 +1597,10 @@ app.post('/harness/runs', async (c) => {
   // The SAME rule that gates a resume decides what is listed — one mechanism (ADR-0013). A run this
   // person could not resume is a run they are not shown.
   const runs = (await listRuns(c.env as never, addressee)).filter((r) => claimableBy(r, caller));
-  return c.json({ ok: true, runs: runs.sort((a, b) => b.updatedAt - a.updatedAt) });
+  // Spec 398 §5.1 — each row also carries the ONE projected state every surface renders from (`state`), beside
+  // the native `awaiting` it always carried. Additive: nothing a caller read before this line changes.
+  const rows = runs.sort((a, b) => b.updatedAt - a.updatedAt).map((r) => ({ ...r, state: projectRunState({ kind: 'suspended', awaiting: r.awaiting?.kind, expired: isExpired(r) }).state }));
+  return c.json({ ok: true, runs: rows });
 });
 
 /**
@@ -1713,6 +1716,7 @@ function plannerSummaryOf(trace: PlannerTraceV1 | undefined): RunPlannerSummaryV
  * door. This function is handed one, and asserts nothing about how it was established.
  */
 export async function runAgentAsk(env: Env, input: { agent: Address; addressee: Address; ask: string; runRef: string; context?: Record<string, unknown>;
+  /** The message's data part naming a skill — what `playbook.answer` reasons over (never part of the intent's digest). */
   /** Spec 390 W2 — the W3C Trace Context the caller's request carried; recorded, never read by a gate. */
   traceContext?: TraceContextV1 | null;
   /** Spec 390 W3 — when the caller's request arrived (ms), for the `receive_request` span. */
@@ -2453,7 +2457,7 @@ async function hearingVocabularyFor(env: Env, asker: string, addressee: string):
   const addresseeName = chartered.pop() as string | null;
   for (const owned of chartered as Array<Array<{ name?: string }>>) for (const a of owned) if (a.name) names.push(a.name);
   if (addresseeName) names.push(addresseeName);
-  const playbook = /^0x[0-9a-f]{40}$/.test(addressee) ? await loadPlaybook(deps.readSubjectRecord, addressee).catch(() => null) : null;
+  const playbook = /^0x[0-9a-f]{40}$/.test(addressee) ? await loadPlaybook(deps.readSubjectRecord, addressee, console.log).catch(() => null) : null;
   const verbs = askVocabulary(playbook).map((v) => v.label);
   return hearingVocabulary({ names, verbs });
 }
@@ -2469,7 +2473,7 @@ app.get('/harness/vocabulary', async (c) => {
   let playbook: { capabilityIds: Set<string> } | null = null;
   if (/^0x[0-9a-f]{40}$/.test(agent)) {
     const deps = harnessDeps(c.env, buildAuditSink(c.env));
-    playbook = await loadPlaybook(deps.readSubjectRecord, agent).catch(() => null);
+    playbook = await loadPlaybook(deps.readSubjectRecord, agent, console.log).catch(() => null);
   }
   // ── WHAT IT MAY DECIDE FOR YOU, and how (spec 363 W5) ──
   //
@@ -4154,6 +4158,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     teamGenesis: teamGenesisDeps(env, audit),
     // Spec 387 W2 — a name's published records (the catalog binding reads `atl:mcpEndpoint`); one 60s-cached reader.
     ...((): Record<string, unknown> => { const r = nameRecordsReader(env); return r ? { readNameRecords: r } : {}; })(),
+    // What an agent PUBLICLY advertises (`atl:capabilities`): `playbook.answer` is listed only for a skill on it.
     resolveName: async (name: string) => {
       if (!env.AGENT_NAME_REGISTRY || !env.AGENT_NAME_UNIVERSAL_RESOLVER) return null;
       const client = new AgentNamingClient({ rpcUrl: env.RPC_URL, chainId: Number(env.CHAIN_ID), registry: env.AGENT_NAME_REGISTRY as Address, universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as Address });

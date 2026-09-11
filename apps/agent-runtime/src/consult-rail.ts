@@ -15,7 +15,7 @@ import { delegatedInputPart, taskStateFromV1, withDelegatedTask, AP_DELEGATED_TA
 import { CONSULT_SKILL_ID, buildConsultRequest, validateConsultAnswer, type ConsultAnswerV1 } from '@agenticprimitives/fabric/messaging';
 import { keccak256, toBytes, type Address, type Hex } from 'viem';
 import { internalHeaders } from './internal-marker.js';
-import { wrapSessionSignature } from './session-wire.js';
+import { wrapSessionSignature } from '@agenticprimitives/a2a';
 import { interactionsSessionAccount, type Env, type IncomingDelegation } from './index.js';
 
 const hashBody = (data: unknown): Hex => keccak256(toBytes(JSON.stringify(data ?? null)));

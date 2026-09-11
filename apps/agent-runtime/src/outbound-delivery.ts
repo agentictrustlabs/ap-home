@@ -37,7 +37,7 @@
 
 import { hashA2aMessage, type A2aMessage, type A2aTransport, A2aWireAdapter } from '@agenticprimitives/a2a';
 import { decodeAllowedTargetsTerms } from '@agenticprimitives/delegation';
-import { SESSION_WRAPPED_SIG_TYPE } from './session-wire.js';
+import { SESSION_WRAPPED_SIG_TYPE } from '@agenticprimitives/a2a';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { keccak256, toBytes } from 'viem';
 

@@ -14,7 +14,7 @@
 import { createPublicClient, http, keccak256, toBytes, type Address, type Hex } from 'viem';
 import { chainFor } from './chain';
 import { hashDelegation, type Delegation } from '@agenticprimitives/delegation';
-import { checkSessionWireShape } from './session-wire.js';
+import { checkSessionWireShape } from '@agenticprimitives/a2a';
 import { buildArchetypeCatalog, chooseArchetypeRoute, resolveArchetypeMethod, type ArchetypeHostGrant, type LibraryPackageMeta } from './archetype-skill.js';
 import {
   createA2aAgent,
@@ -43,14 +43,14 @@ import { draftEndeavorPlan } from './endeavor-plan-skill.js';
 import { executeEndeavorStep, synthesizeEndeavorOutcome, gatherReferenceContext } from './endeavor-work-skill.js';
 import { handleInboxRespond, type InboxRespondInput } from './inbox-skill.js';
 import { handleConsultRespond } from './consult-skill.js';
-import { parseSessionWrappedSignature, verifySessionWrappedSignature, wrapSessionSignature } from './session-wire.js';
+import { parseSessionWrappedSignature, verifySessionWrappedSignature, wrapSessionSignature } from '@agenticprimitives/a2a';
 // spec 341 §7 — the in-Worker marker, split off the custody secret.
 import { internalHeaders, internalMarker, isInternalCall } from './internal-marker.js';
 import { memberConsultGrant, readConsultArtifact, readDelegatedTask, signAsOrg, submitConsult, submitDelegatedTask } from './consult-rail.js';
 import { recordRetention } from './run-export.js';
 import { authorityCapabilityOf, checkpointForStep, awaitingAuthorityNote, engagesProvider } from './endeavor-authority-steps.js';
 import { runEngagementCampaign, campaignNote } from './engagement-campaign.js';
-import { loadPlaybook } from './playbook.js';
+import { loadPlaybook } from '@agenticprimitives/harness';
 import { discoveryFetchFor } from './context-wiring.js';
 import { scopedActionTools } from './harness-run.js';
 import { messagingScopeCovers, messagingScopeDepsFromEnv } from './messaging-scope.js';
@@ -1465,7 +1465,7 @@ export class A2aTaskDO {
         let because: ReturnType<typeof engagesProvider> = null;
         try {
           const deps = harnessDeps(this.env, buildAuditSink(this.env));
-          const playbook = await loadPlaybook(deps.readSubjectRecord, principal).catch(() => null);
+          const playbook = await loadPlaybook(deps.readSubjectRecord, principal, console.log).catch(() => null);
           const own = new Set(scopedActionTools(undefined, playbook).map((t) => t.capability?.id ?? t.id));
           because = engagesProvider(step, needsAuthority, own);
           if (because) {

@@ -1,41 +1,13 @@
-// Org-wire verification (SEC-H1 / SEC-C1) — the TAIL that four call sites repeated.
+// Org-wire verification — what STAYED here after spec 399 W0 promoted the tail (SEC-H1 / SEC-C1).
 //
-// WHAT MOVED AND WHAT DID NOT, because the distinction is the whole point:
-//
-//   MOVED   delegator/delegate identity, caveat evaluation, revocation, signature.
-//           Generic. `delegation.verifyLiveDelegation` decides all of it.
-//
-//   STAYED  which caveat SHAPE counts as member-access vs stewardship, and which contracts a
-//           stewardship wire must pin. That is app authorization policy — `hasStewardshipShape` is a
-//           POSITIVE identity test (allowedTargets present, allowedMethods ABSENT, record-scope
-//           ABSENT, targets pin the governance registries), and no generic "required enforcers" list
-//           can express "these must be absent" or "these terms must name those addresses".
-//           Pushing it into the substrate would have flattened it into something weaker.
-//
-// The four blocks were NOT missing revocation — a correction to the audit that reported them as a
-// partial verify. They each checked `isRevoked`. What they were is four chances to forget it.
-
-import { verifyLiveDelegation, type Delegation, type EnforcerAddressMap } from '@agenticprimitives/delegation';
-import type { Address, Hex } from '@agenticprimitives/types';
-
-/** The wire shape an org delegation arrives as (bigint salt is a decimal string over JSON). */
-export interface IncomingWire {
-  delegator: string;
-  delegate: string;
-  authority: Hex;
-  caveats: { enforcer: string; terms: Hex; args?: Hex }[];
-  salt: string;
-  signature: Hex;
-}
-
-export interface OrgWireChecks {
-  /** EIP-712 delegation digest. */
-  digest: (d: Delegation) => Hex;
-  /** ERC-1271 / 6492 / ECDSA against the delegator. */
-  erc1271: (signer: Address, digest: Hex, sig: Hex) => Promise<boolean>;
-  /** `DelegationManager.isRevoked`. */
-  isRevoked: (digest: Hex) => Promise<boolean>;
-}
+//   MOVED   delegator/delegate identity, caveat evaluation, revocation, signature — `verifyDelegationWire`
+//           in `@agenticprimitives/a2a` (over `delegation.verifyLiveDelegation`). Generic; every A2A service
+//           repeats it.
+//   STAYED  which caveat SHAPE counts as member-access vs stewardship, and which contracts a stewardship
+//           wire must pin (`hasStewardshipShape` in interactions-do — a POSITIVE identity test no generic
+//           "required enforcers" list can express), and THIS deployment's enforcer addresses, below.
+import type { EnforcerAddressMap } from '@agenticprimitives/delegation';
+import type { Address } from '@agenticprimitives/types';
 
 /**
  * Read every enforcer this Worker knows, so `evaluateCaveats` recognizes what real wires carry.
@@ -57,59 +29,4 @@ export function enforcersFromEnv(env: Record<string, string | undefined>): Enfor
     ...(addr(env.QUORUM_ENFORCER) ? { recovery: addr(env.QUORUM_ENFORCER) } : {}),
     ...(addr(env.PAYMENT_ENFORCER) ? { payment: addr(env.PAYMENT_ENFORCER) } : {}),
   };
-}
-
-/** Wire → `Delegation`. Kept here so the four call sites stop each writing the same cast. */
-export function toDelegation(wire: IncomingWire): Delegation {
-  return {
-    delegator: wire.delegator as Address,
-    delegate: wire.delegate as Address,
-    authority: wire.authority,
-    caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer as Address, terms: c.terms, args: (c.args ?? '0x') as Hex })),
-    salt: BigInt(wire.salt),
-    signature: wire.signature,
-  } as Delegation;
-}
-
-/**
- * Verify an org wire is FROM `expectedDelegator` TO `expectedDelegate`, live and genuinely signed.
- *
- * Returns false on every failure path — the callers are boolean gates and must not learn why (the
- * reason would tell a prober which of several wires it is missing).
- *
- * SHAPE IS THE CALLER'S JOB. This says the wire is live and authentic; it says nothing about whether
- * it is a member-access grant or a stewardship grant. Call it AFTER the shape test, never instead.
- */
-export async function verifyOrgWire(input: {
-  wire: IncomingWire | undefined;
-  expectedDelegator: string;
-  expectedDelegate: Address;
-  enforcers: EnforcerAddressMap;
-  checks: OrgWireChecks;
-  now?: number;
-}): Promise<boolean> {
-  const w = input.wire;
-  if (!w?.signature || !w.delegator || !w.delegate) return false;
-
-  let delegation: Delegation;
-  try {
-    delegation = toDelegation(w);
-  } catch {
-    return false; // BigInt(salt) on garbage
-  }
-
-  const r = await verifyLiveDelegation({
-    delegation,
-    expectedDelegator: input.expectedDelegator as Address,
-    expectedDelegate: input.expectedDelegate,
-    enforcers: input.enforcers,
-    now: input.now ?? Math.floor(Date.now() / 1000),
-    checks: {
-      delegationDigest: input.checks.digest,
-      isRevoked: async (d) => input.checks.isRevoked(input.checks.digest(d)),
-      verifySignature: async ({ signer, digest, signature }) =>
-        input.checks.erc1271(signer, digest, signature),
-    },
-  });
-  return r.ok;
 }
