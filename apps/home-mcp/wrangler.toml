@@ -35,6 +35,7 @@ name = "STORE"
 class_name = "HomeMcpStoreDO"
 
 [env.faithnet.vars]
+AGENT_HOST_PATTERN = "https://{label}.faithnet.ai"
 # The Home that signs people in (spec 230) — the one origin that holds credentials.
 HOME_ORIGIN = "https://www.faithnet.me"
 BROKER_JWKS_URL = "https://www.faithnet.me/jwks"

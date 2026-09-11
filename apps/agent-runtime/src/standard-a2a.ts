@@ -343,10 +343,15 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
         const routed = subjectAskOf(ctx.message);
         if (routed && 'errors' in routed) { await ctx.reject([{ text: `the subject-ask profile is malformed: ${routed.errors.join('; ')}` }]); return; }
         if (routed) {
-          if (!session) { await ctx.reject([{ text: 'a routed ask carries the asker’s Home session as the bearer; this one carried none' }]); return; }
+          // Spec 397 W4 — a routed ask from a run asked THROUGH A CLIENT carries the forwarded app credential inside the
+          // profile instead of a session; `/harness/ask` verifies it as the receiver (wire on chain, assertion, the
+          // audience a peer deployment this one names). No session and no such credential is refused as before.
+          const forwarded = routed.ask.asker.credential.kind === 'app-delegation';
+          if (!session && !forwarded) { await ctx.reject([{ text: 'a routed ask carries the asker’s Home session as the bearer (or the forwarded app credential in the profile); this one carried neither' }]); return; }
           if (ctx.principal?.agent) ctx.task.metadata = { ...(ctx.task.metadata ?? {}), asker: ctx.principal.agent };
           const ask = routed.ask;
-          const body = JSON.stringify({ session, addressee: agent, message: ask.request.goal, plan: { steps: [{ toolId: ask.request.capability, args: ask.request.args }] }, subjectAsk: ask, ...(ask.continue ? {} : { runRef: routedRunRefFor(ask.correlation) }) });
+          const wholeAsk = ask.request.capability === 'harness.ask';
+          const body = JSON.stringify({ ...(session ? { session } : {}), addressee: agent, message: ask.request.goal, ...(wholeAsk ? {} : { plan: { steps: [{ toolId: ask.request.capability, args: ask.request.args }] } }), subjectAsk: ask, ...(ask.continue ? {} : { runRef: routedRunRefFor(ask.correlation) }) });
           await ctx.working();
           const res = await deps.appFetch(new Request(`https://${host}/harness/ask`, { method: 'POST', headers: internalHeaders(deps.env, { 'content-type': 'application/json', accept: 'application/json', ...traceHeaders(ctx.headers) }), body }), deps.env);
           const envelope = (await res.json().catch(() => null)) as (AskEnvelope & { subjectAnswer?: { outcome?: string; said?: string } }) | null;

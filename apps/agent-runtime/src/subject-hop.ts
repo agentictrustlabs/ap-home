@@ -75,7 +75,8 @@ export interface SubjectHopInput {
    *  name pins one, a served card that differs is refused: the pin is the name's word about its card. */
   pinnedDigest?: string;
   /** The asker's Home session — the `Authorization` bearer, which is also the credential the profile names. */
-  session: string;
+  /** The asker's Home session as the bearer; absent when the profile carries the forwarded app credential (spec 397 W4). */
+  session?: string;
   fetch: (input: string, init: RequestInit) => Promise<Response>;
 }
 
@@ -108,7 +109,7 @@ export async function sendSubjectAskOverWire(input: SubjectHopInput): Promise<Su
   try {
     res = await input.fetch(endpoint, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json', 'a2a-version': '1.0', authorization: `Bearer ${input.session}`, ...(input.traceparent ? { traceparent: input.traceparent } : {}), ...(input.tracestate ? { tracestate: input.tracestate } : {}) },
+      headers: { 'content-type': 'application/json', accept: 'application/json', 'a2a-version': '1.0', ...(input.session ? { authorization: `Bearer ${input.session}` } : {}), ...(input.traceparent ? { traceparent: input.traceparent } : {}), ...(input.tracestate ? { tracestate: input.tracestate } : {}) },
       body: JSON.stringify(rpc),
     });
   } catch (e) {

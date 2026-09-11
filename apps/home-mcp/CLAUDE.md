@@ -25,16 +25,16 @@ passed through (ADR-0041).
 `/oauth/register|authorize|callback|token|revoke`, `/oauth/demo-connect` (persona path for the live gate, gated by
 `DEMO_CONNECT_ENABLED`), `POST /mcp`, `/health`) · `src/oauth.ts` (the AS) · `src/store.ts` (`HomeMcpStoreDO` — clients,
 pending, codes, tokens, persons; wires sealed AES-GCM under a KEK from `TOKEN_SECRET`; a rebuild, never a bereavement:
-a wiped store means "authorize again") · `src/a2a.ts` (`askAsPerson`) · `src/tools.ts` (`ask`, `discover_agents`, `engage`, `grant_link` — W2: discover/engage are ONE supplied step each at her agent, `discovery.agents.find` / `engagement.agent.invoke` in `apps/demo-a2a/src/enterprise-tools.ts`) ·
+a wiped store means "authorize again") · `src/a2a.ts` (`askAsPerson`) · `src/tools.ts` (`ask`, `discover_agents`, `engage`, `my_runs`, `run`, `grant_link` — discover/engage are ONE supplied step each at her agent, `discovery.agents.find` / `engagement.agent.invoke` in `apps/demo-a2a/src/enterprise-tools.ts`; my_runs/run read her records under the same credential) · `src/stream.ts` (SSE frames, progress, elicitation shape — W3: a `tools/call` with `Accept: text/event-stream` streams progress, elicits a data prompt when the client declared it at initialize, never a signature) ·
 `src/whitelabel.ts` (name, instructions, scopes — the only branded module).
 
 ## Validate / deploy
 
 `npx tsc --noEmit -p .` + `npx vitest run` (the AS: DCR, PKCE, resource binding, rotation, revocation). Live gates
-`scripts/verify-home-mcp.mts` (W1) and `scripts/verify-home-mcp-discovery.mts` (W2: Ligonier found and engaged through her agent). Deploy `npx wrangler deploy --env faithnet`; secrets
+`verify-home-mcp` (W1) · `-browser-path` · `-discovery` (W2) · `-authority` (W3: signed at her Home via /you?run=) · `-stream` (W3) · `-revoke` (W4: Connected assistants → on chain) · `-instructions`. Deploy `npx wrangler deploy --env faithnet`; secrets
 `HOME_MCP_PRIVATE_KEY` (its address is the `delegate` on the Home's `home-mcp` client registration) and `TOKEN_SECRET`.
 Live: `https://home-mcp-faithnet.richardpedersen3.workers.dev` (the faithnet.io zone is at its domain limit).
 
 ## Not here
 
-Authority through the host + the `/you?run=` deep link in the Home (W3); the forwarded credential over the wire for off-deployment targets, connected-apps row + revoke (W4).
+A live gate for an off-deployment target (needs faithnet-b awake and `A2A_TRUSTED_ORIGINS` set there); package extraction of the AS.

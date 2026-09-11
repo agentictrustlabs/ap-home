@@ -410,6 +410,8 @@ export interface Env {
    *  `<handle>.<A2A_PUBLIC_BASE_DOMAIN>` → agent `<handle>.demo.agent`.
    *  Defaults to `impact-agent.io`. */
   A2A_PUBLIC_BASE_DOMAIN?: string;
+  /** Spec 397 W4 — peer deployments whose app-admitted runs may route a step here (their a2a origins, comma-separated). */
+  A2A_TRUSTED_ORIGINS?: string;
   /**
    * UniversalSignatureValidator address. When set, /auth/siwe-verify
    * uses the on-chain validator (handles EOA + ERC-1271 + ERC-6492
@@ -1193,7 +1195,11 @@ async function principalFromForwardedAppDelegation(c: Context<{ Bindings: Env }>
   const zones = a2aBaseDomains(c.env);
   let audHost = '';
   try { audHost = new URL(audience).hostname.toLowerCase(); } catch { return { ok: false, status: 401, error: 'the forwarded app delegation names no audience' }; }
-  if (!zones.some((z) => audHost === z || audHost.endsWith(`.${z}`))) return { ok: false, status: 401, error: `the forwarded app delegation is for ${audience}, not this deployment` };
+  // This deployment's zones, or a PEER deployment this one names (`A2A_TRUSTED_ORIGINS`, spec 397 W4): the assertion
+  // was made to the asker's own agent there, and that agent routed one step here. Never any origin.
+  const peers = String(c.env.A2A_TRUSTED_ORIGINS ?? '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+  const peerOk = peers.some((p) => { try { const h = new URL(p).hostname.toLowerCase(); return audHost === h || audHost.endsWith(`.${h}`); } catch { return false; } });
+  if (!zones.some((z) => audHost === z || audHost.endsWith(`.${z}`)) && !peerOk) return { ok: false, status: 401, error: `the forwarded app delegation is for ${audience}, not this deployment nor a peer it names` };
   const out = await verifyAppDelegation(c.env, `${audience.replace(/\/$/, '')}/harness/ask`, cred.authorization, cred.body, receiver);
   if (!out.ok) return out;
   if (out.sa !== asker.toLowerCase()) return { ok: false, status: 403, error: 'the forwarded app delegation is not the asker\'s' };
@@ -4573,10 +4579,9 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       // S4) as a `SendMessage` with the profile in the metadata; the reply is the receiver's envelope,
       // returned verbatim as the task's `subject-answer` artifact. Unreachable, or no 1.0 endpoint on the
       // card ⇒ said so, in the receiver's words where it has any — never read locally instead (R3).
-      // Spec 397 — the wire's bearer is the asker's Home session; an app-admitted run has none, and its
-      // assertion names THIS origin as audience, so another deployment cannot verify it (W2 names the hop).
-      if (!session) return { ok: false, via, refused: `${name ?? subject} is served elsewhere; a run asked through a client cannot yet be routed off this deployment (spec 397 W2)` };
-      const hop = await sendSubjectAskOverWire({ ...(trace ? { traceparent: trace.traceparent, ...(trace.tracestate ? { tracestate: trace.tracestate } : {}) } : {}), cardUrl: (at as { cardUrl: string }).cardUrl, ...((at as { pinnedDigest?: string }).pinnedDigest ? { pinnedDigest: (at as { pinnedDigest?: string }).pinnedDigest! } : {}), profile, session, fetch: (u, init) => fetch(u, init) });
+      // Spec 397 W4 — an app-admitted run has no session: the profile carries the forwarded app credential, and the
+      // receiver accepts it when it names this deployment as a peer (`A2A_TRUSTED_ORIGINS` there) — refused in its words otherwise.
+      const hop = await sendSubjectAskOverWire({ ...(trace ? { traceparent: trace.traceparent, ...(trace.tracestate ? { tracestate: trace.tracestate } : {}) } : {}), cardUrl: (at as { cardUrl: string }).cardUrl, ...((at as { pinnedDigest?: string }).pinnedDigest ? { pinnedDigest: (at as { pinnedDigest?: string }).pinnedDigest! } : {}), profile, ...(session ? { session } : {}), fetch: (u, init) => fetch(u, init) });
       if (!hop.ok) return { ok: false, via, refused: `${name ?? subject} could not be asked over the wire — ${hop.refused}` };
       envelope = hop.envelope as unknown as AskReplyEnvelopeV1;
       status = 200;

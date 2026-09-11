@@ -43,3 +43,11 @@ export async function askAsPerson(id: PersonIdentity, a2aOrigin: string, body: A
   const out = r.body as { reply?: Record<string, unknown>; runRef?: string; hasProvenance?: unknown };
   return { ok: true, reply: out.reply ?? {}, ...(out.runRef ? { runRef: out.runRef } : {}), ...(out.hasProvenance ? { hasProvenance: out.hasProvenance } : {}) };
 }
+
+/** The agent's own progress lines for a run (spec 370 P2), long-polled as the person. */
+export async function progressAsPerson(id: PersonIdentity, a2aOrigin: string, runRef: string, after: number, fetchImpl: typeof fetch = fetch): Promise<{ lines: Array<{ seq: number; said: string; stepRef?: string; terminal?: boolean }>; terminal: boolean; known: boolean }> {
+  const r = await callAsPerson(id, a2aOrigin, '/harness/progress', { addressee: id.agent, runRef, after, wait: 3000 }, fetchImpl);
+  if (!r.ok) return { lines: [], terminal: false, known: false };
+  const b = r.body as { lines?: Array<{ seq: number; said: string; stepRef?: string; terminal?: boolean }>; terminal?: boolean; known?: boolean };
+  return { lines: b.lines ?? [], terminal: !!b.terminal, known: !!b.known };
+}

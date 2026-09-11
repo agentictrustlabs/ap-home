@@ -270,6 +270,26 @@
       "required": true,
       "paced": false,
       "timeoutSec": 240
+    },
+    {
+      "id": "verify-home-mcp-stream",
+      "script": "scripts/verify-home-mcp-stream.mts",
+      "spec": "397 W3",
+      "proves": "a client that accepts an event stream gets progress notifications as her agent says what it is doing, then the result; a data question is put to the HOST as an MCP elicitation built from the agent's fields and the answer continues the run on the same session; resources serve the doctrine and her agent's public card",
+      "twin": "a signature is never elicited \u2014 the parked act ends the stream with authority_required",
+      "required": true,
+      "paced": true,
+      "timeoutSec": 300
+    },
+    {
+      "id": "verify-home-mcp-instructions",
+      "script": "scripts/verify-home-mcp-instructions.mts",
+      "spec": "397 / 394",
+      "proves": "a standing instruction declared through Claude (read back, confirmed through the host) is her agent's: a payment through Claude with no payer parks naming it",
+      "twin": "the app is not a room \u2014 the instruction is listed at her Home under her session and forgetting it there forgets it for Claude",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 240
     }
   ]
 }

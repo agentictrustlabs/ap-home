@@ -43,11 +43,11 @@ export const TOOLS = [
 ] as const;
 
 export interface ToolEnv { A2A_ORIGIN: string; HOME_ORIGIN: string }
-export interface Person { identity: PersonIdentity; agentName?: string }
+export interface Person { sub: string; identity: PersonIdentity; agentName?: string }
 
 function summarize(reply: Record<string, unknown>): Record<string, unknown> {
-  const { kind, text, error, runRef, prompt, requirement, delegator, summary, capability, parties, receipts, evidence } = reply as Record<string, unknown>;
-  return { kind, ...(text ? { text } : {}), ...(summary ? { summary } : {}), ...(error ? { error } : {}), ...(runRef ? { runRef } : {}), ...(prompt ? { prompt } : {}), ...(requirement ? { requirement } : {}), ...(delegator ? { delegator } : {}), ...(capability ? { capability } : {}), ...(parties ? { parties } : {}), ...(receipts ? { receipts } : {}), ...(evidence ? { evidence } : {}) };
+  const { kind, text, error, runRef, prompt, requirement, delegator, summary, capability, parties, receipts, evidence, resumeToken } = reply as Record<string, unknown>;
+  return { kind, ...(text ? { text } : {}), ...(summary ? { summary } : {}), ...(error ? { error } : {}), ...(runRef ? { runRef } : {}), ...(prompt ? { prompt } : {}), ...(resumeToken ? { resumeToken } : {}), ...(requirement ? { requirement } : {}), ...(delegator ? { delegator } : {}), ...(capability ? { capability } : {}), ...(parties ? { parties } : {}), ...(receipts ? { receipts } : {}), ...(evidence ? { evidence } : {}) };
 }
 
 export async function askTool(env: ToolEnv, person: Person, args: Record<string, unknown>, fetchImpl: typeof fetch = fetch): Promise<Record<string, unknown>> {
@@ -56,8 +56,10 @@ export async function askTool(env: ToolEnv, person: Person, args: Record<string,
   if (!message && !run) return { error: 'say what to ask (message), or name a run to continue (run)' };
   // The addressee: their own agent unless they named an organization (resolved by the agent's own resolver, by name).
   const addressee = typeof args.addressee === 'string' && args.addressee.trim() ? args.addressee.trim() : person.identity.agent;
+  // A fresh ask may ADOPT a run reference the caller minted (the streaming path tails its progress by it).
+  const adopt = !run && typeof args._runRef === 'string' ? args._runRef : '';
   const out = await askAsPerson(person.identity, env.A2A_ORIGIN, {
-    addressee, ...(message ? { message } : {}), ...(run ? { runRef: run } : {}),
+    addressee, ...(message ? { message } : {}), ...(run ? { runRef: run } : adopt ? { runRef: adopt } : {}),
     ...(Array.isArray(args.supplied) ? { supplied: args.supplied } : {}),
     ...(args.plan && typeof args.plan === 'object' ? { plan: args.plan } : {}),
   }, fetchImpl);
@@ -102,7 +104,7 @@ export async function engageTool(env: ToolEnv, person: Person, args: Record<stri
   const agent = String(args.agent ?? '').trim();
   const message = String(args.message ?? '').trim();
   if (!agent || !message) return { error: 'agent and message are required' };
-  const out = await askAsPerson(person.identity, env.A2A_ORIGIN, { addressee: person.identity.agent, message: `ask ${agent}: ${message}`, plan: { steps: [{ toolId: 'engagement.agent.invoke', args: { agent, message } }] } }, fetchImpl);
+  const out = await askAsPerson(person.identity, env.A2A_ORIGIN, { addressee: person.identity.agent, message: `ask ${agent}: ${message}`, plan: { steps: [{ toolId: 'engagement.agent.invoke', args: { agent, message } }] }, ...(typeof args._runRef === 'string' ? { runRef: args._runRef } : {}) }, fetchImpl);
   if (!out.ok) return { error: out.error, status: out.status };
   const reply = summarize(out.reply);
   const results = (out.reply.results as Array<{ toolId: string; result: Record<string, unknown> }> | undefined) ?? [];
