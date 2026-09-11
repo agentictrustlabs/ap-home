@@ -40,6 +40,17 @@ describe('spec 388 — routeProvider', () => {
     const later = await routeProvider(both, undefined, { call: 'composer', estimatedTokens: 4_000 }, { now: Date.now() + 61_000 });
     expect(later.provider).toBe('groq');
   });
+  it('the composer\'s evidence cap is part of the route: a body Groq would summarize goes to the provider that carries it whole', async () => {
+    const small = await routeProvider(both, undefined, { call: 'composer', estimatedTokens: 3_000, largestBodyChars: 10_700 });
+    expect(small.provider).toBe('groq');
+    resetSpend();
+    const big = await routeProvider(both, undefined, { call: 'composer', estimatedTokens: 3_500, largestBodyChars: 12_890 });
+    expect(big.provider).toBe('anthropic');
+    expect(big.because).toContain('its 12000-char evidence cap would summarize a 12890-char result');
+    // the planner is not bound by it — the cap is the composer's
+    resetSpend();
+    expect((await routeProvider(both, undefined, { call: 'planner', estimatedTokens: 3_000, largestBodyChars: 12_890 })).provider).toBe('groq');
+  });
   it('a paid tier raises the meter and the budget by configuration, not by guessing', async () => {
     const paid = { ...(both as object), ORCHESTRATION_GROQ_TPM: '300000', ORCHESTRATION_GROQ_PROMPT_BUDGET: '120000' } as never;
     expect((await routeProvider(paid, undefined, { call: 'planner', estimatedTokens: 50_000 })).provider).toBe('groq');

@@ -3572,7 +3572,8 @@ async function askReplyForInner(env: HarnessEnv, input: {
     let composer = input.composer ?? null;
     if (input.composerFor) {
       // The evidence is what the composer carries (chars/4, plus its own doctrine); the route names who carries it.
-      const need: RouteNeed = { call: 'composer', estimatedTokens: Math.ceil(JSON.stringify(r.steps).length / 4) + 800 };
+      const largestBodyChars = r.steps.filter((o) => o.ok && o.result !== undefined).reduce((m, o) => Math.max(m, JSON.stringify(o.result).length), 0);
+      const need: RouteNeed = { call: 'composer', estimatedTokens: Math.ceil(JSON.stringify(r.steps).length / 4) + 800, ...(largestBodyChars ? { largestBodyChars } : {}) };
       const routed = await input.composerFor(need);
       composer = routed.composer;
       if (input.plannerTrace) input.plannerTrace.route = { ...(input.plannerTrace.route ?? { policy: 'first' }), composer: routed.route };

@@ -177,7 +177,16 @@ export function routePolicy(env: PlannerEnv): RoutePolicy {
   if (raw === 'budget') return 'budget';
   throw new Error(`ORCHESTRATION_ROUTE must be "first" or "budget", got ${JSON.stringify(raw)}`);
 }
-export interface RouteNeed { call: 'planner' | 'composer' | 'structured'; estimatedTokens: number }
+export interface RouteNeed {
+  call: 'planner' | 'composer' | 'structured';
+  estimatedTokens: number;
+  /** The composer only: the largest single result body it must carry whole. A provider whose evidence cap would
+   *  replace that body with a summary does not CARRY the call — the composer would then compose over three titles of
+   *  thirty and say "nothing matched" (seen live on the Ligonier catalog, 12,890 chars against Groq's 12,000). */
+  largestBodyChars?: number;
+}
+/** Each provider's composer evidence cap (the same numbers `selectComposer` builds them with). */
+export const COMPOSER_EVIDENCE_CAP: Record<LlmProvider, number> = { anthropic: 24_000, openai: 24_000, groq: 12_000 };
 export interface RouteDecision {
   provider: LlmProvider | null;
   /** Why, in words a trace reader can check against the numbers beside it. */
@@ -275,7 +284,8 @@ export async function routeProvider(
   const entries = offered.map((p) => {
     providerConfigured(env, p);
     const budget = plannerPromptBudget(env, p);
-    return { provider: p, budget, tpm: providerTpm(env, p), budgetFits: budget === null || need.estimatedTokens <= budget };
+    const capFits = need.call !== 'composer' || need.largestBodyChars === undefined || need.largestBodyChars <= COMPOSER_EVIDENCE_CAP[p];
+    return { provider: p, budget, tpm: providerTpm(env, p), budgetFits: (budget === null || need.estimatedTokens <= budget) && capFits, capFits };
   });
   // The walk stops at the first UNMETERED provider whose budget carries the call: it needs no meter, so
   // nothing past it is ever consulted. Everything before it that is metered goes to the meter in one call.
@@ -302,7 +312,7 @@ export async function routeProvider(
     const mine = considered[at]!;
     const before = considered.slice(0, at);
     const why = mine.budget === null ? 'no budget' : `estimate ${need.estimatedTokens} ≤ budget ${mine.budget}${mine.spentThisMinute !== undefined ? ` and ${need.estimatedTokens}+${mine.spentThisMinute} ≤ ${providerTpm(env, winner)}/min` : ''}`;
-    const rejected = before.length ? ` (${before.map((c) => `${c.provider} would not: ${c.budget !== null && need.estimatedTokens > c.budget ? `estimate ${need.estimatedTokens} > ${c.budget}` : `${need.estimatedTokens}+${c.spentThisMinute ?? 0} > ${providerTpm(env, c.provider)}/min`}`).join('; ')})` : '';
+    const rejected = before.length ? ` (${before.map((c) => `${c.provider} would not: ${!entries.find((e) => e.provider === c.provider)!.capFits ? `its ${COMPOSER_EVIDENCE_CAP[c.provider]}-char evidence cap would summarize a ${need.largestBodyChars}-char result` : c.budget !== null && need.estimatedTokens > c.budget ? `estimate ${need.estimatedTokens} > ${c.budget}` : `${need.estimatedTokens}+${c.spentThisMinute ?? 0} > ${providerTpm(env, c.provider)}/min`}`).join('; ')})` : '';
     return { provider: winner, because: `${winner} for the ${need.call}: ${why}${rejected}`, considered: considered.slice(0, at + 1) };
   }
   // Nothing carries it: the first offered provider takes it, made to fit (the prompt fitter records every drop).
