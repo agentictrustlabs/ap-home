@@ -32,11 +32,20 @@ if (!names.includes('discover_agents') || !names.includes('engage')) fail('disco
 
 // ── discover, through her agent ──
 let t0 = Date.now();
-const found = await call('discover_agents', { intent: 'a study on justification', capability: 'gc:CFnDiscipleshipCurricula', limit: 5 });
+// Spec 349 §2 — the capability is said in WORDS; the registry resolves it to the id it knows and says how.
+const found = await call('discover_agents', { intent: 'a study on justification', capability: 'study plans', limit: 5 });
 const agents = (found.out.agents ?? []) as Array<{ agent: string | null; name: string | null; displayName: string; relevance: number | null; card: string | null }>;
 console.log(`discover → ${found.out.kind} · ${agents.length} agent(s) · ${Date.now() - t0} ms · run ${found.out.runRef}`);
 for (const a of agents) console.log(`  ${a.displayName} · name ${a.name ?? '?'} · ${a.agent} · relevance ${a.relevance} · card ${a.card}`);
+const cr = found.out.capabilityResolution as { requested?: string; resolvedTo?: string | null; because?: string } | undefined;
+console.log(`  capability “${cr?.requested}” → ${cr?.resolvedTo ?? 'unresolved'} · ${cr?.because ?? ''}`);
 if (found.isError) fail(`discover: ${JSON.stringify(found.out).slice(0, 300)}`);
+if (cr?.resolvedTo !== 'gc:CFnDiscipleshipCurricula') fail('the registry did not resolve "study plans" to the declared id');
+// TWIN — an unknown word is refused with the reason, never widened to a text search.
+const unknown = await call('discover_agents', { intent: 'a study on justification', capability: 'basket weaving', limit: 5 });
+const ur = unknown.out.capabilityResolution as { resolvedTo?: string | null; because?: string } | undefined;
+console.log(`twin · capability “basket weaving” → ${((unknown.out.agents ?? []) as unknown[]).length} agent(s) · ${ur?.because ?? unknown.out.note}`);
+if (((unknown.out.agents ?? []) as unknown[]).length !== 0 || ur?.resolvedTo) fail('an unknown capability word must leave the filter unmet, not widen the search');
 const lig = agents.find((a) => /ligonier/i.test(a.displayName) || a.name === 'ligonier.svc');
 if (!lig?.name) fail('Ligonier was not found by name through her agent');
 

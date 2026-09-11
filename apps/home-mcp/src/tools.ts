@@ -12,7 +12,7 @@ export const TOOLS = [
   },
   {
     name: 'discover_agents',
-    description: 'Find agents in the public registry by what the person wants — a ministry with a study on a doctrine, a service offering a capability — THROUGH THEIR OWN AGENT (the search is a run of theirs, with provenance). Args: intent (what they want, in their words), capability (optional filter: a capability id or word, e.g. "study plans"), language (optional BCP-47), limit (default 5). Returns agents with name, description, capabilities, card and relevance. Then `engage` one by its name.',
+    description: 'Find agents in the public registry by what the person wants — a ministry with a study on a doctrine, a service offering a capability — THROUGH THEIR OWN AGENT (the search is a run of theirs, with provenance). Args: intent (what they want, in their words), capability (optional filter: a capability id, or a word the registry resolves to one it knows, e.g. "study plans"; an unknown word is refused with the reason, never widened), language (optional BCP-47), limit (default 5). Returns agents with name, description, capabilities, card and relevance. Then `engage` one by its name.',
     inputSchema: { type: 'object', properties: { intent: { type: 'string' }, capability: { type: 'string' }, language: { type: 'string' }, limit: { type: 'integer' } }, required: ['intent'] },
     annotations: { readOnlyHint: true, openWorldHint: true },
   },
@@ -96,7 +96,8 @@ export async function discoverTool(env: ToolEnv, person: Person, args: Record<st
   if (!out.ok) return { error: out.error, status: out.status };
   const results = (out.reply.results as Array<{ toolId: string; result: Record<string, unknown> }> | undefined) ?? [];
   const found = results.find((r) => r.toolId === 'discovery.agents.find')?.result ?? {};
-  return { kind: out.reply.kind, ...(found.refused ? { refused: found.refused } : {}), agents: found.agents ?? [], referral: found.referral, text: out.reply.text, runRef: out.runRef, ...(out.hasProvenance ? { hasProvenance: out.hasProvenance } : {}), asked_as: person.agentName ?? person.identity.agent, note: found.note };
+  const replyError = typeof out.reply.error === 'string' ? out.reply.error : undefined;
+  return { kind: out.reply.kind, ...(found.refused ? { refused: found.refused } : replyError ? { refused: replyError } : {}), agents: found.agents ?? [], referral: found.referral, ...(found.capabilityResolution ? { capabilityResolution: found.capabilityResolution } : {}), text: out.reply.text, runRef: out.runRef, ...(out.hasProvenance ? { hasProvenance: out.hasProvenance } : {}), asked_as: person.agentName ?? person.identity.agent, note: found.note };
 }
 
 /** Spec 397 W2 — engagement THROUGH the person's agent: their agent sends the message as them; the reply is the other agent's. */

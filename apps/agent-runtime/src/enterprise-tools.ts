@@ -18,8 +18,9 @@ export const DISCOVERY_FIND_TOOL: ToolSpec = {
     + 'offers a capability, a publisher on a subject. The registry searches its entries (public, on-chain-anchored facts) '
     + 'and answers with matching agents: name, description, declared capabilities, card, relevance. Use it BEFORE '
     + 'engagement.agent.invoke when the ask names a kind of agent rather than a specific one. It reads only; it authorizes '
-    + 'nothing. Args: intent (what the person wants, in their words), capability (optional: a capability id or word to '
-    + 'filter on, e.g. "study plans"), language (optional BCP-47 tag), limit (default 5, max 25).',
+    + 'nothing. Args: intent (what the person wants, in their words), capability (optional: a capability id, or a WORD the '
+    + 'registry resolves to one it knows, e.g. "study plans" — an unknown word is refused with the reason, never widened), '
+    + 'language (optional BCP-47 tag), limit (default 5, max 25).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -36,7 +37,9 @@ export const DISCOVERY_FIND_TOOL: ToolSpec = {
 export const ENGAGEMENT_INVOKE_TOOL: ToolSpec = {
   id: ENGAGEMENT_INVOKE_CAPABILITY,
   answers: ['ask them', 'engage', 'what does the ministry say'],
-  verbs: ['engage'],
+  // The imperatives that name an engagement (spec 379's rule for a read that claims a verb): "ask ligonier.svc for …"
+  // is an instruction, and this read IS what was instructed — sending the words to that agent discharges it.
+  verbs: ['engage', 'ask', 'consult'],
   description:
     'ENGAGES A DISCOVERED AGENT: sends the person\'s words, as them, to another agent — one discovery.agents.find returned '
     + '(its name or address) or one the person named — and returns that agent\'s own answer, made under ITS OWN playbook '
@@ -97,7 +100,7 @@ export function discoveryFindInvoker(deps: EnterpriseDeps): ToolInvoker {
     let res: Response;
     try { res = await (deps.fetch ?? fetch)(url, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(plan.body) }); }
     catch (e) { return { refused: `the registry at ${origin} could not be reached: ${e instanceof Error ? e.message : String(e)}`, query: plan.body }; }
-    const out = (await res.json().catch(() => null)) as { results?: Array<Record<string, unknown>>; error?: unknown } | null;
+    const out = (await res.json().catch(() => null)) as { results?: Array<Record<string, unknown>>; error?: unknown; 'ap:capabilityResolution'?: { requested: string; resolvedTo: string | null; because: string; candidates: string[] }; 'ap:capabilityIdsFromText'?: string[] } | null;
     if (!res.ok || !out) return { refused: `the registry answered ${res.status}${out?.error ? `: ${typeof out.error === 'string' ? out.error : JSON.stringify(out.error).slice(0, 160)}` : ''}`, query: plan.body };
     const rows = Array.isArray(out.results) ? out.results : [];
     const agents: FoundAgent[] = await Promise.all(rows.map(async (e) => {
@@ -116,14 +119,20 @@ export function discoveryFindInvoker(deps: EnterpriseDeps): ToolInvoker {
         ...(e['ap:trustEvidence'] ? { evidence: e['ap:trustEvidence'] } : {}),
       };
     }));
+    const resolution = out['ap:capabilityResolution'];
     return {
       agents,
       query: plan.body,
       referral: { registry: url },
+      // Spec 349 §2 — how the registry read the capability word (or why it could not); the text's ids when any.
+      ...(resolution ? { capabilityResolution: resolution } : {}),
+      ...(out['ap:capabilityIdsFromText']?.length ? { capabilityIdsFromText: out['ap:capabilityIdsFromText'] } : {}),
       interpretation: `asked the registry at ${origin} for “${plan.body.query.text}”${plan.body.query.filter?.capabilities ? ` with capability ${plan.body.query.filter.capabilities.join(', ')}` : ''}${plan.body.query.filter?.['ap:language'] ? ` in ${plan.body.query.filter['ap:language'].join(', ')}` : ''}`,
       note: agents.length
         ? `${agents.length} agent(s) from the public registry, ordered by relevance — public facts, never a record of ours and never authority; engage one by its name or address.`
-        : 'nothing registered matched; the registry was asked, not guessed for.',
+        : resolution && !resolution.resolvedTo
+          ? `nothing matched: the registry could not read the capability — ${resolution.because}${resolution.candidates.length ? ` (candidates: ${resolution.candidates.join(', ')})` : ''}. Say it another way or drop the capability; the registry was not widened.`
+          : 'nothing registered matched; the registry was asked, not guessed for.',
     };
   };
 }

@@ -2590,6 +2590,10 @@ export async function resolveStepArgs(
   lookups: PartyLookups,
   where?: {
     stepRef: string; toolId: string; capabilityId?: string; authorityArg?: string; subject?: string; required?: string[];
+    /** The arguments the TOOL ITSELF describes (its input schema). An argument the tool describes and the ontology
+     *  declares no party role for is NOT a party of this step — `catalog.topic.list { parent }` is a topic slug, and
+     *  resolving it as an agent asked "which agent is justification?" (seen live). Counterparties stay resolved. */
+    schemaArgs?: readonly string[];
     /** Spec 363 W5 — the DECISION POINTS this step's capability consults, from its contract (or the
      *  built-in declaration). A point not named here is not consulted: the question is asked. */
     consults?: readonly string[];
@@ -2904,7 +2908,11 @@ export async function resolveStepArgs(
       lookups.onResolved?.({ arg: role.arg, raw: partyWord(role.arg), agent: hit.agent, hint: hit.hint, via: 'context' });
     }
   }
+  const capForRoles = where?.capabilityId ?? where?.toolId;
   for (const key of PARTY_ARGS) {
+    // A party is what the ONTOLOGY says this capability's argument is. An argument the tool describes itself, that no
+    // role names and that is not a counterparty, is the tool's own value (a topic, a label) — never resolved as an agent.
+    if (where?.schemaArgs?.includes(key) && key !== 'workspace' && key !== 'funder' && !COUNTERPARTY_ARGS.has(key) && !PARTY_ROLES.some((r) => r.capability === capForRoles && r.arg === key)) continue;
     const raw = String(out[key] ?? '').trim();
     // NEVER THE ASKER — checked BEFORE the address short-circuit. A planner given the asker's address in
     // its context wrote it as the INVITEE of "invite her", and the guard below only ever saw names, so the
@@ -4198,8 +4206,11 @@ step is then handed to that agent under authority the person grants; leave it ou
     EXTERNAL_AGENT_TOOL,
     // Spec 397 W2 — the enterprise behind this agent: FIND in the registry (only where one is configured — a tool that
     // cannot run is not listed), ENGAGE a discovered agent as the asker (the routed ask, the target planning for itself).
-    ...(env.ARD_REGISTRY_ORIGIN ? [mergeContractTool(DISCOVERY_FIND_TOOL, playbook?.tools?.[DISCOVERY_FIND_TOOL.id])] : []),
-    mergeContractTool(ENGAGEMENT_INVOKE_TOOL, playbook?.tools?.[ENGAGEMENT_INVOKE_TOOL.id]),
+    // OFFERED ONLY WHERE THE PLAYBOOK SAYS SO (the person/org stewards carry the contracts; a content catalog does not):
+    // offered to every agent, a publisher's planner picked `engagement.agent.invoke` for "a study on justification"
+    // and asked which agent "justification" was (seen live) — the capability model generates the surface, never a list.
+    ...(env.ARD_REGISTRY_ORIGIN && playbook?.tools?.[DISCOVERY_FIND_TOOL.id] ? [mergeContractTool(DISCOVERY_FIND_TOOL, playbook.tools[DISCOVERY_FIND_TOOL.id])] : []),
+    ...(playbook?.tools?.[ENGAGEMENT_INVOKE_TOOL.id] ? [mergeContractTool(ENGAGEMENT_INVOKE_TOOL, playbook.tools[ENGAGEMENT_INVOKE_TOOL.id])] : []),
     // Spec 380 — one member of an organization, asked through their own agent (fan-out over the roster).
     MEMBER_CONSULT_TOOL,
     // Spec 384 — ask other agents whether they would take this work, and on what terms (an offer is never accepted here).
@@ -4548,6 +4559,7 @@ step is then handed to that agent under authority the person grants; leave it ou
       if (r.label || !resolved.has(key)) resolved.set(key, r);
     } }, {
       stepRef: 'pending', toolId, ...(tool.capability?.id ? { capabilityId: tool.capability.id } : {}),
+      schemaArgs: Object.keys(((tool.inputSchema ?? {}) as { properties?: Record<string, unknown> }).properties ?? {}),
       // A SCREEN'S OWN PLAN may state base units; a planner may not (see the unit guard above).
       ...(input.plan ? { computedUnits: true } : {}),
       // What this capability lets the substrate decide rather than ask (spec 363 W5).
