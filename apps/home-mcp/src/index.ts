@@ -17,7 +17,7 @@ import { HomeMcpStoreDO, Store, kekFrom, openWire, sealWire, randomToken, sha256
 import { sseFrame, progressNotification, elicitationFor, isJsonRpcResponse } from './stream.js';
 import { progressAsPerson } from './a2a.js';
 import { authorizationServerMetadata, parseAuthorize, registerClient, tokenEndpoint, revokeEndpoint, bearerOf, PENDING_TTL_MS } from './oauth.js';
-import { TOOLS, askTool, grantLinkTool, discoverTool, engageTool, runTool, myRunsTool, needsReauthorization, type Person } from './tools.js';
+import { TOOLS, askTool, grantLinkTool, discoverTool, engageTool, inspectTool, runTool, myRunsTool, needsReauthorization, type Person } from './tools.js';
 import { SERVER, SCOPES } from './whitelabel.js';
 
 export { HomeMcpStoreDO };
@@ -192,6 +192,7 @@ async function callTool(env: Env, person: Person, name: string, args: Record<str
   const done = (out: Record<string, unknown>) => { if (needsReauthorization(out)) throw new ConnectionRefused(String(out.error)); return toolResult(out, 'error' in out); };
   if (name === 'ask') return done(await askTool(env, person, args));
   if (name === 'discover_agents') return done(await discoverTool(env, person, args));
+  if (name === 'inspect_agent') return done(await inspectTool(env, person, args));
   if (name === 'engage') return done(await engageTool(env, person, args));
   if (name === 'my_runs') return done(await myRunsTool(env, person, args));
   if (name === 'run') return done(await runTool(env, person, args));

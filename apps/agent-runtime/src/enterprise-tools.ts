@@ -5,9 +5,12 @@
 // agent says is an observation with its source named (spec 379) — never a record of ours, never authority. Neither
 // capability spends anything: a discovered agent that would ACT parks the act for ITS steward (spec 374).
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
+import { resolveAgentCard } from '@agenticprimitives/a2a/standard';
+import { cardOfName, type ExternalAgentDeps } from './external-agent.js';
 
 export const DISCOVERY_FIND_CAPABILITY = 'discovery.agents.find' as const;
 export const ENGAGEMENT_INVOKE_CAPABILITY = 'engagement.agent.invoke' as const;
+export const DISCOVERY_INSPECT_CAPABILITY = 'discovery.agent.inspect' as const;
 
 export const DISCOVERY_FIND_TOOL: ToolSpec = {
   id: DISCOVERY_FIND_CAPABILITY,
@@ -135,6 +138,41 @@ export function discoveryFindInvoker(deps: EnterpriseDeps): ToolInvoker {
         : resolution && !resolution.resolvedTo
           ? `nothing matched: the registry could not read the capability — ${resolution.because}${resolution.candidates.length ? ` (candidates: ${resolution.candidates.join(', ')})` : ''}. Say it another way or drop the capability; the registry was not widened.`
           : 'nothing registered matched; the registry was asked, not guessed for.',
+    };
+  };
+}
+
+export const DISCOVERY_INSPECT_TOOL: ToolSpec = {
+  id: DISCOVERY_INSPECT_CAPABILITY,
+  answers: ['what does this agent offer', 'inspect', 'what skills does', 'who runs', 'is the card current'],
+  verbs: ['inspect'],
+  description:
+    'INSPECTS ONE AGENT BEFORE ENGAGING IT: its public A2A card, re-fetched through its registry NAME\'s own records (the card '
+    + 'URL and the digest the name pins on chain) — who it says it is, what skills it declares, its provider, and whether '
+    + 'the card served now still matches what its records pin. Public facts, read only; it authorizes nothing and it '
+    + 'never asks the agent anything. Args: agent (the registry name, e.g. ligonier.svc, as discovery returned it).',
+  inputSchema: { type: 'object', properties: { agent: { type: 'string', description: 'The agent\'s registry name (ligonier.svc)' } }, required: ['agent'] },
+  establishes: 'lookup',
+};
+
+/** The card through the NAME's records, pinned when the records pin it — 387's inspect, at her agent. */
+export function discoveryInspectInvoker(deps: Pick<ExternalAgentDeps, 'nameRecords' | 'fetch'>): ToolInvoker {
+  return async (_toolId, args) => {
+    const name = String(args.agent ?? '').trim().toLowerCase();
+    if (!name || /^0x[0-9a-f]{40}$/.test(name)) return { refused: 'inspect by registry NAME (ligonier.svc) — the name\'s own records say where its card is and what pins it' };
+    if (!deps.nameRecords) return { refused: 'no name records are readable here' };
+    const where = await cardOfName(name, deps.nameRecords);
+    if ('refused' in where) return { refused: where.refused };
+    let resolved;
+    try { resolved = await resolveAgentCard(where.cardUrl, deps.fetch ?? fetch); }
+    catch (e) { return { refused: `the card at ${where.cardUrl} could not be read: ${e instanceof Error ? e.message : String(e)}`, cardUrl: where.cardUrl }; }
+    const card = resolved.card as { name?: string; description?: string; provider?: { organization?: string; url?: string }; skills?: Array<{ id?: string; name?: string; description?: string }>; protocolVersion?: string; version?: string };
+    const matchesPin = where.pinnedDigest ? where.pinnedDigest.toLowerCase() === resolved.cardDigest.toLowerCase() : null;
+    return {
+      name, cardUrl: where.cardUrl, endpoint: resolved.endpoint, cardDigest: resolved.cardDigest,
+      pinned: !!where.pinnedDigest, ...(matchesPin !== null ? { matchesPin } : {}),
+      card: { name: card.name, description: card.description, provider: card.provider, protocolVersion: card.protocolVersion, version: card.version, skills: (card.skills ?? []).map((s) => ({ id: s.id, name: s.name, description: s.description })) },
+      note: matchesPin === false ? 'THE SERVED CARD DIFFERS from the digest its records pin — say so; do not engage on it as if current.' : `Public facts from ${name}'s own card${where.pinnedDigest ? ', matching the digest its records pin' : ' (its records pin no digest)'} — never authority.`,
     };
   };
 }

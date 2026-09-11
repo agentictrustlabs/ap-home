@@ -310,6 +310,16 @@
       "required": true,
       "paced": true,
       "timeoutSec": 400
+    },
+    {
+      "id": "verify-home-mcp-people",
+      "script": "scripts/verify-home-mcp-people.mts",
+      "spec": "397",
+      "proves": "through Claude: an invitation asked AT an organization parks, is approved at her Home on the one-prompt path, finishes with the signed invitation the Home's half records, and the organization lists the invitee; her own household records answer; a card is inspected through its name's records with the pin verdict",
+      "twin": "another person's records are refused without stewardship; a read never asks her authority",
+      "required": true,
+      "paced": true,
+      "timeoutSec": 400
     }
   ]
 }

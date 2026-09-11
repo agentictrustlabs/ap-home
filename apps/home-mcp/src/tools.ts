@@ -17,6 +17,12 @@ export const TOOLS = [
     annotations: { readOnlyHint: true, openWorldHint: true },
   },
   {
+    name: 'inspect_agent',
+    description: 'Look at one agent before engaging it: its public A2A card re-fetched through its registry name\'s own records — who it says it is, its skills and provider, and whether the served card still matches the digest its records pin. Read only, through the person\'s agent. Args: agent (the registry name, e.g. ligonier.svc).',
+    inputSchema: { type: 'object', properties: { agent: { type: 'string' } }, required: ['agent'] },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  },
+  {
     name: 'engage',
     description: 'Send the person\'s words, as them, to another agent — one `discover_agents` returned or one they named (ligonier.svc, missio-nexus.org) — and get that agent\'s own answer, made under ITS playbook from its own catalog or records (a study plan with links, what it offers). Their agent sends it and records the hop; the other agent sees only the message. Args: agent (name or 0x address as discovery returned it), message (the ask, complete, in the person\'s words). Present the reply as that agent\'s answer, naming it as the source and keeping every link it gave.',
     inputSchema: { type: 'object', properties: { agent: { type: 'string' }, message: { type: 'string' } }, required: ['agent', 'message'] },
@@ -24,14 +30,14 @@ export const TOOLS = [
   },
   {
     name: 'my_runs',
-    description: 'The person\'s recent runs on their own agent — what they asked (through any surface), what came of it, and which are still waiting on them (a signature at their Home, an answer). Args: limit (default 10). Read from their agent\'s own records; nothing here is a guess.',
-    inputSchema: { type: 'object', properties: { limit: { type: 'integer' } }, required: [] },
+    description: 'The person\'s recent runs — on their own agent, or at an organization they asked at (addressee) — what they asked (through any surface), what came of it, and which are still waiting on them (a signature at their Home, an answer). Args: limit (default 10), addressee (optional: an organization name). Read from the agent\'s own records; nothing here is a guess.',
+    inputSchema: { type: 'object', properties: { limit: { type: 'integer' }, addressee: { type: 'string' } }, required: [] },
     annotations: { readOnlyHint: true },
   },
   {
     name: 'run',
-    description: 'One run of the person\'s, by runRef: the ask, the plan, every step\'s outcome, the receipts (with the transaction when a step left one) and where its provenance is. Use it after they finished a parked run at their Home, or to answer "what did you do for me". Args: run (the runRef).',
-    inputSchema: { type: 'object', properties: { run: { type: 'string' } }, required: ['run'] },
+    description: 'One run of the person\'s, by runRef: the ask, the plan, every step\'s outcome, the receipts (with the transaction when a step left one) and where its provenance is. Use it after they finished a parked run at their Home, or to answer "what did you do for me". Args: run (the runRef), addressee (the organization the run was asked at, when it was — the same addressee as the ask).',
+    inputSchema: { type: 'object', properties: { run: { type: 'string' }, addressee: { type: 'string' } }, required: ['run'] },
     annotations: { readOnlyHint: true },
   },
   {
@@ -57,19 +63,24 @@ function summarize(reply: Record<string, unknown>): Record<string, unknown> {
   return { kind, ...(text ? { text } : {}), ...(summary ? { summary } : {}), ...(error ? { error } : {}), ...(runRef ? { runRef } : {}), ...(prompt ? { prompt } : {}), ...(resumeToken ? { resumeToken } : {}), ...(Array.isArray(routed) && routed.length ? { routed } : {}), ...(requirement ? { requirement } : {}), ...(delegator ? { delegator } : {}), ...(capability ? { capability } : {}), ...(parties ? { parties } : {}), ...(receipts ? { receipts } : {}), ...(evidence ? { evidence } : {}) };
 }
 
+/** WHERE the ask (or the read of a run) goes: her own agent, or a ROOM BY NAME (missio-nexus.org) — the registry says which
+ *  agent that is; her standing there is derived by THAT agent from its own records. The name resolves, it never admits. */
+async function addresseeOf(env: ToolEnv, person: Person, args: Record<string, unknown>, fetchImpl: typeof fetch): Promise<{ addressee: string } | { error: string }> {
+  const named = typeof args.addressee === 'string' && args.addressee.trim() ? args.addressee.trim() : person.identity.agent;
+  if (/^0x[0-9a-fA-F]{40}$/.test(named)) return { addressee: named.toLowerCase() };
+  const info = (await fetchImpl(`${env.HOME_ORIGIN}/connect/name-info?name=${encodeURIComponent(named.toLowerCase())}`).then((r) => r.json()).catch(() => null)) as { exists?: boolean; agent?: string } | null;
+  if (!info?.exists || !info.agent) return { error: `no agent is registered as “${named}” — name the organization as its registry name (missio-nexus.org) or its address` };
+  return { addressee: info.agent.toLowerCase() };
+}
+
 export async function askTool(env: ToolEnv, person: Person, args: Record<string, unknown>, fetchImpl: typeof fetch = fetch): Promise<Record<string, unknown>> {
   const message = String(args.message ?? '').trim();
   const run = typeof args.run === 'string' ? args.run.trim() : '';
   if (!message && !run) return { error: 'say what to ask (message), or name a run to continue (run)' };
   // The addressee: their own agent unless they named an organization (resolved by the agent's own resolver, by name).
-  let addressee = typeof args.addressee === 'string' && args.addressee.trim() ? args.addressee.trim() : person.identity.agent;
-  if (!/^0x[0-9a-fA-F]{40}$/.test(addressee)) {
-    // A ROOM BY NAME (missio-nexus.org): the registry says which agent that is; her standing there is derived by THAT
-    // agent from its own records when the ask arrives — the name resolves, it never admits.
-    const info = (await fetchImpl(`${env.HOME_ORIGIN}/connect/name-info?name=${encodeURIComponent(addressee.toLowerCase())}`).then((r) => r.json()).catch(() => null)) as { exists?: boolean; agent?: string } | null;
-    if (!info?.exists || !info.agent) return { error: `no agent is registered as “${addressee}” — name the organization as its registry name (missio-nexus.org) or its address` };
-    addressee = info.agent.toLowerCase();
-  }
+  const where = await addresseeOf(env, person, args, fetchImpl);
+  if ('error' in where) return where;
+  const addressee = where.addressee;
   // A fresh ask may ADOPT a run reference the caller minted (the streaming path tails its progress by it).
   const adopt = !run && typeof args._runRef === 'string' ? args._runRef : '';
   const out = await askAsPerson(person.identity, env.A2A_ORIGIN, {
@@ -81,7 +92,7 @@ export async function askTool(env: ToolEnv, person: Person, args: Record<string,
     if (isDelegationRefusal(out.status, out.error)) return wireRefused(out.error);
     // Spec 397 W3 — a run named alone that is no longer waiting was FINISHED (at their Home, by them): the record is the answer.
     if (!message && run && out.status === 404) {
-      const rec = await recordOf(env, person, run, fetchImpl);
+      const rec = await recordOf(env, person, run, fetchImpl, addressee);
       if (rec) return { kind: 'done', ...rec, note: 'This run is no longer waiting — it was finished (at their Home, by them). What follows is its record.' };
     }
     return { error: out.error, status: out.status };
@@ -128,8 +139,8 @@ export async function engageTool(env: ToolEnv, person: Person, args: Record<stri
 }
 
 /** Spec 397 W3 — a run's RECORD from her agent, shaped for a host: no mandates, no keyring, the facts and the receipts. */
-async function recordOf(env: ToolEnv, person: Person, runRef: string, fetchImpl: typeof fetch): Promise<Record<string, unknown> | null> {
-  const r = await callAsPerson(person.identity, env.A2A_ORIGIN, '/harness/records', { addressee: person.identity.agent, runRef }, fetchImpl);
+async function recordOf(env: ToolEnv, person: Person, runRef: string, fetchImpl: typeof fetch, addressee = person.identity.agent): Promise<Record<string, unknown> | null> {
+  const r = await callAsPerson(person.identity, env.A2A_ORIGIN, '/harness/records', { addressee, runRef }, fetchImpl);
   if (!r.ok) return null;
   const rec = r.body.record as { runRef?: string; at?: number; intent?: { goal?: string }; outcome?: string; plan?: { steps?: Array<{ toolId: string; args?: unknown }> }; steps?: Array<{ stepRef?: string; toolId: string; ok?: boolean; result?: unknown }>; receipts?: Array<{ stepRef: string; toolId: string; status: string; risk?: string; binding?: { mandateRef?: string }; outputDigest?: string }>; export?: unknown } | undefined;
   if (!rec) return null;
@@ -138,7 +149,7 @@ async function recordOf(env: ToolEnv, person: Person, runRef: string, fetchImpl:
     runRef: rec.runRef ?? runRef, at: rec.at, asked: rec.intent?.goal, outcome: rec.outcome,
     steps: (rec.steps ?? []).map((s) => ({ stepRef: s.stepRef, toolId: s.toolId, ok: s.ok, ...(tx(s.result) ? { txHash: tx(s.result) } : {}), summary: JSON.stringify(s.result ?? null).slice(0, 400) })),
     receipts: (rec.receipts ?? []).map((rc) => ({ stepRef: rc.stepRef, toolId: rc.toolId, status: rc.status, risk: rc.risk, ...(rc.binding?.mandateRef ? { mandateRef: rc.binding.mandateRef } : {}) })),
-    hasProvenance: { agent: person.identity.agent, recordType: `run.provenance:${rec.runRef ?? runRef}`, route: '/harness/provenance' },
+    hasProvenance: { agent: addressee, recordType: `run.provenance:${rec.runRef ?? runRef}`, route: '/harness/provenance' },
     asked_as: person.agentName ?? person.identity.agent,
   };
 }
@@ -146,10 +157,12 @@ async function recordOf(env: ToolEnv, person: Person, runRef: string, fetchImpl:
 export async function runTool(env: ToolEnv, person: Person, args: Record<string, unknown>, fetchImpl: typeof fetch = fetch): Promise<Record<string, unknown>> {
   const run = String(args.run ?? '').trim();
   if (!run) return { error: 'run (a runRef) is required' };
-  const rec = await recordOf(env, person, run, fetchImpl);
+  const where = await addresseeOf(env, person, args, fetchImpl);
+  if ('error' in where) return where;
+  const rec = await recordOf(env, person, run, fetchImpl, where.addressee);
   if (rec) return rec;
   // Still waiting: the checkpoint says on what.
-  const waiting = await callAsPerson(person.identity, env.A2A_ORIGIN, '/harness/runs', { addressee: person.identity.agent }, fetchImpl);
+  const waiting = await callAsPerson(person.identity, env.A2A_ORIGIN, '/harness/runs', { addressee: where.addressee }, fetchImpl);
   if (!waiting.ok && isDelegationRefusal(waiting.status, waiting.error)) return wireRefused(waiting.error);
   const row = waiting.ok ? ((waiting.body.runs as Array<{ runRef: string; message?: string; awaiting?: unknown; updatedAt?: number }> | undefined) ?? []).find((x) => x.runRef === run) : undefined;
   if (row) return { runRef: run, asked: row.message, waiting: row.awaiting ?? null, updatedAt: row.updatedAt, note: 'This run is parked on their agent — see `waiting`; a signature is given at their Home (grant_link), an answer with ask { run, supplied }.' };
@@ -158,9 +171,11 @@ export async function runTool(env: ToolEnv, person: Person, args: Record<string,
 
 export async function myRunsTool(env: ToolEnv, person: Person, args: Record<string, unknown>, fetchImpl: typeof fetch = fetch): Promise<Record<string, unknown>> {
   const limit = Number.isInteger(args.limit) && (args.limit as number) > 0 ? Math.min(args.limit as number, 50) : 10;
+  const where = await addresseeOf(env, person, args, fetchImpl);
+  if ('error' in where) return where;
   const [records, waiting] = await Promise.all([
-    callAsPerson(person.identity, env.A2A_ORIGIN, '/harness/records', { addressee: person.identity.agent }, fetchImpl),
-    callAsPerson(person.identity, env.A2A_ORIGIN, '/harness/runs', { addressee: person.identity.agent }, fetchImpl),
+    callAsPerson(person.identity, env.A2A_ORIGIN, '/harness/records', { addressee: where.addressee }, fetchImpl),
+    callAsPerson(person.identity, env.A2A_ORIGIN, '/harness/runs', { addressee: where.addressee }, fetchImpl),
   ]);
   if (!records.ok) return isDelegationRefusal(records.status, records.error) ? wireRefused(records.error) : { error: records.error, status: records.status };
   const rows = ((records.body.records as Array<{ runRef: string; at?: number; intent?: { goal?: string }; outcome?: string; receipts?: unknown[] }> | undefined) ?? [])
@@ -168,4 +183,16 @@ export async function myRunsTool(env: ToolEnv, person: Person, args: Record<stri
     .map((r) => ({ runRef: r.runRef, at: r.at, asked: r.intent?.goal, outcome: r.outcome, receipts: (r.receipts ?? []).length }));
   const parked = waiting.ok ? ((waiting.body.runs as Array<{ runRef: string; message?: string; awaiting?: unknown; updatedAt?: number }> | undefined) ?? []).map((x) => ({ runRef: x.runRef, asked: x.message, waiting: x.awaiting ?? null, updatedAt: x.updatedAt })) : [];
   return { runs: rows, waitingOnThem: parked, retention: records.body.retention ?? null, asked_as: person.agentName ?? person.identity.agent };
+}
+
+/** Spec 397 — inspect THROUGH the person's agent: one supplied step; the card's public facts as her run's observation. */
+export async function inspectTool(env: ToolEnv, person: Person, args: Record<string, unknown>, fetchImpl: typeof fetch = fetch): Promise<Record<string, unknown>> {
+  const agent = String(args.agent ?? '').trim();
+  if (!agent) return { error: 'agent (a registry name) is required' };
+  const out = await askAsPerson(person.identity, env.A2A_ORIGIN, { addressee: person.identity.agent, message: `inspect ${agent}`, plan: { steps: [{ toolId: 'discovery.agent.inspect', args: { agent } }] } }, fetchImpl);
+  if (!out.ok) return isDelegationRefusal(out.status, out.error) ? wireRefused(out.error) : { error: out.error, status: out.status };
+  const results = (out.reply.results as Array<{ toolId: string; result: Record<string, unknown> }> | undefined) ?? [];
+  const found = results.find((r) => r.toolId === 'discovery.agent.inspect')?.result ?? {};
+  const replyError = typeof out.reply.error === 'string' ? out.reply.error : undefined;
+  return { kind: out.reply.kind, ...(found.refused ? { refused: found.refused } : replyError ? { refused: replyError } : {}), ...found, runRef: out.runRef, ...(out.hasProvenance ? { hasProvenance: out.hasProvenance } : {}), asked_as: person.agentName ?? person.identity.agent };
 }

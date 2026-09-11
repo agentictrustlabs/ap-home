@@ -145,6 +145,7 @@ import { subjectAsk, subjectAnswer, validateSubjectAsk, handoff, type SubjectAns
 import { realtimeKitConfigured, verifyRealtimeKitWebhook, readRealtimeKitWebhook } from './realtimekit.js';
 import { sendSubjectAskOverWire, subjectAnswerMessage, subjectEnvelopeOf, handoffMessage, routedRunRefFor } from './subject-hop.js';
 import { EXTERNAL_AGENT_TOOL, externalAgentInvoker } from './external-agent.js';
+import { DISCOVERY_INSPECT_CAPABILITY, discoveryInspectInvoker } from './enterprise-tools.js';
 import { subjectAddress, nameRecordsReader, servesUnpublishedNames, type SubjectAddressEnv } from './subject-address.js';
 import { MEMBER_CONSULT_TOOL, memberConsultInvoker } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL, engagementProbeInvoker, type ProbeDeps } from './engagement-probe.js';
@@ -3088,7 +3089,17 @@ app.post('/harness/ask', async (c) => {
         // The generated-query read (spec 357 W3) — same tier, same rules: public data, no authority, and
         // the query it ran comes back with the answer.
         // Spec 379 — an outside agent's answer: fetched by its card over the network, graded as an observation.
-        if (toolId === EXTERNAL_AGENT_TOOL.id) return externalAgentInvoker({ timeoutMs: 20_000,
+        // A card on a host THIS Worker serves is read in-process: a Worker cannot fetch its own hostname (CF 522/530), and
+        // the per-agent hosts of this deployment are its own. Anything else goes over the network as it should.
+        const zones = a2aBaseDomains(c.env);
+        const reachFetch: typeof fetch = async (u, init) => {
+          const host = (() => { try { return new URL(String(u instanceof Request ? u.url : u)).hostname.toLowerCase(); } catch { return ''; } })();
+          if (host && zones.some((z) => host === z || host.endsWith(`.${z}`))) return app.fetch(new Request(u instanceof Request ? u.url : String(u), init), c.env, executionContextFor(c.executionCtx));
+          return fetch(u, init);
+        };
+        // Spec 397 — the card through the name's records, at her agent (387's inspect): public facts, pinned when pinned.
+        if (toolId === DISCOVERY_INSPECT_CAPABILITY) return discoveryInspectInvoker({ nameRecords: nameRecordsReader(c.env) ?? (async () => null), fetch: reachFetch })(toolId, args, ctx);
+        if (toolId === EXTERNAL_AGENT_TOOL.id) return externalAgentInvoker({ timeoutMs: 20_000, fetch: reachFetch,
           // Spec 379 W2 — a registry NAME resolves through its own on-chain records to a card, pinned by `atl:cardDigest`.
           nameRecords: nameRecordsReader(c.env) ?? (async () => null) })(toolId, args, ctx);
         // Spec 380 — one member asked through the consult rail, at the organization; skipped without their opt-in.

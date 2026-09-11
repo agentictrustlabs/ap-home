@@ -36,7 +36,7 @@ import { bindSelectedOffer, type SelectedOfferBindingV1 } from './engagement-cam
 import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
 import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
-import { DISCOVERY_FIND_TOOL, ENGAGEMENT_INVOKE_TOOL, DISCOVERY_FIND_CAPABILITY, ENGAGEMENT_INVOKE_CAPABILITY, discoveryFindInvoker } from './enterprise-tools.js';
+import { DISCOVERY_FIND_TOOL, ENGAGEMENT_INVOKE_TOOL, DISCOVERY_INSPECT_TOOL, DISCOVERY_FIND_CAPABILITY, ENGAGEMENT_INVOKE_CAPABILITY, discoveryFindInvoker } from './enterprise-tools.js';
 import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
 import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
@@ -4214,6 +4214,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     // and asked which agent "justification" was (seen live) — the capability model generates the surface, never a list.
     ...(env.ARD_REGISTRY_ORIGIN && playbook?.tools?.[DISCOVERY_FIND_TOOL.id] ? [mergeContractTool(DISCOVERY_FIND_TOOL, playbook.tools[DISCOVERY_FIND_TOOL.id])] : []),
     ...(playbook?.tools?.[ENGAGEMENT_INVOKE_TOOL.id] ? [mergeContractTool(ENGAGEMENT_INVOKE_TOOL, playbook.tools[ENGAGEMENT_INVOKE_TOOL.id])] : []),
+    ...(playbook?.tools?.[DISCOVERY_INSPECT_TOOL.id] ? [mergeContractTool(DISCOVERY_INSPECT_TOOL, playbook.tools[DISCOVERY_INSPECT_TOOL.id])] : []),
     // Spec 380 — one member of an organization, asked through their own agent (fan-out over the roster).
     MEMBER_CONSULT_TOOL,
     // Spec 384 — ask other agents whether they would take this work, and on what terms (an offer is never accepted here).
