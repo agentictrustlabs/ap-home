@@ -3,7 +3,7 @@
 // (desktop) / bottom-nav (mobile) + the routed section as <main>. The active WORKSPACE is
 // derived from the URL (spec 315) and scopes the left nav: person / org / connected app.
 import { useState, type ReactNode, useEffect} from 'react';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { whitelabel } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
 import { useManagedAgents } from './ManagedAgents';
@@ -45,6 +45,15 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
     return () => window.removeEventListener('ap:ask', onAsk);
   }, []);
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  // Spec 397 §6 — `/you?run=<runRef>`: the run an assistant parked for this person's signature. Read HERE, by the shell
+  // that owns the flyout: a page's event fired on mount arrives before this shell's listener exists on a direct link.
+  useEffect(() => {
+    const run = pathname === '/you' ? (searchParams?.get('run') ?? '') : '';
+    if (!/^(run|ask)-[A-Za-z0-9._:-]+$/.test(run)) return;
+    setAskResume(run);
+    setAskOpen(true);
+  }, [pathname, searchParams]);
   // A selection belongs to the screen it was made on: leaving the screen clears it (spec 361 I6).
   useEffect(() => { setAskSelection(null); }, [pathname]);
   const active = parseWorkspacePath(pathname ?? '/');
