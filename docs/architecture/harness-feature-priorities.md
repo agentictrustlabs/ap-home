@@ -179,7 +179,11 @@ paper over. Each has a done-criterion that is a script in the nightly ledger, no
 
 G4–G6 share one fixture (faithnet-b) and one prerequisite (B's caller token; for G5/G6 also the parent wire
 ceremony); they are ONE wave, run in order, not three. The token is an operator action, not code: request it
-now so the wave is not blocked when it starts.
+now so the wave is not blocked when it starts. **Pre-built 2026-09-10:** the three gates carry a `CROSS=1` leg
+that preflights B (`scripts/cross-home-preflight.mts`: B's card, a name placed on B by its records, the parent
+wire) and reports `⊘ skipped — …` naming what is missing; the nightly runner has a `skipped` status (never a pass,
+never a failure, its own column in the trend), so the three rows sit in the ledger waiting; the order and the
+operator requests are in [`docs/runbooks/cross-home-wave-faithnet-b.md`](../runbooks/cross-home-wave-faithnet-b.md).
 
 ### 3.3 Time-gated — starts now, completes in the background during the transition
 

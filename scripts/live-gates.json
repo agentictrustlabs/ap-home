@@ -181,6 +181,45 @@
       "required": true,
       "paced": false,
       "timeoutSec": 420
+    },
+    {
+      "id": "verify-cross-deployment-cross",
+      "script": "scripts/verify-cross-deployment.mts",
+      "spec": "374 W3 (G4)",
+      "proves": "a routed write parked at an organization on Home B resumes the asker's run on Home A under the subject agent's session wire",
+      "twin": "B's completion presented without the wire is refused at A",
+      "required": true,
+      "paced": true,
+      "timeoutSec": 420,
+      "env": {
+        "CROSS": "1"
+      }
+    },
+    {
+      "id": "verify-handoff-cross",
+      "script": "scripts/verify-handoff.mts",
+      "spec": "376 W3 (G5)",
+      "proves": "a child mandate cut on A is redeemed by a specialist on B under the parent agent's own session wire",
+      "twin": "the parent revokes the child and B is denied at its own gate",
+      "required": true,
+      "paced": true,
+      "timeoutSec": 420,
+      "env": {
+        "CROSS": "1"
+      }
+    },
+    {
+      "id": "verify-authority-chain-cross",
+      "script": "scripts/verify-authority-chain.mts",
+      "spec": "383 W3 (G6)",
+      "proves": "a three-link chain across two Homes verifies from either side",
+      "twin": "a link presented by reference only is chain-parent-missing",
+      "required": true,
+      "paced": true,
+      "timeoutSec": 420,
+      "env": {
+        "CROSS": "1"
+      }
     }
   ]
 }

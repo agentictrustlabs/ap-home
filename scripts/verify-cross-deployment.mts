@@ -19,6 +19,9 @@
  */
 import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '../packages/delegation/src/index.js';
 import type { Address, Hex } from 'viem';
+// Priorities §3.2 G4 — the cross-Home leg (CROSS=1): preflighted; skipped-and-said until B holds its caller token.
+import { requireCrossHome } from './cross-home-preflight.mts';
+if (process.env.CROSS === '1') await requireCrossHome('verify-cross-deployment', { needsParentWire: false });
 
 const HOME = 'https://www.faithnet.me';
 const CHAIN = 34348;

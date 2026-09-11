@@ -13,11 +13,12 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-interface Result { id: string; spec: string; ok: boolean; required: boolean; ms: number; status: 'passed' | 'failed' | 'timed out'; tail: string[] }
+interface Result { id: string; spec: string; ok: boolean; required: boolean; ms: number; status: 'passed' | 'failed' | 'timed out' | 'skipped'; tail: string[] }
 interface Report { at: string; passed: number; failed: number; results: Result[] }
 
 /** The failure classes, first match wins. Order matters: the platform's words before the gate's own ✗. */
 const CLASSES: Array<{ id: string; why: string; test: (status: Result['status'], tail: string) => boolean }> = [
+  { id: 'skipped', why: 'the gate is waiting on a prerequisite the estate does not yet hold (says which)', test: (s) => s === 'skipped' },
   { id: 'timeout', why: 'the gate ran past its ledger timeout', test: (s) => s === 'timed out' },
   { id: 'vault-throttle', why: "the organization's vault budget (120 verified calls/min) or a throttled vault call", test: (_s, t) => /auth failed — mcp|rate-limited|throttled|vault budget/i.test(t) },
   { id: 'playbook-drift', why: 'an archetype republished and an agent still pinned to the old digest', test: (_s, t) => /unknown_tool|not exposed by this agent|assignment digest mismatch/i.test(t) },

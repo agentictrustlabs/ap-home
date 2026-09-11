@@ -11,6 +11,9 @@
  */
 import { hashDelegation, buildDigestBindingCaveat, paymentHandler, ROOT_AUTHORITY, registerDefaultSubsetHandlers, type Delegation, type Caveat, type MandateRequirementV1 } from '../packages/delegation/src/index.js';
 import type { Address, Hex } from 'viem';
+// Priorities §3.2 G5 — the cross-Home leg (CROSS=1): preflighted; skipped-and-said until B holds its caller token and the parent wire exists.
+import { requireCrossHome } from './cross-home-preflight.mts';
+if (process.env.CROSS === '1') await requireCrossHome('verify-handoff', { needsParentWire: true });
 registerDefaultSubsetHandlers();
 
 const HOME = 'https://www.faithnet.me';

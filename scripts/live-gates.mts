@@ -20,7 +20,7 @@ import { resolve } from 'node:path';
 
 interface Gate { id: string; script: string; spec: string; proves: string; twin: string; required: boolean; paced?: boolean; timeoutSec?: number; env?: Record<string, string> }
 interface Ledger { home: string; gates: Gate[] }
-interface Result { id: string; spec: string; ok: boolean; required: boolean; ms: number; status: 'passed' | 'failed' | 'timed out'; tail: string[] }
+interface Result { id: string; spec: string; ok: boolean; required: boolean; ms: number; status: 'passed' | 'failed' | 'timed out' | 'skipped'; tail: string[] }
 
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
 const ledger = JSON.parse(readFileSync(resolve(ROOT, 'scripts/live-gates.json'), 'utf8')) as Ledger;
@@ -40,21 +40,26 @@ for (const [i, g] of gates.entries()) {
   const run = spawnSync('npx', ['tsx', g.script], { cwd: ROOT, env: { ...process.env, HOME_URL: HOME, ...(g.env ?? {}) }, encoding: 'utf8', timeout: (g.timeoutSec ?? 300) * 1000, maxBuffer: 16 * 1024 * 1024 });
   const ms = Date.now() - t0;
   const timedOut = run.error?.name === 'Error' && /ETIMEDOUT|TIMEOUT/i.test(String(run.error?.message ?? run.signal ?? ''));
-  const status: Result['status'] = timedOut || run.signal === 'SIGTERM' ? 'timed out' : run.status === 0 ? 'passed' : 'failed';
   const out = `${run.stdout ?? ''}\n${run.stderr ?? ''}`.split('\n').map((l) => l.replace(/\s+$/, '')).filter((l) => l && !/^npm warn/.test(l));
+  // A gate that cannot run because a PREREQUISITE the estate does not yet hold (a second Home's caller token, a
+  // foreign runtime) says so with `⊘ skipped:` and exits 0 — SKIPPED is its own status, never a pass: the morning's
+  // table shows it waiting, and the trend does not count it as green.
+  const skipped = run.status === 0 && out.some((l) => /^⊘ skipped:/.test(l));
+  const status: Result['status'] = timedOut || run.signal === 'SIGTERM' ? 'timed out' : skipped ? 'skipped' : run.status === 0 ? 'passed' : 'failed';
   const tail = out.slice(-8);
   results.push({ id: g.id, spec: g.spec, ok: status === 'passed', required: g.required, ms, status, tail });
-  console.log(`${status === 'passed' ? '✓' : '✗'} ${status} in ${(ms / 1000).toFixed(1)}s`);
+  console.log(`${status === 'passed' ? '✓' : status === 'skipped' ? '⊘' : '✗'} ${status} in ${(ms / 1000).toFixed(1)}s`);
   if (status !== 'passed') for (const l of tail) console.log(`    │ ${l.slice(0, 200)}`);
 }
 
-const failedRequired = results.filter((r) => !r.ok && r.required);
-const failedOptional = results.filter((r) => !r.ok && !r.required);
+const failedRequired = results.filter((r) => !r.ok && r.required && r.status !== 'skipped');
+const failedOptional = results.filter((r) => !r.ok && !r.required && r.status !== 'skipped');
+const skippedGates = results.filter((r) => r.status === 'skipped');
 console.log(`\n── live gates ──`);
 console.log(`| gate | spec | result | time |\n| --- | --- | --- | --- |`);
-for (const r of results) console.log(`| ${r.id} | ${r.spec} | ${r.ok ? '✓ passed' : `✗ ${r.status}${r.required ? '' : ' (advisory)'}`} | ${(r.ms / 1000).toFixed(1)}s |`);
+for (const r of results) console.log(`| ${r.id} | ${r.spec} | ${r.ok ? '✓ passed' : r.status === 'skipped' ? `⊘ skipped — ${r.tail.find((l) => /^⊘ skipped:/.test(l))?.replace(/^⊘ skipped:\s*/, '') ?? 'a prerequisite is missing'}` : `✗ ${r.status}${r.required ? '' : ' (advisory)'}`} | ${(r.ms / 1000).toFixed(1)}s |`);
 const report = { at: new Date().toISOString(), home: HOME, passed: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length, results, ledger: gates.map((g) => ({ id: g.id, spec: g.spec, proves: g.proves, twin: g.twin, required: g.required })) };
 writeFileSync(resolve(ROOT, 'live-gates-report.json'), JSON.stringify(report, null, 2));
-console.log(`\n${report.passed} passed, ${report.failed} failed${failedOptional.length ? ` (${failedOptional.length} advisory)` : ''} · live-gates-report.json`);
+console.log(`\n${report.passed} passed, ${report.failed - skippedGates.length} failed${failedOptional.length ? ` (${failedOptional.length} advisory)` : ''}${skippedGates.length ? `, ${skippedGates.length} skipped (waiting on a prerequisite)` : ''} · live-gates-report.json`);
 if (failedRequired.length) { console.error(`\n✗ ${failedRequired.length} required gate(s) failed: ${failedRequired.map((r) => r.id).join(', ')}`); process.exit(1); }
 console.log(`\n✓ every required live gate holds.`);
