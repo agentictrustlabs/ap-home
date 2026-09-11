@@ -1,6 +1,6 @@
 # Spec 398 — The Agentic Primitives UX strategy: Home Work, Home Build, and the Developer Kit
 
-**Status:** Draft 1 — product brief + spec, 2026-09-10 · **Kind:** program spec (UX + developer tools) · **Companion
+**Status:** Draft 1 — product brief + spec, 2026-09-10 · **G0 census LANDED 2026-09-11** (`pnpm check:home-census`, ledger `docs/architecture/home-census.json`, projection `home-census.md`; a CI step) · **Kind:** program spec (UX + developer tools) · **Companion
 brief:** `[docs/architecture/ux-strategy-product-brief.md](../docs/architecture/ux-strategy-product-brief.md)`
 **Grounds:** [350](350-authority-aware-agent-harness.md) (the harness) · [351 §9](351-agentic-primitives-substrate-program.md)
 (no run UI in Ring 0) · [352](352-ask-capability-program.md)/[353](353-app-scoped-ask.md) (Ask, `AskScopeV1`) ·
@@ -105,7 +105,7 @@ The review marked 25 of 52 Home rows *Unverified* or *Design*. Against the tree 
 | presence                                                                                        | none (and not wanted before the roster is right)                           | §4.5                  |
 
 
-**Consequence for the gates (§12):** G0 is this section, kept current by `check:home-census` (§12.1). G1's journey
+**Consequence for the gates (§12):** G0 is this section, kept current by `check:home-census` (§12.1) — landed 2026-09-11 as data (`docs/architecture/home-census.json`: 27 rows, every one of the Home's 117 page routes and 21 harness endpoints claimed by a row whose status is earned by bindings in the tree; the projection `docs/architecture/home-census.md` is generated, never edited). The tables above are the census as it stood on 2026-09-10; the ledger is the census as it stands. G1's journey
 does not start from zero; most of its screens exist and the work is *ordering, states and parity*, not construction.
 
 ---
