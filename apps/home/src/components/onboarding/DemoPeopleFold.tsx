@@ -8,7 +8,13 @@ import { useSession } from '../../context/session';
 
 interface DemoPersona { readonly handle: string; readonly name: string }
 
-export function DemoPeopleFold() {
+export function DemoPeopleFold({ enroll, appName, onSession }: {
+  /** Spec 397 — on a relying app's ENROLL screen (the Home MCP's, say): picking a persona signs them in and hands the
+   *  session to the enroll flow, which then authorizes the app as them (the recognized path, prompt-free for a demo person). */
+  enroll?: boolean;
+  appName?: string;
+  onSession?: (token: string, via: string) => Promise<void>;
+} = {}) {
   const { openSession } = useSession();
   const [personas, setPersonas] = useState<readonly DemoPersona[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -30,8 +36,9 @@ export function DemoPeopleFold() {
     <details style={{ margin: '1.2rem auto 0', maxWidth: 420, fontSize: '.85rem', color: '#475569' }}>
       <summary style={{ cursor: 'pointer' }}>Demo people</summary>
       <p style={{ margin: '.5rem 0' }}>
-        Local walkthrough only — each is a real Home this stack seeded. Signing in as one opens THEIR
-        portal session on this browser.
+        {enroll
+          ? `Walkthrough only — each is a real Home this stack seeded. Pick one to continue to ${appName ?? 'the app'} as them; they authorize it on the next screen.`
+          : 'Local walkthrough only — each is a real Home this stack seeded. Signing in as one opens THEIR portal session on this browser.'}
       </p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
         {personas.map((p) => (
@@ -51,7 +58,8 @@ export function DemoPeopleFold() {
                 .then((r) => r.json())
                 .then(async (d: { ok?: boolean; homeSession?: string; error?: string }) => {
                   if (!d.ok || !d.homeSession) throw new Error(d.error ?? 'demo sign-in failed');
-                  await openSession(d.homeSession, 'Wallet', true);
+                  if (onSession) await onSession(d.homeSession, 'Wallet');
+                  else await openSession(d.homeSession, 'Wallet', true);
                 })
                 .catch((e: unknown) => setErr(e instanceof Error ? e.message : 'demo sign-in failed'))
                 .finally(() => setBusy(null));

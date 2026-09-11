@@ -432,6 +432,9 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
           // run the ceremony on this genuine home session (no relying-app-token credential reconstruction).
           const t2 = api.enroll?.template;
           if (isCeremonyTemplate(t2)) setView({ k: 'enroll-recognized' });
+          // Spec 397 — a session opened ON the enroll screen (a demo person picked from the fold) continues as that
+          // person on the recognized path: the app is authorized by them, prompt-free for a seeded demo person.
+          else if (t2 === 'ask-as-me') setView({ k: 'enroll-recognized' });
         }}
       />
     );
@@ -929,7 +932,8 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
         </>
       )}
       {err && <p className="onboarding-hint taken">{err}</p>}
-    {!enroll && <DemoPeopleFold />}
+    {/* Spec 397 — on an enroll screen the fold hands the persona's session to the enroll flow (recognized path next). */}
+    {enroll ? <DemoPeopleFold enroll appName={appName} onSession={onSession} /> : <DemoPeopleFold />}
       </Shell>
   );
 }
