@@ -1,5 +1,12 @@
 # @agenticprimitives-demo/sso-next
 
+## 0.0.2-alpha.27
+
+### Patch Changes
+
+- Updated dependencies
+  - @agenticprimitives/a2a@0.0.0-alpha.21
+
 ## 0.0.2-alpha.26
 
 ### Patch Changes

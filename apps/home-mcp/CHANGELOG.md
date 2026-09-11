@@ -1,5 +1,12 @@
 # @agenticprimitives-demo/home-mcp
 
+## 0.0.1-alpha.2
+
+### Patch Changes
+
+- Updated dependencies
+  - @agenticprimitives/a2a@0.0.0-alpha.21
+
 ## 0.0.1-alpha.1
 
 ### Patch Changes
