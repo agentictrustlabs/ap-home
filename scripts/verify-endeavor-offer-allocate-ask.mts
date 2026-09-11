@@ -13,7 +13,7 @@
  *   4. TWIN — carol: the same allocation → the Ask asks for the ORGANIZATION's mandate, which is not hers to give;
  *      her attempt to authorize as the organization is refused; the endeavor carries exactly one allocation.
  */
-import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '../packages/delegation/src/index.js';
+import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import type { Address, Hex } from 'viem';
 
 const HOME = 'https://www.faithnet.me';

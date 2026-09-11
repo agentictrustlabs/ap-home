@@ -14,7 +14,7 @@
  * check rather than a claim.
  */
 import { toHex, type Address, type Hex } from 'viem';
-import { buildDigestBindingCaveat, capabilityHandler, hashDelegation, ROOT_AUTHORITY, type Caveat, type Delegation, type MandateRequirementV1 } from '../packages/delegation/src/index.js';
+import { buildDigestBindingCaveat, capabilityHandler, hashDelegation, ROOT_AUTHORITY, type Caveat, type Delegation, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 
 const HOME = 'https://www.faithnet.me';
 const A2A = 'https://a2a.faithnet.io';

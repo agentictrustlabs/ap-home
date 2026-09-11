@@ -9,10 +9,10 @@
  * persona-sign (the person for their own name; the steward for an organization they custody). No subdomain
  * convention decides anything after this: the record does. Verified by reading the records back.
  */
-import { AgentNamingClient, buildRecordCalls, namehash } from '../packages/agent-naming/src/index.js';
-import { buildExecuteBatchCallData } from '../packages/agent-account/src/index.js';
+import { AgentNamingClient, buildRecordCalls, namehash } from '@agenticprimitives/agent-naming';
+import { buildExecuteBatchCallData } from '@agenticprimitives/agent-account';
 import { hostForName } from '../apps/demo-a2a/src/host-context.js';
-import { CONTRACTS } from '../packages/contracts/dist/deployments/faithchain.js';
+import { CONTRACTS } from '@agenticprimitives/contracts/deployments/faithchain';
 import type { Address, Hex } from 'viem';
 
 const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';

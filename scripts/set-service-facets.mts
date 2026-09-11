@@ -9,13 +9,13 @@
  * Every write is public-by-choice (the name-record tier and the SA profile tier of the three-tier model);
  * nothing here grants anything. Then the indexer is asked to project the agents.
  */
-import { buildRecordCalls, namehash } from '../packages/agent-naming/src/index.js';
-import { AgentNamingClient } from '../packages/agent-naming/src/index.js';
-import { buildExecuteBatchCallData } from '../packages/agent-account/src/index.js';
-import { agentProfileResolverAbi, buildRegisterProfileCall, hashAgentCard } from '../packages/agent-profile/src/index.js';
-import { buildRegisterEntryCall, hashBindingProofBody, type RegistryId, type RegistryEntryId } from '../packages/registry-kit/src/index.js';
-import { urnToBytes32 } from '../packages/registry-kit/src/index.js';
-import { CONTRACTS } from '../packages/contracts/dist/deployments/faithchain.js';
+import { buildRecordCalls, namehash } from '@agenticprimitives/agent-naming';
+import { AgentNamingClient } from '@agenticprimitives/agent-naming';
+import { buildExecuteBatchCallData } from '@agenticprimitives/agent-account';
+import { agentProfileResolverAbi, buildRegisterProfileCall, hashAgentCard } from '@agenticprimitives/agent-profile';
+import { buildRegisterEntryCall, hashBindingProofBody, type RegistryId, type RegistryEntryId } from '@agenticprimitives/registry-kit';
+import { urnToBytes32 } from '@agenticprimitives/registry-kit';
+import { CONTRACTS } from '@agenticprimitives/contracts/deployments/faithchain';
 import { createPublicClient, http, keccak256, toBytes, parseAbi, type Address, type Hex } from 'viem';
 import { readFileSync, writeFileSync } from 'node:fs';
 

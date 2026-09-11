@@ -14,7 +14,7 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { keccak256, toBytes, type Hex, type Address } from 'viem';
-import { buildCaveat, encodeTimestampTerms, encodeAllowedMethodsTerms, hashDelegation, ROOT_AUTHORITY, type Delegation } from '../packages/delegation/src/index.ts';
+import { buildCaveat, encodeTimestampTerms, encodeAllowedMethodsTerms, hashDelegation, ROOT_AUTHORITY, type Delegation } from '@agenticprimitives/delegation';
 const MCP = process.env.HOME_MCP_URL ?? 'https://home-mcp-faithnet.richardpedersen3.workers.dev';
 const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
 const CHAIN_ID = 34348;

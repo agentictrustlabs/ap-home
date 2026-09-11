@@ -22,6 +22,7 @@ import {
   ROOT_AUTHORITY,
 } from '@agenticprimitives/delegation';
 import type { Address, Hex } from '@agenticprimitives/types';
+import { interactionsGrantScopes } from '@agenticprimitives/fabric/interactions';
 import { CHAIN_ID, CONTRACTS } from './chain';
 import { INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from './inbox-delivery';
 
@@ -482,34 +483,18 @@ function buildInteractionsStruct(
   let salt = 0n;
   for (const b of bytes) salt = (salt << 8n) | BigInt(b);
   const caveats: Caveat[] = [
-    buildVaultRecordScopeCaveat([
-      { server: mcpServerId, resources: [CONVERSATION_INDEX_RESOURCE_SCOPE, CONVERSATION_TOPIC_RESOURCE_SCOPE, TOPIC_BODIES_RESOURCE_SCOPE, INBOX_DATA_RESOURCE_SCOPE, DIRECTORY_DATA_RESOURCE_SCOPE, RELATIONSHIPS_DATA_RESOURCE_SCOPE, MEMBER_PROFILE_WILDCARD_SCOPE, ORG_MEMBERSHIP_WILDCARD_SCOPE, ORG_APPLICATIONS_RESOURCE_SCOPE, IMPACT_PROFILE_RESOURCE_SCOPE, CAPABILITIES_DATA_RESOURCE_SCOPE, SKILLS_DATA_RESOURCE_SCOPE, HOME_MANIFEST_RESOURCE_SCOPE, CONTROL_EVENTS_RESOURCE_SCOPE, COORDINATION_REQUESTS_RESOURCE_SCOPE, COORDINATION_INDEX_RESOURCE_SCOPE, COORDINATION_ENDEAVOR_WILDCARD_SCOPE, CONTENT_RECORDS_RESOURCE_SCOPE, RESOLUTION_REQUESTS_RESOURCE_SCOPE, RESOLUTION_GRANTS_RESOURCE_SCOPE, ARCHETYPE_ASSIGNMENT_RESOURCE_SCOPE, PAYMENT_RECEIPT_RESOURCE_SCOPE, HOUSEHOLD_RESOURCE_SCOPE, CONVERSATION_MEMORY_RESOURCE_SCOPE, RUN_PROVENANCE_RESOURCE_SCOPE, RUN_ARTIFACT_RESOURCE_SCOPE, CONFIRMATION_PREFERENCES_RESOURCE_SCOPE, STANDING_INSTRUCTIONS_RESOURCE_SCOPE], ops: ['read', 'write'] },
-      // spec 354 K3 — the PLAYBOOK may also be REMOVED, which is a real custodial act: an agent goes
-      // back to the bare harness. A tombstone (`data: null`) is a DISTINCT op at the record-scope gate
-      // (spec 317 §3.2 / audit F1 — a write-only delegate must not be able to censor records), so the
-      // broad read+write bucket above cannot express it. Granted narrowly, on this one record: the
-      // custodian removing their own agent's behaviour, and nothing else.
-      { server: mcpServerId, resources: [ARCHETYPE_ASSIGNMENT_RESOURCE_SCOPE], ops: ['read', 'write', 'delete'] },
-      // spec 322 W3f — dm bodies are READ-only here: the DO serves the owner's mail reads, while
-      // only the (write-only) delivery plane may create them. Planes stay disjoint on writes.
-      { server: mcpServerId, resources: [DM_BODIES_RESOURCE_SCOPE], ops: ['read'] },
-      // THE ORG'S OWN INVITATIONS, read-only — what makes membership-read's invited-member path LIVE.
-      // A member who joined by invitation and never published a listing is a real member with no
-      // directory row; the org's `org.invite:agent:<sa>` records name them, and without this scope the
-      // survey that would find them rode a grant that could not see them — the roster answered "no
-      // published listing" for people the Members screen plainly showed. Writes stay on the delivery
-      // plane (disjoint-writes, as with mail).
-      { server: mcpServerId, resources: ['vault:org.invite:*'], ops: ['read'] },
-      // spec 334 §6 — the org's own app records, READ-only: the coordination agent AND the discussion
-      // @ask turn ground their work in the org's recorded figures. Two shapes, both read-only/additive:
-      // the uupg app's enumerated public-claim types, and any relying app's ontology namespace ROOT
-      // (e.g. vault:newcity:*) — the platform never names a domain record; the org's playbook does.
-      { server: mcpServerId, resources: [...APP_COORDINATION_READ_SCOPES, ...APP_OWN_NAMESPACE_READ_SCOPES], ops: ['read'] },
-      // Seeding: the same namespace, read+write, so a sandbox org's vault can be populated once by a
-      // steward. The agent never reaches this — its read path is a different op, and the write op is
-      // steward-gated. See APP_OWN_NAMESPACE_SEED_SCOPES.
-      { server: mcpServerId, resources: [...APP_OWN_NAMESPACE_SEED_SCOPES], ops: ['read', 'write'] },
-    ]),
+    // THE CORE SCOPES COME FROM THE PACKAGE (`@agenticprimitives/fabric/interactions`): the one list this
+    // Home and the agent runtime's genesis planes both compose from — a scope added on one side without the
+    // other was the drift that made an enabled-looking org 409 on its first new-record write. What this app
+    // APPENDS is its own namespaces (spec 334 §6): two shapes, both read-only/additive — the uupg app's
+    // enumerated public-claim types, and any relying app's ontology namespace ROOT (e.g. vault:newcity:*) —
+    // the platform never names a domain record; the org's playbook does. Then the same namespace read+write
+    // for steward SEEDING of a sandbox org's vault (the agent never reaches this — its read path is a
+    // different op, and the write op is steward-gated; see APP_OWN_NAMESPACE_SEED_SCOPES).
+    buildVaultRecordScopeCaveat(interactionsGrantScopes(mcpServerId, [
+      { resources: [...APP_COORDINATION_READ_SCOPES, ...APP_OWN_NAMESPACE_READ_SCOPES], ops: ['read'] },
+      { resources: [...APP_OWN_NAMESPACE_SEED_SCOPES], ops: ['read', 'write'] },
+    ])),
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
   ];

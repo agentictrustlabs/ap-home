@@ -10,7 +10,7 @@
  * token (401, nothing fires) and with it (a run, answered); (3) asks the team to take on a goal — the commit
  * of EndeavorRequestSubmitted fires `on-request` at the team, whose row records the run.
  */
-import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '../packages/delegation/src/index.js';
+import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import type { Address, Hex } from 'viem';
 
 const HOME = 'https://www.faithnet.me';

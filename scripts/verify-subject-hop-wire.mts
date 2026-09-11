@@ -12,8 +12,8 @@
  * `apps/demo-a2a/test/unit/subject-hop.test.ts`; live it needs a second deployment.
  */
 import type { Address } from 'viem';
-import { subjectAsk } from '../packages/a2a/src/index.js';
-import { sendSubjectAskOverWire } from '../apps/demo-a2a/src/subject-hop.js';
+import { subjectAsk } from '@agenticprimitives/a2a';
+import { sendSubjectAskOverWire } from '@agenticprimitives/a2a';
 import { readSubjectReply } from '../apps/demo-a2a/src/harness-run.js';
 
 const HOME = 'https://faithnet.me';

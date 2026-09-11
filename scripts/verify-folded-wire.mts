@@ -16,9 +16,9 @@ import { toHex, type Address, type Hex } from 'viem';
 import {
   intentDigest, buildDigestBindingCaveat, capabilityHandler, registerDefaultSubsetHandlers, hashDelegation, ROOT_AUTHORITY,
   CAPABILITY_RAR_TYPE, type Delegation, type MandateRequirementV1,
-} from '../packages/delegation/src/index.js';
-import { buildA2aGrantCaveats, hashA2aMessage } from '../packages/a2a/src/index.js';
-import { delegatedInputPart, withDelegatedTask } from '../packages/a2a/src/standard/index.js';
+} from '@agenticprimitives/delegation';
+import { buildA2aGrantCaveats, hashA2aMessage } from '@agenticprimitives/a2a';
+import { delegatedInputPart, withDelegatedTask } from '@agenticprimitives/a2a/standard';
 import { hashDeliveryBody } from '../apps/demo-a2a/src/outbound-delivery.js';
 
 registerDefaultSubsetHandlers();

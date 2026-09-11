@@ -11,7 +11,7 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { runLiveGates, formatLiveGatesTable, failedRequiredGates, type LiveGatesLedgerV1 } from '../packages/evaluation/src/index.ts';
+import { runLiveGates, formatLiveGatesTable, failedRequiredGates, type LiveGatesLedgerV1 } from '@agenticprimitives/evaluation';
 
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
 const ledger = JSON.parse(readFileSync(resolve(ROOT, 'scripts/live-gates.json'), 'utf8')) as LiveGatesLedgerV1;

@@ -10,7 +10,7 @@
  * (a conversational re-ask of the same runRef refuses with 409).
  */
 import { createPublicClient, http, keccak256, toBytes, toHex, type Address, type Hex } from 'viem';
-import { hashDelegation, buildDigestBindingCaveat, paymentHandler, intentDigest, ROOT_AUTHORITY, PAYMENT_RAR_TYPE, type Delegation, type MandateRequirementV1 } from '../packages/delegation/src/index.js';
+import { hashDelegation, buildDigestBindingCaveat, paymentHandler, intentDigest, ROOT_AUTHORITY, PAYMENT_RAR_TYPE, type Delegation, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 
 const HOME = 'https://www.faithnet.me';
 const RPC = 'https://a2a.faithnet.io/rpc';

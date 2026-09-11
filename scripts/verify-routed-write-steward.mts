@@ -8,7 +8,7 @@
  *
  *   npx tsx scripts/verify-routed-write-steward.mts [invitee]
  */
-import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '../packages/delegation/src/index.js';
+import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import type { Address, Hex } from 'viem';
 
 const HOME = 'https://www.faithnet.me';

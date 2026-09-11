@@ -11,7 +11,7 @@
  * routed by it, and that it still grants nothing: the payment reaches a mandate request, not a payment.
  */
 import { createPublicClient, http, type Address, type Hex } from 'viem';
-import { RELATIONSHIP_TYPE } from '../packages/agent-relationships/src/constants.js';
+import { RELATIONSHIP_TYPE } from '@agenticprimitives/agent-relationships';
 
 const HOME = 'https://www.faithnet.me';
 const RPC = 'https://a2a.faithnet.io/rpc';

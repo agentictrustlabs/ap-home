@@ -18,7 +18,7 @@
  * be a multi-party ceremony in production.
  */
 import { createPublicClient, encodeFunctionData, http, type Address, type Hex } from 'viem';
-import { RELATIONSHIP_TYPE } from '../packages/agent-relationships/src/constants.js';
+import { RELATIONSHIP_TYPE } from '@agenticprimitives/agent-relationships';
 
 const HOME = process.env.HOME_BASE ?? 'https://www.faithnet.me';
 const RPC = process.env.RPC_URL ?? 'https://a2a.faithnet.io/rpc';

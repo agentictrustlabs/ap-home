@@ -16,8 +16,8 @@
  *
  * Ground truth comes from the registry's compiled definitions, never from this repo's code.
  */
-import { planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, type ToolSpec, type AdmissionVerdict } from '../packages/orchestration/src/index.js';
-import { validateAgentHarnessDefinition, type AgentHarnessDefinitionV1, type DefinitionToolV1 } from '../packages/capability-claims/src/index.js';
+import { planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, type ToolSpec, type AdmissionVerdict } from '@agenticprimitives/orchestration';
+import { validateAgentHarnessDefinition, type AgentHarnessDefinitionV1, type DefinitionToolV1 } from '@agenticprimitives/capability-claims';
 
 const REGISTRY = process.env.SKILLS_REGISTRY ?? 'https://skills-a2a-production.richardpedersen3.workers.dev';
 const HOME = process.env.SSO_BASE_URL ?? 'https://www.faithnet.me';

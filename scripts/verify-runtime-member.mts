@@ -23,8 +23,8 @@ import { createPublicClient, http, toHex, type Address, type Hex } from 'viem';
 import {
   intentDigest, buildDigestBindingCaveat, capabilityHandler, registerDefaultSubsetHandlers, hashDelegation, ROOT_AUTHORITY,
   CAPABILITY_RAR_TYPE, type Delegation, type MandateRequirementV1,
-} from '../packages/delegation/src/index.js';
-import { AgentNamingClient } from '../packages/agent-naming/src/index.js';
+} from '@agenticprimitives/delegation';
+import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 
 registerDefaultSubsetHandlers();
 

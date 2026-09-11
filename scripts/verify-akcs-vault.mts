@@ -20,7 +20,7 @@
  * Leaves an `akcs-verification` record behind in the persona's vault — delete it when done.
  */
 import { keccak256, toBytes, toHex } from 'viem';
-import { buildVaultKeyUseCaveat, hashDelegation, ROOT_AUTHORITY, type Delegation } from '../packages/delegation/src/index.js';
+import { buildVaultKeyUseCaveat, hashDelegation, ROOT_AUTHORITY, type Delegation } from '@agenticprimitives/delegation';
 
 const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
 const MCP = process.env.MCP_URL ?? 'https://mcp.faithnet.io';

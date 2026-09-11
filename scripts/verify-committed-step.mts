@@ -9,8 +9,8 @@
  * and approves → done → the step is satisfied on the endeavor with his run, mandate, tx and commitment as
  * evidence. carol claims hers and presents nothing → authority_required; her step stays open.
  */
-import { hashDelegation, buildDigestBindingCaveat, paymentHandler, ROOT_AUTHORITY, registerDefaultSubsetHandlers, type Delegation, type Caveat, type MandateRequirementV1 } from '../packages/delegation/src/index.js';
-import { canonicalizeMessage, sha256Hex32 } from '../packages/fabric/src/messaging/index.js';
+import { hashDelegation, buildDigestBindingCaveat, paymentHandler, ROOT_AUTHORITY, registerDefaultSubsetHandlers, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
+import { canonicalizeMessage, sha256Hex32 } from '@agenticprimitives/fabric/messaging';
 import type { Address, Hex } from 'viem';
 registerDefaultSubsetHandlers();
 

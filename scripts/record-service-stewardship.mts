@@ -11,8 +11,8 @@
  * custodian (alice, persona-sign → ERC-1271 by the agent), then posted to /connect/related-orgs under her
  * session. Same artifact the ceremony would have written; the DO and the Home re-verify it on every use.
  */
-import { hashDelegation, buildCaveat, encodeTimestampTerms, encodeValueTerms, encodeAllowedTargetsTerms, ROOT_AUTHORITY, type Delegation } from '../packages/delegation/src/index.js';
-import { CONTRACTS } from '../packages/contracts/dist/deployments/faithchain.js';
+import { hashDelegation, buildCaveat, encodeTimestampTerms, encodeValueTerms, encodeAllowedTargetsTerms, ROOT_AUTHORITY, type Delegation } from '@agenticprimitives/delegation';
+import { CONTRACTS } from '@agenticprimitives/contracts/deployments/faithchain';
 import { toHex, type Address, type Hex } from 'viem';
 import { readFileSync } from 'node:fs';
 

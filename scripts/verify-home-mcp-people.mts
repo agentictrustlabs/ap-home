@@ -13,7 +13,7 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 import type { Address, Hex } from 'viem';
-import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, registerDefaultSubsetHandlers, type Delegation, type Caveat, type MandateRequirementV1 } from '../packages/delegation/src/index.ts';
+import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, registerDefaultSubsetHandlers, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 registerDefaultSubsetHandlers();
 const MCP = process.env.HOME_MCP_URL ?? 'https://home-mcp-faithnet.richardpedersen3.workers.dev';
 const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';

@@ -10,7 +10,7 @@
  * (`offer-not-bound`) — an offer never becomes a commitment without the signature that names it; the mandate
  * that binds the offer runs the step at the provider.
  */
-import { hashDelegation, buildDigestBindingCaveat, paymentHandler, ROOT_AUTHORITY, registerDefaultSubsetHandlers, type Delegation, type Caveat, type MandateRequirementV1 } from '../packages/delegation/src/index.js';
+import { hashDelegation, buildDigestBindingCaveat, paymentHandler, ROOT_AUTHORITY, registerDefaultSubsetHandlers, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import type { Address, Hex } from 'viem';
 registerDefaultSubsetHandlers();
 

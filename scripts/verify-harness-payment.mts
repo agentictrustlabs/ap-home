@@ -18,7 +18,7 @@ import { createPublicClient, http, keccak256, toBytes, toHex, type Address, type
 import {
   intentDigest, buildDigestBindingCaveat, paymentHandler, registerDefaultSubsetHandlers, hashDelegation, ROOT_AUTHORITY,
   PAYMENT_RAR_TYPE, type Delegation, type MandateRequirementV1,
-} from '../packages/delegation/src/index.js';
+} from '@agenticprimitives/delegation';
 
 registerDefaultSubsetHandlers();
 

@@ -727,7 +727,7 @@ export interface ServedComparison {
 }
 
 /** Pure: given what the endpoint served and what we hold locally, say plainly what is out there. */
-export function compareServed(
+export function compareServedCard(
   served: { reachable: boolean; status?: number; detail?: string; source?: string | null; releaseId?: string | null; servedDigest?: string; canonicalDigest?: string | null },
   local: { draftDigest?: string | null; release?: { releaseId: string; signedContentDigest?: string } | null },
 ): ServedComparison {

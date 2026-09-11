@@ -11,7 +11,7 @@
  * and finishes it there. The organization's agent DELIVERS the outcome to bob's agent, which resumes the
  * run that waited — bob's agent signed nothing, and nothing of the organization's ever left it.
  */
-import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '../packages/delegation/src/index.js';
+import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import type { Address, Hex } from 'viem';
 
 const HOME = 'https://www.faithnet.me';

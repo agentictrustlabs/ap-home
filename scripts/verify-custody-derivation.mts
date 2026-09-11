@@ -26,9 +26,7 @@
  * holds it can sign for every KMS-custodied member.
  */
 import { createPublicClient, http, type Address } from 'viem';
-import { privateKeyToAccount } from 'viem/accounts';
-import { deriveSubjectPrivateKeyHex } from '../packages/key-custody/src/derive-subject.js';
-import { hexToBytes } from 'viem';
+import { deriveSubjectSigner } from '@agenticprimitives/key-custody';
 
 const RPC = process.env.RPC_URL ?? 'https://rpc.faithnet.io/';
 const FACTORY = (process.env.AGENT_ACCOUNT_FACTORY ?? '0x464eEe7518c3c97DA570592481329E0627E9a3B8') as Address;
@@ -78,10 +76,14 @@ console.log(`subject  iss=${iss} sub=${sub} rotation=${rotation}\n`);
 
 let local: Address | null = null;
 if (process.env.MASTER) {
-  const priv = deriveSubjectPrivateKeyHex(hexToBytes(
-    (process.env.MASTER.startsWith('0x') ? process.env.MASTER : `0x${process.env.MASTER}`) as `0x${string}`,
-  ), { iss, sub, rotation });
-  local = privateKeyToAccount(priv).address;
+  // The PUBLIC surface: the derived signer's address is C_sub; the raw key never leaves the package
+  // (`deriveSubjectPrivateKeyHex` is deliberately not exported — audit ARCH-006 / PKG-KEY-CUSTODY-002).
+  const signer = deriveSubjectSigner({
+    backend: 'local-aes',
+    config: { derivationSecretHex: process.env.MASTER.startsWith('0x') ? process.env.MASTER : `0x${process.env.MASTER}` },
+    subject: { iss, sub, rotation },
+  });
+  local = await signer.getSignerAddress();
   console.log(`LOCAL  (candidate master)  C_sub=${local}`);
   console.log(`                           SA   =${await saFor(local)}`);
 }

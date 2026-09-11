@@ -10,7 +10,7 @@
  * THE TWIN: one changed field in the receipt ("status") and the digest no longer matches any row — a tampered
  * receipt cannot borrow a real run's anchor.
  */
-import { receiptDigest, type StepReceipt } from '../packages/orchestration/src/index.js';
+import { receiptDigest, type StepReceipt } from '@agenticprimitives/orchestration';
 import { createPublicClient, http, defineChain, type Hex } from 'viem';
 
 

@@ -9,7 +9,7 @@
  * cost exactly ONE (the userOp). It also SEEDS the team's roster — the grant store writes the
  * org.invite record this team's empty vault was missing, so "who are the members" starts answering.
  */
-import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '../packages/delegation/src/index.js';
+import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import type { Address, Hex } from 'viem';
 
 const HOME = 'https://www.faithnet.me';

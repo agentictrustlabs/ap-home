@@ -8,8 +8,8 @@
  * Each act waits on a mandate alice signs at home; nothing is minted by a script key. Addresses are written to
  * demo/ligonier.faithnet.json — an operator note, not a persona. Idempotent: names already resolving are kept.
  */
-import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '../packages/delegation/src/index.js';
-import { AgentNamingClient } from '../packages/agent-naming/src/index.js';
+import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
+import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import type { Address, Hex } from 'viem';

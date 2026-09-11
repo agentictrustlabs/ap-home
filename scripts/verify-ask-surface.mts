@@ -21,7 +21,7 @@ import { createPublicClient, http, toHex, type Address, type Hex } from 'viem';
 import {
   buildDigestBindingCaveat, capabilityHandler, hashDelegation, ROOT_AUTHORITY,
   type Caveat, type Delegation, type MandateRequirementV1,
-} from '../packages/delegation/src/index.js';
+} from '@agenticprimitives/delegation';
 
 const HOME = 'https://www.faithnet.me';
 const RPC = 'https://a2a.faithnet.io/rpc';

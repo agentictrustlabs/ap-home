@@ -9,7 +9,7 @@
  * to the one step's digest — signs it, and hands the step to the runtime, which runs it under the chain
  * [child, parent] and redeems both on chain. Her answer says who did it and cites the child.
  */
-import { hashDelegation, buildDigestBindingCaveat, paymentHandler, ROOT_AUTHORITY, registerDefaultSubsetHandlers, type Delegation, type Caveat, type MandateRequirementV1 } from '../packages/delegation/src/index.js';
+import { hashDelegation, buildDigestBindingCaveat, paymentHandler, ROOT_AUTHORITY, registerDefaultSubsetHandlers, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import type { Address, Hex } from 'viem';
 // Priorities §3.2 G5 — the cross-Home leg (CROSS=1): preflighted; skipped-and-said until B holds its caller token and the parent wire exists.
 import { requireCrossHome } from './cross-home-preflight.mts';

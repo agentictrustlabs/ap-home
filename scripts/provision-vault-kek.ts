@@ -22,7 +22,7 @@
 // value is read from a file/env, never argv (no leak). Nothing is written; it prints the keyMap.
 
 import { readFileSync } from 'node:fs';
-import { executeGcpProvision, createGcpRestStepExecutor } from '../packages/key-custody/dist/kms/provision-gcp.js';
+import { executeGcpProvision, createGcpRestStepExecutor } from '@agenticprimitives/key-custody/provision-gcp';
 
 function arg(flag: string): string | undefined {
   const i = process.argv.indexOf(flag);

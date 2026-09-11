@@ -8,7 +8,7 @@
  * payee's address, the treasury's name or the words she said. The records listing states the retention.
  * Her vault holds `run.provenance:<runRef>` — read through her own vault question.
  */
-import { hashDelegation, buildDigestBindingCaveat, paymentHandler, ROOT_AUTHORITY, registerDefaultSubsetHandlers, type Delegation, type Caveat, type MandateRequirementV1 } from '../packages/delegation/src/index.js';
+import { hashDelegation, buildDigestBindingCaveat, paymentHandler, ROOT_AUTHORITY, registerDefaultSubsetHandlers, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import type { Address, Hex } from 'viem';
 registerDefaultSubsetHandlers();
 

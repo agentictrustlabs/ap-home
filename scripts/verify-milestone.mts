@@ -10,7 +10,7 @@
  * under her standing); the organization asks for ITS mandate; she grants it at home as its steward; the resume finishes the act at the organization; the detail shows the milestone
  * achieved with her evidence. Plans are supplied (the planner is not under test).
  */
-import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '../packages/delegation/src/index.js';
+import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import type { Address, Hex } from 'viem';
 
 const HOME = 'https://www.faithnet.me';

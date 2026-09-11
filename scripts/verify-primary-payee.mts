@@ -11,7 +11,7 @@
  * still works. This checks that it removed a QUESTION and granted nothing.
  */
 import { createPublicClient, encodeFunctionData, http, type Address, type Hex } from 'viem';
-import { RELATIONSHIP_TYPE, ROLE } from '../packages/agent-relationships/src/index.js';
+import { RELATIONSHIP_TYPE, ROLE } from '@agenticprimitives/agent-relationships';
 
 const HOME = 'https://www.faithnet.me';
 const RPC = 'https://a2a.faithnet.io/rpc';

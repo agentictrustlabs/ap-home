@@ -10,7 +10,7 @@
  * the parent alone and where it went. Twin: alice presents a FORGED child (its `authority` names a parent
  * nobody presented) to her own agent → refused `chain-parent-missing` before any caveat is read.
  */
-import { hashDelegation, buildDigestBindingCaveat, paymentHandler, ROOT_AUTHORITY, registerDefaultSubsetHandlers, type Delegation, type Caveat, type MandateRequirementV1 } from '../packages/delegation/src/index.js';
+import { hashDelegation, buildDigestBindingCaveat, paymentHandler, ROOT_AUTHORITY, registerDefaultSubsetHandlers, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import type { Address, Hex } from 'viem';
 // Priorities §3.2 G6 — the cross-Home leg (CROSS=1): preflighted; skipped-and-said until B holds its caller token and the parent wire exists.
 import { requireCrossHome } from './cross-home-preflight.mts';

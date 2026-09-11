@@ -11,7 +11,7 @@
  * SKIPS dave (no opt-in) with a receipt saying so. The composed answer names each source. Twin: a
  * stranger (david) asking the same is refused at the organization.
  */
-import { hashDelegation, buildCaveat, encodeTimestampTerms, encodeAllowedTargetsTerms, encodeAllowedMethodsTerms, ROOT_AUTHORITY, type Delegation, type Caveat } from '../packages/delegation/src/index.js';
+import { hashDelegation, buildCaveat, encodeTimestampTerms, encodeAllowedTargetsTerms, encodeAllowedMethodsTerms, ROOT_AUTHORITY, type Delegation, type Caveat } from '@agenticprimitives/delegation';
 import { keccak256, toBytes, type Address, type Hex } from 'viem';
 
 const HOME = 'https://www.faithnet.me';

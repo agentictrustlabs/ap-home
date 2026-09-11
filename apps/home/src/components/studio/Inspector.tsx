@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { A2A_CARD_EDITOR_MANIFEST } from '@agenticprimitives/home';
 import { cardContentDigest, type A2AAgentCardDraftV1, type A2AAgentCardReleaseV1, type FieldBindingV1 } from '@agenticprimitives/agent-profile/a2a';
 import type { ProjectionDiagnosticV1 } from '@agenticprimitives/types';
-import { badgeFor, compareServed, diffCards, projectionImpact, DRIFT_COPY, fieldLabelForPointer, sourceWords } from '../../lib/studio-view';
+import { badgeFor, compareServedCard, diffCards, projectionImpact, DRIFT_COPY, fieldLabelForPointer, sourceWords } from '../../lib/studio-view';
 import { fetchWellKnownCard, type DelegationWire, type StoredProjection, type WellKnownCardView } from '../../studio-client';
 import { BusyButton } from '../shared/BusyButton';
 import { DiagnosticsPanel } from './DiagnosticsPanel';
@@ -91,7 +91,7 @@ function LiveEndpoint({
   }, [load]);
 
   const draftDigest = cardContentDigest(draft.card as { signatures?: unknown });
-  const cmp = view ? compareServed(view, { draftDigest, release: release ? { releaseId: release.releaseId, signedContentDigest: release.signedContentDigest } : null }) : null;
+  const cmp = view ? compareServedCard(view, { draftDigest, release: release ? { releaseId: release.releaseId, signedContentDigest: release.signedContentDigest } : null }) : null;
   const tone = cmp?.verdict.kind === 'released-current' ? 'var(--c-ok, #15803d)' : cmp?.verdict.kind === 'live' ? 'var(--c-g700)' : 'var(--c-warn, #b45309)';
 
   function download() {

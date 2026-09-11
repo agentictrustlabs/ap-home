@@ -9,7 +9,7 @@
  * adopts a one-step plan, offers as a participant, allocates to herself and commits — the product's own
  * ops, each re-validated by the reducer. Then the team's `on-commitment` row records the fired run.
  */
-import { canonicalizeMessage, sha256Hex32 } from '../packages/fabric/src/messaging/index.js';
+import { canonicalizeMessage, sha256Hex32 } from '@agenticprimitives/fabric/messaging';
 import type { Address, Hex } from 'viem';
 
 const HOME = 'https://www.faithnet.me';

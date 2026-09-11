@@ -22,6 +22,7 @@
 // and pinned by a cross-app test comparing DECODED scope sets, because two apps that each sign "the
 // interactions grant" must mean the same records by it.
 import type { Address, Hex } from 'viem';
+import { INTERACTIONS_GRANT_CORE_SCOPES, interactionsGrantScopes, type RecordScopeSpec } from '@agenticprimitives/fabric/interactions';
 import {
   buildCaveat, buildVaultRecordScopeCaveat, encodeTimestampTerms, encodeValueTerms, hashDelegation,
   ROOT_AUTHORITY, buildSessionDelegation, type Caveat, type Delegation,
@@ -32,30 +33,11 @@ const APPROVED = '0x03' as Hex;
 
 const MCP_SERVER_ID = 'demo-mcp';
 
-/** The interactions grant's record scopes — the parity-pinned twin of the Home's list. */
-export const GENESIS_INTERACTIONS_SCOPES: ReadonlyArray<{ resources: string[]; ops: Array<'read' | 'write' | 'delete'> }> = [
-  { resources: [
-    'vault:conversation.index', 'vault:conversation.topic:*', 'vault:message.body:topic:*',
-    'vault:inbox.data', 'vault:directory.data', 'vault:relationships.data', 'vault:member.profile:*',
-    'vault:org.membership:*', 'vault:org.applications', 'vault:impact-profile', 'vault:capabilities.data',
-    'vault:skills.data', 'vault:home.manifest', 'vault:control-events.data', 'vault:coordination.requests',
-    'vault:coordination.index', 'vault:coordination.endeavor:*', 'vault:content.*',
-    'vault:resolution.requests', 'vault:resolution.grants', 'vault:archetype.assignment', 'vault:payment.receipt:*',
-    'vault:household.data',
-    // Spec 370 P7 — the person's own recent asks, so "him" can mean whom they just meant.
-    'vault:conversation.recent',
-    // Spec 381 — a run's provenance, kept where the authority was spent (the DO copy is the rebuild).
-    'vault:run.provenance:*',
-    // Spec 391 — a step's raw result, too large for the run's record, kept where the run ran.
-    'vault:run.artifact:*',
-    // Spec 385 — the person's scoped confirmation memory (which "David", per word + capability + argument).
-    'vault:confirmation.preferences',
-    // Spec 394 — the person's standing instructions (a declared default per room + capability + argument).
-    'vault:standing.instructions',
-  ], ops: ['read', 'write'] },
-  { resources: ['vault:archetype.assignment'], ops: ['read', 'write', 'delete'] },
-  { resources: ['vault:message.body:dm:*'], ops: ['read'] },
-  { resources: ['vault:org.invite:*'], ops: ['read'] },
+/** The interactions grant's record scopes: the package CORE (`@agenticprimitives/fabric/interactions` — the
+ *  one list the Home composes from too) plus this product's own namespaces. Only the extension is a local
+ *  literal now, and it is the Home's `APP_*_SCOPES` twin: the uupg app's enumerated public-claim types and the
+ *  relying apps' ontology namespace roots, read-only; family/field read+write for steward seeding. */
+export const GENESIS_INTERACTIONS_APP_SCOPES: ReadonlyArray<RecordScopeSpec> = [
   { resources: [
     'vault:uupg:attestation', 'vault:uupg:attestations', 'vault:uupg:assessed', 'vault:uupg:coalition',
     'vault:uupg:segment-def', 'vault:uupg:org-profile', 'vault:uupg:strategy', 'vault:uupg:identity',
@@ -64,6 +46,7 @@ export const GENESIS_INTERACTIONS_SCOPES: ReadonlyArray<{ resources: string[]; o
   ], ops: ['read'] },
   { resources: ['vault:family:*', 'vault:field:*'], ops: ['read', 'write'] },
 ];
+export const GENESIS_INTERACTIONS_SCOPES: ReadonlyArray<RecordScopeSpec> = [...INTERACTIONS_GRANT_CORE_SCOPES, ...GENESIS_INTERACTIONS_APP_SCOPES];
 
 export interface GenesisPlanesEnv {
   DELEGATION_MANAGER?: string;
@@ -110,7 +93,7 @@ export function buildGenesisPlanes(
 
   const interactions = struct(
     interactionsServiceSA,
-    [buildVaultRecordScopeCaveat(GENESIS_INTERACTIONS_SCOPES.map((g) => ({ server: MCP_SERVER_ID, resources: [...g.resources], ops: [...g.ops] })))],
+    [buildVaultRecordScopeCaveat(interactionsGrantScopes(MCP_SERVER_ID, GENESIS_INTERACTIONS_APP_SCOPES))],
     1n,
   );
   // WRITE-ONLY on the mail records (spec 322 W3f) + invite tracking + content artifacts — the Home's

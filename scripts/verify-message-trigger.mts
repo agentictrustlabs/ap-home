@@ -8,7 +8,7 @@
  * playwright-demo-team holds the Coordinator playbook (`on-dm`). alice, its steward, messages it as herself
  * (her own mandate — the sender's authority), then reads the team's trigger rows and unfinished runs.
  */
-import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '../packages/delegation/src/index.js';
+import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import type { Address, Hex } from 'viem';
 
 const HOME = 'https://www.faithnet.me';

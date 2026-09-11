@@ -10,7 +10,7 @@
  * It RE-ISSUES nothing. Run it against a demo persona whose grant you are willing to end.
  */
 import { createPublicClient, http, toHex, type Address, type Hex } from 'viem';
-import { buildDigestBindingCaveat, capabilityHandler, registerDefaultSubsetHandlers, hashDelegation, ROOT_AUTHORITY, type Delegation, type MandateRequirementV1 } from '../packages/delegation/src/index.js';
+import { buildDigestBindingCaveat, capabilityHandler, registerDefaultSubsetHandlers, hashDelegation, ROOT_AUTHORITY, type Delegation, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 registerDefaultSubsetHandlers();
 
 const HOME = 'https://www.faithnet.me';

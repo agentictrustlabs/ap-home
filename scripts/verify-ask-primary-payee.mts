@@ -7,8 +7,8 @@
  * Then asserts the role is live ON CHAIN, which is the only place the preference actually is.
  */
 import { createPublicClient, http, toHex, type Address, type Hex } from 'viem';
-import { RELATIONSHIP_TYPE, ROLE } from '../packages/agent-relationships/src/index.js';
-import { buildDigestBindingCaveat, capabilityHandler, registerDefaultSubsetHandlers, hashDelegation, ROOT_AUTHORITY, type Delegation, type MandateRequirementV1 } from '../packages/delegation/src/index.js';
+import { RELATIONSHIP_TYPE, ROLE } from '@agenticprimitives/agent-relationships';
+import { buildDigestBindingCaveat, capabilityHandler, registerDefaultSubsetHandlers, hashDelegation, ROOT_AUTHORITY, type Delegation, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 registerDefaultSubsetHandlers();
 
 const HOME = 'https://www.faithnet.me';

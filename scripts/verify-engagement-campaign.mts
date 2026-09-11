@@ -12,7 +12,7 @@
  * mandate → the step is satisfied with a receipt citing run, mandate, tx and OFFER.
  * Twin: a mandate naming NO offer for the same step → `offer-not-bound`.
  */
-import { hashDelegation, buildDigestBindingCaveat, paymentHandler, ROOT_AUTHORITY, registerDefaultSubsetHandlers, type Delegation, type Caveat, type MandateRequirementV1 } from '../packages/delegation/src/index.js';
+import { hashDelegation, buildDigestBindingCaveat, paymentHandler, ROOT_AUTHORITY, registerDefaultSubsetHandlers, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import type { Address, Hex } from 'viem';
 registerDefaultSubsetHandlers();
 

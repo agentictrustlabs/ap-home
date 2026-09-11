@@ -10,7 +10,7 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { createPublicClient, http, encodeFunctionData, type Address, type Hex } from 'viem';
-import { hashDelegation, type Delegation } from '../packages/delegation/src/index.ts';
+import { hashDelegation, type Delegation } from '@agenticprimitives/delegation';
 const MCP = process.env.HOME_MCP_URL ?? 'https://home-mcp-faithnet.richardpedersen3.workers.dev';
 const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
 const RPC = process.env.RPC_URL ?? 'https://a2a.faithnet.io/rpc';

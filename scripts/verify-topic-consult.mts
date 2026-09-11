@@ -34,7 +34,7 @@ const fail = (m: string): never => { console.error(`\n✗ ${m}`); process.exit(1
 // Since 380 W3 the GRANT alone makes a member consultable (`verify-fan-out-consult.mts` issued bob's and
 // carol's); a directory listing adds their name and org role to the ranking. Best-effort, idempotent: a member
 // the organization has not admitted to its directory is still asked, by address.
-import { canonicalizeMessage, sha256Hex32 } from '../packages/fabric/src/messaging/index.js';
+import { canonicalizeMessage, sha256Hex32 } from '@agenticprimitives/fabric/messaging';
 const listed = ((await j(await fetch(`${HOME}/connect/directory?communityId=${ORG}`, { headers: H }))).listings ?? []) as Array<{ listing: { subject: string; consultable?: boolean } }>;
 for (const [handle, displayName] of [['bob', 'Bob Tanaka'], ['carol', 'Carol Mbeki']] as const) {
   const s = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle, client_id: 'demo-web' }) }));

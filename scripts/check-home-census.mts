@@ -55,7 +55,7 @@ const pageRoutes = ((): string[] => {
 const runtimeIndex = readFileSync(R.runtimeIndex!, 'utf8');
 // Capability ids live in the runtime's src AND in the packages its promoted tools moved to (399 §4).
 const capabilitySources = R.capabilitySources ?? [join(R.runtime!, 'src')];
-const runtimeSrc = capabilitySources.flatMap((d) => readdirSync(d).filter((f) => f.endsWith('.ts')).map((f) => readFileSync(join(d, f), 'utf8'))).join('\n');
+const runtimeSrc = capabilitySources.filter((d) => existsSync(d)).flatMap((d) => readdirSync(d).filter((f) => f.endsWith('.ts') || f.endsWith('.js')).map((f) => readFileSync(join(d, f), 'utf8'))).join('\n');
 const harnessEndpoints = [...new Set([...runtimeIndex.matchAll(/'(\/harness\/[a-z/-]*)'/g)].map((m) => m[1]!))].sort();
 const liveGates = (JSON.parse(readFileSync(R.liveGates!, 'utf8')) as { gates: Array<{ id: string; required?: boolean }> }).gates;
 const gateIds = new Set(liveGates.map((g) => g.id));

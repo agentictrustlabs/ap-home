@@ -1,6 +1,9 @@
 // The genesis-folded planes: deterministic (a resume re-derives what was signed), and scope-PINNED to
 // the Home's enable ceremony — two apps that each sign "the interactions grant" must mean the same
-// records by it, and the CONSULT_SKILL local-literal precedent only works with a test holding the pin.
+// records by it. The CORE list is one package source now (`@agenticprimitives/fabric/interactions`,
+// spec 399 §4); what the pin still guards is the PRODUCT EXTENSION — the app namespaces each side
+// appends (Home's APP_*_SCOPES, the runtime's GENESIS_INTERACTIONS_APP_SCOPES) — until those live in
+// one product-shared module in ap-home. That is why this test, and only this test, imports across apps.
 import { describe, it, expect } from 'vitest';
 import { decodeVaultRecordScopeTerms, VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import type { Hex } from 'viem';
@@ -48,7 +51,7 @@ describe('buildGenesisPlanes', () => {
     }
   });
 
-  it("MATCHES THE HOME'S SCOPES — the parity pin on the two local literals", () => {
+  it("MATCHES THE HOME'S SCOPES — core from the package, the app extension pinned here", () => {
     const home = buildApprovedInteractionsDelegation(CHILD, IX_SA, 'demo-mcp');
     const ours = scopeResources(planes.interactions.wire.caveats as never);
     const theirs = scopeResources(home.delegation.caveats as never);

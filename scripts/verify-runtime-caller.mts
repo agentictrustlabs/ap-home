@@ -19,14 +19,14 @@ import { privateKeyToAccount, sign as signRaw, generatePrivateKey } from 'viem/a
 import {
   hashDelegation, buildRevokeDelegationCall, paymentHandler, registerDefaultSubsetHandlers, buildDigestBindingCaveat, ROOT_AUTHORITY,
   type Delegation, type MandateRequirementV1,
-} from '../packages/delegation/src/index.js';
+} from '@agenticprimitives/delegation';
 import { encodeFunctionData } from 'viem';
-import { skillSelector } from '../packages/a2a/src/grant.js';
-import { wrapSessionSignature } from '../packages/a2a/src/session-wire.js';
+import { skillSelector } from '@agenticprimitives/a2a';
+import { wrapSessionSignature } from '@agenticprimitives/a2a';
 import {
   STANDARD_SURFACE_SKILL, callerAssertionDigest, requestBodyHash, sessionAuthorizationHeader,
   type CallerAssertionV1,
-} from '../packages/a2a/src/standard/caller.js';
+} from '@agenticprimitives/a2a/standard';
 
 const HOME = 'https://www.faithnet.me';
 registerDefaultSubsetHandlers();

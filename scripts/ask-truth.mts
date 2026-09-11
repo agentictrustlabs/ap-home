@@ -14,7 +14,7 @@ import {
   answered, replyKindIs, falseEmptiness, emptinessCarriesReason, evidenceFromTool,
   evidenceCountAgrees, claimsRequire, neverClaims, noPlaceholderLeaks,
   type AskOutcome, type TruthCaseV1,
-} from '../packages/evaluation/src/index.js';
+} from '@agenticprimitives/evaluation';
 
 const HOME = process.env.SSO_BASE_URL ?? 'https://www.faithnet.me';
 const KB = process.env.DISCOVERY_MCP_URL ?? 'https://demo-discovery-mcp-faithnet.richardpedersen3.workers.dev';
