@@ -92,4 +92,9 @@ const card = await j(await post('/mcp', { jsonrpc: '2.0', id: 5, method: 'resour
 const cardText = String(card.result?.contents?.[0]?.text ?? '');
 console.log(`agent card → ${cardText ? JSON.parse(cardText).name ?? 'unnamed' : `ERROR ${JSON.stringify(card.error).slice(0, 120)}`}`);
 if (!cardText) fail('her agent card could not be read');
+// ── the host's own record: what it declared and how it called (the diagnostic a real Claude.ai session leaves) ──
+const host = await j(await post('/mcp', { jsonrpc: '2.0', id: 6, method: 'resources/read', params: { uri: 'ap://home-mcp/host' } }, { ...auth, 'mcp-session-id': sid }));
+const hostRec = JSON.parse(String(host.result?.contents?.[0]?.text ?? '{}')) as { declared?: { elicitation?: boolean }; lastCall?: { streamed?: boolean; progressToken?: boolean; elicitation?: string }; calls?: number };
+console.log(`host record → declared elicitation ${hostRec.declared?.elicitation} · calls ${hostRec.calls} · last call streamed ${hostRec.lastCall?.streamed} with progress token ${hostRec.lastCall?.progressToken} · elicitation ${hostRec.lastCall?.elicitation ?? '-'}`);
+if (!hostRec.declared?.elicitation || !hostRec.lastCall?.streamed) fail('the host record does not reflect what this client declared and did');
 console.log('\n✓ spec 397 W3: progress streamed, the agent\'s question put to the host and answered there, resources served; no signature ever elicited');

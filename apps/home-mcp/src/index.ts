@@ -17,7 +17,7 @@ import { HomeMcpStoreDO, Store, kekFrom, openWire, sealWire, randomToken, sha256
 import { sseFrame, progressNotification, elicitationFor, isJsonRpcResponse } from './stream.js';
 import { progressAsPerson } from './a2a.js';
 import { authorizationServerMetadata, parseAuthorize, registerClient, tokenEndpoint, revokeEndpoint, bearerOf, PENDING_TTL_MS } from './oauth.js';
-import { TOOLS, askTool, grantLinkTool, discoverTool, engageTool, runTool, myRunsTool, type Person } from './tools.js';
+import { TOOLS, askTool, grantLinkTool, discoverTool, engageTool, runTool, myRunsTool, needsReauthorization, type Person } from './tools.js';
 import { SERVER, SCOPES } from './whitelabel.js';
 
 export { HomeMcpStoreDO };
@@ -162,24 +162,43 @@ async function personOf(env: Env, sub: string): Promise<Person | null> {
   return { sub, identity: { agent: row.agent, privateKey: env.HOME_MCP_PRIVATE_KEY as Hex, wire }, ...(row.agent_name ? { agentName: row.agent_name } : {}) };
 }
 
+/** Her agent refused the wire this connection holds: the connection is over. Thrown from a tool call; the transport
+ *  answers 401 with the resource metadata (a conformant host re-authorizes by itself) after the tokens are revoked. */
+class ConnectionRefused extends Error { constructor(readonly words: string) { super(words); this.name = 'ConnectionRefused'; } }
+
 /** ONE tool call, whichever transport carries it. */
 async function callTool(env: Env, person: Person, name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
   console.log(`[home-mcp] tools/call ${name} as ${person.agentName ?? person.identity.agent}`);
-  if (name === 'ask') { const out = await askTool(env, person, args); return toolResult(out, 'error' in out); }
-  if (name === 'discover_agents') { const out = await discoverTool(env, person, args); return toolResult(out, 'error' in out); }
-  if (name === 'engage') { const out = await engageTool(env, person, args); return toolResult(out, 'error' in out); }
-  if (name === 'my_runs') { const out = await myRunsTool(env, person, args); return toolResult(out, 'error' in out); }
-  if (name === 'run') { const out = await runTool(env, person, args); return toolResult(out, 'error' in out); }
-  if (name === 'grant_link') { const out = grantLinkTool(env, person, args); return toolResult(out, 'error' in out); }
+  const done = (out: Record<string, unknown>) => { if (needsReauthorization(out)) throw new ConnectionRefused(String(out.error)); return toolResult(out, 'error' in out); };
+  if (name === 'ask') return done(await askTool(env, person, args));
+  if (name === 'discover_agents') return done(await discoverTool(env, person, args));
+  if (name === 'engage') return done(await engageTool(env, person, args));
+  if (name === 'my_runs') return done(await myRunsTool(env, person, args));
+  if (name === 'run') return done(await runTool(env, person, args));
+  if (name === 'grant_link') return done(grantLinkTool(env, person, args));
   throw new RpcError(RPC_ERROR.METHOD_NOT_FOUND, `unknown tool ${name}`);
+}
+
+/** The connection is over: every token of this person for this client dies, the person row goes; the next request meets the challenge. */
+async function endConnection(env: Env, sub: string, clientId: string): Promise<void> {
+  await store(env).deleteTokensFor(sub, clientId).catch(() => undefined);
+  await store(env).deletePerson(sub).catch(() => undefined);
 }
 
 const RESOURCES = (person: Person) => [
   { uri: 'ap://home-mcp/doctrine', name: 'How this connection works', description: 'What the Home MCP is, whose agent it speaks to, and what it will never do.', mimeType: 'text/markdown' },
   { uri: 'ap://person/agent-card', name: `${person.agentName ?? 'the person'}'s agent card`, description: 'The public A2A card of the person\'s own agent — who Claude is talking to through this connection.', mimeType: 'application/json' },
+  { uri: 'ap://home-mcp/host', name: 'What this host declared', description: 'Diagnostics: what the connected client said it is and can do (elicitation, streams, progress), and how its last call arrived — so the person can see what their host actually uses.', mimeType: 'application/json' },
 ];
 
-async function readResource(env: Env, person: Person, uri: string): Promise<Record<string, unknown>> {
+async function readResource(env: Env, person: Person, uri: string, sid: string): Promise<Record<string, unknown>> {
+  if (uri === 'ap://home-mcp/host') {
+    const sess = sid ? await store(env).getSession(sid) : null;
+    const body = sess && sess.sub === person.sub
+      ? { session: sid.slice(0, 8), protocolVersion: sess.protocolVersion, clientInfo: sess.clientInfo ?? null, declared: { elicitation: !!sess.caps?.elicitation, roots: !!sess.caps?.roots, sampling: !!sess.caps?.sampling, capabilities: Object.keys(sess.caps ?? {}) }, calls: sess.calls ?? 0, lastCall: sess.lastCall ?? null, note: 'What the host declared at initialize and how its last tools/call arrived. A host that accepts no event stream gets progress and elicitation as plain results (fields to relay); this is the record of which it is.' }
+      : { note: 'no session: the host sent no Mcp-Session-Id (or one from another connection); initialize first' };
+    return { contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(body, null, 2) }] };
+  }
   if (uri === 'ap://home-mcp/doctrine') {
     const text = [`# ${SERVER.name}`, '', SERVER.instructions, '', '## The rule', '', 'The bearer this client holds names which client of which person is calling; it never leaves this server. What reaches the person\'s agent is their own delegation to this server\'s key, pinned to the act of asking (`harness.ask`), revocable by them at their Home. Every act their agent would take still parks for THEIR signature at their Home — `grant_link` is the page; nothing here signs.', '', `Connected as: ${person.agentName ?? person.identity.agent} (${person.identity.agent})`].join('\n');
     return { contents: [{ uri, mimeType: 'text/markdown', text }] };
@@ -196,18 +215,23 @@ async function readResource(env: Env, person: Person, uri: string): Promise<Reco
   throw new RpcError(RPC_ERROR.INVALID_PARAMS, `unknown resource ${uri}`);
 }
 
-function registryFor(env: Env, person: Person): MethodRegistry {
+function registryFor(env: Env, person: Person, sid: string): MethodRegistry {
   return new MethodRegistry({ onError: (info) => console.error('[home-mcp]', info.method, info.error instanceof Error ? `${info.error.name}: ${info.error.message}` : String(info.error)) })
     .register('server/discover', () => buildServerDiscover({ serverInfo: SERVER_INFO, capabilities: CAPABILITIES }) as unknown as Record<string, unknown>)
     .register('tools/list', () => ({ tools: TOOLS }))
     .register('resources/list', () => ({ resources: RESOURCES(person) }))
-    .register('resources/read', (params) => readResource(env, person, String(params?.uri ?? '')))
-    .register('tools/call', async (params) => callTool(env, person, typeof params?.name === 'string' ? params.name : '', (params?.arguments ?? {}) as Record<string, unknown>));
+    .register('resources/read', (params) => readResource(env, person, String(params?.uri ?? ''), sid))
+    // A refused wire cannot be thrown through the registry (it would become "internal error"): it comes back as a
+    // sentinel result the transport turns into the 401 challenge after ending the connection.
+    .register('tools/call', async (params) => {
+      try { return await callTool(env, person, typeof params?.name === 'string' ? params.name : '', (params?.arguments ?? {}) as Record<string, unknown>); }
+      catch (e) { if (e instanceof ConnectionRefused) return { __connectionRefused: e.words }; throw e; }
+    });
 }
 
 /** Spec 397 W3 — THE STREAMING CALL. Progress as the person's agent says what it is doing; a DATA question put to the
  *  person through the host when the client can (elicitation); then the result. A signature is never elicited. */
-async function streamToolCall(env: Env, person: Person, req: { id: unknown; params?: Record<string, unknown> }, caps: Record<string, unknown> | null, writer: WritableStreamDefaultWriter<Uint8Array>): Promise<void> {
+async function streamToolCall(env: Env, person: Person, req: { id: unknown; params?: Record<string, unknown> }, caps: Record<string, unknown> | null, writer: WritableStreamDefaultWriter<Uint8Array>, sid = ''): Promise<void> {
   const enc = new TextEncoder();
   const send = (m: unknown) => writer.write(enc.encode(sseFrame(m)));
   const name = typeof req.params?.name === 'string' ? req.params.name : '';
@@ -230,7 +254,14 @@ async function streamToolCall(env: Env, person: Person, req: { id: unknown; para
     }
   })() : Promise.resolve();
   let result: Record<string, unknown>;
-  try { result = await callTool(env, person, name, args); } catch (e) { stop = true; await tail.catch(() => undefined); await send({ jsonrpc: '2.0', id: req.id, error: { code: e instanceof RpcError ? e.code : RPC_ERROR.INTERNAL_ERROR, message: e instanceof Error ? e.message : String(e) } }); return; }
+  try { result = await callTool(env, person, name, args); } catch (e) {
+    stop = true; await tail.catch(() => undefined);
+    // A refused wire on a stream: the stream cannot become a 401, so it says so and ends the connection — the host's
+    // next request meets the challenge.
+    if (e instanceof ConnectionRefused) await endConnection(env, person.sub, '').catch(() => undefined);
+    await send({ jsonrpc: '2.0', id: req.id, error: { code: e instanceof RpcError ? e.code : e instanceof ConnectionRefused ? -32001 : RPC_ERROR.INTERNAL_ERROR, message: e instanceof Error ? e.message : String(e) } });
+    return;
+  }
   stop = true; await tail.catch(() => undefined);
   // ELICITATION — a data prompt, when the client said it can ask the person (bounded: three questions per call).
   for (let round = 0; round < 3; round++) {
@@ -245,6 +276,7 @@ async function streamToolCall(env: Env, person: Person, req: { id: unknown; para
     let answer: ElicitAnswer | undefined;
     for (let i = 0; i < 240 && !answer; i++) { await new Promise((r) => setTimeout(r, 500)); answer = (await store(env).getElicit(elicitId))?.answer; }
     await store(env).deleteElicit(elicitId);
+    if (sid) await store(env).updateSession(sid, { lastCall: { at: Date.now(), name, acceptedStream: true, progressToken: progressToken !== undefined, streamed: true, elicitation: answer?.action ?? 'timeout' } }).catch(() => undefined);
     if (!answer || answer.action !== 'accept' || !answer.content) { result = toolResult({ ...(sc as Record<string, unknown>), elicitation: answer?.action ?? 'timeout', note: 'The person did not answer through the host; the run still waits — ask again with `supplied` when they do.' }); break; }
     result = await callTool(env, person, 'ask', { run: sc.runRef ?? runRef, supplied: [{ stepRef, data: answer.content }] }).catch((e) => toolResult({ error: e instanceof Error ? e.message : String(e) }, true));
   }
@@ -280,7 +312,7 @@ app.post('/mcp', async (c) => {
   if (req.method === 'initialize') {
     // The client's declared capabilities (elicitation above all) are kept under a session id it echoes on every request.
     const sid = randomToken(18);
-    await store(c.env).putSession(sid, { sub: token.sub, caps: (req.params?.capabilities as Record<string, unknown> | undefined) ?? {}, protocolVersion: version });
+    await store(c.env).putSession(sid, { sub: token.sub, caps: (req.params?.capabilities as Record<string, unknown> | undefined) ?? {}, protocolVersion: version, ...(req.params?.clientInfo && typeof req.params.clientInfo === 'object' ? { clientInfo: req.params.clientInfo as Record<string, unknown> } : {}), calls: 0 });
     return c.json({ jsonrpc: '2.0', id, result: { protocolVersion: version, capabilities: CAPABILITIES, serverInfo: SERVER_INFO, instructions: SERVER.instructions } }, 200, { 'mcp-session-id': sid });
   }
   if (req.method === 'notifications/initialized') return c.body(null, 202);
@@ -290,17 +322,31 @@ app.post('/mcp', async (c) => {
   // STREAMING (spec 397 W3): a tools/call whose client accepts an event stream gets progress, an elicitation when the
   // agent asks a data question and the client can put it to the person, then the result — on one SSE stream.
   const wantsStream = /text\/event-stream/i.test(c.req.header('accept') ?? '');
+  const sid = c.req.header('mcp-session-id') ?? '';
+  const sess = sid ? await store(c.env).getSession(sid) : null;
+  const mine = !!sess && sess.sub === token.sub;
+  // THE HOST'S RECORD: how this call arrived (diagnostics a person can read at ap://home-mcp/host).
+  if (req.method === 'tools/call' && mine) {
+    const name = String((req.params as { name?: unknown } | undefined)?.name ?? '');
+    const progressToken = (req.params as { _meta?: { progressToken?: unknown } } | undefined)?._meta?.progressToken !== undefined;
+    c.executionCtx.waitUntil(store(c.env).updateSession(sid, { calls: (sess!.calls ?? 0) + 1, lastCall: { at: Date.now(), name, acceptedStream: wantsStream, progressToken, streamed: wantsStream } }).catch(() => undefined));
+  }
   if (wantsStream && req.method === 'tools/call') {
-    const sid = c.req.header('mcp-session-id') ?? '';
-    const sess = sid ? await store(c.env).getSession(sid) : null;
-    const caps = sess && sess.sub === token.sub ? sess.caps : null;
+    const caps = mine ? sess!.caps : null;
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
     const writer = writable.getWriter();
-    const work = streamToolCall(c.env, person, req as { id: unknown; params?: Record<string, unknown> }, caps, writer).catch((e) => console.error('[home-mcp] stream', e instanceof Error ? e.message : String(e))).finally(() => writer.close().catch(() => undefined));
+    const work = streamToolCall(c.env, person, req as { id: unknown; params?: Record<string, unknown> }, caps, writer, mine ? sid : '').catch((e) => console.error('[home-mcp] stream', e instanceof Error ? e.message : String(e))).finally(() => writer.close().catch(() => undefined));
     c.executionCtx.waitUntil(work);
     return new Response(readable, { status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'access-control-allow-origin': '*' } });
   }
-  const res = await registryFor(c.env, person).dispatch(req, { meta, protocolVersion: version, raw });
+  const res = await registryFor(c.env, person, mine ? sid : '').dispatch(req, { meta, protocolVersion: version, raw });
+  const refused = (res as { result?: { __connectionRefused?: string } } | null)?.result?.__connectionRefused;
+  if (typeof refused === 'string') {
+    // Spec 397 W4 — her agent refused the wire: this connection is over. The tokens die and the answer is the
+    // challenge, so a conformant host re-runs authorization by itself instead of showing an error.
+    await endConnection(c.env, token.sub, token.client_id);
+    return buildUnauthorizedResponse({ resourceMetadataUrl, errorDescription: refused });
+  }
   return res === null ? c.body(null, 202) : c.json(res as unknown as Record<string, unknown>);
 });
 

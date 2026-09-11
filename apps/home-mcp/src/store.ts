@@ -9,7 +9,15 @@ export interface PendingRow { id: string; client_id: string; redirect_uri: strin
 export interface CodeRow { code: string; client_id: string; redirect_uri: string; code_challenge: string; scope: string[]; resource: string; sub: string; created_at: number }
 export interface TokenRow { token_hash: string; kind: 'access' | 'refresh'; client_id: string; sub: string; scope: string[]; resource: string; exp: number; refresh_of?: string; created_at: number }
 /** Spec 397 W3 — what the client declared at initialize, kept under the `Mcp-Session-Id` it echoes. */
-export interface SessionRow { sub: string; caps: Record<string, unknown>; protocolVersion: string }
+export interface SessionRow {
+  sub: string; caps: Record<string, unknown>; protocolVersion: string;
+  /** What the host said it is (initialize's clientInfo). */
+  clientInfo?: Record<string, unknown>;
+  /** The last tools/call on this session: how the host called (a stream accepted? a progress token?) — diagnostics for
+   *  the real client, which the gates cannot stand in for. */
+  lastCall?: { at: number; name: string; acceptedStream: boolean; progressToken: boolean; streamed: boolean; elicitation?: string };
+  calls?: number;
+}
 export interface ElicitAnswer { action: 'accept' | 'decline' | 'cancel'; content?: Record<string, unknown> }
 export interface ElicitRow { sub: string; runRef: string; stepRef: string; answer?: ElicitAnswer }
 export interface PersonRow { sub: string; agent: string; agent_name?: string; wire_enc: string; wire_iv: string; wire_ref: string; connected_at: number; client_ids: string[] }
@@ -47,6 +55,7 @@ export class HomeMcpStoreDO {
       case 'person.get': { const r = [...this.sql.exec(`SELECT row FROM persons WHERE sub = ?`, key)][0]; return json({ ok: true, row: r ? JSON.parse(String(r.row)) : null }); }
       case 'person.delete': this.sql.exec(`DELETE FROM persons WHERE sub = ?`, key); return json({ ok: true });
       case 'session.put': this.sql.exec(`INSERT OR REPLACE INTO sessions (id, row, created_at) VALUES (?, ?, ?)`, key, JSON.stringify(row), now); this.sql.exec(`DELETE FROM sessions WHERE created_at < ?`, now - 7 * 86_400_000); return json({ ok: true });
+      case 'session.update': { const r = [...this.sql.exec(`SELECT row FROM sessions WHERE id = ?`, key)][0]; if (!r) return json({ ok: true, row: null }); const cur = JSON.parse(String(r.row)) as Record<string, unknown>; const next = { ...cur, ...(row as Record<string, unknown>) }; this.sql.exec(`UPDATE sessions SET row = ? WHERE id = ?`, JSON.stringify(next), key); return json({ ok: true, row: next }); }
       case 'session.get': { const r = [...this.sql.exec(`SELECT row FROM sessions WHERE id = ?`, key)][0]; return json({ ok: true, row: r ? JSON.parse(String(r.row)) : null }); }
       case 'elicit.put': this.sql.exec(`INSERT OR REPLACE INTO elicit (id, row, created_at) VALUES (?, ?, ?)`, key, JSON.stringify(row), now); this.sql.exec(`DELETE FROM elicit WHERE created_at < ?`, now - 600_000); return json({ ok: true });
       case 'elicit.get': { const r = [...this.sql.exec(`SELECT row FROM elicit WHERE id = ?`, key)][0]; return json({ ok: true, row: r ? JSON.parse(String(r.row)) : null }); }
@@ -68,6 +77,7 @@ export class Store {
   async getClient(id: string): Promise<ClientRow | null> { return (await this.call<{ row: ClientRow | null }>('client.get', id)).row; }
   putSession(id: string, r: SessionRow) { return this.call('session.put', id, r); }
   async getSession(id: string): Promise<SessionRow | null> { return (await this.call<{ row: SessionRow | null }>('session.get', id)).row; }
+  updateSession(id: string, patch: Partial<SessionRow>) { return this.call('session.update', id, patch); }
   putElicit(id: string, r: ElicitRow) { return this.call('elicit.put', id, r); }
   async getElicit(id: string): Promise<ElicitRow | null> { return (await this.call<{ row: ElicitRow | null }>('elicit.get', id)).row; }
   async answerElicit(id: string, answer: ElicitAnswer): Promise<ElicitRow | null> { return (await this.call<{ row: ElicitRow | null }>('elicit.answer', id, answer)).row; }

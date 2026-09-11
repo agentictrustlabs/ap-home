@@ -290,6 +290,16 @@
       "required": true,
       "paced": false,
       "timeoutSec": 240
+    },
+    {
+      "id": "verify-home-mcp-room",
+      "script": "scripts/verify-home-mcp-room.mts",
+      "spec": "397 / 394 W2",
+      "proves": "through Claude, alice asks missio-nexus.org by name; the organization's agent derives her standing and answers its roster; a standing instruction declared at the room through Claude is listed under that room at her Home and cleared there",
+      "twin": "an unregistered room name is refused before anything is asked; the room's instruction is not her own agent's default",
+      "required": true,
+      "paced": true,
+      "timeoutSec": 240
     }
   ]
 }

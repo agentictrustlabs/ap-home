@@ -69,9 +69,14 @@ if (!revoked) fail('the chain still honours the wire');
 await fetch(`${HOME}/connect/app-grants`, { method: 'POST', headers: { 'content-type': 'application/json', ...auth }, body: JSON.stringify({ clientId: 'home-mcp', revoked: true }) });
 
 // ── TWIN: Claude's next ask ──
-const after = await call('ask', { message: 'who is in Missio Nexus?', plan: { steps: [{ toolId: 'organization.membership.list', args: { org: 'missio nexus' } }] } });
-console.log(`twin · ask after the revoke → ${after.isError ? `refused: ${String(after.out.error).slice(0, 140)}` : `ANSWERED ${after.out.kind}`}`);
-if (!after.isError || after.out.reauthorize !== true) fail('a revoked wire must be refused at her agent and reported as needing re-authorization');
+// A conformant host is told to authorize again by the TRANSPORT: 401 with the resource metadata, the tokens dead.
+const afterRes = await post('/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'ask', arguments: { message: 'who is in Missio Nexus?', plan: { steps: [{ toolId: 'organization.membership.list', args: { org: 'missio nexus' } }] } } } }, { authorization: `Bearer ${tok.access_token}` });
+const challenge = afterRes.headers.get('www-authenticate') ?? '';
+console.log(`twin · ask after the revoke → ${afterRes.status} · ${challenge.slice(0, 110)}`);
+if (afterRes.status !== 401 || !/resource_metadata/.test(challenge)) fail(`a revoked wire must end the connection with the OAuth challenge, got ${afterRes.status}: ${(await afterRes.text()).slice(0, 200)}`);
+const again = await post('/mcp', { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }, { authorization: `Bearer ${tok.access_token}` });
+console.log(`twin · the bearer afterwards → ${again.status}`);
+if (again.status !== 401) fail('the bearer must be dead after the connection ended');
 const rows = await j(await fetch(`${HOME}/connect/app-grants`, { headers: auth }));
 if (((rows.grants ?? []) as Array<{ clientId: string }>).some((g) => g.clientId === 'home-mcp')) fail('the row is still listed after the revoke');
 console.log('\n✓ spec 397 W4: revoked at her Home, refused at her agent in its words; the bearer alone is worth nothing');

@@ -45,6 +45,13 @@ export const TOOLS = [
 export interface ToolEnv { A2A_ORIGIN: string; HOME_ORIGIN: string }
 export interface Person { sub: string; identity: PersonIdentity; agentName?: string }
 
+/** The wire itself was refused by her agent: revoked or expired at her Home. The server turns this into a 401 with the
+ *  resource metadata, so a conformant host re-runs authorization by itself; the words are for a host that shows them. */
+export function wireRefused(error: string): Record<string, unknown> {
+  return { error: `the person's agent refused this connection's standing: ${error} — it was revoked or has expired at their Home; they must authorize this connection again`, reauthorize: true };
+}
+export const needsReauthorization = (out: Record<string, unknown>): boolean => out.reauthorize === true;
+
 function summarize(reply: Record<string, unknown>): Record<string, unknown> {
   const { kind, text, error, runRef, prompt, requirement, delegator, summary, capability, parties, receipts, evidence, resumeToken } = reply as Record<string, unknown>;
   return { kind, ...(text ? { text } : {}), ...(summary ? { summary } : {}), ...(error ? { error } : {}), ...(runRef ? { runRef } : {}), ...(prompt ? { prompt } : {}), ...(resumeToken ? { resumeToken } : {}), ...(requirement ? { requirement } : {}), ...(delegator ? { delegator } : {}), ...(capability ? { capability } : {}), ...(parties ? { parties } : {}), ...(receipts ? { receipts } : {}), ...(evidence ? { evidence } : {}) };
@@ -55,7 +62,14 @@ export async function askTool(env: ToolEnv, person: Person, args: Record<string,
   const run = typeof args.run === 'string' ? args.run.trim() : '';
   if (!message && !run) return { error: 'say what to ask (message), or name a run to continue (run)' };
   // The addressee: their own agent unless they named an organization (resolved by the agent's own resolver, by name).
-  const addressee = typeof args.addressee === 'string' && args.addressee.trim() ? args.addressee.trim() : person.identity.agent;
+  let addressee = typeof args.addressee === 'string' && args.addressee.trim() ? args.addressee.trim() : person.identity.agent;
+  if (!/^0x[0-9a-fA-F]{40}$/.test(addressee)) {
+    // A ROOM BY NAME (missio-nexus.org): the registry says which agent that is; her standing there is derived by THAT
+    // agent from its own records when the ask arrives — the name resolves, it never admits.
+    const info = (await fetchImpl(`${env.HOME_ORIGIN}/connect/name-info?name=${encodeURIComponent(addressee.toLowerCase())}`).then((r) => r.json()).catch(() => null)) as { exists?: boolean; agent?: string } | null;
+    if (!info?.exists || !info.agent) return { error: `no agent is registered as “${addressee}” — name the organization as its registry name (missio-nexus.org) or its address` };
+    addressee = info.agent.toLowerCase();
+  }
   // A fresh ask may ADOPT a run reference the caller minted (the streaming path tails its progress by it).
   const adopt = !run && typeof args._runRef === 'string' ? args._runRef : '';
   const out = await askAsPerson(person.identity, env.A2A_ORIGIN, {
@@ -64,7 +78,7 @@ export async function askTool(env: ToolEnv, person: Person, args: Record<string,
     ...(args.plan && typeof args.plan === 'object' ? { plan: args.plan } : {}),
   }, fetchImpl);
   if (!out.ok) {
-    if (isDelegationRefusal(out.status, out.error)) return { error: `the person's agent refused this connection's standing: ${out.error} — it was revoked or has expired at their Home; they must authorize this connection again`, reauthorize: true };
+    if (isDelegationRefusal(out.status, out.error)) return wireRefused(out.error);
     // Spec 397 W3 — a run named alone that is no longer waiting was FINISHED (at their Home, by them): the record is the answer.
     if (!message && run && out.status === 404) {
       const rec = await recordOf(env, person, run, fetchImpl);
@@ -93,7 +107,7 @@ export async function discoverTool(env: ToolEnv, person: Person, args: Record<st
   if (!intent) return { error: 'say what the person wants (intent)' };
   const stepArgs = { intent, ...(typeof args.capability === 'string' && args.capability.trim() ? { capability: args.capability.trim() } : {}), ...(typeof args.language === 'string' && args.language.trim() ? { language: args.language.trim() } : {}), ...(Number.isInteger(args.limit) ? { limit: args.limit } : {}) };
   const out = await askAsPerson(person.identity, env.A2A_ORIGIN, { addressee: person.identity.agent, message: `find agents: ${intent}`, plan: { steps: [{ toolId: 'discovery.agents.find', args: stepArgs }] } }, fetchImpl);
-  if (!out.ok) return { error: out.error, status: out.status };
+  if (!out.ok) return isDelegationRefusal(out.status, out.error) ? wireRefused(out.error) : { error: out.error, status: out.status };
   const results = (out.reply.results as Array<{ toolId: string; result: Record<string, unknown> }> | undefined) ?? [];
   const found = results.find((r) => r.toolId === 'discovery.agents.find')?.result ?? {};
   const replyError = typeof out.reply.error === 'string' ? out.reply.error : undefined;
@@ -106,7 +120,7 @@ export async function engageTool(env: ToolEnv, person: Person, args: Record<stri
   const message = String(args.message ?? '').trim();
   if (!agent || !message) return { error: 'agent and message are required' };
   const out = await askAsPerson(person.identity, env.A2A_ORIGIN, { addressee: person.identity.agent, message: `ask ${agent}: ${message}`, plan: { steps: [{ toolId: 'engagement.agent.invoke', args: { agent, message } }] }, ...(typeof args._runRef === 'string' ? { runRef: args._runRef } : {}) }, fetchImpl);
-  if (!out.ok) return { error: out.error, status: out.status };
+  if (!out.ok) return isDelegationRefusal(out.status, out.error) ? wireRefused(out.error) : { error: out.error, status: out.status };
   const reply = summarize(out.reply);
   const results = (out.reply.results as Array<{ toolId: string; result: Record<string, unknown> }> | undefined) ?? [];
   const hop = results.find((r) => r.toolId === 'engagement.agent.invoke')?.result ?? {};
@@ -136,6 +150,7 @@ export async function runTool(env: ToolEnv, person: Person, args: Record<string,
   if (rec) return rec;
   // Still waiting: the checkpoint says on what.
   const waiting = await callAsPerson(person.identity, env.A2A_ORIGIN, '/harness/runs', { addressee: person.identity.agent }, fetchImpl);
+  if (!waiting.ok && isDelegationRefusal(waiting.status, waiting.error)) return wireRefused(waiting.error);
   const row = waiting.ok ? ((waiting.body.runs as Array<{ runRef: string; message?: string; awaiting?: unknown; updatedAt?: number }> | undefined) ?? []).find((x) => x.runRef === run) : undefined;
   if (row) return { runRef: run, asked: row.message, waiting: row.awaiting ?? null, updatedAt: row.updatedAt, note: 'This run is parked on their agent — see `waiting`; a signature is given at their Home (grant_link), an answer with ask { run, supplied }.' };
   return { error: `no run ${run} of theirs — their agent holds no record and nothing is waiting under that reference` };
@@ -147,7 +162,7 @@ export async function myRunsTool(env: ToolEnv, person: Person, args: Record<stri
     callAsPerson(person.identity, env.A2A_ORIGIN, '/harness/records', { addressee: person.identity.agent }, fetchImpl),
     callAsPerson(person.identity, env.A2A_ORIGIN, '/harness/runs', { addressee: person.identity.agent }, fetchImpl),
   ]);
-  if (!records.ok) return { error: records.error, status: records.status };
+  if (!records.ok) return isDelegationRefusal(records.status, records.error) ? wireRefused(records.error) : { error: records.error, status: records.status };
   const rows = ((records.body.records as Array<{ runRef: string; at?: number; intent?: { goal?: string }; outcome?: string; receipts?: unknown[] }> | undefined) ?? [])
     .sort((a, b) => (b.at ?? 0) - (a.at ?? 0)).slice(0, limit)
     .map((r) => ({ runRef: r.runRef, at: r.at, asked: r.intent?.goal, outcome: r.outcome, receipts: (r.receipts ?? []).length }));
