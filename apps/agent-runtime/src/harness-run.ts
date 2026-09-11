@@ -828,10 +828,10 @@ export interface HarnessDeps {
   /** Spec 379 — whether an agent address is served by THIS deployment (its harness runs here). Absent ⇒ every
    *  address is treated as served, so only a card URL counts as outside. */
   isServedHere?: (agent: string) => boolean;
-  askSubjectAgent?: (input: { subject: Address; toolId: string; args: Record<string, unknown>; goal: string; asker?: Address; session?: string; /** Spec 397 — the asker came through a client they authorized (no session): the admission evidence, forwarded verbatim for the receiver to verify itself. */ appCredential?: { authorization: string; body: string }; /** Spec 390 W2 — W3C Trace Context for the hop: this run's trace, the routed step as the parent span. */ trace?: { traceparent: string; tracestate?: string }; /** Appendix M8 — the run ref the receiver is to adopt for a fresh ask (named by the sender). */ runRef?: string; correlation: { operationId: string; runRef: string; stepRef: string; intentDigest: string }; /** Spec 374 W2 — continue the receiver's parked run with what this turn presented/supplied. */ continue?: { runRef: string; presented?: unknown[]; supplied?: unknown[] } }) => Promise<SubjectAnswerV1>;
+  askSubjectAgent?: (input: { subject: Address; toolId: string; args: Record<string, unknown>; goal: string; asker?: Address; session?: string; /** Spec 397 — the asker came through a client they authorized (no session): the admission evidence, forwarded verbatim for the receiver to verify itself. */ appCredential?: { authorization: string; body: string }; /** Spec 397 — the agent routing this step when it is not the asker's own (an organization the person asked AT). */ via?: Address; /** Spec 390 W2 — W3C Trace Context for the hop: this run's trace, the routed step as the parent span. */ trace?: { traceparent: string; tracestate?: string }; /** Appendix M8 — the run ref the receiver is to adopt for a fresh ask (named by the sender). */ runRef?: string; correlation: { operationId: string; runRef: string; stepRef: string; intentDigest: string }; /** Spec 374 W2 — continue the receiver's parked run with what this turn presented/supplied. */ continue?: { runRef: string; presented?: unknown[]; supplied?: unknown[] } }) => Promise<SubjectAnswerV1>;
   /** Appendix M8 — READ the subject agent's own progress lines for a routed run, under the asker's session,
    *  while the hop is in flight. The receiver's DO answers; nothing is copied but the sentences. */
-  readSubjectProgress?: (input: { subject: Address; runRef: string; session: string; after: number; wait?: number }) => Promise<{ lines: Array<{ seq: number; said: string; stepRef?: string; terminal?: boolean }>; terminal: boolean; known: boolean }>;
+  readSubjectProgress?: (input: { subject: Address; runRef: string; session?: string; /** The asker, for a run admitted without a session (an in-Worker read the receiver trusts as it trusts a routed hop). */ asker?: Address; after: number; wait?: number }) => Promise<{ lines: Array<{ seq: number; said: string; stepRef?: string; terminal?: boolean }>; terminal: boolean; known: boolean }>;
   /** Reverse name lookup for an address (public directory, ADR-0040). Names roster rows; best-effort. */
   nameOf?: (address: string) => Promise<string | null>;
   /** Spec 387 W2 — what a NAME publishes on chain (its `atl:mcpEndpoint` binds the catalog reads). Records first, never a convention. */
@@ -1957,7 +1957,7 @@ export interface HarnessRunInput {
   /** Spec 370 P6 — REPLAY a recorded run: its plan is the plan, its observations answer every step, and
    *  every gate runs again against the world as it is now. Nothing executes. */
   /** Spec 374 W2 — where each routed step of this run waits, from the checkpoint (a resume continues THAT run). */
-  routedAt?: Record<string, { agent: Address; name?: string; runRef: string }>;
+  routedAt?: Record<string, { agent: Address; name?: string; runRef: string; stepRef?: string }>;
   replayOf?: RunRecordV1;
   /** Spec 370 P7 — the asker's own recent turns (their vault's `conversation.recent`). Shown to the
    *  planner as words, handed to the resolver for pronouns and repeated names. NEVER part of the intent:
@@ -2201,7 +2201,9 @@ export type AskReplyVariant =
        *  authority the act needs. Derived from the requirement (deterministic); display + ceremony
        *  input, verified on chain like everything else. */
       alsoApprove?: Array<{ purpose: string; digest: Hex }> }
-  | { kind: 'prompt'; runRef: string; resumeToken: string; prompt: NonNullable<RunResult['prompt']> }
+  | { kind: 'prompt'; runRef: string; resumeToken: string; prompt: NonNullable<RunResult['prompt']>;
+      /** Spec 397 — the question is a routed target's: where it waits, kept on the checkpoint so the answer continues THAT run. */
+      routedAt?: { agent: Address; name?: string; runRef: string; stepRef?: string } }
   /** Spec 374 — the run waits on ANOTHER agent's steward. Not resumable by the asker: only the debtor's
    *  delivered answer moves it. `on` is where the act actually waits; `commitment` is the record. */
   | { kind: 'waiting'; runRef: string; stepRef: string; text: string; on: { agent: Address; name?: string; runRef: string }; commitment: CommitmentRefV1;
@@ -3502,7 +3504,8 @@ async function askReplyForInner(env: HarnessEnv, input: {
         text: `${name}'s steward has to finish this — ${said || 'it has been asked and is waiting on them'}. It will finish here when they do; nothing was signed for them.`,
         ...(parties.length ? { parties } : {}) };
     }
-    return { kind: 'prompt', runRef: r.runRef, resumeToken: r.resumeToken ?? r.prompt.stepRef, prompt: r.prompt };
+    const askedAt = r.prompt.kind === 'data' ? (r.prompt as { at?: { agent: string; name?: string; runRef: string; stepRef?: string } }).at : undefined;
+    return { kind: 'prompt', runRef: r.runRef, resumeToken: r.resumeToken ?? r.prompt.stepRef, prompt: r.prompt, ...(askedAt ? { routedAt: { ...askedAt, agent: askedAt.agent as Address } } : {}) };
   }
   if (r.outcome === 'completed') {
     // "None of these" is stated, never composed: a model asked to phrase a refusal will soften it into a
@@ -4407,7 +4410,9 @@ step is then handed to that agent under authority the person grants; leave it ou
       // resumes its own run under its own gates.
       const at = input.routedAt?.[stepRef];
       const presentedNow = input.presented ? (Array.isArray(input.presented) ? input.presented : [input.presented]) : [];
-      const cont = at ? { runRef: at.runRef, ...(presentedNow.length ? { presented: presentedNow } : {}), ...(inputsFor(ctx.supplied, stepRef).length ? { supplied: inputsFor(ctx.supplied, stepRef) } : {}) } : undefined;
+      // What this turn supplied for HER step is the answer to the SUBJECT's step: re-keyed to the step the subject named.
+      const suppliedThere = inputsFor(ctx.supplied, stepRef).map((x) => (at?.stepRef ? { ...x, stepRef: at.stepRef } : x));
+      const cont = at ? { runRef: at.runRef, ...(presentedNow.length ? { presented: presentedNow } : {}), ...(suppliedThere.length ? { supplied: suppliedThere } : {}) } : undefined;
       const correlation = { operationId: `${input.runRef ?? 'run'}:${stepRef}`, runRef: input.runRef ?? 'run', stepRef, intentDigest };
       // Appendix M8 — THE RECEIVER'S RUN IS NAMED BEFORE IT ANSWERS, so its progress can be read while it
       // runs and this run's record can cite it. A continuation reads the run it continues.
@@ -4417,15 +4422,17 @@ step is then handed to that agent under authority the person grants; leave it ou
       // the receiver's name: "missio-nexus.org: Reading who belongs…". Words only — its record stays its own.
       let stopRelay = false;
       const relayName = subjectName ?? subject;
-      const relay = input.onProgress && input.session && deps.readSubjectProgress
+      // The subject's own progress lines are relayed while the hop runs — under the asker's session, or (spec 397) for a
+      // run admitted through a client, as the asker by name on an in-Worker read the receiver trusts as it trusts the hop.
+      const relay = input.onProgress && (input.session || input.appCredential) && deps.readSubjectProgress
         ? (async () => {
             let after = 0;
             const read = deps.readSubjectProgress!;
-            const session = input.session!;
+            const session = input.session;
             const emit = input.onProgress!;
             while (!stopRelay) {
               let got: Awaited<ReturnType<typeof read>>;
-              try { got = await read({ subject, runRef: receiverRunRef, session, after, wait: 1500 }); } catch { break; }
+              try { got = await read({ subject, runRef: receiverRunRef, ...(session ? { session } : {}), ...(input.person ? { asker: input.person } : {}), after, wait: 1500 }); } catch { break; }
               for (const line of got.lines) {
                 after = Math.max(after, line.seq);
                 if (line.terminal) continue;
@@ -4440,7 +4447,7 @@ step is then handed to that agent under authority the person grants; leave it ou
       // the run reference — the same rule `traceIdFor` applies to the record) with the routed step as parent.
       const hopTrace = { traceparent: formatTraceparent(input.traceContext?.traceId ?? await traceIdOf(correlation.runRef), await spanIdOf(correlation.runRef, correlation.stepRef)), ...(input.traceContext?.tracestate ? { tracestate: input.traceContext.tracestate } : {}) };
       const answer = await deps.askSubjectAgent({
-        subject, toolId: engaged ? STANDARD_SURFACE_SKILL : toolId, args: engaged ? {} : args, goal: engaged ? engaged.said : input.intent.goal, ...(input.person ? { asker: input.person } : {}), ...(input.session ? { session: input.session } : {}), ...(input.appCredential ? { appCredential: input.appCredential } : {}),
+        subject, toolId: engaged ? STANDARD_SURFACE_SKILL : toolId, args: engaged ? {} : args, goal: engaged ? engaged.said : input.intent.goal, ...(input.person ? { asker: input.person } : {}), ...(input.session ? { session: input.session } : {}), ...(input.appCredential ? { appCredential: input.appCredential } : {}), ...(input.addressee && input.person && String(input.addressee).toLowerCase() !== String(input.person).toLowerCase() ? { via: String(input.addressee).toLowerCase() as Address } : {}),
         trace: hopTrace,
         ...(cont ? {} : { runRef: receiverRunRef }),
         // R: this step's stable operation identity, for the receiver to name in S (spec 367 §8).
@@ -4453,8 +4460,17 @@ step is then handed to that agent under authority the person grants; leave it ou
         // Spec 374 — AN ACT THE SUBJECT PARKED FOR ITS OWN STEWARD. The subject's agent took the request
         // and is waiting on someone this asker is not; this run holds the commitment and waits with it.
         // A READ that came back `needs` is a question relayed in the subject's words, as before.
-        if (answer.needs && answer.via.runRef && !tool?.answers) {
+        if (answer.needs && answer.via.runRef && (!tool?.answers || engaged)) {
           const name = answer.via.name ?? subjectName ?? subject;
+          const nwEarly = (answer.needsWhat && typeof answer.needsWhat === 'object') ? (answer.needsWhat as { kind?: string; prompt?: { kind?: string; prompt?: string; fields?: Array<Record<string, unknown>> } }) : null;
+          // Spec 397 — THE SUBJECT'S OWN DATA QUESTION, relayed to the asker (an engaged ministry asking which item, say):
+          // this run parks with that question in the subject's words; the answer supplied here continues the SUBJECT's run
+          // (the continuation below), exactly as spec 387 W3's continue_task did for a gateway's task.
+          if (nwEarly?.kind === 'prompt' && nwEarly.prompt?.kind === 'data') {
+            const there = { agent: subject, ...(answer.via.name ? { name: answer.via.name } : {}), runRef: answer.via.runRef, ...(typeof (nwEarly.prompt as { stepRef?: unknown }).stepRef === 'string' ? { stepRef: (nwEarly.prompt as { stepRef: string }).stepRef } : {}) };
+            input.routedAt = { ...(input.routedAt ?? {}), [stepRef]: there };
+            throw new InputRequired({ kind: 'data', stepRef, toolId, prompt: `${name} asks: ${nwEarly.prompt.prompt ?? 'more is needed'}`, fields: (nwEarly.prompt.fields ?? []) as never, at: there });
+          }
           // Spec 374 W2 — THE STEWARD SHAPE. The subject's agent asked for ITS mandate (or a signature) and
           // this asker STEWARDS it (the receiver derived that from the wire they presented): the request is
           // relayed as the asker's own, their Home mints it exactly as for a local step, and the resume

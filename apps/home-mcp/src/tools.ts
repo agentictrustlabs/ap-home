@@ -53,8 +53,8 @@ export function wireRefused(error: string): Record<string, unknown> {
 export const needsReauthorization = (out: Record<string, unknown>): boolean => out.reauthorize === true;
 
 function summarize(reply: Record<string, unknown>): Record<string, unknown> {
-  const { kind, text, error, runRef, prompt, requirement, delegator, summary, capability, parties, receipts, evidence, resumeToken } = reply as Record<string, unknown>;
-  return { kind, ...(text ? { text } : {}), ...(summary ? { summary } : {}), ...(error ? { error } : {}), ...(runRef ? { runRef } : {}), ...(prompt ? { prompt } : {}), ...(resumeToken ? { resumeToken } : {}), ...(requirement ? { requirement } : {}), ...(delegator ? { delegator } : {}), ...(capability ? { capability } : {}), ...(parties ? { parties } : {}), ...(receipts ? { receipts } : {}), ...(evidence ? { evidence } : {}) };
+  const { kind, text, error, runRef, prompt, requirement, delegator, summary, capability, parties, receipts, evidence, resumeToken, routed } = reply as Record<string, unknown>;
+  return { kind, ...(text ? { text } : {}), ...(summary ? { summary } : {}), ...(error ? { error } : {}), ...(runRef ? { runRef } : {}), ...(prompt ? { prompt } : {}), ...(resumeToken ? { resumeToken } : {}), ...(Array.isArray(routed) && routed.length ? { routed } : {}), ...(requirement ? { requirement } : {}), ...(delegator ? { delegator } : {}), ...(capability ? { capability } : {}), ...(parties ? { parties } : {}), ...(receipts ? { receipts } : {}), ...(evidence ? { evidence } : {}) };
 }
 
 export async function askTool(env: ToolEnv, person: Person, args: Record<string, unknown>, fetchImpl: typeof fetch = fetch): Promise<Record<string, unknown>> {

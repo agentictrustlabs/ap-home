@@ -300,6 +300,16 @@
       "required": true,
       "paced": true,
       "timeoutSec": 240
+    },
+    {
+      "id": "verify-home-mcp-routed",
+      "script": "scripts/verify-home-mcp-routed.mts",
+      "spec": "397",
+      "proves": "through the host: an engagement asked AT an organization routes under her forwarded credential (the profile names the room); a target's data question parks HER run and ask { run, supplied } continues the TARGET's run; a streamed engage relays the target's own progress lines",
+      "twin": "a read's question never asks her authority (prompt, not authority_required)",
+      "required": true,
+      "paced": true,
+      "timeoutSec": 400
     }
   ]
 }
