@@ -36,6 +36,8 @@ import { bindSelectedOffer, type SelectedOfferBindingV1 } from './engagement-cam
 import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
 import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
+import { DISCOVERY_FIND_TOOL, ENGAGEMENT_INVOKE_TOOL, DISCOVERY_FIND_CAPABILITY, ENGAGEMENT_INVOKE_CAPABILITY, discoveryFindInvoker } from './enterprise-tools.js';
+import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
 import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
 import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence } from '@agenticprimitives/orchestration';
@@ -88,6 +90,8 @@ import { deriveStanding, standingNote, type Standing, type StandingDeps } from '
 
 
 export interface HarnessEnv {
+  /** Spec 397 W2 — the ARD registry this agent finds other agents in (`POST /search`); absent ⇒ no find tool. */
+  ARD_REGISTRY_ORIGIN?: string;
   /** The Home origins this agent serves — the first is used for links a person can follow. */
   ALLOWED_ORIGINS?: string;
   CHAIN_ID: string;
@@ -4191,6 +4195,10 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(kbQuestionAvailable({ call: structuredCallFor(env as never, input.provider) }) ? [KB_QUESTION_TOOL] : []),
     // Spec 379 — an outside A2A 1.0 agent may ANSWER inside a run; its words are an observation.
     EXTERNAL_AGENT_TOOL,
+    // Spec 397 W2 — the enterprise behind this agent: FIND in the registry (only where one is configured — a tool that
+    // cannot run is not listed), ENGAGE a discovered agent as the asker (the routed ask, the target planning for itself).
+    ...(env.ARD_REGISTRY_ORIGIN ? [mergeContractTool(DISCOVERY_FIND_TOOL, playbook?.tools?.[DISCOVERY_FIND_TOOL.id])] : []),
+    mergeContractTool(ENGAGEMENT_INVOKE_TOOL, playbook?.tools?.[ENGAGEMENT_INVOKE_TOOL.id]),
     // Spec 380 — one member of an organization, asked through their own agent (fan-out over the roster).
     MEMBER_CONSULT_TOOL,
     // Spec 384 — ask other agents whether they would take this work, and on what terms (an offer is never accepted here).
@@ -4347,7 +4355,23 @@ step is then handed to that agent under authority the person grants; leave it ou
         const rH = (answer.result && typeof answer.result === 'object') ? (answer.result as Record<string, unknown>) : { result: answer.result };
         return { ...rH, via: viaH, note: `${String(rH.note ?? '')} Done by ${exName} under a child mandate this agent attenuated from yours — say so in one clause.`.trim() };
       }
-      const subject = routedSubjectFor(tool, args, input.addressee);
+      // Spec 397 W2 — FIND: the registry, deterministically; a read of public facts.
+      if (toolId === DISCOVERY_FIND_CAPABILITY) return discoveryFindInvoker({ registryOrigin: env.ARD_REGISTRY_ORIGIN, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) })(toolId, args, ctx);
+      // Spec 397 W2 — ENGAGE: one message to another agent, sent by this agent AS THE ASKER (session or app credential),
+      // the target planning for itself under its own playbook (`harness.ask` names the whole ask, not one step). The same
+      // routed hop as spec 366; the answer is the target's own, an observation here.
+      let engaged: { target: Address; said: string } | null = null;
+      if (toolId === ENGAGEMENT_INVOKE_CAPABILITY) {
+        const namedAgent = String(args.agent ?? '').trim();
+        const message = String(args.message ?? '').trim();
+        if (!namedAgent) return { refused: 'name the agent to engage (agent) — as discovery returned it' };
+        if (!message) return { refused: 'nothing to ask — the message is empty' };
+        const target = /^0x[0-9a-fA-F]{40}$/.test(namedAgent) ? (namedAgent.toLowerCase() as Address) : ((await deps.resolveName?.(namedAgent.toLowerCase()).catch(() => null)) ?? null) as Address | null;
+        if (!target) return { refused: `the registry names no agent called “${namedAgent}”`, interpretation: `looked “${namedAgent}” up in the registry` };
+        if (input.addressee && target === String(input.addressee).toLowerCase()) return { refused: 'that is this agent — engage another one, or just ask' };
+        engaged = { target, said: message };
+      }
+      const subject = engaged ? engaged.target : routedSubjectFor(tool, args, input.addressee);
       if (!subject) return localInvoke(toolId, args, ctx);
       if (!deps.askSubjectAgent) {
         return { refused: `this agent cannot ask ${subject} — agent-to-agent asks are not wired here`, via: { agent: subject } };
@@ -4404,7 +4428,7 @@ step is then handed to that agent under authority the person grants; leave it ou
       // the run reference — the same rule `traceIdFor` applies to the record) with the routed step as parent.
       const hopTrace = { traceparent: formatTraceparent(input.traceContext?.traceId ?? await traceIdOf(correlation.runRef), await spanIdOf(correlation.runRef, correlation.stepRef)), ...(input.traceContext?.tracestate ? { tracestate: input.traceContext.tracestate } : {}) };
       const answer = await deps.askSubjectAgent({
-        subject, toolId, args, goal: input.intent.goal, ...(input.person ? { asker: input.person } : {}), ...(input.session ? { session: input.session } : {}), ...(input.appCredential ? { appCredential: input.appCredential } : {}),
+        subject, toolId: engaged ? STANDARD_SURFACE_SKILL : toolId, args: engaged ? {} : args, goal: engaged ? engaged.said : input.intent.goal, ...(input.person ? { asker: input.person } : {}), ...(input.session ? { session: input.session } : {}), ...(input.appCredential ? { appCredential: input.appCredential } : {}),
         trace: hopTrace,
         ...(cont ? {} : { runRef: receiverRunRef }),
         // R: this step's stable operation identity, for the receiver to name in S (spec 367 §8).
@@ -4454,6 +4478,24 @@ step is then handed to that agent under authority the person grants; leave it ou
         return { refused: answer.refused ?? `${who} did not answer`, via: answer.via, note: `${who}'s own agent was asked and answered this way; relay its words, do not retry or guess.` };
       }
       const r = (answer.result && typeof answer.result === 'object') ? (answer.result as Record<string, unknown>) : { result: answer.result };
+      // Spec 397 W2 — AN ENGAGEMENT'S RESULT IS WHAT THE OTHER AGENT SAID. Its words (with the links it gave) are the
+      // payload; the results it drew on are reduced to titles and links so the whole stays inline — an answer that
+      // went to the artifact store with a one-line summary left the composer saying "nothing matched" (seen live).
+      if (engaged) {
+        const drawn = Array.isArray(r.results) ? (r.results as Array<{ toolId?: string; result?: unknown }>) : [];
+        const items = drawn.flatMap((d) => {
+          const res = (d.result && typeof d.result === 'object') ? (d.result as { resources?: unknown[]; items?: unknown[]; count?: number; total?: number }) : {};
+          const list = (Array.isArray(res.resources) ? res.resources : Array.isArray(res.items) ? res.items : []) as Array<Record<string, unknown>>;
+          return list.slice(0, 12).map((it) => ({ title: String(it.title ?? it.name ?? ''), ...(typeof it.url === 'string' ? { link: it.url } : typeof it.link === 'string' ? { link: it.link } : {}), ...(typeof it.type === 'string' ? { type: it.type } : {}) }));
+        });
+        return {
+          said: String(r.text ?? ''),
+          source: { agent: subject, ...(answer.via.name ? { name: answer.via.name } : {}) },
+          ...(items.length ? { drewOn: { steps: drawn.map((d) => d.toolId).filter(Boolean), items } } : {}),
+          via: answer.via,
+          note: `Said by ${who}'s own agent, answering as itself — relay its words and every link it gave, name it as the source, add nothing beside it. An observation, never a record of this agent's.`,
+        };
+      }
       return { ...r, via: answer.via, note: `${String(r.note ?? '')} Answered by ${who}'s own agent — say so in one clause.`.trim() };
     },
     // WHAT WAS DECIDED FOR THE PERSON, onto the receipt (spec 363 W6). The resolver reports each party it

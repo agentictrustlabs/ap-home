@@ -133,7 +133,7 @@ import { admitInboundEmail, emailZones, emailSender, isEmailAddress, type EmailE
 import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 // Spec 397 — the wire scheme on /harness/ask (a person through a client they authorized), verified as an agent's is.
-import { sessionWirePrincipal, parseSessionAuthorization } from '@agenticprimitives/a2a/standard';
+import { sessionWirePrincipal, parseSessionAuthorization, STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
 const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
 import { askVocabulary, commandFieldsFor, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY, HOUSEHOLD_READ_CAPABILITY, CAPABILITY_WORDS, type PlannerTraceV1 } from './harness-run.js';
 import { workersAiTranscriber, repairTranscript, hearingVocabulary, spokenFor } from './voice.js';
@@ -2960,8 +2960,11 @@ app.post('/harness/ask', async (c) => {
     if (!v.ok) return c.json({ ok: false, error: `subject-ask profile: ${v.errors.join('; ')}` }, 400);
     const sa = v.ask;
     if ((sa.asker.credential.kind === 'home-session' && sa.asker.credential.token !== body.session) || sa.asker.agent.toLowerCase() !== String(who.sa).toLowerCase()) return c.json({ ok: false, error: 'subject-ask profile: the asker is not the credential presented' }, 403);
+    // Spec 397 W2 — a request whose capability is the ask itself (`harness.ask`) carries NO plan: this agent plans the
+    // asker's words under its own playbook. Any other request is exactly one step, and the plan is that step.
+    const wholeAsk = sa.request.capability === STANDARD_SURFACE_SKILL;
     const step = body.plan?.steps?.[0];
-    if (!step || body.plan!.steps.length !== 1 || step.toolId !== sa.request.capability) return c.json({ ok: false, error: 'subject-ask profile: the plan is not the request' }, 400);
+    if (wholeAsk ? !!body.plan : (!step || body.plan!.steps.length !== 1 || step.toolId !== sa.request.capability)) return c.json({ ok: false, error: 'subject-ask profile: the plan is not the request' }, 400);
     inResponseTo = { agent: sa.asker.agent.toLowerCase() as Address, operationId: sa.correlation.operationId, runRef: sa.correlation.runRef, stepRef: sa.correlation.stepRef };
     routedStanding = { presented: sa.asker.presented ?? [], routed: true };
     // Spec 374 W2 — A CONTINUATION of this agent's own parked run: the steward asker now presents the
@@ -3318,7 +3321,8 @@ app.post('/harness/ask', async (c) => {
     // `{ refused }` inside its result — the loop treats that as an honest read and the composer narrates
     // it — but on the wire the OUTCOME must say what happened: a task that "completed" with a refusal
     // inside made a stranger's ask look answered (seen live 2026-09-08). The words stay the tool's.
-    const routedResult = reply.kind === 'answer' ? (reply.results?.find((r) => r.toolId === body.plan?.steps?.[0]?.toolId) ?? reply.results?.[0])?.result ?? { text: reply.text } : undefined;
+    // Spec 397 W2 — a whole ask answers with what this agent SAID (and every result it drew on), not one step's result.
+    const routedResult = reply.kind === 'answer' ? (body.plan ? (reply.results?.find((r) => r.toolId === body.plan?.steps?.[0]?.toolId) ?? reply.results?.[0])?.result ?? { text: reply.text } : { text: reply.text, ...(reply.results?.length ? { results: reply.results } : {}) }) : undefined;
     const toolRefusal = routedResult && typeof routedResult === 'object' && typeof (routedResult as { refused?: unknown }).refused === 'string' ? (routedResult as { refused: string }).refused : null;
     const answer = inResponseTo ? subjectAnswer({
       agent: addressee,
@@ -4540,7 +4544,8 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     let envelope: AskReplyEnvelopeV1 | null;
     let status: number;
     if (inProcess) {
-      const body = JSON.stringify({ ...(session ? { session } : {}), addressee: subject, message: goal, plan: { steps: [{ toolId, args }] }, subjectAsk: profile, ...(receiverRunRef && !cont ? { runRef: receiverRunRef } : {}) });
+      // Spec 397 W2 — `harness.ask` names the whole ask: no plan travels; the receiver plans the words itself.
+      const body = JSON.stringify({ ...(session ? { session } : {}), addressee: subject, message: goal, ...(toolId === STANDARD_SURFACE_SKILL ? {} : { plan: { steps: [{ toolId, args }] } }), subjectAsk: profile, ...(receiverRunRef && !cont ? { runRef: receiverRunRef } : {}) });
       const req = new Request(url, { method: 'POST', headers: internalHeaders(env, { 'content-type': 'application/json', accept: 'application/json', ...(trace ? { traceparent: trace.traceparent, ...(trace.tracestate ? { tracestate: trace.tracestate } : {}) } : {}) }), body });
       let res: Response;
       try {

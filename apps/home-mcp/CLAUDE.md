@@ -25,16 +25,16 @@ passed through (ADR-0041).
 `/oauth/register|authorize|callback|token|revoke`, `/oauth/demo-connect` (persona path for the live gate, gated by
 `DEMO_CONNECT_ENABLED`), `POST /mcp`, `/health`) · `src/oauth.ts` (the AS) · `src/store.ts` (`HomeMcpStoreDO` — clients,
 pending, codes, tokens, persons; wires sealed AES-GCM under a KEK from `TOKEN_SECRET`; a rebuild, never a bereavement:
-a wiped store means "authorize again") · `src/a2a.ts` (`askAsPerson`) · `src/tools.ts` (`ask`, `grant_link`) ·
+a wiped store means "authorize again") · `src/a2a.ts` (`askAsPerson`) · `src/tools.ts` (`ask`, `discover_agents`, `engage`, `grant_link` — W2: discover/engage are ONE supplied step each at her agent, `discovery.agents.find` / `engagement.agent.invoke` in `apps/demo-a2a/src/enterprise-tools.ts`) ·
 `src/whitelabel.ts` (name, instructions, scopes — the only branded module).
 
 ## Validate / deploy
 
-`npx tsc --noEmit -p .` + `npx vitest run` (the AS: DCR, PKCE, resource binding, rotation, revocation). Live gate
-`scripts/verify-home-mcp.mts` (nightly row `verify-home-mcp`). Deploy `npx wrangler deploy --env faithnet`; secrets
+`npx tsc --noEmit -p .` + `npx vitest run` (the AS: DCR, PKCE, resource binding, rotation, revocation). Live gates
+`scripts/verify-home-mcp.mts` (W1) and `scripts/verify-home-mcp-discovery.mts` (W2: Ligonier found and engaged through her agent). Deploy `npx wrangler deploy --env faithnet`; secrets
 `HOME_MCP_PRIVATE_KEY` (its address is the `delegate` on the Home's `home-mcp` client registration) and `TOKEN_SECRET`.
 Live: `https://home-mcp-faithnet.richardpedersen3.workers.dev` (the faithnet.io zone is at its domain limit).
 
 ## Not here
 
-Discovery/engagement contracts (W2), authority through the host (W3), the `/you?run=` deep link in the Home (W3).
+Authority through the host + the `/you?run=` deep link in the Home (W3); the forwarded credential over the wire for off-deployment targets, connected-apps row + revoke (W4).

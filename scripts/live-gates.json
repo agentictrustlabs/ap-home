@@ -230,6 +230,16 @@
       "required": true,
       "paced": false,
       "timeoutSec": 180
+    },
+    {
+      "id": "verify-home-mcp-discovery",
+      "script": "scripts/verify-home-mcp-discovery.mts",
+      "spec": "397 W2",
+      "proves": "through the Home MCP, alice's agent finds Ligonier in the public registry (discovery.agents.find) and engages it as her (engagement.agent.invoke \u2192 the routed whole ask under her forwarded credential); Ligonier's agent plans under its own content-catalog playbook and answers a six-week study with links; the reply names the ministry as the source and her run records the hop",
+      "twin": "an unknown name is refused in words; the other agent's answer is an observation \u2014 no authority is asked of her",
+      "required": true,
+      "paced": true,
+      "timeoutSec": 300
     }
   ]
 }

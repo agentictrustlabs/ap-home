@@ -11,6 +11,18 @@ export const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   },
   {
+    name: 'discover_agents',
+    description: 'Find agents in the public registry by what the person wants — a ministry with a study on a doctrine, a service offering a capability — THROUGH THEIR OWN AGENT (the search is a run of theirs, with provenance). Args: intent (what they want, in their words), capability (optional filter: a capability id or word, e.g. "study plans"), language (optional BCP-47), limit (default 5). Returns agents with name, description, capabilities, card and relevance. Then `engage` one by its name.',
+    inputSchema: { type: 'object', properties: { intent: { type: 'string' }, capability: { type: 'string' }, language: { type: 'string' }, limit: { type: 'integer' } }, required: ['intent'] },
+    annotations: { readOnlyHint: true, openWorldHint: true },
+  },
+  {
+    name: 'engage',
+    description: 'Send the person\'s words, as them, to another agent — one `discover_agents` returned or one they named (ligonier.svc, missio-nexus.org) — and get that agent\'s own answer, made under ITS playbook from its own catalog or records (a study plan with links, what it offers). Their agent sends it and records the hop; the other agent sees only the message. Args: agent (name or 0x address as discovery returned it), message (the ask, complete, in the person\'s words). Present the reply as that agent\'s answer, naming it as the source and keeping every link it gave.',
+    inputSchema: { type: 'object', properties: { agent: { type: 'string' }, message: { type: 'string' } }, required: ['agent', 'message'] },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  },
+  {
     name: 'grant_link',
     description: 'For a run that came back `authority_required`: the page on the person\'s Home where THEY sign the mandate (the assistant never signs). Args: run (the runRef). After they have signed, call `ask` with `run` to finish it.',
     inputSchema: { type: 'object', properties: { run: { type: 'string' } }, required: ['run'] },
@@ -52,4 +64,29 @@ export function grantLinkTool(env: ToolEnv, person: Person, args: Record<string,
   const label = (person.agentName ?? '').replace(/\.me$/, '');
   const home = label ? env.HOME_ORIGIN.replace('://www.', `://${label}.`) : env.HOME_ORIGIN;
   return { url: `${home}/you?run=${encodeURIComponent(run)}`, note: 'Only the person can sign here, with the credential that custodies their agent. Once they have, call ask with this run to finish it.' };
+}
+
+/** Spec 397 W2 — discovery THROUGH the person's agent: one supplied step, no planner; the registry's answer as their run's. */
+export async function discoverTool(env: ToolEnv, person: Person, args: Record<string, unknown>, fetchImpl: typeof fetch = fetch): Promise<Record<string, unknown>> {
+  const intent = String(args.intent ?? '').trim();
+  if (!intent) return { error: 'say what the person wants (intent)' };
+  const stepArgs = { intent, ...(typeof args.capability === 'string' && args.capability.trim() ? { capability: args.capability.trim() } : {}), ...(typeof args.language === 'string' && args.language.trim() ? { language: args.language.trim() } : {}), ...(Number.isInteger(args.limit) ? { limit: args.limit } : {}) };
+  const out = await askAsPerson(person.identity, env.A2A_ORIGIN, { addressee: person.identity.agent, message: `find agents: ${intent}`, plan: { steps: [{ toolId: 'discovery.agents.find', args: stepArgs }] } }, fetchImpl);
+  if (!out.ok) return { error: out.error, status: out.status };
+  const results = (out.reply.results as Array<{ toolId: string; result: Record<string, unknown> }> | undefined) ?? [];
+  const found = results.find((r) => r.toolId === 'discovery.agents.find')?.result ?? {};
+  return { kind: out.reply.kind, ...(found.refused ? { refused: found.refused } : {}), agents: found.agents ?? [], referral: found.referral, text: out.reply.text, runRef: out.runRef, ...(out.hasProvenance ? { hasProvenance: out.hasProvenance } : {}), asked_as: person.agentName ?? person.identity.agent, note: found.note };
+}
+
+/** Spec 397 W2 — engagement THROUGH the person's agent: their agent sends the message as them; the reply is the other agent's. */
+export async function engageTool(env: ToolEnv, person: Person, args: Record<string, unknown>, fetchImpl: typeof fetch = fetch): Promise<Record<string, unknown>> {
+  const agent = String(args.agent ?? '').trim();
+  const message = String(args.message ?? '').trim();
+  if (!agent || !message) return { error: 'agent and message are required' };
+  const out = await askAsPerson(person.identity, env.A2A_ORIGIN, { addressee: person.identity.agent, message: `ask ${agent}: ${message}`, plan: { steps: [{ toolId: 'engagement.agent.invoke', args: { agent, message } }] } }, fetchImpl);
+  if (!out.ok) return { error: out.error, status: out.status };
+  const reply = summarize(out.reply);
+  const results = (out.reply.results as Array<{ toolId: string; result: Record<string, unknown> }> | undefined) ?? [];
+  const hop = results.find((r) => r.toolId === 'engagement.agent.invoke')?.result ?? {};
+  return { ...reply, ...(hop.refused ? { refused: hop.refused } : {}), ...(hop.via ? { via: hop.via } : {}), ...(hop.said ? { said: hop.said } : hop.text ? { said: hop.text } : {}), ...(hop.source ? { source: hop.source } : {}), ...(hop.drewOn ? { drewOn: hop.drewOn } : {}), runRef: out.runRef ?? reply.runRef, ...(out.hasProvenance ? { hasProvenance: out.hasProvenance } : {}), asked_as: person.agentName ?? person.identity.agent };
 }

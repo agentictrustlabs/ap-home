@@ -15,7 +15,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import type { Hex } from 'viem';
 import { HomeMcpStoreDO, Store, kekFrom, openWire, sealWire, randomToken, sha256b64, type PersonRow } from './store.js';
 import { authorizationServerMetadata, parseAuthorize, registerClient, tokenEndpoint, revokeEndpoint, bearerOf, PENDING_TTL_MS } from './oauth.js';
-import { TOOLS, askTool, grantLinkTool, type Person } from './tools.js';
+import { TOOLS, askTool, grantLinkTool, discoverTool, engageTool, type Person } from './tools.js';
 import { SERVER, SCOPES } from './whitelabel.js';
 
 export { HomeMcpStoreDO };
@@ -164,6 +164,8 @@ function registryFor(env: Env, person: Person): MethodRegistry {
       const args = ((params?.arguments ?? {}) as Record<string, unknown>);
       console.log(`[home-mcp] tools/call ${name} as ${person.agentName ?? person.identity.agent}`);
       if (name === 'ask') { const out = await askTool(env, person, args); return toolResult(out, 'error' in out); }
+      if (name === 'discover_agents') { const out = await discoverTool(env, person, args); return toolResult(out, 'error' in out); }
+      if (name === 'engage') { const out = await engageTool(env, person, args); return toolResult(out, 'error' in out); }
       if (name === 'grant_link') { const out = grantLinkTool(env, person, args); return toolResult(out, 'error' in out); }
       throw new RpcError(RPC_ERROR.METHOD_NOT_FOUND, `unknown tool ${name}`);
     });

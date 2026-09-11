@@ -397,6 +397,8 @@ zone_name = "faithnet.ai"
 binding = "AI"
 
 [env.faithnet.vars]
+# Spec 397 W2 — the ARD registry this deployment's agents find other agents in.
+ARD_REGISTRY_ORIGIN = "https://discovery-a2a.faithnet.io"
 # Spec 365 — the zones whose inbound mail this Worker routes (`<handle>@<zone>` → the naming service).
 EMAIL_ZONES = "faithnet.me"
 # Outbound mail goes out as this address (its zone is onboarded to Cloudflare Email Sending).
