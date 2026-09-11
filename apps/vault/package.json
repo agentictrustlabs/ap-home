@@ -35,7 +35,9 @@
     "@agenticprimitives/verifiable-credentials": "workspace:*",
     "@agenticprimitives/verification-receipts": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "hono": "^4.12.33"
+    "hono": "^4.12.33",
+    "viem": "^2.52.2",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260604.1",

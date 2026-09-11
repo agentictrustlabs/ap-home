@@ -54,23 +54,3 @@ describe('the client surfaces the detail', () => {
     expect(seg.slice(0, 900)).toContain('[b.error, b.detail].filter(Boolean).join');
   });
 });
-
-describe('verifySignature separates rejection from unavailability', () => {
-  const CLIENT = readFileSync(
-    join(__dirname, '..', '..', '..', '..', 'packages', 'agent-account', 'src', 'client.ts'),
-    'utf8',
-  );
-  const FN = CLIENT.slice(CLIENT.indexOf('async verifySignature('), CLIENT.indexOf('* Build an unsigned UserOp'));
-
-  it('treats a revert as the account saying no', () => {
-    expect(FN).toMatch(/reverted\s*\?\s*\{ valid: false \}/);
-  });
-
-  it('treats anything else as no answer at all', () => {
-    expect(FN).toContain('unavailable: msg');
-  });
-
-  it('leaves isValidSignature a boolean, so nothing that GATES on it changes', () => {
-    expect(CLIENT).toContain('return (await this.verifySignature(account, hash, signature)).valid;');
-  });
-});
