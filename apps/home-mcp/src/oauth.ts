@@ -121,6 +121,9 @@ export async function tokenEndpoint(env: OAuthEnv, store: Store, body: URLSearch
     await store.deleteToken(rh); if (row.refresh_of) await store.deleteToken(row.refresh_of);
     const scope = (body.get('scope') ?? row.scope.join(' ')).split(/\s+/).filter(Boolean);
     if (scope.some((s) => !row.scope.includes(s))) return OAUTH_ERR('invalid_scope', 'a refresh may not widen scope');
+    // RFC 8707 on refresh too: a token is for the resource it was authorized for, and a refresh may name only that one.
+    const wanted = body.get('resource');
+    if (wanted && wanted.replace(/\/$/, '') !== row.resource) return OAUTH_ERR('invalid_target', 'a refresh may not change the resource');
     return issue(row.sub, scope, row.resource);
   }
   return OAUTH_ERR('unsupported_grant_type', 'authorization_code or refresh_token');

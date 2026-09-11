@@ -80,7 +80,8 @@ const v2 = b64u(randomBytes(48));
 const conn2 = await j(await post('/oauth/demo-connect', { handle: 'bob', client_id: reg2.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_challenge: b64u(createHash('sha256').update(v2).digest()), resource: `${MCP}/mcp` }));
 const tok2 = await j(await post('/oauth/token', form({ grant_type: 'authorization_code', code: conn2.code, client_id: reg2.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_verifier: v2, resource: `${MCP}/mcp` })));
 if (!tok2.access_token) fail(`second client token: ${JSON.stringify(tok2)}`);
-const cross = await j(await rpc('tools/call', { name: 'ask', arguments: { message: 'continue', run: out.runRef ?? 'run-none' } }, tok2.access_token));
+// bob's connection names HER run and nothing else: at his agent there is no such run (a message would start his own).
+const cross = await j(await rpc('tools/call', { name: 'ask', arguments: { run: out.runRef ?? 'run-none' } }, tok2.access_token));
 const crossOut = cross.result?.structuredContent ?? {};
 console.log(`twin · bob's client resumes alice's run → isError ${cross.result?.isError ?? false} · kind ${crossOut.kind ?? '-'} · ${String(crossOut.error ?? crossOut.text ?? '').slice(0, 120)}`);
 if (out.runRef && !cross.result?.isError && crossOut.kind !== 'refused') fail("another connection resumed alice's run");

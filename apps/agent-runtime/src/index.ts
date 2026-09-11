@@ -1136,30 +1136,58 @@ function standardCardFor(live: Record<string, unknown>): Record<string, unknown>
 async function principalFromAppDelegation(c: Context<{ Bindings: Env }>, raw: string): Promise<{ ok: true; sa: Address; caip: string; app: true } | { ok: false; status: number; error: string } | null> {
   const auth = c.req.header('authorization') ?? '';
   if (!/^A2A-Session\s/i.test(auth)) return null;
-  const validator = c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
-  if (!validator || !c.env.TIMESTAMP_ENFORCER || !c.env.ALLOWED_METHODS_ENFORCER || !c.env.DELEGATION_MANAGER) return { ok: false, status: 503, error: 'the wire gate is not configured' };
-  const deps = harnessDeps(c.env, buildAuditSink(c.env));
-  const chainId = Number(c.env.CHAIN_ID);
-  const dm = c.env.DELEGATION_MANAGER as Address;
+  return verifyAppDelegation(c.env, c.req.url, auth, raw);
+}
+
+/** Spec 397 — the verification itself, so a ROUTED hop (spec 366) can present the same evidence to the subject's
+ *  agent: `claimOn` names whose object spends the assertion — the asserting person's own by default, the RECEIVER's
+ *  for a forwarded credential (one hop per receiver, never a replay to the same one). */
+async function verifyAppDelegation(env: Env, url: string, auth: string, raw: string, claimOn?: Address): Promise<{ ok: true; sa: Address; caip: string; app: true } | { ok: false; status: number; error: string }> {
+  const validator = env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
+  if (!validator || !env.TIMESTAMP_ENFORCER || !env.ALLOWED_METHODS_ENFORCER || !env.DELEGATION_MANAGER) return { ok: false, status: 503, error: 'the wire gate is not configured' };
+  const deps = harnessDeps(env, buildAuditSink(env));
+  const chainId = Number(env.CHAIN_ID);
+  const dm = env.DELEGATION_MANAGER as Address;
   const principal = sessionWirePrincipal({
-    enforcers: { timestamp: c.env.TIMESTAMP_ENFORCER, allowedMethods: c.env.ALLOWED_METHODS_ENFORCER },
+    enforcers: { timestamp: env.TIMESTAMP_ENFORCER, allowedMethods: env.ALLOWED_METHODS_ENFORCER },
     verifyDelegationSig: async (d) => (await deps.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [d.delegator, hashDelegation(d, chainId, dm), d.signature] })) === true,
     isRevoked: async (d) => (await deps.readContract({ address: dm, abi: IS_REVOKED_ABI_FOR_STANDING, functionName: 'isRevoked', args: [hashDelegation(d, chainId, dm)] })) === true,
     claim: async (digest, expiresAt) => {
       const a = parseSessionAuthorization(auth);
-      const who = String(a?.agent ?? '').toLowerCase();
+      const who = String(claimOn ?? a?.agent ?? '').toLowerCase();
       if (!/^0x[0-9a-f]{40}$/.test(who)) return false;
-      const stub = c.env.A2A_TASKS.get(c.env.A2A_TASKS.idFromName(who));
-      const res = await stub.fetch(new Request('https://a2a-task-do/internal/harness-run/assertion-claim', { method: 'POST', headers: internalHeaders(c.env as never, { 'content-type': 'application/json' }), body: JSON.stringify({ digest, expiresAt }) }));
+      const stub = env.A2A_TASKS.get(env.A2A_TASKS.idFromName(who));
+      const res = await stub.fetch(new Request('https://a2a-task-do/internal/harness-run/assertion-claim', { method: 'POST', headers: internalHeaders(env as never, { 'content-type': 'application/json' }), body: JSON.stringify({ digest, expiresAt }) }));
       const out = (await res.json().catch(() => ({}))) as { ok?: boolean; claimed?: boolean };
       return out.ok === true && out.claimed === true;
     },
     onRefused: (reason, who) => console.warn(`[harness/ask] app delegation refused for ${who ?? '?'}: ${reason}`),
   });
-  const p = await principal(new Request(c.req.url, { method: 'POST', headers: c.req.raw.headers, body: raw }));
+  const p = await principal(new Request(url, { method: 'POST', headers: { authorization: auth, 'content-type': 'application/json' }, body: raw }));
   if (!p) return { ok: false, status: 401, error: 'the app delegation did not verify' };
   const sa = p.agent.toLowerCase() as Address;
   return { ok: true, sa, caip: `eip155:${chainId}:${sa}`, app: true };
+}
+
+/** Spec 397 + 366 — a ROUTED hop whose asker came through a client: the forwarded admission evidence, verified here
+ *  as the receiver (wire, assertion, freshness, audience; spent once on THIS agent's object), and checked to be the
+ *  asker's own ask — the body it binds was addressed to the asker's agent by the asker. */
+async function principalFromForwardedAppDelegation(c: Context<{ Bindings: Env }>, cred: { authorization: string; body: string }, asker: string, receiver: Address): Promise<{ ok: true; sa: Address; caip: string; app: true } | { ok: false; status: number; error: string }> {
+  let original: { addressee?: unknown } | null = null;
+  try { original = JSON.parse(cred.body) as { addressee?: unknown }; } catch { return { ok: false, status: 400, error: 'the forwarded app delegation binds no readable body' }; }
+  if (String(original?.addressee ?? '').toLowerCase() !== asker.toLowerCase()) return { ok: false, status: 403, error: 'the forwarded app delegation was not an ask at the asker\'s own agent' };
+  // The assertion's audience is the origin the asker's agent was asked at (this deployment's canonical a2a origin);
+  // this receiver is served under a per-agent host of the same deployment, so the audience is checked against the
+  // deployment, not this hop's host — an assertion for another deployment is refused here as anywhere.
+  const audience = String(parseSessionAuthorization(cred.authorization)?.audience ?? '');
+  const zones = a2aBaseDomains(c.env);
+  let audHost = '';
+  try { audHost = new URL(audience).hostname.toLowerCase(); } catch { return { ok: false, status: 401, error: 'the forwarded app delegation names no audience' }; }
+  if (!zones.some((z) => audHost === z || audHost.endsWith(`.${z}`))) return { ok: false, status: 401, error: `the forwarded app delegation is for ${audience}, not this deployment` };
+  const out = await verifyAppDelegation(c.env, `${audience.replace(/\/$/, '')}/harness/ask`, cred.authorization, cred.body, receiver);
+  if (!out.ok) return out;
+  if (out.sa !== asker.toLowerCase()) return { ok: false, status: 403, error: 'the forwarded app delegation is not the asker\'s' };
+  return out;
 }
 
 /** Spec 372 S2 — a 1.0 method on `/api/a2a` is served by the standard surface mounted for this agent: the
@@ -2887,13 +2915,24 @@ app.post('/harness/ask', async (c) => {
   } | null;
   // Spec 397 — WHO IS ASKING: the person's Home session (`session` in the body), or the person THROUGH A CLIENT
   // they authorized (an `A2A-Session` assertion over their ask-as-me wire — no session travels). One or the other.
-  const viaApp = await principalFromAppDelegation(c, rawAsk);
+  let viaApp = await principalFromAppDelegation(c, rawAsk);
   if (viaApp && !viaApp.ok) return c.json({ ok: false, error: viaApp.error }, viaApp.status as 401);
+  // Spec 397 + 366 — a routed hop from a run that was asked through a client: the profile forwards the asker's
+  // admission evidence in place of a session; verified here as the receiver, spent once on THIS agent's object.
+  const forwardedCred = (body?.subjectAsk as { asker?: { agent?: string; credential?: { kind?: string; authorization?: string; body?: string } } } | undefined)?.asker?.credential;
+  if (!viaApp && !body?.session && forwardedCred?.kind === 'app-delegation' && typeof forwardedCred.authorization === 'string' && typeof forwardedCred.body === 'string' && body?.addressee) {
+    const askerAgent = String((body.subjectAsk as { asker?: { agent?: string } }).asker?.agent ?? '');
+    const fwd = await principalFromForwardedAppDelegation(c, { authorization: forwardedCred.authorization, body: forwardedCred.body }, askerAgent, body.addressee.toLowerCase() as Address);
+    if (!fwd.ok) return c.json({ ok: false, error: `routed ask: ${fwd.error}` }, fwd.status as 401);
+    viaApp = fwd;
+  }
   if ((!body?.session && !viaApp) || !body?.addressee || !(body.message?.trim() || body.runRef)) {
     return c.json({ ok: false, error: 'session (or an A2A-Session app delegation), addressee and either a message or the runRef of a run to resume are required' }, 400);
   }
   const who = viaApp && viaApp.ok ? viaApp : await verifyHomeSession(String(body.session), c.env);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  // Spec 397 — what a routed hop from this run presents in place of a session: the admission evidence, verbatim.
+  const appCredential = viaApp?.ok && !forwardedCred && /^A2A-Session\s/i.test(c.req.header('authorization') ?? '') ? { authorization: c.req.header('authorization')!, body: rawAsk } : undefined;
   if (!c.env.HARNESS_AGENT_SA) return c.json({ ok: false, error: 'HARNESS_AGENT_SA not configured' }, 503);
   // Spec 377 — which model this turn runs on, decided BEFORE any run state is touched. A listed-but-keyless
   // provider throws here (a configuration error, loud), an unoffered one is refused with the offer named.
@@ -2920,7 +2959,7 @@ app.post('/harness/ask', async (c) => {
     const v = validateSubjectAsk(body.subjectAsk);
     if (!v.ok) return c.json({ ok: false, error: `subject-ask profile: ${v.errors.join('; ')}` }, 400);
     const sa = v.ask;
-    if (sa.asker.credential.token !== body.session || sa.asker.agent.toLowerCase() !== String(who.sa).toLowerCase()) return c.json({ ok: false, error: 'subject-ask profile: the asker is not the session presented' }, 403);
+    if ((sa.asker.credential.kind === 'home-session' && sa.asker.credential.token !== body.session) || sa.asker.agent.toLowerCase() !== String(who.sa).toLowerCase()) return c.json({ ok: false, error: 'subject-ask profile: the asker is not the credential presented' }, 403);
     const step = body.plan?.steps?.[0];
     if (!step || body.plan!.steps.length !== 1 || step.toolId !== sa.request.capability) return c.json({ ok: false, error: 'subject-ask profile: the plan is not the request' }, 400);
     inResponseTo = { agent: sa.asker.agent.toLowerCase() as Address, operationId: sa.correlation.operationId, runRef: sa.correlation.runRef, stepRef: sa.correlation.stepRef };
@@ -2997,7 +3036,7 @@ app.post('/harness/ask', async (c) => {
     };
     const { result, resolved, interactionFor, trace, tools: offeredTools, events: runEvents, presentedRefs, playbook: askedPlaybook, bill } = await runUnderMandateBilled(c.env as unknown as HarnessEnv, askDeps, {
       traceContext: traceContextOf(c.req.raw.headers),
-      intent, presented: turn.presented, person: who.sa as Address, session: body.session, runRef, addressee, onProgress: progress,
+      intent, presented: turn.presented, person: who.sa as Address, session: body.session, ...(appCredential ? { appCredential } : {}), runRef, addressee, onProgress: progress,
       conversation: conversation && conversation.type === 'ap.context.conversation-memory.v1' ? conversation : null,
       ...(inResponseTo ? { inResponseTo } : {}),
       ...(body.channel === 'voice' ? { channel: 'voice' as const } : {}),
@@ -4467,9 +4506,9 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     if (!body?.ok) return { lines: [], terminal: true, known: false };
     return { lines: body.lines ?? [], terminal: !!body.terminal, known: !!body.known };
   };
-  deps.askSubjectAgent = async ({ subject, toolId, args, goal, session, asker, correlation, continue: cont, runRef: receiverRunRef, trace }) => {
+  deps.askSubjectAgent = async ({ subject, toolId, args, goal, session, appCredential, asker, correlation, continue: cont, runRef: receiverRunRef, trace }) => {
     const name = await deps.nameOf?.(subject).catch(() => null) ?? null;
-    if (!session) return { ok: false, via: { agent: subject, name, observedVia: 'serving-handler' }, refused: 'a routed ask carries the asker’s session, and this run has none' };
+    if (!session && !appCredential) return { ok: false, via: { agent: subject, name, observedVia: 'serving-handler' }, refused: 'a routed ask carries the asker’s session, and this run has none' };
     // WHERE IT IS ASKED is what its name publishes (`subject-address.ts`): here, over the wire, or nowhere.
     const at = subjectAddress(name, name ? await nameRecordsOf(name) : null, subjectAddressEnv(env));
     if (at.where === 'nowhere') return { ok: false, via: { agent: subject, name, observedVia: 'serving-handler' }, refused: `${name ?? subject} cannot be asked: ${at.refused}` };
@@ -4490,7 +4529,8 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     }
     const profile = subjectAsk({
       request: { capability: toolId, args, goal },
-      asker: { agent: (asker ?? subject) as Address, credential: { kind: 'home-session', token: session }, ...(presented.length ? { presented } : {}) },
+      // Spec 397 — through a client, no session: the admission evidence travels instead, for the receiver to verify.
+      asker: { agent: (asker ?? subject) as Address, credential: session ? { kind: 'home-session', token: session } : { kind: 'app-delegation', ...appCredential! }, ...(presented.length ? { presented } : {}) },
       correlation,
       // Spec 374 W2 — a continuation of the receiver's own parked run: what this turn presented or
       // supplied goes to THAT run. Forwarded whole; the receiver resumes it under its own gates.
@@ -4500,7 +4540,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     let envelope: AskReplyEnvelopeV1 | null;
     let status: number;
     if (inProcess) {
-      const body = JSON.stringify({ session, addressee: subject, message: goal, plan: { steps: [{ toolId, args }] }, subjectAsk: profile, ...(receiverRunRef && !cont ? { runRef: receiverRunRef } : {}) });
+      const body = JSON.stringify({ ...(session ? { session } : {}), addressee: subject, message: goal, plan: { steps: [{ toolId, args }] }, subjectAsk: profile, ...(receiverRunRef && !cont ? { runRef: receiverRunRef } : {}) });
       const req = new Request(url, { method: 'POST', headers: internalHeaders(env, { 'content-type': 'application/json', accept: 'application/json', ...(trace ? { traceparent: trace.traceparent, ...(trace.tracestate ? { tracestate: trace.tracestate } : {}) } : {}) }), body });
       let res: Response;
       try {
@@ -4515,6 +4555,9 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       // S4) as a `SendMessage` with the profile in the metadata; the reply is the receiver's envelope,
       // returned verbatim as the task's `subject-answer` artifact. Unreachable, or no 1.0 endpoint on the
       // card ⇒ said so, in the receiver's words where it has any — never read locally instead (R3).
+      // Spec 397 — the wire's bearer is the asker's Home session; an app-admitted run has none, and its
+      // assertion names THIS origin as audience, so another deployment cannot verify it (W2 names the hop).
+      if (!session) return { ok: false, via, refused: `${name ?? subject} is served elsewhere; a run asked through a client cannot yet be routed off this deployment (spec 397 W2)` };
       const hop = await sendSubjectAskOverWire({ ...(trace ? { traceparent: trace.traceparent, ...(trace.tracestate ? { tracestate: trace.tracestate } : {}) } : {}), cardUrl: (at as { cardUrl: string }).cardUrl, ...((at as { pinnedDigest?: string }).pinnedDigest ? { pinnedDigest: (at as { pinnedDigest?: string }).pinnedDigest! } : {}), profile, session, fetch: (u, init) => fetch(u, init) });
       if (!hop.ok) return { ok: false, via, refused: `${name ?? subject} could not be asked over the wire — ${hop.refused}` };
       envelope = hop.envelope as unknown as AskReplyEnvelopeV1;

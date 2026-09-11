@@ -824,7 +824,7 @@ export interface HarnessDeps {
   /** Spec 379 — whether an agent address is served by THIS deployment (its harness runs here). Absent ⇒ every
    *  address is treated as served, so only a card URL counts as outside. */
   isServedHere?: (agent: string) => boolean;
-  askSubjectAgent?: (input: { subject: Address; toolId: string; args: Record<string, unknown>; goal: string; asker?: Address; session?: string; /** Spec 390 W2 — W3C Trace Context for the hop: this run's trace, the routed step as the parent span. */ trace?: { traceparent: string; tracestate?: string }; /** Appendix M8 — the run ref the receiver is to adopt for a fresh ask (named by the sender). */ runRef?: string; correlation: { operationId: string; runRef: string; stepRef: string; intentDigest: string }; /** Spec 374 W2 — continue the receiver's parked run with what this turn presented/supplied. */ continue?: { runRef: string; presented?: unknown[]; supplied?: unknown[] } }) => Promise<SubjectAnswerV1>;
+  askSubjectAgent?: (input: { subject: Address; toolId: string; args: Record<string, unknown>; goal: string; asker?: Address; session?: string; /** Spec 397 — the asker came through a client they authorized (no session): the admission evidence, forwarded verbatim for the receiver to verify itself. */ appCredential?: { authorization: string; body: string }; /** Spec 390 W2 — W3C Trace Context for the hop: this run's trace, the routed step as the parent span. */ trace?: { traceparent: string; tracestate?: string }; /** Appendix M8 — the run ref the receiver is to adopt for a fresh ask (named by the sender). */ runRef?: string; correlation: { operationId: string; runRef: string; stepRef: string; intentDigest: string }; /** Spec 374 W2 — continue the receiver's parked run with what this turn presented/supplied. */ continue?: { runRef: string; presented?: unknown[]; supplied?: unknown[] } }) => Promise<SubjectAnswerV1>;
   /** Appendix M8 — READ the subject agent's own progress lines for a routed run, under the asker's session,
    *  while the hop is in flight. The receiver's DO answers; nothing is copied but the sentences. */
   readSubjectProgress?: (input: { subject: Address; runRef: string; session: string; after: number; wait?: number }) => Promise<{ lines: Array<{ seq: number; said: string; stepRef?: string; terminal?: boolean }>; terminal: boolean; known: boolean }>;
@@ -1988,6 +1988,9 @@ export interface HarnessRunInput {
   person?: Address;
   /** Their Home session — the interactions plane authenticates a direct message with it. */
   session?: string;
+  /** Spec 397 — no session: the person asked THROUGH A CLIENT they authorized. The `A2A-Session` authorization and
+   *  the exact body it bound, kept so a routed hop can present the same evidence to the subject's agent. */
+  appCredential?: { authorization: string; body: string };
   /**
    * WHAT THE SURFACE SUPPORTS, and where the person is standing (spec 352 §2).
    *
@@ -4401,7 +4404,7 @@ step is then handed to that agent under authority the person grants; leave it ou
       // the run reference — the same rule `traceIdFor` applies to the record) with the routed step as parent.
       const hopTrace = { traceparent: formatTraceparent(input.traceContext?.traceId ?? await traceIdOf(correlation.runRef), await spanIdOf(correlation.runRef, correlation.stepRef)), ...(input.traceContext?.tracestate ? { tracestate: input.traceContext.tracestate } : {}) };
       const answer = await deps.askSubjectAgent({
-        subject, toolId, args, goal: input.intent.goal, ...(input.person ? { asker: input.person } : {}), ...(input.session ? { session: input.session } : {}),
+        subject, toolId, args, goal: input.intent.goal, ...(input.person ? { asker: input.person } : {}), ...(input.session ? { session: input.session } : {}), ...(input.appCredential ? { appCredential: input.appCredential } : {}),
         trace: hopTrace,
         ...(cont ? {} : { runRef: receiverRunRef }),
         // R: this step's stable operation identity, for the receiver to name in S (spec 367 §8).
