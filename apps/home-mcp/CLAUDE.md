@@ -35,6 +35,14 @@ a wiped store means "authorize again") · `src/a2a.ts` (`askAsPerson`) · `src/t
 `HOME_MCP_PRIVATE_KEY` (its address is the `delegate` on the Home's `home-mcp` client registration) and `TOKEN_SECRET`.
 Live: `https://home-mcp-faithnet.richardpedersen3.workers.dev` (the faithnet.io zone is at its domain limit).
 
+## Key rotation (runbook)
+
+`GET /health` shows `keyAddress`; it must equal the `delegate` on the Home's `home-mcp` client (`apps/demo-sso-next/src/whitelabel/config.ts`).
+To rotate: generate a new key, `wrangler secret put HOME_MCP_PRIVATE_KEY --env faithnet`, set the new address as that `delegate`, push
+the Home, deploy this Worker. Nothing else: every existing connection's assertion stops recovering to its wire's delegate, her agent
+refuses it, the transport answers 401 with the challenge, the host re-authorizes and the Home mints a wire to the new key.
+Registrations and demo connects are bounded per caller and overall per hour (429); a person may hold 25 connected clients.
+
 ## Not here
 
 A live gate for an off-deployment target (needs faithnet-b awake and `A2A_TRUSTED_ORIGINS` set there); package extraction of the AS.

@@ -55,7 +55,10 @@ app.use('*', async (c, next) => {
   c.res.headers.set('access-control-expose-headers', 'www-authenticate, mcp-session-id');
 });
 
-app.get('/health', (c) => c.json({ ok: true, service: 'home-mcp', spec: 397, tools: TOOLS.map((t) => t.name), home: c.env.HOME_ORIGIN }));
+// `keyAddress` is the delegate every ask-as-me wire names: it MUST equal the `delegate` on the Home's `home-mcp` client
+// registration. Rotating the key = a new secret + that registration updated + deploy; every connection then ends itself
+// (the assertion no longer recovers to the wire's delegate → 401 → the host re-authorizes; the Home mints a new wire).
+app.get('/health', (c) => c.json({ ok: true, service: 'home-mcp', spec: 397, tools: TOOLS.map((t) => t.name), home: c.env.HOME_ORIGIN, keyAddress: c.env.HOME_MCP_PRIVATE_KEY ? privateKeyToAccount(c.env.HOME_MCP_PRIVATE_KEY as Hex).address : null }));
 app.get('/', (c) => c.json({ service: SERVER.name, mcp: `POST ${resourceOf(c)} (Streamable HTTP; OAuth 2.1 — see /.well-known/oauth-protected-resource)`, tools: TOOLS.map((t) => t.name), doctrine: SERVER.instructions }));
 
 // ── RFC 9728 / RFC 8414 ──
@@ -64,7 +67,19 @@ app.get('/.well-known/oauth-protected-resource/mcp', (c) => serveProtectedResour
 app.get('/.well-known/oauth-authorization-server', (c) => c.json(authorizationServerMetadata(originOf(c), SCOPES)));
 
 // ── RFC 7591 ──
-app.post('/oauth/register', async (c) => registerClient(store(c.env), (await c.req.json().catch(() => ({}))) as Record<string, unknown>));
+/** A caller's hour: registrations and demo connects are unprivileged, so they are bounded per caller and overall. */
+async function tooMany(env: Env, what: string, caller: string, perCaller: number, overall: number): Promise<boolean> {
+  const hour = 3_600_000;
+  const [mine, all] = await Promise.all([store(env).rateHit(`${what}:${caller}`, hour), store(env).rateHit(`${what}:*`, hour)]);
+  return mine > perCaller || all > overall;
+}
+const callerOf = (c: { req: { header(n: string): string | undefined } }) => c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
+const tooManyResponse = () => new Response(JSON.stringify({ error: 'too_many_requests', error_description: 'this caller has registered or connected too often this hour' }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '3600' } });
+
+app.post('/oauth/register', async (c) => {
+  if (await tooMany(c.env, 'register', callerOf(c), 30, 600)) return tooManyResponse();
+  return registerClient(store(c.env), (await c.req.json().catch(() => ({}))) as Record<string, unknown>);
+});
 
 // ── /oauth/authorize — validated here, COMPLETED at the Home (a relying app never runs a credential ceremony). ──
 app.get('/oauth/authorize', async (c) => {
@@ -105,6 +120,10 @@ async function connectFromHome(env: Env, exchange: { id_token?: string; delegati
   const kek = await kekFrom(env.TOKEN_SECRET ?? 'unset');
   const sealed = await sealWire(kek, wire);
   const prior = await store(env).getPerson(v.claims.sub);
+  // A person's clients are bounded: a registration is unprivileged, and a wire is worth guarding from being handed to
+  // an unbounded number of them. Revoking at the Home ends every one; connecting again starts clean.
+  const MAX_CLIENTS_PER_PERSON = 25;
+  if (prior && !prior.client_ids.includes(clientId) && prior.client_ids.length >= MAX_CLIENTS_PER_PERSON) return { ok: false, error: `this person already has ${MAX_CLIENTS_PER_PERSON} connected clients — revoke the connection at their Home to start over` };
   // The person's REGISTRY NAME (alice.me) from the Home's reverse lookup — the id_token's agent_name is their display name.
   const rn = (await fetch(`${env.HOME_ORIGIN}/connect/reverse-name?address=${agent}`).then((r) => r.json()).catch(() => null)) as { name?: string | null } | null;
   const agentName = typeof rn?.name === 'string' && rn.name ? rn.name : (v.claims.agent_name ?? exchange.agent_name);
@@ -138,6 +157,7 @@ app.get('/oauth/callback', async (c) => {
 //    DEMO_CONNECT_ENABLED. The same Home path (`demo-signin`, template ask-as-me), the same code for the client. ──
 app.post('/oauth/demo-connect', async (c) => {
   if (c.env.DEMO_CONNECT_ENABLED !== 'true') return json({ error: 'not_found' }, 404);
+  if (await tooMany(c.env, 'demo-connect', callerOf(c), 60, 600)) return tooManyResponse();
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
   const q = new URLSearchParams({ client_id: String(body.client_id ?? ''), redirect_uri: String(body.redirect_uri ?? ''), response_type: 'code', code_challenge: String(body.code_challenge ?? ''), code_challenge_method: 'S256', resource: String(body.resource ?? resourceOf(c)), ...(typeof body.scope === 'string' ? { scope: body.scope } : {}) });
   const parsed = await parseAuthorize(store(c.env), q, resourceOf(c), SCOPES);

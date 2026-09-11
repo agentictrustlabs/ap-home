@@ -35,6 +35,8 @@ export class HomeMcpStoreDO {
     // question a run asked, waiting for the host's answer). Both serving-plane, both short-lived.
     this.sql.exec(`CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, row TEXT NOT NULL, created_at INTEGER NOT NULL)`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS elicit (id TEXT PRIMARY KEY, row TEXT NOT NULL, created_at INTEGER NOT NULL)`);
+    // Rate windows (registrations per caller per hour, and the like): a counter, a rebuild, never a record.
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS rate (key TEXT PRIMARY KEY, n INTEGER NOT NULL, since INTEGER NOT NULL)`);
   }
   async fetch(request: Request): Promise<Response> {
     const { op, key, row, ttlMs } = (await request.json()) as { op: string; key?: string; row?: unknown; ttlMs?: number };
@@ -55,6 +57,7 @@ export class HomeMcpStoreDO {
       case 'person.get': { const r = [...this.sql.exec(`SELECT row FROM persons WHERE sub = ?`, key)][0]; return json({ ok: true, row: r ? JSON.parse(String(r.row)) : null }); }
       case 'person.delete': this.sql.exec(`DELETE FROM persons WHERE sub = ?`, key); return json({ ok: true });
       case 'session.put': this.sql.exec(`INSERT OR REPLACE INTO sessions (id, row, created_at) VALUES (?, ?, ?)`, key, JSON.stringify(row), now); this.sql.exec(`DELETE FROM sessions WHERE created_at < ?`, now - 7 * 86_400_000); return json({ ok: true });
+      case 'rate.hit': { const r = row as { windowMs: number }; const [cur] = [...this.sql.exec(`SELECT n, since FROM rate WHERE key = ?`, key)]; if (!cur || now - Number(cur.since) > r.windowMs) { this.sql.exec(`INSERT OR REPLACE INTO rate (key, n, since) VALUES (?, 1, ?)`, key, now); this.sql.exec(`DELETE FROM rate WHERE since < ?`, now - 2 * r.windowMs); return json({ ok: true, n: 1 }); } this.sql.exec(`UPDATE rate SET n = n + 1 WHERE key = ?`, key); return json({ ok: true, n: Number(cur.n) + 1 }); }
       case 'session.update': { const r = [...this.sql.exec(`SELECT row FROM sessions WHERE id = ?`, key)][0]; if (!r) return json({ ok: true, row: null }); const cur = JSON.parse(String(r.row)) as Record<string, unknown>; const next = { ...cur, ...(row as Record<string, unknown>) }; this.sql.exec(`UPDATE sessions SET row = ? WHERE id = ?`, JSON.stringify(next), key); return json({ ok: true, row: next }); }
       case 'session.get': { const r = [...this.sql.exec(`SELECT row FROM sessions WHERE id = ?`, key)][0]; return json({ ok: true, row: r ? JSON.parse(String(r.row)) : null }); }
       case 'elicit.put': this.sql.exec(`INSERT OR REPLACE INTO elicit (id, row, created_at) VALUES (?, ?, ?)`, key, JSON.stringify(row), now); this.sql.exec(`DELETE FROM elicit WHERE created_at < ?`, now - 600_000); return json({ ok: true });
@@ -75,6 +78,8 @@ export class Store {
   }
   putClient(r: ClientRow) { return this.call('client.put', r.client_id, r); }
   async getClient(id: string): Promise<ClientRow | null> { return (await this.call<{ row: ClientRow | null }>('client.get', id)).row; }
+  /** One more hit on a window; the count within it. */
+  async rateHit(key: string, windowMs: number): Promise<number> { return (await this.call<{ n: number }>('rate.hit', key, { windowMs })).n; }
   putSession(id: string, r: SessionRow) { return this.call('session.put', id, r); }
   async getSession(id: string): Promise<SessionRow | null> { return (await this.call<{ row: SessionRow | null }>('session.get', id)).row; }
   updateSession(id: string, patch: Partial<SessionRow>) { return this.call('session.update', id, patch); }

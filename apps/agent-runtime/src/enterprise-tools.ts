@@ -56,7 +56,9 @@ export const ENGAGEMENT_INVOKE_TOOL: ToolSpec = {
     },
     required: ['agent', 'message'],
   },
-  establishes: 'submission',
+  // A READ (spec 379): what the other agent said is an observation; an engagement never establishes that anything
+  // was done here — Ring-0's validator holds the contract to the same rule (an informational skill establishes lookup).
+  establishes: 'lookup',
 };
 
 export interface ArdSearchBody { query: { text: string; filter?: Record<string, string[]> }; pageSize: number; federation: 'none' }
