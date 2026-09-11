@@ -250,6 +250,26 @@
       "required": true,
       "paced": false,
       "timeoutSec": 120
+    },
+    {
+      "id": "verify-home-mcp-authority",
+      "script": "scripts/verify-home-mcp-authority.mts",
+      "spec": "397 W3",
+      "proves": "a payment asked through Claude parks authority_required; grant_link names her Home's /you?run= page; resumed at her Home under her session with the mandate she signs, the payment runs; Claude's run tool reads the receipt with the transaction and ask { run } on the finished run answers its record",
+      "twin": "Claude's ask { run } before she granted is authority_required again \u2014 never a payment; the record view carries no signature",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 300
+    },
+    {
+      "id": "verify-home-mcp-revoke",
+      "script": "scripts/verify-home-mcp-revoke.mts",
+      "spec": "397 W4",
+      "proves": "her Home lists the Home MCP connection under Connected assistants with its wire; revoked on chain from her own account (what the panel's Revoke does), the chain says isRevoked",
+      "twin": "Claude's next ask is refused at her agent in its words and the Home MCP says she must authorize again; the bearer alone is worth nothing; the row is gone",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 240
     }
   ]
 }

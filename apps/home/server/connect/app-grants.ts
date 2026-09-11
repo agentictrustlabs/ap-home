@@ -7,6 +7,7 @@
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { getClient } from '../../src/lib/oidc-clients';
+import { CONTRACTS } from '../../src/lib/chain';
 
 const json = (b: unknown, s = 200): Response => new Response(JSON.stringify(b), { status: s, headers: { 'content-type': 'application/json' } });
 
@@ -35,8 +36,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   const person = await personFrom(request, env);
   if (!person) return json({ error: 'session required' }, 401);
   const rows = JSON.parse((await env.AUTH_CODES.get(`app-grants:${person}`)) ?? '[]') as Row[];
-  const ts = (env as { TIMESTAMP_ENFORCER?: string }).TIMESTAMP_ENFORCER;
-  return json({ ok: true, grants: rows.map((r) => ({ ...r, appName: getClient(r.clientId)?.name ?? r.clientId, validUntil: validUntilOf(r, ts) })) });
+  return json({ ok: true, grants: rows.map((r) => ({ ...r, appName: getClient(r.clientId)?.name ?? r.clientId, validUntil: validUntilOf(r, CONTRACTS.timestampEnforcer) })) });
 };
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {

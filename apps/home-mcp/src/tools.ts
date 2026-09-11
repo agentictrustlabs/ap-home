@@ -81,9 +81,8 @@ export async function askTool(env: ToolEnv, person: Person, args: Record<string,
 export function grantLinkTool(env: ToolEnv, person: Person, args: Record<string, unknown>): Record<string, unknown> {
   const run = String(args.run ?? '').trim();
   if (!/^run-[0-9a-f-]+$/i.test(run)) return { error: 'run must be a runRef (run-…)' };
-  const label = (person.agentName ?? '').replace(/\.me$/, '');
-  const home = label ? env.HOME_ORIGIN.replace('://www.', `://${label}.`) : env.HOME_ORIGIN;
-  return { url: `${home}/you?run=${encodeURIComponent(run)}`, note: 'Only the person can sign here, with the credential that custodies their agent. Once they have, call ask with this run to finish it.' };
+  // The Home's own origin: the page routes by the person's session, whichever host they signed in at.
+  return { url: `${env.HOME_ORIGIN}/you?run=${encodeURIComponent(run)}`, note: 'Only the person can sign here, with the credential that custodies their agent. Once they have, call ask with this run to finish it.' };
 }
 
 /** Spec 397 W2 — discovery THROUGH the person's agent: one supplied step, no planner; the registry's answer as their run's. */

@@ -20,7 +20,10 @@ export const isDelegationRefusal = (status: number, error: string): boolean => s
  *  is a read or a turn OF that act, never a different capability. */
 export async function callAsPerson(id: PersonIdentity, a2aOrigin: string, path: string, body: Record<string, unknown>, fetchImpl: typeof fetch = fetch): Promise<{ ok: true; body: Record<string, unknown>; status: number } | { ok: false; status: number; error: string; body?: Record<string, unknown> }> {
   // `method` names the assertion's method (the receiver compares it to the body's); the route ignores the field.
-  const raw = JSON.stringify({ method: STANDARD_SURFACE_SKILL, ...body });
+  // `nonce` makes every body distinct: the assertion is spent once per digest, and two identical bodies in the same
+  // second (a record read right after a run tool) would otherwise be one digest — the second refused as a replay.
+  const nonce = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const raw = JSON.stringify({ method: STANDARD_SURFACE_SKILL, nonce, ...body });
   const base: Omit<CallerAssertionV1, 'signature'> = { agent: id.agent.toLowerCase(), method: STANDARD_SURFACE_SKILL, bodyHash: requestBodyHash(raw), issuedAt: Math.floor(Date.now() / 1000), audience: new URL(a2aOrigin).origin };
   const sig = await signRaw({ hash: callerAssertionDigest(base), privateKey: id.privateKey, to: 'hex' });
   const assertion: CallerAssertionV1 = { ...base, signature: wrapSessionSignature(id.wire, sig) };
