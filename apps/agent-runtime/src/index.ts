@@ -1636,17 +1636,20 @@ app.post('/harness/confirmations', async (c) => {
  *  person answers then is what is remembered. The write is the person's own agent writing their own
  *  vault, exactly as the memory was written; nothing here is a grant, so nothing here is revoked. */
 app.post('/harness/confirmations/forget', async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { session?: string; scope?: { word?: string; capability?: string; arg?: string } } | null;
+  const body = (await c.req.json().catch(() => null)) as { session?: string; scope?: { word?: string; capability?: string; arg?: string; context?: string } } | null;
   if (!body?.session) return c.json({ ok: false, error: 'session is required' }, 400);
   const scope = body.scope;
-  if (!scope?.word || !scope.capability || !scope.arg) return c.json({ ok: false, error: 'scope { word, capability, arg } is required' }, 400);
+  if (!scope?.word || !scope.capability || !scope.arg) return c.json({ ok: false, error: 'scope { word, capability, arg[, context] } is required' }, 400);
   const who = await verifyHomeSession(body.session, c.env);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const deps = harnessDeps(c.env, buildAuditSink(c.env));
   if (!deps.readSubjectRecord || !deps.writeSubjectRecord) return c.json({ ok: false, error: 'the private tier is not configured' }, 503);
   const me = String(who.sa).toLowerCase();
   const prev = (await deps.readSubjectRecord(me, CONFIRMATION_RECORD).catch(() => null)) as ConfirmationPreferencesV1 | null;
-  const next = forgetConfirmation(prev, { word: String(scope.word), capability: String(scope.capability), arg: String(scope.arg) });
+  // The context is part of the key (spec 385 W2: a choice made IN a room is kept for that room), so a forget that
+  // dropped it answered ok and cleared nothing — the room memory was unforgettable. Absent context = the home scope.
+  const next = forgetConfirmation(prev, { word: String(scope.word), capability: String(scope.capability), arg: String(scope.arg), ...(scope.context ? { context: String(scope.context) } : {}) });
+  if (next.entries.length === (prev?.entries ?? []).length) return c.json({ ok: false, error: 'no remembered choice matches that scope — nothing was cleared' }, 404);
   const wrote = await deps.writeSubjectRecord(me, CONFIRMATION_RECORD, next);
   if (!wrote.ok) return c.json({ ok: false, error: wrote.error ?? 'the preference could not be cleared' }, 502);
   return c.json({ ok: true, entries: confirmationEntries(next) });
@@ -3022,6 +3025,14 @@ app.post('/harness/ask', async (c) => {
      *  deployment default. A provider this agent does not offer is a 400, never a swap. */
     model?: string;
   } | null;
+  // The addressee is an ADDRESS — the vault keys on the hex form. A CAIP-10 `eip155:<chain>:0x…` (what a session's
+  // `sub` is) used to pass through untouched, so the playbook read missed and the agent went quietly bare while
+  // every other read still worked: accept it, and refuse anything that is not an address at all.
+  if (body?.addressee !== undefined && !/^0x[0-9a-fA-F]{40}$/.test(String(body.addressee))) {
+    const hex = String(body.addressee).match(/^eip155:\d+:(0x[0-9a-fA-F]{40})$/)?.[1];
+    if (!hex) return c.json({ ok: false, error: `addressee must be an agent address (0x…) — got "${String(body.addressee).slice(0, 60)}"` }, 400);
+    body.addressee = hex as Address;
+  }
   // Spec 397 — WHO IS ASKING: the person's Home session (`session` in the body), or the person THROUGH A CLIENT
   // they authorized (an `A2A-Session` assertion over their ask-as-me wire — no session travels). One or the other.
   let viaApp = await principalFromAppDelegation(c, rawAsk);

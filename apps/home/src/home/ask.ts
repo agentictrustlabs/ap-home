@@ -315,7 +315,8 @@ async function post(body: unknown): Promise<{ ok: boolean; reply?: AskReply; res
 /** Spec 385 W2 — one remembered choice: for THIS word, filling THIS argument of THIS capability, the person
  *  once picked THIS agent. Evidence the resolver cites ("remembered: you chose … for this before"), never a
  *  grant; shown so it can be cleared. `capabilityWords` is the agent's phrase for the capability. */
-export interface RememberedChoice { word: string; capability: string; capabilityWords: string; arg: string; agent: string; label?: string; at: string; runRef?: string }
+/** `context` = the room the choice was made in (spec 385 W2); absent = made at home. It is part of the memory's key. */
+export interface RememberedChoice { word: string; capability: string; capabilityWords: string; arg: string; agent: string; label?: string; at: string; runRef?: string; context?: string }
 
 /** The person's own remembered choices — theirs alone, whatever room they are asking in. */
 export async function listConfirmations(session: { token: string }): Promise<RememberedChoice[]> {
@@ -341,7 +342,7 @@ export async function forgetInstruction(session: { token: string }, scope: { con
 }
 
 /** Clear one remembered scope; the next ask of that word, in that place, asks again. Returns what remains. */
-export async function forgetConfirmation(session: { token: string }, scope: { word: string; capability: string; arg: string }): Promise<{ ok: true; entries: RememberedChoice[] } | { ok: false; error: string }> {
+export async function forgetConfirmation(session: { token: string }, scope: { word: string; capability: string; arg: string; context?: string }): Promise<{ ok: true; entries: RememberedChoice[] } | { ok: false; error: string }> {
   const out = (await postA2a('/a2a/harness/confirmations/forget', { session: session.token, scope })) as { ok?: boolean; entries?: RememberedChoice[]; error?: string };
   return out.ok ? { ok: true, entries: out.entries ?? [] } : { ok: false, error: out.error ?? 'the choice could not be cleared' };
 }

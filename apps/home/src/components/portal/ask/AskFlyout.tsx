@@ -164,7 +164,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
     if (!session) return;
     setBusy(`forget:${r.word}:${r.capability}:${r.arg}`);
     try {
-      const out = await forgetConfirmation(session, { word: r.word, capability: r.capability, arg: r.arg });
+      const out = await forgetConfirmation(session, { word: r.word, capability: r.capability, arg: r.arg, ...(r.context ? { context: r.context } : {}) });
       if (out.ok) setRemembered(out.entries);
       else setThread((t) => [...t, { role: 'agent', text: `I could not clear that: ${out.error}` }]);
     } finally { setBusy(null); }

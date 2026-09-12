@@ -61,10 +61,10 @@ export interface MemoryViews {
 export function assembleMemory(i: MemoryInputs): MemoryViews {
   const personal: MemoryItem[] = [
     ...i.confirmations.map((c) => ({
-      id: `confirmation:${c.word}:${c.capability}:${c.arg}`, store: 'personal' as const, kind: 'remembered choice',
-      title: `“${c.word}” means ${c.label ?? c.agent.slice(0, 10) + '…'}`, detail: `when ${c.capabilityWords} asks for ${c.arg}`,
+      id: `confirmation:${c.word}:${c.capability}:${c.arg}${c.context ? `@${c.context}` : ''}`, store: 'personal' as const, kind: 'remembered choice',
+      title: `“${c.word}” means ${c.label ?? c.agent.slice(0, 10) + '…'}`, detail: `when ${c.capabilityWords} asks for ${c.arg}${c.context ? ` · in room ${c.context.slice(0, 10)}…` : ' · at home'}`,
       at: Date.parse(c.at), owner: i.self, actions: ['forget' as const, 'correct' as const],
-      ref: { word: c.word, capability: c.capability, arg: c.arg },
+      ref: { word: c.word, capability: c.capability, arg: c.arg, ...(c.context ? { context: c.context } : {}) },
     })),
     ...i.instructions.map((s) => ({
       id: `instruction:${s.context}:${s.capability}:${s.arg}`, store: 'personal' as const, kind: 'standing instruction',

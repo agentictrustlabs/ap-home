@@ -64,7 +64,7 @@ export function MemoryViews({ scope }: { scope: WorkspaceScope }) {
     if (!session || !it.ref) return;
     setBusy(it.id); setErr(null);
     const out = it.kind === 'remembered choice'
-      ? await forgetConfirmation(session, it.ref as { word: string; capability: string; arg: string })
+      ? await forgetConfirmation(session, it.ref as { word: string; capability: string; arg: string; context?: string })
       : await forgetInstruction(session, it.ref as { context: string; capability: string; arg: string });
     setBusy(null);
     if (!out.ok) { setErr(out.error); return; }

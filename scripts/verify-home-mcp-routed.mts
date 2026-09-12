@@ -39,11 +39,19 @@ if (room.isError || room.out.kind !== 'answer') fail(`the room could not engage:
 if (!roomRouted.some((r) => r.name === 'ligonier.svc') || ligonier(roomSaid) < 1) fail(`Ligonier did not answer the room's engagement: ${roomSaid.slice(0, 200)}`);
 
 // ── 2. a question back, answered through the host ──
-t0 = Date.now();
-const asked = await call('engage', { agent: 'ligonier.svc', message: 'Fetch one specific item from your catalog by its id and give me its full record. I have the id ready — ask me for it.' });
-const prompt = asked.out.prompt as { kind?: string; prompt?: string; stepRef?: string; fields?: Array<{ name: string }> } | undefined;
-console.log(`engage (a question back) → ${asked.out.kind} · ${Date.now() - t0} ms · "${String(prompt?.prompt ?? '').slice(0, 90)}" · fields ${JSON.stringify((prompt?.fields ?? []).map((f) => f.name))}`);
-if (asked.out.kind === 'authority_required') fail('a read asked for her authority');
+// Whether Ligonier ASKS (plans `catalog.resource.get` without the id → a data prompt, deterministic from there) or
+// answers in prose ("what id?") is its planner's call on each turn; what this gate tests is the PARKING of a question
+// that was asked. Bounded retries of the same call (ADR-0013) — three turns, the last one judged.
+let asked!: Awaited<ReturnType<typeof call>>; let prompt: { kind?: string; prompt?: string; stepRef?: string; fields?: Array<{ name: string }> } | undefined;
+for (let attempt = 1; attempt <= 3; attempt++) {
+  t0 = Date.now();
+  asked = await call('engage', { agent: 'ligonier.svc', message: 'Fetch one specific item from your catalog by its id and give me its full record. I have the id ready — ask me for it.' });
+  prompt = asked.out.prompt as typeof prompt;
+  console.log(`engage (a question back)${attempt > 1 ? ` · attempt ${attempt}` : ''} → ${asked.out.kind} · ${Date.now() - t0} ms · "${String(prompt?.prompt ?? '').slice(0, 90)}" · fields ${JSON.stringify((prompt?.fields ?? []).map((f) => f.name))}`);
+  if (asked.out.kind === 'authority_required') fail('a read asked for her authority');
+  if (asked.out.kind === 'prompt') break;
+  console.log(`  (Ligonier answered in prose instead of asking: "${String(asked.out.text ?? '').slice(0, 100)}" — its planner's turn, not the hop's; asking again)`);
+}
 if (asked.out.kind !== 'prompt' || prompt?.kind !== 'data' || !prompt.fields?.length) fail(`expected Ligonier's question to park her run: ${JSON.stringify(asked.out).slice(0, 400)}`);
 const field = prompt.fields.find((f) => /id/i.test(f.name))?.name ?? prompt.fields[0]!.name;
 t0 = Date.now();

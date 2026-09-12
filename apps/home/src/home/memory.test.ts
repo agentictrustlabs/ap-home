@@ -20,4 +20,14 @@ describe('three stores, never one label (398 §6.1)', () => {
     expect(m.run[1]!.actions).toContain('promote');
     expect(m.absent.run[0]).toMatch(/not yet an act/);
   });
+  it('a choice made in a room keeps its room: distinct from the same word at home, and the forget ref carries it (385 W2)', () => {
+    const base = { word: 'thompson', capability: 'organization.membership.invite', capabilityWords: 'invite members', arg: 'org', at: iso };
+    const m = assembleMemory({ self: ME, workspace: ORG, confirmations: [{ ...base, agent: '0x3333333333333333333333333333333333333333', label: 'big-thompson-team.org', context: ORG }, { ...base, agent: '0x5555555555555555555555555555555555555555', label: 'thompson.org' }],
+      instructions: [], endeavors: [], artifacts: [], records: [], checkpoints: [] });
+    expect(m.personal.map((x) => x.id)).toEqual([`confirmation:thompson:organization.membership.invite:org@${ORG}`, 'confirmation:thompson:organization.membership.invite:org']);
+    expect(m.personal[0]!.detail).toMatch(/in room 0x11111111/);
+    expect(m.personal[1]!.detail).toMatch(/at home$/);
+    expect(m.personal[0]!.ref).toEqual({ ...{ word: 'thompson', capability: 'organization.membership.invite', arg: 'org' }, context: ORG });
+    expect(m.personal[1]!.ref).not.toHaveProperty('context');
+  });
 });

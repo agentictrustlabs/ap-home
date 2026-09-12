@@ -33,20 +33,15 @@ if (!sig.signature) console.log('  persona-sign said:', JSON.stringify(sig).slic
 const issued = await post({ ...base, grant: prep.grant, signature: sig.signature }) as { ok?: boolean; grantId?: string; error?: string };
 check('the grant is issued, signed by her', issued.ok === true, issued.grantId ?? issued.error ?? '');
 
-/** Can Nathan reach it? Asked of the agent, which is the only side that decides. */
-const reachable = async (): Promise<boolean> => {
-  const caps = ((await j(await fetch(`${HOME}/a2a/harness/vocabulary`))) as { capabilities: Array<{ id: string }> }).capabilities.map((c) => c.id);
-  const t = await j(await fetch(`${HOME}/a2a/harness/ask`, {
-    method: 'POST', headers: H,
-    body: JSON.stringify({ session: nathan.homeSession, addressee: NATHAN, message: 'send 1 usdc to alice', surface: { ceremonies: ['data', 'confirmation', 'signature'], capabilities: caps }, runRef: `rev-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}` }),
-  })) as { reply?: { prompt?: { fields?: Array<{ choices?: Array<{ value: string }> }> }; parties?: Array<{ agent: string }> } };
-  const r = t.reply ?? {};
-  const offered = (r.prompt?.fields?.[0]?.choices ?? []).map((c) => c.value.toLowerCase());
-  const chosen = (r.parties ?? []).map((p) => p.agent.toLowerCase());
-  return [...offered, ...chosen].includes(target.toLowerCase());
-};
-
-check('nathan can reach it while the grant stands', await reachable(), target);
+/** Can Nathan reach it? Asked of the RESOLVER, which is the only side that decides (spec 338 §7): the grant is
+ *  presented where it is used, and the answer is the target or the refusal. (It used to be asked through "send 1
+ *  usdc to alice" — but "alice" is decided by the household rule (spec 368, `payment.recipient`) to her MARKED
+ *  account, so a nameless treasury she granted a way to is correctly never the answer to that word. Reachability is
+ *  resolution, never selection.) */
+const owner = String(prep.grant?.issuer ?? '').match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '';
+const resolve = async () => j(await fetch(`${HOME}/a2a/resolution/resolve`, { method: 'POST', headers: H, body: JSON.stringify({ session: nathan.homeSession, owner, grantId: issued.grantId }) })) as { ok?: boolean; targetAgent?: string; error?: string };
+const standing = await resolve();
+check('nathan can reach it while the grant stands', standing.ok === true && String(standing.targetAgent ?? '').toLowerCase() === target.toLowerCase(), standing.ok ? String(standing.targetAgent) : `refused: ${standing.error}`);
 
 const revoked = await j(await fetch(`${HOME}/a2a/resolution/revoke`, { method: 'POST', headers: H, body: JSON.stringify({ session: alice.homeSession, grantId: issued.grantId }) })) as { ok?: boolean; error?: string };
 check('alice withdraws it', revoked.ok === true, revoked.error ?? issued.grantId ?? '');
@@ -55,7 +50,8 @@ check('alice withdraws it', revoked.ok === true, revoked.error ?? issued.grantId
 const stillHeld = (((await j(await fetch(`${HOME}/a2a/resolution/grants`, { headers: { authorization: `Bearer ${nathan.homeSession}` } }))) as { grants?: Array<{ grantId?: string }> }).grants ?? [])
   .some((g) => g.grantId === issued.grantId);
 check('he still HOLDS the record — nothing reached into his vault', stillHeld, 'held');
-check('and it no longer works', !(await reachable()), 'the treasury is not offered');
+const after = await resolve();
+check('and it no longer works', after.ok === false && /withdrawn/.test(String(after.error)), after.ok ? `STILL RESOLVES to ${after.targetAgent}` : String(after.error));
 
 console.log(`\n${bad === 0 ? '✓' : '✗'} revocation: the issuer withdrew it and it stopped, without touching what the holder keeps — ${bad} failure(s).`);
 if (bad) process.exit(1);
