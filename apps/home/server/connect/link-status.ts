@@ -16,7 +16,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   if (!agent || !ADDR.test(agent)) return json({ error: 'valid agent required' }, 400);
   if (!digest || !B32.test(digest)) return json({ error: 'valid digest required' }, 400);
   const accounts = new AgentAccountClient({
-    rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL,
+    rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL),
     chainId: CHAIN_ID,
     entryPoint: CONTRACTS.entryPoint,
     factory: CONTRACTS.agentAccountFactory,

@@ -33,7 +33,7 @@ const onRequestPostImpl = async ({ request, env }: FnContext): Promise<Response>
   if (!body?.name || !body.kind || !body.aud) return json({ error: 'name, kind, aud required' }, 400);
   // SEC-024: gate iss through the Host allowlist.
   const iss = resolveOrigin(request, env);
-  const rpcUrl = env.RPC_URL ?? DEFAULT_RPC_URL;
+  const rpcUrl = (env.RPC_URL || DEFAULT_RPC_URL);
 
   // Resolve the name → its owning agent (on-chain; server-authoritative).
   const name = fullName(body.name);

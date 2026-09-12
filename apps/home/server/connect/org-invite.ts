@@ -200,7 +200,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if ((mad.delegator ?? '').toLowerCase() !== org) return json({ error: 'memberAccessDelegation delegator must be the org' }, 400);
 
   const orgName = await new AgentNamingClient({
-    rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL, chainId: CHAIN_ID,
+    rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL), chainId: CHAIN_ID,
     registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver,
   }).reverseResolve(org as Address).then((n) => (n ? nameLabel(n) : null)).catch(() => null);
 

@@ -86,7 +86,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // 3. Label ⇔ owner: the person's on-chain primary name must carry this label
   //    (one mechanism: reverseResolve, forward-confirmed on-chain — ADR-0012).
   const naming = new AgentNamingClient({
-    rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL,
+    rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL),
     chainId: CHAIN_ID,
     registry: CONTRACTS.agentNameRegistry,
     universalResolver: CONTRACTS.agentNameUniversalResolver,
@@ -101,7 +101,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const { proof, ...draft } = manifest;
   const digest = homeManifestDigest(draft);
   const accounts = new AgentAccountClient({
-    rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL,
+    rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL),
     chainId: CHAIN_ID,
     entryPoint: CONTRACTS.entryPoint,
     factory: CONTRACTS.agentAccountFactory,

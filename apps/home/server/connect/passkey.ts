@@ -50,7 +50,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   };
 
   const accounts = new AgentAccountClient({
-    rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL,
+    rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL),
     chainId: CHAIN_ID,
     entryPoint: CONTRACTS.entryPoint,
     factory: CONTRACTS.agentAccountFactory,

@@ -44,7 +44,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
 
   // (2) On-chain gate: the agent must actually hold this passkey (owner-authorized custodian, mined).
   const accounts = new AgentAccountClient({
-    rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL, chainId: CHAIN_ID, entryPoint: CONTRACTS.entryPoint, factory: CONTRACTS.agentAccountFactory,
+    rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL), chainId: CHAIN_ID, entryPoint: CONTRACTS.entryPoint, factory: CONTRACTS.agentAccountFactory,
   });
   if (!(await accounts.hasPasskey(agent, digest))) {
     return json({ error: 'agent does not hold this passkey on-chain yet (still mining?)' }, 409);

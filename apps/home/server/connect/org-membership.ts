@@ -81,7 +81,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const linkKey = `related:${person}:${org}`;
   const existing = await env.AUTH_CODES.get(linkKey);
   const memberLabel = await new AgentNamingClient({
-    rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL, chainId: CHAIN_ID,
+    rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL), chainId: CHAIN_ID,
     registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver,
   }).reverseResolve(person as Address).catch(() => null);
   if (existing) {
@@ -89,7 +89,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     await env.AUTH_CODES.put(linkKey, JSON.stringify({ ...link, membershipDelegation: d, ...(madValid ? { memberAccessDelegation: mad } : {}) }));
   } else {
     const orgName = await new AgentNamingClient({
-      rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL, chainId: CHAIN_ID,
+      rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL), chainId: CHAIN_ID,
       registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver,
     }).reverseResolve(org as Address).catch(() => null);
     await env.AUTH_CODES.put(linkKey, JSON.stringify({

@@ -39,7 +39,7 @@ if (!Number.isInteger(CHAIN_ID) || CHAIN_ID <= 0) throw new Error(`NEXT_PUBLIC_C
 /** RPC default. Public Base Sepolia on the deployed chain; a local node otherwise. Override with
  *  RPC_URL (server) / NEXT_PUBLIC_RPC_URL (browser). */
 export const DEFAULT_RPC_URL: string =
-  process.env.NEXT_PUBLIC_RPC_URL ?? (CHAIN_ID === baseSepolia.id ? 'https://sepolia.base.org' : 'http://127.0.0.1:8545');
+  process.env.NEXT_PUBLIC_RPC_URL || (CHAIN_ID === baseSepolia.id ? 'https://sepolia.base.org' : 'http://127.0.0.1:8545');
 
 /** The viem Chain object every client in this app should be built with (never `baseSepolia` directly:
  *  a client whose chain id differs from the node's signs transactions the node rejects). */

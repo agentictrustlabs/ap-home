@@ -30,7 +30,7 @@ export async function ensureOrgMemberLink(
   const linkKey = `related:${p}:${org}`;
   if (await env.AUTH_CODES.get(linkKey)) return; // steward or member link already present — never touch
   const naming = new AgentNamingClient({
-    rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL,
+    rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL),
     chainId: CHAIN_ID,
     registry: CONTRACTS.agentNameRegistry,
     universalResolver: CONTRACTS.agentNameUniversalResolver,

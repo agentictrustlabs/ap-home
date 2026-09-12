@@ -40,6 +40,9 @@ export interface BasicProfile {
   // them to secure-home ONLY while `deployed === false`. A NAMELESS deployed home (true
   // name-deferral) has `deployed: true, name: null` and falls through to the portal.
   deployed: boolean;
+  /** ADR-0013 — when the on-chain read FAILED, `deployed` is false by default and this says why; the gate must
+   *  not read a failed read as "not deployed" (a deployed member was trapped at secure-home by an empty RPC_URL). */
+  deployedError?: string;
 }
 
 export interface SensitivePiiFields {
@@ -49,13 +52,14 @@ export interface SensitivePiiFields {
 
 /** Basic profile — open to ANY valid session (login-grade included). `deployed` is the on-chain
  *  bytecode signal the caller computes (the SA may be counterfactual on a fresh Google return). */
-export function basicProfile(session: AgentSession, name: string | null, deployed: boolean): BasicProfile {
+export function basicProfile(session: AgentSession, name: string | null, deployed: boolean, deployedError?: string): BasicProfile {
   return {
     agent: session.sub,
     name,
     credential: session.principal.kind,
     access: canReadSensitivePii(session) ? 'full (confirmed with device)' : 'standard',
     deployed,
+    ...(deployedError ? { deployedError } : {}),
   };
 }
 

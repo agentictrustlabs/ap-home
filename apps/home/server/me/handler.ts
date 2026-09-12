@@ -63,21 +63,24 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     // false default on RPC error is safe (the gate's secure-home call is idempotent for an
     // already-deployed SA — it short-circuits) and never traps a deployed member.
     let deployed = false;
+    let deployedError: string | undefined;
     const addr = addressFromSub(session.sub);
     if (addr) {
+      // `||`, not `??`: a Vercel secret stored EMPTY ("") is not an absent variable, and an empty rpcUrl fails every
+      // read — which this endpoint then reported as "not deployed", trapping a deployed member at secure-home.
+      const rpcUrl = env.RPC_URL || DEFAULT_RPC_URL;
       try {
-        const accounts = new AgentAccountClient({
-          rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL,
-          chainId: CHAIN_ID,
-          entryPoint: CONTRACTS.entryPoint,
-          factory: CONTRACTS.agentAccountFactory,
-        });
+        const accounts = new AgentAccountClient({ rpcUrl, chainId: CHAIN_ID, entryPoint: CONTRACTS.entryPoint, factory: CONTRACTS.agentAccountFactory });
         deployed = await accounts.isDeployed(addr);
-      } catch {
+      } catch (e) {
+        // ADR-0013 — a failed read is SAID, never read as an answer. The gate keeps the member out of the portal
+        // (it cannot know) but shows the reason and a retry instead of a "You're in." that leads nowhere.
         deployed = false;
+        deployedError = `the chain could not be read (${e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160)})`;
+        console.warn('[me/profile] isDeployed failed:', deployedError);
       }
     }
-    return json({ profile: basicProfile(session, name, deployed) });
+    return json({ profile: basicProfile(session, name, deployed, deployedError) });
   }
   if (route === 'sensitive') {
     const pii = sensitivePii(session);

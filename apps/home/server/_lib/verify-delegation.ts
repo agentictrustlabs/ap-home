@@ -63,7 +63,7 @@ export async function verifyDelegation(
   const digest = hashDelegation(delegation, CHAIN_ID, CONTRACTS.delegationManager as Address);
 
   const accounts = new AgentAccountClient({
-    rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL,
+    rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL),
     chainId: CHAIN_ID,
     entryPoint: CONTRACTS.entryPoint,
     factory: CONTRACTS.agentAccountFactory,
@@ -155,7 +155,7 @@ export async function verifyDelegation(
 async function isRevokedOnChain(env: { RPC_URL?: string }, digest: Hex): Promise<boolean | null> {
   const { createPublicClient, http } = await import('viem');
   try {
-    const client = createPublicClient({ transport: http(env.RPC_URL ?? DEFAULT_RPC_URL) });
+    const client = createPublicClient({ transport: http((env.RPC_URL || DEFAULT_RPC_URL)) });
     return (await client.readContract({
       address: CONTRACTS.delegationManager as Address,
       abi: [

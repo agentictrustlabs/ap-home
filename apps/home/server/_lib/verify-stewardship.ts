@@ -36,7 +36,7 @@ export async function verifyStewardship(
   if (!v.ok) return false;
   // Unrevoked on-chain.
   try {
-    const client = createPublicClient({ transport: http(env.RPC_URL ?? DEFAULT_RPC_URL) });
+    const client = createPublicClient({ transport: http((env.RPC_URL || DEFAULT_RPC_URL)) });
     const revoked = (await client.readContract({
       address: CONTRACTS.delegationManager as Address,
       abi: IS_REVOKED_ABI,

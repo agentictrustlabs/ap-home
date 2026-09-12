@@ -56,6 +56,7 @@ export function HomeResolvedView({
   appName = null,
   onContinue,
   autoAdvanceMs = 1300,
+  note = null,
 }: {
   /** true = freshly-created home ("You're in."); false = resolved existing home ("Welcome back"). */
   fresh: boolean;
@@ -71,6 +72,8 @@ export function HomeResolvedView({
   onContinue: () => void;
   /** Auto-advance delay in ms; 0 disables (Continue-only). */
   autoAdvanceMs?: number;
+  /** What is happening after Continue, when it is not instant — said under the button, never a silent wait. */
+  note?: React.ReactNode;
 }) {
   const handle = useHandle(knownName, address);
   const orgs = useHomeChips(token);
@@ -117,6 +120,7 @@ export function HomeResolvedView({
       <button className="btn-primary" onClick={onContinue}>
         {appName ? `Continue to ${appName}` : 'Continue'}
       </button>
+      {note && <p className="onboarding-sub" role="status" data-testid="resolved-note" style={{ fontSize: '.85rem' }}>{note}</p>}
     </Shell>
   );
 }

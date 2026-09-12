@@ -38,7 +38,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
 
   // Verify the caller controls `delegate` (ERC-1271 over the fixed per-delegate challenge).
   const challenge = keccak256(toBytes(`delegated-orgs:${delegate}`));
-  const client = createPublicClient({ transport: http(env.RPC_URL ?? DEFAULT_RPC_URL) });
+  const client = createPublicClient({ transport: http((env.RPC_URL || DEFAULT_RPC_URL)) });
   let valid = false;
   try {
     const r = (await client.readContract({

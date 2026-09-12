@@ -58,7 +58,7 @@ export const onRequestPut = async ({ request, env }: FnContext): Promise<Respons
     if (!owns) {
       try {
         const accounts = new AgentAccountClient({
-          rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL, chainId: CHAIN_ID,
+          rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL), chainId: CHAIN_ID,
           entryPoint: CONTRACTS.entryPoint, factory: CONTRACTS.agentAccountFactory,
         });
         owns = await accounts.isCustodian(target as Address, demoCustodianAddress(persona) as Address);

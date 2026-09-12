@@ -39,7 +39,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   if (!rec) return json({ error: 'this invitation has expired or was already used' }, 404);
   if (typeof rec.expiresAt === 'number' && rec.expiresAt < Date.now()) return json({ error: 'this invitation has expired' }, 404);
   const orgName = await new AgentNamingClient({
-    rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL, chainId: CHAIN_ID,
+    rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL), chainId: CHAIN_ID,
     registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver,
   }).reverseResolve(org as Address).then((n) => (n ? nameLabel(n) : null)).catch(() => null);
   // The grant's delegate is who this link admits. The redeem page compares it to the restored
