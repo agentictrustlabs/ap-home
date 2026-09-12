@@ -35,7 +35,7 @@ import type { AskCommand } from '../../../home/ask-command';
 /** Spec 377 — where this browser remembers which model the person picked for the Ask. */
 const MODEL_PREF_KEY = 'ask.model';
 import { BusyButton } from '../../shared/BusyButton';
-import { XIcon } from '../../shared/Icons';
+import { XIcon, MicIcon } from '../../shared/Icons';
 import { AgentName } from '../../shared/AgentName';
 import { connectedCredential } from './credential';
 import { createdAgentOf, recordCreatedAgent, invitationOf, recordInvitation } from '../../../home/ask-record';
@@ -792,29 +792,27 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
       {showDiag && <DiagnosticsPane entries={diag} token={session?.token ?? ""} onClose={() => setShowDiag(false)} />}
 
       {command && <CommandForm command={command} realm={realm} addressee={addressee} addresseeLabel={addresseeLabel} selection={selection ?? undefined} initial={draftRun?.initial} draftOf={draftRun?.message} onSubmit={(args) => void doCommand(command, args)} onCancel={() => { setCommand(null); setDraftRun(null); }} />}
-      {commands.length > 0 && !command && !pending && (
-        <div className="muted" style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11.5, padding: '0 2px 4px' }}>
-          <span>Do:</span>
-          <select data-testid="ask-command" className="input" style={{ fontSize: 11.5, padding: '2px 6px', minHeight: 0, width: 'auto' }} value="" onChange={(e) => { const c = commands.find((x) => x.id === e.target.value); if (c) setCommand(c); }} disabled={!!busy}>
-            <option value="">choose an action…</option>
-            {commands.map((c) => <option key={c.id} value={c.id}>{c.label ?? c.id}</option>)}
-          </select>
-        </div>
-      )}
-      {/* Spec 377 — which model proposes, chosen by the person. Same row shape as "Do:" so the two read as one
-          control strip. Rendered only when the agent offers more than one; a single offer is not a choice. */}
-      {models.length > 1 && !command && !pending && (
-        <div className="muted" style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11.5, padding: '0 2px 4px' }}>
-          <span>Model:</span>
-          <select
-            data-testid="ask-model" aria-label="Model" className="input"
-            title="Which model plans and answers this conversation. Authority is unchanged whichever you pick."
-            style={{ fontSize: 11.5, padding: '2px 6px', minHeight: 0, width: 'auto' }}
-            value={model ?? ''} disabled={!!busy}
-            onChange={(e) => setModel(e.target.value)}
-          >
-            {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
-          </select>
+      {/* One control strip: what to do (a generated form) and which model proposes — small, in one row above the input. */}
+      {(commands.length > 0 || models.length > 1) && !command && !pending && (
+        <div className="ask-flyout-strip">
+          {commands.length > 0 && (
+            <label className="ask-flyout-strip__ctl">
+              <span>Do</span>
+              <select data-testid="ask-command" value="" onChange={(e) => { const c = commands.find((x) => x.id === e.target.value); if (c) setCommand(c); }}>
+                <option value="">choose an action…</option>
+                {commands.map((c) => <option key={c.id} value={c.id}>{c.label ?? c.id}</option>)}
+              </select>
+            </label>
+          )}
+          {/* Spec 377 — which model proposes, chosen by the person; rendered only when the agent offers more than one. */}
+          {models.length > 1 && (
+            <label className="ask-flyout-strip__ctl">
+              <span>Model</span>
+              <select data-testid="ask-model" aria-label="Model" title="Which model plans and answers this conversation. Authority is unchanged whichever you pick." value={model ?? ''} disabled={!!busy} onChange={(e) => setModel(e.target.value)}>
+                {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
+            </label>
+          )}
         </div>
       )}
       {(voice.listening || voice.speaking || voiceNote) && (
@@ -825,19 +823,19 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
       <div className="ask-flyout-f">
         {voice.canListen && (
           <button
-            type="button" className={`btn ${voice.listening ? 'primary' : 'ghost'}`} data-testid="ask-mic"
+            type="button" className={`ui-btn ${voice.listening ? 'ui-btn--primary' : 'ui-btn--secondary'}`} data-testid="ask-mic"
             aria-pressed={voice.listening} aria-label={voice.listening ? 'Stop listening' : 'Speak your ask'}
             title={voice.listening ? 'Stop listening' : 'Speak — your agent hears it'}
             disabled={!!busy || pending?.reply.kind === 'authority_required' || (pending?.reply.kind === 'prompt' && pending.reply.prompt.kind === 'signature')}
             onClick={() => (voice.listening ? voice.stopListening() : listen())}
-          >🎙</button>
+          ><MicIcon size={16} /></button>
         )}
         <input
           className="input" data-testid="ask-input" value={q} placeholder={voice.listening ? 'Listening…' : `Ask ${addresseeLabel}…`}
           onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !busy) void send(); }}
           disabled={!!busy || !!pending}
         />
-        <BusyButton busy={busy === 'Thinking…'} busyLabel="Thinking…" disabled={!q.trim() || !!pending} onClick={() => void send()} className="btn primary">Ask</BusyButton>
+        <BusyButton busy={busy === 'Thinking…'} busyLabel="Thinking…" disabled={!q.trim() || !!pending} onClick={() => void send()} className="ui-btn ui-btn--primary">Ask</BusyButton>
       </div>
     </div>
   );

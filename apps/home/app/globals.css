@@ -985,7 +985,7 @@
       }
       .portal-ask-btn svg { flex: none; }
       .portal-ask-btn:hover { background: var(--color-surface-sunken); }
-      .portal-ask-btn.on { background: var(--color-amber-50, #fffbeb); border-color: var(--color-amber-200, #fde68a); color: var(--color-amber-800, #92400e); }
+      .portal-ask-btn.on { background: var(--color-text-primary); border-color: var(--color-text-primary); color: #fff; }
       .ask-flyout {
         position: fixed; right: 0; top: var(--topbar-h); bottom: 0; width: min(420px, 100vw); z-index: 40;
         display: flex; flex-direction: column; background: var(--color-surface);
@@ -995,7 +995,7 @@
       .ask-flyout-body { flex: 1; overflow-y: auto; padding: .8rem; display: flex; flex-direction: column; gap: .6rem; }
       .ask-flyout-f { display: flex; gap: .5rem; padding: .7rem .8rem; border-top: 1px solid var(--color-border); }
       .ask-flyout-f .input { flex: 1; min-width: 0; }
-      .ask-msg { font-size: .85rem; line-height: 1.5; padding: .5rem .65rem; border-radius: 10px; max-width: 92%; }
+      .ask-msg { font-size: 13.5px; line-height: 1.5; padding: .5rem .7rem; border-radius: 12px; max-width: 92%; }
       .ask-msg.you { align-self: flex-end; background: var(--color-surface-sunken); }
       .ask-msg.agent { align-self: flex-start; background: var(--color-surface-raised); border: 1px solid var(--color-border); }
       .ask-card { border: 1px solid var(--color-border-strong); border-radius: 12px; padding: .7rem .8rem; background: var(--color-surface-raised); }
@@ -1645,3 +1645,7 @@ button.ui-switch:hover:not(:disabled) { filter: none; }
 .ui-switch-row .ui-switch-label { font-size: var(--fs-md); color: var(--color-text-primary); font-weight: 600; }
 /* inside the portal a primary button is as wide as its words; the full-width form of onboarding stays there */
 .portal-main .btn-primary { width: auto; }
+/* the Ask composer's control strip: what to do · which model, one small row above the input */
+.ask-flyout-strip { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; padding: 0 .8rem .4rem; }
+.ask-flyout-strip__ctl { display: inline-flex; gap: 6px; align-items: center; font-size: var(--fs-xs); color: var(--color-text-muted); }
+.ask-flyout-strip__ctl select { height: 28px; font-size: var(--fs-sm); padding: 0 1.5rem 0 .5rem; }
