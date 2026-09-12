@@ -152,6 +152,8 @@ export function buildNav(
   // become real areas again with no change here.
   groups.push({ items: [
     { id: 'records-all', label: 'Records', href: href('records'), Icon: DatabaseIcon, status: 'live' },
+    // spec 398 §6.1 — three stores, never one label: personal facts · workspace knowledge · run context, each in its vault.
+    { id: 'memory', label: 'Memory', href: href('memory'), Icon: DatabaseIcon, status: 'live' },
   ], startsRegion: true });
   // Attestations: person-only today. A managed agent CAN sign statements, so the area applies in
   // principle — but none has an agent-scoped page yet, and §5 says an empty area renders nothing.

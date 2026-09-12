@@ -528,14 +528,16 @@
       ],
       "title": "Memory the person can see and clear — remembered confirmations, standing instructions",
       "priority": "P1",
-      "status": "partial",
+      "status": "shipped",
       "specs": [
         385,
         394
       ],
       "section": "398 §6.1",
       "components": [
-        "components/portal/ask/AskFlyout.tsx"
+        "components/portal/MemoryViews.tsx",
+        "components/portal/ask/AskFlyout.tsx",
+        "home/memory.ts"
       ],
       "capabilities": [
         "context.instruction.declare"
@@ -553,7 +555,15 @@
         "verify-home-mcp-instructions"
       ],
       "gaps": [
-        "three stores, never one label — personal facts · workspace context · projections as three views (APUX-035) — 398 §6.1; no personal-memory page"
+        "learned preferences (358 W5) — none kept yet; topic snapshots (340) not listed in the workspace view; promotion from Run to Library is not yet an act with a receipt (398 §6.1) — said in the view, not offered"
+      ],
+      "routes": [
+        "(portal)/memory",
+        "(portal)/org/[org]/memory",
+        "(portal)/service/[agent]/memory"
+      ],
+      "tests": [
+        "apps/demo-sso-next/src/home/memory.test.ts"
       ]
     },
     {
