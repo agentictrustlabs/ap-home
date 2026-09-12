@@ -41,6 +41,8 @@ export const READ_RECORD = 'cardroom.read';
 export const NOTE_RECORD = 'cardroom.note';
 /** What a coach service keeps about a client in ITS OWN vault: pointers, never records. */
 export const CLIENT_RECORD = 'cardroom.client';
+/** The person's own card-room preferences: whether they have been asked about a coach, and what they said. */
+export const PREFS_RECORD = 'cardroom.prefs';
 
 /** Every hand of one day, whole — `cardroom.hands:<yyyy-mm-dd>`. A review over a span reads the days it covers;
  *  advice reads only `cardroom.hand` (counts + the recent few), so a season of hands never rides on a hand's clock. */
@@ -77,12 +79,25 @@ export const CONSULT_TIMEOUT_MS = 15_000;
  *  75 s; the person's agent gives the coach most of that. */
 export const REVIEW_TIMEOUT_MS = 65_000;
 
-export type CardRoomAct = 'advise' | 'record' | 'review';
+export type CardRoomAct = 'advise' | 'record' | 'review' | 'coach';
 
-/** `poker.advise` → advise; `canasta.record` → record; anything else → null (not the card room's). */
+/** `poker.advise` → advise; `canasta.record` → record; `poker.coach` → coach; anything else → null (not the card room's). */
 export function cardRoomActOf(skill: string | null | undefined): CardRoomAct | null {
-  const m = /\.(advise|record|review)$/i.exec(String(skill ?? '').trim());
+  const m = /\.(advise|record|review|coach)$/i.exec(String(skill ?? '').trim());
   return m ? (m[1]!.toLowerCase() as CardRoomAct) : null;
+}
+
+/** The person's card-room preferences — theirs, in their vault; the agent reads and writes them when asked. */
+export interface CardRoomPrefsV1 {
+  type: 'ap.cardroom-prefs.v1';
+  /** They have been asked whether they want a coach, and what they said. Asked ONCE: the card room reads this
+   *  before it asks, so nobody is asked on every visit. */
+  coachAsked?: { at: string; answer: 'hired' | 'later' | 'no' };
+  updatedAt: string;
+}
+
+export function isPrefs(x: unknown): x is CardRoomPrefsV1 {
+  return !!x && typeof x === 'object' && (x as { type?: unknown }).type === 'ap.cardroom-prefs.v1';
 }
 
 /** The grant as it travels in the consultation's material: the person's agent fetched it from her own
@@ -462,6 +477,26 @@ export async function cardRoomTurn(deps: CardRoomDeps, input: CardRoomAskInput):
   }
 
   // ── THE PERSON'S OWN AGENT ──
+  // WHO COACHES YOU, AND HAVE YOU BEEN ASKED — the card room's question on arrival, so it can offer a coach to
+  // somebody without one, once. Answered from the playbook (the specialist) and the person's own preferences
+  // record; with `answered` in the material, the answer is written down so the question is not asked again.
+  // No model, no coach on the hop.
+  if (input.act === 'coach') {
+    const prefsPrev = await deps.readRecord(me, PREFS_RECORD).catch(() => null);
+    const prefs: CardRoomPrefsV1 = isPrefs(prefsPrev) ? prefsPrev : { type: 'ap.cardroom-prefs.v1', updatedAt: new Date().toISOString() };
+    const answered = (input.material?.input as { answered?: unknown } | undefined)?.answered;
+    if (answered === 'hired' || answered === 'later' || answered === 'no') {
+      const next: CardRoomPrefsV1 = { ...prefs, coachAsked: { at: new Date().toISOString(), answer: answered }, updatedAt: new Date().toISOString() };
+      const wrote = await deps.writeRecord(me, PREFS_RECORD, next).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+      if (!wrote.ok) return done('refused', `the answer could not be kept: ${wrote.error ?? 'refused'}`);
+      prefs.coachAsked = next.coachAsked;
+    }
+    const specialists = await deps.specialistsOf(me).catch(() => null);
+    const named = specialists?.find((sp) => /\.advise$/i.test(sp.capability));
+    const coach = named && /\.svc$/.test(named.executor.toLowerCase()) ? named.executor.toLowerCase() : null;
+    const hasGrant = coach ? !!(await deps.studyGrantWire(me, coach).catch(() => null)) : false;
+    return done('answer', JSON.stringify({ say: coach ? `${myName} consults ${coach}${hasGrant ? '' : ' (no study grant stored)'}.` : `${myName} has no coach named.`, coach, hasGrant, asked: prefs.coachAsked ?? null }), { coach, asked: prefs.coachAsked ?? null });
+  }
   if (input.act === 'record') {
     const entry = handEntryOf(input.skill, input.material?.input);
     if (!entry) return done('refused', 'the message carried no hand to record');

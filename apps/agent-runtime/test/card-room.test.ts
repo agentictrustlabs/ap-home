@@ -422,3 +422,31 @@ describe('a backfilled hand, in a line', () => {
     expect(compactHand({ handNo: 1, table: 't', seat: 0, at: '2026-09-12T00:00:00Z', view: { hand: {} } })).toMatchObject({ hand: 1, view: { hand: {} } });
   });
 });
+
+describe('poker.coach — who coaches you, and have you been asked', () => {
+  it('answers from the playbook and the preferences, records an answer once asked, and never consults anyone', async () => {
+    const consults: unknown[] = []; const records: Record<string, unknown> = {};
+    const deps = {
+      nameOf: async (a: string) => (a === ALICE ? 'alice.me' : null), resolveName: async () => COACH,
+      readRecord: async (o: string, t: string) => records[`${o}:${t}`] ?? null,
+      writeRecord: async (o: string, t: string, r: unknown) => { records[`${o}:${t}`] = r; return { ok: true }; },
+      specialistsOf: async () => [{ capability: 'poker.advise', executor: 'bob-coach.svc' }],
+      studyGrantWire: async () => ({ wire: {}, hash: '0x1', delegate: COACH }),
+      verify: async () => ({ ok: false as const, reason: 'n/a' }),
+      consult: async (c: unknown) => { consults.push(c); return { reply: { kind: 'answer', text: '{}' } }; },
+      log: () => undefined,
+    };
+    const ask = (input: Record<string, unknown> = {}) => cardRoomTurn(deps, { agent: '0x' + 'e'.repeat(40), addressee: ALICE, ask: 'poker.coach', runRef: 'r', skill: 'poker.coach', act: 'coach', advertised: true, material: { skill: 'poker.coach', input } });
+    let out = await ask();
+    expect(JSON.parse((out as { text: string }).text)).toMatchObject({ coach: 'bob-coach.svc', hasGrant: true, asked: null });
+    out = await ask({ answered: 'later' });
+    expect(JSON.parse((out as { text: string }).text).asked).toMatchObject({ answer: 'later' });
+    expect((records[`${ALICE}:cardroom.prefs`] as { coachAsked: { answer: string } }).coachAsked.answer).toBe('later');
+    out = await ask();
+    expect(JSON.parse((out as { text: string }).text).asked).toMatchObject({ answer: 'later' }); // remembered
+    expect(consults).toHaveLength(0);
+    // Without a specialist: no coach, and that is the answer.
+    deps.specialistsOf = async () => null;
+    expect(JSON.parse((await ask() as { text: string }).text)).toMatchObject({ coach: null });
+  });
+});
