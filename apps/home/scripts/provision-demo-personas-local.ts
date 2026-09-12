@@ -36,8 +36,10 @@ const REPO_ROOT = join(APP_ROOT, '..', '..');
 const NETWORK = process.env.DEPLOY_NETWORK ?? 'anvil';
 const RPC_URL = process.env.LOCAL_RPC_URL ?? 'http://127.0.0.1:8545';
 const MCP_URL = (process.env.DEMO_MCP_URL ?? 'http://127.0.0.1:8788').replace(/\/$/, '');
-const ROSTER = join(REPO_ROOT, 'demo', 'personas.json');
-const LOCAL_ROSTER = join(REPO_ROOT, 'demo', 'personas.local.json');
+// ROSTER / LOCAL_ROSTER / AGENT_NAME_PARENT are parameters (2026-09-12): a SECOND roster — new people for a shadow
+// deployment — provisions the same way, under the parent the deployment claims names in (`me` on faithnet).
+const ROSTER = process.env.ROSTER ?? join(REPO_ROOT, 'demo', 'personas.json');
+const LOCAL_ROSTER = process.env.LOCAL_ROSTER ?? join(REPO_ROOT, 'demo', 'personas.local.json');
 const DEPLOYMENTS = join(REPO_ROOT, 'packages', 'contracts', `deployments-${NETWORK}.json`);
 // anvil[0] — pays gas for deploys + name registrations. Public dev key; local chains only.
 const GAS_PAYER: Hex = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
@@ -48,11 +50,11 @@ if (!existsSync(ROSTER)) throw new Error(`${ROSTER} not found`);
 if (!existsSync(DEPLOYMENTS)) throw new Error(`${DEPLOYMENTS} not found — deploy the contracts first (pnpm dev:contracts)`);
 const roster = JSON.parse(readFileSync(ROSTER, 'utf8')) as Record<string, RosterEntry>;
 const d = JSON.parse(readFileSync(DEPLOYMENTS, 'utf8')) as {
-  chainId: number; entryPoint: Address; agentAccountFactory: Address; permissionlessSubregistry?: Address;
+  chainId: number; entryPoint: Address; agentAccountFactory: Address; permissionlessSubregistry?: Address; permissionlessSubregistries?: Record<string, Address>;
   agentNameRegistry?: Address; smartAgentPaymaster?: Address;
 };
 /** The TLD names are claimed under (src/lib/domain.ts AGENT_NAME_PARENT — the `.impact` subregistry). */
-const NAME_PARENT = 'impact';
+const NAME_PARENT = process.env.AGENT_NAME_PARENT ?? 'impact';
 
 // src/lib/chain.ts (which the delegation builders read) takes the chain + contracts from NEXT_PUBLIC_*;
 // Next loads .env.local for the app, tsx does not — so load it here, before the dynamic import.
@@ -119,7 +121,10 @@ async function activateVault(sa: Address, pk: Hex): Promise<string> {
  *  shared payer EOA works once and then reverts AlreadyClaimed; the SA must be the caller. Reverse
  *  resolution (`reverseResolveString`) is what the relying apps display, so setPrimaryName matters. */
 async function claimName(handle: string, sa: Address, pk: Hex): Promise<string> {
-  if (!d.permissionlessSubregistry || !d.agentNameRegistry || !d.smartAgentPaymaster) return 'name: n/a (no naming/paymaster deployment)';
+  // The subregistry of the parent being claimed under: the typed roots (`me`, `org`, …) each have their own
+  // (spec 346); `.impact` is the legacy single one.
+  const subregistry = d.permissionlessSubregistries?.[NAME_PARENT] ?? (NAME_PARENT === 'impact' ? d.permissionlessSubregistry : undefined);
+  if (!subregistry || !d.agentNameRegistry || !d.smartAgentPaymaster) return `name: n/a (no ${NAME_PARENT} subregistry / naming / paymaster deployment)`;
   const name = `${handle}.${NAME_PARENT}`;
   const node = namehash(name) as Hex;
   const read = <T>(fn: 'owner' | 'primaryName', args: readonly unknown[]) =>
@@ -129,7 +134,7 @@ async function claimName(handle: string, sa: Address, pk: Hex): Promise<string> 
   if (primary === node.toLowerCase()) return `${name} (primary)`;
   const calls: ContractCall[] = [];
   if (owner === '0x0000000000000000000000000000000000000000') {
-    calls.push(buildSubregistryRegisterCall({ subregistry: d.permissionlessSubregistry, label: handle, newOwner: sa }));
+    calls.push(buildSubregistryRegisterCall({ subregistry, label: handle, newOwner: sa }));
   } else if (owner !== sa.toLowerCase()) {
     return `name: ${name} is owned by ${owner.slice(0, 10)}… — not claimed`;
   }
