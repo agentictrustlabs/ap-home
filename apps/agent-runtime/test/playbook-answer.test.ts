@@ -87,7 +87,7 @@ describe('playbook.answer — a question of judgement, answered from the playboo
     const { call, seen } = fakeCall({ reasoning: 'r', say: 'Raise.', because: 'He folds to bets.' });
     const memory = {
       read: async () => ({ type: 'ap.playbook-memory.v1', family: 'poker', rounds: 12, updatedAt: 'x', subjects: {
-        'agent:sharkbot.svc': { label: 'Sharkbot', rounds: 12, seen: '2026-09-11T00:00:00Z', counters: { hands: 12, vpip: 3, pfr: 3, foldToBetOpps: 5, foldToBet: 4 } },
+        'agent:sharkbot.svc': { label: 'Sharkbot', rounds: 12, seen: '2026-09-11T00:00:00Z', counters: { hands: 12, vpip: 3, pfr: 3, foldToBetOpps: 5, foldToBet: 4, aggressive: 9, passive: 3 } },
         'agent:elsewhere.svc': { label: 'Elsewhere', rounds: 12, seen: '2026-09-11T00:00:00Z', counters: { hands: 12, vpip: 12 } },
         me: { you: true, rounds: 12, seen: '2026-09-11T00:00:00Z', counters: { hands: 12, vpip: 9 } },
       } }),
@@ -101,6 +101,8 @@ describe('playbook.answer — a question of judgement, answered from the playboo
     expect(shown).toContain('Remembered');
     expect(shown).toContain('"vpip":"25% of 12"');
     expect(shown).toContain('"foldToBet":"80% of 5"');
+    expect(shown).toContain('"aggressionFactor":"3.0 (9 bets/raises to 3 calls)"');
+    expect(shown).not.toContain('"aggressive":"75%'); // a tally across streets is not a per-hand rate
     expect(shown).not.toContain('Elsewhere');
     // The raw observation never rides into an advice prompt; it is the review's, and it is already counted.
     expect(shown).not.toContain('"observation"');

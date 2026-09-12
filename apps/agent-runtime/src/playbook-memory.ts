@@ -128,10 +128,15 @@ export function ratesOf(counters: Record<string, number>): Record<string, string
   const out: Record<string, string> = {};
   const hands = counters.hands ?? 0;
   for (const [k, v] of Object.entries(counters)) {
-    if (k === 'hands' || k.endsWith('Opps') || k.startsWith('net')) continue;
+    if (k === 'hands' || k.endsWith('Opps') || k.startsWith('net') || k === 'aggressive' || k === 'passive') continue;
     const opps = counters[`${k}Opps`];
     const denom = typeof opps === 'number' ? opps : hands;
-    if (denom > 0) out[k] = `${Math.round((v / denom) * 100)}% of ${denom}`;
+    // A per-hand counter that exceeds its hands is a tally, not a flag, and "167%" is not a rate.
+    if (denom > 0 && v <= denom) out[k] = `${Math.round((v / denom) * 100)}% of ${denom}`;
+  }
+  // Bets and raises against calls — the aggression factor, the number poker players already know.
+  if (typeof counters.aggressive === 'number' && typeof counters.passive === 'number' && counters.aggressive + counters.passive > 0) {
+    out.aggressionFactor = `${(counters.aggressive / Math.max(1, counters.passive)).toFixed(1)} (${counters.aggressive} bets/raises to ${counters.passive} calls)`;
   }
   return out;
 }
