@@ -73,6 +73,9 @@ export const NOTES_KEPT = 100;
  * a timeout loses capability. The table's own advice budget is 35 s, so the hop back is never the bound.
  */
 export const CONSULT_TIMEOUT_MS = 15_000;
+/** A REVIEW is not on a hand's clock: it reads a week of hands and writes paragraphs. The card room gives it
+ *  75 s; the person's agent gives the coach most of that. */
+export const REVIEW_TIMEOUT_MS = 65_000;
 
 export type CardRoomAct = 'advise' | 'record' | 'review';
 
@@ -343,6 +346,44 @@ export function reviewScopeOf(question: string, recent: HandEntryV1[], now = new
   return { hands: recent, label: `the last ${recent.length} hand${recent.length === 1 ? '' : 's'}` };
 }
 
+/**
+ * ONE HAND, IN A LINE OR THREE — what a review's prompt carries per hand. A backfilled hand arrives as the
+ * table's event log (`view.kind === 'history'`, 3–6 KB each); twenty of them as JSON is thirty thousand
+ * tokens the model reads and then answers nothing to (seen live, 2026-09-12). The line keeps what the
+ * review skill reads: her cards, each street's board and actions with amounts, who timed out, the showdown,
+ * the result, her net. A live-recorded view (the game's own shape) is passed through, trimmed of nothing.
+ */
+export function compactHand(h: HandEntryV1): unknown {
+  const v = h.view as { kind?: unknown; events?: unknown; result?: unknown } | null;
+  if (!v || v.kind !== 'history' || !Array.isArray(v.events)) return { hand: h.handNo, seat: h.seat, at: h.at.slice(0, 16), ...(typeof h.net === 'number' ? { net: h.net } : {}), view: h.view };
+  const me = h.seat;
+  let cards = '';
+  const streets: string[] = [];
+  let cur: string[] = [];
+  let curName = 'preflop';
+  let board = '';
+  let timedOut = 0; let decisions = 0;
+  const flush = () => { if (cur.length) streets.push(`${curName}${board ? ` [${board}]` : ''}: ${cur.join(', ')}`); cur = []; };
+  for (const e of v.events as Array<Record<string, unknown>>) {
+    const t = e.type;
+    if (t === 'hole-cards' && e.seat === me) cards = (e.cards as string[]).join(' ');
+    else if (t === 'blind-posted') cur.push(`s${e.seat} ${e.kind} blind ${e.amount}`);
+    else if (t === 'action') {
+      const r = e.record as { seat: number; street: string; action: { type: string; amount?: number }; amount?: number; timedOut?: boolean };
+      const who = r.seat === me ? 'YOU' : `s${r.seat}`;
+      const amt = r.action.amount ?? r.amount;
+      if (r.seat === me) { decisions += 1; if (r.timedOut) timedOut += 1; }
+      cur.push(`${who} ${r.action.type}${amt ? ` ${amt}` : ''}${r.timedOut ? ' (timed out)' : ''}`);
+    } else if (t === 'street') { flush(); curName = String(e.street); board = (e.board as string[]).join(' '); }
+    else if (t === 'showdown') { flush(); const shown = (e.shown as Array<{ seat: number; holeCards: string[]; rank?: { label?: string } }> | undefined) ?? []; cur.push(...shown.map((x) => `${x.seat === me ? 'YOU' : `s${x.seat}`} shows ${x.holeCards.join(' ')}${x.rank?.label ? ` (${x.rank.label})` : ''}`)); curName = 'showdown'; board = ''; }
+  }
+  flush();
+  const res = v.result as { awards?: Array<{ seat: number; amount: number; rank?: { label?: string } }>; net?: Record<string, number> } | null;
+  const awards = (res?.awards ?? []).map((a) => `${a.seat === me ? 'YOU' : `s${a.seat}`} won ${a.amount}${a.rank?.label ? ` with ${a.rank.label}` : ''}`).join('; ');
+  const net = typeof h.net === 'number' ? h.net : res?.net?.[String(me)];
+  return `hand ${h.handNo} (${h.at.slice(0, 16)}, you are seat ${me}${cards ? `, holding ${cards}` : ''}): ${streets.join(' | ')}${awards ? ` | ${awards}` : ''}${typeof net === 'number' ? ` | your net ${net > 0 ? '+' : ''}${net}` : ''}${timedOut ? ` | you timed out on ${timedOut} of ${decisions} decisions (not decisions — you were away)` : ''}`;
+}
+
 /** A review's default label when the span is known: "the last 7 days, 41 hands". */
 export function spanLabel(days: number, hands: number): string {
   return `the last ${days} day${days === 1 ? '' : 's'}, ${hands} hand${hands === 1 ? '' : 's'}`;
@@ -451,7 +492,7 @@ export async function cardRoomTurn(deps: CardRoomDeps, input: CardRoomAskInput):
   if (!studyGrant) return done('refused', `no study grant for ${coach}; the house coach will answer`);
   if (studyGrant.delegate.toLowerCase() !== coachAddr.toLowerCase()) return done('refused', `the study grant for ${coach} names a different agent`);
   const tConsult = Date.now();
-  const timeoutMs = deps.timeoutMs ?? CONSULT_TIMEOUT_MS;
+  const timeoutMs = deps.timeoutMs ?? (input.act === 'review' ? REVIEW_TIMEOUT_MS : CONSULT_TIMEOUT_MS);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const consulted = await Promise.race([
     deps.consult({

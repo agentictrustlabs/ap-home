@@ -29,7 +29,7 @@
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import type { StructuredCall } from '@agenticprimitives/context';
 import { foldObservation, familyOf, memoryRecordFor, observationOf, rememberedFor } from './playbook-memory.js';
-import { reviewScopeOf, spanLabel, type Study } from './card-room.js';
+import { compactHand, reviewScopeOf, spanLabel, type Study } from './card-room.js';
 
 export const PLAYBOOK_ANSWER_CAPABILITY = 'playbook.answer';
 
@@ -282,7 +282,7 @@ async function reviewStudy(deps: PlaybookAnswerDeps, skill: string, question: st
   }
   // THE HANDS, COMPACT. The view is the game's own; it is passed as it was kept, with the record's own
   // framing (hand number, seat, net) so the model can quote a hand she can find.
-  const hands = scope.hands.map((h) => ({ hand: h.handNo, seat: h.seat, at: h.at.slice(0, 16), ...(typeof h.net === 'number' ? { net: h.net } : {}), view: h.view }));
+  const hands = scope.hands.map(compactHand);
   const system = `${REVIEW_SYSTEM}\n\n---\n\n${relevantInstructions(deps.instructions, skill, null, 'review') || '(this agent has no further instructions)'}`;
   const user = [
     `Skill: ${skill}`,
@@ -291,9 +291,12 @@ async function reviewStudy(deps: PlaybookAnswerDeps, skill: string, question: st
     ...(study.style.length ? [`Her style — her own rules:\n${study.style.map((r) => `- ${r}`).join('\n')}`] : []),
     ...(study.notes.length ? [`Your own earlier remarks (opinions from past reviews — NOT a record of her hands; the hands below are the record), oldest first:\n${study.notes.map((n) => `- ${n.at.slice(0, 10)}: ${n.text}`).join('\n')}`] : []),
     `Counts per player across all ${study.hands} recorded hand${study.hands === 1 ? '' : 's'} (rates computed; "you" is her):\n${JSON.stringify(study.remembered)}`,
-    `The hands in scope, oldest first:\n${JSON.stringify(hands)}`,
+    `The hands in scope, oldest first (one line each: street by street, YOU is her; "timed out" means she was away, not deciding):\n${hands.map((h) => (typeof h === 'string' ? `- ${h}` : `- ${JSON.stringify(h)}`)).join('\n')}`,
   ].join('\n');
-  const out = await deps.call!({
+  // THE REVIEW IS THE REASONING — no hidden scratchpad here: a review is read slowly, and a model that
+  // wrote 120 words of reasoning and then ran out of room for the review itself returned an empty `say`
+  // (seen live, 2026-09-12, over 24 hands). Room for paragraphs, and one second try when the first is empty.
+  const review = async () => deps.call!({
     system,
     messages: [{ role: 'user', content: user }],
     tool: {
@@ -302,18 +305,23 @@ async function reviewStudy(deps: PlaybookAnswerDeps, skill: string, question: st
       input_schema: {
         type: 'object',
         properties: {
-          reasoning: { type: 'string', description: 'At most 120 words: the money, the decisions that mattered, the count behind the leak. Not shown.' },
-          say: { type: 'string', description: 'The review itself: what happened with the count, the decisions that mattered, the leak with its count and cost, one change, what went right. Short paragraphs.' },
+          say: { type: 'string', description: 'The review itself, for her to read: what happened with the count (hands, net), the two or three decisions that mattered with the street, the price and what each cost, the leak with its count and cost, what went right. Short paragraphs separated by blank lines. Never empty.' },
           because: { type: 'string', description: 'The one thing to change next session, in one sentence she can do on the first hand.' },
           note: { type: 'string', description: 'Two or three sentences for your own notes: the date, the scope, the leak with its count, the one change. Checkable against the hands.' },
         },
-        required: ['reasoning', 'say', 'because', 'note'],
+        required: ['say', 'because', 'note'],
       },
     },
-    maxTokens: deps.maxTokens ?? 1200,
+    maxTokens: deps.maxTokens ?? 2500,
   });
-  const say = typeof out.say === 'string' ? out.say.trim() : '';
-  if (!say) return { refused: 'the review produced nothing' };
+  let out = await review();
+  let say = typeof out.say === 'string' ? out.say.trim() : '';
+  if (!say) {
+    console.warn(`[playbook.answer] ${skill} review: the model returned no say (keys ${Object.keys(out).join(',') || 'none'}) · prompt ${system.length + user.length} chars · ${scope.hands.length} hands — asking once more`);
+    out = await review();
+    say = typeof out.say === 'string' ? out.say.trim() : '';
+  }
+  if (!say) return { refused: `the review produced nothing over ${scope.label}` };
   const because = typeof out.because === 'string' ? out.because.trim() : undefined;
   const noteText = typeof out.note === 'string' ? out.note.trim() : '';
   const noted = noteText && deps.study?.note ? (await deps.study.note(noteText, { scope: scope.label }).catch(() => ({ ok: false }))).ok : false;

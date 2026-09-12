@@ -395,3 +395,30 @@ describe('the day records, and a review over a span', () => {
     expect(r.ok && r.access.reads).toEqual(['cardroom.hand', 'cardroom.hands:*']);
   });
 });
+
+describe('a backfilled hand, in a line', () => {
+  it('keeps her cards, each street, who timed out, the showdown and her net — and drops the rest', async () => {
+    const { compactHand } = await import('../src/card-room.js');
+    const view = { kind: 'history', events: [
+      { type: 'hand-started', handNo: 403, seats: [0, 2, 3] },
+      { type: 'blind-posted', seat: 3, kind: 'small', amount: 1 }, { type: 'blind-posted', seat: 0, kind: 'big', amount: 2 },
+      { type: 'hole-cards', seat: 0, cards: ['Tc', 'Ts'], private: true },
+      { type: 'turn', seat: 2, legal: {} }, { type: 'action', record: { seat: 2, street: 'preflop', action: { type: 'call' }, amount: 2 } },
+      { type: 'action', record: { seat: 0, street: 'preflop', action: { type: 'check' }, amount: 0, timedOut: true } },
+      { type: 'street', street: 'flop', board: ['Kc', '7d', 'Td'] },
+      { type: 'action', record: { seat: 0, street: 'flop', action: { type: 'bet', amount: 4 }, amount: 4 } },
+      { type: 'action', record: { seat: 2, street: 'flop', action: { type: 'fold' }, amount: 0 } },
+    ], result: { awards: [{ seat: 0, amount: 6 }], net: { '0': 4, '2': -2 } } };
+    const line = compactHand({ handNo: 403, table: 't', seat: 0, at: '2026-09-12T01:52:53.081Z', view, net: 4 }) as string;
+    expect(line).toContain('holding Tc Ts');
+    expect(line).toContain('preflop: s3 small blind 1, s0 big blind 2, s2 call 2, YOU check (timed out)');
+    expect(line).toContain('flop [Kc 7d Td]: YOU bet 4, s2 fold');
+    expect(line).toContain('YOU won 6');
+    expect(line).toContain('your net +4');
+    expect(line).toContain('timed out on 1 of 2 decisions');
+    expect(line).not.toContain('legal');
+    expect(line.length).toBeLessThan(400);
+    // A live view is passed through as it is.
+    expect(compactHand({ handNo: 1, table: 't', seat: 0, at: '2026-09-12T00:00:00Z', view: { hand: {} } })).toMatchObject({ hand: 1, view: { hand: {} } });
+  });
+});
