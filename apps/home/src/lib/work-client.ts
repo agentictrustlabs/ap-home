@@ -358,32 +358,9 @@ export async function commitContribution(
   });
 }
 
-/** Mark ONE plan step done (endeavor.satisfyStep) — evidence note required; recorded by the
- *  managing principal or an active participant (re-gated by the reducer). */
-/** Spec 382 W2 — take back a commitment (only the committed participant may). The step returns to the pool. */
-export async function withdrawCommitment(token: string, org: string, endeavorId: string, commitmentId: string, reason?: string): Promise<void> {
-  await postWork(token, { action: 'withdraw', org: org.toLowerCase(), endeavorId, commitmentId, ...(reason ? { reason } : {}) });
-}
-
-/** Spec 382 W2 — a steward moves a commitment to another participant: a new allocation for them to commit to. */
-export async function reallocateContribution(token: string, org: string, endeavorId: string, commitmentId: string, participant: string): Promise<{ allocationId?: string }> {
-  return postWork(token, { action: 'reallocate', org: org.toLowerCase(), endeavorId, commitmentId, participant }) as Promise<{ allocationId?: string }>;
-}
-
-export async function markStepDone(
-  token: string,
-  org: string,
-  endeavorId: string,
-  stepId: string,
-  evidence: string,
-): Promise<void> {
-  await postWork(token, { action: 'satisfyStep', org: org.toLowerCase(), endeavorId, stepId, evidence });
-}
-
-/** Spec 382 W3 — record a milestone of the adopted plan as achieved (endeavor.milestone.achieve), with evidence. */
-export async function achieveMilestone(token: string, org: string, endeavorId: string, milestoneId: string, evidence: string): Promise<void> {
-  await postWork(token, { action: 'achieveMilestone', org: org.toLowerCase(), endeavorId, milestoneId, evidence });
-}
+// Spec 361 I4 (2026-09-11) — withdrawCommitment, reallocateContribution, markStepDone and achieveMilestone are
+// gone from this client: each act is a supplied-plan command to the Ask (`src/home/ask-command.ts`), run by the
+// organization's agent under the person's mandate, never a Home route of its own.
 
 /** Mark the whole endeavor complete (endeavor.satisfy) — coordinator/steward act. */
 export async function completeEndeavor(

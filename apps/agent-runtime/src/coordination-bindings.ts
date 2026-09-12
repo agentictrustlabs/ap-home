@@ -26,6 +26,12 @@ export const ENDEAVOR_REQUEST_CAPABILITY = 'coordination.endeavor.request' as co
 export const CONTRIBUTION_PROPOSE_CAPABILITY = 'coordination.contribution.propose' as const;
 export const CONTRIBUTION_ALLOCATE_CAPABILITY = 'coordination.contribution.allocate' as const;
 export const ENDEAVOR_SATISFY_CAPABILITY = 'coordination.endeavor.satisfy' as const;
+/** Spec 382 W2 as Ask capabilities (the Work family's execution parity, 361 I4 / 398 G1): a participant takes a
+ *  commitment back; a steward moves a contribution to someone else as a NEW allocation they must commit to. */
+export const COMMITMENT_WITHDRAW_CAPABILITY = 'coordination.commitment.withdraw' as const;
+export const COMMITMENT_REALLOCATE_CAPABILITY = 'coordination.commitment.reallocate' as const;
+/** Spec 332 §6 as an Ask capability: one plan STEP recorded satisfied with completion evidence — by the people doing the work. */
+export const STEP_SATISFY_CAPABILITY = 'coordination.step.satisfy' as const;
 /** Spec 382 W3 (M6 milestones) — a milestone the adopted plan defines, recorded achieved with criteria evidence. */
 export const MILESTONE_ACHIEVE_CAPABILITY = 'coordination.milestone.achieve' as const;
 /** Spec 393 — a decision raised for DECLARED approvers, and recorded by one of them (immutable). */
@@ -114,6 +120,39 @@ export const MILESTONE_ACHIEVE_TOOL: ToolSpec = {
   establishes: 'authoritative',
 };
 
+/** A plan step done — the execution record, by the managing principal or an active participant, with evidence. */
+export const STEP_SATISFY_TOOL: ToolSpec = {
+  id: STEP_SATISFY_CAPABILITY,
+  verbs: ['step done', 'mark the step done', 'finished the step', 'completed the step', 'did the step', 'record the step as done'],
+  description: 'Record ONE plan step of an endeavor as SATISFIED, with a note of what was done — the completion evidence. Args: org, endeavorId, stepId (from the adopted plan), note. By the organization\'s steward or an active participant (the one doing the work); the record refuses a step the plan does not name. Not the endeavor itself — coordination.endeavor.satisfy closes the whole endeavor.',
+  inputSchema: { type: 'object', properties: { ...ORG_ARG, endeavorId: { type: 'string' }, stepId: { type: 'string', description: 'The step_* id from the adopted plan.' }, note: { type: 'string', description: 'What was done, in a sentence — the completion evidence.' } }, required: ['org', 'endeavorId', 'stepId', 'note'] },
+  capability: { id: STEP_SATISFY_CAPABILITY, action: 'satisfy', resourceArg: 'org', authorityArg: 'org' },
+  risk: 'medium',
+  establishes: 'authoritative',
+};
+
+/** A commitment taken back — the participant's own act; the step returns to the pool. */
+export const COMMITMENT_WITHDRAW_TOOL: ToolSpec = {
+  id: COMMITMENT_WITHDRAW_CAPABILITY,
+  verbs: ['withdraw', 'withdraw my commitment', 'pull out', 'step back from', 'take back my commitment', 'i can\'t do', 'drop my step'],
+  description: 'WITHDRAW a commitment the person made on an endeavor — their promise taken back, the step returned to the pool for someone else. Args: org, endeavorId, commitmentId (the commit_* id of their own commitment), note (why, in a sentence — kept as the reason). Only the committed participant; the record refuses anyone else.',
+  inputSchema: { type: 'object', properties: { ...ORG_ARG, endeavorId: { type: 'string' }, commitmentId: { type: 'string', description: 'The commit_* id of the commitment being withdrawn.' }, note: { type: 'string', description: 'Why, in a sentence.' } }, required: ['org', 'endeavorId', 'commitmentId'] },
+  capability: { id: COMMITMENT_WITHDRAW_CAPABILITY, action: 'withdraw', resourceArg: 'org', authorityArg: 'org' },
+  risk: 'medium',
+  establishes: 'authoritative',
+};
+
+/** A contribution moved to another participant — a steward's act; the new participant's commitment is theirs to sign. */
+export const COMMITMENT_REALLOCATE_TOOL: ToolSpec = {
+  id: COMMITMENT_REALLOCATE_CAPABILITY,
+  verbs: ['reallocate', 'reassign', 'move the step to', 'hand the step to', 'give the step to', 'reallocate to'],
+  description: 'REALLOCATE a committed (or withdrawn) contribution on an endeavor to another participant — a NEW allocation they must commit to themselves; nothing is granted. Args: org, endeavorId, commitmentId (the commit_* id being moved), participant (the resolved agent address it moves to). A steward\'s act as the organization.',
+  inputSchema: { type: 'object', properties: { ...ORG_ARG, endeavorId: { type: 'string' }, commitmentId: { type: 'string', description: 'The commit_* id of the contribution being moved.' }, participant: { type: 'string', description: 'The agent it moves to (resolve the person first).' } }, required: ['org', 'endeavorId', 'commitmentId', 'participant'] },
+  capability: { id: COMMITMENT_REALLOCATE_CAPABILITY, action: 'reallocate', resourceArg: 'org', authorityArg: 'org' },
+  risk: 'medium',
+  establishes: 'authoritative',
+};
+
 /** Raise a decision for the people who may make it — the approvers are named up front; the record is theirs alone. */
 export const DECISION_REQUEST_TOOL: ToolSpec = {
   id: DECISION_REQUEST_CAPABILITY,
@@ -137,7 +176,7 @@ export const DECISION_RECORD_TOOL: ToolSpec = {
 };
 
 export const COORDINATION_READ_TOOLS: ToolSpec[] = [ENDEAVOR_LIST_TOOL, ENDEAVOR_GET_TOOL];
-export const COORDINATION_ACTION_TOOLS: ToolSpec[] = [ENDEAVOR_REQUEST_TOOL, CONTRIBUTION_PROPOSE_TOOL, CONTRIBUTION_ALLOCATE_TOOL, ENDEAVOR_SATISFY_TOOL, MILESTONE_ACHIEVE_TOOL, DECISION_REQUEST_TOOL, DECISION_RECORD_TOOL];
+export const COORDINATION_ACTION_TOOLS: ToolSpec[] = [ENDEAVOR_REQUEST_TOOL, CONTRIBUTION_PROPOSE_TOOL, CONTRIBUTION_ALLOCATE_TOOL, ENDEAVOR_SATISFY_TOOL, MILESTONE_ACHIEVE_TOOL, STEP_SATISFY_TOOL, COMMITMENT_WITHDRAW_TOOL, COMMITMENT_REALLOCATE_TOOL, DECISION_REQUEST_TOOL, DECISION_RECORD_TOOL];
 export const COORDINATION_CAPABILITY_IDS = new Set<string>([...COORDINATION_READ_TOOLS, ...COORDINATION_ACTION_TOOLS].map((t) => t.id));
 
 export interface CoordinationDeps extends StandingDeps {
@@ -248,6 +287,23 @@ export function endeavorActInvoker(deps: CoordinationDeps, addressee: Address, p
         const milestoneId = String(args.milestoneId ?? '').trim();
         const r = await deps.interactionsOp(o.org, 'endeavor.milestone.achieve', { ...common, endeavorId: String(args.endeavorId ?? ''), milestoneId, ...(args.note ? { evidence: String(args.note) } : {}) });
         return { org: o.org, endeavorId: String(args.endeavorId ?? ''), milestoneId: r.milestoneId ?? milestoneId, note: 'Recorded as achieved in the endeavor\'s log, with the evidence given.' };
+      }
+      case STEP_SATISFY_CAPABILITY: {
+        const stepId = String(args.stepId ?? '').trim();
+        const r = await deps.interactionsOp(o.org, 'endeavor.satisfyStep', { ...common, endeavorId: String(args.endeavorId ?? ''), stepId, evidence: String(args.note ?? '') });
+        return { org: o.org, endeavorId: String(args.endeavorId ?? ''), stepId: r.stepId ?? stepId, note: 'Recorded as done in the endeavor\'s log, with the evidence given.' };
+      }
+      case COMMITMENT_WITHDRAW_CAPABILITY: {
+        const commitmentId = String(args.commitmentId ?? '').trim();
+        const r = await deps.interactionsOp(o.org, 'endeavor.withdrawCommitment', { ...common, endeavorId: String(args.endeavorId ?? ''), commitmentId, ...(args.note ? { reason: String(args.note) } : {}) });
+        return { org: o.org, endeavorId: String(args.endeavorId ?? ''), commitmentId: r.commitmentId ?? commitmentId, note: 'Withdrawn. The step is back in the pool; a steward may allocate it again.' };
+      }
+      case COMMITMENT_REALLOCATE_CAPABILITY: {
+        const participant = String(args.participant ?? '').trim();
+        if (!isAddr(participant)) throw new Error(`the participant must be a resolved agent, not “${participant}”`);
+        const commitmentId = String(args.commitmentId ?? '').trim();
+        const r = await deps.interactionsOp(o.org, 'endeavor.reallocate', { ...common, endeavorId: String(args.endeavorId ?? ''), commitmentId, participant: participant.toLowerCase() });
+        return { org: o.org, endeavorId: String(args.endeavorId ?? ''), commitmentId, allocationId: r.allocationId, participant: participant.toLowerCase(), note: 'Reallocated as a new allocation. It waits on the new participant\'s own commitment; nothing was granted.' };
       }
       case DECISION_REQUEST_CAPABILITY: {
         const approvers = (Array.isArray(args.approvers) ? args.approvers : typeof args.approvers === 'string' ? args.approvers.split(/[,\s]+/) : []).map((a) => String(a).trim()).filter(Boolean);

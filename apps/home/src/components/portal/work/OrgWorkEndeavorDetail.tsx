@@ -21,14 +21,12 @@ import {
   commitContribution,
   completeEndeavor,
   fetchWorkDetail,
-  markStepDone,
-  achieveMilestone,
   offerContribution,
   proposePlan,
   recordDecision,
   type WorkDetailResponse,
-  reallocateContribution,
 } from '../../../lib/work-client';
+import { askCommand } from '../../../home/ask-command';
 import { useOrgMemberNames } from './useWork';
 import { EVENT_LABEL, LIFECYCLE_LABEL, STEP_KIND_LABEL, StatusPillStyle } from './labels';
 import type { EndeavorLifecycle } from '@agenticprimitives/home';
@@ -136,11 +134,13 @@ export function OrgWorkEndeavorDetail({ org, endeavorId }: { org: Address; endea
 
   // Spec 382 W2 — reallocate a commitment to another participant (steward only; the reducer re-gates).
   const [reallocTo, setReallocTo] = useState<Record<string, string>>({});
-  const reallocate = useCallback((commitmentId: string, participant: string) => run(`realloc:${commitmentId}`, async () => {
+  // Spec 361 I4 — the act goes to the Ask as a supplied plan (the organization's agent verifies it, asks for the
+  // steward's mandate, the person signs there), not to a Home route of its own. The screen names the act.
+  const reallocate = useCallback((commitmentId: string, participant: string) => {
     if (!session || !participant) return;
-    await reallocateContribution(session.token, communityId, endeavorId, commitmentId, participant);
+    askCommand({ toolId: 'coordination.commitment.reallocate', args: { org: communityId, endeavorId, commitmentId, participant }, message: `Reallocate ${commitmentId} to ${names[participant.toLowerCase()] ?? shortId(participant)}` });
     setReallocTo((m) => ({ ...m, [commitmentId]: '' }));
-  }), [run, session, communityId, endeavorId]);
+  }, [session, communityId, endeavorId, names]);
 
   const commit = useCallback((allocationId: string, steps: string[]) => run(allocationId, async () => {
     if (!session || !agentAddress || !detail?.plan) throw new Error('no adopted plan to commit against');
@@ -206,24 +206,24 @@ export function OrgWorkEndeavorDetail({ org, endeavorId }: { org: Address; endea
       await recordDecision(session.token, communityId, endeavorId, decisionId, outcome, reason);
     }), [run, session, communityId, endeavorId, reasons]);
 
-  const markDone = useCallback((stepId: string) => run(`done:${stepId}`, async () => {
+  const markDone = useCallback((stepId: string) => {
     if (!session) return;
     const note = doneNote.trim();
-    if (!note) throw new Error('Say briefly what was done — it becomes the completion evidence.');
-    await markStepDone(session.token, communityId, endeavorId, stepId, note);
+    if (!note) { setError('Say briefly what was done — it becomes the completion evidence.'); return; }
+    askCommand({ toolId: 'coordination.step.satisfy', args: { org: communityId, endeavorId, stepId, note }, message: `Mark ${stepId} done — ${note}` });
     setDoneFor(null); setDoneNote('');
-  }), [run, session, communityId, endeavorId, doneNote]);
+  }, [session, communityId, endeavorId, doneNote]);
 
   // Spec 382 W3 — a milestone reached: the plan names it, the note is the criteria evidence.
   const [milestoneFor, setMilestoneFor] = useState<string | null>(null);
   const [milestoneNote, setMilestoneNote] = useState('');
-  const achieve = useCallback((milestoneId: string) => run(`milestone:${milestoneId}`, async () => {
+  const achieve = useCallback((milestoneId: string) => {
     if (!session) return;
     const note = milestoneNote.trim();
-    if (!note) throw new Error('Say briefly how the criteria were met — it becomes the achievement evidence.');
-    await achieveMilestone(session.token, communityId, endeavorId, milestoneId, note);
+    if (!note) { setError('Say briefly how the criteria were met — it becomes the achievement evidence.'); return; }
+    askCommand({ toolId: 'coordination.milestone.achieve', args: { org: communityId, endeavorId, milestoneId, note }, message: `Milestone ${milestoneId} achieved — ${note}` });
     setMilestoneFor(null); setMilestoneNote('');
-  }), [run, session, communityId, endeavorId, milestoneNote]);
+  }, [session, communityId, endeavorId, milestoneNote]);
 
   const complete = useCallback(() => run('complete', async () => {
     if (!session) return;

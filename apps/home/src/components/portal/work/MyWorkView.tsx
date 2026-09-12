@@ -26,8 +26,8 @@ import {
   type AllocationRow,
   type EndeavorRequestRow,
   type EndeavorRow,
-  withdrawCommitment,
 } from '../../../lib/work-client';
+import { askCommand } from '../../../home/ask-command';
 import { NewRequestComposer } from './NewRequestComposer';
 import { useRelatedOrgsState, useReEnableInteractions } from './useWork';
 import { LIFECYCLE_LABEL } from './labels';
@@ -148,14 +148,13 @@ export function MyWorkView() {
     return () => { live = false; };
   }, [session?.token, agentAddress, bundles]);
 
-  const withdraw = useCallback(async (bundle: OrgWorkBundle, entry: HomeContributionEntryV1) => {
+  // Spec 361 I4 — the withdrawal goes to the Ask as a supplied plan: the organization's agent verifies that this
+  // person holds the commitment, asks for their mandate, and they sign there. The screen names the act.
+  const withdraw = useCallback((bundle: OrgWorkBundle, entry: HomeContributionEntryV1) => {
     if (!session || !entry.commitmentId) return;
     const reason = typeof window !== 'undefined' ? (window.prompt('Why are you withdrawing? (optional — the organization sees it)') ?? undefined) : undefined;
-    setBusyId(`withdraw:${entry.commitmentId}`); setError(null);
-    try { await withdrawCommitment(session.token, bundle.org, entry.endeavorId, entry.commitmentId, reason?.trim() || undefined); await load(); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-    finally { setBusyId(null); }
-  }, [session, load]);
+    askCommand({ toolId: 'coordination.commitment.withdraw', args: { org: bundle.org, endeavorId: entry.endeavorId, commitmentId: entry.commitmentId, ...(reason?.trim() ? { note: reason.trim() } : {}) }, message: `Withdraw my commitment ${entry.commitmentId}${reason?.trim() ? ` — ${reason.trim()}` : ''}` });
+  }, [session]);
 
   const commit = useCallback(async (bundle: OrgWorkBundle, entry: HomeContributionEntryV1) => {
     if (!session || !agentAddress) return;

@@ -2114,6 +2114,9 @@ export const CAPABILITY_WORDS: Record<string, string> = {
   'coordination.contribution.allocate': 'allocate plan steps',
   'coordination.endeavor.satisfy': 'close an endeavor as done',
   'coordination.milestone.achieve': 'record a milestone as achieved',
+  'coordination.step.satisfy': 'record a step as done',
+  'coordination.commitment.withdraw': 'withdraw a commitment',
+  'coordination.commitment.reallocate': 'reallocate a contribution',
   'coordination.decision.request': 'raise a decision for named approvers',
   'coordination.decision.record': 'record a decision on a pending request',
   'treasury.payment.execute': 'make payments',
@@ -2301,6 +2304,9 @@ const RESOURCE_ARG_FOR: Record<string, string> = {
   'coordination.contribution.allocate': 'org',
   'coordination.endeavor.satisfy': 'org',
   'coordination.milestone.achieve': 'org',
+  'coordination.step.satisfy': 'org',
+  'coordination.commitment.withdraw': 'org',
+  'coordination.commitment.reallocate': 'org',
   'coordination.decision.request': 'org',
   'coordination.decision.record': 'org',
   // The CALL's target: the relationship record. See the pin in `resolveStepArgs` for why the treasury,
@@ -3667,6 +3673,9 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'coordination.contribution.allocate': ['signature'],  // the org's decision, under a steward's signature
   'coordination.endeavor.satisfy': ['signature'],
   'coordination.milestone.achieve': ['signature'],
+  'coordination.step.satisfy': ['signature'],          // the doer's own record, or the steward's as the org
+  'coordination.commitment.withdraw': ['signature'],   // the participant's own act
+  'coordination.commitment.reallocate': ['signature'], // the org's, under a steward's signature
   'coordination.decision.request': ['signature'],
   'coordination.decision.record': ['signature'],
   'treasury.payment.execute': ['signature'],        // the mandate, and the ladder's second party

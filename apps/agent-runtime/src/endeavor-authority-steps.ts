@@ -61,6 +61,9 @@ export const NOT_PLAN_STEPS: readonly string[] = [
   'coordination.contribution.allocate',
   'coordination.endeavor.satisfy',
   'coordination.milestone.achieve',
+  'coordination.step.satisfy',
+  'coordination.commitment.withdraw',
+  'coordination.commitment.reallocate',
   // Spec 393 — a decision is RAISED for declared approvers and RECORDED by one of them; a plan may carry a
   // decision-kind STEP that a record satisfies, but raising or recording is never itself assignable work.
   'coordination.decision.request',

@@ -11,6 +11,7 @@ import { parseWorkspacePath, orgHref } from '../../lib/workspace';
 import { orgStatusOf, STATUS_LABEL } from '../../lib/org-lifecycle';
 import { buildNav, buildSettingsPane, paneGroups, bottomNav } from './nav';
 import { useAskSelection, setAskSelection } from '../../home/ask-selection';
+import type { AskCommand } from '../../home/ask-command';
 import { useRegisteredName } from '../../lib/reverse-name';
 import { PortalTopbar } from './PortalTopbar';
 import { AskFlyout } from './ask/AskFlyout';
@@ -30,12 +31,15 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
   const [askSeed, setAskSeed] = useState<string | null>(null);
   /** Spec 397 §6 — a PARKED run a page wants picked up (`/you?run=`): the flyout resumes it, and the person signs there. */
   const [askResume, setAskResume] = useState<string | null>(null);
+  /** Spec 361 I4 — a COMMAND a screen handed the Ask (a supplied plan): the flyout runs it as the command picker would. */
+  const [askCommandState, setAskCommand] = useState<AskCommand | null>(null);
   // Spec 361 I6 — what the current screen has selected, read here and handed to the Ask as context.
   const askSelection = useAskSelection();
   useEffect(() => {
     const onAsk = (e: Event) => {
-      const detail = (e as CustomEvent<{ message?: string; resumeRun?: string }>).detail;
+      const detail = (e as CustomEvent<{ message?: string; resumeRun?: string; command?: AskCommand }>).detail;
       if (detail?.resumeRun) { setAskResume(detail.resumeRun); setAskOpen(true); return; }
+      if (detail?.command) { setAskCommand(detail.command); setAskOpen(true); return; }
       const message = detail?.message;
       if (!message) return;
       setAskSeed(message);
@@ -141,6 +145,8 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
           onSeedUsed={() => setAskSeed(null)}
           resumeRun={askResume}
           onResumeUsed={() => setAskResume(null)}
+          command={askCommandState}
+          onCommandUsed={() => setAskCommand(null)}
           addressee={askAddressee!} addresseeLabel={askLabel}
           // The app knows where you are standing and what you are to this agent; the Ask should not have
           // to infer it from a sentence.

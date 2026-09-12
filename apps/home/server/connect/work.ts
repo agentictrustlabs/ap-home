@@ -209,51 +209,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     return jsonCors(r.body, request, r.status);
   }
 
-  // Execution (spec 332 §6): mark ONE step done with completion evidence — recorded by the
-  // managing principal or an active participant (the reducer's gate, not ours).
-  // Spec 382 W3 — a milestone of the adopted plan, recorded achieved with evidence (the reducer's gate).
-  if (body.action === 'achieveMilestone') {
-    if (!body.endeavorId?.trim() || !body.milestoneId?.trim() || !body.evidence?.trim()) {
-      return jsonCors({ error: 'endeavorId, milestoneId, evidence required' }, request, 400);
-    }
-    const r = await callInteractions(env, org, 'endeavor.milestone.achieve', {
-      session: who.token, endeavorId: body.endeavorId, milestoneId: body.milestoneId, evidence: body.evidence,
-      ...(stewardship ? { stewardship } : {}),
-    });
-    return jsonCors(r.body, request, r.status);
-  }
-
-  if (body.action === 'satisfyStep') {
-    if (!body.endeavorId?.trim() || !body.stepId?.trim() || !body.evidence?.trim()) {
-      return jsonCors({ error: 'endeavorId, stepId, evidence required' }, request, 400);
-    }
-    const r = await callInteractions(env, org, 'endeavor.satisfyStep', {
-      session: who.token,
-      endeavorId: body.endeavorId,
-      stepId: body.stepId,
-      evidence: body.evidence,
-      ...(stewardship ? { stewardship } : {}),
-    });
-    return jsonCors(r.body, request, r.status);
-  }
-
-  // Spec 382 W2 — a participant withdraws their commitment (the reducer admits only them); a steward
-  // reallocates a commitment to another participant as a NEW allocation they must commit to.
-  if (body.action === 'withdraw') {
-    if (!body.endeavorId?.trim() || !body.commitmentId?.trim()) return jsonCors({ error: 'endeavorId, commitmentId required' }, request, 400);
-    const r = await callInteractions(env, org, 'endeavor.withdrawCommitment', {
-      session: who.token, endeavorId: body.endeavorId, commitmentId: body.commitmentId, ...(body.reason ? { reason: body.reason } : {}),
-    });
-    return jsonCors(r.body, request, r.status);
-  }
-  if (body.action === 'reallocate') {
-    if (!body.endeavorId?.trim() || !body.commitmentId?.trim() || !body.participant?.trim()) return jsonCors({ error: 'endeavorId, commitmentId, participant required' }, request, 400);
-    const r = await callInteractions(env, org, 'endeavor.reallocate', {
-      session: who.token, endeavorId: body.endeavorId, commitmentId: body.commitmentId, participant: body.participant,
-      ...(stewardship ? { stewardship } : {}),
-    });
-    return jsonCors(r.body, request, r.status);
-  }
+  // Spec 361 I4 (2026-09-11) — achieveMilestone, satisfyStep, withdraw and reallocate LEFT this route: the Work
+  // screen hands each act to the Ask as a supplied plan (`coordination.milestone.achieve`, `coordination.step.satisfy`,
+  // `coordination.commitment.withdraw`, `coordination.commitment.reallocate`), and the organization's agent runs it
+  // under the person's mandate. Four fewer session-RPC calls here (spec 341's ratchet); nothing new answers them.
 
   // Mark the whole endeavor complete (outcome validated) / close it — coordinator or steward.
   if (body.action === 'satisfy' || body.action === 'abandon') {

@@ -29,6 +29,7 @@ import { yesNo, matchChoice, listenAfter, plainSpeech, navigationIntent, closest
 import { ask, hear, warmHearing, readProgress, type ProgressLine, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, homeModels, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField, type AskModelOption, listConfirmations, forgetConfirmation, type RememberedChoice, listInstructions, forgetInstruction, type StandingInstruction } from '../../../home/ask';
 import type { AskSelection } from '../../../home/ask-selection';
 import { resolveNavigationTarget } from '../../../lib/interaction-registry';
+import type { AskCommand } from '../../../home/ask-command';
 
 /** Spec 377 — where this browser remembers which model the person picked for the Ask. */
 const MODEL_PREF_KEY = 'ask.model';
@@ -45,7 +46,7 @@ type Entry =
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
-export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose, seed, onSeedUsed, resumeRun, onResumeUsed }: {
+export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose, seed, onSeedUsed, resumeRun, onResumeUsed, command: screenCommand, onCommandUsed }: {
   /** Spec 397 §6 — a parked run to pick up on open (`/you?run=`): resumed at once, every gate re-run; the person signs here. */
   resumeRun?: string | null;
   onResumeUsed?: () => void;
@@ -59,6 +60,9 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   /** An ask a page wants to start on this surface. Prefills the composer; never sends. */
   seed?: string | null;
   onSeedUsed?: () => void;
+  /** Spec 361 I4 — a screen's command: the one act it knows, with the person's choices as arguments. */
+  command?: AskCommand | null;
+  onCommandUsed?: () => void;
 }) {
   const { session, profile, agentAddress, agentName, personName } = useSession();
   const router = useRouter();
@@ -108,6 +112,19 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
     onResumeUsed?.();
     void turn({ message: '', addressee, runRef: resumeRun, presented: null, supplied: [], resumable: true }, 'Picking up what your assistant asked…');
   }, [resumeRun, session]);
+  // Spec 361 I4 — a SCREEN'S COMMAND: run exactly as the command picker runs one (a supplied plan on a fresh
+  // run), so a button and a sentence reach the same boundary and the same ceremony. The screen named the act;
+  // the agent verifies it, asks for the mandate, and the person signs here.
+  useEffect(() => {
+    if (!screenCommand || !session) return;
+    onCommandUsed?.();
+    const cmd = screenCommand;
+    void (async () => {
+      setThread((t) => [...t, { role: 'you', text: cmd.message }]);
+      const surface = await homeScope(realm, addressee, selection ?? undefined);
+      await turn({ message: cmd.message, addressee, runRef: `ask-${Date.now().toString(36)}`, presented: null, supplied: [], surface, plan: { steps: [{ toolId: cmd.toolId, args: cmd.args }] } }, 'Working…');
+    })();
+  }, [screenCommand, session]);
   // WHAT THE PERSON PICKED, in this surface's own words. After choosing "nathan.me" from four Nathans the
   // answer travels as an address, so the next card would show a bare 0x… — asking someone to re-verify a
   // choice they just made, against a string that tells them nothing. This is the surface remembering its
