@@ -417,7 +417,7 @@
         "apps/demo-sso-next/src/home/retry.test.ts"
       ],
       "gaps": [
-        "398 §7.2 — every agentic-trust contract declares idempotency + result.kind and the vocabulary publishes them (retry affordance on the inspector, result kind on Today's next act); five capabilities an archetype carries by id only (treasury.primary.declare, access.grant.revoke, profile.contact.update, household.member.record, service.create) still compile from the ~/skills fallback table without them; the parity pair (§7.2 (4)) is not yet run against the golden journey"
+        "398 §7.2 — every agentic-trust contract declares idempotency + result.kind, every agentic-trust archetype compiles them from its contracts (0 fallback rows), the vocabulary publishes them; the parity pair runs as check:interaction-coverage:behaviour"
       ]
     },
     {
