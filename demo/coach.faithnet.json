@@ -1,0 +1,14 @@
+{
+  "purpose": "the hold'em coaching service in the faithnet estate — chartered by a person, custodied by that person (an operator note, not a persona)",
+  "chainId": 34348,
+  "custodian": {
+    "handle": "bob",
+    "sa": "0x8c5cddca27c088a65e58e94403acdc9bc3eb7fe3"
+  },
+  "service": {
+    "name": "bob-coach.svc",
+    "sa": "0x3c3121c71342c1bd668cf03a3ff50984ec7205cd",
+    "charteredUnder": "bob.me"
+  },
+  "charteredAt": "2026-09-12T20:54:59.321Z"
+}
