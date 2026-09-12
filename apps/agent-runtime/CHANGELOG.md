@@ -1,5 +1,13 @@
 # @agenticprimitives-demo/a2a
 
+## 0.0.2-alpha.29
+
+### Patch Changes
+
+- Updated dependencies
+  - @agenticprimitives/capability-claims@0.0.0-alpha.22
+  - @agenticprimitives/harness@0.0.0-alpha.4
+
 ## 0.0.2-alpha.28
 
 ### Patch Changes
