@@ -98,7 +98,7 @@ async function verifyIdTokenForRelyingClient(
  *  answer; unnamed agents cache as '' and the UI falls back to the address. */
 async function displayNames(env: FnContext['env'], addrs: Set<string>): Promise<Record<string, string>> {
   const naming = new AgentNamingClient({
-    rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL,
+    rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL),
     chainId: CHAIN_ID,
     registry: CONTRACTS.agentNameRegistry,
     universalResolver: CONTRACTS.agentNameUniversalResolver,
@@ -345,7 +345,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       if (transition === 'approve' && body.mandate) {
         // W5: approve + issue. ERC-1271 over the RE-DERIVED mandate digest.
         const accounts = new AgentAccountClient({
-          rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL,
+          rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL),
           chainId: CHAIN_ID,
           entryPoint: CONTRACTS.entryPoint,
           factory: CONTRACTS.agentAccountFactory,

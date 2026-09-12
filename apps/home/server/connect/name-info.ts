@@ -15,7 +15,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   const raw = new URL(request.url).searchParams.get('name');
   if (!raw || !raw.trim()) return jsonCors({ error: 'name required' }, request, 400);
   const name = fullName(raw);
-  const rpcUrl = env.RPC_URL ?? DEFAULT_RPC_URL;
+  const rpcUrl = (env.RPC_URL || DEFAULT_RPC_URL);
 
   const naming = new AgentNamingClient({
     rpcUrl,

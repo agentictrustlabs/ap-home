@@ -40,7 +40,8 @@ interface SessionCtx {
   clearNotice(): void;
   openSession(token: string, via: string, fresh: boolean): Promise<BasicProfile | null>;
   signOut(): void;
-  refreshProfile(): Promise<void>;
+  /** Re-read `/me/profile`; resolves to what was read (null when it could not be read). */
+  refreshProfile(): Promise<BasicProfile | null>;
   /** Re-read the profile name after the person edits their profile. */
   refreshPersonName(): Promise<void>;
 }
@@ -149,9 +150,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     window.location.assign(`/logout?return=${encodeURIComponent(here)}`);
   }, []);
 
-  const refreshProfile = useCallback(async () => {
-    if (!session) return;
-    setProfile(await fetchProfile(session.token));
+  const refreshProfile = useCallback(async (): Promise<BasicProfile | null> => {
+    if (!session) return null;
+    const p = await fetchProfile(session.token);
+    setProfile(p);
+    return p;
   }, [session]);
 
   // The profile name is a vault read (private tier); a home whose vault key or interactions plane is

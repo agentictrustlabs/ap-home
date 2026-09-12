@@ -98,7 +98,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     if (!subjectAddr) return jsonCors({ error: 'listing subject must be an EVM agent' }, request, 400);
     // Label resolution stays Home-side (a naming READ; the DO validates + proof-verifies).
     const naming = new AgentNamingClient({
-      rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL, chainId: CHAIN_ID,
+      rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL), chainId: CHAIN_ID,
       registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver,
     });
     const name = await naming.reverseResolve(subjectAddr).catch(() => null);

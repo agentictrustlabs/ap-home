@@ -2680,6 +2680,8 @@ export interface BasicProfile {
   /** spec 257 Phase 1.5 — is the SA deployed on-chain? false = counterfactual (fresh Google
    *  return, no home yet → secure-home); true with name === null = a nameless deferred home. */
   deployed: boolean;
+  /** The on-chain read failed — `deployed` is a default, not an answer (ADR-0013). */
+  deployedError?: string;
 }
 
 export async function fetchProfile(token: string): Promise<BasicProfile | null> {

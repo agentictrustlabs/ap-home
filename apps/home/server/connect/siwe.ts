@@ -81,7 +81,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // Derive the deterministic SA for this EOA (mode 0, salt 0, custodian = eoa) and
   // confirm on-chain. Already deployed + custodian → reconnect; else → bootstrap.
   const accounts = new AgentAccountClient({
-    rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL,
+    rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL),
     chainId: CHAIN_ID,
     entryPoint: CONTRACTS.entryPoint,
     factory: CONTRACTS.agentAccountFactory,

@@ -12,7 +12,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   if (!/^0x[0-9a-f]{40}$/.test(raw)) return json({ error: 'address (0x…40) required' }, 400);
 
   const naming = new AgentNamingClient({
-    rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL,
+    rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL),
     chainId: CHAIN_ID,
     registry: CONTRACTS.agentNameRegistry,
     universalResolver: CONTRACTS.agentNameUniversalResolver,

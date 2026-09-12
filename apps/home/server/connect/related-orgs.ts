@@ -125,7 +125,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     // service on read (ADR-0013-safe: reconciling a projection from its source, not a fallback).
     if (!link.orgName || link.orgName.toLowerCase() === link.orgAgent.toLowerCase()) {
       const healed = await new AgentNamingClient({
-        rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL, chainId: CHAIN_ID,
+        rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL), chainId: CHAIN_ID,
         registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver,
       }).reverseResolve(link.orgAgent as Address).catch(() => null);
       if (healed) {
@@ -331,7 +331,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     });
     const challenge = hashRelatedAgentWriteChallenge({ person: person as Address, orgAgent: org as Address, contentHash, nonce, expiry });
 
-    const client = createPublicClient({ transport: http(env.RPC_URL ?? 'https://sepolia.base.org') });
+    const client = createPublicClient({ transport: http(env.RPC_URL || DEFAULT_RPC_URL) });
     let valid = false;
     try {
       const r = (await client.readContract({

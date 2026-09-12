@@ -27,7 +27,11 @@ import { HomeResolvedView } from './HomeResolvedView';
 import { enrollResumeHref, readPendingEnroll } from './pending-enroll';
 
 export function GoogleSecureHome() {
-  const { session, refreshProfile } = useSession();
+  const { session, profile, refreshProfile } = useSession();
+  // "You're in." led nowhere when the profile's chain read kept failing (an empty RPC secret): Continue re-read the
+  // profile, `deployed` stayed false, and the gate showed this beat again with nothing said. Now Continue polls a few
+  // times and then SAYS what it could not confirm, with a retry — never a silent loop (ADR-0013).
+  const [confirming, setConfirming] = useState<null | 'checking' | string>(null);
   const community = whitelabel.brand.community;
   const c = whitelabel.copy;
   // 'auto' = the happy path (no name → silently secure a NAMELESS home). 'name' = the reachable
@@ -162,8 +166,24 @@ export function GoogleSecureHome() {
             window.location.assign(enrollResumeHref(pending));
             return;
           }
-          void refreshProfile();
+          setConfirming('checking');
+          void (async () => {
+            // The gate leaves this beat the moment the profile reads `deployed: true`; a fresh deploy can lag a
+            // block or two, so ask a few times before concluding anything.
+            for (let i = 0; i < 6; i++) {
+              const p = await refreshProfile().catch(() => null);
+              if (p?.deployed) return;
+              if (p?.deployedError) { setConfirming(p.deployedError); return; }
+              await new Promise((r) => setTimeout(r, 2500));
+            }
+            setConfirming('your home is secured, but the chain has not confirmed it yet');
+          })();
         }}
+        note={confirming === 'checking'
+          ? 'Confirming your home on the chain…'
+          : confirming
+            ? <>Could not confirm your home yet — {confirming}. <button type="button" className="ui-btn ui-btn--ghost ui-btn--sm" onClick={() => { setConfirming(null); void refreshProfile(); }}>Try again</button></>
+            : null}
       />
     );
   }

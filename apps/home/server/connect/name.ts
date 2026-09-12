@@ -37,7 +37,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   if ('error' in suffix) return json({ error: suffix.error }, 400);
   const { tld } = suffix;
   const naming = new AgentNamingClient({
-    rpcUrl: env.RPC_URL ?? DEFAULT_RPC_URL,
+    rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL),
     chainId: CHAIN_ID,
     registry: CONTRACTS.agentNameRegistry,
     universalResolver: CONTRACTS.agentNameUniversalResolver,
