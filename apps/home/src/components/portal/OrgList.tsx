@@ -8,6 +8,7 @@ import { listMyOrgs, type MyOrg } from '../../connect-client';
 import { vaultListWithDelegation, vaultReadWithDelegation, type VaultRecordRef } from '../../lib/vault-client';
 import { AddressChip } from '../shared/AddressChip';
 import { BuildingIcon } from '../shared/Icons';
+import { FleetLines } from './FleetLines';
 
 
 export function purposeLabel(p: string): string {
@@ -136,6 +137,8 @@ export function OrgList({ token, heading = true, onSelect }: { token: string | n
                 <span className="manage-card-badge live">{o.relationship === 'member' ? 'member' : purposeLabel(o.purpose)}</span>
               </div>
               <div style={{ margin: '.45rem 0' }}><AddressChip address={o.orgAgent} size="sm" /></div>
+              {/* M06 (398 §4.4) — where it runs, what it may spend, what it holds: three lines, not an avatar. */}
+              {token && o.relationship !== 'member' && <FleetLines agent={o.orgAgent as `0x${string}`} token={token} stewardship />}
               <p className="manage-card-blurb">
                 {o.relationship === 'member' ? (
                   <>You belong to this organization as a member (no custody). <ExplorerLink address={o.orgAgent} label="View on explorer ↗" /></>

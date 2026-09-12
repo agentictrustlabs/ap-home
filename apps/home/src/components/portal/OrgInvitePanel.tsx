@@ -18,6 +18,7 @@ import { signHashFor, resolveVia } from '../../home/onboarding';
 import { issueOrganizationResourceAccessDelegation, toWire, type DelegationWire } from '../../lib/delegation';
 import { CONTRACTS } from '../../lib/chain';
 import { MCP_SERVER_ID } from '../../lib/inbox-delivery';
+import { BasisLine } from './BasisLine';
 
 /** Steward arrived from a relying app — send invitees back there after they join.
  *  Stash on the org so a later client nav that drops `?return=&app=` still records the app. */
@@ -185,6 +186,7 @@ export function OrgInvitePanel({ org }: { org: string }) {
 
       <div className="dash-section" style={{ maxWidth: 560 }}>
         <h2>Invite an existing member</h2>
+        <BasisLine needs="the organization's invitation, signed under your stewardship" style={{ marginBottom: '0.4rem' }} />
         <p style={{ fontSize: '.85rem', opacity: 0.75, margin: '0 0 .6rem' }}>
           Someone already in the naming service — they get an in-app invitation with a Join button.
         </p>

@@ -16,6 +16,7 @@ import { sendMessage, MessagingWireRequiredError } from '../../lib/messaging-sen
 import { useManagedAgents } from './ManagedAgents';
 import { ApproveMessaging } from './ApproveMessaging';
 import { readOrgApplications, dropOrgApplication } from '../../lib/org-applications-client';
+import { BasisLine } from './BasisLine';
 
 interface AppItem { applicationId: string; applicant: string; message: string; submittedAt: string }
 
@@ -126,7 +127,8 @@ export function OrgApplicationsPanel({ org }: { org: string }) {
 
   return (
     <div style={{ marginTop: '1.5rem' }}>
-      <h3 className="subhead" style={{ marginBottom: '.6rem' }}>Pending join requests · {items.length}</h3>
+      <h3 className="subhead" style={{ marginBottom: '.3rem' }}>Pending join requests · {items.length}</h3>
+      <BasisLine needs="the organization's membership grant, signed under your stewardship" style={{ marginBottom: '0.5rem' }} />
       <ApproveMessaging
         need={wireNeeded}
         person={communityId as Address}

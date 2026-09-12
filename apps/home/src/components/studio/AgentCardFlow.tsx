@@ -61,6 +61,7 @@ import { Inspector, type PanelId } from './Inspector';
 import { ReleaseStepper } from './ReleaseStepper';
 import { Banner, Chip, ErrorLine, LiveRegion, inputStyle } from './ui';
 import { notifyCardChanged, useCanSignFor } from './useStudio';
+import { BasisLine } from '../portal/BasisLine';
 
 export function AgentCardFlow({
   delegation, detail, projections, scopes, sa, agentName, basePath, signHashFor, onDetail, onReload,
@@ -365,6 +366,7 @@ export function AgentCardFlow({
             </div>
           </div>
         )}
+        {(save.action?.id === 'publish' || save.action?.id === 'republish') && <BasisLine needs="a publication act — editor, approver, signer and publisher are distinct roles (spec 347)" style={{ marginBottom: '0.3rem' }} />}
         <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
           {(save.action?.id === 'publish' || save.action?.id === 'republish') && !waitingOnSomeoneElse && (
             <BusyButton busy={busy === 'publish'} busyLabel={phase || 'Saving…'} className="btn-primary" disabled={plan.kind !== 'ready'} onClick={() => void runPublish()}>

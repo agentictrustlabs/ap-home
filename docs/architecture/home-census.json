@@ -61,7 +61,7 @@
       ],
       "title": "Principal ≠ workspace context — the header switcher, acting-as / acting-in",
       "priority": "P0",
-      "status": "partial",
+      "status": "shipped",
       "specs": [
         315,
         348,
@@ -77,6 +77,7 @@
       ],
       "components": [
         "components/portal/BasisLine.tsx",
+        "components/portal/FleetLines.tsx",
         "components/portal/nav.ts",
         "lib/acting-basis.ts",
         "lib/workspace.ts"
@@ -88,8 +89,7 @@
         "apps/demo-sso-next/src/lib/org-membership-union.test.ts"
       ],
       "gaps": [
-        "fleet isolation shown as a compute + credential boundary, not an avatar — M06",
-        "the basis line is on the Ask's authority card, My Work's decisions, the endeavor detail and the request composer — not yet on every mutation screen (invites, membership, treasury pay, Card Studio publish) nor the M06 fleet lines on the roster (398 §4.4)"
+        "the basis line is on the Ask's authority card, decisions, the endeavor detail, the request composer, invitations, join requests, treasury funding and the Card Studio's publish; M06's three lines (runs at · may spend · holds) on the organization roster — not yet on the services roster or the member rows (398 §4.4)"
       ]
     },
     {
