@@ -42,8 +42,8 @@ function EndeavorRow({ org, row }: { org: string; row: EndeavorRow }) {
         {(row.stepsTotal ?? 0) === 0 && row.lifecycle === 'adopted' && <span style={{ color: 'var(--color-amber-700)' }}> · needs a plan</span>}
         {row.deadline && ` · due ${new Date(row.deadline).toLocaleDateString()}`}
         {row.updatedAt && ` · updated ${new Date(row.updatedAt).toLocaleDateString()}`}
-        {/* 398 §4.3 — the same item contract on the row: owner here; executors · artifacts · acceptance · cost are the item's. */}
-        <span className="ui-micro" data-testid="work-item-row"> · owner <AgentName address={it.owner.agent} /> · {it.onItem.join(' · ')}: on the item</span>
+        {/* 398 §4.3 — the same item contract on the row: the owner here; executors · artifacts · acceptance · cost are read on the item. */}
+        <span data-testid="work-item-row" title={`${it.onItem.join(' · ')}: on the item`}> · owner <AgentName address={it.owner.agent} /></span>
       </>}
       side={<><StatePill state={lifecycleState(row.lifecycle)} native={LIFECYCLE_LABEL[row.lifecycle]} /><Progress done={row.stepsSatisfied ?? 0} total={row.stepsTotal ?? 0} /></>}
     />
