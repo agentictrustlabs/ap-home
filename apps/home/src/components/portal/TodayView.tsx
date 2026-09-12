@@ -1,9 +1,10 @@
 'use client';
 // TODAY — spec 398 §4.2, the first page of every workspace (the nav's first slot, 348's grammar kept). Outcome-led,
 // in a FIXED order: decisions awaiting me → active goals → recent artifacts → routine exceptions → one suggested
-// next act. No message counts, no infrastructure statistics. Every card points at the surface that owns the act
+// next act. No message counts, no infrastructure statistics. Every row points at the surface that owns the act
 // (Work, the Ask, the Library, the Playbook) — nothing here executes: an approval is signed where approvals are
-// signed. The assembly is `src/home/today.ts` (pure, table-tested); this component only fetches and renders.
+// signed. The assembly is `src/home/today.ts` (pure, table-tested); this component only fetches and renders, on the
+// UI system: one section shape, one list of rows, an empty state that is a fact and an unknown state that is not.
 import { useMemo } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
@@ -13,50 +14,34 @@ import { useMyWork } from './work/useWork';
 import { StatePill } from './StatePill';
 import { RunControls } from './runs/RunControls';
 import { workspaceHref, type WorkspaceScope } from '../../lib/workspace';
+import { Section, List, Row, Empty, Unknown, Meta } from '../../ui';
 
 const RECENT_DAYS = 7;
 
 type CardCtx = { token: string; addressee: Address; onCanceled: (runRef: string) => void };
 
-function Section({ title, hint, items, empty, children, ctx, unknown }: { title: string; hint: string; items?: TodayItem[]; empty: string; children?: React.ReactNode; ctx?: CardCtx; /** 398 §6.3 — the read behind this section failed: say so, never render the unknown as nothing */ unknown?: string }) {
-  return (
-    <section className="dash-section" data-testid={`today-${title.toLowerCase().replace(/[^a-z]+/g, '-')}`}>
-      <h2 style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
-        {title}
-        {items && items.length > 0 && <span style={{ fontSize: '0.74rem', fontWeight: 400, opacity: 0.6 }}>{items.length}</span>}
-      </h2>
-      <p className="manage-card-blurb">{hint}</p>
-      {unknown && <p style={{ fontSize: '0.78rem', color: 'var(--color-amber-700, #b45309)' }} data-testid="today-unknown">unknown — {unknown}. {items && items.length > 0 ? 'What is shown is partial.' : 'Nothing is shown because nothing could be read, not because nothing is there.'}</p>}
-      {children ?? (items && items.length === 0 && !unknown ? <p className="muted" style={{ fontSize: '0.8rem' }}>{empty}</p> : null)}
-      {!children && items && items.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-          {items.map((it) => <Card key={it.id} item={it} {...(ctx ? { ctx } : {})} />)}
-        </div>
-      )}
-    </section>
+function ItemRow({ item, ctx }: { item: TodayItem; ctx?: CardCtx }) {
+  const href = item.href ?? (item.askSeed ? `/ask?seed=${encodeURIComponent(item.askSeed)}` : undefined);
+  const side = (
+    <>
+      {item.runRef && ctx && <RunControls token={ctx.token} addressee={ctx.addressee} runRef={item.runRef} compact onCanceled={() => ctx.onCanceled(item.runRef!)} />}
+      {item.state && <StatePill state={item.state} {...(item.native ? { native: item.native } : {})} />}
+      {item.at && <span className="ui-row-time">{new Date(item.at).toLocaleDateString()}</span>}
+    </>
   );
+  // a row with a control on it is not itself a link (a button inside an anchor is two clicks fighting): the title links
+  return item.runRef
+    ? <Row title={item.title} meta={item.detail} side={side} {...(href ? { titleHref: href } : {})} testId="today-card" />
+    : <Row title={item.title} meta={item.detail} side={side} {...(href ? { href } : {})} testId="today-card" />;
 }
 
-function Card({ item, ctx }: { item: TodayItem; ctx?: CardCtx }) {
-  const href = item.href ?? (item.askSeed ? `/ask?seed=${encodeURIComponent(item.askSeed)}` : undefined);
-  const body = (
-    <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
-      <div style={{ minWidth: 0, flex: 1 }}>
-        {/* a card with a control on it is not itself a link (a button inside an anchor is two clicks fighting): the title links */}
-        <div style={{ fontWeight: 600, fontSize: '0.86rem', lineHeight: 1.35 }}>{item.runRef && href ? <a href={href} style={{ color: 'inherit', textDecoration: 'none' }}>{item.title}</a> : item.title}</div>
-        {item.detail && <div style={{ fontSize: '0.73rem', opacity: 0.65, marginTop: '0.15rem' }}>{item.detail}</div>}
-      </div>
-      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flex: 'none' }}>
-        {item.runRef && ctx && <RunControls token={ctx.token} addressee={ctx.addressee} runRef={item.runRef} compact onCanceled={() => ctx.onCanceled(item.runRef!)} />}
-        {item.state && <StatePill state={item.state} {...(item.native ? { native: item.native } : {})} />}
-        {item.at && <span style={{ fontSize: '0.7rem', opacity: 0.55 }}>{new Date(item.at).toLocaleDateString()}</span>}
-      </div>
-    </div>
+function TodaySection({ title, items, empty, unknown, aside, ctx }: { title: string; items: TodayItem[]; empty: string; unknown?: string; aside?: React.ReactNode; ctx?: CardCtx }) {
+  return (
+    <Section title={title} count={items.length || undefined} aside={aside} testId={`today-${title.toLowerCase().replace(/[^a-z]+/g, '-')}`}>
+      {unknown && <Unknown read={unknown} partial={items.length > 0} testId="today-unknown" />}
+      {items.length > 0 ? <List>{items.map((it) => <ItemRow key={it.id} item={it} {...(ctx ? { ctx } : {})} />)}</List> : !unknown ? <Empty>{empty}</Empty> : null}
+    </Section>
   );
-  const style = { display: 'block', padding: '0.6rem 0.85rem', textDecoration: 'none', color: 'inherit' } as const;
-  return href && !item.runRef
-    ? <a className="manage-card" href={href} style={style} data-testid="today-card">{body}</a>
-    : <div className="manage-card" style={style} data-testid="today-card">{body}</div>;
 }
 
 /** Which agent Today is ABOUT: the person's own, or the workspace's organization / service. The decisions and
@@ -88,25 +73,17 @@ export function TodayView({ scope, children }: { scope: WorkspaceScope; children
   if (!session) return null;
   return (
     <div className="today" data-testid="today">
-      {today === null && <p className="muted" style={{ fontSize: '0.8rem' }}>Reading what needs you…</p>}
+      {today === null && <Meta>Reading what needs you…</Meta>}
       {today && (
         <>
-          <Section title="Needs your decision" hint="A signature, a decision you were named to make, a commitment waiting on you. Each opens where it is signed." items={today.decisions} empty="Nothing is waiting on you." {...(ctx ? { ctx } : {})} {...(failed.runs ? { unknown: `the parked runs could not be read (${failed.runs})` } : {})} />
-          <Section title="Active goals" hint="What your agent is doing and what you committed to, with its state." items={today.active} empty="Nothing in motion. Ask for something, or take on work." {...(ctx ? { ctx } : {})} {...(failed.runs ? { unknown: `the parked runs could not be read (${failed.runs})` } : {})} />
-          <Section title="Recent artifacts" hint={`What the last ${RECENT_DAYS} days left in the Library.`} items={today.artifacts} empty="No new artifacts this week." {...(failed.artifacts ? { unknown: `the Library could not be read (${failed.artifacts})` } : {})} />
-          {today.artifacts.length > 0 && <p style={{ fontSize: '0.76rem', marginTop: '-0.6rem' }}><a href={libraryHref}>Open the Library →</a></p>}
-          <Section title="Routine exceptions" hint="A scheduled or hooked routine whose last firing failed." items={today.exceptions} empty="Every routine's last firing went through." {...(failed.triggers ? { unknown: `the schedule could not be read (${failed.triggers})` } : {})} />
-          {today.exceptions.length > 0 && <p style={{ fontSize: '0.76rem', marginTop: '-0.6rem' }}><a href={playbookHref}>Open the Playbook →</a></p>}
-          {/* spec 398 §5.4 — cost, from the bills the records carry; absent when none does, never a zero. */}
-          <p className="manage-card-blurb" data-testid="today-cost" style={{ fontSize: '0.76rem' }}>
-            {today.cost
-              ? <>Cost, last {today.cost.days} days: <strong>{today.cost.runs}</strong> run{today.cost.runs === 1 ? '' : 's'} · <strong>{today.cost.vaultCalls}</strong> vault call{today.cost.vaultCalls === 1 ? '' : 's'} · <strong>{today.cost.doRequests}</strong> serving request{today.cost.doRequests === 1 ? '' : 's'} — each run's bill is on its record.</>
-              : failed.records ? <span style={{ color: 'var(--color-amber-700, #b45309)' }}>cost unknown — the records could not be read ({failed.records})</span> : <>No run in the last {RECENT_DAYS} days carries a bill.</>}
-          </p>
-          <Section title="Next" hint="One act this agent's playbook offers here — drawn from its vocabulary, never a fixed list." empty="This agent offers nothing to suggest yet: choose a playbook for it.">
-            {today.next
-              ? <Card item={today.next} />
-              : <p className="muted" style={{ fontSize: '0.8rem' }}>This agent offers nothing to suggest yet: choose a playbook for it.</p>}
+          <TodaySection title="Needs your decision" items={today.decisions} empty="Nothing is waiting on you." {...(ctx ? { ctx } : {})} {...(failed.runs ? { unknown: `your unfinished asks could not be read (${failed.runs})` } : {})} />
+          <TodaySection title="Active goals" items={today.active} empty="Nothing in motion. Ask for something, or take on work." {...(ctx ? { ctx } : {})} {...(failed.runs ? { unknown: `your unfinished asks could not be read (${failed.runs})` } : {})} />
+          <TodaySection title="Recent artifacts" items={today.artifacts} empty={`Nothing new in the Library in the last ${RECENT_DAYS} days.`} aside={<a href={libraryHref}>Open the Library →</a>} {...(failed.artifacts ? { unknown: `the Library could not be read (${failed.artifacts})` } : {})} />
+          <TodaySection title="Routine exceptions" items={today.exceptions} empty="Every routine's last firing went through." aside={<a href={playbookHref}>Playbook →</a>} {...(failed.triggers ? { unknown: `the schedule could not be read (${failed.triggers})` } : {})} />
+          <Section title="Next" aside={<span data-testid="today-cost">{today.cost
+            ? <>last {today.cost.days} days: {today.cost.runs} run{today.cost.runs === 1 ? '' : 's'} · {today.cost.vaultCalls} vault call{today.cost.vaultCalls === 1 ? '' : 's'} · {today.cost.doRequests} serving request{today.cost.doRequests === 1 ? '' : 's'}</>
+            : failed.records ? <span style={{ color: 'var(--color-amber-700)' }}>cost unknown — the records could not be read ({failed.records})</span> : <>no run in the last {RECENT_DAYS} days carries a bill</>}</span>}>
+            {today.next ? <List><ItemRow item={today.next} /></List> : <Empty>This agent offers nothing to suggest yet — <a href={playbookHref}>choose a playbook</a>.</Empty>}
           </Section>
         </>
       )}

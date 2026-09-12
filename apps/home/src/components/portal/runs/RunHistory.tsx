@@ -9,6 +9,7 @@ import type { Address } from '@agenticprimitives/types';
 import { listRunRecords, type RunRecordRow } from '../../../home/ask';
 import { RunInspector } from './RunInspector';
 import { StatePill } from '../StatePill';
+import { Section, List, Row, Empty, Unknown, Meta, Button } from '../../../ui';
 import { stateOf, type RunStateSource } from '../../../home/run-state';
 
 /** A finished run's record carries its `outcome` (350 `RunOutcome`); the pill shows the projected state (398 §5.1). */
@@ -27,33 +28,34 @@ export function RunHistory({ token, addressee, limit = 25 }: { token: string; ad
     void listRunRecords({ token }, addressee).then((r) => { if (live) setRows(r.records.sort((a, b) => b.at - a.at)); }).catch((e) => { if (live) { setUnknown(e instanceof Error ? e.message : String(e)); setRows([]); } });
     return () => { live = false; };
   }, [token, addressee]);
+  const shown = (rows ?? []).slice(0, limit);
   return (
-    <div className="dash-section" style={{ marginTop: '1.5rem' }} data-testid="run-history">
-      <h2>What this agent did</h2>
-      <p className="manage-card-blurb">
-        Every run you asked of it, from its own records: the goal, how it ended, and — opened — each step, how long it took,
-        under whose authority, and where it handed work on. The same provenance an exporter would carry; download it from any run.
-      </p>
-      {rows === null && <p className="muted" style={{ fontSize: '0.8rem' }}>Reading the runs back…</p>}
-      {unknown && <p style={{ fontSize: '0.8rem', color: 'var(--color-amber-700, #b45309)' }} data-testid="runs-unknown">unknown — the runs could not be read ({unknown}). Nothing is shown because nothing could be read.</p>}
-      {rows !== null && rows.length === 0 && !unknown && <p className="muted" style={{ fontSize: '0.8rem' }}>No finished runs of yours here yet. Ask something, and it appears.</p>}
-      {(rows ?? []).slice(0, limit).map((r) => {
-        const goal = r.intent?.goal ?? r.runRef;
-        const isOpen = open === r.runRef;
-        return (
-          <div key={r.runRef} style={{ padding: '0.45rem 0', borderBottom: '1px solid var(--color-border)' }}>
-            <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'baseline', fontSize: '0.84rem', flexWrap: 'wrap' }}>
-              <span style={{ flex: 'none', opacity: 0.6, fontSize: '0.74rem' }}>{new Date(r.at).toLocaleString()}</span>
-              <span style={{ flex: 1, minWidth: 200 }}>{goal.length > 140 ? `${goal.slice(0, 137)}…` : goal}</span>
-              <StatePill state={stateOf(sourceOf(r))} native={r.canceled ? canceledWords(r.canceled) : r.outcome} compact style={{ flex: 'none' }} />
-              {r.canceled && <span style={{ flex: 'none', fontSize: '0.72rem', opacity: 0.7 }}>{canceledWords(r.canceled)}{r.canceled.note ? ` — “${r.canceled.note}”` : ''}</span>}
-              <span style={{ flex: 'none', fontSize: '0.72rem', opacity: 0.7 }}>{r.steps} step{r.steps === 1 ? '' : 's'} · {r.receipts} receipt{r.receipts === 1 ? '' : 's'}{r.export?.ok ? ' · in the vault' : ''}</span>
-              <button type="button" className="ghost" style={{ flex: 'none', fontSize: '0.74rem' }} onClick={() => setOpen(isOpen ? null : r.runRef)}>{isOpen ? 'Close' : 'Open'}</button>
-            </div>
-            {isOpen && <RunInspector token={token} addressee={addressee} runRef={r.runRef} {...(r.intent?.goal ? { goal: r.intent.goal } : {})} />}
-          </div>
-        );
-      })}
-    </div>
+    <Section title="What this agent did" count={rows?.length || undefined} testId="run-history" aside={<span>every run you asked of it, from its own records — opened, each step, its authority, its provenance</span>}>
+      {rows === null && <Meta>Reading the runs back…</Meta>}
+      {unknown && <Unknown read={<>the runs could not be read ({unknown})</>} testId="runs-unknown" />}
+      {rows !== null && rows.length === 0 && !unknown && <Empty>No finished runs of yours here yet. Ask something, and it appears.</Empty>}
+      {shown.length > 0 && (
+        <List>
+          {shown.map((r) => {
+            const goal = r.intent?.goal ?? r.runRef;
+            const isOpen = open === r.runRef;
+            return (
+              <Row
+                key={r.runRef}
+                title={goal.length > 140 ? `${goal.slice(0, 137)}…` : goal}
+                meta={<>{r.steps} step{r.steps === 1 ? '' : 's'} · {r.receipts} receipt{r.receipts === 1 ? '' : 's'}{r.export?.ok ? ' · in the vault' : ''}{r.canceled ? ` · ${canceledWords(r.canceled)}${r.canceled.note ? ` — “${r.canceled.note}”` : ''}` : ''}</>}
+                side={<>
+                  <StatePill state={stateOf(sourceOf(r))} native={r.canceled ? canceledWords(r.canceled) : r.outcome} compact />
+                  <span className="ui-row-time">{new Date(r.at).toLocaleString()}</span>
+                  <Button size="sm" variant="ghost" onClick={() => setOpen(isOpen ? null : r.runRef)}>{isOpen ? 'Close' : 'Inspect'}</Button>
+                </>}
+              >
+                {isOpen && <RunInspector token={token} addressee={addressee} runRef={r.runRef} {...(r.intent?.goal ? { goal: r.intent.goal } : {})} />}
+              </Row>
+            );
+          })}
+        </List>
+      )}
+    </Section>
   );
 }

@@ -6,12 +6,6 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { parseWorkspacePath, orgHref } from '../../lib/workspace';
 
-const STYLE: React.CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: '.35rem', padding: '.34rem .7rem',
-  borderRadius: 8, fontSize: '.82rem', fontWeight: 600, whiteSpace: 'nowrap', cursor: 'pointer',
-  color: 'var(--color-amber-800)', background: 'var(--color-amber-50)',
-  border: '1px solid var(--color-amber-200)', textDecoration: 'none',
-};
 
 export function WorkspaceAction() {
   const pathname = usePathname();
@@ -20,15 +14,15 @@ export function WorkspaceAction() {
 
   if (active.kind === 'person') {
     return (
-      <button type="button" style={STYLE} onClick={() => router.push('/agents')} title="Create a new organization">
-        ＋ Add organization
+      <button type="button" className="ui-btn ui-btn--secondary ui-btn--sm" onClick={() => router.push('/agents')} title="Create a new organization">
+        Add organization
       </button>
     );
   }
   if (active.kind === 'org') {
     return (
-      <button type="button" style={STYLE} onClick={() => router.push(orgHref(active.org, 'membership'))} title="Invite someone to this organization">
-        ✉ Invite member
+      <button type="button" className="ui-btn ui-btn--secondary ui-btn--sm" onClick={() => router.push(orgHref(active.org, 'membership'))} title="Invite someone to this organization">
+        Invite member
       </button>
     );
   }

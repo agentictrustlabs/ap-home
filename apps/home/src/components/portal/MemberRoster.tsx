@@ -15,10 +15,10 @@ import { useSession } from '../../context/session';
 import { SectionShell } from './SectionShell';
 import { fetchRoster, type RosterMember } from '../../lib/recipient-directory';
 import { AddressChip } from '../shared/AddressChip';
-import { cardSty, mutedText, errorText } from './theme';
 import { setAskSelection } from '../../home/ask-selection';
 import { rosterRows, type RosterRow } from '../../home/roster-contract';
 import { fetchWorkList } from '../../lib/work-client';
+import { List, KeyValue, Empty, ErrorNote, Meta, LinkButton } from '../../ui';
 
 export function MemberRoster({ agent, title = 'Members' }: { agent: string; title?: string }) {
   const { session, agentAddress } = useSession();
@@ -49,67 +49,61 @@ export function MemberRoster({ agent, title = 'Members' }: { agent: string; titl
   }, [session?.token, agent, agentAddress]);
   useEffect(() => { void load(); }, [load]);
 
-  if (!session) return <SectionShell title={title}><p>Not signed in.</p></SectionShell>;
+  if (!session) return <SectionShell title={title}><Empty>Not signed in.</Empty></SectionShell>;
 
+  const rows = members ? rosterRows({ members, executors }) : [];
   return (
-    <SectionShell title={title}>
-      <p className="manage-card-blurb" style={{ marginTop: 0 }}>
-        The people in this workspace and how to reach them. Deciding who belongs is Settings &rarr;
-        Membership.
-      </p>
-      {error && <p style={errorText}>{error}</p>}
+    <SectionShell title={title} description={<>The people in this workspace and how to reach them. Who belongs is decided under Settings → Membership.</>}>
+      {error && <ErrorNote>{error}</ErrorNote>}
       {members === null ? (
-        <p style={mutedText}>Reading the roster…</p>
+        <Meta>Reading the roster…</Meta>
       ) : members.length === 0 ? (
-        <p className="manage-card-blurb">
-          No members yet. Invite someone under Settings &rarr; Membership, and they appear here once they
-          accept.
-        </p>
+        <Empty title="No members yet">Invite someone under Settings → Membership; they appear here once they accept.</Empty>
       ) : (
-        <div style={{ display: 'grid', gap: '.5rem' }}>
-          {rosterRows({ members, executors }).map((m: RosterRow) => {
+        <List testId="roster">
+          {rows.map((m: RosterRow) => {
             const you = !!agentAddress && m.address.toLowerCase() === agentAddress.toLowerCase();
+            const picked = selected === m.address.toLowerCase();
+            const facets = [m.kin, m.role && m.role !== 'member' ? m.role : null].filter(Boolean).join(' · ');
             return (
               <div
                 key={m.address}
+                className="ui-row"
                 // Spec 361 I6 — selecting a member is context the Ask can use ("invite her", "message him"):
                 // the reference reaches the agent as validated context, never as words in a prompt.
-                role="button" tabIndex={0} aria-pressed={selected === m.address.toLowerCase()}
-                onClick={() => { const next = selected === m.address.toLowerCase() ? null : m.address.toLowerCase(); setSelected(next); setAskSelection(next ? { entity: next as `0x${string}`, kind: 'person', label: m.displayName || m.address } : null); }}
+                role="button" tabIndex={0} aria-pressed={picked}
+                onClick={() => { const next = picked ? null : m.address.toLowerCase(); setSelected(next); setAskSelection(next ? { entity: next as `0x${string}`, kind: 'person', label: m.displayName } : null); }}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); (e.currentTarget as HTMLDivElement).click(); } }}
-                style={{ ...cardSty, display: 'flex', alignItems: 'center', gap: '.7rem', flexWrap: 'wrap', cursor: 'pointer', outline: selected === m.address.toLowerCase() ? '2px solid var(--color-sage-700, #3f6212)' : undefined }}
+                style={{ cursor: 'pointer', alignItems: 'flex-start', ...(picked ? { background: 'var(--color-surface-raised)', boxShadow: 'inset 3px 0 0 var(--color-amber-500)' } : {}) }}
+                data-testid={`member-${m.address}`}
               >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: '.9rem' }}>
-                    {m.displayName}{you && <span style={{ ...mutedText, fontWeight: 400 }}> (you)</span>}
+                <div className="ui-row-main">
+                  <div className="ui-row-title" style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                    {m.displayName}{you && <span className="ui-micro">you</span>}
+                    {m.publicName && <span className="ui-meta">{m.publicName}</span>}
+                    {facets && <span className="ui-meta" data-testid={`member-facets-${m.address}`}>{facets}</span>}
                   </div>
-                  {m.publicName && <div style={{ ...mutedText, fontSize: '.78rem' }}>{m.publicName}</div>}
-                  {/* Spec 368 — a household membership says how they are related and who is responsible for
-                      whom: two facts, two words, neither of which grants anything. */}
-                  {(m.kin || (m.role && m.role !== 'member')) && (
-                    <div style={{ ...mutedText, fontSize: '.78rem' }} data-testid={`member-facets-${m.address}`}>
-                      {m.kin ? `${m.kin}` : ''}{m.kin && m.role && m.role !== 'member' ? ' · ' : ''}{m.role && m.role !== 'member' ? m.role : ''}
-                    </div>
-                  )}
-                  <div style={{ marginTop: '.25rem' }}><AddressChip address={m.address as `0x${string}`} size="sm" /></div>
+                  <div style={{ margin: '2px 0 6px' }}><AddressChip address={m.address as `0x${string}`} size="sm" /></div>
                   {/* Spec 398 §4.5 — the roster contract: type · sponsor · responsibility · permissions · active work. */}
-                  <div style={{ ...mutedText, fontSize: '.72rem', marginTop: '.3rem', display: 'grid', gridTemplateColumns: 'max-content 1fr', columnGap: '.5rem', rowGap: 1 }} data-testid={`member-contract-${m.address}`}>
-                    <span>type</span><span>{m.type}</span>
-                    <span>sponsor</span><span>{m.sponsor}</span>
-                    <span>responsibility</span><span>{m.responsibility ?? 'none assigned'}</span>
-                    <span>permissions</span><span>{m.permissions}</span>
-                    <span>active work</span><span>{you ? (m.activeWork === 0 ? 'none' : `${m.activeWork} item${m.activeWork === 1 ? '' : 's'}`) : 'not visible to you (§12 — their own view)'}</span>
+                  <div data-testid={`member-contract-${m.address}`}>
+                    <KeyValue rows={[
+                      ['type', m.type, { absent: m.type === 'unknown' }],
+                      ['sponsor', m.sponsor],
+                      ['responsibility', m.responsibility ?? 'none assigned', { absent: !m.responsibility }],
+                      ['permissions', m.permissions],
+                      ['active work', you ? (m.activeWork === 0 ? 'none' : `${m.activeWork} item${m.activeWork === 1 ? '' : 's'}`) : 'not visible to you — their own view', { absent: !you }],
+                    ]} />
                   </div>
                 </div>
                 {!you && (
-                  <a className="btn-ghost" href={`/messages?to=${m.address}`} style={{ textDecoration: 'none', fontSize: '.8rem' }}>
-                    Message
-                  </a>
+                  <div className="ui-row-side">
+                    <LinkButton size="sm" href={`/messages?to=${m.address}`} onClick={(e) => e.stopPropagation()}>Message</LinkButton>
+                  </div>
                 )}
               </div>
             );
           })}
-        </div>
+        </List>
       )}
     </SectionShell>
   );

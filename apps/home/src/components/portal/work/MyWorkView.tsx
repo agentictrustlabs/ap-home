@@ -12,6 +12,7 @@ import type { HomeContributionEntryV1, HomeDecisionCardV1 } from '@agenticprimit
 import { useSession } from '../../../context/session';
 import { listRuns, type ParkedRun } from '../../../home/ask';
 import { SectionShell } from '../SectionShell';
+import { Section, List, Row, Empty, ErrorNote, Button, LinkButton, Chip } from '../../../ui';
 import { BusyButton } from '../../shared/BusyButton';
 import { Loading } from '../../shared/Loading';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
@@ -38,20 +39,11 @@ function EntryCard({
 }) {
   const detailHref = `/org/${saOf(entry.managingPrincipal)}/work/${encodeURIComponent(entry.endeavorId)}`;
   return (
-    <div className="manage-card" style={{ padding: '0.7rem 0.95rem', display: 'flex', justifyContent: 'space-between', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
-      <div style={{ minWidth: 0 }}>
-        <a href={detailHref} style={{ fontWeight: 600, fontSize: '0.86rem', textDecoration: 'none', color: 'inherit' }}>
-          {entry.endeavorTitle}
-        </a>
-        <div style={{ fontSize: '0.73rem', opacity: 0.65, marginTop: '0.15rem' }}>
-          {orgName ? `${orgName} · ` : ''}
-          {entry.status} · {entry.stepIds.length} plan step{entry.stepIds.length === 1 ? '' : 's'}
-          {entry.planRef.revision > 0 ? ` · plan revision ${entry.planRef.revision}` : ''}
-          {entry.deadline ? ` · due ${new Date(entry.deadline).toLocaleDateString()}` : ''}
-        </div>
-      </div>
-      {action}
-    </div>
+    <Row
+      title={entry.endeavorTitle} titleHref={detailHref}
+      meta={<>{orgName ? `${orgName} · ` : ''}{entry.status} · {entry.stepIds.length} plan step{entry.stepIds.length === 1 ? '' : 's'}{entry.planRef.revision > 0 ? ` · plan revision ${entry.planRef.revision}` : ''}{entry.deadline ? ` · due ${new Date(entry.deadline).toLocaleDateString()}` : ''}</>}
+      side={action}
+    />
   );
 }
 
@@ -136,18 +128,19 @@ export function MyWorkView() {
     };
   }, [bundles]);
 
-  if (!session) return <SectionShell title="My Work"><p>Not signed in.</p></SectionShell>;
+  if (!session) return <SectionShell title="My Work"><Empty>Not signed in.</Empty></SectionShell>;
 
   return (
     <SectionShell
       title="My Work"
+      description="What you asked for, what you were named to decide, and the steps you committed to — across every organization you belong to."
       actions={
-        <button type="button" className="btn-primary" style={{ width: 'auto', fontSize: '0.8rem', padding: '0.35rem 0.8rem' }} onClick={() => setComposerOpen((v) => !v)}>
+        <Button variant={composerOpen ? 'secondary' : 'primary'} onClick={() => setComposerOpen((v) => !v)}>
           {composerOpen ? 'Close' : 'New request'}
-        </button>
+        </Button>
       }
     >
-      {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{error}</p>}
+      {error && <ErrorNote>{error}</ErrorNote>}
 
       {staleOrgs.length > 0 && (
         <div className="manage-card" style={{ padding: '0.8rem 1rem', marginBottom: '0.9rem', border: '1px solid var(--color-amber-400)', background: 'var(--color-amber-50)' }}>
@@ -183,68 +176,57 @@ export function MyWorkView() {
         <>
           {/* Action-priority inbox: everything that NEEDS this person, first and unmissable. */}
           {(awaiting.length > 0 || decisions.length > 0) && (
-            <div className="chat-attention" style={{ marginBottom: '1rem' }}>
-              <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: '0.25rem' }}>
-                Needs your attention ({awaiting.length + decisions.length})
-              </div>
-              {/* spec 398 §4.4 — every decision here is signed as YOU; the organization it is FOR is on each card. */}
-              <BasisLine needs="your signature, as the named approver or the allocated participant" style={{ marginBottom: '0.5rem' }} />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+            <Section title="Needs your decision" count={awaiting.length + decisions.length} aside={<BasisLine needs="your signature, as the named approver or the allocated participant" />}>
+              <List>
                 {awaiting.map(({ b, e }) => (
                   <EntryCard
                     key={`attn:${b.org}:${e.allocationId}`}
                     entry={e}
                     {...(b.orgName ? { orgName: b.orgName } : {})}
                     action={
-                      <BusyButton busy={busyId === e.allocationId} busyLabel="Signing…" className="btn-primary" style={{ width: 'auto' }} onClick={() => void commit(b, e)}>
+                      <BusyButton busy={busyId === e.allocationId} busyLabel="Signing…" className="ui-btn ui-btn--primary ui-btn--sm" onClick={() => void commit(b, e)}>
                         Commit to this work
                       </BusyButton>
                     }
                   />
                 ))}
                 {decisions.map(({ b, c }) => (
-                  <div key={`attn:${b.org}:${c.decisionId}`} className="manage-card" style={{ padding: '0.7rem 0.95rem', display: 'flex', justifyContent: 'space-between', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.86rem' }}>{c.title}</div>
-                      <div style={{ fontSize: '0.73rem', opacity: 0.65 }}>
-                        {b.orgName ? `${b.orgName} · ` : ''}{c.decisionKind}
-                        {c.dueAt ? ` · due ${new Date(c.dueAt).toLocaleDateString()}` : ''}
-                      </div>
-                    </div>
-                    <span style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <Row
+                    key={`attn:${b.org}:${c.decisionId}`}
+                    title={c.title}
+                    meta={<>{b.orgName ? `${b.orgName} · ` : ''}{c.decisionKind}{c.dueAt ? ` · due ${new Date(c.dueAt).toLocaleDateString()}` : ''}</>}
+                    side={<>
                       <input
+                        className="input"
                         value={reasons[c.decisionId] ?? ''}
                         onChange={(e) => setReasons((r) => ({ ...r, [c.decisionId]: e.target.value }))}
                         placeholder="Why? (kept as the record)"
                         aria-label="Reason for the decision"
-                        style={{ fontSize: '0.8rem', padding: '0.3rem 0.5rem', minWidth: '12rem' }}
+                        style={{ fontSize: 'var(--fs-sm)', padding: '4px 8px', minWidth: '12rem', minHeight: 28 }}
                       />
                       {c.allowedActions.map((a) => (
                         <BusyButton
                           key={a.actionId}
                           busy={busyId === c.decisionId}
                           busyLabel="…"
-                          className={a.style === 'destructive' ? 'btn-danger' : 'btn-primary'}
-                          style={{ width: 'auto' }}
+                          className={`ui-btn ui-btn--sm ${a.style === 'destructive' ? 'ui-btn--danger' : 'ui-btn--primary'}`}
                           onClick={() => void decide(b, c, a.transition === 'approve' ? 'approved' : 'rejected')}
                         >
                           {a.label}
                         </BusyButton>
                       ))}
-                    </span>
-                  </div>
+                    </>}
+                  />
                 ))}
-              </div>
-            </div>
+              </List>
+            </Section>
           )}
 
-          <h3 className="subhead">Your requests</h3>
+          <Section title="Your requests" count={myRequests.length || undefined}>
           {myRequests.length === 0 ? (
-            <p style={{ fontSize: '0.8rem', opacity: 0.7, marginBottom: '0.9rem' }}>
-              No requests yet — use New request to state a goal for an organization or person.
-            </p>
+            <Empty>No requests yet — New request states a goal for an organization or a person.</Empty>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', marginBottom: '0.9rem' }}>
+            <List>
               {myRequests.map(({ b, q }) => {
                 // Adopted → resolve the Endeavor it became (the request row's endeavorId, or the
                 // endeavor whose requestRef points back at this request).
@@ -255,44 +237,36 @@ export function MyWorkView() {
                 // fall back to the lifecycle the serving plane attaches to the request row.
                 const lifecycle = endeavor?.lifecycle ?? q.endeavorLifecycle;
                 const completed = lifecycle === 'satisfied';
+                const href = status === 'adopted' && endeavorId ? `/org/${b.org}/work/${encodeURIComponent(endeavorId)}` : undefined;
                 return (
-                  <div key={`${b.org}:${q.requestId}`} className="manage-card" style={{ padding: '0.7rem 0.95rem', display: 'flex', justifyContent: 'space-between', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: '0.86rem' }}>{q.goal}</div>
-                      <div style={{ fontSize: '0.73rem', opacity: 0.65, marginTop: '0.15rem' }}>
-                        {b.orgName ? `${b.orgName} · ` : ''}
-                        {new Date(q.submittedAt).toLocaleString()}
-                        {status === 'pending' && ' · awaiting a decision'}
-                        {status === 'declined' && ` · declined${q.reason ? ` — ${q.reason}` : ''}`}
-                        {status === 'adopted' && !completed && (lifecycle ? <> · accepted — <StatePill state={lifecycleState(lifecycle)} native={LIFECYCLE_LABEL[lifecycle]} compact /></> : ' · accepted as an endeavor')}
-                        {status === 'adopted' && completed && (
-                          <> · <span style={{ color: 'var(--color-sage-700, #047857)', fontWeight: 600 }}>✓ the agent completed this</span></>
-                        )}
-                      </div>
-                    </div>
-                    {status === 'adopted' && endeavorId && (
-                      <a href={`/org/${b.org}/work/${encodeURIComponent(endeavorId)}`} className="btn" style={{ width: 'auto', fontSize: '0.76rem', textDecoration: 'none' }}>
-                        {completed ? 'View result' : 'View endeavor'}
-                      </a>
-                    )}
-                    {q.outcomeSummary && (
-                      <div style={{ flexBasis: '100%', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--color-border)', fontSize: '0.83rem', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
-                        <span style={{ fontWeight: 600 }}>Outcome: </span>{q.outcomeSummary}
-                      </div>
-                    )}
-                  </div>
+                  <Row
+                    key={`${b.org}:${q.requestId}`}
+                    title={q.goal} {...(href ? { titleHref: href } : {})}
+                    meta={<>
+                      {b.orgName ? `${b.orgName} · ` : ''}{new Date(q.submittedAt).toLocaleDateString()}
+                      {status === 'pending' && ' · awaiting a decision'}
+                      {status === 'declined' && ` · declined${q.reason ? ` — ${q.reason}` : ''}`}
+                      {status === 'adopted' && completed && ' · completed'}
+                    </>}
+                    side={<>
+                      {status === 'adopted' && !completed && lifecycle && <StatePill state={lifecycleState(lifecycle)} native={LIFECYCLE_LABEL[lifecycle]} compact />}
+                      {status === 'adopted' && completed && <Chip tone="ok">completed</Chip>}
+                      {href && <LinkButton size="sm" href={href}>{completed ? 'View result' : 'Open'}</LinkButton>}
+                    </>}
+                  >
+                    {q.outcomeSummary && <div className="ui-meta" style={{ marginTop: 4, whiteSpace: 'pre-wrap', color: 'var(--color-text-body)' }}><b>Outcome:</b> {q.outcomeSummary}</div>}
+                  </Row>
                 );
               })}
-            </div>
+            </List>
           )}
+          </Section>
 
-          <h3 className="subhead">Work you committed to</h3>
+          <Section title="Work you committed to" count={active.length || undefined}>
           {active.length === 0 ? (
-            <p style={{ fontSize: '0.8rem', opacity: 0.7 }}>
-              Nothing yet — when a coordinator assigns you plan steps and you commit, they appear here.
-            </p>
+            <Empty>Nothing yet — when a coordinator assigns you plan steps and you commit, they appear here.</Empty>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+            <List>
               {active.map(({ b, e }) => {
                 // Spec 382 W2 — the committed step is a run parked on THIS person's agent: shown beside the
                 // commitment, opened in the Ask (it asks for their mandate there), or taken back here.
@@ -302,13 +276,13 @@ export function MyWorkView() {
                     action={(
                       <span style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
                         {run ? (
-                          <a href={`/ask?seed=${encodeURIComponent(run.message)}`} className="btn-ghost" style={{ fontSize: '0.75rem' }} data-testid="committed-run-open" title={run.runRef}>
-                            Your agent holds it — open in Ask{run.awaiting ? ` (${runStateLabel(stateOf({ kind: 'suspended', awaiting: run.awaiting.kind as AwaitingKind, expired: false }))})` : ''}
-                          </a>
-                        ) : <span style={{ fontSize: '0.72rem', opacity: 0.6 }}>no parked run on your agent yet</span>}
+                          <LinkButton size="sm" href={`/ask?seed=${encodeURIComponent(run.message)}`} data-testid="committed-run-open" title={run.runRef}>
+                            Open in Ask{run.awaiting ? ` · ${runStateLabel(stateOf({ kind: 'suspended', awaiting: run.awaiting.kind as AwaitingKind, expired: false }))}` : ''}
+                          </LinkButton>
+                        ) : <span className="ui-micro">no parked run on your agent yet</span>}
                         {run && agentAddress && <RunControls token={session.token} addressee={agentAddress as Address} runRef={run.runRef} compact onCanceled={() => setParked((p) => p.filter((r) => r.runRef !== run.runRef))} />}
                         {e.commitmentId && (
-                          <BusyButton busy={busyId === `withdraw:${e.commitmentId}`} busyLabel="Withdrawing…" className="btn-ghost" style={{ width: 'auto', fontSize: '0.75rem' }} onClick={() => void withdraw(b, e)} disabled={!!busyId}>
+                          <BusyButton busy={busyId === `withdraw:${e.commitmentId}`} busyLabel="Withdrawing…" className="ui-btn ui-btn--ghost ui-btn--sm" onClick={() => void withdraw(b, e)} disabled={!!busyId}>
                             Withdraw
                           </BusyButton>
                         )}
@@ -317,8 +291,9 @@ export function MyWorkView() {
                   />
                 );
               })}
-            </div>
+            </List>
           )}
+          </Section>
         </>
       )}
     </SectionShell>

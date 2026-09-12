@@ -12,6 +12,7 @@ import { assembleRoutines, type RoutineView } from '../../home/routines';
 import { StatePill } from './StatePill';
 import { BusyButton } from '../shared/BusyButton';
 import { workspaceHref, type WorkspaceScope } from '../../lib/workspace';
+import { Card, KeyValue, Empty, Unknown, ErrorNote, Meta, Micro, Mono, Note, Button } from '../../ui';
 
 async function readAssignment(token: string, agent: string): Promise<{ archetypeId: string; archetypeVersion: string; definitionDigest: string } | null> {
   const r = await fetch('/connect/channels', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ action: 'archetypeAssignmentGet', communityId: agent.toLowerCase() }) });
@@ -60,56 +61,50 @@ export function RoutinesView({ scope }: { scope: WorkspaceScope }) {
   if (!session) return null;
   return (
     <div data-testid="routines">
-      <p className="manage-card-blurb">
-        A routine is a <b>versioned skill</b> (the playbook, by digest) with a <b>trigger</b>. Every firing asks as the agent holding nothing: a read answers; an act <b>parks for a steward&rsquo;s mandate</b> — fresh each time, never carried over. Pausing stops new firings and keeps everything; the budget is vault calls per firing, and going over pauses the routine rather than widening anything.
-      </p>
-      {unknown && <p style={{ fontSize: '0.8rem', color: 'var(--color-amber-700, #b45309)' }} data-testid="routines-unknown">unknown — the schedule could not be read ({unknown}). Nothing is shown because nothing could be read.</p>}
-      {err && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{err}</p>}
-      {triggers === null && !unknown && <p className="muted" style={{ fontSize: '0.8rem' }}>Reading the schedule…</p>}
-      {triggers !== null && routines.length === 0 && !unknown && <p className="muted" style={{ fontSize: '0.8rem' }}>No routines: this agent&rsquo;s playbook declares no triggers. <a href={workspaceHref(scope, 'playbook')}>Choose a playbook →</a></p>}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-        {routines.map((r) => (
-          <div key={r.triggerId} className="manage-card" style={{ padding: '0.75rem 0.95rem' }} data-testid={`routine-${r.triggerId}`} data-state={r.state.state}>
-            <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
-              <span style={{ fontWeight: 600, fontSize: '0.9rem', flex: 1, minWidth: 200 }}>&ldquo;{r.ask}&rdquo;</span>
-              <StatePill state={r.state} native={r.native} />
-            </div>
-            <div style={{ fontSize: '0.76rem', opacity: 0.75, marginTop: '0.3rem', display: 'grid', gridTemplateColumns: 'max-content 1fr', columnGap: '0.6rem', rowGap: 2 }}>
-              <span>trigger</span><span>{r.source}{r.nextAt ? ` · next ${new Date(r.nextAt).toLocaleString()}` : ''}</span>
-              <span>skill</span><span>{r.playbook ? <>{r.playbook.archetypeId} v{r.playbook.version} · <code style={{ fontSize: '0.7rem' }}>{r.playbook.digest.slice(0, 14)}…</code> <a href={workspaceHref(scope, 'playbook')}>playbook →</a></> : <span style={{ opacity: 0.6 }}>no playbook read — the row names its digest on the runtime</span>}</span>
-              <span>authority</span><span>{r.authority}</span>
-              <span>budget</span>
-              <span style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                {r.budget ? `${r.budget} vault calls per firing · ${r.budgetBy === 'playbook' ? 'declared by the playbook' : 'set by a steward'}` : 'none set'}{r.lastBill ? ` · last firing cost ${r.lastBill.vaultCalls} vault calls, ${r.lastBill.doRequests} serving requests` : ''}
-                <input type="number" min="1" placeholder="vault calls" value={budgetDraft[r.triggerId] ?? ''} onChange={(e) => setBudgetDraft((d) => ({ ...d, [r.triggerId]: e.target.value }))} style={{ width: 90, fontSize: '0.74rem', padding: '0.1rem 0.3rem' }} />
-                <BusyButton busy={busy === `${r.triggerId}:budget`} busyLabel="Setting…" className="btn-ghost" style={{ width: 'auto', fontSize: '0.72rem' }} disabled={!budgetDraft[r.triggerId]} onClick={() => void change(r, { budget: { vaultCalls: Number(budgetDraft[r.triggerId]) } })}>Set budget</BusyButton>
-                {r.budget && <button type="button" className="btn-ghost" style={{ fontSize: '0.72rem' }} onClick={() => void change(r, { budget: null })}>Clear</button>}
-              </span>
-              <span>last</span><span>{r.last ? `${r.last.outcome} · ${new Date(r.last.at).toLocaleString()}${r.last.said ? ` — ${r.last.said.slice(0, 120)}` : ''}` : 'never fired'}</span>
-              {r.paused && <><span>paused</span><span>by {r.paused.by} · {new Date(r.paused.at).toLocaleString()}{r.paused.note ? ` — ${r.paused.note}` : ''}</span></>}
-            </div>
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-              {r.paused
-                ? <BusyButton busy={busy === `${r.triggerId}:paused`} busyLabel="Resuming…" className="btn-primary" style={{ width: 'auto', fontSize: '0.76rem' }} onClick={() => void change(r, { paused: false })} data-testid="routine-resume">Resume</BusyButton>
-                : <BusyButton busy={busy === `${r.triggerId}:paused`} busyLabel="Pausing…" className="btn-ghost" style={{ width: 'auto', fontSize: '0.76rem' }} onClick={() => { const note = typeof window !== 'undefined' ? (window.prompt('Pause this routine? Nothing new starts; what it parked stands. A note (optional):') ?? null) : ''; if (note !== null) void change(r, { paused: true, ...(note.trim() ? { note: note.trim() } : {}) }); }} data-testid="routine-pause">Pause</BusyButton>}
-              <BusyButton busy={busy === `${r.triggerId}:fire`} busyLabel="Firing…" className="btn-ghost" style={{ width: 'auto', fontSize: '0.76rem' }} disabled={!!r.paused} onClick={() => void fire(r)} title="Run it now, as the alarm would">Fire now</BusyButton>
-              <span style={{ fontSize: '0.7rem', opacity: 0.55 }} title="Pause is not cancel (a parked firing stands) and not revoke (no authority changes hands)">pause ≠ cancel ≠ revoke</span>
-            </div>
-            <details style={{ marginTop: '0.5rem' }}>
-              <summary style={{ fontSize: '0.76rem', cursor: 'pointer' }}>history · {r.history.length} firing{r.history.length === 1 ? '' : 's'} on record</summary>
-              {r.history.length === 0 && <p className="muted" style={{ fontSize: '0.74rem' }}>No firing on record yet (records keep a week).</p>}
-              {r.history.map((h) => (
-                <div key={h.runRef} style={{ display: 'flex', gap: '0.5rem', fontSize: '0.74rem', alignItems: 'center', padding: '0.15rem 0' }}>
-                  <span style={{ opacity: 0.6 }}>{new Date(h.at).toLocaleString()}</span>
-                  <StatePill state={h.state} native={h.native} compact />
-                  <span>{h.steps} step{h.steps === 1 ? '' : 's'} · {h.receipts} receipt{h.receipts === 1 ? '' : 's'}{h.bill ? ` · ${h.bill.vaultCalls} vault calls` : ''}</span>
-                  <a href={workspaceHref(scope, 'activities')} style={{ fontSize: '0.72rem' }}>inspect →</a>
-                </div>
-              ))}
-            </details>
+      <Note>
+        A routine is a <b>versioned skill</b> (the playbook, by digest) with a <b>trigger</b>. Every firing asks as the agent holding nothing: a read answers; an act parks for a steward&rsquo;s mandate — fresh each time, never carried over. Pausing stops new firings and keeps everything; the budget is vault calls per firing, and going over pauses the routine rather than widening anything.
+      </Note>
+      {unknown && <Unknown read={<>the schedule could not be read ({unknown})</>} testId="routines-unknown" />}
+      {err && <ErrorNote>{err}</ErrorNote>}
+      {triggers === null && !unknown && <Meta>Reading the schedule…</Meta>}
+      {triggers !== null && routines.length === 0 && !unknown && <Empty title="No routines">This agent&rsquo;s playbook declares no triggers. <a href={workspaceHref(scope, 'playbook')}>Choose a playbook →</a></Empty>}
+      {routines.map((r) => (
+        <Card key={r.triggerId} title={<>&ldquo;{r.ask}&rdquo;</>} head={<StatePill state={r.state} native={r.native} />} testId={`routine-${r.triggerId}`}>
+          <div data-state={r.state.state} />
+          <KeyValue rows={[
+            ['trigger', <>{r.source}{r.nextAt ? ` · next ${new Date(r.nextAt).toLocaleString()}` : ''}</>],
+            ['skill', r.playbook ? <>{r.playbook.archetypeId} v{r.playbook.version} · <Mono>{r.playbook.digest.slice(0, 14)}…</Mono> <a href={workspaceHref(scope, 'playbook')}>playbook →</a></> : 'no playbook read — the row names its digest on the runtime', { absent: !r.playbook }],
+            ['authority', r.authority],
+            ['budget', <span style={{ display: 'inline-flex', gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+              {r.budget ? `${r.budget} vault calls per firing · ${r.budgetBy === 'playbook' ? 'declared by the playbook' : 'set by a steward'}` : 'none set'}{r.lastBill ? ` · last firing cost ${r.lastBill.vaultCalls} vault calls, ${r.lastBill.doRequests} serving requests` : ''}
+              <input className="input" type="number" min="1" placeholder="vault calls" value={budgetDraft[r.triggerId] ?? ''} onChange={(e) => setBudgetDraft((d) => ({ ...d, [r.triggerId]: e.target.value }))} style={{ width: 96, fontSize: 'var(--fs-sm)', padding: '3px 8px', minHeight: 26 }} />
+              <BusyButton busy={busy === `${r.triggerId}:budget`} busyLabel="Setting…" className="ui-btn ui-btn--secondary ui-btn--sm" disabled={!budgetDraft[r.triggerId]} onClick={() => void change(r, { budget: { vaultCalls: Number(budgetDraft[r.triggerId]) } })}>Set</BusyButton>
+              {r.budget && <Button size="sm" variant="ghost" onClick={() => void change(r, { budget: null })}>Clear</Button>}
+            </span>, { absent: !r.budget }],
+            ['last', r.last ? `${r.last.outcome} · ${new Date(r.last.at).toLocaleString()}${r.last.said ? ` — ${r.last.said.slice(0, 120)}` : ''}` : 'never fired', { absent: !r.last }],
+            ...(r.paused ? [['paused', <>by {r.paused.by} · {new Date(r.paused.at).toLocaleString()}{r.paused.note ? ` — ${r.paused.note}` : ''}</>] as [React.ReactNode, React.ReactNode]] : []),
+          ]} />
+          <div style={{ display: 'flex', gap: 'var(--sp-2)', marginTop: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'center' }}>
+            {r.paused
+              ? <BusyButton busy={busy === `${r.triggerId}:paused`} busyLabel="Resuming…" className="ui-btn ui-btn--primary ui-btn--sm" onClick={() => void change(r, { paused: false })} data-testid="routine-resume">Resume</BusyButton>
+              : <BusyButton busy={busy === `${r.triggerId}:paused`} busyLabel="Pausing…" className="ui-btn ui-btn--secondary ui-btn--sm" onClick={() => { const note = typeof window !== 'undefined' ? (window.prompt('Pause this routine? Nothing new starts; what it parked stands. A note (optional):') ?? null) : ''; if (note !== null) void change(r, { paused: true, ...(note.trim() ? { note: note.trim() } : {}) }); }} data-testid="routine-pause">Pause</BusyButton>}
+            <BusyButton busy={busy === `${r.triggerId}:fire`} busyLabel="Firing…" className="ui-btn ui-btn--secondary ui-btn--sm" disabled={!!r.paused} onClick={() => void fire(r)} title="Run it now, as the alarm would">Fire now</BusyButton>
+            <Micro>pause ≠ cancel ≠ revoke</Micro>
           </div>
-        ))}
-      </div>
+          <details style={{ marginTop: 'var(--sp-3)' }}>
+            <summary className="ui-meta" style={{ cursor: 'pointer' }}>history · {r.history.length} firing{r.history.length === 1 ? '' : 's'} on record</summary>
+            {r.history.length === 0 && <Meta>No firing on record yet (records keep a week).</Meta>}
+            {r.history.map((h) => (
+              <div key={h.runRef} style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center', padding: '3px 0' }} className="ui-meta">
+                <span className="ui-row-time">{new Date(h.at).toLocaleString()}</span>
+                <StatePill state={h.state} native={h.native} compact />
+                <span>{h.steps} step{h.steps === 1 ? '' : 's'} · {h.receipts} receipt{h.receipts === 1 ? '' : 's'}{h.bill ? ` · ${h.bill.vaultCalls} vault calls` : ''}</span>
+                <a href={workspaceHref(scope, 'activities')}>inspect →</a>
+              </div>
+            ))}
+          </details>
+        </Card>
+      ))}
     </div>
   );
 }

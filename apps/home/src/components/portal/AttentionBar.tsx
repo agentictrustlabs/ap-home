@@ -8,6 +8,7 @@ import type { Address } from '@agenticprimitives/types';
 import { assembleAttention, attentionCounts, ATTENTION_FILTERS, type AttentionFilter, type AttentionInputs, type AttentionItem } from '../../home/attention';
 import { StatePill } from './StatePill';
 import { RunControls } from './runs/RunControls';
+import { List, Row, Button } from '../../ui';
 
 export function AttentionBar({ inputs, token, addressee, onCanceled, renderCaseActions, onOpenDm, onOpenCase }: {
   inputs: AttentionInputs; token: string; addressee: Address; onCanceled: (runRef: string) => void;
@@ -23,43 +24,41 @@ export function AttentionBar({ inputs, token, addressee, onCanceled, renderCaseA
   const items = open ? attention[open] : [];
   const hint = ATTENTION_FILTERS.find((f) => f.id === open)?.hint;
   return (
-    <div className="chat-attention" data-testid="attention-bar">
-      <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '0.5rem' }}>
-        {counts.map((c) => (
-          <button
-            key={c.id} type="button" data-testid={`attention-${c.id}`} data-count={c.count}
-            className={`chat-rail-action${open === c.id ? ' chat-rail-action--active' : ''}`}
-            style={{ opacity: c.count === 0 ? 0.5 : 1, fontWeight: open === c.id ? 700 : 500 }}
-            onClick={() => setPicked(c.id)} disabled={c.count === 0} title={ATTENTION_FILTERS.find((f) => f.id === c.id)?.hint}
-          >
-            {c.label} · {c.count}
-          </button>
-        ))}
+    <div className="ui-section" data-testid="attention-bar" style={{ marginBottom: 'var(--sp-4)' }}>
+      <div className="ui-toolbar" style={{ marginBottom: 'var(--sp-2)' }}>
+        <div className="ui-tabs" role="tablist" aria-label="What needs your attention">
+          {counts.map((c) => (
+            <button
+              key={c.id} type="button" role="tab" data-testid={`attention-${c.id}`} data-count={c.count}
+              className="ui-tab" aria-selected={open === c.id}
+              onClick={() => setPicked(c.id)} disabled={c.count === 0} title={ATTENTION_FILTERS.find((f) => f.id === c.id)?.hint}
+            >
+              {c.label}<span className="ui-count">{c.count}</span>
+            </button>
+          ))}
+        </div>
+        {hint && <span className="ui-meta">{hint}</span>}
       </div>
-      {hint && <div style={{ fontSize: '0.74rem', opacity: 0.65, marginBottom: '0.4rem' }}>{hint}</div>}
-      {items.map((it) => <AttentionCard key={it.id} item={it} token={token} addressee={addressee} onCanceled={onCanceled} renderCaseActions={renderCaseActions} onOpenDm={onOpenDm} onOpenCase={onOpenCase} />)}
+      <List>
+        {items.map((it) => <AttentionRow key={it.id} item={it} token={token} addressee={addressee} onCanceled={onCanceled} renderCaseActions={renderCaseActions} onOpenDm={onOpenDm} onOpenCase={onOpenCase} />)}
+      </List>
     </div>
   );
 }
 
-function AttentionCard({ item, token, addressee, onCanceled, renderCaseActions, onOpenDm, onOpenCase }: {
+function AttentionRow({ item, token, addressee, onCanceled, renderCaseActions, onOpenDm, onOpenCase }: {
   item: AttentionItem; token: string; addressee: Address; onCanceled: (runRef: string) => void;
   renderCaseActions: (caseId: string) => React.ReactNode; onOpenDm: (key: string) => void; onOpenCase: (caseId: string) => void;
 }) {
   const href = item.href ?? (item.askSeed ? `/ask?seed=${encodeURIComponent(item.askSeed)}` : undefined);
-  return (
-    <div data-testid="attention-card" style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center', padding: '0.6rem 0.8rem', background: '#fff', border: '1px solid var(--color-border)', borderRadius: 8, marginBottom: '0.4rem' }}>
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <b>{href ? <a href={href} style={{ color: 'inherit', textDecoration: 'none' }}>{item.title}</a> : item.title}</b>
-        {item.detail && <div style={{ fontSize: '0.82rem', opacity: 0.75 }}>{item.detail}</div>}
-      </div>
-      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-        {item.state && <StatePill state={item.state} {...(item.native ? { native: item.native } : {})} compact />}
-        {item.caseId && renderCaseActions(item.caseId)}
-        {item.caseId && <button type="button" className="ghost" onClick={() => onOpenCase(item.caseId!)}>Open thread</button>}
-        {item.dmKey && <button type="button" className="ghost" onClick={() => onOpenDm(item.dmKey!)}>Open</button>}
-        {item.runRef && <RunControls token={token} addressee={addressee} runRef={item.runRef} compact onCanceled={() => onCanceled(item.runRef!)} />}
-      </div>
-    </div>
+  const side = (
+    <>
+      {item.state && <StatePill state={item.state} {...(item.native ? { native: item.native } : {})} compact />}
+      {item.caseId && renderCaseActions(item.caseId)}
+      {item.caseId && <Button size="sm" variant="ghost" onClick={() => onOpenCase(item.caseId!)}>Open thread</Button>}
+      {item.dmKey && <Button size="sm" variant="ghost" onClick={() => onOpenDm(item.dmKey!)}>Open</Button>}
+      {item.runRef && <RunControls token={token} addressee={addressee} runRef={item.runRef} compact onCanceled={() => onCanceled(item.runRef!)} />}
+    </>
   );
+  return <Row title={item.title} meta={item.detail} side={side} {...(href ? { titleHref: href } : {})} testId="attention-card" />;
 }

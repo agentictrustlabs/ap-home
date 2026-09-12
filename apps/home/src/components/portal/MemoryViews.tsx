@@ -15,6 +15,7 @@ import type { TodayArtifact } from '../../home/today';
 import { StatePill } from './StatePill';
 import { AgentName } from '../shared/AgentName';
 import { workspaceHref, type WorkspaceScope } from '../../lib/workspace';
+import { List, Row, Empty, Unknown, ErrorNote, Meta, Micro, Note, Button, LinkButton } from '../../ui';
 
 const STORES: Array<{ id: MemoryStore; label: string; owner: string; hint: string }> = [
   { id: 'personal', label: 'Personal', owner: 'your vault', hint: 'facts about you that your agent keeps: which "David", which treasury pays. Yours to correct or forget.' },
@@ -82,45 +83,48 @@ export function MemoryViews({ scope }: { scope: WorkspaceScope }) {
   if (!session) return null;
   return (
     <div data-testid="memory-views">
-      <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-        {STORES.map((s) => (
-          <button key={s.id} type="button" className={`chat-rail-action${tab === s.id ? ' chat-rail-action--active' : ''}`} data-testid={`memory-${s.id}`} onClick={() => setTab(s.id)} style={{ fontWeight: tab === s.id ? 700 : 500 }}>
-            {s.label} · {views[s.id].length}
-          </button>
-        ))}
+      <div className="ui-toolbar">
+        <div className="ui-tabs" role="tablist" aria-label="Which store">
+          {STORES.map((s) => (
+            <button key={s.id} type="button" role="tab" className="ui-tab" aria-selected={tab === s.id} data-testid={`memory-${s.id}`} onClick={() => setTab(s.id)}>
+              {s.label}<span className="ui-count">{views[s.id].length}</span>
+            </button>
+          ))}
+        </div>
       </div>
-      <p className="manage-card-blurb" style={{ marginBottom: '0.6rem' }}>
-        <strong>{meta.owner}</strong> — {meta.hint}
+      <Note>
+        <strong style={{ color: 'var(--color-text-body)' }}>{meta.owner}</strong> — {meta.hint}
         {tab === 'personal' && ' Forgetting a fact does not unwrite a receipt that cited it: the receipt stays, the fact is no longer used.'}
         {tab === 'run' && ' Promotion to the Library is an act with a receipt, never a drag.'}
-      </p>
-      {err && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{err}</p>}
-      {!loaded && <p className="muted" style={{ fontSize: '0.8rem' }}>Reading…</p>}
-      {unknown[tab] && <p style={{ fontSize: '0.78rem', color: 'var(--color-amber-700, #b45309)' }} data-testid="memory-unknown">unknown — {unknown[tab]}. {items.length ? 'What is shown is partial.' : 'Nothing is shown because it could not be read, not because nothing is there.'}</p>}
-      {loaded && items.length === 0 && !unknown[tab] && <p className="muted" style={{ fontSize: '0.8rem' }}>Nothing here yet.</p>}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-        {items.map((it) => {
-          const href = hrefOf(it);
-          return (
-            <div key={it.id} className="manage-card" style={{ padding: '0.6rem 0.85rem', display: 'flex', justifyContent: 'space-between', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }} data-testid="memory-item" data-kind={it.kind}>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: '0.7rem', opacity: 0.6 }}>{it.kind} · <AgentName address={it.owner} />{it.visibility ? ` · ${it.visibility}` : ''}</div>
-                <div style={{ fontWeight: 600, fontSize: '0.86rem' }}>{href ? <a href={href} style={{ color: 'inherit', textDecoration: 'none' }}>{it.title}</a> : it.title}</div>
-                {it.detail && <div style={{ fontSize: '0.73rem', opacity: 0.65 }}>{it.detail}</div>}
-              </div>
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                {it.state && <StatePill state={it.state} {...(it.native ? { native: it.native } : {})} compact />}
-                {it.at && <span style={{ fontSize: '0.7rem', opacity: 0.55 }}>{new Date(it.at).toLocaleDateString()}</span>}
-                {it.actions.includes('correct') && <a className="btn-ghost" style={{ fontSize: '0.74rem' }} href={`/ask?seed=${encodeURIComponent(`${it.title} — change that`)}`} title="Correct it by choosing differently: a new confirmation replaces the old">Correct</a>}
-                {it.actions.includes('forget') && <button type="button" className="btn-ghost" style={{ fontSize: '0.74rem' }} disabled={busy === it.id} onClick={() => void forget(it)} data-testid="memory-forget">{busy === it.id ? 'Forgetting…' : 'Forget'}</button>}
-                {it.actions.includes('promote') && <span className="muted" style={{ fontSize: '0.7rem' }} title="Promotion to the Library is an act with a receipt — not offered here yet (398 §6.1)">promote: not yet</span>}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      </Note>
+      {err && <ErrorNote>{err}</ErrorNote>}
+      {!loaded && <Meta>Reading…</Meta>}
+      {unknown[tab] && <Unknown read={unknown[tab]} partial={items.length > 0} testId="memory-unknown" />}
+      {loaded && items.length === 0 && !unknown[tab] && <Empty>Nothing here yet.</Empty>}
+      {items.length > 0 && (
+        <List>
+          {items.map((it) => {
+            const href = hrefOf(it);
+            return (
+              <Row
+                key={it.id}
+                title={it.title} {...(href ? { titleHref: href } : {})}
+                meta={<>{it.kind} · <AgentName address={it.owner} />{it.visibility ? ` · ${it.visibility}` : ''}{it.detail ? ` · ${it.detail}` : ''}</>}
+                side={<>
+                  {it.state && <StatePill state={it.state} {...(it.native ? { native: it.native } : {})} compact />}
+                  {it.at && <span className="ui-row-time">{new Date(it.at).toLocaleDateString()}</span>}
+                  {it.actions.includes('correct') && <LinkButton size="sm" variant="ghost" href={`/ask?seed=${encodeURIComponent(`${it.title} — change that`)}`} title="Correct it by choosing differently: a new confirmation replaces the old">Correct</LinkButton>}
+                  {it.actions.includes('forget') && <Button size="sm" variant="ghost" disabled={busy === it.id} onClick={() => void forget(it)} data-testid="memory-forget">{busy === it.id ? 'Forgetting…' : 'Forget'}</Button>}
+                  {it.actions.includes('promote') && <Micro>promote: not yet</Micro>}
+                </>}
+                testId="memory-item"
+              />
+            );
+          })}
+        </List>
+      )}
       {views.absent[tab].length > 0 && (
-        <p className="muted" style={{ fontSize: '0.74rem', marginTop: '0.6rem' }}>Not shown here yet: {views.absent[tab].join(' · ')}</p>
+        <p className="ui-micro" style={{ marginTop: 'var(--sp-3)' }}>Not shown here yet: {views.absent[tab].join(' · ')}</p>
       )}
     </div>
   );

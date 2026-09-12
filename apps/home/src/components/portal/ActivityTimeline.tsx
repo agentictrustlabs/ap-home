@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import type { HomeControlEventV1, ManagedAgentEntryV1 } from '@agenticprimitives/home';
 import { useSession } from '../../context/session';
 import { SectionShell } from '../../components/portal/SectionShell';
+import { Section, List, Row, Empty, Meta, Mono } from '../../ui';
 import { useManagedAgents } from '../../components/portal/ManagedAgents';
 import { listControlEvents, toManagedAgentEntry } from '../../home/control-plane';
 import { AddressChip } from '../../components/shared/AddressChip';
@@ -62,64 +63,44 @@ export function ActivityTimeline({ agent }: { agent?: string } = {}) {
   return (
     <SectionShell
       title="Activities"
-      description={agent
-        ? 'What changed for this agent, when, and the audit reference behind it — the rows of your control-plane timeline that name it. The on-chain and vault records stay canonical.'
-        : 'Your control-plane timeline: what changed, when, and the audit reference behind it. The on-chain and vault records stay canonical.'}
+      description={agent ? 'What changed for this agent, when, and the audit reference behind it.' : 'What changed, when, and the audit reference behind it — the on-chain and vault records stay canonical.'}
     >
-      <div className="dash-section">
-        <h2>Timeline</h2>
-        {!loaded ? (
-          <p className="manage-card-blurb">Loading…</p>
-        ) : shown.length === 0 ? (
-          <p className="manage-card-blurb">
-            {agent
-              ? 'Nothing recorded for this agent yet. Releasing a card, publishing a projection, issuing a grant or changing its lifecycle all land here.'
-              : 'Nothing recorded yet. Publishing your Home manifest, deciding an inbox request, revoking a delegation, or adding an agent all land here.'}
-          </p>
-        ) : (
-          shown.map((e) => (
-            <div key={e.auditRef} style={{ padding: '0.6rem 0', borderBottom: '1px solid var(--color-border)' }}>
-              <b>{EVENT_COPY[e.eventType]}</b>
-              <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-                {new Date(e.at).toLocaleString()} · audit <code>{e.auditRef.slice(0, 8)}</code>
-                {e.refs.length > 0 && (
-                  <>
-                    {' · '}
-                    {e.refs.map((r, i) => (
-                      <code key={i} style={{ marginRight: 4 }}>
-                        {typeof r === 'object' && 'hash' in r ? `${r.kind} ${r.hash.slice(0, 10)}…` : 'ref'}
-                      </code>
-                    ))}
-                  </>
-                )}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      {entries.length > 0 && (
-        <div className="dash-section" style={{ marginTop: '1.5rem' }}>
-          <h2>Managed agents (portable projection)</h2>
-          <p className="manage-card-blurb">
-            The <code>ManagedAgentEntryV1</code> rows any Home implementation would render for your tree.
-          </p>
-          {entries.map((m) => {
-            const address = m.agent.match(/0x[0-9a-fA-F]{40}$/)?.[0] as `0x${string}` | undefined;
-            return (
-              <div key={m.agent} style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', padding: '0.45rem 0', borderBottom: '1px solid var(--color-border)', flexWrap: 'wrap' }}>
-                {address && <AddressChip address={address} size="sm" />}
-                <span style={{ fontSize: '0.82rem', color: 'var(--color-text-body)' }}>
-                  {m.agentType} · {m.relationship.replaceAll('_', ' ')} · control: <b>{m.controlGrade}</b> · {m.status}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
       {/* Spec 381 W3 — the runs this person asked of this agent, from the agent's own records; opened, a timeline. */}
       {session && (agent ?? agentAddress) && <RunHistory token={session.token} addressee={(agent ?? agentAddress) as `0x${string}`} />}
+
+      <Section title="Control plane" count={loaded && shown.length ? shown.length : undefined}>
+        {!loaded ? (
+          <Meta>Loading…</Meta>
+        ) : shown.length === 0 ? (
+          <Empty>{agent
+            ? 'Nothing recorded for this agent yet. Releasing a card, publishing a projection, issuing a grant or changing its lifecycle all land here.'
+            : 'Nothing recorded yet. Publishing your Home manifest, deciding an inbox request, revoking a delegation, or adding an agent all land here.'}</Empty>
+        ) : (
+          <List>
+            {shown.map((e) => (
+              <Row
+                key={e.auditRef}
+                title={EVENT_COPY[e.eventType]}
+                meta={<>audit <Mono>{e.auditRef.slice(0, 8)}</Mono>{e.refs.map((r, i) => <span key={i}> · <Mono>{typeof r === 'object' && 'hash' in r ? `${r.kind} ${r.hash.slice(0, 10)}…` : 'ref'}</Mono></span>)}</>}
+                side={<span className="ui-row-time">{new Date(e.at).toLocaleString()}</span>}
+              />
+            ))}
+          </List>
+        )}
+      </Section>
+
+      {entries.length > 0 && (
+        <Section title="Managed agents" count={entries.length} aside={<span>the portable <Mono>ManagedAgentEntryV1</Mono> rows any Home would render for your tree</span>}>
+          <List>
+            {entries.map((m) => {
+              const address = m.agent.match(/0x[0-9a-fA-F]{40}$/)?.[0] as `0x${string}` | undefined;
+              return (
+                <Row key={m.agent} title={address ? <AddressChip address={address} size="sm" /> : m.agent} meta={<>{m.agentType} · {m.relationship.replaceAll('_', ' ')} · control: <b>{m.controlGrade}</b> · {m.status}</>} />
+              );
+            })}
+          </List>
+        </Section>
+      )}
     </SectionShell>
   );
 }
-
