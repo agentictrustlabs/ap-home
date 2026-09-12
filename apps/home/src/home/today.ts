@@ -25,6 +25,8 @@ export interface TodayItem {
 }
 
 export interface Today {
+  /** Spec 398 §5.4 — what the last N days COST this agent's storage (396 numbers on the records), or null when no record carries a bill. */
+  cost: { runs: number; vaultCalls: number; doRequests: number; days: number } | null;
   decisions: TodayItem[];
   active: TodayItem[];
   artifacts: TodayItem[];
@@ -46,6 +48,8 @@ export interface TodayInputs {
   vocabulary: ReadonlyArray<AskVocabularyEntry>;
   /** How far back "recent" reaches for artifacts (days). */
   recentDays?: number;
+  /** The agent's run records (the listing keeps each run's bill). */
+  records?: ReadonlyArray<{ at: number; bill?: { vaultCalls: number; doRequests: number } }>;
   /** Where a decision's page lives — the person's own Work, or the organization's. */
   workHref?: (org: string, endeavorId: string) => string;
 }
@@ -148,5 +152,11 @@ export function assembleToday(input: TodayInputs): Today {
     ? { id: `next:${candidate.id}`, title: candidate.label ?? candidate.id, ...(candidate.description || candidate.resultKind ? { detail: [candidate.description, candidate.resultKind ? `→ a ${candidate.resultKind}` : undefined].filter(Boolean).join(' · ') } : {}), askSeed: candidate.label ?? candidate.id, native: candidate.id }
     : null;
 
-  return { decisions, active, artifacts, exceptions, next };
+  // ── cost (§5.4): the bills on the records of the last N days — shown on Today because the record carries them (harness G3).
+  const billed = (input.records ?? []).filter((r) => r.at >= input.now - recentMs && r.bill);
+  const cost = billed.length
+    ? { runs: billed.length, vaultCalls: billed.reduce((n, r) => n + (r.bill?.vaultCalls ?? 0), 0), doRequests: billed.reduce((n, r) => n + (r.bill?.doRequests ?? 0), 0), days: input.recentDays ?? 7 }
+    : null;
+
+  return { cost, decisions, active, artifacts, exceptions, next };
 }

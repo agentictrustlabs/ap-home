@@ -62,6 +62,14 @@ describe('Today (398 §4.2)', () => {
     expect(t.decisions.map((e) => e.id)).toEqual(['trigger-parked:t2']);
   });
 
+  it('cost (§5.4): the bills on the last N days\' records, or null when none carries one', () => {
+    const t = assembleToday({ ...base(), recentDays: 7, records: [
+      { at: NOW - day, bill: { vaultCalls: 5, doRequests: 2 } }, { at: NOW - 2 * day, bill: { vaultCalls: 3, doRequests: 1 } }, { at: NOW - 30 * day, bill: { vaultCalls: 99, doRequests: 99 } }, { at: NOW },
+    ] });
+    expect(t.cost).toEqual({ runs: 2, vaultCalls: 8, doRequests: 3, days: 7 });
+    expect(assembleToday(base()).cost).toBeNull();
+  });
+
   it('one next act, from the vocabulary, lowest risk first, never something already parked', () => {
     const t = assembleToday({ ...base(),
       parked: [{ runRef: 'r', message: 'Who is on my team', awaiting: null, updatedAt: NOW, state: 'running' }],

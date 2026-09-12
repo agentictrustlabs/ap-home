@@ -4,11 +4,11 @@
 // never disagree about what is waiting.
 import { useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { listRuns, listTriggers, homeVocabulary, type ParkedRun, type TriggerRow, type AskVocabularyEntry } from './ask';
+import { listRuns, listTriggers, homeVocabulary, listRunRecords, type ParkedRun, type TriggerRow, type AskVocabularyEntry, type RunRecordRow } from './ask';
 import type { TodayArtifact } from './today';
 import type { RunStateV1 } from './run-state';
 
-export type ReadFailures = Partial<Record<'runs' | 'triggers' | 'vocabulary' | 'artifacts', string>>;
+export type ReadFailures = Partial<Record<'runs' | 'triggers' | 'vocabulary' | 'artifacts' | 'records', string>>;
 
 export interface TodayReads {
   parked: Array<ParkedRun & { state?: RunStateV1 }> | null;
@@ -17,6 +17,8 @@ export interface TodayReads {
   triggers: TriggerRow[];
   vocabulary: AskVocabularyEntry[];
   artifacts: TodayArtifact[];
+  /** The agent's run records — each with its bill (396), for Today's cost line (§5.4). */
+  records: RunRecordRow[];
   /** Drop a run the person just stopped — the runtime dropped its checkpoint. */
   dropRun: (runRef: string) => void;
 }
@@ -26,6 +28,7 @@ export function useTodayReads(token: string | undefined, addressee: string | nul
   const [triggers, setTriggers] = useState<TriggerRow[]>([]);
   const [vocabulary, setVocabulary] = useState<AskVocabularyEntry[]>([]);
   const [artifacts, setArtifacts] = useState<TodayArtifact[]>([]);
+  const [records, setRecords] = useState<RunRecordRow[]>([]);
   const [failed, setFailed] = useState<ReadFailures>({});
   useEffect(() => {
     if (!token || !addressee) return;
@@ -36,6 +39,7 @@ export function useTodayReads(token: string | undefined, addressee: string | nul
     void listRuns({ token }, addressee as Address).then((rs) => { if (live) setParked(rs as TodayReads['parked']); }).catch((e) => { fail('runs', e); if (live) setParked([]); });
     void listTriggers({ token }, addressee as Address).then((ts) => { if (live) setTriggers(ts); }).catch((e) => fail('triggers', e));
     void homeVocabulary(addressee).then((v) => { if (live) setVocabulary(v); }).catch((e) => fail('vocabulary', e));
+    void listRunRecords({ token }, addressee as Address).then((r) => { if (live) setRecords(r.records); }).catch((e) => fail('records', e));
     const scopeQ = libraryScope === 'person' ? '' : `?org=${addressee}`;
     void fetch(`/connect/library${scopeQ}`, { headers: { authorization: `Bearer ${token}` } })
       .then((r) => { if (!r.ok) throw new Error(`the Library answered ${r.status}`); return r.json(); })
@@ -46,5 +50,5 @@ export function useTodayReads(token: string | undefined, addressee: string | nul
       .catch((e) => fail('artifacts', e));
     return () => { live = false; };
   }, [token, addressee, libraryScope]);
-  return { parked, triggers, vocabulary, artifacts, failed, dropRun: (runRef) => setParked((p) => (p ?? []).filter((r) => r.runRef !== runRef)) };
+  return { parked, triggers, vocabulary, artifacts, records, failed, dropRun: (runRef) => setParked((p) => (p ?? []).filter((r) => r.runRef !== runRef)) };
 }

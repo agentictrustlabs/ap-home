@@ -71,14 +71,14 @@ export function TodayView({ scope, children }: { scope: WorkspaceScope; children
   const { session, agentAddress } = useSession();
   const addressee = addresseeOf(scope, agentAddress);
   const { bundles } = useMyWork(session, agentAddress);
-  const { parked, triggers, vocabulary, artifacts, failed, dropRun } = useTodayReads(session?.token, addressee, scope.kind === 'person' ? 'person' : 'other');
+  const { parked, triggers, vocabulary, artifacts, records, failed, dropRun } = useTodayReads(session?.token, addressee, scope.kind === 'person' ? 'person' : 'other');
 
   const today: Today | null = useMemo(() => {
     if (parked === null) return null;
     // An organization's Today shows that organization's work only; a person's spans every organization.
     const mine = scope.kind === 'org' ? (bundles ?? []).filter((b) => b.org.toLowerCase().endsWith(scope.org.toLowerCase())) : scope.kind === 'service' ? [] : bundles;
-    return assembleToday({ now: Date.now(), parked, bundles: mine, artifacts, triggers, vocabulary, recentDays: RECENT_DAYS });
-  }, [parked, bundles, artifacts, triggers, vocabulary, scope]);
+    return assembleToday({ now: Date.now(), parked, bundles: mine, artifacts, triggers, vocabulary, records, recentDays: RECENT_DAYS });
+  }, [parked, bundles, artifacts, triggers, vocabulary, records, scope]);
 
   // A canceled run leaves Today at once — the runtime dropped its checkpoint; the record says what stood.
   const ctx: CardCtx | undefined = addressee ? { token: session?.token ?? '', addressee: addressee as Address, onCanceled: dropRun } : undefined;
@@ -97,6 +97,12 @@ export function TodayView({ scope, children }: { scope: WorkspaceScope; children
           {today.artifacts.length > 0 && <p style={{ fontSize: '0.76rem', marginTop: '-0.6rem' }}><a href={libraryHref}>Open the Library →</a></p>}
           <Section title="Routine exceptions" hint="A scheduled or hooked routine whose last firing failed." items={today.exceptions} empty="Every routine's last firing went through." {...(failed.triggers ? { unknown: `the schedule could not be read (${failed.triggers})` } : {})} />
           {today.exceptions.length > 0 && <p style={{ fontSize: '0.76rem', marginTop: '-0.6rem' }}><a href={playbookHref}>Open the Playbook →</a></p>}
+          {/* spec 398 §5.4 — cost, from the bills the records carry; absent when none does, never a zero. */}
+          <p className="manage-card-blurb" data-testid="today-cost" style={{ fontSize: '0.76rem' }}>
+            {today.cost
+              ? <>Cost, last {today.cost.days} days: <strong>{today.cost.runs}</strong> run{today.cost.runs === 1 ? '' : 's'} · <strong>{today.cost.vaultCalls}</strong> vault call{today.cost.vaultCalls === 1 ? '' : 's'} · <strong>{today.cost.doRequests}</strong> serving request{today.cost.doRequests === 1 ? '' : 's'} — each run's bill is on its record.</>
+              : failed.records ? <span style={{ color: 'var(--color-amber-700, #b45309)' }}>cost unknown — the records could not be read ({failed.records})</span> : <>No run in the last {RECENT_DAYS} days carries a bill.</>}
+          </p>
           <Section title="Next" hint="One act this agent's playbook offers here — drawn from its vocabulary, never a fixed list." empty="This agent offers nothing to suggest yet: choose a playbook for it.">
             {today.next
               ? <Card item={today.next} />

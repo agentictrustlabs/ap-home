@@ -487,7 +487,6 @@
       ],
       "gaps": [
         "steer and pause as client surfaces (a pause is a trigger's, 375); cancel shipped 398 §5.3 — revoke stays on delegations, undo is a new intent",
-        "run cost on the row and on Today — the headers exist (x-ap-vault-calls, x-ap-ms), no UI (APUX-033, 398 §5.4)",
         "no replay UI over the spans (H40)"
       ]
     },
@@ -1017,6 +1016,7 @@
         "home/use-today-inputs.ts"
       ],
       "endpoints": [
+        "/harness/records",
         "/harness/runs",
         "/harness/triggers",
         "/harness/vocabulary"
@@ -1030,7 +1030,6 @@
         "verify-golden-journey"
       ],
       "gaps": [
-        "run cost on Today (398 §5.4) — waits on harness G3, the run's bill on RunRecordV1",
         "approve ceremonies delivered by mail (hear) are not yet a Today decision card — one durable decision record per decision (393) is the prerequisite",
         "a golden-journey gate (398 §13) runs the charter → Today → inspector → work item → decision journey live; not yet: specialist artifacts on the item, the run's own send decision, the page publish, the parity pair"
       ]
