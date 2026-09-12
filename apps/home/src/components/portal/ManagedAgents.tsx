@@ -552,17 +552,16 @@ export function OrganizationsManager({
   // everything shown, the two classes read as headed sections; picking one hides the other rather than
   // rearranging the page under you.
   const Filter = () => (
-    <div style={{ display: 'flex', gap: '.35rem', marginBottom: '.8rem' }} role="group" aria-label="Filter the agents you steward">
-      {([['all', `All (${orgs.length + services.length})`], ['org', `Organizations (${orgs.length})`], ['service', `Services (${services.length})`]] as const).map(([v, l]) => (
-        <button
-          key={v} type="button" onClick={() => setFilter(v)} data-testid={`steward-filter-${v}`}
-          className={filter === v ? 'btn-primary' : 'btn-ghost'} style={{ fontSize: '.78rem', padding: '.3rem .6rem' }}
-        >{l}</button>
-      ))}
+    <div className="ui-toolbar">
+      <div className="ui-tabs" role="tablist" aria-label="Filter the agents you steward">
+        {([['all', 'All', orgs.length + services.length], ['org', 'Organizations', orgs.length], ['service', 'Services', services.length]] as const).map(([v, l, n]) => (
+          <button key={v} type="button" role="tab" aria-selected={filter === v} onClick={() => setFilter(v)} data-testid={`steward-filter-${v}`} className="ui-tab">{l}<span className="ui-count">{n}</span></button>
+        ))}
+      </div>
     </div>
   );
-  const Heading = ({ children }: { children: React.ReactNode }) => (
-    <h3 className="subhead" style={{ gridColumn: '1 / -1', margin: '.2rem 0 -.2rem' }}>{children}</h3>
+  const Heading = ({ children, n }: { children: React.ReactNode; n?: number }) => (
+    <div className="ui-section-head" style={{ gridColumn: '1 / -1', marginTop: 'var(--sp-3)' }}><h2>{children}{typeof n === 'number' && <span className="ui-count">{n}</span>}</h2></div>
   );
 
   return (
@@ -573,7 +572,7 @@ export function OrganizationsManager({
         <>
         <Filter />
         <div className="manage-grid">
-          {showOrgs && orgs.length > 0 && <Heading>Organizations</Heading>}
+          {showOrgs && orgs.length > 0 && <Heading n={orgs.length}>Organizations</Heading>}
           {showOrgs && orgs.map((org) => {
             const t = treasuryFor(org.agent);
             const inactive = orgStatusOf(org) === 'inactive';
@@ -590,7 +589,7 @@ export function OrganizationsManager({
                 <div style={{ margin: '.45rem 0' }}><AddressChip address={org.agent as `0x${string}`} size="sm" /></div>
                 <p className="manage-card-blurb">
                   Custodied by you. <ExplorerLink address={org.agent} label="explorer ↗" />
-                  {onSelect && <> · <button type="button" onClick={() => onSelect(org.agent)} style={{ background: 'none', border: 'none', color: 'var(--c-accent, #2563eb)', cursor: 'pointer', padding: 0, fontSize: 'inherit' }}>view data →</button></>}
+                  {onSelect && <> · <button type="button" onClick={() => onSelect(org.agent)} style={{ background: 'none', border: 'none', color: 'var(--color-amber-700)', cursor: 'pointer', padding: 0, minHeight: 0, fontSize: 'inherit' }}>view data →</button></>}
                 </p>
                 {!org.name && <NameAgentForm agent={org.agent} kind="org" parent={person} person={person} token={token} via={via} onDone={reload} />}
                 {inactive && <ActivateOrgRow org={org} person={person} token={token} onDone={reload} />}
@@ -624,7 +623,7 @@ export function OrganizationsManager({
           {/* Every service-class agent you steward — a workspace, a registry, a plain `.svc` service. They
               were invisible here: this page listed org-class agents only, so a service you had chartered
               existed, resolved, and appeared nowhere you could act on it. */}
-          {showServices && services.length > 0 && <Heading>Services</Heading>}
+          {showServices && services.length > 0 && <Heading n={services.length}>Services</Heading>}
           {showServices && services.map((svc) => (
             <div className="manage-card" key={svc.agent}>
               <div className="manage-card-head">

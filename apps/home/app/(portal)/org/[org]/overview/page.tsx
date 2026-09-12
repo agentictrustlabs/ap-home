@@ -17,7 +17,8 @@ import {
   useManagedAgents,
 } from '../../../../../src/components/portal/ManagedAgents';
 import { AddressChip } from '../../../../../src/components/shared/AddressChip';
-import { BuildingIcon, LandmarkIcon } from '../../../../../src/components/shared/Icons';
+import { BuildingIcon } from '../../../../../src/components/shared/Icons';
+import { Section, Card, Empty, Meta } from '../../../../../src/ui';
 import { nameLabel } from '../../../../../src/lib/domain';
 import { agentClassOf, orgKindWordOf } from '../../../../../src/lib/agent-class';
 
@@ -36,39 +37,25 @@ export default function OrgOverviewPage({ params }: { params: Promise<{ org: str
   const title = orgAgent?.name ? nameLabel(orgAgent.name) : 'Organization';
 
   return (
-    <SectionShell title={title}>
+    <SectionShell title={title} description={orgAgent ? <>{orgKindWordOf(orgAgent.kind)} · {orgAgent.name || 'unnamed'} · custodied by you</> : undefined}>
       {!loaded ? (
-        <p className="manage-card-blurb">Loading…</p>
+        <Meta>Loading…</Meta>
       ) : !orgAgent ? (
-        <p className="manage-card-blurb">
-          You don&apos;t steward an organization at this address. Pick one from the workspace switcher.
-        </p>
+        <Empty>You don&apos;t steward an organization at this address. Pick one from the workspace switcher.</Empty>
       ) : (
         <>
         <TodayView scope={{ kind: 'org', org }} />
-        <div className="manage-grid">
-          {/* Overview SHOWS this organization; it does not operate on it. It used to carry every
-              custodial ceremony the org has — name it, create its treasury, name that, fund it — so the
-              first screen of a workspace was a form stack, and the same forms existed again on the pages
-              that own them. Each card now says what is true and points at where that is done. */}
-          <div className="manage-card">
-            <div className="manage-card-head">
-              <span className="manage-card-label"><BuildingIcon size={16} /> {orgAgent.name || 'Unnamed organization'}</span>
-              <span className="manage-card-badge live" style={{ textTransform: 'capitalize' }}>{orgKindWordOf(orgAgent.kind)}</span>
+        {/* Overview SHOWS this organization; it does not operate on it — each fact says where it is changed. */}
+        <Section title="This organization" aside={<ExplorerLink address={orgAgent.agent} label="explorer ↗" />}>
+          <Card>
+            <div style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span className="ui-card-title" style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}><BuildingIcon size={16} /> {orgAgent.name || 'Unnamed organization'}</span>
+              <span className="ui-chip" style={{ textTransform: 'capitalize' }}>{orgKindWordOf(orgAgent.kind)}</span>
+              <AddressChip address={orgAgent.agent as `0x${string}`} size="sm" />
             </div>
-            <div style={{ margin: '.45rem 0' }}><AddressChip address={orgAgent.agent as `0x${string}`} size="sm" /></div>
-            <p className="manage-card-blurb">
-              Its own on-chain Smart Agent, custodied by you.{' '}
-              <ExplorerLink address={orgAgent.agent} label="explorer ↗" />
-            </p>
-            {!orgAgent.name && (
-              <p className="manage-card-blurb">
-                It has no public name yet, so nothing can look it up.{' '}
-                <a href={`/org/${org}/naming`}>Give it one under Naming →</a>
-              </p>
-            )}
-          </div>
-        </div>
+            {!orgAgent.name && <p className="ui-meta" style={{ margin: 'var(--sp-2) 0 0' }}>It has no public name yet, so nothing can look it up. <a href={`/org/${org}/naming`}>Give it one under Naming →</a></p>}
+          </Card>
+        </Section>
         </>
       )}
     </SectionShell>

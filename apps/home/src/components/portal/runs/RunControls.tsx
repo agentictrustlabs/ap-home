@@ -29,10 +29,10 @@ export function RunControls({ token, addressee, runRef, onCanceled, compact }: {
   return (
     <span style={{ display: 'inline-flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }} data-testid="run-controls" onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}>
       {said
-        ? <span style={{ fontSize: '0.72rem', opacity: 0.75 }}>{said}</span>
-        : <BusyButton busy={busy} busyLabel="Stopping…" className="btn-ghost" style={{ width: 'auto', fontSize: compact ? '0.7rem' : '0.75rem' }} onClick={() => void stop()} data-testid="run-cancel">Stop this run</BusyButton>}
+        ? <span className="ui-meta">{said}</span>
+        : <BusyButton busy={busy} busyLabel="Stopping…" className={`ui-btn ui-btn--secondary${compact ? ' ui-btn--sm' : ''}`} onClick={() => void stop()} data-testid="run-cancel">Stop this run</BusyButton>}
       {!compact && !said && (
-        <span style={{ fontSize: '0.68rem', opacity: 0.55 }} title="Stopping is not withdrawing authority: to refuse the next step of any run, revoke the delegation under Security. Nothing here undoes what already happened.">
+        <span className="ui-micro" title="Stopping is not withdrawing authority: to refuse the next step of any run, revoke the delegation under Security. Nothing here undoes what already happened.">
           what happened stands · <a href="/security" onClick={(e) => e.stopPropagation()}>withdraw authority</a>
         </span>
       )}

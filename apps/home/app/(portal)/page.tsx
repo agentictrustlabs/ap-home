@@ -12,6 +12,7 @@ import { LockIcon, BuildingIcon, LandmarkIcon, DatabaseIcon, ExternalLinkIcon, S
 import { Avatar } from '../../src/components/portal/chat/Avatar';
 import { personAvatarKey } from '../../src/lib/avatar-store';
 import { useAvatar } from '../../src/components/portal/chat/use-avatar';
+import { PageHead, Section, Card, KeyValue } from '../../src/ui';
 
 // Which dedicated page each stewarded area links to (live areas only; spec 275), plus the icon
 // that gives the manage-card its identity at a glance (Discord/Telegram-style iconography).
@@ -33,10 +34,7 @@ export default function HomeDashboard() {
 
   return (
     <div className="dashboard">
-      <header className="section-head">
-        <h1>Today</h1>
-        <p className="section-desc">What needs you, what is in motion, what finished — and who you are in the {whitelabel.brand.community}.</p>
-      </header>
+      <PageHead title="Today" description={<>What needs you, what is in motion, what finished — and who you are in the {whitelabel.brand.community}.</>} />
       {session?.fresh && (
         <div className="welcome-banner" role="status">
           <strong>{whitelabel.copy.portalWelcome}{agentName ? `, ${agentName}` : ''}</strong>
@@ -46,85 +44,67 @@ export default function HomeDashboard() {
 
       <TodayView scope={{ kind: 'person' }} />
 
-      <section className="dash-section">
-        <h2>You</h2>
-        <div className="agent-identity-card hero">
-          <div className="agent-identity-card-top">
-            <Avatar name={agentName ?? 'You'} imageUrl={avatarUrl} size={52} />
-            <div>
-              <div className="agent-identity-name">{agentName ?? 'Your home'}</div>
-              <div className="agent-identity-sub" style={{ display: 'flex', alignItems: 'center', gap: '.3rem' }}>
-                {whitelabel.copy.portalYouLabel} · Secured <CheckIcon size={13} style={{ color: 'var(--color-sage-600, #16a34a)' }} />
-              </div>
+      <Section title="You" aside={<a href="/profile">Edit your profile →</a>}>
+        <Card>
+          <div style={{ display: 'flex', gap: 'var(--sp-4)', alignItems: 'center', flexWrap: 'wrap' }}>
+            <Avatar name={agentName ?? 'You'} imageUrl={avatarUrl} size={48} />
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div className="ui-card-title">{agentName ?? 'Your home'}</div>
+              <div className="ui-meta" style={{ display: 'flex', alignItems: 'center', gap: '.3rem' }}>{whitelabel.copy.portalYouLabel} · secured <CheckIcon size={13} style={{ color: 'var(--color-sage-600, #16a34a)' }} /></div>
             </div>
+            {agentAddress && <AddressChip address={agentAddress} />}
           </div>
-          {agentAddress && <AddressChip address={agentAddress} />}
-          {/* The access level and the explorer link used to live on a separate /you page. That page said
-              nothing this card does not, so it is gone — but these two facts came with it, and dropping
-              them silently would have been a quiet loss rather than a simplification. */}
-          <p className="manage-card-blurb" style={{ display: 'flex', gap: '.6rem', flexWrap: 'wrap', margin: '.2rem 0 0' }}>
-            <span>Access: <b>{profile?.access === 'standard' ? 'Standard' : 'Full access'}</b></span>
-            {agentAddress && <ExplorerLink address={agentAddress} label="explorer ↗" />}
-          </p>
-          {/* This IS your home, so "view your home" led nowhere. The useful link is where the details
-              behind this card are edited. */}
-          <a className="btn-ghost" href="/profile">Edit your profile →</a>
-        </div>
-      </section>
+          <div style={{ marginTop: 'var(--sp-3)' }}>
+            <KeyValue rows={[
+              ['access', profile?.access === 'standard' ? 'Standard' : 'Full access'],
+              ...(agentAddress ? [['on chain', <ExplorerLink address={agentAddress} label="explorer ↗" />] as [React.ReactNode, React.ReactNode]] : []),
+            ]} />
+          </div>
+        </Card>
+      </Section>
 
       {/* spec 257 — the "Claim your public name" card lives on the Naming Service tab (/naming),
           not the home page (its ClaimNameCard surfaces the nameless→named choice there). */}
-      <section className="dash-section">
-        <h2>{whitelabel.copy.portalManageHeading}</h2>
+      <Section title={whitelabel.copy.portalManageHeading}>
         <div className="manage-grid">
           {things.map((t) => {
             const href = STEWARD_HREF[t.kind];
             const Icon = STEWARD_ICON[t.kind] ?? BuildingIcon;
             const body = (
               <>
-                <div className="manage-card-head">
-                  <span className="manage-card-icon"><Icon size={17} /></span>
-                  <span className="manage-card-label">{t.label}</span>
-                  <span className={`manage-card-badge ${t.status}`}>
-                    {t.status === 'live' ? <><CheckIcon size={11} /> Live</> : <><LockIcon size={11} /> Coming soon</>}
-                  </span>
+                <div className="ui-card-head" style={{ marginBottom: 4 }}>
+                  <span className="ui-card-title" style={{ display: 'inline-flex', gap: 8, alignItems: 'center', fontSize: 'var(--fs-md)' }}><Icon size={16} /> {t.label}</span>
+                  {t.status !== 'live' && <span className="ui-chip"><LockIcon size={11} /> soon</span>}
                 </div>
-                <p className="manage-card-blurb">{t.blurb}</p>
+                <p className="ui-meta" style={{ margin: 0 }}>{t.blurb}</p>
               </>
             );
             // Live areas link to their dedicated page; "soon" areas stay non-clickable.
             return t.status === 'live' && href ? (
-              <a key={t.kind} className="manage-card link live" href={href}>{body}</a>
+              <a key={t.kind} className="ui-card" href={href} style={{ margin: 0 }}>{body}</a>
             ) : (
-              <div key={t.kind} className={`manage-card ${t.status}`}>{body}</div>
+              <div key={t.kind} className="ui-card ui-card--quiet" style={{ margin: 0 }}>{body}</div>
             );
           })}
         </div>
-      </section>
+      </Section>
 
-      <section className="dash-section">
-        <h2>Your home</h2>
+      <Section title="Your home">
         <div className="manage-grid">
           {whitelabel.services.connectedApps && (
-            <a className="manage-card link" href="/apps">
-              <div className="manage-card-head">
-                <span className="manage-card-icon"><ExternalLinkIcon size={17} /></span>
-                <span className="manage-card-label">Connected apps</span>
-              </div>
-              <p className="manage-card-blurb">Apps you&apos;ve given permission — see what each can do, revoke anytime.</p>
+            <a className="ui-card" href="/apps" style={{ margin: 0 }}>
+              <div className="ui-card-head" style={{ marginBottom: 4 }}><span className="ui-card-title" style={{ display: 'inline-flex', gap: 8, alignItems: 'center', fontSize: 'var(--fs-md)' }}><ExternalLinkIcon size={16} /> Connected apps</span></div>
+              <p className="ui-meta" style={{ margin: 0 }}>Apps you&apos;ve given permission — see what each can do, revoke anytime.</p>
             </a>
           )}
           {whitelabel.services.devices && (
-            <a className="manage-card link" href="/security">
-              <div className="manage-card-head">
-                <span className="manage-card-icon"><ShieldIcon size={17} /></span>
-                <span className="manage-card-label">Security</span>
-              </div>
-              <p className="manage-card-blurb">How you keep your home secure — your sign-in and linked devices.</p>
+            <a className="ui-card" href="/security" style={{ margin: 0 }}>
+              <div className="ui-card-head" style={{ marginBottom: 4 }}><span className="ui-card-title" style={{ display: 'inline-flex', gap: 8, alignItems: 'center', fontSize: 'var(--fs-md)' }}><ShieldIcon size={16} /> Security</span></div>
+              <p className="ui-meta" style={{ margin: 0 }}>How you keep your home secure — your sign-in and linked devices.</p>
             </a>
           )}
         </div>
-      </section>
+      </Section>
     </div>
   );
 }

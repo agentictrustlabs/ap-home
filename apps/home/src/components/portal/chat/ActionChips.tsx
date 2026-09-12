@@ -18,9 +18,10 @@ import { useSession } from '../../../context/session';
 import { signHashFor, resolveVia, type Via } from '../../../home/onboarding';
 import { ensureCsrfToken, csrfHeaders } from '../../../csrf';
 
+// An offered act reads as a quiet button, not a shout: the system's secondary look, one size.
 const chipStyle = {
-  border: '1px solid var(--color-sage-500)', background: 'var(--color-sage-50)', color: 'var(--color-sage-700)',
-  fontWeight: 600, cursor: 'pointer',
+  border: '1px solid var(--color-border-strong)', background: 'var(--color-surface)', color: 'var(--color-text-primary)',
+  fontWeight: 600, cursor: 'pointer', fontSize: '12.5px', padding: '3px 10px', borderRadius: 8, textTransform: 'none', letterSpacing: 0,
 } as const;
 
 /**

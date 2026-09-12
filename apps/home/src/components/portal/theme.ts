@@ -5,31 +5,38 @@
 // New self-contained-inline portal pages should import from here rather than re-declaring locally.
 import type { CSSProperties } from 'react';
 
+// 2026-09-12 — these now mirror the UI system (`src/ui`, `.ui-*`): the same card, button, input and chip as every
+// page on the system, so the legacy inline pages read as one product until each is moved onto the primitives.
 export const cardSty: CSSProperties = {
   background: 'var(--color-surface)',
   border: '1px solid var(--color-border)',
-  borderRadius: 'var(--radius-12)',
-  boxShadow: 'var(--shadow-card)',
-  padding: '1rem 1.1rem',
+  borderRadius: 10,
+  padding: '16px 20px',
 };
 
 export const btnSty: CSSProperties = {
-  padding: '.5rem .9rem',
-  borderRadius: 'var(--radius-8)',
-  fontWeight: 700,
-  fontSize: '.85rem',
+  padding: '7px 12px',
+  minHeight: 34,
+  borderRadius: 8,
+  fontWeight: 600,
+  fontSize: '13.5px',
+  lineHeight: 1,
   cursor: 'pointer',
-  border: '1.5px solid var(--color-border-strong)',
+  border: '1px solid var(--color-border-strong)',
   background: 'var(--color-surface)',
-  color: 'var(--color-text-body)',
+  color: 'var(--color-text-primary)',
   font: 'inherit',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 6,
 };
 
 export const btnPrimarySty: CSSProperties = {
   ...btnSty,
-  background: 'var(--color-amber-500)',
+  background: 'var(--color-action)',
   color: 'var(--color-action-fg)',
-  border: '1.5px solid var(--color-amber-500)',
+  border: '1px solid transparent',
 };
 
 export const mono: CSSProperties = { fontFamily: 'var(--font-mono)' };
@@ -38,10 +45,11 @@ export const mutedText: CSSProperties = { color: 'var(--color-text-muted)' };
 export const errorText: CSSProperties = { color: 'var(--color-danger)' };
 
 export const inputSty: CSSProperties = {
-  padding: '.6rem .8rem',
-  borderRadius: 'var(--radius-8)',
-  border: '1.5px solid var(--color-border-strong)',
+  padding: '7px 10px',
+  borderRadius: 8,
+  border: '1px solid var(--color-border-strong)',
   font: 'inherit',
+  fontSize: '13.5px',
   background: 'var(--color-surface)',
   color: 'var(--color-text-primary)',
 };
@@ -60,9 +68,9 @@ export function badgeStyle(kind: BadgeKind): CSSProperties {
     display: 'inline-flex',
     alignItems: 'center',
     gap: '.3rem',
-    fontSize: '.72rem',
-    fontWeight: 800,
-    padding: '.2rem .55rem',
+    fontSize: '11.5px',
+    fontWeight: 600,
+    padding: '1px 8px',
     borderRadius: 999,
     border: '1px solid',
     whiteSpace: 'nowrap',
@@ -73,9 +81,9 @@ export function badgeStyle(kind: BadgeKind): CSSProperties {
 /** Toggle "pill" used by "What this agent can do" (published/private) — same visual language as `badgeStyle`. */
 export function pillStyle(on: boolean): CSSProperties {
   return {
-    fontSize: '.72rem',
-    fontWeight: 800,
-    padding: '.2rem .55rem',
+    fontSize: '11.5px',
+    fontWeight: 600,
+    padding: '1px 8px',
     borderRadius: 999,
     border: '1px solid',
     cursor: 'pointer',

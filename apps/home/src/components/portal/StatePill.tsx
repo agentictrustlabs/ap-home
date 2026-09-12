@@ -19,7 +19,7 @@ const TONE: Record<ReturnType<typeof stateTone>, { bg: string; fg: string; borde
 export function statePillStyle(p: ProjectedRunStateV1, extra?: CSSProperties): CSSProperties {
   const t = TONE[stateTone(p)];
   return {
-    display: 'inline-block', padding: '0.05rem 0.45rem', borderRadius: 999, fontSize: '0.68rem', lineHeight: 1.5,
+    display: 'inline-block', padding: '1px 8px', borderRadius: 999, fontSize: '11.5px', fontWeight: 600, lineHeight: 1.5,
     whiteSpace: 'nowrap', background: t.bg, color: t.fg, border: `1px solid ${t.border}`, ...(extra ?? {}),
   };
 }
@@ -33,7 +33,7 @@ export function StatePill({ state, native, style, compact }: { state: ProjectedR
       data-state={state.state}
       data-effect-uncertain={state.effectUncertain ? 'true' : undefined}
       title={tip}
-      style={statePillStyle(state, { ...(compact ? { fontSize: '0.64rem', padding: '0 0.4rem' } : {}), ...(style ?? {}) })}
+      style={statePillStyle(state, { ...(compact ? { fontSize: '11px', padding: '0 7px' } : {}), ...(style ?? {}) })}
     >
       {label}
     </span>

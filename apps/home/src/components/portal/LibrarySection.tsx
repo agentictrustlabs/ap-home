@@ -226,7 +226,7 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
   );
 
   return (
-    <SectionShell title={title}>
+    <SectionShell title={title} description="What this vault holds, who may see each item, and how fresh it is — shared, published or replicated as three separate acts.">
       {/* Explicit text color so every descendant inherits a defined token — never a white ambient
           (e.g. a browser/OS dark-mode default) on our light surfaces. */}
       <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', color: 'var(--color-text-body)' }}>
@@ -248,7 +248,7 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
           {/* filters */}
           {lens !== 'public' && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem', flexWrap: 'wrap', marginBottom: '.5rem' }}>
-              <div style={{ display: 'inline-flex', border: '1px solid var(--color-border-strong)', borderRadius: 8, overflow: 'hidden' }}>
+              <div style={{ display: 'inline-flex', gap: 2, padding: 2, background: 'var(--color-surface-sunken)', borderRadius: 8 }}>
                 {(['all', ...KINDS] as const).map((k) => (
                   <button key={k} style={segSty(kindFilter === k)} onClick={() => setKindFilter(k)}>{k === 'all' ? 'All' : KIND_META[k].plural}</button>
                 ))}
@@ -410,8 +410,8 @@ function ScopeRail({ lens, onLens, orgLabel, ownerLabel, sharedCount, items, pat
     const on = lens === key;
     return (
       <button key={key} role="option" aria-selected={on} onClick={() => onLens(key)}
-        style={{ display: 'flex', gap: '.55rem', alignItems: 'flex-start', width: '100%', textAlign: 'left', padding: '.5rem .6rem', border: 'none', cursor: 'pointer',
-          borderLeft: `3px solid ${on ? 'var(--color-amber-500)' : 'transparent'}`, background: on ? 'var(--color-amber-50)' : 'transparent', color: on ? 'var(--color-amber-700)' : 'var(--color-text-body)' }}>
+        style={{ display: 'flex', gap: '.55rem', alignItems: 'flex-start', width: '100%', textAlign: 'left', padding: '.5rem .6rem', border: 'none', cursor: 'pointer', minHeight: 0, borderRadius: 0, filter: 'none',
+          borderLeft: `3px solid ${on ? 'var(--color-amber-500)' : 'transparent'}`, background: on ? 'var(--color-surface-sunken)' : 'transparent', color: 'var(--color-text-primary)' }}>
         <Icon name={icon} size={17} style={{ marginTop: 1 }} />
         <span style={{ minWidth: 0 }}>
           <span style={{ display: 'block', fontWeight: on ? 700 : 600, fontSize: 13 }}>{label}</span>
@@ -428,7 +428,7 @@ function ScopeRail({ lens, onLens, orgLabel, ownerLabel, sharedCount, items, pat
     return m;
   }, [items]);
   const heading = (s: string) => (
-    <div style={{ ...mutedText, fontSize: 10, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', padding: '.3rem .7rem' }}>{s}</div>
+    <div style={{ ...mutedText, fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', padding: '.3rem .7rem' }}>{s}</div>
   );
   return (
     <div role="listbox" aria-label="Scope" style={{ ...cardSty, padding: '.4rem 0', width: 232, flexShrink: 0, color: 'var(--color-text-body)' }}>
@@ -476,7 +476,7 @@ function ArtifactList({ rows, selectedId, ownerLabel, onOpen, onDescend, onDelet
   const cols = onDelete ? '2.2fr 1.1fr .8fr .8fr 1fr .5fr 2rem' : '2.2fr 1.1fr .8fr .8fr 1fr .5fr';
   return (
     <div style={{ ...cardSty, padding: 0, overflow: 'hidden', color: 'var(--color-text-body)' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: cols, gap: '.5rem', padding: '.5rem .8rem', ...mutedText, fontSize: 10, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase', borderBottom: '1px solid var(--color-border)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: cols, gap: '.5rem', padding: '.5rem .8rem', ...mutedText, fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', borderBottom: '1px solid var(--color-border)' }}>
         <span>Name</span><span>Owner</span><span>Access</span><span>Fresh</span><span>Authority</span><span>Ver</span>{onDelete && <span />}
       </div>
       {rows.map((a) => {
@@ -490,10 +490,10 @@ function ArtifactList({ rows, selectedId, ownerLabel, onOpen, onDescend, onDelet
           <div key={a.id} role="button" tabIndex={0}
             onClick={activate} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } }}
             style={{ display: 'grid', gridTemplateColumns: cols, gap: '.5rem', alignItems: 'center', padding: '.55rem .8rem', minHeight: 44, cursor: 'pointer',
-              borderBottom: '1px solid var(--color-border)', background: on ? 'var(--color-amber-50)' : 'transparent',
+              borderBottom: '1px solid var(--color-border)', background: on ? 'var(--color-surface-raised)' : 'transparent', boxShadow: on ? 'inset 3px 0 0 var(--color-amber-500)' : 'none',
               // Explicit, not inherited: an ancestor that sets no colour leaves this at the browser
               // default, which on a light surface reads as white on white.
-              color: on ? 'var(--color-amber-700)' : 'var(--color-text-primary)' }}
+              color: 'var(--color-text-primary)' }}
             onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = 'var(--color-surface-sunken)'; }}
             onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = 'transparent'; }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: '.5rem', minWidth: 0 }}>
@@ -1143,8 +1143,8 @@ function UploadModal({ destination, folders, orgSa, api, onClose, onDone }: {
 // invisible on our light surface. Every branch names a token; none is left to inherit or default.
 const segSty = (on: boolean): CSSProperties => ({
   ...btnSty,
-  borderRadius: 0,
-  background: on ? 'var(--color-amber-50)' : 'transparent',
-  color: on ? 'var(--color-amber-700)' : 'var(--color-text-body)',
-  fontWeight: on ? 700 : 600,
+  border: 0, minHeight: 0, padding: '5px 10px', borderRadius: 6, fontSize: '12.5px',
+  background: on ? 'var(--color-surface)' : 'transparent',
+  color: on ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+  boxShadow: on ? '0 1px 2px rgba(0,0,0,.08)' : 'none',
 });
