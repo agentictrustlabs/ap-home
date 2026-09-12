@@ -39,6 +39,14 @@ export async function provenanceRecordOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, ag
   const known = Number.isFinite(chainId) && chainId > 0 ? { chainId } : {};
   return { graph: projectHarnessRunProvenance({ ...view, ...known }), ...known };
 }
+/** Spec 398 §5.2 — THE INSPECTOR'S VIEW: the same structural record (`RunProvenanceV1`), as records rather than as a
+ *  graph — outcome, artifacts, decisions, per-step authority, effects, bill — for a surface that orders it
+ *  artifact-first. Never the arguments, results or words: the firewall is the same one the graph passes. */
+export async function provenanceViewOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, agent: string, record: RunRecordV1): Promise<Awaited<ReturnType<typeof provenanceOf>> & { chainId?: number; bill?: RunRecordV1['bill']; canceled?: RunRecordV1['canceled']; plannedSteps?: number }> {
+  const view = await provenanceOf(record, agent);
+  const chainId = Number(env.CHAIN_ID);
+  return { ...view, ...(Number.isFinite(chainId) && chainId > 0 ? { chainId } : {}), ...(record.bill ? { bill: record.bill } : {}), ...(record.canceled ? { canceled: record.canceled } : {}), plannedSteps: record.plan.steps.length };
+}
 export async function provenanceGraphOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, agent: string, record: RunRecordV1): Promise<Record<string, unknown>> {
   const { graph, chainId } = await provenanceRecordOf(env, agent, record);
   return toJsonLd(graph, { context: RUN_PROVENANCE_CONTEXT['@context'] as unknown as Record<string, unknown>, ...(chainId ? { chainId } : {}) });

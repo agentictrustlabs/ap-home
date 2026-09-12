@@ -435,6 +435,7 @@
         "components/portal/StatePill.tsx",
         "components/portal/runs/RunControls.tsx",
         "components/portal/runs/RunHistory.tsx",
+        "components/portal/runs/RunInspector.tsx",
         "components/portal/runs/RunTimeline.tsx",
         "home/run-state.ts"
       ],
@@ -469,7 +470,6 @@
       "gaps": [
         "steer and pause as client surfaces (a pause is a trigger's, 375); cancel shipped 398 §5.3 — revoke stays on delegations, undo is a new intent",
         "run cost on the row and on Today — the headers exist (x-ap-vault-calls, x-ap-ms), no UI (APUX-033, 398 §5.4)",
-        "artifact-first inspector (398 §5.2)",
         "no replay UI over the spans (H40)"
       ]
     },

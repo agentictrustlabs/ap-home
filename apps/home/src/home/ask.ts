@@ -427,6 +427,33 @@ export async function fetchProvenance(session: { token: string }, addressee: Add
   return { text: format === 'prov-n' ? String(out.provN ?? '') : JSON.stringify(out.provenance, null, 2), ...(out.hasProvenance ? { hasProvenance: out.hasProvenance } : {}) };
 }
 
+/** Spec 398 §5.2 — THE INSPECTOR'S RECORD: what the run left, decided, spent authority on and cost, per step —
+ *  digests, verdicts and names, never arguments or words (the same firewall the PROV graph passes). */
+export interface RunInspectorStep {
+  stepRef: string; toolId: string; capability?: { id: string; action: string }; risk?: string; status: string;
+  startedAt?: string; endedAt?: string;
+  authority?: { presentedRef: string | null; decision: string; afterApproval: boolean; chain?: { depth: number; chainDigest: string; accountabilityRoot: string; actingAgent: string } };
+  actor?: { rootPrincipal?: string; originatingAgent?: string; actingAgent: string };
+  receiptDigest?: string; txHash?: string; delegatedTo?: string; delegatedToRun?: string;
+  artifact?: { recordType: string; digest: string; bytes: number };
+  effects?: Array<{ produces: string; ok: boolean }>;
+  decisions?: Array<{ point: string; ruleId: string }>;
+  errorClass?: string;
+}
+export interface RunInspectorRecord {
+  runRef: string; endedAt: string; agent: string; asker?: string; outcome: string; chainId?: number;
+  playbook?: { skillId: string; version: string; commitment: string };
+  inResponseTo?: { agent: string; runRef: string; stepRef?: string };
+  steps: RunInspectorStep[];
+  bill?: { vaultCalls: number; doRequests: number; byStep: Record<string, { vaultCalls: number; doRequests: number }> };
+  canceled?: { at: number; by: string; afterSteps: number; note?: string };
+  plannedSteps?: number;
+}
+export async function fetchRunInspector(session: { token: string }, addressee: Address, runRef: string): Promise<RunInspectorRecord | { error: string }> {
+  const out = (await postA2a('/a2a/harness/provenance', { session: session.token, addressee, runRef, format: 'record' })) as { ok?: boolean; error?: string; record?: RunInspectorRecord };
+  return out.ok && out.record ? out.record : { error: out.error ?? 'the run could not be read back' };
+}
+
 export async function fetchSpans(session: { token: string }, addressee: Address, runRef: string): Promise<RunProvenance | { error: string }> {
   const out = (await postA2a('/a2a/harness/spans', { session: session.token, addressee, runRef })) as { ok?: boolean; error?: string } & Partial<RunProvenance>;
   return out.ok ? { spans: out.spans ?? [], retention: out.retention, ...(out.exporter ? { exporter: out.exporter } : {}), export: out.export ?? null } : { error: out.error ?? 'the run could not be read back' };

@@ -158,7 +158,7 @@ import type { CandidateSource } from '@agenticprimitives/intent-engagement';
 import { answerProbe } from './engagement-answer.js';
 import type { MessageV1 } from '@agenticprimitives/a2a/standard';
 import { signAsAgent } from './consult-rail.js';
-import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, firewalledMetrics, publicProvenanceOf } from './run-export.js';
+import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, provenanceViewOf, firewalledMetrics, publicProvenanceOf } from './run-export.js';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
@@ -2181,7 +2181,7 @@ app.post('/harness/spans', async (c) => {
 // even when the vault write failed — the export report says which), or PROV-N on request. The asker's own runs
 // only (P6's rule). Evidence, never authority: nothing here is read by a gate.
 app.post('/harness/provenance', async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; runRef?: string; format?: 'jsonld' | 'prov-n' } | null;
+  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; runRef?: string; format?: 'jsonld' | 'prov-n' | 'record' } | null;
   if (!body?.session || !body.addressee || !body.runRef) return c.json({ ok: false, error: 'session, addressee and runRef are required' }, 400);
   const who = await verifyHomeSession(body.session, c.env);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
@@ -2191,6 +2191,8 @@ app.post('/harness/provenance', async (c) => {
   if (String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()) return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
   const ref = hasProvenanceRef(addressee, body.runRef);
   if (body.format === 'prov-n') return c.json({ ok: true, hasProvenance: ref, provN: await provenanceProvNOf(c.env, addressee, rec), export: rec.export?.provenance ?? null });
+  // Spec 398 §5.2 — the inspector's record form: what the run left (artifacts), decided, spent authority on, cost.
+  if (body.format === 'record') return c.json({ ok: true, hasProvenance: ref, record: await provenanceViewOf(c.env, addressee, rec), export: rec.export?.provenance ?? null });
   return c.json({ ok: true, hasProvenance: ref, provenance: await provenanceGraphOf(c.env, addressee, rec), export: rec.export?.provenance ?? null });
 });
 

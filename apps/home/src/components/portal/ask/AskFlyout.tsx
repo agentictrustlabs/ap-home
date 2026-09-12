@@ -18,7 +18,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useRouter } from 'next/navigation';
 import { useSession } from '../../../context/session';
-import { RunTimeline } from '../runs/RunTimeline';
+import { RunInspector } from '../runs/RunInspector';
 import { useManagedAgents } from '../ManagedAgents';
 import { orgHref, serviceHref } from '../../../lib/workspace';
 import { agentClassOf } from '../../../lib/agent-class';
@@ -978,7 +978,7 @@ function DiagnosticsPane({ entries, token, onClose }: { entries: DiagEntry[]; to
           {/* A turn with no tool step is not a defect — a refusal or an authority request reads nothing. */}
           {e.evidence.length === 0 && !e.error && <div className="muted">No tool read anything on this turn.</div>}
           {e.trace && <PlannerTraceView trace={e.trace} />}
-          {e.runRef && e.addressee && <RunTimeline token={token} addressee={e.addressee} runRef={e.runRef} />}
+          {e.runRef && e.addressee && <RunInspector token={token} addressee={e.addressee} runRef={e.runRef} open={false} />}
           {e.evidence.map((ev, k) => (
             <div key={k} style={{ marginTop: 4 }}>
               <div className="muted">

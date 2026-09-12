@@ -56,5 +56,6 @@ export function nativeWord(source: RunStateSource): string {
     case 'recovering': return 'recovering';
     case 'trigger': return source.paused ? 'paused' : source.lastOutcome;
     case 'endeavor': return source.lifecycle;
+    case 'step': return source.status;
   }
 }

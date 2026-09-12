@@ -1,12 +1,13 @@
 'use client';
 // WHAT MY AGENT DID — spec 381 W3, the listing. The runs this person asked of an agent, newest first, each
-// with its goal, when it finished, how it ended and how many steps and receipts it left; open one and its
-// provenance draws as a timeline (RunTimeline). Read from the agent's own records under the person's session:
+// with its goal, when it finished, how it ended and how many steps and receipts it left; open one and the
+// inspector draws it artifact-first (RunInspector, spec 398 §5.2 — outcome · artifacts · decisions · plan and
+// authority · execution detail · provenance). Read from the agent's own records under the person's session:
 // the Worker lists only the runs they asked for, and refuses the rest.
 import { useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { listRunRecords, type RunRecordRow } from '../../../home/ask';
-import { RunTimeline } from './RunTimeline';
+import { RunInspector } from './RunInspector';
 import { StatePill } from '../StatePill';
 import { stateOf, type RunStateSource } from '../../../home/run-state';
 
@@ -46,7 +47,7 @@ export function RunHistory({ token, addressee, limit = 25 }: { token: string; ad
               <span style={{ flex: 'none', fontSize: '0.72rem', opacity: 0.7 }}>{r.steps} step{r.steps === 1 ? '' : 's'} · {r.receipts} receipt{r.receipts === 1 ? '' : 's'}{r.export?.ok ? ' · in the vault' : ''}</span>
               <button type="button" className="ghost" style={{ flex: 'none', fontSize: '0.74rem' }} onClick={() => setOpen(isOpen ? null : r.runRef)}>{isOpen ? 'Close' : 'Open'}</button>
             </div>
-            {isOpen && <RunTimeline token={token} addressee={addressee} runRef={r.runRef} open />}
+            {isOpen && <RunInspector token={token} addressee={addressee} runRef={r.runRef} />}
           </div>
         );
       })}
