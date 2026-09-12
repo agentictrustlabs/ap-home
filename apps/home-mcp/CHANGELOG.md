@@ -1,5 +1,15 @@
 # @agenticprimitives-demo/home-mcp
 
+## 0.0.1-alpha.3
+
+### Patch Changes
+
+- Updated dependencies
+  - @agenticprimitives/a2a@0.0.0-alpha.22
+  - @agenticprimitives/connect@1.0.0-alpha.24
+  - @agenticprimitives/mcp-oauth@0.0.0-alpha.6
+  - @agenticprimitives/mcp-protocol@0.0.0-alpha.3
+
 ## 0.0.1-alpha.2
 
 ### Patch Changes

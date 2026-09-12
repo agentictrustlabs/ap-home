@@ -1,5 +1,47 @@
 # @agenticprimitives-demo/a2a
 
+## 0.0.2-alpha.28
+
+### Patch Changes
+
+- Updated dependencies
+  - @agenticprimitives/a2a@0.0.0-alpha.22
+  - @agenticprimitives/agent-account@1.0.0-alpha.24
+  - @agenticprimitives/agent-naming@1.0.0-alpha.24
+  - @agenticprimitives/agent-profile@1.0.0-alpha.24
+  - @agenticprimitives/agent-relationships@1.0.0-alpha.24
+  - @agenticprimitives/agent-resolution@0.0.0-alpha.5
+  - @agenticprimitives/audit@1.0.0-alpha.24
+  - @agenticprimitives/capability-claims@0.0.0-alpha.21
+  - @agenticprimitives/chain-state@0.0.0-alpha.3
+  - @agenticprimitives/chain-state-viem@0.0.0-alpha.5
+  - @agenticprimitives/collaboration@0.0.0-alpha.3
+  - @agenticprimitives/connect@1.0.0-alpha.24
+  - @agenticprimitives/connect-auth@1.0.0-alpha.24
+  - @agenticprimitives/content-storage@1.0.0-alpha.3
+  - @agenticprimitives/context@0.0.0-alpha.3
+  - @agenticprimitives/coordination@0.0.0-alpha.7
+  - @agenticprimitives/delegation@1.0.0-alpha.24
+  - @agenticprimitives/edge-runtime@0.0.0-alpha.6
+  - @agenticprimitives/fabric@0.0.0-alpha.13
+  - @agenticprimitives/harness@0.0.0-alpha.3
+  - @agenticprimitives/home@0.0.0-alpha.13
+  - @agenticprimitives/intent-engagement@0.0.0-alpha.3
+  - @agenticprimitives/key-custody@1.0.0-alpha.24
+  - @agenticprimitives/mcp-runtime@1.0.0-alpha.24
+  - @agenticprimitives/ontology@1.0.0-alpha.24
+  - @agenticprimitives/orchestration@0.0.0-alpha.3
+  - @agenticprimitives/orchestration-anthropic@0.0.0-alpha.4
+  - @agenticprimitives/orchestration-openai-compat@0.0.0-alpha.3
+  - @agenticprimitives/rate-control-cloudflare@0.0.0-alpha.4
+  - @agenticprimitives/registry-kit@0.0.0-alpha.12
+  - @agenticprimitives/related-agents@0.0.0-alpha.20
+  - @agenticprimitives/situations@0.0.0-alpha.8
+  - @agenticprimitives/surface-catalog@0.0.0-alpha.4
+  - @agenticprimitives/types@1.0.0-alpha.24
+  - @agenticprimitives/vault@0.0.0-alpha.4
+  - @agenticprimitives/verification-receipts@0.0.0-alpha.5
+
 ## 0.0.2-alpha.27
 
 ### Patch Changes
