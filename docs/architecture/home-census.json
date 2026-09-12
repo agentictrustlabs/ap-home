@@ -76,17 +76,20 @@
         "(portal)/service/[agent]"
       ],
       "components": [
+        "components/portal/BasisLine.tsx",
         "components/portal/nav.ts",
+        "lib/acting-basis.ts",
         "lib/workspace.ts"
       ],
       "tests": [
-        "apps/demo-sso-next/src/components/portal/nav.test.ts",
         "apps/demo-sso-next/src/components/portal/nav-routes.test.ts",
+        "apps/demo-sso-next/src/components/portal/nav.test.ts",
+        "apps/demo-sso-next/src/lib/acting-basis.test.ts",
         "apps/demo-sso-next/src/lib/org-membership-union.test.ts"
       ],
       "gaps": [
-        "the basis line on every mutation (acting as X, in Y, under Z) — 398 §4.4",
-        "fleet isolation shown as a compute + credential boundary, not an avatar — M06"
+        "fleet isolation shown as a compute + credential boundary, not an avatar — M06",
+        "the basis line is on the Ask's authority card, My Work's decisions, the endeavor detail and the request composer — not yet on every mutation screen (invites, membership, treasury pay, Card Studio publish) nor the M06 fleet lines on the roster (398 §4.4)"
       ]
     },
     {

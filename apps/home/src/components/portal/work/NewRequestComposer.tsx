@@ -11,6 +11,7 @@ import { isReEnableError, submitEndeavorRequest } from '../../../lib/work-client
 import { searchAgentsKb, type AgentSearchHit } from '../../../lib/agent-search';
 import { BusyButton } from '../../shared/BusyButton';
 import { useRelatedOrgs, useReEnableInteractions } from './useWork';
+import { BasisLine } from '../BasisLine';
 
 export function NewRequestComposer({
   /** When set (org Work section), the org is the default target. */
@@ -92,6 +93,7 @@ export function NewRequestComposer({
   return (
     <div className="manage-card" style={{ padding: '1rem' }}>
       <h3 className="subhead" style={{ marginTop: 0 }}>New request</h3>
+      <BasisLine needs="your signature on the request — the target decides whether to adopt it" style={{ marginBottom: '0.4rem' }} />
       <p className="manage-card-blurb" style={{ margin: '0 0 0.7rem' }}>
         Describe what you want done. The target decides whether to adopt your request as an endeavor —
         you state the goal, not the steps.

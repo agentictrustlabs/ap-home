@@ -23,6 +23,7 @@ import { LIFECYCLE_LABEL, lifecycleState } from './labels';
 import { StatePill } from '../StatePill';
 import { RunControls } from '../runs/RunControls';
 import { stateOf, runStateLabel, type AwaitingKind } from '../../../home/run-state';
+import { BasisLine } from '../BasisLine';
 
 const saOf = (caip: string): string => caip.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase() ?? caip;
 
@@ -183,9 +184,11 @@ export function MyWorkView() {
           {/* Action-priority inbox: everything that NEEDS this person, first and unmissable. */}
           {(awaiting.length > 0 || decisions.length > 0) && (
             <div className="chat-attention" style={{ marginBottom: '1rem' }}>
-              <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: '0.5rem' }}>
+              <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: '0.25rem' }}>
                 Needs your attention ({awaiting.length + decisions.length})
               </div>
+              {/* spec 398 §4.4 — every decision here is signed as YOU; the organization it is FOR is on each card. */}
+              <BasisLine needs="your signature, as the named approver or the allocated participant" style={{ marginBottom: '0.5rem' }} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
                 {awaiting.map(({ b, e }) => (
                   <EntryCard

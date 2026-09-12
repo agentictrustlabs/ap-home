@@ -19,6 +19,7 @@ import type { Address } from '@agenticprimitives/types';
 import { useRouter } from 'next/navigation';
 import { useSession } from '../../../context/session';
 import { RunInspector } from '../runs/RunInspector';
+import { BasisLine } from '../BasisLine';
 import { useManagedAgents } from '../ManagedAgents';
 import { orgHref, serviceHref } from '../../../lib/workspace';
 import { agentClassOf } from '../../../lib/agent-class';
@@ -1232,6 +1233,8 @@ function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest
   return (
     <div className="ask-card" data-testid="ask-authority">
       <div style={{ fontWeight: 600, fontSize: 13 }}>This needs your authority</div>
+      {/* spec 398 §4.4 — the two facts, side by side, on the review card: who acts, in what, on what basis. */}
+      <BasisLine needs={`${capabilityWords(reply.capability)} as ${short(d.delegator)}, this request only`} style={{ margin: '4px 0 2px' }} />
       <p style={{ fontSize: 12.5, margin: '6px 0 0', lineHeight: 1.5 }}>
         To do this, <AgentName address={reply.delegate} /> needs permission to <strong>{capabilityWords(reply.capability)}</strong> as{' '}
         <strong><AgentName address={d.delegator} /></strong> — for <strong>this request only</strong>, expiring in {d.expiresInMinutes} minutes.

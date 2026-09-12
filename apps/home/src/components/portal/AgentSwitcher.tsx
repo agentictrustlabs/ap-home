@@ -17,6 +17,7 @@ import { agentClassOf, orgKindWordOf, serviceRoleOf, authorityLineage } from '..
 import { UserIcon, BuildingIcon, LandmarkIcon, CheckIcon } from '../shared/Icons';
 import { nameLabel } from '../../lib/domain';
 import { Popover } from '../shared/ui';
+import { actingBasis } from '../../lib/acting-basis';
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const lc = (s: string) => s.toLowerCase();
@@ -55,13 +56,12 @@ export function AgentSwitcher() {
     active.kind === 'org' ? (activeOrg?.name ? nameLabel(activeOrg.name) : short(active.org))
     : active.kind === 'service' ? (activeService?.name ? nameLabel(activeService.name) : short(active.agent))
     : personLabel;
-  // spec 318: the caption states the RELATIONSHIP truthfully — a member org is authority-only
-  // (never custody), and an org not in the list at all is a guest visit.
-  const caption =
-    active.kind === 'person' ? 'acting as you'
-    : active.kind === 'org' && activeOrg?.relationship === 'member' ? 'member · no custody'
-    : active.kind === 'org' && !activeOrg ? 'visiting · no custody'
-    : 'acting as custodian';
+  // spec 318 / 398 §4.4: the caption states the RELATIONSHIP truthfully — a member org is authority-only (never
+  // custody), an org not in the list at all is a guest visit — from the ONE function every basis line renders from.
+  const caption = actingBasis({
+    active, self: { address: agentAddress ?? '' }, classOf: (k) => agentClassOf(k as Parameters<typeof agentClassOf>[0]),
+    agents: agents.map((a) => ({ agent: a.agent, kind: a.kind, ...(a.relationship ? { relationship: a.relationship } : {}) })),
+  }).caption;
 
   const go = (href: string) => { router.push(href); setOpen(false); };
 

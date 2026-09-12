@@ -31,6 +31,7 @@ import { useOrgMemberNames } from './useWork';
 import { EVENT_LABEL, LIFECYCLE_LABEL, STEP_KIND_LABEL, lifecycleState } from './labels';
 import { StatePill } from '../StatePill';
 import type { EndeavorLifecycle } from '@agenticprimitives/home';
+import { BasisLine } from '../BasisLine';
 
 const STEP_KINDS = ['contribution', 'interaction', 'decision', 'aggregation', 'validation'] as const;
 type StepKind = (typeof STEP_KINDS)[number];
@@ -287,6 +288,8 @@ export function OrgWorkEndeavorDetail({ org, endeavorId }: { org: Address; endea
         <>
           {/* ── Header: status + progress + outcome ── */}
           <div className="manage-card" style={{ padding: '0.85rem 1rem', marginBottom: '0.8rem' }}>
+            {/* spec 398 §4.4 — who is acting, in which organization, on what basis; every act below goes through the Ask. */}
+            <BasisLine scope={{ kind: 'org', org: communityId }} needs="the organization's agent verifying each act under your mandate" style={{ marginBottom: '0.4rem' }} />
             <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
               <StatePill state={lifecycleState(e.lifecycle)} native={LIFECYCLE_LABEL[e.lifecycle as EndeavorLifecycle] ?? e.lifecycle} />
               {stepsTotal > 0 && (
