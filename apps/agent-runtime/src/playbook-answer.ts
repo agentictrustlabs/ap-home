@@ -126,6 +126,18 @@ const ANSWER_SYSTEM =
   + 'it); the counts at this table, weighted by sample size (under ten hands is "so far", a lean; over '
   + 'thirty is a tendency); her reads; your notes. Say the price, then the player. Say the sample size '
   + 'when you use a count.\n\n'
+  + 'EVIDENCE RULES, which override everything above. The ONLY facts about how she or anyone has played '
+  + 'are the counts in "Her records" and the number of hands recorded. Your own past notes are your '
+  + 'earlier OPINIONS, not a record of her hands: never count them, never say "you did this N times" '
+  + 'from them, never treat a note about an earlier question as a hand she played. If the records hold '
+  + 'one hand, she has one hand on record and you say so. A number you cannot point to in the records '
+  + 'does not appear in your answer. Mid-hand you do not know how this hand ends, so you never describe '
+  + 'it as won or lost. Preflop, the house baseline comes from a chart that agrees with a solver nine '
+  + 'times in ten: say what the chart does and depart only for a count here or a rule she wrote. '
+  + 'Pot odds are the share of the final pot a call buys — the equity a hand needs — not "how often the '
+  + 'hand must be best"; preflop the chart already weighs that, so do not fold a chart-call on pot odds '
+  + 'alone. A LIMP is entering an UNRAISED pot by calling; defending a blind against a raise is a call, '
+  + 'not a limp, and a rule against limping does not forbid it.\n\n'
   + 'Then be concrete and short: `say` is ONE sentence for somebody with a clock running; `because` is the '
   + 'reason, which is the half that teaches; `action` is the move you would make, in exactly the action '
   + 'shape asked for, or omitted when you would not commit to one. Never claim to know what you cannot '
@@ -144,7 +156,10 @@ const REVIEW_SYSTEM =
   + 'decision as it was at the time with what she could see — a right decision that lost is still right. '
   + 'Never review cards she could not see; opponents\' cards appear only when shown at showdown, and you '
   + 'say "shown" when you use them. With fewer than five hands, give one honest sentence and say what would '
-  + 'change it. Write it the way a coach talks after the session, not the way a spreadsheet prints.';
+  + 'change it. THE HANDS LISTED ARE THE WHOLE RECORD: your own earlier remarks are opinions, not hands — '
+  + 'never count them, never say "N times" from them, and if they disagree with the hands, the hands win '
+  + 'and you say you were wrong. Write it the way a coach talks after the session, not the way a '
+  + 'spreadsheet prints.';
 
 export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
   return async (toolId, args) => {
@@ -170,7 +185,7 @@ export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
     }
     if (!deps.call) return { refused: 'no model is available to answer with' };
     const street = typeof (m.input as { read?: { street?: unknown } } | undefined)?.read?.street === 'string' ? (m.input as { read: { street: string } }).read.street : null;
-    const system = `${ANSWER_SYSTEM}\n\n---\n\n${relevantInstructions(deps.instructions, skill, street) || '(this agent has no further instructions)'}`;
+    const system = `${ANSWER_SYSTEM}\n\n---\n\n${relevantInstructions(deps.instructions, skill, street, 'advise') || '(this agent has no further instructions)'}`;
     // WHAT THIS AGENT REMEMBERS about the players in the material — its own counts from the rounds the
     // asker reported, with the rates worked out. Only the subjects present here; a memory of somebody at
     // another table is not this question.
@@ -201,7 +216,7 @@ export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
         ? `Her records — the counts on the players here, from the ${study.hands} hand${study.hands === 1 ? '' : 's'} she has recorded (rates are computed; small samples mean little):\n${JSON.stringify(remembered)}`
         : `Remembered — your own counts on the players here, from rounds reported to you (rates are computed; small samples mean little):\n${JSON.stringify(remembered)}`] : []),
       ...(study?.reads.length ? [`Her reads — her own notes on players:\n${study.reads.map((r) => `- ${r.about}: ${r.note}`).join('\n')}`] : []),
-      ...(study?.notes.length ? [`Your own past notes, oldest first:\n${study.notes.map((n) => `- ${n.at.slice(0, 10)}: ${n.text}`).join('\n')}`] : []),
+      ...(study?.notes.length ? [`Your own earlier remarks (opinions from past reviews — NOT a record of her hands; the counts above are the record), oldest first:\n${study.notes.map((n) => `- ${n.at.slice(0, 10)}: ${n.text}`).join('\n')}`] : []),
       `Material: ${JSON.stringify(rest)}`,
     ].join('\n');
     const started = Date.now();
@@ -220,7 +235,6 @@ export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
                 say: { type: 'string', description: 'One sentence, for somebody with a clock running' },
                 because: { type: 'string', description: 'The reason — the half that teaches' },
                 action: { type: 'object', description: 'The move, in the action shape the legal moves use; omit to commit to none', additionalProperties: true },
-                ...(study ? { note: { type: 'string', description: 'RARELY: one or two sentences worth keeping for next time, checkable against this hand (the decision, the price, the count that mattered, what it cost). Empty on most hands.' } } : {}),
               },
               required: ['reasoning', 'say', 'because'],
             },
@@ -233,16 +247,12 @@ export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
     const action = out.action && typeof out.action === 'object' ? out.action : undefined;
     // How long the model took, on the record: latency is a fact about the answer worth keeping beside it.
     console.log(`[playbook.answer] ${skill} model ${Date.now() - started}ms · memory ${memoryMs}ms (${remembered.length} remembered) · prompt ${system.length + user.length} chars · answer ${say.length + (because?.length ?? 0)} chars`);
-    // A NOTE, when the coach found one worth keeping — into HER cabinet, under the grant's append scope.
-    // Awaited: the write is the consultation's only lasting effect, and a promise left behind a reply is
-    // a promise the runtime may drop.
-    let noted = false;
-    const noteText = study && typeof out.note === 'string' ? out.note.trim() : '';
-    if (noteText && deps.study?.note) {
-      const handNo = Number((m.input as { handNo?: unknown } | undefined)?.handNo ?? 0) || undefined;
-      noted = (await deps.study.note(noteText, { ...(handNo ? { hand: handNo } : {}) }).catch(() => ({ ok: false }))).ok;
-    }
-    const result = { skill, say, ...(because ? { because } : {}), ...(action ? { action } : {}), source: deps.agentName ?? 'this agent', modelMs: Date.now() - started, memoryMs, promptChars: system.length + user.length, ...(remembered.length ? { remembered: remembered.map((r) => `${r.label ?? r.id}:${r.rounds}`) } : {}), ...(study ? { study: { owner: study.owner, hands: study.hands, style: study.style.length, reads: study.reads.length, notes: study.notes.length, noted } } : {}) };
+    // NO NOTE MID-HAND. A consultation does not know how the hand ends, and a note written from one reads
+    // later as a record of a hand she played: with the field offered "rarely", the model wrote one on every
+    // consultation and then counted its own notes as her history ("seventh identical spot — called twice,
+    // lost both", over ONE recorded hand; seen live 2026-09-12). Notes are a REVIEW's to write, from hands
+    // that have endings (`reviewStudy`).
+    const result = { skill, say, ...(because ? { because } : {}), ...(action ? { action } : {}), source: deps.agentName ?? 'this agent', modelMs: Date.now() - started, memoryMs, promptChars: system.length + user.length, ...(remembered.length ? { remembered: remembered.map((r) => `${r.label ?? r.id}:${r.rounds}`) } : {}), ...(study ? { study: { owner: study.owner, hands: study.hands, style: study.style.length, reads: study.reads.length, notes: study.notes.length } } : {}) };
     // `answer` is the rendered reply — the JSON a card room decodes, verbatim. The fields beside it are
     // the same answer as an observation, for the trace.
     return { ...result, answer: JSON.stringify({ say, ...(because ? { because } : {}), ...(action ? { action } : {}) }) };
@@ -271,14 +281,14 @@ async function reviewStudy(deps: PlaybookAnswerDeps, skill: string, question: st
   // THE HANDS, COMPACT. The view is the game's own; it is passed as it was kept, with the record's own
   // framing (hand number, seat, net) so the model can quote a hand she can find.
   const hands = scope.hands.map((h) => ({ hand: h.handNo, seat: h.seat, at: h.at.slice(0, 16), ...(typeof h.net === 'number' ? { net: h.net } : {}), view: h.view }));
-  const system = `${REVIEW_SYSTEM}\n\n---\n\n${relevantInstructions(deps.instructions, skill) || '(this agent has no further instructions)'}`;
+  const system = `${REVIEW_SYSTEM}\n\n---\n\n${relevantInstructions(deps.instructions, skill, null, 'review') || '(this agent has no further instructions)'}`;
   const user = [
     `Skill: ${skill}`,
     `Question, in her words: ${question || 'how have I been playing?'}`,
     `Scope: ${scope.label} of ${study.hands} recorded.`,
     ...(study.style.length ? [`Her style — her own rules:\n${study.style.map((r) => `- ${r}`).join('\n')}`] : []),
-    ...(study.notes.length ? [`Your own past notes, oldest first:\n${study.notes.map((n) => `- ${n.at.slice(0, 10)}: ${n.text}`).join('\n')}`] : []),
-    `Counts per player across all recorded hands (rates computed; "you" is her):\n${JSON.stringify(study.remembered)}`,
+    ...(study.notes.length ? [`Your own earlier remarks (opinions from past reviews — NOT a record of her hands; the hands below are the record), oldest first:\n${study.notes.map((n) => `- ${n.at.slice(0, 10)}: ${n.text}`).join('\n')}`] : []),
+    `Counts per player across all ${study.hands} recorded hand${study.hands === 1 ? '' : 's'} (rates computed; "you" is her):\n${JSON.stringify(study.remembered)}`,
     `The hands in scope, oldest first:\n${JSON.stringify(hands)}`,
   ].join('\n');
   const out = await deps.call!({
@@ -342,7 +352,7 @@ async function recordIntoMemory(deps: PlaybookAnswerDeps, skill: string, input: 
  * kept whole; of the act sections, only those about the skill's game are kept. A skill outside any
  * game keeps everything, because there is no basis to cut.
  */
-export function relevantInstructions(instructions: string | null | undefined, skill: string, street?: string | null): string {
+export function relevantInstructions(instructions: string | null | undefined, skill: string, street?: string | null, act?: 'advise' | 'review'): string {
   const text = (instructions ?? '').trim();
   if (!text) return '';
   const game = skill.split('.')[0]?.toLowerCase() ?? '';
@@ -356,9 +366,15 @@ export function relevantInstructions(instructions: string | null | undefined, sk
   // not the whole essay.
   const STREETS = ['preflop', 'flop', 'turn', 'river'];
   const streetOf = (heading: string): string | null => { const m = /hold.?em-(preflop|flop|turn|river)\b/i.exec(heading); return m ? m[1]!.toLowerCase() : null; };
+  // THE ACT SELECTS THE CRAFT, the way the street selects the stage. A coach's playbook carries the review
+  // method beside the street stages; mid-hand the review is four thousand characters the model reads and
+  // sets aside, and in a review the street stages are the same in reverse. Neither is a loss of skill: the
+  // section that applies is the one that stays.
+  const notThisAct = act === 'advise' ? /hold.?em-review\b/i : act === 'review' ? /hold.?em-(preflop|flop|turn|river)\b/i : null;
   const kept = sections.filter((sec) => {
     const heading = sec.split('\n')[0] ?? '';
     if (!(words.test(heading) || words.test(sec.slice(0, 400)))) return false;
+    if (notThisAct && notThisAct.test(heading)) return false;
     const st = streetOf(heading);
     return !st || !street || !STREETS.includes(street) || st === street;
   });

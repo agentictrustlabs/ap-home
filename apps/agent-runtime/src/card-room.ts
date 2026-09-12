@@ -52,9 +52,16 @@ export const STUDY_SERVER = 'demo-mcp';
 export const HANDS_KEPT = 60;
 /** How many coach notes are kept. A note is two sentences; a hundred is a season. */
 export const NOTES_KEPT = 100;
-/** Seconds the person's agent gives the service before the refusal that lets the house answer. The table's
- *  own clock is the asker's; a consultation that takes longer than this has already lost the hand. */
-export const CONSULT_TIMEOUT_MS = 17_000;
+/**
+ * How long the person's agent gives the service before the refusal that lets the house answer.
+ *
+ * Measured 2026-09-12 (Haiku, prompt cached, study prefetched, standing from the grant, the run record
+ * deferred): a COLD consultation is ~12 s as the person's agent sees it — the coach's playbook read (~1.6 s),
+ * the model (~5–7 s), the gates and the hop; warm, 6–10 s. Fifteen seconds is the cold path plus its
+ * variance; below that a slow-but-fine coach would be thrown away for the house line, which is the one way
+ * a timeout loses capability. The table's own advice budget is 35 s, so the hop back is never the bound.
+ */
+export const CONSULT_TIMEOUT_MS = 15_000;
 
 export type CardRoomAct = 'advise' | 'record' | 'review';
 

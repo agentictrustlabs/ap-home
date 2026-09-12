@@ -4006,13 +4006,30 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   // that does not change between two hands. Standing is honesty, not authority (spec 353 §4) — it reaches
   // no verifier — so a minute-old answer misreports nothing anybody could act on.
   const standingPrincipal = input.person; const standingSubject = input.addressee;
-  const standingOnce: Promise<ExecutionBindingV1['standing'] | undefined> | null = standingPrincipal && standingSubject && deps.readSubjectRecord
+  // A STUDY CONSULTATION'S STANDING IS THE GRANT. The person's agent presented it and `runAgentAsk` verified it
+  // (`card-room.ts`); deriving a relation from the coach's records instead cost 2 s of a cold consultation to
+  // say less. Named on every receipt like any other standing — evidence, not authority.
+  const standingOnce: Promise<ExecutionBindingV1['standing'] | undefined> | null = input.study && standingPrincipal && standingSubject
+    ? Promise.resolve({ relation: 'none' as const, subject: standingSubject.toLowerCase(), principal: standingPrincipal.toLowerCase(), because: 'no standing between them — the person\'s agent presented a study grant to this service, verified at admission (wireRef is its digest)', ...(input.study.hash ? { wireRef: input.study.hash } : {}) })
+    : standingPrincipal && standingSubject && deps.readSubjectRecord
     ? remembered(`standing:${standingPrincipal.toLowerCase()}:${standingSubject.toLowerCase()}`, () => deriveStanding({ readSubjectRecord: deps.readSubjectRecord, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}), wireRefOf },
         { principal: standingPrincipal, subject: standingSubject })
       .then((st) => ({ relation: st.relation, subject: st.subject, principal: standingPrincipal.toLowerCase(), because: st.because, ...(st.wireRef ? { wireRef: st.wireRef } : {}) }))
       .catch(() => undefined))
     : null;
   const catalogOnce = remembered(`catalog:${String(input.addressee ?? '').toLowerCase()}`, () => catalogBindingFor(deps, input.addressee ? String(input.addressee) : undefined));
+  // THE PERSON'S STUDY, STARTED NOW (`card-room.ts`): four reads of HER vault under the grant, independent of
+  // everything the harness does before the answering step, so they run beside the playbook load rather than
+  // after the gates — read later, where the tool is built. A consultation is on the table's clock.
+  const studyOnce = input.study && deps.readSubjectRecord && input.material && typeof input.material.skill === 'string'
+    ? (() => {
+        const owner = input.study.owner; const reads = input.study.reads; const review = /\.review$/i.test(String(input.material.skill));
+        const read = (recordType: string) => reads.includes(recordType) ? deps.readSubjectRecord!(owner, recordType).catch(() => null) : Promise.resolve(null);
+        const materialInput = input.material.input;
+        return Promise.all([read(HAND_RECORD), read(STYLE_RECORD), read(READ_RECORD), read(NOTE_RECORD)])
+          .then(([hand, style, playerRead, note]) => studyFrom({ access: input.study!, hand, style, read: playerRead, note, material: materialInput, review }));
+      })()
+    : null;
   const playbook = await loadPlaybook(rememberedRecord, String(input.addressee ?? ''), console.log).catch(() => null);
   mark('playbook');
   const first = Array.isArray(input.presented) ? input.presented[0] ?? null : input.presented;
@@ -4300,12 +4317,10 @@ step is then handed to that agent under authority the person grants; leave it ou
   // the person's own agent presenting the grant `runAgentAsk` verified; the records are read from HER vault
   // (the grant's delegator), never the service's, and the one write is a note appended to her cabinet. The
   // four reads start together — they are independent, and a consultation is on the table's clock.
-  const study = input.study && deps.readSubjectRecord && material
+  const study = input.study && studyOnce && deps.readSubjectRecord && material
     ? (() => {
-        const owner = input.study.owner; const reads = input.study.reads; const review = /\.review$/i.test(material.skill);
-        const read = (recordType: string) => reads.includes(recordType) ? deps.readSubjectRecord!(owner, recordType).catch(() => null) : Promise.resolve(null);
-        const loaded = Promise.all([read(HAND_RECORD), read(STYLE_RECORD), read(READ_RECORD), read(NOTE_RECORD)])
-          .then(([hand, style, playerRead, note]) => studyFrom({ access: input.study!, hand, style, read: playerRead, note, material: material.input, review }));
+        const owner = input.study.owner;
+        const loaded = studyOnce;
         return {
           load: () => loaded,
           coach: input.study.delegate,

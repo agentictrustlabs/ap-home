@@ -4713,10 +4713,12 @@ export class InteractionsDO {
         // to demo-mcp's record-scope gate (the interactions grant's scope) so the vault viewer (spec 315)
         // can VIEW any Home-managed record; an out-of-scope record is denied at demo-mcp, never silently.
         // The self-check above + the KEK gate + the grant scope remain.
-        // The person's OWN card-room study records — their style in their words, their reads on players — are
-        // theirs to write here too (`card-room.ts`); the hand record and the coach's notes are written by the
-        // arrangement (the agent at hand end, the coach under the grant), never by hand.
-        const ownStudyRecord = recordType === 'cardroom.style' || recordType === 'cardroom.read';
+        // The person's OWN card-room study records — their style in their words, their reads on players, and
+        // the coach's notes in their cabinet — are theirs to write here too (`card-room.ts`); the hand record is
+        // written by the arrangement (the agent at hand end), never by hand.
+        // The coach's notes are in HER cabinet and are hers to clear (a wrong note is hers to remove, a fired
+        // coach's notes are hers to keep or drop); the hand record is written by the arrangement only.
+        const ownStudyRecord = recordType === 'cardroom.style' || recordType === 'cardroom.read' || recordType === 'cardroom.note';
         if (op === 'record.put' && !CAPABILITY_RECORDS.has(recordType) && !recordType.startsWith('content.') && !ownStudyRecord) {
           return json({ error: `recordType must be a capability record, a content.* record, or the person's own cardroom.style / cardroom.read` }, 400);
         }

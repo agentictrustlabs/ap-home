@@ -49,6 +49,9 @@ export function structuredCallFor(env: ModelEnv, provider?: LlmProvider, opts: {
   return opts.make ? opts.make(p) : providerStructuredCall(env, p);
 }
 
+/** Roughly 4k tokens — the smallest prefix the vendor's prompt cache will hold for the models in use. */
+const CACHEABLE_SYSTEM_CHARS = 16_000;
+
 /** One provider's structured call — the vendor-touching half, unchanged from spec 358 W1. */
 function providerStructuredCall(env: ModelEnv, p: LlmProvider): StructuredCall {
   providerConfigured(env, p);
@@ -67,8 +70,14 @@ function providerStructuredCall(env: ModelEnv, p: LlmProvider): StructuredCall {
   const client = createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY! });
   const model = modelFor(env, 'anthropic');
   return async ({ system, messages, tool, maxTokens }) => {
+    // A LONG SYSTEM PROMPT IS CACHED AT THE PROVIDER. A playbook's compiled doctrine is the same text on
+    // every call for the same agent and act (a coach's is ~40k characters), and the vendor's prompt cache
+    // keys on the exact prefix: marking it once turns the input pass from seconds into a cache read for
+    // the next five minutes. Below the cache's own minimum the marker is ignored, so it is only set where
+    // it can take. Nothing about the answer changes.
+    const cached = system.length >= CACHEABLE_SYSTEM_CHARS ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] : system;
     const res = await client.messages.create({
-      model, max_tokens: maxTokens ?? 1500, system, messages,
+      model, max_tokens: maxTokens ?? 1500, system: cached as never, messages,
       tools: [tool as never], tool_choice: { type: 'tool', name: tool.name },
     });
     const block = res.content.find((b) => b.type === 'tool_use' && b.name === tool.name);

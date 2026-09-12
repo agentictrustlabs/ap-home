@@ -193,7 +193,7 @@ describe('playbook.answer on the coach service, under her grant', () => {
     return { call, seen };
   };
 
-  it('advises from HER records — style, counts on the players here, notes — in the coach\'s name, and may leave one note', async () => {
+  it('advises from HER records — style, counts on the players here, its past remarks — in the coach\'s name, and writes NO note mid-hand', async () => {
     const notes: Array<{ text: string }> = [{ text: 'folds turns too often' }];
     const { call, seen } = fakeCall({ say: 'You need 43% and have 18% — fold.', because: 'He has bet the flop after raising 3 of 3.', action: { type: 'fold' }, note: 'Turn: 43% price, 18% draw, fold.' });
     const invoke = playbookAnswerInvoker({ call, material, advertised: ['poker.advise'], agentName: 'bob-coach.svc', study: study(notes) });
@@ -206,9 +206,13 @@ describe('playbook.answer on the coach service, under her grant', () => {
     expect(seen[0]!.user).toContain('"cbet":"100% of 3"');
     expect(seen[0]!.user).toContain('folds turns too often');
     expect(seen[0]!.system).toContain('her style beats your craft');
-    // The note went into HER cabinet, with the hand it is about.
-    expect(notes.map((n) => n.text)).toContain('Turn: 43% price, 18% draw, fold. [hand 9]');
-    expect((out.study as { noted: boolean }).noted).toBe(true);
+    expect(seen[0]!.system).toContain('EVIDENCE RULES');
+    expect(seen[0]!.user).toContain('NOT a record of her hands');
+    // NO NOTE MID-HAND, even when the model offers one: a consultation does not know how the hand ends, and
+    // a note from one was read back later as a hand she played. Notes are a review's to write.
+    expect(notes.map((n) => n.text)).toEqual(['folds turns too often']);
+    expect(JSON.stringify(seen[0]!.tool)).not.toContain('note');
+    expect((out.study as { noted?: boolean }).noted).toBeUndefined();
     expect(JSON.parse(String(out.answer))).toEqual({ say: 'You need 43% and have 18% — fold.', because: 'He has bet the flop after raising 3 of 3.', action: { type: 'fold' } });
   });
 

@@ -1753,7 +1753,10 @@ async function cardRoomAsk(env: Env, deps: ReturnType<typeof harnessDeps>, input
     readRecord: (owner, recordType) => deps.readSubjectRecord ? deps.readSubjectRecord(owner, recordType) : Promise.resolve(null),
     writeRecord: (owner, recordType, record) => deps.writeSubjectRecord ? deps.writeSubjectRecord(owner, recordType, record) : Promise.resolve({ ok: false, error: 'no vault' }),
     specialistsOf: async (agent) => (await loadPlaybook(deps.readSubjectRecord ? (subject, recordType) => remembered(`record:${subject.toLowerCase()}:${recordType}`, () => deps.readSubjectRecord!(subject, recordType)) : undefined, agent).catch(() => null))?.specialists ?? null,
-    studyGrantWire: (person, coach) => deps.studyGrantWire?.(person, coach) ?? Promise.resolve(null),
+    // Remembered a minute, like the playbook: the stored wire does not change between two hands, and the
+    // coach verifies it on chain at every consultation regardless — a local `studygrant.revoke` is felt
+    // within the minute, an on-chain revoke at the next hand.
+    studyGrantWire: (person, coach) => remembered(`studygrant:${person.toLowerCase()}:${coach.toLowerCase()}`, () => deps.studyGrantWire?.(person, coach) ?? Promise.resolve(null)),
     verify: async (grant, delegator, delegate) => {
       if (!validator || !dm) return { ok: false, reason: 'this deployment cannot verify a study grant' };
       return verifyStudyGrant({
@@ -1864,13 +1867,20 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
   // whom) were returned to the asker and kept nowhere, so a three-hop story could be read from one end only.
   // Recorded like the ask route's (spec 370 P6) and exported like it (381); a record that fails to land costs
   // a look-back, never the run.
-  try {
-    const kept = await recordFormOf(env, deps, input.addressee, input.runRef, result as never);
-    const record = recordOf({ runRef: input.runRef, intent, result: kept.result, events, presented: (input.resume?.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), ...(input.traceContext ? { traceContext: input.traceContext } : {}), planner: plannerSummaryOf(trace), ...(input.receivedAt ? { receivedAt: input.receivedAt } : {}), offloaded: kept.offloaded, bill });
-    await putRecord(env as never, input.addressee, record);
-    await exportRun(env, { writeSubjectRecord: deps.writeSubjectRecord }, input.addressee, record)
-      .then((r) => putRecord(env as never, input.addressee, { ...record, export: r })).catch(() => undefined);
-  } catch (e) { console.warn('[runAgentAsk] record not kept:', e instanceof Error ? e.message : String(e)); }
+  // WRITTEN AFTER THE REPLY, when the request has a context to carry it: the record is evidence of the run,
+  // not part of the answer, and a second and a half of vault writes sat between a coach's sentence and the
+  // table's clock. `waitUntil` keeps the isolate alive for it; without a context (an alarm, a test) it is
+  // awaited as before so nothing is lost.
+  const keep = (async () => {
+    try {
+      const kept = await recordFormOf(env, deps, input.addressee, input.runRef, result as never);
+      const record = recordOf({ runRef: input.runRef, intent, result: kept.result, events, presented: (input.resume?.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), ...(input.traceContext ? { traceContext: input.traceContext } : {}), planner: plannerSummaryOf(trace), ...(input.receivedAt ? { receivedAt: input.receivedAt } : {}), offloaded: kept.offloaded, bill });
+      await putRecord(env as never, input.addressee, record);
+      await exportRun(env, { writeSubjectRecord: deps.writeSubjectRecord }, input.addressee, record)
+        .then((r) => putRecord(env as never, input.addressee, { ...record, export: r })).catch(() => undefined);
+    } catch (e) { console.warn('[runAgentAsk] record not kept:', e instanceof Error ? e.message : String(e)); }
+  })();
+  if (input.executionCtx) input.executionCtx.waitUntil(keep); else await keep;
   return { reply: reply as never, spoken, result: result as never, events, presentedRefs, bill };
 }
 

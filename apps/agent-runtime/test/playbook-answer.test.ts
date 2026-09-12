@@ -190,3 +190,40 @@ describe('the street selects the stage', () => {
     expect(all).toContain('Nothing left to come');
   });
 });
+
+describe('the act selects the craft', () => {
+  const doctrine = [
+    'You are a **Hold\'em Coach**.',
+    '',
+    '## How each act is done',
+    '',
+    '### holdem-table-read — Reads a Texas Hold\'em hand from the person\'s own seat',
+    'Price first.',
+    '### holdem-turn — The turn at Texas Hold\'em',
+    'Barrels.',
+    '### holdem-memory — How a hold\'em coach uses the player\'s own records',
+    'Say the sample size.',
+    '### holdem-review — How a hold\'em coach reviews a player\'s past hands',
+    'Two leaks at most.',
+    '### coach-bob — Bob\'s own coaching doctrine at hold\'em',
+    'Raise or fold.',
+  ].join('\n');
+
+  it('mid-hand keeps the stage, the memory and the doctrine, and leaves the review method out', async () => {
+    const { relevantInstructions } = await import('../src/playbook-answer.js');
+    const advise = relevantInstructions(doctrine, 'poker.advise', 'turn', 'advise');
+    expect(advise).toContain('Barrels');
+    expect(advise).toContain('Say the sample size');
+    expect(advise).toContain('Raise or fold');
+    expect(advise).not.toContain('Two leaks at most');
+  });
+
+  it('a review keeps the review method, the memory and the doctrine, and leaves the street stages out', async () => {
+    const { relevantInstructions } = await import('../src/playbook-answer.js');
+    const review = relevantInstructions(doctrine, 'poker.review', null, 'review');
+    expect(review).toContain('Two leaks at most');
+    expect(review).toContain('Say the sample size');
+    expect(review).toContain('Price first');
+    expect(review).not.toContain('Barrels');
+  });
+});
