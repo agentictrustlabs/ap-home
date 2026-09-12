@@ -17,6 +17,7 @@ import { claimName } from '../../../src/connect-client';
 import { provisionCommunityMessaging } from '../../../src/lib/messaging-ceremony';
 import { nameLabel } from '../../../src/lib/domain';
 import { BusyButton } from '../../../src/components/shared/BusyButton';
+import { BrandShield } from '../../../src/components/shared/BrandShield';
 import type { Hex } from '@agenticprimitives/types';
 
 // Coerce ANY thrown shape to a readable string — Error, a string, or a plain object with a `.message`
@@ -231,18 +232,20 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
   };
 
   return (
-    <div style={{ maxWidth: 440, margin: '4rem auto', padding: '1.5rem', fontFamily: 'system-ui, sans-serif' }}>
-      {err && <p style={{ color: '#b91c1c' }}>{err}</p>}
+    <div className="onboarding-screen">
+    <div className="onboarding-card wide">
+      <BrandShield size={48} />
+      {err && <p className="onboarding-error">{err}</p>}
       {!invite ? (
-        !err && <p style={{ opacity: 0.7 }}>Loading invitation…</p>
+        !err ? <p className="onboarding-sub">Loading invitation…</p> : <p className="onboarding-sub">This invitation could not be opened. Ask the organization for a new link.</p>
       ) : (
         <>
-          <h1 style={{ fontSize: '1.4rem' }}>{inviteHeadline(invite.orgName, invite.appName)}</h1>
+          <h1 className="onboarding-h1">{inviteHeadline(invite.orgName, invite.appName)}</h1>
           {phase === 'restoring' ? (
             <p style={{ opacity: 0.7 }}>Checking who is signed in…</p>
           ) : emailInviteNeedsSignOut(agentAddress, invite.invitedAgent) ? (
             <>
-              <p style={{ fontSize: '.9rem', opacity: 0.75 }}>
+              <p className="onboarding-sub">
                 You&rsquo;re signed in as <b>{agentName ?? agentAddress}</b>. This invitation is for a
                 different home — the one bound to the invited email. Accepting here would join the
                 wrong person.
@@ -266,15 +269,15 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
             </>
           ) : session && agentAddress ? (
             <>
-              <p style={{ fontSize: '.9rem', opacity: 0.75 }}>{inviteLead(invite.orgName, invite.appName)}</p>
-              <label style={{ fontSize: '.78rem', opacity: 0.7 }}>
+              <p className="onboarding-sub">{inviteLead(invite.orgName, invite.appName)}</p>
+              <label className="ui-meta" style={{ display: 'block', textAlign: 'left', width: '100%' }}>
                 How you are known in {invite.appName ? `${invite.appName} · ${invite.orgName}` : invite.orgName}
               </label>
               <input
                 placeholder="Display name (how members see you)"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                style={{ width: '100%', padding: '.55rem .7rem', margin: '.6rem 0', borderRadius: 8, border: '1px solid #d1d5db' }}
+                className="onboarding-input" style={{ margin: '.5rem 0' }}
               />
               <BusyButton busy={busy} busyLabel="Signing…" onClick={() => void accept()}>
                 {inviteAcceptLabel(invite.orgName, invite.appName)}
@@ -293,15 +296,15 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
             </>
           ) : (
             <>
-              <p style={{ fontSize: '.9rem', opacity: 0.75 }}>{inviteLead(invite.orgName, invite.appName)}</p>
-              <label style={{ fontSize: '.78rem', opacity: 0.7 }}>
+              <p className="onboarding-sub">{inviteLead(invite.orgName, invite.appName)}</p>
+              <label className="ui-meta" style={{ display: 'block', textAlign: 'left', width: '100%' }}>
                 How you are known in {invite.appName ? `${invite.appName} · ${invite.orgName}` : invite.orgName}
               </label>
               <input
                 placeholder="Display name (how members see you)"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                style={{ width: '100%', padding: '.55rem .7rem', margin: '.6rem 0', borderRadius: 8, border: '1px solid #d1d5db' }}
+                className="onboarding-input" style={{ margin: '.5rem 0' }}
               />
               {!otpFallback ? (
                 <>
@@ -342,6 +345,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
           )}
         </>
       )}
+    </div>
     </div>
   );
 }

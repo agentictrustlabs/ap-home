@@ -71,7 +71,7 @@ export function InvitationInspector() {
     <Card>
       <Stack gap={0.75}>
         <div>
-          <h3 style={{ margin: 0, fontSize: '1rem' }}>Check an invitation</h3>
+          <h3 className="subhead" style={{ margin: 0, fontSize: 15 }}>Check an invitation</h3>
           <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', opacity: 0.75 }}>
             Paste an invitation someone sent you. Everything is checked in your browser — you are not
             asked to trust the sender&apos;s server, which is the point.

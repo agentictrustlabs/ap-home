@@ -81,11 +81,11 @@ export function OrgProfileSection({ orgSa }: { orgSa: string }) {
 export function OrgMembersSection({ orgSa }: { orgSa: string }) {
   const { session } = useSession();
   const { record, loaded, token } = useOrgRecord(orgSa);
-  if (!session) return <NotSignedIn title="Members" />;
-  if (!loaded) return <Loading title="Members" />;
-  if (!record) return <NoRecord title="Members" />;
+  if (!session) return <NotSignedIn title="Membership" />;
+  if (!loaded) return <Loading title="Membership" />;
+  if (!record) return <NoRecord title="Membership" />;
   return (
-    <SectionShell title="Members">
+    <SectionShell title="Membership" description="Who belongs, who has asked to, and who you invite. Membership is the relationship; a member's access grant is evidence of it, never the membership itself.">
       <OrgMembers org={record} token={token} />
       {/* spec 324 §7/§12 — ONE enrollment surface: pending join requests (steward decides) + Invite live with
           the roster (the standalone /invite page 308-redirects here; the topbar "Invite member" points here). */}

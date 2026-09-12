@@ -25,7 +25,7 @@ export function VisibilityTab() {
 
   return (
     <Stack gap={1}>
-      <div role="tablist" aria-label="Visibility" style={{ display: 'flex', gap: '0.25rem' }}>
+      <div role="tablist" aria-label="Visibility" className="ui-tabs">
         {(
           [
             ['agent', 'This agent'],
@@ -38,15 +38,7 @@ export function VisibilityTab() {
             type="button"
             aria-selected={pane === id}
             onClick={() => setPane(id)}
-            style={{
-              padding: '0.35rem 0.75rem',
-              borderRadius: 999,
-              border: '1px solid var(--border, #e4e0d8)',
-              background: pane === id ? 'var(--accent-soft, rgba(124,92,255,0.1))' : 'transparent',
-              fontWeight: pane === id ? 600 : 400,
-              fontSize: '0.85rem',
-              cursor: 'pointer',
-            }}
+            className="ui-tab"
           >
             {label}
           </button>

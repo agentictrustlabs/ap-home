@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
 import { BusyButton } from '../shared/BusyButton';
+import { Section, List, Row, Empty, ErrorNote, Note, Button } from '../../ui';
 import { AgentName } from '../shared/AgentName';
 import { householdThroughHarness, readHouseholdThroughHarness, type HouseholdMemberRow } from '../../home/household-harness';
 import { inviteThroughHarness } from '../../home/invite-harness';
@@ -206,71 +207,39 @@ export function HouseholdPanel() {
 
   return (
     <div>
-      <p style={{ ...mutedText, fontSize: 12, marginTop: 0 }}>
-        The people you live with, as you record them. It is held in your own vault, published nowhere, and
-        it gives nobody any authority — a guardian here still needs a delegation to act for anyone.
-        What it does is let your agent understand you: <em>“send my daughter 20 usdc”</em> resolves here,
-        without a directory learning who you asked about. You can keep more than one — a second home, a
-        week somewhere else, a house you share part of the time.
-      </p>
-      {err && <p style={errorText}>{err}</p>}
-      {loaded && rows.length === 0 && (
-        <p style={{ ...mutedText, fontSize: 12 }}>Nobody recorded yet.</p>
-      )}
+      <Note>
+        What this lets your agent do is understand you: <em>“send my daughter 20 usdc”</em> resolves here, without a directory
+        learning who you asked about — and a guardian recorded here still needs a delegation to act for anyone. You can keep
+        more than one home: a second home, a week somewhere else, a house you share part of the time.
+      </Note>
+      {err && <ErrorNote>{err}</ErrorNote>}
+      {loaded && rows.length === 0 && <Empty>Nobody recorded yet.</Empty>}
       {/* ONE SECTION PER HOUSEHOLD. A person can keep more than one — a child between two homes, a
           second home, a carer's week — and appending "· the farm" to a row in one long list makes the
           second household look like a note about a person rather than a place they live. The heading
           appears once there IS more than one: a single home needs no label. */}
-      {groups.map(([house, people]) => (
-        <div key={house} data-testid={`household-group-${house}`} style={{ marginTop: 10 }}>
-          {groups.length > 1 && (
-            <div style={{ fontSize: 11.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--muted, #6b7280)' }}>
-              {house}
-              <span className="muted" style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}> · {people.length} {people.length === 1 ? 'person' : 'people'}</span>
-            </div>
-          )}
-          {householdAgents.length > 0 && people.length > 1 && (() => {
-            const target = householdAgents.find((a) => (a.name ?? '').toLowerCase().split('.')[0] === house.toLowerCase()) ?? householdAgents[0]!;
-            return (
-              <div style={{ margin: '4px 0 2px' }}>
-                <button type="button" className="btn-ghost" style={{ fontSize: 11 }} disabled={busy} data-testid={`household-invite-all-${house}`}
-                  onClick={() => void inviteEveryone(people, target)}>
-                  Invite everyone here to {target.name ? target.name.split('.')[0] : 'the household'} — one signature each
-                </button>
-              </div>
-            );
-          })()}
-          {people.map((m) => (
-        <div key={m.agent} data-testid={`household-row-${m.agent}`}
-          style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '6px 0', borderTop: '1px solid var(--border, #e6e8ec)' }}>
-          <strong style={{ fontSize: 13 }}>{m.label ?? <AgentName address={m.agent as Address} />}</strong>
-          {/* TWO DIFFERENT QUESTIONS, said as two different sentences. "your child · dependent" reads as
-              one label with a mysterious suffix; it is in fact HOW THEY ARE RELATED to you and WHO IS
-              RESPONSIBLE in this home, which are independent (an adult sibling is kin and neither cared
-              for nor caring). Conflating them is how a system decides a spouse may act for a spouse
-              because the words sounded close enough. */}
-          <span className="muted" style={{ fontSize: 11.5 }}>
-            {m.relation ? `your ${m.relation}` : 'lives with you'}
-            {m.role === 'dependent' ? ' — cared for here' : m.role === 'guardian' ? ' — responsible for dependents here' : ''}
-          </span>
-          {householdAgents.length > 0 && (() => {
-            // The household agent this section belongs with: the one whose label matches the section, else the first.
-            const target = householdAgents.find((a) => (a.name ?? '').toLowerCase().split('.')[0] === house.toLowerCase()) ?? householdAgents[0]!;
-            return (
-              <button type="button" className="btn-ghost" style={{ marginLeft: 'auto', fontSize: 11 }}
-                disabled={busy} onClick={() => void inviteToHousehold(m, target)} data-testid={`household-invite-agent-${m.agent}`}>
-                Invite to {target.name ? target.name.split('.')[0] : 'household'}
-              </button>
-            );
-          })()}
-          <button type="button" className="btn-ghost" style={{ marginLeft: householdAgents.length ? 0 : 'auto', fontSize: 11 }}
-            disabled={busy} onClick={() => void remove(m.agent, m.household ?? house)} data-testid={`household-remove-${m.agent}`}>
-            Remove
-          </button>
-        </div>
-          ))}
-        </div>
-      ))}
+      {groups.map(([house, people]) => {
+        const target = householdAgents.find((a) => (a.name ?? '').toLowerCase().split('.')[0] === house.toLowerCase()) ?? householdAgents[0];
+        return (
+          <Section key={house} title={groups.length > 1 ? house : 'People'} count={people.length} testId={`household-group-${house}`}
+            aside={target && people.length > 1 ? <Button size="sm" variant="ghost" disabled={busy} data-testid={`household-invite-all-${house}`} onClick={() => void inviteEveryone(people, target)}>Invite everyone here to {target.name ? target.name.split('.')[0] : 'the household'} — one signature each</Button> : undefined}>
+            <List>
+              {people.map((m) => (
+                <Row key={m.agent} testId={`household-row-${m.agent}`}
+                  title={m.label ?? <AgentName address={m.agent as Address} />}
+                  /* TWO DIFFERENT QUESTIONS, said as two different sentences: HOW THEY ARE RELATED to you and WHO IS
+                     RESPONSIBLE in this home are independent (an adult sibling is kin and neither cared for nor caring). */
+                  meta={<>{m.relation ? `your ${m.relation}` : 'lives with you'}{m.role === 'dependent' ? ' — cared for here' : m.role === 'guardian' ? ' — responsible for dependents here' : ''}</>}
+                  side={<>
+                    {target && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void inviteToHousehold(m, target)} data-testid={`household-invite-agent-${m.agent}`}>Invite to {target.name ? target.name.split('.')[0] : 'household'}</Button>}
+                    <Button size="sm" variant="ghost" disabled={busy} onClick={() => void remove(m.agent, m.household ?? house)} data-testid={`household-remove-${m.agent}`}>Remove</Button>
+                  </>}
+                />
+              ))}
+            </List>
+          </Section>
+        );
+      })}
       {/* WHAT THE TWO WORDS MEAN, where the person is choosing them — not in a tooltip they will not
           open. A role grants nothing here: a guardian still needs a delegation to act for anyone. */}
       <p style={{ ...mutedText, fontSize: 11, marginTop: 14, marginBottom: 4 }}>

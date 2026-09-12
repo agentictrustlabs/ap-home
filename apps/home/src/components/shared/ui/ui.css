@@ -50,22 +50,24 @@
 .ap-popover-panel[data-align='end'] { right: 0; }
 
 /* ── Tabs ───────────────────────────────────────────────────────────────── */
-.ap-tablist { display: inline-flex; gap: 0.15rem; padding: 0.2rem; background: var(--color-surface-sunken); border-radius: var(--radius-12); }
+.ap-tablist { display: inline-flex; gap: 2px; padding: 2px; background: var(--color-surface-sunken); border-radius: 8px; max-width: 100%; overflow-x: auto; }   /* = .ui-tabs */
 .ap-tab {
   appearance: none;
   border: 0;
   background: transparent;
   color: var(--color-text-muted);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: 12.5px;
   font-weight: 600;
-  padding: 0.35rem 0.75rem;
-  border-radius: var(--radius-8);
+  padding: 5px 10px;
+  min-height: 0;
+  border-radius: 6px;
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
+  filter: none;
 }
-.ap-tab:hover { color: var(--color-text-body); }
-.ap-tab[aria-selected='true'] { background: var(--color-surface-raised); color: var(--color-text-primary); box-shadow: var(--shadow-card); }
+.ap-tab:hover { color: var(--color-text-primary); background: transparent; filter: none; }
+.ap-tab[aria-selected='true'] { background: var(--color-surface); color: var(--color-text-primary); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
 .ap-tab:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }
 
 /* ── Tooltip ────────────────────────────────────────────────────────────── */
@@ -85,11 +87,11 @@
 }
 
 /* ── Presentational ─────────────────────────────────────────────────────── */
-.ap-card { background: var(--color-surface-raised); border: 1px solid var(--color-border); border-radius: var(--radius-16); box-shadow: var(--shadow-card); padding: 1rem; }
+.ap-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 10px; padding: 16px 20px; }   /* = .ui-card */
 .ap-stack { display: flex; flex-direction: column; }
 .ap-row { display: flex; align-items: center; }
-.ap-field-label { display: block; font-size: 0.78rem; font-weight: 600; color: var(--color-text-body); margin-bottom: 0.3rem; }
-.ap-field-hint { font-size: 0.74rem; color: var(--color-text-muted); margin-top: 0.3rem; }
+.ap-field-label { display: block; font-size: 12.5px; font-weight: 600; color: var(--color-text-body); margin-bottom: 0.3rem; }
+.ap-field-hint { font-size: 12px; color: var(--color-text-muted); margin-top: 0.3rem; }
 .ap-field-error { font-size: 0.74rem; color: var(--color-danger); margin-top: 0.3rem; }
 
 @keyframes ap-fade-in { from { opacity: 0; } to { opacity: 1; } }

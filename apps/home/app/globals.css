@@ -1313,18 +1313,20 @@
       .onboarding-card.wide { max-width: 520px; align-items: stretch; text-align: left; }
       .onboarding-card .btn-primary, .onboarding-card .btn-ghost, .onboarding-card .value-step-list, .onboarding-card .receipt-card, .onboarding-card .onboarding-error, .onboarding-card .name-chip { width: 100%; }
       .onboarding-card .value-step-list, .onboarding-card .receipt-card { text-align: left; }
-      .onboarding-h1 { font-size: 1.5rem; font-weight: 800; color: var(--color-text-primary); letter-spacing: -.03em; margin: .25rem 0 0; line-height: 1.2; }
+      .onboarding-h1 { font-size: 1.45rem; font-weight: 700; color: var(--color-text-primary); letter-spacing: -.02em; margin: .25rem 0 0; line-height: 1.2; }
       .onboarding-sub { color: var(--color-text-muted); font-size: .92rem; line-height: 1.55; margin: 0; }
-      .onboarding-note { font-size: .8rem; color: var(--color-text-body); background: var(--color-amber-50); border: 1px solid var(--color-amber-100); border-radius: var(--radius-8); padding: .5rem .75rem; margin: 0; width: 100%; }
+      .onboarding-note { font-size: .8rem; color: var(--color-text-body); background: var(--color-surface-sunken); border: 1px solid var(--color-border); border-radius: var(--radius-8); padding: .5rem .75rem; margin: 0; width: 100%; }
       .onboarding-secondary { width: 100%; }
+      /* full width is the onboarding card's rule, not the portal's */
+      .portal-main .onboarding-secondary { width: auto; }
       .onboarding-busy { display: flex; flex-direction: column; align-items: center; gap: .6rem; padding: 1.5rem 0; }
-      .onboarding-busy-msg { font-weight: 700; color: var(--color-text-primary); margin: 0; }
+      .onboarding-busy-msg { font-weight: 600; color: var(--color-text-primary); margin: 0; }
       .onboarding-busy-sub { font-size: .8rem; color: var(--color-text-muted); margin: 0; max-width: 36ch; text-align: center; }
       .ceremony-progress { width: 100%; max-width: 240px; height: 6px; background: var(--color-surface-sunken, #e8e4d9); border-radius: 999px; overflow: hidden; }
-      .ceremony-progress-fill { height: 100%; background: var(--color-accent, #2563eb); border-radius: 999px; transition: width .4s ease; }
+      .ceremony-progress-fill { height: 100%; background: var(--color-amber-500); border-radius: 999px; transition: width .4s ease; }
       .onboarding-error { background: var(--color-danger-subtle); border: 1px solid #fecaca; color: var(--color-danger); border-radius: var(--radius-8); padding: .6rem .85rem; font-size: .85rem; }
       .name-chip { background: var(--color-surface-sunken); border: 1px solid var(--color-border); border-radius: var(--radius-12); padding: .6rem 1rem; display: flex; flex-direction: column; gap: .1rem; align-items: center; }
-      .name-chip-label { font-size: 1.1rem; font-weight: 800; color: var(--color-text-primary); }
+      .name-chip-label { font-size: 1.1rem; font-weight: 700; color: var(--color-text-primary); }
       .name-chip-full { font-family: var(--font-mono); font-size: .78rem; color: var(--color-text-muted); }
       .celebrate { display: flex; flex-direction: column; align-items: center; gap: .4rem; }
       .onboarding-input { width: 100%; font-size: 1rem; padding: .7rem .85rem; border: 1px solid var(--color-border-strong); border-radius: var(--radius-12); background: var(--color-surface); color: var(--color-text-primary); }
