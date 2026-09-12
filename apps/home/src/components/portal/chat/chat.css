@@ -87,6 +87,9 @@
 }
 
 .chat-rail-action:hover { background: var(--color-surface); color: var(--color-text-body); }
+/* spec 398 §5.5 — the open attention filter */
+.chat-rail-action--active { background: var(--color-surface); color: var(--color-text-body); border: 1px solid var(--color-border); }
+.chat-rail-action:disabled { cursor: default; }
 
 .chat-rail-list {
   flex: 1;

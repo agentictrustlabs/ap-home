@@ -29,6 +29,10 @@ import { ApproveMessaging } from './ApproveMessaging';
 import { MessagingWireRequiredError } from '../../lib/messaging-send';
 import { isAllowedRelyingOrigin } from '../../lib/oidc-clients';
 import { ShareWayChip, ContinuePaymentChip } from './chat/ActionChips';
+import { AttentionBar } from './AttentionBar';
+import { useTodayReads } from '../../home/use-today-inputs';
+import { useMyWork } from './work/useWork';
+import type { AttentionInputs } from '../../home/attention';
 
 
 const PENDING_STATES = ['submitted', 'triaged'];
@@ -143,6 +147,9 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const { view, refresh, loadThread, loadPreviews, post, send, approved, wireRequired, setWireRequired, busy, error, setError } = useInboxView(session, targetAgent, sendingAs, stewardship);
   const me = (sendingAs ?? '').toLowerCase();
 
+  // Spec 398 §5.5 — the attention model reads what Today reads (parked runs, schedule, Library) plus this inbox's cases.
+  const reads = useTodayReads(session?.token, me || null, targetAgent ? 'other' : 'person');
+  const { bundles } = useMyWork(session, targetAgent ? null : agentAddress);
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [localBusy, setLocalBusy] = useState(false);
@@ -293,7 +300,6 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
     },
     [view],
   );
-  const pendingCases = useMemo(() => (view?.cases ?? []).filter((c) => PENDING_STATES.includes(c.state)), [view]);
   const dmForCase = useCallback(
     (c: InteractionCaseV1): string | null => {
       const cid = view?.items.find((i) => i.interactionId === c.id)?.conversationId;
@@ -301,6 +307,15 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
     },
     [view, dms],
   );
+
+  const attentionInputs = useMemo<AttentionInputs | null>(() => {
+    if (!view || reads.parked === null) return null;
+    return {
+      now: Date.now(), parked: reads.parked, bundles: targetAgent ? [] : bundles, artifacts: reads.artifacts, triggers: reads.triggers, vocabulary: reads.vocabulary,
+      me, cases: view.cases.map((c) => ({ id: c.id, kind: c.kind, subject: c.subject, state: c.state, requester: String(c.requester), responder: String(c.responder), updatedAt: c.updatedAt, ...(view.cards[c.id]?.title ? { title: view.cards[c.id]!.title } : {}), ...(view.cards[c.id]?.summary ? { summary: view.cards[c.id]!.summary } : {}) })),
+      dms: dms.map((d) => ({ key: d.key, title: titleFor(d), unread: d.unread, lastEventAt: d.lastEventAt, preview: previewFor(d) })),
+    };
+  }, [view, reads.parked, reads.artifacts, reads.triggers, reads.vocabulary, bundles, me, dms, titleFor, previewFor, targetAgent]);
 
   const filteredDms = useMemo(() => {
     const q = railFilter.trim().toLowerCase();
@@ -420,30 +435,14 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
       />
       {error && <p style={{ color: 'var(--color-danger)' }}>{error}</p>}
 
-      {pendingCases.length > 0 && (
-        <div className="chat-attention">
-          <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: '0.5rem' }}>Needs attention · {pendingCases.length}</div>
-          {pendingCases.map((c) => {
-            const card = view?.cards[c.id];
-            const key = dmForCase(c);
-            return (
-              <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center', padding: '0.6rem 0.8rem', background: '#fff', border: '1px solid var(--color-border)', borderRadius: 8, marginBottom: '0.4rem' }}>
-                <div>
-                  <b>{card?.title ?? c.subject}</b>
-                  <div style={{ fontSize: '0.82rem', opacity: 0.75 }}>
-                    {card?.summary ?? `${c.kind} · from ${agentLabel(c.requester, view?.names)}`}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                  {caseActions(c)}
-                  {key && (
-                    <button type="button" className="ghost" onClick={() => openDm(key)}>Open thread</button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+      {/* Spec 398 §5.5 — ATTENTION, NOT NOTIFICATIONS: six filters, one card per object, one action set each. */}
+      {attentionInputs && me && (
+        <AttentionBar
+          inputs={attentionInputs} token={session.token} addressee={me as Address} onCanceled={reads.dropRun}
+          renderCaseActions={(id) => { const c = view?.cases.find((x) => x.id === id); return c ? caseActions(c) : null; }}
+          onOpenDm={openDm}
+          onOpenCase={(id) => { const c = view?.cases.find((x) => x.id === id); const key = c ? dmForCase(c) : null; if (key) openDm(key); }}
+        />
       )}
 
       {delivery.enabled === false && (

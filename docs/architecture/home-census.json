@@ -300,8 +300,9 @@
       "gates": [
         "verify-home-mcp-room"
       ],
-      "gaps": [
-        "attention distinct from unread — a filter model over decisions · approvals · questions · effect-uncertain · stalled (APUX-012) — 398 §5.5"
+      "gaps": [],
+      "components": [
+        "components/portal/AttentionBar.tsx"
       ]
     },
     {
@@ -960,9 +961,12 @@
         "(portal)/service/[agent]"
       ],
       "components": [
-        "components/portal/TodayView.tsx",
+        "components/portal/AttentionBar.tsx",
         "components/portal/StatePill.tsx",
-        "home/today.ts"
+        "components/portal/TodayView.tsx",
+        "home/attention.ts",
+        "home/today.ts",
+        "home/use-today-inputs.ts"
       ],
       "endpoints": [
         "/harness/runs",
@@ -970,13 +974,13 @@
         "/harness/vocabulary"
       ],
       "tests": [
-        "apps/demo-sso-next/src/home/today.test.ts",
-        "apps/demo-sso-next/src/components/portal/nav.test.ts"
+        "apps/demo-sso-next/src/components/portal/nav.test.ts",
+        "apps/demo-sso-next/src/home/attention.test.ts",
+        "apps/demo-sso-next/src/home/today.test.ts"
       ],
       "gates": [],
       "gaps": [
         "run cost on Today (398 §5.4) — waits on harness G3, the run's bill on RunRecordV1",
-        "attention filter model on Messages (398 §5.5, APUX-012) — decisions still live in Messages without the six filters",
         "approve ceremonies delivered by mail (hear) are not yet a Today decision card — one durable decision record per decision (393) is the prerequisite",
         "a golden-journey gate (398 §13) that lands on Today and reads the decision it expects"
       ]

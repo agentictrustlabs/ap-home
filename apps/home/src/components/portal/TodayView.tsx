@@ -4,16 +4,15 @@
 // next act. No message counts, no infrastructure statistics. Every card points at the surface that owns the act
 // (Work, the Ask, the Library, the Playbook) — nothing here executes: an approval is signed where approvals are
 // signed. The assembly is `src/home/today.ts` (pure, table-tested); this component only fetches and renders.
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
-import { listRuns, listTriggers, homeVocabulary, type ParkedRun, type TriggerRow, type AskVocabularyEntry } from '../../home/ask';
-import { assembleToday, type Today, type TodayItem, type TodayArtifact } from '../../home/today';
+import { assembleToday, type Today, type TodayItem } from '../../home/today';
+import { useTodayReads } from '../../home/use-today-inputs';
 import { useMyWork } from './work/useWork';
 import { StatePill } from './StatePill';
 import { RunControls } from './runs/RunControls';
 import { workspaceHref, type WorkspaceScope } from '../../lib/workspace';
-import type { RunStateV1 } from '../../home/run-state';
 
 const RECENT_DAYS = 7;
 
@@ -71,28 +70,7 @@ export function TodayView({ scope, children }: { scope: WorkspaceScope; children
   const { session, agentAddress } = useSession();
   const addressee = addresseeOf(scope, agentAddress);
   const { bundles } = useMyWork(session, agentAddress);
-  const [parked, setParked] = useState<Array<ParkedRun & { state?: RunStateV1 }> | null>(null);
-  const [triggers, setTriggers] = useState<TriggerRow[]>([]);
-  const [vocabulary, setVocabulary] = useState<AskVocabularyEntry[]>([]);
-  const [artifacts, setArtifacts] = useState<TodayArtifact[]>([]);
-
-  useEffect(() => {
-    if (!session || !addressee) return;
-    let live = true;
-    const token = session.token;
-    void listRuns({ token }, addressee as Address).then((rs) => { if (live) setParked(rs as Array<ParkedRun & { state?: RunStateV1 }>); }).catch(() => { if (live) setParked([]); });
-    void listTriggers({ token }, addressee as Address).then((ts) => { if (live) setTriggers(ts); }).catch(() => undefined);
-    void homeVocabulary(addressee).then((v) => { if (live) setVocabulary(v); }).catch(() => undefined);
-    const scopeQ = scope.kind === 'person' ? '' : `?org=${addressee}`;
-    void fetch(`/connect/library${scopeQ}`, { headers: { authorization: `Bearer ${token}` } })
-      .then((r) => (r.ok ? r.json() : { artifacts: [] }))
-      .then((b: { artifacts?: Array<{ id: string; name: string; kind?: string; folder?: string; createdAt?: number; version?: number; isFolder?: boolean }> }) => {
-        if (!live) return;
-        setArtifacts((b.artifacts ?? []).filter((a) => !a.isFolder && typeof a.createdAt === 'number').map((a) => ({ id: a.id, name: a.name, createdAt: a.createdAt as number, ...(a.kind ? { kind: a.kind } : {}), ...(a.folder ? { folder: a.folder } : {}), ...(a.version ? { version: a.version } : {}) })));
-      })
-      .catch(() => undefined);
-    return () => { live = false; };
-  }, [session?.token, addressee, scope.kind]);
+  const { parked, triggers, vocabulary, artifacts, dropRun } = useTodayReads(session?.token, addressee, scope.kind === 'person' ? 'person' : 'other');
 
   const today: Today | null = useMemo(() => {
     if (parked === null) return null;
@@ -102,7 +80,7 @@ export function TodayView({ scope, children }: { scope: WorkspaceScope; children
   }, [parked, bundles, artifacts, triggers, vocabulary, scope]);
 
   // A canceled run leaves Today at once — the runtime dropped its checkpoint; the record says what stood.
-  const ctx: CardCtx | undefined = addressee ? { token: session?.token ?? '', addressee: addressee as Address, onCanceled: (runRef) => setParked((p) => (p ?? []).filter((r) => r.runRef !== runRef)) } : undefined;
+  const ctx: CardCtx | undefined = addressee ? { token: session?.token ?? '', addressee: addressee as Address, onCanceled: dropRun } : undefined;
   const libraryHref = workspaceHref(scope, 'library');
   const playbookHref = workspaceHref(scope, 'playbook');
 
