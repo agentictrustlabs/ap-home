@@ -300,6 +300,9 @@ export function buildSettingsPane(
     // NOT "Discussions" — that is the top band, where you take part. This edits the replies.
     ...(isPerson ? [{ id: 'set-discussion', label: 'Discussion replies', href: '/discussion-replies', Icon: HashIcon, status: 'live' as const }] : []),
     { id: 'set-playbook', label: 'Playbook', href: href('playbook'), Icon: CodeIcon, status: 'live' },
+    // A coaching SERVICE per game, consulted by the person's own agent at a card table under a grant they sign
+    // here. A person's surface only: a service or an organization has no coach.
+    ...(isPerson ? [{ id: 'set-coaches', label: 'Coaches', href: href('coaches'), Icon: AwardIcon, status: 'live' as const }] : []),
     // spec 398 G3 — a routine as a product: versioned skill + trigger + fresh authority, with its history.
     { id: 'set-routines', label: 'Routines', href: href('routines'), Icon: HistoryIcon, status: 'live' },
   ];
