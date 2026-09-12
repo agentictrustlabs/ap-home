@@ -7,6 +7,7 @@
 // the same /connect/related-orgs vault (MAM-D7) via listManagedAgents.
 import { useEffect, useState } from 'react';
 import { ExplorerLink } from '../shared/ExplorerLink';
+import { FleetLines } from './FleetLines';
 import { fundThroughHarness } from '../../home/fund-harness';
 import { createPublicClient, http, formatUnits } from 'viem';
 import { baseSepolia } from 'viem/chains';
@@ -633,6 +634,8 @@ export function OrganizationsManager({
               </div>
               <div style={{ margin: '.45rem 0' }}><AddressChip address={svc.agent as `0x${string}`} size="sm" /></div>
               <p className="manage-card-blurb">Custodied by you. <ExplorerLink address={svc.agent} label="explorer ↗" /></p>
+              {/* M06 (398 §4.4) — the fleet boundary on the services roster too: runs at · may spend · holds. */}
+              <FleetLines agent={svc.agent as `0x${string}`} token={token} stewardship />
               {!svc.name && <NameAgentForm agent={svc.agent} kind={svc.kind} parent={svc.parent} person={person} token={token} via={via} onDone={reload} />}
             </div>
           ))}

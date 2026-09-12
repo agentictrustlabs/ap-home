@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { workItemOf } from './work-item';
+import { workItemOf, workItemRow } from './work-item';
 
 const ORG = '0x1111111111111111111111111111111111111111';
 const P1 = '0x2222222222222222222222222222222222222222', P2 = '0x3333333333333333333333333333333333333333';
@@ -21,4 +21,11 @@ describe('the accountable work item (398 §4.3)', () => {
     expect(w.artifacts).toEqual([]); expect(w.cost).toBeNull();
   });
   it('no endeavor, no item', () => { expect(workItemOf(ORG, 'x', {})).toBeNull(); });
+  it('the list row carries the same contract: goal · owner · state · progress, and names what only the item answers', () => {
+    const r = workItemRow(ORG, { title: 'Retreat', lifecycle: 'active', stepsTotal: 4, stepsSatisfied: 1 });
+    expect(r.goal).toBe('Retreat'); expect(r.owner).toEqual({ agent: ORG.toLowerCase(), kind: 'org' });
+    expect(r.state.state).toBe('running'); expect(r.progress).toEqual({ satisfied: 1, total: 4 });
+    expect(r.onItem).toEqual(['executors', 'artifacts', 'acceptance', 'cost']);
+    expect(workItemRow(ORG, { title: 'x', lifecycle: 'proposed' }).progress).toBeNull();
+  });
 });

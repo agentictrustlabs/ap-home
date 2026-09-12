@@ -58,3 +58,23 @@ export function workItemOf(org: string, endeavorId: string, d: WorkDetailRespons
     cost: null,
   };
 }
+
+/** The same contract on a LIST ROW (398 §4.3 — one item, every surface): what the row carries (goal, owner, status,
+ *  progress) and what only the item carries (executors, artifacts, acceptance, cost) — said, not implied. */
+export interface WorkItemRowV1 {
+  goal: string;
+  owner: { agent: string; kind: 'org' };
+  state: ProjectedRunStateV1;
+  native: string;
+  progress: { satisfied: number; total: number } | null;
+  /** The fields this row cannot answer — the item can. Never rendered as empty lists. */
+  onItem: ReadonlyArray<'executors' | 'artifacts' | 'acceptance' | 'cost'>;
+}
+export function workItemRow(org: string, row: { title: string; lifecycle: string; stepsTotal?: number; stepsSatisfied?: number }): WorkItemRowV1 {
+  const lc = row.lifecycle as Parameters<typeof lifecycleState>[0];
+  return {
+    goal: row.title, owner: { agent: org.toLowerCase(), kind: 'org' }, state: lifecycleState(lc), native: row.lifecycle,
+    progress: typeof row.stepsTotal === 'number' ? { satisfied: row.stepsSatisfied ?? 0, total: row.stepsTotal } : null,
+    onItem: ['executors', 'artifacts', 'acceptance', 'cost'],
+  };
+}

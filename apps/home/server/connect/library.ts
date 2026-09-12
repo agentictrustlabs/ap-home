@@ -195,7 +195,8 @@ interface SkillReleaseRecord {
  *  stable name, NOT its location), version, bundleRoot, owner, publisher, lockDigest, risk — so the same
  *  release from any vault has the same id. The owner/publisher persona signs the releaseId (ERC-1271). */
 async function mintRelease(env: FnContext['env'], owner: string, art: LibraryArtifact, list: LibraryArtifact[]): Promise<SkillReleaseRecord> {
-  const canonicalId = canonicalHash({ skill: art.name });
+  // A page's release id is its own kind's — a page named like a skill is not that skill's release.
+  const canonicalId = canonicalHash(art.kind === 'skill' || art.isFolder ? { skill: art.name } : { page: art.name, kind: art.kind });
   const bundleRoot = art.isFolder
     ? canonicalHash(list.filter((x) => x.folder === folderFullPath(art) && x.contentCommitment).map((x) => x.contentCommitment!).sort())
     : canonicalHash({ root: art.contentCommitment ?? `blob:${art.id}` });
@@ -232,6 +233,8 @@ interface InboundGrant {
 
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/i;
 const KINDS = new Set(['skill', 'ttl', 'md', 'json-ld', 'image']);
+/** What a release can be minted for (398 §6.2): a skill, or a page. */
+const PUBLISHABLE = new Set(['skill', 'md', 'json-ld']);
 const SOURCES = new Set<ArtifactSource>(['blob', 'graphdb', 'vault', 'external']);
 const ACTIONS = new Set<ArtifactAction>(['read', 'write', 'share', 'export', 'delete']);
 const AGENT_KINDS = new Set<AgentKind>(['person', 'org', 'service']);
@@ -567,11 +570,14 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       return jsonCors({ ok: true, status: 'requested' }, request);
     }
     case 'publish': {
-      // Publish a signed skill RELEASE (Phase 5) — owner-gated, append-only, version-monotonic. Only a
-      // skill or a bundle folder is publishable; the acting principal is the owner + publisher.
+      // Publish a signed RELEASE (Phase 5) — owner-gated, append-only, version-monotonic. A skill or a bundle folder,
+      // and (spec 398 §6.2 — share · publish · replicate are three acts) a PAGE: an `md` or `json-ld` artifact, whose
+      // release names its content commitment so a site that serves it can prove what it serves. Not an image, not a
+      // ttl (an ontology is published through the corpus, never a Library release).
       const art = list.find((x) => x.id === body.id);
       if (!art) return jsonCors({ error: 'unknown artifact id' }, request, 404);
-      if (art.kind !== 'skill' && !art.isFolder) return jsonCors({ error: 'only a skill or a bundle folder can be published as a release' }, request, 400);
+      if (!PUBLISHABLE.has(art.kind) && !art.isFolder) return jsonCors({ error: 'only a skill, a page (md, json-ld) or a bundle folder can be published as a release' }, request, 400);
+      if (!art.isFolder && !art.contentCommitment) return jsonCors({ error: 'a page with no content cannot be published — a release names what it serves' }, request, 400);
       const release = await mintRelease(env, person, art, list);
       art.releases = [...(art.releases ?? []), release];
       await scope.write(list);

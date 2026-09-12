@@ -558,7 +558,8 @@ function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, ownerSa, fol
   // rendered a placeholder about directories instead of its own content. Now that packages are
   // stored as actual folders, only a folder is a bundle.
   const isBundle = artifact.isFolder;
-  const publishable = artifact.kind === 'skill' || artifact.isFolder === true;
+  // 398 §6.2 — a skill, a bundle, or a PAGE (md, json-ld) can be published as a signed release; an image or a ttl cannot.
+  const publishable = artifact.kind === 'skill' || artifact.kind === 'md' || artifact.kind === 'json-ld' || artifact.isFolder === true;
   const owned = (artifact.accessMode ?? 'Owned') === 'Owned';
   const members = useMemo(() => (artifact.isFolder ? items.filter((x) => x.folder === fullPath(artifact)) : []), [artifact, items]);
 

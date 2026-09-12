@@ -185,9 +185,18 @@ describe('/connect/library — as a demo user (person scope)', () => {
     expect(r2.release.releaseId).not.toBe(r1.release.releaseId);
     expect(r2.artifact.releases.length).toBe(2);
 
-    // a plain document is not publishable as a release (only skills / bundles)
-    await post({ action: 'save', artifact: { id: 'a-doc', kind: 'md', name: 'd.md', source: 'blob', bytesB64: btoa('x') } });
-    expect((await post({ action: 'publish', id: 'a-doc' })).status).toBe(400);
+    // spec 398 §6.2 — a PAGE (md / json-ld) publishes as a release naming its content commitment; its canonical id
+    // is its own kind's (a page named like the skill is not that skill's release); an image or a ttl is refused
+    await post({ action: 'save', artifact: { id: 'a-page', kind: 'md', name: 'triage-skill', source: 'blob', bytesB64: btoa('# Retreat\n') } });
+    const p1 = await (await post({ action: 'publish', id: 'a-page' })).json();
+    expect(p1.ok).toBe(true);
+    expect(p1.release.version).toBe('1.0.0');
+    expect(p1.release.canonicalId).not.toBe(r1.release.canonicalId);
+    expect(p1.release.signed).toBe(true);
+    await post({ action: 'save', artifact: { id: 'a-pic', kind: 'image', name: 'p.png', source: 'blob', bytesB64: btoa('x') } });
+    expect((await post({ action: 'publish', id: 'a-pic' })).status).toBe(400);
+    await post({ action: 'save', artifact: { id: 'a-ttl', kind: 'ttl', name: 'o.ttl', source: 'blob', bytesB64: btoa('x') } });
+    expect((await post({ action: 'publish', id: 'a-ttl' })).status).toBe(400);
   });
 
   it('surfaces a grant under "Shared with me" for the grantee, and withdraws it on revoke', async () => {

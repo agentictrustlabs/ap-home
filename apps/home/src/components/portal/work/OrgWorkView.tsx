@@ -11,6 +11,8 @@ import { SectionShell } from '../SectionShell';
 import { BusyButton } from '../../shared/BusyButton';
 import { Loading } from '../../shared/Loading';
 import { type EndeavorRow } from '../../../lib/work-client';
+import { workItemRow } from '../../../home/work-item';
+import { AgentName } from '../../shared/AgentName';
 import { useOrgMemberNames, useReEnableInteractions, useWorkList } from './useWork';
 import { RequestsTriage } from './RequestsTriage';
 import { LIFECYCLE_LABEL, lifecycleState } from './labels';
@@ -47,6 +49,12 @@ function EndeavorCard({ org, row, compact }: { org: string; row: EndeavorRow; co
         {row.deadline && <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>due {new Date(row.deadline).toLocaleDateString()}</span>}
         {row.updatedAt && <span style={{ fontSize: '0.7rem', color: 'var(--color-text-faint)' }}>updated {new Date(row.updatedAt).toLocaleDateString()}</span>}
       </div>
+      {/* 398 §4.3 — the same item contract on the row: owner here; executors · artifacts · acceptance · cost are the item's, said so. */}
+      {!compact && (() => { const it = workItemRow(org, row); return (
+        <div style={{ fontSize: '0.68rem', color: 'var(--color-text-faint)', marginTop: '0.3rem' }} data-testid="work-item-row">
+          owner <AgentName address={it.owner.agent} /> · {it.onItem.join(' · ')}: on the item →
+        </div>
+      ); })()}
     </a>
   );
 }

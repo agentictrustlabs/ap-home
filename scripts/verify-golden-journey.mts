@@ -18,8 +18,8 @@
  *   Negative twin covered inline: T06 — a different question may not ride the run's mandate (the digest binds it).
  *   Twins covered by their own gates in the ledger: T11 verify-cancel · T07 verify-grant-revocation · T05 verify-ask-surface.
  * NOT YET (named, never faked): two specialist allocations with artifacts linked to the item (391 refs on the item);
- * the "send" decision from a run's own decision request (393 W2 from the harness); publishing the page artifact (§6.2);
- * the page publish (§6.2). The parity pair (§7.2 (4)) for this journey's capabilities — organization.team.create,
+ * the "send" decision from a run's own decision request (393 W2 from the harness); the page's publication requested BY
+ * THE RUN (step 5 publishes it as the person's act — the release is real, the run's asking is not yet). The parity pair (§7.2 (4)) for this journey's capabilities — organization.team.create,
  * coordination.decision.request/record — is judged by `check:interaction-coverage:behaviour` (249 pairs; AGENT_URL for the
  * live offer). The gate reports what it covered; it fails only on what it claims.
  */
@@ -28,6 +28,7 @@ import { buildDigestBindingCaveat, capabilityHandler, hashDelegation, ROOT_AUTHO
 import { assembleToday } from '../apps/demo-sso-next/src/home/today';
 import { assembleAttention } from '../apps/demo-sso-next/src/home/attention';
 import { workItemOf } from '../apps/demo-sso-next/src/home/work-item';
+import { artifactIdentity } from '../apps/demo-sso-next/src/home/artifact-identity';
 import { projectAllocationEntry, projectCommitmentEntry, projectDecisionCard } from '../apps/demo-sso-next/src/lib/work-client';
 
 const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
@@ -182,9 +183,30 @@ try {
   console.log(`    carol approved → gone from her Today; the item's acceptance now names ${item2?.acceptance.approvers.map((a) => `${a.agent.slice(0, 10)}… (${a.decisionKind}${a.pending ? ', pending' : ''})`).join(', ')}`);
 } finally { await restore(); }
 
+// ── 5. the page: drafted into the organization's Library, PUBLISHED as a signed release (§6.2) ───────────────────────
+// "build an event page … ask before publishing": the page is an artifact in Missio Nexus's Library (alice stewards it);
+// publishing is a distinct act — a release, signed by the publisher, naming the content commitment — and the identity
+// strip (§6.2) says version · author · sources · scope · access method · the release. Removed after.
+{
+  const lib = async (body: unknown) => j(await fetch(`${HOME}/connect/library?org=${ORG}`, { method: 'POST', headers: { authorization: `Bearer ${alice.homeSession}`, 'content-type': 'application/json' }, body: JSON.stringify({ org: ORG, ...(body as object) }) }));
+  const page = '# The retreat\n\nSaturday, 10am, the hall. Bring a friend.\n';
+  const saved = await lib({ action: 'save', artifact: { name: 'retreat-event-page.md', kind: 'md', source: 'blob', folder: 'pages', contentType: 'text/markdown', bytesB64: Buffer.from(page, 'utf8').toString('base64') } });
+  if (!saved.ok) fail(`the page could not be drafted into the Library: ${JSON.stringify(saved).slice(0, 200)}`);
+  const before = artifactIdentity(saved.artifact, { sa: ORG, vaultLabel: 'Missio Nexus vault' }, true);
+  const published = await lib({ action: 'publish', id: saved.artifact.id });
+  if (!published.ok) fail(`the page could not be published: ${JSON.stringify(published).slice(0, 200)}`);
+  const after = artifactIdentity(published.artifact, { sa: ORG, vaultLabel: 'Missio Nexus vault' }, true);
+  console.log(`  5 page ${saved.artifact.id}: ${before.version} · ${before.accessMethod} · publish ${before.acts.publish} · sources ${before.sources.map((x) => x.kind).join('+')} → published ${published.release.version} by ${String(published.release.publisher).slice(0, 10)}… ${published.release.signed ? 'signed' : 'UNSIGNED'} · strip: release ${after.latestRelease?.version ?? '—'}`);
+  if (before.acts.publish !== 'offered' || !published.release.signed || after.latestRelease?.version !== '1.0.0') fail('the page publish did not happen as a signed release the strip shows');
+  const rid = published.release.releaseId;
+  await lib({ action: 'delete', id: saved.artifact.id });
+  console.log(`    release ${String(rid).slice(0, 14)}… minted; the draft removed again (the gate leaves no artifact behind)`);
+}
+
 console.log(`
 ✓ spec 398 §13 — covered: charter parks → Today decision → grant/sign → done → inspector (completed, verified, receipted) →
-  work item (owner, state, acceptance) → decision request on carol's Today → recorded → gone. T06 inline; T11/T07/T05 by
-  their own gates.
+  work item (owner, state, acceptance) → decision request on carol's Today → recorded → gone → the page drafted and
+  PUBLISHED as a signed release (§6.2). T06 inline; T11/T07/T05 by their own gates.
   not yet: specialist allocations with artifacts on the item · the run's own send decision (393 W2 in the harness) ·
-  publishing the page artifact (§6.2). The parity pair: check:interaction-coverage:behaviour.`);
+  the page's publication REQUESTED BY THE RUN (today the person publishes; "ask before publishing" is a 393 decision the
+  run does not yet raise). The parity pair: check:interaction-coverage:behaviour.`);
