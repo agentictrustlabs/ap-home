@@ -47,7 +47,7 @@ export function RunHistory({ token, addressee, limit = 25 }: { token: string; ad
               <span style={{ flex: 'none', fontSize: '0.72rem', opacity: 0.7 }}>{r.steps} step{r.steps === 1 ? '' : 's'} · {r.receipts} receipt{r.receipts === 1 ? '' : 's'}{r.export?.ok ? ' · in the vault' : ''}</span>
               <button type="button" className="ghost" style={{ flex: 'none', fontSize: '0.74rem' }} onClick={() => setOpen(isOpen ? null : r.runRef)}>{isOpen ? 'Close' : 'Open'}</button>
             </div>
-            {isOpen && <RunInspector token={token} addressee={addressee} runRef={r.runRef} />}
+            {isOpen && <RunInspector token={token} addressee={addressee} runRef={r.runRef} {...(r.intent?.goal ? { goal: r.intent.goal } : {})} />}
           </div>
         );
       })}

@@ -3855,6 +3855,9 @@ export function askVocabulary(
     // stays authoritative for the bare harness — but a domain author who wrote a sentence for their own
     // capability should see it, and this is the copy the Home renders on the authority card.
     label: CAPABILITY_WORDS[c.id] ?? c.id,
+    // Spec 398 §7.2 — from the contract, for a client's retry affordance and render; read by no gate here.
+    ...(playbook?.tools?.[c.id]?.idempotency ? { idempotency: playbook.tools[c.id]!.idempotency } : {}),
+    ...(playbook?.tools?.[c.id]?.result?.kind ? { resultKind: playbook.tools[c.id]!.result!.kind } : {}),
   }));
 }
 

@@ -7,7 +7,8 @@
 // form of the run's provenance — digests, verdicts and names, never arguments or words.
 import { useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { fetchRunInspector, type RunInspectorRecord, type RunInspectorStep } from '../../../home/ask';
+import { fetchRunInspector, homeVocabulary, type AskVocabularyEntry, type RunInspectorRecord, type RunInspectorStep } from '../../../home/ask';
+import { retryAffordance } from '../../../home/retry';
 import { stateOf } from '../../../home/run-state';
 import { StatePill } from '../StatePill';
 import { RunTimeline } from './RunTimeline';
@@ -24,13 +25,15 @@ export function stoppedWords(c: NonNullable<RunInspectorRecord['canceled']>): st
   return c.afterSteps === 0 ? 'stopped before any step ran' : `stopped after step ${c.afterSteps}; step${c.afterSteps === 1 ? ' 1' : `s 1–${c.afterSteps}`} happened`;
 }
 
-export function RunInspector({ token, addressee, runRef, open = true }: { token: string; addressee: Address; runRef: string; /** false ⇒ a button opens it (the Ask's How pane); nothing is fetched for a run nobody opens */ open?: boolean }) {
+export function RunInspector({ token, addressee, runRef, goal, open = true }: { token: string; addressee: Address; runRef: string; /** the ask's words, from the listing — provenance never carries them */ goal?: string; /** false ⇒ a button opens it (the Ask's How pane); nothing is fetched for a run nobody opens */ open?: boolean }) {
   const [wanted, setWanted] = useState(open);
   const [rec, setRec] = useState<RunInspectorRecord | { error: string } | null>(null);
+  const [vocabulary, setVocabulary] = useState<AskVocabularyEntry[]>([]);
   useEffect(() => {
     if (!wanted) return;
     let live = true;
     void fetchRunInspector({ token }, addressee, runRef).then((r) => { if (live) setRec(r); });
+    void homeVocabulary(addressee).then((v) => { if (live) setVocabulary(v); }).catch(() => undefined);
     return () => { live = false; };
   }, [token, addressee, runRef, wanted]);
   if (!wanted) return <div className="muted" style={{ marginTop: 4, fontSize: 11.5 }}><button type="button" className="btn ghost" style={{ fontSize: 10.5, padding: '0 6px', minHeight: 0 }} onClick={() => setWanted(true)}>inspect this run</button></div>;
@@ -44,6 +47,9 @@ export function RunInspector({ token, addressee, runRef, open = true }: { token:
   const pending = rec.steps.filter((s) => s.status === 'suspended' || s.status === 'authority-required' || s.status === 'awaiting');
   const effects = rec.steps.flatMap((s) => (s.effects ?? []).map((e) => ({ step: s.stepRef, ...e })));
   const txs = rec.steps.filter((s) => s.txHash);
+  // Spec 398 §7.2 (1) — the retry affordance comes from the acted capability's declared idempotency, never from a guess.
+  const acted = [...rec.steps].reverse().find((s) => s.capability?.id) ?? rec.steps[rec.steps.length - 1];
+  const retry = retryAffordance(state, acted?.capability?.id ?? acted?.toolId, vocabulary);
 
   return (
     <div className="muted" style={{ marginTop: 4, fontSize: 11.5, lineHeight: 1.55 }} data-testid="run-inspector">
@@ -58,6 +64,11 @@ export function RunInspector({ token, addressee, runRef, open = true }: { token:
         {rec.inResponseTo ? ` · in response to ${short(rec.inResponseTo.agent, 12)} run ${short(rec.inResponseTo.runRef, 16)}` : ''}
         {rec.bill ? ` · cost: ${rec.bill.vaultCalls} vault call${rec.bill.vaultCalls === 1 ? '' : 's'}, ${rec.bill.doRequests} serving request${rec.bill.doRequests === 1 ? '' : 's'}` : ''}
       </div>
+      {retry.kind !== 'none' && (
+        <div data-testid="run-retry" data-retry={retry.kind} title={retry.why}>
+          <a href={`/ask${goal ? `?seed=${encodeURIComponent(goal)}` : ''}`}>{retry.label} →</a> <span style={{ opacity: 0.6 }}>{retry.why}</span>
+        </div>
+      )}
 
       {/* 2 · ARTIFACTS */}
       <H n={artifacts.length}>artifacts</H>

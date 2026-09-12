@@ -145,7 +145,7 @@ export function assembleToday(input: TodayInputs): Today {
     .filter((v) => (v.label ?? '').trim() && !busy.has((v.label ?? '').toLowerCase()))
     .sort((a, b) => rank(a.riskTier) - rank(b.riskTier) || a.id.localeCompare(b.id))[0];
   const next: TodayItem | null = candidate
-    ? { id: `next:${candidate.id}`, title: candidate.label ?? candidate.id, ...(candidate.description ? { detail: candidate.description } : {}), askSeed: candidate.label ?? candidate.id, native: candidate.id }
+    ? { id: `next:${candidate.id}`, title: candidate.label ?? candidate.id, ...(candidate.description || candidate.resultKind ? { detail: [candidate.description, candidate.resultKind ? `→ a ${candidate.resultKind}` : undefined].filter(Boolean).join(' · ') } : {}), askSeed: candidate.label ?? candidate.id, native: candidate.id }
     : null;
 
   return { decisions, active, artifacts, exceptions, next };

@@ -398,7 +398,8 @@
         "(portal)/service/[agent]/capabilities"
       ],
       "components": [
-        "components/portal/capabilities"
+        "components/portal/capabilities",
+        "home/retry.ts"
       ],
       "endpoints": [
         "/harness/vocabulary"
@@ -407,7 +408,11 @@
         "apps/demo-a2a/test/ask-vocabulary.test.ts",
         "apps/demo-a2a/test/capability-ids.test.ts",
         "apps/demo-a2a/test/card-mounted-skills.test.ts",
-        "apps/demo-sso-next/src/components/portal/capabilities/editor.test.ts"
+        "apps/demo-sso-next/src/components/portal/capabilities/editor.test.ts",
+        "apps/demo-sso-next/src/home/retry.test.ts"
+      ],
+      "gaps": [
+        "398 §7.2 — every agentic-trust contract declares idempotency + result.kind and the vocabulary publishes them (retry affordance on the inspector, result kind on Today's next act); five capabilities an archetype carries by id only (treasury.primary.declare, access.grant.revoke, profile.contact.update, household.member.record, service.create) still compile from the ~/skills fallback table without them; the parity pair (§7.2 (4)) is not yet run against the golden journey"
       ]
     },
     {
