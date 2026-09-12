@@ -19,10 +19,12 @@ const canceledWords = (c: NonNullable<RunRecordRow['canceled']>): string =>
 
 export function RunHistory({ token, addressee, limit = 25 }: { token: string; addressee: Address; limit?: number }) {
   const [rows, setRows] = useState<RunRecordRow[] | null>(null);
+  const [unknown, setUnknown] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
-    void listRunRecords({ token }, addressee).then((r) => { if (live) setRows(r.records.sort((a, b) => b.at - a.at)); }).catch(() => { if (live) setRows([]); });
+    // 398 §6.3 — a listing that could not be read is said; it is never rendered as "no runs".
+    void listRunRecords({ token }, addressee).then((r) => { if (live) setRows(r.records.sort((a, b) => b.at - a.at)); }).catch((e) => { if (live) { setUnknown(e instanceof Error ? e.message : String(e)); setRows([]); } });
     return () => { live = false; };
   }, [token, addressee]);
   return (
@@ -33,7 +35,8 @@ export function RunHistory({ token, addressee, limit = 25 }: { token: string; ad
         under whose authority, and where it handed work on. The same provenance an exporter would carry; download it from any run.
       </p>
       {rows === null && <p className="muted" style={{ fontSize: '0.8rem' }}>Reading the runs back…</p>}
-      {rows !== null && rows.length === 0 && <p className="muted" style={{ fontSize: '0.8rem' }}>No finished runs of yours here yet. Ask something, and it appears.</p>}
+      {unknown && <p style={{ fontSize: '0.8rem', color: 'var(--color-amber-700, #b45309)' }} data-testid="runs-unknown">unknown — the runs could not be read ({unknown}). Nothing is shown because nothing could be read.</p>}
+      {rows !== null && rows.length === 0 && !unknown && <p className="muted" style={{ fontSize: '0.8rem' }}>No finished runs of yours here yet. Ask something, and it appears.</p>}
       {(rows ?? []).slice(0, limit).map((r) => {
         const goal = r.intent?.goal ?? r.runRef;
         const isOpen = open === r.runRef;

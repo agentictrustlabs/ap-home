@@ -34,21 +34,26 @@ export function MemoryViews({ scope }: { scope: WorkspaceScope }) {
   const [records, setRecords] = useState<RunRecordRow[]>([]);
   const [checkpoints, setCheckpoints] = useState<Array<ParkedRun & { state?: string }>>([]);
   const [loaded, setLoaded] = useState(false);
+  // 398 §6.3 — which reads failed, by store: an empty tab is never shown for a read that did not happen.
+  const [unknown, setUnknown] = useState<Partial<Record<MemoryStore, string>>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!session || !self) return;
     const token = session.token;
+    const why = (e: unknown) => (e instanceof Error ? e.message : String(e)) || 'unreachable';
+    const u: Partial<Record<MemoryStore, string>> = {};
     const [c, s, runs, recs] = await Promise.all([
-      listConfirmations({ token }).catch(() => []), listInstructions({ token }).catch(() => []),
-      listRuns({ token }, workspace as Address).catch(() => []), listRunRecords({ token }, workspace as Address).then((r) => r.records).catch(() => []),
+      listConfirmations({ token }).catch((e) => { u.personal = `remembered choices: ${why(e)}`; return []; }), listInstructions({ token }).catch((e) => { u.personal = `standing instructions: ${why(e)}`; return []; }),
+      listRuns({ token }, workspace as Address).catch((e) => { u.run = `checkpoints: ${why(e)}`; return []; }), listRunRecords({ token }, workspace as Address).then((r) => r.records).catch((e) => { u.run = `run records: ${why(e)}`; return []; }),
     ]);
     setConfirmations(c); setInstructions(s); setCheckpoints(runs as never); setRecords(recs);
-    if (scope.kind === 'org') { const w = await fetchWorkList(token, workspace).catch(() => null); setEndeavors(w?.endeavors ?? []); }
+    if (scope.kind === 'org') { const w = await fetchWorkList(token, workspace).catch((e) => { u.workspace = `the work list: ${why(e)}`; return null; }); setEndeavors(w?.endeavors ?? []); }
     const scopeQ = scope.kind === 'person' ? '' : `?org=${workspace}`;
-    const lib = await fetch(`/connect/library${scopeQ}`, { headers: { authorization: `Bearer ${token}` } }).then((r) => (r.ok ? r.json() : { artifacts: [] })).catch(() => ({ artifacts: [] })) as { artifacts?: Array<{ id: string; name: string; kind?: string; createdAt?: number; version?: number; isFolder?: boolean; releases?: unknown[]; grants?: unknown[] }> };
+    const lib = await fetch(`/connect/library${scopeQ}`, { headers: { authorization: `Bearer ${token}` } }).then((r) => { if (!r.ok) throw new Error(`the Library answered ${r.status}`); return r.json(); }).catch((e) => { u.workspace = [u.workspace, `the Library: ${why(e)}`].filter(Boolean).join('; '); return { artifacts: [] }; }) as { artifacts?: Array<{ id: string; name: string; kind?: string; createdAt?: number; version?: number; isFolder?: boolean; releases?: unknown[]; grants?: unknown[] }> };
     setArtifacts((lib.artifacts ?? []).filter((a) => !a.isFolder && typeof a.createdAt === 'number').map((a) => ({ id: a.id, name: a.name, createdAt: a.createdAt as number, ...(a.kind ? { kind: a.kind } : {}), ...(a.version ? { version: a.version } : {}), ...(a.releases?.length ? { releases: a.releases.length } : {}), ...(a.grants?.length ? { grants: a.grants.length } : {}) })));
+    setUnknown(u);
     setLoaded(true);
   }, [session?.token, self, workspace, scope.kind]);
   useEffect(() => { void load(); }, [load]);
@@ -91,7 +96,8 @@ export function MemoryViews({ scope }: { scope: WorkspaceScope }) {
       </p>
       {err && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{err}</p>}
       {!loaded && <p className="muted" style={{ fontSize: '0.8rem' }}>Reading…</p>}
-      {loaded && items.length === 0 && <p className="muted" style={{ fontSize: '0.8rem' }}>Nothing here yet.</p>}
+      {unknown[tab] && <p style={{ fontSize: '0.78rem', color: 'var(--color-amber-700, #b45309)' }} data-testid="memory-unknown">unknown — {unknown[tab]}. {items.length ? 'What is shown is partial.' : 'Nothing is shown because it could not be read, not because nothing is there.'}</p>}
+      {loaded && items.length === 0 && !unknown[tab] && <p className="muted" style={{ fontSize: '0.8rem' }}>Nothing here yet.</p>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
         {items.map((it) => {
           const href = hrefOf(it);

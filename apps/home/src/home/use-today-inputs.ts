@@ -8,8 +8,12 @@ import { listRuns, listTriggers, homeVocabulary, type ParkedRun, type TriggerRow
 import type { TodayArtifact } from './today';
 import type { RunStateV1 } from './run-state';
 
+export type ReadFailures = Partial<Record<'runs' | 'triggers' | 'vocabulary' | 'artifacts', string>>;
+
 export interface TodayReads {
   parked: Array<ParkedRun & { state?: RunStateV1 }> | null;
+  /** Spec 398 §6.3 — a read that failed is SAID, never rendered as an empty list: which read, and why. */
+  failed: ReadFailures;
   triggers: TriggerRow[];
   vocabulary: AskVocabularyEntry[];
   artifacts: TodayArtifact[];
@@ -22,21 +26,25 @@ export function useTodayReads(token: string | undefined, addressee: string | nul
   const [triggers, setTriggers] = useState<TriggerRow[]>([]);
   const [vocabulary, setVocabulary] = useState<AskVocabularyEntry[]>([]);
   const [artifacts, setArtifacts] = useState<TodayArtifact[]>([]);
+  const [failed, setFailed] = useState<ReadFailures>({});
   useEffect(() => {
     if (!token || !addressee) return;
     let live = true;
-    void listRuns({ token }, addressee as Address).then((rs) => { if (live) setParked(rs as TodayReads['parked']); }).catch(() => { if (live) setParked([]); });
-    void listTriggers({ token }, addressee as Address).then((ts) => { if (live) setTriggers(ts); }).catch(() => undefined);
-    void homeVocabulary(addressee).then((v) => { if (live) setVocabulary(v); }).catch(() => undefined);
+    const why = (e: unknown) => (e instanceof Error ? e.message : String(e)) || 'unreachable';
+    const fail = (k: keyof ReadFailures, e: unknown) => { if (live) setFailed((f) => ({ ...f, [k]: why(e) })); };
+    setFailed({});
+    void listRuns({ token }, addressee as Address).then((rs) => { if (live) setParked(rs as TodayReads['parked']); }).catch((e) => { fail('runs', e); if (live) setParked([]); });
+    void listTriggers({ token }, addressee as Address).then((ts) => { if (live) setTriggers(ts); }).catch((e) => fail('triggers', e));
+    void homeVocabulary(addressee).then((v) => { if (live) setVocabulary(v); }).catch((e) => fail('vocabulary', e));
     const scopeQ = libraryScope === 'person' ? '' : `?org=${addressee}`;
     void fetch(`/connect/library${scopeQ}`, { headers: { authorization: `Bearer ${token}` } })
-      .then((r) => (r.ok ? r.json() : { artifacts: [] }))
+      .then((r) => { if (!r.ok) throw new Error(`the Library answered ${r.status}`); return r.json(); })
       .then((b: { artifacts?: Array<{ id: string; name: string; kind?: string; folder?: string; createdAt?: number; version?: number; isFolder?: boolean }> }) => {
         if (!live) return;
         setArtifacts((b.artifacts ?? []).filter((a) => !a.isFolder && typeof a.createdAt === 'number').map((a) => ({ id: a.id, name: a.name, createdAt: a.createdAt as number, ...(a.kind ? { kind: a.kind } : {}), ...(a.folder ? { folder: a.folder } : {}), ...(a.version ? { version: a.version } : {}) })));
       })
-      .catch(() => undefined);
+      .catch((e) => fail('artifacts', e));
     return () => { live = false; };
   }, [token, addressee, libraryScope]);
-  return { parked, triggers, vocabulary, artifacts, dropRun: (runRef) => setParked((p) => (p ?? []).filter((r) => r.runRef !== runRef)) };
+  return { parked, triggers, vocabulary, artifacts, failed, dropRun: (runRef) => setParked((p) => (p ?? []).filter((r) => r.runRef !== runRef)) };
 }

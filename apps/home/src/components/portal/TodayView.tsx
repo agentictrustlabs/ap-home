@@ -18,7 +18,7 @@ const RECENT_DAYS = 7;
 
 type CardCtx = { token: string; addressee: Address; onCanceled: (runRef: string) => void };
 
-function Section({ title, hint, items, empty, children, ctx }: { title: string; hint: string; items?: TodayItem[]; empty: string; children?: React.ReactNode; ctx?: CardCtx }) {
+function Section({ title, hint, items, empty, children, ctx, unknown }: { title: string; hint: string; items?: TodayItem[]; empty: string; children?: React.ReactNode; ctx?: CardCtx; /** 398 §6.3 — the read behind this section failed: say so, never render the unknown as nothing */ unknown?: string }) {
   return (
     <section className="dash-section" data-testid={`today-${title.toLowerCase().replace(/[^a-z]+/g, '-')}`}>
       <h2 style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
@@ -26,7 +26,8 @@ function Section({ title, hint, items, empty, children, ctx }: { title: string; 
         {items && items.length > 0 && <span style={{ fontSize: '0.74rem', fontWeight: 400, opacity: 0.6 }}>{items.length}</span>}
       </h2>
       <p className="manage-card-blurb">{hint}</p>
-      {children ?? (items && items.length === 0 ? <p className="muted" style={{ fontSize: '0.8rem' }}>{empty}</p> : null)}
+      {unknown && <p style={{ fontSize: '0.78rem', color: 'var(--color-amber-700, #b45309)' }} data-testid="today-unknown">unknown — {unknown}. {items && items.length > 0 ? 'What is shown is partial.' : 'Nothing is shown because nothing could be read, not because nothing is there.'}</p>}
+      {children ?? (items && items.length === 0 && !unknown ? <p className="muted" style={{ fontSize: '0.8rem' }}>{empty}</p> : null)}
       {!children && items && items.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
           {items.map((it) => <Card key={it.id} item={it} {...(ctx ? { ctx } : {})} />)}
@@ -70,7 +71,7 @@ export function TodayView({ scope, children }: { scope: WorkspaceScope; children
   const { session, agentAddress } = useSession();
   const addressee = addresseeOf(scope, agentAddress);
   const { bundles } = useMyWork(session, agentAddress);
-  const { parked, triggers, vocabulary, artifacts, dropRun } = useTodayReads(session?.token, addressee, scope.kind === 'person' ? 'person' : 'other');
+  const { parked, triggers, vocabulary, artifacts, failed, dropRun } = useTodayReads(session?.token, addressee, scope.kind === 'person' ? 'person' : 'other');
 
   const today: Today | null = useMemo(() => {
     if (parked === null) return null;
@@ -90,11 +91,11 @@ export function TodayView({ scope, children }: { scope: WorkspaceScope; children
       {today === null && <p className="muted" style={{ fontSize: '0.8rem' }}>Reading what needs you…</p>}
       {today && (
         <>
-          <Section title="Needs your decision" hint="A signature, a decision you were named to make, a commitment waiting on you. Each opens where it is signed." items={today.decisions} empty="Nothing is waiting on you." {...(ctx ? { ctx } : {})} />
-          <Section title="Active goals" hint="What your agent is doing and what you committed to, with its state." items={today.active} empty="Nothing in motion. Ask for something, or take on work." {...(ctx ? { ctx } : {})} />
-          <Section title="Recent artifacts" hint={`What the last ${RECENT_DAYS} days left in the Library.`} items={today.artifacts} empty="No new artifacts this week." />
+          <Section title="Needs your decision" hint="A signature, a decision you were named to make, a commitment waiting on you. Each opens where it is signed." items={today.decisions} empty="Nothing is waiting on you." {...(ctx ? { ctx } : {})} {...(failed.runs ? { unknown: `the parked runs could not be read (${failed.runs})` } : {})} />
+          <Section title="Active goals" hint="What your agent is doing and what you committed to, with its state." items={today.active} empty="Nothing in motion. Ask for something, or take on work." {...(ctx ? { ctx } : {})} {...(failed.runs ? { unknown: `the parked runs could not be read (${failed.runs})` } : {})} />
+          <Section title="Recent artifacts" hint={`What the last ${RECENT_DAYS} days left in the Library.`} items={today.artifacts} empty="No new artifacts this week." {...(failed.artifacts ? { unknown: `the Library could not be read (${failed.artifacts})` } : {})} />
           {today.artifacts.length > 0 && <p style={{ fontSize: '0.76rem', marginTop: '-0.6rem' }}><a href={libraryHref}>Open the Library →</a></p>}
-          <Section title="Routine exceptions" hint="A scheduled or hooked routine whose last firing failed." items={today.exceptions} empty="Every routine's last firing went through." />
+          <Section title="Routine exceptions" hint="A scheduled or hooked routine whose last firing failed." items={today.exceptions} empty="Every routine's last firing went through." {...(failed.triggers ? { unknown: `the schedule could not be read (${failed.triggers})` } : {})} />
           {today.exceptions.length > 0 && <p style={{ fontSize: '0.76rem', marginTop: '-0.6rem' }}><a href={playbookHref}>Open the Playbook →</a></p>}
           <Section title="Next" hint="One act this agent's playbook offers here — drawn from its vocabulary, never a fixed list." empty="This agent offers nothing to suggest yet: choose a playbook for it.">
             {today.next
