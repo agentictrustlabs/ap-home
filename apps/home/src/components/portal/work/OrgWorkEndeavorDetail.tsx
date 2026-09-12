@@ -535,9 +535,9 @@ export function OrgWorkEndeavorDetail({ org, endeavorId }: { org: Address; endea
               )}
             </div>
           ) : latestProposed ? (
-            <div className="manage-card" style={{ padding: '0.75rem 0.95rem', marginBottom: '0.8rem', border: '1px solid var(--color-amber-400)', background: 'var(--color-amber-50, #fffbeb)' }}>
+            <div className="manage-card" style={{ padding: '0.75rem 0.95rem', marginBottom: '0.8rem', borderLeft: '3px solid var(--color-amber-500)' }}>
               <div style={{ fontSize: '0.76rem', marginBottom: '0.45rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                <span className="badge" style={{ border: '1px solid var(--color-amber-400)', color: 'var(--color-amber-700, #b45309)', fontSize: '0.66rem' }}>
+                <span className="badge">
                   {proposedByAgent ? "Suggested by the organization's agent" : `Draft by ${label(latestProposed.proposedBy ?? '')}`}
                 </span>
                 <span style={{ color: 'var(--color-text-muted)' }}>Revision {latestProposed.revision} — awaiting adoption</span>
