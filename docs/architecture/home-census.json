@@ -252,7 +252,8 @@
       ],
       "gates": [
         "verify-endeavor-decision",
-        "verify-endeavor-offer-allocate-ask"
+        "verify-endeavor-offer-allocate-ask",
+        "verify-golden-journey"
       ],
       "gaps": [
         "§4.3 work item on the endeavor detail; the same contract on the board row, the inbox card and the Ask's done reply is still native; artifacts and cost are not linked on the item record (391 refs, 396 bill) — said absent on the card"
@@ -984,11 +985,13 @@
         "apps/demo-sso-next/src/home/attention.test.ts",
         "apps/demo-sso-next/src/home/today.test.ts"
       ],
-      "gates": [],
+      "gates": [
+        "verify-golden-journey"
+      ],
       "gaps": [
         "run cost on Today (398 §5.4) — waits on harness G3, the run's bill on RunRecordV1",
         "approve ceremonies delivered by mail (hear) are not yet a Today decision card — one durable decision record per decision (393) is the prerequisite",
-        "a golden-journey gate (398 §13) that lands on Today and reads the decision it expects"
+        "a golden-journey gate (398 §13) runs the charter → Today → inspector → work item → decision journey live; not yet: specialist artifacts on the item, the run's own send decision, the page publish, the parity pair"
       ]
     },
     {
