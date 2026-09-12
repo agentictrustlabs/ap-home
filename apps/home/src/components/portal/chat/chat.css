@@ -794,8 +794,8 @@
 
 .chat-rail-head__title {
   flex: 1;
-  font-weight: 700;
-  font-size: 0.95rem;
+  font-weight: 600;
+  font-size: 15px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

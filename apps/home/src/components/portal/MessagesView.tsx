@@ -472,13 +472,12 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
               editable={!!agentAddress}
               onUpload={(url) => { if (agentAddress) setPersonAvatar(agentAddress, url); }}
             />
-            <span className="chat-rail-head__title">Direct messages</span>
+            <span className="chat-rail-head__title">Messages</span>
             {!targetAgent && (
               <>
                 {/* spec 334 §5 — posting a request is a first-class Home action; the goal-first
                     composer lives on My Work. */}
-                <a href="/work" className="chat-rail-action" title="New request — describe a goal for a person or organization (My Work)">Request</a>
-                <a href="/agent" className="chat-rail-action" aria-label="Agent settings — message bot and playbook" title="Agent settings — message bot & playbook"><BotIcon size={15} /></a>
+                <a href="/agent" className="chat-rail-action" aria-label="Agent settings — message bot and playbook" title="Agent settings — how your agent replies for you"><BotIcon size={15} /></a>
               </>
             )}
             <button

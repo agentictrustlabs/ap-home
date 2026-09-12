@@ -356,8 +356,7 @@ function FolderTree({ nodes, path, onGo, counts }: {
           style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 13,
             padding: '.28rem .5rem', paddingLeft: `${0.5 + depth * 0.75}rem`,
             background: on ? 'var(--color-surface-sunken)' : 'transparent',
-            color: 'var(--color-text-primary)', fontWeight: on ? 600 : 500,
-            fontWeight: on ? 700 : 500 }}>
+            color: 'var(--color-text-primary)', fontWeight: on ? 600 : 500 }}>
           <span onClick={(e) => { e.stopPropagation(); if (hasKids) setOpen((s) => { const n2 = new Set(s); n2.has(n.path) ? n2.delete(n.path) : n2.add(n.path); return n2; }); }}
             style={{ width: 12, flexShrink: 0, color: 'var(--color-text-muted)', fontSize: 10, textAlign: 'center' }}
             aria-hidden={!hasKids}>{hasKids ? (expanded ? '▾' : '▸') : ''}</span>
