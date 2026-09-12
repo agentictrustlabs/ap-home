@@ -455,6 +455,8 @@
         "components/portal/runs/RunHistory.tsx",
         "components/portal/runs/RunInspector.tsx",
         "components/portal/runs/RunTimeline.tsx",
+        "components/portal/runs/SaveAsRecipe.tsx",
+        "home/recipe.ts",
         "home/run-state.ts"
       ],
       "endpoints": [
@@ -463,6 +465,7 @@
         "/harness/cancel",
         "/harness/durable",
         "/harness/progress",
+        "/harness/recipe",
         "/harness/replay",
         "/harness/run",
         "/harness/runs",
@@ -475,13 +478,16 @@
         "apps/demo-a2a/test/harness-workflow-core.test.ts",
         "apps/demo-a2a/test/unit/artifact-store.test.ts",
         "apps/demo-a2a/test/unit/run-export.test.ts",
+        "apps/demo-sso-next/src/home/recipe.test.ts",
         "apps/demo-sso-next/src/home/run-state.test.ts",
+        "packages/harness/test/unit/recipe.test.ts",
         "packages/harness/test/unit/run-state.test.ts"
       ],
       "gates": [
         "verify-cancel",
         "verify-durable-run",
         "verify-handoff",
+        "verify-recipe",
         "verify-run-bill",
         "verify-run-export"
       ],
@@ -525,7 +531,8 @@
         "apps/demo-a2a/test/unit/trigger-kinds.test.ts",
         "apps/demo-a2a/test/unit/triggers.test.ts",
         "apps/demo-sso-next/src/home/routines.test.ts",
-        "apps/demo-sso-next/src/home/triggers.test.ts"
+        "apps/demo-sso-next/src/home/triggers.test.ts",
+        "packages/capability-claims/test/unit/harness-contract.test.ts"
       ],
       "gaps": [
         "a routine's budget is set by a steward on the row, not yet declared on the SKILL.md trigger (375 contract); save-as-recipe (398 G3) not built"

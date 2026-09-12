@@ -12,6 +12,10 @@ import { retryAffordance } from '../../../home/retry';
 import { stateOf } from '../../../home/run-state';
 import { StatePill } from '../StatePill';
 import { RunTimeline } from './RunTimeline';
+import { SaveAsRecipe } from './SaveAsRecipe';
+import { canSaveAsRecipe } from '@agenticprimitives/harness/recipe';
+import { usePathname } from 'next/navigation';
+import { parseWorkspacePath } from '../../../lib/workspace';
 
 const short = (v: unknown, n = 14): string => { const t = String(v ?? ''); return t.length > n ? `${t.slice(0, n - 4)}…${t.slice(-3)}` : t; };
 const kb = (b: number): string => (b >= 1024 ? `${(b / 1024).toFixed(1)} kB` : `${b} B`);
@@ -29,6 +33,7 @@ export function RunInspector({ token, addressee, runRef, goal, open = true }: { 
   const [wanted, setWanted] = useState(open);
   const [rec, setRec] = useState<RunInspectorRecord | { error: string } | null>(null);
   const [vocabulary, setVocabulary] = useState<AskVocabularyEntry[]>([]);
+  const pathname = usePathname();
   useEffect(() => {
     if (!wanted) return;
     let live = true;
@@ -69,6 +74,8 @@ export function RunInspector({ token, addressee, runRef, goal, open = true }: { 
           <a href={`/ask${goal ? `?seed=${encodeURIComponent(goal)}` : ''}`}>{retry.label} →</a> <span style={{ opacity: 0.6 }}>{retry.why}</span>
         </div>
       )}
+      {/* Spec 398 §5 / APUX-034 — successful work becomes a draft recipe in the Library; a stopped or failed run does not. */}
+      {canSaveAsRecipe(state, rec.outcome) && <SaveAsRecipe token={token} addressee={addressee} runRef={runRef} scope={parseWorkspacePath(pathname ?? '/')} />}
 
       {/* 2 · ARTIFACTS */}
       <H n={artifacts.length}>artifacts</H>

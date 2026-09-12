@@ -40,7 +40,7 @@ export interface TriggerScheduleV1 {
   paused?: { at: number; by: 'steward' | 'budget'; note?: string };
   /** Spec 398 §5.4 — the routine's budget per firing, in the numbers 396 counts. Exhaustion PAUSES the routine —
    *  it never widens a mandate and never tops up silently. */
-  budget?: { vaultCalls: number };
+  budget?: { vaultCalls: number; /** Declared on the SKILL.md trigger (spec 398 §5.4) rather than set by a steward. */ declared?: true };
   /** Spec 396 W3 — what the last firing cost. */
   lastBill?: { vaultCalls: number; doRequests: number };
 }
@@ -54,13 +54,16 @@ const hex = (n: number): string => `0x${[...crypto.getRandomValues(new Uint8Arra
 export function schedulesFor(agent: Address, playbookDigest: string, triggers: readonly TriggerV1[], now = Date.now()): TriggerScheduleV1[] {
   const a = agent.toLowerCase() as Address;
   return triggers.map((t): TriggerScheduleV1 => {
+    // Spec 398 §5.4 — the budget the contract declares is the row's initial one, marked as declared so a
+    // steward's own setting can be told from it (and survives a version change while this does not).
+    const budget = t.budget ? { budget: { vaultCalls: t.budget.vaultCalls, declared: true as const } } : {};
     if (t.kind === 'schedule') {
       const everyMs = durationMs(t.every);
-      return { agent: a, triggerId: t.id, kind: 'schedule', ask: t.ask, every: t.every, everyMs, nextAt: now + everyMs, playbookDigest };
+      return { agent: a, triggerId: t.id, kind: 'schedule', ask: t.ask, every: t.every, everyMs, nextAt: now + everyMs, playbookDigest, ...budget };
     }
-    if (t.kind === 'event') return { agent: a, triggerId: t.id, kind: 'event', on: { event: t.on.event }, ask: t.ask, playbookDigest };
-    if (t.kind === 'webhook') return { agent: a, triggerId: t.id, kind: 'webhook', token: hex(24), ask: t.ask, playbookDigest };
-    return { agent: a, triggerId: t.id, kind: 'message', on: { profile: t.on.profile }, ask: t.ask, playbookDigest };
+    if (t.kind === 'event') return { agent: a, triggerId: t.id, kind: 'event', on: { event: t.on.event }, ask: t.ask, playbookDigest, ...budget };
+    if (t.kind === 'webhook') return { agent: a, triggerId: t.id, kind: 'webhook', token: hex(24), ask: t.ask, playbookDigest, ...budget };
+    return { agent: a, triggerId: t.id, kind: 'message', on: { profile: t.on.profile }, ask: t.ask, playbookDigest, ...budget };
   });
 }
 
@@ -94,9 +97,11 @@ export function withPause(row: TriggerScheduleV1, paused: boolean, note: string 
   if (!paused) { const { paused: _p, ...rest } = row; return rest; }
   return { ...row, paused: { at: now, by: 'steward', ...(note ? { note: note.slice(0, 200) } : {}) } };
 }
-export function withBudget(row: TriggerScheduleV1, vaultCalls: number | null): TriggerScheduleV1 {
-  if (vaultCalls === null) { const { budget: _b, ...rest } = row; return rest; }
-  return { ...row, budget: { vaultCalls: Math.max(1, Math.floor(vaultCalls)) } };
+/** `null` clears the steward's budget — and the row RETURNS to the one its playbook declares (spec 398 §5.4), when
+ *  the caller passes it: clearing a cap is not lifting the routine's own ceiling. */
+export function withBudget(row: TriggerScheduleV1, vaultCalls: number | null, declared?: { vaultCalls: number } | null): TriggerScheduleV1 {
+  if (vaultCalls === null) { const { budget: _b, ...rest } = row; return declared ? { ...rest, budget: { vaultCalls: declared.vaultCalls, declared: true } } : rest; }
+  return { ...row, budget: { vaultCalls: Math.max(1, Math.floor(vaultCalls)) } };   // a steward's: never `declared`
 }
 
 /** Spec 375 — WHAT FIRED. The source a row is matched against, and the context its run receives. */

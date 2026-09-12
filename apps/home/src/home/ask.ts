@@ -466,6 +466,14 @@ export async function fetchSpans(session: { token: string }, addressee: Address,
   return out.ok ? { spans: out.spans ?? [], retention: out.retention, ...(out.exporter ? { exporter: out.exporter } : {}), export: out.export ?? null } : { error: out.error ?? 'the run could not be read back' };
 }
 
+/** Spec 398 §5 / APUX-034 — the DRAFT RECIPE a completed run becomes: the runtime composes it from the record and the
+ *  playbook (never from a key); saving it in the Library is the person's act, done here. */
+export interface RecipeDraft { name: string; fileName: string; capabilities: string[]; roles: Array<{ role: string; from: string; firstBoundTo?: string }>; steps: Array<{ n: number; capability: string; args: Record<string, unknown>; risk?: string; action?: string }>; skillMd: string; notes: string[] }
+export async function draftRecipeOf(session: { token: string }, addressee: Address, runRef: string): Promise<{ ok: true; recipe: RecipeDraft; playbookRead: boolean } | { ok: false; error: string }> {
+  const out = (await postA2a('/a2a/harness/recipe', { session: session.token, addressee, runRef })) as { ok?: boolean; error?: string; recipe?: RecipeDraft; playbookRead?: boolean };
+  return out.ok && out.recipe ? { ok: true, recipe: out.recipe, playbookRead: out.playbookRead === true } : { ok: false, error: out.error ?? 'the run could not be drafted as a recipe' };
+}
+
 /** Spec 398 §5.3 — CANCEL an unfinished run: it stops; what already happened stands (steps 1–N and their receipts).
  *  One of four distinct controls — not a pause (a trigger's), not a revoke (a delegation's, under Security), not an
  *  undo (a new intent with its own mandate). Only whoever could resume the run may stop it. */
@@ -488,7 +496,8 @@ export interface TriggerRow {
   /** Spec 398 §5.3 — paused: nothing new starts; by a steward, or by the budget (§5.4). */
   paused?: { at: number; by: 'steward' | 'budget'; note?: string };
   /** Spec 398 §5.4 — vault calls per firing; exhaustion pauses. */
-  budget?: { vaultCalls: number };
+  /** `declared` — written on the SKILL.md trigger itself (398 §5.4); otherwise a steward set it on the row. */
+  budget?: { vaultCalls: number; declared?: true };
   lastBill?: { vaultCalls: number; doRequests: number };
 }
 

@@ -14,7 +14,7 @@ describe('a routine as a product (398 G3)', () => {
     expect(r!.playbook).toEqual({ archetypeId: 'org-steward', version: '3', digest: '0xabc', current: true });
     expect(r!.source).toBe('every 7d'); expect(r!.state.state).toBe('completed');
     expect(r!.history.map((h) => h.runRef)).toEqual(['r2', 'r1']);
-    expect(r!.budget).toBe(20); expect(r!.lastBill?.vaultCalls).toBe(6);
+    expect(r!.budget).toBe(20); expect(r!.budgetBy).toBe('steward'); expect(r!.lastBill?.vaultCalls).toBe(6);
     expect(r!.authority).toMatch(/never one carried/);
   });
   it('paused reads as blocked and says by whom; a never-fired routine is queued', () => {

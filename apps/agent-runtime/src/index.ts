@@ -140,7 +140,7 @@ const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stat
 import { askVocabulary, commandFieldsFor, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY, HOUSEHOLD_READ_CAPABILITY, CAPABILITY_WORDS, type PlannerTraceV1 } from './harness-run.js';
 import { workersAiTranscriber, repairTranscript, hearingVocabulary, spokenFor } from './voice.js';
 import { DECISION_POINTS } from '@agenticprimitives/ontology';
-import { loadPlaybook, billed, chargeBill, memoRead, forgetMemo, projectRunState } from '@agenticprimitives/harness';
+import { loadPlaybook, billed, chargeBill, memoRead, forgetMemo, projectRunState, draftRecipe } from '@agenticprimitives/harness';
 import { runUnderMandate, askReplyFor, readSubjectReply, type AskReplyEnvelopeV1, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { subjectAsk, subjectAnswer, validateSubjectAsk, handoff, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
@@ -2120,7 +2120,13 @@ app.post('/harness/triggers/pause', async (c) => {
   let row = (await listTriggers(c.env as never, addressee)).find((t) => t.triggerId === body.triggerId);
   if (!row) return c.json({ ok: false, error: `no trigger "${body.triggerId}" on this agent` }, 404);
   if (body.paused !== undefined) row = withPause(row, body.paused === true, typeof body.note === 'string' ? body.note : undefined);
-  if (body.budget !== undefined) row = withBudget(row, body.budget === null ? null : Number(body.budget?.vaultCalls));
+  if (body.budget !== undefined) {
+    // Clearing a steward's budget returns the row to what the playbook declares on this trigger (spec 398 §5.4).
+    const deps = harnessDeps(c.env, buildAuditSink(c.env));
+    const playbook = body.budget === null ? await loadPlaybook(deps.readSubjectRecord, addressee, console.log).catch(() => null) : null;
+    const declared = playbook?.triggers?.find((t) => t.id === body.triggerId)?.budget ?? null;
+    row = withBudget(row, body.budget === null ? null : Number(body.budget?.vaultCalls), declared);
+  }
   if (body.budget && !Number.isFinite(Number(body.budget.vaultCalls))) return c.json({ ok: false, error: 'budget.vaultCalls must be a number' }, 400);
   await advanceTrigger(c.env as never, addressee, row);
   await buildAuditSink(c.env).write({
@@ -2231,6 +2237,33 @@ app.post('/harness/provenance', async (c) => {
   // Spec 398 §5.2 — the inspector's record form: what the run left (artifacts), decided, spent authority on, cost.
   if (body.format === 'record') return c.json({ ok: true, hasProvenance: ref, record: await provenanceViewOf(c.env, addressee, rec), export: rec.export?.provenance ?? null });
   return c.json({ ok: true, hasProvenance: ref, provenance: await provenanceGraphOf(c.env, addressee, rec), export: rec.export?.provenance ?? null });
+});
+
+// POST /harness/recipe { session, addressee, runRef } — spec 398 §5 / APUX-034 (G3). SAVE SUCCESSFUL WORK AS A RECIPE:
+// the run's admitted plan as steps, the capability ids used, the parties as roles — a draft SKILL.md the Home puts in
+// the Library. Composed from the RECORD and the PLAYBOOK's definition only: the mandates the run presented, its session
+// and every key are not inputs, so no secret can reach the draft. The asker's own runs only (as /harness/provenance).
+// This route WRITES NOTHING: the Library is the Home's, and saving there is the person's act.
+app.post('/harness/recipe', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; runRef?: string } | null;
+  if (!body?.session || !body.addressee || !body.runRef) return c.json({ ok: false, error: 'session, addressee and runRef are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const addressee = body.addressee.toLowerCase() as Address;
+  const rec = await getRecord(c.env as never, addressee, body.runRef);
+  if (!rec) return c.json({ ok: false, error: 'no such record' }, 404);
+  if (String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()) return c.json({ ok: false, error: 'this run was not yours to save' }, 403);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  const playbook = await loadPlaybook(deps.readSubjectRecord, addressee, console.log).catch(() => null);
+  const tools = playbook?.tools ? Object.values(playbook.tools) : [];
+  const observed = new Map(rec.steps.map((s) => [s.stepRef, s]));
+  const out = draftRecipe({
+    runRef: rec.runRef, at: rec.at, agent: addressee, goal: String(rec.intent.goal ?? ''), outcome: rec.outcome, ...(rec.canceled ? { canceled: true } : {}),
+    ...(playbook ? { playbook: { archetypeId: playbook.archetypeId, version: playbook.archetypeVersion, digest: playbook.digest } } : {}),
+    steps: rec.plan.steps.map((st, i) => { const ref = st.id ?? `s${i}`; const ob = observed.get(ref); return { stepRef: ref, toolId: st.toolId, args: st.args ?? {}, ...(ob ? { ok: ob.ok, ...(ob.skipped ? { skipped: true } : {}) } : { skipped: true }), ...(st.executor ? { executor: st.executor } : {}) }; }),
+  }, tools as never);
+  if (!out.ok) return c.json({ ok: false, error: out.reason }, 409);
+  return c.json({ ok: true, recipe: out.recipe, playbookRead: !!playbook });
 });
 
 // POST /provenance/public { agent, runRef } — spec 395. THE PUBLIC PROJECTION: the run's ANCHORED OUTCOMES, digests

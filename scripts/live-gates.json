@@ -350,6 +350,16 @@
       "required": true,
       "paced": true,
       "timeoutSec": 240
+    },
+    {
+      "id": "verify-recipe",
+      "script": "scripts/verify-recipe.mts",
+      "spec": "398 §5 / APUX-034 (G3)",
+      "proves": "a completed run (a supplied-plan read) becomes a draft SKILL.md recipe — the capability named, the organization written as a role, no address in its steps, no credential value, authority requested anew — saved into her Library as a skill artifact under recipes/ (content commitment matches) and removed",
+      "twin": "a run that did not complete (a payment parked for authority) is refused as a recipe by name; the draft is compiled from the record and the playbook only — the keyring is not an input",
+      "required": true,
+      "paced": true,
+      "timeoutSec": 180
     }
   ]
 }

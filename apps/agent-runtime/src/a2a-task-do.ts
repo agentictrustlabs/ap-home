@@ -845,8 +845,14 @@ export class A2aTaskDO {
         if (rows[0] && (rows[0] as { agent?: string }).agent) await this.state.storage.put(AGENT_SA_KEY, String((rows[0] as { agent?: string }).agent).toLowerCase());
         for (const r of rows) {
           const prior = existing.get(tkey(r.triggerId));
-          // Same playbook ⇒ the row keeps its clock; a new digest starts the interval over.
-          const row = prior && prior.playbookDigest === r.playbookDigest ? { ...r, nextAt: prior.nextAt, ...(prior as Record<string, unknown>) } : r;
+          // Same playbook ⇒ the row keeps its clock; a new digest starts the interval over — but a STEWARD's pause and a
+          // steward's budget are theirs, not the version's (spec 398 §5.3/§5.4): a new playbook version must not resume
+          // a routine somebody paused or lift a cap somebody set. A budget the old contract declared is replaced by
+          // whatever the new one declares (or nothing).
+          const p = prior as (Record<string, unknown> & { paused?: { by?: string }; budget?: { declared?: true } }) | undefined;
+          const row = p && p.playbookDigest === r.playbookDigest
+            ? { ...r, nextAt: p.nextAt, ...(p as Record<string, unknown>) }
+            : { ...r, ...(p?.paused?.by === 'steward' ? { paused: p.paused } : {}), ...(p?.budget && !p.budget.declared ? { budget: p.budget } : {}) };
           await this.state.storage.put(tkey(r.triggerId), row);
           out.push(row);
         }

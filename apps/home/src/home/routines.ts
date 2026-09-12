@@ -18,6 +18,8 @@ export interface RoutineView {
   native: string;
   paused: TriggerRow['paused'] | null;
   budget: number | null;
+  /** Where the budget came from: the playbook's own declaration, or a steward's setting on the row. */
+  budgetBy: 'playbook' | 'steward' | null;
   lastBill: TriggerRow['lastBill'] | null;
   nextAt: number | null;
   last: { at: number; runRef?: string; outcome: string; said?: string } | null;
@@ -59,7 +61,7 @@ export function assembleRoutines(i: RoutineInputs): RoutineView[] {
       triggerId: t.triggerId, ask: t.ask, source: sourceWords(t), kind,
       playbook: i.assignment ? { archetypeId: i.assignment.archetypeId, version: i.assignment.archetypeVersion, digest: i.assignment.definitionDigest, current: true } : null,
       state: st, native: t.paused ? `paused by ${t.paused.by}` : t.lastOutcome ?? 'never fired',
-      paused: t.paused ?? null, budget: t.budget?.vaultCalls ?? null, lastBill: t.lastBill ?? null, nextAt: t.nextAt ?? null,
+      paused: t.paused ?? null, budget: t.budget?.vaultCalls ?? null, budgetBy: t.budget ? (t.budget.declared ? 'playbook' : 'steward') : null, lastBill: t.lastBill ?? null, nextAt: t.nextAt ?? null,
       last: t.lastAt ? { at: t.lastAt, ...(t.lastRunRef ? { runRef: t.lastRunRef } : {}), outcome: t.lastOutcome ?? 'unknown', ...(t.lastSaid ? { said: t.lastSaid } : {}) } : null,
       history: (byTrigger.get(t.triggerId) ?? []).sort((a, b) => b.at - a.at),
       authority: 'every firing asks as the agent holding nothing; a firing that reaches an act parks and waits for a steward\'s mandate — never one carried from a previous firing',

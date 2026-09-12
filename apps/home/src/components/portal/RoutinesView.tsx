@@ -80,7 +80,7 @@ export function RoutinesView({ scope }: { scope: WorkspaceScope }) {
               <span>authority</span><span>{r.authority}</span>
               <span>budget</span>
               <span style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                {r.budget ? `${r.budget} vault calls per firing` : 'none set'}{r.lastBill ? ` · last firing cost ${r.lastBill.vaultCalls} vault calls, ${r.lastBill.doRequests} serving requests` : ''}
+                {r.budget ? `${r.budget} vault calls per firing · ${r.budgetBy === 'playbook' ? 'declared by the playbook' : 'set by a steward'}` : 'none set'}{r.lastBill ? ` · last firing cost ${r.lastBill.vaultCalls} vault calls, ${r.lastBill.doRequests} serving requests` : ''}
                 <input type="number" min="1" placeholder="vault calls" value={budgetDraft[r.triggerId] ?? ''} onChange={(e) => setBudgetDraft((d) => ({ ...d, [r.triggerId]: e.target.value }))} style={{ width: 90, fontSize: '0.74rem', padding: '0.1rem 0.3rem' }} />
                 <BusyButton busy={busy === `${r.triggerId}:budget`} busyLabel="Setting…" className="btn-ghost" style={{ width: 'auto', fontSize: '0.72rem' }} disabled={!budgetDraft[r.triggerId]} onClick={() => void change(r, { budget: { vaultCalls: Number(budgetDraft[r.triggerId]) } })}>Set budget</BusyButton>
                 {r.budget && <button type="button" className="btn-ghost" style={{ fontSize: '0.72rem' }} onClick={() => void change(r, { budget: null })}>Clear</button>}

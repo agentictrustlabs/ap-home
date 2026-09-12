@@ -49,4 +49,17 @@ describe('pause and budget (398 §5.3 / §5.4)', () => {
     expect(under.paused).toBeUndefined();
     expect(withBudget(over, null).budget).toBeUndefined();
   });
+  // Spec 398 §5.4 — the budget the SKILL.md trigger declares is the row's initial one, told apart from a steward's.
+  it('a budget declared on the contract lands on the row as declared; a steward setting one is not declared', () => {
+    const [declared] = schedulesFor(agent, '0xd', [{ id: 'digest', kind: 'schedule', every: 'PT24H', ask: 'what are we working on', budget: { vaultCalls: 40 } }], 0);
+    expect(declared!.budget).toEqual({ vaultCalls: 40, declared: true });
+    const [hook] = schedulesFor(agent, '0xd', [{ id: 'h', kind: 'webhook', ask: 'status', budget: { vaultCalls: 3 } }], 0);
+    expect(hook!.budget).toEqual({ vaultCalls: 3, declared: true });
+    expect(withBudget(declared!, 12).budget).toEqual({ vaultCalls: 12 });
+    // clearing the steward's returns to the declared one when the playbook still declares it; to none otherwise
+    expect(withBudget(withBudget(declared!, 12), null, { vaultCalls: 40 }).budget).toEqual({ vaultCalls: 40, declared: true });
+    expect(withBudget(withBudget(declared!, 12), null, null).budget).toBeUndefined();
+    const over = advanced(declared!, 'answered', 'r1', 'ok', 9000, { vaultCalls: 41, doRequests: 1 });
+    expect(over.paused?.by).toBe('budget');
+  });
 });
