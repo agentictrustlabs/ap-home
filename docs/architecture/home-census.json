@@ -951,7 +951,7 @@
       ],
       "gaps": [
         "the Home component registry (H47, 398 §10.5) is absent",
-        "the Developer MCP (`ap mcp`) is built and tested; it is not yet in the product-repo template's coding-agent setup (`claude mcp add`) nor exercised by the clean-machine CI job"
+        "`ap mcp` is registered in the product template (.mcp.json, .cursor/mcp.json) but the devkit alpha that ships it is not published yet, and the clean-machine CI job (T21) does not exercise it"
       ],
       "tests": [
         "packages/devkit/test/developer-mcp.test.ts"
