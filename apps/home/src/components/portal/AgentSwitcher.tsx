@@ -173,7 +173,7 @@ export function AgentSwitcher() {
             background: 'transparent', border: 'none', color: 'var(--color-amber-700)', fontWeight: 600, fontSize: '.82rem', cursor: 'pointer',
           }}
         >
-          ＋ Create an organization or service
+          Create an organization or service
         </button>
       </Popover>
     </div>

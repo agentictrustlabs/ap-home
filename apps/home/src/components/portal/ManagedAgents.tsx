@@ -613,7 +613,7 @@ export function OrganizationsManager({
                 <div style={{ marginTop: '.5rem', paddingTop: '.5rem', borderTop: '1px solid var(--c-g100, #eee)' }}>
                   <CreateAgentForm
                     choices={creatableKinds('org', claimable).filter((c) => c.kind !== 'org-treasury')}
-                    parent={org.agent} person={person} token={token} via={via} onDone={reload} cta="＋ Charter inside this organization"
+                    parent={org.agent} person={person} token={token} via={via} onDone={reload} cta="Charter inside this organization"
                   />
                 </div>
               </div>
@@ -645,7 +645,7 @@ export function OrganizationsManager({
             <div className="manage-card-head">
               <span className="manage-card-icon"><BuildingIcon size={17} /></span>
               <span className="manage-card-label">New agent</span>
-              <span className="manage-card-badge">＋</span>
+              <span className="manage-card-badge">new</span>
             </div>
             <p className="manage-card-blurb">An organization, team, workspace or service you control — its own Smart Agent and typed name.</p>
             <CreateAgentForm choices={creatableKinds('person', claimable)} parent={person} person={person} token={token} via={via} onDone={reload} cta="Create agent" />
@@ -674,7 +674,7 @@ export function TreasuriesRollup({ token, person, via }: { token: string | null;
         <p className="manage-card-blurb">Loading…</p>
       ) : (
         <>
-          <h3 className="subhead">Personal</h3>
+          <div className="ui-section-head"><h2>Personal<span className="ui-count">{personal.length}</span></h2></div>
           <div className="manage-grid">
             {personal.length ? (
               personal.map((t) => (
@@ -712,7 +712,7 @@ export function TreasuriesRollup({ token, person, via }: { token: string | null;
             </div>
           </div>
 
-          <h3 className="subhead" style={{ marginTop: '1.5rem' }}>Organization treasuries</h3>
+          <div className="ui-section-head" style={{ marginTop: 'var(--sp-6)' }}><h2>Organization treasuries</h2></div>
           {orgTreasuries.length === 0 ? (
             <p className="manage-card-blurb">No org treasuries yet — create one from an organization in <a href="/agents">Agents</a>.</p>
           ) : (

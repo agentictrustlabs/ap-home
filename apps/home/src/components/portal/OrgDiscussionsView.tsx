@@ -702,7 +702,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
         <div className="channels-sidebar">
           <div className="channels-sidebar__title">
             <span>Topics</span>
-            <button type="button" className="btn" style={{ padding: '0.1rem 0.5rem' }} disabled={orgVault === false} onClick={() => setCreating((v) => !v)} title="New topic">＋</button>
+            <button type="button" className="ui-btn ui-btn--ghost ui-btn--sm" disabled={orgVault === false} onClick={() => setCreating((v) => !v)} title="New topic">New topic</button>
           </div>
           {creating && orgVault !== false && (
             <div style={{ marginBottom: '0.6rem', padding: '0 0.4rem' }}>
@@ -892,7 +892,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                 <div className="channels-sidebar__title">
                   <span>Participants · {(participants ?? []).length + pendingInvites.length}</span>
                   {youFacilitator && (
-                    <button type="button" className="btn" style={{ padding: '0.1rem 0.5rem' }} title="Invite a participant to this topic" onClick={() => setTopicInviteOpen((v) => !v)}>＋</button>
+                    <button type="button" className="btn" style={{ padding: '0.1rem 0.5rem' }} title="Invite a participant to this topic" onClick={() => setTopicInviteOpen((v) => !v)}>+</button>
                   )}
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', padding: '0 0.25rem' }}>
@@ -934,7 +934,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                   ))}
                   {(participants ?? []).length === 0 && pendingInvites.length === 0 && (
                     <p style={{ fontSize: '0.75rem', opacity: 0.6, padding: '0.25rem' }}>
-                      No participants yet{youFacilitator ? ' — use ＋ to invite organization members.' : ''}
+                      No participants yet{youFacilitator ? ' — use + to invite organization members.' : ''}
                     </p>
                   )}
                 </div>

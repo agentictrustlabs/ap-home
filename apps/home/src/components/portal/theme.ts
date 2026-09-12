@@ -92,11 +92,13 @@ export function pillStyle(on: boolean): CSSProperties {
 }
 
 /** Amber info banner — matches `.settings-banner--info` / `chat-dm-resolution-banner` elsewhere. */
+/** An explanatory note — quiet, never an amber wash (amber is for warnings and the primary action). */
 export const infoBannerSty: CSSProperties = {
   ...cardSty,
-  background: 'var(--color-amber-50)',
-  borderColor: 'var(--color-amber-400)',
-  color: 'var(--color-amber-900, #78350f)',
+  background: 'var(--color-surface-raised)',
+  color: 'var(--color-text-body)',
+  fontSize: '12.5px',
+  lineHeight: 1.5,
 };
 
 export const modalOverlaySty: CSSProperties = {

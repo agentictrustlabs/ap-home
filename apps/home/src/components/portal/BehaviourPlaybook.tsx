@@ -218,7 +218,7 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
   if (options.length === 0) {
     return (
       <div style={{ marginBottom: '1.2rem' }}>
-        <h3 style={{ margin: '0 0 .3rem', fontSize: '.95rem' }}>Archetype</h3>
+        <h3>Archetype</h3>
         <p className="manage-card-blurb" style={{ margin: 0 }}>No archetypes apply to this kind of agent yet.</p>
       </div>
     );
@@ -226,7 +226,7 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
 
   return (
     <div style={{ marginBottom: '1.4rem' }}>
-      <h3 style={{ margin: '0 0 .3rem', fontSize: '.95rem' }}>Archetype</h3>
+      <h3>Archetype</h3>
       <p className="manage-card-blurb" style={{ margin: '0 0 .7rem' }}>
         An archetype is a compiled behaviour — the skills, tools and reasoning {name || 'this agent'} runs
         under. Assigning one <strong>changes what the agent knows how to do; it grants no authority.</strong>{' '}

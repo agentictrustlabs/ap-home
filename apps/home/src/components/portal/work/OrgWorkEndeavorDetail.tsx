@@ -592,7 +592,7 @@ export function OrgWorkEndeavorDetail({ org, endeavorId }: { org: Address; endea
               ))}
               <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.2rem' }}>
                 <button type="button" className="btn" style={{ width: 'auto' }} onClick={() => setDraftSteps((cur) => [...cur, { kind: 'contribution', description: '' }])}>
-                  ＋ Add step
+                  Add step
                 </button>
                 <BusyButton busy={busyId === 'plan'} busyLabel="Proposing…" className="btn-primary" style={{ width: 'auto' }} onClick={() => void submitPlan()}>
                   {isSteward ? 'Propose + adopt plan' : 'Propose plan'}

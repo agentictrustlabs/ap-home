@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSession } from '../../context/session';
 import { BusyButton } from '../shared/BusyButton';
+import { Section, List, Row, Empty, Unknown, Meta, Mono, Button } from '../../ui';
 import { activateInteractionsIfNeeded, resolveVia } from '../../home/onboarding';
 import {
   listPersonRecords,
@@ -99,73 +100,49 @@ export function PersonVaultReader() {
 
   if (!session) {
     return (
-      <div className="dash-section">
-        <h3 className="subhead">Records</h3>
-        <p className="manage-card-blurb">Sign in to read your vault records.</p>
+      <div>
+        <Empty>Sign in to read your vault records.</Empty>
       </div>
     );
   }
 
   return (
-    <div className="dash-section" style={{ marginTop: '1.25rem' }}>
-      <h3 className="subhead">Your vault records</h3>
-      <p className="manage-card-blurb" style={{ margin: '0 0 .6rem' }}>
-        The records in YOUR vault that your Home is entitled to read (your interactions grant + vault key).
-        This data lives in your vault — the Home reads it for you, on this device, over your session. Records
-        an app writes under its own grant aren&rsquo;t listed here; view those inside that app.
-      </p>
+    <Section title="Your vault records" count={records?.length || undefined} aside={<span>read by your Home on this device, over your session — an app's own records are inside that app</span>}>
       {busy ? (
-        <p className="manage-card-blurb">Reading your vault…</p>
+        <Meta>Reading your vault…</Meta>
       ) : gate === 'vault-key' ? (
-        <p className="manage-card-blurb">
-          Your vault key isn&rsquo;t active yet. <Link href="/vault-key">Activate your vault key</Link> to read your records.
-        </p>
+        <Empty title="Your vault key isn't active yet"><Link href="/vault-key">Activate your vault key</Link> to read your records.</Empty>
       ) : gate === 'interactions' ? (
         // "Enable it via sign-in" is not a path a person already signed in can take. A grant also goes
         // stale when the interactions-session key rotates — the stored DEL-001 leaf still names the old
         // signer — and that leaves a returning member reading an instruction they cannot act on. So the
         // action lives here, and it re-issues rather than telling someone to leave and come back.
-        <div>
-          <p className="manage-card-blurb">
-            Your interactions plane isn&rsquo;t enabled — that&rsquo;s what holds your vault records. Enabling it
-            signs one grant from your agent; nothing else changes.
-          </p>
-          <BusyButton
-            busy={enabling}
-            busyLabel="Enabling…"
-            className="btn-primary"
-            onClick={() => void enableInteractions()}
-          >
-            Enable interactions
-          </BusyButton>
-          {enableErr && <p className="manage-card-blurb" style={{ color: 'var(--c-danger, #dc2626)' }}>{enableErr}</p>}
-        </div>
+        <Empty title="Your interactions plane isn't enabled" action={<BusyButton busy={enabling} busyLabel="Enabling…" className="ui-btn ui-btn--primary" onClick={() => void enableInteractions()}>Enable interactions</BusyButton>}>
+          That is what holds your vault records. Enabling it signs one grant from your agent; nothing else changes.
+          {enableErr && <div className="ui-error" style={{ marginTop: 8 }}>{enableErr}</div>}
+        </Empty>
       ) : err ? (
-        <p className="manage-card-blurb" style={{ color: 'var(--c-danger, #dc2626)' }}>Couldn&rsquo;t read: {err}</p>
+        <Unknown read={<>your vault could not be read ({err})</>} />
       ) : !records || records.length === 0 ? (
-        <p className="manage-card-blurb">No records yet.</p>
+        <Empty>No records yet.</Empty>
       ) : (
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: '.82rem' }}>
+        <List>
           {records.map((r) => (
-            <li key={r.record_type} style={{ borderTop: '1px solid var(--c-g100, #eee)', padding: '.45rem 0' }}>
-              <strong>{labelFor(r.record_type)}</strong> <code style={{ color: 'var(--c-g500, #64748b)' }}>{r.record_type}</code>
-              {r.updated_at && <span style={{ color: 'var(--c-g400, #94a3b8)' }}> · {r.updated_at}</span>}{' '}
-              <button
-                type="button"
-                onClick={() => void show(r.record_type)}
-                style={{ background: 'none', border: 'none', color: 'var(--c-accent, #2563eb)', cursor: 'pointer', padding: 0, fontSize: '.8rem' }}
-              >
-                {open[r.record_type] ? 'hide' : 'show'}
-              </button>
+            <Row
+              key={r.record_type}
+              title={labelFor(r.record_type)}
+              meta={<><Mono>{r.record_type}</Mono>{r.updated_at ? ` · ${r.updated_at}` : ''}</>}
+              side={<Button size="sm" variant="ghost" onClick={() => void show(r.record_type)}>{open[r.record_type] ? 'Hide' : 'Show'}</Button>}
+            >
               {open[r.record_type] && (
-                <pre style={{ background: 'var(--c-g50, #f8fafc)', padding: '.45rem .6rem', borderRadius: 6, overflowX: 'auto', fontSize: '.72rem', margin: '.3rem 0 0' }}>
+                <pre className="ui-mono" style={{ background: 'var(--color-surface-sunken)', padding: '8px 10px', borderRadius: 8, overflowX: 'auto', margin: '6px 0 0', whiteSpace: 'pre-wrap' }}>
                   {bodies[r.record_type] ?? 'Reading…'}
                 </pre>
               )}
-            </li>
+            </Row>
           ))}
-        </ul>
+        </List>
       )}
-    </div>
+    </Section>
   );
 }

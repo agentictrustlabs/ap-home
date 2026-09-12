@@ -428,9 +428,10 @@
 }
 
 .channels-sidebar__item--active {
-  background: var(--color-amber-100);
-  color: var(--color-amber-700);
-  font-weight: 700;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--color-border);
 }
 
 .channels-sidebar__item--active::before {

@@ -10,9 +10,9 @@
 // and where is not whether.
 import { useCallback, useEffect, useState } from 'react';
 import { useSession } from '../../context/session';
-import { SectionShell } from './SectionShell';
+import { Section, Empty, ErrorNote } from '../../ui';
 import { AddressChip } from '../shared/AddressChip';
-import { cardSty, mutedText, errorText } from './theme';
+import { cardSty, mutedText } from './theme';
 
 interface SentRequest { kind?: string; owner?: string; ownerName?: string; wants?: string; amount?: string; status?: string }
 /** A REFERENCE, not an address. The holder is told whose agent they may reach and which grant says so;
@@ -76,18 +76,16 @@ export function ReadyToSend({ onAsk }: { onAsk?: (message: string) => void }) {
   // whether this had deployed at all.
   if (!rows?.length) {
     return (
-      <SectionShell title="Ready to send">
-        {err && <p style={errorText}>{err}</p>}
-        <p style={{ ...mutedText, fontSize: 11.5 }} data-testid="ready-to-send-empty">
-          Nothing waiting. When someone gives you a way to reach an agent of theirs, it appears here.
-        </p>
-      </SectionShell>
+      <Section title="Ready to send">
+        {err && <ErrorNote>{err}</ErrorNote>}
+        <Empty testId="ready-to-send-empty">Nothing waiting. When someone gives you a way to reach an agent of theirs, it appears here.</Empty>
+      </Section>
     );
   }
 
   return (
-    <SectionShell title="Ready to send">
-      {err && <p style={errorText}>{err}</p>}
+    <Section title="Ready to send" count={rows.length}>
+      {err && <ErrorNote>{err}</ErrorNote>}
       {rows.map(({ grant, amount }) => (
         <div
           key={grant.grantId} style={cardSty}
@@ -118,6 +116,6 @@ export function ReadyToSend({ onAsk }: { onAsk?: (message: string) => void }) {
           </button>
         </div>
       ))}
-    </SectionShell>
+    </Section>
   );
 }
