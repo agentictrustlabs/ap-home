@@ -37,7 +37,7 @@ import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
 import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
 import { PLAYBOOK_ANSWER_TOOL, playbookAnswerAvailable, playbookAnswerInvoker, type PlaybookMaterial } from './playbook-answer.js';
-import { HAND_RECORD, NOTE_RECORD, READ_RECORD, STYLE_RECORD, appendNote, studyFrom, type StudyAccess } from './card-room.js';
+import { DAY_RECORDS_SCOPE, HAND_RECORD, NOTE_RECORD, READ_RECORD, STYLE_RECORD, appendNote, dayRecordsFor, reviewDaysOf, studyFrom, type StudyAccess } from './card-room.js';
 import { memoryRecordFor } from './playbook-memory.js';
 import { remembered, forget } from './run-memo.js';
 import { DISCOVERY_FIND_TOOL, ENGAGEMENT_INVOKE_TOOL, DISCOVERY_INSPECT_TOOL, DISCOVERY_FIND_CAPABILITY, ENGAGEMENT_INVOKE_CAPABILITY, discoveryFindInvoker } from './enterprise-tools.js';
@@ -4026,8 +4026,12 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
         const owner = input.study.owner; const reads = input.study.reads; const review = /\.review$/i.test(String(input.material.skill));
         const read = (recordType: string) => reads.includes(recordType) ? deps.readSubjectRecord!(owner, recordType).catch(() => null) : Promise.resolve(null);
         const materialInput = input.material.input;
-        return Promise.all([read(HAND_RECORD), read(STYLE_RECORD), read(READ_RECORD), read(NOTE_RECORD)])
-          .then(([hand, style, playerRead, note]) => studyFrom({ access: input.study!, hand, style, read: playerRead, note, material: materialInput, review }));
+        // A REVIEW READS THE SPAN'S DAYS — seven by default, the request's `days` otherwise — when the grant covers
+        // them; advice reads none of them. Read in parallel: a week is seven small reads, not one large one.
+        const span = review ? reviewDaysOf(materialInput) : 0;
+        const dayTypes = review && reads.includes(DAY_RECORDS_SCOPE) ? dayRecordsFor(span) : [];
+        return Promise.all([read(HAND_RECORD), read(STYLE_RECORD), read(READ_RECORD), read(NOTE_RECORD), Promise.all(dayTypes.map((t) => deps.readSubjectRecord!(owner, t).catch(() => null)))])
+          .then(([hand, style, playerRead, note, days]) => studyFrom({ access: input.study!, hand, style, read: playerRead, note, material: materialInput, review, days, ...(span ? { span } : {}) }));
       })()
     : null;
   const playbook = await loadPlaybook(rememberedRecord, String(input.addressee ?? ''), console.log).catch(() => null);

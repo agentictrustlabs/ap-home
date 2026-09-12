@@ -4007,7 +4007,9 @@ export class InteractionsDO {
         try { scopes = decodeVaultRecordScopeTerms(scopeCav.terms as Hex); } catch { return json({ error: 'the study grant’s scope terms are undecodable' }, 400); }
         const resources = scopes.flatMap((gr) => gr.resources);
         if (resources.length === 0) return json({ error: 'the study grant must name at least one resource' }, 400);
-        if (resources.some((r) => !/^vault:cardroom\.[a-z]+$/.test(r))) return json({ error: 'a study grant scopes card-room study records (vault:cardroom.*) and nothing else' }, 400);
+        // The four records by name, and the day records by prefix (`vault:cardroom.hands:*`) — never `vault:cardroom.*`
+        // whole, which would also cover a coach's own client pointers if it ever kept them here.
+        if (resources.some((r) => !/^vault:cardroom\.[a-z]+(:\*)?$/.test(r))) return json({ error: 'a study grant scopes card-room study records (vault:cardroom.<record>, vault:cardroom.hands:*) and nothing else' }, 400);
         if (!scopes.some((gr) => gr.ops.includes('read') && gr.resources.includes('vault:cardroom.hand'))) return json({ error: 'the study grant must read vault:cardroom.hand' }, 400);
         if (scopes.some((gr) => (gr.ops.includes('write') || gr.ops.includes('delete')) && gr.resources.some((r) => r !== 'vault:cardroom.note'))) return json({ error: 'a study grant may write nothing but vault:cardroom.note' }, 400);
         const d: Delegation = { ...incoming, salt: BigInt(incoming.salt), caveats: incoming.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;

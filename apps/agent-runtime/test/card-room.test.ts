@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { buildVaultRecordScopeCaveat, VAULT_RECORD_SCOPE_ENFORCER, TIMESTAMP_ENFORCER } from '@agenticprimitives/delegation';
 import {
   HANDS_KEPT, HAND_RECORD, NOTE_RECORD, STUDY_SERVER,
-  appendNote, cardRoomActOf, cardRoomTurn, isHandRecord, recordHand, reviewScopeOf, studyFrom, studyGrantOf, verifyStudyGrant,
+  appendNote, cardRoomActOf, cardRoomTurn, dayRecordFor, dayRecordsFor, handEntryOf, isHandRecord, recordDayHand, recordHand, reviewDaysOf, reviewScopeOf, studyFrom, studyGrantOf, verifyStudyGrant,
 } from '../src/card-room.js';
 import { PLAYBOOK_ANSWER_TOOL, playbookAnswerInvoker } from '../src/playbook-answer.js';
 import type { IncomingWire } from '../src/org-wire.js';
@@ -323,7 +323,9 @@ describe('the turn — who talks to whom, and what never happens', () => {
     expect(JSON.parse((out as { text: string }).text).say).toBe('Recorded hand 7 — 1 on record.');
     expect(w.consults).toHaveLength(0);          // hand end never messages the coach
     expect(w.models()).toBe(0);                  // poker.record does not call a completion API
-    expect(w.writes).toEqual([expect.objectContaining({ owner: ALICE, recordType: 'cardroom.hand' })]);
+    // Two writes, both to HER vault: the running record and the day's record.
+    expect(w.writes.map((x) => x.owner)).toEqual([ALICE, ALICE]);
+    expect(w.writes.map((x) => x.recordType).sort()).toEqual(['cardroom.hand', `cardroom.hands:${new Date().toISOString().slice(0, 10)}`]);
     // Twice more: the record grows in HER vault.
     await cardRoomTurn(w.deps, table('poker.record', hand(8)));
     const rec = w.records[`${ALICE}:cardroom.hand`] as { hands: number };
@@ -357,5 +359,39 @@ describe('the turn — who talks to whom, and what never happens', () => {
     expect(seen).toEqual([ALICE, BOB]);
     expect((w.consults[0]!.material.grant as { hash: string }).hash).toBe('0xaaaa');
     expect((w.consults[1]!.material.grant as { hash: string }).hash).toBe('0xbbbb');
+  });
+});
+
+describe('the day records, and a review over a span', () => {
+  it('a hand goes into its day, whole, once; a backfilled hand keeps its own date', () => {
+    const e1 = handEntryOf('poker.record', hand(1))!;
+    let day = recordDayHand(null, e1);
+    day = recordDayHand(day, e1); // a retry
+    expect(day.hands).toHaveLength(1);
+    expect(day.day).toBe(e1.at.slice(0, 10));
+    const old = handEntryOf('poker.record', hand(2, { endedAt: Date.parse('2026-09-05T20:00:00Z') }))!;
+    expect(old.at).toBe('2026-09-05T20:00:00.000Z');
+    expect(dayRecordFor(old.at)).toBe('cardroom.hands:2026-09-05');
+    expect(dayRecordsFor(7, new Date('2026-09-12T12:00:00Z'))).toEqual(['cardroom.hands:2026-09-06', 'cardroom.hands:2026-09-07', 'cardroom.hands:2026-09-08', 'cardroom.hands:2026-09-09', 'cardroom.hands:2026-09-10', 'cardroom.hands:2026-09-11', 'cardroom.hands:2026-09-12']);
+    expect(reviewDaysOf({ days: 3 })).toBe(3);
+    expect(reviewDaysOf({})).toBe(7);
+    expect(reviewDaysOf({ days: 400 })).toBe(30);
+  });
+
+  it('a study for a review takes the span\'s hands from the day records when the grant reads them', () => {
+    const access = { owner: ALICE, delegate: COACH, hash: '0x', reads: ['cardroom.hand', 'cardroom.hands:*'], appends: [] };
+    const d1 = recordDayHand(null, handEntryOf('poker.record', hand(1, { endedAt: Date.parse('2026-09-10T20:00:00Z') }))!);
+    const d2 = recordDayHand(null, handEntryOf('poker.record', hand(2, { endedAt: Date.parse('2026-09-11T20:00:00Z') }))!);
+    const s = studyFrom({ access, hand: null, style: null, read: null, note: null, material: {}, review: true, days: [d2, d1, null], span: 7 });
+    expect(s.recent!.map((h) => h.handNo)).toEqual([1, 2]); // oldest first, across days
+    expect(s.days).toBe(7);
+    // The grant that verifies reads the day records too.
+    expect(access.reads).toContain('cardroom.hands:*');
+  });
+
+  it('the study grant covers the day records when the caveat carries the wildcard', async () => {
+    const wide = grantWire({ scopes: [{ resources: ['vault:cardroom.hand', 'vault:cardroom.hands:*'], ops: ['read'] }] });
+    const r = await verifyStudyGrant({ grant: { wire: wide, hash: '' }, delegator: ALICE, delegate: COACH, enforcers, checks: checks() });
+    expect(r.ok && r.access.reads).toEqual(['cardroom.hand', 'cardroom.hands:*']);
   });
 });

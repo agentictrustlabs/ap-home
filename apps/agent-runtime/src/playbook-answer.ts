@@ -29,7 +29,7 @@
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import type { StructuredCall } from '@agenticprimitives/context';
 import { foldObservation, familyOf, memoryRecordFor, observationOf, rememberedFor } from './playbook-memory.js';
-import { reviewScopeOf, type Study } from './card-room.js';
+import { reviewScopeOf, spanLabel, type Study } from './card-room.js';
 
 export const PLAYBOOK_ANSWER_CAPABILITY = 'playbook.answer';
 
@@ -270,10 +270,12 @@ async function reviewStudy(deps: PlaybookAnswerDeps, skill: string, question: st
   const study = await deps.study!.load().catch(() => null);
   const recent = study?.recent ?? [];
   if (!study || study.hands === 0 || recent.length === 0) {
-    const say = 'There are no recorded hands to review yet — play a session with your agent at the table and ask again.';
+    const say = study?.days ? `There are no recorded hands in the last ${study.days} day${study.days === 1 ? '' : 's'} — play a session with your agent at the table, or ask the card room to send your past hands, and ask again.` : 'There are no recorded hands to review yet — play a session with your agent at the table and ask again.';
     return { skill, say, source, hands: 0, answer: JSON.stringify({ say }) };
   }
-  const scope = reviewScopeOf(question, recent);
+  // The question narrows the span (a day, one hand); otherwise the review is the whole span.
+  const named = reviewScopeOf(question, recent);
+  const scope = named.label.startsWith('the last ') && study.days ? { hands: recent, label: spanLabel(study.days, recent.length) } : named;
   if (scope.hands.length === 0) {
     const say = `Nothing recorded for ${scope.label.split(',')[0]} — the record holds ${study.hands} hand${study.hands === 1 ? '' : 's'}, the most recent ${recent.length} in full.`;
     return { skill, say, source, hands: 0, answer: JSON.stringify({ say }) };
