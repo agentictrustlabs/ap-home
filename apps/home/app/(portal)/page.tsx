@@ -1,7 +1,9 @@
 'use client';
-// Your home (dashboard) at `/` — a map of what you steward + how you keep it secure. The gate
-// guarantees an authed session here. Renders from the stewardship domain model.
+// TODAY at `/` — spec 398 §4.2: the outcome-led first page (what needs my decision · what is active · what
+// finished · what next), in a fixed order, then who you are and what you steward (the map this page used to be).
+// The gate guarantees an authed session here.
 import { useSession } from '../../src/context/session';
+import { TodayView } from '../../src/components/portal/TodayView';
 import { ExplorerLink } from '../../src/components/shared/ExplorerLink';
 import { whitelabel } from '../../src/whitelabel/config';
 import { stewardedThings } from '../../src/home/stewardship';
@@ -32,8 +34,8 @@ export default function HomeDashboard() {
   return (
     <div className="dashboard">
       <header className="section-head">
-        <h1>Home</h1>
-        <p className="section-desc">Everything you steward in the {whitelabel.brand.community} — at a glance.</p>
+        <h1>Today</h1>
+        <p className="section-desc">What needs you, what is in motion, what finished — and who you are in the {whitelabel.brand.community}.</p>
       </header>
       {session?.fresh && (
         <div className="welcome-banner" role="status">
@@ -41,6 +43,8 @@ export default function HomeDashboard() {
           <span>You&apos;re all set. This is your home in the {whitelabel.brand.community}.</span>
         </div>
       )}
+
+      <TodayView scope={{ kind: 'person' }} />
 
       <section className="dash-section">
         <h2>You</h2>

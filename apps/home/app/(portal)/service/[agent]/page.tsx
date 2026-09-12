@@ -1,11 +1,13 @@
 'use client';
-// Service workspace — Overview (spec 315 / ADR-0046). One custodial SERVICE-class agent,
+// Service workspace — TODAY (spec 398 §4.2 over spec 315's Overview / ADR-0046): what this service agent has
+// parked, what it is doing, what it left, what next — then its role panel. One custodial SERVICE-class agent,
 // selected from the header switcher. Role-agnostic shell: the treasury role renders the
 // spec 275 TreasuryCard (balance, funding, naming, host connections); future service roles
 // add their own panel here without new nav categories.
 import { use } from 'react';
 import { useSession } from '../../../../src/context/session';
 import { SectionShell } from '../../../../src/components/portal/SectionShell';
+import { TodayView } from '../../../../src/components/portal/TodayView';
 import { useManagedAgents, TreasuryCard, NameAgentForm } from '../../../../src/components/portal/ManagedAgents';
 import { AddressChip } from '../../../../src/components/shared/AddressChip';
 import { agentClassOf, serviceRoleOf, authorityLineage } from '../../../../src/lib/agent-class';
@@ -41,6 +43,7 @@ export default function ServiceWorkspacePage({ params }: { params: Promise<{ age
         </p>
       ) : (
         <>
+          <TodayView scope={{ kind: 'service', agent }} />
           <p className="manage-card-blurb" style={{ marginBottom: '.8rem' }}>
             Service agent · role: <b>{role}</b> · authority: <code style={{ fontSize: '.82rem' }}>{lineage}</code>
           </p>

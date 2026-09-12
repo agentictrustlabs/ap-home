@@ -9,50 +9,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import type { HomeContributionEntryV1, HomeDecisionCardV1 } from '@agenticprimitives/home';
-import { validateHomeContributionEntry, validateHomeDecisionCard } from '@agenticprimitives/home';
 import { useSession } from '../../../context/session';
 import { listRuns, type ParkedRun } from '../../../home/ask';
 import { SectionShell } from '../SectionShell';
 import { BusyButton } from '../../shared/BusyButton';
 import { Loading } from '../../shared/Loading';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
-import {
-  commitContribution,
-  fetchWorkList,
-  recordDecision,
-  projectAllocationEntry,
-  projectCommitmentEntry,
-  projectDecisionCard,
-  type AllocationRow,
-  type EndeavorRequestRow,
-  type EndeavorRow,
-} from '../../../lib/work-client';
+import { commitContribution, recordDecision } from '../../../lib/work-client';
 import { askCommand } from '../../../home/ask-command';
 import { NewRequestComposer } from './NewRequestComposer';
-import { useRelatedOrgsState, useReEnableInteractions } from './useWork';
+import { useReEnableInteractions, useMyWork, type OrgWorkBundle, type StaleOrg } from './useWork';
 import { LIFECYCLE_LABEL, lifecycleState } from './labels';
 import { StatePill } from '../StatePill';
 import { stateOf, runStateLabel, type AwaitingKind } from '../../../home/run-state';
-
-interface OrgWorkBundle {
-  org: string;
-  orgName?: string;
-  allocations: AllocationRow[];
-  entries: HomeContributionEntryV1[];
-  decisions: HomeDecisionCardV1[];
-  /** Requests THIS viewer submitted to the org (§12 — the requester sees their own). */
-  myRequests: EndeavorRequestRow[];
-  /** The org's visible endeavors — used to resolve adopted requests to their endeavor. */
-  endeavors: EndeavorRow[];
-}
-
-/** An org whose interactions grant predates the vault:coordination.* scopes (the serving
- *  plane's 409 needsReEnable signal) — a steward re-signs via the re-enable ceremony. */
-interface StaleOrg {
-  org: string;
-  orgName?: string;
-  steward: boolean;
-}
 
 const saOf = (caip: string): string => caip.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase() ?? caip;
 
@@ -86,50 +55,12 @@ function EntryCard({
 
 export function MyWorkView() {
   const { session, profile: homeProfile, agentAddress } = useSession();
-  const { orgs, loaded: orgsLoaded } = useRelatedOrgsState(session);
-  const [bundles, setBundles] = useState<OrgWorkBundle[] | null>(null);
-  const [staleOrgs, setStaleOrgs] = useState<StaleOrg[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const { bundles, staleOrgs, error: loadError, load } = useMyWork(session, agentAddress);
+  const [actError, setError] = useState<string | null>(null);
+  const error = actError ?? loadError;
   const [busyId, setBusyId] = useState<string | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const reEnable = useReEnableInteractions();
-
-  const load = useCallback(async () => {
-    if (!session || !agentAddress || !orgsLoaded) return;
-    const stale: StaleOrg[] = [];
-    try {
-      const results = await Promise.all(orgs.map(async (o): Promise<OrgWorkBundle | null> => {
-        try {
-          const r = await fetchWorkList(session.token, o.orgAgent);
-          if (r.needsReEnable === true) {
-            stale.push({ org: o.orgAgent, ...(o.orgName ? { orgName: o.orgName } : {}), steward: r.steward === true || o.relationship === 'steward' });
-            return null;
-          }
-          if (r.member === false || r.ok === false) return null;
-          const allocations = r.mine?.allocations ?? [];
-          const entries = [
-            ...allocations.map((a) => projectAllocationEntry(o.orgAgent, agentAddress, a)),
-            ...(r.mine?.commitments ?? [])
-              .filter((c) => c.status === 'active')
-              .map((c) => projectCommitmentEntry(o.orgAgent, agentAddress, c)),
-            // Allocations may precede plan adoption (no planRef yet) — render them anyway;
-            // committed entries must pass the portable contract's fail-closed validation.
-          ].filter((e) => e.status === 'allocated' || validateHomeContributionEntry(e).length === 0);
-          const decisions = (r.mine?.decisions ?? [])
-            .filter((d) => d.status === 'pending')
-            .map((d) => projectDecisionCard(o.orgAgent, d))
-            .filter((c) => validateHomeDecisionCard(c).length === 0);
-          const myRequests = (r.requests ?? []).filter((q) => q.requester.toLowerCase() === agentAddress.toLowerCase());
-          return { org: o.orgAgent, ...(o.orgName ? { orgName: o.orgName } : {}), allocations, entries, decisions, myRequests, endeavors: r.endeavors ?? [] };
-        } catch { return null; }
-      }));
-      setBundles(results.filter((b): b is OrgWorkBundle => b !== null));
-      setStaleOrgs(stale);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, [session, agentAddress, orgs, orgsLoaded]);
 
   const runReEnable = useCallback(async (s: StaleOrg) => {
     setBusyId(`reenable:${s.org}`); setError(null);
@@ -138,8 +69,6 @@ export function MyWorkView() {
     else await load();
     setBusyId(null);
   }, [reEnable, load]);
-
-  useEffect(() => { void load(); }, [load]);
 
   // Spec 382 W2 — the runs parked on this person's agent, so a commitment can show the ask it became.
   const [parked, setParked] = useState<ParkedRun[]>([]);

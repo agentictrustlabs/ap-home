@@ -1,6 +1,7 @@
 'use client';
-// Org workspace — Overview (spec 315). The URL carries the org SA; everything here is scoped to
-// that one organization: identity and its treasury, at a glance.
+// Org workspace — TODAY (spec 398 §4.2 over spec 315's Overview). The URL carries the org SA; everything here is
+// scoped to that one organization: what needs a decision there, what is active, what it left, what next — then
+// its identity.
 //
 // It carries NO custodial ceremonies AND no treasury. It used to hold every ceremony the org has — name
 // it, create its treasury, name that, fund it — so the first screen of a workspace was a stack of forms,
@@ -11,6 +12,7 @@ import { ExplorerLink } from '../../../../../src/components/shared/ExplorerLink'
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../../../src/context/session';
 import { SectionShell } from '../../../../../src/components/portal/SectionShell';
+import { TodayView } from '../../../../../src/components/portal/TodayView';
 import {
   useManagedAgents,
 } from '../../../../../src/components/portal/ManagedAgents';
@@ -42,6 +44,8 @@ export default function OrgOverviewPage({ params }: { params: Promise<{ org: str
           You don&apos;t steward an organization at this address. Pick one from the workspace switcher.
         </p>
       ) : (
+        <>
+        <TodayView scope={{ kind: 'org', org }} />
         <div className="manage-grid">
           {/* Overview SHOWS this organization; it does not operate on it. It used to carry every
               custodial ceremony the org has — name it, create its treasury, name that, fund it — so the
@@ -65,6 +69,7 @@ export default function OrgOverviewPage({ params }: { params: Promise<{ org: str
             )}
           </div>
         </div>
+        </>
       )}
     </SectionShell>
   );

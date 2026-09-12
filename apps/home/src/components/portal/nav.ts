@@ -90,7 +90,7 @@ export function buildNav(
   };
 
   // ── the top band: the same four questions of any agent ────────────────────────────────────────────
-  //    what is it · who is talking to it · what has it done · what does it hold
+  //    what needs me today · who is talking to it · what has it done · what does it hold
   const overviewHref = isPerson ? '/' : active.kind === 'service' ? serviceHref(active.agent) : orgHref(active.org, 'overview');
   // No context heading: it rendered `alice-home-church` as `ALICE-HOME-CHURCH` (a user-supplied name run
   // through a label style), and existed for org/service but not person — so every row shifted 27px when
@@ -98,7 +98,8 @@ export function buildNav(
   // pane header repeats it where it is load-bearing (you are about to write to that agent's vault).
   const top: NavGroup = {
     items: [
-      { id: 'overview', label: 'Overview', href: overviewHref, Icon: isPerson ? HomeIcon : active.kind === 'org' ? BuildingIcon : LandmarkIcon, status: 'live' },
+      // spec 398 §4.1 — the first slot is TODAY (§4.2): decisions · active · finished · next; the status map sits under it.
+      { id: 'overview', label: 'Today', href: overviewHref, Icon: isPerson ? HomeIcon : active.kind === 'org' ? BuildingIcon : LandmarkIcon, status: 'live' },
       { id: 'messages', label: 'Messages', href: href('messages'), Icon: ChatIcon, status: 'live', ...(badges.inbox ? { badge: badges.inbox } : {}) },
       // spec 310's control-plane timeline, in the plural because the band is a place.
       { id: 'activities', label: 'Activities', href: href('activities'), Icon: HistoryIcon, status: 'live' },

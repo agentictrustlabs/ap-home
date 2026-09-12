@@ -6,7 +6,18 @@ import { useCallback, useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession, type Session } from '../../../context/session';
 import { activateInteractionsIfNeeded, resolveVia } from '../../../home/onboarding';
-import { fetchWorkList, type WorkListResponse } from '../../../lib/work-client';
+import {
+  fetchWorkList,
+  projectAllocationEntry,
+  projectCommitmentEntry,
+  projectDecisionCard,
+  type AllocationRow,
+  type EndeavorRequestRow,
+  type EndeavorRow,
+  type WorkListResponse,
+} from '../../../lib/work-client';
+import type { HomeContributionEntryV1, HomeDecisionCardV1 } from '@agenticprimitives/home';
+import { validateHomeContributionEntry, validateHomeDecisionCard } from '@agenticprimitives/home';
 import { membersFromReceivedDelegations } from '../../../lib/recipient-directory';
 import { isHiddenOrg } from '../../../lib/org-lifecycle';
 
@@ -150,4 +161,75 @@ export function useWorkList(session: Session | null, org: string): WorkListState
   }, [refresh]);
 
   return { data, member, steward, error, needsReEnable, refresh };
+}
+
+// ── MY WORK, across every organization I belong to — the one aggregation My Work and Today both read ──────
+export interface OrgWorkBundle {
+  org: string;
+  orgName?: string;
+  allocations: AllocationRow[];
+  entries: HomeContributionEntryV1[];
+  decisions: HomeDecisionCardV1[];
+  /** Requests THIS viewer submitted to the org (§12 — the requester sees their own). */
+  myRequests: EndeavorRequestRow[];
+  /** The org's visible endeavors — used to resolve adopted requests to their endeavor. */
+  endeavors: EndeavorRow[];
+}
+
+/** An org whose interactions grant predates the vault:coordination.* scopes (the serving
+ *  plane's 409 needsReEnable signal) — a steward re-signs via the re-enable ceremony. */
+export interface StaleOrg {
+  org: string;
+  orgName?: string;
+  steward: boolean;
+}
+
+/** Every organization's work as it concerns THIS person: their allocations and active commitments, the decisions
+ *  waiting on them (393), the requests they submitted, the org's endeavors. `bundles === null` until the first read;
+ *  a stale org (grant predates the coordination scopes) is reported, never silently dropped. */
+export function useMyWork(session: Session | null, agentAddress: string | null | undefined): {
+  bundles: OrgWorkBundle[] | null; staleOrgs: StaleOrg[]; error: string | null; load: () => Promise<void>; orgsLoaded: boolean;
+} {
+  const { orgs, loaded: orgsLoaded } = useRelatedOrgsState(session);
+  const [bundles, setBundles] = useState<OrgWorkBundle[] | null>(null);
+  const [staleOrgs, setStaleOrgs] = useState<StaleOrg[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    if (!session || !agentAddress || !orgsLoaded) return;
+    const stale: StaleOrg[] = [];
+    try {
+      const results = await Promise.all(orgs.map(async (o): Promise<OrgWorkBundle | null> => {
+        try {
+          const r = await fetchWorkList(session.token, o.orgAgent);
+          if (r.needsReEnable === true) {
+            stale.push({ org: o.orgAgent, ...(o.orgName ? { orgName: o.orgName } : {}), steward: r.steward === true || o.relationship === 'steward' });
+            return null;
+          }
+          if (r.member === false || r.ok === false) return null;
+          const allocations = r.mine?.allocations ?? [];
+          const entries = [
+            ...allocations.map((a) => projectAllocationEntry(o.orgAgent, agentAddress, a)),
+            ...(r.mine?.commitments ?? [])
+              .filter((c) => c.status === 'active')
+              .map((c) => projectCommitmentEntry(o.orgAgent, agentAddress, c)),
+            // Allocations may precede plan adoption (no planRef yet) — render them anyway;
+            // committed entries must pass the portable contract's fail-closed validation.
+          ].filter((e) => e.status === 'allocated' || validateHomeContributionEntry(e).length === 0);
+          const decisions = (r.mine?.decisions ?? [])
+            .filter((d) => d.status === 'pending')
+            .map((d) => projectDecisionCard(o.orgAgent, d))
+            .filter((c) => validateHomeDecisionCard(c).length === 0);
+          const myRequests = (r.requests ?? []).filter((q) => q.requester.toLowerCase() === agentAddress.toLowerCase());
+          return { org: o.orgAgent, ...(o.orgName ? { orgName: o.orgName } : {}), allocations, entries, decisions, myRequests, endeavors: r.endeavors ?? [] };
+        } catch { return null; }
+      }));
+      setBundles(results.filter((b): b is OrgWorkBundle => b !== null));
+      setStaleOrgs(stale);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [session, agentAddress, orgs, orgsLoaded]);
+  useEffect(() => { void load(); }, [load]);
+  return { bundles, staleOrgs, error, load, orgsLoaded };
 }

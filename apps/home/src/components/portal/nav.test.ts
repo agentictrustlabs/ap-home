@@ -23,11 +23,11 @@ const ORG_SCOPE = { kind: 'org', org: ORG } as const;
 const SVC_SCOPE = { kind: 'service', agent: SVC } as const;
 
 const labels = (g: NavGroup[]): string[] => g.flatMap((x) => x.items.map((i) => i.label));
-const TOP = ['Overview', 'Messages', 'Activities', 'Library'];
+const TOP = ['Today', 'Messages', 'Activities', 'Library'];
 
 describe('the top band is the same four for every class', () => {
   for (const [name, scope] of [['person', PERSON], ['org', ORG_SCOPE], ['service', SVC_SCOPE]] as const) {
-    it(`${name}: Overview · Messages · Activities · Library, in that order, and none of them a pane`, () => {
+    it(`${name}: Today · Messages · Activities · Library, in that order, and none of them a pane`, () => {
       const first = buildNav(whitelabel, {}, scope)[0]!;
       expect(first.items.map((i) => i.label)).toEqual(TOP);
       expect(first.items.some((i) => i.opensPane)).toBe(false);

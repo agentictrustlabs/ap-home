@@ -946,11 +946,37 @@
       ],
       "title": "Today — the outcome-led first page: decisions, attention, cost",
       "priority": "P0",
-      "status": "absent",
+      "status": "partial",
       "specs": [
         398
       ],
-      "section": "398 §4.2 / §5.4 / §5.5 (G1)"
+      "section": "398 §4.2 / §5.4 / §5.5 (G1)",
+      "routes": [
+        "(portal)",
+        "(portal)/org/[org]/overview",
+        "(portal)/service/[agent]"
+      ],
+      "components": [
+        "components/portal/TodayView.tsx",
+        "components/portal/StatePill.tsx",
+        "home/today.ts"
+      ],
+      "endpoints": [
+        "/harness/runs",
+        "/harness/triggers",
+        "/harness/vocabulary"
+      ],
+      "tests": [
+        "apps/demo-sso-next/src/home/today.test.ts",
+        "apps/demo-sso-next/src/components/portal/nav.test.ts"
+      ],
+      "gates": [],
+      "gaps": [
+        "run cost on Today (398 §5.4) — waits on harness G3, the run's bill on RunRecordV1",
+        "attention filter model on Messages (398 §5.5, APUX-012) — decisions still live in Messages without the six filters",
+        "approve ceremonies delivered by mail (hear) are not yet a Today decision card — one durable decision record per decision (393) is the prerequisite",
+        "a golden-journey gate (398 §13) that lands on Today and reads the decision it expects"
+      ]
     },
     {
       "id": "home.presence",
