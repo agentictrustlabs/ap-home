@@ -20,6 +20,10 @@
   .chat-shell.chat-shell--thread-open .chat-rail {
     display: none;
   }
+  /* one pane at a time on a phone: the rail until a thread is opened, then the thread with its back control */
+  .chat-shell:not(.chat-shell--thread-open) .chat-thread {
+    display: none;
+  }
   .chat-thread-back {
     display: inline-flex !important;
     align-items: center;
