@@ -35,6 +35,11 @@ export interface RosterMember {
   role?: string;
   /** Household membership (spec 368): how this member is related to the founder — `aphh:kinRelation`. */
   kin?: string;
+  /** Spec 398 §4.5 — which view of membership found them: their own signed listing, or the organization's grant on an
+   *  invitation (the steward's received index). Both when both; the listing's row wins the name. */
+  admittedVia?: 'listing' | 'invite';
+  /** The invitation grant's caveats (record scopes → the permissions summary), when the received index carried the wire. */
+  grantCaveats?: Array<{ enforcer: string; terms: string }>;
 }
 
 /** The directory response shape the Home proxies from the org's InteractionsDO `directory.list`. */
@@ -64,6 +69,7 @@ export function rosterFromDirectoryResponse(body: DirectoryResponse): RosterMemb
       address,
       displayName: displayName || `${address.slice(0, 6)}…${address.slice(-4)}`,
       publicName: l?.publicName?.trim() || null,
+      admittedVia: 'listing',
       ...(l?.orgRole ? { role: l.orgRole } : {}),
     });
   }
@@ -74,7 +80,7 @@ export function rosterFromDirectoryResponse(body: DirectoryResponse): RosterMemb
  *  redeemed an invite and delegated to the org, with the display name they chose at join. Keyed by
  *  the ORG they joined (`viaOrg`); the member's own SA is — confusingly — `orgAgent`. */
 export interface ReceivedMembersResponse {
-  received?: Array<{ viaOrg?: string; orgAgent?: string; displayName?: string; orgName?: string; kin?: string; role?: string }>;
+  received?: Array<{ viaOrg?: string; orgAgent?: string; displayName?: string; orgName?: string; kin?: string; role?: string; delegation?: { caveats?: Array<{ enforcer?: string; terms?: string }> } }>;
 }
 
 /** Pure: the members of `org` from the received-delegations index. Empty for an org the person does
@@ -92,7 +98,8 @@ export function membersFromReceivedDelegations(body: ReceivedMembersResponse, or
     // With no chosen name the address is the honest label; the DM header resolves a naming-service
     // name once the thread opens.
     const displayName = r.displayName?.trim() || `${address.slice(0, 6)}…${address.slice(-4)}`;
-    out.push({ address, displayName, publicName: null, ...(r.role ? { role: r.role } : {}), ...(r.kin ? { kin: r.kin } : {}) });
+    const caveats = (r.delegation?.caveats ?? []).filter((c): c is { enforcer: string; terms: string } => typeof c.enforcer === 'string' && typeof c.terms === 'string');
+    out.push({ address, displayName, publicName: null, admittedVia: 'invite', ...(caveats.length ? { grantCaveats: caveats } : {}), ...(r.role ? { role: r.role } : {}), ...(r.kin ? { kin: r.kin } : {}) });
   }
   return out;
 }
@@ -104,7 +111,8 @@ export function membersFromReceivedDelegations(body: ReceivedMembersResponse, or
 export function mergeRosters(listings: readonly RosterMember[], received: readonly RosterMember[]): RosterMember[] {
   const byAddr = new Map<string, RosterMember>();
   for (const m of received) byAddr.set(m.address, m);
-  for (const m of listings) byAddr.set(m.address, { ...(byAddr.get(m.address) ?? {}), ...m });
+  // a listing's row wins the name; the invitation's provenance (how they were admitted, the grant) survives the merge
+  for (const m of listings) { const prev = byAddr.get(m.address); byAddr.set(m.address, { ...(prev ?? {}), ...m, admittedVia: prev?.admittedVia ?? 'listing', ...(prev?.grantCaveats ? { grantCaveats: prev.grantCaveats } : {}) }); }
   return [...byAddr.values()].sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }));
 }
 

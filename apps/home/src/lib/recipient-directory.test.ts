@@ -58,8 +58,12 @@ describe('membersFromReceivedDelegations + mergeRosters', () => {
       [{ address: A, displayName: 'Alice (invited)', publicName: null }, { address: B, displayName: 'Boris', publicName: null }],
     );
     expect(merged).toEqual([
-      { address: A, displayName: 'Ali', publicName: 'alice.impact', role: 'steward' },
+      // 398 §4.5 — the merge also says HOW they were admitted: a listing found with no invite row is 'listing'
+      { address: A, displayName: 'Ali', publicName: 'alice.impact', role: 'steward', admittedVia: 'listing' },
       { address: B, displayName: 'Boris', publicName: null },
     ]);
+    // someone in BOTH keeps the invitation's provenance under the listing's name
+    const both = mergeRosters([{ address: A, displayName: 'Ali', publicName: 'alice.impact', admittedVia: 'listing' }], [{ address: A, displayName: 'x', publicName: null, admittedVia: 'invite' }]);
+    expect(both[0]).toMatchObject({ displayName: 'Ali', admittedVia: 'invite' });
   });
 });

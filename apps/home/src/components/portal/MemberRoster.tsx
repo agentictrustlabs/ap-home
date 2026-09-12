@@ -17,10 +17,14 @@ import { fetchRoster, type RosterMember } from '../../lib/recipient-directory';
 import { AddressChip } from '../shared/AddressChip';
 import { cardSty, mutedText, errorText } from './theme';
 import { setAskSelection } from '../../home/ask-selection';
+import { rosterRows, type RosterRow } from '../../home/roster-contract';
+import { fetchWorkList } from '../../lib/work-client';
 
 export function MemberRoster({ agent, title = 'Members' }: { agent: string; title?: string }) {
   const { session, agentAddress } = useSession();
   const [members, setMembers] = useState<RosterMember[] | null>(null);
+  // Spec 398 §4.5 — active work per participant: items where they are an executor, from the organization's work list.
+  const [executors, setExecutors] = useState<Map<string, number>>(new Map());
   const [error, setError] = useState<string | null>(null);
   // Spec 361 I6 — the member the person has selected, handed to the Ask as context.
   const [selected, setSelected] = useState<string | null>(null);
@@ -30,12 +34,19 @@ export function MemberRoster({ agent, title = 'Members' }: { agent: string; titl
     setError(null);
     try {
       setMembers(await fetchRoster(session.token, agent));
+      // §12 visibility: the work list carries the CALLER's own allocations and commitments, not everyone's — so the
+      // count is yours; another member's active work reads "not visible to you" rather than a false zero (398 §6.3).
+      const w = await fetchWorkList(session.token, agent).catch(() => null);
+      const counts = new Map<string, number>();
+      const me = (agentAddress ?? '').toLowerCase();
+      if (me) counts.set(me, (w?.mine?.allocations?.length ?? 0) + (w?.mine?.commitments ?? []).filter((c) => c.status === 'active').length);
+      setExecutors(counts);
     } catch (e) {
       // A directory refusal (403 — not a member) is a real answer and is named, never papered over.
       setError(e instanceof Error ? e.message : String(e));
       setMembers([]);
     }
-  }, [session?.token, agent]);
+  }, [session?.token, agent, agentAddress]);
   useEffect(() => { void load(); }, [load]);
 
   if (!session) return <SectionShell title={title}><p>Not signed in.</p></SectionShell>;
@@ -56,7 +67,7 @@ export function MemberRoster({ agent, title = 'Members' }: { agent: string; titl
         </p>
       ) : (
         <div style={{ display: 'grid', gap: '.5rem' }}>
-          {members.map((m) => {
+          {rosterRows({ members, executors }).map((m: RosterRow) => {
             const you = !!agentAddress && m.address.toLowerCase() === agentAddress.toLowerCase();
             return (
               <div
@@ -81,6 +92,14 @@ export function MemberRoster({ agent, title = 'Members' }: { agent: string; titl
                     </div>
                   )}
                   <div style={{ marginTop: '.25rem' }}><AddressChip address={m.address as `0x${string}`} size="sm" /></div>
+                  {/* Spec 398 §4.5 — the roster contract: type · sponsor · responsibility · permissions · active work. */}
+                  <div style={{ ...mutedText, fontSize: '.72rem', marginTop: '.3rem', display: 'grid', gridTemplateColumns: 'max-content 1fr', columnGap: '.5rem', rowGap: 1 }} data-testid={`member-contract-${m.address}`}>
+                    <span>type</span><span>{m.type}</span>
+                    <span>sponsor</span><span>{m.sponsor}</span>
+                    <span>responsibility</span><span>{m.responsibility ?? 'none assigned'}</span>
+                    <span>permissions</span><span>{m.permissions}</span>
+                    <span>active work</span><span>{you ? (m.activeWork === 0 ? 'none' : `${m.activeWork} item${m.activeWork === 1 ? '' : 's'}`) : 'not visible to you (§12 — their own view)'}</span>
+                  </div>
                 </div>
                 {!you && (
                   <a className="btn-ghost" href={`/messages?to=${m.address}`} style={{ textDecoration: 'none', fontSize: '.8rem' }}>

@@ -192,6 +192,7 @@
         "apps/demo-a2a/test/harness-team-create.test.ts",
         "apps/demo-a2a/test/org-wire.test.ts",
         "apps/demo-sso-next/src/components/onboarding/OrgChooser.test.ts",
+        "apps/demo-sso-next/src/home/roster-contract.test.ts",
         "apps/demo-sso-next/src/lib/email-invite-home.test.ts",
         "apps/demo-sso-next/src/lib/invitation-check.test.ts",
         "apps/demo-sso-next/src/lib/invite-copy.test.ts",
@@ -201,7 +202,12 @@
       "gates": [
         "verify-home-mcp-people"
       ],
-      "gaps": []
+      "gaps": [
+        "398 §4.5 roster contract shipped (type · sponsor · responsibility · permissions · active work); another member's active work reads 'not visible to you' under §12 visibility rather than a false zero; the sponsor names the organization, not the steward who signed (the grant carries the delegator only)"
+      ],
+      "components": [
+        "home/roster-contract.ts"
+      ]
     },
     {
       "id": "home.work",
