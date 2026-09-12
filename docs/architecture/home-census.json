@@ -188,21 +188,20 @@
         "/harness/approve"
       ],
       "tests": [
-        "apps/demo-a2a/test/harness-team-create.test.ts",
         "apps/demo-a2a/test/chartered-agents.test.ts",
+        "apps/demo-a2a/test/harness-team-create.test.ts",
         "apps/demo-a2a/test/org-wire.test.ts",
-        "apps/demo-sso-next/src/lib/invitation-check.test.ts",
-        "apps/demo-sso-next/src/lib/new-member.test.ts",
+        "apps/demo-sso-next/src/components/onboarding/OrgChooser.test.ts",
         "apps/demo-sso-next/src/lib/email-invite-home.test.ts",
+        "apps/demo-sso-next/src/lib/invitation-check.test.ts",
         "apps/demo-sso-next/src/lib/invite-copy.test.ts",
-        "apps/demo-sso-next/src/components/onboarding/OrgChooser.test.ts"
+        "apps/demo-sso-next/src/lib/new-member.test.ts",
+        "scripts/check-invitation-audit.mts"
       ],
       "gates": [
         "verify-home-mcp-people"
       ],
-      "gaps": [
-        "roster fields (role · basis · last acted · presence: none) and the invitation audit (T18) — 398 §4.5; presence deliberately not built before the roster is right"
-      ]
+      "gaps": []
     },
     {
       "id": "home.work",
