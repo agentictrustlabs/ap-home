@@ -931,10 +931,13 @@
         "(portal)/developer"
       ],
       "gaps": [
-        "packages/devkit and packages/create-app exist in Ring 0 (399 W0, 2026-09-11) but are NOT yet published — the canary needs NPM_CANARY_TOKEN; nothing is consumable from a clean machine",
-        "the read-only Developer MCP (398 §10.4) is not built",
-        "the Home component registry (H47, 398 §10.5) is absent"
-      ]
+        "the Home component registry (H47, 398 §10.5) is absent",
+        "the Developer MCP (`ap mcp`) is built and tested; it is not yet in the product-repo template's coding-agent setup (`claude mcp add`) nor exercised by the clean-machine CI job"
+      ],
+      "tests": [
+        "packages/devkit/test/developer-mcp.test.ts"
+      ],
+      "notes": null
     },
     {
       "id": "home.build",
