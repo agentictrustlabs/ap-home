@@ -901,9 +901,15 @@ export class A2aTaskDO {
       // on the agent's own object for looking back and replaying. Listed WITHOUT its mandates.
       const rkey = (ref: string) => `harness:record:${ref}`;
       if (op === 'record-put') {
-        const rec = (body as { record?: { runRef?: string } } | null)?.record;
+        const rec = (body as { record?: { runRef?: string; canceled?: unknown } } | null)?.record;
         if (!rec?.runRef) return Response.json({ ok: false, error: 'record.runRef required' }, { status: 400 });
-        await this.state.storage.put(rkey(rec.runRef), rec);
+        // Spec 398 §5.3 — A CANCEL MARK IS NEVER LOST TO A LATE WRITE. The turn writes its record after it has
+        // answered (waitUntil), and the exporter writes it again with the export report; a cancel that landed in
+        // between would be overwritten by either. The store is the one place both pass, so the mark is kept here.
+        // (Seen live on the estate: the gate's cancel beat the turn's record write and the record read as never
+        // canceled — a plausible falsehood about the one fact the person acted on.)
+        const prior = (await this.state.storage.get(rkey(rec.runRef))) as { canceled?: unknown } | undefined;
+        await this.state.storage.put(rkey(rec.runRef), prior?.canceled && !rec.canceled ? { ...rec, canceled: prior.canceled } : rec);
         return Response.json({ ok: true });
       }
       if (op === 'record-get') {

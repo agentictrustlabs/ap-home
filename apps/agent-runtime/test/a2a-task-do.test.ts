@@ -195,3 +195,26 @@ describe('the injected seam is an injection point, not a bypass', () => {
     expect(out.error.code).toBe(-32700);
   });
 });
+
+// ── spec 398 §5.3 — a cancel mark survives the turn's late record write ────────────────────────────────────
+describe('the record store keeps a cancel mark', () => {
+  const put = (record: Record<string, unknown>) => task.fetch(new Request('https://do.test/internal/harness-run/record-put', {
+    method: 'POST', body: JSON.stringify({ record }), headers: { 'Content-Type': 'application/json', 'x-ap-internal': SECRET },
+  }));
+  const get = async (runRef: string) => (await (await task.fetch(new Request('https://do.test/internal/harness-run/record-get', {
+    method: 'POST', body: JSON.stringify({ runRef }), headers: { 'Content-Type': 'application/json', 'x-ap-internal': SECRET },
+  }))).json()) as { record: Record<string, unknown> | null };
+
+  it('a later write without the mark (the turn\'s deferred record, the exporter\'s rewrite) does not erase it', async () => {
+    await put({ type: 'ap.run-record.v1', runRef: 'r9', at: 1, outcome: 'authority-required', canceled: { at: 2, by: CALLER, afterSteps: 0 } });
+    await put({ type: 'ap.run-record.v1', runRef: 'r9', at: 1, outcome: 'authority-required', export: { ok: true } });
+    const rec = (await get('r9')).record!;
+    expect(rec.canceled).toEqual({ at: 2, by: CALLER, afterSteps: 0 });
+    expect(rec.export).toEqual({ ok: true });
+  });
+  it('a write that carries its own mark wins', async () => {
+    await put({ type: 'ap.run-record.v1', runRef: 'r10', at: 1, outcome: 'suspended' });
+    await put({ type: 'ap.run-record.v1', runRef: 'r10', at: 1, outcome: 'suspended', canceled: { at: 5, by: CALLER, afterSteps: 1 } });
+    expect((await get('r10')).record!.canceled).toEqual({ at: 5, by: CALLER, afterSteps: 1 });
+  });
+});
