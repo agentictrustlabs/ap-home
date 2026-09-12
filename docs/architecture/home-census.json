@@ -244,20 +244,23 @@
         "/harness/approve"
       ],
       "tests": [
-        "apps/demo-a2a/test/endeavors.test.ts",
-        "apps/demo-a2a/test/endeavor-intake.test.ts",
         "apps/demo-a2a/test/endeavor-authority-steps.test.ts",
-        "apps/demo-a2a/test/unit/endeavor-committed-steps.test.ts"
+        "apps/demo-a2a/test/endeavor-intake.test.ts",
+        "apps/demo-a2a/test/endeavors.test.ts",
+        "apps/demo-a2a/test/unit/endeavor-committed-steps.test.ts",
+        "apps/demo-sso-next/src/home/work-item.test.ts"
       ],
       "gates": [
         "verify-endeavor-decision",
         "verify-endeavor-offer-allocate-ask"
       ],
       "gaps": [
-        "the accountable work item contract (goal · owner · acting agent · state · authority basis · artifacts · receipts on one row) and an outcome-led Today — 398 §4.2/§4.3 (APUX-009)"
+        "§4.3 work item on the endeavor detail; the same contract on the board row, the inbox card and the Ask's done reply is still native; artifacts and cost are not linked on the item record (391 refs, 396 bill) — said absent on the card"
       ],
       "components": [
-        "components/portal/StatePill.tsx"
+        "components/portal/StatePill.tsx",
+        "components/portal/work/WorkItemCard.tsx",
+        "home/work-item.ts"
       ]
     },
     {

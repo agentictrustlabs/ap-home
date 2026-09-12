@@ -32,6 +32,8 @@ import { EVENT_LABEL, LIFECYCLE_LABEL, STEP_KIND_LABEL, lifecycleState } from '.
 import { StatePill } from '../StatePill';
 import type { EndeavorLifecycle } from '@agenticprimitives/home';
 import { BasisLine } from '../BasisLine';
+import { workItemOf } from '../../../home/work-item';
+import { WorkItemCard } from './WorkItemCard';
 
 const STEP_KINDS = ['contribution', 'interaction', 'decision', 'aggregation', 'validation'] as const;
 type StepKind = (typeof STEP_KINDS)[number];
@@ -302,14 +304,8 @@ export function OrgWorkEndeavorDetail({ org, endeavorId }: { org: Address; endea
               )}
               <span style={{ fontSize: '0.72rem', opacity: 0.5, marginLeft: 'auto' }}>{shortId(e.endeavorId)}</span>
             </div>
-            {(e.outcome?.criteria ?? []).length > 0 && (
-              <div style={{ marginTop: '0.55rem', fontSize: '0.82rem' }}>
-                <span style={{ fontWeight: 600 }}>Success looks like:</span>
-                <ul style={{ margin: '0.25rem 0 0', paddingLeft: '1.2rem' }}>
-                  {e.outcome!.criteria!.map((c, i) => <li key={i}>{c}</li>)}
-                </ul>
-              </div>
-            )}
+            {/* spec 398 §4.3 — the accountable work item: the eight facts, absent ones said absent. */}
+            {(() => { const w = detail ? workItemOf(communityId, endeavorId, detail) : null; return w ? <WorkItemCard item={w} org={communityId} /> : null; })()}
             {/* Steward lifecycle acts */}
             {isSteward && phase === 'execution' && (
               <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem', flexWrap: 'wrap', alignItems: 'center' }}>
