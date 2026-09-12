@@ -19,8 +19,9 @@
  *   Twins covered by their own gates in the ledger: T11 verify-cancel · T07 verify-grant-revocation · T05 verify-ask-surface.
  * NOT YET (named, never faked): two specialist allocations with artifacts linked to the item (391 refs on the item);
  * the "send" decision from a run's own decision request (393 W2 from the harness); publishing the page artifact (§6.2);
- * the devkit parity pair (§7.2 (4) against this journey). The gate reports what it covered; it fails only on what it
- * claims.
+ * the page publish (§6.2). The parity pair (§7.2 (4)) for this journey's capabilities — organization.team.create,
+ * coordination.decision.request/record — is judged by `check:interaction-coverage:behaviour` (249 pairs; AGENT_URL for the
+ * live offer). The gate reports what it covered; it fails only on what it claims.
  */
 import { toHex, type Address, type Hex } from 'viem';
 import { buildDigestBindingCaveat, capabilityHandler, hashDelegation, ROOT_AUTHORITY, type Caveat, type Delegation, type MandateRequirementV1 } from '@agenticprimitives/delegation';
@@ -186,4 +187,4 @@ console.log(`
   work item (owner, state, acceptance) → decision request on carol's Today → recorded → gone. T06 inline; T11/T07/T05 by
   their own gates.
   not yet: specialist allocations with artifacts on the item · the run's own send decision (393 W2 in the harness) ·
-  publishing the page artifact (§6.2) · the devkit parity pair (§7.2 (4)).`);
+  publishing the page artifact (§6.2). The parity pair: check:interaction-coverage:behaviour.`);
