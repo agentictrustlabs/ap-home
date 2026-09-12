@@ -23,3 +23,30 @@ describe('trigger schedules', () => {
     expect(dueNow([after], later)).toEqual([]);
   });
 });
+
+// ── spec 398 §5.3 / §5.4 — PAUSE is a routine's own control; BUDGET exhaustion pauses, never widens ─────────────
+import { withPause, withBudget, matchingTriggers as matching } from '../../src/triggers.js';
+describe('pause and budget (398 §5.3 / §5.4)', () => {
+  const agent = '0xee11dfb02e4a02630be512886305df5c68fd682c' as const;
+  const row = { agent, triggerId: 't1', kind: 'schedule' as const, ask: 'send the digest', every: '1h', everyMs: 3_600_000, nextAt: 1000, playbookDigest: '0xd' };
+  it('a paused schedule is never due; resumed, it is', () => {
+    const paused = withPause(row, true, 'holiday', 5);
+    expect(paused.paused).toEqual({ at: 5, by: 'steward', note: 'holiday' });
+    expect(dueNow([paused], 2000)).toEqual([]);
+    expect(dueNow([withPause(paused, false, undefined)], 2000)).toHaveLength(1);
+  });
+  it('a paused event or webhook row matches no source', () => {
+    const hook = withPause({ agent, triggerId: 'w', kind: 'webhook' as const, token: 'tok', ask: 'x', playbookDigest: '0xd' }, true, undefined);
+    expect(matching([hook], { kind: 'webhook', triggerId: 'w', token: 'tok', payload: {} })).toEqual([]);
+  });
+  it('a firing over budget pauses the routine BY BUDGET with the numbers on the row; under budget it does not', () => {
+    const budgeted = withBudget(row, 10);
+    const over = advanced(budgeted, 'answered', 'r1', 'ok', 9000, { vaultCalls: 14, doRequests: 3 });
+    expect(over.paused?.by).toBe('budget'); expect(over.paused?.note).toMatch(/14 vault calls against a budget of 10/);
+    expect(over.lastBill).toEqual({ vaultCalls: 14, doRequests: 3 });
+    expect(over.nextAt).toBe(9000 + 3_600_000);   // the clock still advanced — the firing happened; only the next is held
+    const under = advanced(budgeted, 'answered', 'r2', 'ok', 9000, { vaultCalls: 4, doRequests: 1 });
+    expect(under.paused).toBeUndefined();
+    expect(withBudget(over, null).budget).toBeUndefined();
+  });
+});

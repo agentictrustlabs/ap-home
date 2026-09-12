@@ -35,6 +35,14 @@ export interface TriggerScheduleV1 {
   /** What the last firing reached: answered · parked (waiting on a steward) · failed. */
   lastOutcome?: 'answered' | 'parked' | 'failed';
   lastSaid?: string;
+  /** Spec 398 §5.3 — PAUSED: nothing new starts, state kept. A steward's act, or the budget's (§5.4). Never a
+   *  cancel (the parked run stands), never a revoke (no authority changes hands). */
+  paused?: { at: number; by: 'steward' | 'budget'; note?: string };
+  /** Spec 398 §5.4 — the routine's budget per firing, in the numbers 396 counts. Exhaustion PAUSES the routine —
+   *  it never widens a mandate and never tops up silently. */
+  budget?: { vaultCalls: number };
+  /** Spec 396 W3 — what the last firing cost. */
+  lastBill?: { vaultCalls: number; doRequests: number };
 }
 
 /** The schedule rows a playbook's triggers become, first due one interval from now (never immediately —
@@ -60,7 +68,7 @@ const isSchedule = (r: TriggerScheduleV1): r is TriggerScheduleV1 & { nextAt: nu
 
 /** The schedule rows due now, oldest first. Other kinds are fired by their sources, never by the clock. */
 export function dueNow(rows: readonly TriggerScheduleV1[], now = Date.now()): TriggerScheduleV1[] {
-  return rows.filter(isSchedule).filter((r) => r.nextAt <= now).sort((a, b) => a.nextAt - b.nextAt);
+  return rows.filter(isSchedule).filter((r) => !r.paused && r.nextAt <= now).sort((a, b) => a.nextAt - b.nextAt);
 }
 
 /** The next moment any schedule row is due, for the alarm. */
@@ -71,8 +79,24 @@ export function nextDue(rows: readonly TriggerScheduleV1[]): number | null {
 
 /** After a firing: a schedule's next due time is one interval on from NOW (not from the planned time — a
  *  DO that slept through three intervals runs once, not three times); every kind keeps its last outcome. */
-export function advanced(row: TriggerScheduleV1, outcome: TriggerScheduleV1['lastOutcome'], runRef: string, said: string | undefined, now = Date.now()): TriggerScheduleV1 {
-  return { ...row, ...(isSchedule(row) ? { nextAt: now + row.everyMs } : {}), lastAt: now, lastRunRef: runRef, lastOutcome: outcome, ...(said ? { lastSaid: said.slice(0, 400) } : {}) };
+export function advanced(row: TriggerScheduleV1, outcome: TriggerScheduleV1['lastOutcome'], runRef: string, said: string | undefined, now = Date.now(), bill?: { vaultCalls: number; doRequests: number }): TriggerScheduleV1 {
+  // Spec 398 §5.4 — over budget ⇒ PAUSED, said on the row; the firing that went over still happened (its receipts stand).
+  const over = bill && row.budget && bill.vaultCalls > row.budget.vaultCalls;
+  return {
+    ...row, ...(isSchedule(row) ? { nextAt: now + row.everyMs } : {}), lastAt: now, lastRunRef: runRef, lastOutcome: outcome,
+    ...(said ? { lastSaid: said.slice(0, 400) } : {}), ...(bill ? { lastBill: { vaultCalls: bill.vaultCalls, doRequests: bill.doRequests } } : {}),
+    ...(over ? { paused: { at: now, by: 'budget' as const, note: `the last firing cost ${bill.vaultCalls} vault calls against a budget of ${row.budget!.vaultCalls}` } } : {}),
+  };
+}
+
+/** Spec 398 §5.3 — a steward pauses or resumes a routine; §5.4 — sets its budget. Pure: the row, changed. */
+export function withPause(row: TriggerScheduleV1, paused: boolean, note: string | undefined, now = Date.now()): TriggerScheduleV1 {
+  if (!paused) { const { paused: _p, ...rest } = row; return rest; }
+  return { ...row, paused: { at: now, by: 'steward', ...(note ? { note: note.slice(0, 200) } : {}) } };
+}
+export function withBudget(row: TriggerScheduleV1, vaultCalls: number | null): TriggerScheduleV1 {
+  if (vaultCalls === null) { const { budget: _b, ...rest } = row; return rest; }
+  return { ...row, budget: { vaultCalls: Math.max(1, Math.floor(vaultCalls)) } };
 }
 
 /** Spec 375 — WHAT FIRED. The source a row is matched against, and the context its run receives. */
@@ -84,6 +108,7 @@ export type TriggerSource =
 /** The rows a source fires. A webhook must name its row AND carry that row's token — nothing else matches;
  *  an event matches by type; a message by profile. */
 export function matchingTriggers(rows: readonly TriggerScheduleV1[], source: TriggerSource): TriggerScheduleV1[] {
+  rows = rows.filter((r) => !r.paused);   // a paused routine fires from no source (398 §5.3)
   return rows.filter((r) => {
     if (source.kind === 'event') return r.kind === 'event' && r.on?.event === source.event.type;
     if (source.kind === 'webhook') return r.kind === 'webhook' && r.triggerId === source.triggerId && !!r.token && r.token === source.token;
@@ -171,7 +196,7 @@ export async function fireTriggers(
   env: TriggerStoreEnv,
   agent: Address,
   source: TriggerSource,
-  run: (row: TriggerScheduleV1, runRef: string, context: Record<string, unknown>) => Promise<{ outcome: 'answered' | 'parked' | 'failed'; said?: string; runRef: string }>,
+  run: (row: TriggerScheduleV1, runRef: string, context: Record<string, unknown>) => Promise<{ outcome: 'answered' | 'parked' | 'failed'; said?: string; runRef: string; bill?: { vaultCalls: number; doRequests: number } }>,
 ): Promise<Array<{ triggerId: string; runRef: string; outcome: string }>> {
   const rows = await listTriggers(env, agent).catch(() => [] as TriggerScheduleV1[]);
   const fired: Array<{ triggerId: string; runRef: string; outcome: string }> = [];
@@ -179,13 +204,14 @@ export async function fireTriggers(
     let outcome: TriggerScheduleV1['lastOutcome'] = 'failed';
     let said: string | undefined;
     let runRef = `trigger-${row.triggerId}-${Date.now().toString(36)}`;
+    let bill: { vaultCalls: number; doRequests: number } | undefined;
     try {
       const r = await run(row, runRef, triggerContext(source));
-      outcome = r.outcome; said = r.said; runRef = r.runRef;
+      outcome = r.outcome; said = r.said; runRef = r.runRef; bill = r.bill;
     } catch (e) {
       said = e instanceof Error ? e.message : String(e);
     }
-    await advanceTrigger(env, agent, advanced(row, outcome, runRef, said)).catch(() => undefined);
+    await advanceTrigger(env, agent, advanced(row, outcome, runRef, said, Date.now(), bill)).catch(() => undefined);
     fired.push({ triggerId: row.triggerId, runRef, outcome: outcome ?? 'failed' });
   }
   return fired;

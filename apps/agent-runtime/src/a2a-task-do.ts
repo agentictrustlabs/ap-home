@@ -1319,13 +1319,14 @@ export class A2aTaskDO {
       let outcome: TriggerScheduleV1['lastOutcome'] = 'failed';
       let said: string | undefined;
       let runRef = `trigger-${row.triggerId}-${Date.now().toString(36)}`;
+      let bill: { vaultCalls: number; doRequests: number } | undefined;
       try {
         const r = await runUnattendedAsk(this.env, row, runRef);
-        outcome = r.outcome; said = r.said; runRef = r.runRef;
+        outcome = r.outcome; said = r.said; runRef = r.runRef; bill = r.bill;
       } catch (e) {
         said = e instanceof Error ? e.message : String(e);
       }
-      await this.state.storage.put(`harness:trigger:${row.triggerId}`, advanced(row, outcome, runRef, said));
+      await this.state.storage.put(`harness:trigger:${row.triggerId}`, advanced(row, outcome, runRef, said, Date.now(), bill));
     }
   }
 

@@ -340,6 +340,16 @@
       "required": false,
       "paced": true,
       "timeoutSec": 420
+    },
+    {
+      "id": "verify-routine-pause",
+      "script": "scripts/verify-routine-pause.mts",
+      "spec": "398 §5.3 / §5.4 (G3)",
+      "proves": "a steward pauses a routine (listed as blocked; \"fire now\" refused with the pause named) and resumes it; with a budget of 1 vault call the firing HAPPENS and the routine pauses itself by budget with the numbers on the row",
+      "twin": "a non-steward can neither pause nor budget it; a pause is not a cancel (the firing that went over stood, its record kept) and not a revoke (no authority changed hands); the budget never widens a mandate or tops up",
+      "required": true,
+      "paced": true,
+      "timeoutSec": 240
     }
   ]
 }

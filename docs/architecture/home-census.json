@@ -498,31 +498,41 @@
       ],
       "title": "Routines — triggers on the playbook, scheduled and hooked work under fresh authority",
       "priority": "P1",
-      "status": "partial",
+      "status": "shipped",
       "specs": [
         375
       ],
       "section": "398 G3",
       "routes": [
-        "(portal)/playbook"
+        "(portal)/org/[org]/routines",
+        "(portal)/playbook",
+        "(portal)/routines",
+        "(portal)/service/[agent]/routines"
       ],
       "components": [
+        "components/portal/RoutinesView.tsx",
         "components/portal/StatePill.tsx",
-        "components/portal/TriggersPanel.tsx"
+        "components/portal/TriggersPanel.tsx",
+        "home/routines.ts"
       ],
       "endpoints": [
+        "/harness/hooks/",
         "/harness/triggers",
         "/harness/triggers/fire",
-        "/harness/triggers/rotate",
-        "/harness/hooks/"
+        "/harness/triggers/pause",
+        "/harness/triggers/rotate"
       ],
       "tests": [
-        "apps/demo-sso-next/src/home/triggers.test.ts",
+        "apps/demo-a2a/test/unit/trigger-kinds.test.ts",
         "apps/demo-a2a/test/unit/triggers.test.ts",
-        "apps/demo-a2a/test/unit/trigger-kinds.test.ts"
+        "apps/demo-sso-next/src/home/routines.test.ts",
+        "apps/demo-sso-next/src/home/triggers.test.ts"
       ],
       "gaps": [
-        "a routine as a product page: versioned skill + trigger + fresh authority, with its run history — 398 §12 G3"
+        "a routine's budget is set by a steward on the row, not yet declared on the SKILL.md trigger (375 contract); save-as-recipe (398 G3) not built"
+      ],
+      "gates": [
+        "verify-routine-pause"
       ]
     },
     {

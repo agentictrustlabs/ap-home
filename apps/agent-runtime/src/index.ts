@@ -12,7 +12,7 @@ import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
 import { recordOf, replayingInvoker, traceContextOf, type RunPlannerSummaryV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent, type RunBillV1 } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
 import { recordFormOf, rehydrateExecuted } from './artifact-store.js';
-import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken } from './triggers.js';
+import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken, advanceTrigger, withPause, withBudget, advanced } from './triggers.js';
 import { appendProgress, readProgress, type ProgressLineV1 } from './harness-progress.js';
 import { Hono, type Context } from 'hono';
 import { setCookie, getCookie } from 'hono/cookie';
@@ -1744,6 +1744,8 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
   result: { plan: unknown; receipts?: unknown[] };
   events: RunEvent[];
   presentedRefs: string[];
+  /** Spec 396 W3 — what the run cost its agent's storage; a routine's budget is judged against it (398 §5.4). */
+  bill?: { vaultCalls: number; doRequests: number };
 }> {
   const deps = harnessDeps(env, buildAuditSink(env));
   deps.addresseeKind = await deps.agentTypeOf?.(input.addressee).catch(() => null) ?? null;
@@ -1781,7 +1783,7 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
     await exportRun(env, { writeSubjectRecord: deps.writeSubjectRecord }, input.addressee, record)
       .then((r) => putRecord(env as never, input.addressee, { ...record, export: r })).catch(() => undefined);
   } catch (e) { console.warn('[runAgentAsk] record not kept:', e instanceof Error ? e.message : String(e)); }
-  return { reply: reply as never, spoken, result: result as never, events, presentedRefs };
+  return { reply: reply as never, spoken, result: result as never, events, presentedRefs, bill };
 }
 
 /**
@@ -1869,11 +1871,11 @@ async function deliverRoutedOutcome(env: Env, ctx: ExecutionContext | undefined,
   return { delivered: state === 'TASK_STATE_COMPLETED', note: state ? `${state}${said ? `: ${said}` : ''}` : (body?.error?.message ?? `${res.status}`) };
 }
 
-export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef: string, context: Record<string, unknown> = {}): Promise<{ outcome: 'answered' | 'parked' | 'failed'; said?: string; runRef: string }> {
+export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef: string, context: Record<string, unknown> = {}): Promise<{ outcome: 'answered' | 'parked' | 'failed'; said?: string; runRef: string; bill?: { vaultCalls: number; doRequests: number } }> {
   const agent = row.agent.toLowerCase() as Address;
   // Spec 375 — what fired this run rides as CONTEXT for the planner (the event's public fields, a webhook's
   // payload, a message's envelope); no verifier reads it, and no party it names is resolved from it.
-  const { reply, spoken, result } = await runAgentAsk(env, { agent, addressee: agent, ask: row.ask, runRef, context: { trigger: row.triggerId, ...context } });
+  const { reply, spoken, result, bill } = await runAgentAsk(env, { agent, addressee: agent, ask: row.ask, runRef, context: { trigger: row.triggerId, ...context } });
   if (reply.kind === 'prompt' || reply.kind === 'authority_required') {
     const now = Date.now();
     await saveRun(env as never, {
@@ -1890,10 +1892,10 @@ export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef:
       expiresAt: now + (row.everyMs ?? AWAIT_WINDOW_MS.data),
       createdAt: now, updatedAt: now,
     } as never);
-    return { outcome: 'parked', said: spoken, runRef };
+    return { outcome: 'parked', said: spoken, runRef, bill };
   }
-  if (reply.kind === 'answer' || reply.kind === 'done') return { outcome: 'answered', said: reply.kind === 'answer' ? reply.text : spoken, runRef };
-  return { outcome: 'failed', said: reply.kind === 'refused' ? reply.error : spoken, runRef };
+  if (reply.kind === 'answer' || reply.kind === 'done') return { outcome: 'answered', said: reply.kind === 'answer' ? reply.text : spoken, runRef, bill };
+  return { outcome: 'failed', said: reply.kind === 'refused' ? reply.error : spoken, runRef, bill };
 }
 
 /** May this session see or fire an agent's triggers: the agent's own session, or a steward by the caller's own links. */
@@ -2100,6 +2102,33 @@ app.post('/harness/triggers', async (c) => {
   return c.json({ ok: true, addressee, triggers: await listTriggers(c.env as never, addressee) });
 });
 
+// POST /harness/triggers/pause { session, addressee, triggerId, paused?, note?, budget? } — spec 398 §5.3 / §5.4.
+// PAUSE is a steward's act on a ROUTINE: nothing new starts, state kept; the run it last parked stands (that is
+// cancel's business), no authority changes hands (that is revocation's). BUDGET: vault calls per firing; the firing
+// that goes over still happened, and the routine pauses itself with the reason on the row. Stewards only.
+app.post('/harness/triggers/pause', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; triggerId?: string; paused?: boolean; note?: string; budget?: { vaultCalls?: number } | null } | null;
+  if (!body?.session || !body.addressee || !body.triggerId) return c.json({ ok: false, error: 'session, addressee and triggerId are required' }, 400);
+  if (body.paused === undefined && body.budget === undefined) return c.json({ ok: false, error: 'say what changes: paused (true|false) and/or budget ({ vaultCalls } | null)' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const addressee = body.addressee.toLowerCase() as Address;
+  if (!(await mayDriveTriggers(c.env, String(who.sa).toLowerCase() as Address, addressee))) return c.json({ ok: false, error: 'only a steward of this agent may pause its routines or set their budget' }, 403);
+  let row = (await listTriggers(c.env as never, addressee)).find((t) => t.triggerId === body.triggerId);
+  if (!row) return c.json({ ok: false, error: `no trigger "${body.triggerId}" on this agent` }, 404);
+  if (body.paused !== undefined) row = withPause(row, body.paused === true, typeof body.note === 'string' ? body.note : undefined);
+  if (body.budget !== undefined) row = withBudget(row, body.budget === null ? null : Number(body.budget?.vaultCalls));
+  if (body.budget && !Number.isFinite(Number(body.budget.vaultCalls))) return c.json({ ok: false, error: 'budget.vaultCalls must be a number' }, 400);
+  await advanceTrigger(c.env as never, addressee, row);
+  await buildAuditSink(c.env).write({
+    id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: body.paused === undefined ? 'harness.trigger.budget' : body.paused ? 'harness.trigger.paused' : 'harness.trigger.resumed', outcome: 'success',
+    actor: { type: 'user', id: String(who.sa).toLowerCase() }, subject: { type: 'trigger', id: body.triggerId },
+    context: { addressee, ...(row.budget ? { budgetVaultCalls: row.budget.vaultCalls } : {}), ...(row.paused ? { pausedBy: row.paused.by } : {}) },
+  }).catch(() => undefined);
+  const { token: _t, ...safe } = row;
+  return c.json({ ok: true, trigger: safe });
+});
+
 // POST /harness/triggers/fire { session, addressee, triggerId } — spec 370 P5. Run one trigger now, as
 // the alarm would: the live gate, and a steward's "do it now". Stewards only.
 app.post('/harness/triggers/fire', async (c) => {
@@ -2110,9 +2139,14 @@ app.post('/harness/triggers/fire', async (c) => {
   const addressee = body.addressee.toLowerCase() as Address;
   if (!(await mayDriveTriggers(c.env, String(who.sa).toLowerCase() as Address, addressee))) return c.json({ ok: false, error: 'only a steward of this agent may fire its triggers' }, 403);
   const row = (await listTriggers(c.env as never, addressee)).find((t) => t.triggerId === body.triggerId);
+  if (row?.paused) return c.json({ ok: false, error: `this routine is paused (by ${row.paused.by}${row.paused.note ? `: ${row.paused.note}` : ''}) — resume it first` }, 409);
   if (!row) return c.json({ ok: false, error: `no trigger "${body.triggerId}" on this agent — ask it something first so its schedule syncs, or check its playbook` }, 404);
   const out = await runUnattendedAsk(c.env, row, `trigger-${row.triggerId}-${Date.now().toString(36)}`);
-  return c.json({ ok: true, addressee, triggerId: row.triggerId, ...out });
+  // A steward's "fire now" is a firing like the alarm's: it lands on the row (last outcome, bill) and the budget judges
+  // it (398 §5.4) — before this, a manual firing left no mark, and a budget could only ever be checked by the clock.
+  await advanceTrigger(c.env as never, addressee, advanced(row, out.outcome, out.runRef, out.said, Date.now(), out.bill)).catch(() => undefined);
+  const { bill: _b, ...rest } = out;
+  return c.json({ ok: true, addressee, triggerId: row.triggerId, ...rest, ...(out.bill ? { bill: out.bill } : {}) });
 });
 
 // POST /harness/triggers/rotate { session, addressee, triggerId } — spec 375 W3. A webhook row's token is

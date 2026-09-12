@@ -484,6 +484,17 @@ export interface TriggerRow {
   triggerId: string; kind?: 'schedule' | 'event' | 'webhook' | 'message'; ask: string;
   every?: string; nextAt?: number; on?: { event?: string; profile?: string }; token?: string;
   lastAt?: number; lastRunRef?: string; lastOutcome?: 'answered' | 'parked' | 'failed'; lastSaid?: string;
+  /** Spec 398 §5.3 — paused: nothing new starts; by a steward, or by the budget (§5.4). */
+  paused?: { at: number; by: 'steward' | 'budget'; note?: string };
+  /** Spec 398 §5.4 — vault calls per firing; exhaustion pauses. */
+  budget?: { vaultCalls: number };
+  lastBill?: { vaultCalls: number; doRequests: number };
+}
+
+/** Spec 398 §5.3 / §5.4 — pause or resume a routine, or set its budget (null clears). Stewards only. */
+export async function pauseTrigger(session: { token: string }, addressee: Address, triggerId: string, change: { paused?: boolean; note?: string; budget?: { vaultCalls: number } | null }): Promise<{ ok: true; trigger: TriggerRow } | { ok: false; error: string }> {
+  const out = (await postA2a('/a2a/harness/triggers/pause', { session: session.token, addressee, triggerId, ...change })) as { ok?: boolean; error?: string; trigger?: TriggerRow };
+  return out.ok && out.trigger ? { ok: true, trigger: out.trigger } : { ok: false, error: out.error ?? 'the routine could not be changed' };
 }
 
 /** What fires a row, in words — the source a steward reads beside the ask. Pure; display only. */

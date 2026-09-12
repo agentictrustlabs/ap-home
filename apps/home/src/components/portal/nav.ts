@@ -300,6 +300,8 @@ export function buildSettingsPane(
     // NOT "Discussions" — that is the top band, where you take part. This edits the replies.
     ...(isPerson ? [{ id: 'set-discussion', label: 'Discussion replies', href: '/discussion-replies', Icon: HashIcon, status: 'live' as const }] : []),
     { id: 'set-playbook', label: 'Playbook', href: href('playbook'), Icon: CodeIcon, status: 'live' },
+    // spec 398 G3 — a routine as a product: versioned skill + trigger + fresh authority, with its history.
+    { id: 'set-routines', label: 'Routines', href: href('routines'), Icon: HistoryIcon, status: 'live' },
   ];
   const access: NavItem[] = [
     // "Membership", not "Members": the main nav's Members is the roster. This is where a steward decides
