@@ -31,7 +31,7 @@
 // `canasta`), the act is the last (`advise`, `record`, `review`), and the view is the game's own.
 import { VAULT_RECORD_SCOPE_ENFORCER, decodeVaultRecordScopeTerms, vaultRecordScopeAllows, type EnforcerAddressMap } from '@agenticprimitives/delegation';
 import type { Hex } from '@agenticprimitives/types';
-import { verifyOrgWire, type IncomingWire, type OrgWireChecks } from './org-wire.js';
+import { verifyDelegationWire, type DelegationWireLike as IncomingWire, type WireChecks as OrgWireChecks } from '@agenticprimitives/a2a';
 import { foldObservation, observationOf, rememberedFor, type PlaybookMemoryV1 } from './playbook-memory.js';
 
 /** The person's study records, by type. Read by the service under the grant; written as the table says. */
@@ -42,7 +42,18 @@ export const NOTE_RECORD = 'cardroom.note';
 /** What a coach service keeps about a client in ITS OWN vault: pointers, never records. */
 export const CLIENT_RECORD = 'cardroom.client';
 
-export const STUDY_READS = [HAND_RECORD, STYLE_RECORD, READ_RECORD, NOTE_RECORD] as const;
+/** Every hand of one day, whole — `cardroom.hands:<yyyy-mm-dd>`. A review over a span reads the days it covers;
+ *  advice reads only `cardroom.hand` (counts + the recent few), so a season of hands never rides on a hand's clock. */
+export const DAY_RECORD_PREFIX = 'cardroom.hands:';
+export const dayRecordFor = (at: Date | string | number): string => `${DAY_RECORD_PREFIX}${new Date(at).toISOString().slice(0, 10)}`;
+/** The grant resource that covers the day records. `vault:cardroom.hands:*` in the caveat; `*` matches a prefix. */
+export const DAY_RECORDS_SCOPE = 'cardroom.hands:*';
+export const STUDY_READS = [HAND_RECORD, STYLE_RECORD, READ_RECORD, NOTE_RECORD, DAY_RECORDS_SCOPE] as const;
+/** How many days a review may reach back. Seven by default; a month at most — a season is a review of reviews. */
+export const REVIEW_DAYS_DEFAULT = 7;
+export const REVIEW_DAYS_MAX = 30;
+/** How many hands one day's record keeps whole. */
+export const DAY_HANDS_KEPT = 600;
 export const STUDY_APPENDS = [NOTE_RECORD] as const;
 /** The MCP server id the vault-record-scope caveat binds (`hasScopedAccess` pins the same constant). */
 export const STUDY_SERVER = 'demo-mcp';
@@ -101,7 +112,7 @@ export function studyGrantOf(material: Record<string, unknown> | null | undefine
  * Shape and scope are decided here (app policy, the same split as `hasScopedAccess`): the caveat must be
  * a vault-record-scope caveat, it must read `cardroom.hand` at least, and it may write nothing but
  * `cardroom.note`. Liveness — signature, revocation, the timestamp window — is the substrate's
- * (`verifyLiveDelegation`, through `verifyOrgWire`). The reason is returned because the PERSON reads it:
+ * (`verifyLiveDelegation`, through `verifyDelegationWire`). The reason is returned because the PERSON reads it:
  * "your coach's grant is revoked" is what lets her fix it, and nothing here is a probe surface — the
  * grant is hers, presented by her own agent.
  */
@@ -127,7 +138,9 @@ export async function verifyStudyGrant(input: {
   if (grants.length === 0) return { ok: false, reason: 'the study grant scopes nothing' };
   // `vaultRecordScopeAllows` answers TRUE for an empty scope set; the emptiness test above is what keeps
   // "no scope" from reading as "every scope" (the same NO SCOPE ⇒ NO rule as `hasScopedAccess`).
-  const reads = STUDY_READS.filter((r) => vaultRecordScopeAllows(grants, { server: STUDY_SERVER, resource: `vault:${r}`, op: 'read' }));
+  // A wildcard resource is checked as a representative member: `vaultRecordScopeAllows` matches a caveat's
+  // trailing `*` against a concrete resource, never a wildcard against a wildcard.
+  const reads = STUDY_READS.filter((r) => vaultRecordScopeAllows(grants, { server: STUDY_SERVER, resource: `vault:${r.endsWith('*') ? r.slice(0, -1) + '2026-01-01' : r}`, op: 'read' }));
   const appends = STUDY_APPENDS.filter((r) => vaultRecordScopeAllows(grants, { server: STUDY_SERVER, resource: `vault:${r}`, op: 'write' }));
   if (!reads.includes(HAND_RECORD)) return { ok: false, reason: 'the study grant does not read her hands' };
   // NOTHING BUT THE NOTE IS WRITABLE. A grant that let the coach write her hands or her style would let
@@ -135,7 +148,7 @@ export async function verifyStudyGrant(input: {
   const writesElse = grants.some((gr) => gr.ops.includes('write') || gr.ops.includes('delete')
     ? gr.resources.some((r) => r !== `vault:${NOTE_RECORD}`) : false);
   if (writesElse) return { ok: false, reason: 'the study grant writes more than the coach’s notes' };
-  const live = await verifyOrgWire({ wire: w, expectedDelegator: input.delegator, expectedDelegate: input.delegate as `0x${string}`, enforcers: input.enforcers, checks: input.checks, ...(input.now ? { now: input.now } : {}) });
+  const live = await verifyDelegationWire({ wire: w, expectedDelegator: input.delegator, expectedDelegate: input.delegate as `0x${string}`, enforcers: input.enforcers, checks: input.checks, ...(input.now ? { now: input.now } : {}) });
   if (!live) return { ok: false, reason: 'the study grant is expired, revoked or not genuinely signed' };
   return { ok: true, access: { owner: w.delegator.toLowerCase(), delegate: w.delegate.toLowerCase(), hash: g.hash, reads, appends } };
 }
@@ -147,6 +160,7 @@ export interface HandEntryV1 {
   handNo: number;
   table: string;
   seat: number;
+  /** When the hand ENDED — the table's clock when it says so (a backfilled hand keeps its own date), else now. */
   at: string;
   /** The final view for her seat — her cards, the board, the action, the result. Never another seat's. */
   view: unknown;
@@ -176,8 +190,9 @@ export function isHandRecord(x: unknown): x is HandRecordV1 {
  * was "worth remembering" kept nothing (2026-09-11), and a model on this hop is a bill at every showdown.
  */
 export function recordHand(prev: unknown, skill: string, input: unknown, now = new Date()): HandRecordV1 | null {
-  const inp = (input && typeof input === 'object' ? input : null) as { handNo?: unknown; tableId?: unknown; seat?: unknown; view?: unknown; observation?: unknown } | null;
+  const inp = (input && typeof input === 'object' ? input : null) as { handNo?: unknown; tableId?: unknown; seat?: unknown; view?: unknown; observation?: unknown; endedAt?: unknown } | null;
   if (!inp || inp.view === undefined) return null;
+  const endedAt = typeof inp.endedAt === 'number' && Number.isFinite(inp.endedAt) && inp.endedAt > 0 ? new Date(inp.endedAt) : now;
   const family = (skill.split('.')[0] ?? skill).toLowerCase();
   const base: HandRecordV1 = isHandRecord(prev) && prev.family === family
     ? prev
@@ -188,7 +203,7 @@ export function recordHand(prev: unknown, skill: string, input: unknown, now = n
     handNo: Number(inp.handNo ?? 0) || 0,
     table: String(inp.tableId ?? ''),
     seat: Number(inp.seat ?? 0) || 0,
-    at: now.toISOString(),
+    at: endedAt.toISOString(),
     view: inp.view,
     ...(you && typeof you.counters.netChips === 'number' ? { net: you.counters.netChips } : {}),
   };
@@ -202,6 +217,42 @@ export function recordHand(prev: unknown, skill: string, input: unknown, now = n
     memory: obs ? foldObservation(base.memory, family, obs, now) : base.memory,
     updatedAt: now.toISOString(),
   };
+}
+
+/** The hand entry a record makes, for the DAY record — the same entry `recordHand` keeps in `recent`. */
+export function handEntryOf(skill: string, input: unknown, now = new Date()): HandEntryV1 | null {
+  const one = recordHand(null, skill, input, now);
+  return one?.recent[0] ?? null;
+}
+
+/** Every hand of one day, whole. Deduped by table + hand + seat; bounded. */
+export interface DayHandsV1 { type: 'ap.cardroom-hands.v1'; day: string; hands: HandEntryV1[]; updatedAt: string }
+
+export function isDayHands(x: unknown): x is DayHandsV1 {
+  return !!x && typeof x === 'object' && (x as { type?: unknown }).type === 'ap.cardroom-hands.v1' && Array.isArray((x as { hands?: unknown }).hands);
+}
+
+/** A hand into its day's record. Pure; `prev` may be anything the vault returned. */
+export function recordDayHand(prev: unknown, entry: HandEntryV1, now = new Date()): DayHandsV1 {
+  const day = entry.at.slice(0, 10);
+  const base = isDayHands(prev) && prev.day === day ? prev.hands : [];
+  const dup = entry.handNo > 0 && base.some((h) => h.table === entry.table && h.handNo === entry.handNo && h.seat === entry.seat);
+  const hands = dup ? base : [...base, entry].sort((a, b) => a.at.localeCompare(b.at)).slice(-DAY_HANDS_KEPT);
+  return { type: 'ap.cardroom-hands.v1', day, hands, updatedAt: now.toISOString() };
+}
+
+/** The day records a review over the last `days` covers, newest last. */
+export function dayRecordsFor(days: number, now = new Date()): string[] {
+  const n = Math.min(REVIEW_DAYS_MAX, Math.max(1, Math.floor(days) || REVIEW_DAYS_DEFAULT));
+  const out: string[] = [];
+  for (let i = n - 1; i >= 0; i--) out.push(dayRecordFor(new Date(now.getTime() - i * 86_400_000)));
+  return out;
+}
+
+/** How many days a review request asks for: `input.days`, else the default. */
+export function reviewDaysOf(material: unknown): number {
+  const d = Number((material as { days?: unknown } | null | undefined)?.days);
+  return Number.isFinite(d) && d > 0 ? Math.min(REVIEW_DAYS_MAX, Math.floor(d)) : REVIEW_DAYS_DEFAULT;
 }
 
 // ── Her style, her reads, the coach's notes ──────────────────────────────────────────────────────────
@@ -245,13 +296,20 @@ export interface Study {
   notes: CoachNoteV1[];
   /** How many hands her record holds. */
   hands: number;
-  /** For a review: the recent hands themselves. */
+  /** For a review: the hands in the span, oldest first — the day records when the grant reads them, else the recent few. */
   recent?: HandEntryV1[];
+  /** For a review: the span the hands cover, in days. */
+  days?: number;
 }
 
-export function studyFrom(input: { access: StudyAccess; hand: unknown; style: unknown; read: unknown; note: unknown; material: unknown; review?: boolean }): Study {
+export function studyFrom(input: { access: StudyAccess; hand: unknown; style: unknown; read: unknown; note: unknown; material: unknown; review?: boolean; days?: unknown[]; span?: number }): Study {
   const hand = isHandRecord(input.hand) ? input.hand : null;
   const notes = input.access.reads.includes(NOTE_RECORD) ? notesOf(input.note).slice(-6) : [];
+  // THE SPAN'S HANDS, from the day records, deduped against the recent few (a hand is in both).
+  const fromDays = (input.days ?? []).filter(isDayHands).flatMap((d) => d.hands);
+  const recent = input.review
+    ? (fromDays.length ? fromDays : (hand?.recent ?? [])).slice().sort((a, b) => a.at.localeCompare(b.at))
+    : undefined;
   return {
     owner: input.access.owner,
     style: input.access.reads.includes(STYLE_RECORD) ? styleRulesOf(input.style) : [],
@@ -259,7 +317,8 @@ export function studyFrom(input: { access: StudyAccess; hand: unknown; style: un
     reads: input.access.reads.includes(READ_RECORD) ? readsOf(input.read) : [],
     notes,
     hands: hand?.hands ?? 0,
-    ...(input.review && hand ? { recent: hand.recent } : {}),
+    ...(recent ? { recent } : {}),
+    ...(input.span ? { days: input.span } : {}),
   };
 }
 
@@ -282,6 +341,11 @@ export function reviewScopeOf(question: string, recent: HandEntryV1[], now = new
     return { hands, label: hands.length ? `hand ${hands[0]!.handNo}` : 'no hand' };
   }
   return { hands: recent, label: `the last ${recent.length} hand${recent.length === 1 ? '' : 's'}` };
+}
+
+/** A review's default label when the span is known: "the last 7 days, 41 hands". */
+export function spanLabel(days: number, hands: number): string {
+  return `the last ${days} day${days === 1 ? '' : 's'}, ${hands} hand${hands === 1 ? '' : 's'}`;
 }
 
 // ── The turn itself ──────────────────────────────────────────────────────────────────────────────────
@@ -358,12 +422,21 @@ export async function cardRoomTurn(deps: CardRoomDeps, input: CardRoomAskInput):
 
   // ── THE PERSON'S OWN AGENT ──
   if (input.act === 'record') {
-    const prev = await deps.readRecord(me, HAND_RECORD).catch(() => null);
+    const entry = handEntryOf(input.skill, input.material?.input);
+    if (!entry) return done('refused', 'the message carried no hand to record');
+    // TWO RECORDS, both hers: the running one (counts + the recent few, what advice reads) and the day's
+    // (every hand whole, what a review over a span reads). Read together, written together.
+    const dayType = dayRecordFor(entry.at);
+    const [prev, prevDay] = await Promise.all([deps.readRecord(me, HAND_RECORD).catch(() => null), deps.readRecord(me, dayType).catch(() => null)]);
     const next = recordHand(prev, input.skill, input.material?.input);
     if (!next) return done('refused', 'the message carried no hand to record');
-    const wrote = await deps.writeRecord(me, HAND_RECORD, next).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+    const [wrote, wroteDay] = await Promise.all([
+      deps.writeRecord(me, HAND_RECORD, next).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) })),
+      deps.writeRecord(me, dayType, recordDayHand(prevDay, entry)).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) })),
+    ]);
     if (!wrote.ok) return done('refused', `the hand could not be recorded: ${wrote.error ?? 'refused'}`);
-    return done('answer', JSON.stringify({ say: `Recorded hand ${next.recent[next.recent.length - 1]?.handNo ?? next.hands} — ${next.hands} on record.` }), { hands: next.hands });
+    if (!wroteDay.ok) log(`[card-room] ${myName} ${input.skill} · day record ${dayType} not kept: ${wroteDay.error ?? 'refused'}`);
+    return done('answer', JSON.stringify({ say: `Recorded hand ${entry.handNo} — ${next.hands} on record.` }), { hands: next.hands, day: dayType });
   }
   // advise / review: consult the specialist the playbook names — a coaching SERVICE, by name. A review
   // goes to the same coach as advice when no specialist names it separately.
