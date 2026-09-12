@@ -947,16 +947,20 @@
       ],
       "section": "398 §10",
       "routes": [
-        "(portal)/developer"
+        "(portal)/developer",
+        "registry/[[...path]]"
       ],
       "gaps": [
-        "the Home component registry (H47, 398 §10.5) is absent",
-        "`ap mcp` is registered in the product template (.mcp.json, .cursor/mcp.json) but the devkit alpha that ships it is not published yet, and the clean-machine CI job (T21) does not exercise it"
+        "`ap mcp` is registered in the product template (.mcp.json, .cursor/mcp.json) but the devkit alpha that ships it is not published yet, and the clean-machine CI job (T21) does not exercise it",
+        "the component registry (398 §10.5) serves 9 items at /registry with their contracts; it is not yet reachable through the Developer MCP (which answers from the install only) and the items are not yet installable by the shadcn CLI end to end (the files reference the Home's own imports)"
       ],
       "tests": [
         "packages/devkit/test/developer-mcp.test.ts"
       ],
-      "notes": null
+      "notes": null,
+      "components": [
+        "registry/registry.json"
+      ]
     },
     {
       "id": "home.build",
