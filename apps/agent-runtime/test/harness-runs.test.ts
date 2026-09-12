@@ -138,3 +138,26 @@ describe('a run stops being resumable (P1 tail)', () => {
     expect(isExpired({ updatedAt: now - 3 * 3600_000, awaiting: { kind: 'data', prompt: 'who?', stepRef: 's0' } }, now)).toBe(false);
   });
 });
+
+// ── spec 398 §5.3 — CANCEL: the run stops; what already happened stands ──────────────────────────────────
+import { canceledRecord } from '../src/harness-runs.js';
+describe('canceling a run', () => {
+  const receipt = { runRef: 'r1', stepRef: 's0', index: 0, toolId: 'kb.question', risk: 'informational', startedAt: 1, inputDigest: 'json:{}', ok: true } as never;
+  it('marks the kept record canceled — never failed — with how many steps happened', () => {
+    const existing = { type: 'ap.run-record.v1', runRef: 'r1', at: 5, intent: { goal: 'x' }, plan: { steps: [] }, steps: [{ stepRef: 's0', toolId: 'kb.question', args: {}, ok: true }], receipts: [receipt], events: [], outcome: 'suspended' } as never;
+    const r = canceledRecord(existing, { ...stored, executed: { plan: { steps: [] } as never, completed: [{ stepRef: 's0', receipt }] } }, { at: 9, by: ASKER, note: '  changed my mind  ' });
+    expect(r.outcome).toBe('suspended');
+    expect(r.canceled).toEqual({ at: 9, by: ASKER, afterSteps: 1, note: 'changed my mind' });
+    expect(r.receipts).toEqual([receipt]);
+  });
+  it('synthesises the record from the checkpoint when the turn\'s never landed — what ran, nothing invented', () => {
+    const r = canceledRecord(null, { ...stored, executed: { plan: { steps: [] } as never, completed: [{ stepRef: 's0', result: 42, receipt }] } }, { at: 9, by: ASKER });
+    expect(r.intent).toEqual({ goal: stored.message });
+    expect(r.steps).toEqual([{ stepRef: 's0', toolId: 'kb.question', args: {}, ok: true, result: 42 }]);
+    expect(r.canceled.afterSteps).toBe(1);
+    expect(r.canceled.note).toBeUndefined();
+  });
+  it('a run that had done nothing cancels after step 0', () => {
+    expect(canceledRecord(null, stored, { at: 1, by: ASKER }).canceled.afterSteps).toBe(0);
+  });
+});

@@ -21,6 +21,7 @@ import { NewRequestComposer } from './NewRequestComposer';
 import { useReEnableInteractions, useMyWork, type OrgWorkBundle, type StaleOrg } from './useWork';
 import { LIFECYCLE_LABEL, lifecycleState } from './labels';
 import { StatePill } from '../StatePill';
+import { RunControls } from '../runs/RunControls';
 import { stateOf, runStateLabel, type AwaitingKind } from '../../../home/run-state';
 
 const saOf = (caip: string): string => caip.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase() ?? caip;
@@ -302,6 +303,7 @@ export function MyWorkView() {
                             Your agent holds it — open in Ask{run.awaiting ? ` (${runStateLabel(stateOf({ kind: 'suspended', awaiting: run.awaiting.kind as AwaitingKind, expired: false }))})` : ''}
                           </a>
                         ) : <span style={{ fontSize: '0.72rem', opacity: 0.6 }}>no parked run on your agent yet</span>}
+                        {run && agentAddress && <RunControls token={session.token} addressee={agentAddress as Address} runRef={run.runRef} compact onCanceled={() => setParked((p) => p.filter((r) => r.runRef !== run.runRef))} />}
                         {e.commitmentId && (
                           <BusyButton busy={busyId === `withdraw:${e.commitmentId}`} busyLabel="Withdrawing…" className="btn-ghost" style={{ width: 'auto', fontSize: '0.75rem' }} onClick={() => void withdraw(b, e)} disabled={!!busyId}>
                             Withdraw

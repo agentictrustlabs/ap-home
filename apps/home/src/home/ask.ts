@@ -384,7 +384,7 @@ export async function postA2a(path: string, body: unknown): Promise<Record<strin
 
 /** Spec 350 W3 — the runs parked on an agent that this person may pick up, with what each waits for and where it
  *  came from (a committed step names its endeavor and step). Never the mandates. */
-export interface ParkedRun { runRef: string; message: string; awaiting?: { kind: string; prompt: string; stepRef: string } | null; updatedAt: number; origin?: { endeavorId?: string; stepId?: string; principal?: string; commitmentRef?: string } }
+export interface ParkedRun { runRef: string; message: string; awaiting?: { kind: string; prompt: string; stepRef: string } | null; updatedAt: number; /** the state the runtime projected (398 §5.1) */ state?: string; origin?: { endeavorId?: string; stepId?: string; principal?: string; commitmentRef?: string } }
 /** Spec 381 W3 — one span of a run's provenance, as the Worker exports it after the firewall (ids and named
  *  attributes only; no bodies, no keys). A link names a span of ANOTHER run in the same trace (a hand-off). */
 export interface SpanRow {
@@ -397,6 +397,8 @@ export interface RunProvenance { spans: SpanRow[]; retention?: unknown; exporter
 /** Spec 381 W3 — one finished run of an agent, as the record listing carries it (no mandates, no events). */
 export interface RunRecordRow {
   runRef: string; at: number; outcome: string; steps: number; receipts: number;
+  /** Spec 398 §5.3 — the run was stopped by the person who could resume it, after `afterSteps` completed steps. */
+  canceled?: { at: number; by: string; afterSteps: number; note?: string };
   intent: { goal: string; context?: Record<string, unknown> };
   export?: { ok?: boolean; where?: string; error?: string } | null;
 }
@@ -428,6 +430,14 @@ export async function fetchProvenance(session: { token: string }, addressee: Add
 export async function fetchSpans(session: { token: string }, addressee: Address, runRef: string): Promise<RunProvenance | { error: string }> {
   const out = (await postA2a('/a2a/harness/spans', { session: session.token, addressee, runRef })) as { ok?: boolean; error?: string } & Partial<RunProvenance>;
   return out.ok ? { spans: out.spans ?? [], retention: out.retention, ...(out.exporter ? { exporter: out.exporter } : {}), export: out.export ?? null } : { error: out.error ?? 'the run could not be read back' };
+}
+
+/** Spec 398 §5.3 — CANCEL an unfinished run: it stops; what already happened stands (steps 1–N and their receipts).
+ *  One of four distinct controls — not a pause (a trigger's), not a revoke (a delegation's, under Security), not an
+ *  undo (a new intent with its own mandate). Only whoever could resume the run may stop it. */
+export async function cancelRun(session: { token: string }, addressee: Address, runRef: string, note?: string): Promise<{ ok: true; stoppedAfter: number; happened: string[] } | { ok: false; error: string }> {
+  const out = (await postA2a('/a2a/harness/cancel', { session: session.token, addressee, runRef, ...(note ? { note } : {}) })) as { ok?: boolean; error?: string; stoppedAfter?: number; happened?: string[] };
+  return out.ok ? { ok: true, stoppedAfter: out.stoppedAfter ?? 0, happened: out.happened ?? [] } : { ok: false, error: out.error ?? 'the run could not be stopped' };
 }
 
 export async function listRuns(session: { token: string }, addressee: Address): Promise<ParkedRun[]> {

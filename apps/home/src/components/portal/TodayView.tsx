@@ -11,12 +11,15 @@ import { listRuns, listTriggers, homeVocabulary, type ParkedRun, type TriggerRow
 import { assembleToday, type Today, type TodayItem, type TodayArtifact } from '../../home/today';
 import { useMyWork } from './work/useWork';
 import { StatePill } from './StatePill';
+import { RunControls } from './runs/RunControls';
 import { workspaceHref, type WorkspaceScope } from '../../lib/workspace';
 import type { RunStateV1 } from '../../home/run-state';
 
 const RECENT_DAYS = 7;
 
-function Section({ title, hint, items, empty, children }: { title: string; hint: string; items?: TodayItem[]; empty: string; children?: React.ReactNode }) {
+type CardCtx = { token: string; addressee: Address; onCanceled: (runRef: string) => void };
+
+function Section({ title, hint, items, empty, children, ctx }: { title: string; hint: string; items?: TodayItem[]; empty: string; children?: React.ReactNode; ctx?: CardCtx }) {
   return (
     <section className="dash-section" data-testid={`today-${title.toLowerCase().replace(/[^a-z]+/g, '-')}`}>
       <h2 style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
@@ -27,29 +30,31 @@ function Section({ title, hint, items, empty, children }: { title: string; hint:
       {children ?? (items && items.length === 0 ? <p className="muted" style={{ fontSize: '0.8rem' }}>{empty}</p> : null)}
       {!children && items && items.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-          {items.map((it) => <Card key={it.id} item={it} />)}
+          {items.map((it) => <Card key={it.id} item={it} {...(ctx ? { ctx } : {})} />)}
         </div>
       )}
     </section>
   );
 }
 
-function Card({ item }: { item: TodayItem }) {
+function Card({ item, ctx }: { item: TodayItem; ctx?: CardCtx }) {
   const href = item.href ?? (item.askSeed ? `/ask?seed=${encodeURIComponent(item.askSeed)}` : undefined);
   const body = (
     <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontWeight: 600, fontSize: '0.86rem', lineHeight: 1.35 }}>{item.title}</div>
+        {/* a card with a control on it is not itself a link (a button inside an anchor is two clicks fighting): the title links */}
+        <div style={{ fontWeight: 600, fontSize: '0.86rem', lineHeight: 1.35 }}>{item.runRef && href ? <a href={href} style={{ color: 'inherit', textDecoration: 'none' }}>{item.title}</a> : item.title}</div>
         {item.detail && <div style={{ fontSize: '0.73rem', opacity: 0.65, marginTop: '0.15rem' }}>{item.detail}</div>}
       </div>
       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flex: 'none' }}>
+        {item.runRef && ctx && <RunControls token={ctx.token} addressee={ctx.addressee} runRef={item.runRef} compact onCanceled={() => ctx.onCanceled(item.runRef!)} />}
         {item.state && <StatePill state={item.state} {...(item.native ? { native: item.native } : {})} />}
         {item.at && <span style={{ fontSize: '0.7rem', opacity: 0.55 }}>{new Date(item.at).toLocaleDateString()}</span>}
       </div>
     </div>
   );
   const style = { display: 'block', padding: '0.6rem 0.85rem', textDecoration: 'none', color: 'inherit' } as const;
-  return href
+  return href && !item.runRef
     ? <a className="manage-card" href={href} style={style} data-testid="today-card">{body}</a>
     : <div className="manage-card" style={style} data-testid="today-card">{body}</div>;
 }
@@ -96,6 +101,8 @@ export function TodayView({ scope, children }: { scope: WorkspaceScope; children
     return assembleToday({ now: Date.now(), parked, bundles: mine, artifacts, triggers, vocabulary, recentDays: RECENT_DAYS });
   }, [parked, bundles, artifacts, triggers, vocabulary, scope]);
 
+  // A canceled run leaves Today at once — the runtime dropped its checkpoint; the record says what stood.
+  const ctx: CardCtx | undefined = addressee ? { token: session?.token ?? '', addressee: addressee as Address, onCanceled: (runRef) => setParked((p) => (p ?? []).filter((r) => r.runRef !== runRef)) } : undefined;
   const libraryHref = workspaceHref(scope, 'library');
   const playbookHref = workspaceHref(scope, 'playbook');
 
@@ -105,8 +112,8 @@ export function TodayView({ scope, children }: { scope: WorkspaceScope; children
       {today === null && <p className="muted" style={{ fontSize: '0.8rem' }}>Reading what needs you…</p>}
       {today && (
         <>
-          <Section title="Needs your decision" hint="A signature, a decision you were named to make, a commitment waiting on you. Each opens where it is signed." items={today.decisions} empty="Nothing is waiting on you." />
-          <Section title="Active goals" hint="What your agent is doing and what you committed to, with its state." items={today.active} empty="Nothing in motion. Ask for something, or take on work." />
+          <Section title="Needs your decision" hint="A signature, a decision you were named to make, a commitment waiting on you. Each opens where it is signed." items={today.decisions} empty="Nothing is waiting on you." {...(ctx ? { ctx } : {})} />
+          <Section title="Active goals" hint="What your agent is doing and what you committed to, with its state." items={today.active} empty="Nothing in motion. Ask for something, or take on work." {...(ctx ? { ctx } : {})} />
           <Section title="Recent artifacts" hint={`What the last ${RECENT_DAYS} days left in the Library.`} items={today.artifacts} empty="No new artifacts this week." />
           {today.artifacts.length > 0 && <p style={{ fontSize: '0.76rem', marginTop: '-0.6rem' }}><a href={libraryHref}>Open the Library →</a></p>}
           <Section title="Routine exceptions" hint="A scheduled or hooked routine whose last firing failed." items={today.exceptions} empty="Every routine's last firing went through." />

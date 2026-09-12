@@ -112,7 +112,7 @@ import { KB_QUESTION_TOOL, kbQuestionInvoker } from '@agenticprimitives/context'
 import { discoveryFetchFor, structuredCallFor } from './context-wiring.js';
 import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@agenticprimitives/context';
 import { selectComposer, selectComposerRouted, resolveProvider, availableModels, plannerPromptBudget, defaultProvider, widestPromptBudget, type RouteNeed, type RouteDecision } from './orchestration.js';
-import { loadRun, saveRun, dropRun, listRuns, mergeTurn, type HarnessRunCheckpointV1, completedStepsOf, isExpired, AWAIT_WINDOW_MS, expiryFor } from './harness-runs.js';
+import { loadRun, saveRun, dropRun, listRuns, mergeTurn, type HarnessRunCheckpointV1, completedStepsOf, isExpired, AWAIT_WINDOW_MS, expiryFor, canceledRecord } from './harness-runs.js';
 import { buildGenesisPlanes, type GenesisPlaneWires } from './genesis-planes.js';
 import { vaultServerId } from './vault-server-id.js';
 import { bindHarnessAttempt, HarnessApprovalWorkflow, type HarnessWorkflowParams } from './harness-workflow.js';
@@ -588,7 +588,7 @@ export interface Env {
   GATEWAY_SHADOW?: string;
   DELIVERY_SERVICE_SA?: string;
   /** spec 362 — the durable-executor binding (Cloudflare Workflows). Absent ⇒ durable runs 503. */
-  HARNESS_WORKFLOW?: { create(opts: { id: string; params: unknown }): Promise<unknown>; get(id: string): Promise<{ sendEvent(e: { type: string; payload: unknown }): Promise<void>; status(): Promise<unknown> }> };
+  HARNESS_WORKFLOW?: { create(opts: { id: string; params: unknown }): Promise<unknown>; get(id: string): Promise<{ sendEvent(e: { type: string; payload: unknown }): Promise<void>; status(): Promise<unknown>; terminate(): Promise<void> }> };
 }
 
 const MCP_AUDIENCE = 'urn:mcp:server:person';
@@ -2398,6 +2398,42 @@ app.post('/harness/approve', async (c) => {
   return c.json({ ok: true, runRef: body.runRef });
 });
 
+// ── Spec 398 §5.3 — CANCEL: ask an unfinished run to stop. Completed effects stand ─────────────────────────
+// One of four controls that are four things: PAUSE (a trigger; nothing new starts, state kept), CANCEL (this —
+// the run stops; steps 1–N happened and their receipts remain), REVOKE (a delegation on chain — the next
+// `verifyMandateForStep` refuses; the run itself is not stopped) and UNDO (a NEW intent with its own mandate,
+// where a compensation exists). A cancel is available to whoever could resume the run (`claimableBy`) and
+// to nobody else: stopping someone's run is as much theirs as finishing it. The record is kept and marked
+// `canceled` (never rewritten as failed — nothing went wrong); the checkpoint is dropped; a durable
+// instance is terminated.
+app.post('/harness/cancel', async (c) => {
+  const raw = await c.req.text();
+  const body = ((): { session?: string; addressee?: Address; runRef?: string; note?: string } | null => { try { return JSON.parse(raw); } catch { return null; } })();
+  if (!body?.addressee || !body.runRef) return c.json({ ok: false, error: 'session (or an app delegation), addressee and runRef are required' }, 400);
+  const who = await askSurfacePrincipal(c, raw, body);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const addressee = body.addressee.toLowerCase() as Address;
+  const caller = String(who.sa).toLowerCase() as Address;
+  const stored = await loadRun(c.env as never, addressee, body.runRef).catch(() => null);
+  if (!stored) return c.json({ ok: false, error: 'no such unfinished run — it finished, expired, or was never here' }, 404);
+  if (!claimableBy(stored, caller)) return c.json({ ok: false, error: 'this run is not yours to stop' }, 403);
+  const happened = (stored.executed?.completed ?? []).map((x) => x.stepRef);
+  const at = Date.now();
+  const existing = await getRecord(c.env as never, addressee, body.runRef).catch(() => null);
+  const note = typeof body.note === 'string' ? body.note : undefined;
+  await putRecord(c.env as never, addressee, canceledRecord(existing, stored, { at, by: caller, ...(note ? { note } : {}) }));
+  await dropRun(c.env as never, addressee, body.runRef);
+  if (stored.executor === 'workflow' && c.env.HARNESS_WORKFLOW) {
+    try { await (await c.env.HARNESS_WORKFLOW.get(body.runRef)).terminate(); } catch { /* already finished, or never started durably — the checkpoint is what held it */ }
+  }
+  await buildAuditSink(c.env).write({
+    id: crypto.randomUUID(), timestamp: new Date(at).toISOString(), action: 'harness.run.canceled', outcome: 'success',
+    actor: { type: 'user', id: caller }, subject: { type: 'run', id: body.runRef },
+    context: { addressee, afterSteps: happened.length, awaiting: stored.awaiting?.kind ?? '', ...(note?.trim() ? { note: note.trim().slice(0, 280) } : {}) },
+  }).catch(() => undefined);
+  return c.json({ ok: true, runRef: body.runRef, state: 'canceled', stoppedAfter: happened.length, happened });
+});
+
 // ── Spec 369 — THE AGENT HEARS. Audio → words, biased by what THIS agent knows about the asker (their
 // household, the agents chartered under them, the words its capabilities answer to), then a deterministic
 // repair of windows that normalise exactly to a known label. Processed in memory and discarded: no DO
@@ -3264,10 +3300,13 @@ app.post('/harness/ask', async (c) => {
           // Spec 374 — waiting on another agent's steward: the commitment is the record, and only the
           // debtor's delivered answer moves this run (the asker cannot resume it).
           ...(reply.kind === 'waiting' ? { awaiting: { kind: 'commitment' as const, prompt: reply.text, stepRef: reply.stepRef, expiresAt: now + AWAIT_WINDOW_MS.commitment, commitment: reply.commitment } } : {}),
+          // Spec 398 §5.1 — a run parked on AUTHORITY says so. Saved without `awaiting`, the listing projected it as
+          // `awaiting-input` ("waiting for an answer") — a plausible falsehood: what it waits for is a mandate.
+          ...(reply.kind === 'authority_required' ? { awaiting: { kind: 'authority' as const, prompt: `${CAPABILITY_WORDS[reply.capability] ?? reply.capability} — needs your mandate`, stepRef: reply.stepRef, expiresAt: now + AWAIT_WINDOW_MS.authority } } : {}),
           // WHAT RAN (spec 370 P1): the admitted plan and the completed steps with their receipts, so the
           // next turn replays them instead of planning and executing the whole ask again.
           executed: { plan: recordForm.result.plan, completed: completedStepsOf(recordForm.result) },
-          expiresAt: expiryFor(reply.kind === 'prompt' ? { kind: reply.prompt.kind, prompt: reply.prompt.prompt, stepRef: reply.prompt.stepRef } : reply.kind === 'waiting' ? { kind: 'commitment', prompt: reply.text, stepRef: reply.stepRef } : undefined, now),
+          expiresAt: expiryFor(reply.kind === 'prompt' ? { kind: reply.prompt.kind, prompt: reply.prompt.prompt, stepRef: reply.prompt.stepRef } : reply.kind === 'waiting' ? { kind: 'commitment', prompt: reply.text, stepRef: reply.stepRef } : reply.kind === 'authority_required' ? { kind: 'authority', prompt: '', stepRef: reply.stepRef } : undefined, now),
           createdAt: stored?.createdAt ?? now, updatedAt: now,
         });
       } else {

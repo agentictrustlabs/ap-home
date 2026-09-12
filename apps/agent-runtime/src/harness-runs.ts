@@ -18,7 +18,7 @@
 // mandate is re-verified (on chain: signature, revocation, intent binding, limits), the ladder is
 // re-applied and the approval re-checked — every turn, exactly as the first. The checkpoint holds only
 // what the person already gave us; it grants nothing and it decides nothing.
-import type { SuppliedInputV1, Plan, StepReceipt, CommitmentRefV1 } from '@agenticprimitives/orchestration';
+import type { SuppliedInputV1, Plan, StepReceipt, CommitmentRefV1, RunRecordV1 } from '@agenticprimitives/orchestration';
 import type { SelectedOfferBindingV1 } from './engagement-campaign.js';
 import type { Address } from 'viem';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
@@ -235,4 +235,28 @@ export function completedStepsOf(result: { steps: ReadonlyArray<{ ok: boolean; s
       const receipt = result.receipts.find((r) => r.stepRef === o.stepRef);
       return { stepRef: o.stepRef!, ...(o.result !== undefined ? { result: o.result } : {}), ...(receipt ? { receipt } : {}) };
     });
+}
+
+/**
+ * Spec 398 §5.3 — THE RECORD OF A CANCELED RUN. The turn's record is kept and MARKED (never rewritten as
+ * failed: nothing went wrong); a record that never landed (the turn writes it fire-and-forget) is synthesised
+ * from the checkpoint — what ran, what it left, nothing invented. `afterSteps` is how many steps had completed:
+ * the sentence a surface shows is "stopped after step N; steps 1–N happened".
+ */
+export function canceledRecord(
+  existing: RunRecordV1 | null,
+  stored: Pick<HarnessRunCheckpointV1, 'runRef' | 'message' | 'intent' | 'executed'>,
+  by: { at: number; by: Address; note?: string },
+): RunRecordV1 & { canceled: NonNullable<RunRecordV1['canceled']> } {
+  const completed = stored.executed?.completed ?? [];
+  const base: RunRecordV1 = existing ?? {
+    type: 'ap.run-record.v1', runRef: stored.runRef, at: by.at,
+    intent: stored.intent ?? { goal: stored.message },
+    plan: stored.executed?.plan ?? { steps: [] },
+    steps: completed.map((x) => ({ stepRef: x.stepRef, toolId: x.receipt?.toolId ?? '', args: {}, ok: true, ...(x.result !== undefined ? { result: x.result } : {}) })),
+    receipts: completed.flatMap((x) => (x.receipt ? [x.receipt] : [])),
+    events: [], outcome: 'suspended',
+  };
+  const note = by.note?.trim() ? by.note.trim().slice(0, 280) : undefined;
+  return { ...base, canceled: { at: by.at, by: by.by, afterSteps: completed.length, ...(note ? { note } : {}) } };
 }

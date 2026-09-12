@@ -11,7 +11,10 @@ import { StatePill } from '../StatePill';
 import { stateOf, type RunStateSource } from '../../../home/run-state';
 
 /** A finished run's record carries its `outcome` (350 `RunOutcome`); the pill shows the projected state (398 §5.1). */
-const sourceOf = (r: RunRecordRow): RunStateSource => ({ kind: 'run', outcome: r.outcome as Extract<RunStateSource, { kind: 'run' }>['outcome'] });
+const sourceOf = (r: RunRecordRow): RunStateSource => ({ kind: 'run', outcome: r.outcome as Extract<RunStateSource, { kind: 'run' }>['outcome'], ...(r.canceled ? { canceled: true } : {}) });
+/** Spec 398 §5.3 — a canceled run says what stood: "stopped after step N; steps 1–N happened". */
+const canceledWords = (c: NonNullable<RunRecordRow['canceled']>): string =>
+  c.afterSteps === 0 ? 'stopped before any step ran' : `stopped after step ${c.afterSteps}; step${c.afterSteps === 1 ? ' 1' : `s 1–${c.afterSteps}`} happened`;
 
 export function RunHistory({ token, addressee, limit = 25 }: { token: string; addressee: Address; limit?: number }) {
   const [rows, setRows] = useState<RunRecordRow[] | null>(null);
@@ -38,7 +41,8 @@ export function RunHistory({ token, addressee, limit = 25 }: { token: string; ad
             <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'baseline', fontSize: '0.84rem', flexWrap: 'wrap' }}>
               <span style={{ flex: 'none', opacity: 0.6, fontSize: '0.74rem' }}>{new Date(r.at).toLocaleString()}</span>
               <span style={{ flex: 1, minWidth: 200 }}>{goal.length > 140 ? `${goal.slice(0, 137)}…` : goal}</span>
-              <StatePill state={stateOf(sourceOf(r))} native={r.outcome} compact style={{ flex: 'none' }} />
+              <StatePill state={stateOf(sourceOf(r))} native={r.canceled ? canceledWords(r.canceled) : r.outcome} compact style={{ flex: 'none' }} />
+              {r.canceled && <span style={{ flex: 'none', fontSize: '0.72rem', opacity: 0.7 }}>{canceledWords(r.canceled)}{r.canceled.note ? ` — “${r.canceled.note}”` : ''}</span>}
               <span style={{ flex: 'none', fontSize: '0.72rem', opacity: 0.7 }}>{r.steps} step{r.steps === 1 ? '' : 's'} · {r.receipts} receipt{r.receipts === 1 ? '' : 's'}{r.export?.ok ? ' · in the vault' : ''}</span>
               <button type="button" className="ghost" style={{ flex: 'none', fontSize: '0.74rem' }} onClick={() => setOpen(isOpen ? null : r.runRef)}>{isOpen ? 'Close' : 'Open'}</button>
             </div>

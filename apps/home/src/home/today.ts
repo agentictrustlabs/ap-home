@@ -20,6 +20,8 @@ export interface TodayItem {
   state?: ProjectedRunStateV1;
   native?: string;
   at?: number;
+  /** An unfinished run of the agent Today is about — the card carries its cancel control (398 §5.3). */
+  runRef?: string;
 }
 
 export interface Today {
@@ -65,7 +67,7 @@ export function assembleToday(input: TodayInputs): Today {
   for (const r of input.parked) {
     const st = parkedState(r);
     const item: TodayItem = {
-      id: `run:${r.runRef}`, title: r.message, state: st, at: r.updatedAt,
+      id: `run:${r.runRef}`, title: r.message, state: st, at: r.updatedAt, runRef: r.runRef,
       askSeed: r.message,
       ...(r.awaiting?.prompt ? { detail: r.awaiting.prompt } : {}),
       ...(r.origin?.endeavorId && r.origin.principal ? { href: workHref(r.origin.principal, r.origin.endeavorId) } : {}),
