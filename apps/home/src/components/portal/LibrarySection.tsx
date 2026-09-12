@@ -13,6 +13,7 @@ import remarkGfm from 'remark-gfm';
 import { useSession } from '../../context/session';
 import { SectionShell } from './SectionShell';
 import { cardSty, btnSty, btnPrimarySty, mono, mutedText, errorText, inputSty, badgeStyle, modalOverlaySty, infoBannerSty, shortAddr, type BadgeKind } from './theme';
+import { artifactIdentity } from '../../home/artifact-identity';
 
 type Kind = 'skill' | 'ttl' | 'md' | 'json-ld' | 'image';
 type Source = 'blob' | 'graphdb' | 'vault' | 'external';
@@ -108,9 +109,10 @@ function Icon({ name, size = 16, style }: { name: IconName; size?: number; style
 }
 
 export function LibrarySection({ orgSa }: { orgSa?: string }) {
-  const { session } = useSession();
+  const { session, agentAddress } = useSession();
   const token = session?.token ?? '';
   const scopeQ = orgSa ? `?org=${orgSa}` : '';
+  const ownerSa = (orgSa ?? agentAddress ?? '').toLowerCase();
   const [items, setItems] = useState<Artifact[]>([]);
   const [sharedItems, setSharedItems] = useState<Artifact[]>([]);
   const [requests, setRequests] = useState<{ requester: string; artifactId: string; artifactName?: string; actions: string[]; at: number }[]>([]);
@@ -291,6 +293,7 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
                 items={items}
                 ownerLabel={ownerLabel}
                 ownerVaultKind={ownerVaultKind}
+                ownerSa={ownerSa}
                 folders={allFolders}
                 onClose={() => setSelectedId(null)}
                 onGrant={grant}
@@ -538,8 +541,8 @@ function FederatedPlaceholder({ lens }: { lens: Lens }) {
 
 // ── detail / workspace panel — progressive disclosure, one primary action + overflow ──
 type Tab = 'content' | 'access' | 'provenance' | 'versions';
-function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, folders, onClose, onGrant, onRevoke, onDiscuss, onMove, onRemove, onOpenMember, onOpenLive, onRequestAccess, onPublish }: {
-  artifact: Artifact; items: Artifact[]; ownerLabel: string; ownerVaultKind: string; folders: string[];
+function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, ownerSa, folders, onClose, onGrant, onRevoke, onDiscuss, onMove, onRemove, onOpenMember, onOpenLive, onRequestAccess, onPublish }: {
+  artifact: Artifact; items: Artifact[]; ownerLabel: string; ownerVaultKind: string; ownerSa: string; folders: string[];
   onClose: () => void; onGrant: (id: string, addr: string, kind: string, actions: string[], label?: string) => void; onRevoke: (id: string, addr: string) => void;
   onDiscuss: (id: string) => void; onMove: (a: Artifact, dest: string) => void; onRemove: (a: Artifact) => void; onOpenMember: (id: string) => void;
   onOpenLive: (a: Artifact) => Promise<Artifact>; onRequestAccess: (a: Artifact, actions: string[]) => Promise<void>;
@@ -596,6 +599,32 @@ function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, folders, onC
         </div>
         <button style={{ ...btnSty, background: 'none', border: 'none', padding: 2, color: 'var(--color-text-muted)' }} onClick={onClose} aria-label="close"><Icon name="close" size={18} /></button>
       </div>
+
+      {/* spec 398 §6.2 — ARTIFACT IDENTITY: version · author · sources · scope · linked work item · access method; and the
+          three acts kept distinct (share on Access, publish on Provenance, replicate not yet). Absent is said absent. */}
+      {(() => {
+        const id = artifactIdentity(artifact, { sa: ownerSa, vaultLabel: ownerVaultKind }, publishable);
+        const row: React.CSSProperties = { display: 'flex', gap: 6, fontSize: 11.5, lineHeight: 1.45 };
+        const k: React.CSSProperties = { ...mutedText, flex: 'none', width: 62 };
+        return (
+          <div data-testid="artifact-identity" data-access={id.accessMethod} style={{ padding: '.5rem .9rem', borderBottom: '1px solid var(--color-border)', display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <div style={row}><span style={k}>version</span><span>{id.version}{id.latestRelease ? ` · released ${id.latestRelease.version}` : ''}</span></div>
+            <div style={row}><span style={k}>author</span><span>{shortAddr(id.author)}</span></div>
+            <div style={row}><span style={k}>sources</span><span>{id.sources.length ? id.sources.map((x) => `${x.kind}: ${x.value.length > 28 ? `${x.value.slice(0, 25)}…` : x.value}`).join(' · ') : <span style={mutedText}>none recorded</span>}</span></div>
+            <div style={row}><span style={k}>scope</span><span>{id.scope.vault} · {id.scope.live} live grant{id.scope.live === 1 ? '' : 's'}{id.scope.grants > id.scope.live ? ` (${id.scope.grants - id.scope.live} revoked)` : ''}</span></div>
+            <div style={row}><span style={k}>work item</span><span style={mutedText}>none linked yet</span></div>
+            <div style={row}><span style={k}>access</span><span><strong>{id.accessMethod}</strong></span></div>
+            <div style={{ ...row, marginTop: 3 }}>
+              <span style={k}>acts</span>
+              <span>
+                <button style={{ ...btnSty, padding: '.05rem .4rem', fontSize: 11 }} disabled={id.acts.share !== 'offered'} onClick={() => setTab('access')} title="Share = a grant on this artifact; a preview shared never grants vault or sandbox access">share</button>{' '}
+                <button style={{ ...btnSty, padding: '.05rem .4rem', fontSize: 11 }} disabled={id.acts.publish !== 'offered'} onClick={() => { onPublish(artifact.id); setTab('provenance'); }} title={id.acts.publish === 'not-publishable' ? 'only a playbook or a folder is published as a release' : 'Publish = a signed release under your name'}>publish</button>{' '}
+                <button style={{ ...btnSty, padding: '.05rem .4rem', fontSize: 11 }} disabled title="Replicate = an authorized copy in another vault — not yet an act here (398 §6.2)">replicate · not yet</button>
+              </span>
+            </div>
+          </div>
+        );
+      })()}
 
       <div role="tablist" style={{ display: 'flex', gap: 2, padding: '.4rem .6rem 0', borderBottom: '1px solid var(--color-border)' }}>
         {(['content', 'access', 'provenance', 'versions'] as Tab[]).map((t) => (
