@@ -8,6 +8,8 @@ import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
 import { BusyButton } from '../shared/BusyButton';
 import { listTriggers, fireTrigger, rotateTrigger, triggerSourceLabel, type TriggerRow } from '../../home/ask';
+import { StatePill } from './StatePill';
+import { stateOf } from '../../home/run-state';
 
 const when = (ms?: number) => (ms ? new Date(ms).toLocaleString() : '');
 
@@ -79,7 +81,7 @@ export function TriggersPanel({ agent }: { agent: Address }) {
               )}
               {r.lastAt && (
                 <div style={{ color: 'var(--color-text-muted)', marginTop: '.2rem' }}>
-                  last: <strong>{r.lastOutcome ?? '?'}</strong> {when(r.lastAt)}{r.lastRunRef ? ` · run ${r.lastRunRef.slice(0, 22)}…` : ''}{r.lastSaid ? ` — ${r.lastSaid.slice(0, 140)}` : ''}
+                  last: {r.lastOutcome ? <StatePill state={stateOf({ kind: 'trigger', lastOutcome: r.lastOutcome })} native={r.lastOutcome} compact /> : <strong>?</strong>} {when(r.lastAt)}{r.lastRunRef ? ` · run ${r.lastRunRef.slice(0, 22)}…` : ''}{r.lastSaid ? ` — ${r.lastSaid.slice(0, 140)}` : ''}
                 </div>
               )}
             </li>

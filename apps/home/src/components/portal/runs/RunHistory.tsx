@@ -7,8 +7,11 @@ import { useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { listRunRecords, type RunRecordRow } from '../../../home/ask';
 import { RunTimeline } from './RunTimeline';
+import { StatePill } from '../StatePill';
+import { stateOf, type RunStateSource } from '../../../home/run-state';
 
-const OUTCOME_LABEL: Record<string, string> = { completed: 'done', failed: 'failed', refused: 'refused', suspended: 'waiting', cancelled: 'cancelled' };
+/** A finished run's record carries its `outcome` (350 `RunOutcome`); the pill shows the projected state (398 §5.1). */
+const sourceOf = (r: RunRecordRow): RunStateSource => ({ kind: 'run', outcome: r.outcome as Extract<RunStateSource, { kind: 'run' }>['outcome'] });
 
 export function RunHistory({ token, addressee, limit = 25 }: { token: string; addressee: Address; limit?: number }) {
   const [rows, setRows] = useState<RunRecordRow[] | null>(null);
@@ -35,7 +38,7 @@ export function RunHistory({ token, addressee, limit = 25 }: { token: string; ad
             <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'baseline', fontSize: '0.84rem', flexWrap: 'wrap' }}>
               <span style={{ flex: 'none', opacity: 0.6, fontSize: '0.74rem' }}>{new Date(r.at).toLocaleString()}</span>
               <span style={{ flex: 1, minWidth: 200 }}>{goal.length > 140 ? `${goal.slice(0, 137)}…` : goal}</span>
-              <span className="badge" style={{ flex: 'none', fontSize: '0.64rem', border: '1px solid var(--color-border)', color: r.outcome === 'completed' ? 'var(--color-sage-700, #047857)' : 'var(--color-text-muted)' }}>{OUTCOME_LABEL[r.outcome] ?? r.outcome}</span>
+              <StatePill state={stateOf(sourceOf(r))} native={r.outcome} compact style={{ flex: 'none' }} />
               <span style={{ flex: 'none', fontSize: '0.72rem', opacity: 0.7 }}>{r.steps} step{r.steps === 1 ? '' : 's'} · {r.receipts} receipt{r.receipts === 1 ? '' : 's'}{r.export?.ok ? ' · in the vault' : ''}</span>
               <button type="button" className="ghost" style={{ flex: 'none', fontSize: '0.74rem' }} onClick={() => setOpen(isOpen ? null : r.runRef)}>{isOpen ? 'Close' : 'Open'}</button>
             </div>

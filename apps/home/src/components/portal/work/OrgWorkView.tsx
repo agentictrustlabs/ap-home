@@ -13,7 +13,8 @@ import { Loading } from '../../shared/Loading';
 import { type EndeavorRow } from '../../../lib/work-client';
 import { useOrgMemberNames, useReEnableInteractions, useWorkList } from './useWork';
 import { RequestsTriage } from './RequestsTriage';
-import { LIFECYCLE_LABEL, StatusPillStyle } from './labels';
+import { LIFECYCLE_LABEL, lifecycleState } from './labels';
+import { StatePill } from '../StatePill';
 
 function Progress({ done, total }: { done: number; total: number }) {
   if (total === 0) return null;
@@ -36,7 +37,7 @@ function EndeavorCard({ org, row, compact }: { org: string; row: EndeavorRow; co
     >
       <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'baseline', justifyContent: 'space-between' }}>
         <span style={{ fontWeight: 600, fontSize: '0.87rem', lineHeight: 1.35 }}>{row.title}</span>
-        {!compact && <span style={StatusPillStyle(row.lifecycle)}>{LIFECYCLE_LABEL[row.lifecycle]}</span>}
+        {!compact && <StatePill state={lifecycleState(row.lifecycle)} native={LIFECYCLE_LABEL[row.lifecycle]} />}
       </div>
       <div style={{ display: 'flex', gap: '0.7rem', alignItems: 'center', marginTop: '0.35rem', flexWrap: 'wrap' }}>
         <Progress done={row.stepsSatisfied ?? 0} total={row.stepsTotal ?? 0} />
@@ -182,7 +183,7 @@ export function OrgWorkView({ org }: { org: Address }) {
             return (
               <div key={lc} style={{ minWidth: 230, flex: '0 0 230px', background: 'var(--color-surface-sunken, #f6f6f4)', borderRadius: 10, padding: '0.55rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', margin: '0 0 0.5rem 0.15rem' }}>
-                  <span style={StatusPillStyle(lc)}>{LIFECYCLE_LABEL[lc]}</span>
+                  <StatePill state={lifecycleState(lc)} native={LIFECYCLE_LABEL[lc]} />
                   <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>{rows.length}</span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>

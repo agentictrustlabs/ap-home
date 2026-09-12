@@ -28,7 +28,8 @@ import {
 } from '../../../lib/work-client';
 import { askCommand } from '../../../home/ask-command';
 import { useOrgMemberNames } from './useWork';
-import { EVENT_LABEL, LIFECYCLE_LABEL, STEP_KIND_LABEL, StatusPillStyle } from './labels';
+import { EVENT_LABEL, LIFECYCLE_LABEL, STEP_KIND_LABEL, lifecycleState } from './labels';
+import { StatePill } from '../StatePill';
 import type { EndeavorLifecycle } from '@agenticprimitives/home';
 
 const STEP_KINDS = ['contribution', 'interaction', 'decision', 'aggregation', 'validation'] as const;
@@ -287,7 +288,7 @@ export function OrgWorkEndeavorDetail({ org, endeavorId }: { org: Address; endea
           {/* ── Header: status + progress + outcome ── */}
           <div className="manage-card" style={{ padding: '0.85rem 1rem', marginBottom: '0.8rem' }}>
             <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
-              <span style={StatusPillStyle(e.lifecycle as EndeavorLifecycle)}>{LIFECYCLE_LABEL[e.lifecycle as EndeavorLifecycle] ?? e.lifecycle}</span>
+              <StatePill state={lifecycleState(e.lifecycle)} native={LIFECYCLE_LABEL[e.lifecycle as EndeavorLifecycle] ?? e.lifecycle} />
               {stepsTotal > 0 && (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.76rem', color: 'var(--color-text-muted)' }}>
                   <span style={{ width: 90, height: 6, borderRadius: 999, background: 'var(--color-surface-sunken, #eee)', overflow: 'hidden', display: 'inline-block' }}>

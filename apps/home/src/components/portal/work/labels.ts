@@ -6,8 +6,8 @@
 //   commitment                 → "commitment" (kept — it IS a signed act)
 // The internal nouns stay on the wire and in provenance tooltips; the labels
 // are display-only.
-import type { CSSProperties } from 'react';
 import type { EndeavorLifecycle } from '@agenticprimitives/home';
+import { stateOf, type ProjectedRunStateV1 } from '../../../home/run-state';
 
 export const LIFECYCLE_LABEL: Record<EndeavorLifecycle, string> = {
   proposed: 'Requested',
@@ -18,15 +18,12 @@ export const LIFECYCLE_LABEL: Record<EndeavorLifecycle, string> = {
   abandoned: 'Closed',
 };
 
-/** Status-pill styling per lifecycle — existing design tokens only. */
-export const LIFECYCLE_PILL: Record<EndeavorLifecycle, { bg: string; fg: string; border: string }> = {
-  proposed: { bg: 'var(--color-surface-sunken, #f4f4f2)', fg: 'var(--color-text-muted, #6b7280)', border: 'var(--color-border)' },
-  adopted: { bg: 'var(--color-amber-50, #fffbeb)', fg: 'var(--color-amber-700, #b45309)', border: 'var(--color-amber-400, #fbbf24)' },
-  active: { bg: 'var(--color-sage-50, #f0f7f2)', fg: 'var(--color-sage-700, #2f6846)', border: 'var(--color-sage-500, #5f9b76)' },
-  suspended: { bg: 'var(--color-surface-sunken, #f4f4f2)', fg: 'var(--color-text-muted, #6b7280)', border: 'var(--color-border)' },
-  satisfied: { bg: 'var(--color-sage-100, #dfeee4)', fg: 'var(--color-sage-700, #2f6846)', border: 'var(--color-sage-500, #5f9b76)' },
-  abandoned: { bg: 'var(--color-surface-sunken, #f4f4f2)', fg: 'var(--color-text-faint, #9ca3af)', border: 'var(--color-border)' },
-};
+/** Spec 398 §5.1 — an endeavor's lifecycle shown through the ONE state vocabulary (`proposed` → drafted, `adopted` →
+ *  queued, `active` → running, `suspended` → blocked, `satisfied` → completed, `abandoned` → canceled). The domain's
+ *  own word (`LIFECYCLE_LABEL`) is the pill's tooltip, never its text. */
+export function lifecycleState(lc: EndeavorLifecycle | string): ProjectedRunStateV1 & { unknownNative?: string } {
+  return stateOf({ kind: 'endeavor', lifecycle: String(lc) });
+}
 
 export const STEP_KIND_LABEL: Record<string, string> = {
   contribution: 'work',
@@ -58,17 +55,3 @@ export const EVENT_LABEL: Record<string, string> = {
   EndeavorAbandoned: 'Closed',
 };
 
-export function StatusPillStyle(lc: EndeavorLifecycle): CSSProperties {
-  const p = LIFECYCLE_PILL[lc];
-  return {
-    display: 'inline-block',
-    padding: '0.1rem 0.55rem',
-    borderRadius: 999,
-    fontSize: '0.7rem',
-    fontWeight: 600,
-    background: p.bg,
-    color: p.fg,
-    border: `1px solid ${p.border}`,
-    whiteSpace: 'nowrap',
-  };
-}

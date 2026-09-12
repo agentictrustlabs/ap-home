@@ -30,7 +30,9 @@ import {
 import { askCommand } from '../../../home/ask-command';
 import { NewRequestComposer } from './NewRequestComposer';
 import { useRelatedOrgsState, useReEnableInteractions } from './useWork';
-import { LIFECYCLE_LABEL } from './labels';
+import { LIFECYCLE_LABEL, lifecycleState } from './labels';
+import { StatePill } from '../StatePill';
+import { stateOf, runStateLabel, type AwaitingKind } from '../../../home/run-state';
 
 interface OrgWorkBundle {
   org: string;
@@ -329,7 +331,7 @@ export function MyWorkView() {
                         {new Date(q.submittedAt).toLocaleString()}
                         {status === 'pending' && ' · awaiting a decision'}
                         {status === 'declined' && ` · declined${q.reason ? ` — ${q.reason}` : ''}`}
-                        {status === 'adopted' && !completed && (lifecycle ? ` · accepted — ${LIFECYCLE_LABEL[lifecycle]}` : ' · accepted as an endeavor')}
+                        {status === 'adopted' && !completed && (lifecycle ? <> · accepted — <StatePill state={lifecycleState(lifecycle)} native={LIFECYCLE_LABEL[lifecycle]} compact /></> : ' · accepted as an endeavor')}
                         {status === 'adopted' && completed && (
                           <> · <span style={{ color: 'var(--color-sage-700, #047857)', fontWeight: 600 }}>✓ the agent completed this</span></>
                         )}
@@ -368,7 +370,7 @@ export function MyWorkView() {
                       <span style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
                         {run ? (
                           <a href={`/ask?seed=${encodeURIComponent(run.message)}`} className="btn-ghost" style={{ fontSize: '0.75rem' }} data-testid="committed-run-open" title={run.runRef}>
-                            Your agent holds it — open in Ask{run.awaiting ? ` (waiting on ${run.awaiting.kind === 'signature' ? 'your mandate' : run.awaiting.kind === 'data' ? 'an answer' : run.awaiting.kind})` : ''}
+                            Your agent holds it — open in Ask{run.awaiting ? ` (${runStateLabel(stateOf({ kind: 'suspended', awaiting: run.awaiting.kind as AwaitingKind, expired: false }))})` : ''}
                           </a>
                         ) : <span style={{ fontSize: '0.72rem', opacity: 0.6 }}>no parked run on your agent yet</span>}
                         {e.commitmentId && (
