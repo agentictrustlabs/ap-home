@@ -185,7 +185,7 @@
       /* Plain <h3> is reserved for the uppercase eyebrow label below; use this class for a
          normal-case sub-section title INSIDE a card/panel (e.g. OrgDetail groups, join prompts). */
       .subhead {
-        font-size: 14px; font-weight: 600; color: var(--color-text-primary);
+        font-size: 14px; font-weight: 600; color: var(--color-text-primary); text-transform: none;
         letter-spacing: -.01em; margin: 0 0 .35rem; line-height: 1.3;
       }
 
