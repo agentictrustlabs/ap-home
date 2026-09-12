@@ -90,6 +90,7 @@ import { checkSessionWireShape } from '@agenticprimitives/a2a';
 import { handleEndeavorOp, reduceEventLog, coordinationEventsResource, COORDINATION_REQUESTS_RESOURCE, type CoordinationRequestsDocV1, type EndeavorOpDeps } from './endeavors.js';
 import type { CoordinationEventV1 } from '@agenticprimitives/coordination';
 import { ERC1271_MAGIC_VALUE as ERC1271_MAGIC } from '@agenticprimitives/types';
+import { vaultServerId } from './vault-server-id.js';
 
 const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'bytes4' }] }] as const;
 const IS_REVOKED_ABI = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ name: 'delegationHash', type: 'bytes32' }], outputs: [{ name: 'revoked', type: 'bool' }] }] as const;
@@ -1351,7 +1352,7 @@ export class InteractionsDO {
     // `vault:*`). The op's `resource` arrives bare — `content.artifact.<id>` — so comparing the two
     // unprefixed would never match any real grant and this would refuse every scoped read while
     // looking like it worked.
-    if (!vaultRecordScopeAllows(grants, { server: 'demo-mcp', resource: `vault:${resource}`, op })) return { ok: false };
+    if (!vaultRecordScopeAllows(grants, { server: vaultServerId(this.env), resource: `vault:${resource}`, op })) return { ok: false };
     // SHAPE + SCOPE decided above (app policy); LIVENESS by the substrate, same as every other proof.
     return (await this.verifyWire(wire, principal, sessionSa)) ? { ok: true, grants } : { ok: false };
   }
@@ -2990,7 +2991,7 @@ export class InteractionsDO {
             const stored = ((await this.vaultFor(dg).read<unknown>({ owner: '', resource }))?.data ?? []) as Array<{ id?: string }>;
             const mine = (e: { id?: string }): boolean =>
               vaultRecordScopeAllows(scopedGrants!, {
-                server: 'demo-mcp',
+                server: vaultServerId(this.env),
                 resource: `vault:content.artifact.${String(e.id ?? '')}`,
                 op: 'write',
               });

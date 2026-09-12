@@ -95,12 +95,12 @@ for (const handle of HANDLES) {
     if (!needIx && !needDl && !needKey) { console.log(`  ✓ ${t.label} — planes + vault key on`); continue; }
     if (!DRY && needKey) {
       try {
-        const info = await j(await fetch(`${HOME}/mcp-bind/custody/vault-key/server-info`)) as { serverKey?: string; defaultResources?: string[]; classificationCeiling?: string; ops?: ('read' | 'write')[] };
+        const info = await j(await fetch(`${HOME}/mcp-bind/custody/vault-key/server-info`)) as { serverId?: string; serverKey?: string; defaultResources?: string[]; classificationCeiling?: string; ops?: ('read' | 'write')[] };
         const issuedAt = Math.floor(Date.now() / 1000);
         const challenge = keccak256(toBytes(['demo-mcp:vault-key-provision:v1', t.sa, String(issuedAt)].join('\n')));
         const prov = await j(await fetch(`${HOME}/mcp-bind/custody/vault-key/provision`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ owner: t.sa, issuedAt, proof: await sign(challenge) }) })) as { ok?: boolean; kmsKeyRef?: string; error_description?: string; detail?: string };
         if (!prov.ok || !prov.kmsKeyRef) throw new Error(prov.error_description ?? prov.detail ?? 'provision failed');
-        const params = { vaultId: 'demo-mcp', kmsKeyRef: prov.kmsKeyRef, serverKey: (info.serverKey ?? '0x0000000000000000000000000000000000000001') as Address, allowedResources: info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:*'], classificationCeiling: info.classificationCeiling ?? 'regulated.high', ops: info.ops ?? ['read', 'write'] as ('read' | 'write')[] };
+        const params = { vaultId: String(info.serverId ?? '').trim() || 'demo-mcp', kmsKeyRef: prov.kmsKeyRef, serverKey: (info.serverKey ?? '0x0000000000000000000000000000000000000001') as Address, allowedResources: info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:*'], classificationCeiling: info.classificationCeiling ?? 'regulated.high', ops: info.ops ?? ['read', 'write'] as ('read' | 'write')[] };
         const { delegation, digest, expiresAt } = buildVaultKeyAuthorization(t.sa as Address, params);
         delegation.signature = await sign(digest);
         const bound = await j(await fetch(`${HOME}/mcp-bind/custody/vault-key/bind`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ owner: t.sa, vaultId: params.vaultId, kmsKeyRef: params.kmsKeyRef, allowedResources: params.allowedResources, classificationCeiling: params.classificationCeiling, ops: params.ops, expiresAt, authorization: toWire(delegation) }) })) as { ok?: boolean; reason?: string; error?: string };

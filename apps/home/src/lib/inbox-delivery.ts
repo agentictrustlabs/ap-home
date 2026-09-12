@@ -6,6 +6,7 @@
 // delivery-service SA being operator-provisioned: unset ⇒ activation is inert (no signature, no store),
 // so shipping this before the SA exists is deploy-safe (mirrors the KEK being operator-provisioned).
 import type { Address } from '@agenticprimitives/types';
+import { VAULT_SERVER_ID } from './domain';
 
 /**
  * The Home-operated delivery-service SA — the DELEGATE of the inbox-delivery delegation, and the party
@@ -17,9 +18,9 @@ import type { Address } from '@agenticprimitives/types';
 export const DELIVERY_SERVICE_SA: Address | undefined =
   ((process.env.NEXT_PUBLIC_DELIVERY_SERVICE_SA as string | undefined)?.trim() || undefined) as Address | undefined;
 
-/** The demo-mcp resource-server id the record-scope grant binds. Matches demo-mcp's `VAULT_SERVER_ID`;
- *  demo-mcp only honors a `VaultRecordScopeGrant` whose `server` equals this before gating a vault op. */
-export const MCP_SERVER_ID = 'demo-mcp';
+/** The vault's resource-server id the record-scope grant binds — the deployment's `VAULT_SERVER_ID` (domain.ts);
+ *  the vault only honors a `VaultRecordScopeGrant` whose `server` equals its own before gating a vault op. */
+export const MCP_SERVER_ID = VAULT_SERVER_ID;
 
 /** The interactions-execution SA (spec 322 §2 plane B) — the DELEGATE of the per-principal
  *  interactions grant, exercised ONLY by that principal's InteractionsDO (the serialized execution

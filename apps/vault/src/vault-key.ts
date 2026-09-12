@@ -38,11 +38,20 @@ import { getVaultKeyBindingRow, putVaultKeyBindingRow, type VaultKeyBindingRow }
 // signature check here cannot drift from the one the authority reader makes.
 import { universalSignatureValidatorAbi as USV_ISVALIDSIG_ABI } from '@agenticprimitives/chain-state-viem';
 
-/** The host id a person SA authorizes in its VaultKeyBinding. */
-export const VAULT_SERVER_ID = 'demo-mcp';
+/** The host id a person SA authorizes in its VaultKeyBinding — the `server` every record-scope grant names and
+ *  the key of every binding row. A DEPLOYMENT's name for its vault (`VAULT_SERVER_ID` in wrangler vars): a second
+ *  deployment on the same chain (spec 399 — a product repo's own estate) names its own, so a grant made to one
+ *  vault never satisfies another. Unset ⇒ `demo-mcp`, the id Ring 0's estates were provisioned under; Ring-0
+ *  developers see no change (spec 399 §0.1). */
+export const DEFAULT_VAULT_SERVER_ID = 'demo-mcp';
+export function vaultServerId(env: { VAULT_SERVER_ID?: string }): string {
+  return (env.VAULT_SERVER_ID ?? '').trim() || DEFAULT_VAULT_SERVER_ID;
+}
 
 export interface VaultKeyEnv extends AkcsEnv {
   DB: D1Database;
+  /** This deployment's vault server id (see `vaultServerId`). */
+  VAULT_SERVER_ID?: string;
   RPC_URL: string;
   CHAIN_ID: string;
   DELEGATION_MANAGER: string;
@@ -140,7 +149,7 @@ function delegationFromWire(json: string): Delegation {
  * exists but GCP creds are missing (a misconfiguration, not a person-authorization gap).
  */
 export async function resolvePersonVault(env: VaultKeyEnv, owner: string): Promise<PersonVault | null> {
-  const row = await getVaultKeyBindingRow(env.DB, owner, VAULT_SERVER_ID);
+  const row = await getVaultKeyBindingRow(env.DB, owner, vaultServerId(env));
   if (!row) return null;
   let provider;
   if (isLocalKekRef(row.kms_key_ref)) {
@@ -191,8 +200,8 @@ export async function resolvePersonVault(env: VaultKeyEnv, owner: string): Promi
  * to skip the activation step for members who are already bound (so returning members aren't
  * re-prompted). A revoked binding is excluded by the query; an expired one is treated as unbound.
  */
-export async function isVaultKeyBound(env: Pick<VaultKeyEnv, 'DB'>, owner: string): Promise<boolean> {
-  const row = await getVaultKeyBindingRow(env.DB, owner, VAULT_SERVER_ID);
+export async function isVaultKeyBound(env: Pick<VaultKeyEnv, 'DB' | 'VAULT_SERVER_ID'>, owner: string): Promise<boolean> {
+  const row = await getVaultKeyBindingRow(env.DB, owner, vaultServerId(env));
   if (!row) return false;
   if (row.expires_at && Date.parse(row.expires_at) < Date.now()) return false;
   return true;
@@ -216,7 +225,7 @@ export async function isVaultKeyBindingCurrent(
   env: VaultKeyEnv,
   owner: string,
 ): Promise<{ bound: boolean; stale: boolean; allowedResources: string[] }> {
-  const row = await getVaultKeyBindingRow(env.DB, owner, VAULT_SERVER_ID);
+  const row = await getVaultKeyBindingRow(env.DB, owner, vaultServerId(env));
   if (!row) return { bound: false, stale: false, allowedResources: [] };
   if (row.expires_at && Date.parse(row.expires_at) < Date.now()) {
     return { bound: false, stale: false, allowedResources: [] };
@@ -231,7 +240,7 @@ export async function isVaultKeyBindingCurrent(
       request: {
         vaultId: binding.vaultId,
         ownerPersonSA: owner,
-        serverId: VAULT_SERVER_ID,
+        serverId: vaultServerId(env),
         resource: allowedResources[0] ?? 'vault:*',
         op: binding.ops?.[0] ?? 'read',
         classification: binding.classificationCeiling,
@@ -258,8 +267,8 @@ export async function isVaultKeyBindingCurrent(
 /** The authorized resource scope of an owner's LIVE binding ([] if none/expired). Lets onboarding detect a
  *  STALE binding (one created before the `vault:*` namespace default) and re-bind to upgrade it — otherwise
  *  the member's app records (`vault:<app>:<type>`) stay `resource_not_authorized` forever. */
-export async function getVaultKeyAllowedResources(env: Pick<VaultKeyEnv, 'DB'>, owner: string): Promise<string[]> {
-  const row = await getVaultKeyBindingRow(env.DB, owner, VAULT_SERVER_ID);
+export async function getVaultKeyAllowedResources(env: Pick<VaultKeyEnv, 'DB' | 'VAULT_SERVER_ID'>, owner: string): Promise<string[]> {
+  const row = await getVaultKeyBindingRow(env.DB, owner, vaultServerId(env));
   if (!row) return [];
   if (row.expires_at && Date.parse(row.expires_at) < Date.now()) return [];
   try { return JSON.parse(row.allowed_resources) as string[]; } catch { return []; }
@@ -393,7 +402,7 @@ export async function verifyAndStoreBinding(
     vaultId: input.vaultId,
     ownerPersonSA: input.owner,
     kmsKeyRef: input.kmsKeyRef,
-    allowedServerId: VAULT_SERVER_ID,
+    allowedServerId: vaultServerId(env),
     allowedResources: input.allowedResources,
     classificationCeiling: input.classificationCeiling,
     ops: input.ops,
@@ -411,7 +420,7 @@ export async function verifyAndStoreBinding(
     request: {
       vaultId: input.vaultId,
       ownerPersonSA: input.owner,
-      serverId: VAULT_SERVER_ID,
+      serverId: vaultServerId(env),
       resource: input.allowedResources[0]!,
       op: input.ops[0]!,
       classification: input.classificationCeiling,
@@ -422,7 +431,7 @@ export async function verifyAndStoreBinding(
 
   await putVaultKeyBindingRow(env.DB, {
     owner_address: input.owner,
-    server_id: VAULT_SERVER_ID,
+    server_id: vaultServerId(env),
     vault_id: input.vaultId,
     kms_key_ref: input.kmsKeyRef,
     allowed_resources: JSON.stringify(input.allowedResources),

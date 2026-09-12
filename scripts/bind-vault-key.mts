@@ -23,10 +23,10 @@ for (const a of agents) {
   const low = a.toLowerCase() as Address;
   const bound = await j(await fetch(`${HOME}/mcp-bind/custody/vault-key/is-bound?owner=${low}`));
   if (bound.bound === true) { console.log(`· ${low}: already bound`); continue; }
-  const info = await j(await fetch(`${HOME}/mcp-bind/custody/vault-key/server-info?owner=${low}`)) as { serverKey?: string; kmsKeyRef?: string | null; defaultResources?: string[]; classificationCeiling?: string; ops?: ('read' | 'write')[] };
+  const info = await j(await fetch(`${HOME}/mcp-bind/custody/vault-key/server-info?owner=${low}`)) as { serverId?: string; serverKey?: string; kmsKeyRef?: string | null; defaultResources?: string[]; classificationCeiling?: string; ops?: ('read' | 'write')[] };
   if (!info?.kmsKeyRef) { console.log(`✗ ${low}: server-info names no kmsKeyRef`); failed = true; continue; }
   const params: VaultKeyCeremonyParams = {
-    vaultId: 'demo-mcp', kmsKeyRef: info.kmsKeyRef, serverKey: (info.serverKey ?? '0x0000000000000000000000000000000000000001') as Address,
+    vaultId: String(info.serverId ?? '').trim() || 'demo-mcp', kmsKeyRef: info.kmsKeyRef, serverKey: (info.serverKey ?? '0x0000000000000000000000000000000000000001') as Address,
     allowedResources: info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:*'], classificationCeiling: info.classificationCeiling ?? 'regulated.high', ops: info.ops ?? ['read', 'write'],
     validitySeconds: 60 * 60 * 24 * 365,
   };

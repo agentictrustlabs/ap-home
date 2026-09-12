@@ -3,7 +3,7 @@
 // site (ADR-0021 — app level, never packages). The member-facing lexicon is documented in
 // docs/portal-lexicon.md; this config is its single source of truth. Swapping verticals is a
 // new config, not a code change.
-import { A2A_DOMAIN, AGENT_NAME_PARENT, CONNECT_DOMAIN } from '../lib/domain';
+import { A2A_DOMAIN, AGENT_NAME_PARENT, CONNECT_DOMAIN, VAULT_SERVER_ID } from '../lib/domain';
 import type { WhiteLabelConfig } from './schema';
 
 /**
@@ -103,16 +103,18 @@ const faithImpact: WhiteLabelConfig = {
     // a delegation from the person to the Home MCP's key pinned to `harness.ask` — the right to put a question
     // to their agent as them, revocable on chain, and nothing more. `delegate` is that key (the Worker's
     // secret's address), the same shape as an agent's session wire.
+    // Which Worker and which key are THIS deployment's: `NEXT_PUBLIC_HOME_MCP_ORIGIN` (its origin) and
+    // `NEXT_PUBLIC_HOME_MCP_DELEGATE` (its key's address); unset ⇒ faithnet's, the estate Ring 0 deploys.
     {
       client_id: 'home-mcp',
       name: 'Claude (Home MCP)',
       redirect_uris: [
-        'https://home-mcp-faithnet.richardpedersen3.workers.dev/oauth/callback',
+        `${process.env.NEXT_PUBLIC_HOME_MCP_ORIGIN || 'https://home-mcp-faithnet.richardpedersen3.workers.dev'}/oauth/callback`,
         'http://localhost:8797/oauth/callback',
       ],
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['ask-as-me'],
-      delegate: '0x2D16473370b654D75FCf9cC37649BBd86B9Aff70',
+      delegate: (process.env.NEXT_PUBLIC_HOME_MCP_DELEGATE || '0x2D16473370b654D75FCf9cC37649BBd86B9Aff70') as `0x${string}`,
     },
     {
       client_id: 'skills-app',
@@ -326,7 +328,7 @@ const faithImpact: WhiteLabelConfig = {
       // workspace roster reads listings in place, never copies them (org_read_grant — see schema).
       org_read_grant: {
         delegate: (process.env.NEXT_PUBLIC_GATHER_WORKSPACE_SA || '0xcE7bb378e132Cd373B366746B5F43533f9777Da7') as `0x${string}`, // gather27-workspace (faithnet SA when set)
-        server: 'demo-mcp',
+        server: VAULT_SERVER_ID,
         resources: ['vault:gather27:listing'],
       },
       // spec 345 — round-2 D3 individual custody: a person publishing under their own name (no
@@ -334,7 +336,7 @@ const faithImpact: WhiteLabelConfig = {
       // the self-as-org incident (existingOrg pointed at the person's own address wrote a bogus
       // kind:'org' impact-relationships entry) by never touching org machinery at all.
       self_vault_grant: {
-        server: 'demo-mcp',
+        server: VAULT_SERVER_ID,
         resources: ['vault:gather27:listing'],
         ops: ['read', 'write'],
       },

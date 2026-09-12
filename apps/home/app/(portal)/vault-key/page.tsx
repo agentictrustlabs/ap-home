@@ -17,10 +17,12 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useSession } from '../../../src/context/session';
 import { bindVaultKey, activateInteractionsIfNeeded, resolveVia, type Via } from '../../../src/home/onboarding';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
+import { VAULT_SERVER_ID } from '../../../src/lib/domain';
 
 const MCP_BIND = '/mcp-bind';
 
 interface ServerInfo {
+  serverId?: string;
   serverKey: string;
   defaultResources: string[];
   classificationCeiling: string;
@@ -89,7 +91,7 @@ export default function VaultKeyPage() {
       const out = await bindVaultKey(
         agentAddress,
         {
-          vaultId: 'demo-mcp',
+          vaultId: info.serverId ?? VAULT_SERVER_ID,
           kmsKeyRef: kmsKeyRef.trim(),
           serverKey: info.serverKey as `0x${string}`,
           allowedResources: info.defaultResources,

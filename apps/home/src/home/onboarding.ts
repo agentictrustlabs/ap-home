@@ -219,11 +219,11 @@ async function buildBatchedPersonPlaneGrants(sa: Address): Promise<{ digests: He
   let vaultFolded = false;
   try {
     const info = (await fetch(`/mcp-bind/custody/vault-key/server-info?owner=${low}`).then((r) => r.json())) as {
-      serverKey?: string; kmsKeyRef?: string | null; defaultResources?: string[]; classificationCeiling?: string; ops?: ('read' | 'write')[];
+      serverId?: string; serverKey?: string; kmsKeyRef?: string | null; defaultResources?: string[]; classificationCeiling?: string; ops?: ('read' | 'write')[];
     };
     if (info?.kmsKeyRef) {
       const params: VaultKeyCeremonyParams = {
-        vaultId: 'demo-mcp',
+        vaultId: info.serverId ?? MCP_SERVER_ID,
         kmsKeyRef: info.kmsKeyRef,
         serverKey: (info.serverKey ?? '0x0000000000000000000000000000000000000001') as Address,
         allowedResources: info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:*'],
@@ -1173,7 +1173,7 @@ export async function activateVault(
 ): Promise<Result<{ kmsKeyRef: string }>> {
   try {
     const info = (await fetch('/mcp-bind/custody/vault-key/server-info').then((r) => r.json())) as {
-      serverKey?: string;
+      serverId?: string; serverKey?: string;
       defaultResources?: string[];
       classificationCeiling?: string;
       ops?: ('read' | 'write')[];
@@ -1197,7 +1197,7 @@ export async function activateVault(
     const bound = await bindVaultKey(
       owner,
       {
-        vaultId: 'demo-mcp',
+        vaultId: info.serverId ?? MCP_SERVER_ID,
         kmsKeyRef: prov.kmsKeyRef,
         serverKey: (info.serverKey ?? '0x0000000000000000000000000000000000000001') as Address,
         allowedResources: info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:*'],

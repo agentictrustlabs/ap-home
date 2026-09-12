@@ -114,6 +114,7 @@ import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@
 import { selectComposer, selectComposerRouted, resolveProvider, availableModels, plannerPromptBudget, defaultProvider, widestPromptBudget, type RouteNeed, type RouteDecision } from './orchestration.js';
 import { loadRun, saveRun, dropRun, listRuns, mergeTurn, type HarnessRunCheckpointV1, completedStepsOf, isExpired, AWAIT_WINDOW_MS, expiryFor } from './harness-runs.js';
 import { buildGenesisPlanes, type GenesisPlaneWires } from './genesis-planes.js';
+import { vaultServerId } from './vault-server-id.js';
 import { bindHarnessAttempt, HarnessApprovalWorkflow, type HarnessWorkflowParams } from './harness-workflow.js';
 import { toErrorCode } from './harness-workflow-core.js';
 export { HarnessApprovalWorkflow };
@@ -290,6 +291,8 @@ export interface Env {
   CHAIN_ID: string;
   ALLOWED_ORIGINS: string;
   MCP_URL: string;
+  /** The deployment's vault server id — the `server` of every grant this runtime issues (`vault-server-id.ts`). */
+  VAULT_SERVER_ID?: string;
   /**
    * spec 288 §4/§6 — GatewayAssertion HMAC secret. Same value on demo-edge (signer) + demo-mcp/demo-a2a
    * (verifiers). When set, the `/api/a2a` task endpoint verifies the edge admitted THESE exact bytes for
@@ -6715,12 +6718,13 @@ app.post('/custody/oidc/activate-vault', async (c) => {
 
     // Discover this server's binding params, then provision the per-person KEK (idempotent).
     const info = (await (await mfetch('/custody/vault-key/server-info')).json().catch(() => ({}))) as
-      { serverKey?: string; defaultResources?: string[]; classificationCeiling?: string; ops?: ('read' | 'write')[] };
+      { serverId?: string; serverKey?: string; defaultResources?: string[]; classificationCeiling?: string; ops?: ('read' | 'write')[] };
     const serverKey = ((info.serverKey ?? '').trim() || '0x0000000000000000000000000000000000000001') as Address;
     const allowedResources = info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:*'];
     const classificationCeiling = info.classificationCeiling ?? 'regulated.high';
     const ops: ('read' | 'write')[] = info.ops ?? ['read', 'write'];
-    const vaultId = 'demo-mcp';
+    // The vault names its own server id; the binding the person signs is for THAT vault, never a literal here.
+    const vaultId = String(info.serverId ?? '').trim() || vaultServerId(c.env);
 
     const provRes = await mfetch('/custody/vault-key/provision', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ owner: person }),

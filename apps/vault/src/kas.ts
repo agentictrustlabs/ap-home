@@ -69,7 +69,7 @@ export async function authorizeDecrypt(input: AuthorizeDecryptInput): Promise<Ke
     mcp: { resourceUri: input.audience, serverId: input.serverId, toolName: input.toolName, argsHash },
     authorization: { entitlementHashes },
     vault: {
-      vaultId: 'demo-mcp',
+      vaultId: input.serverId,
       objectIds: [`${input.principal.toLowerCase()}:${input.resource}`],
       resource: input.resource,
       fields: input.allowedFields,

@@ -38,7 +38,7 @@ import {
   RESOURCE_ORG_SENSITIVE,
   VAULT_RECORD_PREFIX,
 } from './vault';
-import { localKekEnabled, localKekRef, resolvePersonVault, buildVaultKeyVerifier, verifyAndStoreBinding, isVaultKeyBound, isVaultKeyBindingCurrent, getVaultKeyAllowedResources, VAULT_SERVER_ID, type PersonVault } from './vault-key';
+import { localKekEnabled, localKekRef, resolvePersonVault, buildVaultKeyVerifier, verifyAndStoreBinding, isVaultKeyBound, isVaultKeyBindingCurrent, getVaultKeyAllowedResources, vaultServerId, type PersonVault } from './vault-key';
 import { verifyVaultKeyAuthorization } from '@agenticprimitives/key-authorization';
 import { createDurableObjectBudgetStore, type BudgetDoNamespace } from '@agenticprimitives/rate-control-cloudflare';
 import { decodeGatewayAssertionToken, verifyGatewayAssertion, createHmacGatewayAssertionVerifier } from '@agenticprimitives/edge-runtime';
@@ -208,11 +208,12 @@ type SensitiveReadResult =
  *  whose ops include `op`; deny-by-default. NO caveat ⇒ inert (binding-only). This NARROWS, never widens,
  *  the vault-key binding: callers MUST still run `authorizePersonVaultOp` (the two gates AND). */
 function recordScopeAllows(
+  env: Pick<Env, 'VAULT_SERVER_ID'>,
   recordScopes: VaultRecordScopeGrant[] | undefined,
   resource: string,
   op: 'read' | 'write' | 'delete',
 ): boolean {
-  return vaultRecordScopeAllows(recordScopes, { server: VAULT_SERVER_ID, resource, op });
+  return vaultRecordScopeAllows(recordScopes, { server: vaultServerId(env), resource, op });
 }
 
 function applyDataScope(grants: DataScopeGrant[] | undefined, resource: string, requested?: string[]): string[] | undefined {
@@ -260,7 +261,7 @@ async function readSensitive(
   const release = await authorizeDecrypt({
     principal,
     audience: ctx.audience,
-    serverId: VAULT_SERVER_ID,
+    serverId: vaultServerId(env),
     toolName: spec.toolName,
     args: args ?? {},
     resource: spec.resource,
@@ -380,7 +381,7 @@ async function authorizePersonVaultOp(
     verifier: buildVaultKeyVerifier(env),
     authorization: pv.authorization,
     binding: pv.binding,
-    request: { vaultId: pv.binding.vaultId, ownerPersonSA: owner, serverId: VAULT_SERVER_ID, resource, op, classification },
+    request: { vaultId: pv.binding.vaultId, ownerPersonSA: owner, serverId: vaultServerId(env), resource, op, classification },
   });
   if (!verdict.ok) {
     console.warn(`[vault-key] unauthorized: owner=${owner} resource=${resource} op=${op} reason=${verdict.reason} allowed=${JSON.stringify(pv.binding.allowedResources)}`);
@@ -391,6 +392,8 @@ async function authorizePersonVaultOp(
 
 export interface Env extends AkcsEnv {
   DB: D1Database;
+  /** This deployment's vault server id — the `server` of every grant, the key of every binding (`vaultServerId`). */
+  VAULT_SERVER_ID?: string;
 
   RPC_URL: string;
   CHAIN_ID: string;
@@ -1241,7 +1244,7 @@ app.post('/tools/get_vault_record', async (c) => {
         if (!recordType) return { ok: false, error: 'recordType required' };
         const resource = `${VAULT_RECORD_PREFIX}${recordType}`;
         // spec 317 §3.2: per-delegation record scope FIRST (narrows the binding), then the binding gate.
-        if (!recordScopeAllows(recordScopes, resource, 'read')) {
+        if (!recordScopeAllows(c.env, recordScopes, resource, 'read')) {
           return { ok: false, error: 'record_scope_denied', served_by: 'demo-mcp:get_vault_record' };
         }
         const gate = await authorizePersonVaultOp(c.env, principal, resource, 'read', 'internal');
@@ -1294,10 +1297,10 @@ app.post('/tools/get_vault_records', async (c) => {
         let authFailed = false;
         await Promise.all(recordTypes.map(async (rt) => {
           const resource = `${VAULT_RECORD_PREFIX}${rt}`;
-          if (!recordScopeAllows(recordScopes, resource, 'read')) return; // scoped-out → omit (legit)
+          if (!recordScopeAllows(c.env, recordScopes, resource, 'read')) return; // scoped-out → omit (legit)
           const verdict = await verifyVaultKeyAuthorization({
             verifier, authorization: pv.authorization, binding: pv.binding,
-            request: { vaultId: pv.binding.vaultId, ownerPersonSA: principal, serverId: VAULT_SERVER_ID, resource, op: 'read', classification: 'internal' },
+            request: { vaultId: pv.binding.vaultId, ownerPersonSA: principal, serverId: vaultServerId(c.env), resource, op: 'read', classification: 'internal' },
           });
           if (!verdict.ok) { authFailed = true; return; } // do NOT read; fail the whole batch below
           const obj = await pv.vault.read({ owner: principal, resource });
@@ -1345,7 +1348,7 @@ app.post('/tools/set_vault_record', async (c) => {
         // gate, so a write-only delegate cannot censor records (spec 317 §3.2 / audit F1).
         const isTombstone = (args?.data ?? null) === null;
         // spec 317 §3.2: per-delegation record scope FIRST (narrows the binding), then the binding gate.
-        if (!recordScopeAllows(recordScopes, resource, isTombstone ? 'delete' : 'write')) {
+        if (!recordScopeAllows(c.env, recordScopes, resource, isTombstone ? 'delete' : 'write')) {
           return { ok: false, error: 'record_scope_denied', served_by: 'demo-mcp:set_vault_record' };
         }
         // spec 278 write gate: sealing requires op:'write' on the person's vault-key authorization
@@ -1400,7 +1403,7 @@ app.post('/tools/list_vault_record', async (c) => {
           // spec 317 §3.2: a record-scoped delegation only ENUMERATES record types it may READ, so a
           // write-only delivery delegate lists nothing (no leakage of which records exist). No caveat ⇒
           // unchanged (recordScopeAllows returns true).
-          .filter((r) => recordScopeAllows(recordScopes, r.resource, 'read'))
+          .filter((r) => recordScopeAllows(c.env, recordScopes, r.resource, 'read'))
           .map((r) => ({ record_type: r.resource.slice(VAULT_RECORD_PREFIX.length), updated_at: r.updatedAt }));
         return { ok: true, owner: principal, records, served_by: 'demo-mcp:list_vault_record' };
       },
@@ -1671,7 +1674,7 @@ app.post('/tools/get_entitled_record', async (c) => {
         if (!recordType) return { ok: false, error: 'recordType required' };
         // spec 317 §3.2: the reader's OWN delegation may carry a record scope — it narrows what this
         // delegation may read even cross-principal. No caveat ⇒ inert (the entitlement is the gate).
-        if (!recordScopeAllows(recordScopes, `${VAULT_RECORD_PREFIX}${recordType}`, 'read')) {
+        if (!recordScopeAllows(c.env, recordScopes, `${VAULT_RECORD_PREFIX}${recordType}`, 'read')) {
           return { ok: false, error: 'record_scope_denied', served_by: 'demo-mcp:get_entitled_record' };
         }
         const r = await readEntitledRecord(c.env, {
@@ -1863,7 +1866,7 @@ app.post('/custody/vault-key/bind', async (c) => {
       authorization: normalizedAuthorization,
     });
     if (!res.ok) return c.json({ ok: false, error: 'authorization_invalid', reason: res.reason }, 401);
-    return c.json({ ok: true, owner, kmsKeyRef, server_id: VAULT_SERVER_ID });
+    return c.json({ ok: true, owner, kmsKeyRef, server_id: vaultServerId(c.env) });
   } catch (e) {
     return c.json({ ok: false, error: 'bind_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
@@ -1917,8 +1920,8 @@ app.get('/custody/vault-key/server-info', (c) => {
     if (!kmsKeyRef && localKekEnabled(c.env)) kmsKeyRef = localKekRef(owner);
   }
   return c.json({
-    serverId: VAULT_SERVER_ID,
-    vaultId: VAULT_SERVER_ID,
+    serverId: vaultServerId(c.env),
+    vaultId: vaultServerId(c.env),
     serverKey: (c.env.VAULT_KEY_SERVER_DELEGATE ?? '').trim() || '0x0000000000000000000000000000000000000001',
     kmsKeyRef,
     // `vault:*` authorizes the person's WHOLE own vault-record namespace (impact-profile, jp:adopter,

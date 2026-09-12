@@ -63,7 +63,7 @@ async function activateVault(): Promise<string> {
   const status = (await fetch(`${MCP_URL}/custody/vault-key/is-bound?owner=${OWNER}`).then((r) => r.json())) as { bound?: boolean; allowedResources?: string[] };
   if (status.bound && status.allowedResources?.includes('vault:*')) return 'vault bound';
   const info = (await fetch(`${MCP_URL}/custody/vault-key/server-info?owner=${OWNER.toLowerCase()}`).then((r) => r.json())) as {
-    serverKey?: string; defaultResources?: string[]; classificationCeiling?: string; ops?: ('read' | 'write')[];
+    serverId?: string; serverKey?: string; defaultResources?: string[]; classificationCeiling?: string; ops?: ('read' | 'write')[];
   };
   const issuedAt = Math.floor(Date.now() / 1000);
   const challenge = keccak256(toBytes(['demo-mcp:vault-key-provision:v1', OWNER.toLowerCase(), String(issuedAt)].join('\n')));
@@ -73,7 +73,7 @@ async function activateVault(): Promise<string> {
   }).then((r) => r.json())) as { ok?: boolean; kmsKeyRef?: string; error_description?: string; detail?: string };
   if (!prov.ok || !prov.kmsKeyRef) return `vault provision failed: ${prov.error_description ?? prov.detail ?? 'unknown'}`;
   const params = {
-    vaultId: 'demo-mcp',
+    vaultId: String(info.serverId ?? '').trim() || 'demo-mcp',
     kmsKeyRef: prov.kmsKeyRef,
     serverKey: (info.serverKey ?? '0x0000000000000000000000000000000000000001') as Address,
     allowedResources: info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:*'],

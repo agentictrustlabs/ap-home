@@ -12,6 +12,8 @@ vi.mock('../lib/chain', () => ({
     paymentEnforcer: '0x07fa0ae59fde4b7ce8962d6fe7a1d648ec3dd5ce',
     digestBindingEnforcer: '0xa3bb9bcc9b2f6f2419e1abe5ed6fd5399b9e68e1',
   },
+  // domain.ts (reached through inbox-delivery's VAULT_SERVER_ID) reads the subregistry table at load.
+  PERMISSIONLESS_SUBREGISTRIES: {},
 }));
 vi.mock('../csrf', () => ({ ensureCsrfToken: async () => 't', csrfHeaders: () => ({}) }));
 
@@ -85,6 +87,7 @@ describe('where the Ask exists at all', () => {
         valueEnforcer: '0x8759c1a6cebf1d5069e9434ef46327bf2ef69975', paymentEnforcer: '0x07fa0ae59fde4b7ce8962d6fe7a1d648ec3dd5ce',
         digestBindingEnforcer: `0x${'0'.repeat(40)}`,
       },
+      PERMISSIONLESS_SUBREGISTRIES: {},
     }));
     const fresh = await import('./ask');
     expect(fresh.askIsAvailable()).toBe(false);

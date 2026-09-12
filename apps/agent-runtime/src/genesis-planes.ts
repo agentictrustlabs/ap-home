@@ -31,7 +31,7 @@ import {
 /** The 0x03 approved-hash sentinel — the SA's ERC-1271 approved-hash branch validates these wires. */
 const APPROVED = '0x03' as Hex;
 
-const MCP_SERVER_ID = 'demo-mcp';
+import { vaultServerId } from './vault-server-id.js';
 
 /** The interactions grant's record scopes: the package CORE (`@agenticprimitives/fabric/interactions` — the
  *  one list the Home composes from too) plus this product's own namespaces. Only the extension is a local
@@ -53,6 +53,7 @@ export interface GenesisPlanesEnv {
   TIMESTAMP_ENFORCER?: string;
   VALUE_ENFORCER?: string;
   CHAIN_ID?: string | number;
+  VAULT_SERVER_ID?: string;
 }
 
 export interface GenesisPlaneWires {
@@ -81,6 +82,7 @@ export function buildGenesisPlanes(
   const val = env.VALUE_ENFORCER as Address;
   if (!dm || !ts || !val) throw new Error('genesis planes: delegation contracts not configured');
   const { validUntil } = stewardship;
+  const MCP_SERVER_ID = vaultServerId(env);
 
   const struct = (delegate: Address, caveats: Caveat[], saltOffset: bigint): { wire: Delegation; digest: Hex } => {
     const d: Delegation = {

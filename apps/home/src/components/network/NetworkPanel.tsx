@@ -14,6 +14,7 @@
 // are inlined against this app's proxies.
 import { useEffect, useState } from 'react';
 import { SectionShell } from '../portal/SectionShell';
+import { VAULT_SERVER_ID } from '../../lib/domain';
 
 // ── Backend read shapes + helpers (impact's src/lib/backend.ts, trimmed to this page) ──
 interface Health {
@@ -124,7 +125,7 @@ export function NetworkPanel() {
         <h2>Services</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '.8rem' }}>
           <ServiceCard label="demo-a2a" sub="relayer · custody bridge · vault proxy" ok={!!a2a?.ok} detail={a2a?.runtime} />
-          <ServiceCard label="demo-mcp" sub="vault · vault-key bind ceremony" ok={!!mcp?.ok} detail={mcp?.service ?? (mcp ? undefined : 'unreachable')} />
+          <ServiceCard label={VAULT_SERVER_ID} sub="vault · vault-key bind ceremony" ok={!!mcp?.ok} detail={mcp?.service ?? (mcp ? undefined : 'unreachable')} />
         </div>
       </div>
 

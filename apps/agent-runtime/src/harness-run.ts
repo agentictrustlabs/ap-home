@@ -88,6 +88,7 @@ import { decodePaymentTerms } from '@agenticprimitives/delegation';
 import { preconditionRefusal } from './capability-preconditions.js';
 import { AUTHORITY_BEARING_CAPABILITIES } from './endeavor-authority-steps.js';
 import { deriveStanding, standingNote, type Standing, type StandingDeps } from '@agenticprimitives/context';
+import { vaultServerId } from './vault-server-id.js';
 
 
 export interface HarnessEnv {
@@ -97,6 +98,8 @@ export interface HarnessEnv {
   ALLOWED_ORIGINS?: string;
   CHAIN_ID: string;
   RPC_URL?: string;
+  /** The deployment's vault server id (`vault-server-id.ts`); unset ⇒ demo-mcp. */
+  VAULT_SERVER_ID?: string;
   DELEGATION_MANAGER: string;
   UNIVERSAL_SIGNATURE_VALIDATOR?: string;
   /** The SA this agent acts as under a mandate (the mandate's DELEGATE). Deployed per chain, custodied by the
@@ -1058,9 +1061,9 @@ export function suppliedApprovalsPort(
   };
 }
 
-/** The MCP server whose vault scope an org→member access grant names. Must match the Home's
- *  `MCP_SERVER_ID`, or the grant reads as scoped to a server nobody consults. */
-const MCP_SERVER_ID = 'demo-mcp';
+// The MCP server whose vault scope an org→member access grant names is the deployment's `VAULT_SERVER_ID`
+// (`vault-server-id.ts`) — the same value the Home and the vault hold, or the grant reads as scoped to a server
+// nobody consults.
 /** spec 322 W3 — the org record a member may read once they join. */
 const ORG_PROFILE_RESOURCE_SCOPE = 'vault:org.profile';
 
@@ -1072,7 +1075,7 @@ const ORG_PROFILE_RESOURCE_SCOPE = 'vault:org.profile';
 function buildInviteGrant(env: HarnessEnv, org: Address, invitee: Address, salt: bigint, validUntil: number): Delegation {
   const enforcers = harnessEnforcers(env);
   const caveats: Caveat[] = [
-    buildVaultRecordScopeCaveat([{ server: MCP_SERVER_ID, resources: [ORG_PROFILE_RESOURCE_SCOPE], ops: ['read'] }]),
+    buildVaultRecordScopeCaveat([{ server: vaultServerId(env), resources: [ORG_PROFILE_RESOURCE_SCOPE], ops: ['read'] }]),
     buildCaveat(enforcers.timestamp, encodeTimestampTerms(0, validUntil)),
     buildCaveat(enforcers.value, encodeValueTerms(0n)),
   ];

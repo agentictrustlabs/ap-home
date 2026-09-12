@@ -71,7 +71,7 @@ const delegation: Delegation = {
   delegate: (info.serverKey ?? '0x0000000000000000000000000000000000000001') as `0x${string}`,
   authority: ROOT_AUTHORITY,
   caveats: [buildVaultKeyUseCaveat({
-    vaultId: 'demo-mcp', kmsKeyRef: prov.kmsKeyRef, resources: info.defaultResources,
+    vaultId: String(info.serverId ?? '').trim() || 'demo-mcp', kmsKeyRef: prov.kmsKeyRef, resources: info.defaultResources,
     classificationCeiling: info.classificationCeiling, ops: info.ops, noSubdelegation: true,
   })],
   salt, signature: '0x',
@@ -80,7 +80,7 @@ delegation.signature = await sign(hashDelegation(delegation, CHAIN_ID, DELEGATIO
 const bind = await j(await fetch(`${MCP}/custody/vault-key/bind`, {
   method: 'POST', headers: { 'content-type': 'application/json' },
   body: JSON.stringify({
-    owner, vaultId: 'demo-mcp', kmsKeyRef: prov.kmsKeyRef,
+    owner, vaultId: String(info.serverId ?? '').trim() || 'demo-mcp', kmsKeyRef: prov.kmsKeyRef,
     allowedResources: info.defaultResources, classificationCeiling: info.classificationCeiling,
     ops: info.ops, expiresAt: new Date(Date.now() + 90 * 864e5).toISOString(),
     authorization: { ...delegation, salt: salt.toString() },

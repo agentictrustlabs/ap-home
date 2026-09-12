@@ -88,7 +88,7 @@ async function activateVault(sa: Address, pk: Hex): Promise<string> {
   const status = (await fetch(`${MCP_URL}/custody/vault-key/is-bound?owner=${sa}`).then((r) => r.json())) as { bound?: boolean; allowedResources?: string[] };
   if (status.bound && status.allowedResources?.includes('vault:*')) return 'vault bound';
   const info = (await fetch(`${MCP_URL}/custody/vault-key/server-info?owner=${sa.toLowerCase()}`).then((r) => r.json())) as {
-    serverKey?: string; kmsKeyRef?: string | null; defaultResources?: string[]; classificationCeiling?: string; ops?: ('read' | 'write')[];
+    serverId?: string; serverKey?: string; kmsKeyRef?: string | null; defaultResources?: string[]; classificationCeiling?: string; ops?: ('read' | 'write')[];
   };
   if (!info.kmsKeyRef) return 'vault: no kmsKeyRef (set DEMO_VAULT_LOCAL_KEK_SECRET on demo-mcp)';
   const issuedAt = Math.floor(Date.now() / 1000);
@@ -99,7 +99,7 @@ async function activateVault(sa: Address, pk: Hex): Promise<string> {
   }).then((r) => r.json())) as { ok?: boolean; kmsKeyRef?: string; error_description?: string; detail?: string };
   if (!prov.ok || !prov.kmsKeyRef) return `vault provision failed: ${prov.error_description ?? prov.detail ?? 'unknown'}`;
   const params = {
-    vaultId: 'demo-mcp',
+    vaultId: String(info.serverId ?? '').trim() || 'demo-mcp',
     kmsKeyRef: prov.kmsKeyRef,
     serverKey: (info.serverKey ?? '0x0000000000000000000000000000000000000001') as Address,
     allowedResources: info.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:*'],
