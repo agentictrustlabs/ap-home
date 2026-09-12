@@ -355,13 +355,12 @@ function FolderTree({ nodes, path, onGo, counts }: {
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onGo(n.path.split('/')); } }}
           style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 13,
             padding: '.28rem .5rem', paddingLeft: `${0.5 + depth * 0.75}rem`,
-            background: on ? 'var(--color-amber-50)' : 'transparent',
-            color: on ? 'var(--color-amber-700)' : 'var(--color-text-body)',
-            fontWeight: on ? 700 : 500 }}>
+            background: on ? 'var(--color-surface-sunken)' : 'transparent',
+            color: 'var(--color-text-primary)', fontWeight: on ? 600 : 500 }}>
           <span onClick={(e) => { e.stopPropagation(); if (hasKids) setOpen((s) => { const n2 = new Set(s); n2.has(n.path) ? n2.delete(n.path) : n2.add(n.path); return n2; }); }}
             style={{ width: 12, flexShrink: 0, color: 'var(--color-text-muted)', fontSize: 10, textAlign: 'center' }}
             aria-hidden={!hasKids}>{hasKids ? (expanded ? '▾' : '▸') : ''}</span>
-          <Icon name="folder" size={14} style={{ flexShrink: 0, color: on ? 'var(--color-amber-700)' : 'var(--color-text-muted)' }} />
+          <Icon name="folder" size={14} style={{ flexShrink: 0, color: 'var(--color-text-muted)' }} />
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{n.name}</span>
           {/* DIRECT files only, deliberately. A subtree total would show 7 on a collapsed parent and
               5 on the child inside it, which reads as double counting; direct counts stay consistent
@@ -386,10 +385,10 @@ function FolderTree({ nodes, path, onGo, counts }: {
         onClick={() => onGo([])}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onGo([]); } }}
         style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 13, padding: '.28rem .5rem',
-          background: atRoot ? 'var(--color-amber-50)' : 'transparent',
-          color: atRoot ? 'var(--color-amber-700)' : 'var(--color-text-body)', fontWeight: atRoot ? 700 : 500 }}>
+          background: atRoot ? 'var(--color-surface-sunken)' : 'transparent',
+          color: 'var(--color-text-primary)', fontWeight: atRoot ? 600 : 500 }}>
         <span style={{ width: 12, flexShrink: 0 }} />
-        <Icon name="vault" size={14} style={{ flexShrink: 0, color: atRoot ? 'var(--color-amber-700)' : 'var(--color-text-muted)' }} />
+        <Icon name="vault" size={14} style={{ flexShrink: 0, color: 'var(--color-text-muted)' }} />
         <span style={{ flex: 1 }}>All items</span>
         {(counts.get('') ?? 0) > 0 && (
           <span style={{ ...mutedText, fontSize: 11, flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}

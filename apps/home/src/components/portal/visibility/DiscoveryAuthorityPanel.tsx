@@ -78,7 +78,7 @@ export function DiscoveryAuthorityPanel() {
     <Card>
       <Stack gap={0.75}>
         <div>
-          <h3 style={{ margin: 0, fontSize: '1rem' }}>Let someone else make this agent discoverable</h3>
+          <h3 className="subhead" style={{ margin: 0, fontSize: 15 }}>Let someone else make this agent discoverable</h3>
           <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', opacity: 0.75 }}>
             Sign once, and they can issue discovery grants for this agent without you. It is an
             ordinary delegation — scoped to one action, time-boxed, and revocable on-chain.

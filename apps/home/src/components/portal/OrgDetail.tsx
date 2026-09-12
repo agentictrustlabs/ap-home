@@ -371,12 +371,7 @@ export function OrgMembers({ org, token }: { org: MyOrg; token: string | null })
 
   return (
     <div className="dash-section" style={{ marginTop: '1.25rem' }}>
-      <h3 className="subhead">Members</h3>
-      <p className="manage-card-blurb" style={{ margin: '0 0 .7rem' }}>
-        Members of <b>{org.orgName || 'this org'}</b> — one roster. Membership is the relationship; the
-        access grant shown per member is how you read their profile (their data stays in their own vault).
-        The grant is evidence of membership, not the membership itself — revoking it never ends a membership.
-      </p>
+      <h3>Members</h3>
       {err && <p className="manage-card-blurb" style={{ color: 'var(--c-danger, #dc2626)' }}>{err}</p>}
       {!loaded ? (
         <p className="manage-card-blurb">Loading members…</p>

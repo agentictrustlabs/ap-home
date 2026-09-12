@@ -1311,8 +1311,8 @@ function PromptCard({ prompt, answers, setAnswers, busy, onAnswer, onCancel, onC
                     style={{
                       display: 'block', width: '100%', textAlign: 'left', marginTop: 4, padding: '7px 9px',
                       borderRadius: 7, cursor: 'pointer', font: 'inherit',
-                      border: `1px solid ${picked ? 'var(--accent, #2563eb)' : 'var(--border, #d8dbe0)'}`,
-                      background: picked ? 'var(--accent-soft, #eff4ff)' : 'transparent',
+                      border: `1px solid ${picked ? 'var(--color-border-strong)' : 'var(--color-border)'}`,
+                      background: picked ? 'var(--color-surface-sunken)' : 'transparent', boxShadow: picked ? 'inset 3px 0 0 var(--color-amber-500)' : 'none',
                     }}
                   >
                     {/* An explicit colour: inheriting one rendered the label the same shade as the card

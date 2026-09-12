@@ -185,7 +185,7 @@
       /* Plain <h3> is reserved for the uppercase eyebrow label below; use this class for a
          normal-case sub-section title INSIDE a card/panel (e.g. OrgDetail groups, join prompts). */
       .subhead {
-        font-size: 14px; font-weight: 600; color: var(--color-text-primary);
+        font-size: 14px; font-weight: 600; color: var(--color-text-primary); text-transform: none;
         letter-spacing: -.01em; margin: 0 0 .35rem; line-height: 1.3;
       }
 
@@ -1313,18 +1313,20 @@
       .onboarding-card.wide { max-width: 520px; align-items: stretch; text-align: left; }
       .onboarding-card .btn-primary, .onboarding-card .btn-ghost, .onboarding-card .value-step-list, .onboarding-card .receipt-card, .onboarding-card .onboarding-error, .onboarding-card .name-chip { width: 100%; }
       .onboarding-card .value-step-list, .onboarding-card .receipt-card { text-align: left; }
-      .onboarding-h1 { font-size: 1.5rem; font-weight: 800; color: var(--color-text-primary); letter-spacing: -.03em; margin: .25rem 0 0; line-height: 1.2; }
+      .onboarding-h1 { font-size: 1.45rem; font-weight: 700; color: var(--color-text-primary); letter-spacing: -.02em; margin: .25rem 0 0; line-height: 1.2; }
       .onboarding-sub { color: var(--color-text-muted); font-size: .92rem; line-height: 1.55; margin: 0; }
-      .onboarding-note { font-size: .8rem; color: var(--color-text-body); background: var(--color-amber-50); border: 1px solid var(--color-amber-100); border-radius: var(--radius-8); padding: .5rem .75rem; margin: 0; width: 100%; }
+      .onboarding-note { font-size: .8rem; color: var(--color-text-body); background: var(--color-surface-sunken); border: 1px solid var(--color-border); border-radius: var(--radius-8); padding: .5rem .75rem; margin: 0; width: 100%; }
       .onboarding-secondary { width: 100%; }
+      /* full width is the onboarding card's rule, not the portal's */
+      .portal-main .onboarding-secondary { width: auto; }
       .onboarding-busy { display: flex; flex-direction: column; align-items: center; gap: .6rem; padding: 1.5rem 0; }
-      .onboarding-busy-msg { font-weight: 700; color: var(--color-text-primary); margin: 0; }
+      .onboarding-busy-msg { font-weight: 600; color: var(--color-text-primary); margin: 0; }
       .onboarding-busy-sub { font-size: .8rem; color: var(--color-text-muted); margin: 0; max-width: 36ch; text-align: center; }
       .ceremony-progress { width: 100%; max-width: 240px; height: 6px; background: var(--color-surface-sunken, #e8e4d9); border-radius: 999px; overflow: hidden; }
-      .ceremony-progress-fill { height: 100%; background: var(--color-accent, #2563eb); border-radius: 999px; transition: width .4s ease; }
+      .ceremony-progress-fill { height: 100%; background: var(--color-amber-500); border-radius: 999px; transition: width .4s ease; }
       .onboarding-error { background: var(--color-danger-subtle); border: 1px solid #fecaca; color: var(--color-danger); border-radius: var(--radius-8); padding: .6rem .85rem; font-size: .85rem; }
       .name-chip { background: var(--color-surface-sunken); border: 1px solid var(--color-border); border-radius: var(--radius-12); padding: .6rem 1rem; display: flex; flex-direction: column; gap: .1rem; align-items: center; }
-      .name-chip-label { font-size: 1.1rem; font-weight: 800; color: var(--color-text-primary); }
+      .name-chip-label { font-size: 1.1rem; font-weight: 700; color: var(--color-text-primary); }
       .name-chip-full { font-family: var(--font-mono); font-size: .78rem; color: var(--color-text-muted); }
       .celebrate { display: flex; flex-direction: column; align-items: center; gap: .4rem; }
       .onboarding-input { width: 100%; font-size: 1rem; padding: .7rem .85rem; border: 1px solid var(--color-border-strong); border-radius: var(--radius-12); background: var(--color-surface); color: var(--color-text-primary); }
@@ -1551,7 +1553,7 @@
   --ui-radius: 10px; --ui-border: 1px solid var(--color-border);
 }
 /* page header: title · one-line description · actions */
-.ui-page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4); margin: 0 0 var(--sp-6); }
+.ui-page-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--sp-3) var(--sp-4); margin: 0 0 var(--sp-6); }
 .ui-page-head h1 { font-size: var(--fs-2xl); font-weight: 700; letter-spacing: -.02em; line-height: var(--lh-tight); margin: 0; color: var(--color-text-primary); }
 .ui-page-head .ui-page-desc { margin: var(--sp-1) 0 0; font-size: var(--fs-md); color: var(--color-text-muted); line-height: var(--lh-body); max-width: 64ch; }
 .ui-page-head .ui-page-actions { display: flex; gap: var(--sp-2); align-items: center; flex: none; padding-top: 2px; }
@@ -1565,15 +1567,15 @@
 .ui-section-head .ui-section-aside a:hover { text-decoration: underline; }
 /* list: one bordered container, hairline rows */
 .ui-list { border: var(--ui-border); border-radius: var(--ui-radius); background: var(--color-surface); overflow: hidden; }
-.ui-row { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-3) var(--sp-4); min-height: 52px; color: inherit; text-decoration: none; }
+.ui-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); padding: var(--sp-3) var(--sp-4); min-height: 52px; color: inherit; text-decoration: none; }
 .ui-row + .ui-row { border-top: var(--ui-border); }
 a.ui-row:hover, .ui-row--link:hover { background: var(--color-surface-raised); }
-.ui-row-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.ui-row-main { min-width: 0; flex: 1 1 220px; display: flex; flex-direction: column; gap: 2px; }
 .ui-row-title { font-size: var(--fs-md); font-weight: 600; color: var(--color-text-primary); line-height: var(--lh-tight); overflow-wrap: anywhere; }
 .ui-row-title a { color: inherit; text-decoration: none; }
 .ui-row-title a:hover { text-decoration: underline; }
 .ui-row-meta { font-size: var(--fs-sm); color: var(--color-text-muted); line-height: var(--lh-body); overflow-wrap: anywhere; }
-.ui-row-side { display: flex; align-items: center; gap: var(--sp-2); flex: none; }
+.ui-row-side { display: flex; align-items: center; gap: var(--sp-2); flex: none; flex-wrap: wrap; max-width: 100%; }
 .ui-row-time { font-size: var(--fs-xs); color: var(--color-text-faint); white-space: nowrap; }
 /* card: a bordered surface for a thing with structure of its own */
 .ui-card { border: var(--ui-border); border-radius: var(--ui-radius); background: var(--color-surface); padding: var(--sp-4) var(--sp-5); }
@@ -1602,7 +1604,7 @@ a.ui-card:hover { border-color: var(--color-border-strong); }
 .ui-toolbar { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; margin: 0 0 var(--sp-4); }
 .ui-toolbar .ui-spacer { flex: 1; }
 /* tabs: a segmented row of equals; the active one is the light one */
-.ui-tabs { display: inline-flex; gap: 2px; padding: 2px; background: var(--color-surface-sunken); border-radius: 8px; }
+.ui-tabs { display: inline-flex; gap: 2px; padding: 2px; background: var(--color-surface-sunken); border-radius: 8px; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .ui-tab { appearance: none; border: 0; background: transparent; padding: 5px 10px; border-radius: 6px; font: inherit; font-size: var(--fs-sm); font-weight: 600; color: var(--color-text-muted); cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
 .ui-tab:hover { color: var(--color-text-primary); }
 .ui-tab[aria-selected="true"], .ui-tab.active { background: var(--color-surface); color: var(--color-text-primary); box-shadow: 0 1px 2px rgba(0,0,0,.08); }

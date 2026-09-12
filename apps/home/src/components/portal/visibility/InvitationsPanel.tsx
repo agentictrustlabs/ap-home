@@ -143,7 +143,7 @@ export function InvitationsPanel() {
     <Card>
       <Stack gap={0.75}>
         <div>
-          <h3 style={{ margin: 0, fontSize: '1rem' }}>Let someone find this agent</h3>
+          <h3 className="subhead" style={{ margin: 0, fontSize: 15 }}>Let someone find this agent</h3>
           <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', opacity: 0.75 }}>
             A grant lets one party discover how to reach you. It is signed by <em>your</em> key and
             verified on-chain before the resolver will honour it — and it never lets them use anything.

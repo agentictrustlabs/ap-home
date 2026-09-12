@@ -58,7 +58,7 @@ export function VisibilityPolicyCard({
     <Card>
       <Stack gap={0.75}>
         <div>
-          <h3 style={{ margin: 0, fontSize: '1rem' }}>Who can find this agent?</h3>
+          <h3 className="subhead" style={{ margin: 0, fontSize: 15 }}>Who can find this agent?</h3>
           <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', opacity: 0.75 }}>
             Four separate choices, not one switch. Presets set sensible combinations; open the details to
             see exactly what each one means.
@@ -77,19 +77,18 @@ export function VisibilityPolicyCard({
                 aria-checked={selected}
                 onClick={() => onChange(p.id)}
                 style={{
-                  textAlign: 'left',
+                  display: 'block', textAlign: 'left', width: '100%', minHeight: 0, filter: 'none',
                   padding: '0.6rem 0.75rem',
                   borderRadius: 8,
-                  border: `1px solid ${selected ? 'var(--accent, #7c5cff)' : 'var(--border, #e4e0d8)'}`,
-                  background: selected ? 'var(--accent-soft)' : 'transparent',
-                  // The app's bare `button {}` rule paints text #fff on a primary fill. These buttons
-                  // replace the FILL and not the colour, so the label stayed white on white.
-                  color: 'var(--color-text-body)',
+                  border: `1px solid ${selected ? 'var(--color-border-strong)' : 'var(--color-border)'}`,
+                  boxShadow: selected ? 'inset 3px 0 0 var(--color-amber-500)' : 'none',
+                  background: selected ? 'var(--color-surface-sunken)' : 'var(--color-surface)',
+                  color: 'var(--color-text-primary)',
                   cursor: 'pointer',
                 }}
               >
-                <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{p.label}</div>
-                <div style={{ fontSize: '0.8rem', opacity: 0.75 }}>{p.blurb}</div>
+                <div style={{ fontWeight: 600, fontSize: '13.5px' }}>{p.label}</div>
+                <div className="ui-meta">{p.blurb}</div>
               </button>
             );
           })}
