@@ -141,6 +141,8 @@ import { askVocabulary, commandFieldsFor, waitingOn, ACCESS_LIST_CAPABILITY, PRO
 import { workersAiTranscriber, repairTranscript, hearingVocabulary, spokenFor } from './voice.js';
 import { DECISION_POINTS } from '@agenticprimitives/ontology';
 import { loadPlaybook, billed, chargeBill, memoRead, forgetMemo, projectRunState, draftRecipe } from '@agenticprimitives/harness';
+import { cardRoomActOf, cardRoomTurn, verifyStudyGrant, type CardRoomAct, type StudyAccess } from './card-room.js';
+import { enforcersFromEnv } from './org-wire.js';
 import { runUnderMandate, askReplyFor, readSubjectReply, type AskReplyEnvelopeV1, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { subjectAsk, subjectAnswer, validateSubjectAsk, handoff, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
@@ -1732,6 +1734,46 @@ function plannerSummaryOf(trace: PlannerTraceV1 | undefined): RunPlannerSummaryV
  * agent whose schedule fired, and a runtime's is the agent whose session wire was verified on chain at the
  * door. This function is handed one, and asserts nothing about how it was established.
  */
+/**
+ * ONE CARD-ROOM ASK, decided before the harness — `cardRoomTurn` in `card-room.ts` says why each branch is what
+ * it is; this is its seams into the Worker: the vault, the naming service, the chain, and the in-process
+ * consultation of the coach (both agents are served here, the Worker cannot fetch its own hostname, and the
+ * grant is what authorizes the hop — exactly what the coach's gate would check had it crossed the wire).
+ */
+async function cardRoomAsk(env: Env, deps: ReturnType<typeof harnessDeps>, input: {
+  agent: Address; addressee: Address; ask: string; runRef: string; skill: string; act: CardRoomAct; advertised: boolean;
+  material: Record<string, unknown> | null; executionCtx?: { waitUntil(p: Promise<unknown>): void }; traceContext?: TraceContextV1 | null;
+}): Promise<Awaited<ReturnType<typeof runAgentAsk>> | { study: StudyAccess }> {
+  const validator = env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
+  const dm = env.DELEGATION_MANAGER as Address | undefined;
+  const chainId = Number(env.CHAIN_ID);
+  const out = await cardRoomTurn({
+    nameOf: (a) => remembered(`name:${a.toLowerCase()}`, () => deps.nameOf?.(a).catch(() => null) ?? Promise.resolve(null)),
+    resolveName: (n) => remembered(`resolve:${n.toLowerCase()}`, () => deps.resolveName?.(n) ?? Promise.resolve(null)),
+    readRecord: (owner, recordType) => deps.readSubjectRecord ? deps.readSubjectRecord(owner, recordType) : Promise.resolve(null),
+    writeRecord: (owner, recordType, record) => deps.writeSubjectRecord ? deps.writeSubjectRecord(owner, recordType, record) : Promise.resolve({ ok: false, error: 'no vault' }),
+    specialistsOf: async (agent) => (await loadPlaybook(deps.readSubjectRecord ? (subject, recordType) => remembered(`record:${subject.toLowerCase()}:${recordType}`, () => deps.readSubjectRecord!(subject, recordType)) : undefined, agent).catch(() => null))?.specialists ?? null,
+    studyGrantWire: (person, coach) => deps.studyGrantWire?.(person, coach) ?? Promise.resolve(null),
+    verify: async (grant, delegator, delegate) => {
+      if (!validator || !dm) return { ok: false, reason: 'this deployment cannot verify a study grant' };
+      return verifyStudyGrant({
+        grant, delegator, delegate, enforcers: enforcersFromEnv(env as unknown as Record<string, string | undefined>),
+        checks: {
+          digest: (d) => hashDelegation(d, chainId, dm),
+          erc1271: async (signer, digest, sig) => (await deps.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [signer, digest, sig] }).catch(() => false)) === true,
+          isRevoked: async (digest) => (await deps.readContract({ address: dm, abi: IS_REVOKED_ABI_FOR_STANDING, functionName: 'isRevoked', args: [digest] })) === true,
+        },
+      });
+    },
+    consult: async (c) => {
+      const r = await runAgentAsk(env, { agent: c.agent as Address, addressee: c.addressee as Address, ask: c.ask, runRef: c.runRef, material: c.material, ...(input.executionCtx ? { executionCtx: input.executionCtx } : {}), ...(input.traceContext ? { traceContext: input.traceContext } : {}) });
+      return { reply: { kind: r.reply.kind, ...(r.reply.text ? { text: r.reply.text } : {}), ...(r.reply.error ? { error: r.reply.error } : {}) } };
+    },
+  }, input);
+  if ('study' in out) return out;
+  return { reply: { kind: out.kind, text: out.text, runRef: input.runRef, ...(out.kind === 'refused' ? { error: out.text } : {}), ...out.extra } as never, spoken: out.text, result: { plan: { steps: [] } } as never, events: [], presentedRefs: [] };
+}
+
 export async function runAgentAsk(env: Env, input: { agent: Address; addressee: Address; ask: string; runRef: string; context?: Record<string, unknown>;
   /** The message's data part naming a skill — what `playbook.answer` reasons over (never part of the intent's digest). */
   material?: Record<string, unknown> | null;
@@ -1779,10 +1821,24 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
   const question = typeof (input.material?.input as { question?: unknown } | undefined)?.question === 'string' ? (input.material!.input as { question: string }).question : undefined;
   const tAdvertised = Date.now() - askT0;
   const suppliedPlan: Plan | undefined = advertised ? { steps: [{ toolId: 'playbook.answer', args: { skill: skillNamed, ...(question ? { question } : {}) } }], rationale: 'the message names a skill this agent advertises' } : undefined;
+  // THE CARD ROOM'S ASKS (`card-room.ts`): advise, record, review. A PERSON'S agent generates nothing for
+  // any of them — it records a hand into her vault, or consults the coach service her playbook names under
+  // the study grant she signed, or refuses in one line so the house coach answers. Only a coach SERVICE
+  // presented with a grant that verifies goes on to the harness, where `playbook.answer` runs the model
+  // over her records. Nothing here reaches the planner: an unadvertised or ungranted card-room ask is a
+  // refusal, never a model call (the invariant the tests hold: alice.me's poker.advise costs no tokens).
+  const act: CardRoomAct | null = skillNamed && !input.plan && !input.resume ? cardRoomActOf(skillNamed) : null;
+  let study: StudyAccess | undefined;
+  if (act) {
+    const turn = await cardRoomAsk(env, deps, { agent: input.agent, addressee: input.addressee, ask: input.ask, runRef: input.runRef, skill: skillNamed!, act, advertised, material: input.material ?? null, ...(input.executionCtx ? { executionCtx: input.executionCtx } : {}), ...(input.traceContext ? { traceContext: input.traceContext } : {}) });
+    if ('reply' in turn) return turn;
+    study = turn.study;
+  }
   const tRun0 = Date.now();
   const { result, interactionFor, trace, tools, events, presentedRefs, bill } = await runUnderMandateBilled(env as unknown as HarnessEnv, deps, {
     intent, presented: input.resume?.presented ?? null, person: input.agent, runRef: input.runRef, addressee: input.addressee,
     ...(input.material ? { material: input.material } : {}),
+    ...(study ? { study } : {}),
     ...(suppliedPlan ? { plan: suppliedPlan } : {}),
     ...(input.traceContext ? { traceContext: input.traceContext } : {}),
     ...(input.resume?.plan ? { plan: input.resume.plan } : input.plan ? { plan: input.plan } : {}),
@@ -4385,6 +4441,13 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       const out = await callInteractionsInternal(env, person, 'internal.readgrant.wire', { clientId }).catch(() => null);
       const r = out as { ok?: boolean; wire?: unknown; hash?: string } | null;
       return r?.ok && r.wire && r.hash ? { wire: r.wire, hash: r.hash } : null;
+    },
+    // The person's STUDY GRANT to one coach service (`card-room.ts`), read from their own object by their own
+    // agent — the one thing it presents when it consults the coach. Grants nothing here: the coach's gate verifies it.
+    studyGrantWire: async (person: string, coach: string) => {
+      const out = await callInteractionsInternal(env, person, 'internal.studygrant.wire', { coach }).catch(() => null);
+      const r = out as { ok?: boolean; wire?: unknown; hash?: string; delegate?: string } | null;
+      return r?.ok && r.wire && r.hash && r.delegate ? { wire: r.wire, hash: r.hash, delegate: r.delegate } : null;
     },
     // The inverse read: whose treasury is this? Used ONLY to deliver a payee-side receipt to the person
     // behind the paid treasury — the same edge, read from the other end. It grants nothing.

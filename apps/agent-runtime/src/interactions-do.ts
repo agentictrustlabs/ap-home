@@ -279,6 +279,10 @@ function scopedContentOp(
 }
 
 const READ_GRANT_KEY = (clientId: string): string => `read.grant:${clientId.toLowerCase()}`;
+/** A STUDY GRANT — the person's delegation to a COACH SERVICE (never an app, never a person) to read their
+ *  card-room study records and append the coach's notes. Keyed by the coach's typed name. */
+const STUDY_GRANT_KEY = (coach: string): string => `study.grant:${coach.toLowerCase()}`;
+interface StudyGrantRecord { wire: IncomingDelegation; hash: string; coach: string; delegate: string; resources: string[]; storedAt: string }
 interface ReadGrantRecord { wire: IncomingDelegation; hash: string; clientId: string; storedAt: string }
 
 const MESSAGING_WIRE_KEY = 'messaging.wire';
@@ -373,7 +377,7 @@ const RESOLUTION_GRANTS_RESOURCE = 'resolution.grants';
 // what it resolved for them into their own vault. Memory, never a general write path.
 // Spec 385 — the scoped confirmation memory is the same kind of thing: the person's agent writing what THEY
 // chose into their own vault, from the resume that supplied the choice; and clearing it when they say so.
-const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run.provenance:', 'run.artifact:', 'confirmation.preferences', 'standing.instructions', 'playbook.memory:'] as const;
+const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run.provenance:', 'run.artifact:', 'confirmation.preferences', 'standing.instructions', 'playbook.memory:', 'cardroom.'] as const;
 
 const CAPABILITY_RECORDS = new Set(['impact-profile', 'capabilities.data', 'skills.data', 'home.manifest', 'control-events.data', 'archetype.assignment']);
 const CONTROL_EVENTS_RESOURCE = 'control-events.data';
@@ -1204,6 +1208,30 @@ export class InteractionsDO {
    *  nameless members joined it may be an org-local slug — presenting either as a naming-service
    *  name would be a lie the reader cannot detect. A resolver failure yields null (fail-closed:
    *  the roster renders without a public name, never with a guessed one). */
+  /** Whether THIS principal is a service agent — by its on-chain derived type when a profile resolver is
+   *  configured, else by its typed name (`*.svc`). Unknown reads as NOT a service: the check refuses a
+   *  service a write, and an unreadable chain must not refuse a person hers. Memoised for the object's life. */
+  private serviceKind: Promise<boolean> | null = null;
+  private principalIsService(principal: string): Promise<boolean> {
+    if (this.serviceKind) return this.serviceKind;
+    this.serviceKind = (async () => {
+      if (!this.env.RPC_URL || !this.env.AGENT_NAME_REGISTRY || !this.env.AGENT_NAME_UNIVERSAL_RESOLVER) return false;
+      const naming = new AgentNamingClient({
+        rpcUrl: this.env.RPC_URL, chainId: Number(this.env.CHAIN_ID ?? 84532),
+        registry: this.env.AGENT_NAME_REGISTRY as Address, universalResolver: this.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address,
+        ...(this.env.PROFILE_RESOLVER ? { profileResolver: this.env.PROFILE_RESOLVER as Address } : {}),
+      });
+      const me = principal as Address;
+      if (this.env.PROFILE_RESOLVER) {
+        const d = await naming.readDerivedType(me).catch(() => null);
+        if (d?.agentType) return d.agentType === 'service';
+      }
+      const name = await naming.reverseResolve(me).catch(() => null);
+      return typeof name === 'string' && /\.svc$/i.test(name);
+    })().catch(() => false);
+    return this.serviceKind;
+  }
+
   private publicNameCache = new Map<string, { name: string | null; at: number }>();
   private async resolvePublicNames(addrs: readonly string[]): Promise<Record<string, string | null>> {
     const out: Record<string, string | null> = {};
@@ -1730,7 +1758,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -1957,6 +1985,13 @@ export class InteractionsDO {
             return json({ ok: false, error: `internal.coordination.vaultWrite may not write "${recordType}" — declared-effect artifacts only` }, 403);
           }
           if (body.record === undefined) return json({ ok: false, error: 'record required' }, 400);
+          // A COACH SERVICE KEEPS NOTHING OF A CLIENT'S. The person's study records (hand, style, read, note)
+          // live in the PERSON's vault and the service reaches them under her grant; a service that filed her
+          // hands in its own cabinet would keep them after she fired it — the one design mistake the
+          // arrangement exists to make impossible. Refused here, on the principal, whoever asked.
+          if (/^cardroom\.(hand|style|read|note)$/.test(recordType) && (await this.principalIsService(principal))) {
+            return json({ ok: false, error: `a service keeps no "${recordType}" of its own — a client's study records live in the client's vault, under the client's grant` }, 403);
+          }
           try {
             await this.writeDoc(g, recordType, body.record);
             return json({ ok: true, recordType });
@@ -2205,6 +2240,15 @@ export class InteractionsDO {
         // Handing out a signed delegation is not a disclosure risk here (it is the person's own grant,
         // returned to the person's own agent), but it is more than a list needs, which is why it is a
         // separate op rather than a field.
+        // THE STUDY GRANT, for the person's own agent to present to the coach it is about to consult.
+        // Read by in-Worker code only, for the principal whose grant it is; the coach's gate verifies it.
+        if (op === 'internal.studygrant.wire') {
+          const coach = String(body.coach ?? '').trim().toLowerCase();
+          if (!coach) return json({ ok: false, error: 'coach required' }, 400);
+          const rec = (await this.state.storage.get(STUDY_GRANT_KEY(coach))) as StudyGrantRecord | undefined;
+          if (!rec) return json({ ok: false, error: `no study grant stored for "${coach}"` }, 404);
+          return json({ ok: true, wire: rec.wire, hash: rec.hash, coach: rec.coach, delegate: rec.delegate });
+        }
         if (op === 'internal.readgrant.wire') {
           const clientId = String(body.clientId ?? '').trim().toLowerCase();
           if (!clientId) return json({ ok: false, error: 'clientId required' }, 400);
@@ -3186,6 +3230,7 @@ export class InteractionsDO {
      */
     const OWNER_ONLY = new Set([
       'readgrant.put', 'readgrant.list', 'readgrant.revoke',
+      'studygrant.put', 'studygrant.list', 'studygrant.revoke',
       'relationships.get', 'relationships.merge',
       'inbox.assistantEnable', 'inbox.assistantDisable', 'inbox.assistantGet',
       'member.profile.put', 'membership.put', 'grants.list',
@@ -3914,6 +3959,70 @@ export class InteractionsDO {
         return json({ ok: true, invite: data });
       }
 
+      // ── STUDY GRANTS — the person authorizes ONE COACH SERVICE to read their card-room study records
+      //    (`cardroom.hand|style|read|note`) and to append its notes. Self-access only. The delegate is
+      //    the SERVICE (a `.svc` name), never the coach as a person and never this Home's own service SA:
+      //    a coach who is fired is fired by revoking exactly this, and nothing of the person's is left on
+      //    the service (`card-room.ts`). ──
+      if (op === 'studygrant.put' || op === 'studygrant.list' || op === 'studygrant.revoke') {
+        if (sessionSa.toLowerCase() !== principal) return json({ error: 'only this agent may decide who studies its play' }, 403);
+        if (op === 'studygrant.list') {
+          const rows = await this.state.storage.list({ prefix: STUDY_GRANT_KEY('') });
+          const grants: Array<{ coach: string; delegate: string; hash: string; resources: string[]; storedAt: string; revoked: boolean }> = [];
+          for (const [, v] of rows) {
+            const rec = v as StudyGrantRecord;
+            let revoked = false;
+            try {
+              revoked = (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [rec.hash as Hex] })) as boolean;
+            } catch { revoked = true; }
+            grants.push({ coach: rec.coach, delegate: rec.delegate, hash: rec.hash, resources: rec.resources, storedAt: rec.storedAt, revoked });
+          }
+          return json({ ok: true, grants });
+        }
+        const coach = String(body.coach ?? '').trim().toLowerCase();
+        if (!coach) return json({ error: 'coach required — the service’s typed name' }, 400);
+        if (op === 'studygrant.revoke') {
+          await this.state.storage.delete(STUDY_GRANT_KEY(coach));
+          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.studygrant.revoke', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'agent', id: coach } });
+          return json({ ok: true, note: 'local copy dropped — revoke the delegation on-chain to kill it everywhere' });
+        }
+        // studygrant.put
+        if (!/\.svc$/.test(coach)) return json({ error: 'a study grant is given to a coaching SERVICE (a .svc name), never to a person' }, 400);
+        const incoming = body.delegation as IncomingDelegation | undefined;
+        if (!incoming) return json({ error: 'a person-signed study grant is required' }, 400);
+        if (incoming.delegator.toLowerCase() !== principal) return json({ error: 'the study grant must be issued BY this agent' }, 400);
+        const delegate = String(incoming.delegate ?? '').toLowerCase();
+        if (!/^0x[0-9a-f]{40}$/.test(delegate)) return json({ error: 'the study grant must name the service’s address as delegate' }, 400);
+        if (delegate === (this.env.INTERACTIONS_SERVICE_SA ?? '').toLowerCase()) return json({ error: 'a study grant delegates to the coach service, not to this Home’s own service' }, 400);
+        // The delegate IS the named service: resolved here, so the grant and the name cannot disagree.
+        if (this.env.RPC_URL && this.env.AGENT_NAME_REGISTRY && this.env.AGENT_NAME_UNIVERSAL_RESOLVER) {
+          const naming = new AgentNamingClient({ rpcUrl: this.env.RPC_URL, chainId: Number(this.env.CHAIN_ID ?? 84532), registry: this.env.AGENT_NAME_REGISTRY as Address, universalResolver: this.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address });
+          const resolved = await naming.resolveName(coach).catch(() => null);
+          if (!resolved) return json({ error: `"${coach}" does not resolve to an agent` }, 400);
+          if (resolved.toLowerCase() !== delegate) return json({ error: `"${coach}" is ${resolved}, not the grant’s delegate` }, 400);
+        }
+        const scopeCav = (incoming.caveats ?? []).find((c) => (c.enforcer ?? '').toLowerCase() === VAULT_RECORD_SCOPE_ENFORCER.toLowerCase());
+        if (!scopeCav?.terms) return json({ error: 'the study grant must carry a vault-record-scope caveat' }, 400);
+        let scopes: VaultRecordScopeGrant[] = [];
+        try { scopes = decodeVaultRecordScopeTerms(scopeCav.terms as Hex); } catch { return json({ error: 'the study grant’s scope terms are undecodable' }, 400); }
+        const resources = scopes.flatMap((gr) => gr.resources);
+        if (resources.length === 0) return json({ error: 'the study grant must name at least one resource' }, 400);
+        if (resources.some((r) => !/^vault:cardroom\.[a-z]+$/.test(r))) return json({ error: 'a study grant scopes card-room study records (vault:cardroom.*) and nothing else' }, 400);
+        if (!scopes.some((gr) => gr.ops.includes('read') && gr.resources.includes('vault:cardroom.hand'))) return json({ error: 'the study grant must read vault:cardroom.hand' }, 400);
+        if (scopes.some((gr) => (gr.ops.includes('write') || gr.ops.includes('delete')) && gr.resources.some((r) => r !== 'vault:cardroom.note'))) return json({ error: 'a study grant may write nothing but vault:cardroom.note' }, 400);
+        const d: Delegation = { ...incoming, salt: BigInt(incoming.salt), caveats: incoming.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
+        const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+        if (!(await this.erc1271(incoming.delegator as Address, digest, incoming.signature as Hex))) return json({ error: 'study grant signature failed verification against this agent' }, 403);
+        try {
+          const revoked = (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [digest] })) as boolean;
+          if (revoked) return json({ error: 'that study grant is already revoked on-chain' }, 403);
+        } catch { return json({ error: 'revocation check unavailable — nothing stored (fail-closed)' }, 503); }
+        const rec: StudyGrantRecord = { wire: incoming, hash: digest, coach, delegate, resources, storedAt: new Date().toISOString() };
+        await this.state.storage.put(STUDY_GRANT_KEY(coach), rec);
+        await audit.write({ id: crypto.randomUUID(), timestamp: rec.storedAt, action: 'interactions.studygrant.put', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'agent', id: coach } });
+        return json({ ok: true, coach, delegate, hash: digest, resources });
+      }
+
       // ── spec 341 §4.3 — PER-APP READ GRANTS. The person authorizes ONE app to read, and can revoke
       //    that app alone. Self-access only: nobody else decides which apps may read your records. ──
       if (op === 'readgrant.put' || op === 'readgrant.list' || op === 'readgrant.revoke') {
@@ -4604,8 +4713,12 @@ export class InteractionsDO {
         // to demo-mcp's record-scope gate (the interactions grant's scope) so the vault viewer (spec 315)
         // can VIEW any Home-managed record; an out-of-scope record is denied at demo-mcp, never silently.
         // The self-check above + the KEK gate + the grant scope remain.
-        if (op === 'record.put' && !CAPABILITY_RECORDS.has(recordType) && !recordType.startsWith('content.')) {
-          return json({ error: `recordType must be a capability record or a content.* record` }, 400);
+        // The person's OWN card-room study records — their style in their words, their reads on players — are
+        // theirs to write here too (`card-room.ts`); the hand record and the coach's notes are written by the
+        // arrangement (the agent at hand end, the coach under the grant), never by hand.
+        const ownStudyRecord = recordType === 'cardroom.style' || recordType === 'cardroom.read';
+        if (op === 'record.put' && !CAPABILITY_RECORDS.has(recordType) && !recordType.startsWith('content.') && !ownStudyRecord) {
+          return json({ error: `recordType must be a capability record, a content.* record, or the person's own cardroom.style / cardroom.read` }, 400);
         }
         if (op === 'record.get') {
           const r = await this.vaultFor(recordGrant).read<unknown>({ owner: '', resource: recordType });

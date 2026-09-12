@@ -47,37 +47,37 @@ describe('playbook.answer — a question of judgement, answered from the playboo
     expect(await none(PLAYBOOK_ANSWER_TOOL.id, { skill: 'poker.advise' }, ctx)).toEqual({ refused: 'the message carried no material to answer from' });
   });
 
-  it('REMEMBERS a review without a model: the round\'s counts fold into the agent\'s own vault', async () => {
+  it('REMEMBERS a record without a model: the round\'s counts fold into the agent\'s own vault', async () => {
     const { call, seen } = fakeCall({ say: 'never' });
     const vault = new Map<string, unknown>();
     const memory = { read: async (t: string) => vault.get(t) ?? null, write: async (t: string, r: unknown) => { vault.set(t, r); return { ok: true }; } };
-    const round = (vpip: number) => ({ ...material, skill: 'poker.review', input: { seat: 0, view: {}, observation: { subjects: { 'agent:sharkbot.svc': { label: 'Sharkbot', counters: { hands: 1, vpip, pfr: vpip, foldToBetOpps: 1, foldToBet: 0 } }, me: { you: true, counters: { hands: 1, vpip: 1 } } } } } });
-    const invoke = playbookAnswerInvoker({ call, material: round(1), advertised: ['poker.review'], agentName: 'alice.me', memory });
-    const out = (await invoke(PLAYBOOK_ANSWER_TOOL.id, { skill: 'poker.review' }, ctx)) as Record<string, unknown>;
+    const round = (vpip: number) => ({ ...material, skill: 'poker.record', input: { seat: 0, view: {}, observation: { subjects: { 'agent:sharkbot.svc': { label: 'Sharkbot', counters: { hands: 1, vpip, pfr: vpip, foldToBetOpps: 1, foldToBet: 0 } }, me: { you: true, counters: { hands: 1, vpip: 1 } } } } } });
+    const invoke = playbookAnswerInvoker({ call, material: round(1), advertised: ['poker.record'], agentName: 'alice.me', memory });
+    const out = (await invoke(PLAYBOOK_ANSWER_TOOL.id, { skill: 'poker.record' }, ctx)) as Record<string, unknown>;
     expect(seen).toHaveLength(0); // no model call — arithmetic is not judgement
     expect(out.kept).toBe(true);
     expect(out.record).toBe('playbook.memory:poker');
     expect(out.say).toContain('Remembered round 1');
     expect(JSON.parse(String(out.answer))).toEqual({ say: out.say });
     // A second round ADDS: counts accumulate, rounds count up, the label and "you" survive.
-    await playbookAnswerInvoker({ call, material: round(0), advertised: ['poker.review'], memory })(PLAYBOOK_ANSWER_TOOL.id, { skill: 'poker.review' }, ctx);
+    await playbookAnswerInvoker({ call, material: round(0), advertised: ['poker.record'], memory })(PLAYBOOK_ANSWER_TOOL.id, { skill: 'poker.record' }, ctx);
     const mem = vault.get('playbook.memory:poker') as { rounds: number; subjects: Record<string, { rounds: number; label?: string; you?: boolean; counters: Record<string, number> }> };
     expect(mem.rounds).toBe(2);
     expect(mem.subjects['agent:sharkbot.svc']).toMatchObject({ rounds: 2, label: 'Sharkbot', counters: { hands: 2, vpip: 1, pfr: 1, foldToBetOpps: 2, foldToBet: 0 } });
     expect(mem.subjects.me).toMatchObject({ you: true, counters: { hands: 2, vpip: 2 } });
   });
 
-  it('a review with nothing to count, or no memory to keep it in, is acknowledged and costs nothing', async () => {
+  it('a record with nothing to count, or no memory to keep it in, is acknowledged and costs nothing', async () => {
     const { call, seen } = fakeCall({ say: 'never' });
-    const bare = playbookAnswerInvoker({ call, material: { ...material, skill: 'poker.review' }, advertised: ['poker.review'] });
-    const out = (await bare(PLAYBOOK_ANSWER_TOOL.id, { skill: 'poker.review' }, ctx)) as Record<string, unknown>;
+    const bare = playbookAnswerInvoker({ call, material: { ...material, skill: 'poker.record' }, advertised: ['poker.record'] });
+    const out = (await bare(PLAYBOOK_ANSWER_TOOL.id, { skill: 'poker.record' }, ctx)) as Record<string, unknown>;
     expect(out.say).toContain('nothing to count');
-    const noVault = playbookAnswerInvoker({ call, material: { ...material, skill: 'poker.review', input: { observation: { subjects: { x: { counters: { hands: 1 } } } } } }, advertised: ['poker.review'] });
-    expect(((await noVault(PLAYBOOK_ANSWER_TOOL.id, { skill: 'poker.review' }, ctx)) as Record<string, unknown>).kept).toBe(false);
+    const noVault = playbookAnswerInvoker({ call, material: { ...material, skill: 'poker.record', input: { observation: { subjects: { x: { counters: { hands: 1 } } } } } }, advertised: ['poker.record'] });
+    expect(((await noVault(PLAYBOOK_ANSWER_TOOL.id, { skill: 'poker.record' }, ctx)) as Record<string, unknown>).kept).toBe(false);
     // A vault that refuses (a grant signed before the scope existed) is reported, never thrown.
     const refusing = { read: async () => null, write: async () => ({ ok: false, error: 'record_scope_denied' }) };
-    const denied = playbookAnswerInvoker({ call, material: { ...material, skill: 'poker.review', input: { observation: { subjects: { x: { counters: { hands: 1 } } } } } }, advertised: ['poker.review'], memory: refusing });
-    const d = (await denied(PLAYBOOK_ANSWER_TOOL.id, { skill: 'poker.review' }, ctx)) as Record<string, unknown>;
+    const denied = playbookAnswerInvoker({ call, material: { ...material, skill: 'poker.record', input: { observation: { subjects: { x: { counters: { hands: 1 } } } } } }, advertised: ['poker.record'], memory: refusing });
+    const d = (await denied(PLAYBOOK_ANSWER_TOOL.id, { skill: 'poker.record' }, ctx)) as Record<string, unknown>;
     expect(d.kept).toBe(false);
     expect(d.say).toContain('record_scope_denied');
     expect(seen).toHaveLength(0);
@@ -104,7 +104,7 @@ describe('playbook.answer — a question of judgement, answered from the playboo
     expect(shown).toContain('"aggressionFactor":"3.0 (9 bets/raises to 3 calls)"');
     expect(shown).not.toContain('"aggressive":"75%'); // a tally across streets is not a per-hand rate
     expect(shown).not.toContain('Elsewhere');
-    // The raw observation never rides into an advice prompt; it is the review's, and it is already counted.
+    // The raw observation never rides into an advice prompt; it is the record's, and it is already counted.
     expect(shown).not.toContain('"observation"');
   });
 

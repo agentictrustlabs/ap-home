@@ -37,6 +37,7 @@ import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
 import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
 import { PLAYBOOK_ANSWER_TOOL, playbookAnswerAvailable, playbookAnswerInvoker, type PlaybookMaterial } from './playbook-answer.js';
+import { HAND_RECORD, NOTE_RECORD, READ_RECORD, STYLE_RECORD, appendNote, studyFrom, type StudyAccess } from './card-room.js';
 import { memoryRecordFor } from './playbook-memory.js';
 import { remembered, forget } from './run-memo.js';
 import { DISCOVERY_FIND_TOOL, ENGAGEMENT_INVOKE_TOOL, DISCOVERY_INSPECT_TOOL, DISCOVERY_FIND_CAPABILITY, ENGAGEMENT_INVOKE_CAPABILITY, discoveryFindInvoker } from './enterprise-tools.js';
@@ -863,6 +864,9 @@ export interface HarnessDeps {
   readGrants?: (person: string) => Promise<Array<{ clientId: string; hash: string; storedAt: string; revoked: boolean }>>;
   /** ONE stored grant, wire and all — asked for only when something is about to revoke it. */
   readGrantWire?: (person: string, clientId: string) => Promise<{ wire: unknown; hash: string } | null>;
+  /** The person's STUDY GRANT to one coach service (`card-room.ts`), wire and all — read by the person's own
+   *  agent to present to the coach it is about to consult. Null when none is stored. */
+  studyGrantWire?: (person: string, coach: string) => Promise<{ wire: unknown; hash: string; delegate: string } | null>;
   /** Merge named fields into the person's own contact record. Merge, never replace. */
   mergeProfile?: (person: string, fields: Record<string, string>) => Promise<{ ok: boolean; changed?: string[]; refused?: string[]; error?: string }>;
   /** Record ONE person in the asker's own household note. Private tier; grants nothing. */
@@ -1968,6 +1972,10 @@ export interface HarnessRunInput {
   /** The message's DATA part naming a skill — the material `playbook.answer` reasons over. Never in the intent: it is
    *  what the person can already see, not what they asked, and it must not bind a mandate's digest. */
   material?: Record<string, unknown> | null;
+  /** A VERIFIED STUDY GRANT for this run (`card-room.ts`): the addressee is a coach service consulted by the
+   *  person's own agent, and `playbook.answer` reads that person's study records under it. Set only by
+   *  `runAgentAsk` after `verifyStudyGrant`; absent, the answering tool knows only what the message carried. */
+  study?: StudyAccess;
   /** Spec 370 P1 — the checkpoint's record of what ran: the admitted plan and the completed steps. The
    *  loop replays the completed steps and plans nothing anew; the remaining steps are verified afresh. */
   resume?: { plan: Plan; completed: ReadonlyArray<{ stepRef: string; result?: unknown; receipt?: StepReceipt }> };
@@ -4288,8 +4296,31 @@ step is then handed to that agent under authority the person grants; leave it ou
         write: async (recordType: string, record: unknown) => { const out = await deps.writeSubjectRecord!(memoryOwner, recordType, record); await forget(`memory:${memoryOwner}:${recordType}`); return out; },
       }
     : undefined;
+  // THE PERSON'S STUDY, under her grant (`card-room.ts`). The addressee is a coach SERVICE and the asker is
+  // the person's own agent presenting the grant `runAgentAsk` verified; the records are read from HER vault
+  // (the grant's delegator), never the service's, and the one write is a note appended to her cabinet. The
+  // four reads start together — they are independent, and a consultation is on the table's clock.
+  const study = input.study && deps.readSubjectRecord && material
+    ? (() => {
+        const owner = input.study.owner; const reads = input.study.reads; const review = /\.review$/i.test(material.skill);
+        const read = (recordType: string) => reads.includes(recordType) ? deps.readSubjectRecord!(owner, recordType).catch(() => null) : Promise.resolve(null);
+        const loaded = Promise.all([read(HAND_RECORD), read(STYLE_RECORD), read(READ_RECORD), read(NOTE_RECORD)])
+          .then(([hand, style, playerRead, note]) => studyFrom({ access: input.study!, hand, style, read: playerRead, note, material: material.input, review }));
+        return {
+          load: () => loaded,
+          coach: input.study.delegate,
+          note: input.study.appends.includes(NOTE_RECORD) && deps.writeSubjectRecord
+            ? async (text: string, extra?: { hand?: number; scope?: string }) => {
+                const by = deps.nameOf && input.addressee ? (await deps.nameOf(String(input.addressee)).catch(() => null)) ?? String(input.addressee) : String(input.addressee ?? '');
+                const prev = await deps.readSubjectRecord!(owner, NOTE_RECORD).catch(() => null);
+                return deps.writeSubjectRecord!(owner, NOTE_RECORD, appendNote(prev, { by, at: new Date().toISOString(), text, ...(extra?.hand ? { hand: extra.hand } : {}), ...(extra?.scope ? { scope: extra.scope } : {}) }));
+              }
+            : undefined,
+        };
+      })()
+    : undefined;
   const answerInvoke = playbookAnswer.length
-    ? playbookAnswerInvoker({ call: structuredCallFor(env as never, input.provider), instructions: playbook?.instructions ?? null, material, advertised, agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null, ...(memory ? { memory } : {}) })
+    ? playbookAnswerInvoker({ call: structuredCallFor(env as never, input.provider), instructions: playbook?.instructions ?? null, material, advertised, agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null, ...(memory ? { memory } : {}), ...(study ? { study } : {}) })
     : null;
   const localInvoke: ToolInvoker = async (toolId, args, ctx) => {
     mark(`invoke:${toolId}:start`);

@@ -45,6 +45,8 @@ export const GENESIS_INTERACTIONS_APP_SCOPES: ReadonlyArray<RecordScopeSpec> = [
     'vault:newcity:*', 'vault:family:*', 'vault:field:*',
   ], ops: ['read'] },
   { resources: ['vault:family:*', 'vault:field:*'], ops: ['read', 'write'] },
+  // The person's card-room study records: hands (recorded by their own agent), style, reads, the coach's notes.
+  { resources: ['vault:cardroom.*'], ops: ['read', 'write'] },
 ];
 export const GENESIS_INTERACTIONS_SCOPES: ReadonlyArray<RecordScopeSpec> = [...INTERACTIONS_GRANT_CORE_SCOPES, ...GENESIS_INTERACTIONS_APP_SCOPES];
 

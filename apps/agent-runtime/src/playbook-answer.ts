@@ -14,6 +14,13 @@
 // structured answer. `answer` renders it deterministically, so the grounded-composition governor (built
 // for facts read from records) never judges a sentence of advice against a table it cannot check.
 //
+// WHO ANSWERS AT A CARD TABLE (`card-room.ts`). A PERSON'S agent never runs this for `poker.advise`: it
+// consults the coach SERVICE its playbook names, presenting the study grant the person signed, and the
+// service runs this tool under that grant with the person's own records (`study`) beside the material —
+// her style, her counts on the players here, her reads, the coach's past notes. `poker.review` is a real
+// review over her recorded hands, on the service, when she asks. `poker.record` folds a finished hand
+// into memory without a model. The only model call on a hand's clock is the coach's, on its own account.
+//
 // WHAT IT IS NOT. Not an act: nothing is performed and no mandate is asked for; a suggested move in the
 // answer is a suggestion, and the card room applies nothing it returns. Not a record: the answer is an
 // observation with its source named — this agent, this playbook. And not a fallback for the planner:
@@ -22,6 +29,7 @@
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import type { StructuredCall } from '@agenticprimitives/context';
 import { foldObservation, familyOf, memoryRecordFor, observationOf, rememberedFor } from './playbook-memory.js';
+import { reviewScopeOf, type Study } from './card-room.js';
 
 export const PLAYBOOK_ANSWER_CAPABILITY = 'playbook.answer';
 
@@ -81,6 +89,18 @@ export interface PlaybookAnswerDeps {
     read: (recordType: string, fresh?: boolean) => Promise<unknown>;
     write: (recordType: string, record: unknown) => Promise<{ ok: boolean; error?: string }>;
   };
+  /**
+   * THE PERSON'S STUDY, under her grant (`card-room.ts`) — present only when this agent is a coach SERVICE
+   * consulted by the person's own agent, which presented a study grant `runAgentAsk` verified. Her style,
+   * her hand record's counts on the players here, her reads, and this coach's own past notes, read from HER
+   * vault; `note` appends one note to her cabinet. Present ⇒ `.review` is a real review over her hands.
+   */
+  study?: {
+    load: () => Promise<Study>;
+    /** The service consulted — the grant's delegate. */
+    coach: string;
+    note?: (text: string, extra?: { hand?: number; scope?: string }) => Promise<{ ok: boolean; error?: string }>;
+  };
 }
 
 /** Whether the tool should be LISTED for this turn: a named, advertised skill, and a model to answer with. */
@@ -101,10 +121,30 @@ const ANSWER_SYSTEM =
   + 'that share: what you remember about the player across the table is the reason to pick one — bet '
   + 'into a player who folds to bets, check behind one who never does. A move that is free (checking) is '
   + 'never folded. A move must be one the legal moves allow.\n\n'
+  + 'WHEN HER STUDY IS GIVEN — her style, her counts on the players here, her reads, your own past notes — '
+  + 'it outranks in this order: her style beats your craft (say what a rule costs; never talk her out of '
+  + 'it); the counts at this table, weighted by sample size (under ten hands is "so far", a lean; over '
+  + 'thirty is a tendency); her reads; your notes. Say the price, then the player. Say the sample size '
+  + 'when you use a count.\n\n'
   + 'Then be concrete and short: `say` is ONE sentence for somebody with a clock running; `because` is the '
   + 'reason, which is the half that teaches; `action` is the move you would make, in exactly the action '
   + 'shape asked for, or omitted when you would not commit to one. Never claim to know what you cannot '
   + 'see. Never perform anything — this is advice, and the person plays the move or does not.';
+
+const REVIEW_SYSTEM =
+  'You are a hold\'em coach reviewing ONE person\'s past hands from her own records, because she asked. '
+  + 'The records are hers: each hand as her seat saw it (her cards, the board, the action, the result) and '
+  + 'the counts per player folded across every hand. Say the sample size in the first sentence — ten '
+  + 'hands are an anecdote, thirty a lean, sixty a pattern. Then, in order: what happened (the money, in a '
+  + 'few sentences); the two or three decisions that mattered, each with the street, the price and what it '
+  + 'cost or earned; the leak they point to, with the count behind it and the chips it cost (two leaks at '
+  + 'most); ONE thing to change next session, concrete enough to do on the first hand; what went right, in '
+  + 'a sentence. A number you did not compute from the records is not in the review. If a leak is a rule '
+  + 'in her style, say what it cost and that it is her rule. If she asks about one decision, answer the '
+  + 'decision as it was at the time with what she could see — a right decision that lost is still right. '
+  + 'Never review cards she could not see; opponents\' cards appear only when shown at showdown, and you '
+  + 'say "shown" when you use them. With fewer than five hands, give one honest sentence and say what would '
+  + 'change it. Write it the way a coach talks after the session, not the way a spreadsheet prints.';
 
 export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
   return async (toolId, args) => {
@@ -115,21 +155,30 @@ export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
     if (!deps.advertised.map((s) => s.toLowerCase()).includes(skill.toLowerCase())) {
       return { refused: `${deps.agentName ?? 'this agent'} does not advertise ${skill}` };
     }
-    // A REVIEW IS REMEMBERED, NOT ANSWERED. The round is over; there is nothing to advise and nobody
-    // reading a sentence about it. What the asker sent as an observation is folded into the agent's own
-    // memory of this skill family — counts, in its vault — and that costs no model call at all. It used
-    // to spend one on "what is worth remembering" and keep nothing (2026-09-11).
-    if (/\.review$/i.test(skill)) return reviewIntoMemory(deps, skill, m.input);
-    if (!deps.call) return { refused: 'no model is available to answer with' };
+    // A RECORD IS REMEMBERED, NOT ANSWERED. The round is over; there is nothing to advise and nobody
+    // reading a sentence about it. The observation folds into the agent's own memory of this skill
+    // family — counts, in its vault — and costs no model call. (A person's agent records a hand before
+    // the harness runs at all — `runAgentAsk` — so this is the path for any other agent that keeps one.)
+    if (/\.record$/i.test(skill)) return recordIntoMemory(deps, skill, m.input);
     const question = String(args.question ?? m.question ?? '').trim();
+    // A REVIEW READS HER RECORDS. Without a study grant there are none to read: the person's agent does not
+    // review (it consults), and a service without the grant has nothing of hers. Refused, never improvised.
+    if (/\.review$/i.test(skill)) {
+      if (!deps.study) return { refused: 'a review reads her hand records under her study grant, and none was presented' };
+      if (!deps.call) return { refused: 'no model is available to review with' };
+      return reviewStudy(deps, skill, question);
+    }
+    if (!deps.call) return { refused: 'no model is available to answer with' };
     const street = typeof (m.input as { read?: { street?: unknown } } | undefined)?.read?.street === 'string' ? (m.input as { read: { street: string } }).read.street : null;
     const system = `${ANSWER_SYSTEM}\n\n---\n\n${relevantInstructions(deps.instructions, skill, street) || '(this agent has no further instructions)'}`;
     // WHAT THIS AGENT REMEMBERS about the players in the material — its own counts from the rounds the
     // asker reported, with the rates worked out. Only the subjects present here; a memory of somebody at
     // another table is not this question.
     const memoryT0 = Date.now();
-    const memory = deps.memory ? await deps.memory.read(memoryRecordFor(skill)).catch(() => null) : null;
-    const remembered = rememberedFor(memory, m.input);
+    // HER STUDY, when this is a coach consulted under her grant; otherwise the agent's own memory.
+    const study = deps.study ? await deps.study.load().catch(() => null) : null;
+    const memory = !study && deps.memory ? await deps.memory.read(memoryRecordFor(skill)).catch(() => null) : null;
+    const remembered = study ? study.remembered : rememberedFor(memory, m.input);
     const memoryMs = Date.now() - memoryT0;
     // THE ASKER'S OWN SHAPE, when it sent one. A card room names its game's exact action union; an answer
     // in any other shape is a move it can only refuse to draw a button for.
@@ -147,7 +196,12 @@ export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
       ...(shape ? [`Answer shape, field by field:\n${shape}`] : []),
       ...(read != null ? [`Read — the facts of the spot, computed (use these numbers):\n${JSON.stringify(read)}`] : []),
       ...(baseline != null ? [`House baseline — a rules coach's line, as an observation:\n${JSON.stringify(baseline)}`] : []),
-      ...(remembered.length ? [`Remembered — your own counts on the players here, from rounds reported to you (rates are computed; small samples mean little):\n${JSON.stringify(remembered)}`] : []),
+      ...(study?.style.length ? [`Her style — her own rules, which outrank your craft:\n${study.style.map((r) => `- ${r}`).join('\n')}`] : []),
+      ...(remembered.length ? [study
+        ? `Her records — the counts on the players here, from the ${study.hands} hand${study.hands === 1 ? '' : 's'} she has recorded (rates are computed; small samples mean little):\n${JSON.stringify(remembered)}`
+        : `Remembered — your own counts on the players here, from rounds reported to you (rates are computed; small samples mean little):\n${JSON.stringify(remembered)}`] : []),
+      ...(study?.reads.length ? [`Her reads — her own notes on players:\n${study.reads.map((r) => `- ${r.about}: ${r.note}`).join('\n')}`] : []),
+      ...(study?.notes.length ? [`Your own past notes, oldest first:\n${study.notes.map((n) => `- ${n.at.slice(0, 10)}: ${n.text}`).join('\n')}`] : []),
       `Material: ${JSON.stringify(rest)}`,
     ].join('\n');
     const started = Date.now();
@@ -166,6 +220,7 @@ export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
                 say: { type: 'string', description: 'One sentence, for somebody with a clock running' },
                 because: { type: 'string', description: 'The reason — the half that teaches' },
                 action: { type: 'object', description: 'The move, in the action shape the legal moves use; omit to commit to none', additionalProperties: true },
+                ...(study ? { note: { type: 'string', description: 'RARELY: one or two sentences worth keeping for next time, checkable against this hand (the decision, the price, the count that mattered, what it cost). Empty on most hands.' } } : {}),
               },
               required: ['reasoning', 'say', 'because'],
             },
@@ -178,7 +233,16 @@ export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
     const action = out.action && typeof out.action === 'object' ? out.action : undefined;
     // How long the model took, on the record: latency is a fact about the answer worth keeping beside it.
     console.log(`[playbook.answer] ${skill} model ${Date.now() - started}ms · memory ${memoryMs}ms (${remembered.length} remembered) · prompt ${system.length + user.length} chars · answer ${say.length + (because?.length ?? 0)} chars`);
-    const result = { skill, say, ...(because ? { because } : {}), ...(action ? { action } : {}), source: deps.agentName ?? 'this agent', modelMs: Date.now() - started, memoryMs, promptChars: system.length + user.length, ...(remembered.length ? { remembered: remembered.map((r) => `${r.label ?? r.id}:${r.rounds}`) } : {}) };
+    // A NOTE, when the coach found one worth keeping — into HER cabinet, under the grant's append scope.
+    // Awaited: the write is the consultation's only lasting effect, and a promise left behind a reply is
+    // a promise the runtime may drop.
+    let noted = false;
+    const noteText = study && typeof out.note === 'string' ? out.note.trim() : '';
+    if (noteText && deps.study?.note) {
+      const handNo = Number((m.input as { handNo?: unknown } | undefined)?.handNo ?? 0) || undefined;
+      noted = (await deps.study.note(noteText, { ...(handNo ? { hand: handNo } : {}) }).catch(() => ({ ok: false }))).ok;
+    }
+    const result = { skill, say, ...(because ? { because } : {}), ...(action ? { action } : {}), source: deps.agentName ?? 'this agent', modelMs: Date.now() - started, memoryMs, promptChars: system.length + user.length, ...(remembered.length ? { remembered: remembered.map((r) => `${r.label ?? r.id}:${r.rounds}`) } : {}), ...(study ? { study: { owner: study.owner, hands: study.hands, style: study.style.length, reads: study.reads.length, notes: study.notes.length, noted } } : {}) };
     // `answer` is the rendered reply — the JSON a card room decodes, verbatim. The fields beside it are
     // the same answer as an observation, for the trace.
     return { ...result, answer: JSON.stringify({ say, ...(because ? { because } : {}), ...(action ? { action } : {}) }) };
@@ -186,10 +250,70 @@ export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
 }
 
 /**
+ * A REVIEW OF HER HANDS, from her records, because she asked (`holdem-review`). One model call over the
+ * hands in scope; the note it leaves goes into her cabinet so the next consultation starts where this
+ * review ended. Never triggered by a hand ending — the table records those without a model.
+ */
+async function reviewStudy(deps: PlaybookAnswerDeps, skill: string, question: string): Promise<Record<string, unknown>> {
+  const source = deps.agentName ?? 'this agent';
+  const started = Date.now();
+  const study = await deps.study!.load().catch(() => null);
+  const recent = study?.recent ?? [];
+  if (!study || study.hands === 0 || recent.length === 0) {
+    const say = 'There are no recorded hands to review yet — play a session with your agent at the table and ask again.';
+    return { skill, say, source, hands: 0, answer: JSON.stringify({ say }) };
+  }
+  const scope = reviewScopeOf(question, recent);
+  if (scope.hands.length === 0) {
+    const say = `Nothing recorded for ${scope.label.split(',')[0]} — the record holds ${study.hands} hand${study.hands === 1 ? '' : 's'}, the most recent ${recent.length} in full.`;
+    return { skill, say, source, hands: 0, answer: JSON.stringify({ say }) };
+  }
+  // THE HANDS, COMPACT. The view is the game's own; it is passed as it was kept, with the record's own
+  // framing (hand number, seat, net) so the model can quote a hand she can find.
+  const hands = scope.hands.map((h) => ({ hand: h.handNo, seat: h.seat, at: h.at.slice(0, 16), ...(typeof h.net === 'number' ? { net: h.net } : {}), view: h.view }));
+  const system = `${REVIEW_SYSTEM}\n\n---\n\n${relevantInstructions(deps.instructions, skill) || '(this agent has no further instructions)'}`;
+  const user = [
+    `Skill: ${skill}`,
+    `Question, in her words: ${question || 'how have I been playing?'}`,
+    `Scope: ${scope.label} of ${study.hands} recorded.`,
+    ...(study.style.length ? [`Her style — her own rules:\n${study.style.map((r) => `- ${r}`).join('\n')}`] : []),
+    ...(study.notes.length ? [`Your own past notes, oldest first:\n${study.notes.map((n) => `- ${n.at.slice(0, 10)}: ${n.text}`).join('\n')}`] : []),
+    `Counts per player across all recorded hands (rates computed; "you" is her):\n${JSON.stringify(study.remembered)}`,
+    `The hands in scope, oldest first:\n${JSON.stringify(hands)}`,
+  ].join('\n');
+  const out = await deps.call!({
+    system,
+    messages: [{ role: 'user', content: user }],
+    tool: {
+      name: 'review',
+      description: 'The review, as a coach talks after the session.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          reasoning: { type: 'string', description: 'At most 120 words: the money, the decisions that mattered, the count behind the leak. Not shown.' },
+          say: { type: 'string', description: 'The review itself: what happened with the count, the decisions that mattered, the leak with its count and cost, one change, what went right. Short paragraphs.' },
+          because: { type: 'string', description: 'The one thing to change next session, in one sentence she can do on the first hand.' },
+          note: { type: 'string', description: 'Two or three sentences for your own notes: the date, the scope, the leak with its count, the one change. Checkable against the hands.' },
+        },
+        required: ['reasoning', 'say', 'because', 'note'],
+      },
+    },
+    maxTokens: deps.maxTokens ?? 1200,
+  });
+  const say = typeof out.say === 'string' ? out.say.trim() : '';
+  if (!say) return { refused: 'the review produced nothing' };
+  const because = typeof out.because === 'string' ? out.because.trim() : undefined;
+  const noteText = typeof out.note === 'string' ? out.note.trim() : '';
+  const noted = noteText && deps.study?.note ? (await deps.study.note(noteText, { scope: scope.label }).catch(() => ({ ok: false }))).ok : false;
+  console.log(`[playbook.answer] ${skill} review ${Date.now() - started}ms · ${scope.label} · prompt ${system.length + user.length} chars · noted=${noted}`);
+  return { skill, say, ...(because ? { because } : {}), source, hands: scope.hands.length, scope: scope.label, noted, modelMs: Date.now() - started, answer: JSON.stringify({ say, ...(because ? { because } : {}) }) };
+}
+
+/**
  * A FINISHED ROUND, INTO MEMORY. No model: the observation is counts, and adding counts is arithmetic.
  * The reply is one line for the record; the asker does not wait for it and nobody reads it aloud.
  */
-async function reviewIntoMemory(deps: PlaybookAnswerDeps, skill: string, input: unknown): Promise<Record<string, unknown>> {
+async function recordIntoMemory(deps: PlaybookAnswerDeps, skill: string, input: unknown): Promise<Record<string, unknown>> {
   const family = familyOf(skill);
   const source = deps.agentName ?? 'this agent';
   const obs = observationOf(input);

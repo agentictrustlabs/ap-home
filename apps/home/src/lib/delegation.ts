@@ -385,6 +385,10 @@ export const STANDING_INSTRUCTIONS_RESOURCE_SCOPE = 'vault:standing.instructions
  *  review folds in, advice reads back. Behaviour, never authority. Additive: a grant signed before this scope
  *  existed denies the record until re-issued, and the review says so in its reply. */
 export const PLAYBOOK_MEMORY_RESOURCE_SCOPE = 'vault:playbook.memory:*' as const;
+/** The person's CARD-ROOM STUDY RECORDS (`cardroom.hand|style|read|note`, and a coach service's own `cardroom.client`):
+ *  their hands as their seat saw them, their style in their words, their reads on players, and the notes the coach
+ *  service they named writes back under a study grant. Additive, like playbook memory. */
+export const CARDROOM_RESOURCE_SCOPE = 'vault:cardroom.*' as const;
 /** Content-fabric records (spec 335 / ADR-0055): the person's Content Artifacts / releases, keyed
  *  `vault:content.<type>.<id>` — one namespace, read+write via the interactions grant. */
 export const CONTENT_RECORDS_RESOURCE_SCOPE = 'vault:content.*' as const;
@@ -461,7 +465,7 @@ export const APP_OWN_NAMESPACE_READ_SCOPES = ['vault:newcity:*', 'vault:family:*
  *  exists because a shared sandbox has no owner to author them, and an empty vault makes every
  *  grounded answer impossible to demonstrate. Grants signed before it shipped simply lack it and
  *  deny the seed per-record, like every other additive scope. */
-export const APP_OWN_NAMESPACE_SEED_SCOPES = ['vault:family:*', 'vault:field:*'] as const;
+export const APP_OWN_NAMESPACE_SEED_SCOPES = ['vault:family:*', 'vault:field:*', 'vault:cardroom.*'] as const;   // cardroom: the person's own study records (hands, style, reads, notes)
 // `vault:family:*` is the skills-app family-office relying namespace (record types like
 // `family:portfolio`, `family:budget`; resource = `vault:` + recordType). ADDITIVE + read-only:
 // only grants built AFTER this ships carry it, so existing grants are unaffected — an org must

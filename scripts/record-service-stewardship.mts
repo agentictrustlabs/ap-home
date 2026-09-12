@@ -4,7 +4,9 @@
  * driven from a script (`charter-ligonier.mts`) chartered the agents and wrote no link, so every steward-gated
  * call at them (assign a playbook, enable the assistant) answered "only the agent's custodian may…".
  *
- *   npx tsx scripts/record-service-stewardship.mts            (reads demo/ligonier.faithnet.json)
+ *   npx tsx scripts/record-service-stewardship.mts            (reads demo/ligonier.faithnet.json; alice stewards both)
+ *   NOTE=demo/coach.faithnet.json BY=bob npx tsx scripts/record-service-stewardship.mts
+ *                                                             (a service a PERSON chartered directly — the coach)
  *
  * What it does, per agent (the org, then the service under it): a fresh STEWARDSHIP wire agent → alice's SA in
  * the Home's own shape (`siteCaveats`: timestamp + value 0 + governance allowedTargets), signed by the agent's
@@ -20,8 +22,10 @@ const HOME = 'https://www.faithnet.me';
 const CHAIN = 34348;
 const DAYS = Number(process.env.DAYS ?? 3650);
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 250), _status: r.status }; } };
-const note = JSON.parse(readFileSync('demo/ligonier.faithnet.json', 'utf8')) as { org: { name: string; sa: Address }; service: { name: string; sa: Address } };
-const alice = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alice', client_id: 'demo-web' }) }));
+const NOTE = process.env.NOTE ?? 'demo/ligonier.faithnet.json';
+const BY = process.env.BY ?? 'alice';
+const note = JSON.parse(readFileSync(NOTE, 'utf8')) as { org?: { name: string; sa: Address }; service: { name: string; sa: Address } };
+const alice = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: BY, client_id: 'demo-web' }) }));
 if (!alice.homeSession) throw new Error('no alice session');
 const ME = String(alice.agent).toLowerCase() as Address;
 const auth = { 'content-type': 'application/json', authorization: `Bearer ${alice.homeSession}` };
@@ -46,7 +50,11 @@ async function stewardshipWire(agent: Address): Promise<Record<string, unknown>>
 
 const orgs = ((await j(await fetch(`${HOME}/connect/related-orgs?surface=any`, { headers: auth }))).orgs ?? []) as Array<{ orgAgent: string; orgName: string; relationship: string }>;
 const has = (sa: string) => orgs.some((o) => o.orgAgent.toLowerCase() === sa.toLowerCase() && o.relationship === 'steward');
-for (const [agent, name, kind, parent] of [[note.org.sa, note.org.name, 'org', ME], [note.service.sa, note.service.name, 'service', note.org.sa]] as Array<[Address, string, string, Address]>) {
+// An org and the service under it (ligonier), or a service chartered straight under the person (the coach).
+const agents: Array<[Address, string, string, Address]> = note.org
+  ? [[note.org.sa, note.org.name, 'org', ME], [note.service.sa, note.service.name, 'service', note.org.sa]]
+  : [[note.service.sa, note.service.name, 'service', ME]];
+for (const [agent, name, kind, parent] of agents) {
   const sa = agent.toLowerCase() as Address;
   if (has(sa)) { console.log(`· ${name} ${sa}: already a steward link`); continue; }
   const wire = await stewardshipWire(sa);
@@ -57,4 +65,4 @@ for (const [agent, name, kind, parent] of [[note.org.sa, note.org.name, 'org', M
   console.log(`${r.ok === true || r.link || r.orgAgent ? '✓' : '✗'} ${name} ${sa} ← steward link (parent ${parent.slice(0, 10)}…): ${JSON.stringify(r).slice(0, 160)}`);
 }
 const after = ((await j(await fetch(`${HOME}/connect/related-orgs?surface=any`, { headers: auth }))).orgs ?? []) as Array<{ orgAgent: string; orgName: string; relationship: string; kind?: string }>;
-for (const o of after.filter((o) => [note.org.sa, note.service.sa].some((s) => s.toLowerCase() === o.orgAgent.toLowerCase()))) console.log(`  now: ${o.orgName} ${o.orgAgent} ${o.relationship} ${o.kind ?? ''}`);
+for (const o of after.filter((o) => agents.some(([sa]) => sa.toLowerCase() === o.orgAgent.toLowerCase()))) console.log(`  now: ${o.orgName} ${o.orgAgent} ${o.relationship} ${o.kind ?? ''}`);
