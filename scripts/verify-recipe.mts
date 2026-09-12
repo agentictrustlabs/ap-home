@@ -1,7 +1,7 @@
 /**
  * Spec 398 §5 / APUX-034 (G3) — SAVE SUCCESSFUL WORK AS A RECIPE, live.
  *
- *   npx tsx scripts/verify-recipe.mts        (from the repo root; HOME_URL=… to point elsewhere)
+ *   npx tsx scripts/verify-recipe.mts        (from the repo root; HOME_URL=… to point elsewhere, HANDLE=… for its roster)
  *
  * alice asks her own agent, with a SUPPLIED plan (the planner is not what is under test), "who are the members of
  * Missio Nexus" — a read that completes. She drafts a recipe from that run: the draft names the capability, writes the
@@ -15,7 +15,9 @@ import type { Address } from 'viem';
 const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 250), _status: r.status }; } };
 const fail = (m: string): never => { console.error(`\n✗ ${m}`); process.exit(1); };
-const alice = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alice', client_id: 'demo-web' }) }));
+const HANDLE = process.env.HANDLE ?? 'alice';   // the roster differs per deployment (Faithnet: alice; the estate: mara …)
+const alice = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: HANDLE, client_id: 'demo-web' }) }));
+if (!alice.homeSession) fail(`${HANDLE} could not sign in: ${JSON.stringify(alice).slice(0, 120)}`);
 const ME = String(alice.sub).replace(/^eip155:\d+:/, '').toLowerCase() as Address;
 const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
 const csrf = (await j(csrfRes)) as { token?: string };
@@ -23,9 +25,11 @@ const H = { 'content-type': 'application/json', origin: HOME, cookie: (csrfRes.h
 const post = async (path: string, body: unknown) => j(await fetch(`${HOME}/a2a/harness/${path}`, { method: 'POST', headers: H, body: JSON.stringify({ session: alice.homeSession, ...(body as object) }) }));
 const library = async (body: unknown) => j(await fetch(`${HOME}/connect/library`, { method: 'POST', headers: { authorization: `Bearer ${alice.homeSession}`, 'content-type': 'application/json' }, body: JSON.stringify(body) }));
 
-const orgs = ((await j(await fetch(`${HOME}/connect/related-orgs?surface=any`, { headers: { authorization: `Bearer ${alice.homeSession}` } }))).orgs ?? []) as Array<{ orgAgent: string; orgName: string }>;
-const org = orgs.find((o) => /missio nexus/i.test(o.orgName));
-if (!org) fail('alice is not related to Missio Nexus');
+const orgs = ((await j(await fetch(`${HOME}/connect/related-orgs?surface=any`, { headers: { authorization: `Bearer ${alice.homeSession}` } }))).orgs ?? []) as Array<{ orgAgent: string; orgName: string; relationship?: string; kind?: string }>;
+// Missio Nexus on Faithnet; on another deployment (the estate), any organization alice stewards — the gate is about the
+// recipe, not the fixture.
+const org = orgs.find((o) => /missio nexus/i.test(o.orgName)) ?? orgs.find((o) => o.relationship === 'steward' && !/treasury/.test(o.kind ?? '') && o.orgName);
+if (!org) fail(`${HANDLE} stewards no organization here`);
 const ORG = org!.orgAgent.toLowerCase();
 console.log(`── alice ${ME} · ${org!.orgName} ${ORG} ──`);
 
