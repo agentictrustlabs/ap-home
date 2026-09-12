@@ -27,6 +27,7 @@ import { issueDirectoryListing } from '../../../home/directory';
 import { revokeGrantedDelegation } from '../../../connect-client';
 import { shortId } from '../../../home/use-inbox';
 import { BusyButton } from '../../shared/BusyButton';
+import { Switch } from '../../../ui';
 import { Tabs, type TabItem } from '../../shared/ui';
 import { mutedText } from '../theme';
 
@@ -83,7 +84,7 @@ export function useMessagingDelivery(targetAgent?: Address): {
   return { enabled, busy, error, enable };
 }
 
-const sectionTitleSty: React.CSSProperties = { fontSize: '0.85rem', fontWeight: 700, margin: '0 0 0.35rem' };
+const sectionTitleSty: React.CSSProperties = { margin: '0 0 0.5rem' };   // a bare <h3> is the section label (globals.css)
 
 /** spec 329 §2.3 — the consent copy the opt-in MUST state (verbatim; topic-context disclosure). */
 const CONSULT_CONSENT_COPY =
@@ -327,21 +328,15 @@ export function AgentTab({ only }: { only?: 'ask' | 'discussion' } = {}) {
       <section aria-label="Auto-reply assistant">
         <h3 style={sectionTitleSty}>Auto-reply assistant</h3>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <BusyButton
+          <Switch
+            checked={assistant === null ? null : assistant.enabled === true}
             busy={assistantBusy}
-            busyLabel="…"
-            onClick={() => void toggleAssistant()}
-            className="ghost"
-            disabled={assistant === null}
-            aria-label={assistant?.enabled ? 'Auto-reply assistant on — disable' : 'Enable auto-reply assistant'}
-            aria-pressed={assistant?.enabled === true}
-            style={assistant?.enabled ? undefined : { opacity: 0.45 }}
+            onChange={() => void toggleAssistant()}
+            label={assistant?.enabled ? 'Auto-reply assistant on — disable' : 'Enable auto-reply assistant'}
             title={assistant?.enabled
               ? `Auto-reply assistant on${assistant.displayName ? ` (replies as ${assistant.displayName})` : ''} — click to disable`
               : 'Let your own agent auto-reply to new 1:1 messages while you are away'}
-          >
-            🤖
-          </BusyButton>
+          />
           <span style={{ fontSize: '0.82rem' }}>
             {assistant === null
               ? 'Checking…'
@@ -358,21 +353,15 @@ export function AgentTab({ only }: { only?: 'ask' | 'discussion' } = {}) {
       <section aria-label="Do the work">
         <h3 style={sectionTitleSty}>Do the work</h3>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <BusyButton
+          <Switch
+            checked={autoWork}
             busy={autoWorkBusy}
-            busyLabel="…"
-            onClick={() => void toggleAutoWork()}
-            className="ghost"
-            disabled={autoWork === null}
-            aria-label={autoWork ? 'Auto-work on — disable' : 'Enable auto-work'}
-            aria-pressed={autoWork === true}
-            style={autoWork ? undefined : { opacity: 0.45 }}
+            onChange={() => void toggleAutoWork()}
+            label={autoWork ? 'Auto-work on — disable' : 'Enable auto-work'}
             title={autoWork
               ? 'Your agent executes plan steps it can do itself and advances your endeavors — click to disable'
               : 'Let your agent do the work: draft a plan, execute the steps it can, and advance your endeavors'}
-          >
-            🛠
-          </BusyButton>
+          />
           <span style={{ fontSize: '0.82rem' }}>{autoWork === null ? 'Checking…' : autoWork ? 'On' : 'Off'}</span>
         </div>
         <p style={{ margin: '0.3rem 0 0', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>

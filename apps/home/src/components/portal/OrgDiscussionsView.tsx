@@ -4,6 +4,7 @@
 // Telegram-style member→DM slide-over, group avatars, rich messages (emoji + images), amber design system.
 // NOTE: the internal transport keys (`/connect/channels`, `channelId`, `communityId`, CSS `channels-*`) are
 // unchanged pending the W6 record-key migration; only the user-facing vocabulary is Discussions/Topics here.
+import { MailIcon } from '../shared/Icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { HuddleAffordance } from './huddle/HuddleDock';
 import type { Address } from '@agenticprimitives/types';
@@ -774,7 +775,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                       <span
                         title={`${channel.assistant.displayName} ${channel.assistant.trigger === 'mention' ? `answers @ask (or @${channel.assistant.mentionHandle})` : 'answers every post'}`}
                       >
-                        {channel.assistant.trigger === 'mention' ? ' · 🤖 @ask' : ' · 🤖 auto'}
+                        {channel.assistant.trigger === 'mention' ? ' · agent on @ask' : ' · agent auto-replies'}
                       </span>
                     )}
                     {channel.assistant && channel.routing && (
@@ -909,7 +910,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                         {/* One-to-one MESSAGING (not discussion): same DM slide-over as the Members rail. */}
                         {!isMe && pl && (
                           <button type="button" className="btn" style={{ padding: '0 0.35rem', fontSize: '0.7rem' }} title={`Message ${pName}`} onClick={() => openDm(pl.listing.displayName, pl.label, pl.listing.subject)}>
-                            ✉
+                            <MailIcon size={14} />
                           </button>
                         )}
                         {youFacilitator && !isMe && (
@@ -1031,7 +1032,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                     </div>
                   </div>
                   {l.listing.displayName !== you && (
-                    <span className="channels-member-row__hint" aria-hidden>✉</span>
+                    <span className="channels-member-row__hint" aria-hidden><MailIcon size={13} /></span>
                   )}
                 </button>
                 <button

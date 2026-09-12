@@ -143,3 +143,10 @@ export const Meta = ({ children, className }: { children: ReactNode; className?:
 export const Micro = ({ children }: { children: ReactNode }) => <span className="ui-micro">{children}</span>;
 export const Mono = ({ children, title }: { children: ReactNode; title?: string }) => <code className="ui-mono" {...(title ? { title } : {})}>{children}</code>;
 export const Note = ({ children }: { children: ReactNode }) => <p className="ui-note">{children}</p>;
+
+/** An on/off control. `checked === null` is "not yet known" — disabled, never shown as off. */
+export function Switch({ checked, onChange, busy, label, ...rest }: { checked: boolean | null; onChange: () => void; busy?: boolean; label: string } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onChange'>) {
+  return (
+    <button type="button" role="switch" aria-checked={checked === true} aria-label={label} className="ui-switch" disabled={checked === null || busy} onClick={onChange} {...rest} />
+  );
+}

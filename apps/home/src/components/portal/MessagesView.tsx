@@ -4,6 +4,7 @@
 // shows the last message ("You: …" when it was yours) and when, and "New message" is a To: typeahead
 // with no subject line. Requests stay pinned above; a request's thread lives inside the DM with the
 // party that raised it. Rich compose (emoji + images), amber design system.
+import { BotIcon } from '../shared/Icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import type { InteractionCaseV1 } from '@agenticprimitives/fabric/interactions';
@@ -477,7 +478,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                 {/* spec 334 §5 — posting a request is a first-class Home action; the goal-first
                     composer lives on My Work. */}
                 <a href="/work" className="chat-rail-action" title="New request — describe a goal for a person or organization (My Work)">Request</a>
-                <a href="/agent" className="chat-rail-action" aria-label="Agent settings — message bot and playbook" title="Agent settings — message bot & playbook">🤖</a>
+                <a href="/agent" className="chat-rail-action" aria-label="Agent settings — message bot and playbook" title="Agent settings — message bot & playbook"><BotIcon size={15} /></a>
               </>
             )}
             <button
@@ -633,7 +634,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                     <div key={i.messageId}>
                       {agentAuthored && mine && firstOfGroup && (
                         <div style={{ textAlign: 'right', fontSize: '0.68rem', opacity: 0.6, margin: '0.15rem 0.5rem 0.1rem 0' }}>
-                          🤖 sent by your assistant
+                          sent by your assistant
                         </div>
                       )}
                       <MessageBubble

@@ -24,7 +24,7 @@ export default function OrgTreasuryPage({ params }: { params: Promise<{ org: str
   const treasury = agents.find((a) => a.kind === 'org-treasury' && lc(a.parent) === lc(org));
 
   return (
-    <SectionShell title={orgAgent?.name ? `${nameLabel(orgAgent.name)} — treasury` : 'Treasury'}>
+    <SectionShell title="Treasury" description={orgAgent?.name ? <>The money agent of {nameLabel(orgAgent.name)}: its balance, funding, and where its payments go.</> : 'This organization\u2019s money agent: its balance, funding, and where its payments go.'}>
       {!loaded ? (
         <p className="manage-card-blurb">Loading…</p>
       ) : treasury ? (

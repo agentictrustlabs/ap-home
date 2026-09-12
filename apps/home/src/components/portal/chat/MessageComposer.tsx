@@ -1,5 +1,6 @@
 'use client';
 
+import { PaperclipIcon } from '../../shared/Icons';
 import { useRef, useState } from 'react';
 import { EmojiButton } from './EmojiButton';
 import { fileToMessageDataUrl } from '../../../lib/avatar-store';
@@ -55,7 +56,7 @@ export function MessageComposer({
           disabled={disabled}
           onClick={() => fileRef.current?.click()}
         >
-          📎
+          <PaperclipIcon size={16} />
         </button>
         <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => {
           const f = e.target.files?.[0];

@@ -41,24 +41,21 @@ const TAB_TONE: Record<'good' | 'warn' | 'muted', string> = { good: 'var(--color
 function Tabs({ tabs, base, cardId, active }: { tabs: ReturnType<typeof studioTabs>; base: string; cardId: string; active: string }) {
   const href = `${base}/${encodeURIComponent(cardId)}`;
   return (
-    <nav aria-label="Card sections" style={{ display: 'flex', gap: '.3rem', flexWrap: 'wrap', margin: '0 0 .9rem' }}>
-      {tabs.map((t) => (
-        <Link
-          key={t.id}
-          href={`${href}${t.suffix}`}
-          prefetch={false}
-          aria-current={t.id === active ? 'page' : undefined}
-          style={{
-            display: 'grid', gap: '.1rem', textDecoration: 'none', padding: '.4rem .7rem', minHeight: 44,
-            borderRadius: 8, border: '1px solid var(--c-g200)',
-            background: t.id === active ? 'var(--c-primary-subtle)' : 'var(--color-surface)',
-            color: t.id === active ? 'var(--c-primary)' : 'var(--c-g700)',
-          }}
-        >
-          <span style={{ fontSize: '.78rem', fontWeight: t.id === active ? 700 : 500 }}>{t.label}</span>
-          {t.status && <span style={{ fontSize: '.66rem', color: t.id === active ? 'var(--c-primary)' : TAB_TONE[t.tone] }}>{t.status}</span>}
-        </Link>
-      ))}
+    <nav aria-label="Card sections" className="ui-toolbar">
+      <div className="ui-tabs">
+        {tabs.map((t) => (
+          <Link
+            key={t.id}
+            href={`${href}${t.suffix}`}
+            prefetch={false}
+            aria-current={t.id === active ? 'page' : undefined}
+            className={`ui-tab${t.id === active ? ' active' : ''}`}
+            style={{ textDecoration: 'none' }}
+          >
+            {t.label}{t.status && <span className="ui-count" style={{ color: t.id === active ? TAB_TONE[t.tone] : undefined }}>{t.status}</span>}
+          </Link>
+        ))}
+      </div>
     </nav>
   );
 }
