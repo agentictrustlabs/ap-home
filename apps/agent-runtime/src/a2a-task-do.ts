@@ -1052,6 +1052,16 @@ export class A2aTaskDO {
       }
       return Response.json({ ok: true, messageId: p.envelope.id });
     }
+    // Spec 400 W2 (B7) — FIRE THIS AGENT'S TRIGGERS from a source another object saw (a reaction on its post). The
+    // source is matched against the playbook's rows here; a row that does not match fires nothing. Marker-gated.
+    if (url.pathname === '/internal/fire-triggers') {
+      if (!isInternalCall(req, this.env)) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
+      const p = (await req.json().catch(() => null)) as { source?: { kind?: string; message?: { id?: string; from?: string; profile?: string } } } | null;
+      const me = (url.searchParams.get('agent') ?? '').toLowerCase();
+      if (!p?.source || p.source.kind !== 'message' || !p.source.message?.id || !p.source.message.profile || !/^0x[0-9a-f]{40}$/.test(me)) return Response.json({ ok: false, error: 'a message source and the agent are required' }, { status: 400 });
+      const fired = await fireTriggersAt(this.env, me as Address, p.source as never).catch((e: unknown) => { console.warn('[triggers] fire-triggers failed:', e instanceof Error ? e.message : String(e)); return []; });
+      return Response.json({ ok: true, fired });
+    }
     if (url.pathname === '/internal/discussion-respond') {
       if (!isInternalCall(req, this.env)) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
       const p = (await req.json().catch(() => null)) as (DiscussionRespondInput & { trigger?: string; mentionHandle?: string }) | null;

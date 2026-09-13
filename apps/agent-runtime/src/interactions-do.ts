@@ -463,6 +463,8 @@ export interface InteractionsDeps {
     toolName: 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record',
     toolArgs: Record<string, unknown>,
   ): Promise<Response>;
+  /** Typed-name resolution for mentions (spec 400 W2). Default: the naming registry over `env.RPC_URL`. */
+  resolveName?(name: string): Promise<Address | null>;
 }
 
 export class InteractionsDO {
@@ -533,13 +535,14 @@ export class InteractionsDO {
   private dispatchMentions(opts: { entry: ChannelV1; channelId: string; principal: string; grant: IncomingDelegation; posterCaip: string; posterName: string; bodyText: string; messageId: string }): void {
     const refs = mentionsIn(opts.bodyText);
     if (!refs.length || !internalMarker(this.env)) return;
-    if (!this.env.RPC_URL || !this.env.AGENT_NAME_REGISTRY || !this.env.AGENT_NAME_UNIVERSAL_RESOLVER) return;
+    const injected = this.deps?.resolveName;
+    if (!injected && (!this.env.RPC_URL || !this.env.AGENT_NAME_REGISTRY || !this.env.AGENT_NAME_UNIVERSAL_RESOLVER)) return;
     const audit = buildAuditSink(this.env);
     const chainId = Number(this.env.CHAIN_ID ?? 84532);
     void (async () => {
-      const naming = new AgentNamingClient({ rpcUrl: this.env.RPC_URL!, chainId, registry: this.env.AGENT_NAME_REGISTRY as Address, universalResolver: this.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address });
+      const naming = injected ? null : new AgentNamingClient({ rpcUrl: this.env.RPC_URL!, chainId, registry: this.env.AGENT_NAME_REGISTRY as Address, universalResolver: this.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address });
       const members = await resolveMentions(refs, {
-        resolveName: async (n) => (await naming.resolveName(n)) as Address | null,
+        resolveName: async (n) => injected ? injected(n) : (await naming!.resolveName(n)) as Address | null,
         // A member: the organization's own invitation record for it (S3b — for a service the invitation is the admission).
         isMember: async (a) => !!(await this.readDoc<unknown>(opts.grant, `org.invite:agent:${a.toLowerCase()}`, null)),
         exclude: [opts.principal as Address],
@@ -571,6 +574,24 @@ export class InteractionsDO {
         }
       }
     })().catch(() => undefined);
+  }
+
+  /** Spec 400 W2 (B7) — fire the post author's `reaction` triggers. Audited and dropped on failure (ADR-0013). */
+  private dispatchReaction(opts: { entry: ChannelV1; channelId: string; principal: string; author: string; messageId: string; emoji: string; by: string; byName: string | null }): void {
+    if (!internalMarker(this.env)) return;
+    const author = (opts.author.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+    if (!author) return;
+    const audit = buildAuditSink(this.env);
+    void (async () => {
+      const source = { kind: 'message', message: { id: opts.messageId, from: opts.by, ...(opts.byName ? { fromName: opts.byName } : {}), profile: 'reaction', text: opts.emoji, subject: `${opts.emoji} on your post in ${opts.entry.descriptor.title}`.slice(0, 120), thread: topicThreadId(opts.principal, opts.channelId), topic: { org: opts.principal, channelId: opts.channelId, title: opts.entry.descriptor.title } } };
+      const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(author));
+      const resp = await stub.fetch(new Request(`https://do/internal/fire-triggers?agent=${author}`, { method: 'POST', headers: internalHeaders(this.env), body: JSON.stringify({ source }) }));
+      const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; fired?: unknown[]; error?: string };
+      if (!resp.ok || out.ok === false) throw new Error(out.error ?? `fire-triggers failed (${resp.status})`);
+      if ((out.fired ?? []).length) await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.channels.reactionFired', outcome: 'success', actor: { type: 'user', id: opts.by }, subject: { type: 'channel-post', id: opts.messageId }, reason: `${opts.emoji} → ${author} (${(out.fired ?? []).length} trigger(s))` });
+    })().catch((e) => {
+      void audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.channels.reactionFailed', outcome: 'error', actor: { type: 'user', id: opts.by }, subject: { type: 'channel-post', id: opts.messageId }, reason: e instanceof Error ? e.message : String(e) });
+    });
   }
 
   /** spec 334 §6 — hand the just-adopted goal to the org's OWN agent to DRAFT a first plan
@@ -3677,7 +3698,14 @@ export class InteractionsDO {
           }
           if (Object.keys(cur).length) row.reactions = cur;
           else delete row.reactions;
+          const added = !holders.includes(me);
           await this.writeDoc(grant, TOPIC_RESOURCE(channelId), messages);
+          // Spec 400 W2 (B7) — A REACTION IS A TRIGGER SOURCE. An emoji ADDED to a post fires the post's AUTHOR's
+          // `message` triggers with profile `reaction` (a removal fires nothing): a 👍 on the coordinator's proposal is
+          // the lightest "go" a member has, and the playbook says what it means. Post-commit, fire-and-forget, the
+          // author's own object, marker-gated; the org itself and persons are authors too — a person's agent hears
+          // it through its own triggers. Never authority: what the author may do about it is its grant.
+          if (added) this.dispatchReaction({ entry, channelId, principal, author: row.envelope.from, messageId, emoji, by: sessionSa.toLowerCase(), byName: presence.you ?? null });
           await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.channels.react', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel-post', id: messageId } });
           return json({ ok: true, messageId, reactions: row.reactions ?? {} });
         });
