@@ -37,7 +37,7 @@ import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
 import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
 import { PLAYBOOK_ANSWER_TOOL, playbookAnswerAvailable, playbookAnswerInvoker, type PlaybookMaterial } from './playbook-answer.js';
-import { DAY_RECORDS_SCOPE, HAND_RECORD, NOTE_RECORD, READ_RECORD, STYLE_RECORD, appendNote, dayRecordsFor, reviewDaysOf, studyFrom, type StudyAccess } from './card-room.js';
+import { appendNote, dayRecordsFor, reviewDaysOf, studyFrom, studyRecords, type StudyAccess } from './card-room.js';
 import { memoryRecordFor } from './playbook-memory.js';
 import { remembered, forget } from './run-memo.js';
 import { DISCOVERY_FIND_TOOL, ENGAGEMENT_INVOKE_TOOL, DISCOVERY_INSPECT_TOOL, DISCOVERY_FIND_CAPABILITY, ENGAGEMENT_INVOKE_CAPABILITY, discoveryFindInvoker } from './enterprise-tools.js';
@@ -4027,13 +4027,16 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   const studyOnce = input.study && deps.readSubjectRecord && input.material && typeof input.material.skill === 'string'
     ? (() => {
         const owner = input.study.owner; const reads = input.study.reads; const review = /\.review$/i.test(String(input.material.skill));
+        // THIS GAME'S CABINET — the record names the grant was verified against (`cardroom.hand`, or
+        // `cardroom.canasta.hand`, …), never hold'em's by default.
+        const rec = input.study.records ?? studyRecords(String(input.material.skill));
         const read = (recordType: string) => reads.includes(recordType) ? deps.readSubjectRecord!(owner, recordType).catch(() => null) : Promise.resolve(null);
         const materialInput = input.material.input;
         // A REVIEW READS THE SPAN'S DAYS — seven by default, the request's `days` otherwise — when the grant covers
         // them; advice reads none of them. Read in parallel: a week is seven small reads, not one large one.
         const span = review ? reviewDaysOf(materialInput) : 0;
-        const dayTypes = review && reads.includes(DAY_RECORDS_SCOPE) ? dayRecordsFor(span) : [];
-        return Promise.all([read(HAND_RECORD), read(STYLE_RECORD), read(READ_RECORD), read(NOTE_RECORD), Promise.all(dayTypes.map((t) => deps.readSubjectRecord!(owner, t).catch(() => null)))])
+        const dayTypes = review && reads.includes(rec.dayScope) ? dayRecordsFor(span, new Date(), rec.family) : [];
+        return Promise.all([read(rec.hand), read(rec.style), read(rec.read), read(rec.note), Promise.all(dayTypes.map((t) => deps.readSubjectRecord!(owner, t).catch(() => null)))])
           .then(([hand, style, playerRead, note, days]) => studyFrom({ access: input.study!, hand, style, read: playerRead, note, material: materialInput, review, days, ...(span ? { span } : {}) }));
       })()
     : null;
@@ -4328,14 +4331,15 @@ step is then handed to that agent under authority the person grants; leave it ou
     ? (() => {
         const owner = input.study.owner;
         const loaded = studyOnce;
+        const noteRecord = (input.study.records ?? studyRecords(String(material.skill ?? 'poker.advise'))).note;
         return {
           load: () => loaded,
           coach: input.study.delegate,
-          note: input.study.appends.includes(NOTE_RECORD) && deps.writeSubjectRecord
+          note: input.study.appends.includes(noteRecord) && deps.writeSubjectRecord
             ? async (text: string, extra?: { hand?: number; scope?: string }) => {
                 const by = deps.nameOf && input.addressee ? (await deps.nameOf(String(input.addressee)).catch(() => null)) ?? String(input.addressee) : String(input.addressee ?? '');
-                const prev = await deps.readSubjectRecord!(owner, NOTE_RECORD).catch(() => null);
-                return deps.writeSubjectRecord!(owner, NOTE_RECORD, appendNote(prev, { by, at: new Date().toISOString(), text, ...(extra?.hand ? { hand: extra.hand } : {}), ...(extra?.scope ? { scope: extra.scope } : {}) }));
+                const prev = await deps.readSubjectRecord!(owner, noteRecord).catch(() => null);
+                return deps.writeSubjectRecord!(owner, noteRecord, appendNote(prev, { by, at: new Date().toISOString(), text, ...(extra?.hand ? { hand: extra.hand } : {}), ...(extra?.scope ? { scope: extra.scope } : {}) }));
               }
             : undefined,
         };

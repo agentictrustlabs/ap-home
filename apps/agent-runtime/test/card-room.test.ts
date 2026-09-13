@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { buildVaultRecordScopeCaveat, VAULT_RECORD_SCOPE_ENFORCER, TIMESTAMP_ENFORCER } from '@agenticprimitives/delegation';
 import {
   HANDS_KEPT, HAND_RECORD, NOTE_RECORD, STUDY_SERVER,
-  appendNote, cardRoomActOf, cardRoomTurn, dayRecordFor, dayRecordsFor, handEntryOf, isHandRecord, recordDayHand, recordHand, reviewDaysOf, reviewScopeOf, studyFrom, studyGrantOf, verifyStudyGrant,
+  appendNote, cardRoomActOf, cardRoomTurn, compactCanastaRound, dayRecordFor, dayRecordsFor, handEntryOf, isHandRecord, recordDayHand, recordHand, reviewDaysOf, reviewScopeOf, studyFamilyOfRecord, studyFrom, studyGrantOf, studyRecords, verifyStudyGrant,
 } from '../src/card-room.js';
 import { PLAYBOOK_ANSWER_TOOL, playbookAnswerInvoker } from '../src/playbook-answer.js';
 import type { IncomingWire } from '../src/org-wire.js';
@@ -448,5 +448,62 @@ describe('poker.coach — who coaches you, and have you been asked', () => {
     // Without a specialist: no coach, and that is the answer.
     deps.specialistsOf = async () => null;
     expect(JSON.parse((await ask() as { text: string }).text)).toMatchObject({ coach: null });
+  });
+});
+
+describe('one cabinet per game', () => {
+  it('hold\'em keeps the bare names; every other game carries its family in the record name', () => {
+    expect(studyRecords('poker')).toMatchObject({ family: 'poker', hand: 'cardroom.hand', note: 'cardroom.note', dayPrefix: 'cardroom.hands:', dayScope: 'cardroom.hands:*' });
+    expect(studyRecords('canasta.advise')).toMatchObject({ family: 'canasta', hand: 'cardroom.canasta.hand', style: 'cardroom.canasta.style', read: 'cardroom.canasta.read', note: 'cardroom.canasta.note', dayPrefix: 'cardroom.canasta.hands:', dayScope: 'cardroom.canasta.hands:*' });
+    expect(studyRecords('canasta').reads).toEqual(['cardroom.canasta.hand', 'cardroom.canasta.style', 'cardroom.canasta.read', 'cardroom.canasta.note', 'cardroom.canasta.hands:*']);
+    expect(dayRecordFor('2026-09-12T20:00:00Z', 'canasta')).toBe('cardroom.canasta.hands:2026-09-12');
+    expect(dayRecordsFor(2, new Date('2026-09-12T12:00:00Z'), 'canasta')).toEqual(['cardroom.canasta.hands:2026-09-11', 'cardroom.canasta.hands:2026-09-12']);
+    expect(studyFamilyOfRecord('cardroom.hand')).toBe('poker');
+    expect(studyFamilyOfRecord('cardroom.canasta.hands:2026-09-12')).toBe('canasta');
+    expect(studyFamilyOfRecord('cardroom.prefs')).toBeNull();
+  });
+
+  it('a canasta grant is verified against canasta\'s names — a hold\'em grant reads nothing of canasta\'s', async () => {
+    const canastaGrant = grantWire({ scopes: [{ resources: ['vault:cardroom.canasta.hand', 'vault:cardroom.canasta.hands:*', 'vault:cardroom.canasta.style', 'vault:cardroom.canasta.read', 'vault:cardroom.canasta.note'], ops: ['read'] }, { resources: ['vault:cardroom.canasta.note'], ops: ['write'] }] });
+    const r = await verifyStudyGrant({ grant: { wire: canastaGrant, hash: '0xc' }, delegator: ALICE, delegate: COACH, enforcers, checks: checks(), family: 'canasta' });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.access.reads).toEqual(['cardroom.canasta.hand', 'cardroom.canasta.style', 'cardroom.canasta.read', 'cardroom.canasta.note', 'cardroom.canasta.hands:*']);
+      expect(r.access.appends).toEqual(['cardroom.canasta.note']);
+      expect(r.access.records?.family).toBe('canasta');
+    }
+    // Bob's hold'em grant presented for a canasta consultation reads none of her canasta records.
+    expect(await verifyStudyGrant({ grant: { wire: grantWire(), hash: '' }, delegator: ALICE, delegate: COACH, enforcers, checks: checks(), family: 'canasta' })).toEqual({ ok: false, reason: 'the study grant does not read her canasta hands' });
+    // And a canasta grant that writes her hold'em notes is refused whole.
+    const writesOther = grantWire({ scopes: [{ resources: ['vault:cardroom.canasta.hand'], ops: ['read'] }, { resources: ['vault:cardroom.note'], ops: ['write'] }] });
+    expect(await verifyStudyGrant({ grant: { wire: writesOther, hash: '' }, delegator: ALICE, delegate: COACH, enforcers, checks: checks(), family: 'canasta' })).toEqual({ ok: false, reason: 'the study grant writes more than the coach’s notes' });
+  });
+
+  it('a canasta round is recorded into the canasta cabinet and never touches the hold\'em counts', async () => {
+    const writes: Array<{ recordType: string; record: unknown }> = [];
+    const records: Record<string, unknown> = { [`${ALICE}:cardroom.hand`]: recordHand(null, 'poker.record', hand(1)) };
+    const deps = {
+      nameOf: async () => 'alice.me', resolveName: async () => null,
+      readRecord: async (owner: string, recordType: string) => records[`${owner}:${recordType}`] ?? null,
+      writeRecord: async (owner: string, recordType: string, record: unknown) => { writes.push({ recordType, record }); records[`${owner}:${recordType}`] = record; return { ok: true }; },
+      specialistsOf: async () => [], studyGrantWire: async () => null,
+      verify: async () => ({ ok: false as const, reason: 'no' }), consult: async () => { throw new Error('no consult'); }, log: () => undefined,
+    };
+    const view = { roundNo: 7, phase: 'play', stock: 31, pileTop: '8C', pileSize: 11, frozen: true, melds: { 0: [{ rank: '8', cards: ['8H', '8S', '8C', '8D', '8H', '8S', '8C'], canasta: true, natural: true }], 1: [{ rank: 'K', cards: ['KS', 'KH', 'KD', 'KC'], canasta: false, natural: true }] }, redThrees: { 0: 1, 1: 0 }, seats: [{ seat: 0, cards: 3, team: 0 }, { seat: 1, cards: 7, team: 1 }, { seat: 2, cards: 0, team: 0 }, { seat: 3, cards: 8, team: 1 }], hand: ['5C', 'W*', '4D'], result: { wentOut: 2, concealed: false, scores: { 0: { melds: 195, canastas: 500, redThrees: 100, goingOut: 100, inHand: -160, total: 735 }, 1: { melds: 40, canastas: 0, redThrees: 0, goingOut: 0, inHand: -135, total: -95 } } } };
+    const out = await cardRoomTurn(deps, { agent: '0x' + 'e'.repeat(40), addressee: ALICE, ask: 'canasta.record: round 7 is over', runRef: 'r', skill: 'canasta.record', act: 'record', advertised: true, material: { skill: 'canasta.record', input: { skill: 'canasta.record', tableId: 't1', handNo: 7, seat: 0, view, endedAt: Date.parse('2026-09-12T20:41:10Z'), observation: { subjects: { me: { you: true, counters: { rounds: 1, wentOut: 0, netScore: 735 } } } } } } });
+    expect(out).toMatchObject({ kind: 'answer' });
+    expect(writes.map((w) => w.recordType).sort()).toEqual(['cardroom.canasta.hand', 'cardroom.canasta.hands:2026-09-12']);
+    // Hold'em's cabinet is untouched: one hand, family poker.
+    expect((records[`${ALICE}:cardroom.hand`] as { hands: number; family: string })).toMatchObject({ hands: 1, family: 'poker' });
+    expect((records[`${ALICE}:cardroom.canasta.hand`] as { hands: number; family: string })).toMatchObject({ hands: 1, family: 'canasta' });
+    // And the round compacts to one line a review can quote.
+    const entry = (records[`${ALICE}:cardroom.canasta.hand`] as { recent: Array<{ handNo: number; seat: number; at: string; view: unknown; net?: number }> }).recent[0]!;
+    const line = compactCanastaRound(entry);
+    expect(line).toContain('round 7');
+    expect(line).toContain('YOUR side melds [8×7 natural canasta]');
+    expect(line).toContain('pile 11 FROZEN top 8C');
+    expect(line).toContain('seat 2 went out');
+    expect(line).toContain('YOUR side +735');
+    expect(compactCanastaRound({ handNo: 1, table: 't', seat: 0, at: '2026-09-12T00:00:00Z', view: { hand: { street: 'flop' } } })).toBeNull();
   });
 });

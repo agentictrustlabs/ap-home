@@ -47,10 +47,48 @@ export const PREFS_RECORD = 'cardroom.prefs';
 /** Every hand of one day, whole — `cardroom.hands:<yyyy-mm-dd>`. A review over a span reads the days it covers;
  *  advice reads only `cardroom.hand` (counts + the recent few), so a season of hands never rides on a hand's clock. */
 export const DAY_RECORD_PREFIX = 'cardroom.hands:';
-export const dayRecordFor = (at: Date | string | number): string => `${DAY_RECORD_PREFIX}${new Date(at).toISOString().slice(0, 10)}`;
+export const dayRecordFor = (at: Date | string | number, family = 'poker'): string => `${studyRecords(family).dayPrefix}${new Date(at).toISOString().slice(0, 10)}`;
 /** The grant resource that covers the day records. `vault:cardroom.hands:*` in the caveat; `*` matches a prefix. */
 export const DAY_RECORDS_SCOPE = 'cardroom.hands:*';
 export const STUDY_READS = [HAND_RECORD, STYLE_RECORD, READ_RECORD, NOTE_RECORD, DAY_RECORDS_SCOPE] as const;
+
+/**
+ * ONE CABINET PER GAME. Hold'em's records keep the names above (`cardroom.hand`, …) — the card room's own
+ * rule is that no stamp means poker, and every grant already issued names them. Every other game's records
+ * carry the family in the name: `cardroom.canasta.hand`, `cardroom.canasta.hands:<day>`, `.style`, `.read`,
+ * `.note`. So a person coached at both games has two cabinets and two grants, a hold'em coach's grant covers
+ * nothing of canasta's, and a canasta round can never reset the hold'em counts (a record whose `family` did
+ * not match used to be started afresh — one cabinet for two games was a cabinet for whichever wrote last).
+ */
+export interface StudyRecords {
+  family: string;
+  hand: string;
+  style: string;
+  read: string;
+  note: string;
+  /** `cardroom.hands:` or `cardroom.<family>.hands:` — the day records' prefix. */
+  dayPrefix: string;
+  /** The grant resource that covers the day records — the prefix with a trailing `*`. */
+  dayScope: string;
+  reads: readonly string[];
+  appends: readonly string[];
+}
+
+export const familyOfSkill = (skill: string | null | undefined): string => (String(skill ?? '').split('.')[0] ?? '').trim().toLowerCase() || 'poker';
+
+export function studyRecords(familyOrSkill: string | null | undefined): StudyRecords {
+  const family = familyOfSkill(familyOrSkill && familyOrSkill.includes('.') ? familyOrSkill : `${familyOrSkill ?? 'poker'}.x`);
+  const infix = family === 'poker' ? '' : `${family}.`;
+  const dayPrefix = `cardroom.${infix}hands:`;
+  const r = { family, hand: `cardroom.${infix}hand`, style: `cardroom.${infix}style`, read: `cardroom.${infix}read`, note: `cardroom.${infix}note`, dayPrefix, dayScope: `${dayPrefix}*` };
+  return { ...r, reads: [r.hand, r.style, r.read, r.note, r.dayScope], appends: [r.note] };
+}
+
+/** Which game a record name belongs to, or null when it is not a study record at all. */
+export function studyFamilyOfRecord(recordType: string): string | null {
+  const m = /^cardroom\.(?:([a-z0-9-]+)\.)?(hand|hands:[^\s]*|style|read|note)$/i.exec(recordType);
+  return m ? (m[1] ?? 'poker').toLowerCase() : null;
+}
 /** How many days a review may reach back. Seven by default; a month at most — a season is a review of reviews. */
 export const REVIEW_DAYS_DEFAULT = 7;
 export const REVIEW_DAYS_MAX = 30;
@@ -93,6 +131,8 @@ export interface CardRoomPrefsV1 {
   /** They have been asked whether they want a coach, and what they said. Asked ONCE: the card room reads this
    *  before it asks, so nobody is asked on every visit. */
   coachAsked?: { at: string; answer: 'hired' | 'later' | 'no' };
+  /** The same, per game other than hold'em — `canasta`, … */
+  coachAskedFor?: Record<string, { at: string; answer: 'hired' | 'later' | 'no' }>;
   updatedAt: string;
 }
 
@@ -113,6 +153,8 @@ export interface StudyAccess {
   hash: string;
   reads: string[];
   appends: string[];
+  /** Which game's cabinet the grant is for — the record names the reads and appends are drawn from. */
+  records?: StudyRecords;
 }
 
 export function studyGrantOf(material: Record<string, unknown> | null | undefined): StudyGrantWire | null {
@@ -143,7 +185,10 @@ export async function verifyStudyGrant(input: {
   enforcers: EnforcerAddressMap;
   checks: OrgWireChecks;
   now?: number;
+  /** The skill family being consulted — `poker` unless the ask says otherwise. */
+  family?: string;
 }): Promise<{ ok: true; access: StudyAccess } | { ok: false; reason: string }> {
+  const rec = studyRecords(input.family ?? 'poker');
   const g = input.grant;
   if (!g) return { ok: false, reason: 'no study grant was presented' };
   const w = g.wire;
@@ -158,17 +203,17 @@ export async function verifyStudyGrant(input: {
   // "no scope" from reading as "every scope" (the same NO SCOPE ⇒ NO rule as `hasScopedAccess`).
   // A wildcard resource is checked as a representative member: `vaultRecordScopeAllows` matches a caveat's
   // trailing `*` against a concrete resource, never a wildcard against a wildcard.
-  const reads = STUDY_READS.filter((r) => vaultRecordScopeAllows(grants, { server: STUDY_SERVER, resource: `vault:${r.endsWith('*') ? r.slice(0, -1) + '2026-01-01' : r}`, op: 'read' }));
-  const appends = STUDY_APPENDS.filter((r) => vaultRecordScopeAllows(grants, { server: STUDY_SERVER, resource: `vault:${r}`, op: 'write' }));
-  if (!reads.includes(HAND_RECORD)) return { ok: false, reason: 'the study grant does not read her hands' };
+  const reads = rec.reads.filter((r) => vaultRecordScopeAllows(grants, { server: STUDY_SERVER, resource: `vault:${r.endsWith('*') ? r.slice(0, -1) + '2026-01-01' : r}`, op: 'read' }));
+  const appends = rec.appends.filter((r) => vaultRecordScopeAllows(grants, { server: STUDY_SERVER, resource: `vault:${r}`, op: 'write' }));
+  if (!reads.includes(rec.hand)) return { ok: false, reason: rec.family === 'poker' ? 'the study grant does not read her hands' : `the study grant does not read her ${rec.family} hands` };
   // NOTHING BUT THE NOTE IS WRITABLE. A grant that let the coach write her hands or her style would let
   // it rewrite the evidence it is judged against; such a grant is refused whole, not narrowed.
   const writesElse = grants.some((gr) => gr.ops.includes('write') || gr.ops.includes('delete')
-    ? gr.resources.some((r) => r !== `vault:${NOTE_RECORD}`) : false);
+    ? gr.resources.some((r) => r !== `vault:${rec.note}`) : false);
   if (writesElse) return { ok: false, reason: 'the study grant writes more than the coach’s notes' };
   const live = await verifyDelegationWire({ wire: w, expectedDelegator: input.delegator, expectedDelegate: input.delegate as `0x${string}`, enforcers: input.enforcers, checks: input.checks, ...(input.now ? { now: input.now } : {}) });
   if (!live) return { ok: false, reason: 'the study grant is expired, revoked or not genuinely signed' };
-  return { ok: true, access: { owner: w.delegator.toLowerCase(), delegate: w.delegate.toLowerCase(), hash: g.hash, reads, appends } };
+  return { ok: true, access: { owner: w.delegator.toLowerCase(), delegate: w.delegate.toLowerCase(), hash: g.hash, reads, appends, records: rec } };
 }
 
 // ── Her hand record ──────────────────────────────────────────────────────────────────────────────────
@@ -223,7 +268,8 @@ export function recordHand(prev: unknown, skill: string, input: unknown, now = n
     seat: Number(inp.seat ?? 0) || 0,
     at: endedAt.toISOString(),
     view: inp.view,
-    ...(you && typeof you.counters.netChips === 'number' ? { net: you.counters.netChips } : {}),
+    // Her net: chips at hold'em (`netChips`), her side's points at canasta (`netScore`).
+    ...(you && typeof (you.counters.netChips ?? you.counters.netScore) === 'number' ? { net: (you.counters.netChips ?? you.counters.netScore) as number } : {}),
   };
   // The same hand reported twice (a retry) is recorded once: the table names the hand and the seat.
   const dup = base.recent.some((h) => h.table === entry.table && h.handNo === entry.handNo && h.seat === entry.seat && entry.handNo > 0);
@@ -260,10 +306,10 @@ export function recordDayHand(prev: unknown, entry: HandEntryV1, now = new Date(
 }
 
 /** The day records a review over the last `days` covers, newest last. */
-export function dayRecordsFor(days: number, now = new Date()): string[] {
+export function dayRecordsFor(days: number, now = new Date(), family = 'poker'): string[] {
   const n = Math.min(REVIEW_DAYS_MAX, Math.max(1, Math.floor(days) || REVIEW_DAYS_DEFAULT));
   const out: string[] = [];
-  for (let i = n - 1; i >= 0; i--) out.push(dayRecordFor(new Date(now.getTime() - i * 86_400_000)));
+  for (let i = n - 1; i >= 0; i--) out.push(dayRecordFor(new Date(now.getTime() - i * 86_400_000), family));
   return out;
 }
 
@@ -322,7 +368,8 @@ export interface Study {
 
 export function studyFrom(input: { access: StudyAccess; hand: unknown; style: unknown; read: unknown; note: unknown; material: unknown; review?: boolean; days?: unknown[]; span?: number }): Study {
   const hand = isHandRecord(input.hand) ? input.hand : null;
-  const notes = input.access.reads.includes(NOTE_RECORD) ? notesOf(input.note).slice(-6) : [];
+  const rec = input.access.records ?? studyRecords('poker');
+  const notes = input.access.reads.includes(rec.note) ? notesOf(input.note).slice(-6) : [];
   // THE SPAN'S HANDS, from the day records, deduped against the recent few (a hand is in both).
   const fromDays = (input.days ?? []).filter(isDayHands).flatMap((d) => d.hands);
   const recent = input.review
@@ -330,9 +377,9 @@ export function studyFrom(input: { access: StudyAccess; hand: unknown; style: un
     : undefined;
   return {
     owner: input.access.owner,
-    style: input.access.reads.includes(STYLE_RECORD) ? styleRulesOf(input.style) : [],
+    style: input.access.reads.includes(rec.style) ? styleRulesOf(input.style) : [],
     remembered: hand ? rememberedFor(hand.memory, input.material) : [],
-    reads: input.access.reads.includes(READ_RECORD) ? readsOf(input.read) : [],
+    reads: input.access.reads.includes(rec.read) ? readsOf(input.read) : [],
     notes,
     hands: hand?.hands ?? 0,
     ...(recent ? { recent } : {}),
@@ -370,6 +417,8 @@ export function reviewScopeOf(question: string, recent: HandEntryV1[], now = new
  */
 export function compactHand(h: HandEntryV1): unknown {
   const v = h.view as { kind?: unknown; events?: unknown; result?: unknown } | null;
+  const canasta = compactCanastaRound(h);
+  if (canasta) return canasta;
   if (!v || v.kind !== 'history' || !Array.isArray(v.events)) return { hand: h.handNo, seat: h.seat, at: h.at.slice(0, 16), ...(typeof h.net === 'number' ? { net: h.net } : {}), view: h.view };
   const me = h.seat;
   let cards = '';
@@ -399,6 +448,64 @@ export function compactHand(h: HandEntryV1): unknown {
   return `hand ${h.handNo} (${h.at.slice(0, 16)}, you are seat ${me}${cards ? `, holding ${cards}` : ''}): ${streets.join(' | ')}${awards ? ` | ${awards}` : ''}${typeof net === 'number' ? ` | your net ${net > 0 ? '+' : ''}${net}` : ''}${timedOut ? ` | you timed out on ${timedOut} of ${decisions} decisions (not decisions — you were away)` : ''}`;
 }
 
+/**
+ * ONE CANASTA ROUND, IN A LINE — the same job for the other game. A live-recorded round is the seat's final
+ * view (its own hand, both sides' melds, the pile, the result and what it paid); a backfilled one is the
+ * table's event log. Either way the line keeps what the review skill reads: which side you were on, what
+ * each side melded and which were canastas, what the pile did, who went out, each side's score and why,
+ * your side's net. Returns null when the entry is not a canasta round at all.
+ */
+export function compactCanastaRound(h: HandEntryV1): string | null {
+  const v = h.view as Record<string, unknown> | null;
+  if (!v || typeof v !== 'object') return null;
+  const me = h.seat; const side = me % 2; const other = 1 - side;
+  const sideWord = (t: number) => (t === side ? 'YOUR side' : 'THEIR side');
+  const meldLine = (ms: unknown) => (Array.isArray(ms) ? ms : []).map((m) => {
+    const x = m as { rank?: string; cards?: unknown[]; canasta?: boolean; natural?: boolean };
+    const n = Array.isArray(x.cards) ? x.cards.length : 0;
+    const wilds = Array.isArray(x.cards) ? x.cards.filter((c) => typeof c === 'string' && (c.startsWith('2') || c.startsWith('W'))).length : 0;
+    return `${x.rank}×${n}${x.canasta ? (x.natural ? ' natural canasta' : ' mixed canasta') : ''}${wilds && !x.canasta ? ` (${wilds} wild)` : ''}`;
+  }).join(', ');
+  const resultLine = (res: unknown) => {
+    const r = res as { wentOut?: number | null; concealed?: boolean; scores?: Record<string, { melds: number; canastas: number; redThrees: number; goingOut: number; inHand: number; total: number }> } | null;
+    if (!r || !r.scores) return '';
+    const sc = (t: number) => { const x = r.scores?.[String(t)]; return x ? `${x.total > 0 ? '+' : ''}${x.total} (melds ${x.melds}, canastas ${x.canastas}, red threes ${x.redThrees}, going out ${x.goingOut}, in hand ${x.inHand})` : '?'; };
+    const out = typeof r.wentOut === 'number' ? `${r.wentOut === me ? 'YOU' : `seat ${r.wentOut}`} went out${r.concealed ? ' concealed' : ''}` : 'the stock ran out';
+    return `${out} | ${sideWord(side)} ${sc(side)} | ${sideWord(other)} ${sc(other)}`;
+  };
+  // A live final view: the game's own shape.
+  if (v.melds && typeof v.melds === 'object' && 'pileSize' in v) {
+    const melds = v.melds as Record<string, unknown>;
+    const hand = Array.isArray(v.hand) ? (v.hand as string[]).join(' ') : '';
+    const seats = Array.isArray(v.seats) ? (v.seats as Array<{ seat: number; cards: number; team: number }>).map((x) => `s${x.seat}${x.seat === me ? '(YOU)' : ''}:${x.cards}`).join(' ') : '';
+    const red = v.redThrees as Record<string, number> | undefined;
+    return `round ${h.handNo} (${h.at.slice(0, 16)}, you are seat ${me}, side ${side}${hand ? `, holding at the end ${hand}` : ''}): ${sideWord(side)} melds [${meldLine(melds[String(side)]) || 'none'}]${red?.[String(side)] ? ` + ${red[String(side)]} red three(s)` : ''} | ${sideWord(other)} melds [${meldLine(melds[String(other)]) || 'none'}] | pile ${v.pileSize}${v.frozen ? ' FROZEN' : ''}${v.pileTop ? ` top ${v.pileTop}` : ''} | stock ${v.stock} | cards held ${seats} | ${resultLine(v.result)}${typeof h.net === 'number' ? ` | your side's net ${h.net > 0 ? '+' : ''}${h.net}` : ''}`;
+  }
+  // A backfilled round: the table's event log, if the events are canasta's.
+  if (v.kind === 'history' && Array.isArray(v.events)) {
+    const evs = v.events as Array<Record<string, unknown>>;
+    if (!evs.some((e) => e.type === 'melded' || e.type === 'took-pile' || e.type === 'discarded' || e.type === 'round-started')) return null;
+    const lines: string[] = [];
+    let dealt = '';
+    for (const e of evs) {
+      const who = (x: unknown) => (x === me ? 'YOU' : `s${String(x)}`);
+      switch (e.type) {
+        case 'dealt': if (e.seat === me) dealt = (e.cards as string[]).join(' '); break;
+        case 'upcard': lines.push(`upcard ${e.card}${e.frozen ? ' (frozen)' : ''}`); break;
+        case 'red-three': lines.push(`${who(e.seat)} lays a red three`); break;
+        case 'took-pile': lines.push(`${who(e.seat)} takes the pile (${e.cards} cards, top ${e.top})`); break;
+        case 'melded': lines.push(`${who(e.seat)} melds ${e.rank}×${e.size}${e.canasta ? ' — canasta' : ''}`); break;
+        case 'opened': lines.push(`${who(e.seat)} opens for ${e.value}`); break;
+        case 'discarded': lines.push(`${who(e.seat)} discards ${e.card}${e.frozen ? ' — pile frozen' : ''}`); break;
+        default: break;
+      }
+    }
+    const res = evs.find((e) => e.type === 'round-ended') as { result?: unknown } | undefined;
+    return `round ${h.handNo} (${h.at.slice(0, 16)}, you are seat ${me}, side ${side}${dealt ? `, dealt ${dealt}` : ''}): ${lines.join('; ')}${res ? ` | ${resultLine(res.result)}` : ''}${typeof h.net === 'number' ? ` | your side's net ${h.net > 0 ? '+' : ''}${h.net}` : ''}`;
+  }
+  return null;
+}
+
 /** A review's default label when the span is known: "the last 7 days, 41 hands". */
 export function spanLabel(days: number, hands: number): string {
   return `the last ${days} day${days === 1 ? '' : 's'}, ${hands} hand${hands === 1 ? '' : 's'}`;
@@ -415,7 +522,7 @@ export interface CardRoomDeps {
   /** The addressee's playbook specialists (`{ capability, executor }`), or null when it has no playbook. */
   specialistsOf: (agent: string) => Promise<ReadonlyArray<{ capability: string; executor: string }> | null>;
   studyGrantWire: (person: string, coach: string) => Promise<{ wire: unknown; hash: string; delegate: string } | null>;
-  verify: (grant: StudyGrantWire, delegator: string, delegate: string) => Promise<{ ok: true; access: StudyAccess } | { ok: false; reason: string }>;
+  verify: (grant: StudyGrantWire, delegator: string, delegate: string, family: string) => Promise<{ ok: true; access: StudyAccess } | { ok: false; reason: string }>;
   /** The consultation: the person's agent asks the coach, in-process, presenting the grant in the material. */
   consult: (input: { agent: string; addressee: string; ask: string; runRef: string; material: Record<string, unknown> }) => Promise<{ reply: { kind: string; text?: string; error?: string } }>;
   timeoutMs?: number;
@@ -470,7 +577,7 @@ export async function cardRoomTurn(deps: CardRoomDeps, input: CardRoomAskInput):
   const grant = studyGrantOf(input.material);
   if (grant) {
     if (input.act === 'record') return done('refused', 'a hand is recorded by the person\'s own agent, never by a coach');
-    const verified = await deps.verify(grant, input.agent, input.addressee);
+    const verified = await deps.verify(grant, input.agent, input.addressee, familyOfSkill(input.skill));
     if (!verified.ok) return done('refused', verified.reason);
     log(`[card-room] ${myName} ${input.skill} · study grant from ${verified.access.owner} verified in ${Date.now() - t0}ms · reads ${verified.access.reads.length} appends ${verified.access.appends.length}`);
     return { study: verified.access };
@@ -482,32 +589,40 @@ export async function cardRoomTurn(deps: CardRoomDeps, input: CardRoomAskInput):
   // record; with `answered` in the material, the answer is written down so the question is not asked again.
   // No model, no coach on the hop.
   if (input.act === 'coach') {
+    const family = familyOfSkill(input.skill);
     const prefsPrev = await deps.readRecord(me, PREFS_RECORD).catch(() => null);
     const prefs: CardRoomPrefsV1 = isPrefs(prefsPrev) ? prefsPrev : { type: 'ap.cardroom-prefs.v1', updatedAt: new Date().toISOString() };
     const answered = (input.material?.input as { answered?: unknown } | undefined)?.answered;
+    // ASKED ONCE PER GAME: hold'em's answer is the original `coachAsked`; every other game's is keyed by family.
+    const askedFor = (p: CardRoomPrefsV1) => (family === 'poker' ? p.coachAsked : p.coachAskedFor?.[family]) ?? null;
     if (answered === 'hired' || answered === 'later' || answered === 'no') {
-      const next: CardRoomPrefsV1 = { ...prefs, coachAsked: { at: new Date().toISOString(), answer: answered }, updatedAt: new Date().toISOString() };
+      const stamp: { at: string; answer: 'hired' | 'later' | 'no' } = { at: new Date().toISOString(), answer: answered };
+      const next: CardRoomPrefsV1 = family === 'poker'
+        ? { ...prefs, coachAsked: stamp, updatedAt: stamp.at }
+        : { ...prefs, coachAskedFor: { ...(prefs.coachAskedFor ?? {}), [family]: stamp }, updatedAt: stamp.at };
       const wrote = await deps.writeRecord(me, PREFS_RECORD, next).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
       if (!wrote.ok) return done('refused', `the answer could not be kept: ${wrote.error ?? 'refused'}`);
-      prefs.coachAsked = next.coachAsked;
+      if (family === 'poker') prefs.coachAsked = stamp; else prefs.coachAskedFor = { ...(prefs.coachAskedFor ?? {}), [family]: stamp };
     }
     const specialists = await deps.specialistsOf(me).catch(() => null);
-    const named = specialists?.find((sp) => /\.advise$/i.test(sp.capability));
+    // THIS GAME'S coach: the specialist for `<family>.advise` — a hold'em coach is not a canasta coach.
+    const named = specialists?.find((sp) => sp.capability.toLowerCase() === `${family}.advise`);
     const coach = named && /\.svc$/.test(named.executor.toLowerCase()) ? named.executor.toLowerCase() : null;
     const hasGrant = coach ? !!(await deps.studyGrantWire(me, coach).catch(() => null)) : false;
-    return done('answer', JSON.stringify({ say: coach ? `${myName} consults ${coach}${hasGrant ? '' : ' (no study grant stored)'}.` : `${myName} has no coach named.`, coach, hasGrant, asked: prefs.coachAsked ?? null }), { coach, asked: prefs.coachAsked ?? null });
+    return done('answer', JSON.stringify({ say: coach ? `${myName} consults ${coach} for ${family}${hasGrant ? '' : ' (no study grant stored)'}.` : `${myName} has no ${family} coach named.`, coach, hasGrant, asked: askedFor(prefs), game: family }), { coach, asked: askedFor(prefs), game: family });
   }
   if (input.act === 'record') {
     const entry = handEntryOf(input.skill, input.material?.input);
     if (!entry) return done('refused', 'the message carried no hand to record');
     // TWO RECORDS, both hers: the running one (counts + the recent few, what advice reads) and the day's
     // (every hand whole, what a review over a span reads). Read together, written together.
-    const dayType = dayRecordFor(entry.at);
-    const [prev, prevDay] = await Promise.all([deps.readRecord(me, HAND_RECORD).catch(() => null), deps.readRecord(me, dayType).catch(() => null)]);
+    const rec = studyRecords(input.skill);
+    const dayType = dayRecordFor(entry.at, rec.family);
+    const [prev, prevDay] = await Promise.all([deps.readRecord(me, rec.hand).catch(() => null), deps.readRecord(me, dayType).catch(() => null)]);
     const next = recordHand(prev, input.skill, input.material?.input);
     if (!next) return done('refused', 'the message carried no hand to record');
     const [wrote, wroteDay] = await Promise.all([
-      deps.writeRecord(me, HAND_RECORD, next).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) })),
+      deps.writeRecord(me, rec.hand, next).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) })),
       deps.writeRecord(me, dayType, recordDayHand(prevDay, entry)).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) })),
     ]);
     if (!wrote.ok) return done('refused', `the hand could not be recorded: ${wrote.error ?? 'refused'}`);

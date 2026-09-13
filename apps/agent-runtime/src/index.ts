@@ -1757,10 +1757,10 @@ async function cardRoomAsk(env: Env, deps: ReturnType<typeof harnessDeps>, input
     // coach verifies it on chain at every consultation regardless — a local `studygrant.revoke` is felt
     // within the minute, an on-chain revoke at the next hand.
     studyGrantWire: (person, coach) => remembered(`studygrant:${person.toLowerCase()}:${coach.toLowerCase()}`, () => deps.studyGrantWire?.(person, coach) ?? Promise.resolve(null)),
-    verify: async (grant, delegator, delegate) => {
+    verify: async (grant, delegator, delegate, family) => {
       if (!validator || !dm) return { ok: false, reason: 'this deployment cannot verify a study grant' };
       return verifyStudyGrant({
-        grant, delegator, delegate, enforcers: enforcersFromEnv(env as unknown as Record<string, string | undefined>),
+        grant, delegator, delegate, family, enforcers: enforcersFromEnv(env as unknown as Record<string, string | undefined>),
         checks: {
           digest: (d) => hashDelegation(d, chainId, dm),
           erc1271: async (signer, digest, sig) => (await deps.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [signer, digest, sig] }).catch(() => false)) === true,

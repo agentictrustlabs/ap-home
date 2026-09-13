@@ -1989,7 +1989,7 @@ export class InteractionsDO {
           // live in the PERSON's vault and the service reaches them under her grant; a service that filed her
           // hands in its own cabinet would keep them after she fired it — the one design mistake the
           // arrangement exists to make impossible. Refused here, on the principal, whoever asked.
-          if (/^cardroom\.(hand|style|read|note)$/.test(recordType) && (await this.principalIsService(principal))) {
+          if (/^cardroom\.(?:[a-z0-9-]+\.)?(hand|hands:.*|style|read|note)$/.test(recordType) && (await this.principalIsService(principal))) {
             return json({ ok: false, error: `a service keeps no "${recordType}" of its own — a client's study records live in the client's vault, under the client's grant` }, 403);
           }
           try {
@@ -4008,10 +4008,14 @@ export class InteractionsDO {
         const resources = scopes.flatMap((gr) => gr.resources);
         if (resources.length === 0) return json({ error: 'the study grant must name at least one resource' }, 400);
         // The four records by name, and the day records by prefix (`vault:cardroom.hands:*`) — never `vault:cardroom.*`
-        // whole, which would also cover a coach's own client pointers if it ever kept them here.
-        if (resources.some((r) => !/^vault:cardroom\.[a-z]+(:\*)?$/.test(r))) return json({ error: 'a study grant scopes card-room study records (vault:cardroom.<record>, vault:cardroom.hands:*) and nothing else' }, 400);
-        if (!scopes.some((gr) => gr.ops.includes('read') && gr.resources.includes('vault:cardroom.hand'))) return json({ error: 'the study grant must read vault:cardroom.hand' }, 400);
-        if (scopes.some((gr) => (gr.ops.includes('write') || gr.ops.includes('delete')) && gr.resources.some((r) => r !== 'vault:cardroom.note'))) return json({ error: 'a study grant may write nothing but vault:cardroom.note' }, 400);
+        // whole, which would also cover a coach's own client pointers if it ever kept them here. ONE CABINET PER
+        // GAME: hold'em's records are the bare names, every other game's carry the family (`vault:cardroom.canasta.hand`).
+        const STUDY_RESOURCE = /^vault:cardroom\.(?:[a-z0-9-]+\.)?[a-z]+(:\*)?$/;
+        const STUDY_HAND = /^vault:cardroom\.(?:[a-z0-9-]+\.)?hand$/;
+        const STUDY_NOTE = /^vault:cardroom\.(?:[a-z0-9-]+\.)?note$/;
+        if (resources.some((r) => !STUDY_RESOURCE.test(r))) return json({ error: 'a study grant scopes card-room study records (vault:cardroom.<record>, vault:cardroom.hands:*, or vault:cardroom.<game>.<record>) and nothing else' }, 400);
+        if (!scopes.some((gr) => gr.ops.includes('read') && gr.resources.some((r) => STUDY_HAND.test(r)))) return json({ error: 'the study grant must read a hand record (vault:cardroom.hand, or vault:cardroom.<game>.hand)' }, 400);
+        if (scopes.some((gr) => (gr.ops.includes('write') || gr.ops.includes('delete')) && gr.resources.some((r) => !STUDY_NOTE.test(r)))) return json({ error: 'a study grant may write nothing but the coach’s notes (vault:cardroom.note, or vault:cardroom.<game>.note)' }, 400);
         const d: Delegation = { ...incoming, salt: BigInt(incoming.salt), caveats: incoming.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
         const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
         if (!(await this.erc1271(incoming.delegator as Address, digest, incoming.signature as Hex))) return json({ error: 'study grant signature failed verification against this agent' }, 403);
@@ -4720,7 +4724,7 @@ export class InteractionsDO {
         // written by the arrangement (the agent at hand end), never by hand.
         // The coach's notes are in HER cabinet and are hers to clear (a wrong note is hers to remove, a fired
         // coach's notes are hers to keep or drop); the hand record is written by the arrangement only.
-        const ownStudyRecord = recordType === 'cardroom.style' || recordType === 'cardroom.read' || recordType === 'cardroom.note';
+        const ownStudyRecord = /^cardroom\.(?:[a-z0-9-]+\.)?(style|read|note)$/.test(recordType);
         if (op === 'record.put' && !CAPABILITY_RECORDS.has(recordType) && !recordType.startsWith('content.') && !ownStudyRecord) {
           return json({ error: `recordType must be a capability record, a content.* record, or the person's own cardroom.style / cardroom.read` }, 400);
         }

@@ -20,16 +20,16 @@ import { signHashFor, type Via } from '../home/onboarding';
 import { SESSION_KEY } from '../context/session';
 import { fetchProfile, getCapabilities, listSkillClaims, saveSkillClaims, setCapabilities, capabilityIdFor } from '../connect-client';
 import { assignDefaultArchetype } from '../home/default-archetype';
-import { GAMES, coachFor, hireCoachGrant, listStudyGrants, readSpecialists, resolveCoach, writeSpecialists, type CoachedGame } from './coaches';
+import { GAMES, coachFor, hireCoachGrant, listStudyGrants, readSpecialists, resolveCoach, studyScopesFor, writeSpecialists, type CoachedGame } from './coaches';
 
 export interface ClientDefaults {
-  /** The coach every person connecting from this app gets, per game — a SERVICE, by typed name. */
-  coach: { game: CoachedGame['id']; service: string };
+  /** The coach every person connecting from this app gets, per game — a SERVICE, by typed name. One per game. */
+  coaches: Array<{ game: CoachedGame['id']; service: string }>;
 }
 
-/** By OIDC client id. The card room is the one app with a default coach today. */
+/** By OIDC client id. The card room is the one app with default coaches today: Bob for hold'em, Carol for canasta. */
 export const CLIENT_DEFAULTS: Record<string, ClientDefaults> = {
-  pokernight: { coach: { game: 'poker', service: 'bob-coach.svc' } },
+  pokernight: { coaches: [{ game: 'poker', service: 'bob-coach.svc' }, { game: 'canasta', service: 'carol-coach.svc' }] },
 };
 
 const toVia = (via: string | undefined): Via => {
@@ -61,18 +61,19 @@ export async function applyClientDefaults(clientId: string, onStep?: (line: stri
   const profile = await fetchProfile(token).catch(() => null);
   const agent = (profile?.agent ? (profile.agent.split(':').pop() as Address) : null) ?? null;
   if (!agent || !profile?.deployed) return { ...out, error: 'the agent is not deployed yet' };
-  const game = GAMES.find((g) => g.id === d.coach.game)!;
+  const games = d.coaches.map((c) => ({ ...c, game: GAMES.find((g) => g.id === c.game)! })).filter((c) => c.game);
   const signer = () => signHashFor(toVia(via), agent, { token });
 
-  // 1. The card room's skills on the agent — one signature, only when something is missing.
+  // 1. The card room's skills on the agent, for EVERY game it deals — one signature, only when something is missing.
   const published = await getCapabilities(agent).catch(() => [] as string[]);
-  const wantIds = game.agentCapabilities.map(capabilityIdFor);
+  const wantClaims = games.flatMap((c) => c.game.agentCapabilities);
+  const wantIds = [...new Set(wantClaims.map(capabilityIdFor))];
   if (wantIds.every((id) => published.includes(id))) out.skipped.push('skills');
   else {
     onStep?.('Putting the card room’s skills on your agent…');
     const claims = await listSkillClaims(token).catch(() => []);
     const have = new Set(claims.map((c) => capabilityIdFor(c)));
-    const next = [...claims, ...game.agentCapabilities.filter((c) => !have.has(capabilityIdFor(c)))].map((c) => (wantIds.includes(capabilityIdFor(c)) ? { ...c, asserted: true } : c));
+    const next = [...claims, ...wantClaims.filter((c) => !have.has(capabilityIdFor(c)))].map((c) => (wantIds.includes(capabilityIdFor(c)) ? { ...c, asserted: true } : c));
     await saveSkillClaims(token, next);
     const res = await setCapabilities(agent, profile.name ?? agent, [...new Set([...published, ...wantIds])].sort(), await signer());
     if (!res.ok) return { ...out, error: `skills: ${res.error}` };
@@ -89,16 +90,18 @@ export async function applyClientDefaults(clientId: string, onStep?: (line: stri
     out.applied.push('playbook');
   }
 
-  // 3. The coach: the grant (the person signs), then the lines — unless both are already in place.
-  const current = coachFor(sp.specialists, game);
+  // 3. The coaches, one per game: the grant (the person signs), then the lines — unless both are already in place.
   const grants = await listStudyGrants(agent).catch(() => []);
-  const live = grants.find((g) => g.coach === d.coach.service && !g.revoked);
-  if (current === d.coach.service && live) { out.skipped.push('coach'); return out; }
-  onStep?.(`Making ${d.coach.service} your ${game.label} coach — you sign one grant…`);
-  const coachSA = await resolveCoach(d.coach.service);
-  if (!coachSA) return { ...out, error: `${d.coach.service} does not resolve` };
-  if (!live) await hireCoachGrant(agent, d.coach.service, coachSA, await signer());
-  if (current !== d.coach.service) await writeSpecialists(token, agent, game, d.coach.service);
-  out.applied.push('coach');
+  for (const { game, service } of games) {
+    const current = coachFor(sp.specialists, game);
+    const live = grants.find((g) => g.coach === service && !g.revoked && g.resources.some((r) => studyScopesFor(game.id).reads.includes(r)));
+    if (current === service && live) { out.skipped.push(`coach:${game.id}`); continue; }
+    onStep?.(`Making ${service} your ${game.label} coach — you sign one grant…`);
+    const coachSA = await resolveCoach(service);
+    if (!coachSA) { out.error = `${service} does not resolve`; continue; }
+    if (!live) await hireCoachGrant(agent, service, coachSA, await signer(), game.id);
+    if (current !== service) { await writeSpecialists(token, agent, game, service); sp = await readSpecialists(token, agent).catch(() => sp); }
+    out.applied.push(`coach:${game.id}`);
+  }
   return out;
 }

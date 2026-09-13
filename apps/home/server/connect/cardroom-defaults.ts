@@ -25,7 +25,7 @@ import { CHAIN, CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain
 import { SKILLS_REGISTRY_ORIGIN } from '../../src/lib/domain';
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 import { CLIENT_DEFAULTS } from '../../src/lib/client-defaults';
-import { GAMES, STUDY_APPENDS, STUDY_GRANT_DAYS, STUDY_READS, STUDY_SERVER, coachFor } from '../../src/lib/coaches';
+import { GAMES, STUDY_GRANT_DAYS, STUDY_SERVER, coachFor, studyScopesFor } from '../../src/lib/coaches';
 
 function cors(request: Request): Record<string, string> {
   const origin = request.headers.get('Origin') ?? '';
@@ -58,7 +58,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (!persona) return json({ ok: false, needsSignature: true, error: 'not a demo person — sign at the Home under Settings → Coaches' }, request);
   const a2a = (env as { A2A_CUSTODY_URL?: string }).A2A_CUSTODY_URL?.replace(/\/$/, '');
   if (!a2a) return json({ error: 'interactions execution point not configured' }, request, 503);
-  const game = GAMES.find((g) => g.id === d.coach.game)!;
+  const games = d.coaches.map((c) => ({ service: c.service, game: GAMES.find((g) => g.id === c.game)! })).filter((c) => c.game);
   const applied: string[] = []; const skipped: string[] = [];
   const sign = (digest: Hex) => signDigestAsDemoPersona(persona, digest);
   const rpcUrl = ((env as { RPC_URL?: string }).RPC_URL || DEFAULT_RPC_URL);
@@ -68,7 +68,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // 1. The card room's skills on the agent (atl:capabilities), one sponsored userOp signed by the custodian.
     const current = String(await pc.readContract({ address: CONTRACTS.agentProfileResolver, abi: agentProfileResolverAbi, functionName: 'getStringProperty', args: [person, ATL_CAPABILITIES] }).catch(() => ''));
     const have = current.split(',').map((s) => s.trim()).filter(Boolean);
-    const want = game.agentCapabilities.map((c) => c.capabilityId!).filter((id) => !have.includes(id));
+    const want = [...new Set(games.flatMap((c) => c.game.agentCapabilities.map((x) => x.capabilityId!)))].filter((id) => !have.includes(id));
     if (want.length === 0) skipped.push('skills');
     else {
       const registered = (await pc.readContract({ address: CONTRACTS.agentProfileResolver, abi: agentProfileResolverAbi, functionName: 'isRegistered', args: [person] }).catch(() => false)) as boolean;
@@ -101,25 +101,32 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       if (put.body.ok !== true) throw new Error(`playbook: ${String(put.body.error ?? 'not assigned')}`);
       applied.push('playbook');
     }
-    const current2 = coachFor(rec.definition.specialists ?? [], game);
-    if (current2 !== d.coach.service) {
-      const others = (rec.definition.specialists ?? []).filter((s) => !game.coached.includes(s.capability));
-      const definition: AgentHarnessDefinitionV1 = { ...rec.definition, specialists: [...others, ...game.coached.map((capability) => ({ capability, executor: d.coach.service }))] };
+    // ONE COACH PER GAME, every specialist line written in one put.
+    let specialists = rec.definition.specialists ?? [];
+    let changed = false;
+    for (const { game, service } of games) {
+      if (coachFor(specialists, game) === service) { skipped.push(`specialist:${game.id}`); continue; }
+      specialists = [...specialists.filter((s) => !game.coached.includes(s.capability)), ...game.coached.map((capability) => ({ capability, executor: service }))];
+      changed = true;
+      applied.push(`specialist:${game.id}`);
+    }
+    if (changed) {
+      const definition: AgentHarnessDefinitionV1 = { ...rec.definition, specialists };
       const check = validateAgentHarnessDefinition(definition);
       if (!check.ok) throw new Error(`playbook: ${check.errors[0]}`);
       const put = await callInteractions(env, person, 'channels.archetypeAssignment.put', { session: token, record: { ...rec, definition, definitionDigest: definitionDigest(definition) } });
       if (put.body.ok !== true) throw new Error(`playbook: ${String(put.body.error ?? 'not written')}`);
-      applied.push('specialist');
-    } else skipped.push('specialist');
+    }
 
-    // 3. The study grant, unless a live one is stored.
+    // 3. The study grants — one per game's coach, scoped to THAT game's cabinet — unless a live one is stored.
     const listed = await callInteractions(env, person, 'studygrant.list', { session: token });
-    const grants = (listed.body.grants ?? []) as Array<{ coach: string; revoked: boolean }>;
-    if (grants.some((g) => g.coach === d.coach.service && !g.revoked)) skipped.push('grant');
-    else {
-      const naming = new AgentNamingClient({ rpcUrl, chainId: CHAIN_ID, registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver });
-      const coachSA = (await naming.resolveName(d.coach.service).catch(() => null)) as Address | null;
-      if (!coachSA) throw new Error(`grant: ${d.coach.service} does not resolve`);
+    const grants = (listed.body.grants ?? []) as Array<{ coach: string; revoked: boolean; resources?: string[] }>;
+    const naming = new AgentNamingClient({ rpcUrl, chainId: CHAIN_ID, registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver });
+    for (const { game, service } of games) {
+      const scopes = studyScopesFor(game.id);
+      if (grants.some((g) => g.coach === service && !g.revoked && (g.resources ?? []).some((r) => scopes.reads.includes(r)))) { skipped.push(`grant:${game.id}`); continue; }
+      const coachSA = (await naming.resolveName(service).catch(() => null)) as Address | null;
+      if (!coachSA) throw new Error(`grant: ${service} does not resolve`);
       const nowSec = Math.floor(Date.now() / 1000);
       const bytes = crypto.getRandomValues(new Uint8Array(16));
       let salt = 0n; for (const b of bytes) salt = (salt << 8n) | BigInt(b);
@@ -127,16 +134,16 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         delegator: person, delegate: coachSA, authority: ROOT_AUTHORITY,
         caveats: [
           buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, nowSec + STUDY_GRANT_DAYS * 86_400)),
-          buildVaultRecordScopeCaveat([{ server: STUDY_SERVER, resources: [...STUDY_READS], ops: ['read'] }, { server: STUDY_SERVER, resources: [...STUDY_APPENDS], ops: ['write'] }]),
+          buildVaultRecordScopeCaveat([{ server: STUDY_SERVER, resources: scopes.reads, ops: ['read'] }, { server: STUDY_SERVER, resources: scopes.appends, ops: ['write'] }]),
         ],
         salt, signature: '0x',
       };
       delegation.signature = await sign(hashDelegation(delegation, CHAIN_ID, CONTRACTS.delegationManager));
-      const put = await callInteractions(env, person, 'studygrant.put', { session: token, coach: d.coach.service, delegation: { ...delegation, salt: salt.toString() } });
+      const put = await callInteractions(env, person, 'studygrant.put', { session: token, coach: service, delegation: { ...delegation, salt: salt.toString() } });
       if (put.body.ok !== true) throw new Error(`grant: ${String(put.body.error ?? 'not stored')}`);
-      applied.push('grant');
+      applied.push(`grant:${game.id}`);
     }
-    return json({ ok: true, coach: d.coach.service, game: game.id, applied, skipped }, request);
+    return json({ ok: true, coaches: games.map((c) => ({ game: c.game.id, coach: c.service })), applied, skipped }, request);
   } catch (e) {
     return json({ ok: false, error: e instanceof Error ? e.message : String(e), applied, skipped }, request, 500);
   }

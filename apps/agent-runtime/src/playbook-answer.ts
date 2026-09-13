@@ -161,6 +161,68 @@ const REVIEW_SYSTEM =
   + 'and you say you were wrong. Write it the way a coach talks after the session, not the way a '
   + 'spreadsheet prints.';
 
+/**
+ * THE OTHER GAME'S PROMPTS. Canasta has no price, no outs, no streets and no solver: the order the playbook
+ * teaches is the pile, the partner's card count, the minimum, what the hand can build, what the discard
+ * gives away — and a partnership is not a channel, so nothing here ever names a partner's card. The evidence
+ * rules are the same rules with "rounds" for "hands".
+ */
+const ANSWER_SYSTEM_CANASTA =
+  'You are answering AS this agent, for the person whose agent you are, from the playbook below. The '
+  + 'material is what the person can see themselves — their own hand, every other seat as a card COUNT, the '
+  + 'pile as its top card and size, both sides\' melds; you have been shown nothing they have not. Answer '
+  + 'the question of judgement it poses.\n\n'
+  + 'REASON FIRST, in `reasoning`, in the order the playbook teaches — the pile (its size, whether it is '
+  + 'frozen, whether this hand can take it and what the discard after it gives away), the partner\'s card '
+  + 'count, the opening minimum still to reach, what the hand can build toward a canasta, what the '
+  + 'discard says — and only then decide. WHEN LEGAL MOVES ARE GIVEN, THEY ARE THE LAW: whether the pile '
+  + 'can be taken and why not, the minimum to open, which cards may be discarded, whether the side may go '
+  + 'out — use them and do not recompute them. When a house baseline is given it is a rules coach\'s line '
+  + 'and is right about the mechanics; start from it, and depart from it only for a reason you state in '
+  + '`reasoning`. Going out ends everybody\'s round: say it is available and what it is worth, and leave '
+  + 'the press to the person. A move must be one the legal moves allow, in the game\'s own action shape '
+  + '(draw; take-pile with the meld the top card goes into; meld with ranks and cards; discard with the card).\n\n'
+  + 'WHEN THEIR STUDY IS GIVEN — their style, their counts on the players here, their reads, your own past '
+  + 'notes — it outranks in this order: their style beats your craft (say what a rule costs; never talk '
+  + 'them out of it); the counts at this table, weighted by sample size (under ten rounds is "so far", a '
+  + 'lean; over thirty is a tendency) — the partner\'s going-out rate first; their reads; your notes. Say '
+  + 'the pile, then the partner, then the move. Say the sample size when you use a count.\n\n'
+  + 'EVIDENCE RULES, which override everything above. The ONLY facts about how they or anyone has played '
+  + 'are the counts in "Their records" and the number of rounds recorded. Your own past notes are your '
+  + 'earlier OPINIONS, not a record of their rounds: never count them, never say "you did this N times" '
+  + 'from them. If the records hold one round, they have one round on record and you say so. A number you '
+  + 'cannot point to in the records does not appear in your answer. On a turn you do not know how this '
+  + 'round ends, so you never describe it as won or lost. NOTHING FACE-DOWN IS A FACT: what is under the '
+  + 'pile\'s top card, what the partner holds, what an opponent holds — say what is likely from what has '
+  + 'gone, as likelihood, and never name a partner\'s card.\n\n'
+  + 'Then be concrete and short: `say` is ONE sentence for somebody with a clock running; `because` is the '
+  + 'reason, which is the half that teaches; `action` is the move you would make, in exactly the action '
+  + 'shape asked for, or omitted when you would not commit to one. Never claim to know what you cannot '
+  + 'see. Never perform anything — this is advice, and the person plays the move or does not.';
+
+const REVIEW_SYSTEM_CANASTA =
+  'You are a canasta coach reviewing ONE person\'s past rounds from their own records, because they asked. '
+  + 'The records are theirs: each round as their seat saw it (their hand at the end, both sides\' melds and '
+  + 'which were canastas, the pile, who went out, each side\'s score and why) and the counts per seat folded '
+  + 'across every round. Say the sample size in the first sentence — five rounds are an anecdote, fifteen a '
+  + 'lean, thirty a pattern. Then, in order: what happened (the points, per side, in a few sentences); the '
+  + 'two or three decisions that mattered, each with the round, the pile or the meld, and what it cost or '
+  + 'earned in points; the leak they point to, with the count behind it and the points it cost (two leaks '
+  + 'at most); ONE thing to change next session, concrete enough to do on the first turn; what went right, '
+  + 'in a sentence. The partnership is counts, never blame: a partner\'s habit is "went out 4 of 11 rounds", '
+  + 'and the change you propose is one the person can make. A number you did not compute from the records '
+  + 'is not in the review. If a leak is a rule in their style, say what it cost and that it is their rule. '
+  + 'If they ask about one decision, answer the decision as it was at the time with what they could see — '
+  + 'a right decision that lost is still right. Never review cards they could not see; a partner\'s or '
+  + 'opponent\'s hand appears only as a count and as what was melded. With fewer than three rounds, give '
+  + 'one honest sentence and say what would change it. THE ROUNDS LISTED ARE THE WHOLE RECORD: your own '
+  + 'earlier remarks are opinions, not rounds — never count them, never say "N times" from them, and if '
+  + 'they disagree with the rounds, the rounds win and you say you were wrong. Write it the way a coach '
+  + 'talks after the evening, not the way a scoreboard prints.';
+
+const answerSystemFor = (skill: string): string => (familyOf(skill) === 'canasta' ? ANSWER_SYSTEM_CANASTA : ANSWER_SYSTEM);
+const reviewSystemFor = (skill: string): string => (familyOf(skill) === 'canasta' ? REVIEW_SYSTEM_CANASTA : REVIEW_SYSTEM);
+
 export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
   return async (toolId, args) => {
     if (toolId !== PLAYBOOK_ANSWER_CAPABILITY) return { refused: `${toolId} is not playbook.answer` };
@@ -185,7 +247,7 @@ export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
     }
     if (!deps.call) return { refused: 'no model is available to answer with' };
     const street = typeof (m.input as { read?: { street?: unknown } } | undefined)?.read?.street === 'string' ? (m.input as { read: { street: string } }).read.street : null;
-    const system = `${ANSWER_SYSTEM}\n\n---\n\n${relevantInstructions(deps.instructions, skill, street, 'advise') || '(this agent has no further instructions)'}`;
+    const system = `${answerSystemFor(skill)}\n\n---\n\n${relevantInstructions(deps.instructions, skill, street, 'advise') || '(this agent has no further instructions)'}`;
     // WHAT THIS AGENT REMEMBERS about the players in the material — its own counts from the rounds the
     // asker reported, with the rates worked out. Only the subjects present here; a memory of somebody at
     // another table is not this question.
@@ -270,7 +332,8 @@ async function reviewStudy(deps: PlaybookAnswerDeps, skill: string, question: st
   const study = await deps.study!.load().catch(() => null);
   const recent = study?.recent ?? [];
   if (!study || study.hands === 0 || recent.length === 0) {
-    const say = study?.days ? `There are no recorded hands in the last ${study.days} day${study.days === 1 ? '' : 's'} — play a session with your agent at the table, or ask the card room to send your past hands, and ask again.` : 'There are no recorded hands to review yet — play a session with your agent at the table and ask again.';
+    const unit = familyOf(skill) === 'canasta' ? 'rounds' : 'hands';
+    const say = study?.days ? `There are no recorded ${unit} in the last ${study.days} day${study.days === 1 ? '' : 's'} — play a session with your agent at the table, or ask the card room to send your past ${unit}, and ask again.` : `There are no recorded ${unit} to review yet — play a session with your agent at the table and ask again.`;
     return { skill, say, source, hands: 0, answer: JSON.stringify({ say }) };
   }
   // The question narrows the span (a day, one hand); otherwise the review is the whole span.
@@ -283,7 +346,7 @@ async function reviewStudy(deps: PlaybookAnswerDeps, skill: string, question: st
   // THE HANDS, COMPACT. The view is the game's own; it is passed as it was kept, with the record's own
   // framing (hand number, seat, net) so the model can quote a hand she can find.
   const hands = scope.hands.map(compactHand);
-  const system = `${REVIEW_SYSTEM}\n\n---\n\n${relevantInstructions(deps.instructions, skill, null, 'review') || '(this agent has no further instructions)'}`;
+  const system = `${reviewSystemFor(skill)}\n\n---\n\n${relevantInstructions(deps.instructions, skill, null, 'review') || '(this agent has no further instructions)'}`;
   const user = [
     `Skill: ${skill}`,
     `Question, in her words: ${question || 'how have I been playing?'}`,
@@ -291,7 +354,9 @@ async function reviewStudy(deps: PlaybookAnswerDeps, skill: string, question: st
     ...(study.style.length ? [`Her style — her own rules:\n${study.style.map((r) => `- ${r}`).join('\n')}`] : []),
     ...(study.notes.length ? [`Your own earlier remarks (opinions from past reviews — NOT a record of her hands; the hands below are the record), oldest first:\n${study.notes.map((n) => `- ${n.at.slice(0, 10)}: ${n.text}`).join('\n')}`] : []),
     `Counts per player across all ${study.hands} recorded hand${study.hands === 1 ? '' : 's'} (rates computed; "you" is her):\n${JSON.stringify(study.remembered)}`,
-    `The hands in scope, oldest first (one line each: street by street, YOU is her; "timed out" means she was away, not deciding):\n${hands.map((h) => (typeof h === 'string' ? `- ${h}` : `- ${JSON.stringify(h)}`)).join('\n')}`,
+    familyOf(skill) === 'canasta'
+      ? `The rounds in scope, oldest first (one line each; YOU is the person, "YOUR side" their partnership):\n${hands.map((h) => (typeof h === 'string' ? `- ${h}` : `- ${JSON.stringify(h)}`)).join('\n')}`
+      : `The hands in scope, oldest first (one line each: street by street, YOU is her; "timed out" means she was away, not deciding):\n${hands.map((h) => (typeof h === 'string' ? `- ${h}` : `- ${JSON.stringify(h)}`)).join('\n')}`,
   ].join('\n');
   // THE REVIEW IS THE REASONING — no hidden scratchpad here: a review is read slowly, and a model that
   // wrote 120 words of reasoning and then ran out of room for the review itself returned an empty `say`
@@ -380,7 +445,9 @@ export function relevantInstructions(instructions: string | null | undefined, sk
   // method beside the street stages; mid-hand the review is four thousand characters the model reads and
   // sets aside, and in a review the street stages are the same in reverse. Neither is a loss of skill: the
   // section that applies is the one that stays.
-  const notThisAct = act === 'advise' ? /hold.?em-review\b/i : act === 'review' ? /hold.?em-(preflop|flop|turn|river)\b/i : null;
+  // Canasta has no streets; its review method (`canasta-review`) is the one section a turn does not need, and
+  // a review needs the review method and the partner's craft but not the consult skill's mechanics.
+  const notThisAct = act === 'advise' ? /(hold.?em|canasta)-review\b/i : act === 'review' ? /hold.?em-(preflop|flop|turn|river)\b/i : null;
   const kept = sections.filter((sec) => {
     const heading = sec.split('\n')[0] ?? '';
     if (!(words.test(heading) || words.test(sec.slice(0, 400)))) return false;

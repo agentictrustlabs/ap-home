@@ -1,0 +1,14 @@
+{
+  "purpose": "the canasta coaching service in the faithnet estate \u2014 chartered by a person, custodied by that person (an operator note, not a persona)",
+  "chainId": 34348,
+  "custodian": {
+    "handle": "carol",
+    "sa": "0x6fece74d4c13ba2b408a7531e6e44d02dcb3f015"
+  },
+  "service": {
+    "name": "carol-coach.svc",
+    "sa": "0x1a02e157df07af4d07a79fc6b987813f0a8d0fc4",
+    "charteredUnder": "carol.me"
+  },
+  "charteredAt": "2026-09-13T03:51:44.208Z"
+}

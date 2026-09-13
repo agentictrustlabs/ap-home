@@ -57,8 +57,10 @@ export const GAMES: CoachedGame[] = [
     label: 'Classic Canasta',
     coached: ['canasta.advise', 'canasta.review'],
     agentCapabilities: [
-      { label: 'Canasta advice', capabilityId: 'canasta.advise', asserted: true, description: 'Say what the person in a seat should do at Classic Canasta, and why — consulted from the coaching service this agent’s playbook names. Advice only.', tags: ['canasta.advise', 'canasta', 'advice', 'coach', 'pokernight'] },
-      { label: 'Canasta round record', capabilityId: 'canasta.record', asserted: true, description: 'Receive a finished round as one seat saw it, with the table’s counts, and put it into the person’s own vault. A vault put: no model.', tags: ['canasta.record', 'canasta', 'record', 'pokernight'] },
+      { label: 'Canasta advice', capabilityId: 'canasta.advise', asserted: true, description: 'Say what the person in a seat should do at Classic Canasta, and why — consulted from the coaching service this agent’s playbook names, under the person’s study grant. Advice only: nothing here takes a turn.', tags: ['canasta.advise', 'canasta', 'advice', 'coach', 'pokernight'] },
+      { label: 'Canasta round record', capabilityId: 'canasta.record', asserted: true, description: 'Receive a finished round as one seat saw it, with the table’s counts, and put it into the person’s own vault under canasta’s own record names. A vault put: no model.', tags: ['canasta.record', 'canasta', 'record', 'pokernight'] },
+      { label: 'Canasta review', capabilityId: 'canasta.review', asserted: true, description: 'When the person asks how they have been playing canasta, forward the question to the coaching service their playbook names, with their study grant; the coach reviews their recorded rounds and answers in its own name.', tags: ['canasta.review', 'canasta', 'review', 'coach', 'pokernight'] },
+      { label: 'Who coaches me at canasta', capabilityId: 'canasta.coach', asserted: true, description: 'Answer the card room: which coaching service this agent consults for canasta, and whether the person has been asked about hiring one; record the person’s answer in their own vault so they are asked once.', tags: ['canasta.coach', 'canasta', 'coach', 'pokernight'] },
     ],
   },
 ];
@@ -73,11 +75,24 @@ export interface CoachOffer { name: string; displayName: string; blurb: string; 
  */
 export const COACH_OFFERS: CoachOffer[] = [
   { game: 'poker', name: 'bob-coach.svc', displayName: "Bob's Hold'em coach", blurb: 'Tight-aggressive by conviction. Price before player, one sentence at the table, two or three after it; reviews decisions, not results; will not talk you into a line you have ruled out. Reads only your recorded hands, under your grant. Its tokens, not yours.' },
+  { game: 'canasta', name: 'carol-coach.svc', displayName: "Carol's Canasta coach", blurb: 'Thirty years of partnership canasta. The pile before the plan, your partner’s card count before the pile, wilds for canastas and not for melds; one sentence at the table, three after it; reviews decisions, not results, and your partner as a count, never as blame. Reads only your recorded rounds, under your grant. Its tokens, not yours.' },
 ];
 
-/** What the study grant lets the coach read, and the one thing it may write. */
+/**
+ * What the study grant lets the coach read, and the one thing it may write — PER GAME. Hold'em's records keep
+ * the bare names (`cardroom.hand`, …: every grant already issued names them, and the card room's own rule is
+ * that no stamp means poker); every other game's carry the family (`cardroom.canasta.hand`). One cabinet per
+ * game, so a hold'em coach's grant covers nothing of canasta's and firing one coach leaves the other's alone.
+ */
 export const STUDY_READS = ['vault:cardroom.hand', 'vault:cardroom.hands:*', 'vault:cardroom.style', 'vault:cardroom.read', 'vault:cardroom.note'] as const;
 export const STUDY_APPENDS = ['vault:cardroom.note'] as const;
+export function studyScopesFor(game: CoachedGame['id']): { reads: string[]; appends: string[] } {
+  const infix = game === 'poker' ? '' : `${game}.`;
+  return {
+    reads: [`vault:cardroom.${infix}hand`, `vault:cardroom.${infix}hands:*`, `vault:cardroom.${infix}style`, `vault:cardroom.${infix}read`, `vault:cardroom.${infix}note`],
+    appends: [`vault:cardroom.${infix}note`],
+  };
+}
 export const STUDY_SERVER = 'demo-mcp';
 export const STUDY_GRANT_DAYS = 365;
 
@@ -120,8 +135,9 @@ export async function resolveCoach(name: string): Promise<Address | null> {
 }
 
 /** Mint + sign the study grant (the person signs with their own credential) and store it on their object. */
-export async function hireCoachGrant(person: Address, coach: string, coachSA: Address, signHash: SignHash): Promise<{ hash: string }> {
+export async function hireCoachGrant(person: Address, coach: string, coachSA: Address, signHash: SignHash, game: CoachedGame['id'] = 'poker'): Promise<{ hash: string }> {
   const nowSec = Math.floor(Date.now() / 1000);
+  const scopes = studyScopesFor(game);
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   let salt = 0n;
   for (const b of bytes) salt = (salt << 8n) | BigInt(b);
@@ -129,7 +145,7 @@ export async function hireCoachGrant(person: Address, coach: string, coachSA: Ad
     delegator: person, delegate: coachSA, authority: ROOT_AUTHORITY,
     caveats: [
       buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, nowSec + STUDY_GRANT_DAYS * 86_400)),
-      buildVaultRecordScopeCaveat([{ server: STUDY_SERVER, resources: [...STUDY_READS], ops: ['read'] }, { server: STUDY_SERVER, resources: [...STUDY_APPENDS], ops: ['write'] }]),
+      buildVaultRecordScopeCaveat([{ server: STUDY_SERVER, resources: scopes.reads, ops: ['read'] }, { server: STUDY_SERVER, resources: scopes.appends, ops: ['write'] }]),
     ],
     salt, signature: '0x',
   };

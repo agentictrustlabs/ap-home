@@ -94,7 +94,7 @@ export default function CoachesPage() {
     try {
       const coachSA = await resolveCoach(coach);
       if (!coachSA) { setErr(`${coach} does not resolve to a deployed agent.`); return; }
-      const { hash } = await hireCoachGrant(agentAddress, coach, coachSA, await signer());
+      const { hash } = await hireCoachGrant(agentAddress, coach, coachSA, await signer(), game.id);
       await writeSpecialists(session.token, agentAddress, game, coach);
       setMsg(`${coach} is your ${game.label} coach. It reads your recorded hands under the grant you just signed (${hash.slice(0, 12)}…) and advises through your own agent at the table.`);
       await reload();
