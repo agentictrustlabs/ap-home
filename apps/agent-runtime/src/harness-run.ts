@@ -777,6 +777,9 @@ export interface HarnessDeps {
   /** Send a direct message through the sender's own interactions plane. */
   sendDirectMessage?: (input: {
     sender: Address; recipient: Address; bodyText: string; session: string;
+    /** Spec 400 W1 / 375 W2 — the sender is an agent the session's person STEWARDS (an outside runtime's reply, an
+     *  organization's): the person drives that agent's rail with the stewardship wire; the message is from the agent. */
+    stewardship?: unknown;
     /** Spec 364 — typed pointers the recipient's surface renders as an action. Never authority. */
     contextRefs?: Array<{ kind: string; id: string; label?: string }>;
   }) => Promise<{ ok: true; messageId?: string } | { ok: false; error: string }>;
@@ -1720,11 +1723,26 @@ export function messageInvoker(deps: HarnessDeps, presented: MandatePresentation
     if (!deps.sendDirectMessage) throw new Error('messaging is not wired on this agent');
     const recipient = String(args.recipient ?? '').toLowerCase() as Address;
     if (!/^0x[0-9a-f]{40}$/.test(recipient)) throw new Error(`the recipient did not resolve to an agent (${String(args.recipient ?? '')})`);
+    // WHO THE MESSAGE IS FROM (spec 400 W1 / 375 W2). The mandate's delegator is the agent this act is an act OF. When
+    // that is the person, the message is theirs, on their own rail. When it is an agent they STEWARD — an outside
+    // runtime answering a message sent to it, an organization replying — the message is FROM that agent: the person
+    // drives its rail with the stewardship wire their own links hold, as the DO admits a steward. A steward who holds
+    // no wire for it cannot send as it, and is told so — never a message quietly sent as themselves instead.
+    const delegator = String((presented?.wire as { delegator?: string } | undefined)?.delegator ?? '').toLowerCase();
+    let sender: Address = person;
+    let stewardship: unknown;
+    if (/^0x[0-9a-f]{40}$/.test(delegator) && delegator !== person.toLowerCase()) {
+      const links = deps.readSubjectRecord ? await deps.readSubjectRecord(person.toLowerCase(), 'relationships.data').catch(() => null) : null;
+      const row = relationshipRows(links).find((r) => r.agent.toLowerCase() === delegator && r.relationship === 'steward' && r.stewardshipDelegation);
+      if (!row) throw new Error(`this message would be sent as ${delegator}, which you do not steward`);
+      sender = delegator as Address;
+      stewardship = row.stewardshipDelegation;
+    }
     // A planner that cannot find who was named will sometimes fill the field with whoever it DOES know —
     // and the person it knows is the asker. "Send a message to zzz-nobody-here" came back addressed to
     // Nathan. Harmless for a message and not harmless as a habit: an invented party is the failure the
     // whole resolution tier exists to prevent, so it is a question rather than a plan.
-    if (recipient === person.toLowerCase()) {
+    if (recipient === sender.toLowerCase()) {
       throw new InputRequired({
         kind: 'data', stepRef, toolId,
         prompt: 'That would send the message to you. Who did you mean?',
@@ -1739,9 +1757,9 @@ export function messageInvoker(deps: HarnessDeps, presented: MandatePresentation
         fields: [{ name: 'message', label: 'Message', type: 'text', required: true, hint: 'they will see it in their inbox, from you' }],
       });
     }
-    const out = await deps.sendDirectMessage({ sender: person, recipient, bodyText: text, session });
+    const out = await deps.sendDirectMessage({ sender, recipient, bodyText: text, session, ...(stewardship ? { stewardship } : {}) });
     if (!out.ok) throw new Error(out.error);
-    return { sent: true, recipient, from: person, message: text, ...(out.messageId ? { messageId: out.messageId } : {}) };
+    return { sent: true, recipient, from: sender, ...(sender !== person ? { drivenBy: person } : {}), message: text, ...(out.messageId ? { messageId: out.messageId } : {}) };
   };
 }
 
@@ -2778,9 +2796,15 @@ export async function resolveStepArgs(
     } else if (!current) {
       const realmSuffix = where.realmSuffix ?? (where.realmKind ? KIND_SUFFIX[where.realmKind] : undefined);
       const typesHere = partyTypesFor(where.capabilityId ?? where.toolId, arg) ?? [];
-      if (where.addressee && realmSuffix && typesHere.includes(realmSuffix) && where.addressee.toLowerCase() !== where.subject.toLowerCase()) {
+      // A role that admits ANY agent (`ap:Agent` — the sender of a message) admits the addressed agent too: a message
+      // asked for inside an organization's room is the organization's, and one a service's own run parks for is the
+      // service's — the steward who finishes it signs FOR that agent, never quietly as themselves (spec 400 W1 / 375 W2:
+      // the runtime's reply, resumed at its custodian's Home, was re-addressed "from" the custodian, who was then asked
+      // "that would send the message to you — who did you mean?").
+      const admitsRealm = !!realmSuffix && (typesHere.length === 0 || typesHere.includes(realmSuffix));
+      if (where.addressee && admitsRealm && where.addressee.toLowerCase() !== where.subject.toLowerCase()) {
         out[arg] = where.addressee.toLowerCase();
-        lookups.onResolved?.({ arg, raw: partyWord(arg), agent: where.addressee.toLowerCase(), hint: 'the organization you are standing in', via: 'context' });
+        lookups.onResolved?.({ arg, raw: partyWord(arg), agent: where.addressee.toLowerCase(), hint: realmSuffix === 'svc' ? 'this service agent — its own act, signed by its custodian' : 'the organization you are standing in', via: 'context' });
       } else {
         out[arg] = where.subject.toLowerCase();
       }

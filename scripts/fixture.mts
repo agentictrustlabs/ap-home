@@ -68,6 +68,10 @@ export interface GateFixtureV1 {
   routineAgent: { handle: string; playbook: string } | null;
   /** The skills registry the playbooks are read from (the `~/skills` deployment). */
   skillsRegistry: string;
+  /** An outside ACP runtime as a member (spec 400 W1): its `.svc` (chartered by the steward) and the workspace it joined. */
+  acpRuntime: { member: string; workspace: string } | null;
+  /** The deployment's hosts the runtime member speaks to: the standard surface (edge) and the runtime. */
+  edge: string;
   /** Names that resolve NOWHERE — the twins that must be refused by name. */
   absent: { org: string; svc: string };
 }
@@ -89,6 +93,8 @@ export const FAITHNET_FIXTURE: GateFixtureV1 = {
   ambiguousWords: ['thompson', 'rich', 'somali corridor team', 'xyz', 'voice test'],
   routineAgent: { handle: 'playwright-demo-team.impact', playbook: 'agentic-trust/coordinator' },
   skillsRegistry: 'https://skills-a2a-production.richardpedersen3.workers.dev',
+  acpRuntime: { member: 'goose-1.svc', workspace: 'missio-nexus.org' },
+  edge: 'https://edge.faithnet.io',
   absent: { org: 'nobody-here-zz.org', svc: 'nobody-here-zz.svc' },
 };
 

@@ -1861,7 +1861,7 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
   });
   if (input.material) console.log(`[phases ask] agentType ${tKind}ms · advertised ${tAdvertised}ms · run ${Date.now() - tRun0}ms`);
   const reply = await askReplyFor(env as unknown as HarnessEnv, {
-    intent, result, addressee: input.addressee, composerFor: (need: RouteNeed) => selectComposerRouted(env, { ...(input.guidance ? { systemPrompt: input.guidance } : {}), need }), deps, interactionFor, plannerTrace: trace, tools,
+    intent, result, addressee: input.addressee, ...(input.plan ? { suppliedPlan: true } : {}), composerFor: (need: RouteNeed) => selectComposerRouted(env, { ...(input.guidance ? { systemPrompt: input.guidance } : {}), need }), deps, interactionFor, plannerTrace: trace, tools,
     resolveName: (name: string) => deps.resolveName?.(name) ?? Promise.resolve(null),
   } as never);
   const spoken = await spokenFor(reply as never, async (a) => deps.nameOf?.(a) ?? null, (id) => CAPABILITY_WORDS[id] ?? id).catch(() => '');
@@ -4456,11 +4456,11 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     // cannot be (ADR-0025), which is why an unfound label becomes a question rather than a guess.
     // A direct message rides the SENDER's own interactions plane — the same `messaging.send` the Home's
     // message box posts to, so there is one conversation per counterparty and one place the bodies live.
-    sendDirectMessage: async ({ sender, recipient, bodyText, session, contextRefs }) => {
+    sendDirectMessage: async ({ sender, recipient, bodyText, session, contextRefs, stewardship }) => {
       const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(sender.toLowerCase()));
       const res = await stub.fetch(new Request(`https://do/interactions/${sender.toLowerCase()}/messaging.send`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ session, recipient: recipient.toLowerCase(), bodyText, ...(contextRefs?.length ? { contextRefs } : {}) }),
+        body: JSON.stringify({ session, recipient: recipient.toLowerCase(), bodyText, ...(stewardship ? { stewardship } : {}), ...(contextRefs?.length ? { contextRefs } : {}) }),
       }));
       const out = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; code?: string; messageId?: string };
       if (res.ok && out.ok !== false) return { ok: true as const, ...(out.messageId ? { messageId: out.messageId } : {}) };

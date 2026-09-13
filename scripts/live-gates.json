@@ -360,6 +360,16 @@
       "required": true,
       "paced": true,
       "timeoutSec": 180
+    },
+    {
+      "id": "verify-runtime-acp-member",
+      "script": "scripts/verify-runtime-acp-member.mts",
+      "spec": "400 W1",
+      "proves": "an outside ACP runtime joins a workspace as a .svc member (its own key, the custodian's session wire, its playbook), receives the steward's message through its own inbox as itself, answers through the ACP agent — its local shell refused by policy, the workspace's tools allowed — its reply parks for the steward's mandate and lands when she signs FOR it, it reads the roster as a member; revoked on chain, it is refused everywhere",
+      "twin": "the session wire revoked on chain by the custodian: the next wire-signed request is refused; the host refuses the agent's local shell by default",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 420
     }
   ]
 }
