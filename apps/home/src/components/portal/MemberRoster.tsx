@@ -1,16 +1,10 @@
 'use client';
-// "Who is here" — the roster of an organization's or workspace's members (spec 348 §2.1).
-//
-// This is NOT the membership management surface. Settings → Membership is where a steward decides who
-// gets in and who is removed; this is the participation view: the people you are working with, and a way
-// to reach them. They were one page, which meant looking up a colleague put you on a screen full of
-// pending applications and invite controls.
-//
-// The roster is the UNION of both projections of membership (`fetchRoster`): a member's own signed
-// directory listing, and the steward's received-delegations index for those who joined by invite and
-// never published one. Reading either alone hides real members — that mistake is why Discussions used to
-// report "Participants · 0" beside five join messages.
-import { useCallback, useEffect, useState } from 'react';
+// MEMBERS — who is in this organization and how to reach them (design system v2, 2026-09-13). A ROSTER: one row per
+// member with their mark, their name and public name, what kind of participant they are, the responsibility they
+// carry, and what they may read here — searchable, filterable by kind; a row opens the member's contract (spec 398
+// §4.5: type · sponsor · responsibility · permissions · active work) in a drawer, and hands them to the Ask as its
+// selection (361 I6). Managing membership is Settings → Membership; this is the participation view.
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSession } from '../../context/session';
 import { SectionShell } from './SectionShell';
 import { fetchRoster, type RosterMember } from '../../lib/recipient-directory';
@@ -18,92 +12,119 @@ import { AddressChip } from '../shared/AddressChip';
 import { setAskSelection } from '../../home/ask-selection';
 import { rosterRows, type RosterRow } from '../../home/roster-contract';
 import { fetchWorkList } from '../../lib/work-client';
-import { List, KeyValue, Empty, ErrorNote, Meta, LinkButton } from '../../ui';
+import { List, Row, KeyValue, ErrorNote, LinkButton, Panel, Stats, Stat, SearchInput, FilterChip, Avatar, Chip, Drawer, Button, type PanelState } from '../../ui';
+import { InboxIcon } from './today-icons';
+
+type KindFilter = 'all' | 'person' | 'agent';
+const isAgentType = (t: string) => t === 'service' || t === 'organization';
+const typeWords = (t: string) => (t === 'unknown' ? 'member' : t.replace(/[_-]+/g, ' '));
 
 export function MemberRoster({ agent, title = 'Members' }: { agent: string; title?: string }) {
   const { session, agentAddress } = useSession();
   const [members, setMembers] = useState<RosterMember[] | null>(null);
-  // Spec 398 §4.5 — active work per participant: items where they are an executor, from the organization's work list.
   const [executors, setExecutors] = useState<Map<string, number>>(new Map());
   const [error, setError] = useState<string | null>(null);
-  // Spec 361 I6 — the member the person has selected, handed to the Ask as context.
   const [selected, setSelected] = useState<string | null>(null);
+  const [q, setQ] = useState('');
+  const [kind, setKind] = useState<KindFilter>('all');
 
   const load = useCallback(async () => {
     if (!session?.token) return;
     setError(null);
     try {
       setMembers(await fetchRoster(session.token, agent));
-      // §12 visibility: the work list carries the CALLER's own allocations and commitments, not everyone's — so the
-      // count is yours; another member's active work reads "not visible to you" rather than a false zero (398 §6.3).
       const w = await fetchWorkList(session.token, agent).catch(() => null);
       const counts = new Map<string, number>();
       const me = (agentAddress ?? '').toLowerCase();
       if (me) counts.set(me, (w?.mine?.allocations?.length ?? 0) + (w?.mine?.commitments ?? []).filter((c) => c.status === 'active').length);
       setExecutors(counts);
     } catch (e) {
-      // A directory refusal (403 — not a member) is a real answer and is named, never papered over.
       setError(e instanceof Error ? e.message : String(e));
       setMembers([]);
     }
   }, [session?.token, agent, agentAddress]);
   useEffect(() => { void load(); }, [load]);
 
-  if (!session) return <SectionShell title={title}><Empty>Not signed in.</Empty></SectionShell>;
+  const rows = useMemo(() => (members ? rosterRows({ members, executors }) : []), [members, executors]);
+  const agents = rows.filter((m) => isAgentType(m.type)).length;
+  const stewards = rows.filter((m) => /steward|custodian|founder/i.test(`${m.role ?? ''} ${m.responsibility ?? ''}`)).length;
+  const needle = q.trim().toLowerCase();
+  const shown = rows.filter((m) => (kind === 'all' || (kind === 'agent') === isAgentType(m.type)) && (!needle || `${m.displayName} ${m.publicName ?? ''} ${m.role ?? ''} ${m.responsibility ?? ''} ${m.address}`.toLowerCase().includes(needle)));
+  const open = selected ? rows.find((m) => m.address.toLowerCase() === selected) ?? null : null;
+  const state: PanelState = members === null ? 'loading' : shown.length ? 'ready' : 'empty';
 
-  const rows = members ? rosterRows({ members, executors }) : [];
+  if (!session) return <SectionShell title={title}><Panel title={title} state="empty" empty={{ title: 'Not signed in' }} /></SectionShell>;
+
+  const pick = (m: RosterRow) => {
+    const next = selected === m.address.toLowerCase() ? null : m.address.toLowerCase();
+    setSelected(next);
+    setAskSelection(next ? { entity: next as `0x${string}`, kind: 'person', label: m.displayName } : null);
+  };
+
   return (
-    <SectionShell title={title} description={<>The people in this workspace and how to reach them. Who belongs is decided under Settings → Membership.</>}>
+    <SectionShell title={title} description={<>The people and agents in this workspace and how to reach them. Who belongs is decided under Settings → Membership.</>}>
       {error && <ErrorNote>{error}</ErrorNote>}
-      {members === null ? (
-        <Meta>Reading the roster…</Meta>
-      ) : members.length === 0 ? (
-        <Empty title="No members yet">Invite someone under Settings → Membership; they appear here once they accept.</Empty>
-      ) : (
-        <List testId="roster">
-          {rows.map((m: RosterRow) => {
+      <Stats>
+        <Stat label="Members" value={rows.length} loading={members === null} hint="people and agents admitted" />
+        <Stat label="Agents" value={agents} loading={members === null} hint="services, teams, runtimes" />
+        <Stat label="Stewards" value={stewards} loading={members === null} hint="who may act for the organization" />
+      </Stats>
+      <div className="ui-toolbar">
+        <SearchInput placeholder="Search members…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search members" />
+        <div style={{ display: 'flex', gap: 6 }}>
+          <FilterChip active={kind === 'all'} onClick={() => setKind('all')}>All</FilterChip>
+          <FilterChip active={kind === 'person'} count={members ? rows.length - agents : undefined} onClick={() => setKind('person')}>People</FilterChip>
+          <FilterChip active={kind === 'agent'} count={members ? agents : undefined} onClick={() => setKind('agent')}>Agents</FilterChip>
+        </div>
+      </div>
+      <Panel title="Roster" icon={<InboxIcon />} count={shown.length} state={state} rows={5} lead testId="roster"
+        empty={{ title: needle || kind !== 'all' ? 'No member matches' : 'No members yet', hint: needle || kind !== 'all' ? 'Clear the search or the filter.' : 'Invite someone under Settings → Membership; they appear here once they accept.' }}>
+        <List>
+          {shown.map((m) => {
             const you = !!agentAddress && m.address.toLowerCase() === agentAddress.toLowerCase();
             const picked = selected === m.address.toLowerCase();
-            const facets = [m.kin, m.role && m.role !== 'member' ? m.role : null].filter(Boolean).join(' · ');
+            const isAgent = isAgentType(m.type);
             return (
-              <div
-                key={m.address}
-                className="ui-row"
-                // Spec 361 I6 — selecting a member is context the Ask can use ("invite her", "message him"):
-                // the reference reaches the agent as validated context, never as words in a prompt.
-                role="button" tabIndex={0} aria-pressed={picked}
-                onClick={() => { const next = picked ? null : m.address.toLowerCase(); setSelected(next); setAskSelection(next ? { entity: next as `0x${string}`, kind: 'person', label: m.displayName } : null); }}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); (e.currentTarget as HTMLDivElement).click(); } }}
-                style={{ cursor: 'pointer', alignItems: 'flex-start', ...(picked ? { background: 'var(--color-surface-raised)', boxShadow: 'inset 3px 0 0 var(--color-amber-500)' } : {}) }}
-                data-testid={`member-${m.address}`}
-              >
+              <div key={m.address} className="ui-row" role="button" tabIndex={0} aria-pressed={picked} data-testid={`member-${m.address}`}
+                onClick={() => pick(m)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(m); } }}
+                style={{ cursor: 'pointer', ...(picked ? { background: 'var(--st-accent-bg)', boxShadow: 'inset 3px 0 0 var(--color-action)' } : {}) }}>
+                <div className="ui-row-lead"><Avatar name={m.publicName ?? m.displayName} address={m.address} agent={isAgent} /></div>
                 <div className="ui-row-main">
                   <div className="ui-row-title" style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'baseline', flexWrap: 'wrap' }}>
-                    {m.displayName}{you && <span className="ui-micro">you</span>}
+                    {m.displayName}{you && <Chip>you</Chip>}
                     {m.publicName && <span className="ui-meta">{m.publicName}</span>}
-                    {facets && <span className="ui-meta" data-testid={`member-facets-${m.address}`}>{facets}</span>}
                   </div>
-                  <div style={{ margin: '2px 0 6px' }}><AddressChip address={m.address as `0x${string}`} size="sm" /></div>
-                  {/* Spec 398 §4.5 — the roster contract: type · sponsor · responsibility · permissions · active work. */}
-                  <div data-testid={`member-contract-${m.address}`}>
-                    <KeyValue rows={[
-                      ['type', m.type, { absent: m.type === 'unknown' }],
-                      ['sponsor', m.sponsor],
-                      ['responsibility', m.responsibility ?? 'none assigned', { absent: !m.responsibility }],
-                      ['permissions', m.permissions],
-                      ['active work', you ? (m.activeWork === 0 ? 'none' : `${m.activeWork} item${m.activeWork === 1 ? '' : 's'}`) : 'not visible to you — their own view', { absent: !you }],
-                    ]} />
+                  <div className="ui-row-meta" data-testid={`member-facets-${m.address}`}>
+                    {typeWords(m.type)}{m.responsibility ? ` · ${m.responsibility}` : ''}{m.kin ? ` · ${m.kin}` : ''}{m.role && m.role !== 'member' ? ` · ${m.role}` : ''} · {m.permissions.length > 60 ? `${m.permissions.slice(0, 57)}…` : m.permissions}
                   </div>
                 </div>
-                {!you && (
-                  <div className="ui-row-side">
-                    <LinkButton size="sm" href={`/messages?to=${m.address}`} onClick={(e) => e.stopPropagation()}>Message</LinkButton>
-                  </div>
-                )}
+                <div className="ui-row-side">
+                  {isAgent && <Chip>agent</Chip>}
+                  {you && m.activeWork > 0 && <Chip tone="ok">{m.activeWork} active</Chip>}
+                  {!you && <LinkButton size="sm" href={`/messages?to=${m.address}`} onClick={(e) => e.stopPropagation()}>Message</LinkButton>}
+                </div>
               </div>
             );
           })}
         </List>
+      </Panel>
+      {open && (
+        <Drawer title={<span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}><Avatar name={open.publicName ?? open.displayName} address={open.address} agent={isAgentType(open.type)} size="sm" />{open.displayName}</span>} onClose={() => { setSelected(null); setAskSelection(null); }}
+          actions={!(agentAddress && open.address.toLowerCase() === agentAddress.toLowerCase()) ? <LinkButton size="sm" variant="primary" href={`/messages?to=${open.address}`}>Message</LinkButton> : undefined}>
+          <div style={{ marginBottom: 'var(--sp-4)' }}><AddressChip address={open.address as `0x${string}`} size="sm" /></div>
+          {/* Spec 398 §4.5 — the roster contract: type · sponsor · responsibility · permissions · active work. */}
+          <div className="ui-card ui-card--quiet" data-testid={`member-contract-${open.address}`}>
+            <KeyValue rows={[
+              ['Type', typeWords(open.type), { absent: open.type === 'unknown' }],
+              ['Public name', open.publicName ?? 'none', { absent: !open.publicName }],
+              ['Sponsor', open.sponsor],
+              ['Responsibility', open.responsibility ?? 'none assigned', { absent: !open.responsibility }],
+              ['Permissions', open.permissions],
+              ['Active work', agentAddress && open.address.toLowerCase() === agentAddress.toLowerCase() ? (open.activeWork === 0 ? 'none' : `${open.activeWork} item${open.activeWork === 1 ? '' : 's'}`) : 'not visible to you — their own view', { absent: !(agentAddress && open.address.toLowerCase() === agentAddress.toLowerCase()) }],
+            ]} />
+          </div>
+          <p className="ui-note" style={{ marginTop: 'var(--sp-4)' }}>Selected for the Ask: a command from this page names this member. <Button size="sm" variant="ghost" onClick={() => { setSelected(null); setAskSelection(null); }}>Clear</Button></p>
+        </Drawer>
       )}
     </SectionShell>
   );

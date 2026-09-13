@@ -14,7 +14,7 @@ import { useSession } from '../../context/session';
 import { SectionShell } from './SectionShell';
 import { cardSty, btnSty, btnPrimarySty, mono, mutedText, errorText, inputSty, badgeStyle, modalOverlaySty, infoBannerSty, shortAddr, type BadgeKind } from './theme';
 import { artifactIdentity } from '../../home/artifact-identity';
-import { SkeletonRows, EmptyState, Button, Tabs, useReadyReport } from '../../ui';
+import { SkeletonRows, EmptyState, Button, Tabs, Drawer, Chip, Meta, KeyValue, useReadyReport } from '../../ui';
 
 type Kind = 'skill' | 'ttl' | 'md' | 'json-ld' | 'image';
 type Source = 'blob' | 'graphdb' | 'vault' | 'external';
@@ -135,6 +135,18 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
   const cwd = path.join('/');
+  // `?open=<id>` (Today's artifact rows link here): once the vault has landed, select the item and stand in its folder.
+  const openedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (loading || typeof window === 'undefined') return;
+    const want = new URLSearchParams(window.location.search).get('open');
+    if (!want || openedRef.current === want) return;
+    const hit = items.find((a) => a.id === want);
+    if (!hit) return;
+    openedRef.current = want;
+    setPath(hit.folder ? hit.folder.split('/') : []);
+    setSelectedId(hit.id);
+  }, [loading, items]);
 
   const ownerLabel = orgSa ? 'This organization' : 'You';
   const ownerVaultKind = orgSa ? 'Organization vault' : 'Person vault';
@@ -584,14 +596,20 @@ function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, ownerSa, fol
 
   useEffect(() => { const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey); }, [onClose]);
 
+  const id = artifactIdentity(artifact, { sa: ownerSa, vaultLabel: ownerVaultKind }, publishable);
+  const mode: AccessMode = artifact.accessMode ?? 'Owned';
   return (
-    <aside style={{ ...cardSty, width: 400, flexShrink: 0, alignSelf: 'stretch', display: 'flex', flexDirection: 'column', maxHeight: '78vh' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '.5rem', padding: '.8rem .9rem', borderBottom: '1px solid var(--color-border)' }}>
-        <Icon name={artifact.isFolder ? 'folder' : KIND_META[artifact.kind].icon} size={20} style={{ color: 'var(--color-text-muted)', marginTop: 2 }} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <h2 style={{ margin: 0, fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis' }} tabIndex={-1}>{artifact.name}</h2>
-          <div style={{ ...mutedText, fontSize: 12 }}>{artifact.isFolder ? 'Folder' : KIND_META[artifact.kind].label} · v{artifact.version ?? 1}{!owned && artifact.sharedBy ? ` · shared by ${shortAddr(artifact.sharedBy)}` : ''}</div>
-        </div>
+    <Drawer wide
+      title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, minWidth: 0 }}><Icon name={artifact.isFolder ? 'folder' : KIND_META[artifact.kind].icon} size={18} style={{ color: 'var(--color-text-muted)' }} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{artifact.name}</span></span>}
+      onClose={onClose}
+      actions={<Button variant="primary" size="sm" disabled={opening} onClick={() => (owned ? setTab('access') : void openLive())}>{owned ? 'Manage access' : opening ? 'Opening…' : 'Open live'}</Button>}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 'var(--sp-3)' }}>
+        <Chip>{artifact.isFolder ? 'Folder' : KIND_META[artifact.kind].label}</Chip>
+        <Chip>v{artifact.version ?? 1}{id.latestRelease ? ` · released ${id.latestRelease.version}` : ''}</Chip>
+        <Chip tone={ACCESS_TONE[mode] === 'ok' ? 'ok' : ACCESS_TONE[mode] === 'warn' ? 'warn' : undefined}>{mode}</Chip>
+        {!artifact.isFolder && <Chip tone={FRESH_TONE[mode !== 'Owned' ? 'Cached' : freshnessOf(artifact)] === 'ok' ? 'ok' : undefined}>{mode !== 'Owned' ? 'Cached' : freshnessOf(artifact)}</Chip>}
+        {!owned && artifact.sharedBy && <Meta>shared by {shortAddr(artifact.sharedBy)}</Meta>}
+        <span style={{ flex: 1 }} />
         <div style={{ position: 'relative' }}>
           <button style={{ ...btnSty, display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((v) => !v)}>More<Icon name="chevron" size={12} style={{ transform: 'rotate(90deg)' }} /></button>
           {menuOpen && (
@@ -615,25 +633,21 @@ function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, ownerSa, fol
             </div>
           )}
         </div>
-        <button style={{ ...btnSty, background: 'none', border: 'none', padding: 2, color: 'var(--color-text-muted)' }} onClick={onClose} aria-label="close"><Icon name="close" size={18} /></button>
       </div>
 
       {/* spec 398 §6.2 — ARTIFACT IDENTITY: version · author · sources · scope · linked work item · access method; and the
           three acts kept distinct (share on Access, publish on Provenance, replicate not yet). Absent is said absent. */}
       {(() => {
-        const id = artifactIdentity(artifact, { sa: ownerSa, vaultLabel: ownerVaultKind }, publishable);
-        const row: React.CSSProperties = { display: 'flex', gap: 6, fontSize: 11.5, lineHeight: 1.45 };
-        const k: React.CSSProperties = { ...mutedText, flex: 'none', width: 62 };
         return (
-          <div data-testid="artifact-identity" data-access={id.accessMethod} style={{ padding: '.5rem .9rem', borderBottom: '1px solid var(--color-border)', display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <div style={row}><span style={k}>version</span><span>{id.version}{id.latestRelease ? ` · released ${id.latestRelease.version}` : ''}</span></div>
-            <div style={row}><span style={k}>author</span><span>{shortAddr(id.author)}</span></div>
-            <div style={row}><span style={k}>sources</span><span>{id.sources.length ? id.sources.map((x) => `${x.kind}: ${x.value.length > 28 ? `${x.value.slice(0, 25)}…` : x.value}`).join(' · ') : <span style={mutedText}>none recorded</span>}</span></div>
-            <div style={row}><span style={k}>scope</span><span>{id.scope.vault} · {id.scope.live} live grant{id.scope.live === 1 ? '' : 's'}{id.scope.grants > id.scope.live ? ` (${id.scope.grants - id.scope.live} revoked)` : ''}</span></div>
-            <div style={row}><span style={k}>work item</span><span style={mutedText}>none linked yet</span></div>
-            <div style={row}><span style={k}>access</span><span><strong>{id.accessMethod}</strong></span></div>
-            <div style={{ ...row, marginTop: 3 }}>
-              <span style={k}>acts</span>
+          <div data-testid="artifact-identity" data-access={id.accessMethod} className="ui-card ui-card--quiet" style={{ padding: 'var(--sp-3) var(--sp-4)', marginBottom: 'var(--sp-4)' }}>
+            <KeyValue rows={[
+              ['Author', shortAddr(id.author)],
+              ['Sources', id.sources.length ? id.sources.map((x) => `${x.kind}: ${x.value.length > 28 ? `${x.value.slice(0, 25)}…` : x.value}`).join(' · ') : 'none recorded', { absent: !id.sources.length }],
+              ['Scope', `${id.scope.vault} · ${id.scope.live} live grant${id.scope.live === 1 ? '' : 's'}${id.scope.grants > id.scope.live ? ` (${id.scope.grants - id.scope.live} revoked)` : ''}`],
+              ['Work item', 'none linked yet', { absent: true }],
+              ['Access', <strong key="a">{id.accessMethod}</strong>],
+            ]} />
+            <div style={{ display: 'flex', gap: 6, marginTop: 'var(--sp-3)', flexWrap: 'wrap' }}>
               <span>
                 <button style={{ ...btnSty, padding: '.05rem .4rem', fontSize: 11 }} disabled={id.acts.share !== 'offered'} onClick={() => setTab('access')} title="Share = a grant on this artifact; a preview shared never grants vault or sandbox access">share</button>{' '}
                 <button style={{ ...btnSty, padding: '.05rem .4rem', fontSize: 11 }} disabled={id.acts.publish !== 'offered'} onClick={() => { onPublish(artifact.id); setTab('provenance'); }} title={id.acts.publish === 'not-publishable' ? 'only a playbook or a folder is published as a release' : 'Publish = a signed release under your name'}>publish</button>{' '}
@@ -644,14 +658,11 @@ function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, ownerSa, fol
         );
       })()}
 
-      <div role="tablist" style={{ display: 'flex', gap: 2, padding: '.4rem .6rem 0', borderBottom: '1px solid var(--color-border)' }}>
-        {(['content', 'access', 'provenance', 'versions'] as Tab[]).map((t) => (
-          <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}
-            style={{ ...btnSty, border: 'none', borderRadius: 0, borderBottom: `2px solid ${tab === t ? 'var(--color-amber-500)' : 'transparent'}`, color: tab === t ? 'var(--color-amber-700)' : 'var(--color-text-muted)', fontWeight: tab === t ? 700 : 500, textTransform: 'capitalize', padding: '.35rem .5rem' }}>{t}</button>
-        ))}
+      <div style={{ marginBottom: 'var(--sp-3)' }}>
+        <Tabs value={tab} onChange={setTab} label="Artifact" items={[{ id: 'content' as Tab, label: artifact.isFolder ? 'Contents' : 'Content' }, { id: 'access' as Tab, label: 'Access' }, { id: 'provenance' as Tab, label: 'Provenance' }, { id: 'versions' as Tab, label: 'Versions' }]} />
       </div>
 
-      <div style={{ padding: '.8rem .9rem', overflowY: 'auto', flex: 1 }}>
+      <div>
         {tab === 'content' && (isBundle
           ? <Members artifact={artifact} members={members} onOpenMember={onOpenMember} />
           : owned ? <ContentPreview artifact={artifact} items={items} />
@@ -662,11 +673,7 @@ function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, ownerSa, fol
         {tab === 'provenance' && <ProvenanceTab artifact={artifact} ownerLabel={owned ? ownerLabel : (artifact.sharedBy ? shortAddr(artifact.sharedBy) : 'Another vault')} ownerVaultKind={owned ? ownerVaultKind : `${artifact.sharedByKind ?? 'Person'} vault`} publishable={publishable} owned={owned} onPublish={() => onPublish(artifact.id)} />}
         {tab === 'versions' && <VersionsTab version={artifact.version ?? 1} />}
       </div>
-
-      <div style={{ padding: '.7rem .9rem', borderTop: '1px solid var(--color-border)' }}>
-        <button style={{ ...btnPrimarySty, width: '100%' }} disabled={opening} onClick={() => (owned ? setTab('access') : void openLive())}>{owned ? 'Manage access' : opening ? 'Opening…' : 'Open live'}</button>
-      </div>
-    </aside>
+    </Drawer>
   );
 }
 

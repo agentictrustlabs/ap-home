@@ -1798,3 +1798,5 @@ input:not([type=checkbox]):not([type=radio]), select, textarea { border-color: v
 .ui-filter .ui-count { font-weight: 600; opacity: .75; }
 /* lists nested inside a panel's padded body: hairline only, no second shadow */
 .ui-panel .ui-list { box-shadow: none; }
+/* the artifact drawer is wider — a document reads at 640 */
+.ui-drawer--wide { width: min(680px, 100vw); }

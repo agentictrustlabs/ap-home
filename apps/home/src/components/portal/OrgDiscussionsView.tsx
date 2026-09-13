@@ -14,6 +14,8 @@ import { sendMessage, MessagingWireRequiredError } from '../../lib/messaging-sen
 import { membersFromReceivedDelegations, type RosterMember } from '../../lib/recipient-directory';
 import { ApproveMessaging } from './ApproveMessaging';
 import { agentNameForLabel } from '../../lib/domain';
+import { SkeletonRows, EmptyState, useReadyReport } from '../../ui';
+import { HashIcon as HashGlyph } from '../shared/Icons';
 import { SectionShell } from './SectionShell';
 import { issueDirectoryListing } from '../../home/directory';
 import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, isKmsVia, resolveVia, signHashFor, type Via } from '../../home/onboarding';
@@ -82,6 +84,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   const communityAvatar = useAvatar(communityAvatarKey(org));
 
   const [channels, setChannels] = useState<Channel[] | null>(null);
+  useReadyReport('discussions-channels', channels === null);
   const [bodies, setBodies] = useState<Record<string, string>>({});
   const [orgVault, setOrgVault] = useState<boolean | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
@@ -742,12 +745,13 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
               onClick={() => setActive(c.descriptor.id)}
               title={c.participationPolicy === 'restricted' ? 'Restricted topic — invite-only participation' : 'Open topic — all organization members participate'}
             >
-              <span>{c.participationPolicy === 'restricted' ? '🔒 ' : ''}{c.title}</span>
-              <span style={{ marginLeft: 'auto', opacity: 0.5, fontSize: '0.75rem' }}>{c.messages.length}</span>
+              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.participationPolicy === 'restricted' ? '🔒 ' : ''}{c.title}</span>
+              <span className="ui-count" style={{ marginLeft: 'auto', fontSize: 'var(--fs-xs)', background: 'var(--color-surface-sunken)', color: 'var(--color-text-muted)', borderRadius: 999, padding: '1px 7px', fontWeight: 600 }}>{c.messages.length}</span>
             </button>
           ))}
+          {channels === null && <div style={{ padding: '0 0.2rem' }}><SkeletonRows rows={4} /></div>}
           {channels && channels.length === 0 && !creating && (
-            <p style={{ fontSize: '0.8rem', opacity: 0.6, padding: '0 0.4rem' }}>No topics yet.</p>
+            <EmptyState title="No topics yet" hint="A topic is a place the organization talks about one thing." />
           )}
         </div>
 
@@ -788,6 +792,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
               </div>
 
               <div className="chat-thread-body" style={{ flex: 1 }} ref={threadRef} onScroll={onThreadScroll}>
+                {channel.messages.length === 0 && <div style={{ margin: 'auto', maxWidth: 420, padding: '2rem 0' }}><EmptyState icon={<HashGlyph size={18} />} title={`Nothing said in # ${channel.title} yet`} hint={channel.assistant?.mentionHandle ? `Say something — @${channel.assistant.mentionHandle} brings the organization's agent in.` : 'Say something to open the conversation.'} /></div>}
                 {channel.messages.map((m, idx) => {
                   const l = listingBySubject.get(m.envelope.from.toLowerCase());
                   const mine = m.authorName === you;
@@ -870,7 +875,9 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
               />
             </>
           ) : (
-            <p className="manage-card-blurb" style={{ margin: 'auto', padding: '2rem', textAlign: 'center' }}>{channels === null ? 'Loading…' : 'Pick or create a topic.'}</p>
+            channels === null
+              ? <div style={{ padding: '1rem' }}><SkeletonRows rows={5} lead /></div>
+              : <div style={{ margin: 'auto', padding: '2rem', maxWidth: 420 }}><EmptyState icon={<HashGlyph size={18} />} title="Pick a topic" hint="Or create one — a topic is where the organization talks about one thing." /></div>
           )}
         </div>
 

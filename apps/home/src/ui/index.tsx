@@ -277,11 +277,11 @@ export function relativeLabel(at: number | string, now = Date.now()): string {
 }
 
 /** A side drawer for a detail (a run's inspector, a message's provenance) — the list stays where it was. */
-export function Drawer({ title, onClose, children, actions }: { title: ReactNode; onClose: () => void; children: ReactNode; actions?: ReactNode }) {
+export function Drawer({ title, onClose, children, actions, wide }: { title: ReactNode; onClose: () => void; children: ReactNode; actions?: ReactNode; wide?: boolean }) {
   return (
     <>
       <div className="ui-drawer-backdrop" onClick={onClose} aria-hidden />
-      <aside className="ui-drawer" role="dialog" aria-modal="true">
+      <aside className={cx('ui-drawer', wide && 'ui-drawer--wide')} role="dialog" aria-modal="true">
         <div className="ui-drawer-head">
           <h2>{title}</h2>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>{actions}<IconButton label="Close" onClick={onClose}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M6 6l12 12M18 6 6 18" /></svg></IconButton></div>
