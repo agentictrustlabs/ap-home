@@ -2093,13 +2093,41 @@ app.post('/harness/hooks/:agent/:triggerId', async (c) => {
 // join, hands back the provider token ONCE: it goes to this browser and nowhere else (not a log, not a
 // receipt, not a model). Unconfigured provider ⇒ 503 `huddles_not_configured`, never a fallback.
 type HuddleScopeIn = { kind?: string; principal?: string; id?: string };
-function huddleScopeOf(raw: HuddleScopeIn | undefined): { kind: 'conversation' | 'topic' | 'org' | 'team' | 'workspace'; principal: Address; id?: string } | null {
+type HuddleScopeKind = 'conversation' | 'topic' | 'org' | 'team' | 'workspace' | 'club';
+function huddleScopeOf(raw: HuddleScopeIn | undefined): { kind: HuddleScopeKind; principal: Address; id?: string } | null {
   const kind = String(raw?.kind ?? '');
   const principal = String(raw?.principal ?? '').toLowerCase();
-  if (!['conversation', 'topic', 'org', 'team', 'workspace'].includes(kind) || !/^0x[0-9a-f]{40}$/.test(principal)) return null;
+  if (!['conversation', 'topic', 'org', 'team', 'workspace', 'club'].includes(kind) || !/^0x[0-9a-f]{40}$/.test(principal)) return null;
   const id = raw?.id ? String(raw.id).slice(0, 200) : undefined;
-  if ((kind === 'conversation' || kind === 'topic') && !id) return null;
-  return { kind: kind as 'conversation' | 'topic' | 'org' | 'team' | 'workspace', principal: principal as Address, ...(id ? { id } : {}) };
+  if ((kind === 'conversation' || kind === 'topic' || kind === 'club') && !id) return null;
+  return { kind: kind as HuddleScopeKind, principal: principal as Address, ...(id ? { id } : {}) };
+}
+/**
+ * A CLUB'S ROSTER IS THE RELYING APP'S RECORD (pokernight WORKSPACES.md §5): the club is a `.workspace` agent the
+ * host custodies, but who is a member is kept by the card room, not by the workspace's own vault — the
+ * membership handoff ceremonies have not landed there yet. So for a `club` scope the standing is asked of the
+ * card room: `GET <origin>/clubs/<id>/standing-of?agent=<caller>` answers the club's workspace agent and the
+ * caller's standing on its roster. Two checks keep this honest: the origin must be one this deployment DECLARES
+ * may vouch for clubs (`CLUB_ROSTER_ORIGINS`, config — never a fallback), and the club's agent it names must be
+ * the scope's principal, so a card room can vouch only for the workspaces it chartered. The person still acts
+ * with their own Home session; nothing here is a token the app holds.
+ */
+async function clubStandingFor(env: Env, caller: Address, scope: { principal: Address; id?: string }): Promise<'steward' | 'member' | 'none'> {
+  const origins = String((env as { CLUB_ROSTER_ORIGINS?: string }).CLUB_ROSTER_ORIGINS ?? '').split(',').map((s) => s.trim().replace(/\/$/, '')).filter(Boolean);
+  const secret = String((env as { CLUB_ROSTER_SECRET?: string }).CLUB_ROSTER_SECRET ?? '');
+  if (!origins.length || !scope.id) return 'none';
+  for (const origin of origins) {
+    try {
+      const r = await fetch(`${origin}/clubs/${encodeURIComponent(scope.id)}/standing-of?agent=${caller}`, { headers: { accept: 'application/json', ...(secret ? { authorization: `Bearer ${secret}` } : {}) }, signal: AbortSignal.timeout(4000) });
+      if (!r.ok) continue;
+      const b = (await r.json().catch(() => null)) as { agent?: string; standing?: string } | null;
+      if (!b || String(b.agent ?? '').toLowerCase() !== scope.principal.toLowerCase()) continue;
+      if (b.standing === 'host') return 'steward';
+      if (b.standing === 'member') return 'member';
+      return 'none';
+    } catch { /* the next origin, or none */ }
+  }
+  return 'none';
 }
 /** The caller's standing AT THE SCOPE (spec 378 §2): for an organization-class scope, derived from records
  *  the organization keeps (spec 366); for a conversation, whether the caller is one of its parties. */
@@ -2109,6 +2137,7 @@ async function huddleStandingFor(env: Env, caller: Address, scope: NonNullable<R
     return parties.includes(caller.toLowerCase()) || scope.principal === caller.toLowerCase() ? 'party' : 'none';
   }
   if (scope.principal === caller.toLowerCase()) return 'steward';
+  if (scope.kind === 'club') return clubStandingFor(env, caller, scope);
   const askDeps = harnessDeps(env, buildAuditSink(env));
   const standing = await deriveStanding({
     ...(askDeps.readSubjectRecord ? { readSubjectRecord: askDeps.readSubjectRecord } : {}),
