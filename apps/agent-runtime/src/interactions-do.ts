@@ -74,6 +74,7 @@ import {
 import { inboxRevision, upsertConversation, type InboxDataV1 } from '@agenticprimitives/fabric';
 import { generateMessageId, messageBodyResource, type MessageEnvelopeV2 } from '@agenticprimitives/fabric/messaging';
 import { mentionsIn, resolveMentions, topicThreadId, topicContextRef } from './mentions.js';
+import { emptyIndex, indexDoc, searchIndex, SEARCH_INDEX_KEY, type SearchDocV1, type SearchIndexV1 } from './work-search.js';
 // spec 341 §5.1b — outbound delivery, performed here because this is where the signing key is.
 import { deliverOutbound, wireTargets } from './outbound-delivery.js';
 import { messagingScopeCovers, messagingScopeDepsFromEnv } from './messaging-scope.js';
@@ -524,6 +525,15 @@ export class InteractionsDO {
     })().catch((e) => {
       void audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.assistant.dispatchFailed', outcome: 'error', actor: { type: 'service', id: opts.principal }, subject: { type: 'channel', id: opts.channelId }, reason: e instanceof Error ? e.message : String(e) }).catch(() => undefined);
     });
+  }
+
+  /** Spec 400 W2 (B5) — one document into this object's search index (DO-local, rebuildable). Never fails the write it
+   *  follows: an index that could not be updated is rebuilt by `search.reindex`, and says nothing to the caller. */
+  private async indexForSearch(id: string, doc: SearchDocV1, text: string): Promise<void> {
+    try {
+      const idx = ((await this.state.storage.get(SEARCH_INDEX_KEY)) as SearchIndexV1 | undefined) ?? emptyIndex();
+      await this.state.storage.put(SEARCH_INDEX_KEY, indexDoc(idx, id, doc, text));
+    } catch (e) { console.warn('[search] index write skipped:', e instanceof Error ? e.message : String(e)); }
   }
 
   /** Spec 400 W2 (B3) — MENTIONS INTO WORK. `@goose-2` in a topic: the mentioned MEMBER agent (any member, not only
@@ -1834,7 +1844,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.search.query' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -2455,6 +2465,7 @@ export class InteractionsDO {
             const store = createVaultMessageBodyStore(this.vaultFor(g), principal);
             await store.putBody({ messageId: r.envelope.id, bytes: new TextEncoder().encode(bodyText), contentType: 'text/plain', classification: 'internal', resource: r.envelope.body.resource });
             await this.writeDoc(g, TOPIC_RESOURCE(channelId), composed[0]!.messages);
+            await this.indexForSearch(r.envelope.id, { kind: 'topic', at: r.envelope.createdAt, snippet: '', ref: { org: principal, channelId, messageId: r.envelope.id, from: authorAddr, fromName: authorName, title: entry.title } }, bodyText);
             return json({ ok: true, messageId: r.envelope.id });
           });
         }
@@ -3244,6 +3255,14 @@ export class InteractionsDO {
             return json({ ok: true });
           });
         }
+        // internal.search.query — spec 400 W2 (B5): the harness's search tool reading this object's index in-Worker,
+        // for an asker the harness already established as self or steward. The index is a projection; never a record.
+        if (op === 'internal.search.query') {
+          const idx = ((await this.state.storage.get(SEARCH_INDEX_KEY)) as SearchIndexV1 | undefined) ?? emptyIndex();
+          const kinds = Array.isArray(body.kinds) ? (body.kinds as string[]).filter((k): k is SearchDocV1['kind'] => k === 'message' || k === 'topic' || k === 'run') : undefined;
+          const hits = searchIndex(idx, String(body.query ?? ''), { ...(kinds?.length ? { kinds } : {}), ...(typeof body.since === 'string' ? { since: body.since } : {}), ...(typeof body.limit === 'number' ? { limit: body.limit } : {}) });
+          return json({ ok: true, hits, indexed: idx.order.length });
+        }
         // internal.runtime.wake.put — spec 400 W1c: the queue consumer's receipt of one wake, kept DO-local and
         // bounded (a serving-plane ledger: what the steward and the live gate read back; rebuildable, never a record).
         if (op === 'internal.runtime.wake.put') {
@@ -3279,6 +3298,12 @@ export class InteractionsDO {
           // Spec 400 W1c — where this member's runtime lives, if its custodian declared one, so the deliverer can
           // WAKE it (a duplicate is not admitted and wakes nothing). Config on this object, never authority.
           const runtimeHost = fresh ? parseRuntimeHost(await this.state.storage.get(RUNTIME_HOST_KEY)) : null;
+          // Spec 400 W2 (B5) — searchable from the moment it is admitted: the words the deliverer carried (never read
+          // back from the vault here), the sender, the thread. The record is the vault's; this is its shadow.
+          if (fresh && typeof body.bodyText === 'string' && body.bodyText.trim()) {
+            const from = (String(envelope.from).match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+            await this.indexForSearch(envelope.id, { kind: 'message', at: envelope.createdAt, snippet: '', ref: { conversationId: envelope.conversationId, messageId: envelope.id, from, ...(typeof body.fromName === 'string' ? { fromName: body.fromName } : {}), ...(envelope.subject ? { title: envelope.subject } : {}) } }, body.bodyText);
+          }
           return json({ ok: true, messageId: envelope.id, admitted: fresh, ...(runtimeHost ? { runtimeHost } : {}) });
         });
       } catch (e) {
@@ -3649,6 +3674,7 @@ export class InteractionsDO {
           // Channel bodies live in the CHANNEL namespace (the envelope's own resource — closes FAB-SSO-2).
           await store.putBody({ messageId: r.envelope.id, bytes: new TextEncoder().encode(String(body.bodyText ?? '').trim()), contentType: 'text/plain', classification: 'internal', resource: r.envelope.body.resource });
           await this.writeDoc(grant, TOPIC_RESOURCE(channelId), composed[0]!.messages);
+          await this.indexForSearch(r.envelope.id, { kind: 'topic', at: r.envelope.createdAt, snippet: '', ref: { org: principal, channelId, messageId: r.envelope.id, from: sessionSa.toLowerCase(), fromName: name ?? 'Steward', title: entry.title } }, String(body.bodyText ?? '').trim());
           // spec 327 §3 — post-commit assistant trigger: fire-and-forget AFTER the member's post is
           // durable; a failed/limited dispatch is audited + dropped, never affecting this response.
           if (assistantTrigger(entry, { from: sessionCaip as AnyMessageEnvelope['from'], bodyText: String(body.bodyText ?? '') })) {
@@ -3871,6 +3897,45 @@ export class InteractionsDO {
       //    URL that serves `POST /wake`. DO-local: it is config for the serving plane (wiped ⇒ re-declared with
       //    `ap runtime host`), not a record — and it authorizes nothing; the runtime's acts are judged by its wire
       //    and its grant when they arrive. `runtime.wake.get` reads the bounded ledger of wake receipts. ──
+      // ── Spec 400 W2 (B5) — SEARCH OVER THIS OBJECT'S OWN INDEX (self or steward): messages (a person's), topic posts
+      //    (an organization's). `search.reindex` rebuilds it from the records — the index is a projection, and a
+      //    rebuild is what "wiped" costs. Results cite ids; the reader opens the record where it lives. ──
+      if (op === 'search.query' || op === 'search.reindex') {
+        const isSelf = sessionSa.toLowerCase() === principal;
+        const steward = isSelf || await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
+        if (!steward) return json({ error: 'only this agent or its steward may search its records' }, 403);
+        if (op === 'search.query') {
+          const idx = ((await this.state.storage.get(SEARCH_INDEX_KEY)) as SearchIndexV1 | undefined) ?? emptyIndex();
+          const kinds = Array.isArray(body.kinds) ? (body.kinds as string[]).filter((k): k is SearchDocV1['kind'] => k === 'message' || k === 'topic' || k === 'run') : undefined;
+          const hits = searchIndex(idx, String(body.query ?? ''), { ...(kinds?.length ? { kinds } : {}), ...(typeof body.since === 'string' ? { since: body.since } : {}), ...(typeof body.limit === 'number' ? { limit: body.limit } : {}) });
+          return json({ ok: true, hits, indexed: idx.order.length });
+        }
+        // REBUILD from the records this object serves: the inbox (bodies batched by resource) and every topic.
+        const idx = emptyIndex();
+        let n = 0;
+        const inbox = await this.readDoc<{ envelopes?: MessageEnvelopeV1[] }>(grant, INBOX_RESOURCE, {}).catch(() => ({} as { envelopes?: MessageEnvelopeV1[] }));
+        const envs = (inbox.envelopes ?? []).slice(-2000);
+        const bodies = envs.length ? await this.readTopicBodies(grant, envs as never).catch(() => ({} as Record<string, string>)) : {};
+        for (const e of envs) {
+          const text = bodies[e.id]; if (!text) continue;
+          const from = (String(e.from).match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+          indexDoc(idx, e.id, { kind: 'message', at: e.createdAt, snippet: '', ref: { conversationId: e.conversationId, messageId: e.id, from, ...(e.subject ? { title: e.subject } : {}) } }, text); n += 1;
+        }
+        const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []).catch(() => [] as ChannelV1[]);
+        for (const ch of index) {
+          const messages = await this.readDoc<{ envelope: MessageEnvelopeV1; authorName?: string }[]>(grant, TOPIC_RESOURCE(ch.descriptor.id), []).catch(() => []);
+          const tb = messages.length ? await this.readTopicBodies(grant, messages.map((m) => m.envelope) as never).catch(() => ({} as Record<string, string>)) : {};
+          for (const m of messages) {
+            const text = tb[m.envelope.id]; if (!text) continue;
+            const from = (String(m.envelope.from).match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+            indexDoc(idx, m.envelope.id, { kind: 'topic', at: m.envelope.createdAt, snippet: '', ref: { org: principal, channelId: ch.descriptor.id, messageId: m.envelope.id, from, ...(m.authorName ? { fromName: m.authorName } : {}), title: ch.title } }, text); n += 1;
+          }
+        }
+        await this.state.storage.put(SEARCH_INDEX_KEY, idx);
+        await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.search.reindex', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'search-index', id: principal }, reason: `${n} document(s)` });
+        return json({ ok: true, indexed: n });
+      }
+
       if (op === 'runtime.host.get' || op === 'runtime.host.put' || op === 'runtime.wake.get') {
         const isSelf = sessionSa.toLowerCase() === principal;
         const steward = isSelf || await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
@@ -4568,6 +4633,8 @@ export class InteractionsDO {
           for (const b of bodyBytes) bin += String.fromCharCode(b);
           await this.vaultFor(dgSend).write({ owner: '', resource: envelope.body.resource, data: { b64: btoa(bin), contentType: 'text/plain', bodyHash: envelope.bodyHash }, classification: 'internal' } as never);
           doc.envelopes = [...((doc.envelopes as MessageEnvelopeV1[] | undefined) ?? []), envelope as never];
+          // Spec 400 W2 (B5) — what I said is searchable too.
+          await this.indexForSearch(envelope.id, { kind: 'message', at: envelope.createdAt, snippet: '', ref: { conversationId: envelope.conversationId, messageId: envelope.id, from: principal } }, new TextDecoder().decode(bodyBytes));
           const sent: MessageEventV1 = { version: 'ap.message.event.v1', messageId: envelope.id, actor: envelope.from, eventType: 'sent', at: envelope.createdAt };
           doc.events = [...((doc.events as MessageEventV1[] | undefined) ?? []), sent];
           // The sender's own view of the thread — same descriptor, owned by them.

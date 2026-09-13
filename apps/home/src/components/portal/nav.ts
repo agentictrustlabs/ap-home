@@ -101,6 +101,8 @@ export function buildNav(
       // spec 398 §4.1 — the first slot is TODAY (§4.2): decisions · active · finished · next; the status map sits under it.
       { id: 'overview', label: 'Today', href: overviewHref, Icon: isPerson ? HomeIcon : active.kind === 'org' ? BuildingIcon : LandmarkIcon, status: 'live' },
       { id: 'messages', label: 'Messages', href: href('messages'), Icon: ChatIcon, status: 'live', ...(badges.inbox ? { badge: badges.inbox } : {}) },
+      // Spec 400 W2 (B5) — SEARCH over the person's own work (a person's surface: their tier, their stewardships).
+      ...(isPerson ? [{ id: 'search', label: 'Search', href: '/search', Icon: DatabaseIcon, status: 'live' as const }] : []),
       // spec 310's control-plane timeline, in the plural because the band is a place.
       { id: 'activities', label: 'Activities', href: href('activities'), Icon: HistoryIcon, status: 'live' },
       { id: 'library', label: 'Library', href: href('library'), Icon: DatabaseIcon, status: 'live' },

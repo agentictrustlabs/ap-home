@@ -392,6 +392,16 @@
       "timeoutSec": 480
     },
     {
+      "id": "verify-search",
+      "script": "scripts/verify-search.mts",
+      "spec": "400 W2 (B5)",
+      "proves": "search over one's own work from rebuildable DO-side indexes (never an engine over decrypted copies): a direct message is indexed the moment it is admitted and its recipient finds it by words, cited by conversation and message id; a topic post is found by the org's steward, cited by org, topic and post; every result names where it lives; a rebuild (search.reindex) leaves the sent copy findable",
+      "twin": "a member finds nothing in an organization they do not steward; an outsider finds nothing of a message that was never theirs",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 300
+    },
+    {
       "id": "verify-contacts",
       "script": "scripts/verify-contacts.mts",
       "spec": "401 C1",

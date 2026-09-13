@@ -4807,6 +4807,19 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
      * This runs in-Worker, where the internal ops have no external gate — which is exactly why the check
      * has to be HERE. Reaching a principal's DO is possible; being entitled to is what this establishes.
      */
+    // Spec 400 W2 (B5) — one subject's search: its interactions object (messages, topic posts) and its task object
+    // (runs), both in-Worker; the asker's entitlement to the subject was established by `readableVaults`.
+    searchSubject: async (subject, query, opts) => {
+      const [ix, runs] = await Promise.all([
+        callInteractionsInternal(env, subject, 'internal.search.query', { query, ...opts }).catch(() => ({ hits: [], indexed: 0 })),
+        (async () => {
+          const res = await env.A2A_TASKS.get(env.A2A_TASKS.idFromName(subject.toLowerCase())).fetch(new Request('https://a2a-task-do/internal/harness-run/search', { method: 'POST', headers: internalHeaders(env), body: JSON.stringify({ query, ...opts }) }));
+          return (await res.json().catch(() => ({ hits: [], indexed: 0 }))) as { hits?: unknown[]; indexed?: number };
+        })().catch(() => ({ hits: [], indexed: 0 })),
+      ]);
+      const a = ix as { hits?: unknown[]; indexed?: number };
+      return { hits: [...(a.hits ?? []), ...(runs.hits ?? [])] as never, indexed: (a.indexed ?? 0) + (runs.indexed ?? 0) };
+    },
     readableVaults: async (asker: string) => {
       // NAMED, not an address. The self entry used to label its records `0xb0d1…3d11 :: capabilities.data`,
       // and a composer asked "what records does nathan hold" duly presented ALICE'S OWN records as

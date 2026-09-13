@@ -90,6 +90,7 @@ import {
 import { buildAuditSink, callMcpToolWithProof, interactionsSessionAccount, runUnattendedAsk, runAgentAsk, fireTriggersAt, harnessDeps, probeSenderFor, candidateSourceFor, type Env, type IncomingDelegation } from './index.js';
 import { dueNow, advanced, messageTriggerSource, type TriggerScheduleV1 } from './triggers.js';
 import { enqueueRuntimeWake, parseRuntimeHost } from './runtime-wake.js';
+import { emptyIndex, indexDoc, searchIndex, SEARCH_INDEX_KEY, type SearchIndexV1 } from './work-search.js';
 import { ERC1271_MAGIC_VALUE as ERC1271_MAGIC } from '@agenticprimitives/types';
 
 /** How long an unfinished harness run stays resumable. A day is well past the point: the mandate a
@@ -805,7 +806,11 @@ export class A2aTaskDO {
         return out as Record<string, unknown>;
       };
       await call('internal.dm.body.put', { resource: body.resource, data: body.stored });
-      const delivered = await call('internal.deliver', { envelope });
+      // Spec 400 W2 (B5) — the words travel with the admission so the recipient's object can index them; the sender's
+      // NAME rides too, as the words a result is found by. Neither is read back from the vault for this.
+      const senderAddr0 = (envelope.from.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+      const senderName0 = admitted && senderAddr0 ? await harnessDeps(this.env, buildAuditSink(this.env)).nameOf?.(senderAddr0).catch(() => null) ?? null : null;
+      const delivered = await call('internal.deliver', { envelope, ...(admitted?.bodyText ? { bodyText: admitted.bodyText } : {}), ...(senderName0 ? { fromName: senderName0 } : {}) });
       // Spec 400 W1c — ADMITTED, and this member's custodian said where its runtime lives: wake it. One queue
       // message, no content, no authority; the runtime reads the message under its own wire. Detached like the
       // triggers below — the sender's receipt says "admitted", never "woken".
@@ -819,8 +824,8 @@ export class A2aTaskDO {
       // the delivery: the sender's receipt says "admitted", never "reacted to", and a run that takes a
       // planner's time must not hold the sender's delivery open. An inbound message never performs an act
       // (spec 365): the run may draft the reply, which parks for a steward.
-      const senderAddr = (envelope.from.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
-      const fromName = admitted && senderAddr ? await harnessDeps(this.env, buildAuditSink(this.env)).nameOf?.(senderAddr).catch(() => null) ?? null : null;
+      const senderAddr = senderAddr0;
+      const fromName = senderName0;
       const source = admitted ? messageTriggerSource(envelope, admitted.skill, admitted.bodyText, fromName) : null;
       if (source) {
         void fireTriggersAt(this.env, recipient.toLowerCase() as Address, source)
@@ -844,7 +849,7 @@ export class A2aTaskDO {
     if (url.pathname.startsWith('/internal/harness-run/')) {
       if (!isInternalCall(req, this.env)) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
       const op = url.pathname.slice('/internal/harness-run/'.length);
-      const body = (await req.json().catch(() => null)) as { runRef?: string; checkpoint?: { runRef?: string }; asker?: string; line?: Record<string, unknown> & { seq?: number; terminal?: boolean }; after?: number } | null;
+      const body = (await req.json().catch(() => null)) as { runRef?: string; checkpoint?: { runRef?: string }; asker?: string; line?: Record<string, unknown> & { seq?: number; terminal?: boolean }; after?: number; query?: string; since?: string; limit?: number } | null;
       const key = (ref: string) => `harness:run:${ref}`;
       // Spec 370 P2 — the run's PROGRESS LINES: a short list per run, appended by the ask route as the loop
       // narrates itself, long-polled by the surface. Rebuildable, TTL'd, and read only by the asker whose
@@ -979,7 +984,20 @@ export class A2aTaskDO {
         const cp = body?.checkpoint;
         if (!cp?.runRef) return Response.json({ ok: false, error: 'checkpoint.runRef required' }, { status: 400 });
         await this.state.storage.put(key(cp.runRef), cp);
+        // Spec 400 W2 (B5) — a run is searchable by what was asked and what it waits for; a dropped run stays findable
+        // as history (the record of it is its receipts and provenance in the vault; the index cites the ref).
+        try {
+          const idx = ((await this.state.storage.get(SEARCH_INDEX_KEY)) as SearchIndexV1 | undefined) ?? emptyIndex();
+          const c = cp as { runRef: string; message?: string; awaiting?: { prompt?: string }; updatedAt?: number; createdAt?: number; thread?: string };
+          const at = new Date(c.updatedAt ?? c.createdAt ?? Date.now()).toISOString();
+          await this.state.storage.put(SEARCH_INDEX_KEY, indexDoc(idx, `run:${c.runRef}`, { kind: 'run', at, snippet: '', ref: { runRef: c.runRef, ...(c.thread ? { conversationId: c.thread } : {}), ...(c.awaiting?.prompt ? { title: c.awaiting.prompt } : {}) } }, `${c.message ?? ''} ${c.awaiting?.prompt ?? ''}`));
+        } catch (e) { console.warn('[search] run index skipped:', e instanceof Error ? e.message : String(e)); }
         return Response.json({ ok: true });
+      }
+      if (op === 'search') {
+        const idx = ((await this.state.storage.get(SEARCH_INDEX_KEY)) as SearchIndexV1 | undefined) ?? emptyIndex();
+        const hits = searchIndex(idx, String(body?.query ?? ''), { kinds: ['run'], ...(typeof body?.since === 'string' ? { since: body.since } : {}), ...(typeof body?.limit === 'number' ? { limit: body.limit } : {}) });
+        return Response.json({ ok: true, hits, indexed: idx.order.length });
       }
       if (op === 'load') {
         if (!body?.runRef) return Response.json({ ok: false, error: 'runRef required' }, { status: 400 });

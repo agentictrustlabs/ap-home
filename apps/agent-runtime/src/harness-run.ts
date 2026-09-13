@@ -43,6 +43,7 @@ import { remembered, forget } from './run-memo.js';
 import { DISCOVERY_FIND_TOOL, ENGAGEMENT_INVOKE_TOOL, DISCOVERY_INSPECT_TOOL, DISCOVERY_FIND_CAPABILITY, ENGAGEMENT_INVOKE_CAPABILITY, discoveryFindInvoker } from './enterprise-tools.js';
 import { INVITATIONS_RECEIVED_TOOL } from './invitations-received.js';
 import { INBOX_LIST_TOOL, inboxListInvoker } from './inbox-list.js';
+import { WORK_SEARCH_TOOL, workSearchInvoker } from './work-search-tool.js';
 import { CONTACT_INVITE_TOOL, CONTACT_LIST_TOOL, CONTACT_REMOVE_TOOL, contactInviteInvoker, contactListInvoker, contactRemoveInvoker, type ContactDeps } from './contacts.js';
 import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
 import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
@@ -830,6 +831,8 @@ export interface HarnessDeps {
   /** Spec 356 §2.2 — whose vaults this asker may read: their own, plus what they STEWARD. Derived, never
    *  a caller's list; membership and custody are not sources (see `readableVaults` in index.ts). */
   readableVaults?: (asker: string) => Promise<Array<{ subject: string; name?: string; why: 'self' | 'stewardship' }>>;
+  /** Spec 400 W2 (B5) — one subject's search indexes (its interactions object: messages, topics; its task object: runs). */
+  searchSubject?: (subject: string, query: string, opts: { kinds?: string[]; since?: string; limit?: number }) => Promise<{ hits: import('./work-search.js').SearchHit[]; indexed: number }>;
   /** Spec 356 §2.5 — the INVENTORY of a subject's vault: keys and timestamps, no plaintext. */
   survey?: (subject: string) => Promise<Array<{ recordType: string; updatedAt?: string }>>;
   /** Spec 356 §2.5 — decode exactly these keys, one batched call. */
@@ -1904,6 +1907,9 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     // Spec 400 W1 — what has been said to THIS agent, from its own inbox (an outside runtime's poll; a person's "what's new").
     if (toolId === INBOX_LIST_TOOL.id) {
       return inboxListInvoker({ ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, person)(toolId, args, ctx);
+    }
+    if (toolId === WORK_SEARCH_TOOL.id) {
+      return workSearchInvoker({ ...(deps.readableVaults ? { readableVaults: deps.readableVaults } : {}), ...(deps.searchSubject ? { searchSubject: deps.searchSubject } : {}) }, person)(toolId, args, ctx);
     }
     // Spec 401 C1 — CONTACTS: membership on the person agent. The organization's mechanism with the person as principal.
     if (toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_LIST_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id) {
@@ -4427,6 +4433,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(playbook?.tools?.[INVITATIONS_RECEIVED_TOOL.id] ? [mergeContractTool(INVITATIONS_RECEIVED_TOOL, playbook.tools[INVITATIONS_RECEIVED_TOOL.id])] : []),
     // Spec 400 W1 — the agent's own inbox since a cursor (the runtime-member playbook offers it; a person's may too).
     ...(playbook?.tools?.[INBOX_LIST_TOOL.id] ? [mergeContractTool(INBOX_LIST_TOOL, playbook.tools[INBOX_LIST_TOOL.id])] : []),
+    ...(playbook?.tools?.[WORK_SEARCH_TOOL.id] ? [mergeContractTool(WORK_SEARCH_TOOL, playbook.tools[WORK_SEARCH_TOOL.id])] : []),
     // Spec 401 C1 — contacts (the person-steward playbook offers them).
     ...(playbook?.tools?.[CONTACT_INVITE_TOOL.id] ? [mergeContractTool(CONTACT_INVITE_TOOL, playbook.tools[CONTACT_INVITE_TOOL.id])] : []),
     ...(playbook?.tools?.[CONTACT_LIST_TOOL.id] ? [mergeContractTool(CONTACT_LIST_TOOL, playbook.tools[CONTACT_LIST_TOOL.id])] : []),
