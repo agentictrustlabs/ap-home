@@ -17,6 +17,7 @@ import {
   createChildAgentForSite,
   createOrganizationWithGoogle,
   signupWithName,
+  signupWalletNoName,
   passkeySignHash,
   googleSignHash,
   connectCustodianCached,
@@ -442,6 +443,34 @@ export async function secureHomeNoName(auth?: Auth, opts: { claimPendingNameVia?
   await activatePersonPlanes(out.agent, opts.claimPendingNameVia ?? 'google', auth);
   await bornWithPlaybook(out.agent, auth);
   return { ok: true, home: { address: out.agent, name: claimed } };
+}
+
+/** Secure a NAMELESS home with a WALLET — the door's "Continue with a wallet" for an EOA that has no home yet.
+ *  Mirrors the wallet branch of `secureHome` with no name: the plane grants fold into the deploy userOp (one
+ *  wallet prompt), the vault key binds unless it was folded, the agent is born with its playbook, and the
+ *  session comes back from the SIWE sign-in. The public name is claimed later, by choice (ADR-0013: one
+ *  mechanism — deploy nameless, claim on demand). */
+export async function secureHomeWalletNoName(onStep?: (s: string) => void): Promise<Result<{ token: string; home: Home; fresh: boolean }>> {
+  let batched = false;
+  let vaultFolded = false;
+  const out = await signupWalletNoName(onStep, async (sa) => {
+    batched = true;
+    const g = await buildBatchedPersonPlaneGrants(sa);
+    vaultFolded = g.vaultFolded;
+    return g;
+  });
+  if (!out.ok) return { ok: false, error: out.error };
+  const auth: Auth = { token: out.token };
+  if (out.fresh) {
+    if (!batched) {
+      await activatePersonPlanes(out.agent, 'wallet', auth);
+    } else if (!vaultFolded) {
+      try { const bound = await activateVaultIfNeeded(out.agent, 'wallet', auth); if (!bound.ok) console.warn('[home-create] vault key not activated (activate later from Security):', bound.error); }
+      catch (e) { console.warn('[home-create] vault-key activation deferred:', e); }
+    }
+    await bornWithPlaybook(out.agent, auth);
+  }
+  return { ok: true, token: out.token, home: { address: out.agent, name: '' }, fresh: out.fresh };
 }
 
 /** Open your home from this device (prove it's you → a session). `via` = the credential. */

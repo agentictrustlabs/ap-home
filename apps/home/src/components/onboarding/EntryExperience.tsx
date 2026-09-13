@@ -4,7 +4,7 @@
 // (onboarding / sign-in). The onboarding journey itself lives in <OnboardingJourney/>.
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { openHome, createOrganization, personGrantForOrgCreate, continueWithGoogle, continueWithYouVersion, resolveVia, signHashFor, type Via, type Auth } from '../../home/onboarding';
+import { openHome, createOrganization, personGrantForOrgCreate, continueWithGoogle, continueWithYouVersion, resolveVia, signHashFor, secureHomeWalletNoName, type Via, type Auth } from '../../home/onboarding';
 import { passkeyLogin, fetchProfile, siweLogin, claimName, createManagedAgent, resolveHomeNameForLabel } from '../../connect-client';
 import { loadPasskey } from '../../lib/passkey';
 import { hasWallet } from '../../lib/wallet';
@@ -712,7 +712,8 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
   };
   // spec 257 W3 — when a passkey resolves an EXISTING home, show the "We found your Impact home"
   // confirmation beat before issuing the session (display only; the token is already minted).
-  const [resolved, setResolved] = useState<{ token: string; name: string | null; address: Address | null; via: string } | null>(null);
+  const [resolved, setResolved] = useState<{ token: string; name: string | null; address: Address | null; via: string; fresh?: boolean } | null>(null);
+  const [busyStep, setBusyStep] = useState('');
 
   async function withPasskey() {
     setBusy('passkey');
@@ -750,6 +751,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
   // subdomain-bound, so no origin hop is needed (unlike passkey).
   async function withWallet() {
     setBusy('wallet');
+    setBusyStep('');
     setErr('');
     await paintYield(); // paint "Confirm in your wallet…" before MetaMask blocks
     try {
@@ -766,8 +768,13 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
         return;
       }
       if (out.status === 'bootstrap') {
-        // New wallet — no home for this EOA yet. Name path → the journey deploys the wallet home.
-        onUseName('wallet');
+        // New wallet — no home for this EOA yet. Secure a NAMELESS home right here (one wallet prompt for the
+        // deploy, one SIWE for the session) — never a detour through choosing a name; the public name is a
+        // later choice from the portal, exactly as a Google home is born (spec 257 name-deferral).
+        setBusyStep('Preparing your home…');
+        const made = await secureHomeWalletNoName(setBusyStep);
+        if (!made.ok) { setErr(made.error); return; }
+        setResolved({ token: made.token, name: null, address: made.home.address, via: 'wallet', fresh: made.fresh });
         return;
       }
       setErr(('reason' in out && out.reason) || 'wallet sign-in failed');
@@ -783,7 +790,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
   if (resolved) {
     return (
       <HomeResolvedView
-        fresh={false}
+        fresh={resolved.fresh === true}
         knownName={resolved.name}
         address={resolved.address}
         token={resolved.token}
@@ -850,14 +857,21 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
               )}
             </>
           )}
-          {offers('passkey') && (walletEnabled || passkeyEnabled) && (
-            // The device-credential lane. A wallet is not subdomain-bound but a new one has no home yet,
-            // and a passkey home is subdomain-bound — either way the name path opens the right home.
+          {offers('passkey') && passkeyEnabled && (
+            // A passkey home is subdomain-bound, so the name path opens the right home.
+            <button className="btn-ghost onboarding-secondary" onClick={() => onUseName('passkey')}>
+              Continue with a passkey
+            </button>
+          )}
+          {offers('passkey') && walletEnabled && (
+            // The wallet is not subdomain-bound: an existing EOA home signs straight in, a new EOA gets a
+            // NAMELESS home here — then the beat hands the session to the enroll flow. Never the name path.
             <button
               className="btn-ghost onboarding-secondary"
-              onClick={() => onUseName(passkeyEnabled ? 'passkey' : 'wallet')}
+              onClick={() => { if (walletAvail) void withWallet(); else setErr('No wallet found in this browser — install a wallet extension such as MetaMask, or continue another way.'); }}
+              disabled={busy !== null}
             >
-              {passkeyEnabled ? 'Continue with a passkey or wallet' : 'Continue with a wallet'}
+              {busy === 'wallet' ? (busyStep || 'Confirm in your wallet…') : 'Continue with a wallet'}
             </button>
           )}
           {offers('name') && (
@@ -902,7 +916,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
               onClick={() => { if (walletAvail) void withWallet(); else setErr('No wallet found in this browser — install a wallet extension such as MetaMask, or continue another way.'); }}
               disabled={busy !== null}
             >
-              {busy === 'wallet' ? 'Confirm in your wallet…' : 'Continue with a wallet'}
+              {busy === 'wallet' ? (busyStep || 'Confirm in your wallet…') : 'Continue with a wallet'}
             </button>
           )}
           {phoneEnabled && (

@@ -2672,6 +2672,38 @@ export async function signupWithName(
     : { ok: false, error: `created, but sign-in returned ${login.status}` };
 }
 
+/** A NAMELESS wallet home (spec 257 name-deferral, extended to the wallet 2026-09-13): the EOA's deterministic
+ *  person SA is deployed with NO name claimed — the public name is a later choice from the portal, exactly as
+ *  a Google home is born. A returning EOA whose SA already exists just signs in. Plane grants fold into the
+ *  deploy userOp (`buildExtra`, spec 253) so the whole thing is ONE wallet prompt plus the SIWE sign-in. */
+export async function signupWalletNoName(
+  onStep?: (s: string) => void,
+  buildExtra?: (sa: Address) => Promise<{ digests: Hex[]; submit: () => Promise<void> }>,
+): Promise<{ ok: true; token: string; agent: Address; fresh: boolean } | { ok: false; error: string }> {
+  onStep?.('Connecting your wallet…');
+  const address = await connectWallet(true);
+  const sa = await deriveEoaSa(address, 0n);
+  rememberSessionCustodian(sa, address);
+  const deployed = await isAgentDeployed(sa);
+  if (!deployed) {
+    const extra = buildExtra ? await buildExtra(sa) : undefined;
+    const deployCallData = extra && extra.digests.length
+      ? buildExecuteBatchCallData(extra.digests.map(buildApproveHashCall))
+      : undefined;
+    const dep = await bootstrapWithWallet(address, onStep, deployCallData);
+    if (!dep.ok) return { ok: false, error: dep.error };
+    if (extra) {
+      for (let i = 0; i < 20; i++) { if (await isAgentDeployed(dep.agent).catch(() => false)) break; await new Promise((r) => setTimeout(r, fastPollMs(2000))); }
+      await extra.submit();
+    }
+  }
+  onStep?.('Signing you in…');
+  const login = await siweLogin();
+  return login.status === 'issued'
+    ? { ok: true, token: login.token, agent: sa, fresh: !deployed }
+    : { ok: false, error: `${deployed ? 'found' : 'created'}, but sign-in returned ${login.status}` };
+}
+
 export interface BasicProfile {
   agent: string;
   name: string | null;
