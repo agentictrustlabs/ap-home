@@ -26,7 +26,7 @@ const ROUTINE = skipUnless(fx.routineAgent, 'agent with a scheduled routine (rou
 const team = orgs.find((o) => (o.orgName ?? '').toLowerCase() === ROUTINE.handle.toLowerCase() && o.relationship === 'steward');
 if (!team) fail(`${fx.people.steward} does not steward ${ROUTINE.handle}`);
 const TEAM = team!.orgAgent.toLowerCase() as Address;
-type Row = { triggerId: string; kind?: string; ask: string; paused?: { by: string; note?: string }; budget?: { vaultCalls: number }; lastBill?: { vaultCalls: number }; lastOutcome?: string };
+type Row = { triggerId: string; kind?: string; ask: string; paused?: { by: string; note?: string }; budget?: { vaultCalls: number; declared?: boolean }; lastBill?: { vaultCalls: number }; lastOutcome?: string };
 const rows = async () => ((await post('triggers', { session: alice.homeSession, addressee: TEAM })) as { triggers?: Row[] }).triggers ?? [];
 await post('ask', { session: alice.homeSession, addressee: TEAM, message: 'what are we working on' });   // syncs the playbook's rows
 const row = (await rows()).find((r) => (r.kind ?? 'schedule') === 'schedule');
@@ -61,6 +61,7 @@ if (!after.lastBill || after.lastBill.vaultCalls <= 1) fail('the firing that wen
 
 // restore
 const cleared = await post('triggers/pause', { session: alice.homeSession, addressee: TEAM, triggerId: id, paused: false, budget: null });
-if (cleared.ok !== true || cleared.trigger?.paused || cleared.trigger?.budget) fail(`restore: ${JSON.stringify(cleared).slice(0, 200)}`);
+// the steward's override is gone; a budget the PLAYBOOK declares (`declared: true`, 398 G3) is the row's own and stays
+if (cleared.ok !== true || cleared.trigger?.paused || (cleared.trigger?.budget && !cleared.trigger.budget.declared)) fail(`restore: ${JSON.stringify(cleared).slice(0, 200)}`);
 console.log('  cleared the budget and resumed');
 console.log('\n✓ spec 398 §5.3/§5.4 (G3): a steward paused and resumed the routine (a non-steward could not); over budget it paused itself with the numbers on the row, the firing that went over stood.');

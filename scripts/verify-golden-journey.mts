@@ -39,7 +39,6 @@ const E = {
   allowedTargets: '0x2156311097A936de1916a878bF53Bfd43c7b5715', allowedMethods: '0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41',
   value: '0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975', digestBinding: '0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1',
 } as const;
-const WORKSPACE = (process.env.WORKSPACE ?? '0xee11DFB02e4a02630bE512886305DF5C68Fd682c').toLowerCase() as Address;
 const N = Date.now().toString(36).slice(-4);
 
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
@@ -60,6 +59,7 @@ const harness = async (path: string, body: unknown) => j(await fetch(`${HOME}/a2
 const alice = await signinAs(fx.people.steward); const ALICE = String(alice.agent).toLowerCase() as Address;
 const carol = await signinAs(fx.people.member2); const CAROL = String(carol.agent).toLowerCase() as Address;
 const ORG = (process.env.ORG ? process.env.ORG.toLowerCase() : await resolveOrgAgent(alice.homeSession)) as Address;
+const WORKSPACE = (process.env.WORKSPACE ? process.env.WORKSPACE.toLowerCase() : await resolveOrgAgent(alice.homeSession, fx.workspace)) as Address;
 const personas = await j(await fetch(`${HOME}/connect/demo-personas`));
 const credential = { kind: 'eoa', address: (personas.personas as Array<{ sa: string; custodian: string }>).find((p) => p.sa.toLowerCase() === ALICE)!.custodian };
 const sign = async (token: string, digest: Hex): Promise<Hex> => {

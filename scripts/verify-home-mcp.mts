@@ -12,7 +12,7 @@
  * No model unless the planner is under test: the ask carries a supplied plan (spec 392's rule).
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { fixture as fx, A2A, HOME_MCP, orgWord } from './fixture.mts';
+import { fixture as fx, A2A, HOME_MCP, memberWord, orgWord } from './fixture.mts';
 const MCP = HOME_MCP;
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
 function fail(m: string): never { console.error(`\n✗ ${m}`); process.exit(1); }
@@ -62,7 +62,7 @@ const out = ask.result?.structuredContent ?? {};
 console.log(`ask → kind ${out.kind ?? '?'} · run ${out.runRef ?? '-'} · ${Date.now() - t0} ms · isError ${ask.result?.isError ?? false}`);
 console.log(`  ${String(out.text ?? out.error ?? JSON.stringify(out)).slice(0, 300)}`);
 if (ask.result?.isError || !out.kind) fail(`ask: ${JSON.stringify(ask).slice(0, 400)}`);
-if (!orgWord().test(String(out.text ?? ''))) fail(`the answer does not speak of ${fx.org.name}`);
+if (!orgWord().test(String(out.text ?? '')) && !memberWord().test(String(out.text ?? ''))) fail(`the answer does not speak of ${fx.org.name} or its members`);
 
 // ── TWIN 1: the bearer at her agent directly is nothing ──
 const direct = await fetch(`${A2A}/harness/ask`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${tok.access_token}` }, body: JSON.stringify({ addressee: conn.agent, message: `who is in ${fx.org.name}?` }) });

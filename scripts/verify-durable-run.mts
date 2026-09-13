@@ -14,7 +14,7 @@
  */
 import { toHex, type Address, type Hex } from 'viem';
 import { buildDigestBindingCaveat, capabilityHandler, hashDelegation, ROOT_AUTHORITY, type Caveat, type Delegation, type MandateRequirementV1 } from '@agenticprimitives/delegation';
-import { fixture as fx, HOME } from './fixture.mts';
+import { fixture as fx, HOME, resolveOrgAgent } from './fixture.mts';
 
 const CHAIN = 34348;
 const E = {
@@ -22,7 +22,6 @@ const E = {
   allowedTargets: '0x2156311097A936de1916a878bF53Bfd43c7b5715', allowedMethods: '0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41',
   value: '0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975', digestBinding: '0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1',
 } as const;
-const WORKSPACE = '0xee11DFB02e4a02630bE512886305DF5C68Fd682c'.toLowerCase() as Address;
 const LABEL = `durable-${Date.now().toString(36).slice(-4)}`;
 
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
@@ -32,6 +31,7 @@ const signinAs = async (handle: string) => {
   return s as { homeSession: string; agent: string };
 };
 const alice = await signinAs(fx.people.steward);
+const WORKSPACE = (process.env.WORKSPACE ? process.env.WORKSPACE.toLowerCase() : await resolveOrgAgent(alice.homeSession, fx.workspace)) as Address;
 const personas = await j(await fetch(`${HOME}/connect/demo-personas`));
 const credential = { kind: 'eoa', address: (personas.personas as Array<{ sa: string; custodian: string }>).find((p) => p.sa.toLowerCase() === String(alice.agent).toLowerCase())!.custodian };
 const sign = async (token: string, digest: Hex): Promise<Hex> => {

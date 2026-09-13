@@ -10,11 +10,10 @@
  * as much the asker's as a resume is (claimableBy), and a refusal names it.
  */
 import type { Address } from 'viem';
-import { fixture as fx, HOME } from './fixture.mts';
+import { fixture as fx, HOME, resolveOrgAgent } from './fixture.mts';
 
 const HANDLE = fx.people.steward;
 const OTHER = process.env.OTHER ?? fx.people.member;
-const WORKSPACE = (process.env.WORKSPACE ?? '0xee11DFB02e4a02630bE512886305DF5C68Fd682c').toLowerCase() as Address;
 const LABEL = `stop-${Date.now().toString(36).slice(-4)}`;
 
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
@@ -31,6 +30,7 @@ const H = { 'content-type': 'application/json', origin: HOME, cookie, 'x-csrf-to
 const post = async (path: string, body: unknown) => j(await fetch(`${HOME}/a2a/harness/${path}`, { method: 'POST', headers: H, body: JSON.stringify(body) }));
 
 const alice = await signinAs(HANDLE);
+const WORKSPACE = (process.env.WORKSPACE ? process.env.WORKSPACE.toLowerCase() : await resolveOrgAgent(alice.homeSession, fx.workspace)) as Address;
 const message = `create a team called ${LABEL}`;
 console.log(`── "${message}" at the workspace — then stop it ──`);
 

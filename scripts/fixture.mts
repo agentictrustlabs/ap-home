@@ -43,6 +43,8 @@ export interface GateFixtureV1 {
   };
   /** The organization the steward stewards; `agent` is optional — resolved from the steward's own links by name. */
   org: { name: string; handle: string; agent?: string };
+  /** Where the steward asks for a team to be chartered (a workspace or organization they steward) — the run gates' addressee. */
+  workspace: { handle: string; agent?: string };
   /** A SECOND organization the steward stewards, for the routed (hop) gates. */
   peerOrg: { handle: string; agent?: string } | null;
   treasuries: {
@@ -77,6 +79,7 @@ export const FAITHNET_FIXTURE: GateFixtureV1 = {
   vaultServerId: 'demo-mcp',
   people: { steward: 'alice', member: 'bob', member2: 'carol', outsider: 'dave', payeeOwner: 'nathan', invitee: 'david' },
   org: { name: 'Missio Nexus', handle: 'missio-nexus.org', agent: '0x3b99f2b452766de5df0dbcdfc676f27257151333' },
+  workspace: { handle: 'alicefield.impact', agent: '0xee11DFB02e4a02630bE512886305DF5C68Fd682c' },
   peerOrg: { handle: 'globalchurch.org' },
   treasuries: { own: 'alice3.treasury', ownOther: 'alice2.treasury', payee: 'nathan.treasury' },
   specialist: { handle: 'runtime-c3s0.svc', agent: '0x309b2a566e93cc77aabe895d0ec2702c36856ebd' },

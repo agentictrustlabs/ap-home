@@ -24,6 +24,8 @@ const WAIVED: Record<string, string> = {
 
 // Faithnet's roster and its names, as they appear in code. A `.me` / `.treasury` / `.org` handle, a persona in
 // quotes, the hostname, the organization, the ministry.
+// Faithnet's persona and fixture ADDRESSES — a bare address in a gate is a roster literal with the name filed off.
+const FAITHNET_ADDRESSES = /0x(1dba4a27c53d7babda99513080223fb3bfc4bad1|3b99f2b452766de5df0dbcdfc676f27257151333|309b2a566e93cc77aabe895d0ec2702c36856ebd|fC1C328c26505d1AEAb1EAd4a46b3F74981F07a4|0daC3e3C83486D334627fbA18fD0Fe730139eC|ee11DFB02e4a02630bE512886305DF5C68Fd682c)/i;
 const LITERAL = /'(alice|bob|carol|dave|david|elena|nathan|frank|pete|jill)'|"(alice|bob|carol|dave|david|nathan)"|\b(alice[0-9]?|nathan|bob|carol|david)\.(me|treasury)\b|missio[- ]nexus|[Mm]issio Nexus|\bligonier\b|globalchurch\.org|runtime-c3s0|faithnet\.(me|io|ai)|richardpedersen3\.workers\.dev/;
 
 let bad = 0;
@@ -43,7 +45,7 @@ for (const g of ledger.gates) {
     if (t.startsWith('//') || t.startsWith('*')) return;
     // prose in a console.log / fail() sentence is fine when it names a ROLE; a name that is code is not
     const code = line.replace(/\/\/.*$/, '');
-    const m = LITERAL.exec(code);
+    const m = LITERAL.exec(code) ?? FAITHNET_ADDRESSES.exec(code);
     if (m) hits.push(`${i + 1}: ${m[0]}`);
   });
   if (hits.length) { console.error(`✗ ${g.script} names Faithnet's roster in code: ${hits.slice(0, 4).join(' · ')}${hits.length > 4 ? ` (+${hits.length - 4})` : ''}`); bad++; }

@@ -6,9 +6,17 @@
  * Grants Nathan a way to reach one of Alice's treasuries, shows it working, withdraws it, and shows it
  * stop — without touching the record he holds. That is the point: revocation is the ISSUER's, and it
  * takes effect where the grant is USED, not where it is stored.
+ *
+ * THE REQUEST COMES FIRST. A grant is the owner's ANSWER: the issuer's record of it is written onto the holder's
+ * request row (`internal.resolution.approve` updates the row it finds and nothing else), so with no request there is
+ * nothing to approve and the "issued" grant resolves nothing. Faithnet carried nathan's request from an earlier day;
+ * another estate does not — so the holder asks first, through his own agent (`resolution.invitation.request`, a
+ * supplied plan, his mandate signed at his Home when the runtime asks for one).
  */
+import { randomBytes } from 'node:crypto';
+import type { Address, Hex } from 'viem';
+import { buildDigestBindingCaveat, capabilityHandler, hashDelegation, ROOT_AUTHORITY, type Caveat, type Delegation, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import { fixture as fx, HOME } from './fixture.mts';
-const NATHAN = '0x1dba4a27c53d7babda99513080223fb3bfc4bad1';
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 200), _status: r.status }; } };
 let bad = 0;
 const check = (label: string, ok: boolean, detail: string) => { console.log(`  ${ok ? '✓' : '✗'} ${label} — ${detail}`); if (!ok) bad++; };
@@ -18,12 +26,38 @@ const csrf = (await j(csrfRes)) as { token?: string };
 const cookie = (csrfRes.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
 const H = { 'content-type': 'application/json', origin: HOME, cookie, 'x-csrf-token': csrf.token ?? '' };
 const alice = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: fx.people.steward, client_id: 'demo-jp' }) })) as { homeSession: string };
-const nathan = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: fx.people.payeeOwner, client_id: 'demo-jp' }) })) as { homeSession: string };
+const nathan = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: fx.people.payeeOwner, client_id: 'demo-jp' }) })) as { homeSession: string; agent?: string };
+const NATHAN = String(nathan.agent ?? '').toLowerCase();   // the holder — the fixture's payee owner
+if (!/^0x[0-9a-f]{40}$/.test(NATHAN)) { console.error(`✗ ${fx.people.payeeOwner} could not sign in`); process.exit(1); }
 
 const orgs = ((await j(await fetch(`${HOME}/connect/related-orgs`, { headers: { authorization: `Bearer ${alice.homeSession}` } }))) as { orgs?: Array<{ orgAgent: string; orgName?: string; kind?: string }> }).orgs ?? [];
 const target = orgs.find((o) => o.kind === 'person-treasury' && !String(o.orgName ?? '').includes('.'))?.orgAgent
   ?? orgs.find((o) => o.kind === 'person-treasury')!.orgAgent;
-console.log(`── alice grants, then withdraws, a way to reach ${target} ──`);
+console.log(`── ${fx.people.steward} grants, then withdraws, a way to reach ${target} ──`);
+
+// 0. the holder ASKS for a way to reach a treasury of hers — the row her answer will be written onto
+{
+  const C = ((await import(`@agenticprimitives/contracts/deployments/${process.env.CHAIN_NAME ?? 'faithchain'}`)) as { CONTRACTS: Record<string, string> & { chainId: number } }).CONTRACTS;
+  const ENF = { delegationManager: C.delegationManager, timestamp: C.timestampEnforcer, allowedTargets: C.allowedTargetsEnforcer, allowedMethods: C.allowedMethodsEnforcer, value: C.valueEnforcer, payment: C.paymentEnforcer, digestBinding: C.digestBindingEnforcer } as const;
+  const ask = async (body: Record<string, unknown>) => j(await fetch(`${HOME}/a2a/harness/ask`, { method: 'POST', headers: H, body: JSON.stringify({ session: nathan.homeSession, addressee: NATHAN, ...body }) })) as { reply?: { kind?: string; error?: string; runRef?: string; requirement?: MandateRequirementV1; delegator?: Address; delegate?: Address; alsoApprove?: Array<{ digest: Hex }> } };
+  let r = await ask({ message: `ask ${fx.people.steward}.me for a way to reach a treasury of theirs (revocation gate ${Date.now().toString(36)})`, plan: { steps: [{ toolId: 'resolution.invitation.request', args: { owner: `${fx.people.steward}.me`, wants: 'treasury', purpose: 'the revocation gate' } }] } });
+  let rep = r.reply;
+  if (rep?.kind === 'authority_required' && rep.requirement && rep.delegator && rep.delegate) {
+    const caveats: Caveat[] = [...capabilityHandler.toCaveats(rep.requirement, ENF as never), buildDigestBindingCaveat(ENF.digestBinding as Address, 'intent', rep.requirement.intentDigest as Hex)];
+    let salt = 0n; for (const b of randomBytes(16)) salt = (salt << 8n) | BigInt(b);
+    const mandate: Delegation = { delegator: rep.delegator, delegate: rep.delegate, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
+    const authorize = async (body: Record<string, unknown>) => j(await fetch(`${HOME}/a2a/harness/authorize`, { method: 'POST', headers: H, body: JSON.stringify({ session: nathan.homeSession, delegator: rep!.delegator, ...body }) }));
+    const a = await authorize({ digests: [hashDelegation(mandate, C.chainId, C.delegationManager as Address), ...(rep.alsoApprove ?? []).map((x) => x.digest)] });
+    const sig = await j(await fetch(`${HOME}/connect/persona-sign`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${nathan.homeSession}` }, body: JSON.stringify({ digest: a.userOpHash }) })) as { signature?: Hex };
+    const b2 = await authorize({ userOp: a.userOp, signature: sig.signature });
+    if (b2.ok !== true) { console.error(`✗ the holder's mandate for the request was not accepted: ${JSON.stringify(b2).slice(0, 200)}`); process.exit(1); }
+    mandate.signature = '0x03';
+    r = await ask({ runRef: rep.runRef, presented: { ...mandate, salt: salt.toString() } });
+    rep = r.reply;
+  }
+  console.log(`  the holder asked for a way to reach her treasury → ${rep?.kind}${rep?.error ? ` ${rep.error}` : ''}`);
+  if (rep?.kind !== 'done' && rep?.kind !== 'answer') { console.error(`✗ the request did not land: ${JSON.stringify(r).slice(0, 300)}`); process.exit(1); }
+}
 
 const post = async (payload: unknown) => j(await fetch(`${HOME}/a2a/resolution/grant`, { method: 'POST', headers: H, body: JSON.stringify(payload) }));
 const base = { session: alice.homeSession, requester: NATHAN, targetAgent: target, wants: 'treasury' };
