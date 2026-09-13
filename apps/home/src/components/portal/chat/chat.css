@@ -1081,3 +1081,8 @@
 .chat-thread-header { background: var(--color-surface); border-bottom: 1px solid var(--color-border); }
 .chat-attention { border-left-color: var(--color-action); box-shadow: var(--shadow-card); }
 .chat-shell { box-shadow: var(--shadow-card); border-radius: 12px; }
+/* the send control: ink on idle-with-text, the accent on hover — the arrow always readable */
+.chat-send-btn { background: #1f2937; color: #fff; box-shadow: var(--shadow-card); }
+.chat-send-btn:hover:not(:disabled) { background: var(--color-action); color: var(--color-action-fg); }
+.chat-send-btn:disabled { opacity: .35; }
+.chat-composer, .chat-thread-composer { border-top: 1px solid var(--color-border); background: var(--color-surface); }
