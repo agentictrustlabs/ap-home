@@ -13,7 +13,9 @@
  *   3. waits for the WAKE RECEIPT on the member's object: the Worker enqueued after admission, the consumer woke the
  *      Container, the Container ran one pass — the agent was prompted with the steward's words, its local shell refused,
  *      the workspace tool allowed — and its reply PARKED for the steward's mandate (the parked run ref is in the receipt);
- *   4. the steward signs that reply at her Home and it lands;
+ *   4. the reply LANDS: under the OPEN MANDATE (spec 400 W2a — a standing grant the custodian signed once, the child the
+ *      runtime derived for this intent, the chain verified by the harness) it went through without a signature and the
+ *      receipt names both refs; with no grant it parked and the steward signs it at her Home;
  *   5. THE TWIN: the custodian CLEARS the host declaration; another message is admitted and NO wake is delivered (the
  *      Worker wakes nothing it was not told about); the declaration is restored.
  */
@@ -90,17 +92,17 @@ if (declared.host?.kind !== 'container') fail(`${R.member} declares no Container
 async function dm(text: string): Promise<string> {
   let r = (await post('/harness/ask', { session: steward.bearer, addressee: steward.agent, message: `send ${R.member} a message: ${text}`, plan: { steps: [{ toolId: 'messaging.direct.send', args: { recipient: R.member, message: text } }] } })).reply as Reply;
   if (r.kind === 'authority_required') r = await approve(steward.agent, r.runRef!, r);
-  if (r.kind !== 'done' && r.kind !== 'answer') fail(`the steward's message did not go: ${JSON.stringify(r).slice(0, 300)}`);
+  if (r.kind !== 'done' && r.kind !== 'answer') throw new Error(`the steward's message did not go: ${JSON.stringify(r).slice(0, 300)}`);
   const id = (r.result as { messageId?: string } | undefined)?.messageId ?? '';
   console.log(`  steward → ${R.member}: ${r.kind} · message ${id || '(id not reported)'}`);
   return id;
 }
 const nonce = Date.now().toString(36);
 const sentAt = Date.now();
-const messageId = await dm(`summarize the retreat plan (${nonce})`);
+const messageId = await dm(`summarize the retreat plan (${nonce})`).catch((e: Error) => fail(e.message));
 
 // ── 3. the wake receipt: enqueued after admission, the Container woken, one pass, the reply parked ──
-type Receipt = { messageId: string; outcome: string; status: number | null; error?: string; wokeAt: string; turns: Array<{ messageId: string; fromName: string | null; answer: string; reply: string; parkedRunRef?: string }> };
+type Receipt = { messageId: string; outcome: string; status: number | null; error?: string; wokeAt: string; turns: Array<{ messageId: string; fromName: string | null; answer: string; reply: string; parkedRunRef?: string; underStandingGrant?: { childRef: string; standingRef: string } }> };
 let receipt: Receipt | undefined;
 for (let i = 0; i < 40 && !receipt; i++) {
   await sleep(3000);
@@ -116,27 +118,39 @@ if (!t) fail(`the Container's pass did not answer the steward's message: ${JSON.
 console.log(`  turn: from ${t!.fromName} · agent said "${t!.answer.slice(0, 70)}…" · reply: ${t!.reply.slice(0, 90)}`);
 if (!t!.answer.includes('local tool refused')) fail('the host in the Container allowed the agent\'s local shell by default');
 if (!t!.answer.includes('workspace tool allowed')) fail('the workspace tool was not allowed to the agent');
-if (!t!.parkedRunRef) fail(`the runtime's reply did not park for a mandate: ${t!.reply}`);
 
-// ── 4. the steward signs the reply at her Home; it lands ──
-const parked = (await post('/harness/ask', { session: steward.bearer, addressee: member, runRef: t!.parkedRunRef })).reply as Reply;
-const landed = parked.kind === 'authority_required' ? await approve(member, t!.parkedRunRef!, parked) : parked;
-console.log(`  the steward signed the reply → ${landed.kind}${landed.error ? ` ${landed.error}` : ''}`);
-if (landed.kind !== 'done' && landed.kind !== 'answer') fail(`the runtime's reply did not land after the steward signed: ${JSON.stringify(landed).slice(0, 300)}`);
+// ── 4. the reply lands — under the open mandate (no signature), else after the steward signs ──
+if (t!.underStandingGrant) {
+  console.log(`  under the OPEN MANDATE: standing ${t!.underStandingGrant.standingRef.slice(0, 14)}… → child ${t!.underStandingGrant.childRef.slice(0, 14)}… · reply "${t!.reply.slice(0, 60)}"`);
+  if (t!.parkedRunRef) fail(`the reply went under the standing grant yet still parked: ${t!.reply}`);
+  if (/^parked:|^failed:|^refused:/.test(t!.reply)) fail(`the reply did not land under the standing grant: ${t!.reply}`);
+} else {
+  if (!t!.parkedRunRef) fail(`the runtime's reply did not park for a mandate and no standing grant carried it: ${t!.reply}`);
+  const parked = (await post('/harness/ask', { session: steward.bearer, addressee: member, runRef: t!.parkedRunRef })).reply as Reply;
+  const landed = parked.kind === 'authority_required' ? await approve(member, t!.parkedRunRef!, parked) : parked;
+  console.log(`  no standing grant — the steward signed the reply → ${landed.kind}${landed.error ? ` ${landed.error}` : ''}`);
+  if (landed.kind !== 'done' && landed.kind !== 'answer') fail(`the runtime's reply did not land after the steward signed: ${JSON.stringify(landed).slice(0, 300)}`);
+}
 
 // ── 5. twin: no declaration, no wake ──
 const cleared = await memberOp('runtime.host.put', { host: null }) as { ok?: boolean };
 if (cleared.ok !== true) fail(`could not clear the host declaration: ${JSON.stringify(cleared).slice(0, 200)}`);
+// The declaration is restored WHATEVER happens in the twin — `fail` exits the process, so the verdict is kept and
+// raised after the restore, never before it (a gate that leaves the member undeclared breaks the next run).
+let twinVerdict: string | null = null;
 try {
-  const twinId = await dm(`and now, with no host declared (${nonce}-twin)`);
-  await sleep(20_000);
-  const got = await memberOp('runtime.wake.get', { limit: 10 }) as { wakes?: Receipt[] };
-  const stray = (got.wakes ?? []).find((w) => (twinId ? w.messageId === twinId : w.turns.some((x) => x.answer.includes(`${nonce}-twin`))));
-  if (stray) fail(`the Worker woke the Container with no host declared: ${JSON.stringify(stray).slice(0, 200)}`);
-  console.log('  twin: no host declared → no wake delivered (20s)');
+  const twinId = await dm(`and now, with no host declared (${nonce}-twin)`).catch((e: Error) => { twinVerdict = `the twin's message did not go: ${e.message}`; return ''; });
+  if (!twinVerdict) {
+    await sleep(20_000);
+    const got = await memberOp('runtime.wake.get', { limit: 10 }) as { wakes?: Receipt[] };
+    const stray = (got.wakes ?? []).find((w) => (twinId ? w.messageId === twinId : w.turns.some((x) => x.answer.includes(`${nonce}-twin`))));
+    if (stray) twinVerdict = `the Worker woke the Container with no host declared: ${JSON.stringify(stray).slice(0, 200)}`;
+    else console.log('  twin: no host declared → no wake delivered (20s)');
+  }
 } finally {
   const back = await memberOp('runtime.host.put', { host: { v: 1, kind: 'container' } }) as { ok?: boolean };
   console.log(`  host declaration restored → ${back.ok === true ? 'container' : JSON.stringify(back).slice(0, 120)}`);
 }
+if (twinVerdict) fail(twinVerdict);
 
-console.log(`\n✓ spec 400 W1c on ${CHAIN_NAME}: ${R.member} on a Container, woken by the Worker after admission — the agent prompted, its shell refused, the workspace allowed, the reply parked and landed when the steward signed; with no host declared, nothing was woken.`);
+console.log(`\n✓ spec 400 W1c on ${CHAIN_NAME}: ${R.member} on a Container, woken by the Worker after admission — the agent prompted, its shell refused, the workspace allowed, the reply landed (under the open mandate, or after the steward signed); with no host declared, nothing was woken.`);

@@ -1286,6 +1286,20 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
       const stored = await loadRun(c.env as never, input.addressee, input.runRef).catch(() => null);
       if (!stored) return { refused: 'no run is waiting under that task' };
       if (String(stored.outsider?.agent ?? '').toLowerCase() !== input.agent.toLowerCase()) return { refused: 'that run is waiting on someone else' };
+      // Spec 400 W2a — THE AGENT'S OWN RUN PARKED FOR AUTHORITY, and the agent now presents a chain: a standing grant
+      // its custodian signed once (root = the agent) → a child it derived for this intent. Nothing is trusted from the
+      // message: the same run is re-entered with the chain as `presented`, and the harness verifies every link and
+      // the intent binding before the step it parked on may act. A chain that does not verify parks it again.
+      if (input.presented?.length && !stored.awaiting) {
+        if (isExpired(stored)) { await dropRun(c.env as never, input.addressee, input.runRef).catch(() => undefined); return { refused: 'that run has expired — ask again' }; }
+        const out = await runAgentAsk(c.env, {
+          agent: input.agent, addressee: input.addressee, ask: stored.message, runRef: input.runRef,
+          ...(stored.intent ? { intent: stored.intent } : {}),
+          resume: { ...(stored.plan ? { plan: stored.plan } : stored.executed?.plan ? { plan: stored.executed.plan as never } : {}), ...(stored.executed?.completed ? { executed: stored.executed } : {}), presented: input.presented as never, supplied: stored.supplied ?? [] },
+        });
+        if (out.reply.kind !== 'authority_required' && out.reply.kind !== 'prompt') await dropRun(c.env as never, input.addressee, input.runRef).catch(() => undefined);
+        return out;
+      }
       if (!stored.awaiting || stored.awaiting.kind !== 'data') return { refused: stored.awaiting ? `that run waits on ${stored.awaiting.kind === 'authority' || stored.awaiting.kind === 'signature' ? 'a steward\'s signature' : `a ${stored.awaiting.kind}`}, which an outside caller cannot supply` : 'that run is not waiting on an answer' };
       if (isExpired(stored)) { await dropRun(c.env as never, input.addressee, input.runRef).catch(() => undefined); return { refused: 'that run\'s prompt has expired — ask again' }; }
       const supplied = [...(stored.supplied ?? []), { stepRef: stored.awaiting.stepRef, data: input.data }];
@@ -4547,11 +4561,13 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     // cannot be (ADR-0025), which is why an unfound label becomes a question rather than a guess.
     // A direct message rides the SENDER's own interactions plane — the same `messaging.send` the Home's
     // message box posts to, so there is one conversation per counterparty and one place the bodies live.
-    sendDirectMessage: async ({ sender, recipient, bodyText, session, contextRefs, stewardship }) => {
+    sendDirectMessage: async ({ sender, recipient, bodyText, session, contextRefs, stewardship, asSelf }) => {
       const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(sender.toLowerCase()));
-      const res = await stub.fetch(new Request(`https://do/interactions/${sender.toLowerCase()}/messaging.send`, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ session, recipient: recipient.toLowerCase(), bodyText, ...(stewardship ? { stewardship } : {}), ...(contextRefs?.length ? { contextRefs } : {}) }),
+      // Spec 400 W2a — the agent's OWN rail driven in-Worker after the harness verified a chain rooted at it: the
+      // internal op, the internal marker, no session (the DO admits the marker for `internal.*` only).
+      const res = await stub.fetch(new Request(`https://do/interactions/${sender.toLowerCase()}/${asSelf ? 'internal.messaging.send' : 'messaging.send'}`, {
+        method: 'POST', headers: asSelf ? internalHeaders(env) : { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...(asSelf ? {} : { session }), recipient: recipient.toLowerCase(), bodyText, ...(stewardship ? { stewardship } : {}), ...(contextRefs?.length ? { contextRefs } : {}) }),
       }));
       const out = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; code?: string; messageId?: string };
       if (res.ok && out.ok !== false) return { ok: true as const, ...(out.messageId ? { messageId: out.messageId } : {}) };

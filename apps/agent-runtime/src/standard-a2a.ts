@@ -23,6 +23,17 @@
 // that owns it. Nothing a person cannot rebuild is in either (ADR-0055).
 import { buildFlowTrace, flowIdOf, referralOf, traceContextOf } from '@agenticprimitives/orchestration';
 import { hasProvenanceRef } from './run-export.js';
+/** Spec 400 W2a — `metadata.presented` on an agent caller's CONTINUATION: the mandate chain it presents for a run of
+ *  its own that parked as AUTH_REQUIRED — a standing grant its custodian signed once and the child it derived for
+ *  this intent. Shape-checked here; VERIFIED by the harness where it is used (signatures, revocation, subset, the
+ *  intent binding). Anything else is ignored, not guessed. */
+export function presentedOf(metadata: Record<string, unknown> | undefined): Array<Record<string, unknown>> | null {
+  const p = metadata?.presented;
+  if (!Array.isArray(p) || !p.length || p.length > 5) return null;
+  const ok = p.every((w) => w && typeof w === 'object' && ['delegator', 'delegate', 'authority', 'salt', 'signature'].every((k) => typeof (w as Record<string, unknown>)[k] === 'string') && Array.isArray((w as { caveats?: unknown }).caveats));
+  return ok ? (p as Array<Record<string, unknown>>) : null;
+}
+
 /** `metadata.plan` on an agent caller's message — `{ steps: [{ toolId, args }] }` or nothing; anything else is ignored, not guessed. */
 function supplierPlanOf(metadata: Record<string, unknown> | undefined): Plan | null {
   const p = metadata?.plan as { steps?: unknown } | undefined;
@@ -69,7 +80,7 @@ export interface StandardMountDeps {
   /** Spec 387 W3 — CONTINUE a run this agent parked for an outside agent: the caller's answer to the prompt,
    *  applied to the checkpoint (plan replayed, completed steps replayed, the answer supplied for the waiting
    *  step). Refused unless the run parked for exactly this caller and is still waiting. */
-  resumeAsAgent?: (input: { agent: Address; addressee: Address; runRef: string; data: Record<string, unknown> }) => Promise<{
+  resumeAsAgent?: (input: { agent: Address; addressee: Address; runRef: string; data: Record<string, unknown>; /** Spec 400 W2a — the chain the agent presents for its own run that parked for authority. */ presented?: Array<Record<string, unknown>> | null }) => Promise<{
     reply: { kind: string; text?: string; prompt?: { kind: string; prompt: string; stepRef: string }; error?: string };
     spoken: string; result?: { plan: unknown }; events?: RunEvent[];
   } | { refused: string }>;
@@ -195,10 +206,11 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           let runRef = `svc-${ctx.task.id}`;
           let asked: Awaited<ReturnType<NonNullable<typeof deps.askAsAgent>>>;
           if (parkedRef && deps.resumeAsAgent) {
-            if (!answer) { await ctx.reject([{ text: 'A continuation carries the answer as a data part keyed by the prompt\'s field names.' }]); return; }
+            const presented = presentedOf(ctx.message.metadata);
+            if (!answer && !presented) { await ctx.reject([{ text: 'A continuation carries the answer as a data part keyed by the prompt\'s field names, or the mandate chain it presents in metadata.presented.' }]); return; }
             await ctx.working();
             runRef = parkedRef;
-            const resumed = await deps.resumeAsAgent({ agent: caller, addressee: agent, runRef: parkedRef, data: answer });
+            const resumed = await deps.resumeAsAgent({ agent: caller, addressee: agent, runRef: parkedRef, data: answer ?? {}, ...(presented ? { presented } : {}) });
             if ('refused' in resumed) { await ctx.reject([{ text: resumed.refused }]); return; }
             asked = resumed;
           } else {
@@ -246,7 +258,13 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
             if (!parkedRef) await deps.parkRun?.({ runRef, ask: message, addressee: agent, asker: caller, reply: asked.reply, ...(asked.result ? { result: asked.result } : {}) }).catch((e: unknown) => console.warn('[standard-a2a] park failed:', e instanceof Error ? e.message : String(e)));
           }
           if (asked.reply.kind === 'prompt') { await ctx.inputRequired([{ text: asked.reply.prompt?.prompt ?? words }, { data: asked.reply.prompt ?? {} }]); return; }
-          if (asked.reply.kind === 'authority_required') { await ctx.authRequired([{ text: words || 'This needs a mandate no one has granted.' }, { data: { runRef, openToStewards: true } }]); return; }
+          if (asked.reply.kind === 'authority_required') {
+            // Spec 400 W2a — WHAT IT WOULD NEED rides on the task: the requirement (capability, location, window, the
+            // intent digest) and the parties, so an agent holding a standing grant can DERIVE the child for this very
+            // intent and continue; a steward at the Home reads the same. Names an authority; grants none.
+            const need = asked.reply as { requirement?: unknown; delegator?: string; delegate?: string; alsoApprove?: unknown };
+            await ctx.authRequired([{ text: words || 'This needs a mandate no one has granted.' }, { data: { runRef, openToStewards: true, ...(need.requirement ? { requirement: need.requirement } : {}), ...(need.delegator ? { delegator: need.delegator } : {}), ...(need.delegate ? { delegate: need.delegate } : {}), ...(need.alsoApprove ? { alsoApprove: need.alsoApprove } : {}) } }]); return;
+          }
           await ctx.reject([{ text: words || asked.reply.error || 'Refused.' }]);
           return;
         }

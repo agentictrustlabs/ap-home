@@ -9,13 +9,16 @@
 # and key arrive as AP_RUNTIME_RECORD / AP_RUNTIME_KEY from the Worker's secrets (see src/runtime-container.ts).
 FROM node:22-slim
 WORKDIR /host
+# LAYER 1 (stable, cached, pushed once): the outside deps — the kit's peer (viem), the ACP adapter for Claude Code,
+# Claude Code itself. Nothing of ours in it, so a kit change never re-pushes these hundreds of MB.
+RUN npm install --omit=dev --no-audit --no-fund --no-package-lock viem@^2.52.2 @zed-industries/claude-code-acp@0.16.2 @anthropic-ai/claude-code@2.1.270 2>&1 | tail -2 \
+ && ln -s /host/node_modules/.bin/claude-code-acp /usr/local/bin/claude-code-acp
+# LAYER 2 (per kit change, small): the kit and the closure of its workspace deps from the tarballs.
 COPY tarballs ./tarballs
-# The kit and its closure from the tarballs; its peer (viem); the ACP adapter for Claude Code; Claude Code.
-RUN npm install --omit=dev --no-audit --no-fund --no-package-lock ./tarballs/*.tgz viem@^2.52.2 @zed-industries/claude-code-acp@0.16.2 @anthropic-ai/claude-code@2.1.270 2>&1 | tail -2 \
+RUN npm install --omit=dev --no-audit --no-fund --no-package-lock ./tarballs/*.tgz 2>&1 | tail -2 \
  && rm -rf ./tarballs \
  && printf '#!/bin/sh\nexec node /host/node_modules/@agenticprimitives/acp/bin/acp-stub-agent.mjs "$@"\n' > /usr/local/bin/acp-stub-agent && chmod +x /usr/local/bin/acp-stub-agent \
- && ln -s /host/node_modules/.bin/claude-code-acp /usr/local/bin/claude-code-acp \
- && ln -s /host/node_modules/.bin/ap-runtime /usr/local/bin/ap-runtime
+ && ln -sf /host/node_modules/.bin/ap-runtime /usr/local/bin/ap-runtime
 ENV NODE_ENV=production PORT=8080
 EXPOSE 8080
 # The member's name comes from the record the Worker supplies; the agent from AP_RUNTIME_AGENT.

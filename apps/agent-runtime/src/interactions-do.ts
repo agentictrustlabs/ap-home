@@ -1619,7 +1619,7 @@ export class InteractionsDO {
     const url = new URL(request.url);
     const parts = url.pathname.split('/').filter(Boolean); // interactions/<principal>/<op>
     const principal = (parts[1] ?? '').toLowerCase();
-    const op = parts[2] ?? '';
+    let op = parts[2] ?? '';
     if (!/^0x[0-9a-fA-F]{40}$/.test(principal)) return json({ error: 'bad principal' }, 400);
     const rawBody = await request.text();
     let body: Record<string, unknown> = {};
@@ -3210,7 +3210,18 @@ export class InteractionsDO {
     // path with the id_token it holds — NOT a Home session (its aud is a client_id, not DEMO_SSO_AUD),
     // so verifyHomeSession is tried first and verifyRelyingIdToken second. Both resolve to the person's
     // SA; AUTHORIZATION is still enforced below by the on-chain steward/member gate. ──
-    let gate = await verifyHomeSession(String(body.session ?? ''), this.env);
+    // ── Spec 400 W2a — THE AGENT'S OWN RAIL, DRIVEN IN-WORKER. `internal.messaging.send` is `messaging.send` with
+    //    this principal as the sender and no session: the harness, co-resident, has ALREADY verified a mandate chain
+    //    whose root is this agent (a standing grant its custodian signed once → a child the runtime derived for this
+    //    intent) and is now performing the act it authorized. The internal marker says "the Worker is calling"; the
+    //    mandate said "this agent may". Neither alone reaches here: the public router refuses `internal.*`, and a
+    //    session-less `messaging.send` is refused below. Same rail, same wire, same recipient gate as the person's. ──
+    const asSelfInternal = op === 'internal.messaging.send';
+    if (asSelfInternal && !isInternalCall(request, this.env)) return json({ error: 'internal op — not authorized' }, 403);
+    if (asSelfInternal) op = 'messaging.send';
+    let gate = asSelfInternal
+      ? { ok: true as const, sa: principal as Address, caip: caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address) }
+      : await verifyHomeSession(String(body.session ?? ''), this.env);
     /** The relying app that called, when one did. Null for the person's own Home (spec 341 §4.3b). */
     let skillsClientId: string | null = null;
     if (!gate.ok) {

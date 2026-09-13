@@ -30,9 +30,13 @@ export class RuntimeContainer extends Container<Env> {
         AP_RUNTIME_RECORD: v,
         AP_RUNTIME_MEMBER: String(rec.name ?? ''),
         ...(secrets[`AP_RUNTIME_KEY_${suffix}`] ? { AP_RUNTIME_KEY: secrets[`AP_RUNTIME_KEY_${suffix}`]! } : {}),
-        AP_RUNTIME_AGENT: secrets.AP_RUNTIME_AGENT ?? 'acp-stub-agent',
-        ...(secrets.ANTHROPIC_API_KEY ? { ANTHROPIC_API_KEY: secrets.ANTHROPIC_API_KEY } : {}),
+        // The agent, per member (`AP_RUNTIME_AGENT_<NAME>`) else the deployment's default: the gate's member keeps the
+        // deterministic stub while another member runs Claude Code.
+        AP_RUNTIME_AGENT: secrets[`AP_RUNTIME_AGENT_${suffix}`] ?? secrets.AP_RUNTIME_AGENT ?? 'acp-stub-agent',
+        // Claude Code's own credential — the operator's subscription token (`claude setup-token`) or an API key —
+        // under the Container's OWN secret names, never the Worker's planner key. Nothing of ours.
         ...(secrets.CLAUDE_CODE_OAUTH_TOKEN ? { CLAUDE_CODE_OAUTH_TOKEN: secrets.CLAUDE_CODE_OAUTH_TOKEN } : {}),
+        ...(secrets.AP_RUNTIME_ANTHROPIC_API_KEY ? { ANTHROPIC_API_KEY: secrets.AP_RUNTIME_ANTHROPIC_API_KEY } : {}),
       };
       break;
     }

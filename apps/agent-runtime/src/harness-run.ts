@@ -783,6 +783,9 @@ export interface HarnessDeps {
     stewardship?: unknown;
     /** Spec 364 — typed pointers the recipient's surface renders as an action. Never authority. */
     contextRefs?: Array<{ kind: string; id: string; label?: string }>;
+    /** Spec 400 W2a — the sender is the run's own agent, under a mandate chain rooted at it (a standing grant its
+     *  custodian signed); no session — the app drives the agent's own rail in-Worker. Set only by `messageInvoker`. */
+    asSelf?: true;
   }) => Promise<{ ok: true; messageId?: string } | { ok: false; error: string }>;
   /** Public directory search — for QUESTIONS about who exists (`find_agents`), never to fill a party in an
    *  action: a directory hit proves an agent exists, not that this person knows them (spec 352 §7). */
@@ -1717,11 +1720,17 @@ export function profileUpdateInvoker(deps: HarnessDeps, person: Address | undefi
  * capability adds no storage and no second path — it resolves who was meant, asks for the words if the ask
  * did not carry them, and hands both to the plane that already does this.
  */
-export function messageInvoker(deps: HarnessDeps, presented: MandatePresentation, person: Address | undefined, session: string | undefined): ToolInvoker {
+export function messageInvoker(deps: HarnessDeps, presented: MandatePresentation, person: Address | undefined, session: string | undefined, chain?: { presentedAll: MandatePresentation[]; chainId: number; delegationManager: Address }): ToolInvoker {
   return async (toolId, args, ctx) => {
     const stepRef = ctx.step.id ?? `s${ctx.index}`;
-    if (!person || !session) throw new Error('a direct message is sent as you, and there is no signed-in person on this run');
     if (!deps.sendDirectMessage) throw new Error('messaging is not wired on this agent');
+    // Spec 400 W2a — AN AGENT SENDING AS ITSELF, with no one's session. The run is the agent's own (an outside runtime
+    // answering on its inbox) and the mandate is a CHAIN the verifier already judged: a standing grant its custodian
+    // signed once (root delegator = this agent) → the child the runtime derived for this intent. The act is the
+    // agent's, on its own rail, in-Worker (`internal.messaging.send`). A chain rooted anywhere else, or no chain,
+    // with no session, is refused as before — a session-less send is never quietly sent as someone.
+    const asSelf = !session && !!person && !!chain && rootDelegatorOf(presented, chain).toLowerCase() === person.toLowerCase();
+    if (!person || (!session && !asSelf)) throw new Error('a direct message is sent as you, and there is no signed-in person on this run');
     const recipient = String(args.recipient ?? '').toLowerCase() as Address;
     if (!/^0x[0-9a-f]{40}$/.test(recipient)) throw new Error(`the recipient did not resolve to an agent (${String(args.recipient ?? '')})`);
     // WHO THE MESSAGE IS FROM (spec 400 W1 / 375 W2). The mandate's delegator is the agent this act is an act OF. When
@@ -1729,10 +1738,10 @@ export function messageInvoker(deps: HarnessDeps, presented: MandatePresentation
     // runtime answering a message sent to it, an organization replying — the message is FROM that agent: the person
     // drives its rail with the stewardship wire their own links hold, as the DO admits a steward. A steward who holds
     // no wire for it cannot send as it, and is told so — never a message quietly sent as themselves instead.
-    const delegator = String((presented?.wire as { delegator?: string } | undefined)?.delegator ?? '').toLowerCase();
+    const delegator = asSelf ? person.toLowerCase() : String((presented?.wire as { delegator?: string } | undefined)?.delegator ?? '').toLowerCase();
     let sender: Address = person;
     let stewardship: unknown;
-    if (/^0x[0-9a-f]{40}$/.test(delegator) && delegator !== person.toLowerCase()) {
+    if (!asSelf && /^0x[0-9a-f]{40}$/.test(delegator) && delegator !== person.toLowerCase()) {
       const links = deps.readSubjectRecord ? await deps.readSubjectRecord(person.toLowerCase(), 'relationships.data').catch(() => null) : null;
       const row = relationshipRows(links).find((r) => r.agent.toLowerCase() === delegator && r.relationship === 'steward' && r.stewardshipDelegation);
       if (!row) throw new Error(`this message would be sent as ${delegator}, which you do not steward`);
@@ -1758,10 +1767,24 @@ export function messageInvoker(deps: HarnessDeps, presented: MandatePresentation
         fields: [{ name: 'message', label: 'Message', type: 'text', required: true, hint: 'they will see it in their inbox, from you' }],
       });
     }
-    const out = await deps.sendDirectMessage({ sender, recipient, bodyText: text, session, ...(stewardship ? { stewardship } : {}) });
+    const out = await deps.sendDirectMessage({ sender, recipient, bodyText: text, session: session ?? '', ...(stewardship ? { stewardship } : {}), ...(asSelf ? { asSelf: true as const } : {}) });
     if (!out.ok) throw new Error(out.error);
-    return { sent: true, recipient, from: sender, ...(sender !== person ? { drivenBy: person } : {}), message: text, ...(out.messageId ? { messageId: out.messageId } : {}) };
+    return { sent: true, recipient, from: sender, ...(sender !== person ? { drivenBy: person } : {}), ...(asSelf ? { underStandingGrant: true } : {}), message: text, ...(out.messageId ? { messageId: out.messageId } : {}) };
   };
+}
+
+/** The ROOT delegator of the presented leaf's chain — who the act is ultimately an act OF. Walks `authority` through
+ *  the wires this turn presented (the verifier already refused a chain with a missing link); a root mandate is its own. */
+export function rootDelegatorOf(leaf: MandatePresentation, chain: { presentedAll: MandatePresentation[]; chainId: number; delegationManager: Address }): string {
+  let wire = leaf.wire as Delegation;
+  for (let hop = 0; hop < 5; hop++) {
+    const auth = String(wire.authority).toLowerCase();
+    if (auth === ROOT_AUTHORITY.toLowerCase()) return wire.delegator;
+    const parent = chain.presentedAll.map((p) => p.wire as Delegation).find((d) => hashDelegation(d, chain.chainId, chain.delegationManager).toLowerCase() === auth);
+    if (!parent) return wire.delegator;
+    wire = parent;
+  }
+  return wire.delegator;
 }
 
 /** The invoker: informational tools go to the existing MCP path; the payment tool redeems on chain; the
@@ -1858,7 +1881,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     const coordinationDeps = { ...deps, ...(deps.standingContext ? { context: deps.standingContext } : {}) };
     if (toolId === ENDEAVOR_LIST_CAPABILITY || toolId === ENDEAVOR_GET_CAPABILITY) return endeavorReadInvoker(coordinationDeps, (addressee ?? person) as Address, person)(toolId, args, ctx);
     if (COORDINATION_CAPABILITY_IDS.has(toolId)) return endeavorActInvoker(coordinationDeps, (addressee ?? person) as Address, person, session)(toolId, args, ctx);
-    if (toolId === 'messaging.direct.send') return messageInvoker(deps, presented!, person, session)(toolId, args, ctx);
+    if (toolId === 'messaging.direct.send') return messageInvoker(deps, presented!, person, session, { presentedAll, chainId: Number(env.CHAIN_ID), delegationManager: env.DELEGATION_MANAGER as Address })(toolId, args, ctx);
     if (toolId === ORG_INVITE_CAPABILITY) return inviteInvoker(env, presented!, person, deps, session)(toolId, args, ctx);
     if (CHILD_AGENT_TLD[toolId]) {
       if (!deps.teamGenesis) throw new Error(`${toolId} is not configured on this agent (no genesis substrate)`);

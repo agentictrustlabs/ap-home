@@ -78,7 +78,7 @@ console.log(`── ${R.member} ${member} · workspace ${R.workspace} ${org} · 
 }
 
 // ── 1. join ──
-const { record } = await runtimeJoin({ home: HOME, edge: fx.edge, a2a: A2A, member: R.member, workspace: R.workspace, contracts: C as never, custodian: steward, registry: { origin: fx.skillsRegistry, context: 'agentic-trust', archetype: 'runtime-member' }, validForSeconds: 3600, log: (l) => console.log(`  join: ${l}`) });
+const { record } = await runtimeJoin({ home: HOME, edge: fx.edge, a2a: A2A, member: R.member, workspace: R.workspace, contracts: C as never, custodian: steward, registry: { origin: fx.skillsRegistry, context: 'agentic-trust', archetype: 'runtime-member' }, validForSeconds: 3600, messagingTo: [steward.agent], log: (l) => console.log(`  join: ${l}`) });
 
 // the cursor BEFORE the steward writes, so the loop answers exactly her message
 const before = await askAs(record, record.name, "what's new for me", { plan: { steps: [{ toolId: 'messaging.inbox.list', args: { limit: 1 } }] } });
@@ -108,8 +108,13 @@ if (!t!.parkedRunRef) fail(`the runtime's reply did not park for a mandate: ${t!
 const parked = (await post('/harness/ask', { session: steward.bearer, addressee: member, runRef: t!.parkedRunRef })).reply as Reply;
 console.log(`  resumed at her Home → ${parked.kind} · delegator ${String(parked.delegator ?? '').slice(0, 12)}… (the member is ${member.slice(0, 12)}…, she is ${steward.agent.slice(0, 12)}…)`);
 const landed = parked.kind === 'authority_required' ? await approve(member, t!.parkedRunRef!, parked) : parked;
-console.log(`  the steward signed the reply → ${landed.kind}${landed.error ? ` ${landed.error}` : ''}`);
+console.log(`  the steward signed the reply → ${landed.kind}${landed.error ? ` ${landed.error}` : ''} · ${String(landed.text ?? '').slice(0, 80)}`);
 if (landed.kind !== 'done' && landed.kind !== 'answer') fail(`the runtime's reply did not land after the steward signed: ${JSON.stringify(landed).slice(0, 300)}`);
+// LANDED IS EVIDENCE, NOT A KIND: an `answer` after an act can be the composer explaining a failure ("messaging is not
+// enabled on your home yet" — seen live, a day green on a wire_absent). The result says `sent`; the text says nothing went wrong.
+const landedResult = (landed.result ?? {}) as { sent?: boolean; messageId?: string };
+if (landedResult.sent !== true && !/\bsent\b|delivered/i.test(String(landed.text ?? ''))) fail(`the steward signed, but nothing says the message was sent: ${JSON.stringify(landed).slice(0, 300)}`);
+if (/not enabled|could not|did not go|parked|refused/i.test(String(landed.text ?? ''))) fail(`the steward signed, but the reply says the send failed: ${String(landed.text).slice(0, 200)}`);
 
 // ── 5. the runtime reads the organization as a member ──
 const roster = await askAs(record, R.workspace, 'who are the members', { plan: { steps: [{ toolId: 'organization.membership.list', args: { org: R.workspace } }] } });

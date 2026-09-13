@@ -73,6 +73,11 @@ proxies selected MCP requests during local demos.
   the member's Container (`RUNTIME`, `RuntimeContainer` — Node + `ap runtime serve` + the ACP agent, image from
   `runtime-container/`; `node runtime-container/build.mjs` before deploy) or a URL; the receipt lands DO-local
   (`runtime.wake.get`). The Worker never polls and never speaks ACP; a wake carries no content and no authority.
+  **W2a — the open mandate:** an AUTH_REQUIRED task says what it needs (`requirement/delegator/delegate`); an agent
+  caller continues its own parked run with `metadata.presented` = the chain it derived from a standing grant
+  (`presentedOf` → `resumeAsAgent` → `resume.presented`, verified by the harness); `messageInvoker` sends AS the
+  agent (its own rail, `internal.messaging.send`, in-Worker) only when the chain's root delegator is that agent
+  (`rootDelegatorOf`). Spec 400 §5.6.
 
 ## What this app does not own
 
