@@ -11,6 +11,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { agentClassOf } from '../../../lib/agent-class';
 import { useManagedAgents } from '../ManagedAgents';
+import { useSession } from '../../../context/session';
+import { readContactsThroughHarness } from '../../../home/contacts-harness';
 import { AvatarUpload } from './AvatarUpload';
 import { personAvatarKey } from '../../../lib/avatar-store';
 import { useAvatar } from './use-avatar';
@@ -88,7 +90,7 @@ export function RecipientPicker({
    *  member who chose no join name, instead of showing their address. */
   names?: Readonly<Record<string, string>>;
 }) {
-  const [selected, setSelected] = useState<string>('names');
+  const [selected, setSelected] = useState<string>('contacts');
   const [rows, setRows] = useState<PickedRecipient[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -113,11 +115,15 @@ export function RecipientPicker({
     }
     const byLabel = (x: ScopeEntry, y: ScopeEntry) => x.label.localeCompare(y.label, undefined, { sensitivity: 'base' });
     return [
+      // Spec 401 — CONTACTS FIRST: the people and agents the person let in, from their own vault; the derived scopes
+      // (names, organizations, workspaces) follow.
+      { id: 'contacts', scope: 'contacts', label: 'Contacts', sub: 'people and agents you let in', Icon: GlobeIcon },
       { id: 'names', scope: 'names', label: 'Names', sub: 'naming service', Icon: GlobeIcon },
       ...orgs.sort(byLabel),
       ...spaces.sort(byLabel),
     ];
   }, [agents]);
+  const { agentAddress } = useSession();
   const active = entries.find((e) => e.id === selected) ?? entries[0]!;
 
   // Populate the right pane on scope selection. Under Names, re-query the KB as you type so the cap on
@@ -131,7 +137,9 @@ export function RecipientPicker({
     // frame — a stale list is a wrong list. Names re-queries keep their rows while the filter refines.
     if (active.scope !== 'names' || !namesQuery) setRows(null);
     const t = window.setTimeout(() => {
-      const load: Promise<PickedRecipient[]> = active.scope === 'names'
+      const load: Promise<PickedRecipient[]> = active.scope === 'contacts'
+        ? (agentAddress ? readContactsThroughHarness({ person: agentAddress as `0x${string}`, session: { token } }).then((r) => (r.ok ? r.contacts.map((c) => ({ address: c.contact.toLowerCase(), title: c.name ?? `${c.contact.slice(0, 6)}…${c.contact.slice(-4)}`, subtitle: c.role, ...(c.name ? { name: c.name } : {}), scope: 'contacts' as const })) : Promise.reject(new Error(r.error)))) : Promise.resolve([]))
+        : active.scope === 'names'
         ? listNamedAgents(namesQuery.length >= 2 ? namesQuery : '')
         : fetchRoster(token, active.id).then((roster) =>
             roster.map((m) => {
@@ -166,11 +174,12 @@ export function RecipientPicker({
   const first = recentRows[0] ?? listed[0];
 
   const groups: { key: string; title: string; items: ScopeEntry[] }[] = [
+    { key: 'contacts', title: '', items: entries.filter((e) => e.scope === 'contacts') },
     { key: 'names', title: '', items: entries.filter((e) => e.scope === 'names') },
     { key: 'orgs', title: 'Organizations', items: entries.filter((e) => e.scope === 'organization') },
     { key: 'spaces', title: 'Workspaces', items: entries.filter((e) => e.scope === 'workspace') },
   ];
-  const paneTitle = active.scope === 'names' ? 'People with a name' : `Members of ${active.label}`;
+  const paneTitle = active.scope === 'contacts' ? 'Your contacts' : active.scope === 'names' ? 'People with a name' : `Members of ${active.label}`;
 
   return (
     <div className="chat-picker" data-testid="dm-picker">
@@ -181,7 +190,7 @@ export function RecipientPicker({
           autoFocus
           data-testid="dm-compose-to"
           className="chat-compose-to__input"
-          placeholder={active.scope === 'names' ? 'Search by name…' : `Search ${active.label}…`}
+          placeholder={active.scope === 'names' ? 'Search by name…' : active.scope === 'contacts' ? 'Search your contacts…' : `Search ${active.label}…`}
           value={query}
           onChange={(e) => onQuery(e.target.value)}
           onKeyDown={(e) => {

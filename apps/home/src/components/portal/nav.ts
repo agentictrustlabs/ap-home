@@ -214,6 +214,10 @@ export function stewardshipPane(active: WorkspaceScope = { kind: 'person' }): Se
         // A HOUSEHOLD IS NOT AN AGENT and this row does not make it one (ADR-0046, tbox/household.ttl):
         // it is a body of people you keep a private record of. Nothing here is chartered, custodied or
         // deployed, and the page says so.
+        // Spec 401 — CONTACTS: membership on the person agent. The agents you let in (a friend, a coach service, an
+        // outside runtime) with the grant you gave each — the organization's roster, your word for it. Beside Household
+        // because both are bodies of people you keep a private record of; unlike Household, a contact HOLDS a grant.
+        { id: 'contacts', label: 'Contacts', href: '/contacts', Icon: UserIcon, status: 'live' },
         { id: 'household', label: 'Household', href: '/household', Icon: UserIcon, status: 'live' },
         { id: 'alliances', label: 'Alliances', href: '/alliances', Icon: LinkIcon, status: 'live' },
       ]

@@ -162,7 +162,12 @@ export function contactInviteInvoker(deps: ContactDeps, presented: MandatePresen
       throw new InputRequired({ kind: 'signature', stepRef, toolId, prompt: `Sign the contact grant from you to ${contact} — it lets them read your contact profile.`, digest: grantDigest, signer: person, payload: { contact, role, scope: CONTACT_RESOURCE_SCOPE, validUntil } });
     }
     const delegation: DelegationWireV1 = { ...grant, salt: salt.toString(), signature: signed.signature as Hex };
-    const record: ContactRecordV1 = { type: 'ap.contact.v1', contact, role, delegation, grantDigest, status: 'contact', createdAt: Date.now(), ...(kind === 'person' ? { mutual: false } : {}) };
+    let mutual: boolean | undefined;
+    if (kind === 'person') {
+      const inbox = (await deps.readSubjectRecord(me, 'inbox.data').catch(() => null)) as { envelopes?: Array<{ from?: string; contextRefs?: Array<{ kind: string; id: string }> }> } | null;
+      mutual = (inbox?.envelopes ?? []).some((e) => (String(e.from ?? '').match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() === contact && (e.contextRefs ?? []).some((r) => r.kind === 'contact' && r.id.toLowerCase() === me));
+    }
+    const record: ContactRecordV1 = { type: 'ap.contact.v1', contact, role, delegation, grantDigest, status: 'contact', createdAt: Date.now(), ...(mutual !== undefined ? { mutual } : {}) };
     const wrote = await deps.writeSubjectRecord(me, contactRecordType(contact), record);
     if (!wrote.ok) throw new Error(`the contact could not be recorded: ${wrote.error ?? 'write refused'}`);
     // WHAT FOLLOWS (spec 360): the contact is TOLD — a message from the person carrying the reference the Home renders
@@ -171,7 +176,7 @@ export function contactInviteInvoker(deps: ContactDeps, presented: MandatePresen
     if (session && deps.sendDirectMessage) {
       told = await deps.sendDirectMessage({ sender: person, recipient: contact, bodyText: kind === 'person' ? `I've added you to my contacts as ${role}. Add me back and we're mutual.` : `You're now in my contacts as ${role}.`, session, contextRefs: [{ kind: 'contact', id: me, label: 'Add back' }] }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
     }
-    return { added: true, contact, role, grantDigest, delegation, told, kind: kind ?? 'unknown', note: kind === 'person' ? 'recorded in your contacts; mutual once they add you back' : 'recorded in your contacts' };
+    return { added: true, contact, role, grantDigest, delegation, told, kind: kind ?? 'unknown', ...(mutual !== undefined ? { mutual } : {}), note: kind === 'person' ? (mutual ? 'recorded in your contacts — mutual: they had already added you' : 'recorded in your contacts; mutual once they add you back') : 'recorded in your contacts' };
   };
 }
 
@@ -189,6 +194,11 @@ export function contactListInvoker(deps: ContactDeps, person: Address | undefine
       if (rec?.type !== 'ap.contact.v1') continue;
       contacts.push({ contact: rec.contact, name: deps.nameOf ? await deps.nameOf(rec.contact).catch(() => null) : null, role: rec.role, status: rec.status, grantDigest: rec.grantDigest, ...(rec.mutual !== undefined ? { mutual: rec.mutual } : {}), since: new Date(rec.createdAt).toISOString() });
     }
+    // MUTUAL, from evidence in the person's OWN vault: a person contact who added them back sent a message carrying a
+    // `contact` reference (the invoker below tells the contact that way). Nobody reads another's contact list.
+    const inbox = (await deps.readSubjectRecord?.(me, 'inbox.data').catch(() => null)) as { envelopes?: Array<{ from?: string; contextRefs?: Array<{ kind: string; id: string }> }> } | null;
+    const addedMeBack = new Set((inbox?.envelopes ?? []).filter((e) => (e.contextRefs ?? []).some((r) => r.kind === 'contact' && r.id.toLowerCase() === me)).map((e) => (String(e.from ?? '').match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase()));
+    for (const c of contacts) if (c.mutual === false && addedMeBack.has(c.contact.toLowerCase())) c.mutual = true;
     const current = contacts.filter((c) => c.status === 'contact');
     return { count: current.length, contacts: current, removed: contacts.length - current.length, interpretation: `read the person's own contacts (${contacts.length} record(s))`, note: current.length ? 'Your contacts, from your own records; the role is declarative — the grant is what each may read.' : 'No contacts yet — "add bob.me as a contact".' };
   };

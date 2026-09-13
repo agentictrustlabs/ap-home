@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import type { InteractionCaseV1 } from '@agenticprimitives/fabric/interactions';
 import { useSession } from '../../context/session';
+import { askCommand } from '../../home/ask-command';
 import { SectionShell } from '../../components/portal/SectionShell';
 import { issueMandateForCase } from '../../home/mandate';
 import { signHashFor, type Via } from '../../home/onboarding';
@@ -75,6 +76,19 @@ function ContextChip({ r, names }: { r: { kind: string; id: string; label?: stri
         title={r.id}>
         {r.label ?? 'Open in the app'} →
       </a>
+    );
+  }
+  if (r.kind === 'contact' && /^0x[0-9a-fA-F]{40}$/.test(r.id)) {
+    // Spec 401 — "I've added you to my contacts": the chip adds them BACK (mutual), through the Ask as the person's
+    // own act — their mandate, their grant. The sender's address is the chip's id; the name is the thread's.
+    const who = names?.[r.id.toLowerCase()];
+    return (
+      <button type="button" className="badge"
+        style={{ border: '1px solid var(--color-sage-500)', background: 'var(--color-sage-50)', color: 'var(--color-sage-700)', fontWeight: 600, cursor: 'pointer' }}
+        title={`Add ${who ?? r.id} to your contacts`}
+        onClick={() => askCommand({ toolId: 'person.contact.invite', args: { contact: r.id.toLowerCase(), role: 'friend' }, message: `add ${who ?? r.id} as a contact (friend)` })}>
+        {r.label ?? 'Add back'} →
+      </button>
     );
   }
   if (r.kind === 'org-channels') {
