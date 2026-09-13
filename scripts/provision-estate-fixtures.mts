@@ -17,6 +17,12 @@
  *      does: the custodian's proof, the Home's KMS ref, the authorization signed by the owner's custodian;
  *   2d. the steward's two treasuries hold demo USDC (`treasury.fund` — the faucet mint, in the funder's name): a
  *      parked payment must reach its mandate, and a payer holding 0 is refused before it parks;
+ *   2c'. every treasury's `ap:charteredUnder` edge on chain (backfill-chartered-under.mts: propose / confirm /
+ *      activate, each signed by the custodian) — the PUBLIC fact the payer resolver reads roles from; a treasury with
+ *      no edge cannot be marked and "send X 1 USDC" asks which account every time;
+ *   2d'. `treasuries.own` is the steward's PRIMARY PAYER (`treasury.primary.declare`, role payer — the public
+ *      `ap:primaryPayer` role on the chartered edge): a payment with no payer then parks on its mandate instead of
+ *      asking "which of your treasuries?" — what the payment gates expect of a person who holds two;
  *   2e. `routineAgent` carries its playbook (the coordinator's, which declares schedule rows) — the assignment record
  *      the Playbook page writes, put under the steward's session + stewardship wire;
  *   3. the steward invites `member` and `member2` to `org` on the one-prompt path (the mandate and the org→member
@@ -32,6 +38,7 @@
  * that need them skip by name.
  */
 import { randomBytes } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { createPublicClient, erc20Abi, formatUnits, http, keccak256, toBytes, type Address, type Hex } from 'viem';
 import { buildCaveat, buildDigestBindingCaveat, capabilityHandler, encodeAllowedTargetsTerms, encodeTimestampTerms, encodeValueTerms, hashDelegation, ROOT_AUTHORITY, type Caveat, type Delegation, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import { fixture as fx, HOME, A2A } from './fixture.mts';
@@ -209,6 +216,32 @@ for (const t of [fx.treasuries.own, fx.treasuries.ownOther]) {
   if (usdc >= 10) { console.log(`${t} holds ${usdc} USDC`); continue; }
   console.log(`── ${t} holds ${usdc} USDC: ${fx.people.steward} funds it with ${FUND_USDC} demo USDC ──`);
   await act(steward, steward.me, `fund ${t} with ${FUND_USDC} usdc`, 'treasury.fund', { funder: steward.me, asset: C.mockUsdc, treasury: t, usdc: FUND_USDC });
+}
+
+// 2c'. the treasuries' charteredUnder edges on chain (idempotent: an ACTIVE edge is left alone)
+if (!DRY) {
+  console.log(`── charteredUnder edges for ${fx.people.steward}'s and ${fx.people.payeeOwner}'s treasuries ──`);
+  const out = execFileSync('npx', ['tsx', 'scripts/backfill-chartered-under.mts', '--handles', `${fx.people.steward},${fx.people.payeeOwner}`], { env: { ...process.env, HOME_BASE: HOME, RPC_URL: `${A2A}/rpc` }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  console.log(out.split('\n').filter((l) => /✓|✗|backfill/.test(l)).map((l) => `  ${l.trim()}`).join('\n'));
+}
+
+// 2d'. the steward's primary PAYER — so a payment with no payer parks on its mandate rather than asking which account.
+// Probed first with a payment the script never signs: a run that parks at authority_required already has a payer.
+{
+  const own = await nameInfo(fx.treasuries.own);
+  if (own && !DRY) {
+    const probe = await post('/harness/ask', { session: steward.token, addressee: steward.me, message: `send ${fx.treasuries.payee} 1 usdc (payer probe)`, plan: { steps: [{ toolId: 'treasury.payment.execute', args: { payee: fx.treasuries.payee, usdc: '1' } }] } });
+    const kind = String(probe.reply?.kind ?? '');
+    if (probe.reply?.runRef) await post('/harness/cancel', { session: steward.token, addressee: steward.me, runRef: probe.reply.runRef, note: 'payer probe' });
+    if (kind === 'authority_required') console.log(`${fx.treasuries.own}: a payment with no payer already parks on its mandate (primary payer set)`);
+    else {
+      console.log(`── ${fx.treasuries.own}: ${fx.people.steward}'s primary payer (a payment with no payer ${kind === 'prompt' ? 'asked which account' : `ended ${kind}`}) ──`);
+      const rep = await act(steward, steward.me, `pay from ${fx.treasuries.own} by default`, 'treasury.primary.declare', { treasury: own, role: 'payer', holder: steward.me, on: true });
+      const res = (rep.result ?? {}) as { declared?: boolean; note?: string; alreadySet?: boolean };
+      console.log(`  declared: ${res.declared}${res.alreadySet ? ' (already)' : ''}${res.note ? ` — ${res.note}` : ''}`);
+      if (!res.declared) fail(`${fx.treasuries.own} could not be marked the primary payer — its charteredUnder edge is missing on chain (scripts/backfill-chartered-under.mts writes it)`);
+    }
+  } else if (own) console.log(`  [dry-run] would probe ${fx.people.steward}'s payer and declare ${fx.treasuries.own} primary payer if asked`);
 }
 
 // 2e. the routine agent's playbook — the assignment the Home's Playbook page writes (K3), here from the registry by digest
