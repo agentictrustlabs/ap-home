@@ -1174,8 +1174,8 @@
            `overflow-y: auto` box is a clipped menu, and the person's menu lives at the foot. */
         .portal-sidebar-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
         .portal-sidebar-foot { flex: 0 0 auto; padding-top: .6rem; margin-top: .4rem; border-top: 1px solid var(--color-border); }
-        /* On desktop the person lives in the nav's foot, so the topbar copy stands down. */
-        .portal-topbar .identity-chip-wrap { display: none; }
+        /* The person's menu lives top right on every width (the sidebar foot no longer carries a copy). */
+        .portal-sidebar-foot { display: none; }
         .portal-settings-pane {
           display: flex; flex-direction: column; flex: 0 0 var(--settings-pane-w);
           width: var(--settings-pane-w); padding: 1rem .75rem;

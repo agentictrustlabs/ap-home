@@ -16,7 +16,9 @@ import { AddressChip } from '../shared/AddressChip';
 import { ChevronDownIcon } from '../shared/Icons';
 import { Popover } from '../shared/ui';
 
-export function IdentityChip() {
+/** The person's menu, top right. `open`/`onOpenChange` let the shell keep it and the Ask mutually exclusive: one
+ *  panel at a time on the right edge. */
+export function IdentityChip({ open, onOpenChange }: { open?: boolean; onOpenChange?: (open: boolean) => void } = {}) {
   const { agentName, agentAddress, signOut } = useSession();
 
   return (
@@ -24,6 +26,8 @@ export function IdentityChip() {
       <Popover
         role="menu"
         panelClassName="identity-popover"
+        {...(open !== undefined ? { open } : {})}
+        {...(onOpenChange ? { onOpenChange } : {})}
         trigger={(p) => (
           <button type="button" className="identity-chip" {...p} aria-label={agentName ?? 'Your portal'}>
             {/* On a phone the chip is the initial alone; the name is in the menu it opens. */}

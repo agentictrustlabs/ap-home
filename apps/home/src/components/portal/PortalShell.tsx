@@ -25,6 +25,9 @@ import { nameLabel } from '../../lib/domain';
 
 export function PortalShell({ children, appsBadge }: { children: ReactNode; appsBadge?: number }) {
   const [askOpen, setAskOpen] = useState(false);
+  // The person's menu and the Ask share the right edge: opening one closes the other.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const openAsk = (open: boolean) => { setAskOpen(open); if (open) setMenuOpen(false); };
   /** An ask a PAGE wants to start — "finish the payment you were waiting on". The shell owns whether the
    *  flyout is open, so a card deep in a page asks for it by event rather than by prop-drilling through
    *  every layer between them. Prefilled and not sent: the person still reads it and presses send. */
@@ -38,12 +41,12 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
   useEffect(() => {
     const onAsk = (e: Event) => {
       const detail = (e as CustomEvent<{ message?: string; resumeRun?: string; command?: AskCommand }>).detail;
-      if (detail?.resumeRun) { setAskResume(detail.resumeRun); setAskOpen(true); return; }
-      if (detail?.command) { setAskCommand(detail.command); setAskOpen(true); return; }
+      if (detail?.resumeRun) { setAskResume(detail.resumeRun); openAsk(true); return; }
+      if (detail?.command) { setAskCommand(detail.command); openAsk(true); return; }
       const message = detail?.message;
       if (!message) return;
       setAskSeed(message);
-      setAskOpen(true);
+      openAsk(true);
     };
     window.addEventListener('ap:ask', onAsk);
     return () => window.removeEventListener('ap:ask', onAsk);
@@ -56,7 +59,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
     const run = pathname === '/you' ? (searchParams?.get('run') ?? '') : '';
     if (!/^(run|ask)-[A-Za-z0-9._:-]+$/.test(run)) return;
     setAskResume(run);
-    setAskOpen(true);
+    openAsk(true);
   }, [pathname, searchParams]);
   // A selection belongs to the screen it was made on: leaving the screen clears it (spec 361 I6).
   useEffect(() => { setAskSelection(null); }, [pathname]);
@@ -116,7 +119,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
   return (
     <HuddleProvider>
     <div className="portal-root">
-      <PortalTopbar brandName={whitelabel.brand.name} {...(canAsk ? { askOpen, onToggleAsk: () => setAskOpen((v) => !v) } : {})} />
+      <PortalTopbar brandName={whitelabel.brand.name} {...(canAsk ? { askOpen, onToggleAsk: () => openAsk(!askOpen) } : {})} menuOpen={menuOpen} onMenuOpenChange={(open) => { setMenuOpen(open); if (open) setAskOpen(false); }} />
       <HuddleDock nameOf={nameOfAgent} />
       <div className="portal-body">
         <PortalSidebar groups={groups} panes={panes} workspaceName={workspaceName} />

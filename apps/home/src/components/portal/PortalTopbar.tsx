@@ -8,10 +8,10 @@ import { WorkspaceAction } from './WorkspaceAction';
 import { ChatIcon } from '../shared/Icons';
 
 // On a phone the bar carries FOUR things and no more: the shield (home), the workspace you stand in, Ask,
-// and a small identity chip whose menu holds Sign out. The brand name and the workspace action are desktop
-// furniture — with them, the Ask button was the thing squeezed off a 390px screen (`.portal-topbar-*` rules
+// and the identity chip whose menu holds Sign out (on every width — top right, beside Ask). The brand name and
+// the workspace action are desktop furniture — with them, the Ask button was the thing squeezed off a 390px screen (`.portal-topbar-*` rules
 // in globals.css).
-export function PortalTopbar({ brandName, askOpen, onToggleAsk }: { brandName: string; askOpen?: boolean; onToggleAsk?: () => void }) {
+export function PortalTopbar({ brandName, askOpen, onToggleAsk, menuOpen, onMenuOpenChange }: { brandName: string; askOpen?: boolean; onToggleAsk?: () => void; menuOpen?: boolean; onMenuOpenChange?: (open: boolean) => void }) {
   return (
     <header className="portal-topbar" role="banner">
       <div className="portal-topbar-l">
@@ -36,7 +36,8 @@ export function PortalTopbar({ brandName, askOpen, onToggleAsk }: { brandName: s
             <span>Ask</span>
           </button>
         )}
-        <IdentityChip />
+        {/* The person's menu ('connect') — top right beside Ask; the two never stand open together. */}
+        <IdentityChip {...(menuOpen !== undefined ? { open: menuOpen } : {})} {...(onMenuOpenChange ? { onOpenChange: onMenuOpenChange } : {})} />
       </div>
     </header>
   );
