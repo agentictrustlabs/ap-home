@@ -392,8 +392,9 @@ Decision: Faithnet stays the development deployment; the 399 cut is deferred; th
 
 | Wave | What | Status |
 | --- | --- | --- |
-| W1 | an ACP runtime (Claude Code / goose / Codex) joins a workspace as a `.svc` member, receives work, acts under a mandate, is revoked on chain from the Home | **next** — the authority half is 372 S3 (done); the adapter is the work |
+| W1 | an ACP runtime (Claude Code / goose / Codex) joins a workspace as a `.svc` member, receives work, acts under a mandate, is revoked on chain from the Home | **W1a LIVE 2026-09-13** — `@agenticprimitives/acp` (host) + `@agenticprimitives/runtime-member` (join · run · mcp), `messaging.inbox.list`, the `runtime-member` archetype; `verify-runtime-acp-member` green on Faithnet (goose-1.svc in Missio Nexus, the stub agent). W1b: the Home's pairing code + Members panel affordances |
 | W2 | mentions supply a turn to an open run; reactions as a trigger; search over the person's own tier by selector; one admin screen of every grant an org issued | queued |
+| **401** | Contacts — membership on the person agent (a coach, a runtime, a friend as the person's own roster with a scoped grant; the DM picker's first section) | spec drafted 2026-09-13 (user direction); C1 runtime → C2 Home |
 | W3 | Build-for-code on GitHub as the forge (398 §9, G4): work item → branch → PR → review with test evidence → promotion bound to an intent digest | queued (needs W1 + the GitHub connector) |
 | W4 | connectors as capabilities under the delegation model (GitHub first, Calendar/Drive, Slack) | queued; GitHub pulled ahead for W3 |
 
