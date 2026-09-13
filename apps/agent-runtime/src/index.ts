@@ -4664,6 +4664,16 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       const r = out as { ok?: boolean; removed?: true; role?: string; kin?: string; household?: string; count?: number; error?: string };
       return { ok: r.ok === true, ...(r.removed ? { removed: true as const } : {}), ...(r.role ? { role: r.role } : {}), ...(r.kin ? { kin: r.kin } : {}), ...(r.household ? { household: r.household } : {}), ...(typeof r.count === 'number' ? { count: r.count } : {}), ...(r.error ? { error: r.error } : {}) };
     },
+    // Spec 400 W2 (B4) — the grants screen's read and the revocation's expansion, on the subject's own object.
+    auditGrants: async (subject: string) => {
+      const out = await callInteractionsInternal(env, subject, 'internal.grants.audit', {}).catch(() => null);
+      return (out as { grants?: Array<{ kind: string; holder: string; holderName?: string; what: string; digest: string; issuedAt?: string; revoked: boolean; source: string }> } | null)?.grants ?? [];
+    },
+    grantWireByDigest: async (holder: string, digest: string) => {
+      const out = await callInteractionsInternal(env, holder, 'internal.grant.byDigest', { digest }).catch(() => null);
+      const r = out as { ok?: boolean; wire?: unknown; hash?: string; source?: string } | null;
+      return r?.ok && r.wire && r.hash ? { wire: r.wire, hash: r.hash, source: r.source ?? '' } : null;
+    },
     readGrantWire: async (person: string, clientId: string) => {
       const out = await callInteractionsInternal(env, person, 'internal.readgrant.wire', { clientId }).catch(() => null);
       const r = out as { ok?: boolean; wire?: unknown; hash?: string } | null;

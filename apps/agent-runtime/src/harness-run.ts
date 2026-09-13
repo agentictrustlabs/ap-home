@@ -237,6 +237,25 @@ export const ACCESS_LIST_TOOL: ToolSpec = {
 };
 
 
+export const ACCESS_AUDIT_CAPABILITY = 'access.grants.audit' as const;
+/** Spec 400 W2 (B4) — ONE SCREEN OF EVERY GRANT an agent issued: apps (Home MCP connections among them), members,
+ *  contacts, runtimes' standing grants, a coach's study grant — who holds it, what it permits, its digest, whether
+ *  the chain says it is revoked. The ACL a peer platform shows, made of grants. For the asker's own agent or one
+ *  they steward; a read, never authority. Revoke with `access.grant.revoke` naming the digest. */
+export const ACCESS_AUDIT_TOOL: ToolSpec = {
+  id: ACCESS_AUDIT_CAPABILITY,
+  answers: ['every grant', 'all the grants', 'who holds a grant', 'what has this organization granted', 'what have I granted', 'grants issued', 'audit the grants'],
+  description:
+    'LISTS EVERY GRANT an agent has ISSUED that its records can enumerate — apps reading its records (Home MCP '
+    + 'connections among them), members\' access delegations, contacts, standing grants to runtimes, a coach\'s study '
+    + 'grant — each with who holds it, what it permits, its digest, when, and whether it is revoked on chain. Use for '
+    + '"what has the organization granted", "every grant", "who holds a grant", "audit the grants". Args: subject '
+    + '(optional — the organization whose grants, a name or address; omit for the asker\'s own). A read.',
+  inputSchema: { type: 'object', properties: { subject: { type: 'string', description: 'Whose grants — an organization the asker stewards (name or address); omit for their own' } } },
+  establishes: 'lookup',
+  interaction: { navigationTarget: 'grants' },
+};
+
 export const INVITE_TOOL: ToolSpec = {
   id: ORG_INVITE_CAPABILITY,
   verbs: ['invite', 'add', 'bring'],
@@ -564,17 +583,19 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     id: ACCESS_REVOKE_CAPABILITY,
     verbs: ['revoke', 'remove access', 'disconnect', 'cut off'],
     description:
-      'Revoke ON CHAIN a read grant this person issued to an app, so it stops working everywhere rather '
-      + 'than only here. Args: app (the client id from access.grants.list, e.g. "demo-jp"), holder (the '
-      + 'SA whose grant it is — normally the person asking). Use for "stop <app> reading my records", '
-      + '"revoke <app> access", "cut off <app>".',
+      'Revoke ON CHAIN a grant this agent issued, so it stops working everywhere rather than only here: an '
+      + 'app\'s read grant by client id, or ANY grant by its digest from access.grants.audit (a member\'s access, a '
+      + 'contact, a runtime\'s standing grant, a coach\'s study grant). Args: app (the client id from '
+      + 'access.grants.list) OR digest (0x…, from access.grants.audit), holder (the SA whose grant it is — the person '
+      + 'asking, or an organization they steward). Use for "stop <app> reading my records", "revoke <app> access", '
+      + '"revoke grant 0x…", "cut off <app>".',
     inputSchema: {
       type: 'object',
       properties: {
         app: { type: 'string', description: 'The app\'s client id, as listed by access.grants.list' },
-        holder: { type: 'string', description: 'Whose grant this is (the person who issued it)' },
+        digest: { type: 'string', description: 'The grant\'s digest (0x…), as listed by access.grants.audit' },
+        holder: { type: 'string', description: 'Whose grant this is (the agent that issued it)' },
       },
-      required: ['app'],
     },
     capability: { id: ACCESS_REVOKE_CAPABILITY, action: 'revoke', resourceArg: 'manager', authorityArg: 'holder' },
     risk: 'medium',
@@ -897,6 +918,10 @@ export interface HarnessDeps {
   valueHeld?: (agent: string) => Promise<{ amount: bigint; display: string } | null>;
   /** The apps a person has authorized to read their records, and whether each grant is still live. */
   readGrants?: (person: string) => Promise<Array<{ clientId: string; hash: string; storedAt: string; revoked: boolean }>>;
+  /** Spec 400 W2 (B4) — every grant `subject` issued (its object enumerates them); entitlement is the caller's to establish. */
+  auditGrants?: (subject: string) => Promise<Array<{ kind: string; holder: string; holderName?: string; what: string; digest: string; issuedAt?: string; revoked: boolean; source: string }>>;
+  /** Spec 400 W2 (B4) — the wire of one grant `holder` issued, by digest — for the revocation about to expand it. */
+  grantWireByDigest?: (holder: string, digest: string) => Promise<{ wire: unknown; hash: string; source: string } | null>;
   /** ONE stored grant, wire and all — asked for only when something is about to revoke it. */
   readGrantWire?: (person: string, clientId: string) => Promise<{ wire: unknown; hash: string } | null>;
   /** The person's STUDY GRANT to one coach service (`card-room.ts`), wire and all — read by the person's own
@@ -1469,19 +1494,24 @@ export function accessRevokeInvoker(deps: HarnessDeps, env: HarnessEnv, presente
     const wire = presented.wire as Delegation;
     if (!deps.readGrantWire) throw new Error('this agent cannot read the grant to revoke (no read-grant seam wired)');
     const app = String(args.app ?? '').trim().toLowerCase();
-    if (!app) {
+    const digestArg = String(args.digest ?? '').trim().toLowerCase();
+    if (!app && !/^0x[0-9a-f]{64}$/.test(digestArg)) {
       throw new InputRequired({
         kind: 'data', stepRef, toolId: _toolId,
-        prompt: 'Which app should lose access?',
-        fields: [{ name: 'app', label: 'app', type: 'text', required: true, hint: 'its client id — ask "who can read my records" to see the list' }],
+        prompt: 'Which grant should be revoked?',
+        fields: [{ name: 'digest', label: 'grant digest', type: 'text', required: true, hint: 'its digest from the grants screen (0x…), or an app\'s client id in "app"' }],
       });
     }
-    const holder = (person ?? wire.delegator).toLowerCase();
-    if (wire.delegator.toLowerCase() !== holder) throw new Error(`a grant is revoked by the person who issued it (${holder}); the mandate is from ${wire.delegator}`);
-    const found = await deps.readGrantWire(holder, app);
+    // WHOSE GRANT: the mandate's delegator — the person for their own, the organization when its steward signs FOR it
+    // (spec 400 W2 B4: an org's grants are revoked from the org's grants screen under the org's mandate).
+    const holder = wire.delegator.toLowerCase();
+    if (person && !digestArg && wire.delegator.toLowerCase() !== person.toLowerCase()) throw new Error(`a grant is revoked by the person who issued it (${person}); the mandate is from ${wire.delegator}`);
+    const found = digestArg
+      ? (deps.grantWireByDigest ? await deps.grantWireByDigest(holder, digestArg) : null)
+      : await deps.readGrantWire(holder, app);
     if (!found) {
       // NOT AN ERROR TO RETRY. There is no such grant here, which is a fact about what they authorized.
-      return { revoked: false, app, note: `no read grant for "${app}" is stored here — nothing to revoke` };
+      return { revoked: false, ...(app ? { app } : { digest: digestArg }), note: digestArg ? `no grant with digest ${digestArg.slice(0, 14)}… was issued by ${holder} — nothing to revoke` : `no read grant for "${app}" is stored here — nothing to revoke` };
     }
     const grant = found.wire as unknown as { delegator: string; delegate: string; authority: string; caveats: Array<{ enforcer: string; terms: string; args?: string }>; salt: string; signature: string };
     if (grant.delegator.toLowerCase() !== holder) throw new Error('that grant was issued by someone else — it is not yours to revoke');
@@ -1834,6 +1864,31 @@ export function topicPostInvoker(deps: HarnessDeps, presented: MandatePresentati
   };
 }
 
+/** `access.grants.audit` — every grant a subject issued, for the asker's own agent or one they steward. */
+export function accessAuditInvoker(deps: HarnessDeps, person: Address | undefined): ToolInvoker {
+  return async (_toolId, args) => {
+    if (!person) return { refused: 'a grants audit is over the asker\'s own agent or one they steward, and there is no asker on this run' };
+    if (!deps.auditGrants || !deps.readableVaults) return { refused: 'the grants audit is not wired on this agent' };
+    const wanted = String(args.subject ?? '').trim();
+    const readable = await deps.readableVaults(person.toLowerCase());
+    let subject = readable.find((r) => r.why === 'self') ?? { subject: person.toLowerCase(), why: 'self' as const };
+    if (wanted) {
+      const byAddr = /^0x[0-9a-fA-F]{40}$/.test(wanted) ? wanted.toLowerCase() : (deps.resolveName ? (await deps.resolveName(wanted).catch(() => null))?.toLowerCase() : null);
+      const hit = readable.find((r) => r.subject.toLowerCase() === byAddr || (r.name ?? '').toLowerCase().startsWith(wanted.toLowerCase()));
+      if (!hit) return { refused: `${wanted} is not an agent you steward — a grants audit reads only your own agent or one you steward` };
+      subject = hit;
+    }
+    const grants = await deps.auditGrants(subject.subject);
+    const live = grants.filter((g) => !g.revoked);
+    const named = deps.nameOf ? await Promise.all(grants.map(async (g) => ({ ...g, holderName: g.holderName ?? (/^0x[0-9a-f]{40}$/i.test(g.holder) ? await deps.nameOf!(g.holder).catch(() => null) ?? undefined : undefined) }))) : grants;
+    return {
+      subject: subject.subject, ...(subject.name ? { subjectName: subject.name } : {}), why: subject.why,
+      count: live.length, total: grants.length, grants: named,
+      note: grants.length ? 'each row is one grant this agent issued: who holds it, what it permits, its digest; a revoked one is refused everywhere, not only here. Revoke with access.grant.revoke and the digest.' : 'this agent has issued no grant its records can enumerate',
+    };
+  };
+}
+
 /** The ROOT delegator of the presented leaf's chain — who the act is ultimately an act OF. Walks `authority` through
  *  the wires this turn presented (the verifier already refused a chain with a missing link); a root mandate is its own. */
 export function rootDelegatorOf(leaf: MandatePresentation, chain: { presentedAll: MandatePresentation[]; chainId: number; delegationManager: Address }): string {
@@ -1955,6 +2010,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (toolId === 'treasury.fund') return fundInvoker(deps, env, presented!)(toolId, args, ctx);
     if (toolId === PRIMARY_PAYEE_CAPABILITY) return primaryPayeeInvoker(deps, env, presented!)(toolId, args, ctx);
     if (toolId === ACCESS_REVOKE_CAPABILITY) return accessRevokeInvoker(deps, env, presented!, person)(toolId, args, ctx);
+    if (toolId === ACCESS_AUDIT_CAPABILITY) return accessAuditInvoker(deps, person)(toolId, args, ctx);
     if (toolId === PROFILE_UPDATE_CAPABILITY) return profileUpdateInvoker(deps, person)(toolId, args, ctx);
     if (toolId === HOUSEHOLD_RECORD_CAPABILITY) return householdRecordInvoker(deps, person)(toolId, args, ctx);
     if (toolId === STANDING_INSTRUCTION_CAPABILITY) return standingInstructionInvoker(deps, person, addressee)(toolId, args, ctx);
@@ -2269,6 +2325,7 @@ export const CAPABILITY_WORDS: Record<string, string> = {
   'resolution.invitation.request': 'ask someone how to reach an agent of theirs',
   'treasury.primary.declare': 'say which treasury receives payments to you',
   'access.grants.list': 'say which apps can read your records',
+  'access.grants.audit': 'list every grant this agent issued',
   'access.grant.revoke': 'revoke an app\'s access on chain',
   'profile.contact.update': 'change your own contact details',
   'household.member.record': 'record who is in your household',
@@ -4456,6 +4513,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(deps.readSubjectRecord ? COORDINATION_READ_TOOLS : []),
     // The person's own access audit — informational, always available on their own surface.
     ...(deps.readGrants ? [ACCESS_LIST_TOOL] : []),
+    ...(deps.auditGrants && playbook?.tools?.[ACCESS_AUDIT_TOOL.id] ? [mergeContractTool(ACCESS_AUDIT_TOOL, playbook.tools[ACCESS_AUDIT_TOOL.id])] : []),
     ...(deps.readSubjectRecord ? [PROFILE_READ_TOOL, HOUSEHOLD_READ_TOOL] : []),
     UNSUPPORTED_TOOL,
   ];

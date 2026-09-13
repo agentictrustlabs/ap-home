@@ -29,6 +29,9 @@ export function resolveNavigationTarget(target: string, realm: InteractionRealm)
       return { href: '/treasuries', label: 'Open treasuries' };
     case 'messages':
       return { href: '/messages', label: 'Open messages' };
+    case 'grants':
+      // Spec 400 W2 (B4) — the org's grants under the org, the person's under theirs.
+      return org ? { href: `/org/${org}/grants`, label: 'Open grants' } : { href: '/grants', label: 'Open grants' };
     case 'search':
       // Spec 400 W2 (B5) — a PERSON'S surface: the search is over their own tier.
       return realm.kind === 'person' || !realm.kind ? { href: '/search', label: 'Open search' } : null;

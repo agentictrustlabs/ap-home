@@ -402,6 +402,16 @@
       "timeoutSec": 300
     },
     {
+      "id": "verify-grants-admin",
+      "script": "scripts/verify-grants-admin.mts",
+      "spec": "400 W2 (B4)",
+      "proves": "one screen of every grant an agent issued (access.grants.audit — apps, members' access delegations, contacts, runtimes' standing grants, a coach's study grant; holder, what, digest, the chain's word): the steward audits the organization she stewards and the runtime she custodies, revokes the runtime's standing grant BY DIGEST under the issuer's mandate (a transaction), and the audit reflects it; then grants anew",
+      "twin": "a member who stewards nothing here, and an outsider, get nothing of the organization's grants",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 420
+    },
+    {
       "id": "verify-contacts",
       "script": "scripts/verify-contacts.mts",
       "spec": "401 C1",

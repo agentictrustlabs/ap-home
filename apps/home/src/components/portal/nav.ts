@@ -120,6 +120,8 @@ export function buildNav(
       { items: [
         { id: 'org-discussions', label: 'Discussions', href: orgHref(active.org, 'discussions'), Icon: HashIcon, status: 'live' },
         ...(hasMembers ? [{ id: 'members', label: 'Members', href: href('members'), Icon: UserIcon, status: 'live' as const }] : []),
+        // Spec 400 W2 (B4) — every grant the organization issued, one screen, revoke here (its steward's act).
+        { id: 'grants', label: 'Grants', href: href('grants'), Icon: ShieldIcon, status: 'live' as const },
         { id: 'work', label: 'Work', href: orgHref(active.org, 'work'), Icon: CheckCircleIcon, status: 'live' as const },
       ] },
       backHome,
@@ -220,6 +222,8 @@ export function stewardshipPane(active: WorkspaceScope = { kind: 'person' }): Se
         // outside runtime) with the grant you gave each — the organization's roster, your word for it. Beside Household
         // because both are bodies of people you keep a private record of; unlike Household, a contact HOLDS a grant.
         { id: 'contacts', label: 'Contacts', href: '/contacts', Icon: UserIcon, status: 'live' },
+        // Spec 400 W2 (B4) — every grant you issued, one screen, revoke here.
+        { id: 'grants', label: 'Grants', href: '/grants', Icon: ShieldIcon, status: 'live' },
         { id: 'household', label: 'Household', href: '/household', Icon: UserIcon, status: 'live' },
         { id: 'alliances', label: 'Alliances', href: '/alliances', Icon: LinkIcon, status: 'live' },
       ]

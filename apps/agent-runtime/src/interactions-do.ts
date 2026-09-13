@@ -288,6 +288,10 @@ const READ_GRANT_KEY = (clientId: string): string => `read.grant:${clientId.toLo
 const STUDY_GRANT_KEY = (coach: string): string => `study.grant:${coach.toLowerCase()}`;
 interface StudyGrantRecord { wire: IncomingDelegation; hash: string; coach: string; delegate: string; resources: string[]; storedAt: string }
 interface ReadGrantRecord { wire: IncomingDelegation; hash: string; clientId: string; storedAt: string }
+/** Spec 400 W2a/B4 — a STANDING GRANT this agent's custodian issued to its runtime's key (the open mandate), kept
+ *  here like a read grant so the grants screen lists it and a revocation can expand its digest back into the struct. */
+const STANDING_GRANT_KEY = (ref: string): string => `standing.grant:${ref.toLowerCase()}`;
+interface StandingGrantRecord { wire: IncomingDelegation; hash: string; capabilities: string[]; locations: string[]; holder: string; holderName?: string; validUntil: number; storedAt: string }
 
 const MESSAGING_WIRE_KEY = 'messaging.wire';
 /** TWO artifacts, because the gate asks two questions. `wire` (person → session key) authorizes the key
@@ -1844,7 +1848,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.search.query' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -2307,6 +2311,67 @@ export class InteractionsDO {
         // `revoked` is the ON-CHAIN answer, as the session-facing list already insists: a person
         // auditing access needs to see that a revoke landed, and an unreadable chain reports revoked
         // (the conservative answer for a question whose purpose is spotting access you did not intend).
+        // Spec 400 W2 (B4) — EVERY GRANT THIS AGENT ISSUED that its object can enumerate, for the grants screen: app
+        // read grants (Home MCP connections among them), member access delegations (an organization's roster),
+        // contacts (a person's), standing grants to runtimes, the study grant to a coach. Each row: who holds it,
+        // what it permits, its digest, when, and whether the chain says it is revoked. A list; never the wires.
+        if (op === 'internal.grants.audit') {
+          const rows: Array<{ kind: string; holder: string; holderName?: string; what: string; digest: string; issuedAt?: string; revoked: boolean; source: string }> = [];
+          const revokedOf = async (digest: string): Promise<boolean> => {
+            try { return (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [digest as Hex] })) as boolean; } catch { return true; }
+          };
+          for (const [, v] of await this.state.storage.list({ prefix: READ_GRANT_KEY('') })) {
+            const rec = v as ReadGrantRecord;
+            rows.push({ kind: 'app', holder: rec.clientId, what: 'reads the records the grant scopes', digest: rec.hash, issuedAt: rec.storedAt, revoked: await revokedOf(rec.hash), source: 'read.grant' });
+          }
+          for (const [, v] of await this.state.storage.list({ prefix: STANDING_GRANT_KEY('') })) {
+            const rec = v as StandingGrantRecord;
+            rows.push({ kind: 'runtime', holder: rec.holder, ...(rec.holderName ? { holderName: rec.holderName } : {}), what: `${rec.capabilities.join(', ')}${rec.locations.length ? ` to ${rec.locations.length} recipient(s)` : ' to anyone'} until ${new Date(rec.validUntil * 1000).toISOString().slice(0, 10)}`, digest: rec.hash, issuedAt: rec.storedAt, revoked: await revokedOf(rec.hash), source: 'standing.grant' });
+          }
+          const study = await this.state.storage.list({ prefix: STUDY_GRANT_KEY('') });
+          for (const [k, v] of study) {
+            const rec = v as { wire?: IncomingDelegation; hash?: string; storedAt?: string; delegate?: string };
+            if (rec.hash) rows.push({ kind: 'coach', holder: rec.delegate ?? rec.wire?.delegate ?? '', holderName: k.slice(STUDY_GRANT_KEY('').length), what: 'reads the study records; appends notes', digest: rec.hash, ...(rec.storedAt ? { issuedAt: rec.storedAt } : {}), revoked: await revokedOf(rec.hash), source: 'study.grant' });
+          }
+          // Vault-resident families (the survey names them; the records decode): members and contacts.
+          const survey = await this.mcpVaultTool(g, 'list_vault_record', {}).then((r) => r.json()).catch(() => ({})) as { records?: Array<{ record_type: string }> };
+          const keys = (survey.records ?? []).map((r) => r.record_type).filter((k) => k.startsWith('org.invite:agent:') || k.startsWith('contact:'));
+          if (keys.length) {
+            const got = await this.mcpVaultTool(g, 'get_vault_records', { recordTypes: keys.slice(0, 200) }).then((r) => r.json()).catch(() => ({})) as { records?: Record<string, unknown> };
+            for (const [k, v] of Object.entries(got.records ?? {})) {
+              const rec = v as { delegation?: IncomingDelegation; grantDigest?: string; status?: string; role?: string; createdAt?: number; contact?: string };
+              const wire = rec.delegation; if (!wire) continue;
+              const digest = rec.grantDigest ?? hashDelegation({ ...wire, salt: BigInt(String(wire.salt)), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+              const member = k.startsWith('org.invite:agent:');
+              if (member && rec.status === 'removed') continue;
+              rows.push({ kind: member ? 'member' : 'contact', holder: (member ? k.slice('org.invite:agent:'.length) : String(rec.contact ?? wire.delegate)).toLowerCase(), what: member ? `member access${rec.role ? ` (${rec.role})` : ''}${rec.status ? ` · ${rec.status}` : ''}` : `contact (${rec.role ?? 'contact'})${rec.status === 'removed' ? ' · removed' : ''}`, digest, ...(rec.createdAt ? { issuedAt: new Date(rec.createdAt).toISOString() } : {}), revoked: rec.status === 'removed' ? true : await revokedOf(digest), source: k });
+            }
+          }
+          return json({ ok: true, grants: rows });
+        }
+        // The WIRE of any grant this agent issued, by digest — asked for only by a revocation about to expand it.
+        if (op === 'internal.grant.byDigest') {
+          const want = String(body.digest ?? '').toLowerCase();
+          if (!/^0x[0-9a-f]{64}$/.test(want)) return json({ error: 'digest required' }, 400);
+          for (const prefix of [READ_GRANT_KEY(''), STANDING_GRANT_KEY(''), STUDY_GRANT_KEY('')]) {
+            for (const [k, v] of await this.state.storage.list({ prefix })) {
+              const rec = v as { wire?: IncomingDelegation; hash?: string };
+              if (rec.hash?.toLowerCase() === want && rec.wire) return json({ ok: true, wire: rec.wire, hash: rec.hash, source: k });
+            }
+          }
+          const survey = await this.mcpVaultTool(g, 'list_vault_record', {}).then((r) => r.json()).catch(() => ({})) as { records?: Array<{ record_type: string }> };
+          const keys = (survey.records ?? []).map((r) => r.record_type).filter((k) => k.startsWith('org.invite:agent:') || k.startsWith('contact:'));
+          if (keys.length) {
+            const got = await this.mcpVaultTool(g, 'get_vault_records', { recordTypes: keys.slice(0, 200) }).then((r) => r.json()).catch(() => ({})) as { records?: Record<string, unknown> };
+            for (const [k, v] of Object.entries(got.records ?? {})) {
+              const rec = v as { delegation?: IncomingDelegation; grantDigest?: string };
+              if (!rec.delegation) continue;
+              const digest = (rec.grantDigest ?? hashDelegation({ ...rec.delegation, salt: BigInt(String(rec.delegation.salt)), caveats: rec.delegation.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address)).toLowerCase();
+              if (digest === want) return json({ ok: true, wire: rec.delegation, hash: digest, source: k });
+            }
+          }
+          return json({ ok: true, wire: null });
+        }
         if (op === 'internal.readgrant.list') {
           const rows = await this.state.storage.list({ prefix: READ_GRANT_KEY('') });
           const grants: Array<{ clientId: string; hash: string; storedAt: string; revoked: boolean }> = [];
@@ -3934,6 +3999,29 @@ export class InteractionsDO {
         await this.state.storage.put(SEARCH_INDEX_KEY, idx);
         await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.search.reindex', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'search-index', id: principal }, reason: `${n} document(s)` });
         return json({ ok: true, indexed: n });
+      }
+
+      // Spec 400 W2a/B4 — the STANDING GRANT the custodian issued to this agent's runtime key, kept on the agent's
+      // object (like a read grant) so the grants screen lists it and revocation can expand it. Verified as issued by
+      // this agent (ERC-1271 over its digest) before it is kept; a steward's act.
+      if (op === 'runtime.standing.put' || op === 'runtime.standing.list') {
+        const isSelf = sessionSa.toLowerCase() === principal;
+        const steward = isSelf || await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
+        if (!steward) return json({ error: 'only the agent’s custodian may record a standing grant' }, 403);
+        if (op === 'runtime.standing.list') {
+          const out: Array<Omit<StandingGrantRecord, 'wire'>> = [];
+          for (const [, v] of await this.state.storage.list({ prefix: STANDING_GRANT_KEY('') })) { const { wire: _w, ...rest } = v as StandingGrantRecord; out.push(rest); }
+          return json({ ok: true, grants: out });
+        }
+        const wire = body.wire as IncomingDelegation | undefined;
+        if (!wire || wire.delegator.toLowerCase() !== principal) return json({ error: 'a standing grant is this agent\'s own delegation' }, 400);
+        const d: Delegation = { ...wire, salt: BigInt(String(wire.salt)), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
+        const hash = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+        if (!(await this.erc1271(principal as Address, hash, wire.signature as Hex))) return json({ error: 'the standing grant\'s signature does not verify against this agent' }, 403);
+        const rec: StandingGrantRecord = { wire, hash, capabilities: Array.isArray(body.capabilities) ? (body.capabilities as string[]).map(String) : [], locations: Array.isArray(body.locations) ? (body.locations as string[]).map(String) : [], holder: String(wire.delegate).toLowerCase(), ...(typeof body.holderName === 'string' ? { holderName: body.holderName } : {}), validUntil: Number(body.validUntil ?? 0), storedAt: new Date().toISOString() };
+        await this.state.storage.put(STANDING_GRANT_KEY(hash), rec);
+        await audit.write({ id: crypto.randomUUID(), timestamp: rec.storedAt, action: 'interactions.runtime.standingPut', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'delegation', id: hash } });
+        return json({ ok: true, hash });
       }
 
       if (op === 'runtime.host.get' || op === 'runtime.host.put' || op === 'runtime.wake.get') {
