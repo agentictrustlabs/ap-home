@@ -256,7 +256,9 @@ export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
       return reviewStudy(deps, skill, question);
     }
     if (!deps.call) return { refused: 'no model is available to answer with' };
-    const street = typeof (m.input as { read?: { street?: unknown } } | undefined)?.read?.street === 'string' ? (m.input as { read: { street: string } }).read.street : null;
+    // THE STAGE: hold'em's street from the read; canasta's phase (draw | play) from the seat's view.
+    const stageInput = m.input as { read?: { street?: unknown }; view?: { phase?: unknown } } | undefined;
+    const street = typeof stageInput?.read?.street === 'string' ? stageInput.read.street : typeof stageInput?.view?.phase === 'string' && familyOf(skill) === 'canasta' ? stageInput.view.phase : null;
     const system = `${answerSystemFor(skill)}\n\n---\n\n${relevantInstructions(deps.instructions, skill, street, 'advise') || '(this agent has no further instructions)'}`;
     // WHAT THIS AGENT REMEMBERS about the players in the material — its own counts from the rounds the
     // asker reported, with the rates worked out. Only the subjects present here; a memory of somebody at
@@ -473,15 +475,17 @@ export function relevantInstructions(instructions: string | null | undefined, sk
   // card that has not come. Sections naming no street (the table read, the person's style) always
   // apply. This is the selective context PokerSkill measured the gain from: the applicable procedure,
   // not the whole essay.
-  const STREETS = ['preflop', 'flop', 'turn', 'river'];
-  const streetOf = (heading: string): string | null => { const m = /hold.?em-(preflop|flop|turn|river)\b/i.exec(heading); return m ? m[1]!.toLowerCase() : null; };
+  // Canasta's stages are its two PHASES — the draw decision (draw, or take the pile) and the play (meld, discard).
+  // A skill named for one (canasta-draw, canasta-play) is that phase's craft; canasta-endgame applies to both.
+  const STREETS = ['preflop', 'flop', 'turn', 'river', 'draw', 'play'];
+  const streetOf = (heading: string): string | null => { const m = /hold.?em-(preflop|flop|turn|river)\b/i.exec(heading) ?? /canasta-(draw|play)\b/i.exec(heading); return m ? m[1]!.toLowerCase() : null; };
   // THE ACT SELECTS THE CRAFT, the way the street selects the stage. A coach's playbook carries the review
   // method beside the street stages; mid-hand the review is four thousand characters the model reads and
   // sets aside, and in a review the street stages are the same in reverse. Neither is a loss of skill: the
   // section that applies is the one that stays.
   // Canasta has no streets; its review method (`canasta-review`) is the one section a turn does not need, and
   // a review needs the review method and the partner's craft but not the consult skill's mechanics.
-  const notThisAct = act === 'advise' ? /(hold.?em|canasta)-review\b/i : act === 'review' ? /hold.?em-(preflop|flop|turn|river)\b/i : null;
+  const notThisAct = act === 'advise' ? /(hold.?em|canasta)-review\b/i : act === 'review' ? /(hold.?em-(preflop|flop|turn|river)|canasta-(draw|play))\b/i : null;
   const kept = sections.filter((sec) => {
     const heading = sec.split('\n')[0] ?? '';
     if (!(words.test(heading) || words.test(sec.slice(0, 400)))) return false;
