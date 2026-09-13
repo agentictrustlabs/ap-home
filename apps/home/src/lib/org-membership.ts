@@ -103,16 +103,27 @@ export async function recordOrgMembership(
       organizationDecisionRef: `enroll-decision:${org.toLowerCase()}:${member.toLowerCase()}`,
       bearer,
     });
-    await fetch(`${doBase}/relationships.merge`, {
-      method: 'POST', headers: hdrs,
-      body: JSON.stringify({ session: bearer, entry: { org: org.toLowerCase(), relationship: 'member', delegations: [toWire(d)], ...(membershipProvenance ?? {}) } }),
-    }).catch(() => null);
-    if (displayName?.trim()) {
-      await fetch(`${doBase}/member.profile.put`, {
+    // THE TWO WRITES THAT REMAIN ARE INDEPENDENT of each other — the member's relationships doc and their
+    // per-org profile card — and each is a vault operation of its own. Sequential, a join spent their sum
+    // while the person watched "telling the workspace you joined…"; together they cost the longer one.
+    // spec 322 W3d — AUTHORITATIVE person-plane write-through via the member's own InteractionsDO:
+    // their relationships doc + the per-org profile card (the server's `related:*` KV is a
+    // projection/cache of this). A 409 here (person hasn't enabled interactions yet) is expected —
+    // the doc catches up at their enable ceremony; the KV projection covers display meanwhile.
+    // HOME-PORT-1 (2026-07-12) — include the member→org membership WIRE in the vault entry, not just the
+    // relationship label, so any Home reconstructs the authority wire from the person's own doc.
+    await Promise.all([
+      fetch(`${doBase}/relationships.merge`, {
         method: 'POST', headers: hdrs,
-        body: JSON.stringify({ session: bearer, org: org.toLowerCase(), profile: { displayName: displayName.trim().slice(0, 80) } }),
-      }).catch(() => null);
-    }
+        body: JSON.stringify({ session: bearer, entry: { org: org.toLowerCase(), relationship: 'member', delegations: [toWire(d)], ...(membershipProvenance ?? {}) } }),
+      }).catch(() => null),
+      displayName?.trim()
+        ? fetch(`${doBase}/member.profile.put`, {
+            method: 'POST', headers: hdrs,
+            body: JSON.stringify({ session: bearer, org: org.toLowerCase(), profile: { displayName: displayName.trim().slice(0, 80) } }),
+          }).catch(() => null)
+        : Promise.resolve(null),
+    ]);
   } catch (e) {
     console.warn('[org-membership] membership delegation not recorded (join still succeeded):', e);
   }

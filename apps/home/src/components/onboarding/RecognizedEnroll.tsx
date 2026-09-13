@@ -378,6 +378,21 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         if (!res.ok || !out.ok || !out.invite?.delegation) {
           return fail(out.error ?? 'No invitation was found for you at this workspace — ask its steward to invite you.');
         }
+        // THE LINK AND THE WORKSPACE'S OWN RECORD, TOGETHER. The link is the member's own note (and what the Home
+        // derives standing from); the record is the workspace's word about who belongs. Neither waits on the
+        // other, and each is seconds of vault work, so they run side by side — a join that took twenty seconds
+        // of "telling the workspace" took ten.
+        setGrantProgress({ step: 2, total: 2, label: 'Joining, and telling the workspace…' });
+        const invite = out.invite;
+        const recordP = (async () => {
+          try {
+            const { recordOrgMembership } = await import('../../lib/org-membership');
+            const signHash = await signHashFor(viaLower as Via, home.address, token ? { token } : undefined);
+            await recordOrgMembership(home.address, enroll.grantOrg!, signHash, token, (invite.membership ?? null) as { delegate?: string } | null, homeLabel(home.name));
+          } catch (e) {
+            console.warn('[connect] workspace-join: the workspace could not record the membership', e);
+          }
+        })();
         const linked = await fetch('/connect/related-orgs', {
           method: 'POST',
           headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
@@ -407,22 +422,10 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         if (!linked.ok || link.ok === false) {
           return fail(link.error ?? `joined, but the workspace could not be linked to your home (HTTP ${linked.status})`);
         }
-        // AND THE WORKSPACE'S OWN RECORD OF THEM. The link above is the member's note about themselves; the
-        // workspace's `org.membership:member:<sa>` record (spec 325, finding ORG-MEM-1) is the organization's
-        // word about who belongs — the thing its own agent answers "who are the members" from, and the thing a
-        // relying app reads when its roster is a PROJECTION of this Home's (a card room's club, 2026-09-13).
-        // Before this a workspace joined here had a member nobody but the member could see. Same helper as
-        // every other join surface: the member signs member→workspace, presents the steward's pre-signed
-        // workspace→member access beside it, and the DO re-checks both before writing. Best-effort by the
-        // helper's own design — the link has landed and the membership stands on the signed grants.
-        setGrantProgress({ step: 2, total: 2, label: 'Telling the workspace you joined…' });
-        try {
-          const { recordOrgMembership } = await import('../../lib/org-membership');
-          const signHash = await signHashFor(viaLower as Via, home.address, token ? { token } : undefined);
-          await recordOrgMembership(home.address, enroll.grantOrg, signHash, token, (out.invite.membership ?? null) as { delegate?: string } | null, homeLabel(home.name));
-        } catch (e) {
-          console.warn('[connect] workspace-join: the workspace could not record the membership', e);
-        }
+        // AND THE WORKSPACE'S OWN RECORD OF THEM (spec 325, finding ORG-MEM-1) — started above beside the link;
+        // waited for here, because the roster a relying app reads is that record, and a person sent back before
+        // it landed would arrive at a club that did not list them yet.
+        await recordP;
       }
 
       let code: string;

@@ -78,6 +78,7 @@ import { messagingScopeCovers, messagingScopeDepsFromEnv } from './messaging-sco
 import { wrapSessionSignature } from '@agenticprimitives/a2a';
 // spec 341 §7 — the in-Worker marker, split off the custody secret.
 import { internalHeaders, internalMarker, isInternalCall } from './internal-marker.js';
+import { parseRuntimeHost, RUNTIME_HOST_KEY, RUNTIME_WAKES_KEY, RUNTIME_WAKE_PREFIX, RUNTIME_WAKES_CAP, type WakeReceiptV1 } from './runtime-wake.js';
 import type { A2aTransport } from '@agenticprimitives/a2a';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import type { Vault } from '@agenticprimitives/vault';
@@ -1761,7 +1762,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -3162,6 +3163,19 @@ export class InteractionsDO {
             return json({ ok: true });
           });
         }
+        // internal.runtime.wake.put — spec 400 W1c: the queue consumer's receipt of one wake, kept DO-local and
+        // bounded (a serving-plane ledger: what the steward and the live gate read back; rebuildable, never a record).
+        if (op === 'internal.runtime.wake.put') {
+          const receipt = body.receipt as WakeReceiptV1 | undefined;
+          if (!receipt || receipt.v !== 1 || typeof receipt.messageId !== 'string') return json({ error: 'receipt required' }, 400);
+          const ids = ((await this.state.storage.get(RUNTIME_WAKES_KEY)) as string[] | undefined) ?? [];
+          const next = [...ids.filter((i) => i !== receipt.messageId), receipt.messageId];
+          const evict = next.length > RUNTIME_WAKES_CAP ? next.splice(0, next.length - RUNTIME_WAKES_CAP) : [];
+          await this.state.storage.put(`${RUNTIME_WAKE_PREFIX}${receipt.messageId}`, receipt);
+          await this.state.storage.put(RUNTIME_WAKES_KEY, next);
+          for (const e of evict) await this.state.storage.delete(`${RUNTIME_WAKE_PREFIX}${e}`);
+          return json({ ok: true });
+        }
         // internal.deliver — append-only merge of a validated envelope (the skill already verified
         // addressing + bodyHash and persisted the body under the delivery grant).
         const envelope = body.envelope as MessageEnvelopeV1 | undefined;
@@ -3169,7 +3183,8 @@ export class InteractionsDO {
         return this.serialize(async () => { // ARCH-H1 — serialize the inbox merge (many senders → one inbox)
           const doc = (await this.readDoc<Record<string, unknown>>(g, INBOX_RESOURCE, null as never)) ?? { version: 1, envelopes: [], events: [], draftCases: [], caseEvents: [], cards: {} };
           const envs = (doc.envelopes as MessageEnvelopeV1[] | undefined) ?? [];
-          if (!envs.some((e) => e.id === envelope.id)) {
+          const fresh = !envs.some((e) => e.id === envelope.id);
+          if (fresh) {
             doc.envelopes = [...envs, envelope];
             doc.events = [
               ...((doc.events as unknown[] | undefined) ?? []),
@@ -3180,7 +3195,10 @@ export class InteractionsDO {
             // serialize slot, NOT awaited (we hold the mutex); never affects this response.
             this.queueInboxAssistantScan(principal, doc.envelopes as MessageEnvelopeV1[]);
           }
-          return json({ ok: true, messageId: envelope.id });
+          // Spec 400 W1c — where this member's runtime lives, if its custodian declared one, so the deliverer can
+          // WAKE it (a duplicate is not admitted and wakes nothing). Config on this object, never authority.
+          const runtimeHost = fresh ? parseRuntimeHost(await this.state.storage.get(RUNTIME_HOST_KEY)) : null;
+          return json({ ok: true, messageId: envelope.id, admitted: fresh, ...(runtimeHost ? { runtimeHost } : {}) });
         });
       } catch (e) {
         return json({ error: e instanceof Error ? e.message : String(e) }, 409);
@@ -3291,8 +3309,11 @@ export class InteractionsDO {
         }
         return this.serialize(async () => {
           await this.writeDoc(grant, `org.membership:member:${member}`, record);
-          // The room says so: a new member is announced in the Welcome topic (best-effort, never gating).
-          await this.postWelcome(grant, principal, `👋 ${await this.boardNameFor(grant, member)} joined.`, true);
+          // The room says so: a new member is announced in the Welcome topic — best-effort, never gating, and
+          // AFTER the answer: a join ceremony waited on the topic being created, read and appended to (several
+          // vault operations) before the person could be told they were in.
+          const announce = async () => { try { await this.postWelcome(grant, principal, `👋 ${await this.boardNameFor(grant, member)} joined.`, true); } catch { /* the welcome is not the membership */ } };
+          this.state.waitUntil(announce());
           return json({ ok: true, member });
         });
       }
@@ -3741,6 +3762,30 @@ export class InteractionsDO {
         await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: body.record === null ? 'interactions.channels.archetypeAssignmentClear' : 'interactions.channels.archetypeAssignmentPut', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'archetype-assignment', id: principal } });
         await this.writeDoc(grant, 'archetype.assignment', body.record);
         return json({ ok: true, cleared: body.record === null });
+      }
+
+      // ── spec 400 W1c — WHERE THE MEMBER'S RUNTIME LIVES, and what its wakes came to. The custodian's
+      //    declaration (self or steward, the archetype-assignment gate): a Container instance the app binds, or a
+      //    URL that serves `POST /wake`. DO-local: it is config for the serving plane (wiped ⇒ re-declared with
+      //    `ap runtime host`), not a record — and it authorizes nothing; the runtime's acts are judged by its wire
+      //    and its grant when they arrive. `runtime.wake.get` reads the bounded ledger of wake receipts. ──
+      if (op === 'runtime.host.get' || op === 'runtime.host.put' || op === 'runtime.wake.get') {
+        const isSelf = sessionSa.toLowerCase() === principal;
+        const steward = isSelf || await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
+        if (!steward) return json({ error: 'only the agent’s custodian may say where its runtime lives' }, 403);
+        if (op === 'runtime.host.get') return json({ ok: true, host: parseRuntimeHost(await this.state.storage.get(RUNTIME_HOST_KEY)) });
+        if (op === 'runtime.host.put') {
+          if (body.host === null) { await this.state.storage.delete(RUNTIME_HOST_KEY); return json({ ok: true, host: null }); }
+          const host = parseRuntimeHost(body.host);
+          if (!host) return json({ error: 'host must be { v: 1, kind: "container" } or { v: 1, kind: "url", url } (null clears it)' }, 400);
+          await this.state.storage.put(RUNTIME_HOST_KEY, host);
+          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.runtime.hostPut', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'runtime-host', id: principal }, reason: host.kind });
+          return json({ ok: true, host });
+        }
+        const ids = ((await this.state.storage.get(RUNTIME_WAKES_KEY)) as string[] | undefined) ?? [];
+        const want = typeof body.messageId === 'string' ? [body.messageId] : ids.slice(-Number(body.limit ?? 10));
+        const wakes = (await Promise.all(want.map((id) => this.state.storage.get(`${RUNTIME_WAKE_PREFIX}${id}`)))).filter(Boolean) as WakeReceiptV1[];
+        return json({ ok: true, wakes });
       }
 
       // ── spec 327 — the org assistant on a topic (318 §8.1: the org's OWN agent, steward-enabled). ──
