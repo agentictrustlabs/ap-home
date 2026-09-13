@@ -1650,7 +1650,7 @@ button.ui-switch:hover:not(:disabled) { filter: none; }
 /* the Ask composer's control strip: what to do · which model, one small row above the input */
 .ask-flyout-strip { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; padding: 0 .8rem .4rem; }
 .ask-flyout-strip__ctl { display: inline-flex; gap: 6px; align-items: center; font-size: var(--fs-xs); color: var(--color-text-muted); }
-.ask-flyout-strip__ctl select { height: 28px; font-size: var(--fs-sm); padding: 0 1.5rem 0 .5rem; }
+.ask-flyout-strip__ctl select { height: 28px; font-size: var(--fs-sm); padding: 0 1.5rem 0 .5rem; max-width: 190px; }
 /* a labelled checkbox row: the box, then the words — the words wrap, the box does not */
 .dev-apps__check, .ui-check { display: flex; gap: 10px; align-items: flex-start; font-size: var(--fs-md); color: var(--color-text-body); line-height: var(--lh-body); padding: 4px 0; cursor: pointer; }
 .dev-apps__check input, .ui-check input { flex: none; margin-top: 3px; }

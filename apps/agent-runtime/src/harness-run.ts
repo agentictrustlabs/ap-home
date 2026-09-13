@@ -3479,10 +3479,13 @@ async function askReplyForInner(env: HarnessEnv, input: {
     // answer is not waiting, it is stuck, and stuck reads to a person as broken rather than as unsupported.
     const kind = r.prompt.kind;
     const declared = input.surface?.ceremonies;
-    if (declared?.length && !new Set([...ASSUMED_CEREMONIES, ...declared]).has(kind)) {
+    // A routed subject's AUTHORITY request (spec 374 W2) is not a ceremony the surface collects as a prompt: it is
+    // turned into `authority_required` below, which every surface that presents mandates already handles. Gating it
+    // here refused "invite carol to thompson" at the Home with "this needs a authority" (seen 2026-09-13).
+    if (kind !== 'authority' && declared?.length && !new Set([...ASSUMED_CEREMONIES, ...declared]).has(kind)) {
       return {
         kind: 'refused', runRef: r.runRef, outcome: 'denied', receipts: r.receipts,
-        error: `this needs a ${kind} and this surface cannot collect one — nothing was authorized`,
+        error: `this needs ${kind === 'signature' ? 'a signature' : `a ${kind} step`} and this surface cannot collect one — nothing was authorized`,
       };
     }
     // STANDING BEFORE THE QUESTION (spec 353 S5). A prompt is a demand on a person. Asking a member to
