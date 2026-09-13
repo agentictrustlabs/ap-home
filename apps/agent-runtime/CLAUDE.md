@@ -67,6 +67,13 @@ proxies selected MCP requests during local demos.
   or an agent's **session wire** (S3c). `message/send` / `tasks/*` are DELETED — `forwardA2aTask` with them.
   The live card gains the 1.0 fields + the extension; a released card is untouched. A door, never a grant.
 
+- **The runtime wake (spec 400 W1c, `src/runtime-wake.ts` + `src/runtime-container.ts`):** after `internal.deliver`
+  ADMITS a message into a member whose custodian declared where its runtime lives (`runtime.host.put`, DO-local
+  config), the deliverer enqueues one wake on `RUNTIME_WAKE` and the consumer (this Worker's `queue`) POSTs `/wake` to
+  the member's Container (`RUNTIME`, `RuntimeContainer` — Node + `ap runtime serve` + the ACP agent, image from
+  `runtime-container/`; `node runtime-container/build.mjs` before deploy) or a URL; the receipt lands DO-local
+  (`runtime.wake.get`). The Worker never polls and never speaks ACP; a wake carries no content and no authority.
+
 ## What this app does not own
 
 - Package delegation semantics → `packages/delegation`.

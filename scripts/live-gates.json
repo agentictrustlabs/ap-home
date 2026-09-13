@@ -372,6 +372,16 @@
       "timeoutSec": 420
     },
     {
+      "id": "verify-runtime-wake",
+      "script": "scripts/verify-runtime-wake.mts",
+      "spec": "400 W1c",
+      "proves": "a runtime member hosted on a Cloudflare Container next to the Worker is WOKEN, never polled: the steward's message is admitted into the member's inbox, the Worker enqueues one wake (no content, no authority), the consumer wakes the member's Container, the ACP host inside runs one pass — the agent prompted with the steward's words, its local shell refused, the workspace tool allowed — and the reply parks for the steward's mandate and lands when she signs; the receipt is on the member's object",
+      "twin": "the custodian clears the host declaration: another message is admitted and nothing is woken (the Worker wakes only what it was told about); the declaration restored",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 420
+    },
+    {
       "id": "verify-contacts",
       "script": "scripts/verify-contacts.mts",
       "spec": "401 C1",

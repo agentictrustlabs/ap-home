@@ -369,6 +369,11 @@ new_sqlite_classes = ["HuddleRoomDO"]
 tag = "v5"
 new_sqlite_classes = ["ProviderMeterDO"]
 
+# Spec 400 W1c — the runtime member's Container (a DO per member instance; the Container class extends DurableObject).
+[[migrations]]
+tag = "v6"
+new_sqlite_classes = ["RuntimeContainer"]
+
 # ── FAITHNET (Azure faithchain 34348) — gcp-kms custody, Home on faithnet.me, backend on faithnet.io ──
 [env.faithnet]
 name = "demo-a2a-faithnet"
@@ -397,6 +402,9 @@ zone_name = "faithnet.ai"
 binding = "AI"
 
 [env.faithnet.vars]
+# Spec 400 W1c — the ACP agent the runtime Container spawns: the deterministic stub (the live gate's) or
+# `claude-code-acp` (Claude Code; the operator's ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN as secrets).
+AP_RUNTIME_AGENT = "acp-stub-agent"
 # Spec 397 W2 — the ARD registry this deployment's agents find other agents in.
 ARD_REGISTRY_ORIGIN = "https://discovery-a2a.faithnet.io"
 # Spec 365 — the zones whose inbound mail this Worker routes (`<handle>@<zone>` → the naming service).
@@ -531,7 +539,32 @@ bindings = [
   { name = "HUDDLES", class_name = "HuddleRoomDO" },
   { name = "PROVIDER_METER", class_name = "ProviderMeterDO" },
   { name = "SA_BUDGET", class_name = "SmartAgentBudgetDO", script_name = "demo-mcp-faithnet" },
+  # Spec 400 W1c — one runtime Container per member, named by the member's agent address.
+  { name = "RUNTIME", class_name = "RuntimeContainer" },
 ]
+
+# Spec 400 W1c — the runtime member's Container: Node + `ap runtime serve` + the ACP agent, next to the Worker.
+# Image built by wrangler from ./runtime-container (run `node runtime-container/build.mjs` first — it packs the kit
+# into ./runtime-container/tarballs). Per-member secrets: AP_RUNTIME_RECORD_<NAME> / AP_RUNTIME_KEY_<NAME>
+# (`ap runtime export`); AP_RUNTIME_AGENT picks the agent (acp-stub-agent | claude-code-acp).
+[[env.faithnet.containers]]
+class_name = "RuntimeContainer"
+image = "./runtime-container/Dockerfile"
+max_instances = 3
+instance_type = "basic"
+
+# Spec 400 W1c — the wake queue: produced after a message is ADMITTED into a member that declared a host; consumed
+# by this same Worker, which POSTs /wake to the member's Container (or URL). No content, no authority in a message.
+[[env.faithnet.queues.producers]]
+binding = "RUNTIME_WAKE"
+queue = "runtime-wake-faithnet"
+
+[[env.faithnet.queues.consumers]]
+queue = "runtime-wake-faithnet"
+max_batch_size = 10
+max_batch_timeout = 2
+max_retries = 2
+max_concurrency = 2
 
 [[env.faithnet.kv_namespaces]]
 binding = "BRIDGE_NONCES"

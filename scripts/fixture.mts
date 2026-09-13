@@ -70,6 +70,9 @@ export interface GateFixtureV1 {
   skillsRegistry: string;
   /** An outside ACP runtime as a member (spec 400 W1): its `.svc` (chartered by the steward) and the workspace it joined. */
   acpRuntime: { member: string; workspace: string } | null;
+  /** Spec 400 W1c — a runtime member whose host is a Container the Worker WAKES (joined once by hand with
+   *  `ap runtime join … --wake container --days 30`, its record + key as the Worker's secrets); null = no Container. */
+  containerRuntime: { member: string; workspace: string } | null;
   /** The deployment's hosts the runtime member speaks to: the standard surface (edge) and the runtime. */
   edge: string;
   /** Names that resolve NOWHERE — the twins that must be refused by name. */
@@ -94,6 +97,7 @@ export const FAITHNET_FIXTURE: GateFixtureV1 = {
   routineAgent: { handle: 'playwright-demo-team.impact', playbook: 'agentic-trust/coordinator' },
   skillsRegistry: 'https://skills-a2a-production.richardpedersen3.workers.dev',
   acpRuntime: { member: 'goose-1.svc', workspace: 'missio-nexus.org' },
+  containerRuntime: { member: 'goose-2.svc', workspace: 'missio-nexus.org' },
   edge: 'https://edge.faithnet.io',
   absent: { org: 'nobody-here-zz.org', svc: 'nobody-here-zz.svc' },
 };

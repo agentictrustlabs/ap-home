@@ -89,6 +89,7 @@ import {
 // time (never at module-init), and `Env`/`IncomingDelegation` are type-only.
 import { buildAuditSink, callMcpToolWithProof, interactionsSessionAccount, runUnattendedAsk, runAgentAsk, fireTriggersAt, harnessDeps, probeSenderFor, candidateSourceFor, type Env, type IncomingDelegation } from './index.js';
 import { dueNow, advanced, messageTriggerSource, type TriggerScheduleV1 } from './triggers.js';
+import { enqueueRuntimeWake, parseRuntimeHost } from './runtime-wake.js';
 import { ERC1271_MAGIC_VALUE as ERC1271_MAGIC } from '@agenticprimitives/types';
 
 /** How long an unfinished harness run stays resumable. A day is well past the point: the mandate a
@@ -779,16 +780,25 @@ export class A2aTaskDO {
         // spec 323 W3.2 — the recipient's InteractionsDO does BOTH admissions with its OWN held
         // delivery wire: the body (internal.dm.body.put) then the inbox.data merge (internal.deliver).
         const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(recipient.toLowerCase()));
-        const call = async (op: string, payload: unknown): Promise<void> => {
+        const call = async (op: string, payload: unknown): Promise<Record<string, unknown>> => {
           const resp = await stub.fetch(new Request(`https://do/interactions/${recipient.toLowerCase()}/${op}`, {
             // ARCH-H2 — the in-Worker internal marker the InteractionsDO requires for internal.* ops.
             method: 'POST', headers: internalHeaders(this.env), body: JSON.stringify(payload),
           }));
           const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
           if (!resp.ok || !out.ok) throw new Error(out.error ?? `${op} failed (${resp.status})`);
+          return out as Record<string, unknown>;
         };
         await call('internal.dm.body.put', { resource: body.resource, data: body.stored });
-        await call('internal.deliver', { envelope });
+        const delivered = await call('internal.deliver', { envelope });
+        // Spec 400 W1c — ADMITTED, and this member's custodian said where its runtime lives: wake it. One queue
+        // message, no content, no authority; the runtime reads the message under its own wire. Detached like the
+        // triggers below — the sender's receipt says "admitted", never "woken".
+        const runtimeHost = parseRuntimeHost(delivered.runtimeHost);
+        if (runtimeHost && delivered.admitted === true) {
+          void enqueueRuntimeWake(this.env, { member: recipient.toLowerCase(), memberName: await harnessDeps(this.env, buildAuditSink(this.env)).nameOf?.(recipient.toLowerCase()).catch(() => null) ?? null, conversationId: envelope.conversationId, messageId: envelope.id, host: runtimeHost })
+            .catch((e: unknown) => console.warn('[runtime-wake] enqueue failed:', e instanceof Error ? e.message : String(e)));
+        }
         // Spec 375 W2 — ADMITTED, so now the playbook may hear about it: the recipient's own `message`
         // triggers fire one unattended run each, this agent as the asker holding nothing (P5). Detached from
         // the delivery: the sender's receipt says "admitted", never "reacted to", and a run that takes a
