@@ -42,8 +42,11 @@ export async function recordOrgMembership(
    *  card (a vault-resident member.profile will replace this once generic owner writes exist). */
   displayName?: string,
 ): Promise<void> {
+  const t0 = Date.now();
+  const lap = (what: string) => console.info(`[org-membership] ${what} +${Date.now() - t0}ms`);
   try {
     const d = await issueMemberProfileAccessDelegation(member, org as Address, MCP_SERVER_ID, sign);
+    lap('delegation signed');
     const madMatches = !!memberAccess && (memberAccess.delegate ?? '').toLowerCase() === member.toLowerCase();
 
     /*
@@ -78,6 +81,7 @@ export async function recordOrgMembership(
         ...(displayName?.trim() ? { displayName: displayName.trim().slice(0, 80) } : {}),
       }),
     });
+    lap('org-membership recorded');
     // spec 322 W3d — AUTHORITATIVE person-plane write-through via the member's own InteractionsDO:
     // their relationships doc + the per-org profile card (the server's `related:*` KV is a
     // projection/cache of this). A 409 here (person hasn't enabled interactions yet) is expected —
@@ -103,6 +107,7 @@ export async function recordOrgMembership(
       organizationDecisionRef: `enroll-decision:${org.toLowerCase()}:${member.toLowerCase()}`,
       bearer,
     });
+    lap('membership situation written');
     // THE TWO WRITES THAT REMAIN ARE INDEPENDENT of each other — the member's relationships doc and their
     // per-org profile card — and each is a vault operation of its own. Sequential, a join spent their sum
     // while the person watched "telling the workspace you joined…"; together they cost the longer one.
@@ -124,6 +129,7 @@ export async function recordOrgMembership(
           }).catch(() => null)
         : Promise.resolve(null),
     ]);
+    lap('relationships + profile written');
   } catch (e) {
     console.warn('[org-membership] membership delegation not recorded (join still succeeded):', e);
   }

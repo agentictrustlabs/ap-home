@@ -276,7 +276,10 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         return;
       }
       // SEC-001: server-mint the grant FIRST; use the registry-derived delegate (anti-spoof).
+      const tCeremony = Date.now();
+      const lapCeremony = (what: string) => console.info(`[connect ${enroll.template}] ${what} +${Date.now() - tCeremony}ms`);
       const { grant_id, delegate } = await beginEnrollmentGrant(enroll, home.name);
+      lapCeremony('grant begun');
       /*
         PASS THE SESSION TOKEN FOR EVERY CREDENTIAL, not only the KMS ones.
 
@@ -364,6 +367,8 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       if (enroll.template === 'workspace-join') {
         if (!enroll.grantOrg) return fail('This join names no workspace.');
         if (!token) return fail('Your Home session is needed to join a workspace.');
+        const tJoin = Date.now();
+        const lapJoin = (what: string) => console.info(`[workspace-join] ${what} +${Date.now() - tJoin}ms`);
         setGrantProgress({ step: 1, total: 2, label: 'Claiming your invitation…' });
         const res = await fetch('/connect/workspace-invite', {
           method: 'POST',
@@ -378,6 +383,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         if (!res.ok || !out.ok || !out.invite?.delegation) {
           return fail(out.error ?? 'No invitation was found for you at this workspace — ask its steward to invite you.');
         }
+        lapJoin('invitation claimed');
         // THE LINK AND THE WORKSPACE'S OWN RECORD, TOGETHER. The link is the member's own note (and what the Home
         // derives standing from); the record is the workspace's word about who belongs. Neither waits on the
         // other, and each is seconds of vault work, so they run side by side — a join that took twenty seconds
@@ -422,10 +428,12 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         if (!linked.ok || link.ok === false) {
           return fail(link.error ?? `joined, but the workspace could not be linked to your home (HTTP ${linked.status})`);
         }
+        lapJoin('linked');
         // AND THE WORKSPACE'S OWN RECORD OF THEM (spec 325, finding ORG-MEM-1) — started above beside the link;
         // waited for here, because the roster a relying app reads is that record, and a person sent back before
         // it landed would arrive at a club that did not list them yet.
         await recordP;
+        lapJoin('workspace recorded the membership');
       }
 
       let code: string;
@@ -580,10 +588,13 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         }
         // spec 345 — a self-vault grant rides this SAME plain sign-in when the client declares one.
         const selfVaultScope = whitelabel.relyingApps.find((a) => a.client_id === enroll.aud)?.self_vault_grant;
+        lapCeremony('template leg done');
         let granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey, payment, selfVaultScope);
         if (!granted.ok) return fail(granted.error);
+        lapCeremony(`permission given${granted.reused ? ' (reused)' : ''}`);
         try {
           code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation, granted.selfVaultGrant);
+          lapCeremony('code minted');
         } catch (e) {
           // The REUSED standing grant was refused (revoked / no longer verifiable). Clear it and mint
           // fresh ONCE — the single explicit fallback (ADR-0013). A fresh-mint refusal is terminal.
@@ -605,6 +616,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       // Same reason: the vault-key ceremony signs, so a wallet-credential demo home needs the token.
       try { await activateVaultIfNeeded(home.address, viaLower, token ? { token } : undefined); }
       catch (e) { console.warn('[connect] vault-key activation failed (non-fatal — vault reads will 401 until bound):', e); }
+      lapCeremony('vault key checked');
       // Same consent as connect: storage, delivery, and a SCOPED wire — the communities they belong
       // to plus, for a named home, the named-to-named class — so the first send from the app is not
       // a second ceremony. One signature; the gate resolves membership and namedness live.
