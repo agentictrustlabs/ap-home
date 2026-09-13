@@ -47,6 +47,8 @@ const nextConfig = {
   // EXT-004: the list grows with every consumed package; a future cleanup wave
   // collapses thin wrappers (EXT-003) which will shrink this list naturally.
   transpilePackages: [
+    // the product-shared module ships TypeScript source (spec 399 §4); Next transpiles it like the workspace packages
+    '@agenticprimitives-demo/home-shared',
     '@agenticprimitives/types',
     '@agenticprimitives/connect',
     '@agenticprimitives/connect-auth',

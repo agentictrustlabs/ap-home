@@ -1,9 +1,9 @@
 // The genesis-folded planes: deterministic (a resume re-derives what was signed), and scope-PINNED to
 // the Home's enable ceremony — two apps that each sign "the interactions grant" must mean the same
-// records by it. The CORE list is one package source now (`@agenticprimitives/fabric/interactions`,
-// spec 399 §4); what the pin still guards is the PRODUCT EXTENSION — the app namespaces each side
-// appends (Home's APP_*_SCOPES, the runtime's GENESIS_INTERACTIONS_APP_SCOPES) — until those live in
-// one product-shared module in ap-home. That is why this test, and only this test, imports across apps.
+// records by it. The CORE list is one package source (`@agenticprimitives/fabric/interactions`) and the
+// PRODUCT EXTENSION is one product-shared module (`@agenticprimitives-demo/home-shared`, spec 399 §4) —
+// so what this test guards is the FOLD: that the genesis caveat carries exactly core + extension, and
+// that the Home's builder (imported across apps here, and only here) lands on the same resources.
 import { describe, it, expect } from 'vitest';
 import { decodeVaultRecordScopeTerms, VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 import type { Hex } from 'viem';

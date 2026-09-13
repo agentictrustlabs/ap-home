@@ -32,22 +32,12 @@ import {
 const APPROVED = '0x03' as Hex;
 
 import { vaultServerId } from './vault-server-id.js';
+import { INTERACTIONS_APP_SCOPES } from '@agenticprimitives-demo/home-shared';
 
-/** The interactions grant's record scopes: the package CORE (`@agenticprimitives/fabric/interactions` — the
- *  one list the Home composes from too) plus this product's own namespaces. Only the extension is a local
- *  literal now, and it is the Home's `APP_*_SCOPES` twin: the uupg app's enumerated public-claim types and the
- *  relying apps' ontology namespace roots, read-only; family/field read+write for steward seeding. */
-export const GENESIS_INTERACTIONS_APP_SCOPES: ReadonlyArray<RecordScopeSpec> = [
-  { resources: [
-    'vault:uupg:attestation', 'vault:uupg:attestations', 'vault:uupg:assessed', 'vault:uupg:coalition',
-    'vault:uupg:segment-def', 'vault:uupg:org-profile', 'vault:uupg:strategy', 'vault:uupg:identity',
-    'vault:uupg:community', 'vault:uupg:observations',
-    'vault:newcity:*', 'vault:family:*', 'vault:field:*',
-  ], ops: ['read'] },
-  { resources: ['vault:family:*', 'vault:field:*'], ops: ['read', 'write'] },
-  // The person's card-room study records: hands (recorded by their own agent), style, reads, the coach's notes.
-  { resources: ['vault:cardroom.*'], ops: ['read', 'write'] },
-];
+/** The interactions grant's record scopes: the package CORE (`@agenticprimitives/fabric/interactions`) plus this
+ *  product's own namespaces — the ONE list the Home's enable ceremony appends too (`@agenticprimitives-demo/home-shared`,
+ *  spec 399 §4). Nothing here is a local literal any more: a scope added for one app is added for both. */
+export const GENESIS_INTERACTIONS_APP_SCOPES: ReadonlyArray<RecordScopeSpec> = INTERACTIONS_APP_SCOPES;
 export const GENESIS_INTERACTIONS_SCOPES: ReadonlyArray<RecordScopeSpec> = [...INTERACTIONS_GRANT_CORE_SCOPES, ...GENESIS_INTERACTIONS_APP_SCOPES];
 
 export interface GenesisPlanesEnv {

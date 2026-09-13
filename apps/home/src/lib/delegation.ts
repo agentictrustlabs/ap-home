@@ -24,6 +24,7 @@ import {
 import type { Address, Hex } from '@agenticprimitives/types';
 import { interactionsGrantScopes } from '@agenticprimitives/fabric/interactions';
 import { CHAIN_ID, CONTRACTS } from './chain';
+import { INTERACTIONS_APP_SCOPES } from '@agenticprimitives-demo/home-shared';
 import { INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from './inbox-delivery';
 
 type SignHash = (hash: Hex) => Promise<Hex>;
@@ -422,55 +423,10 @@ export const ARCHETYPE_ASSIGNMENT_RESOURCE_SCOPE = 'vault:archetype.assignment' 
  *  presents carries write authority). */
 export const PAYMENT_RECEIPT_RESOURCE_SCOPE = 'vault:payment.receipt:*' as const;
 
-/** spec 334 §6 — the org's OWN app-coordination records the org agent may READ (read-only) while it
- *  works an endeavor, so its deliverables are grounded in what the org has actually recorded rather
- *  than invented. These are relying-app record types (the UUPG engagement app), listed here because
- *  the interactions grant is minted at the Home; the coordination plane reads them owner-self through
- *  that grant. READ-ONLY and ADDITIVE (same re-enable precedent as coordination.*): a grant lacking
- *  them denies per-record at demo-mcp, surfaced as "re-enable storage". The private companion
- *  (`uupg:attestation-private`) is deliberately EXCLUDED — the agent reasons over public-tier claims,
- *  never the sensitive record. */
-export const APP_COORDINATION_READ_SCOPES = [
-  'vault:uupg:attestation', 'vault:uupg:attestations', 'vault:uupg:assessed',
-  'vault:uupg:coalition', 'vault:uupg:segment-def', 'vault:uupg:org-profile', 'vault:uupg:strategy',
-  // The HOTSPOT TRACKER's own record set (same relying-app family, same public tier). Its ✦ Ask turn
-  // is grounded in exactly these: the minted people-group identities, the tracked bodies and their
-  // delineations, and what was observed happening. Their absence is why that feature answered "no
-  // reference facts reached me" for every question — the gather turn asked for `uupg:identity` and
-  // `uupg:community` and got `record_scope_denied` from demo-mcp, which reaches a person as an agent
-  // that cannot see its own organization's records.
-  'vault:uupg:identity', 'vault:uupg:community', 'vault:uupg:observations',
-] as const;
-
-/** The org's OWN app-record NAMESPACE, READ-only. Where APP_COORDINATION_READ_SCOPES enumerates the
- *  uupg app's individual public-claim record types, a relying app whose ontology decomposes ALL of a
- *  principal's data into ONE vault namespace root (newcitycase doc 10 §1: `vault:newcity:*`) grants
- *  the org's own agent read over that ROOT — a namespace WILDCARD, never per-record. The platform
- *  therefore never names a single domain record: which records the agent actually reads is decided
- *  by the org's PLAYBOOK at turn time (spec 327 §4b), read owner-self through this grant. READ-ONLY
- *  and ADDITIVE (same re-enable precedent as coordination.*): a grant lacking it denies per-record at
- *  demo-mcp, surfaced as "re-enable storage", never blanket-staled. Grounds the discussion @ask turn
- *  (and coordination) in the org's own recorded figures instead of invention. */
-export const APP_OWN_NAMESPACE_READ_SCOPES = ['vault:newcity:*', 'vault:family:*', 'vault:field:*'] as const;
-
-/** SEEDING scope — the same namespaces, read+WRITE, for provisioning a demo/sandbox org whose vault
- *  starts empty. Deliberately narrow and deliberately separate from the read scope above.
- *
- *  The read-only rule exists so an agent cannot manufacture the evidence it later cites, and that
- *  rule is NOT relaxed here: the write is reachable only through a STEWARD-GATED op
- *  (`channels.assistantSkill.put` → isSteward), never from an agent turn. The agent's own path is
- *  `internal.coordination.vaultRead`, which is read and stays read.
- *
- *  A production org should not need this — its records are owner-authored through the portal. It
- *  exists because a shared sandbox has no owner to author them, and an empty vault makes every
- *  grounded answer impossible to demonstrate. Grants signed before it shipped simply lack it and
- *  deny the seed per-record, like every other additive scope. */
-export const APP_OWN_NAMESPACE_SEED_SCOPES = ['vault:family:*', 'vault:field:*', 'vault:cardroom.*'] as const;   // cardroom: the person's own study records (hands, style, reads, notes)
-// `vault:family:*` is the skills-app family-office relying namespace (record types like
-// `family:portfolio`, `family:budget`; resource = `vault:` + recordType). ADDITIVE + read-only:
-// only grants built AFTER this ships carry it, so existing grants are unaffected — an org must
-// (re-)enable discussion storage to pick it up. The records themselves are owner-authored through
-// the portal's browser-vault-client (spec 288 edge); the org's playbook names which to read.
+// The product's own namespaces on the interactions grant live in ONE module both apps import
+// (`@agenticprimitives-demo/home-shared`, spec 399 §4): re-exported here for the callers that always read them from
+// this file; the caveat below is built from the same list the runtime's genesis planes append.
+export { APP_COORDINATION_READ_SCOPES, APP_OWN_NAMESPACE_READ_SCOPES, APP_OWN_NAMESPACE_SEED_SCOPES, INTERACTIONS_APP_SCOPES } from '@agenticprimitives-demo/home-shared';
 
 /**
  * spec 322 §2 plane B — the INTERACTIONS grant `principal → INTERACTIONS_SERVICE_SA`, signed once
@@ -499,10 +455,7 @@ function buildInteractionsStruct(
     // the platform never names a domain record; the org's playbook does. Then the same namespace read+write
     // for steward SEEDING of a sandbox org's vault (the agent never reaches this — its read path is a
     // different op, and the write op is steward-gated; see APP_OWN_NAMESPACE_SEED_SCOPES).
-    buildVaultRecordScopeCaveat(interactionsGrantScopes(mcpServerId, [
-      { resources: [...APP_COORDINATION_READ_SCOPES, ...APP_OWN_NAMESPACE_READ_SCOPES], ops: ['read'] },
-      { resources: [...APP_OWN_NAMESPACE_SEED_SCOPES], ops: ['read', 'write'] },
-    ])),
+    buildVaultRecordScopeCaveat(interactionsGrantScopes(mcpServerId, INTERACTIONS_APP_SCOPES)),
     buildCaveat(CONTRACTS.timestampEnforcer, encodeTimestampTerms(0, validUntil)),
     buildCaveat(CONTRACTS.valueEnforcer, encodeValueTerms(0n)),
   ];
