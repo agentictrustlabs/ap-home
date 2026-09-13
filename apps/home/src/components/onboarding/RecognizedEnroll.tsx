@@ -337,6 +337,27 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         });
         const out = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
         if (!res.ok || !out.ok) return fail(out.error ?? `the invitation could not be stored (HTTP ${res.status})`);
+        // AND TELL THEM. The stash is claimed by a ceremony the member starts from the app; nothing at their
+        // own Home said an invitation existed — a host "invited Rich" and Rich's Home showed nothing waiting
+        // (2026-09-13). So the host's own agent sends them one message, the way an organization's invitation
+        // reaches an invitee (spec 341 §5.1b): delivered over A2A by the inviter's agent, never written by the
+        // Home, carrying the app's link to where the join is. Best-effort: the invitation stands on the stash.
+        setGrantProgress({ step: 2, total: 2, label: 'Telling them…' });
+        try {
+          const { approveMessagingContact, COMMUNITY_MESSAGING_VALIDITY_SECONDS } = await import('../../lib/messaging-ceremony');
+          const { sendMessage } = await import('../../lib/messaging-send');
+          setSsoCookie(token, viaLower); // `sendMessage` reads the person's bearer from where the Home keeps it
+          await approveMessagingContact({ person: home.address, recipient: enroll.member, via: viaLower as Via, token, validitySeconds: COMMUNITY_MESSAGING_VALIDITY_SECONDS });
+          const place = enroll.orgBase?.trim() || 'a workspace';
+          await sendMessage({
+            person: home.address,
+            recipient: enroll.member,
+            bodyText: `${homeLabel(home.name)} invited you into ${place} at ${appName}. Open ${place}'s page there and press "Join at your Home" — your Home will then know you as a member.`,
+            contextRefs: enroll.appLink ? [{ kind: 'app-link', id: enroll.appLink, label: `Join ${place} at ${appName}` }] : [],
+          });
+        } catch (e) {
+          console.warn('[connect] workspace-member-invite: the invitation could not be sent as a message', e);
+        }
       }
       if (enroll.template === 'workspace-join') {
         if (!enroll.grantOrg) return fail('This join names no workspace.');

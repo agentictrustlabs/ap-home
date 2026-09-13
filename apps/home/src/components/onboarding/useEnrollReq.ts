@@ -29,6 +29,9 @@ export interface EnrollReq {
   purpose?: string; // org_create: app-level purpose tag (e.g. jp-adopter-org) — ADR-0025
   grantOrg?: Address; // org_create: a broker org SA to also grant scoped read (spec 246)
   member?: Address; // workspace-member-invite: the person SA being granted into the workspace (P4)
+  /** workspace-member-invite: where the invited person picks the invitation up IN THE APP — the page the
+   *  message the host's agent sends them points at. Accepted only on the relying app's own origin. */
+  appLink?: string;
   existingOrg?: Address; // org_create: reuse an EXISTING org the person stewards — grant from it instead of deploying a new one
   sessionKey?: Address; // spec 270 v4 W2 — the relying app's session-key address; the home signs the DEL-001 leaf for it
   payAmount?: string; // spec 272 — x402 charge amount (atomic units) the relying app requested (tier price); capped by the client's paymentConfig
@@ -80,6 +83,7 @@ export function parseEnrollReq(): EnrollReq | null {
       purpose: p.get('org_purpose') ?? undefined,
       grantOrg: (p.get('grant_org') as Address) ?? undefined,
       member: (p.get('member') as Address) ?? undefined,
+      appLink: sameOriginLink(p.get('app_link'), redirectUri),
       existingOrg: (p.get('existing_org') as Address) ?? undefined,
       sessionKey: (p.get('session_key') as Address) ?? undefined,
       payAmount: /^\d+$/.test(p.get('pay_amount') ?? '') ? (p.get('pay_amount') as string) : undefined,
@@ -91,6 +95,18 @@ export function parseEnrollReq(): EnrollReq | null {
     };
   } catch {
     return null;
+  }
+}
+
+/** A link a relying app may put in front of a person: https, and on the app's own registered origin. */
+function sameOriginLink(link: string | null, redirectUri: string): string | undefined {
+  if (!link) return undefined;
+  try {
+    const u = new URL(link);
+    if (u.protocol !== 'https:' || u.origin !== new URL(redirectUri).origin) return undefined;
+    return u.toString().slice(0, 500);
+  } catch {
+    return undefined;
   }
 }
 

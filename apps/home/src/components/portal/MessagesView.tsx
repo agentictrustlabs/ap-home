@@ -66,6 +66,17 @@ function ContextChip({ r, names }: { r: { kind: string; id: string; label?: stri
       </a>
     );
   }
+  if (r.kind === 'app-link' && /^https:\/\//.test(r.id)) {
+    // A relying app's own page — where an invitation into one of its workspaces is picked up. The sender's
+    // agent put the link in the message; the Home shows it as what it is, a door out to that app.
+    return (
+      <a href={r.id} target="_blank" rel="noopener noreferrer" className="badge"
+        style={{ border: '1px solid var(--color-sage-500)', background: 'var(--color-sage-50)', color: 'var(--color-sage-700)', textDecoration: 'none', fontWeight: 600 }}
+        title={r.id}>
+        {r.label ?? 'Open in the app'} →
+      </a>
+    );
+  }
   if (r.kind === 'org-channels') {
     // Name the ORG on the chip — a thread can carry invites to DIFFERENT orgs (contextRefs union),
     // and generic "Join the organization" chips were indistinguishable.
