@@ -5,6 +5,7 @@
 // openSession — the exact rail the SIWE handoff already rides. Renders nothing off localhost.
 import { useEffect, useState } from 'react';
 import { useSession } from '../../context/session';
+import { WorkingBar } from './WorkingBar';
 
 interface DemoPersona { readonly handle: string; readonly name: string }
 
@@ -72,6 +73,7 @@ export function DemoPeopleFold({ enroll, appName, onSession }: {
           </button>
         ))}
       </div>
+      {busy && <WorkingBar label={`Opening ${personas.find((p) => p.handle === busy)?.name.split(' — ')[0] ?? 'their'} home…`} />}
       {err && <p style={{ color: '#b91c1c', marginTop: '.4rem' }}>{err}</p>}
     </details>
   );
