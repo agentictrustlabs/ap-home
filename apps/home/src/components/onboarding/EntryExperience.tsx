@@ -679,10 +679,11 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
   // email or phone lands in the portal.
   const [showEmail, setShowEmail] = useState(false);
   const [showPhone, setShowPhone] = useState(false);
-  // Only offer the wallet button when an injected provider is actually present (client-only check,
-  // set after mount to avoid an SSR/first-paint mismatch).
+  // The wallet button is offered whenever the config names it; whether an injected provider is actually
+  // present is a client-only check (set after mount to avoid an SSR/first-paint mismatch) that decides
+  // what the CLICK does — the door never hides a configured way in because this browser lacks it.
   const [walletAvail, setWalletAvail] = useState(false);
-  useEffect(() => { setWalletAvail(walletEnabled && hasWallet()); }, []);
+  useEffect(() => { setWalletAvail(hasWallet()); }, []);
   // Remote-persona arrival (uupg tracker demo — ?signer=remote&opener=<allowlisted>): the opener holds the
   // persona's key and signs over postMessage, so auto-run the REAL wallet ceremony — the SIWE message +
   // any deploy userOpHash route to the opener via wallet.ts provider(). One-shot per mount.
@@ -895,10 +896,10 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
             // open the session via useSession, so the Gate advances into the portal. No device gesture.
             <div style={{ margin: '.4rem 0 .2rem' }}><EmailAuthCard /></div>
           )}
-          {walletAvail && (
+          {walletEnabled && (
             <button
               className="btn-ghost onboarding-secondary"
-              onClick={withWallet}
+              onClick={() => { if (walletAvail) void withWallet(); else setErr('No wallet found in this browser — install a wallet extension such as MetaMask, or continue another way.'); }}
               disabled={busy !== null}
             >
               {busy === 'wallet' ? 'Confirm in your wallet…' : 'Continue with a wallet'}

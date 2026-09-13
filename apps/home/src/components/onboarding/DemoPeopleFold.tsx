@@ -48,6 +48,7 @@ export function DemoPeopleFold({ enroll, appName, onSession }: {
             key={p.handle}
             type="button"
             className="btn-ghost onboarding-secondary"
+            style={{ width: 'auto', padding: '.3rem .7rem', fontSize: '.78rem', fontWeight: 500 }}
             disabled={busy !== null}
             onClick={() => {
               setBusy(p.handle);
