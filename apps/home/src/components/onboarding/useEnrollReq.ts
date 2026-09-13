@@ -7,6 +7,7 @@
 // SEC-005: the relying-origin allowlist is no longer hardcoded here. It's derived from
 // `whitelabel.relyingApps[].redirect_uris` so the two sources cannot drift.
 import { CLIENT_DEFAULTS, applyClientDefaults } from '../../lib/client-defaults';
+import { isPaymentTemplate } from '../../whitelabel/config';
 import { useCallback, useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 // Curated clients resolve synchronously from the bundle; MEMBER-REGISTERED ones are looked up
@@ -207,7 +208,12 @@ export function deliverEnrollCode(enroll: EnrollReq, popupMode: boolean, code: s
   // card room leaves with the card room's skills on their agent and its default coach hired — the first hand
   // has a coach, and nobody is asked to go and set it up. Bounded (a minute) and never fatal: a failure is
   // logged, the code is delivered anyway, and the app's own sheet offers the Coaches page.
-  if (code && CLIENT_DEFAULTS[enroll.aud]) {
+  // ON THE SIGN-IN ONLY. Every ceremony delivers a code — a workspace join, an invitation, a charter, a
+  // wire — and each one spent fifteen seconds re-checking the card room's defaults (already applied, all
+  // skipped) before the person was sent back: a join that took thirty seconds was half this. The defaults
+  // are about ARRIVING, and arriving is the plain sign-in.
+  const plainSignIn = !enroll.template || enroll.template === 'site-login' || isPaymentTemplate(enroll.template);
+  if (code && plainSignIn && CLIENT_DEFAULTS[enroll.aud]) {
     const deadline = new Promise<void>((resolve) => setTimeout(resolve, 60_000));
     void Promise.race([applyClientDefaults(enroll.aud, (line) => console.log('[client-defaults]', line)).then((o) => { if (o.error) console.warn('[client-defaults]', enroll.aud, o.error); else console.log('[client-defaults]', enroll.aud, 'applied', o.applied, 'skipped', o.skipped); }).catch((e: unknown) => console.warn('[client-defaults]', enroll.aud, e)), deadline])
       .then(() => deliverEnrollCodeNow(enroll, popupMode, code));
