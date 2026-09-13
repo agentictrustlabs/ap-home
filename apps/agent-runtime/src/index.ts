@@ -13,6 +13,7 @@ import { recordOf, replayingInvoker, traceContextOf, type RunPlannerSummaryV1, t
 import { putRecord, getRecord, listRecords } from './run-records.js';
 import { recordFormOf, rehydrateExecuted } from './artifact-store.js';
 import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken, advanceTrigger, withPause, withBudget, advanced } from './triggers.js';
+import { consumeRuntimeWakes } from './runtime-wake.js';
 import { appendProgress, readProgress, type ProgressLineV1 } from './harness-progress.js';
 import { Hono, type Context } from 'hono';
 import { setCookie, getCookie } from 'hono/cookie';
@@ -287,6 +288,11 @@ export interface Env {
    * owner's vault (ADR-0055); this is a rebuild, not a bereavement. Absent binding ⇒ the live card is served.
    */
   RELEASED_CARDS?: KVNamespace;
+  /** Spec 400 W1c — the queue that wakes a runtime member's host after a message is admitted (producer + consumer
+   *  are this Worker), and the Container binding the host runs in (one instance per member). Both optional: unbound
+   *  ⇒ a runtime polls (`ap runtime run`), said in the log. */
+  RUNTIME_WAKE?: Queue<unknown>;
+  RUNTIME?: DurableObjectNamespace;
   /**
    * spec 347 §9 — Card Studio separation of duties. `strict` refuses `release.approve` / `projection.approve`
    * from the principal who last edited the draft / built the plan. Default OFF (demo: one steward holds every
@@ -2245,6 +2251,42 @@ app.get('/clubs/mine', async (c) => {
   }))).filter((x): x is { club: string; name: string; standing: string } => x !== null);
   console.log(`[clubs/mine] ${agent}: ${relationshipRows(tree).length} links, ${rows.length} workspaces, ${clubs.length} clubs · ${Date.now() - t0}ms`);
   return c.json({ ok: true, agent, clubs });
+});
+/**
+ * WHICH CLUBS A PERSON HAS BEEN INVITED TO AND NOT JOINED — the card room's rail, under the paired secret. An
+ * invitation into a club reaches the person as a MESSAGE from the host's agent (the invite ceremony sends it)
+ * carrying an `app-link` reference to the club's door; this reads those references off the person's own inbox,
+ * names each club from its profile, and leaves out the clubs they already belong to. Their inbox is their own:
+ * what leaves here is the club addresses the card room itself put in those links, and nothing else.
+ */
+app.get('/clubs/invitations', async (c) => {
+  if (!clubRosterSecretOk(c.env, c.req.header('authorization') ?? '')) return c.json({ ok: false, error: 'not for you' }, 403);
+  const agent = String(c.req.query('agent') ?? '').toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(agent)) return c.json({ ok: false, error: 'agent (0x…40) required' }, 400);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  if (!deps.readSubjectRecord) return c.json({ ok: true, agent, invitations: [] });
+  const [inbox, tree] = await Promise.all([
+    deps.readSubjectRecord(agent, 'inbox.data').catch(() => null) as Promise<{ envelopes?: Array<{ from?: string; createdAt?: string; contextRefs?: Array<{ kind?: string; id?: string }> }> } | null>,
+    deps.readSubjectRecord(agent, 'relationships.data').catch(() => null),
+  ]);
+  const belongs = new Set(relationshipRows(tree).map((r) => r.agent));
+  const seen = new Map<string, { club: string; from?: string; invitedAt?: string }>();
+  for (const e of inbox?.envelopes ?? []) {
+    for (const ref of e.contextRefs ?? []) {
+      if (ref.kind !== 'app-link') continue;
+      const club = String(ref.id ?? '').match(/#\/join\/(0x[0-9a-fA-F]{40})/)?.[1]?.toLowerCase();
+      if (!club || belongs.has(club) || seen.has(club)) continue;
+      const from = String(e.from ?? '').match(/0x[0-9a-fA-F]{40}/)?.[0]?.toLowerCase();
+      seen.set(club, { club, ...(from ? { from } : {}), ...(e.createdAt ? { invitedAt: e.createdAt } : {}) });
+    }
+  }
+  const invitations = (await Promise.all([...seen.values()].map(async (inv) => {
+    const profile = (await deps.readSubjectRecord!(inv.club, CLUB_RECORDS.profile).catch(() => null)) as { name?: unknown; retiredAt?: unknown } | null;
+    if (!profile || profile.retiredAt) return null;
+    const fromName = inv.from && deps.nameOf ? await deps.nameOf(inv.from).catch(() => null) : null;
+    return { ...inv, name: typeof profile.name === 'string' ? profile.name : inv.club, ...(fromName ? { fromName } : {}) };
+  }))).filter((x): x is NonNullable<typeof x> => x !== null);
+  return c.json({ ok: true, agent, invitations });
 });
 app.post('/huddles/:op', async (c) => {
   const op = String(c.req.param('op') ?? '');
@@ -9182,7 +9224,10 @@ export default {
   fetch: app.fetch,
   // Present unconditionally; Cloudflare only calls it for zones routed at this Worker.
   email: handleInboundEmail,
+  // Spec 400 W1c — the runtime-wake consumer (the only queue this Worker consumes).
+  queue: (batch: MessageBatch<unknown>, env: Env) => consumeRuntimeWakes(batch, env),
 };
+export { RuntimeContainer } from './runtime-container.js';
 
 // ── spec 362 — the Worker-side ATTEMPT the workflow drives. One whole attempt = load the run's CURRENT
 //    inputs from its checkpoint (approvals a custodian delivered while the engine slept arrive as
