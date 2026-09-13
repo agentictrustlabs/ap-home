@@ -44,6 +44,7 @@ import { DISCOVERY_FIND_TOOL, ENGAGEMENT_INVOKE_TOOL, DISCOVERY_INSPECT_TOOL, DI
 import { INVITATIONS_RECEIVED_TOOL } from './invitations-received.js';
 import { INBOX_LIST_TOOL, inboxListInvoker } from './inbox-list.js';
 import { WORK_SEARCH_TOOL, workSearchInvoker } from './work-search-tool.js';
+import { GITHUB_TOOLS, GITHUB_ACTS, githubInvoker } from './connectors/github-tools.js';
 import { CONTACT_INVITE_TOOL, CONTACT_LIST_TOOL, CONTACT_REMOVE_TOOL, contactInviteInvoker, contactListInvoker, contactRemoveInvoker, type ContactDeps } from './contacts.js';
 import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
 import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
@@ -317,6 +318,8 @@ export const UNSUPPORTED_TOOL: ToolSpec = {
 export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   // Spec 370 P4 — Work & Planning, bound thinly onto the Endeavor substrate (coordination-bindings.ts).
   ...COORDINATION_ACTION_TOOLS,
+  // Spec 400 W3/W4 — the forge's acts (a connector's; the playbook narrows who offers them).
+  ...GITHUB_TOOLS.filter((t) => GITHUB_ACTS.has(t.id)),
   {
     id: 'treasury.payment.execute',
     verbs: ['send', 'pay', 'transfer', 'wire'],
@@ -1916,7 +1919,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     setBillStep(ctx.step.id ?? `s${ctx.index}`);
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
     // mandate); explicit so a future caller cannot make it reachable quietly.
-    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === 'messaging.topic.post' || toolId === ORG_INVITE_CAPABILITY || toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === 'messaging.topic.post' || GITHUB_ACTS.has(toolId) || toolId === ORG_INVITE_CAPABILITY || toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
     if (toolId === UNSUPPORTED_TOOL.id) {
       const offered = scopedActionTools(surface, playbook).map((t) => t.capability?.id ?? t.id);
       return { unsupported: true, what: String(args.what ?? ''), available: offered };
@@ -2011,6 +2014,8 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (toolId === PRIMARY_PAYEE_CAPABILITY) return primaryPayeeInvoker(deps, env, presented!)(toolId, args, ctx);
     if (toolId === ACCESS_REVOKE_CAPABILITY) return accessRevokeInvoker(deps, env, presented!, person)(toolId, args, ctx);
     if (toolId === ACCESS_AUDIT_CAPABILITY) return accessAuditInvoker(deps, person)(toolId, args, ctx);
+    // Spec 400 W3/W4 — GitHub as a connector: reads under the holder's connector, acts under the holder's mandate.
+    if (GITHUB_TOOLS.some((t) => t.id === toolId)) return githubInvoker({ env: env as unknown as Record<string, unknown>, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (toolId === PROFILE_UPDATE_CAPABILITY) return profileUpdateInvoker(deps, person)(toolId, args, ctx);
     if (toolId === HOUSEHOLD_RECORD_CAPABILITY) return householdRecordInvoker(deps, person)(toolId, args, ctx);
     if (toolId === STANDING_INSTRUCTION_CAPABILITY) return standingInstructionInvoker(deps, person, addressee)(toolId, args, ctx);
@@ -2326,6 +2331,9 @@ export const CAPABILITY_WORDS: Record<string, string> = {
   'treasury.primary.declare': 'say which treasury receives payments to you',
   'access.grants.list': 'say which apps can read your records',
   'access.grants.audit': 'list every grant this agent issued',
+  'github.pr.open': 'open a pull request on GitHub',
+  'github.pr.comment': 'comment on a pull request',
+  'github.pr.merge': 'promote (merge) a pull request',
   'access.grant.revoke': 'revoke an app\'s access on chain',
   'profile.contact.update': 'change your own contact details',
   'household.member.record': 'record who is in your household',
@@ -2501,6 +2509,9 @@ const RESOURCE_ARG_FOR: Record<string, string> = {
   'organization.membership.invite': 'org',
   'messaging.direct.send': 'recipient',
   'messaging.topic.post': 'org',
+  'github.pr.open': 'holder',
+  'github.pr.comment': 'holder',
+  'github.pr.merge': 'holder',
   'coordination.endeavor.request': 'org',
   'coordination.contribution.propose': 'org',
   'coordination.contribution.allocate': 'org',
@@ -3896,6 +3907,9 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'treasury.fund': ['signature'],                   // the mandate
   'messaging.direct.send': ['signature'],           // the mandate — sending as you is acting as you
   'messaging.topic.post': ['signature'],            // the mandate — posting as you is acting as you
+  'github.pr.open': ['signature'],                  // the mandate — the holder's connector acts
+  'github.pr.comment': ['signature'],
+  'github.pr.merge': ['signature'],                 // the mandate — bound to the work the PR names
   'resolution.invitation.request': ['signature'],   // the mandate — asking is an act of yours too
   'treasury.primary.declare': ['signature'],        // the mandate — a public statement of yours
   'access.grant.revoke': ['signature'],             // the mandate — taking authority back is an act too
@@ -4514,6 +4528,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     // The person's own access audit — informational, always available on their own surface.
     ...(deps.readGrants ? [ACCESS_LIST_TOOL] : []),
     ...(deps.auditGrants && playbook?.tools?.[ACCESS_AUDIT_TOOL.id] ? [mergeContractTool(ACCESS_AUDIT_TOOL, playbook.tools[ACCESS_AUDIT_TOOL.id])] : []),
+    ...GITHUB_TOOLS.filter((t) => !GITHUB_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     ...(deps.readSubjectRecord ? [PROFILE_READ_TOOL, HOUSEHOLD_READ_TOOL] : []),
     UNSUPPORTED_TOOL,
   ];

@@ -72,6 +72,12 @@ export const NOT_PLAN_STEPS: readonly string[] = [
   'messaging.direct.send',
   // Spec 400 W2 (B3) — a reply in a topic is a message like a DM: words to a thread, never assignable work.
   'messaging.topic.post',
+  // Spec 400 W3/W4 — the forge's acts are the REVIEW LOOP's, driven by a run at the steward's ask or a runtime's
+  // turn; a plan step that could open or promote a PR as assignable work would make the forge a place an
+  // endeavor decides code lands, which a mandate bound to the opening intent exists to prevent.
+  'github.pr.open',
+  'github.pr.comment',
+  'github.pr.merge',
   'resolution.invitation.request',
   // A PREFERENCE IS NOT WORK. "Payments to me come here" is a standing statement its owner makes about
   // their own tree — nobody assigns it, nothing waits on it, and putting it in a plan would invite an

@@ -412,6 +412,16 @@
       "timeoutSec": 420
     },
     {
+      "id": "verify-forge-loop",
+      "script": "scripts/verify-forge-loop.mts",
+      "spec": "400 W3 + W4",
+      "proves": "the review loop on GitHub as the forge, under the delegation model: the organization's connector credential is the platform's (a Worker secret keyed by its name; no agent carries it); its steward reads the repository, OPENS a pull request under the organization's mandate — a branch, a change, a PR whose body names the run's intent digest and the run — reviews it, reads it back as evidence (binding, checks, reviews), and PROMOTES it under a mandate bound to that intent (the high-risk rung's second signature included); the forge shows it merged",
+      "twin": "a promotion whose ask names another intent digest is refused before the forge is touched (binding mismatch); no token appears in any reply",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 420
+    },
+    {
       "id": "verify-contacts",
       "script": "scripts/verify-contacts.mts",
       "spec": "401 C1",
