@@ -667,10 +667,10 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
             Ask {addresseeLabel} a question, or ask it to do something — “create a team called outreach”.
             Anything that changes the world will ask you to grant the authority for it first, and you will
             see exactly what you are granting.
-            {voice.canListen && <> Tap 🎙 to talk instead: it answers aloud and listens for your reply until you switch Voice off. When it needs your authority or a signature, say “approve” — your credential signs, and a device that asks will still ask.</>}
+            {voice.canListen && <> Tap the microphone to talk instead: it answers aloud and listens for your reply until you switch Voice off. When it needs your authority or a signature, say “approve” — your credential signs, and a device that asks will still ask.</>}
           </p>
         )}
-        {thread.map((e, i) => (
+        {thread.map((e, i) => ('reply' in e && (e.reply.kind === 'authority_required' || e.reply.kind === 'prompt')) ? null : (   /* those render as the pending card, not as an empty bubble */
           <div key={i} className={e.role === 'you' ? 'ask-msg you' : 'ask-msg agent'}>
             {'text' in e ? <span>{e.text}</span> : <ReplyView reply={e.reply} realm={realm} addressee={addressee} onNext={(n) => void doCommand({ id: n.capability, label: n.words } as AskVocabularyEntry, n.args)} />}
           </div>
