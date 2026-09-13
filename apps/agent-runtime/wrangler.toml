@@ -438,9 +438,9 @@ PUBLIC_GRAPH_URL = "https://graphdb.agentkg.io/repositories/gc-public"
 SA_BUDGET_LIMIT_UNITS = "50000"
 DEMO_REQUIRE_GATEWAY_ASSERTION = "true"
 ALLOWED_ORIGINS = "http://localhost:5175,http://127.0.0.1:5175,https://faithnet.me,https://www.faithnet.me,https://*.faithnet.me,https://gather27-web-faithnet.richardpedersen3.workers.dev,https://gather27-web-churchglobal.richardpedersen3.workers.dev,https://poker.faithnet.io"
-# Spec 378 — a CLUB huddle: the card room that may vouch for a club's roster (its workspace agent + who is a member).
-# The secret is set with `wrangler secret put CLUB_ROSTER_SECRET --env faithnet`, and the same value on the card room.
-CLUB_ROSTER_ORIGINS = "https://tables.faithnet.io"
+# Spec 378 — a CLUB huddle. The card room names a member under the paired secret (`wrangler secret put
+# CLUB_ROSTER_SECRET --env faithnet`, the same value on the card room) and reads a club workspace's roster under it;
+# the standing itself is derived here from this Home's own records of the workspace, never asked of the card room.
 MCP_URL = "https://mcp.faithnet.io"
 # AKCS (Agentic Key Custody Service) — faithchain runs entirely on it; Base Sepolia stays on gcp-kms.
 # Every key role moves together: the relayer signer, envelope wrap/unwrap, and — the one that would

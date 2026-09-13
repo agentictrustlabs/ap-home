@@ -25,7 +25,7 @@ import { givePermission, createOrganization, personGrantForOrgCreate, collectDue
 import { issueAskAsMeDelegation, issueSiteDelegation, issueWorkspaceMembershipAccessDelegation, toWire } from '../../lib/delegation';
 import { MCP_SERVER_ID } from '../../lib/inbox-delivery';
 import { clearStandingGrant } from '../../lib/grant-cache';
-import type { Home } from '../../home/types';
+import { homeLabel, type Home } from '../../home/types';
 import { whitelabel, fmt, isPaymentTemplate } from '../../whitelabel/config';
 import { createManagedAgent, fetchProfile, listManagedAgents, resolveTreasuryByConvention } from '../../connect-client';
 import { readSsoCookie, setSsoCookie, clearSsoCookie } from '../../lib/sso-cookie';
@@ -381,6 +381,22 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         const link = (await linked.json().catch(() => ({}))) as { ok?: boolean; error?: string };
         if (!linked.ok || link.ok === false) {
           return fail(link.error ?? `joined, but the workspace could not be linked to your home (HTTP ${linked.status})`);
+        }
+        // AND THE WORKSPACE'S OWN RECORD OF THEM. The link above is the member's note about themselves; the
+        // workspace's `org.membership:member:<sa>` record (spec 325, finding ORG-MEM-1) is the organization's
+        // word about who belongs — the thing its own agent answers "who are the members" from, and the thing a
+        // relying app reads when its roster is a PROJECTION of this Home's (a card room's club, 2026-09-13).
+        // Before this a workspace joined here had a member nobody but the member could see. Same helper as
+        // every other join surface: the member signs member→workspace, presents the steward's pre-signed
+        // workspace→member access beside it, and the DO re-checks both before writing. Best-effort by the
+        // helper's own design — the link has landed and the membership stands on the signed grants.
+        setGrantProgress({ step: 2, total: 2, label: 'Telling the workspace you joined…' });
+        try {
+          const { recordOrgMembership } = await import('../../lib/org-membership');
+          const signHash = await signHashFor(viaLower as Via, home.address, token ? { token } : undefined);
+          await recordOrgMembership(home.address, enroll.grantOrg, signHash, token, (out.invite.membership ?? null) as { delegate?: string } | null, homeLabel(home.name));
+        } catch (e) {
+          console.warn('[connect] workspace-join: the workspace could not record the membership', e);
         }
       }
 

@@ -124,7 +124,7 @@ import { internalHeaders, isInternalCall } from './internal-marker.js';
 import { standardServerFor } from './standard-a2a.js';
 import { withStandardCardFields } from '@agenticprimitives/a2a/standard';
 import type { AgentCardV1 } from '@agenticprimitives/a2a/standard';
-import { chainStewardshipCheck, deriveStanding } from '@agenticprimitives/context';
+import { chainStewardshipCheck, deriveStanding, membershipRows } from '@agenticprimitives/context';
 import { charteredAgentsReader, charteredOwnerReader } from './chartered-agents.js';
 import { relationshipRows } from '@agenticprimitives/context';
 import { grantBody } from '@agenticprimitives/agent-resolution';
@@ -2106,32 +2106,16 @@ function huddleScopeOf(raw: HuddleScopeIn | undefined): { kind: HuddleScopeKind;
   return { kind: kind as HuddleScopeKind, principal: principal as Address, ...(id ? { id } : {}) };
 }
 /**
- * A CLUB'S ROSTER IS THE RELYING APP'S RECORD (pokernight WORKSPACES.md §5): the club is a `.workspace` agent the
- * host custodies, but who is a member is kept by the card room, not by the workspace's own vault — the
- * membership handoff ceremonies have not landed there yet. So for a `club` scope the standing is asked of the
- * card room: `GET <origin>/clubs/<id>/standing-of?agent=<caller>` answers the club's workspace agent and the
- * caller's standing on its roster. Two checks keep this honest: the origin must be one this deployment DECLARES
- * may vouch for clubs (`CLUB_ROSTER_ORIGINS`, config — never a fallback), and the club's agent it names must be
- * the scope's principal, so a card room can vouch only for the workspaces it chartered. The person still acts
- * with their own Home session; nothing here is a token the app holds.
+ * A CLUB IS A WORKSPACE, AND ITS MEMBERSHIP LIVES HERE (spec 378 `club` scope; pokernight WORKSPACES.md §5 as
+ * amended 2026-09-13). The club is a `.workspace` agent the host custodies, and who belongs to it is what this
+ * Home records: the host's stewardship wire, a member's own related-agent link written by the `workspace-join`
+ * ceremony, and the workspace's own `org.membership:member:<sa>` record written at that join. So a club scope's
+ * standing is `deriveStanding` over those records, the same read every organization-class scope gets — the
+ * card room's roster is a PROJECTION of this and is asked nothing. A member the card room lists but this Home
+ * does not know is `none` here, truthfully: they have not joined the club at their Home yet, and the card room
+ * tells them so. (Until this the Home asked the card room under a paired secret, which made the relying app
+ * the authority on who belongs to an agent it does not custody.)
  */
-async function clubStandingFor(env: Env, caller: Address, scope: { principal: Address; id?: string }): Promise<'steward' | 'member' | 'none'> {
-  const origins = String((env as { CLUB_ROSTER_ORIGINS?: string }).CLUB_ROSTER_ORIGINS ?? '').split(',').map((s) => s.trim().replace(/\/$/, '')).filter(Boolean);
-  const secret = String((env as { CLUB_ROSTER_SECRET?: string }).CLUB_ROSTER_SECRET ?? '');
-  if (!origins.length || !scope.id) return 'none';
-  for (const origin of origins) {
-    try {
-      const r = await fetch(`${origin}/clubs/${encodeURIComponent(scope.id)}/standing-of?agent=${caller}`, { headers: { accept: 'application/json', ...(secret ? { authorization: `Bearer ${secret}` } : {}) }, signal: AbortSignal.timeout(4000) });
-      if (!r.ok) continue;
-      const b = (await r.json().catch(() => null)) as { agent?: string; standing?: string } | null;
-      if (!b || String(b.agent ?? '').toLowerCase() !== scope.principal.toLowerCase()) continue;
-      if (b.standing === 'host') return 'steward';
-      if (b.standing === 'member') return 'member';
-      return 'none';
-    } catch { /* the next origin, or none */ }
-  }
-  return 'none';
-}
 /** The caller's standing AT THE SCOPE (spec 378 §2): for an organization-class scope, derived from records
  *  the organization keeps (spec 366); for a conversation, whether the caller is one of its parties. */
 async function huddleStandingFor(env: Env, caller: Address, scope: NonNullable<ReturnType<typeof huddleScopeOf>>): Promise<'steward' | 'member' | 'party' | 'none'> {
@@ -2140,7 +2124,6 @@ async function huddleStandingFor(env: Env, caller: Address, scope: NonNullable<R
     return parties.includes(caller.toLowerCase()) || scope.principal === caller.toLowerCase() ? 'party' : 'none';
   }
   if (scope.principal === caller.toLowerCase()) return 'steward';
-  if (scope.kind === 'club') return clubStandingFor(env, caller, scope);
   const askDeps = harnessDeps(env, buildAuditSink(env));
   const standing = await deriveStanding({
     ...(askDeps.readSubjectRecord ? { readSubjectRecord: askDeps.readSubjectRecord } : {}),
@@ -2183,6 +2166,37 @@ function clubRosterSecretOk(env: Env, authorization: string): boolean {
   for (let i = 0; i < secret.length; i++) diff |= secret.charCodeAt(i) ^ given.charCodeAt(i);
   return diff === 0;
 }
+/**
+ * WHO BELONGS TO THIS WORKSPACE — for a relying app whose roster is a PROJECTION of the Home's (pokernight's
+ * clubs, 2026-09-13), under the same paired secret the club huddle uses. Answers from the workspace's OWN
+ * membership records (`org.membership:member:<sa>`, written by the `workspace-join` ceremony; an ended one is
+ * not a member) — the organization's word about who belongs, never the members' notes about themselves. The
+ * secret is the estate's trust in the card room, not a person's; the card room asks for workspaces it
+ * chartered and shows the answer only to people with standing in that club. A workspace with no storage of
+ * its own answers an empty roster with `needsEnable`, so the app can say what to do rather than show nobody.
+ */
+app.get('/clubs/roster', async (c) => {
+  if (!clubRosterSecretOk(c.env, c.req.header('authorization') ?? '')) return c.json({ ok: false, error: 'not for you' }, 403);
+  const workspace = String(c.req.query('workspace') ?? '').toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(workspace)) return c.json({ ok: false, error: 'workspace (0x…40) required' }, 400);
+  // The inventory first (spec 356 §2.5, no plaintext), then exactly the membership keys. The survey's own
+  // refusal is kept apart from an empty roster: "no interactions grant" is a workspace whose steward has not
+  // enabled its storage, which somebody can act on; an empty list is a club with nobody in it yet.
+  let inventory: Array<{ recordType?: string }>;
+  try {
+    const out = await callInteractionsInternal(c.env, workspace, 'internal.coordination.vaultSurvey', {});
+    inventory = (out as { records?: Array<{ recordType?: string }> }).records ?? [];
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e);
+    return c.json({ ok: true, workspace, members: [], ...(/grant/i.test(why) ? { needsEnable: true } : {}), error: why });
+  }
+  const keys = inventory.map((r) => String(r.recordType ?? '')).filter((rt) => rt.startsWith('org.membership:member:')).slice(0, 500);
+  const bodies = keys.length
+    ? ((await callInteractionsInternal(c.env, workspace, 'internal.coordination.vaultQuery', { recordTypes: keys }).catch(() => ({}))) as { records?: Record<string, unknown> }).records ?? {}
+    : {};
+  const members = membershipRows(keys, bodies).map((r) => ({ agent: r.agent, ...(r.name ? { name: r.name } : {}), ...(r.role ? { role: r.role } : {}) }));
+  return c.json({ ok: true, workspace, members });
+});
 app.post('/huddles/:op', async (c) => {
   const op = String(c.req.param('op') ?? '');
   if (!['start', 'join', 'get', 'leave', 'end', 'invite', 'removeParticipant'].includes(op)) return c.json({ ok: false, error: 'unknown huddle operation' }, 404);
@@ -2191,10 +2205,10 @@ app.post('/huddles/:op', async (c) => {
   const scope = huddleScopeOf(body?.scope);
   if (!scope) return c.json({ ok: false, error: 'scope { kind: conversation|org|team|workspace|club, principal, id? } required' }, 400);
   // WHO. A person's own Home session as ever — or, for a CLUB scope only, the card room's server-to-server call
-  // under the paired roster secret, naming the member it verified on its own session. The card room is the
-  // club's roster authority already (clubStandingFor asks it who is a member); a person who signed in to the
-  // card room through their Home holds no Home bearer in that browser, so this is the one road to the club's
-  // huddle for them. The standing is still derived here, at join time, from the roster.
+  // under the paired secret, naming the member it verified on its own session (a Home sign-in at the card room
+  // carries their agent address). A person who signed in to the card room through their Home holds no Home
+  // bearer in that browser, so this is their one road to the club's huddle. The secret names WHO is asking and
+  // nothing more: their standing at the club is derived here, from this Home's own records of the workspace.
   let actor: Address;
   if (body?.session) {
     const who = await verifyHomeSession(body.session, c.env);
