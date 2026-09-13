@@ -77,9 +77,14 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         { to: CONTRACTS.agentProfileResolver, value: 0n, data: encodeFunctionData({ abi: agentProfileResolverAbi, functionName: 'setStringProperty', args: [person, ATL_CAPABILITIES, [...have, ...want].join(',')] }) },
       ];
       const callData = buildExecuteBatchCallData(calls);
-      const built = (await (await fetch(`${a2a}/account/build-call-userop`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sender: person, callData }) })).json().catch(() => ({}))) as { ok?: boolean; userOp?: Record<string, unknown>; userOpHash?: Hex; error?: string };
-      if (!built.ok || !built.userOpHash) throw new Error(`skills: ${built.error ?? 'could not build the userOp'}`);
-      const sent = (await (await fetch(`${a2a}/account/submit-call-userop`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ userOp: { ...built.userOp, signature: await sign(built.userOpHash) } }) })).json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      // The account routes take a CSRF pair like every mutating /a2a call (the scripts fetch it the same way).
+      const origin = ownIssuer(request, env);
+      const csrfRes = await fetch(`${a2a}/auth/csrf`, { headers: { origin } });
+      const csrf = (await csrfRes.json().catch(() => ({}))) as { token?: string };
+      const H = { 'content-type': 'application/json', origin, cookie: (csrfRes.headers.get('set-cookie') ?? '').split(';')[0] ?? '', 'x-csrf-token': csrf.token ?? '' };
+      const built = (await (await fetch(`${a2a}/account/build-call-userop`, { method: 'POST', headers: H, body: JSON.stringify({ sender: person, callData }) })).json().catch(() => ({}))) as { ok?: boolean; userOp?: Record<string, unknown>; userOpHash?: Hex; error?: string; detail?: string };
+      if (!built.ok || !built.userOpHash) throw new Error(`skills: ${built.error ?? 'could not build the userOp'}${built.detail ? ` — ${String(built.detail).slice(0, 120)}` : ''}`);
+      const sent = (await (await fetch(`${a2a}/account/submit-call-userop`, { method: 'POST', headers: H, body: JSON.stringify({ userOp: { ...built.userOp, signature: await sign(built.userOpHash) } }) })).json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!sent.ok) throw new Error(`skills: ${sent.error ?? 'the userOp was not accepted'}`);
       applied.push('skills');
     }
