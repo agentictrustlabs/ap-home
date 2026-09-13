@@ -366,7 +366,7 @@
       }
       textarea { height: auto; padding: .5rem .75rem; line-height: 1.5; }
       select { width: auto; padding-right: 1.75rem; }
-      input[type="checkbox"], input[type="radio"] { width: auto; height: auto; }
+      input[type="checkbox"], input[type="radio"], .settings-field input[type="checkbox"], .settings-field input[type="radio"], .ap-field input[type="checkbox"] { width: 16px; height: 16px; min-height: 0; padding: 0; margin: 0; accent-color: var(--color-amber-600); vertical-align: middle; }
       input:hover, select:hover, textarea:hover { border-color: var(--color-text-faint); }
       input:focus, select:focus, textarea:focus {
         outline: none;
@@ -1651,3 +1651,6 @@ button.ui-switch:hover:not(:disabled) { filter: none; }
 .ask-flyout-strip { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; padding: 0 .8rem .4rem; }
 .ask-flyout-strip__ctl { display: inline-flex; gap: 6px; align-items: center; font-size: var(--fs-xs); color: var(--color-text-muted); }
 .ask-flyout-strip__ctl select { height: 28px; font-size: var(--fs-sm); padding: 0 1.5rem 0 .5rem; }
+/* a labelled checkbox row: the box, then the words — the words wrap, the box does not */
+.dev-apps__check, .ui-check { display: flex; gap: 10px; align-items: flex-start; font-size: var(--fs-md); color: var(--color-text-body); line-height: var(--lh-body); padding: 4px 0; cursor: pointer; }
+.dev-apps__check input, .ui-check input { flex: none; margin-top: 3px; }

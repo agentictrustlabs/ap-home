@@ -29,8 +29,8 @@ export function AgentRegistryListing({ kind, agent }: { kind: StudioScopeKind; a
   const state = useCardDetail(ctx.delegation, cardId);
   const canSign = useCanSignFor(ctx.sa);
 
-  if (!ctx.session) return <SectionShell title="Registry"><p>Not signed in.</p></SectionShell>;
-  if (!ctx.loaded || !cardsLoaded) return <SectionShell title="Registry"><p className="manage-card-blurb">Loading…</p></SectionShell>;
+  if (!ctx.session) return <SectionShell title="Registry"><p className="ui-meta">Not signed in.</p></SectionShell>;
+  if (!ctx.loaded || !cardsLoaded) return <SectionShell title="Registry"><p className="ui-meta">Loading…</p></SectionShell>;
   if (!ctx.delegation || !ctx.sa) {
     return (
       <SectionShell title="Registry">
@@ -40,16 +40,12 @@ export function AgentRegistryListing({ kind, agent }: { kind: StudioScopeKind; a
   }
 
   return (
-    <SectionShell title="Registry">
-      <p className="manage-card-blurb" style={{ marginTop: 0 }}>
-        Listing this agent where people and other agents search. The listing points at its agent card, so
-        whoever finds it reads what the card says.
-      </p>
+    <SectionShell title="Registry" description="Listing this agent where people and other agents search — the listing points at its agent card, so whoever finds it reads what the card says.">
       {/* Two prerequisites, said BEFORE the button rather than discovered by pressing it. The type is not
           inferred from the name here on purpose: spec 346 makes the on-chain `atl:agentType` the
           authority and a suffix only a claim, so guessing from ".impact" would be the very inference the
           spec refuses. Stating the requirement is honest; asserting this agent fails it would not be. */}
-      <p className="manage-card-blurb" style={{ marginTop: '-.4rem' }}>
+      <p className="ui-note">
         A directory needs two things from an agent: a <b>card</b> to point at, and a declared <b>type</b> —
         what kind of agent it is — which it gets from a typed name (<code>.me</code>, <code>.org</code>,
         <code>.team</code>, <code>.church</code>, <code>.circle</code>, <code>.svc</code>,

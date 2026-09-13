@@ -180,9 +180,9 @@ export function OrgSettingsSection({ orgSa }: { orgSa: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stewardship, token, agentAddress, orgSa]);
 
-  if (!session) return <NotSignedIn title="Settings" />;
-  if (!loaded || reading) return <Loading title="Settings" />;
-  if (!record) return <NoRecord title="Settings" />;
+  if (!session) return <NotSignedIn title="Status" />;
+  if (!loaded || reading) return <Loading title="Status" />;
+  if (!record) return <NoRecord title="Status" />;
 
   const status = lifecycle ? orgStatusOf(lifecycle) : orgStatusOf(record);
   const orgLabel = record.orgName || orgSa;
@@ -216,17 +216,12 @@ export function OrgSettingsSection({ orgSa }: { orgSa: string }) {
   }
 
   return (
-    <SectionShell title="Settings">
-      <div className="dash-section" style={{ marginTop: '1.25rem' }}>
+    <SectionShell title="Status" description={<>Whether this organization appears in your home — written to the organization&rsquo;s own vault (<code>org.lifecycle</code>) over your stewardship delegation; only a steward can set it.</>}>
+      <div className="dash-section">
         <h3 className="subhead" style={{ display: 'flex', alignItems: 'center', gap: '.5rem' }}>
           Organization status <StatusBadge status={status} />
         </h3>
-        <p className="manage-card-blurb" style={{ margin: '0 0 .7rem', maxWidth: 620 }}>
-          Whether this organization appears in your home. The decision is written to the{' '}
-          <b>organization&rsquo;s own vault</b> (<code>org.lifecycle</code>) over your stewardship delegation —
-          only a steward can set it.
-        </p>
-        <p className="manage-card-blurb" style={{ margin: '0 0 .9rem', maxWidth: 620 }}>
+        <p className="ui-note" style={{ margin: '0 0 .9rem' }}>
           <b>What this does not do:</b> it revokes no delegation, disables no agent, and deletes no data.
           Deleting marks the organization as retired — every record in its vault is kept, and its address
           stays what it always was. To withdraw authority, revoke the delegations under <b>Access</b>.

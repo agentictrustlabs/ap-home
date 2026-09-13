@@ -250,6 +250,8 @@
   box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18);
 }
 
+.settings-field input[type="checkbox"], .settings-field input[type="radio"] { width: 16px; height: 16px; padding: 0; }
+
 .settings-field__help {
   font-size: 12px;
   color: var(--color-text-muted);
