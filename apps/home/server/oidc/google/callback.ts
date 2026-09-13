@@ -29,17 +29,21 @@ import { getServer, json, resolveOrigin, type FnContext } from '../../_lib/serve
 // redirect validation. Accept a return URL ONLY if it matches the env allowlist, the relying-client
 // registry, OR our own portal. An EMPTY REDIRECT_URI_ALLOWLIST must NOT bypass the check — doing so
 // 302'd the auth code (issued path) or the victim's verified email (bootstrap path) to any attacker URL.
-function redirectAllowed(allowlist: string | undefined, rpRedirect: string): boolean {
+function redirectAllowed(allowlist: string | undefined, rpRedirect: string, selfOrigin: string): boolean {
   const allow = (allowlist ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-  return validateRedirectUri(allow, rpRedirect) || isAllowedRelyingOrigin(rpRedirect) || isOwnPortalReturn(rpRedirect);
+  return validateRedirectUri(allow, rpRedirect) || isAllowedRelyingOrigin(rpRedirect) || isOwnPortalReturn(rpRedirect, selfOrigin);
 }
 
-function isOwnPortalReturn(rpRedirect: string): boolean {
+/** `selfOrigin` is the origin this callback was invoked on: a Home served from a host that is not its CONNECT_DOMAIN
+ *  (a Vercel preview, the estate before it has a domain) returns to itself — the same origin is never an open
+ *  redirect. Root path only, as for the connect-domain homes. */
+function isOwnPortalReturn(rpRedirect: string, selfOrigin: string): boolean {
   try {
     const u = new URL(rpRedirect);
     if (u.protocol !== 'https:') return false;
     if (u.pathname !== '/' && u.pathname !== '') return false;
     if (u.search || u.hash) return false;
+    if (u.origin === selfOrigin) return true;
     const h = u.hostname.toLowerCase();
     if (h === CONNECT_DOMAIN) return true;
     const suffix = '.' + CONNECT_DOMAIN;
@@ -187,7 +191,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     if (!agent) {
       // Only 302 the email-carrying bootstrap notice to a VALIDATED redirect (fail-closed); otherwise
       // return the bootstrap status inline without leaking the email to an unvalidated URL.
-      if (stash.rpRedirect && redirectAllowed(env.REDIRECT_URI_ALLOWLIST, stash.rpRedirect)) {
+      if (stash.rpRedirect && redirectAllowed(env.REDIRECT_URI_ALLOWLIST, stash.rpRedirect, url.origin)) {
         const dest = new URL(stash.rpRedirect);
         dest.searchParams.set('connect_status', 'bootstrap');
         dest.searchParams.set('via', 'google');
@@ -229,7 +233,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
 
   if (stash.rpRedirect) {
     // SSO-OIDC-REDIRECT-FAILOPEN-1: fail-closed — an empty allowlist no longer bypasses the check.
-    if (!redirectAllowed(env.REDIRECT_URI_ALLOWLIST, stash.rpRedirect)) {
+    if (!redirectAllowed(env.REDIRECT_URI_ALLOWLIST, stash.rpRedirect, url.origin)) {
       return json({ error: 'redirect_uri not allowed (CN-1)' }, 400);
     }
     const dest = new URL(stash.rpRedirect);
