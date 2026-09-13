@@ -370,6 +370,16 @@
       "required": true,
       "paced": false,
       "timeoutSec": 420
+    },
+    {
+      "id": "verify-contacts",
+      "script": "scripts/verify-contacts.mts",
+      "spec": "401 C1",
+      "proves": "contacts are membership on the person agent: the steward adds an agent contact under her own mandate (her grant to it, scoped to her contact profile), her list names it with its role, an organization is refused as a contact, the contact cannot list her contacts, and removing it revokes the grant on chain and drops it from her list",
+      "twin": "an organization refused as a contact; the contact refused her contacts list; a removed contact's grant revoked on chain (a transaction)",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 420
     }
   ]
 }

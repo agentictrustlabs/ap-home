@@ -43,6 +43,7 @@ import { remembered, forget } from './run-memo.js';
 import { DISCOVERY_FIND_TOOL, ENGAGEMENT_INVOKE_TOOL, DISCOVERY_INSPECT_TOOL, DISCOVERY_FIND_CAPABILITY, ENGAGEMENT_INVOKE_CAPABILITY, discoveryFindInvoker } from './enterprise-tools.js';
 import { INVITATIONS_RECEIVED_TOOL } from './invitations-received.js';
 import { INBOX_LIST_TOOL, inboxListInvoker } from './inbox-list.js';
+import { CONTACT_INVITE_TOOL, CONTACT_LIST_TOOL, CONTACT_REMOVE_TOOL, contactInviteInvoker, contactListInvoker, contactRemoveInvoker, type ContactDeps } from './contacts.js';
 import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
 import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
@@ -1776,7 +1777,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     setBillStep(ctx.step.id ?? `s${ctx.index}`);
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
     // mandate); explicit so a future caller cannot make it reachable quietly.
-    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === ORG_INVITE_CAPABILITY || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === ORG_INVITE_CAPABILITY || toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
     if (toolId === UNSUPPORTED_TOOL.id) {
       const offered = scopedActionTools(surface, playbook).map((t) => t.capability?.id ?? t.id);
       return { unsupported: true, what: String(args.what ?? ''), available: offered };
@@ -1822,6 +1823,24 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     // Spec 400 W1 — what has been said to THIS agent, from its own inbox (an outside runtime's poll; a person's "what's new").
     if (toolId === INBOX_LIST_TOOL.id) {
       return inboxListInvoker({ ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, person)(toolId, args, ctx);
+    }
+    // Spec 401 C1 — CONTACTS: membership on the person agent. The organization's mechanism with the person as principal.
+    if (toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_LIST_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id) {
+      const cdeps: ContactDeps = {
+        env, enforcers: harnessEnforcers(env), vaultServerId: vaultServerId(env),
+        ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}),
+        ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}),
+        ...(deps.survey ? { survey: deps.survey } : {}),
+        ...(deps.readRecords ? { readRecords: deps.readRecords } : {}),
+        ...(deps.nameOf ? { nameOf: deps.nameOf } : {}),
+        ...(deps.agentTypeOf ? { agentTypeOf: deps.agentTypeOf } : {}),
+        ...(deps.sendDirectMessage ? { sendDirectMessage: deps.sendDirectMessage } : {}),
+        ...(deps.executeAsServiceSa ? { executeAsServiceSa: deps.executeAsServiceSa } : {}),
+        digestBindingArgsFor, stepDigests,
+      };
+      if (toolId === CONTACT_LIST_TOOL.id) return contactListInvoker(cdeps, person)(toolId, args, ctx);
+      if (toolId === CONTACT_INVITE_TOOL.id) return contactInviteInvoker(cdeps, presented!, person, session)(toolId, args, ctx);
+      return contactRemoveInvoker(cdeps, presented!, person)(toolId, args, ctx);
     }
     if (toolId === RESOLUTION_REQUEST_TOOL.id) {
       return resolutionRequestInvoker(
@@ -2351,6 +2370,7 @@ const RESOURCE_ARG_FOR: Record<string, string> = {
   // Likewise: a revocation is a call to the DelegationManager, and WHICH grant it kills travels in the
   // calldata. The caveat bounds the contract; the invoker bounds the grant to one the person issued.
   'access.grant.revoke': 'manager',
+  'person.contact.remove': 'manager',
   'profile.contact.update': 'record',
   'household.member.record': 'record',
 };
@@ -3293,7 +3313,9 @@ export async function resolveStepArgs(
     out.record = String(env.AGENT_RELATIONSHIP).toLowerCase();
   }
 
-  if (where?.capabilityId === ACCESS_REVOKE_CAPABILITY && env.DELEGATION_MANAGER) {
+  if ((where?.capabilityId === ACCESS_REVOKE_CAPABILITY || where?.capabilityId === CONTACT_REMOVE_TOOL.id) && env.DELEGATION_MANAGER) {
+    // Spec 401 — removing a contact IS a revocation: the call's target is the DelegationManager; WHICH grant travels in
+    // the calldata (the contact names it), so the caveat bounds the contract, never the contact.
     out.manager = String(env.DELEGATION_MANAGER).toLowerCase();
   }
   // The RECORD a profile edit writes. Not an address and not a contract — it is a vault record type, and
@@ -3751,6 +3773,8 @@ const ONCHAIN_CALLS_FOR: Record<string, readonly Hex[]> = {
   // authority kill. The struct shape is the DelegationManager's, so the selector is computed from it
   // rather than written down: a hand-copied selector is a revocation that reverts.
   [ACCESS_REVOKE_CAPABILITY]: [methodSelectorOf('revokeDelegationByOwner((address,address,bytes32,(address,bytes,bytes)[],uint256,bytes))')],
+  // Spec 401 — removing a contact IS that same revocation, of the grant the person gave the contact.
+  [CONTACT_REMOVE_TOOL.id]: [methodSelectorOf('revokeDelegationByOwner((address,address,bytes32,(address,bytes,bytes)[],uint256,bytes))')],
 };
 
 /** Ceremonies every surface is assumed to render: it is a conversation, so it can ask and be answered. */
@@ -4318,6 +4342,10 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(playbook?.tools?.[INVITATIONS_RECEIVED_TOOL.id] ? [mergeContractTool(INVITATIONS_RECEIVED_TOOL, playbook.tools[INVITATIONS_RECEIVED_TOOL.id])] : []),
     // Spec 400 W1 — the agent's own inbox since a cursor (the runtime-member playbook offers it; a person's may too).
     ...(playbook?.tools?.[INBOX_LIST_TOOL.id] ? [mergeContractTool(INBOX_LIST_TOOL, playbook.tools[INBOX_LIST_TOOL.id])] : []),
+    // Spec 401 C1 — contacts (the person-steward playbook offers them).
+    ...(playbook?.tools?.[CONTACT_INVITE_TOOL.id] ? [mergeContractTool(CONTACT_INVITE_TOOL, playbook.tools[CONTACT_INVITE_TOOL.id])] : []),
+    ...(playbook?.tools?.[CONTACT_LIST_TOOL.id] ? [mergeContractTool(CONTACT_LIST_TOOL, playbook.tools[CONTACT_LIST_TOOL.id])] : []),
+    ...(playbook?.tools?.[CONTACT_REMOVE_TOOL.id] ? [mergeContractTool(CONTACT_REMOVE_TOOL, playbook.tools[CONTACT_REMOVE_TOOL.id])] : []),
     // Spec 380 — one member of an organization, asked through their own agent (fan-out over the roster).
     MEMBER_CONSULT_TOOL,
     // Spec 384 — ask other agents whether they would take this work, and on what terms (an offer is never accepted here).
