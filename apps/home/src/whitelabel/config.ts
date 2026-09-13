@@ -78,7 +78,9 @@ const faithImpact: WhiteLabelConfig = {
   // Domains stay sourced from lib/domain.ts (the ADR-0021 single source of hostnames).
   domains: { connect: CONNECT_DOMAIN, a2a: A2A_DOMAIN, nameParent: AGENT_NAME_PARENT },
   onboarding: {
-    credentialMethods: ['passkey', 'wallet', 'google', 'youversion', 'email', 'phone'],
+    // The ways in, in the order the front door offers them (2026-09-13: Google · email · wallet; passkey,
+    // phone and YouVersion are OFF — a passkey cannot sign on faithchain, and the door stays three doors).
+    credentialMethods: ['google', 'email', 'wallet'],
   },
   services: { devices: true, connectedApps: true },
   // The stewardship hub: what the member helps oversee / manage / protect from their home.

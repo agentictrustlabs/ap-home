@@ -33,8 +33,10 @@ export function DemoPeopleFold({ enroll, appName, onSession }: {
   }, [local]);
   if (!local || personas === null || personas.length === 0) return null;
   return (
-    <details style={{ margin: '1.2rem auto 0', maxWidth: 420, fontSize: '.85rem', color: '#475569' }}>
-      <summary style={{ cursor: 'pointer' }}>Demo people</summary>
+    <details className="demo-people-fold" style={{ margin: '1.2rem auto 0', maxWidth: 420, width: '100%', fontSize: '.8rem', color: 'var(--color-text-muted, #475569)', textAlign: 'left' }}>
+      <summary style={{ cursor: 'pointer', listStyle: 'none', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '.78rem', fontWeight: 500 }}>
+        <span aria-hidden className="demo-people-fold__chev" style={{ display: 'inline-block', transition: 'transform .15s' }}>›</span> Demo people
+      </summary>
       <p style={{ margin: '.5rem 0' }}>
         {enroll
           ? `Walkthrough only — each is a real Home this stack seeded. Pick one to continue to ${appName ?? 'the app'} as them; they authorize it on the next screen.`

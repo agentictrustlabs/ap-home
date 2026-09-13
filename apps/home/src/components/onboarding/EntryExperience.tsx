@@ -20,6 +20,9 @@ import { CENTRAL_AUTH_DOMAIN, nameLabel, personalAuthOrigin, toAgentName, parseA
 const googleEnabled = whitelabel.onboarding.credentialMethods.includes('google');
 const youversionEnabled = whitelabel.onboarding.credentialMethods.includes('youversion');
 const walletEnabled = whitelabel.onboarding.credentialMethods.includes('wallet');
+const passkeyEnabled = whitelabel.onboarding.credentialMethods.includes('passkey');
+const emailEnabled = whitelabel.onboarding.credentialMethods.includes('email');
+const phoneEnabled = whitelabel.onboarding.credentialMethods.includes('phone');
 import { useEnrollReq, type EnrollApi, isCeremonyTemplate } from './useEnrollReq';
 import { OnboardingJourney } from './OnboardingJourney';
 import { DemoPeopleFold } from './DemoPeopleFold';
@@ -639,30 +642,17 @@ function NameStart({ onStart, enrollApi, reason }: { onStart: (name: string, exi
 }
 
 // ── spec 257 W1: credential-first front door ──────────────────────────────────
-// Consolidated social entry: ONE "Continue with Social" button that reveals the provider choice
-// (Google / YouVersion), like the email flow reveals an input. With exactly one social provider enabled
-// we skip the picker and show its direct button (no redundant click). Used on the credential-first +
-// name-entry surfaces where the USER picks a provider — NOT SignInView, where the home's own
-// connectionKind already dictates which social button to show.
+// Social entry: a DIRECT "Continue with Google" (and "Continue with YouVersion" when that provider is
+// configured) — one button per provider, never a "Continue with Social" picker that hides the choice
+// behind a click. Used on the credential-first + name-entry surfaces where the USER picks a provider —
+// NOT SignInView, where the home's own connectionKind already dictates which social button to show.
 function SocialConnect({ onGoogle, onYouVersion, primary }: { onGoogle: () => void; onYouVersion: () => void; primary?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const count = (googleEnabled ? 1 : 0) + (youversionEnabled ? 1 : 0);
-  if (count === 0) return null;
+  if (!googleEnabled && !youversionEnabled) return null;
   const cls = primary ? 'btn-primary' : 'btn-ghost onboarding-secondary';
-  if (count === 1) {
-    return googleEnabled
-      ? <button className={cls} onClick={onGoogle}>Continue with Google</button>
-      : <button className={cls} onClick={onYouVersion}>Continue with YouVersion</button>;
-  }
   return (
     <>
-      <button className={cls} onClick={() => setOpen((v) => !v)}>Continue with Social</button>
-      {open && (
-        <div style={{ display: 'flex', gap: '.5rem', margin: '.4rem 0 .2rem', flexWrap: 'wrap' }}>
-          <button className="btn-ghost onboarding-secondary" onClick={onGoogle}>Google</button>
-          <button className="btn-ghost onboarding-secondary" onClick={onYouVersion}>YouVersion</button>
-        </div>
-      )}
+      {googleEnabled && <button className={cls} onClick={onGoogle}>Continue with Google</button>}
+      {youversionEnabled && <button className={googleEnabled ? 'btn-ghost onboarding-secondary' : cls} onClick={onYouVersion}>Continue with YouVersion</button>}
     </>
   );
 }
@@ -825,7 +815,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
           {/* When a client offers email ALONE there is nothing to choose between, so the card is
               open and the person types straight into it rather than pressing a button that only
               reveals the one field they were always going to use. */}
-          {offers('email') && !soleMethod && (
+          {offers('email') && emailEnabled && !soleMethod && (
             <button
               className="btn-ghost onboarding-secondary"
               style={showEmail ? SELECTED_METHOD_STY : undefined}
@@ -836,12 +826,12 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
               Continue with email
             </button>
           )}
-          {offers('email') && (showEmail || soleMethod) && (
+          {offers('email') && emailEnabled && (showEmail || soleMethod) && (
             <div style={{ margin: '.4rem 0 .2rem' }}>
               <EmailAuthCard />
             </div>
           )}
-          {offers('phone') && (
+          {offers('phone') && phoneEnabled && (
             <>
               <button
                 className="btn-ghost onboarding-secondary"
@@ -859,12 +849,14 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
               )}
             </>
           )}
-          {offers('passkey') && (
+          {offers('passkey') && (walletEnabled || passkeyEnabled) && (
+            // The device-credential lane. A wallet is not subdomain-bound but a new one has no home yet,
+            // and a passkey home is subdomain-bound — either way the name path opens the right home.
             <button
               className="btn-ghost onboarding-secondary"
-              onClick={() => onUseName('passkey')}
+              onClick={() => onUseName(passkeyEnabled ? 'passkey' : 'wallet')}
             >
-              Continue with a passkey or wallet
+              {passkeyEnabled ? 'Continue with a passkey or wallet' : 'Continue with a wallet'}
             </button>
           )}
           {offers('name') && (
@@ -875,15 +867,34 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
         </>
       ) : (
         <>
-          {/* Self-serve: real device login. A discoverable passkey / existing wallet home resolves
-              straight in; a brand-new credential falls through to the name path. */}
-          <button
-            className={googleEnabled ? 'btn-ghost onboarding-secondary' : 'btn-primary'}
-            onClick={withPasskey}
-            disabled={busy !== null}
-          >
-            {busy === 'passkey' ? 'Checking your device…' : 'Continue with a passkey'}
-          </button>
+          {/* Self-serve, in the configured order: Google above, then email, then the wallet — a discoverable
+              passkey / existing wallet home resolves straight in; a brand-new credential falls through to the
+              name path. Passkey and phone appear only when the white-label config offers them. */}
+          {passkeyEnabled && (
+            <button
+              className={googleEnabled ? 'btn-ghost onboarding-secondary' : 'btn-primary'}
+              onClick={withPasskey}
+              disabled={busy !== null}
+            >
+              {busy === 'passkey' ? 'Checking your device…' : 'Continue with a passkey'}
+            </button>
+          )}
+          {emailEnabled && (
+            <button
+              className="btn-ghost onboarding-secondary"
+              style={showEmail ? SELECTED_METHOD_STY : undefined}
+              aria-pressed={showEmail}
+              onClick={() => { setShowEmail((v) => !v); setShowPhone(false); }}
+              disabled={busy !== null}
+            >
+              Continue with email
+            </button>
+          )}
+          {emailEnabled && showEmail && (
+            // Verify a code (existing email home) OR bootstrap a KMS-custodied home (no home yet) — both
+            // open the session via useSession, so the Gate advances into the portal. No device gesture.
+            <div style={{ margin: '.4rem 0 .2rem' }}><EmailAuthCard /></div>
+          )}
           {walletAvail && (
             <button
               className="btn-ghost onboarding-secondary"
@@ -893,30 +904,18 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
               {busy === 'wallet' ? 'Confirm in your wallet…' : 'Continue with a wallet'}
             </button>
           )}
-          <button
-            className="btn-ghost onboarding-secondary"
-            style={showEmail ? SELECTED_METHOD_STY : undefined}
-            aria-pressed={showEmail}
-            onClick={() => { setShowEmail((v) => !v); setShowPhone(false); }}
-            disabled={busy !== null}
-          >
-            Continue with email
-          </button>
-          {showEmail && (
-            // Verify a code (existing email home) OR bootstrap a KMS-custodied home (no home yet) — both
-            // open the session via useSession, so the Gate advances into the portal. No device gesture.
-            <div style={{ margin: '.4rem 0 .2rem' }}><EmailAuthCard /></div>
+          {phoneEnabled && (
+            <button
+              className="btn-ghost onboarding-secondary"
+              style={showPhone ? SELECTED_METHOD_STY : undefined}
+              aria-pressed={showPhone}
+              onClick={() => { setShowPhone((v) => !v); setShowEmail(false); }}
+              disabled={busy !== null}
+            >
+              Continue with phone
+            </button>
           )}
-          <button
-            className="btn-ghost onboarding-secondary"
-            style={showPhone ? SELECTED_METHOD_STY : undefined}
-            aria-pressed={showPhone}
-            onClick={() => { setShowPhone((v) => !v); setShowEmail(false); }}
-            disabled={busy !== null}
-          >
-            Continue with phone
-          </button>
-          {showPhone && (
+          {phoneEnabled && showPhone && (
             // Verify an SMS code (existing phone home) OR bootstrap a KMS-custodied home (no home yet). Same
             // session/Gate advance as email; add a passkey afterward for the durable credential (spec 320).
             <div style={{ margin: '.4rem 0 .2rem' }}><PhoneAuthCard /></div>
@@ -1163,10 +1162,10 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
               so passkey sign-in is unavailable here. Use the credential below that opened this home.
             </p>
           )}
-          {showPasskey && (
+          {showPasskey && passkeyEnabled && (
             <button className={socialKind && !passkeyFirst ? 'btn-ghost onboarding-secondary' : 'btn-primary'} onClick={() => go('passkey')}>Continue with passkey</button>
           )}
-          {showPasskey && (
+          {showPasskey && passkeyEnabled && (
             <button className="btn-ghost onboarding-secondary" onClick={() => go('passkey', 'discoverable')}>
               Use synced or phone passkey
             </button>
@@ -1183,10 +1182,12 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
             Continue with email
           </button>
           {showEmail && <div style={{ margin: '.4rem 0 .2rem' }}><EmailAuthCard /></div>}
-          <button className="btn-ghost onboarding-secondary" style={showPhone ? SELECTED_METHOD_STY : undefined} aria-pressed={showPhone} onClick={() => { setShowPhone((v) => !v); setShowEmail(false); }}>
-            Continue with phone
-          </button>
-          {showPhone && <div style={{ margin: '.4rem 0 .2rem' }}><PhoneAuthCard /></div>}
+          {phoneEnabled && (
+            <button className="btn-ghost onboarding-secondary" style={showPhone ? SELECTED_METHOD_STY : undefined} aria-pressed={showPhone} onClick={() => { setShowPhone((v) => !v); setShowEmail(false); }}>
+              Continue with phone
+            </button>
+          )}
+          {phoneEnabled && showPhone && <div style={{ margin: '.4rem 0 .2rem' }}><PhoneAuthCard /></div>}
         </>
       )}
       {err && <p className="onboarding-hint taken">{err}</p>}

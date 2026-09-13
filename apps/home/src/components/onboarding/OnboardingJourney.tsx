@@ -86,7 +86,6 @@ export function OnboardingJourney({
   // passkey + google are always available; wallet needs an injected provider.
   const methods = whitelabel.onboarding.credentialMethods.filter((m) => (m === 'wallet' ? hasWallet() : true));
   const [error, setError] = useState<string>('');
-  const [socialOpen, setSocialOpen] = useState(false); // "Continue with Social" → Google/YouVersion picker
   const [contactKind, setContactKind] = useState<'email' | 'phone'>('email');
   const failBack = useRef<Screen>('overview');
 
@@ -524,27 +523,13 @@ export function OnboardingJourney({
               <span style={{ display: 'block', fontSize: '.78rem', fontWeight: 500, opacity: .86, marginTop: 3 }}>Best for this device</span>
             </button>
           )}
-          {methods.includes('wallet') && (
-            <button className="btn-ghost onboarding-secondary" onClick={onSecureWithWallet}>Secure with a wallet</button>
+          {methods.includes('google') && (
+            // Self-serve → returns to GoogleSecureHome. Relying-app enrollment → onGoogle stashes
+            // the enroll request so the post-redirect resume finishes the grant + returns the code.
+            <button className={methods.includes('passkey') ? 'btn-ghost onboarding-secondary' : 'btn-primary'} onClick={onGoogle}>Continue with Google</button>
           )}
-          {(methods.includes('google') || methods.includes('youversion')) && !socialOpen && (
-            // ONE social entry ("Continue with Social") that expands to the configured IdPs — the
-            // product asked for the IdP choice to live BEHIND the social option, not headline it.
-            <button className="btn-ghost onboarding-secondary" onClick={() => setSocialOpen(true)}>
-              Continue with Social
-            </button>
-          )}
-          {socialOpen && (
-            <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap', justifyContent: 'center' }}>
-              {methods.includes('google') && (
-                // Self-serve → returns to GoogleSecureHome. Relying-app enrollment → onGoogle stashes
-                // the enroll request so the post-redirect resume finishes the grant + returns the code.
-                <button className="btn-ghost onboarding-secondary" onClick={onGoogle}>Google</button>
-              )}
-              {methods.includes('youversion') && (
-                <button className="btn-ghost onboarding-secondary" onClick={onYouVersion}>YouVersion</button>
-              )}
-            </div>
+          {methods.includes('youversion') && (
+            <button className="btn-ghost onboarding-secondary" onClick={onYouVersion}>Continue with YouVersion</button>
           )}
           {/* Email / phone (specs 319/320): OTP-verified, KMS-custodied homes. In relying-app
               enrollment, completion returns to this journey and continues to the permission step. */}
@@ -552,6 +537,9 @@ export function OnboardingJourney({
             <button className="btn-ghost onboarding-secondary" onClick={() => { openContact('email'); }}>
               Continue with email
             </button>
+          )}
+          {methods.includes('wallet') && (
+            <button className="btn-ghost onboarding-secondary" onClick={onSecureWithWallet}>Secure with a wallet</button>
           )}
           {methods.includes('phone') && (
             <button className="btn-ghost onboarding-secondary" onClick={() => { openContact('phone'); }}>

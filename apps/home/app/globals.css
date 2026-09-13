@@ -1408,6 +1408,10 @@
         content: ''; flex: 1; height: 1px; background: var(--stone-200, #e7e5e4);
       }
 
+      /* Demo people — a small left-justified fold under the ways in; the chevron turns when open. */
+      .demo-people-fold summary::-webkit-details-marker { display: none; }
+      .demo-people-fold[open] .demo-people-fold__chev { transform: rotate(90deg); }
+
       /* Dismissible notice banner (Google-already-linked, bootstrap notices, etc.) */
       .notice-banner {
         position: sticky; top: 0; z-index: 50;
