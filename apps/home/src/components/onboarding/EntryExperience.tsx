@@ -874,11 +874,6 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
               {busy === 'wallet' ? (busyStep || 'Confirm in your wallet…') : 'Continue with a wallet'}
             </button>
           )}
-          {offers('name') && (
-            <button className="btn-ghost onboarding-secondary enroll-name-link" onClick={() => onUseName()}>
-              Use my {whitelabel.brand.name} name
-            </button>
-          )}
         </>
       ) : (
         <>
@@ -935,10 +930,6 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
             // session/Gate advance as email; add a passkey afterward for the durable credential (spec 320).
             <div style={{ margin: '.4rem 0 .2rem' }}><PhoneAuthCard /></div>
           )}
-          <div className="method-or">or</div>
-          <button className="btn-ghost onboarding-secondary" onClick={() => onUseName()}>
-            Use my {whitelabel.brand.name} name
-          </button>
         </>
       )}
       {err && <p className="onboarding-hint taken">{err}</p>}
