@@ -113,7 +113,7 @@ import { KB_QUESTION_TOOL, kbQuestionInvoker } from '@agenticprimitives/context'
 import { discoveryFetchFor, structuredCallFor } from './context-wiring.js';
 import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@agenticprimitives/context';
 import { selectComposer, selectComposerRouted, resolveProvider, availableModels, plannerPromptBudget, defaultProvider, widestPromptBudget, type RouteNeed, type RouteDecision } from './orchestration.js';
-import { loadRun, saveRun, dropRun, listRuns, mergeTurn, type HarnessRunCheckpointV1, completedStepsOf, isExpired, AWAIT_WINDOW_MS, expiryFor, canceledRecord } from './harness-runs.js';
+import { loadRun, saveRun, dropRun, listRuns, openRunOnThread, mergeTurn, type HarnessRunCheckpointV1, completedStepsOf, isExpired, AWAIT_WINDOW_MS, expiryFor, canceledRecord } from './harness-runs.js';
 import { buildGenesisPlanes, type GenesisPlaneWires } from './genesis-planes.js';
 import { vaultServerId } from './vault-server-id.js';
 import { bindHarnessAttempt, HarnessApprovalWorkflow, type HarnessWorkflowParams } from './harness-workflow.js';
@@ -1995,6 +1995,33 @@ async function deliverRoutedOutcome(env: Env, ctx: ExecutionContext | undefined,
 
 export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef: string, context: Record<string, unknown> = {}): Promise<{ outcome: 'answered' | 'parked' | 'failed'; said?: string; runRef: string; bill?: { vaultCalls: number; doRequests: number } }> {
   const agent = row.agent.toLowerCase() as Address;
+  // Spec 400 W2 (B3) — MENTIONS INTO AN OPEN RUN. A message on a thread where this agent already has a run parked for
+  // DATA answers that run (spec 370 P1 resume: its plan, what completed, what was supplied — plus these words) instead
+  // of opening another beside it. The run is the agent's to remember; the thread is how it is found.
+  const thread = typeof (context.message as { thread?: unknown } | undefined)?.thread === 'string' ? String((context.message as { thread: string }).thread) : undefined;
+  const words = typeof (context.message as { text?: unknown } | undefined)?.text === 'string' ? String((context.message as { text: string }).text) : '';
+  const open = thread ? openRunOnThread(await listRuns(env as never, agent).catch(() => []), thread) : null;
+  if (open?.awaiting && words) {
+    const stored = await loadRun(env as never, agent, open.runRef).catch(() => null);
+    if (stored) {
+      const supplied = [...(stored.supplied ?? []), { stepRef: stored.awaiting!.stepRef, data: { text: words, message: words, answer: words } }];
+      const cont = await runAgentAsk(env, {
+        agent, addressee: agent, ask: stored.message, runRef: stored.runRef, ...(stored.intent ? { intent: stored.intent } : {}),
+        context: { trigger: row.triggerId, ...context, continued: { runRef: stored.runRef, asked: stored.awaiting!.prompt } },
+        resume: { ...(stored.plan ? { plan: stored.plan } : stored.executed?.plan ? { plan: stored.executed.plan as never } : {}), ...(stored.executed?.completed ? { executed: stored.executed } : {}), presented: [], supplied },
+        guidance: `This run was CONTINUED by a message on its thread: it had asked "${stored.awaiting!.prompt}" and the thread answered "${words.slice(0, 300)}". The step has run with it. Answer from the step results now; never ask again for what was supplied.`,
+      });
+      if (cont.reply.kind === 'prompt' && cont.reply.prompt) {
+        const now = Date.now();
+        await saveRun(env as never, { ...stored, supplied, awaiting: { kind: (cont.reply.prompt.kind as 'data') ?? 'data', prompt: cont.reply.prompt.prompt, stepRef: cont.reply.prompt.stepRef, expiresAt: now + AWAIT_WINDOW_MS.data }, expiresAt: now + AWAIT_WINDOW_MS.data, updatedAt: now } as never);
+        return { outcome: 'parked', said: cont.spoken, runRef: stored.runRef, bill: cont.bill };
+      }
+      if (cont.reply.kind !== 'authority_required') await dropRun(env as never, agent, stored.runRef).catch(() => undefined);
+      if (cont.reply.kind === 'answer' || cont.reply.kind === 'done') return { outcome: 'answered', said: cont.reply.kind === 'answer' ? cont.reply.text : cont.spoken, runRef: stored.runRef, bill: cont.bill };
+      if (cont.reply.kind === 'authority_required') return { outcome: 'parked', said: cont.spoken, runRef: stored.runRef, bill: cont.bill };
+      return { outcome: 'failed', said: cont.reply.kind === 'refused' ? cont.reply.error : cont.spoken, runRef: stored.runRef, bill: cont.bill };
+    }
+  }
   // Spec 375 — what fired this run rides as CONTEXT for the planner (the event's public fields, a webhook's
   // payload, a message's envelope); no verifier reads it, and no party it names is resolved from it.
   const { reply, spoken, result, bill } = await runAgentAsk(env, { agent, addressee: agent, ask: row.ask, runRef, context: { trigger: row.triggerId, ...context } });
@@ -2003,6 +2030,7 @@ export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef:
     await saveRun(env as never, {
       runRef, message: row.ask, addressee: agent, asker: agent, presented: [], supplied: [],
       openToStewards: true, trigger: { id: row.triggerId, playbookDigest: row.playbookDigest },
+      ...(thread ? { thread } : {}),
       ...(reply.kind === 'prompt'
         ? { awaiting: { kind: reply.prompt!.kind, prompt: reply.prompt!.prompt, stepRef: reply.prompt!.stepRef, expiresAt: now + (row.everyMs ?? AWAIT_WINDOW_MS.data) } }
         // An act the run reached waits on a STEWARD'S MANDATE — said so, where the stewards read it (spec 375
@@ -4561,6 +4589,21 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     // cannot be (ADR-0025), which is why an unfound label becomes a question rather than a guess.
     // A direct message rides the SENDER's own interactions plane — the same `messaging.send` the Home's
     // message box posts to, so there is one conversation per counterparty and one place the bodies live.
+    // Spec 400 W2 (B3) — a post in an organization's topic. A person posts through the session-gated `channels.post`
+    // (their own post, as the Home does it); an AGENT — the run's own under a chain rooted at it, or one the person
+    // stewards — posts through the org's in-Worker `internal.channels.post` naming itself as the member author: the
+    // org's object checks the invitation record; the harness already verified the mandate.
+    postTopic: async ({ org, channelId, sender, senderName, bodyText, session, stewardship, asSelf }) => {
+      const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(org.toLowerCase()));
+      const agentPost = asSelf || !!stewardship;
+      const res = await stub.fetch(new Request(`https://do/interactions/${org.toLowerCase()}/${agentPost ? 'internal.channels.post' : 'channels.post'}`, {
+        method: 'POST', headers: agentPost ? internalHeaders(env) : { 'content-type': 'application/json' },
+        body: JSON.stringify(agentPost ? { channelId, bodyText, member: sender.toLowerCase(), ...(senderName ? { memberName: senderName } : {}) } : { session, channelId, bodyText }),
+      }));
+      const out = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; messageId?: string };
+      if (res.ok && out.ok !== false) return { ok: true as const, ...(out.messageId ? { messageId: out.messageId } : {}) };
+      return { ok: false as const, error: out.error ?? `the post could not be made (${res.status})` };
+    },
     sendDirectMessage: async ({ sender, recipient, bodyText, session, contextRefs, stewardship, asSelf }) => {
       const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(sender.toLowerCase()));
       // Spec 400 W2a — the agent's OWN rail driven in-Worker after the harness verified a chain rooted at it: the

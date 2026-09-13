@@ -364,6 +364,26 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     risk: 'low',
   },
   {
+    id: 'messaging.topic.post',
+    verbs: ['post in', 'post to the topic', 'reply in the topic', 'answer in the thread', 'say in the topic'],
+    description:
+      'POST IN A TOPIC of an organization — a reply in the thread where something was said to you (spec 400 W2: a '
+      + 'mention in a topic is answered in that topic, never by a private message). Args: org (the organization\'s '
+      + 'ADDRESS or NAME), channelId (the topic\'s id — a mention\'s context names it), message (the text to post).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        org: { type: 'string', description: 'The organization whose topic it is — an address or a name' },
+        channelId: { type: 'string', description: 'The topic id (from the mention\'s context)' },
+        message: { type: 'string', description: 'The text to post' },
+      },
+      required: ['org', 'channelId', 'message'],
+    },
+    // Posting as you is acting as you — the same mandate shape as a direct message; low risk, a post is never authority.
+    capability: { id: 'messaging.topic.post', action: 'post', resourceArg: 'org', authorityArg: 'sender' },
+    risk: 'low',
+  },
+  {
     id: 'treasury.fund',
     verbs: ['fund', 'top up', 'add funds', 'deposit'],
     description:
@@ -787,6 +807,10 @@ export interface HarnessDeps {
      *  custodian signed); no session — the app drives the agent's own rail in-Worker. Set only by `messageInvoker`. */
     asSelf?: true;
   }) => Promise<{ ok: true; messageId?: string } | { ok: false; error: string }>;
+  /** Spec 400 W2 (B3) — post in an organization's topic as `sender`: a person under their session, or an agent
+   *  (the run's own under a chain rooted at it, or one the person stewards) as a MEMBER of that organization —
+   *  the org's object checks the invitation record and authors the post as the member. */
+  postTopic?: (input: { org: Address; channelId: string; sender: Address; senderName?: string | null; bodyText: string; session: string; stewardship?: unknown; asSelf?: true }) => Promise<{ ok: true; messageId?: string } | { ok: false; error: string }>;
   /** Public directory search — for QUESTIONS about who exists (`find_agents`), never to fill a party in an
    *  action: a directory hit proves an agent exists, not that this person knows them (spec 352 §7). */
   findAgents?: (terms: string) => Promise<Array<{ name?: string | null; smartAgent?: string; displayName?: string | null }>>;
@@ -1773,6 +1797,40 @@ export function messageInvoker(deps: HarnessDeps, presented: MandatePresentation
   };
 }
 
+/**
+ * `messaging.topic.post` — a reply IN THE TOPIC (spec 400 W2, B3). Who posts is decided exactly as `messageInvoker`
+ * decides who sends: the person under their session; an agent they steward (the mandate's delegator, their
+ * stewardship wire); the run's own agent under a chain rooted at it (a runtime answering a mention, no session).
+ * The org's object authors the post as that member after checking its invitation record.
+ */
+export function topicPostInvoker(deps: HarnessDeps, presented: MandatePresentation, person: Address | undefined, session: string | undefined, chain?: { presentedAll: MandatePresentation[]; chainId: number; delegationManager: Address }): ToolInvoker {
+  return async (toolId, args, ctx) => {
+    const stepRef = ctx.step.id ?? `s${ctx.index}`;
+    if (!deps.postTopic) throw new Error('topic posting is not wired on this agent');
+    const asSelf = !session && !!person && !!chain && rootDelegatorOf(presented, chain).toLowerCase() === person.toLowerCase();
+    if (!person || (!session && !asSelf)) throw new Error('a topic post is made as you, and there is no signed-in person on this run');
+    const org = String(args.org ?? '').toLowerCase() as Address;
+    if (!/^0x[0-9a-f]{40}$/.test(org)) throw new Error(`the organization did not resolve to an agent (${String(args.org ?? '')})`);
+    const channelId = String(args.channelId ?? '').trim();
+    if (!channelId) throw new InputRequired({ kind: 'data', stepRef, toolId, prompt: 'Which topic? (its id is in the mention\'s context)', fields: [{ name: 'channelId', label: 'Topic id', type: 'text', required: true }] });
+    const delegator = asSelf ? person.toLowerCase() : String((presented?.wire as { delegator?: string } | undefined)?.delegator ?? '').toLowerCase();
+    let sender: Address = person; let stewardship: unknown;
+    if (!asSelf && /^0x[0-9a-f]{40}$/.test(delegator) && delegator !== person.toLowerCase()) {
+      const links = deps.readSubjectRecord ? await deps.readSubjectRecord(person.toLowerCase(), 'relationships.data').catch(() => null) : null;
+      const row = relationshipRows(links).find((r) => r.agent.toLowerCase() === delegator && r.relationship === 'steward' && r.stewardshipDelegation);
+      if (!row) throw new Error(`this post would be made as ${delegator}, which you do not steward`);
+      sender = delegator as Address; stewardship = row.stewardshipDelegation;
+    }
+    const supplied = dataFor(ctx.supplied, stepRef);
+    const text = String(supplied.message ?? args.message ?? '').trim();
+    if (!text) throw new InputRequired({ kind: 'data', stepRef, toolId, prompt: 'What should the post say?', fields: [{ name: 'message', label: 'Message', type: 'text', required: true }] });
+    const senderName = deps.nameOf ? await deps.nameOf(sender).catch(() => null) : null;
+    const out = await deps.postTopic({ org, channelId, sender, senderName, bodyText: text, session: session ?? '', ...(stewardship ? { stewardship } : {}), ...(asSelf ? { asSelf: true as const } : {}) });
+    if (!out.ok) throw new Error(out.error);
+    return { posted: true, org, channelId, from: sender, ...(sender !== person ? { drivenBy: person } : {}), ...(asSelf ? { underStandingGrant: true } : {}), message: text, ...(out.messageId ? { messageId: out.messageId } : {}) };
+  };
+}
+
 /** The ROOT delegator of the presented leaf's chain — who the act is ultimately an act OF. Walks `authority` through
  *  the wires this turn presented (the verifier already refused a chain with a missing link); a root mandate is its own. */
 export function rootDelegatorOf(leaf: MandatePresentation, chain: { presentedAll: MandatePresentation[]; chainId: number; delegationManager: Address }): string {
@@ -1800,7 +1858,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     setBillStep(ctx.step.id ?? `s${ctx.index}`);
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
     // mandate); explicit so a future caller cannot make it reachable quietly.
-    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === ORG_INVITE_CAPABILITY || toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === 'messaging.topic.post' || toolId === ORG_INVITE_CAPABILITY || toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
     if (toolId === UNSUPPORTED_TOOL.id) {
       const offered = scopedActionTools(surface, playbook).map((t) => t.capability?.id ?? t.id);
       return { unsupported: true, what: String(args.what ?? ''), available: offered };
@@ -1882,6 +1940,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (toolId === ENDEAVOR_LIST_CAPABILITY || toolId === ENDEAVOR_GET_CAPABILITY) return endeavorReadInvoker(coordinationDeps, (addressee ?? person) as Address, person)(toolId, args, ctx);
     if (COORDINATION_CAPABILITY_IDS.has(toolId)) return endeavorActInvoker(coordinationDeps, (addressee ?? person) as Address, person, session)(toolId, args, ctx);
     if (toolId === 'messaging.direct.send') return messageInvoker(deps, presented!, person, session, { presentedAll, chainId: Number(env.CHAIN_ID), delegationManager: env.DELEGATION_MANAGER as Address })(toolId, args, ctx);
+    if (toolId === 'messaging.topic.post') return topicPostInvoker(deps, presented!, person, session, { presentedAll, chainId: Number(env.CHAIN_ID), delegationManager: env.DELEGATION_MANAGER as Address })(toolId, args, ctx);
     if (toolId === ORG_INVITE_CAPABILITY) return inviteInvoker(env, presented!, person, deps, session)(toolId, args, ctx);
     if (CHILD_AGENT_TLD[toolId]) {
       if (!deps.teamGenesis) throw new Error(`${toolId} is not configured on this agent (no genesis substrate)`);
@@ -2200,6 +2259,7 @@ export const CAPABILITY_WORDS: Record<string, string> = {
   'treasury.payment.execute': 'make payments',
   'treasury.fund': 'fund a treasury with demo USDC',
   'messaging.direct.send': 'send direct messages',
+  'messaging.topic.post': 'post in a topic',
   'resolution.invitation.request': 'ask someone how to reach an agent of theirs',
   'treasury.primary.declare': 'say which treasury receives payments to you',
   'access.grants.list': 'say which apps can read your records',
@@ -2377,6 +2437,7 @@ const RESOURCE_ARG_FOR: Record<string, string> = {
   'treasury.fund': 'asset',
   'organization.membership.invite': 'org',
   'messaging.direct.send': 'recipient',
+  'messaging.topic.post': 'org',
   'coordination.endeavor.request': 'org',
   'coordination.contribution.propose': 'org',
   'coordination.contribution.allocate': 'org',
@@ -3771,6 +3832,7 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'treasury.payment.execute': ['signature'],        // the mandate, and the ladder's second party
   'treasury.fund': ['signature'],                   // the mandate
   'messaging.direct.send': ['signature'],           // the mandate — sending as you is acting as you
+  'messaging.topic.post': ['signature'],            // the mandate — posting as you is acting as you
   'resolution.invitation.request': ['signature'],   // the mandate — asking is an act of yours too
   'treasury.primary.declare': ['signature'],        // the mandate — a public statement of yours
   'access.grant.revoke': ['signature'],             // the mandate — taking authority back is an act too

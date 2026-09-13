@@ -776,49 +776,57 @@ export class A2aTaskDO {
           const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
           if (!resp.ok || !out.ok) throw new Error(out.error ?? `application append failed (${resp.status})`);
         }),
-        ...makeMessagingSkills(agentSA, async (recipient, envelope, body, admitted) => {
-        // spec 323 W3.2 — the recipient's InteractionsDO does BOTH admissions with its OWN held
-        // delivery wire: the body (internal.dm.body.put) then the inbox.data merge (internal.deliver).
-        const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(recipient.toLowerCase()));
-        const call = async (op: string, payload: unknown): Promise<Record<string, unknown>> => {
-          const resp = await stub.fetch(new Request(`https://do/interactions/${recipient.toLowerCase()}/${op}`, {
-            // ARCH-H2 — the in-Worker internal marker the InteractionsDO requires for internal.* ops.
-            method: 'POST', headers: internalHeaders(this.env), body: JSON.stringify(payload),
-          }));
-          const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-          if (!resp.ok || !out.ok) throw new Error(out.error ?? `${op} failed (${resp.status})`);
-          return out as Record<string, unknown>;
-        };
-        await call('internal.dm.body.put', { resource: body.resource, data: body.stored });
-        const delivered = await call('internal.deliver', { envelope });
-        // Spec 400 W1c — ADMITTED, and this member's custodian said where its runtime lives: wake it. One queue
-        // message, no content, no authority; the runtime reads the message under its own wire. Detached like the
-        // triggers below — the sender's receipt says "admitted", never "woken".
-        const runtimeHost = parseRuntimeHost(delivered.runtimeHost);
-        if (runtimeHost && delivered.admitted === true) {
-          void enqueueRuntimeWake(this.env, { member: recipient.toLowerCase(), memberName: await harnessDeps(this.env, buildAuditSink(this.env)).nameOf?.(recipient.toLowerCase()).catch(() => null) ?? null, conversationId: envelope.conversationId, messageId: envelope.id, host: runtimeHost })
-            .catch((e: unknown) => console.warn('[runtime-wake] enqueue failed:', e instanceof Error ? e.message : String(e)));
-        }
-        // Spec 375 W2 — ADMITTED, so now the playbook may hear about it: the recipient's own `message`
-        // triggers fire one unattended run each, this agent as the asker holding nothing (P5). Detached from
-        // the delivery: the sender's receipt says "admitted", never "reacted to", and a run that takes a
-        // planner's time must not hold the sender's delivery open. An inbound message never performs an act
-        // (spec 365): the run may draft the reply, which parks for a steward.
-        const senderAddr = (envelope.from.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
-        const fromName = admitted && senderAddr ? await harnessDeps(this.env, buildAuditSink(this.env)).nameOf?.(senderAddr).catch(() => null) ?? null : null;
-        const source = admitted ? messageTriggerSource(envelope, admitted.skill, admitted.bodyText, fromName) : null;
-        if (source) {
-          void fireTriggersAt(this.env, recipient.toLowerCase() as Address, source)
-            .then((fired) => { if (fired.length) console.log(`[triggers] message ${envelope.id} fired at ${recipient}: ${fired.map((f) => `${f.triggerId}→${f.outcome}`).join(', ')}`); })
-            .catch((e: unknown) => console.warn('[triggers] message firing failed:', e instanceof Error ? e.message : String(e)));
-        }
-      })], vault, mcp, hashBody, budget,
+        ...makeMessagingSkills(agentSA, (recipient, envelope, body, admitted) => this.admitInbound(recipient, envelope, body, admitted)),
+      ], vault, mcp, hashBody, budget,
       // spec 303 W3 — mint verification receipts at the message/send +
       // resubmit terminals; the accept receipt rides the send result so the
       // SENDER retains it, and rows persist to D1 (migration 0002).
       receipts: buildA2aReceiptsConfig(this.env, agentSA),
     });
     return this.agent;
+  }
+
+  /** WHAT ADMISSION IS, in one place (spec 323 W3.2 / 375 W2 / 400 W1c+W2): the recipient's InteractionsDO does BOTH
+   *  writes with its OWN delivery wire — the body, then the inbox merge — and only then may anything hear about it:
+   *  the playbook's `message` triggers fire one unattended run each, and a declared runtime host is woken. Used by
+   *  the A2A messaging skills (a sender's delivery) and by `/internal/admit-message` (a mention put to this member
+   *  by an organization's topic, in-Worker). Nothing here presents the recipient's wire; a message is never authority. */
+  private async admitInbound(recipient: string, envelope: MessageEnvelopeV1, body: { resource: string; stored: { b64: string; contentType: string; bodyHash: string } }, admitted?: { skill: string; bodyText: string }): Promise<void> {
+        // spec 323 W3.2 — the recipient's InteractionsDO does BOTH admissions with its OWN held
+      // delivery wire: the body (internal.dm.body.put) then the inbox.data merge (internal.deliver).
+      const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(recipient.toLowerCase()));
+      const call = async (op: string, payload: unknown): Promise<Record<string, unknown>> => {
+        const resp = await stub.fetch(new Request(`https://do/interactions/${recipient.toLowerCase()}/${op}`, {
+          // ARCH-H2 — the in-Worker internal marker the InteractionsDO requires for internal.* ops.
+          method: 'POST', headers: internalHeaders(this.env), body: JSON.stringify(payload),
+        }));
+        const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+        if (!resp.ok || !out.ok) throw new Error(out.error ?? `${op} failed (${resp.status})`);
+        return out as Record<string, unknown>;
+      };
+      await call('internal.dm.body.put', { resource: body.resource, data: body.stored });
+      const delivered = await call('internal.deliver', { envelope });
+      // Spec 400 W1c — ADMITTED, and this member's custodian said where its runtime lives: wake it. One queue
+      // message, no content, no authority; the runtime reads the message under its own wire. Detached like the
+      // triggers below — the sender's receipt says "admitted", never "woken".
+      const runtimeHost = parseRuntimeHost(delivered.runtimeHost);
+      if (runtimeHost && delivered.admitted === true) {
+        void enqueueRuntimeWake(this.env, { member: recipient.toLowerCase(), memberName: await harnessDeps(this.env, buildAuditSink(this.env)).nameOf?.(recipient.toLowerCase()).catch(() => null) ?? null, conversationId: envelope.conversationId, messageId: envelope.id, host: runtimeHost })
+          .catch((e: unknown) => console.warn('[runtime-wake] enqueue failed:', e instanceof Error ? e.message : String(e)));
+      }
+      // Spec 375 W2 — ADMITTED, so now the playbook may hear about it: the recipient's own `message`
+      // triggers fire one unattended run each, this agent as the asker holding nothing (P5). Detached from
+      // the delivery: the sender's receipt says "admitted", never "reacted to", and a run that takes a
+      // planner's time must not hold the sender's delivery open. An inbound message never performs an act
+      // (spec 365): the run may draft the reply, which parks for a steward.
+      const senderAddr = (envelope.from.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+      const fromName = admitted && senderAddr ? await harnessDeps(this.env, buildAuditSink(this.env)).nameOf?.(senderAddr).catch(() => null) ?? null : null;
+      const source = admitted ? messageTriggerSource(envelope, admitted.skill, admitted.bodyText, fromName) : null;
+      if (source) {
+        void fireTriggersAt(this.env, recipient.toLowerCase() as Address, source)
+          .then((fired) => { if (fired.length) console.log(`[triggers] message ${envelope.id} fired at ${recipient}: ${fired.map((f) => `${f.triggerId}→${f.outcome}`).join(', ')}`); })
+          .catch((e: unknown) => console.warn('[triggers] message firing failed:', e instanceof Error ? e.message : String(e)));
+      }
   }
 
   async fetch(req: Request): Promise<Response> {
@@ -1021,6 +1029,29 @@ export class A2aTaskDO {
       return Response.json({ ok: false, error: `unknown harness-run op: ${op}` }, { status: 404 });
     }
 
+    // Spec 400 W2 (B3) — A MENTION PUT TO THIS MEMBER by an organization's topic, in-Worker: the org's object built the
+    // envelope (from the poster, to this member, on the topic's thread, a `topic` context ref) and this member's own
+    // object admits it exactly as a delivered DM — body, inbox, then triggers and the runtime wake. Marker-gated:
+    // only co-resident code reaches it; the envelope is validated and must address this agent.
+    if (url.pathname === '/internal/admit-message') {
+      if (!isInternalCall(req, this.env)) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
+      const p = (await req.json().catch(() => null)) as { envelope?: MessageEnvelopeV1; bodyText?: string; skill?: string } | null;
+      if (!p?.envelope || typeof p.bodyText !== 'string') return Response.json({ ok: false, error: 'envelope + bodyText required' }, { status: 400 });
+      const errors = validateMessageEnvelope(p.envelope);
+      if (errors.length) return Response.json({ ok: false, error: `invalid envelope: ${errors.join(', ')}` }, { status: 400 });
+      const me = (url.searchParams.get('agent') ?? '').toLowerCase();
+      const addrOf = (caip: string): string => (caip.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(me) || !p.envelope.to.some((t) => addrOf(t) === me)) return Response.json({ ok: false, error: 'the envelope is not addressed to this agent' }, { status: 400 });
+      const bytes = new TextEncoder().encode(p.bodyText);
+      if (p.envelope.bodyHash !== await sha256Hex32(bytes)) return Response.json({ ok: false, error: 'bodyHash does not match the text' }, { status: 400 });
+      let bin = ''; for (const b of bytes) bin += String.fromCharCode(b);
+      try {
+        await this.admitInbound(me, p.envelope, { resource: p.envelope.body.resource, stored: { b64: btoa(bin), contentType: 'text/plain', bodyHash: p.envelope.bodyHash } }, { skill: p.skill ?? 'messaging.mention', bodyText: p.bodyText });
+      } catch (e) {
+        return Response.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 409 });
+      }
+      return Response.json({ ok: true, messageId: p.envelope.id });
+    }
     if (url.pathname === '/internal/discussion-respond') {
       if (!isInternalCall(req, this.env)) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
       const p = (await req.json().catch(() => null)) as (DiscussionRespondInput & { trigger?: string; mentionHandle?: string }) | null;

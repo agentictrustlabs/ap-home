@@ -108,7 +108,10 @@ export function withBudget(row: TriggerScheduleV1, vaultCalls: number | null, de
 export type TriggerSource =
   | { kind: 'event'; event: { type: string; endeavorId: string; at?: string } & Record<string, unknown> }
   | { kind: 'webhook'; triggerId: string; token: string; payload: unknown }
-  | { kind: 'message'; message: { id: string; from: string; fromName?: string; profile: string; subject?: string; text?: string } };
+  | { kind: 'message'; message: { id: string; from: string; fromName?: string; profile: string; subject?: string; text?: string;
+      /** Spec 400 W2 (B3) — the THREAD the message is on (its conversation id) and, for a mention in a topic, the topic:
+       *  what an open run is found by, and where the reply goes back to. */
+      thread?: string; topic?: { org: string; channelId: string; title?: string } } };
 
 /** The rows a source fires. A webhook must name its row AND carry that row's token — nothing else matches;
  *  an event matches by type; a message by profile. */
@@ -132,7 +135,7 @@ export function matchingTriggers(rows: readonly TriggerScheduleV1[], source: Tri
  * `null` ⇒ nothing fires.
  */
 export function messageTriggerSource(
-  envelope: { id: string; from: string; actor?: string; subject?: string },
+  envelope: { id: string; from: string; actor?: string; subject?: string; conversationId?: string; contextRefs?: Array<{ kind: string; id: string; label?: string }> },
   admittedBy: string,
   bodyText: string | undefined,
   /** The sender's registered NAME, when the gateway could read one: the words a run's plan may name the
@@ -141,12 +144,17 @@ export function messageTriggerSource(
    *  resolver still settles it in the agent's own tier like any other. */
   fromName?: string | null,
 ): TriggerSource | null {
-  if (envelope.actor) return null;
+  // A MENTION is the one agent-authored admission that fires: the poster is a person (or an agent) speaking in a
+  // topic, and `actor` names them, not a notice-writing agent. The `messaging.mention` skill says which it is.
+  if (envelope.actor && admittedBy !== 'messaging.mention') return null;
   const from = (envelope.from.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
   if (!from) return null;
-  const profile = admittedBy === 'interactions.respond' ? 'response' : admittedBy === 'interactions.deliverCredential' ? 'credential' : 'dm';
+  const profile = admittedBy === 'messaging.mention' ? 'mention' : admittedBy === 'interactions.respond' ? 'response' : admittedBy === 'interactions.deliverCredential' ? 'credential' : 'dm';
   const text = (bodyText ?? '').trim().slice(0, 2_000);
-  return { kind: 'message', message: { id: envelope.id, from, ...(fromName ? { fromName } : {}), profile, ...(envelope.subject ? { subject: envelope.subject } : {}), ...(text ? { text } : {}) } };
+  // A topic ref's id is `<org address>:<channelId>` (mentions.ts) — the org whose topic it is, and which channel.
+  const topicRef = (envelope.contextRefs ?? []).find((r) => r.kind === 'topic' && /^0x[0-9a-f]{40}:.+$/i.test(r.id));
+  const topic = topicRef ? { org: topicRef.id.slice(0, 42).toLowerCase(), channelId: topicRef.id.slice(43), ...(topicRef.label ? { title: topicRef.label } : {}) } : undefined;
+  return { kind: 'message', message: { id: envelope.id, from, ...(fromName ? { fromName } : {}), profile, ...(envelope.subject ? { subject: envelope.subject } : {}), ...(text ? { text } : {}), ...(envelope.conversationId ? { thread: envelope.conversationId } : {}), ...(topic ? { topic } : {}) } };
 }
 
 /** The context a fired run receives — the source's public facts, for the planner; no verifier reads it. */

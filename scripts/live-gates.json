@@ -382,6 +382,16 @@
       "timeoutSec": 420
     },
     {
+      "id": "verify-mention-into-run",
+      "script": "scripts/verify-mention-into-run.mts",
+      "spec": "400 W2 (B3)",
+      "proves": "a mention in a topic is a turn put to the mentioned MEMBER agent in that thread, not a new Ask: the org's object resolves @label to a member and admits the post into its inbox on the topic's thread; the member's runtime is woken and answers IN THE TOPIC as itself (messaging.topic.post, under its open mandate); a second mention continues the same run (one session per thread — turn N then N+1)",
+      "twin": "the same handle mentioned in a topic of an organization the member does not belong to admits nothing and wakes nothing (20s)",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 480
+    },
+    {
       "id": "verify-contacts",
       "script": "scripts/verify-contacts.mts",
       "spec": "401 C1",

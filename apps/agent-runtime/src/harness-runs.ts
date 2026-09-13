@@ -104,6 +104,10 @@ export interface HarnessRunCheckpointV1 {
    *  the other entry path refuses to advance a run it does not own, because two engines discovering the
    *  same operation is how a payment happens twice. */
   executor?: 'client' | 'workflow';
+  /** Spec 400 W2 (B3) — the THREAD this run belongs to (a conversation id: a DM, or a topic's `conv_topic-…`), when a
+   *  message on that thread opened it. What a later mention on the same thread finds the run by: a run parked for
+   *  DATA there takes the mention as its answer instead of a new run opening beside it. */
+  thread?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -148,6 +152,15 @@ export type SuspendedRunV1 = Omit<HarnessRunCheckpointV1, 'presented'>;
 export async function listRuns(env: RunStoreEnv, addressee: Address): Promise<SuspendedRunV1[]> {
   const out = await call(env, addressee, 'list', {});
   return (out.runs as SuspendedRunV1[] | undefined) ?? [];
+}
+
+/** Spec 400 W2 (B3) — THE OPEN RUN ON A THREAD: the newest unexpired run on `thread` that waits for DATA (a question the
+ *  next message can answer). A run waiting on a signature, a commitment or authority is not resumable by words, and a
+ *  mention leaves it where it is (the reply to that mention opens no run either — the run is what is waiting). */
+export function openRunOnThread(runs: readonly SuspendedRunV1[], thread: string, now = Date.now()): SuspendedRunV1 | null {
+  return runs
+    .filter((r) => r.thread === thread && r.awaiting?.kind === 'data' && !isExpired(r, now))
+    .sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null;
 }
 
 /** A run that reached a terminal outcome leaves nothing behind: done is done, and a denial is terminal

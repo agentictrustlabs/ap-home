@@ -72,6 +72,8 @@ import {
 } from '@agenticprimitives/fabric/messaging';
 // spec 341 Wave 2a — the inbox read cursor (Ring-0, pure; survives the Wave 5 transport change).
 import { inboxRevision, upsertConversation, type InboxDataV1 } from '@agenticprimitives/fabric';
+import { generateMessageId, messageBodyResource, type MessageEnvelopeV2 } from '@agenticprimitives/fabric/messaging';
+import { mentionsIn, resolveMentions, topicThreadId, topicContextRef } from './mentions.js';
 // spec 341 §5.1b — outbound delivery, performed here because this is where the signing key is.
 import { deliverOutbound, wireTargets } from './outbound-delivery.js';
 import { messagingScopeCovers, messagingScopeDepsFromEnv } from './messaging-scope.js';
@@ -520,6 +522,55 @@ export class InteractionsDO {
     })().catch((e) => {
       void audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.assistant.dispatchFailed', outcome: 'error', actor: { type: 'service', id: opts.principal }, subject: { type: 'channel', id: opts.channelId }, reason: e instanceof Error ? e.message : String(e) }).catch(() => undefined);
     });
+  }
+
+  /** Spec 400 W2 (B3) — MENTIONS INTO WORK. `@goose-2` in a topic: the mentioned MEMBER agent (any member, not only
+   *  the org's own assistant) is handed the post as a message on the topic's thread — admitted by ITS OWN object
+   *  (`/internal/admit-message` on its task DO: body, inbox, then its `message` triggers with profile `mention` and its
+   *  runtime wake). The org resolves `@label` to a typed name and checks the member's invitation record in its own
+   *  vault; a handle that names no member tells nobody. Post-commit, fire-and-forget: a failed hand-off is audited
+   *  and dropped (ADR-0013), never queued, never affecting the poster's response. A mention grants nothing. */
+  private dispatchMentions(opts: { entry: ChannelV1; channelId: string; principal: string; grant: IncomingDelegation; posterCaip: string; posterName: string; bodyText: string; messageId: string }): void {
+    const refs = mentionsIn(opts.bodyText);
+    if (!refs.length || !internalMarker(this.env)) return;
+    if (!this.env.RPC_URL || !this.env.AGENT_NAME_REGISTRY || !this.env.AGENT_NAME_UNIVERSAL_RESOLVER) return;
+    const audit = buildAuditSink(this.env);
+    const chainId = Number(this.env.CHAIN_ID ?? 84532);
+    void (async () => {
+      const naming = new AgentNamingClient({ rpcUrl: this.env.RPC_URL!, chainId, registry: this.env.AGENT_NAME_REGISTRY as Address, universalResolver: this.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address });
+      const members = await resolveMentions(refs, {
+        resolveName: async (n) => (await naming.resolveName(n)) as Address | null,
+        // A member: the organization's own invitation record for it (S3b — for a service the invitation is the admission).
+        isMember: async (a) => !!(await this.readDoc<unknown>(opts.grant, `org.invite:agent:${a.toLowerCase()}`, null)),
+        exclude: [opts.principal as Address],
+      });
+      for (const m of members) {
+        try {
+          const now = new Date().toISOString();
+          const messageId = generateMessageId();
+          const bytes = new TextEncoder().encode(opts.bodyText);
+          const envelope: MessageEnvelopeV2 = {
+            version: 'ap.message.v2', id: messageId,
+            conversationId: topicThreadId(opts.principal, opts.channelId),
+            performative: 'REQUEST',
+            from: opts.posterCaip as AnyMessageEnvelope['from'], to: [caip10(chainId, m.agent) as AnyMessageEnvelope['from']],
+            subject: `@${m.label} in ${opts.entry.descriptor.title}`.slice(0, 120),
+            createdAt: now, classification: 'internal',
+            body: { resource: messageBodyResource(messageId), classification: 'internal', updatedAt: now },
+            bodyHash: await sha256Hex32(bytes), bodyContentType: 'text/plain',
+            actor: opts.posterCaip as AnyMessageEnvelope['from'],
+            contextRefs: [topicContextRef(opts.principal, opts.channelId, opts.entry.descriptor.title)],
+          };
+          const stub = this.env.A2A_TASKS.get(this.env.A2A_TASKS.idFromName(m.agent));
+          const resp = await stub.fetch(new Request(`https://do/internal/admit-message?agent=${m.agent}`, { method: 'POST', headers: internalHeaders(this.env), body: JSON.stringify({ envelope, bodyText: opts.bodyText, skill: 'messaging.mention' }) }));
+          const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+          if (!resp.ok || out.ok === false) throw new Error(out.error ?? `admit-message failed (${resp.status})`);
+          await audit.write({ id: crypto.randomUUID(), timestamp: now, action: 'interactions.channels.mention', outcome: 'success', actor: { type: 'service', id: opts.principal }, subject: { type: 'channel-post', id: opts.messageId }, reason: `${m.name} told (${messageId})` });
+        } catch (e) {
+          void audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.channels.mentionFailed', outcome: 'error', actor: { type: 'service', id: opts.principal }, subject: { type: 'channel-post', id: opts.messageId }, reason: `${m.name}: ${e instanceof Error ? e.message : String(e)}` });
+        }
+      }
+    })().catch(() => undefined);
   }
 
   /** spec 334 §6 — hand the just-adopted goal to the org's OWN agent to DRAFT a first plan
@@ -2348,9 +2399,16 @@ export class InteractionsDO {
           // The assistant's reply write (spec 327 §5). `from`/`actor` are PINNED server-side to the
           // org principal — the caller supplies only { channelId, bodyText }; it cannot author as
           // anyone. Disable wins races: a reply landing after the steward disables is rejected.
+          // Spec 400 W2 (B3) — OR a MEMBER AGENT's post, in-Worker after the harness verified its mandate
+          // (`messaging.topic.post`): `member` names the author, which must hold this organization's invitation
+          // (its record in the org's own vault); the author is then that member, never the org, and the assistant
+          // need not be enabled — a member speaks in a topic as a member does.
           const channelId = String(body.channelId ?? '');
           const bodyText = String(body.bodyText ?? '').trim();
           if (!channelId || !bodyText) return json({ error: 'channelId + bodyText required' }, 400);
+          const member = typeof body.member === 'string' && /^0x[0-9a-f]{40}$/i.test(body.member) ? body.member.toLowerCase() : null;
+          const memberName = member ? String(body.memberName ?? '').trim().slice(0, 80) : '';
+          if (member && member !== principal && !(await this.readDoc<unknown>(g, `org.invite:agent:${member}`, null))) return json({ error: 'that agent is not a member of this organization' }, 403);
           // spec 329 §6 — the routing turns' posts may carry the `routed-consultation` contextRef
           // (chip) + PROV attribution. PINNED: only that ref kind is accepted from the caller (the
           // in-Worker assistant pipeline), so this seam can never smuggle arbitrary refs.
@@ -2364,13 +2422,15 @@ export class InteractionsDO {
             const entry = index.find((c) => c.descriptor.id === channelId);
             if (!entry) return json({ error: 'unknown channel' }, 404);
             const assistant = entry.assistant;
-            if (!assistant) return json({ error: 'assistant is not enabled on this topic' }, 409);
-            const orgCaip = caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address) as AnyMessageEnvelope['from'];
+            if (!member && !assistant) return json({ error: 'assistant is not enabled on this topic' }, 409);
+            const authorAddr = member && member !== principal ? member : principal;
+            const authorCaip = caip10(Number(this.env.CHAIN_ID ?? 84532), authorAddr as Address) as AnyMessageEnvelope['from'];
+            const authorName = member && member !== principal ? (memberName || member.slice(0, 10)) : (assistant?.displayName || memberName || principal.slice(0, 10));
             const messages = await this.readDoc<ChannelMessageEntryV1[]>(g, TOPIC_RESOURCE(channelId), []);
             const composed: ChannelV1[] = [{ ...entry, messages }];
-            const r = await appendBoardPost(composed, { channelId, from: orgCaip, authorName: assistant.displayName, bodyText, actor: orgCaip, ...(extraRefs.length ? { contextRefs: extraRefs } : {}), ...(prov ? { prov } : {}) });
+            const r = await appendBoardPost(composed, { channelId, from: authorCaip, authorName, bodyText, actor: authorCaip, ...(extraRefs.length ? { contextRefs: extraRefs } : {}), ...(prov ? { prov } : {}) });
             if (!r.ok) return json({ error: r.error }, 400);
-            await audit.write({ id: crypto.randomUUID(), timestamp: r.envelope.createdAt, action: 'interactions.channels.assistantPost', outcome: 'success', actor: { type: 'service', id: principal }, subject: { type: 'channel-post', id: r.envelope.id } });
+            await audit.write({ id: crypto.randomUUID(), timestamp: r.envelope.createdAt, action: member && member !== principal ? 'interactions.channels.memberAgentPost' : 'interactions.channels.assistantPost', outcome: 'success', actor: { type: 'service', id: authorAddr }, subject: { type: 'channel-post', id: r.envelope.id } });
             const store = createVaultMessageBodyStore(this.vaultFor(g), principal);
             await store.putBody({ messageId: r.envelope.id, bytes: new TextEncoder().encode(bodyText), contentType: 'text/plain', classification: 'internal', resource: r.envelope.body.resource });
             await this.writeDoc(g, TOPIC_RESOURCE(channelId), composed[0]!.messages);
@@ -3573,6 +3633,9 @@ export class InteractionsDO {
           if (assistantTrigger(entry, { from: sessionCaip as AnyMessageEnvelope['from'], bodyText: String(body.bodyText ?? '') })) {
             this.dispatchAssistant({ entry, channelId, principal, triggerAuthor: name ?? 'Steward', triggerBody: String(body.bodyText ?? '').trim() });
           }
+          // Spec 400 W2 (B3) — every MEMBER AGENT the post names hears it: the mention is admitted into that
+          // member's inbox on the topic's thread, post-commit, fire-and-forget (audited, never queued).
+          this.dispatchMentions({ entry, channelId, principal, grant, posterCaip: sessionCaip, posterName: name ?? 'Steward', bodyText: String(body.bodyText ?? '').trim(), messageId: r.envelope.id });
           return json({ ok: true, messageId: r.envelope.id });
         });
       }
