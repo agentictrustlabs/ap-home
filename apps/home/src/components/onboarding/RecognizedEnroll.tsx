@@ -95,6 +95,8 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
   const relyingApp = enroll
     ? (whitelabel.relyingApps.find((a) => a.client_id === enroll.aud) ?? knownRelyingClient(enroll.aud) ?? undefined)
     : undefined;
+  /** The ordinary sign-in, as opposed to a named ceremony run on the way into one. */
+  const plainSignIn = !enroll?.template || enroll.template === 'site-login';
   const appHost = enroll ? hostOf(enroll.redirectUri) : '';
   const appName = displayAppName(relyingApp?.name, appHost);
   const appDomain = displayAppDomain(appHost);
@@ -538,12 +540,16 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
             // spec 272 recurring — a SUBSCRIPTION connect (sub_period set): also mint a standing pull mandate.
             subscription: enroll.subPeriod ? { periodSeconds: enroll.subPeriod } : undefined,
           };
-        } else if (grantsCoinAtConnect(relyingApp)) {
+        } else if (grantsCoinAtConnect(relyingApp) && plainSignIn) {
           // THE APP'S OWN COIN, granted in the PLAIN sign-in (`new_member.currency.spend_grant`).
           // Same mandate, same `issuePaymentDelegation`, same return trip to the app on the token
           // exchange — the only thing that changed is that the member no longer has to come back for
           // a second ceremony to authorize it. `null` (no account, or no currency declared) simply
           // leaves `payment` undefined and the connect runs exactly as it did before.
+          // THE PLAIN SIGN-IN ONLY. A ceremony template (charter a club, invite a member into it, join
+          // it, hire a coach) is a different act, and the sheet for it said "take up to 200 Sheqels
+          // from your money account" beside "let the person you named read this workspace" — a spending
+          // mandate re-minted, and disclosed, on the one screen whose job is to say what is being trusted.
           payment = coinMandateLeg(relyingApp, treasuryAddr) ?? undefined;
         }
         // spec 345 — a self-vault grant rides this SAME plain sign-in when the client declares one.
@@ -698,17 +704,15 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
   // the same list as everything else it can do. The setup screen discloses it to a member who is
   // typing the name now; this is what a RETURNING member (whose name is already on file, and who
   // never sees that screen) gets to read before authorizing. No-op for every unscoped app.
-  const tpl = withCurrencyConsent(
-    withProfileNameConsent(
-      whitelabel.delegationTemplates[enroll.template] ?? {
-        canDo: [],
-        cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'],
-      },
-      relyingApp,
-    ),
+  const baseTpl = withProfileNameConsent(
+    whitelabel.delegationTemplates[enroll.template] ?? {
+      canDo: [],
+      cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'],
+    },
     relyingApp,
-    appName,
   );
+  // The coin's consent lines belong to the plain sign-in, where the coin is granted (see the mandate leg).
+  const tpl = plainSignIn ? withCurrencyConsent(baseTpl, relyingApp, appName) : baseTpl;
   return (
     <div className="onboarding-screen">
       <div className="onboarding-card wide">
