@@ -124,7 +124,8 @@ import { internalHeaders, isInternalCall } from './internal-marker.js';
 import { standardServerFor } from './standard-a2a.js';
 import { withStandardCardFields } from '@agenticprimitives/a2a/standard';
 import type { AgentCardV1 } from '@agenticprimitives/a2a/standard';
-import { chainStewardshipCheck, deriveStanding, membershipRows } from '@agenticprimitives/context';
+import { chainStewardshipCheck, deriveStanding } from '@agenticprimitives/context';
+import { clubTurn, CLUB_RECORDS } from './card-room-club.js';
 import { charteredAgentsReader, charteredOwnerReader } from './chartered-agents.js';
 import { relationshipRows } from '@agenticprimitives/context';
 import { grantBody } from '@agenticprimitives/agent-resolution';
@@ -2167,35 +2168,73 @@ function clubRosterSecretOk(env: Env, authorization: string): boolean {
   return diff === 0;
 }
 /**
- * WHO BELONGS TO THIS WORKSPACE — for a relying app whose roster is a PROJECTION of the Home's (pokernight's
- * clubs, 2026-09-13), under the same paired secret the club huddle uses. Answers from the workspace's OWN
- * membership records (`org.membership:member:<sa>`, written by the `workspace-join` ceremony; an ended one is
- * not a member) — the organization's word about who belongs, never the members' notes about themselves. The
- * secret is the estate's trust in the card room, not a person's; the card room asks for workspaces it
- * chartered and shows the answer only to people with standing in that club. A workspace with no storage of
- * its own answers an empty roster with `needsEnable`, so the app can say what to do rather than show nobody.
+ * A CLUB ACTS ON ITS OWN RECORDS — the card room's direct door to a club's workspace agent (`card-room-club.ts`).
+ *
+ * The caller is the CLUB: an `A2A-Session` assertion over the service-agent wire its host signed at charter
+ * (`workspace → the card room's session key`), verified exactly as the standard surface verifies an agent
+ * caller — wire shape and signature against the workspace's own ERC-1271, unrevoked on chain, the assertion
+ * bound to this URL's origin, this method and these exact bytes, spent once. Then `clubTurn`: a vault read or
+ * a vault put, no model. A direct route rather than the task surface because a club page is drawn from this
+ * answer on every load and the task machinery's seconds are not what a page-load should cost; the AUTHORITY is
+ * the same wire either way. Body: `{ method: 'club.act', club, skill: 'club.read' | 'club.write', input }`.
  */
-app.get('/clubs/roster', async (c) => {
+app.post('/clubs/act', async (c) => {
+  const raw = await c.req.text();
+  const auth = c.req.header('authorization') ?? '';
+  if (!/^A2A-Session\s/i.test(auth)) return c.json({ ok: false, error: 'a club acts under its wire — an A2A-Session assertion is required' }, 401);
+  const who = await verifyAppDelegation(c.env, c.req.url, auth, raw);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  type ActBody = { method?: string; club?: string; skill?: string; input?: Record<string, unknown> };
+  let body: ActBody | null = null;
+  try { body = JSON.parse(raw) as ActBody; } catch { return c.json({ ok: false, error: 'not json' }, 400); }
+  if (!body || body.method !== 'club.act') return c.json({ ok: false, error: 'method must be club.act' }, 400);
+  const club = String(body.club ?? '').toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(club)) return c.json({ ok: false, error: 'club (the workspace agent, 0x…40) required' }, 400);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  const turn = await clubTurn({
+    readRecord: (subject, recordType) => deps.readSubjectRecord ? deps.readSubjectRecord(subject, recordType) : Promise.resolve(null),
+    writeRecord: (subject, recordType, record) => deps.writeSubjectRecord ? deps.writeSubjectRecord(subject, recordType, record) : Promise.resolve({ ok: false, error: 'no vault' }),
+    survey: async (subject) => {
+      const out = await callInteractionsInternal(c.env, subject, 'internal.coordination.vaultSurvey', {}).catch(() => null);
+      return (((out as { records?: Array<{ recordType?: string }> } | null)?.records ?? []).filter((r) => !!r.recordType).map((r) => ({ recordType: String(r.recordType) })));
+    },
+    readRecords: async (subject, recordTypes) => {
+      const out = await callInteractionsInternal(c.env, subject, 'internal.coordination.vaultQuery', { recordTypes }).catch(() => null);
+      return (out as { records?: Record<string, unknown> } | null)?.records ?? {};
+    },
+    ...(deps.nameOf ? { nameOf: deps.nameOf } : {}),
+    ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}),
+    verifyStewardship: chainStewardshipCheck({
+      readContract: ((args: never) => deps.readContract(args)) as never,
+      chainId: Number(c.env.CHAIN_ID), delegationManager: c.env.DELEGATION_MANAGER as Address,
+      allowedTargetsEnforcer: c.env.ALLOWED_TARGETS_ENFORCER, vaultRecordScopeEnforcer: VAULT_RECORD_SCOPE_ENFORCER,
+      isRevokedAbi: IS_REVOKED_ABI_FOR_STANDING, validatorAbi: universalSignatureValidatorAbi,
+      ...(c.env.UNIVERSAL_SIGNATURE_VALIDATOR ? { validator: c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address } : {}),
+    }),
+  }, { caller: who.sa, club, skill: String(body.skill ?? ''), material: { input: body.input ?? {} } });
+  if (turn.kind === 'refused') return c.json({ ok: false, error: turn.text }, 403);
+  return c.json({ ok: true, ...turn.data });
+});
+/**
+ * WHICH CLUBS A PERSON IS IN — the card room's rail, under the paired secret. A person's links are their own; what
+ * this answers is the narrow question an app they signed in to may ask: of the workspaces this person is linked to,
+ * which are CLUBS OF THIS CARD ROOM — the ones whose agent keeps a `cardroom.club.profile`. Nothing else about their
+ * links leaves. (The one read still on the secret: a person's clubs are nobody's to act as, so no wire names them.)
+ */
+app.get('/clubs/mine', async (c) => {
   if (!clubRosterSecretOk(c.env, c.req.header('authorization') ?? '')) return c.json({ ok: false, error: 'not for you' }, 403);
-  const workspace = String(c.req.query('workspace') ?? '').toLowerCase();
-  if (!/^0x[0-9a-f]{40}$/.test(workspace)) return c.json({ ok: false, error: 'workspace (0x…40) required' }, 400);
-  // The inventory first (spec 356 §2.5, no plaintext), then exactly the membership keys. The survey's own
-  // refusal is kept apart from an empty roster: "no interactions grant" is a workspace whose steward has not
-  // enabled its storage, which somebody can act on; an empty list is a club with nobody in it yet.
-  let inventory: Array<{ recordType?: string }>;
-  try {
-    const out = await callInteractionsInternal(c.env, workspace, 'internal.coordination.vaultSurvey', {});
-    inventory = (out as { records?: Array<{ recordType?: string }> }).records ?? [];
-  } catch (e) {
-    const why = e instanceof Error ? e.message : String(e);
-    return c.json({ ok: true, workspace, members: [], ...(/grant/i.test(why) ? { needsEnable: true } : {}), error: why });
-  }
-  const keys = inventory.map((r) => String(r.recordType ?? '')).filter((rt) => rt.startsWith('org.membership:member:')).slice(0, 500);
-  const bodies = keys.length
-    ? ((await callInteractionsInternal(c.env, workspace, 'internal.coordination.vaultQuery', { recordTypes: keys }).catch(() => ({}))) as { records?: Record<string, unknown> }).records ?? {}
-    : {};
-  const members = membershipRows(keys, bodies).map((r) => ({ agent: r.agent, ...(r.name ? { name: r.name } : {}), ...(r.role ? { role: r.role } : {}) }));
-  return c.json({ ok: true, workspace, members });
+  const agent = String(c.req.query('agent') ?? '').toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(agent)) return c.json({ ok: false, error: 'agent (0x…40) required' }, 400);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  const tree = deps.readSubjectRecord ? await deps.readSubjectRecord(agent, 'relationships.data').catch(() => null) : null;
+  const rows = relationshipRows(tree).filter((r) => r.agent !== agent);
+  const clubs = (await Promise.all(rows.map(async (r) => {
+    const profile = deps.readSubjectRecord ? await deps.readSubjectRecord(r.agent, CLUB_RECORDS.profile).catch(() => null) : null;
+    if (!profile || typeof profile !== 'object') return null;
+    const p = profile as { name?: unknown };
+    return { club: r.agent, name: typeof p.name === 'string' && p.name ? p.name : r.name, standing: r.relationship === 'steward' ? 'host' : 'member' };
+  }))).filter((x): x is { club: string; name: string; standing: string } => x !== null);
+  return c.json({ ok: true, agent, clubs });
 });
 app.post('/huddles/:op', async (c) => {
   const op = String(c.req.param('op') ?? '');

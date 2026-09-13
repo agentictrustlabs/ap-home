@@ -1060,14 +1060,17 @@ export async function authorizeContentSigningForOwner(
 export async function authorizeServiceAgentWire(
   via: Via,
   auth: Auth | undefined,
-  opts: { a2aBase: string; idToken: string },
+  opts: { a2aBase: string; idToken: string;
+    /** The agent the service is to act AS, when the app names one (a card-room club's workspace): the service
+     *  answers for that identity and the custodian signs as it. Absent, the service names its own identity. */
+    identity?: Address },
   onStep?: (s: string) => void,
 ): Promise<Result<{ identity: Address; delegate: Address; skills: string[]; expiresAt: string | null }>> {
   try {
     const base = opts.a2aBase.replace(/\/$/, '');
     const authHeader = { authorization: `Bearer ${opts.idToken}` };
     onStep?.('Reading the service\u2019s signing key\u2026');
-    const who = (await fetch(`${base}/admin/signer-address`, { headers: authHeader })
+    const who = (await fetch(`${base}/admin/signer-address${opts.identity ? `?identity=${encodeURIComponent(opts.identity)}` : ''}`, { headers: authHeader })
       .then((r) => r.json())
       .catch(() => ({}))) as { identity?: Address; delegate?: Address; skill?: string; skills?: string[]; error?: string };
     // The service names the SET it needs. `skill` is the single-skill form kept working, because a
@@ -1075,6 +1078,11 @@ export async function authorizeServiceAgentWire(
     const skills = who.skills?.length ? who.skills : who.skill ? [who.skill] : [];
     if (!who.identity || !who.delegate || skills.length === 0) {
       return { ok: false, error: who.error ?? 'the service could not report its signing key' };
+    }
+    // The app named an identity and the service answered for a different one: refuse rather than sign a wire
+    // for whatever came back — the custodian is approving THIS agent's delegate, not the service's choice.
+    if (opts.identity && who.identity.toLowerCase() !== opts.identity.toLowerCase()) {
+      return { ok: false, error: `the service answered for ${who.identity}, not the agent named (${opts.identity})` };
     }
 
     // Sign AS the identity — the custodian custodies it, which is the whole premise of the ceremony.

@@ -248,7 +248,9 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         if (!enroll.collectToken) return fail('missing owner token for service-agent authorization');
         // Same reason as the grant path: the demo-custody probe needs the token on the wallet via.
         const swAuth: Auth | undefined = token ? { token } : undefined;
-        const res = await authorizeServiceAgentWire(viaLower, swAuth, { a2aBase: cfg.a2aBase, idToken: enroll.collectToken });
+        // `grant_org` names the agent the service is to act AS (a card-room club's workspace, 2026-09-13); without
+        // it the service names its own identity, as before.
+        const res = await authorizeServiceAgentWire(viaLower, swAuth, { a2aBase: cfg.a2aBase, idToken: enroll.collectToken, ...(enroll.grantOrg ? { identity: enroll.grantOrg } : {}) });
         if (!res.ok) return fail(res.error);
         setSsoCookie(token, viaLower);
         setPhase('connected');
