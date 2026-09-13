@@ -20,16 +20,26 @@ import { signHashFor, type Via } from '../home/onboarding';
 import { SESSION_KEY } from '../context/session';
 import { fetchProfile, getCapabilities, listSkillClaims, saveSkillClaims, setCapabilities, capabilityIdFor } from '../connect-client';
 import { assignDefaultArchetype } from '../home/default-archetype';
+import { createAgentWithBirthrights } from '../components/portal/ManagedAgents';
+import { listManagedAgents } from '../connect-client';
 import { GAMES, coachFor, hireCoachGrant, listStudyGrants, readSpecialists, resolveCoach, studyScopesFor, writeSpecialists, type CoachedGame } from './coaches';
 
 export interface ClientDefaults {
   /** The coach every person connecting from this app gets, per game — a SERVICE, by typed name. One per game. */
   coaches: Array<{ game: CoachedGame['id']; service: string }>;
+  /**
+   * A MONEY ACCOUNT, made in the ceremony when the person has none. The card room's tables settle from a
+   * person-treasury; a person who arrived without one met "Set up your stake" on the first table they opened
+   * and had to be sent back here. Creating it is the same ceremony the treasuries page runs (one account
+   * custodied by the person's own credential, gas sponsored), narrated as a step here. It GRANTS the app
+   * nothing — the buy-in mandate is still the person's to sign, by name, before a single coin moves.
+   */
+  treasury?: boolean;
 }
 
 /** By OIDC client id. The card room is the one app with default coaches today: Bob for hold'em, Carol for canasta. */
 export const CLIENT_DEFAULTS: Record<string, ClientDefaults> = {
-  pokernight: { coaches: [{ game: 'poker', service: 'bob-coach.svc' }, { game: 'canasta', service: 'carol-coach.svc' }] },
+  pokernight: { coaches: [{ game: 'poker', service: 'bob-coach.svc' }, { game: 'canasta', service: 'carol-coach.svc' }], treasury: true },
 };
 
 const toVia = (via: string | undefined): Via => {
@@ -63,6 +73,22 @@ export async function applyClientDefaults(clientId: string, onStep?: (line: stri
   if (!agent || !profile?.deployed) return { ...out, error: 'the agent is not deployed yet' };
   const games = d.coaches.map((c) => ({ ...c, game: GAMES.find((g) => g.id === c.game)! })).filter((c) => c.game);
   const signer = () => signHashFor(toVia(via), agent, { token });
+
+  // 0. A money account, when the app settles and the person has none. Never a second one; never on failure
+  //    a blocked sign-in — the card room's own "Set up your stake" panel remains the recovery path.
+  if (d.treasury) {
+    try {
+      const mine = (await listManagedAgents(token).catch(() => [])).filter((a) => a.kind === 'person-treasury' && (a.relationship ?? 'steward') === 'steward');
+      if (mine.length) out.skipped.push('treasury');
+      else {
+        onStep?.('Making you a money account for the tables…');
+        const made = await createAgentWithBirthrights({ kind: 'person-treasury', parent: agent, person: agent, via: via || 'passkey' }, token, (line) => onStep?.(line));
+        if (made.ok) out.applied.push('treasury'); else { out.error = `treasury: ${made.error}`; }
+      }
+    } catch (e) {
+      out.error = `treasury: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
 
   // 1. The card room's skills on the agent, for EVERY game it deals — one signature, only when something is missing.
   const published = await getCapabilities(agent).catch(() => [] as string[]);
