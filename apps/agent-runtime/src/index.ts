@@ -914,6 +914,9 @@ app.use('*', async (c, next) => {
   // and spent once: there is no cookie for CSRF to defend and no ambient authority to forge. Its own
   // verification is the gate; a Home MCP's ask reaches the harness this way, as the person, under their wire.
   if (/^A2A-Session\s/i.test(c.req.header('authorization') ?? '')) return next();
+  // Spec 378 club scope — the CARD ROOM's server-to-server call for one of its club members, under the paired
+  // roster secret (checked in the route): no browser, no cookie, nothing for CSRF to defend.
+  if (c.req.path.startsWith('/huddles/') && clubRosterSecretOk(c.env, c.req.header('authorization') ?? '')) return next();
   // Federated-token custody (spec 265) — server-to-server from the Connect broker / MCP, bridge-HMAC
   // authenticated (no browser cookie).
   if (c.req.path === '/custody/youversion/store-token') return next();
@@ -2171,17 +2174,38 @@ app.post('/huddles/webhook', async (c) => {
   const res = await stub.fetch(new Request('https://huddle-room/', { method: 'POST', headers: internalHeaders(c.env, { 'content-type': 'application/json' }), body: JSON.stringify({ op: 'webhook', event: ev }) }));
   return c.json(await res.json().catch(() => ({ ok: true })));
 });
+/** The paired secret a card room presents (spec 378 club scope) — constant-time, and never a fallback. */
+function clubRosterSecretOk(env: Env, authorization: string): boolean {
+  const secret = String((env as { CLUB_ROSTER_SECRET?: string }).CLUB_ROSTER_SECRET ?? '');
+  const given = authorization.replace(/^Bearer\s+/i, '');
+  if (!secret || !given || secret.length !== given.length) return false;
+  let diff = 0;
+  for (let i = 0; i < secret.length; i++) diff |= secret.charCodeAt(i) ^ given.charCodeAt(i);
+  return diff === 0;
+}
 app.post('/huddles/:op', async (c) => {
   const op = String(c.req.param('op') ?? '');
   if (!['start', 'join', 'get', 'leave', 'end', 'invite', 'removeParticipant'].includes(op)) return c.json({ ok: false, error: 'unknown huddle operation' }, 404);
   if (!realtimeKitConfigured(c.env) || !c.env.HUDDLES) return c.json({ ok: false, error: 'huddles_not_configured' }, 503);
-  const body = (await c.req.json().catch(() => null)) as { session?: string; scope?: HuddleScopeIn; represented?: string; displayName?: string; invitee?: string; target?: string; key?: string } | null;
-  if (!body?.session) return c.json({ ok: false, error: 'session required' }, 400);
-  const who = await verifyHomeSession(body.session, c.env);
-  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
-  const actor = String(who.sa).toLowerCase() as Address;
-  const scope = huddleScopeOf(body.scope);
-  if (!scope) return c.json({ ok: false, error: 'scope { kind: conversation|org|team|workspace, principal, id? } required' }, 400);
+  const body = (await c.req.json().catch(() => null)) as { session?: string; actor?: string; scope?: HuddleScopeIn; represented?: string; displayName?: string; invitee?: string; target?: string; key?: string } | null;
+  const scope = huddleScopeOf(body?.scope);
+  if (!scope) return c.json({ ok: false, error: 'scope { kind: conversation|org|team|workspace|club, principal, id? } required' }, 400);
+  // WHO. A person's own Home session as ever — or, for a CLUB scope only, the card room's server-to-server call
+  // under the paired roster secret, naming the member it verified on its own session. The card room is the
+  // club's roster authority already (clubStandingFor asks it who is a member); a person who signed in to the
+  // card room through their Home holds no Home bearer in that browser, so this is the one road to the club's
+  // huddle for them. The standing is still derived here, at join time, from the roster.
+  let actor: Address;
+  if (body?.session) {
+    const who = await verifyHomeSession(body.session, c.env);
+    if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+    actor = String(who.sa).toLowerCase() as Address;
+  } else if (scope.kind === 'club' && clubRosterSecretOk(c.env, c.req.header('authorization') ?? '') && /^0x[0-9a-fA-F]{40}$/.test(String(body?.actor ?? ''))) {
+    actor = String(body!.actor).toLowerCase() as Address;
+  } else {
+    return c.json({ ok: false, error: 'session required' }, 400);
+  }
+  if (!body) return c.json({ ok: false, error: 'a body is required' }, 400);
   const standing = await huddleStandingFor(c.env, actor, scope);
   // A represented principal is a CLAIM the caller makes; it is honoured only when the caller stewards it.
   let represented: Address | undefined;
