@@ -6,6 +6,7 @@
 //
 // SEC-005: the relying-origin allowlist is no longer hardcoded here. It's derived from
 // `whitelabel.relyingApps[].redirect_uris` so the two sources cannot drift.
+import { CLIENT_DEFAULTS, applyClientDefaults } from '../../lib/client-defaults';
 import { useCallback, useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 // Curated clients resolve synchronously from the bundle; MEMBER-REGISTERED ones are looked up
@@ -186,6 +187,20 @@ export async function submitEnrollGrant(
 /** Deliver the code back: popup → postMessage (exact origin) + close; else full-page ?code&state.
  *  Falls back to a redirect if the popup lost its opener (cross-origin OAuth round-trip). */
 export function deliverEnrollCode(enroll: EnrollReq, popupMode: boolean, code: string): void {
+  // THE APP'S DEFAULTS, BEFORE THE CODE GOES BACK (`src/lib/client-defaults.ts`): a person connecting from the
+  // card room leaves with the card room's skills on their agent and its default coach hired — the first hand
+  // has a coach, and nobody is asked to go and set it up. Bounded (a minute) and never fatal: a failure is
+  // logged, the code is delivered anyway, and the app's own sheet offers the Coaches page.
+  if (code && CLIENT_DEFAULTS[enroll.aud]) {
+    const deadline = new Promise<void>((resolve) => setTimeout(resolve, 60_000));
+    void Promise.race([applyClientDefaults(enroll.aud, (line) => console.log('[client-defaults]', line)).then((o) => { if (o.error) console.warn('[client-defaults]', enroll.aud, o.error); else console.log('[client-defaults]', enroll.aud, 'applied', o.applied, 'skipped', o.skipped); }).catch((e: unknown) => console.warn('[client-defaults]', enroll.aud, e)), deadline])
+      .then(() => deliverEnrollCodeNow(enroll, popupMode, code));
+    return;
+  }
+  deliverEnrollCodeNow(enroll, popupMode, code);
+}
+
+function deliverEnrollCodeNow(enroll: EnrollReq, popupMode: boolean, code: string): void {
   if (popupMode && typeof window !== 'undefined' && window.opener && relyingAllowed(enroll.redirectUri)) {
     postEnrollToOpener(enroll, { type: 'AC_SUCCESS', state: enroll.state, code });
     window.close();
