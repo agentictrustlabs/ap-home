@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { buildVaultRecordScopeCaveat, VAULT_RECORD_SCOPE_ENFORCER, TIMESTAMP_ENFORCER } from '@agenticprimitives/delegation';
 import {
   HANDS_KEPT, HAND_RECORD, NOTE_RECORD, STUDY_SERVER,
-  appendNote, cardRoomActOf, cardRoomTurn, compactCanastaRound, dayRecordFor, dayRecordsFor, handEntryOf, isHandRecord, recordDayHand, recordHand, reviewDaysOf, reviewScopeOf, studyFamilyOfRecord, studyFrom, studyGrantOf, studyRecords, verifyStudyGrant,
+  appendNote, cardRoomActOf, cardRoomTurn, compactCanastaRound, dayRecordFor, dayRecordsFor, handEntryOf, isHandRecord, recordDayHand, recordHand, reviewDaysOf, reviewScopeOf, profileFor, studyFamilyOfRecord, studyFrom, studyGrantOf, studyRecords, verifyStudyGrant,
 } from '../src/card-room.js';
 import { PLAYBOOK_ANSWER_TOOL, playbookAnswerInvoker } from '../src/playbook-answer.js';
 import type { IncomingWire } from '../src/org-wire.js';
@@ -455,7 +455,9 @@ describe('one cabinet per game', () => {
   it('hold\'em keeps the bare names; every other game carries its family in the record name', () => {
     expect(studyRecords('poker')).toMatchObject({ family: 'poker', hand: 'cardroom.hand', note: 'cardroom.note', dayPrefix: 'cardroom.hands:', dayScope: 'cardroom.hands:*' });
     expect(studyRecords('canasta.advise')).toMatchObject({ family: 'canasta', hand: 'cardroom.canasta.hand', style: 'cardroom.canasta.style', read: 'cardroom.canasta.read', note: 'cardroom.canasta.note', dayPrefix: 'cardroom.canasta.hands:', dayScope: 'cardroom.canasta.hands:*' });
-    expect(studyRecords('canasta').reads).toEqual(['cardroom.canasta.hand', 'cardroom.canasta.style', 'cardroom.canasta.read', 'cardroom.canasta.note', 'cardroom.canasta.hands:*']);
+    // …plus the ONE record shared across games: the person's profile.
+    expect(studyRecords('canasta').reads).toEqual(['cardroom.canasta.hand', 'cardroom.canasta.style', 'cardroom.canasta.read', 'cardroom.canasta.note', 'cardroom.canasta.hands:*', 'cardroom.profile']);
+    expect(studyRecords('poker').profile).toBe('cardroom.profile');
     expect(dayRecordFor('2026-09-12T20:00:00Z', 'canasta')).toBe('cardroom.canasta.hands:2026-09-12');
     expect(dayRecordsFor(2, new Date('2026-09-12T12:00:00Z'), 'canasta')).toEqual(['cardroom.canasta.hands:2026-09-11', 'cardroom.canasta.hands:2026-09-12']);
     expect(studyFamilyOfRecord('cardroom.hand')).toBe('poker');
@@ -505,5 +507,21 @@ describe('one cabinet per game', () => {
     expect(line).toContain('seat 2 went out');
     expect(line).toContain('YOUR side +735');
     expect(compactCanastaRound({ handNo: 1, table: 't', seat: 0, at: '2026-09-12T00:00:00Z', view: { hand: { street: 'flop' } } })).toBeNull();
+  });
+});
+
+describe('the profile and the last plan', () => {
+  it('the profile is read for THIS game when the grant covers it, and the last note\'s leak and plan come back structured', () => {
+    const access = { owner: ALICE, delegate: COACH, hash: '0x', reads: ['cardroom.canasta.hand', 'cardroom.canasta.note', 'cardroom.profile'], appends: ['cardroom.canasta.note'], records: studyRecords('canasta') };
+    const profile = { type: 'ap.cardroom-profile.v1', coachingStyle: 'teach', experience: { poker: { level: 'learning', since: 'this spring' }, canasta: { level: 'steady', since: '1998' } }, goals: { canasta: ['Stop being caught with two wilds.'], poker: ['Stop calling from the blinds.'] }, about: 'I play with my mother on Thursdays.', updatedAt: 'x' };
+    const notes = appendNote(appendNote(null, { by: 'carol-coach.svc', at: '2026-09-06T08:00:00Z', text: 'first' }), { by: 'carol-coach.svc', at: '2026-09-13T08:02:31Z', text: 'Thursday, 11 rounds …', scope: 'the last 7 days, 11 rounds', leak: { pattern: 'Held two or more wilds into the last five cards of the stock.', count: 6, of: 11, cost: 280 }, change: 'When your partner is down to four cards, discard your highest card every turn.' });
+    const s = studyFrom({ access, hand: null, style: null, read: null, note: notes, profile, material: {}, review: true });
+    expect(s.profile).toEqual({ level: 'steady', since: '1998', goals: ['Stop being caught with two wilds.'], coachingStyle: 'teach', about: 'I play with my mother on Thursdays.' });
+    expect(s.lastPlan).toMatchObject({ at: '2026-09-13T08:02:31Z', change: 'When your partner is down to four cards, discard your highest card every turn.', leak: { count: 6, of: 11 } });
+    // Without the profile in the grant's reads, nothing of it is handed over.
+    const narrow = studyFrom({ access: { ...access, reads: ['cardroom.canasta.hand'] }, hand: null, style: null, read: null, note: notes, profile, material: {} });
+    expect(narrow.profile).toBeUndefined();
+    expect(profileFor(profile, 'poker')).toMatchObject({ level: 'learning', goals: ['Stop calling from the blinds.'] });
+    expect(profileFor({ type: 'ap.cardroom-profile.v1', updatedAt: 'x' }, 'poker')).toBeNull();
   });
 });

@@ -99,7 +99,7 @@ export interface PlaybookAnswerDeps {
     load: () => Promise<Study>;
     /** The service consulted — the grant's delegate. */
     coach: string;
-    note?: (text: string, extra?: { hand?: number; scope?: string }) => Promise<{ ok: boolean; error?: string }>;
+    note?: (text: string, extra?: { hand?: number; scope?: string; leak?: { pattern: string; count: number; of: number; cost?: number; metric?: string }; change?: string }) => Promise<{ ok: boolean; error?: string }>;
   };
 }
 
@@ -220,6 +220,16 @@ const REVIEW_SYSTEM_CANASTA =
   + 'they disagree with the rounds, the rounds win and you say you were wrong. Write it the way a coach '
   + 'talks after the evening, not the way a scoreboard prints.';
 
+/** The person's profile for this game, as the coach reads it (cr:PlayerProfile): register, goals, how to speak. */
+function profileLines(p: NonNullable<Study['profile']>): string {
+  const lines: string[] = [];
+  if (p.level) lines.push(`Their own account of where they are at this game: ${p.level}${p.since ? ` (playing since ${p.since})` : ''} — "new" gets the rule named before the move, "strong" gets the number and the move.`);
+  if (p.coachingStyle) lines.push(`How they want to be spoken to: ${p.coachingStyle === 'teach' ? 'teach me — the reason with every move' : p.coachingStyle === 'terse' ? 'keep it short — the move and one clause' : 'only when I ask — nothing unless they typed a question'}. This outranks your own doctrine about how to say it.`);
+  if (p.goals.length) lines.push(`What they said they want to get better at (their goals, in their words):\n${p.goals.map((g) => `- ${g}`).join('\n')}`);
+  if (p.about) lines.push(`In their words, about themselves: ${p.about}`);
+  return `Their profile — what they told their coach:\n${lines.join('\n')}`;
+}
+
 const answerSystemFor = (skill: string): string => (familyOf(skill) === 'canasta' ? ANSWER_SYSTEM_CANASTA : ANSWER_SYSTEM);
 const reviewSystemFor = (skill: string): string => (familyOf(skill) === 'canasta' ? REVIEW_SYSTEM_CANASTA : REVIEW_SYSTEM);
 
@@ -273,6 +283,8 @@ export function playbookAnswerInvoker(deps: PlaybookAnswerDeps): ToolInvoker {
       ...(shape ? [`Answer shape, field by field:\n${shape}`] : []),
       ...(read != null ? [`Read — the facts of the spot, computed (use these numbers):\n${JSON.stringify(read)}`] : []),
       ...(baseline != null ? [`House baseline — a rules coach's line, as an observation:\n${JSON.stringify(baseline)}`] : []),
+      ...(study?.profile ? [profileLines(study.profile)] : []),
+      ...(study?.lastPlan?.change ? [`The one change your last review set (${study.lastPlan.at.slice(0, 10)}${study.lastPlan.scope ? `, ${study.lastPlan.scope}` : ''}): "${study.lastPlan.change}"${study.lastPlan.leak ? ` — for the leak "${study.lastPlan.leak.pattern}" (${study.lastPlan.leak.count} of ${study.lastPlan.leak.of})` : ''}. When this spot is that spot, say so in one clause.`] : []),
       ...(study?.style.length ? [`Her style — her own rules, which outrank your craft:\n${study.style.map((r) => `- ${r}`).join('\n')}`] : []),
       ...(remembered.length ? [study
         ? `Her records — the counts on the players here, from the ${study.hands} hand${study.hands === 1 ? '' : 's'} she has recorded (rates are computed; small samples mean little):\n${JSON.stringify(remembered)}`
@@ -351,6 +363,8 @@ async function reviewStudy(deps: PlaybookAnswerDeps, skill: string, question: st
     `Skill: ${skill}`,
     `Question, in her words: ${question || 'how have I been playing?'}`,
     `Scope: ${scope.label} of ${study.hands} recorded.`,
+    ...(study.profile ? [profileLines(study.profile), ...(study.profile.goals.length ? ['ANSWER THEIR GOALS FIRST: before anything you found on your own, say how the records answer each goal above, with the count.'] : [])] : []),
+    ...(study.lastPlan ? [`YOUR LAST REVIEW (${study.lastPlan.at.slice(0, 10)}${study.lastPlan.scope ? `, ${study.lastPlan.scope}` : ''}) set the plan "${study.lastPlan.change ?? '(none)'}"${study.lastPlan.leak ? ` for the leak "${study.lastPlan.leak.pattern}", counted ${study.lastPlan.leak.count} of ${study.lastPlan.leak.of}` : ''}. MEASURE PROGRESS against it from the records in scope — the same pattern, its count now over its sample now — and say improving, same, worse, or too few to say (under ten). Say what went right FIRST when the plan worked.`] : []),
     ...(study.style.length ? [`Her style — her own rules:\n${study.style.map((r) => `- ${r}`).join('\n')}`] : []),
     ...(study.notes.length ? [`Your own earlier remarks (opinions from past reviews — NOT a record of her hands; the hands below are the record), oldest first:\n${study.notes.map((n) => `- ${n.at.slice(0, 10)}: ${n.text}`).join('\n')}`] : []),
     `Counts per player across all ${study.hands} recorded hand${study.hands === 1 ? '' : 's'} (rates computed; "you" is her):\n${JSON.stringify(study.remembered)}`,
@@ -373,6 +387,19 @@ async function reviewStudy(deps: PlaybookAnswerDeps, skill: string, question: st
           say: { type: 'string', description: 'The review itself, for her to read: what happened with the count (hands, net), the two or three decisions that mattered with the street, the price and what each cost, the leak with its count and cost, what went right. Short paragraphs separated by blank lines. Never empty.' },
           because: { type: 'string', description: 'The one thing to change next session, in one sentence she can do on the first hand.' },
           note: { type: 'string', description: 'Two or three sentences for your own notes: the date, the scope, the leak with its count, the one change. Checkable against the hands.' },
+          leak: {
+            type: 'object',
+            description: 'THE ONE LEAK the plan addresses, as a count: the pattern named so she can recognise it on the next deal, how many times, out of how many chances or units in scope, and what it cost. Omit when the records show none.',
+            properties: {
+              pattern: { type: 'string', description: 'The mistake, in one clause: "called a raise from the blinds, then folded the flop".' },
+              count: { type: 'integer', description: 'How many times, in the records in scope.' },
+              of: { type: 'integer', description: 'Out of how many chances or units.' },
+              cost: { type: 'integer', description: 'What it cost over the span, in chips or points, computed from the records. Omit rather than estimate.' },
+              metric: { type: 'string', description: 'The counter it was read off, when one names it (foldToBet, inHandValue). Optional.' },
+            },
+            required: ['pattern', 'count', 'of'],
+          },
+          progress: { type: 'string', description: 'When a last plan was given: improving | same | worse | too-few, followed by the two counts ("8 of 11, then 2 of 9"). Omit when there was no last plan.' },
         },
         required: ['say', 'because', 'note'],
       },
@@ -389,9 +416,16 @@ async function reviewStudy(deps: PlaybookAnswerDeps, skill: string, question: st
   if (!say) return { refused: `the review produced nothing over ${scope.label}` };
   const because = typeof out.because === 'string' ? out.because.trim() : undefined;
   const noteText = typeof out.note === 'string' ? out.note.trim() : '';
-  const noted = noteText && deps.study?.note ? (await deps.study.note(noteText, { scope: scope.label }).catch(() => ({ ok: false }))).ok : false;
-  console.log(`[playbook.answer] ${skill} review ${Date.now() - started}ms · ${scope.label} · prompt ${system.length + user.length} chars · noted=${noted}`);
-  return { skill, say, ...(because ? { because } : {}), source, hands: scope.hands.length, scope: scope.label, noted, modelMs: Date.now() - started, answer: JSON.stringify({ say, ...(because ? { because } : {}) }) };
+  // THE LEAK AND THE PLAN, STRUCTURED (cr:Leak, cr:CoachingPlan): kept on the note so the next review measures
+  // progress against counts rather than re-reading prose. A leak without a count is not kept as one.
+  const rawLeak = out.leak && typeof out.leak === 'object' ? (out.leak as { pattern?: unknown; count?: unknown; of?: unknown; cost?: unknown; metric?: unknown }) : null;
+  const leak = rawLeak && typeof rawLeak.pattern === 'string' && rawLeak.pattern.trim() && typeof rawLeak.count === 'number' && typeof rawLeak.of === 'number' && rawLeak.of > 0
+    ? { pattern: rawLeak.pattern.trim(), count: Math.round(rawLeak.count), of: Math.round(rawLeak.of), ...(typeof rawLeak.cost === 'number' ? { cost: Math.round(rawLeak.cost) } : {}), ...(typeof rawLeak.metric === 'string' && rawLeak.metric.trim() ? { metric: rawLeak.metric.trim() } : {}) }
+    : undefined;
+  const progress = typeof out.progress === 'string' && out.progress.trim() ? out.progress.trim() : undefined;
+  const noted = noteText && deps.study?.note ? (await deps.study.note(noteText, { scope: scope.label, ...(leak ? { leak } : {}), ...(because ? { change: because } : {}) }).catch(() => ({ ok: false }))).ok : false;
+  console.log(`[playbook.answer] ${skill} review ${Date.now() - started}ms · ${scope.label} · prompt ${system.length + user.length} chars · noted=${noted}${leak ? ` · leak ${leak.count}/${leak.of}` : ''}${progress ? ` · progress ${progress.split(' ')[0]}` : ''}`);
+  return { skill, say, ...(because ? { because } : {}), ...(leak ? { leak } : {}), ...(progress ? { progress } : {}), source, hands: scope.hands.length, scope: scope.label, noted, modelMs: Date.now() - started, answer: JSON.stringify({ say, ...(because ? { because } : {}), ...(leak ? { leak } : {}), ...(progress ? { progress } : {}) }) };
 }
 
 /**

@@ -66,6 +66,8 @@ export interface StudyRecords {
   style: string;
   read: string;
   note: string;
+  /** The ONE record shared across games — who the person is as a player, their goals, how they want to be coached. */
+  profile: string;
   /** `cardroom.hands:` or `cardroom.<family>.hands:` — the day records' prefix. */
   dayPrefix: string;
   /** The grant resource that covers the day records — the prefix with a trailing `*`. */
@@ -80,12 +82,45 @@ export function studyRecords(familyOrSkill: string | null | undefined): StudyRec
   const family = familyOfSkill(familyOrSkill && familyOrSkill.includes('.') ? familyOrSkill : `${familyOrSkill ?? 'poker'}.x`);
   const infix = family === 'poker' ? '' : `${family}.`;
   const dayPrefix = `cardroom.${infix}hands:`;
-  const r = { family, hand: `cardroom.${infix}hand`, style: `cardroom.${infix}style`, read: `cardroom.${infix}read`, note: `cardroom.${infix}note`, dayPrefix, dayScope: `${dayPrefix}*` };
-  return { ...r, reads: [r.hand, r.style, r.read, r.note, r.dayScope], appends: [r.note] };
+  const r = { family, hand: `cardroom.${infix}hand`, style: `cardroom.${infix}style`, read: `cardroom.${infix}read`, note: `cardroom.${infix}note`, profile: PROFILE_RECORD, dayPrefix, dayScope: `${dayPrefix}*` };
+  return { ...r, reads: [r.hand, r.style, r.read, r.note, r.dayScope, r.profile], appends: [r.note] };
+}
+
+/**
+ * THE PERSON'S PLAYER PROFILE — `cardroom.profile`, one across games (cr:PlayerProfile in the card-room
+ * ontology): how experienced they are at each game, what they want to get better at, how they want to be
+ * coached, anything else they told their coach to know. Written by the person at their Home; read by every
+ * coach they hire under that coach's grant; never written by a coach. It steers HOW a coach speaks and WHAT a
+ * review looks for first; it is never authority and never a verdict.
+ */
+export const PROFILE_RECORD = 'cardroom.profile';
+export interface PlayerProfileV1 {
+  type: 'ap.cardroom-profile.v1';
+  /** teach | terse | only-when-asked — how they want to be spoken to, every coach, every game. */
+  coachingStyle?: 'teach' | 'terse' | 'only-when-asked';
+  /** Per game: their own account of where they are, and since when. */
+  experience?: Record<string, { level: 'new' | 'learning' | 'steady' | 'strong'; since?: string }>;
+  /** Per game: what they want to get better at, in their own words. */
+  goals?: Record<string, string[]>;
+  /** Anything else, in their words. */
+  about?: string;
+  updatedAt: string;
+}
+export function isProfile(x: unknown): x is PlayerProfileV1 {
+  return !!x && typeof x === 'object' && (x as { type?: unknown }).type === 'ap.cardroom-profile.v1';
+}
+/** The profile as the coach reads it, for ONE game: level, goals, style, about — or null when nothing is on file. */
+export function profileFor(x: unknown, family: string): { level?: string; since?: string; goals: string[]; coachingStyle?: string; about?: string } | null {
+  if (!isProfile(x)) return null;
+  const exp = x.experience?.[family];
+  const goals = (x.goals?.[family] ?? []).filter((g) => typeof g === 'string' && g.trim()).slice(0, 8);
+  const out = { ...(exp?.level ? { level: exp.level } : {}), ...(exp?.since ? { since: exp.since } : {}), goals, ...(x.coachingStyle ? { coachingStyle: x.coachingStyle } : {}), ...(x.about?.trim() ? { about: x.about.trim().slice(0, 600) } : {}) };
+  return out.level || out.goals.length || out.coachingStyle || out.about ? out : null;
 }
 
 /** Which game a record name belongs to, or null when it is not a study record at all. */
 export function studyFamilyOfRecord(recordType: string): string | null {
+  if (recordType === PROFILE_RECORD) return 'any';
   const m = /^cardroom\.(?:([a-z0-9-]+)\.)?(hand|hands:[^\s]*|style|read|note)$/i.exec(recordType);
   return m ? (m[1] ?? 'poker').toLowerCase() : null;
 }
@@ -323,7 +358,14 @@ export function reviewDaysOf(material: unknown): number {
 
 export interface StyleRecordV1 { type: 'ap.cardroom-style.v1'; rules: string[]; updatedAt: string }
 export interface PlayerReadV1 { type: 'ap.cardroom-read.v1'; reads: Array<{ about: string; note: string; at: string }>; updatedAt: string }
-export interface CoachNoteV1 { by: string; at: string; text: string; hand?: number; scope?: string }
+/** A LEAK, as the card-room ontology names it (cr:Leak): the pattern, the count over the sample, what it cost. */
+export interface LeakV1 { pattern: string; count: number; of: number; cost?: number; metric?: string }
+/**
+ * One note. `text` is what the coach wrote; `leak` and `change` are the same review's finding and its ONE plan
+ * (cr:Leak, cr:CoachingPlan), kept structured so the NEXT review can measure progress against them (cr:Progress)
+ * instead of re-reading prose — and so the screen can show the plan without parsing a paragraph.
+ */
+export interface CoachNoteV1 { by: string; at: string; text: string; hand?: number; scope?: string; leak?: LeakV1; change?: string }
 export interface CoachNotesV1 { type: 'ap.cardroom-note.v1'; entries: CoachNoteV1[]; updatedAt: string }
 
 export function styleRulesOf(x: unknown): string[] {
@@ -364,12 +406,19 @@ export interface Study {
   recent?: HandEntryV1[];
   /** For a review: the span the hands cover, in days. */
   days?: number;
+  /** The person's profile for this game — level, goals, how they want to be coached — when the grant reads it and it is on file. */
+  profile?: NonNullable<ReturnType<typeof profileFor>>;
+  /** The last review's leak and plan, structured, when the last note carried them — what progress is measured against. */
+  lastPlan?: { at: string; leak?: LeakV1; change?: string; scope?: string };
 }
 
-export function studyFrom(input: { access: StudyAccess; hand: unknown; style: unknown; read: unknown; note: unknown; material: unknown; review?: boolean; days?: unknown[]; span?: number }): Study {
+export function studyFrom(input: { access: StudyAccess; hand: unknown; style: unknown; read: unknown; note: unknown; profile?: unknown; material: unknown; review?: boolean; days?: unknown[]; span?: number }): Study {
   const hand = isHandRecord(input.hand) ? input.hand : null;
   const rec = input.access.records ?? studyRecords('poker');
   const notes = input.access.reads.includes(rec.note) ? notesOf(input.note).slice(-6) : [];
+  const profile = input.access.reads.includes(rec.profile) ? profileFor(input.profile, rec.family) : null;
+  const withPlan = [...notes].reverse().find((n) => n.leak || n.change);
+  const lastPlan = withPlan ? { at: withPlan.at, ...(withPlan.leak ? { leak: withPlan.leak } : {}), ...(withPlan.change ? { change: withPlan.change } : {}), ...(withPlan.scope ? { scope: withPlan.scope } : {}) } : undefined;
   // THE SPAN'S HANDS, from the day records, deduped against the recent few (a hand is in both).
   const fromDays = (input.days ?? []).filter(isDayHands).flatMap((d) => d.hands);
   const recent = input.review
@@ -384,6 +433,8 @@ export function studyFrom(input: { access: StudyAccess; hand: unknown; style: un
     hands: hand?.hands ?? 0,
     ...(recent ? { recent } : {}),
     ...(input.span ? { days: input.span } : {}),
+    ...(profile ? { profile } : {}),
+    ...(lastPlan ? { lastPlan } : {}),
   };
 }
 

@@ -4036,8 +4036,8 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
         // them; advice reads none of them. Read in parallel: a week is seven small reads, not one large one.
         const span = review ? reviewDaysOf(materialInput) : 0;
         const dayTypes = review && reads.includes(rec.dayScope) ? dayRecordsFor(span, new Date(), rec.family) : [];
-        return Promise.all([read(rec.hand), read(rec.style), read(rec.read), read(rec.note), Promise.all(dayTypes.map((t) => deps.readSubjectRecord!(owner, t).catch(() => null)))])
-          .then(([hand, style, playerRead, note, days]) => studyFrom({ access: input.study!, hand, style, read: playerRead, note, material: materialInput, review, days, ...(span ? { span } : {}) }));
+        return Promise.all([read(rec.hand), read(rec.style), read(rec.read), read(rec.note), read(rec.profile), Promise.all(dayTypes.map((t) => deps.readSubjectRecord!(owner, t).catch(() => null)))])
+          .then(([hand, style, playerRead, note, profile, days]) => studyFrom({ access: input.study!, hand, style, read: playerRead, note, profile, material: materialInput, review, days, ...(span ? { span } : {}) }));
       })()
     : null;
   const playbook = await loadPlaybook(rememberedRecord, String(input.addressee ?? ''), console.log).catch(() => null);
@@ -4336,10 +4336,10 @@ step is then handed to that agent under authority the person grants; leave it ou
           load: () => loaded,
           coach: input.study.delegate,
           note: input.study.appends.includes(noteRecord) && deps.writeSubjectRecord
-            ? async (text: string, extra?: { hand?: number; scope?: string }) => {
+            ? async (text: string, extra?: { hand?: number; scope?: string; leak?: { pattern: string; count: number; of: number; cost?: number; metric?: string }; change?: string }) => {
                 const by = deps.nameOf && input.addressee ? (await deps.nameOf(String(input.addressee)).catch(() => null)) ?? String(input.addressee) : String(input.addressee ?? '');
                 const prev = await deps.readSubjectRecord!(owner, noteRecord).catch(() => null);
-                return deps.writeSubjectRecord!(owner, noteRecord, appendNote(prev, { by, at: new Date().toISOString(), text, ...(extra?.hand ? { hand: extra.hand } : {}), ...(extra?.scope ? { scope: extra.scope } : {}) }));
+                return deps.writeSubjectRecord!(owner, noteRecord, appendNote(prev, { by, at: new Date().toISOString(), text, ...(extra?.hand ? { hand: extra.hand } : {}), ...(extra?.scope ? { scope: extra.scope } : {}), ...(extra?.leak ? { leak: extra.leak } : {}), ...(extra?.change ? { change: extra.change } : {}) }));
               }
             : undefined,
         };

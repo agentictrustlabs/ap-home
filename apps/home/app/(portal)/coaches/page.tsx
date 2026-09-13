@@ -20,7 +20,7 @@ import { btnSty, btnPrimarySty, cardSty, errorText, infoBannerSty, mutedText, mo
 import { signHashFor, type Via } from '../../../src/home/onboarding';
 import { getCapabilities, listSkillClaims, saveSkillClaims, setCapabilities, capabilityIdFor, type CapabilityClaim } from '../../../src/connect-client';
 import {
-  COACH_OFFERS, GAMES, coachFor, dropCoachGrant, hireCoachGrant, listStudyGrants, readSpecialists, resolveCoach, writeSpecialists,
+  COACH_OFFERS, COACHING_STYLES, EXPERIENCE_LEVELS, GAMES, coachFor, dropCoachGrant, hireCoachGrant, listStudyGrants, readProfile, readSpecialists, resolveCoach, writeProfile, writeSpecialists, type ExperienceLevel, type PlayerProfile,
   type CoachedGame, type StudyGrantRow,
 } from '../../../src/lib/coaches';
 import type { SpecialistV1 } from '@agenticprimitives/capability-claims';
@@ -44,6 +44,11 @@ export default function CoachesPage() {
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // THE PROFILE — who they are as a player, what they want to get better at, how they want to be coached. One
+  // record across games; every coach they hire reads it under its grant. Edited here, saved in one put.
+  const [profile, setProfile] = useState<PlayerProfile | null>(null);
+  const [profileDraft, setProfileDraft] = useState<{ coachingStyle: string; about: string; experience: Record<string, string>; since: Record<string, string>; goals: Record<string, string> }>({ coachingStyle: '', about: '', experience: {}, since: {}, goals: {} });
+  const [profileDirty, setProfileDirty] = useState(false);
   // The game in the address (`/coaches?game=poker`, as the card room's "want a coach?" sheet sends people)
   // is opened first; every game is on the page.
   const wanted = useMemo(() => (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('game') : null), []);
@@ -52,6 +57,15 @@ export default function CoachesPage() {
     if (!session?.token || !agentAddress) return;
     setLoading(true);
     try {
+      readProfile(agentAddress).then((p) => {
+        setProfile(p);
+        setProfileDraft({
+          coachingStyle: p?.coachingStyle ?? '', about: p?.about ?? '',
+          experience: Object.fromEntries(GAMES.map((g) => [g.id, p?.experience?.[g.id]?.level ?? ''])),
+          since: Object.fromEntries(GAMES.map((g) => [g.id, p?.experience?.[g.id]?.since ?? ''])),
+          goals: Object.fromEntries(GAMES.map((g) => [g.id, (p?.goals?.[g.id] ?? []).join('\n')])),
+        });
+      }).catch(() => {});
       const [sp, gs, pub, cl] = await Promise.all([
         readSpecialists(session.token, agentAddress).catch(() => ({ assigned: false, specialists: [] as SpecialistV1[] })),
         listStudyGrants(agentAddress).catch(() => [] as StudyGrantRow[]),
@@ -115,6 +129,24 @@ export default function CoachesPage() {
   };
 
   const ordered = [...GAMES].sort((a, b) => (a.id === wanted ? -1 : b.id === wanted ? 1 : 0));
+  const draft = (patch: Partial<typeof profileDraft>) => { setProfileDraft((d) => ({ ...d, ...patch })); setProfileDirty(true); };
+  const saveProfile = async () => {
+    if (!agentAddress) return;
+    setBusy('profile'); setErr(null); setMsg(null);
+    try {
+      const experience = Object.fromEntries(GAMES.filter((g) => profileDraft.experience[g.id]).map((g) => [g.id, { level: profileDraft.experience[g.id] as ExperienceLevel, ...(profileDraft.since[g.id]?.trim() ? { since: profileDraft.since[g.id]!.trim() } : {}) }]));
+      const goals = Object.fromEntries(GAMES.map((g) => [g.id, (profileDraft.goals[g.id] ?? '').split('\n').map((x) => x.trim()).filter(Boolean).slice(0, 8)]).filter(([, v]) => (v as string[]).length));
+      const saved = await writeProfile(agentAddress, {
+        ...(profileDraft.coachingStyle ? { coachingStyle: profileDraft.coachingStyle as PlayerProfile['coachingStyle'] } : {}),
+        ...(Object.keys(experience).length ? { experience } : {}),
+        ...(Object.keys(goals).length ? { goals } : {}),
+        ...(profileDraft.about.trim() ? { about: profileDraft.about.trim().slice(0, 600) } : {}),
+      });
+      setProfile(saved); setProfileDirty(false); setMsg('Your profile is saved. Every coach you hire reads it under its grant.');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(null); }
+  };
 
   return (
     <SectionShell
@@ -126,6 +158,51 @@ export default function CoachesPage() {
       ) : null}
       {err ? <p style={errorText} role="alert">{err}</p> : null}
       {msg ? <p role="status">{msg}</p> : null}
+      {/* THE PROFILE, FIRST — it is what every coach reads before it says a word. */}
+      <section style={{ ...cardSty, display: 'grid', gap: '0.6rem' }} aria-labelledby="coach-profile">
+        <h3 id="coach-profile" style={{ margin: 0 }}>How you want to be coached</h3>
+        <p style={{ margin: 0, ...mutedText }}>
+          Your own words, in your own vault (<span style={mono}>cardroom.profile</span>). Every coach you hire reads it under its grant and
+          speaks accordingly; a review answers your goals before anything it found on its own. Nothing here is a verdict — you set it, and only you.
+        </p>
+        <label style={{ display: 'grid', gap: '0.25rem' }}>
+          <span><strong>How to speak to me</strong></span>
+          <select value={profileDraft.coachingStyle} onChange={(e) => draft({ coachingStyle: e.target.value })} disabled={busy != null} style={{ maxWidth: '24rem' }}>
+            <option value="">— not said —</option>
+            {COACHING_STYLES.map((s) => <option key={s.id} value={s.id}>{s.label} — {s.hint}</option>)}
+          </select>
+        </label>
+        <div style={{ display: 'grid', gap: '0.6rem', gridTemplateColumns: 'repeat(auto-fit, minmax(18rem, 1fr))' }}>
+          {GAMES.map((g) => (
+            <div key={g.id} style={{ display: 'grid', gap: '0.35rem' }}>
+              <strong>{g.label}</strong>
+              <label style={{ display: 'grid', gap: '0.2rem' }}>
+                <span style={mutedText}>Where I am</span>
+                <select value={profileDraft.experience[g.id] ?? ''} onChange={(e) => draft({ experience: { ...profileDraft.experience, [g.id]: e.target.value } })} disabled={busy != null}>
+                  <option value="">— not said —</option>
+                  {EXPERIENCE_LEVELS.map((l) => <option key={l.id} value={l.id}>{l.label} — {l.hint}</option>)}
+                </select>
+              </label>
+              <label style={{ display: 'grid', gap: '0.2rem' }}>
+                <span style={mutedText}>Playing since</span>
+                <input value={profileDraft.since[g.id] ?? ''} onChange={(e) => draft({ since: { ...profileDraft.since, [g.id]: e.target.value } })} placeholder="this spring · 1998" disabled={busy != null} />
+              </label>
+              <label style={{ display: 'grid', gap: '0.2rem' }}>
+                <span style={mutedText}>What I want to get better at (one per line)</span>
+                <textarea rows={3} value={profileDraft.goals[g.id] ?? ''} onChange={(e) => draft({ goals: { ...profileDraft.goals, [g.id]: e.target.value } })} placeholder={g.id === 'poker' ? 'Stop calling raises from the blinds with hands I then fold.' : 'Stop being caught with two wilds when my partner goes out.'} disabled={busy != null} />
+              </label>
+            </div>
+          ))}
+        </div>
+        <label style={{ display: 'grid', gap: '0.25rem' }}>
+          <span><strong>Anything else your coach should know</strong></span>
+          <textarea rows={2} value={profileDraft.about} onChange={(e) => draft({ about: e.target.value })} placeholder="I play canasta with my mother on Thursdays; she goes out fast." disabled={busy != null} maxLength={600} />
+        </label>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <BusyButton busy={busy === 'profile'} busyLabel="Saving…" style={btnPrimarySty} onClick={() => void saveProfile()} disabled={busy != null || !profileDirty}>Save my profile</BusyButton>
+          <span style={mutedText}>{profile?.updatedAt ? `Last saved ${profile.updatedAt.slice(0, 10)}.` : 'Nothing on file yet — your coaches go by the craft alone until you say.'}</span>
+        </div>
+      </section>
       {ordered.map((game) => {
         const current = coachFor(specialists, game);
         const grant = current ? grants.find((g) => g.coach === current) : undefined;

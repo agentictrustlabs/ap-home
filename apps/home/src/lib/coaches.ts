@@ -89,9 +89,50 @@ export const STUDY_APPENDS = ['vault:cardroom.note'] as const;
 export function studyScopesFor(game: CoachedGame['id']): { reads: string[]; appends: string[] } {
   const infix = game === 'poker' ? '' : `${game}.`;
   return {
-    reads: [`vault:cardroom.${infix}hand`, `vault:cardroom.${infix}hands:*`, `vault:cardroom.${infix}style`, `vault:cardroom.${infix}read`, `vault:cardroom.${infix}note`],
+    // …and the ONE record shared across games: the person's profile (who they are as a player, their goals, how
+    // they want to be coached) — read by every coach they hire, written by nobody but them.
+    reads: [`vault:cardroom.${infix}hand`, `vault:cardroom.${infix}hands:*`, `vault:cardroom.${infix}style`, `vault:cardroom.${infix}read`, `vault:cardroom.${infix}note`, PROFILE_RECORD_SCOPE],
     appends: [`vault:cardroom.${infix}note`],
   };
+}
+
+/**
+ * THE PLAYER PROFILE — `cardroom.profile`, one record across games (cr:PlayerProfile in the card-room ontology):
+ * how experienced the person is at each game, what they want to get better at, how they want to be coached.
+ * Steers how a coach speaks and what a review looks for first. Theirs to write here; a coach only reads it.
+ */
+export const PROFILE_RECORD = 'cardroom.profile';
+export const PROFILE_RECORD_SCOPE = `vault:${PROFILE_RECORD}`;
+export type ExperienceLevel = 'new' | 'learning' | 'steady' | 'strong';
+export type CoachingStyle = 'teach' | 'terse' | 'only-when-asked';
+export interface PlayerProfile {
+  type: 'ap.cardroom-profile.v1';
+  coachingStyle?: CoachingStyle;
+  experience?: Partial<Record<CoachedGame['id'], { level: ExperienceLevel; since?: string }>>;
+  goals?: Partial<Record<CoachedGame['id'], string[]>>;
+  about?: string;
+  updatedAt: string;
+}
+export const EXPERIENCE_LEVELS: Array<{ id: ExperienceLevel; label: string; hint: string }> = [
+  { id: 'new', label: 'New', hint: 'name the rule before the move' },
+  { id: 'learning', label: 'Learning', hint: 'the reason with every move' },
+  { id: 'steady', label: 'Steady', hint: 'the number and the move' },
+  { id: 'strong', label: 'Strong', hint: 'only where the craft and the counts disagree' },
+];
+export const COACHING_STYLES: Array<{ id: CoachingStyle; label: string; hint: string }> = [
+  { id: 'teach', label: 'Teach me', hint: 'the reason with every move' },
+  { id: 'terse', label: 'Keep it short', hint: 'the move and one clause' },
+  { id: 'only-when-asked', label: 'Only when I ask', hint: 'nothing unless I type a question' },
+];
+export async function readProfile(person: Address): Promise<PlayerProfile | null> {
+  const r = await op<{ record?: unknown }>(person, 'record.get', { recordType: PROFILE_RECORD }).catch(() => ({ record: null }));
+  const rec = r.record as PlayerProfile | null;
+  return rec && typeof rec === 'object' && rec.type === 'ap.cardroom-profile.v1' ? rec : null;
+}
+export async function writeProfile(person: Address, profile: Omit<PlayerProfile, 'type' | 'updatedAt'>): Promise<PlayerProfile> {
+  const record: PlayerProfile = { type: 'ap.cardroom-profile.v1', ...profile, updatedAt: new Date().toISOString() };
+  await op(person, 'record.put', { recordType: PROFILE_RECORD, record });
+  return record;
 }
 export const STUDY_SERVER = 'demo-mcp';
 export const STUDY_GRANT_DAYS = 365;

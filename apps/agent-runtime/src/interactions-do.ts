@@ -1989,7 +1989,7 @@ export class InteractionsDO {
           // live in the PERSON's vault and the service reaches them under her grant; a service that filed her
           // hands in its own cabinet would keep them after she fired it — the one design mistake the
           // arrangement exists to make impossible. Refused here, on the principal, whoever asked.
-          if (/^cardroom\.(?:[a-z0-9-]+\.)?(hand|hands:.*|style|read|note)$/.test(recordType) && (await this.principalIsService(principal))) {
+          if ((/^cardroom\.(?:[a-z0-9-]+\.)?(hand|hands:.*|style|read|note)$/.test(recordType) || recordType === 'cardroom.profile') && (await this.principalIsService(principal))) {
             return json({ ok: false, error: `a service keeps no "${recordType}" of its own — a client's study records live in the client's vault, under the client's grant` }, 403);
           }
           try {
@@ -4724,7 +4724,7 @@ export class InteractionsDO {
         // written by the arrangement (the agent at hand end), never by hand.
         // The coach's notes are in HER cabinet and are hers to clear (a wrong note is hers to remove, a fired
         // coach's notes are hers to keep or drop); the hand record is written by the arrangement only.
-        const ownStudyRecord = /^cardroom\.(?:[a-z0-9-]+\.)?(style|read|note)$/.test(recordType);
+        const ownStudyRecord = /^cardroom\.(?:[a-z0-9-]+\.)?(style|read|note)$/.test(recordType) || recordType === 'cardroom.profile';
         if (op === 'record.put' && !CAPABILITY_RECORDS.has(recordType) && !recordType.startsWith('content.') && !ownStudyRecord) {
           return json({ error: `recordType must be a capability record, a content.* record, or the person's own cardroom.style / cardroom.read` }, 400);
         }
