@@ -83,17 +83,17 @@ export function RequestsTriage({
                       onChange={(e) => setDeclineReason(e.target.value)}
                       style={{ flex: 1, minWidth: 200, fontSize: '0.8rem', padding: '0.32rem 0.5rem', border: '1px solid var(--color-border)', borderRadius: 6 }}
                     />
-                    <BusyButton busy={busyId === r.requestId} busyLabel="Declining…" className="btn-danger" style={{ width: 'auto' }} onClick={() => void decline(r)}>
+                    <BusyButton busy={busyId === r.requestId} busyLabel="Declining…" className="ui-btn ui-btn--danger" onClick={() => void decline(r)}>
                       Decline request
                     </BusyButton>
-                    <button type="button" className="ghost" onClick={() => { setDeclining(null); setDeclineReason(''); }}>Cancel</button>
+                    <button type="button" className="ui-btn ui-btn--ghost" onClick={() => { setDeclining(null); setDeclineReason(''); }}>Cancel</button>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <BusyButton busy={busyId === r.requestId} busyLabel="Accepting…" className="btn-primary" style={{ width: 'auto' }} onClick={() => void adopt(r)}>
                       Accept — start an endeavor
                     </BusyButton>
-                    <button type="button" className="btn" style={{ width: 'auto' }} disabled={busyId !== null} onClick={() => setDeclining(r.requestId)}>
+                    <button type="button" className="ui-btn ui-btn--secondary" disabled={busyId !== null} onClick={() => setDeclining(r.requestId)}>
                       Decline
                     </button>
                   </div>

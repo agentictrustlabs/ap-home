@@ -146,7 +146,7 @@ export function NewRequestComposer({
               onKeyDown={(e) => { if (e.key === 'Enter') void runSearch(); }}
               style={{ flex: 1, padding: '0.4rem 0.7rem', border: '1px solid var(--color-border)', borderRadius: 999 }}
             />
-            <button type="button" className="btn" disabled={!personQuery.trim()} onClick={() => void runSearch()}>Search</button>
+            <button type="button" className="ui-btn ui-btn--secondary" disabled={!personQuery.trim()} onClick={() => void runSearch()}>Search</button>
           </div>
           {hits !== null && (
             hits.length === 0 ? (

@@ -194,7 +194,7 @@ export function OrgInvitePanel({ org }: { org: string }) {
           <input placeholder="Find a person by name…" value={query}
             onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void search(); }}
             style={{ flex: 1, padding: '.5rem .7rem', borderRadius: 8, border: '1px solid #d1d5db' }} />
-          <button className="btn" disabled={!query.trim()} onClick={() => void search()}>Search</button>
+          <button className="ui-btn ui-btn--secondary" disabled={!query.trim()} onClick={() => void search()}>Search</button>
         </div>
         {hits?.map((h) => (
           <div key={h.name} style={{ display: 'flex', alignItems: 'center', gap: '.5rem', padding: '.5rem 0', borderBottom: '1px solid #f1f5f9' }}>

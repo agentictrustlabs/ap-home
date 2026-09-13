@@ -893,7 +893,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                 <div className="channels-sidebar__title">
                   <span>Participants · {(participants ?? []).length + pendingInvites.length}</span>
                   {youFacilitator && (
-                    <button type="button" className="btn" style={{ padding: '0.1rem 0.5rem' }} title="Invite a participant to this topic" onClick={() => setTopicInviteOpen((v) => !v)}>+</button>
+                    <button type="button" className="ui-btn ui-btn--ghost ui-btn--sm" title="Invite a participant to this topic" onClick={() => setTopicInviteOpen((v) => !v)}>Invite</button>
                   )}
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', padding: '0 0.25rem' }}>
@@ -909,7 +909,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                         </span>
                         {/* One-to-one MESSAGING (not discussion): same DM slide-over as the Members rail. */}
                         {!isMe && pl && (
-                          <button type="button" className="btn" style={{ padding: '0 0.35rem', fontSize: '0.7rem' }} title={`Message ${pName}`} onClick={() => openDm(pl.listing.displayName, pl.label, pl.listing.subject)}>
+                          <button type="button" className="ui-btn ui-btn--ghost ui-btn--sm" title={`Message ${pName}`} onClick={() => openDm(pl.listing.displayName, pl.label, pl.listing.subject)}>
                             <MailIcon size={14} />
                           </button>
                         )}
@@ -956,7 +956,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                       <div style={{ background: 'var(--color-surface, #fff)', borderRadius: 14, boxShadow: '0 22px 64px rgba(0,0,0,.32)', width: '100%', maxWidth: 440, maxHeight: '76vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                         <div style={{ display: 'flex', alignItems: 'center', padding: '0.9rem 1.1rem', borderBottom: '1px solid var(--color-border, #e5e7eb)' }}>
                           <b>Invite a participant</b>
-                          <button type="button" className="btn" style={{ marginLeft: 'auto', padding: '0 0.5rem', fontSize: '1.1rem', lineHeight: 1 }} title="Close" onClick={() => setTopicInviteOpen(false)}>×</button>
+                          <button type="button" className="ui-btn ui-btn--ghost ui-btn--sm" style={{ marginLeft: 'auto' }} title="Close" onClick={() => setTopicInviteOpen(false)}>Close</button>
                         </div>
                         <div style={{ padding: '0.75rem 1.1rem 0.5rem' }}>
                           <input
