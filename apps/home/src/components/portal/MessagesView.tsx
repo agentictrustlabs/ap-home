@@ -31,6 +31,7 @@ import { ApproveMessaging } from './ApproveMessaging';
 import { MessagingWireRequiredError } from '../../lib/messaging-send';
 import { isAllowedRelyingOrigin } from '../../lib/oidc-clients';
 import { ShareWayChip, ContinuePaymentChip } from './chat/ActionChips';
+import { SkeletonRows, useReadyReport } from '../../ui';
 import { AttentionBar } from './AttentionBar';
 import { useTodayReads } from '../../home/use-today-inputs';
 import { useMyWork } from './work/useWork';
@@ -38,6 +39,22 @@ import type { AttentionInputs } from '../../home/attention';
 
 
 const PENDING_STATES = ['submitted', 'triaged'];
+
+/** The thread's ACTIONS — the decisions its messages carry (join, share a way, finish a payment). The newest three
+ *  show; the rest fold behind "N more", so a thread that collected a dozen invitations still has a readable header. */
+function ThreadActions({ refs, names }: { refs: Array<{ kind: string; id: string; label?: string }>; names?: Record<string, string> }) {
+  const [all, setAll] = useState(false);
+  const seen = new Set<string>();
+  const unique = refs.filter((r) => { const k = `${r.kind}:${r.id}`; if (seen.has(k)) return false; seen.add(k); return true; });
+  if (!unique.length) return null;
+  const shown = all ? unique : unique.slice(-3);
+  return (
+    <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.3rem', alignItems: 'center' }}>
+      {shown.map((r) => <ContextChip key={`${r.kind}:${r.id}`} r={r} names={names} />)}
+      {unique.length > 3 && <button type="button" className="ui-btn ui-btn--ghost ui-btn--sm" onClick={() => setAll((v) => !v)}>{all ? 'Fewer' : `${unique.length - 3} more`}</button>}
+    </div>
+  );
+}
 
 function ContextChip({ r, names }: { r: { kind: string; id: string; label?: string }; names?: Record<string, string> }) {
   // Spec 364 — a message that CARRIES a decision renders it here, where it was read. A pointer, never
@@ -171,6 +188,8 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const sendingAs = (targetAgent ?? agentAddress ?? undefined) as Address | undefined;
   const stewardship = targetAgent ? managed?.stewardshipDelegation : undefined;
   const { view, refresh, loadThread, loadPreviews, post, send, approved, wireRequired, setWireRequired, busy, error, setError } = useInboxView(session, targetAgent, sendingAs, stewardship);
+  // Readiness (design system v2): the rail shows a skeleton until the inbox view has landed — never "no messages yet".
+  useReadyReport('messages-inbox', view === null);
   const me = (sendingAs ?? '').toLowerCase();
 
   // Spec 398 §5.5 — the attention model reads what Today reads (parked runs, schedule, Library) plus this inbox's cases.
@@ -524,7 +543,8 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
             />
           </div>
           <div className="chat-rail-list">
-            {dms.length === 0 && (
+            {view === null && <div style={{ padding: 8 }}><SkeletonRows rows={6} lead /></div>}
+            {view !== null && dms.length === 0 && (
               <p className="chat-rail-empty">
                 No direct messages yet.{' '}
                 <button type="button" className="ghost" style={{ display: 'inline', padding: 0, minHeight: 0 }} onClick={startCompose}>Start one</button>
@@ -627,9 +647,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                   {activeDm.counterparties.length === 1 && (
                     <div style={{ fontSize: '0.75rem', opacity: 0.6 }}>{shortId(activeDm.counterparties[0]!)}</div>
                   )}
-                  <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.15rem' }}>
-                    {activeDm.contextRefs.map((r) => <ContextChip key={`${r.kind}:${r.id}`} r={r} names={view?.names} />)}
-                  </div>
+                  <ThreadActions refs={activeDm.contextRefs} names={view?.names} />
                 </div>
               </div>
 

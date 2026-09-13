@@ -24,16 +24,21 @@ export function statePillStyle(p: ProjectedRunStateV1, extra?: CSSProperties): C
   };
 }
 
+const V2_TONE: Record<ReturnType<typeof stateTone>, string> = { idle: 'neutral', active: 'info', attention: 'warn', done: 'ok', bad: 'danger', uncertain: 'warn' };
+
 export function StatePill({ state, native, style, compact }: { state: ProjectedRunStateV1 & { unknownNative?: string }; native?: string; style?: CSSProperties; compact?: boolean }) {
   const label = runStateLabel(state);
   const tip = state.unknownNative ? `unmapped state: ${state.unknownNative}` : native && native !== label ? native : undefined;
+  const tone = stateTone(state);
+  // Design system v2: the pill IS the status badge — a dot and a soft tint, one vocabulary on every surface; a
+  // running state pulses. `statePillStyle` stays for legacy inline callers.
   return (
     <span
-      className="state-pill"
+      className={`state-pill ui-status ui-status--${V2_TONE[tone]}${tone === 'active' ? ' ui-status--live' : ''}`}
       data-state={state.state}
       data-effect-uncertain={state.effectUncertain ? 'true' : undefined}
       title={tip}
-      style={statePillStyle(state, { ...(compact ? { fontSize: '11px', padding: '0 7px' } : {}), ...(style ?? {}) })}
+      style={{ ...(compact ? { fontSize: '11px' } : {}), ...(style ?? {}) }}
     >
       {label}
     </span>

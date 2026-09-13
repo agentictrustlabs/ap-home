@@ -1,16 +1,17 @@
 'use client';
-// WHAT MY AGENT DID — spec 381 W3, the listing. The runs this person asked of an agent, newest first, each
-// with its goal, when it finished, how it ended and how many steps and receipts it left; open one and the
-// inspector draws it artifact-first (RunInspector, spec 398 §5.2 — outcome · artifacts · decisions · plan and
-// authority · execution detail · provenance). Read from the agent's own records under the person's session:
-// the Worker lists only the runs they asked for, and refuses the rest.
-import { useEffect, useState } from 'react';
+// WHAT THIS AGENT DID — spec 381 W3, on the UI system v2. Every run the person asked of this agent, from its own
+// records: grouped by day, filterable by state (needs you · running · finished · failed · stopped), searchable by
+// what was asked, each row the projected state (398 §5.1), the step and receipt counts, when — and Inspect opens
+// the run in a DRAWER (its steps, authority, provenance) so the list stays where it was. Runs still waiting are
+// listed first under "Needs you" because that is what a person opens this page for.
+import { useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { listRunRecords, type RunRecordRow } from '../../../home/ask';
 import { RunInspector } from './RunInspector';
 import { StatePill } from '../StatePill';
-import { Section, List, Row, Empty, Unknown, Meta, Button } from '../../../ui';
-import { stateOf, type RunStateSource } from '../../../home/run-state';
+import { List, Row, Panel, Stats, Stat, FilterChip, SearchInput, DayHeader, Drawer, Button, timeLabel, type PanelState } from '../../../ui';
+import { stateOf, stateTone, type RunStateSource } from '../../../home/run-state';
+import { ClockIcon } from '../today-icons';
 
 /** A finished run's record carries its `outcome` (350 `RunOutcome`); the pill shows the projected state (398 §5.1). */
 const sourceOf = (r: RunRecordRow): RunStateSource => ({ kind: 'run', outcome: r.outcome as Extract<RunStateSource, { kind: 'run' }>['outcome'], ...(r.canceled ? { canceled: true } : {}) });
@@ -18,44 +19,91 @@ const sourceOf = (r: RunRecordRow): RunStateSource => ({ kind: 'run', outcome: r
 const canceledWords = (c: NonNullable<RunRecordRow['canceled']>): string =>
   c.afterSteps === 0 ? 'stopped before any step ran' : `stopped after step ${c.afterSteps}; step${c.afterSteps === 1 ? ' 1' : `s 1–${c.afterSteps}`} happened`;
 
-export function RunHistory({ token, addressee, limit = 25 }: { token: string; addressee: Address; limit?: number }) {
+type Filter = 'all' | 'attention' | 'active' | 'done' | 'bad' | 'stopped';
+const FILTERS: Array<{ id: Filter; label: string }> = [{ id: 'all', label: 'All' }, { id: 'attention', label: 'Needs you' }, { id: 'active', label: 'Running' }, { id: 'done', label: 'Finished' }, { id: 'bad', label: 'Failed' }, { id: 'stopped', label: 'Stopped' }];
+function bucketOf(r: RunRecordRow): Exclude<Filter, 'all'> {
+  if (r.canceled) return 'stopped';
+  const t = stateTone(stateOf(sourceOf(r)));
+  return t === 'attention' || t === 'uncertain' ? 'attention' : t === 'active' ? 'active' : t === 'bad' ? 'bad' : 'done';
+}
+const dayKey = (at: number) => new Date(at).toDateString();
+
+export function RunHistory({ token, addressee, limit = 60 }: { token: string; addressee: Address; limit?: number }) {
   const [rows, setRows] = useState<RunRecordRow[] | null>(null);
   const [unknown, setUnknown] = useState<string | null>(null);
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<RunRecordRow | null>(null);
+  const [filter, setFilter] = useState<Filter>('all');
+  const [q, setQ] = useState('');
+  const [shownLimit, setShownLimit] = useState(limit);
   useEffect(() => {
     let live = true;
-    // 398 §6.3 — a listing that could not be read is said; it is never rendered as "no runs".
+    setRows(null); setUnknown(null);
     void listRunRecords({ token }, addressee).then((r) => { if (live) setRows(r.records.sort((a, b) => b.at - a.at)); }).catch((e) => { if (live) { setUnknown(e instanceof Error ? e.message : String(e)); setRows([]); } });
     return () => { live = false; };
   }, [token, addressee]);
-  const shown = (rows ?? []).slice(0, limit);
+
+  const counts = useMemo(() => {
+    const c: Record<Filter, number> = { all: 0, attention: 0, active: 0, done: 0, bad: 0, stopped: 0 };
+    for (const r of rows ?? []) { c.all += 1; c[bucketOf(r)] += 1; }
+    return c;
+  }, [rows]);
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return (rows ?? []).filter((r) => (filter === 'all' || bucketOf(r) === filter) && (!needle || (r.intent?.goal ?? r.runRef).toLowerCase().includes(needle) || r.runRef.toLowerCase().includes(needle)));
+  }, [rows, filter, q]);
+  const shown = filtered.slice(0, shownLimit);
+  const groups = useMemo(() => { const g: Array<{ day: number; rows: RunRecordRow[] }> = []; for (const r of shown) { const last = g[g.length - 1]; if (last && dayKey(last.day) === dayKey(r.at)) last.rows.push(r); else g.push({ day: r.at, rows: [r] }); } return g; }, [shown]);
+  const state: PanelState = rows === null ? 'loading' : unknown ? 'unknown' : filtered.length ? 'ready' : 'empty';
+  const emptyWords = rows && rows.length && (q || filter !== 'all') ? { title: 'No run matches', hint: q ? `Nothing you asked of this agent mentions “${q}”.` : `No run is ${FILTERS.find((f) => f.id === filter)?.label.toLowerCase()} right now.` } : { title: 'No runs yet', hint: 'Ask something of this agent, and it appears here with every step it took.' };
+
   return (
-    <Section title="What this agent did" count={rows?.length || undefined} testId="run-history" aside={<span>every run you asked of it, from its own records — opened, each step, its authority, its provenance</span>}>
-      {rows === null && <Meta>Reading the runs back…</Meta>}
-      {unknown && <Unknown read={<>the runs could not be read ({unknown})</>} testId="runs-unknown" />}
-      {rows !== null && rows.length === 0 && !unknown && <Empty>No finished runs of yours here yet. Ask something, and it appears.</Empty>}
-      {shown.length > 0 && (
-        <List>
-          {shown.map((r) => {
-            const goal = r.intent?.goal ?? r.runRef;
-            const isOpen = open === r.runRef;
-            return (
-              <Row
-                key={r.runRef}
-                title={goal.length > 140 ? `${goal.slice(0, 137)}…` : goal}
-                meta={<>{r.steps} step{r.steps === 1 ? '' : 's'} · {r.receipts} receipt{r.receipts === 1 ? '' : 's'}{r.export?.ok ? ' · in the vault' : ''}{r.canceled ? ` · ${canceledWords(r.canceled)}${r.canceled.note ? ` — “${r.canceled.note}”` : ''}` : ''}</>}
-                side={<>
-                  <StatePill state={stateOf(sourceOf(r))} native={r.canceled ? canceledWords(r.canceled) : r.outcome} compact />
-                  <span className="ui-row-time">{new Date(r.at).toLocaleString()}</span>
-                  <Button size="sm" variant="ghost" onClick={() => setOpen(isOpen ? null : r.runRef)}>{isOpen ? 'Close' : 'Inspect'}</Button>
-                </>}
-              >
-                {isOpen && <RunInspector token={token} addressee={addressee} runRef={r.runRef} {...(r.intent?.goal ? { goal: r.intent.goal } : {})} />}
-              </Row>
-            );
-          })}
-        </List>
+    <>
+      <Stats>
+        <Stat label="Needs you" value={counts.attention} loading={rows === null} tone={counts.attention ? 'warn' : undefined} hint="waiting on a signature or an answer" />
+        <Stat label="Running" value={counts.active} loading={rows === null} hint="in motion now" />
+        <Stat label="Finished" value={counts.done} loading={rows === null} tone="ok" hint="completed with receipts" />
+        <Stat label="Failed or stopped" value={counts.bad + counts.stopped} loading={rows === null} tone={counts.bad ? 'danger' : undefined} hint="refused, failed, or stopped by you" />
+      </Stats>
+      <div className="ui-toolbar">
+        <SearchInput placeholder="Search what was asked…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search runs" />
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {FILTERS.map((f) => <FilterChip key={f.id} active={filter === f.id} count={rows ? counts[f.id] : undefined} onClick={() => setFilter(f.id)}>{f.label}</FilterChip>)}
+        </div>
+      </div>
+      <Panel title="What this agent did" icon={<ClockIcon />} count={filtered.length} state={state} rows={5} testId="run-history"
+        aside={<span>every run you asked of it — opened, each step, its authority, its provenance</span>}
+        empty={{ icon: <ClockIcon />, ...emptyWords }}
+        unknown={{ read: <>the runs could not be read ({unknown})</> }}>
+        <div style={{ padding: '0 var(--sp-4) var(--sp-3)' }}>
+          {groups.map((g) => (
+            <div key={dayKey(g.day)}>
+              <DayHeader at={g.day} />
+              <List>
+                {g.rows.map((r) => {
+                  const goal = r.intent?.goal ?? r.runRef;
+                  return (
+                    <Row key={r.runRef} title={goal.length > 140 ? `${goal.slice(0, 137)}…` : goal}
+                      meta={<>{r.steps} step{r.steps === 1 ? '' : 's'} · {r.receipts} receipt{r.receipts === 1 ? '' : 's'}{r.export?.ok ? ' · in the vault' : ''}{r.canceled ? ` · ${canceledWords(r.canceled)}${r.canceled.note ? ` — “${r.canceled.note}”` : ''}` : ''}</>}
+                      side={<>
+                        <StatePill state={stateOf(sourceOf(r))} native={r.canceled ? canceledWords(r.canceled) : r.outcome} compact />
+                        <span className="ui-row-time" title={new Date(r.at).toLocaleString()}>{timeLabel(r.at)}</span>
+                        <Button size="sm" variant="ghost" onClick={() => setOpen(r)}>Inspect</Button>
+                      </>} />
+                  );
+                })}
+              </List>
+            </div>
+          ))}
+          {filtered.length > shownLimit && <div style={{ padding: 'var(--sp-3) 0 0', textAlign: 'center' }}><Button variant="secondary" size="sm" onClick={() => setShownLimit((n) => n + limit)}>Show {Math.min(limit, filtered.length - shownLimit)} more of {filtered.length - shownLimit}</Button></div>}
+        </div>
+      </Panel>
+      {open && (
+        <Drawer title={<span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}>Run <StatePill state={stateOf(sourceOf(open))} compact /></span>} onClose={() => setOpen(null)}>
+          <p className="ui-note" style={{ fontSize: 'var(--fs-md)', color: 'var(--color-text-primary)', fontWeight: 600 }}>{open.intent?.goal ?? open.runRef}</p>
+          <p className="ui-micro">{new Date(open.at).toLocaleString()} · <code className="ui-mono">{open.runRef}</code></p>
+          <RunInspector token={token} addressee={addressee} runRef={open.runRef} {...(open.intent?.goal ? { goal: open.intent.goal } : {})} />
+        </Drawer>
       )}
-    </Section>
+    </>
   );
 }

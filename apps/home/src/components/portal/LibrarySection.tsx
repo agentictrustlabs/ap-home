@@ -14,6 +14,7 @@ import { useSession } from '../../context/session';
 import { SectionShell } from './SectionShell';
 import { cardSty, btnSty, btnPrimarySty, mono, mutedText, errorText, inputSty, badgeStyle, modalOverlaySty, infoBannerSty, shortAddr, type BadgeKind } from './theme';
 import { artifactIdentity } from '../../home/artifact-identity';
+import { SkeletonRows, EmptyState, Button, useReadyReport } from '../../ui';
 
 type Kind = 'skill' | 'ttl' | 'md' | 'json-ld' | 'image';
 type Source = 'blob' | 'graphdb' | 'vault' | 'external';
@@ -27,6 +28,9 @@ interface Artifact { id: string; kind: Kind; name: string; source: Source; folde
   // present on "Shared with me" rows (a federated inbound grant from another vault)
   accessMode?: AccessMode; sharedBy?: string; sharedByKind?: string; myActions?: string[] }
 interface TreeNode { name: string; path: string; children: TreeNode[] }
+
+/** The shape of the list while the vault is being read — never the empty state. */
+function LibrarySkeleton() { return <SkeletonRows rows={4} />; }
 
 const KINDS: Kind[] = ['skill', 'ttl', 'md', 'json-ld', 'image'];
 const SOURCES: Source[] = ['blob', 'graphdb', 'vault', 'external'];
@@ -118,6 +122,8 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
   const [requests, setRequests] = useState<{ requester: string; artifactId: string; artifactName?: string; actions: string[]; at: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [sharedLoading, setSharedLoading] = useState(false);
+  useReadyReport('library-vault', loading);
+  useReadyReport('library-shared', sharedLoading);
   const [err, setErr] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
 
@@ -175,6 +181,22 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
     let arr = lens === 'shared'
       ? (searching ? source.filter((a) => a.name.toLowerCase().includes(q)) : source)
       : source.filter((a) => (searching ? a.name.toLowerCase().includes(q) : a.folder === cwd));
+    // FOLDERS ARE ROWS. A folder exists because something is in it (an item's `folder` path), whether or not a folder
+    // record was written; at this level every immediate child folder is listed as a row — so the top level of a vault
+    // whose items all live in folders never reads "Nothing in your vault yet" (seen live, 2026-09-13).
+    if (lens === 'vault' && !searching) {
+      const present = new Set(arr.filter((a) => a.isFolder).map((a) => a.name));
+      const implicit = new Map<string, number>();
+      for (const a of source) {
+        if (a.isFolder ? !a.folder.startsWith(cwd) : !(a.folder === cwd || a.folder.startsWith(cwd ? `${cwd}/` : ''))) continue;
+        const rest = a.isFolder ? fullPath(a) : a.folder;
+        const below = cwd ? (rest.startsWith(`${cwd}/`) ? rest.slice(cwd.length + 1) : '') : rest;
+        const child = below.split('/')[0];
+        if (!child || (a.isFolder && rest === (cwd ? `${cwd}/${a.name}` : a.name) && a.folder === cwd)) continue;
+        implicit.set(child, (implicit.get(child) ?? 0) + (a.isFolder ? 0 : 1));
+      }
+      for (const [name, count] of implicit) if (!present.has(name)) arr = [...arr, { id: `folder:${cwd ? `${cwd}/` : ''}${name}`, kind: 'md', name, source: 'blob', folder: cwd, isFolder: true, contentType: 'inode/directory', size: count, createdAt: 0, grants: [] } as Artifact];
+    }
     if (kindFilter !== 'all') arr = arr.filter((a) => !a.isFolder && a.kind === kindFilter);
     return [...arr].sort((a, b) => {
       if (a.isFolder !== b.isFolder) return a.isFolder ? -1 : 1; // folders first
@@ -271,14 +293,14 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
             <div style={{ flex: 1, minWidth: 0 }}>
               {lens === 'public'
                 ? <FederatedPlaceholder lens="public" />
-                : (lens === 'vault' && loading) || (lens === 'shared' && sharedLoading) ? <p style={mutedText}>loading…</p>
+                : (lens === 'vault' && loading) || (lens === 'shared' && sharedLoading) ? <LibrarySkeleton />
                 : rows.length === 0 ? (
-                  <div style={{ ...cardSty, textAlign: 'center', padding: '1.6rem' }}>
-                    <p style={mutedText}>{
-                      lens === 'shared' ? (searching ? `No shared items match “${query}”.` : 'Nothing has been shared with you yet.')
-                        : searching ? `No matches for “${query}” in this vault.` : path.length ? 'This folder is empty.' : 'Nothing in your vault yet.'
-                    }</p>
-                    {writable && !searching && <button style={{ ...btnPrimarySty, marginTop: 8 }} onClick={() => setUploadOpen(true)}>Add to vault</button>}
+                  <div className="ui-panel">
+                    <EmptyState icon={<Icon name={lens === 'shared' ? 'org' : 'folder'} size={18} />}
+                      title={lens === 'shared' ? (searching ? `No shared items match “${query}”` : 'Nothing has been shared with you yet')
+                        : searching ? `No matches for “${query}” in this vault` : path.length ? 'This folder is empty' : items.length ? `Nothing at the top level — ${items.filter((a) => !a.isFolder).length} item${items.filter((a) => !a.isFolder).length === 1 ? '' : 's'} in folders` : 'Nothing in your vault yet'}
+                      hint={lens === 'shared' ? 'A grant someone issues to you appears here as an item you can open.' : searching ? 'Try fewer words, or another folder.' : 'Documents, playbooks, ontologies and records your runs produce, or that you add.'}
+                      action={writable && !searching ? <Button variant="primary" size="sm" onClick={() => setUploadOpen(true)}>Add to vault</Button> : undefined} />
                   </div>
                 ) : (
                   <ArtifactList rows={rows} selectedId={selectedId} ownerLabel={ownerLabel} onOpen={select} onDescend={descend}

@@ -12,9 +12,9 @@ import type { HomeContributionEntryV1, HomeDecisionCardV1 } from '@agenticprimit
 import { useSession } from '../../../context/session';
 import { listRuns, type ParkedRun } from '../../../home/ask';
 import { SectionShell } from '../SectionShell';
-import { Section, List, Row, Empty, ErrorNote, Button, LinkButton, Chip } from '../../../ui';
+import { List, Row, Empty, ErrorNote, Button, LinkButton, Chip, Panel, Stats, Stat, SearchInput, FilterChip, relativeLabel, type PanelState } from '../../../ui';
+import { AlertIcon, CheckIcon, InboxIcon, ActivityIcon } from '../today-icons';
 import { BusyButton } from '../../shared/BusyButton';
-import { Loading } from '../../shared/Loading';
 import { resolveVia, signHashFor } from '../../../home/onboarding';
 import { commitContribution, recordDecision } from '../../../lib/work-client';
 import { askCommand } from '../../../home/ask-command';
@@ -128,6 +128,30 @@ export function MyWorkView() {
     };
   }, [bundles]);
 
+  // The page's own filters: words, an organization, whether finished requests are shown.
+  const [q, setQ] = useState('');
+  const [orgFilter, setOrgFilter] = useState<string | null>(null);
+  const [showDone, setShowDone] = useState(false);
+  const orgs = useMemo(() => [...new Map((bundles ?? []).map((b) => [b.org, b.orgName ?? `${b.org.slice(0, 10)}…`])).entries()], [bundles]);
+  const needle = q.trim().toLowerCase();
+  const matches = (words: string, org: string) => (!needle || words.toLowerCase().includes(needle)) && (!orgFilter || org === orgFilter);
+  const requestRows = useMemo(() => myRequests.map(({ b, q: r }) => {
+    const endeavorId = r.endeavorId ?? b.endeavors.find((e) => e.requestRef === r.requestId)?.endeavorId;
+    const endeavor = endeavorId ? b.endeavors.find((e) => e.endeavorId === endeavorId) : undefined;
+    const status = r.status ?? 'pending';
+    const lifecycle = endeavor?.lifecycle ?? r.endeavorLifecycle;
+    const completed = status === 'adopted' && lifecycle === 'satisfied';
+    const done = completed || status === 'declined';
+    const href = status === 'adopted' && endeavorId ? `/org/${b.org}/work/${encodeURIComponent(endeavorId)}` : undefined;
+    return { b, r, status, lifecycle, completed, done, href };
+  }), [myRequests]);
+  const openRequests = requestRows.filter((x) => !x.done && matches(x.r.goal, x.b.org));
+  const doneRequests = requestRows.filter((x) => x.done && matches(x.r.goal, x.b.org));
+  const attention = [...awaiting.map(({ b, e }) => ({ b, key: `attn:${b.org}:${e.allocationId}`, words: e.endeavorTitle })), ...decisions.map(({ b, c }) => ({ b, key: `attn:${b.org}:${c.decisionId}`, words: c.title }))].filter((x) => matches(x.words, x.b.org));
+  const committed = active.filter(({ b, e }) => matches(e.endeavorTitle, b.org));
+  const loading = bundles === null;
+  const st = (n: number): PanelState => (loading ? 'loading' : n ? 'ready' : 'empty');
+
   if (!session) return <SectionShell title="My Work"><Empty>Not signed in.</Empty></SectionShell>;
 
   return (
@@ -143,21 +167,15 @@ export function MyWorkView() {
       {error && <ErrorNote>{error}</ErrorNote>}
 
       {staleOrgs.length > 0 && (
-        <div className="manage-card" style={{ padding: '0.8rem 1rem', marginBottom: '0.9rem', border: '1px solid var(--color-amber-400)', background: 'var(--color-amber-50)' }}>
-          <p style={{ fontSize: '0.83rem', margin: '0 0 0.5rem' }}>
-            Storage was upgraded for coordination — these organizations&rsquo; grants must be re-signed before their work loads:
-          </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+        <div className="ui-card" style={{ marginBottom: 'var(--sp-4)', borderColor: 'var(--st-warn-dot)', background: 'var(--st-warn-bg)' }}>
+          <p className="ui-note" style={{ color: 'var(--st-warn-fg)' }}>Storage was upgraded for coordination — these organizations&rsquo; grants must be re-signed before their work loads:</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {staleOrgs.map((s) => (
-              <div key={s.org} style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>{s.orgName ?? `${s.org.slice(0, 10)}…`}</span>
+              <div key={s.org} style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600 }}>{s.orgName ?? `${s.org.slice(0, 10)}…`}</span>
                 {s.steward ? (
-                  <BusyButton busy={busyId === `reenable:${s.org}`} busyLabel="Re-enabling…" className="btn" style={{ width: 'auto', fontSize: '0.76rem', padding: '0.25rem 0.6rem' }} onClick={() => void runReEnable(s)}>
-                    Re-enable storage
-                  </BusyButton>
-                ) : (
-                  <span style={{ fontSize: '0.74rem', opacity: 0.7 }}>ask a steward to re-enable</span>
-                )}
+                  <BusyButton busy={busyId === `reenable:${s.org}`} busyLabel="Re-enabling…" className="ui-btn ui-btn--secondary ui-btn--sm" onClick={() => void runReEnable(s)}>Re-enable storage</BusyButton>
+                ) : <span className="ui-micro">ask a steward to re-enable</span>}
               </div>
             ))}
           </div>
@@ -165,137 +183,107 @@ export function MyWorkView() {
       )}
 
       {composerOpen && (
-        <div style={{ marginBottom: '1rem' }}>
+        <div style={{ marginBottom: 'var(--sp-4)' }}>
           <NewRequestComposer onSubmitted={() => void load()} />
         </div>
       )}
 
-      {bundles === null ? (
-        <Loading label="Loading your work across every organization…" />
-      ) : (
-        <>
-          {/* Action-priority inbox: everything that NEEDS this person, first and unmissable. */}
-          {(awaiting.length > 0 || decisions.length > 0) && (
-            <Section title="Needs your decision" count={awaiting.length + decisions.length} aside={<BasisLine needs="your signature, as the named approver or the allocated participant" />}>
-              <List>
-                {awaiting.map(({ b, e }) => (
-                  <EntryCard
-                    key={`attn:${b.org}:${e.allocationId}`}
-                    entry={e}
-                    {...(b.orgName ? { orgName: b.orgName } : {})}
-                    action={
-                      <BusyButton busy={busyId === e.allocationId} busyLabel="Signing…" className="ui-btn ui-btn--primary ui-btn--sm" onClick={() => void commit(b, e)}>
-                        Commit to this work
-                      </BusyButton>
-                    }
-                  />
-                ))}
-                {decisions.map(({ b, c }) => (
-                  <Row
-                    key={`attn:${b.org}:${c.decisionId}`}
-                    title={c.title}
-                    meta={<>{b.orgName ? `${b.orgName} · ` : ''}{c.decisionKind}{c.dueAt ? ` · due ${new Date(c.dueAt).toLocaleDateString()}` : ''}</>}
-                    side={<>
-                      <input
-                        className="input"
-                        value={reasons[c.decisionId] ?? ''}
-                        onChange={(e) => setReasons((r) => ({ ...r, [c.decisionId]: e.target.value }))}
-                        placeholder="Why? (kept as the record)"
-                        aria-label="Reason for the decision"
-                        style={{ fontSize: 'var(--fs-sm)', padding: '4px 8px', minWidth: '12rem', minHeight: 28 }}
-                      />
-                      {c.allowedActions.map((a) => (
-                        <BusyButton
-                          key={a.actionId}
-                          busy={busyId === c.decisionId}
-                          busyLabel="…"
-                          className={`ui-btn ui-btn--sm ${a.style === 'destructive' ? 'ui-btn--danger' : 'ui-btn--primary'}`}
-                          onClick={() => void decide(b, c, a.transition === 'approve' ? 'approved' : 'rejected')}
-                        >
-                          {a.label}
-                        </BusyButton>
-                      ))}
-                    </>}
-                  />
-                ))}
-              </List>
-            </Section>
-          )}
+      <Stats>
+        <Stat label="Needs your decision" value={attention.length} loading={loading} tone={attention.length ? 'warn' : undefined} hint="to sign, approve or commit" href="#work-attention" />
+        <Stat label="Open requests" value={openRequests.length} loading={loading} hint="what you asked for, still in motion" href="#work-requests" />
+        <Stat label="Committed" value={committed.length} loading={loading} hint="steps you took on" href="#work-committed" />
+        <Stat label="Completed" value={doneRequests.filter((x) => x.completed).length} loading={loading} tone="ok" hint="requests that finished" />
+      </Stats>
 
-          <Section title="Your requests" count={myRequests.length || undefined}>
-          {myRequests.length === 0 ? (
-            <Empty>No requests yet — New request states a goal for an organization or a person.</Empty>
-          ) : (
-            <List>
-              {myRequests.map(({ b, q }) => {
-                // Adopted → resolve the Endeavor it became (the request row's endeavorId, or the
-                // endeavor whose requestRef points back at this request).
-                const endeavorId = q.endeavorId ?? b.endeavors.find((e) => e.requestRef === q.requestId)?.endeavorId;
-                const endeavor = endeavorId ? b.endeavors.find((e) => e.endeavorId === endeavorId) : undefined;
-                const status = q.status ?? 'pending';
-                // The requester isn't a participant, so the endeavor rarely appears in b.endeavors —
-                // fall back to the lifecycle the serving plane attaches to the request row.
-                const lifecycle = endeavor?.lifecycle ?? q.endeavorLifecycle;
-                const completed = lifecycle === 'satisfied';
-                const href = status === 'adopted' && endeavorId ? `/org/${b.org}/work/${encodeURIComponent(endeavorId)}` : undefined;
-                return (
-                  <Row
-                    key={`${b.org}:${q.requestId}`}
-                    title={q.goal} {...(href ? { titleHref: href } : {})}
-                    meta={<>
-                      {b.orgName ? `${b.orgName} · ` : ''}{new Date(q.submittedAt).toLocaleDateString()}
-                      {status === 'pending' && ' · awaiting a decision'}
-                      {status === 'declined' && ` · declined${q.reason ? ` — ${q.reason}` : ''}`}
-                      {status === 'adopted' && completed && ' · completed'}
-                    </>}
-                    side={<>
-                      {status === 'adopted' && !completed && lifecycle && <StatePill state={lifecycleState(lifecycle)} native={LIFECYCLE_LABEL[lifecycle]} compact />}
-                      {status === 'adopted' && completed && <Chip tone="ok">completed</Chip>}
-                      {href && <LinkButton size="sm" href={href}>{completed ? 'View result' : 'Open'}</LinkButton>}
-                    </>}
-                  >
-                    {q.outcomeSummary && <div className="ui-meta" style={{ marginTop: 4, whiteSpace: 'pre-wrap', color: 'var(--color-text-body)' }}><b>Outcome:</b> {q.outcomeSummary}</div>}
-                  </Row>
-                );
-              })}
-            </List>
-          )}
-          </Section>
+      <div className="ui-toolbar">
+        <SearchInput placeholder="Search your work…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search work" />
+        {orgs.length > 1 && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <FilterChip active={orgFilter === null} onClick={() => setOrgFilter(null)}>All organizations</FilterChip>
+            {orgs.map(([org, name]) => <FilterChip key={org} active={orgFilter === org} onClick={() => setOrgFilter(orgFilter === org ? null : org)}>{name}</FilterChip>)}
+          </div>
+        )}
+      </div>
 
-          <Section title="Work you committed to" count={active.length || undefined}>
-          {active.length === 0 ? (
-            <Empty>Nothing yet — when a coordinator assigns you plan steps and you commit, they appear here.</Empty>
-          ) : (
-            <List>
-              {active.map(({ b, e }) => {
-                // Spec 382 W2 — the committed step is a run parked on THIS person's agent: shown beside the
-                // commitment, opened in the Ask (it asks for their mandate there), or taken back here.
-                const run = parked.find((r) => r.origin?.endeavorId === e.endeavorId && e.stepIds.includes(r.origin?.stepId ?? ''));
-                return (
-                  <EntryCard key={`${b.org}:${e.commitmentId ?? e.allocationId}`} entry={e} {...(b.orgName ? { orgName: b.orgName } : {})}
-                    action={(
-                      <span style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                        {run ? (
-                          <LinkButton size="sm" href={`/ask?seed=${encodeURIComponent(run.message)}`} data-testid="committed-run-open" title={run.runRef}>
-                            Open in Ask{run.awaiting ? ` · ${runStateLabel(stateOf({ kind: 'suspended', awaiting: run.awaiting.kind as AwaitingKind, expired: false }))}` : ''}
-                          </LinkButton>
-                        ) : <span className="ui-micro">no parked run on your agent yet</span>}
-                        {run && agentAddress && <RunControls token={session.token} addressee={agentAddress as Address} runRef={run.runRef} compact onCanceled={() => setParked((p) => p.filter((r) => r.runRef !== run.runRef))} />}
-                        {e.commitmentId && (
-                          <BusyButton busy={busyId === `withdraw:${e.commitmentId}`} busyLabel="Withdrawing…" className="ui-btn ui-btn--ghost ui-btn--sm" onClick={() => void withdraw(b, e)} disabled={!!busyId}>
-                            Withdraw
-                          </BusyButton>
-                        )}
-                      </span>
-                    )}
-                  />
-                );
-              })}
-            </List>
-          )}
-          </Section>
-        </>
+      <div id="work-attention" />
+      <Panel title="Needs your decision" icon={<AlertIcon />} count={attention.length} state={st(attention.length)} rows={2} aside={<BasisLine needs="your signature, as the named approver or the allocated participant" />}
+        empty={{ icon: <AlertIcon />, title: 'Nothing is waiting on you', hint: 'Allocations to commit to and decisions you were named for appear here first.' }}>
+        <List>
+          {awaiting.filter(({ b, e }) => matches(e.endeavorTitle, b.org)).map(({ b, e }) => (
+            <EntryCard key={`attn:${b.org}:${e.allocationId}`} entry={e} {...(b.orgName ? { orgName: b.orgName } : {})}
+              action={<BusyButton busy={busyId === e.allocationId} busyLabel="Signing…" className="ui-btn ui-btn--primary ui-btn--sm" onClick={() => void commit(b, e)}>Commit to this work</BusyButton>} />
+          ))}
+          {decisions.filter(({ b, c }) => matches(c.title, b.org)).map(({ b, c }) => (
+            <Row key={`attn:${b.org}:${c.decisionId}`} title={c.title}
+              meta={<>{b.orgName ? `${b.orgName} · ` : ''}{c.decisionKind}{c.dueAt ? ` · due ${new Date(c.dueAt).toLocaleDateString()}` : ''}</>}
+              side={<>
+                <input className="input" value={reasons[c.decisionId] ?? ''} onChange={(e) => setReasons((r) => ({ ...r, [c.decisionId]: e.target.value }))} placeholder="Why? (kept as the record)" aria-label="Reason for the decision" style={{ fontSize: 'var(--fs-sm)', padding: '4px 10px', minWidth: '14rem', minHeight: 32, height: 32 }} />
+                {c.allowedActions.map((a) => (
+                  <BusyButton key={a.actionId} busy={busyId === c.decisionId} busyLabel="…" className={`ui-btn ui-btn--sm ${a.style === 'destructive' ? 'ui-btn--danger' : 'ui-btn--primary'}`} onClick={() => void decide(b, c, a.transition === 'approve' ? 'approved' : 'rejected')}>{a.label}</BusyButton>
+                ))}
+              </>} />
+          ))}
+        </List>
+      </Panel>
+
+      <div id="work-requests" />
+      <Panel title="Your requests" icon={<InboxIcon />} count={openRequests.length} state={st(openRequests.length)} rows={4}
+        aside={doneRequests.length > 0 ? <button type="button" className="ui-btn ui-btn--ghost ui-btn--sm" onClick={() => setShowDone((v) => !v)}>{showDone ? 'Hide' : 'Show'} {doneRequests.length} finished</button> : undefined}
+        empty={{ icon: <InboxIcon />, title: needle || orgFilter ? 'No open request matches' : 'No open requests', hint: needle || orgFilter ? 'Clear the search or the organization filter.' : 'New request states a goal for an organization or a person; what comes of it is tracked here.', action: needle || orgFilter ? undefined : <Button size="sm" variant="secondary" onClick={() => setComposerOpen(true)}>New request</Button> }}>
+        <List>
+          {openRequests.map(({ b, r, status, lifecycle, href }) => (
+            <Row key={`${b.org}:${r.requestId}`} title={r.goal} {...(href ? { titleHref: href } : {})}
+              meta={<>{b.orgName ? `${b.orgName} · ` : ''}asked {relativeLabel(r.submittedAt)} ago{status === 'pending' ? ' · awaiting a decision' : ''}</>}
+              side={<>
+                {status === 'pending' && <Chip tone="warn">pending</Chip>}
+                {status === 'adopted' && lifecycle && <StatePill state={lifecycleState(lifecycle)} native={LIFECYCLE_LABEL[lifecycle]} compact />}
+                {href && <LinkButton size="sm" href={href}>Open</LinkButton>}
+              </>}>
+              {r.outcomeSummary && <div className="ui-meta" style={{ marginTop: 4, whiteSpace: 'pre-wrap', color: 'var(--color-text-body)' }}><b>Outcome:</b> {r.outcomeSummary}</div>}
+            </Row>
+          ))}
+        </List>
+      </Panel>
+
+      {showDone && doneRequests.length > 0 && (
+        <Panel title="Finished requests" icon={<CheckIcon />} count={doneRequests.length} state="ready">
+          <List>
+            {doneRequests.map(({ b, r, status, completed, href }) => (
+              <Row key={`${b.org}:${r.requestId}`} title={r.goal} {...(href ? { titleHref: href } : {})}
+                meta={<>{b.orgName ? `${b.orgName} · ` : ''}{new Date(r.submittedAt).toLocaleDateString()}{status === 'declined' ? ` · declined${r.reason ? ` — ${r.reason}` : ''}` : ''}</>}
+                side={<>{completed ? <Chip tone="ok">completed</Chip> : <Chip tone="danger">declined</Chip>}{href && <LinkButton size="sm" href={href}>View result</LinkButton>}</>}>
+                {r.outcomeSummary && <div className="ui-meta" style={{ marginTop: 4, whiteSpace: 'pre-wrap', color: 'var(--color-text-body)' }}><b>Outcome:</b> {r.outcomeSummary}</div>}
+              </Row>
+            ))}
+          </List>
+        </Panel>
       )}
+
+      <div id="work-committed" />
+      <Panel title="Work you committed to" icon={<ActivityIcon />} count={committed.length} state={st(committed.length)} rows={2}
+        empty={{ icon: <ActivityIcon />, title: 'Nothing committed yet', hint: 'When a coordinator allocates you plan steps and you commit, they appear here with the run that does them.' }}>
+        <List>
+          {committed.map(({ b, e }) => {
+            const run = parked.find((r) => r.origin?.endeavorId === e.endeavorId && e.stepIds.includes(r.origin?.stepId ?? ''));
+            return (
+              <EntryCard key={`${b.org}:${e.commitmentId ?? e.allocationId}`} entry={e} {...(b.orgName ? { orgName: b.orgName } : {})}
+                action={(
+                  <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    {run ? (
+                      <LinkButton size="sm" href={`/ask?seed=${encodeURIComponent(run.message)}`} data-testid="committed-run-open" title={run.runRef}>
+                        Open in Ask{run.awaiting ? ` · ${runStateLabel(stateOf({ kind: 'suspended', awaiting: run.awaiting.kind as AwaitingKind, expired: false }))}` : ''}
+                      </LinkButton>
+                    ) : <span className="ui-micro">no parked run on your agent yet</span>}
+                    {run && agentAddress && <RunControls token={session.token} addressee={agentAddress as Address} runRef={run.runRef} compact onCanceled={() => setParked((p) => p.filter((r) => r.runRef !== run.runRef))} />}
+                    {e.commitmentId && (
+                      <BusyButton busy={busyId === `withdraw:${e.commitmentId}`} busyLabel="Withdrawing…" className="ui-btn ui-btn--ghost ui-btn--sm" onClick={() => void withdraw(b, e)} disabled={!!busyId}>Withdraw</BusyButton>
+                    )}
+                  </span>
+                )} />
+            );
+          })}
+        </List>
+      </Panel>
     </SectionShell>
   );
 }

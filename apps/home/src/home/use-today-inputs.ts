@@ -14,6 +14,8 @@ export interface TodayReads {
   parked: Array<ParkedRun & { state?: RunStateV1 }> | null;
   /** Spec 398 §6.3 — a read that failed is SAID, never rendered as an empty list: which read, and why. */
   failed: ReadFailures;
+  /** Which reads are still out — the section shows a skeleton until its read answers. */
+  pending: Record<'runs' | 'triggers' | 'vocabulary' | 'records' | 'artifacts', boolean>;
   triggers: TriggerRow[];
   vocabulary: AskVocabularyEntry[];
   artifacts: TodayArtifact[];
@@ -30,16 +32,20 @@ export function useTodayReads(token: string | undefined, addressee: string | nul
   const [artifacts, setArtifacts] = useState<TodayArtifact[]>([]);
   const [records, setRecords] = useState<RunRecordRow[]>([]);
   const [failed, setFailed] = useState<ReadFailures>({});
+  /** Which reads are still OUT — a section shows a skeleton, never an empty state, while its read is pending. */
+  const [pending, setPending] = useState<Record<'runs' | 'triggers' | 'vocabulary' | 'records' | 'artifacts', boolean>>({ runs: true, triggers: true, vocabulary: true, records: true, artifacts: true });
   useEffect(() => {
     if (!token || !addressee) return;
     let live = true;
     const why = (e: unknown) => (e instanceof Error ? e.message : String(e)) || 'unreachable';
     const fail = (k: keyof ReadFailures, e: unknown) => { if (live) setFailed((f) => ({ ...f, [k]: why(e) })); };
     setFailed({});
-    void listRuns({ token }, addressee as Address).then((rs) => { if (live) setParked(rs as TodayReads['parked']); }).catch((e) => { fail('runs', e); if (live) setParked([]); });
-    void listTriggers({ token }, addressee as Address).then((ts) => { if (live) setTriggers(ts); }).catch((e) => fail('triggers', e));
-    void homeVocabulary(addressee).then((v) => { if (live) setVocabulary(v); }).catch((e) => fail('vocabulary', e));
-    void listRunRecords({ token }, addressee as Address).then((r) => { if (live) setRecords(r.records); }).catch((e) => fail('records', e));
+    setPending({ runs: true, triggers: true, vocabulary: true, records: true, artifacts: true });
+    const done = (k: keyof typeof pending) => { if (live) setPending((p) => ({ ...p, [k]: false })); };
+    void listRuns({ token }, addressee as Address).then((rs) => { if (live) setParked(rs as TodayReads['parked']); }).catch((e) => { fail('runs', e); if (live) setParked([]); }).finally(() => done('runs'));
+    void listTriggers({ token }, addressee as Address).then((ts) => { if (live) setTriggers(ts); }).catch((e) => fail('triggers', e)).finally(() => done('triggers'));
+    void homeVocabulary(addressee).then((v) => { if (live) setVocabulary(v); }).catch((e) => fail('vocabulary', e)).finally(() => done('vocabulary'));
+    void listRunRecords({ token }, addressee as Address).then((r) => { if (live) setRecords(r.records); }).catch((e) => fail('records', e)).finally(() => done('records'));
     const scopeQ = libraryScope === 'person' ? '' : `?org=${addressee}`;
     void fetch(`/connect/library${scopeQ}`, { headers: { authorization: `Bearer ${token}` } })
       .then((r) => { if (!r.ok) throw new Error(`the Library answered ${r.status}`); return r.json(); })
@@ -47,8 +53,9 @@ export function useTodayReads(token: string | undefined, addressee: string | nul
         if (!live) return;
         setArtifacts((b.artifacts ?? []).filter((a) => !a.isFolder && typeof a.createdAt === 'number').map((a) => ({ id: a.id, name: a.name, createdAt: a.createdAt as number, ...(a.kind ? { kind: a.kind } : {}), ...(a.folder ? { folder: a.folder } : {}), ...(a.version ? { version: a.version } : {}) })));
       })
-      .catch((e) => fail('artifacts', e));
+      .catch((e) => fail('artifacts', e))
+      .finally(() => done('artifacts'));
     return () => { live = false; };
   }, [token, addressee, libraryScope]);
-  return { parked, triggers, vocabulary, artifacts, records, failed, dropRun: (runRef) => setParked((p) => (p ?? []).filter((r) => r.runRef !== runRef)) };
+  return { parked, triggers, vocabulary, artifacts, records, failed, pending, dropRun: (runRef) => setParked((p) => (p ?? []).filter((r) => r.runRef !== runRef)) };
 }

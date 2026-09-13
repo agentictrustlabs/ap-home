@@ -1066,3 +1066,18 @@
     border-color: var(--color-amber-400);
   }
 }
+
+/* ── design system v2 (2026-09-13): the thread reads like a modern messenger — mine on the dark ink, theirs on a
+   quiet surface; no yellow fields; the rail's active row tinted with the accent mark ── */
+.chat-bubble { font-size: var(--fs-md, 13.5px); border-radius: 16px; padding: 0.5rem 0.8rem 0.4rem; }
+.chat-bubble--mine { background: #1f2937; color: #fff; border: 0; }
+.chat-bubble--mine .chat-bubble__time { opacity: .7; }
+.chat-bubble--mine a { color: #fde68a; }
+.chat-bubble--theirs { background: var(--color-surface-sunken); color: var(--color-text-primary); border: 0; }
+.chat-rail { background: var(--color-surface); }
+.chat-rail-item--active { background: var(--st-accent-bg); box-shadow: inset 3px 0 0 var(--color-action); }
+.chat-rail-item__title--unread { font-weight: 700; }
+.chat-unread-badge { background: var(--color-action); color: var(--color-action-fg); font-weight: 700; }
+.chat-thread-header { background: var(--color-surface); border-bottom: 1px solid var(--color-border); }
+.chat-attention { border-left-color: var(--color-action); box-shadow: var(--shadow-card); }
+.chat-shell { box-shadow: var(--shadow-card); border-radius: 12px; }
