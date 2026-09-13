@@ -18,7 +18,7 @@ import { buildCaveat, buildVaultRecordScopeCaveat, encodeTimestampTerms, hashDel
 import { definitionDigest, validateAgentHarnessDefinition, type AgentHarnessDefinitionV1 } from '@agenticprimitives/capability-claims';
 import type { Address, Hex } from '@agenticprimitives/types';
 import { createPublicClient, encodeFunctionData, http, keccak256, toBytes } from 'viem';
-import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
+import { getServer, ownIssuer, resolveOrigin, type FnContext } from '../_lib/server-broker';
 import { demoPersonaFor, signDigestAsDemoPersona } from '../_lib/demo-custody';
 import { callInteractions } from './channels';
 import { CHAIN, CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
@@ -78,7 +78,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       ];
       const callData = buildExecuteBatchCallData(calls);
       // The account routes take a CSRF pair like every mutating /a2a call (the scripts fetch it the same way).
-      const origin = ownIssuer(request, env);
+      const origin = resolveOrigin(request, env);
       const csrfRes = await fetch(`${a2a}/auth/csrf`, { headers: { origin } });
       const csrf = (await csrfRes.json().catch(() => ({}))) as { token?: string };
       const H = { 'content-type': 'application/json', origin, cookie: (csrfRes.headers.get('set-cookie') ?? '').split(';')[0] ?? '', 'x-csrf-token': csrf.token ?? '' };
