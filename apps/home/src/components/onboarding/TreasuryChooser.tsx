@@ -1,4 +1,5 @@
 'use client';
+import { WorkingBar } from './WorkingBar';
 // Home-side MONEY-ACCOUNT chooser for an app that needs the member to have a personal treasury
 // before it can do anything with money (spec 275 treasuries × spec 230 relying apps).
 //
@@ -143,6 +144,7 @@ export function TreasuryChooser({
   if (!loaded) {
     return (
       <div className="onboarding-busy">
+        <WorkingBar />
         <span className="spinner spinner-lg" role="status" aria-label="Loading your money accounts" />
         <p className="onboarding-busy-msg">Looking for money accounts you already have…</p>
       </div>

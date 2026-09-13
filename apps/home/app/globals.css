@@ -1319,7 +1319,15 @@
       .onboarding-secondary { width: 100%; }
       /* full width is the onboarding card's rule, not the portal's */
       .portal-main .onboarding-secondary { width: auto; }
-      .onboarding-busy { display: flex; flex-direction: column; align-items: center; gap: .6rem; padding: 1.5rem 0; }
+      .onboarding-busy { display: flex; flex-direction: column; align-items: center; gap: .6rem; padding: 1.5rem 0; width: 100%; }
+      /* Every waiting state on an onboarding screen shows MOTION — a moving bar — so a ceremony that takes
+         seconds (a redirect, a userOp, a KMS sign) never reads as frozen. `.onboarding-busy` gets it for
+         free; a beat that waits on a redirect ("Returning you to…") mounts <WorkingBar/> explicitly. */
+      .onboarding-working { width: 100%; max-width: 260px; height: 4px; border-radius: 999px; background: var(--color-surface-sunken, #eceff3); overflow: hidden; position: relative; margin: .25rem auto 0; }
+      .onboarding-working::after { content: ''; position: absolute; inset: 0; width: 45%; border-radius: 999px; background: var(--color-action, var(--color-amber-500)); animation: ui-progress 1.1s ease-in-out infinite; }
+      .onboarding-busy > .onboarding-working { order: 99; }
+      .onboarding-working-label { font-size: .8rem; color: var(--color-text-muted); margin: .35rem 0 0; }
+      @media (prefers-reduced-motion: reduce) { .onboarding-working::after { animation-duration: 2.4s; } }
       .onboarding-busy-msg { font-weight: 600; color: var(--color-text-primary); margin: 0; }
       .onboarding-busy-sub { font-size: .8rem; color: var(--color-text-muted); margin: 0; max-width: 36ch; text-align: center; }
       .ceremony-progress { width: 100%; max-width: 240px; height: 6px; background: var(--color-surface-sunken, #e8e4d9); border-radius: 999px; overflow: hidden; }

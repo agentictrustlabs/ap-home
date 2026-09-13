@@ -1,4 +1,5 @@
 'use client';
+import { WorkingBar } from './WorkingBar';
 // Home-side org chooser for an org-create enroll that arrives WITHOUT a preselected org
 // (`org_base` / `existing_org` absent): the person picks an organization they belong to
 // (membership, or a stewarded org created for this request's purpose) — or names a new
@@ -124,6 +125,7 @@ export function OrgChooser({
   if (orgs === null || (orgs.length === 0 && toOrgLabel(defaultName ?? '').length >= 3)) {
     return (
       <div className="onboarding-busy">
+        <WorkingBar />
         <span className="spinner spinner-lg" role="status" aria-label="Loading your organizations" />
         <p className="onboarding-busy-msg">Finding organizations you belong to…</p>
       </div>

@@ -1,4 +1,5 @@
 'use client';
+import { WorkingBar } from './WorkingBar';
 // The onboarding first-run journey, composed from the home ACTIVITIES (src/home/onboarding):
 // secure → register → permit. Three understandable activities backed by the fewest device
 // prompts: createHomeKey (your device becomes your key) + secureHome (found your home AND
@@ -433,6 +434,7 @@ export function OnboardingJourney({
     return (
       <Frame>
         <div className="onboarding-busy">
+          <WorkingBar />
           <span className="spinner spinner-lg" role="status" aria-label="Working" />
           <p className="onboarding-busy-msg">{busy}</p>
           <p className="onboarding-busy-sub">Your device may ask you to confirm. This takes a few seconds.</p>
@@ -608,6 +610,7 @@ export function OnboardingJourney({
       <Frame>
         <OnboardingProgress total={hasApp ? 3 : 2} current={1} label={c.portalStepCta} />
         <div className="onboarding-busy">
+          <WorkingBar />
           <span className="spinner spinner-lg" role="status" aria-label="Securing your home" />
           <p className="onboarding-busy-msg">{securingMsg}</p>
         </div>
@@ -721,6 +724,7 @@ export function OnboardingJourney({
         </div>
         <ReceiptCard title={fmt(c.authorizeStepReceipt, { app: appName })} />
         <p className="onboarding-sub">Returning you to {appName}…</p>
+        <WorkingBar />
       </Frame>
     );
   }

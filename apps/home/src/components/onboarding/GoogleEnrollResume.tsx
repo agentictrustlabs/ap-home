@@ -1,4 +1,5 @@
 'use client';
+import { WorkingBar } from './WorkingBar';
 // Resume a relying-app enrollment AFTER a Google redirect (spec 235 + spec 230). The Google OAuth
 // is a full-page redirect, so the enroll request can't survive in the URL — OnboardingJourney
 // stashed it in sessionStorage before redirecting. On return the member is in a custody-grade
@@ -226,6 +227,7 @@ export function GoogleEnrollResume() {
     return (
       <Shell>
         <div className="onboarding-busy">
+          <WorkingBar />
           <span className="spinner spinner-lg" role="status" aria-label="Securing your home" />
           <p className="onboarding-busy-msg">Securing your home in the {community}…</p>
         </div>
@@ -289,6 +291,7 @@ export function GoogleEnrollResume() {
     return (
       <Shell>
         <div className="onboarding-busy">
+          <WorkingBar />
           <span className="spinner spinner-lg" role="status" aria-label="Granting permission" />
           <p className="onboarding-busy-msg">{fmt(c.authorizeStepBusy, { app: appName })}</p>
         </div>
@@ -305,6 +308,7 @@ export function GoogleEnrollResume() {
         </div>
         <ReceiptCard title={fmt(c.authorizeStepReceipt, { app: appName })} />
         <p className="onboarding-sub">Returning you to {appName}…</p>
+        <WorkingBar />
       </Shell>
     );
   }

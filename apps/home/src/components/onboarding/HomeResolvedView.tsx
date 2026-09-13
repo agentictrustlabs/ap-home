@@ -1,4 +1,6 @@
 'use client';
+import { WorkingBar } from './WorkingBar';
+import { whitelabel } from '../../whitelabel/config';
 // spec 257 Phase 1 W3 — the "home resolved" confirmation beat (greenfield 06 / 10). The moment a
 // credential resolves to (or bootstraps) an Impact home, show a clean, on-brand confirmation —
 // "We found your Impact home" (returning) or "You're in." (new) — with the handle rendered
@@ -96,10 +98,10 @@ export function HomeResolvedView({
       </div>
       {fresh ? (
         <p className="onboarding-sub">
-          Your Impact home is ready{appName ? <> and connected to <strong>{appName}</strong></> : null}.
+          Your {whitelabel.brand.name} home is ready{appName ? <> and connected to <strong>{appName}</strong></> : null}.
         </p>
       ) : (
-        <p className="onboarding-sub">We found your Impact home.</p>
+        <p className="onboarding-sub">We found your {whitelabel.brand.name} home.</p>
       )}
       {handle && (
         <div className="name-chip">
@@ -121,6 +123,7 @@ export function HomeResolvedView({
         {appName ? `Continue to ${appName}` : 'Continue'}
       </button>
       {note && <p className="onboarding-sub" role="status" data-testid="resolved-note" style={{ fontSize: '.85rem' }}>{note}</p>}
+      {autoAdvanceMs > 0 && <WorkingBar label={appName ? `Returning you to ${appName}…` : 'Opening your home…'} />}
     </Shell>
   );
 }

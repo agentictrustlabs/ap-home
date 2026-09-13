@@ -1,4 +1,5 @@
 'use client';
+import { WorkingBar } from './WorkingBar';
 // Full-bleed entry experience shown by the portal gate when NOT authed (or mid relying-app
 // enrollment). Routes: relying-app enroll (new / existing / org-create) and self-serve
 // (onboarding / sign-in). The onboarding journey itself lives in <OnboardingJourney/>.
@@ -348,7 +349,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
   }, [mode, api.enroll, api.allowed, api.resolvingClient]);
 
   if (view.k === 'checking') {
-    return <Shell><div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">One moment…</p></div></Shell>;
+    return <Shell><div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">One moment…</p><WorkingBar /></div></Shell>;
   }
   if (view.k === 'blocked') {
     return (
@@ -1085,7 +1086,7 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
         <h1 className="onboarding-h1">Welcome back</h1>
         <p className="onboarding-sub">You&apos;re already signed in — continue as <strong>{nameLabel(name)}</strong>.</p>
         {busy ? (
-          <div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">Confirming…</p></div>
+          <div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">Confirming…</p><WorkingBar /></div>
         ) : (
           <>
             <button
@@ -1124,7 +1125,7 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
         // (showPasskey=true) flash "Continue with passkey" as the primary even for a WALLET-only home,
         // so the member is taken to passkey when they should get wallet. Show only this home's ACTUAL
         // credential(s) once resolved.
-        <div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">{busy ? busyMsg : 'Opening your home…'}</p></div>
+        <div className="onboarding-busy"><span className="spinner spinner-lg" /><p className="onboarding-busy-msg">{busy ? busyMsg : 'Opening your home…'}</p><WorkingBar /></div>
       ) : notFound ? (
         <>
           <p className="onboarding-hint taken">No home named <strong>{nameLabel(name)}</strong> yet.</p>
@@ -1347,7 +1348,7 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
     );
   }
   // Spec 255 W4.1 — the org-create "connected" receipt: what the single approval accomplished.
-  if (phase === 'connected') return <Shell><BrandShield size={56} /><h1 className="onboarding-h1">{orgBase} is ready</h1><ReceiptCard title={`${orgBase} is ready`} body={existingOrg ? `${orgAppName} can now read what it posts — the organization stays in your control.` : isWorkspace ? `Its agent is started, its name is claimed, and ${orgAppName} can act as this workspace — revocably.` : `Its home is started, its name is claimed, and ${orgAppName} can now read what it posts.`} /><p className="onboarding-sub">Returning you to {orgAppName}…</p></Shell>;
+  if (phase === 'connected') return <Shell><BrandShield size={56} /><h1 className="onboarding-h1">{orgBase} is ready</h1><ReceiptCard title={`${orgBase} is ready`} body={existingOrg ? `${orgAppName} can now read what it posts — the organization stays in your control.` : isWorkspace ? `Its agent is started, its name is claimed, and ${orgAppName} can act as this workspace — revocably.` : `Its home is started, its name is claimed, and ${orgAppName} can now read what it posts.`} /><p className="onboarding-sub">Returning you to {orgAppName}…</p><WorkingBar /></Shell>;
   if (phase === 'error') return <Shell><h1 className="onboarding-h1">Couldn&apos;t finish</h1><p className="onboarding-hint taken">{err}</p><button className="btn-primary" onClick={() => setPhase(preselected ? 'consent' : 'choose')}>Try again</button></Shell>;
   return (
     <Shell>

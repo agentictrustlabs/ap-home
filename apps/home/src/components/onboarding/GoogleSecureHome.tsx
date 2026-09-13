@@ -1,4 +1,5 @@
 'use client';
+import { WorkingBar } from './WorkingBar';
 // Post-Google secure-home step. A Google member returns from the OIDC redirect ALREADY in a
 // custody-grade session (sub = their deterministic KMS-custodied SA) but with NO home yet —
 // the SA is counterfactual + unnamed. This screen claims their name: demo-a2a derives their
@@ -121,6 +122,7 @@ export function GoogleSecureHome() {
     return (
       <Shell>
         <div className="onboarding-busy">
+          <WorkingBar />
           <span className="spinner spinner-lg" role="status" aria-label="Securing your home" />
           <p className="onboarding-busy-msg">Securing your home in the {community}…</p>
         </div>
@@ -133,6 +135,7 @@ export function GoogleSecureHome() {
     return (
       <Shell>
         <div className="onboarding-busy">
+          <WorkingBar />
           <span className="spinner spinner-lg" role="status" aria-label="Securing your home" />
           <p className="onboarding-busy-msg">Securing {securingLabel} in the {community}…</p>
         </div>

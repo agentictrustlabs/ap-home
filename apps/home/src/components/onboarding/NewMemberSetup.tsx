@@ -1,4 +1,5 @@
 'use client';
+import { WorkingBar } from './WorkingBar';
 // First-connect setup — the one screen that gives a brand-new member what the app they are joining
 // declared they need (`new_member` in the relying-app registry), immediately after their own
 // account is deployed and before the permission consent.
@@ -294,6 +295,7 @@ export function NewMemberSetup({
     return (
       <Shell>
         <div className="onboarding-busy">
+          <WorkingBar />
           <span className="spinner spinner-lg" role="status" aria-label="Setting you up" />
           <p className="onboarding-busy-msg">{step || 'Setting you up…'}</p>
           <p className="onboarding-busy-sub">This takes a few seconds.</p>

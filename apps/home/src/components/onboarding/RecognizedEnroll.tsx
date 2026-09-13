@@ -1,4 +1,5 @@
 'use client';
+import { WorkingBar } from './WorkingBar';
 // Recognized-member fast-path for a relying-app site-login enroll (extends the ADR-0032 custody
 // boundary to the redirect path). An ALREADY-AUTHENTICATED member arriving at a connect request is
 // recognized from the cross-subdomain `ap_sso` cookie — no "Welcome / sign in or get started". We
@@ -679,6 +680,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
     return (
       <Shell>
         <div className="onboarding-busy">
+          <WorkingBar />
           <span className="spinner spinner-lg" role="status" aria-label="Recognizing you" />
           <p className="onboarding-busy-msg">Welcome back — getting your home…</p>
         </div>
@@ -723,6 +725,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         </div>
         <ReceiptCard title={fmt(c.authorizeStepReceipt, { app: appName })} />
         <p className="onboarding-sub">Returning you to {appName}…</p>
+        <WorkingBar />
       </Shell>
     );
   }
