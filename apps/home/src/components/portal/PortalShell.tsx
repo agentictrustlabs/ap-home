@@ -3,6 +3,7 @@
 // (desktop) / bottom-nav (mobile) + the routed section as <main>. The active WORKSPACE is
 // derived from the URL (spec 315) and scopes the left nav: person / org / connected app.
 import { useState, type ReactNode, useEffect} from 'react';
+import { ReadyProvider } from '../../ui/ready';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { whitelabel } from '../../whitelabel/config';
 import { useSession } from '../../context/session';
@@ -138,7 +139,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
               <a href={orgHref(active.org, 'status')}>Settings → Status</a>.
             </div>
           )}
-          {children}
+          <ReadyProvider key={pathname}>{children}</ReadyProvider>
         </main>
       </div>
       <PortalBottomNav groups={groups} tabs={tabs} panes={panes} workspaceName={workspaceName} />

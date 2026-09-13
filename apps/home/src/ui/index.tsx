@@ -6,9 +6,9 @@
 // Doctrine the system encodes: an EMPTY read and an UNREADABLE read are different sentences (§6.3) — `Empty` says a
 // fact ("nothing is waiting on you"), `Unknown` says a failure and names the read; amber is the one primary action and
 // the active mark, never a background wash; a row's title links, its controls do not ride inside the link.
-import { useId, type ReactNode, type ButtonHTMLAttributes, type AnchorHTMLAttributes, type InputHTMLAttributes } from 'react';
-import { useReadyReport, usePageReady } from './ready';
+import type { ReactNode, ButtonHTMLAttributes, AnchorHTMLAttributes, InputHTMLAttributes } from 'react';
 export { ReadyProvider, useReadyReport, usePageReady } from './ready';
+export { Panel, PageReadyLine, PageProgress, type PanelState } from './panel';
 
 const cx = (...c: Array<string | false | null | undefined>): string => c.filter(Boolean).join(' ');
 
@@ -174,37 +174,6 @@ export function SkeletonRows({ rows = 3, lead }: { rows?: number; lead?: boolean
   );
 }
 
-export type PanelState = 'loading' | 'ready' | 'empty' | 'unknown';
-
-/**
- * A titled surface with ONE state. `loading` shows a skeleton (and counts toward the page's readiness); `ready`
- * shows the children; `empty` shows the fact (only ever after the read answered); `unknown` names the failed read.
- * A panel never shows an empty state while its read is still out — that is the half-done screen this replaces.
- */
-export function Panel({ title, icon, count, aside, state, rows = 3, lead, empty, unknown, children, testId, id }: {
-  title: ReactNode; icon?: ReactNode; count?: number; aside?: ReactNode; state: PanelState; rows?: number; lead?: boolean;
-  /** The fact to say when there is nothing — a title and a line, optionally an action. */
-  empty?: { icon?: ReactNode; title: ReactNode; hint?: ReactNode; action?: ReactNode };
-  /** What could not be read (398 §6.3). */
-  unknown?: { read: ReactNode; partial?: boolean };
-  children?: ReactNode; testId?: string; id?: string;
-}) {
-  const autoId = useId();
-  useReadyReport(id ?? autoId, state === 'loading');
-  return (
-    <section className="ui-panel" {...(testId ? { 'data-testid': testId } : {})} data-state={state}>
-      <div className="ui-panel-head">
-        <h2>{icon}{title}{typeof count === 'number' && state === 'ready' && <span className="ui-count">{count}</span>}</h2>
-        {aside && <div className="ui-panel-aside">{aside}</div>}
-      </div>
-      {state === 'loading' && <SkeletonRows rows={rows} {...(lead ? { lead } : {})} />}
-      {state === 'unknown' && unknown && <Unknown read={unknown.read} {...(unknown.partial ? { partial: true } : {})} />}
-      {(state === 'ready' || (state === 'unknown' && unknown?.partial)) && children}
-      {state === 'empty' && (empty ? <EmptyState {...empty} /> : <Empty>Nothing here.</Empty>)}
-    </section>
-  );
-}
-
 /** An empty state with an icon — a fact, calm, one line, at most one action. */
 export function EmptyState({ icon, title, hint, action, testId }: { icon?: ReactNode; title: ReactNode; hint?: ReactNode; action?: ReactNode; testId?: string }) {
   return (
@@ -318,10 +287,3 @@ export function Drawer({ title, onClose, children, actions }: { title: ReactNode
   );
 }
 
-/** The page's own readiness line: pulses while reads are out; says "updated" once they are all in. */
-export function PageReadyLine() {
-  const { busy, settledAt } = usePageReady();
-  if (!busy && !settledAt) return null;
-  return <div className="ui-page-ready" data-busy={busy}>{busy ? 'Reading…' : `Up to date · ${timeLabel(settledAt!)}`}</div>;
-}
-export function PageProgress() { const { busy } = usePageReady(); return busy ? <div className="ui-progress" role="progressbar" aria-label="Loading" /> : null; }

@@ -5,7 +5,7 @@
 // When status='soon' it renders the ComingSoonState instead of children (unless a `preview` node is supplied).
 import type { ReactNode } from 'react';
 import { ComingSoonState } from './ComingSoonState';
-import { ReadyProvider, PageReadyLine, PageProgress } from '../../ui';
+import { PageReadyLine, PageProgress } from '../../ui';
 
 export function SectionShell({
   title,
@@ -37,7 +37,6 @@ export function SectionShell({
   children?: ReactNode;
 }) {
   return (
-    <ReadyProvider>
     <section
       className={`section-shell${wide ? ' section-shell--wide' : ''}`}
       {...(title ? { 'aria-labelledby': 'section-title' } : {})}
@@ -63,6 +62,5 @@ export function SectionShell({
         children
       )}
     </section>
-    </ReadyProvider>
   );
 }

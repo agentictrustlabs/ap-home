@@ -8,9 +8,9 @@ import type { Address } from '@agenticprimitives/types';
 import { ENDEAVOR_LIFECYCLES, type EndeavorLifecycle } from '@agenticprimitives/home';
 import { useSession } from '../../../context/session';
 import { SectionShell } from '../SectionShell';
-import { Section, List, Row, Card, Empty, ErrorNote, Meta, Toolbar, Tabs, Button, LinkButton } from '../../../ui';
+import { List, Row, Card, Empty, ErrorNote, Meta, Toolbar, Tabs, Button, LinkButton, Panel, Stats, Stat, SearchInput, useReadyReport, type PanelState } from '../../../ui';
+import { ActivityIcon, CheckIcon, InboxIcon } from '../today-icons';
 import { BusyButton } from '../../shared/BusyButton';
-import { Loading } from '../../shared/Loading';
 import { type EndeavorRow } from '../../../lib/work-client';
 import { workItemRow } from '../../../home/work-item';
 import { AgentName } from '../../shared/AgentName';
@@ -71,6 +71,7 @@ export function OrgWorkView({ org }: { org: Address }) {
   const names = useOrgMemberNames(session, communityId);
   const [tab, setTab] = useState<Tab>('list');
   const [showClosed, setShowClosed] = useState(false);
+  const [q, setQ] = useState('');
   const reEnable = useReEnableInteractions();
   const [reEnabling, setReEnabling] = useState(false);
   const [reEnableError, setReEnableError] = useState<string | null>(null);
@@ -92,6 +93,11 @@ export function OrgWorkView({ org }: { org: Address }) {
   const closedRows = endeavors.filter((e) => e.lifecycle === 'satisfied' || e.lifecycle === 'abandoned');
   const requests = useMemo(() => data?.requests ?? [], [data]);
   const pendingRequests = requests.filter((r) => (r.status ?? 'pending') === 'pending').length;
+
+  const needle = q.trim().toLowerCase();
+  const shownOpen = needle ? openRows.filter((e) => `${e.title ?? ''} ${e.endeavorId}`.toLowerCase().includes(needle)) : openRows;
+  const shownClosed = needle ? closedRows.filter((e) => `${e.title ?? ''} ${e.endeavorId}`.toLowerCase().includes(needle)) : closedRows;
+  useReadyReport('org-work', data === null);
 
   if (!session) return <SectionShell title="Work"><Empty>Not signed in.</Empty></SectionShell>;
 
@@ -123,27 +129,33 @@ export function OrgWorkView({ org }: { org: Address }) {
         <ErrorNote>{error}</ErrorNote>
       ) : null}
 
+      <Stats>
+        <Stat label="Pending requests" value={pendingRequests} loading={data === null} tone={pendingRequests ? 'warn' : undefined} hint="waiting for a steward's decision" />
+        <Stat label="In flight" value={openRows.length} loading={data === null} hint="endeavors adopted and moving" />
+        <Stat label="Completed & closed" value={closedRows.length} loading={data === null} tone="ok" hint="satisfied or closed" />
+      </Stats>
       <Toolbar>
         <Tabs value={tab} onChange={setTab} label="Work views" items={[{ id: 'list', label: 'List' }, { id: 'board', label: 'Board' }, { id: 'requests', label: 'Requests', ...(pendingRequests > 0 ? { count: pendingRequests } : {}) }]} />
+        {tab !== 'requests' && <SearchInput placeholder="Search endeavors…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search endeavors" />}
       </Toolbar>
 
-      {data === null ? (
-        <Loading label="Loading requests and endeavors…" />
-      ) : tab === 'requests' ? (
-        <RequestsTriage org={communityId} requests={requests} steward={steward} names={names} refresh={refresh} />
-      ) : endeavors.length === 0 ? (
-        <Empty title="No endeavors yet">A request becomes an endeavor when a steward accepts it — start with <a href={`/org/${communityId}/work/new`}>New request</a>.</Empty>
+      {tab === 'requests' ? (
+        data === null ? <Panel title="Requests" icon={<InboxIcon />} state="loading" rows={3} /> : <RequestsTriage org={communityId} requests={requests} steward={steward} names={names} refresh={refresh} />
       ) : tab === 'list' ? (
         <>
-          <Section title="In flight" count={openRows.length || undefined}>
-            {openRows.length > 0 ? <List>{openRows.map((e) => <EndeavorRow key={e.endeavorId} org={communityId} row={e} />)}</List> : <Empty>Nothing in flight — everything is completed or closed.</Empty>}
-          </Section>
+          <Panel title="In flight" icon={<ActivityIcon />} count={shownOpen.length} state={(data === null ? 'loading' : shownOpen.length ? 'ready' : 'empty') as PanelState} rows={4}
+            empty={{ icon: <ActivityIcon />, title: q ? 'No endeavor matches' : endeavors.length ? 'Nothing in flight' : 'No endeavors yet', hint: q ? `Nothing in flight mentions “${q}”.` : endeavors.length ? 'Everything is completed or closed.' : 'A request becomes an endeavor when a steward accepts it.', action: !q && !endeavors.length ? <LinkButton size="sm" variant="secondary" href={`/org/${communityId}/work/new`}>New request</LinkButton> : undefined }}>
+            <List>{shownOpen.map((e) => <EndeavorRow key={e.endeavorId} org={communityId} row={e} />)}</List>
+          </Panel>
           {closedRows.length > 0 && (
-            <Section title="Completed & closed" count={closedRows.length} aside={<Button size="sm" variant="ghost" onClick={() => setShowClosed((v) => !v)}>{showClosed ? 'Hide' : 'Show'}</Button>}>
-              {showClosed ? <List>{closedRows.map((e) => <EndeavorRow key={e.endeavorId} org={communityId} row={e} />)}</List> : null}
-            </Section>
+            <Panel title="Completed & closed" icon={<CheckIcon />} count={shownClosed.length} state={showClosed ? (shownClosed.length ? 'ready' : 'empty') : 'ready'} aside={<Button size="sm" variant="ghost" onClick={() => setShowClosed((v) => !v)}>{showClosed ? 'Hide' : 'Show'}</Button>}
+              empty={{ icon: <CheckIcon />, title: 'No closed endeavor matches' }}>
+              {showClosed ? <List>{shownClosed.map((e) => <EndeavorRow key={e.endeavorId} org={communityId} row={e} />)}</List> : <div className="ui-note" style={{ padding: 'var(--sp-3) var(--sp-4)', margin: 0 }}>{closedRows.length} finished endeavor{closedRows.length === 1 ? '' : 's'} — show them to look back.</div>}
+            </Panel>
           )}
         </>
+      ) : data === null ? (
+        <Panel title="Board" icon={<ActivityIcon />} state="loading" rows={3} />
       ) : (
         <div style={{ display: 'flex', gap: 'var(--sp-3)', overflowX: 'auto', alignItems: 'flex-start', paddingBottom: 'var(--sp-2)' }}>
           {ENDEAVOR_LIFECYCLES.map((lc: EndeavorLifecycle) => {
