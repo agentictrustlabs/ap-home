@@ -1270,7 +1270,7 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
         })) === true,
       },
     } : {}),
-    askAsAgent: (input) => runAgentAsk(c.env, { ...input, executionCtx: c.executionCtx }),
+    askAsAgent: ({ plan, ...input }) => runAgentAsk(c.env, { ...input, ...(plan ? { plan } : {}), executionCtx: c.executionCtx }),
     // Spec 387 W3 — the outside agent that parked a run answers its prompt. The checkpoint decides: it must have
     // parked for exactly this caller (`outsider.agent`), still be waiting on a data prompt, and not have expired.
     // The answer joins the supplied inputs and the run is replayed from its checkpoint (spec 370 P1) — the

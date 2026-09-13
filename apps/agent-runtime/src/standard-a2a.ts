@@ -23,7 +23,17 @@
 // that owns it. Nothing a person cannot rebuild is in either (ADR-0055).
 import { buildFlowTrace, flowIdOf, referralOf, traceContextOf } from '@agenticprimitives/orchestration';
 import { hasProvenanceRef } from './run-export.js';
-import type { RunEvent, SuppliedInputV1 } from '@agenticprimitives/orchestration';
+/** `metadata.plan` on an agent caller's message — `{ steps: [{ toolId, args }] }` or nothing; anything else is ignored, not guessed. */
+function supplierPlanOf(metadata: Record<string, unknown> | undefined): Plan | null {
+  const p = metadata?.plan as { steps?: unknown } | undefined;
+  if (!p || !Array.isArray(p.steps) || !p.steps.length) return null;
+  const steps = p.steps
+    .filter((st): st is { toolId: string; args?: unknown } => !!st && typeof (st as { toolId?: unknown }).toolId === 'string')
+    .map((st) => ({ toolId: st.toolId, args: (st.args && typeof st.args === 'object' ? st.args : {}) as Record<string, unknown> }));
+  return steps.length ? { steps } : null;
+}
+
+import type { Plan, RunEvent, SuppliedInputV1 } from '@agenticprimitives/orchestration';
 import type { Address } from 'viem';
 import {
   createStandardA2aServer, createMemoryTaskStore, createMemoryPushStore, sessionWirePrincipal,
@@ -49,7 +59,7 @@ export interface StandardMountDeps {
    *  runtime lives. Returns the JSON-RPC response verbatim. */
   delegatedRpc?: DelegatedRpc;
   /** Spec 372 S3c — an agent asking as itself: no session, no mandate, its own standing. */
-  askAsAgent?: (input: { agent: Address; addressee: Address; ask: string; runRef: string; /** Spec 390 W2 — the caller's W3C Trace Context, kept on the run's record. */ traceContext?: import('@agenticprimitives/orchestration').TraceContextV1 | null; /** Spec 390 W3 — when the request arrived. */ receivedAt?: number; /** The message's DATA part, when it carried one naming a skill — the material `playbook.answer` reasons over. */ material?: Record<string, unknown> | null }) => Promise<{
+  askAsAgent?: (input: { agent: Address; addressee: Address; ask: string; runRef: string; /** Spec 390 W2 — the caller's W3C Trace Context, kept on the run's record. */ traceContext?: import('@agenticprimitives/orchestration').TraceContextV1 | null; /** Spec 390 W3 — when the request arrived. */ receivedAt?: number; /** The message's DATA part, when it carried one naming a skill — the material `playbook.answer` reasons over. */ material?: Record<string, unknown> | null; /** Spec 400 W1 — a plan the caller supplied in the message's metadata; admitted by the harness like any supplied plan (367 W1), never trusted. */ plan?: Plan | null }) => Promise<{
     reply: { kind: string; text?: string; prompt?: { kind: string; prompt: string; stepRef: string }; error?: string };
     spoken: string;
     result?: { plan: unknown };
@@ -198,7 +208,11 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
             // question as text; the text alone gave the planner "advise seat 0" and nothing to advise ON.
             const material = partsData(ctx.message.parts);
             const askT0 = Date.now();
-            asked = await deps.askAsAgent({ agent: caller, addressee: agent, ask: message, runRef, traceContext: traceContextOf(ctx.headers), receivedAt: startedAt, ...(material && typeof material.skill === 'string' ? { material } : {}) });
+            // Spec 400 W1 — a SUPPLIED PLAN from an agent caller (`metadata.plan`): an outside runtime's poll of its own inbox
+            // is a deterministic read and need not cost a planner turn. The harness admits it against the playbook's tools
+            // (367 W1) exactly as it admits the Home's; a plan naming a tool the agent does not have is refused there.
+            const suppliedPlan = supplierPlanOf(ctx.message.metadata);
+            asked = await deps.askAsAgent({ agent: caller, addressee: agent, ask: message, runRef, traceContext: traceContextOf(ctx.headers), receivedAt: startedAt, ...(material && typeof material.skill === 'string' ? { material } : {}), ...(suppliedPlan ? { plan: suppliedPlan } : {}) });
             if (material) console.log(`[phases surface] principal→ask ${askT0 - startedAt}ms · ask ${Date.now() - askT0}ms`);
           }
           // Spec 387 W2 — THE TRACE RIDES WITH THE TASK: what admitted the run, what was offered and chosen, each
