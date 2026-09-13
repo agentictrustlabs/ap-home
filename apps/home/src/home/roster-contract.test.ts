@@ -12,8 +12,10 @@ describe('the roster contract (398 §4.5)', () => {
       { address: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', displayName: 'Mara', publicName: 'mara.me', admittedVia: 'invite', grantCaveats: [{ enforcer: c.enforcer, terms: c.terms }] },
       { address: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', displayName: 'Theo', publicName: 'theo.me', admittedVia: 'listing', role: 'treasurer' },
     ] });
-    expect(rows[0]!.sponsor).toMatch(/admitted by Missio Nexus on an invitation/); expect(rows[0]!.permissions).toBe('read org.profile'); expect(rows[0]!.activeWork).toBe(2);
+    expect(rows[0]!.sponsor).toMatch(/admitted by Missio Nexus on an invitation/); expect(rows[0]!.permissions).toBe('read org profile'); expect(rows[0]!.activeWork).toBe(2);
     expect(rows[1]!.sponsor).toMatch(/own signed listing/); expect(rows[1]!.responsibility).toBe('treasurer'); expect(rows[1]!.activeWork).toBe(0);
     expect(permissionWords(undefined)).toMatch(/no record scope named/);
+    const scoped = buildVaultRecordScopeCaveat([{ server: 'demo-mcp', resources: ['vault:member.profile:0x3b99f2b452766de5df0dbcdfc676f27257151333', 'vault:message.body:*'], ops: ['read'] }]);
+    expect(permissionWords([{ enforcer: scoped.enforcer, terms: scoped.terms }])).toBe('read the member profile for this organization · read message body');
   });
 });

@@ -14,7 +14,7 @@ import { useSession } from '../../context/session';
 import { SectionShell } from './SectionShell';
 import { cardSty, btnSty, btnPrimarySty, mono, mutedText, errorText, inputSty, badgeStyle, modalOverlaySty, infoBannerSty, shortAddr, type BadgeKind } from './theme';
 import { artifactIdentity } from '../../home/artifact-identity';
-import { SkeletonRows, EmptyState, Button, Tabs, Drawer, Chip, Meta, KeyValue, useReadyReport } from '../../ui';
+import { SkeletonRows, EmptyState, Button, Tabs, Drawer, Chip, Meta, KeyValue, Micro, useReadyReport } from '../../ui';
 
 type Kind = 'skill' | 'ttl' | 'md' | 'json-ld' | 'image';
 type Source = 'blob' | 'graphdb' | 'vault' | 'external';
@@ -647,12 +647,12 @@ function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, ownerSa, fol
               ['Work item', 'none linked yet', { absent: true }],
               ['Access', <strong key="a">{id.accessMethod}</strong>],
             ]} />
-            <div style={{ display: 'flex', gap: 6, marginTop: 'var(--sp-3)', flexWrap: 'wrap' }}>
-              <span>
-                <button style={{ ...btnSty, padding: '.05rem .4rem', fontSize: 11 }} disabled={id.acts.share !== 'offered'} onClick={() => setTab('access')} title="Share = a grant on this artifact; a preview shared never grants vault or sandbox access">share</button>{' '}
-                <button style={{ ...btnSty, padding: '.05rem .4rem', fontSize: 11 }} disabled={id.acts.publish !== 'offered'} onClick={() => { onPublish(artifact.id); setTab('provenance'); }} title={id.acts.publish === 'not-publishable' ? 'only a playbook or a folder is published as a release' : 'Publish = a signed release under your name'}>publish</button>{' '}
-                <button style={{ ...btnSty, padding: '.05rem .4rem', fontSize: 11 }} disabled title="Replicate = an authorized copy in another vault — not yet an act here (398 §6.2)">replicate · not yet</button>
-              </span>
+            <div style={{ display: 'flex', gap: 6, marginTop: 'var(--sp-3)', flexWrap: 'wrap', alignItems: 'center' }}>
+              <Micro>Acts</Micro>
+              <Button size="sm" disabled={id.acts.share !== 'offered'} onClick={() => setTab('access')} title="Share = a grant on this artifact; a preview shared never grants vault or sandbox access">Share</Button>
+              <Button size="sm" disabled={id.acts.publish !== 'offered'} onClick={() => { onPublish(artifact.id); setTab('provenance'); }} title={id.acts.publish === 'not-publishable' ? 'only a playbook or a folder is published as a release' : 'Publish = a signed release under your name'}>Publish</Button>
+              <Button size="sm" disabled title="Replicate = an authorized copy in another vault — not yet an act here (398 §6.2)">Replicate</Button>
+              <Meta>replicate is not an act here yet</Meta>
             </div>
           </div>
         );

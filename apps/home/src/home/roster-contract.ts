@@ -38,6 +38,16 @@ export function participantType(publicName: string | null): ParticipantType {
   return SUFFIX[tld] ?? 'unknown';
 }
 
+/** A record resource in words: `vault:member.profile:0x3b99…` → "the member profile for this organization";
+ *  `vault:message.body:*` → "message bodies". An address qualifier names the organization, never the hex. */
+function resourceWords(resource: string): string {
+  const [key, ...rest] = resource.replace(/^vault:/, '').replace(/:\*$/, '').split(':');
+  const label = (key ?? '').replace(/[._-]+/g, ' ');
+  if (!rest.length) return label;
+  if (/^0x[0-9a-fA-F]{40}$/.test(rest[0] ?? '')) return `the ${label} for this organization`;
+  return `${label} ${rest.join(':')}`;
+}
+
 /** The record scopes a grant carries, in plain words ("read the organization's profile"). */
 export function permissionWords(caveats: ReadonlyArray<{ enforcer: string; terms: string }> | undefined): string {
   if (!caveats?.length) return 'a membership grant — take part; no record scope named';
@@ -45,7 +55,7 @@ export function permissionWords(caveats: ReadonlyArray<{ enforcer: string; terms
   if (!scope) return 'a membership grant — take part; no record scope named';
   try {
     const grants = decodeVaultRecordScopeTerms(scope.terms as Hex);
-    const words = grants.flatMap((g) => g.resources.map((r) => `${g.ops.join('/')} ${r.replace(/^vault:/, '').replace(/:\*$/, '')}`));
+    const words = grants.flatMap((g) => g.resources.map((r) => `${g.ops.join('/')} ${resourceWords(r)}`));
     return words.length ? words.join(' · ') : 'a membership grant — take part';
   } catch { return 'a membership grant (scope unreadable here)'; }
 }

@@ -15,7 +15,7 @@ import { membersFromReceivedDelegations, type RosterMember } from '../../lib/rec
 import { ApproveMessaging } from './ApproveMessaging';
 import { agentNameForLabel } from '../../lib/domain';
 import { SkeletonRows, EmptyState, useReadyReport } from '../../ui';
-import { HashIcon as HashGlyph } from '../shared/Icons';
+import { HashIcon as HashGlyph, LockIcon as LockGlyph } from '../shared/Icons';
 import { SectionShell } from './SectionShell';
 import { issueDirectoryListing } from '../../home/directory';
 import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, isKmsVia, resolveVia, signHashFor, type Via } from '../../home/onboarding';
@@ -745,7 +745,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
               onClick={() => setActive(c.descriptor.id)}
               title={c.participationPolicy === 'restricted' ? 'Restricted topic — invite-only participation' : 'Open topic — all organization members participate'}
             >
-              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.participationPolicy === 'restricted' ? '🔒 ' : ''}{c.title}</span>
+              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 5 }}>{c.participationPolicy === 'restricted' && <LockGlyph size={12} style={{ flex: 'none', opacity: 0.7 }} />}<span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.title}</span></span>
               <span className="ui-count" style={{ marginLeft: 'auto', fontSize: 'var(--fs-xs)', background: 'var(--color-surface-sunken)', color: 'var(--color-text-muted)', borderRadius: 999, padding: '1px 7px', fontWeight: 600 }}>{c.messages.length}</span>
             </button>
           ))}
@@ -766,11 +766,8 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                   editable
                   onUpload={(url) => setCommunityAvatar(org, url)}
                 />
-                <div>
+                <div style={{ minWidth: 0, flex: 1 }}>
                   <strong># {channel.title}</strong>
-                  {/* Spec 378 — this topic's huddle: start it here, or join the one already running. Each
-                      topic of each team is its own room, judged by standing at this organization. */}
-                  <span style={{ marginLeft: '.6rem' }}><HuddleAffordance scope={{ kind: 'topic', principal: org.toLowerCase(), id: channel.descriptor.id }} scopeName={`# ${channel.title}`} /></span>
                   <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
                     {channel.participationPolicy === 'restricted'
                       ? `Restricted · ${(participants ?? []).length} participants · ${channel.messages.length} messages`
@@ -784,11 +781,14 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                     )}
                     {channel.assistant && channel.routing && (
                       <span title={`Member routing on — the assistant may consult up to ${channel.routing.maxFanout} opted-in members' agents per question`}>
-                        {' · 🧭 members'}
+                        {' · consults members'}
                       </span>
                     )}
                   </div>
                 </div>
+                {/* Spec 378 — this topic's huddle: start it here, or join the one already running. Each
+                    topic of each team is its own room, judged by standing at this organization. */}
+                <span style={{ flex: 'none' }}><HuddleAffordance scope={{ kind: 'topic', principal: org.toLowerCase(), id: channel.descriptor.id }} scopeName={`# ${channel.title}`} /></span>
               </div>
 
               <div className="chat-thread-body" style={{ flex: 1 }} ref={threadRef} onScroll={onThreadScroll}>
@@ -846,7 +846,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                             title="This reply involved consulting opted-in members’ agents (routed consultation)"
                             style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', margin: '0.1rem 0.35rem 0' }}
                           >
-                            🧭 member consultation
+                            member consultation
                           </span>
                         )}
                       </div>
