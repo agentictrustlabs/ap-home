@@ -244,28 +244,29 @@ if (!DRY) {
   } else if (own) console.log(`  [dry-run] would probe ${fx.people.steward}'s payer and declare ${fx.treasuries.own} primary payer if asked`);
 }
 
-// 2e. the routine agent's playbook — the assignment the Home's Playbook page writes (K3), here from the registry by digest
-if (fx.routineAgent) {
-  const sa = await nameInfo(fx.routineAgent.handle);
-  if (!sa) console.log(`${fx.routineAgent.handle} does not resolve — charter it (a team under the organization) and run again`);
-  else {
-    const links = await relatedOrgs(steward);
-    const wire = links.find((o) => o.orgAgent.toLowerCase() === sa)?.stewardshipDelegation;
-    const got = await j(await fetch(`${A2A}/interactions/${sa}/channels.archetypeAssignment.get`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session: steward.token, ...(wire ? { stewardship: wire } : {}) }) })) as { record?: { archetypeId?: string; definitionDigest?: string } };
-    const want = `skill:archetypes/${fx.routineAgent.playbook.split('/').pop()}`;
-    if (got.record?.archetypeId === want) console.log(`${fx.routineAgent.handle}: playbook ${got.record.archetypeId} already assigned (${String(got.record.definitionDigest).slice(0, 12)}…)`);
-    else if (DRY) console.log(`  [dry-run] would assign ${fx.routineAgent.playbook} to ${fx.routineAgent.handle}`);
-    else {
-      const r = await fetch(`${fx.skillsRegistry.replace(/\/$/, '')}/context/contexts/${fx.routineAgent.playbook.replace('/', '/archetypes/')}/definition`, { headers: { 'user-agent': 'Mozilla/5.0 (provision-estate-fixtures)' } });
-      const b = (await r.json().catch(() => ({}))) as { definition?: { archetypeId: string; archetypeVersion: string }; digest?: string };
-      if (!b.definition || !b.digest) fail(`the ${fx.routineAgent.playbook} definition could not be read from ${fx.skillsRegistry}`);
-      const record = { type: 'ap.archetype-assignment.v1', archetypeId: b.definition!.archetypeId, archetypeVersion: b.definition!.archetypeVersion, definitionDigest: b.digest, definition: b.definition };
-      const put = await j(await fetch(`${A2A}/interactions/${sa}/channels.archetypeAssignment.put`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session: steward.token, ...(wire ? { stewardship: wire } : {}), record }) }));
-      console.log(`  ${put.ok === true || put.record ? '✓' : '✗'} ${fx.routineAgent.handle}: ${b.definition!.archetypeId} v${b.definition!.archetypeVersion} assigned${put.ok === true || put.record ? '' : ` — ${JSON.stringify(put).slice(0, 200)}`}`);
-      if (!(put.ok === true || put.record)) fail(`the playbook was not assigned to ${fx.routineAgent.handle}`);
-    }
-  }
+// 2e. playbooks — the assignment record the Home's Playbook page writes (K3), here from the registry by digest: the
+// routine agent carries the coordinator's (schedule rows; no invite tool), the ambiguous-word teams the org-steward's
+// (an invite routed to a team runs under ITS playbook — a coordinator team refuses it unknown_tool).
+async function assignPlaybook(handle: string, playbook: string): Promise<void> {
+  const sa = await nameInfo(handle);
+  if (!sa) { console.log(`${handle} does not resolve — charter it and run again`); return; }
+  const links = await relatedOrgs(steward);
+  const wire = links.find((o) => o.orgAgent.toLowerCase() === sa)?.stewardshipDelegation;
+  const got = await j(await fetch(`${A2A}/interactions/${sa}/channels.archetypeAssignment.get`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session: steward.token, ...(wire ? { stewardship: wire } : {}) }) })) as { record?: { archetypeId?: string; definitionDigest?: string } };
+  const want = `skill:archetypes/${playbook.split('/').pop()}`;
+  if (got.record?.archetypeId === want) { console.log(`${handle}: playbook ${got.record.archetypeId} already assigned (${String(got.record.definitionDigest).slice(0, 12)}…)`); return; }
+  if (DRY) { console.log(`  [dry-run] would assign ${playbook} to ${handle}`); return; }
+  const r = await fetch(`${fx.skillsRegistry.replace(/\/$/, '')}/context/contexts/${playbook.replace('/', '/archetypes/')}/definition`, { headers: { 'user-agent': 'Mozilla/5.0 (provision-estate-fixtures)' } });
+  const b = (await r.json().catch(() => ({}))) as { definition?: { archetypeId: string; archetypeVersion: string }; digest?: string };
+  if (!b.definition || !b.digest) fail(`the ${playbook} definition could not be read from ${fx.skillsRegistry}`);
+  const record = { type: 'ap.archetype-assignment.v1', archetypeId: b.definition!.archetypeId, archetypeVersion: b.definition!.archetypeVersion, definitionDigest: b.digest, definition: b.definition };
+  const put = await j(await fetch(`${A2A}/interactions/${sa}/channels.archetypeAssignment.put`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session: steward.token, ...(wire ? { stewardship: wire } : {}), record }) }));
+  const ok = put.ok === true || put.record;
+  console.log(`  ${ok ? '✓' : '✗'} ${handle}: ${b.definition!.archetypeId} v${b.definition!.archetypeVersion} assigned${ok ? '' : ` — ${JSON.stringify(put).slice(0, 200)}`}`);
+  if (!ok) fail(`the playbook was not assigned to ${handle}`);
 }
+if (fx.routineAgent) await assignPlaybook(fx.routineAgent.handle, fx.routineAgent.playbook);
+for (const team of [fx.team, fx.team2]) if (team && team.handle !== fx.routineAgent?.handle) await assignPlaybook(team.handle, 'agentic-trust/org-steward');
 
 // 3. the members — invited by the steward at the organization, joined by themselves. Two halves, each kept when
 // already there: the ORGANIZATION's (the org→member access grant, which its roster reads) and the MEMBER's (the

@@ -68,5 +68,10 @@ console.log(`  payer from the standing instruction: ${named ? 'yes' : 'not visib
 await home('/harness/instructions/forget', { scope: { capability: 'treasury.payment.execute', arg: 'payer' } });
 const after = await call('ask', { message: `send ${PAYEE} 1 usdc (after ${nonce})`, plan: { steps: [{ toolId: 'treasury.payment.execute', args: { payee: PAYEE, usdc: '1' } }] } });
 console.log(`after forget → ${after.kind} · delegator ${String(after.delegator ?? '').slice(0, 12)}…`);
-if (after.kind === 'authority_required' && pay.delegator && after.delegator === pay.delegator && named) fail('the forgotten instruction still fills the payer for Claude');
+// The payer may still be filled — by a PRIMARY-PAYER mark on her treasury (a public preference, not an instruction) —
+// so what must be gone is the instruction's citation: a payer party that still says "your standing instruction" is the
+// forgotten instruction still speaking.
+const afterPayer = ((after.parties ?? []) as Array<{ arg?: string; hint?: string }>).find((p) => p.arg === 'payer');
+if (after.kind === 'authority_required' && /standing instruction/i.test(String(afterPayer?.hint ?? ''))) fail('the forgotten instruction still fills the payer for Claude');
+console.log(`  payer after forget: ${afterPayer ? `${afterPayer.hint ?? 'no hint'}` : 'asked (no payer)'}`);
 console.log('\n✓ spec 397: a standing instruction through Claude is her agent\'s — visible at her Home, forgotten there for every surface');
