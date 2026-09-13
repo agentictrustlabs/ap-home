@@ -392,13 +392,14 @@ Decision: Faithnet stays the development deployment; the 399 cut is deferred; th
 
 | Wave | What | Status |
 | --- | --- | --- |
-| W1 | an ACP runtime (Claude Code / goose / Codex) joins a workspace as a `.svc` member, receives work, acts under a mandate, is revoked on chain from the Home | **W1a LIVE 2026-09-13** — `@agenticprimitives/acp` (host) + `@agenticprimitives/runtime-member` (join · run · mcp), `messaging.inbox.list`, the `runtime-member` archetype; `verify-runtime-acp-member` green on Faithnet (goose-1.svc in Missio Nexus, the stub agent). W1b: the Home's pairing code + Members panel affordances |
-| W2 | mentions supply a turn to an open run; reactions as a trigger; search over the person's own tier by selector; one admin screen of every grant an org issued | queued |
+| W1 | ADMISSION of an existing general-purpose runtime (Claude Code / goose / Codex) as a `.svc` member — "walks in without a rewrite"; not "add coding". Receives work, acts under a mandate, is revoked on chain from the Home | **W1a LIVE 2026-09-13** — `@agenticprimitives/acp` (host) + `@agenticprimitives/runtime-member` (join · run · mcp), `messaging.inbox.list`, the `runtime-member` archetype; `verify-runtime-acp-member` green on Faithnet (goose-1.svc in Missio Nexus, the stub agent). W1b: the Home's pairing code + Members panel affordances |
+| W2 | mentions supply a turn to an open run (B3 — the item that carries Buzz's multi-agent FEEL; the engine — A2A + the harness — already exists); reactions as a trigger; search over the person's own tier by selector; one admin screen of every grant an org issued | **next** |
 | **401** | Contacts — membership on the person agent (a coach, a runtime, a friend as the person's own roster with a scoped grant; the DM picker's first section) | **C1 + C2 LIVE 2026-09-13** — `person.contact.invite/list/remove`, `contact:<sa>` under `vault:contact:*`, standing reads it, `verify-contacts` green; the Contacts screen on Faithnet, Contacts first in the DM picker, the Add-back chip. Open: the coach's study grant shown as a contact; W1b pairing code |
 | W3 | Build-for-code on GitHub as the forge (398 §9, G4): work item → branch → PR → review with test evidence → promotion bound to an intent digest | queued (needs W1 + the GitHub connector) |
 | W4 | connectors as capabilities under the delegation model (GitHub first, Calendar/Drive, Slack) | queued; GitHub pulled ahead for W3 |
 
-Ahead of Buzz today: authority (grant + signature, on-chain revocation), triggers with budgets, voice, provenance,
-bills. Parity: channels/DMs/threads, pairing, specs + conformance. Behind: bring-your-own runtime (protocol half),
-search, the forge loop, connectors.
+Ahead of Buzz today: authority (grant + signature, on-chain revocation), the multi-agent engine itself (routed asks,
+hand-offs, triggers with budgets — the harness and A2A ARE the multi-agent environment), voice, provenance, bills.
+Parity: channels/DMs/threads, pairing, specs + conformance. Behind: mentions into open runs (the feel), search, the
+review loop on a forge, connectors. Admission of existing runtimes (W1a) is done — it answered one question only.
 
