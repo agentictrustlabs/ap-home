@@ -384,3 +384,20 @@ faithnet-b (the parent-wire ceremony minted before G5). In the background (§3.3
 week for T1, a fortnight for T2; T3 waits on a foreign runtime. Everything in §3.4 is the transition itself.
 The position in §1 holds today; G2, G5 and G6 are what make its three strongest claims checkable by someone
 who is not us. The Home MCP (§3.5) is the transition's first host-facing surface, already gated end to end.
+
+## 7. The workspace gap — Buzz and the team-agent platforms (2026-09-13)
+
+Decision: Faithnet stays the development deployment; the 399 cut is deferred; the focus is
+[spec 400](../../specs/400-closing-the-workspace-gap-buzz-and-team-agent-platforms.md). The snapshot, kept current here:
+
+| Wave | What | Status |
+| --- | --- | --- |
+| W1 | an ACP runtime (Claude Code / goose / Codex) joins a workspace as a `.svc` member, receives work, acts under a mandate, is revoked on chain from the Home | **next** — the authority half is 372 S3 (done); the adapter is the work |
+| W2 | mentions supply a turn to an open run; reactions as a trigger; search over the person's own tier by selector; one admin screen of every grant an org issued | queued |
+| W3 | Build-for-code on GitHub as the forge (398 §9, G4): work item → branch → PR → review with test evidence → promotion bound to an intent digest | queued (needs W1 + the GitHub connector) |
+| W4 | connectors as capabilities under the delegation model (GitHub first, Calendar/Drive, Slack) | queued; GitHub pulled ahead for W3 |
+
+Ahead of Buzz today: authority (grant + signature, on-chain revocation), triggers with budgets, voice, provenance,
+bills. Parity: channels/DMs/threads, pairing, specs + conformance. Behind: bring-your-own runtime (protocol half),
+search, the forge loop, connectors.
+
