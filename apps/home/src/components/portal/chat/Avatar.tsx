@@ -44,7 +44,8 @@ export function Avatar({
         fontSize: Math.round(size * 0.42),
         fontWeight: 600,
         color: '#fff',
-        background: `linear-gradient(135deg, hsl(${hueOf(name)} 62% 52%), hsl(${(hueOf(name) + 24) % 360} 62% 44%))`,
+        // Design system v2: a muted, deterministic hue — identity without a colour wheel on the rail.
+        background: `linear-gradient(135deg, hsl(${hueOf(name)} 34% 46%), hsl(${(hueOf(name) + 24) % 360} 34% 38%))`,
       }}
     >
       {letter}

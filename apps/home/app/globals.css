@@ -1796,3 +1796,5 @@ input:not([type=checkbox]):not([type=radio]), select, textarea { border-color: v
 .ui-filter:hover { background: var(--color-surface-sunken); }
 .ui-filter[aria-pressed="true"] { background: var(--color-text-primary); color: #fff; border-color: var(--color-text-primary); }
 .ui-filter .ui-count { font-weight: 600; opacity: .75; }
+/* lists nested inside a panel's padded body: hairline only, no second shadow */
+.ui-panel .ui-list { box-shadow: none; }

@@ -9,20 +9,25 @@
 import type { ReactNode, ButtonHTMLAttributes, AnchorHTMLAttributes, InputHTMLAttributes } from 'react';
 export { ReadyProvider, useReadyReport, usePageReady } from './ready';
 export { Panel, PageReadyLine, PageProgress, type PanelState } from './panel';
+import { PageReadyLine, PageProgress } from './panel';
 
 const cx = (...c: Array<string | false | null | undefined>): string => c.filter(Boolean).join(' ');
 
 /** Page header: the title, one line saying what the page answers, the page's own actions on the right. */
 export function PageHead({ title, description, actions, children }: { title: ReactNode; description?: ReactNode; actions?: ReactNode; children?: ReactNode }) {
   return (
-    <header className="ui-page-head">
-      <div style={{ minWidth: 0 }}>
-        <h1>{title}</h1>
-        {description && <p className="ui-page-desc">{description}</p>}
-        {children}
-      </div>
-      {actions && <div className="ui-page-actions">{actions}</div>}
-    </header>
+    <>
+      <PageProgress />
+      <header className="ui-page-head">
+        <div style={{ minWidth: 0 }}>
+          <h1>{title}</h1>
+          {description && <p className="ui-page-desc">{description}</p>}
+          <PageReadyLine />
+          {children}
+        </div>
+        {actions && <div className="ui-page-actions">{actions}</div>}
+      </header>
+    </>
   );
 }
 

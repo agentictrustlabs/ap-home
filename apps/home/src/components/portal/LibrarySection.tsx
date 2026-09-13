@@ -14,7 +14,7 @@ import { useSession } from '../../context/session';
 import { SectionShell } from './SectionShell';
 import { cardSty, btnSty, btnPrimarySty, mono, mutedText, errorText, inputSty, badgeStyle, modalOverlaySty, infoBannerSty, shortAddr, type BadgeKind } from './theme';
 import { artifactIdentity } from '../../home/artifact-identity';
-import { SkeletonRows, EmptyState, Button, useReadyReport } from '../../ui';
+import { SkeletonRows, EmptyState, Button, Tabs, useReadyReport } from '../../ui';
 
 type Kind = 'skill' | 'ttl' | 'md' | 'json-ld' | 'image';
 type Source = 'blob' | 'graphdb' | 'vault' | 'external';
@@ -270,11 +270,7 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
           {/* filters */}
           {lens !== 'public' && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem', flexWrap: 'wrap', marginBottom: '.5rem' }}>
-              <div style={{ display: 'inline-flex', gap: 2, padding: 2, background: 'var(--color-surface-sunken)', borderRadius: 8 }}>
-                {(['all', ...KINDS] as const).map((k) => (
-                  <button key={k} style={segSty(kindFilter === k)} onClick={() => setKindFilter(k)}>{k === 'all' ? 'All' : KIND_META[k].plural}</button>
-                ))}
-              </div>
+              <Tabs value={kindFilter} onChange={setKindFilter} label="Kind" items={(['all', ...KINDS] as const).map((k) => ({ id: k, label: k === 'all' ? 'All' : KIND_META[k].plural }))} />
               <div style={{ flex: 1 }} />
               <span style={{ ...mutedText, fontSize: 12 }}>Sort</span>
               <select style={{ ...inputSty, fontSize: 12, padding: '.3rem .4rem' }} value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
