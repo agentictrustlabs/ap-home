@@ -2182,8 +2182,10 @@ app.post('/clubs/act', async (c) => {
   const raw = await c.req.text();
   const auth = c.req.header('authorization') ?? '';
   if (!/^A2A-Session\s/i.test(auth)) return c.json({ ok: false, error: 'a club acts under its wire — an A2A-Session assertion is required' }, 401);
+  const tAct0 = Date.now();
   const who = await verifyAppDelegation(c.env, c.req.url, auth, raw);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const tVerify = Date.now() - tAct0;
   type ActBody = { method?: string; club?: string; skill?: string; input?: Record<string, unknown> };
   let body: ActBody | null = null;
   try { body = JSON.parse(raw) as ActBody; } catch { return c.json({ ok: false, error: 'not json' }, 400); }
@@ -2204,6 +2206,7 @@ app.post('/clubs/act', async (c) => {
     },
     ...(deps.nameOf ? { nameOf: deps.nameOf } : {}),
     ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}),
+    remember: (key, fn) => remembered(key, fn),
     verifyStewardship: chainStewardshipCheck({
       readContract: ((args: never) => deps.readContract(args)) as never,
       chainId: Number(c.env.CHAIN_ID), delegationManager: c.env.DELEGATION_MANAGER as Address,
@@ -2212,6 +2215,7 @@ app.post('/clubs/act', async (c) => {
       ...(c.env.UNIVERSAL_SIGNATURE_VALIDATOR ? { validator: c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address } : {}),
     }),
   }, { caller: who.sa, club, skill: String(body.skill ?? ''), material: { input: body.input ?? {} } });
+  console.log(`[clubs/act] ${body.skill} ${club}: verify ${tVerify}ms · turn ${Date.now() - tAct0 - tVerify}ms${turn.kind === 'refused' ? ` · refused: ${turn.text}` : ''}`);
   if (turn.kind === 'refused') return c.json({ ok: false, error: turn.text }, 403);
   return c.json({ ok: true, ...turn.data });
 });
@@ -2226,14 +2230,20 @@ app.get('/clubs/mine', async (c) => {
   const agent = String(c.req.query('agent') ?? '').toLowerCase();
   if (!/^0x[0-9a-f]{40}$/.test(agent)) return c.json({ ok: false, error: 'agent (0x…40) required' }, 400);
   const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  const t0 = Date.now();
   const tree = deps.readSubjectRecord ? await deps.readSubjectRecord(agent, 'relationships.data').catch(() => null) : null;
-  const rows = relationshipRows(tree).filter((r) => r.agent !== agent);
+  // ONLY THE WORKSPACES. A person's tree names every organization, team and circle they belong to; a club is a
+  // workspace, and reading a club profile off a church's vault is a second's wasted DO call per link. A row
+  // that says no kind at all is still tried — an older link may predate the field.
+  const rows = relationshipRows(tree).filter((r) => r.agent !== agent && (!r.kind || r.kind === 'workspace'));
   const clubs = (await Promise.all(rows.map(async (r) => {
     const profile = deps.readSubjectRecord ? await deps.readSubjectRecord(r.agent, CLUB_RECORDS.profile).catch(() => null) : null;
     if (!profile || typeof profile !== 'object') return null;
-    const p = profile as { name?: unknown };
+    const p = profile as { name?: unknown; retiredAt?: unknown };
+    if (p.retiredAt) return null;
     return { club: r.agent, name: typeof p.name === 'string' && p.name ? p.name : r.name, standing: r.relationship === 'steward' ? 'host' : 'member' };
   }))).filter((x): x is { club: string; name: string; standing: string } => x !== null);
+  console.log(`[clubs/mine] ${agent}: ${relationshipRows(tree).length} links, ${rows.length} workspaces, ${clubs.length} clubs · ${Date.now() - t0}ms`);
   return c.json({ ok: true, agent, clubs });
 });
 app.post('/huddles/:op', async (c) => {

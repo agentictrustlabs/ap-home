@@ -46,6 +46,11 @@ export interface ClubDeps extends StandingDeps {
   survey: (subject: string) => Promise<Array<{ recordType: string }>>;
   readRecords: (subject: string, recordTypes: string[]) => Promise<Record<string, unknown>>;
   nameOf?: (address: string) => Promise<string | null>;
+  /** A short in-isolate memo (the Worker's `remembered`, a minute): the founder's name and a POSITIVE standing are
+   *  remembered — a club page is read several times a minute by the same person, and each derivation is a tree
+   *  read and a chain check. `none` is never remembered: the person who just joined must not read as a stranger
+   *  for a minute after the ceremony. */
+  remember?: <T>(key: string, fn: () => Promise<T>) => Promise<T>;
   now?: () => number;
 }
 
@@ -90,21 +95,33 @@ export async function clubTurn(deps: ClubDeps, input: { caller: string; club: st
   const m = (input.material?.input ?? {}) as Record<string, unknown>;
 
   if (skill === CLUB_READ_SKILL) {
-    const [profile, schedule, nights, roster] = await Promise.all([
+    const t0 = Date.now();
+    const remember = deps.remember ?? (<T,>(_k: string, fn: () => Promise<T>) => fn());
+    const agent = typeof m.agent === 'string' && /^0x[0-9a-fA-F]{40}$/.test(m.agent) ? lc(m.agent) : null;
+    // THE PERSON'S STANDING is derived beside the records, not after them — it depends on their tree and the
+    // chain, not on anything read here. A positive answer is remembered a minute; `none` is asked again.
+    const standingP = agent
+      ? remember(`club-standing:${agent}:${club}`, async () => {
+          const st = await deriveStanding(deps, { principal: agent as Address, subject: club as Address }).catch(() => null);
+          const standing = st?.relation === 'self' || st?.relation === 'steward' ? 'host' : st?.relation === 'member' ? 'member' : 'none';
+          const you = { agent, standing, because: st?.because ?? 'this agent could not read your links' } as NonNullable<ClubReadOut['you']>;
+          if (standing === 'none') throw Object.assign(new Error('not remembered'), { you });
+          return you;
+        }).catch((e: unknown) => (e as { you?: NonNullable<ClubReadOut['you']> }).you ?? { agent, standing: 'none' as const, because: 'this agent could not read your links' })
+      : Promise.resolve(undefined);
+    const [profile, schedule, nights, roster, you] = await Promise.all([
       deps.readRecord(club, CLUB_RECORDS.profile).catch(() => null),
       deps.readRecord(club, CLUB_RECORDS.schedule).catch(() => null),
       deps.readRecord(club, CLUB_RECORDS.nights).catch(() => null),
       rosterOf(deps, club),
+      standingP,
     ]);
-    const out: ClubReadOut = { club, profile, schedule, nights, roster };
-    const agent = typeof m.agent === 'string' && /^0x[0-9a-fA-F]{40}$/.test(m.agent) ? lc(m.agent) : null;
-    if (agent) {
-      // The card room asks on behalf of a person it signed in; their standing is THIS agent's derivation over
-      // its own records and the chain — never a claim the card room makes.
-      const st = await deriveStanding(deps, { principal: agent as Address, subject: club as Address }).catch(() => null);
-      const standing = st?.relation === 'self' || st?.relation === 'steward' ? 'host' : st?.relation === 'member' ? 'member' : 'none';
-      out.you = { agent, standing, because: st?.because ?? 'this agent could not read your links' };
-    }
+    const out: ClubReadOut = { club, profile, schedule, nights, roster, ...(you ? { you } : {}) };
+    // WHO TO SHOW AS HOST: the founder the profile names (their standing is still derived when they ask),
+    // with the name the estate calls them — a member's roster row carries a name, the steward's would not.
+    const founder = profile && typeof profile === 'object' && typeof (profile as { foundedBy?: unknown }).foundedBy === 'string' ? lc(String((profile as { foundedBy: string }).foundedBy)) : null;
+    if (founder && deps.nameOf) (out as ClubReadOut & { founderName?: string | null }).founderName = await remember(`name:${founder}`, () => deps.nameOf!(founder)).catch(() => null);
+    console.log(`[club.read] ${Date.now() - t0}ms`);
     return { kind: 'answer', data: out as unknown as Record<string, unknown> };
   }
 
