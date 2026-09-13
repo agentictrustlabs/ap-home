@@ -520,7 +520,7 @@ function ArtifactList({ rows, selectedId, ownerLabel, onOpen, onDescend, onDelet
             <span style={{ display: 'flex', alignItems: 'center', gap: '.5rem', minWidth: 0 }}>
               <Icon name={a.isFolder ? 'folder' : KIND_META[a.kind].icon} size={17} style={{ color: 'var(--color-text-muted)' }} />
               <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
-              <span style={{ ...badgeStyle('neutral'), fontSize: 10 }}>{a.isFolder ? 'Folder' : KIND_META[a.kind].label}</span>
+              <span style={{ ...badgeStyle('neutral'), fontSize: 10 }}>{a.isFolder ? (a.id.startsWith('folder:') && a.size ? `Folder · ${a.size}` : 'Folder') : KIND_META[a.kind].label}</span>
             </span>
             <span style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><b>{owner}</b></span>
             <span><span style={{ ...badgeStyle(ACCESS_TONE[mode]), fontSize: 11 }}>{mode}</span></span>

@@ -56,11 +56,12 @@ export const inputSty: CSSProperties = {
 
 export type BadgeKind = 'ok' | 'warn' | 'err' | 'neutral';
 
+// Design system v2 (2026-09-13): the same soft tints the `.ui-status` / `.ui-chip` vocabulary uses — no outlined pills.
 export const BADGE_STY: Record<BadgeKind, CSSProperties> = {
-  ok: { color: 'var(--color-sage-700)', background: 'var(--color-sage-50)', borderColor: 'var(--color-sage-500)' },
-  warn: { color: 'var(--color-amber-700)', background: 'var(--color-amber-50)', borderColor: 'var(--color-amber-400)' },
-  err: { color: '#991b1b', background: 'var(--color-danger-subtle)', borderColor: '#fecaca' },
-  neutral: { color: 'var(--color-text-muted)', background: 'var(--color-surface-sunken)', borderColor: 'var(--color-border)' },
+  ok: { color: 'var(--st-ok-fg)', background: 'var(--st-ok-bg)', borderColor: 'transparent' },
+  warn: { color: 'var(--st-warn-fg)', background: 'var(--st-warn-bg)', borderColor: 'transparent' },
+  err: { color: 'var(--st-danger-fg)', background: 'var(--st-danger-bg)', borderColor: 'transparent' },
+  neutral: { color: 'var(--st-neutral-fg)', background: 'var(--st-neutral-bg)', borderColor: 'transparent' },
 };
 
 export function badgeStyle(kind: BadgeKind): CSSProperties {
