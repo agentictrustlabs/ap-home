@@ -11,9 +11,9 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { createPublicClient, http, encodeFunctionData, type Address, type Hex } from 'viem';
 import { hashDelegation, type Delegation } from '@agenticprimitives/delegation';
-const MCP = process.env.HOME_MCP_URL ?? 'https://home-mcp-faithnet.richardpedersen3.workers.dev';
-const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
-const RPC = process.env.RPC_URL ?? 'https://a2a.faithnet.io/rpc';
+import { fixture as fx, HOME, A2A, HOME_MCP } from './fixture.mts';
+const MCP = HOME_MCP;
+const RPC = process.env.RPC_URL ?? `${A2A}/rpc`;
 const CHAIN = 34348;
 const DM = '0x710cb1bF08C234Df397e0910331e0A29710EF4F7' as Address;
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
@@ -24,7 +24,7 @@ const post = (path: string, body: unknown, headers: Record<string, string> = {})
 // ── connect + one ask ──
 const reg = await j(await post('/oauth/register', { client_name: 'verify-home-mcp-revoke', redirect_uris: ['https://claude.ai/api/mcp/auth_callback'] }));
 const verifier = b64u(randomBytes(48));
-const conn = await j(await post('/oauth/demo-connect', { handle: 'alice', client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_challenge: b64u(createHash('sha256').update(verifier).digest()), resource: `${MCP}/mcp` }));
+const conn = await j(await post('/oauth/demo-connect', { handle: fx.people.steward, client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_challenge: b64u(createHash('sha256').update(verifier).digest()), resource: `${MCP}/mcp` }));
 if (!conn.code) fail(`demo-connect: ${JSON.stringify(conn)}`);
 const tok = await j(await post('/oauth/token', new URLSearchParams({ grant_type: 'authorization_code', code: conn.code, client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_verifier: verifier, resource: `${MCP}/mcp` }).toString()));
 if (!tok.access_token) fail(`token: ${JSON.stringify(tok)}`);
@@ -34,7 +34,7 @@ console.log(`connected · my_runs → ${before.isError ? `error ${before.out.err
 if (before.isError) fail('the connection does not work before the revoke');
 
 // ── her Home: the row, and the revoke on chain from her own account ──
-const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alice', client_id: 'demo-web' }) }));
+const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: fx.people.steward, client_id: 'demo-web' }) }));
 const auth = { authorization: `Bearer ${si.homeSession}` };
 const grants = await j(await fetch(`${HOME}/connect/app-grants`, { headers: auth }));
 const row = ((grants.grants ?? []) as Array<{ clientId: string; appName: string; delegation: Delegation & { salt: string }; validUntil: number | null }>).find((g) => g.clientId === 'home-mcp');
@@ -70,7 +70,7 @@ await fetch(`${HOME}/connect/app-grants`, { method: 'POST', headers: { 'content-
 
 // ── TWIN: Claude's next ask ──
 // A conformant host is told to authorize again by the TRANSPORT: 401 with the resource metadata, the tokens dead.
-const afterRes = await post('/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'ask', arguments: { message: 'who is in Missio Nexus?', plan: { steps: [{ toolId: 'organization.membership.list', args: { org: 'missio nexus' } }] } } } }, { authorization: `Bearer ${tok.access_token}` });
+const afterRes = await post('/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'ask', arguments: { message: `who is in ${fx.org.name}?`, plan: { steps: [{ toolId: 'organization.membership.list', args: { org: fx.org.name.toLowerCase() } }] } } } }, { authorization: `Bearer ${tok.access_token}` });
 const challenge = afterRes.headers.get('www-authenticate') ?? '';
 console.log(`twin · ask after the revoke → ${afterRes.status} · ${challenge.slice(0, 110)}`);
 if (afterRes.status !== 401 || !/resource_metadata/.test(challenge)) fail(`a revoked wire must end the connection with the OAuth challenge, got ${afterRes.status}: ${(await afterRes.text()).slice(0, 200)}`);

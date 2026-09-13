@@ -12,8 +12,8 @@
  * No model unless the planner is under test: the ask carries a supplied plan (spec 392's rule).
  */
 import { createHash, randomBytes } from 'node:crypto';
-const MCP = process.env.HOME_MCP_URL ?? 'https://home-mcp-faithnet.richardpedersen3.workers.dev';
-const A2A = process.env.A2A_URL ?? 'https://a2a.faithnet.io';
+import { fixture as fx, A2A, HOME_MCP, orgWord } from './fixture.mts';
+const MCP = HOME_MCP;
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
 function fail(m: string): never { console.error(`\n✗ ${m}`); process.exit(1); }
 const b64u = (b: Buffer) => b.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -33,7 +33,7 @@ console.log(`client ${reg.client_id}`);
 // ── alice connects (the persona path; a person would be on the Home's authorize) ──
 const verifier = b64u(randomBytes(48));
 const challenge = b64u(createHash('sha256').update(verifier).digest());
-const conn = await j(await post('/oauth/demo-connect', { handle: 'alice', client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_challenge: challenge, resource: `${MCP}/mcp`, scope: 'ask' }));
+const conn = await j(await post('/oauth/demo-connect', { handle: fx.people.steward, client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_challenge: challenge, resource: `${MCP}/mcp`, scope: 'ask' }));
 if (!conn.code) fail(`demo-connect: ${JSON.stringify(conn)}`);
 console.log(`alice connected · agent ${conn.agent}`);
 
@@ -55,17 +55,17 @@ const names = (list.result?.tools ?? []).map((t: { name: string }) => t.name);
 console.log(`server ${init.result.serverInfo.name} · tools ${JSON.stringify(names)}`);
 if (!names.includes('ask')) fail('no ask tool');
 
-const plan = { steps: [{ toolId: 'organization.membership.list', args: { org: 'missio nexus' } }] }; // a supplied plan: the planner is not under test
+const plan = { steps: [{ toolId: 'organization.membership.list', args: { org: fx.org.name.toLowerCase() } }] }; // a supplied plan: the planner is not under test
 const t0 = Date.now();
-const ask = await j(await rpc('tools/call', { name: 'ask', arguments: { message: 'who is in Missio Nexus?', plan } }));
+const ask = await j(await rpc('tools/call', { name: 'ask', arguments: { message: `who is in ${fx.org.name}?`, plan } }));
 const out = ask.result?.structuredContent ?? {};
 console.log(`ask → kind ${out.kind ?? '?'} · run ${out.runRef ?? '-'} · ${Date.now() - t0} ms · isError ${ask.result?.isError ?? false}`);
 console.log(`  ${String(out.text ?? out.error ?? JSON.stringify(out)).slice(0, 300)}`);
 if (ask.result?.isError || !out.kind) fail(`ask: ${JSON.stringify(ask).slice(0, 400)}`);
-if (!/missio/i.test(String(out.text ?? ''))) fail('the answer does not speak of Missio Nexus');
+if (!orgWord().test(String(out.text ?? ''))) fail(`the answer does not speak of ${fx.org.name}`);
 
 // ── TWIN 1: the bearer at her agent directly is nothing ──
-const direct = await fetch(`${A2A}/harness/ask`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${tok.access_token}` }, body: JSON.stringify({ addressee: conn.agent, message: 'who is in Missio Nexus?' }) });
+const direct = await fetch(`${A2A}/harness/ask`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${tok.access_token}` }, body: JSON.stringify({ addressee: conn.agent, message: `who is in ${fx.org.name}?` }) });
 console.log(`twin · bearer at her agent → ${direct.status}`);
 if (direct.status < 400) fail('the Home MCP bearer must be refused at her agent');
 
@@ -77,7 +77,7 @@ if (!elsewhere.error) fail('a token for another resource must be refused');
 // ── TWIN 3: a second client's token is its own connection; her run is not its to resume ──
 const reg2 = await j(await post('/oauth/register', { client_name: 'verify-home-mcp-2', redirect_uris: ['https://claude.ai/api/mcp/auth_callback'] }));
 const v2 = b64u(randomBytes(48));
-const conn2 = await j(await post('/oauth/demo-connect', { handle: 'bob', client_id: reg2.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_challenge: b64u(createHash('sha256').update(v2).digest()), resource: `${MCP}/mcp` }));
+const conn2 = await j(await post('/oauth/demo-connect', { handle: fx.people.member, client_id: reg2.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_challenge: b64u(createHash('sha256').update(v2).digest()), resource: `${MCP}/mcp` }));
 const tok2 = await j(await post('/oauth/token', form({ grant_type: 'authorization_code', code: conn2.code, client_id: reg2.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_verifier: v2, resource: `${MCP}/mcp` })));
 if (!tok2.access_token) fail(`second client token: ${JSON.stringify(tok2)}`);
 // bob's connection names HER run and nothing else: at his agent there is no such run (a message would start his own).

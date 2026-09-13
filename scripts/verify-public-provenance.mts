@@ -9,14 +9,14 @@
  * transaction her receipt carries; the JSON carries no address and none of the run's words. THE TWINS: a run of hers
  * with no transaction answers rows: [] with every step refused by name; a bogus runRef is 404.
  */
-const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
-const A2A = process.env.A2A_URL ?? 'https://a2a.faithnet.io';
+import { fixture as fx, HOME, A2A } from './fixture.mts';
+
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
 function fail(m: string): never { console.error(`\n✗ ${m}`); process.exit(1); }
 type Receipt = { stepRef: string; toolId?: string; status?: string };
 type Row = { runRef: string; receipts?: Receipt[]; steps?: Array<{ id?: string; result?: unknown }> };
 
-const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alice', client_id: 'demo-jp' }) }));
+const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: fx.people.steward, client_id: 'demo-jp' }) }));
 if (!si.homeSession) fail(`no session: ${JSON.stringify(si).slice(0, 200)}`);
 const ALICE = String(si.agent).toLowerCase();
 const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });

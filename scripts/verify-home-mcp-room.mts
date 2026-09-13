@@ -10,9 +10,10 @@
  * registered is refused before anything is asked; a room's instruction is not her own agent's default.
  */
 import { createHash, randomBytes } from 'node:crypto';
-const MCP = process.env.HOME_MCP_URL ?? 'https://home-mcp-faithnet.richardpedersen3.workers.dev';
-const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
-const ORG = 'missio-nexus.org';
+import { fixture as fx, HOME, HOME_MCP, memberWord } from './fixture.mts';
+const MCP = HOME_MCP;
+const ORG = fx.org.handle;
+const TREASURY = fx.treasuries.own;
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
 function fail(m: string): never { console.error(`\n✗ ${m}`); process.exit(1); }
 const b64u = (b: Buffer) => b.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -20,7 +21,7 @@ const post = (path: string, body: unknown, headers: Record<string, string> = {})
 
 const reg = await j(await post('/oauth/register', { client_name: 'verify-home-mcp-room', redirect_uris: ['https://claude.ai/api/mcp/auth_callback'] }));
 const verifier = b64u(randomBytes(48));
-const conn = await j(await post('/oauth/demo-connect', { handle: 'alice', client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_challenge: b64u(createHash('sha256').update(verifier).digest()), resource: `${MCP}/mcp` }));
+const conn = await j(await post('/oauth/demo-connect', { handle: fx.people.steward, client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_challenge: b64u(createHash('sha256').update(verifier).digest()), resource: `${MCP}/mcp` }));
 if (!conn.code) fail(`demo-connect: ${JSON.stringify(conn)}`);
 const tok = await j(await post('/oauth/token', new URLSearchParams({ grant_type: 'authorization_code', code: conn.code, client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_verifier: verifier, resource: `${MCP}/mcp` }).toString()));
 if (!tok.access_token) fail(`token: ${JSON.stringify(tok)}`);
@@ -32,15 +33,15 @@ if (!ORG_ADDR) fail(`${ORG} is not registered`);
 // ── the roster, asked AT the organization by name ──
 const roster = await call('ask', { addressee: ORG, message: 'who is in this organization?', plan: { steps: [{ toolId: 'organization.membership.list', args: {} }] } });
 console.log(`ask at ${ORG} → ${roster.out.kind} · ${String(roster.out.text ?? roster.out.error ?? '').replace(/\s+/g, ' ').slice(0, 120)}…`);
-if (roster.isError || roster.out.kind !== 'answer' || !/nathan|bob|carol|member/i.test(String(roster.out.text ?? ''))) fail(`the room did not answer its roster: ${JSON.stringify(roster.out).slice(0, 300)}`);
+if (roster.isError || roster.out.kind !== 'answer' || !memberWord().test(String(roster.out.text ?? ''))) fail(`the room did not answer its roster: ${JSON.stringify(roster.out).slice(0, 300)}`);
 
 // ── TWIN: a name nobody registered ──
-const nobody = await call('ask', { addressee: 'nobody-here-zz.org', message: 'hello' });
+const nobody = await call('ask', { addressee: fx.absent.org, message: 'hello' });
 console.log(`twin · unknown room → ${nobody.isError ? `refused: ${String(nobody.out.error).slice(0, 90)}` : 'ANSWERED'}`);
 if (!nobody.isError) fail('an unregistered room name must be refused before anything is asked');
 
 // ── a standing instruction declared AT the room through Claude is the ROOM's ──
-const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alice', client_id: 'demo-web' }) }));
+const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: fx.people.steward, client_id: 'demo-web' }) }));
 const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
 const csrf = (await j(csrfRes)) as { token?: string };
 const cookie = (csrfRes.headers.get('set-cookie') ?? '').split(';')[0];
@@ -48,7 +49,7 @@ const home = async (path: string, body: Record<string, unknown>) => j(await fetc
 const forget = () => home('/harness/instructions/forget', { scope: { capability: 'treasury.payment.execute', arg: 'payer', context: ORG_ADDR } });
 await forget();
 const nonce = Date.now().toString(36);
-let d = await call('ask', { addressee: ORG, message: `from now on pay from alice3.treasury here (${nonce})`, plan: { steps: [{ toolId: 'context.instruction.declare', args: { capability: 'treasury.payment.execute', value: 'alice3.treasury' } }] } });
+let d = await call('ask', { addressee: ORG, message: `from now on pay from ${TREASURY} here (${nonce})`, plan: { steps: [{ toolId: 'context.instruction.declare', args: { capability: 'treasury.payment.execute', value: TREASURY } }] } });
 console.log(`declare at ${ORG} → ${d.out.kind}${d.out.kind === 'prompt' ? `: "${(d.out.prompt as { prompt?: string })?.prompt}"` : ''}`);
 if (d.out.kind === 'prompt') {
   const pr = d.out.prompt as { stepRef?: string; fields?: Array<{ name: string }> };

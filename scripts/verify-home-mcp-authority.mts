@@ -13,9 +13,10 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Address, Hex } from 'viem';
 import { hashDelegation, buildDigestBindingCaveat, paymentHandler, ROOT_AUTHORITY, registerDefaultSubsetHandlers, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
+import { fixture as fx, HOME, HOME_MCP } from './fixture.mts';
 registerDefaultSubsetHandlers();
-const MCP = process.env.HOME_MCP_URL ?? 'https://home-mcp-faithnet.richardpedersen3.workers.dev';
-const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
+const MCP = HOME_MCP;
+const PAYEE = fx.treasuries.payee;
 const CHAIN = 34348;
 const DM = '0x710cb1bF08C234Df397e0910331e0A29710EF4F7' as Address;
 const ENFORCERS = { delegationManager: DM, timestamp: '0x73A7B878168b7DE48677617179A8bE894f0Dfe96', allowedTargets: '0x2156311097A936de1916a878bF53Bfd43c7b5715', allowedMethods: '0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41', value: '0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975', payment: '0x07fA0aE59FdE4B7ce8962d6fE7a1d648ec3DD5CE', digestBinding: '0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1' } as const;
@@ -27,7 +28,7 @@ const post = (path: string, body: unknown, headers: Record<string, string> = {})
 // ── Claude's side: connect alice ──
 const reg = await j(await post('/oauth/register', { client_name: 'verify-home-mcp-authority', redirect_uris: ['https://claude.ai/api/mcp/auth_callback'] }));
 const verifier = b64u(randomBytes(48));
-const conn = await j(await post('/oauth/demo-connect', { handle: 'alice', client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_challenge: b64u(createHash('sha256').update(verifier).digest()), resource: `${MCP}/mcp` }));
+const conn = await j(await post('/oauth/demo-connect', { handle: fx.people.steward, client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_challenge: b64u(createHash('sha256').update(verifier).digest()), resource: `${MCP}/mcp` }));
 if (!conn.code) fail(`demo-connect: ${JSON.stringify(conn)}`);
 const tok = await j(await post('/oauth/token', new URLSearchParams({ grant_type: 'authorization_code', code: conn.code, client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_verifier: verifier, resource: `${MCP}/mcp` }).toString()));
 if (!tok.access_token) fail(`token: ${JSON.stringify(tok)}`);
@@ -36,8 +37,8 @@ const call = async (name: string, args: Record<string, unknown>) => { const r = 
 
 // ── the ask: a payment; it parks ──
 const nonce = Date.now().toString(36);
-const plan = { steps: [{ toolId: 'treasury.payment.execute', args: { payee: 'nathan.treasury', usdc: '1', memo: `via claude ${nonce}` }, id: 's0' }] };
-const asked = await call('ask', { message: `pay nathan.treasury 1 usdc (via claude ${nonce})`, plan });
+const plan = { steps: [{ toolId: 'treasury.payment.execute', args: { payee: PAYEE, usdc: '1', memo: `via claude ${nonce}` }, id: 's0' }] };
+const asked = await call('ask', { message: `pay ${PAYEE} 1 usdc (via claude ${nonce})`, plan });
 const runRef = String(asked.out.runRef ?? '');
 console.log(`ask → ${asked.out.kind} · run ${runRef} · ${String(asked.out.next ?? '').slice(0, 90)}…`);
 if (asked.out.kind !== 'authority_required' || !runRef) fail(`expected authority_required: ${JSON.stringify(asked.out).slice(0, 400)}`);
@@ -51,7 +52,7 @@ console.log(`twin · ask { run } before the grant → ${early.out.kind ?? early.
 if (early.out.kind !== 'authority_required') fail(`the resume before her grant must park again: ${JSON.stringify(early.out).slice(0, 300)}`);
 
 // ── her Home: /you?run= — the flyout resumes the run under HER session; she signs the mandate ──
-const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alice', client_id: 'demo-web' }) }));
+const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: fx.people.steward, client_id: 'demo-web' }) }));
 const sign = async (digest: Hex): Promise<Hex> => { const b = await j(await fetch(`${HOME}/connect/persona-sign`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${si.homeSession}` }, body: JSON.stringify({ digest }) })); if (!b.signature) throw new Error(`persona-sign: ${JSON.stringify(b).slice(0, 200)}`); return b.signature; };
 const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
 const csrf = (await j(csrfRes)) as { token?: string };

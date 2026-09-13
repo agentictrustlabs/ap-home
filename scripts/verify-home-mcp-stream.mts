@@ -11,7 +11,8 @@
  * THE TWIN: a signature is never elicited — the parked act ends the stream with authority_required and grant_link.
  */
 import { createHash, randomBytes } from 'node:crypto';
-const MCP = process.env.HOME_MCP_URL ?? 'https://home-mcp-faithnet.richardpedersen3.workers.dev';
+import { fixture as fx, HOME_MCP } from './fixture.mts';
+const MCP = HOME_MCP;
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
 function fail(m: string): never { console.error(`\n✗ ${m}`); process.exit(1); }
 const b64u = (b: Buffer) => b.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -19,7 +20,7 @@ const post = (path: string, body: unknown, headers: Record<string, string> = {})
 
 const reg = await j(await post('/oauth/register', { client_name: 'verify-home-mcp-stream', redirect_uris: ['https://claude.ai/api/mcp/auth_callback'] }));
 const verifier = b64u(randomBytes(48));
-const conn = await j(await post('/oauth/demo-connect', { handle: 'alice', client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_challenge: b64u(createHash('sha256').update(verifier).digest()), resource: `${MCP}/mcp` }));
+const conn = await j(await post('/oauth/demo-connect', { handle: fx.people.steward, client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_challenge: b64u(createHash('sha256').update(verifier).digest()), resource: `${MCP}/mcp` }));
 if (!conn.code) fail(`demo-connect: ${JSON.stringify(conn)}`);
 const tok = await j(await post('/oauth/token', new URLSearchParams({ grant_type: 'authorization_code', code: conn.code, client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_verifier: verifier, resource: `${MCP}/mcp` }).toString()));
 if (!tok.access_token) fail(`token: ${JSON.stringify(tok)}`);
@@ -67,7 +68,7 @@ async function streamed(body: unknown, answers: Record<string, unknown> = {}): P
 
 // ── progress on a plain ask ──
 let t0 = Date.now();
-const a = await streamed({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { _meta: { progressToken: 'p1' }, name: 'ask', arguments: { message: 'who is in Missio Nexus?', plan: { steps: [{ toolId: 'organization.membership.list', args: { org: 'missio nexus' } }] } } } });
+const a = await streamed({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { _meta: { progressToken: 'p1' }, name: 'ask', arguments: { message: `who is in ${fx.org.name}?`, plan: { steps: [{ toolId: 'organization.membership.list', args: { org: fx.org.name.toLowerCase() } }] } } } });
 const sc = (a.result?.result as { structuredContent?: { kind?: string; text?: string } } | undefined)?.structuredContent;
 console.log(`ask (streamed) → ${sc?.kind} · ${a.progress} progress line(s) · ${Date.now() - t0} ms · ${String(sc?.text ?? '').slice(0, 80)}…`);
 if (sc?.kind !== 'answer') fail(`expected an answer on the stream: ${JSON.stringify(a.result).slice(0, 300)}`);
@@ -75,7 +76,7 @@ if (a.progress < 1) fail('no progress notification arrived');
 
 // ── elicitation: an invitation with no invitee asks her; the host answers; the act then parks for her authority ──
 t0 = Date.now();
-const e = await streamed({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { _meta: { progressToken: 'p2' }, name: 'ask', arguments: { message: 'invite someone to missio nexus', plan: { steps: [{ toolId: 'organization.membership.invite', args: { org: 'missio nexus' } }] } } } }, { invitee: 'bob.me' });
+const e = await streamed({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { _meta: { progressToken: 'p2' }, name: 'ask', arguments: { message: `invite someone to ${fx.org.name.toLowerCase()}`, plan: { steps: [{ toolId: 'organization.membership.invite', args: { org: fx.org.name.toLowerCase() } }] } } } }, { invitee: `${fx.people.member}.me` });
 const es = (e.result?.result as { structuredContent?: { kind?: string; prompt?: { prompt?: string }; error?: string } } | undefined)?.structuredContent;
 console.log(`invite (streamed) → ${es?.kind ?? es?.error} · elicited ${e.elicited} · ${Date.now() - t0} ms`);
 if (e.elicited < 1) fail(`the agent's question was not put to the host: ${JSON.stringify(e.result).slice(0, 300)}`);

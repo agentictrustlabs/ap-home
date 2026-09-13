@@ -14,10 +14,11 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Address, Hex } from 'viem';
 import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, registerDefaultSubsetHandlers, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
+import { fixture as fx, HOME, HOME_MCP, orgWord, skipUnless } from './fixture.mts';
 registerDefaultSubsetHandlers();
-const MCP = process.env.HOME_MCP_URL ?? 'https://home-mcp-faithnet.richardpedersen3.workers.dev';
-const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
-const ORG = 'missio-nexus.org'; const INVITEE = process.env.INVITEE ?? 'david.me';
+const MCP = HOME_MCP;
+const ORG = fx.org.handle; const INVITEE = process.env.INVITEE ?? `${fx.people.invitee}.me`;
+const MIN = skipUnless(fx.ministry, 'ministry in the public registry (its card is inspected by name)');
 const CHAIN = 34348; const DM = '0x710cb1bF08C234Df397e0910331e0A29710EF4F7' as Address;
 const ENFORCERS = { delegationManager: DM, timestamp: '0x73A7B878168b7DE48677617179A8bE894f0Dfe96', allowedTargets: '0x2156311097A936de1916a878bF53Bfd43c7b5715', allowedMethods: '0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41', value: '0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975', payment: '0x07fA0aE59FdE4B7ce8962d6fE7a1d648ec3DD5CE', digestBinding: '0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1' } as const;
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
@@ -34,8 +35,8 @@ async function connect(handle: string) {
   const call = async (name: string, args: Record<string, unknown>) => { const r = await j(await post('/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }, { authorization: `Bearer ${tok.access_token}` })); return { out: (r.result?.structuredContent ?? {}) as Record<string, unknown>, isError: !!r.result?.isError }; };
   return { call, agent: String(conn.agent).toLowerCase() as Address };
 }
-const alice = await connect('alice');
-const david = await connect('david');
+const alice = await connect(fx.people.steward);
+const david = await connect(fx.people.invitee);
 const orgInfo = await j(await fetch(`${HOME}/connect/name-info?name=${ORG}`)) as { agent?: string };
 const ORG_ADDR = String(orgInfo.agent ?? '').toLowerCase() as Address;
 
@@ -45,7 +46,7 @@ const inv = await alice.call('ask', { addressee: ORG, message: `invite ${INVITEE
 console.log(`invite → ${inv.out.kind} · run ${inv.out.runRef}`);
 if (inv.out.kind !== 'authority_required') fail(`expected authority_required: ${JSON.stringify(inv.out).slice(0, 400)}`);
 // her Home's one-prompt path (what the flyout does on /you?run=): the org approves the mandate + the grant in ONE userOp
-const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alice', client_id: 'demo-web' }) }));
+const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: fx.people.steward, client_id: 'demo-web' }) }));
 const sign = async (d: Hex): Promise<Hex> => { const b = await j(await fetch(`${HOME}/connect/persona-sign`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${si.homeSession}` }, body: JSON.stringify({ digest: d }) })); if (!b.signature) throw new Error(`persona-sign: ${JSON.stringify(b).slice(0, 200)}`); return b.signature; };
 const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
 const csrf = (await j(csrfRes)) as { token?: string };
@@ -88,20 +89,20 @@ const mine = await david.call('ask', { message: 'what invitations do I have', pl
 const mineText = String(mine.out.text ?? '');
 console.log(`david, through Claude → ${mine.out.kind} · ${mineText.replace(/\s+/g, ' ').slice(0, 160)}…`);
 if (mine.out.kind !== 'answer') fail(`david's own read did not answer: ${JSON.stringify(mine.out).slice(0, 300)}`);
-if (told?.ok && !/missio/i.test(mineText)) fail('the invitee was told, but his own read does not name the organization');
+if (told?.ok && !orgWord().test(mineText)) fail('the invitee was told, but his own read does not name the organization');
 if (!told?.ok) console.log('  (the message could not be sent — the effect is reported on the act, not hidden; the invitee\'s read is honest about it)');
 
 // ── 2. her own records ──
 const hh = await alice.call('ask', { message: 'who is in my household', plan: { steps: [{ toolId: 'vault.records.query', args: { question: 'who is in my household' } }] } });
 console.log(`her records → ${hh.out.kind} · ${String(hh.out.text ?? hh.out.error ?? '').replace(/\s+/g, ' ').slice(0, 120)}…`);
 if (hh.out.kind !== 'answer') fail(`her own records did not answer: ${JSON.stringify(hh.out).slice(0, 300)}`);
-const other = await alice.call('ask', { message: "who is in nathan's household", plan: { steps: [{ toolId: 'vault.records.query', args: { question: 'who is in the household', subject: 'nathan.me' } }] } });
-console.log(`twin · nathan's records → ${other.out.kind} · ${String(other.out.text ?? other.out.error ?? '').replace(/\s+/g, ' ').slice(0, 120)}`);
-if (other.out.kind === 'answer' && !/cannot|no stewardship|refus|not (yours|readable)|may not|could not/i.test(String(other.out.text ?? ''))) fail("nathan's records were read without stewardship");
+const other = await alice.call('ask', { message: `who is in ${fx.people.payeeOwner}'s household`, plan: { steps: [{ toolId: 'vault.records.query', args: { question: 'who is in the household', subject: `${fx.people.payeeOwner}.me` } }] } });
+console.log(`twin · ${fx.people.payeeOwner}'s records → ${other.out.kind} · ${String(other.out.text ?? other.out.error ?? '').replace(/\s+/g, ' ').slice(0, 120)}`);
+if (other.out.kind === 'answer' && !/cannot|no stewardship|refus|not (yours|readable)|may not|could not/i.test(String(other.out.text ?? ''))) fail(`${fx.people.payeeOwner}'s records were read without stewardship`);
 
 // ── 3. inspect ──
-const insp = await alice.call('inspect_agent', { agent: 'ligonier.svc' });
+const insp = await alice.call('inspect_agent', { agent: MIN.svc });
 const card = insp.out.card as { name?: string; skills?: Array<{ id?: string }> } | undefined;
-console.log(`inspect ligonier.svc → ${card?.name ?? insp.out.refused} · skills ${(card?.skills ?? []).length} · pinned ${insp.out.pinned} · matchesPin ${insp.out.matchesPin ?? 'n/a'}`);
+console.log(`inspect ${MIN.svc} → ${card?.name ?? insp.out.refused} · skills ${(card?.skills ?? []).length} · pinned ${insp.out.pinned} · matchesPin ${insp.out.matchesPin ?? 'n/a'}`);
 if (insp.isError || !card?.name) fail(`inspect: ${JSON.stringify(insp.out).slice(0, 300)}`);
 console.log('\n✓ spec 397: an invitation asked through Claude, approved at her Home, seen by the invitee\'s agent; her own records answered and another\'s refused; a card inspected through its name');

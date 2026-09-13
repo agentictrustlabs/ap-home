@@ -10,20 +10,21 @@
  * the row. Cleared and resumed after. The twin: bob (not a steward) can neither pause nor budget it.
  */
 import type { Address } from 'viem';
+import { fixture as fx, HOME, skipUnless } from './fixture.mts';
 
-const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 250), _status: r.status }; } };
 const fail = (m: string): never => { console.error(`\n✗ ${m}`); process.exit(1); };
 const signin = async (handle: string) => j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle, client_id: 'demo-web' }) }));
-const alice = await signin('alice'); const bob = await signin('bob');
+const alice = await signin(fx.people.steward); const bob = await signin(fx.people.member);
 const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
 const csrf = (await j(csrfRes)) as { token?: string };
 const H = { 'content-type': 'application/json', origin: HOME, cookie: (csrfRes.headers.get('set-cookie') ?? '').split(';')[0] ?? '', 'x-csrf-token': csrf.token ?? '' };
 const post = async (path: string, body: unknown) => j(await fetch(`${HOME}/a2a/harness/${path}`, { method: 'POST', headers: H, body: JSON.stringify(body) }));
 
 const orgs = ((await j(await fetch(`${HOME}/connect/related-orgs?surface=any`, { headers: { authorization: `Bearer ${alice.homeSession}` } }))).orgs ?? []) as Array<{ orgAgent: string; orgName: string; relationship?: string }>;
-const team = orgs.find((o) => /playwright-demo-team/i.test(o.orgName) && o.relationship === 'steward');
-if (!team) fail('alice does not steward playwright-demo-team');
+const ROUTINE = skipUnless(fx.routineAgent, 'agent with a scheduled routine (routineAgent)');
+const team = orgs.find((o) => (o.orgName ?? '').toLowerCase() === ROUTINE.handle.toLowerCase() && o.relationship === 'steward');
+if (!team) fail(`${fx.people.steward} does not steward ${ROUTINE.handle}`);
 const TEAM = team!.orgAgent.toLowerCase() as Address;
 type Row = { triggerId: string; kind?: string; ask: string; paused?: { by: string; note?: string }; budget?: { vaultCalls: number }; lastBill?: { vaultCalls: number }; lastOutcome?: string };
 const rows = async () => ((await post('triggers', { session: alice.homeSession, addressee: TEAM })) as { triggers?: Row[] }).triggers ?? [];

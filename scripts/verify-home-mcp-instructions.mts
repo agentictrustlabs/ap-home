@@ -10,9 +10,10 @@
  * through Claude no longer names alice3. Every run is left at authority_required: nothing signed, nothing moves.
  */
 import { createHash, randomBytes } from 'node:crypto';
-const MCP = process.env.HOME_MCP_URL ?? 'https://home-mcp-faithnet.richardpedersen3.workers.dev';
-const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
-const TREASURY = process.env.STANDING_TREASURY ?? 'alice3.treasury';
+import { fixture as fx, HOME, HOME_MCP } from './fixture.mts';
+const MCP = HOME_MCP;
+const TREASURY = process.env.STANDING_TREASURY ?? fx.treasuries.own;
+const PAYEE = fx.treasuries.payee;
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
 function fail(m: string): never { console.error(`\n✗ ${m}`); process.exit(1); }
 const b64u = (b: Buffer) => b.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -20,14 +21,14 @@ const post = (path: string, body: unknown, headers: Record<string, string> = {})
 
 const reg = await j(await post('/oauth/register', { client_name: 'verify-home-mcp-instructions', redirect_uris: ['https://claude.ai/api/mcp/auth_callback'] }));
 const verifier = b64u(randomBytes(48));
-const conn = await j(await post('/oauth/demo-connect', { handle: 'alice', client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_challenge: b64u(createHash('sha256').update(verifier).digest()), resource: `${MCP}/mcp` }));
+const conn = await j(await post('/oauth/demo-connect', { handle: fx.people.steward, client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_challenge: b64u(createHash('sha256').update(verifier).digest()), resource: `${MCP}/mcp` }));
 if (!conn.code) fail(`demo-connect: ${JSON.stringify(conn)}`);
 const tok = await j(await post('/oauth/token', new URLSearchParams({ grant_type: 'authorization_code', code: conn.code, client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_verifier: verifier, resource: `${MCP}/mcp` }).toString()));
 if (!tok.access_token) fail(`token: ${JSON.stringify(tok)}`);
 const call = async (name: string, args: Record<string, unknown>) => { const r = await j(await post('/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }, { authorization: `Bearer ${tok.access_token}` })); return (r.result?.structuredContent ?? {}) as Record<string, unknown>; };
 
 // her Home, for the twin
-const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alice', client_id: 'demo-web' }) }));
+const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: fx.people.steward, client_id: 'demo-web' }) }));
 const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
 const csrf = (await j(csrfRes)) as { token?: string };
 const cookie = (csrfRes.headers.get('set-cookie') ?? '').split(';')[0];
@@ -53,10 +54,10 @@ const kept = (await listAtHome()).find((e) => e.capability === 'treasury.payment
 const keptNames = !!kept && (kept.value.toLowerCase() === String(treasuryOf?.agent ?? '-').toLowerCase() || kept.value.toLowerCase().includes(TREASURY.split('.')[0]!));
 console.log(`twin · listed at her Home → ${kept ? `${kept.value} (${TREASURY} is ${treasuryOf?.agent ?? '?'})` : 'NOT LISTED'}`);
 if (!kept) fail('the instruction declared through Claude is not her agent\'s (not listed at her Home)');
-if (!keptNames) console.log('  (the listed value does not name alice3.treasury by address or label — recorded, not failed)');
+if (!keptNames) console.log(`  (the listed value does not name ${TREASURY} by address or label — recorded, not failed)`);
 
 // ── 2. an unspoken payer through Claude is filled from it ──
-const pay = await call('ask', { message: `send nathan.treasury 1 usdc (via claude ${nonce})`, plan: { steps: [{ toolId: 'treasury.payment.execute', args: { payee: 'nathan.treasury', usdc: '1' } }] } });
+const pay = await call('ask', { message: `send ${PAYEE} 1 usdc (via claude ${nonce})`, plan: { steps: [{ toolId: 'treasury.payment.execute', args: { payee: PAYEE, usdc: '1' } }] } });
 console.log(`payment → ${pay.kind} · delegator ${String(pay.delegator ?? '').slice(0, 12)}… · parties ${JSON.stringify(pay.parties ?? null).slice(0, 160)}`);
 if (pay.kind !== 'authority_required') fail(`expected authority_required: ${JSON.stringify(pay).slice(0, 300)}`);
 const partiesText = JSON.stringify(pay.parties ?? pay).toLowerCase();
@@ -65,7 +66,7 @@ console.log(`  payer from the standing instruction: ${named ? 'yes' : 'not visib
 
 // ── 3. forgotten at her Home, gone for Claude ──
 await home('/harness/instructions/forget', { scope: { capability: 'treasury.payment.execute', arg: 'payer' } });
-const after = await call('ask', { message: `send nathan.treasury 1 usdc (after ${nonce})`, plan: { steps: [{ toolId: 'treasury.payment.execute', args: { payee: 'nathan.treasury', usdc: '1' } }] } });
+const after = await call('ask', { message: `send ${PAYEE} 1 usdc (after ${nonce})`, plan: { steps: [{ toolId: 'treasury.payment.execute', args: { payee: PAYEE, usdc: '1' } }] } });
 console.log(`after forget → ${after.kind} · delegator ${String(after.delegator ?? '').slice(0, 12)}…`);
 if (after.kind === 'authority_required' && pay.delegator && after.delegator === pay.delegator && named) fail('the forgotten instruction still fills the payer for Claude');
 console.log('\n✓ spec 397: a standing instruction through Claude is her agent\'s — visible at her Home, forgotten there for every surface');

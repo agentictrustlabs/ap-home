@@ -6,8 +6,8 @@
  *
  *   npx tsx scripts/verify-route.mts        (one live ask; HANDLE=… ASK=… to vary)
  */
-const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
-const HANDLE = process.env.HANDLE ?? 'alice';
+import { fixture as fx, HOME } from './fixture.mts';
+const HANDLE = fx.people.steward;
 const ASK = process.env.ASK ?? 'how many organizations are in the public directory, and name three';
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
 const fail = (m: string): never => { console.error(`\n✗ ${m}`); process.exit(1); };

@@ -30,9 +30,9 @@ import { assembleAttention } from '../apps/demo-sso-next/src/home/attention';
 import { workItemOf } from '../apps/demo-sso-next/src/home/work-item';
 import { artifactIdentity } from '../apps/demo-sso-next/src/home/artifact-identity';
 import { projectAllocationEntry, projectCommitmentEntry, projectDecisionCard } from '../apps/demo-sso-next/src/lib/work-client';
+import { fixture as fx, HOME, A2A, resolveOrgAgent } from './fixture.mts';
 
-const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
-const A2A = process.env.A2A_URL ?? 'https://a2a.faithnet.io';
+
 const CHAIN = 34348;
 const E = {
   delegationManager: '0x710cb1bF08C234Df397e0910331e0A29710EF4F7', timestamp: '0x73A7B878168b7DE48677617179A8bE894f0Dfe96',
@@ -40,7 +40,6 @@ const E = {
   value: '0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975', digestBinding: '0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1',
 } as const;
 const WORKSPACE = (process.env.WORKSPACE ?? '0xee11DFB02e4a02630bE512886305DF5C68Fd682c').toLowerCase() as Address;
-const ORG = (process.env.ORG ?? '0x3b99f2b452766de5df0dbcdfc676f27257151333').toLowerCase() as Address; // Missio Nexus
 const N = Date.now().toString(36).slice(-4);
 
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
@@ -58,8 +57,9 @@ const cookie = (csrfRes.headers.get('set-cookie') ?? '').split(';')[0];
 const H: Record<string, string> = { 'content-type': 'application/json', origin: HOME, cookie: cookie ?? '', 'x-csrf-token': csrf.token ?? '' };
 const harness = async (path: string, body: unknown) => j(await fetch(`${HOME}/a2a/harness/${path}`, { method: 'POST', headers: H, body: JSON.stringify(body) }));
 
-const alice = await signinAs('alice'); const ALICE = String(alice.agent).toLowerCase() as Address;
-const carol = await signinAs('carol'); const CAROL = String(carol.agent).toLowerCase() as Address;
+const alice = await signinAs(fx.people.steward); const ALICE = String(alice.agent).toLowerCase() as Address;
+const carol = await signinAs(fx.people.member2); const CAROL = String(carol.agent).toLowerCase() as Address;
+const ORG = (process.env.ORG ? process.env.ORG.toLowerCase() : await resolveOrgAgent(alice.homeSession)) as Address;
 const personas = await j(await fetch(`${HOME}/connect/demo-personas`));
 const credential = { kind: 'eoa', address: (personas.personas as Array<{ sa: string; custodian: string }>).find((p) => p.sa.toLowerCase() === ALICE)!.custodian };
 const sign = async (token: string, digest: Hex): Promise<Hex> => {
@@ -85,7 +85,7 @@ async function todayFor(session: { homeSession: string; agent: string }, address
     const r = await j(await fetch(`${A2A}/interactions/${org}/endeavor.list`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session: session.homeSession }) }));
     const mine = (r.mine ?? {}) as { allocations?: never[]; commitments?: Array<{ status: string }>; decisions?: Array<{ status: string }> };
     bundles = [{
-      org, orgName: 'Missio Nexus', allocations: mine.allocations ?? [],
+      org, orgName: fx.org.name, allocations: mine.allocations ?? [],
       entries: [...(mine.allocations ?? []).map((a) => projectAllocationEntry(org, me, a)), ...(mine.commitments ?? []).filter((c) => c.status === 'active').map((c) => projectCommitmentEntry(org, me, c as never))],
       decisions: (mine.decisions ?? []).filter((d) => d.status === 'pending').map((d) => projectDecisionCard(org, d as never)),
       myRequests: [], endeavors: r.endeavors ?? [],
@@ -192,10 +192,10 @@ try {
   const page = '# The retreat\n\nSaturday, 10am, the hall. Bring a friend.\n';
   const saved = await lib({ action: 'save', artifact: { name: 'retreat-event-page.md', kind: 'md', source: 'blob', folder: 'pages', contentType: 'text/markdown', bytesB64: Buffer.from(page, 'utf8').toString('base64') } });
   if (!saved.ok) fail(`the page could not be drafted into the Library: ${JSON.stringify(saved).slice(0, 200)}`);
-  const before = artifactIdentity(saved.artifact, { sa: ORG, vaultLabel: 'Missio Nexus vault' }, true);
+  const before = artifactIdentity(saved.artifact, { sa: ORG, vaultLabel: `${fx.org.name} vault` }, true);
   const published = await lib({ action: 'publish', id: saved.artifact.id });
   if (!published.ok) fail(`the page could not be published: ${JSON.stringify(published).slice(0, 200)}`);
-  const after = artifactIdentity(published.artifact, { sa: ORG, vaultLabel: 'Missio Nexus vault' }, true);
+  const after = artifactIdentity(published.artifact, { sa: ORG, vaultLabel: `${fx.org.name} vault` }, true);
   console.log(`  5 page ${saved.artifact.id}: ${before.version} · ${before.accessMethod} · publish ${before.acts.publish} · sources ${before.sources.map((x) => x.kind).join('+')} → published ${published.release.version} by ${String(published.release.publisher).slice(0, 10)}… ${published.release.signed ? 'signed' : 'UNSIGNED'} · strip: release ${after.latestRelease?.version ?? '—'}`);
   if (before.acts.publish !== 'offered' || !published.release.signed || after.latestRelease?.version !== '1.0.0') fail('the page publish did not happen as a signed release the strip shows');
   const rid = published.release.releaseId;

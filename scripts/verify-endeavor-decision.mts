@@ -10,22 +10,22 @@
  * Work lists nothing after.
  */
 import type { Address } from 'viem';
+import { fixture as fx, HOME, A2A, resolveOrgAgent } from './fixture.mts';
 
-const HOME = 'https://www.faithnet.me';
-const A2A = 'https://a2a.faithnet.io';
-const ORG = '0x3b99f2b452766de5df0dbcdfc676f27257151333' as Address; // Missio Nexus
+
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 250), _status: r.status }; } };
 let restoreAutoWork: () => Promise<void> = async () => undefined;
 const fail = (m: string): never => { console.error(`\n✗ ${m}`); void restoreAutoWork().finally(() => process.exit(1)); throw new Error(m); };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const signin = async (handle: string) => j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle, client_id: 'demo-web' }) }));
 
-const alice = await signin('alice'); const ALICE = String(alice.agent).toLowerCase() as Address;
-const bob = await signin('bob'); const BOB = String(bob.agent).toLowerCase() as Address;
-const carol = await signin('carol'); const CAROL = String(carol.agent).toLowerCase() as Address;
+const alice = await signin(fx.people.steward); const ALICE = String(alice.agent).toLowerCase() as Address;
+const bob = await signin(fx.people.member); const BOB = String(bob.agent).toLowerCase() as Address;
+const carol = await signin(fx.people.member2); const CAROL = String(carol.agent).toLowerCase() as Address;
+const ORG = (await resolveOrgAgent(alice.homeSession)) as Address;
 const related = await j(await fetch(`${HOME}/connect/related-orgs?person=${ALICE}`, { headers: { authorization: `Bearer ${alice.homeSession}` } }));
 const stewardship = (related.orgs ?? []).find((o: { orgAgent: string }) => o.orgAgent.toLowerCase() === ORG)?.stewardshipDelegation;
-if (!stewardship) fail('alice holds no stewardship wire for Missio Nexus');
+if (!stewardship) fail(`${fx.people.steward} holds no stewardship wire for ${fx.org.name}`);
 type Ix = { ok?: boolean; error?: string; _status?: number; status?: string | number } & Record<string, unknown>;
 const ix = async (token: string, op: string, payload: Record<string, unknown>, withStewardship = false): Promise<Ix & { httpStatus: number }> => {
   // The organization's vault verifies its grant per op on a rate-limited RPC; a transient `auth failed — mcp`

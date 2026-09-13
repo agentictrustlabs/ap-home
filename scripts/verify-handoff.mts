@@ -13,20 +13,21 @@ import { hashDelegation, buildDigestBindingCaveat, paymentHandler, ROOT_AUTHORIT
 import type { Address, Hex } from 'viem';
 // Priorities §3.2 G5 — the cross-Home leg (CROSS=1): preflighted; skipped-and-said until B holds its caller token and the parent wire exists.
 import { requireCrossHome } from './cross-home-preflight.mts';
+import { fixture as fx, HOME, A2A, skipUnless } from './fixture.mts';
 if (process.env.CROSS === '1') await requireCrossHome('verify-handoff', { needsParentWire: true });
 registerDefaultSubsetHandlers();
 
-const HOME = 'https://www.faithnet.me';
 const CHAIN = 34348;
 const DM = '0x710cb1bF08C234Df397e0910331e0A29710EF4F7' as Address;
 const ENFORCERS = { delegationManager: DM, timestamp: '0x73A7B878168b7DE48677617179A8bE894f0Dfe96', allowedTargets: '0x2156311097A936de1916a878bF53Bfd43c7b5715', allowedMethods: '0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41', value: '0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975', payment: '0x07fA0aE59FdE4B7ce8962d6fE7a1d648ec3DD5CE', digestBinding: '0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1' } as const;
-const RUNTIME = '0x309b2a566e93cc77aabe895d0ec2702c36856ebd' as Address; // runtime-c3s0.svc
+const SPECIALIST = skipUnless(fx.specialist, 'specialist service (the executor a step is handed to)');
+const RUNTIME = skipUnless(SPECIALIST.agent, 'specialist address') as Address;
+const PAYEE = fx.treasuries.payee;
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 250), _status: r.status }; } };
-const alice = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alice', client_id: 'demo-web' }) }));
+const alice = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: fx.people.steward, client_id: 'demo-web' }) }));
 const ALICE = String(alice.agent).toLowerCase() as Address;
 // The Worker host directly (the Home's proxy is not under test here); CSRF from that host.
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/128 Safari/537.36';
-const A2A = 'https://alice.faithnet.ai';
 const csrfRes = await fetch(`${A2A}/auth/csrf`, { headers: { origin: HOME, 'user-agent': UA } });
 const csrfTok = csrfRes.headers.get('x-csrf-token') || ((await j(csrfRes.clone())) as { token?: string }).token || '';
 const cookie = (csrfRes.headers.get('set-cookie') ?? '').split(';')[0];
@@ -42,11 +43,11 @@ const SENTENCE = process.env.SENTENCE === '1';
 // the person-steward-runtime playbook, whose rule hands every payment to runtime-c3s0.svc. The compiled payment
 // shape plans the step; `withSpecialists` sets its executor; the same chain follows.
 const PLAYBOOK = process.env.PLAYBOOK === '1';
-const goal = SENTENCE ? `have runtime-c3s0.svc pay nathan.treasury 1 usdc for handoff ${nonce}` : PLAYBOOK ? `pay nathan.treasury 1 usdc for handoff ${nonce}` : `pay nathan.treasury 1 usdc (handoff ${nonce})`;
+const goal = SENTENCE ? `have ${SPECIALIST.handle} pay ${PAYEE} 1 usdc for handoff ${nonce}` : PLAYBOOK ? `pay ${PAYEE} 1 usdc for handoff ${nonce}` : `pay ${PAYEE} 1 usdc (handoff ${nonce})`;
 // LOCAL=1 runs the same plan with no executor — the single-mandate path through the same invoker, as a regression.
 const LOCAL = process.env.LOCAL === '1';
-const plan = { steps: [{ toolId: 'treasury.payment.execute', args: { payee: 'nathan.treasury', usdc: '1', memo: `${LOCAL ? 'local' : 'handoff'} ${nonce}` }, id: 's0', ...(LOCAL ? {} : { executor: RUNTIME }) }] };
-console.log(`alice ${ALICE} → step executor runtime-c3s0.svc ${RUNTIME}`);
+const plan = { steps: [{ toolId: 'treasury.payment.execute', args: { payee: PAYEE, usdc: '1', memo: `${LOCAL ? 'local' : 'handoff'} ${nonce}` }, id: 's0', ...(LOCAL ? {} : { executor: RUNTIME }) }] };
+console.log(`${fx.people.steward} ${ALICE} → step executor ${SPECIALIST.handle} ${RUNTIME}`);
 let r1 = await post('/harness/ask', { session: alice.homeSession, addressee: ALICE, message: goal, ...(SENTENCE || PLAYBOOK ? {} : { plan }) });
 let rep = r1.reply as { kind?: string; error?: string; text?: string; runRef?: string; requirement?: MandateRequirementV1; delegator?: Address; delegate?: Address; routed?: Array<{ agent: string; name?: string; observedVia: string; runRef?: string; childRef?: string; receipts?: number }> } | undefined;
 console.log(`  ask → ${rep?.kind}${rep?.error ? ` ${rep.error}` : ''}${rep?.delegator ? ` (delegator ${rep.delegator.slice(0, 10)}…)` : ''}`);
@@ -83,4 +84,4 @@ if (via?.observedVia !== 'handoff' || via.agent.toLowerCase() !== RUNTIME || !vi
 const receipt = (rep as { receipts?: Array<{ stepRef: string; status: string; binding?: { correlation?: { delegatedTo?: { agent: string; runRef: string } } } }> }).receipts?.find((x) => x.stepRef === 's0');
 console.log(`  parent receipt: ${receipt ? `${receipt.status}, delegatedTo ${JSON.stringify(receipt.binding?.correlation?.delegatedTo)}` : 'none'}`);
 if (receipt?.binding?.correlation?.delegatedTo?.agent?.toLowerCase() !== RUNTIME) throw new Error('the parent receipt does not link to the specialist\'s run');
-console.log(`\n✓ spec 376 ${PLAYBOOK ? 'W2 (the playbook\'s specialist — no name in the words, no plan supplied; the rule on alice\'s playbook handed the step)' : SENTENCE ? 'W2 (sentence form — the executor came from alice\'s words, resolved in her own tier)' : 'W1'}: the step ran at runtime-c3s0.svc under a child mandate alice's harness attenuated from hers and redeemed as a chain; her receipt names the specialist's run and its child.`);
+console.log(`\n✓ spec 376 ${PLAYBOOK ? 'W2 (the playbook\'s specialist — no name in the words, no plan supplied; the rule on alice\'s playbook handed the step)' : SENTENCE ? 'W2 (sentence form — the executor came from alice\'s words, resolved in her own tier)' : 'W1'}: the step ran at ${SPECIALIST.handle} under a child mandate alice's harness attenuated from hers and redeemed as a chain; her receipt names the specialist's run and its child.`);

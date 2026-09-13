@@ -7,7 +7,7 @@
  * stop — without touching the record he holds. That is the point: revocation is the ISSUER's, and it
  * takes effect where the grant is USED, not where it is stored.
  */
-const HOME = 'https://www.faithnet.me';
+import { fixture as fx, HOME } from './fixture.mts';
 const NATHAN = '0x1dba4a27c53d7babda99513080223fb3bfc4bad1';
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 200), _status: r.status }; } };
 let bad = 0;
@@ -17,8 +17,8 @@ const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME }
 const csrf = (await j(csrfRes)) as { token?: string };
 const cookie = (csrfRes.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
 const H = { 'content-type': 'application/json', origin: HOME, cookie, 'x-csrf-token': csrf.token ?? '' };
-const alice = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alice', client_id: 'demo-jp' }) })) as { homeSession: string };
-const nathan = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'nathan', client_id: 'demo-jp' }) })) as { homeSession: string };
+const alice = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: fx.people.steward, client_id: 'demo-jp' }) })) as { homeSession: string };
+const nathan = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: fx.people.payeeOwner, client_id: 'demo-jp' }) })) as { homeSession: string };
 
 const orgs = ((await j(await fetch(`${HOME}/connect/related-orgs`, { headers: { authorization: `Bearer ${alice.homeSession}` } }))) as { orgs?: Array<{ orgAgent: string; orgName?: string; kind?: string }> }).orgs ?? [];
 const target = orgs.find((o) => o.kind === 'person-treasury' && !String(o.orgName ?? '').includes('.'))?.orgAgent

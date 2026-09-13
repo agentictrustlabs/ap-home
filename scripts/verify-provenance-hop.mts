@@ -7,9 +7,9 @@
  *
  *   npx tsx scripts/verify-provenance-hop.mts        (HANDLE=… ORG=… ASK=… to vary)
  */
-const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
-const HANDLE = process.env.HANDLE ?? 'alice';
-const ORG = process.env.ORG ?? 'globalchurch.org';
+import { fixture as fx, HOME, skipUnless } from './fixture.mts';
+const HANDLE = fx.people.steward;
+const ORG = process.env.ORG ?? skipUnless(fx.peerOrg, 'peer organization (a second organization the steward stewards, for the routed hop)').handle;
 const ASK = process.env.ASK ?? `who are the members of ${ORG}`;
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
 const fail = (m: string): never => { console.error(`\n✗ ${m}`); process.exit(1); };

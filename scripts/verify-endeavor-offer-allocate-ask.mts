@@ -15,14 +15,13 @@
  */
 import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import type { Address, Hex } from 'viem';
+import { fixture as fx, HOME, A2A, resolveOrgAgent } from './fixture.mts';
 
-const HOME = 'https://www.faithnet.me';
-const A2A = 'https://a2a.faithnet.io';
+
 const CHAIN = 34348;
 const DM = '0x710cb1bF08C234Df397e0910331e0A29710EF4F7' as Address;
 const ENFORCERS = { delegationManager: DM, timestamp: '0x73A7B878168b7DE48677617179A8bE894f0Dfe96', allowedTargets: '0x2156311097A936de1916a878bF53Bfd43c7b5715', allowedMethods: '0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41', value: '0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975', payment: '0x07fA0aE59FdE4B7ce8962d6fE7a1d648ec3DD5CE', digestBinding: '0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1' } as const;
-const ORG = '0x3b99f2b452766de5df0dbcdfc676f27257151333' as Address; // Missio Nexus
-const NON_MEMBER_CANDIDATES = (process.env.NON_MEMBERS ?? 'dave,nathan,frank').split(',');
+const NON_MEMBER_CANDIDATES = (process.env.NON_MEMBERS ?? `${fx.people.outsider},${fx.people.payeeOwner}`).split(',');
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 250), _status: r.status }; } };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let restoreAutoWork: () => Promise<void> = async () => undefined;
@@ -31,11 +30,12 @@ type Session = { homeSession: string; agent: string; handle: string };
 const signin = async (handle: string): Promise<Session> => ({ ...(await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle, client_id: 'demo-web' }) }))), handle });
 const signerFor = (s: Session) => async (digest: Hex): Promise<Hex> => { const b = await j(await fetch(`${HOME}/connect/persona-sign`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${s.homeSession}` }, body: JSON.stringify({ digest }) })); if (!b.signature) throw new Error(`persona-sign (${s.handle}): ${JSON.stringify(b).slice(0, 160)}`); return b.signature; };
 
-const alice = await signin('alice'); const ALICE = String(alice.agent).toLowerCase() as Address;
-const carol = await signin('carol'); const CAROL = String(carol.agent).toLowerCase() as Address;
+const alice = await signin(fx.people.steward); const ALICE = String(alice.agent).toLowerCase() as Address;
+const carol = await signin(fx.people.member2); const CAROL = String(carol.agent).toLowerCase() as Address;
+const ORG = (await resolveOrgAgent(alice.homeSession)) as Address;
 const related = await j(await fetch(`${HOME}/connect/related-orgs?person=${ALICE}`, { headers: { authorization: `Bearer ${alice.homeSession}` } }));
 const stewardship = (related.orgs ?? []).find((o: { orgAgent: string }) => o.orgAgent.toLowerCase() === ORG)?.stewardshipDelegation;
-if (!stewardship) fail('alice holds no stewardship wire for Missio Nexus');
+if (!stewardship) fail(`${fx.people.steward} holds no stewardship wire for ${fx.org.name}`);
 type Ix = { ok?: boolean; error?: string } & Record<string, unknown>;
 const ix = async (token: string, op: string, payload: Record<string, unknown>, withStewardship = false): Promise<Ix & { httpStatus: number }> => {
   for (let attempt = 0; ; attempt++) {
@@ -101,7 +101,7 @@ try {
     if (l.ok === true && l.member === false && l.steward !== true) { outsider = s; break; }
     console.log(`  (${h} is a member or steward here — not the outsider)`);
   }
-  if (!outsider) fail(`none of ${NON_MEMBER_CANDIDATES.join(', ')} is an outsider to Missio Nexus — set NON_MEMBERS=`);
+  if (!outsider) fail(`none of ${NON_MEMBER_CANDIDATES.join(', ')} is an outsider to ${fx.org.name} — set NON_MEMBERS=`);
   const OUT = String(outsider!.agent).toLowerCase() as Address;
   console.log(`personas: alice ${ALICE} (steward) · carol ${CAROL} (member) · ${outsider!.handle} ${OUT} (outsider)`);
 

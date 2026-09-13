@@ -11,7 +11,10 @@
  * asked of her — the run completes without authority_required).
  */
 import { createHash, randomBytes } from 'node:crypto';
-const MCP = process.env.HOME_MCP_URL ?? 'https://home-mcp-faithnet.richardpedersen3.workers.dev';
+import { fixture as fx, HOME_MCP, skipUnless } from './fixture.mts';
+const MCP = HOME_MCP;
+const MIN = skipUnless(fx.ministry, 'ministry in the public registry with a content-catalog playbook');
+const minWord = new RegExp(MIN.name.split(/\s+/)[0]!, 'i');
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
 function fail(m: string): never { console.error(`\n✗ ${m}`); process.exit(1); }
 const b64u = (b: Buffer) => b.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -20,7 +23,7 @@ const post = (path: string, body: unknown, headers: Record<string, string> = {})
 // ── connect alice (W1's door) ──
 const reg = await j(await post('/oauth/register', { client_name: 'verify-home-mcp-discovery', redirect_uris: ['https://claude.ai/api/mcp/auth_callback'] }));
 const verifier = b64u(randomBytes(48));
-const conn = await j(await post('/oauth/demo-connect', { handle: 'alice', client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_challenge: b64u(createHash('sha256').update(verifier).digest()), resource: `${MCP}/mcp` }));
+const conn = await j(await post('/oauth/demo-connect', { handle: fx.people.steward, client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_challenge: b64u(createHash('sha256').update(verifier).digest()), resource: `${MCP}/mcp` }));
 if (!conn.code) fail(`demo-connect: ${JSON.stringify(conn)}`);
 const tok = await j(await post('/oauth/token', new URLSearchParams({ grant_type: 'authorization_code', code: conn.code, client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_verifier: verifier, resource: `${MCP}/mcp` }).toString()));
 if (!tok.access_token) fail(`token: ${JSON.stringify(tok)}`);
@@ -46,8 +49,8 @@ const unknown = await call('discover_agents', { intent: 'a study on justificatio
 const ur = unknown.out.capabilityResolution as { resolvedTo?: string | null; because?: string } | undefined;
 console.log(`twin · capability “basket weaving” → ${((unknown.out.agents ?? []) as unknown[]).length} agent(s) · ${ur?.because ?? unknown.out.note}`);
 if (((unknown.out.agents ?? []) as unknown[]).length !== 0 || ur?.resolvedTo) fail('an unknown capability word must leave the filter unmet, not widen the search');
-const lig = agents.find((a) => /ligonier/i.test(a.displayName) || a.name === 'ligonier.svc');
-if (!lig?.name) fail('Ligonier was not found by name through her agent');
+const lig = agents.find((a) => minWord.test(a.displayName) || a.name === MIN.svc);
+if (!lig?.name) fail(`${MIN.name} was not found by name through her agent`);
 
 // ── engage, as her ──
 t0 = Date.now();
@@ -58,14 +61,14 @@ const via = eng.out.via as { name?: string; agent?: string; observedVia?: string
 console.log(`engage → kind ${eng.out.kind} · ${Date.now() - t0} ms · via ${via?.name ?? '?'} (${via?.observedVia ?? '?'}, its run ${via?.runRef ?? '-'}) · her run ${eng.out.runRef}`);
 console.log(`  ${said.replace(/\s+/g, ' ').slice(0, 400)}…`); if (process.env.DEBUG) console.log('  keys', Object.keys(eng.out).join(','), 'text', String(eng.out.text ?? '').slice(0, 200));
 if (eng.isError || eng.out.refused) fail(`engage: ${JSON.stringify(eng.out).slice(0, 400)}`);
-const links = (said.match(/https:\/\/[a-z.]*ligonier\.org\/[^\s)>\]]+/g) ?? []).length;
-console.log(`  ligonier.org links in the answer: ${links} · weeks named: ${(said.match(/week\s*\d/gi) ?? []).length}`);
-if (via?.name !== 'ligonier.svc') fail(`the hop was not to ligonier.svc: ${JSON.stringify(via)}`);
+const links = (said.match(new RegExp(`https://[a-z.]*${MIN.org.replace(/\./g, '\\.')}/[^\\s)>\\]]+`, 'g')) ?? []).length;
+console.log(`  ${MIN.org} links in the answer: ${links} · weeks named: ${(said.match(/week\s*\d/gi) ?? []).length}`);
+if (via?.name !== MIN.svc) fail(`the hop was not to ${MIN.svc}: ${JSON.stringify(via)}`);
 if (links < 3) fail('the ministry\'s answer carries fewer than three links into its catalog');
 if (eng.out.kind === 'authority_required') fail('an engagement asked for her authority — an observation must not');
 
 // ── twin: a name the registry does not know ──
-const bogus = await call('engage', { agent: 'nobody-here-zz.svc', message: 'hello' });
+const bogus = await call('engage', { agent: fx.absent.svc, message: 'hello' });
 console.log(`twin · engage an unknown name → refused: ${String(bogus.out.refused ?? bogus.out.text ?? '').slice(0, 120)}`);
 if (!bogus.out.refused && !/no agent|not found|names no/i.test(String(bogus.out.text ?? ''))) fail('an unknown name must be refused in words');
 console.log('\n✓ spec 397 W2: found in the registry and engaged through her agent — Ligonier\'s own answer, with its links, as an observation of her run');

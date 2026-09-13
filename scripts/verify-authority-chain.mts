@@ -14,19 +14,20 @@ import { hashDelegation, buildDigestBindingCaveat, paymentHandler, ROOT_AUTHORIT
 import type { Address, Hex } from 'viem';
 // Priorities §3.2 G6 — the cross-Home leg (CROSS=1): preflighted; skipped-and-said until B holds its caller token and the parent wire exists.
 import { requireCrossHome } from './cross-home-preflight.mts';
+import { fixture as fx, HOME, A2A, skipUnless } from './fixture.mts';
 if (process.env.CROSS === '1') await requireCrossHome('verify-authority-chain', { needsParentWire: true });
 registerDefaultSubsetHandlers();
 
-const HOME = 'https://www.faithnet.me';
 const CHAIN = 34348;
 const DM = '0x710cb1bF08C234Df397e0910331e0A29710EF4F7' as Address;
 const ENFORCERS = { delegationManager: DM, timestamp: '0x73A7B878168b7DE48677617179A8bE894f0Dfe96', allowedTargets: '0x2156311097A936de1916a878bF53Bfd43c7b5715', allowedMethods: '0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41', value: '0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975', payment: '0x07fA0aE59FdE4B7ce8962d6fE7a1d648ec3DD5CE', digestBinding: '0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1' } as const;
-const RUNTIME = '0x309b2a566e93cc77aabe895d0ec2702c36856ebd' as Address; // runtime-c3s0.svc
+const SPECIALIST = skipUnless(fx.specialist, 'specialist service (the executor a step is handed to)');
+const RUNTIME = skipUnless(SPECIALIST.agent, 'specialist address') as Address;
+const PAYEE = fx.treasuries.payee;
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 250), _status: r.status }; } };
-const alice = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alice', client_id: 'demo-web' }) }));
+const alice = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: fx.people.steward, client_id: 'demo-web' }) }));
 const ALICE = String(alice.agent).toLowerCase() as Address;
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/128 Safari/537.36';
-const A2A = 'https://alice.faithnet.ai';
 const csrfRes = await fetch(`${A2A}/auth/csrf`, { headers: { origin: HOME, 'user-agent': UA } });
 const csrfTok = csrfRes.headers.get('x-csrf-token') || ((await j(csrfRes.clone())) as { token?: string }).token || '';
 const cookie = (csrfRes.headers.get('set-cookie') ?? '').split(';')[0];
@@ -40,8 +41,8 @@ const salt = () => { let s = 0n; for (const b of crypto.getRandomValues(new Uint
 
 // ── 1. the handed-off payment (spec 376) ─────────────────────────────────────────────────────────────
 const nonce = Date.now().toString(36);
-const goal = `pay nathan.treasury 1 usdc (chain ${nonce})`;
-const plan = { steps: [{ toolId: 'treasury.payment.execute', args: { payee: 'nathan.treasury', usdc: '1', memo: `chain ${nonce}` }, id: 's0', executor: RUNTIME }] };
+const goal = `pay ${PAYEE} 1 usdc (chain ${nonce})`;
+const plan = { steps: [{ toolId: 'treasury.payment.execute', args: { payee: PAYEE, usdc: '1', memo: `chain ${nonce}` }, id: 's0', executor: RUNTIME }] };
 let r1 = await post('/harness/ask', { session: alice.homeSession, addressee: ALICE, message: goal, plan });
 let rep = r1.reply as Reply;
 console.log(`ask → ${rep?.kind}${rep?.error ? ` ${rep.error}` : ''}`);
@@ -94,7 +95,7 @@ if (actor.originatingAgent !== ALICE || actor.rootPrincipal !== ALICE) throw new
 console.log('  ✓ three parties, two grants, one chain digest — named on the receipt, not inferred from the last link');
 
 // ── 4. twin: a forged child, presented alone ─────────────────────────────────────────────────────────
-const r2 = await post('/harness/ask', { session: alice.homeSession, addressee: ALICE, message: `pay nathan.treasury 1 usdc (forged child ${nonce})`, plan: { steps: [{ toolId: 'treasury.payment.execute', args: { payee: 'nathan.treasury', usdc: '1', memo: `forged ${nonce}` }, id: 's0' }] } });
+const r2 = await post('/harness/ask', { session: alice.homeSession, addressee: ALICE, message: `pay ${PAYEE} 1 usdc (forged child ${nonce})`, plan: { steps: [{ toolId: 'treasury.payment.execute', args: { payee: PAYEE, usdc: '1', memo: `forged ${nonce}` }, id: 's0' }] } });
 const rep2 = r2.reply as Reply;
 if (rep2?.kind !== 'authority_required' || !rep2.requirement || !rep2.delegator || !rep2.delegate) throw new Error(`twin: expected a mandate ask: ${JSON.stringify(r2).slice(0, 400)}`);
 const req2 = rep2.requirement;

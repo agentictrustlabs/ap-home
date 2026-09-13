@@ -9,16 +9,16 @@
  * Then the other direction: the room-scoped one cleared, a default declared at home (`any`) IS read at the
  * organization. Every run is left at authority_required: nothing signed, nothing moves.
  */
-const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
-const ORG = (process.env.ORG ?? '0x3b99f2b452766de5df0dbcdfc676f27257151333').toLowerCase();
-const DEFAULT_TREASURY = process.env.STANDING_TREASURY ?? 'alice3.treasury';
+import { fixture as fx, HOME, resolveOrgAgent } from './fixture.mts';
+const DEFAULT_TREASURY = process.env.STANDING_TREASURY ?? fx.treasuries.own;
+const PAYEE = fx.treasuries.payee;
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300) }; } };
 function fail(m: string): never { console.error(`\n✗ ${m}`); process.exit(1); }
 type Binding = { arg: string; agent: string; label?: string; source: string };
 type Reply = { kind: string; error?: string; runRef?: string; delegator?: string; prompt?: { kind: string; prompt: string; stepRef: string; fields?: Array<{ name: string }> }; result?: Record<string, unknown>; plannerTrace?: { bindings?: Binding[] } };
 type Out = { ok?: boolean; reply?: Reply; error?: string };
 
-const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alice', client_id: 'demo-jp' }) }));
+const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: fx.people.steward, client_id: 'demo-jp' }) }));
 if (!si.homeSession) fail(`no session: ${JSON.stringify(si).slice(0, 200)}`);
 const ALICE = String(si.agent).toLowerCase();
 const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
@@ -33,7 +33,8 @@ if (!T_DEFAULT) fail(`${DEFAULT_TREASURY} is not among alice's agents`);
 const describe = (r: Reply | undefined) => `${r?.kind}${r?.prompt ? ` (${r.prompt.kind}: ${r.prompt.prompt.slice(0, 90)})` : ''}${r?.delegator ? ` · delegator ${r.delegator}` : ''}${r?.error ? ` — ${r.error}` : ''}`;
 const payerOf = (r: Reply | undefined) => r?.plannerTrace?.bindings?.find((b) => b.arg === 'payer');
 const nonce = Date.now().toString(36);
-const PAY = { steps: [{ toolId: 'treasury.payment.execute', args: { payee: 'nathan.treasury', usdc: '1' } }] };
+const PAY = { steps: [{ toolId: 'treasury.payment.execute', args: { payee: PAYEE, usdc: '1' } }] };
+const ORG = process.env.ORG ? process.env.ORG.toLowerCase() : await resolveOrgAgent(si.homeSession);
 const declareAt = async (addressee: string, label: string) => {
   let o = await askAt(addressee, { message: `from now on pay from ${DEFAULT_TREASURY} (${label} ${nonce})`, plan: { steps: [{ toolId: 'context.instruction.declare', args: { capability: 'treasury.payment.execute', value: DEFAULT_TREASURY } }] } });
   let r = o.reply;
@@ -50,11 +51,11 @@ await clear();
 // ── 1. declared AT the organization: read there, not at home ──
 const ctx = await declareAt(ORG, 'the organization');
 if (ctx !== ORG) fail(`the room should be the organization (${ORG}), got ${ctx}`);
-let o = await askAt(ORG, { message: `send nathan.treasury 1 USDC (${nonce}a)`, plan: PAY });
+let o = await askAt(ORG, { message: `send ${PAYEE} 1 USDC (${nonce}a)`, plan: PAY });
 let p = payerOf(o.reply);
 console.log(`  at the organization → ${describe(o.reply)} · payer ${p ? `${p.label ?? p.agent} (${p.source})` : 'none'}`);
 if (o.reply?.kind !== 'authority_required' || String(o.reply.delegator).toLowerCase() !== T_DEFAULT || p?.source !== 'standing') fail('at the organization the room-scoped instruction should fill the payer');
-o = await askAt(ALICE, { message: `send nathan.treasury 1 USDC (${nonce}b)`, plan: PAY });
+o = await askAt(ALICE, { message: `send ${PAYEE} 1 USDC (${nonce}b)`, plan: PAY });
 p = payerOf(o.reply);
 console.log(`  at home → ${describe(o.reply)} · payer ${p ? `${p.label ?? p.agent} (${p.source})` : 'none'}`);
 if (p?.source === 'standing' || (o.reply?.kind === 'authority_required' && String(o.reply.delegator).toLowerCase() === T_DEFAULT && p?.source === 'standing')) fail('a default declared for the organization was read at home');
@@ -63,7 +64,7 @@ if (p?.source === 'standing' || (o.reply?.kind === 'authority_required' && Strin
 await clear();
 const ctx2 = await declareAt(ALICE, 'home');
 if (ctx2 !== 'any') fail(`home should be \`any\`, got ${ctx2}`);
-o = await askAt(ORG, { message: `send nathan.treasury 1 USDC (${nonce}c)`, plan: PAY });
+o = await askAt(ORG, { message: `send ${PAYEE} 1 USDC (${nonce}c)`, plan: PAY });
 p = payerOf(o.reply);
 console.log(`  at the organization (home default) → ${describe(o.reply)} · payer ${p ? `${p.label ?? p.agent} (${p.source})` : 'none'}`);
 if (o.reply?.kind !== 'authority_required' || String(o.reply.delegator).toLowerCase() !== T_DEFAULT || p?.source !== 'standing') fail('a default declared at home should be read in the organization');

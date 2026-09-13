@@ -19,7 +19,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 interface Gate { id: string; script: string; spec: string; proves: string; twin: string; required: boolean; paced?: boolean; timeoutSec?: number; env?: Record<string, string> }
-interface Ledger { home: string; gates: Gate[] }
+interface Ledger { home: string; fixture?: string; gates: Gate[] }
 interface Result { id: string; spec: string; ok: boolean; required: boolean; ms: number; status: 'passed' | 'failed' | 'timed out' | 'skipped'; tail: string[] }
 
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
@@ -30,6 +30,7 @@ const gates = ledger.gates.filter((g) => !wanted || wanted.has(g.id));
 if (!gates.length) { console.error(`no gates match ${only}`); process.exit(2); }
 const PACE_MS = Number(process.env.LIVE_GATES_PACE_MS ?? 20_000);
 const HOME = process.env.HOME_URL ?? ledger.home;
+const FIXTURE: Record<string, string> = ledger.fixture ? { FIXTURE_JSON: resolve(ROOT, ledger.fixture) } : {};   // the roster the gates read (scripts/fixture.mts)
 
 const results: Result[] = [];
 console.log(`live gates · ${gates.length} of ${ledger.gates.length} · ${HOME}\n`);
@@ -37,7 +38,7 @@ for (const [i, g] of gates.entries()) {
   if (i > 0 && g.paced && PACE_MS > 0) await new Promise((r) => setTimeout(r, PACE_MS));
   const t0 = Date.now();
   process.stdout.write(`▶ ${g.id.padEnd(26)} ${g.spec.padEnd(20)} `);
-  const run = spawnSync('npx', ['tsx', g.script], { cwd: ROOT, env: { ...process.env, HOME_URL: HOME, ...(g.env ?? {}) }, encoding: 'utf8', timeout: (g.timeoutSec ?? 300) * 1000, maxBuffer: 16 * 1024 * 1024 });
+  const run = spawnSync('npx', ['tsx', g.script], { cwd: ROOT, env: { ...process.env, ...FIXTURE, HOME_URL: HOME, ...(g.env ?? {}) }, encoding: 'utf8', timeout: (g.timeoutSec ?? 300) * 1000, maxBuffer: 16 * 1024 * 1024 });
   const ms = Date.now() - t0;
   const timedOut = run.error?.name === 'Error' && /ETIMEDOUT|TIMEOUT/i.test(String(run.error?.message ?? run.signal ?? ''));
   const out = `${run.stdout ?? ''}\n${run.stderr ?? ''}`.split('\n').map((l) => l.replace(/\s+$/, '')).filter((l) => l && !/^npm warn/.test(l));

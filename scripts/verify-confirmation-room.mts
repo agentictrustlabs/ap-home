@@ -10,10 +10,9 @@
  * left at authority_required or a question: nothing signed, nothing moves.
  */
 import type { Hex } from 'viem';
-const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
-const A2A = process.env.A2A_URL ?? 'https://a2a.faithnet.io';
-const ORG = (process.env.ORG ?? '0x3b99f2b452766de5df0dbcdfc676f27257151333').toLowerCase();
-const ROTATION = ['thompson', 'rich', 'somali corridor team', 'xyz', 'voice test'];
+import { fixture as fx, HOME, A2A, resolveOrgAgent } from './fixture.mts';
+
+const ROTATION = fx.ambiguousWords;
 type Choice = { label: string; value: string };
 type Field = { name: string; choices?: Choice[] };
 type Prompt = { kind: string; prompt: string; stepRef: string; fields?: Field[]; scope?: { word: string; capability: string; arg: string } };
@@ -22,9 +21,10 @@ type Reply = { kind: string; error?: string; prompt?: Prompt; parties?: Party[];
 type Out = { ok?: boolean; reply?: Reply; runRef?: string; error?: string };
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300) }; } };
 function fail(m: string): never { console.error(`\n✗ ${m}`); process.exit(1); }
-const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alice', client_id: 'demo-jp' }) }));
+const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: fx.people.steward, client_id: 'demo-jp' }) }));
 if (!si.homeSession) fail(`no session: ${JSON.stringify(si).slice(0, 200)}`);
 const ALICE = String(si.agent).toLowerCase();
+const ORG = process.env.ORG ? process.env.ORG.toLowerCase() : await resolveOrgAgent(si.homeSession);
 const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
 const csrf = (await j(csrfRes)) as { token?: string };
 const cookie = (csrfRes.headers.get('set-cookie') ?? '').split(';')[0];
@@ -56,11 +56,11 @@ async function drive(addressee: string, message: string, p: ReturnType<typeof pl
 }
 const say = (label: string, d: { turns: Out[]; picked: Choice | null; asked: boolean }) => console.log(`  ${label} → ${d.asked ? `asked "which one?"${d.picked ? `, picked ${d.picked.label}` : ''}` : 'no question'} · ended ${d.turns[d.turns.length - 1]!.reply?.kind}${remembered(d.turns[d.turns.length - 1]!) ? ' · cited the memory' : ''}`);
 
-console.log(`alice ${ALICE} · room Missio Nexus ${ORG} · word "${word}"`);
+console.log(`${fx.people.steward} ${ALICE} · room ${fx.org.name} ${ORG} · word "${word}"`);
 for (const e of (await list()).filter((e) => e.word === word)) await forget(e);
 
 // 1. at the organization: asked, picks → the memory is written FOR THE ROOM
-const one = await drive(ORG, `invite bob to ${word}`, plan('bob'), (cs) => cs.find((c) => c.label.includes('.')) ?? cs[0] ?? null);
+const one = await drive(ORG, `invite ${fx.people.member} to ${word}`, plan(fx.people.member), (cs) => cs.find((c) => c.label.includes('.')) ?? cs[0] ?? null);
 say('1. at the organization', one);
 if (!one.picked) fail(`no "which one?" for "${word}" at the organization: ${JSON.stringify(one.turns[0]).slice(0, 400)}`);
 if (presented(one.turns)) fail('a mandate was presented that nobody signed');
@@ -69,7 +69,7 @@ console.log(`     remembered: ${kept ? `${kept.agent.slice(0, 10)}… in room ${
 if (!kept || kept.context !== ORG) fail(`the confirmation should be kept for the room ${ORG}: ${JSON.stringify(kept)}`);
 
 // 2. at HOME: the room's choice is not read — the question comes back (the twin)
-const two = await drive(ALICE, `invite carol to ${word}`, plan('carol'), () => null);
+const two = await drive(ALICE, `invite ${fx.people.member2} to ${word}`, plan(fx.people.member2), () => null);
 say('2. at home (twin)', two);
 if (remembered(two.turns[0]!) || (!two.asked && two.turns[0]!.reply?.kind !== 'prompt')) {
   // the rolling window (word-scoped by design, 370 P7) may settle it — that is not the durable room memory
@@ -79,7 +79,7 @@ if (remembered(two.turns[0]!) || (!two.asked && two.turns[0]!.reply?.kind !== 'p
 }
 
 // 3. at the organization again: settled from the memory, cited
-const three = await drive(ORG, `invite dave to ${word}`, plan('dave'), () => null);
+const three = await drive(ORG, `invite ${fx.people.outsider} to ${word}`, plan(fx.people.outsider), () => null);
 say('3. at the organization again', three);
 if (three.asked) fail('asked "which one?" again at the organization although the choice was remembered there');
 const cited = three.turns.map(remembered).find(Boolean);

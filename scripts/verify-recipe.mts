@@ -11,11 +11,11 @@
  */
 import { createHash } from 'node:crypto';
 import type { Address } from 'viem';
+import { fixture as fx, HOME } from './fixture.mts';
 
-const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 250), _status: r.status }; } };
 const fail = (m: string): never => { console.error(`\n✗ ${m}`); process.exit(1); };
-const HANDLE = process.env.HANDLE ?? 'alice';   // the roster differs per deployment (Faithnet: alice; the estate: mara …)
+const HANDLE = fx.people.steward;   // the roster differs per deployment (Faithnet: alice; the estate: mara …)
 const alice = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: HANDLE, client_id: 'demo-web' }) }));
 if (!alice.homeSession) fail(`${HANDLE} could not sign in: ${JSON.stringify(alice).slice(0, 120)}`);
 const ME = String(alice.sub).replace(/^eip155:\d+:/, '').toLowerCase() as Address;
@@ -26,12 +26,11 @@ const post = async (path: string, body: unknown) => j(await fetch(`${HOME}/a2a/h
 const library = async (body: unknown) => j(await fetch(`${HOME}/connect/library`, { method: 'POST', headers: { authorization: `Bearer ${alice.homeSession}`, 'content-type': 'application/json' }, body: JSON.stringify(body) }));
 
 const orgs = ((await j(await fetch(`${HOME}/connect/related-orgs?surface=any`, { headers: { authorization: `Bearer ${alice.homeSession}` } }))).orgs ?? []) as Array<{ orgAgent: string; orgName: string; relationship?: string; kind?: string }>;
-// Missio Nexus on Faithnet; on another deployment (the estate), any organization alice stewards — the gate is about the
-// recipe, not the fixture.
-const org = orgs.find((o) => /missio nexus/i.test(o.orgName)) ?? orgs.find((o) => o.relationship === 'steward' && !/treasury/.test(o.kind ?? '') && o.orgName);
+// the fixture's organization, else any organization the steward stewards — the gate is about the recipe, not the fixture
+const org = orgs.find((o) => [fx.org.name, fx.org.handle].some((n) => n.toLowerCase() === (o.orgName ?? '').toLowerCase())) ?? orgs.find((o) => o.relationship === 'steward' && !/treasury/.test(o.kind ?? '') && o.orgName);
 if (!org) fail(`${HANDLE} stewards no organization here`);
 const ORG = org!.orgAgent.toLowerCase();
-console.log(`── alice ${ME} · ${org!.orgName} ${ORG} ──`);
+console.log(`── ${HANDLE} ${ME} · ${org!.orgName} ${ORG} ──`);
 
 // 1. a read that completes, with a supplied plan
 const runRef = `recipe-${Date.now().toString(36)}`;
@@ -67,7 +66,7 @@ await library({ action: 'delete', id: art.id });
 console.log('  removed again (the gate leaves no artifact behind)');
 
 // twin: a run that did not complete is not a recipe
-const parked = await post('ask', { addressee: ME, message: 'send 1 usdc to alice3.treasury', plan: { steps: [{ toolId: 'treasury.payment.execute', args: { payee: 'alice3.treasury', usdc: '1' } }] } });
+const parked = await post('ask', { addressee: ME, message: `send 1 usdc to ${fx.treasuries.payee}`, plan: { steps: [{ toolId: 'treasury.payment.execute', args: { payee: fx.treasuries.payee, usdc: '1' } }] } });
 const parkedRef = String(parked.reply?.runRef ?? '');
 const refused = await post('recipe', { addressee: ME, runRef: parkedRef });
 console.log(`  twin: a ${parked.reply?.kind} run → ${refused.ok === false ? `refused: ${refused.error}` : 'DRAFTED'}`);

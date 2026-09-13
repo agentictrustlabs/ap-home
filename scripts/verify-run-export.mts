@@ -10,18 +10,17 @@
  */
 import { hashDelegation, buildDigestBindingCaveat, paymentHandler, ROOT_AUTHORITY, registerDefaultSubsetHandlers, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import type { Address, Hex } from 'viem';
+import { fixture as fx, HOME, A2A } from './fixture.mts';
 registerDefaultSubsetHandlers();
 
-const HOME = 'https://www.faithnet.me';
 const CHAIN = 34348;
 const DM = '0x710cb1bF08C234Df397e0910331e0A29710EF4F7' as Address;
 const ENFORCERS = { delegationManager: DM, timestamp: '0x73A7B878168b7DE48677617179A8bE894f0Dfe96', allowedTargets: '0x2156311097A936de1916a878bF53Bfd43c7b5715', allowedMethods: '0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41', value: '0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975', payment: '0x07fA0aE59FdE4B7ce8962d6fE7a1d648ec3DD5CE', digestBinding: '0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1' } as const;
 const NATHAN_TREASURY = '0x2c471607' ; // prefix only — the gate never needs the full payee, and the span must not carry it
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 250), _status: r.status }; } };
-const alice = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alice', client_id: 'demo-web' }) }));
+const alice = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: fx.people.steward, client_id: 'demo-web' }) }));
 const ALICE = String(alice.agent).toLowerCase() as Address;
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/128 Safari/537.36';
-const A2A = 'https://alice.faithnet.ai';
 const csrfRes = await fetch(`${A2A}/auth/csrf`, { headers: { origin: HOME, 'user-agent': UA } });
 const csrfTok = csrfRes.headers.get('x-csrf-token') || ((await j(csrfRes.clone())) as { token?: string }).token || '';
 const cookie = (csrfRes.headers.get('set-cookie') ?? '').split(';')[0];
@@ -31,8 +30,9 @@ const sign = async (digest: Hex): Promise<Hex> => { const b = await j(await fetc
 
 // ── 1. a payment, the single-mandate path ─────────────────────────────────────────────────────────────
 const nonce = Date.now().toString(36);
-const goal = `pay nathan.treasury 1 usdc (export ${nonce})`;
-const plan = { steps: [{ toolId: 'treasury.payment.execute', args: { payee: 'nathan.treasury', usdc: '1', memo: `export ${nonce}` }, id: 's0' }] };
+const PAYEE = fx.treasuries.payee;
+const goal = `pay ${PAYEE} 1 usdc (export ${nonce})`;
+const plan = { steps: [{ toolId: 'treasury.payment.execute', args: { payee: PAYEE, usdc: '1', memo: `export ${nonce}` }, id: 's0' }] };
 let r1 = await post('/harness/ask', { session: alice.homeSession, addressee: ALICE, message: goal, plan });
 let rep = r1.reply as { kind?: string; error?: string; runRef?: string; requirement?: MandateRequirementV1; delegator?: Address; delegate?: Address; prompt?: { kind?: string; stepRef?: string; digest?: Hex; prompt?: string } };
 console.log(`ask → ${rep?.kind}${rep?.error ? ` ${rep.error}` : ''}`);
@@ -77,7 +77,7 @@ if (!/^0x[0-9a-f]{64}$/.test(String(pay.attributes['ap.receipt.digest']))) throw
 const text = JSON.stringify(spans).toLowerCase();
 if (text.includes(payee)) throw new Error('a span carries the payee\'s address');
 if (text.includes(ALICE)) throw new Error('a span carries alice\'s address');
-if (text.includes('nathan')) throw new Error('a span carries the treasury\'s name');
+if (text.includes(PAYEE.split('.')[0]!)) throw new Error('a span carries the treasury\'s name');
 if (text.includes(`export ${nonce}`) || text.includes('pay nathan')) throw new Error('a span carries the utterance');
 if (/0x[0-9a-f]{40}(?![0-9a-f])/.test(text.replace(/0x[0-9a-f]{64}/g, ''))) throw new Error('a span carries some address');
 console.log('  ✓ step names + receipt digest + verdict; no payee, no name, no utterance, no address');

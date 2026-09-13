@@ -14,8 +14,8 @@
  */
 import { toHex, type Address, type Hex } from 'viem';
 import { buildDigestBindingCaveat, capabilityHandler, hashDelegation, ROOT_AUTHORITY, type Caveat, type Delegation, type MandateRequirementV1 } from '@agenticprimitives/delegation';
+import { fixture as fx, HOME } from './fixture.mts';
 
-const HOME = 'https://www.faithnet.me';
 const CHAIN = 34348;
 const E = {
   delegationManager: '0x710cb1bF08C234Df397e0910331e0A29710EF4F7', timestamp: '0x73A7B878168b7DE48677617179A8bE894f0Dfe96',
@@ -31,7 +31,7 @@ const signinAs = async (handle: string) => {
   if (!s.homeSession) throw new Error(`no session for ${handle}`);
   return s as { homeSession: string; agent: string };
 };
-const alice = await signinAs('alice');
+const alice = await signinAs(fx.people.steward);
 const personas = await j(await fetch(`${HOME}/connect/demo-personas`));
 const credential = { kind: 'eoa', address: (personas.personas as Array<{ sa: string; custodian: string }>).find((p) => p.sa.toLowerCase() === String(alice.agent).toLowerCase())!.custodian };
 const sign = async (token: string, digest: Hex): Promise<Hex> => {
@@ -99,7 +99,7 @@ console.log(`  after: ${after.reply?.kind ?? after.error} — ${after.error ?? '
 if (after.ok !== false) throw new Error('a finished run must not be resumable');
 
 // A run belongs to the person who started it.
-const bob = await signinAs('bob');
+const bob = await signinAs(fx.people.member);
 const r2 = await post({ session: alice.homeSession, addressee: WORKSPACE, message: `create a team called ${LABEL}-b` });
 const stolen = await post({ session: bob.homeSession, addressee: WORKSPACE, runRef: r2.runRef });
 console.log(`  someone else's run: ${stolen.error ?? stolen.reply?.kind}`);

@@ -10,10 +10,10 @@
  * as much the asker's as a resume is (claimableBy), and a refusal names it.
  */
 import type { Address } from 'viem';
+import { fixture as fx, HOME } from './fixture.mts';
 
-const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
-const HANDLE = process.env.HANDLE ?? 'alice';
-const OTHER = process.env.OTHER ?? 'bob';
+const HANDLE = fx.people.steward;
+const OTHER = process.env.OTHER ?? fx.people.member;
 const WORKSPACE = (process.env.WORKSPACE ?? '0xee11DFB02e4a02630bE512886305DF5C68Fd682c').toLowerCase() as Address;
 const LABEL = `stop-${Date.now().toString(36).slice(-4)}`;
 

@@ -12,14 +12,14 @@
  */
 import { receiptDigest, type StepReceipt } from '@agenticprimitives/orchestration';
 import { createPublicClient, http, defineChain, type Hex } from 'viem';
+import { fixture as fx, HOME, A2A } from './fixture.mts';
 
 
-const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
-const A2A = process.env.A2A_URL ?? 'https://a2a.faithnet.io';
+
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
 function fail(m: string): never { console.error(`\n✗ ${m}`); process.exit(1); }
 
-const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alice', client_id: 'demo-jp' }) }));
+const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: fx.people.steward, client_id: 'demo-jp' }) }));
 if (!si.homeSession) fail(`no session: ${JSON.stringify(si).slice(0, 200)}`);
 const ALICE = String(si.agent).toLowerCase();
 const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });

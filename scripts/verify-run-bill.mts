@@ -8,10 +8,10 @@
  * spans reply carries the `ap.vault.calls` metric beside the four. THE TWIN: the bill names no record content — only
  * step refs and numbers.
  */
-const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
+import { fixture as fx, HOME } from './fixture.mts';
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300) }; } };
 function fail(m: string): never { console.error(`\n✗ ${m}`); process.exit(1); }
-const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alice', client_id: 'demo-jp' }) }));
+const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: fx.people.steward, client_id: 'demo-jp' }) }));
 if (!si.homeSession) fail(`no session: ${JSON.stringify(si).slice(0, 200)}`);
 const ALICE = String(si.agent).toLowerCase();
 const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
@@ -20,7 +20,7 @@ const cookie = (csrfRes.headers.get('set-cookie') ?? '').split(';')[0];
 const post = async (path: string, body: Record<string, unknown>) =>
   j(await fetch(`${HOME}/a2a${path}`, { method: 'POST', headers: { 'content-type': 'application/json', origin: HOME, cookie, 'x-csrf-token': csrf.token ?? '' }, body: JSON.stringify({ session: si.homeSession, ...body }) }));
 type Reply = { kind: string; runRef?: string; prompt?: { stepRef: string; fields?: Array<{ name: string }> } };
-let o = await post('/harness/ask', { addressee: ALICE, message: `from now on pay from alice3.treasury (bill ${Date.now().toString(36)})`, plan: { steps: [{ toolId: 'context.instruction.declare', args: { capability: 'treasury.payment.execute', value: 'alice3.treasury' } }] } });
+let o = await post('/harness/ask', { addressee: ALICE, message: `from now on pay from ${fx.treasuries.own} (bill ${Date.now().toString(36)})`, plan: { steps: [{ toolId: 'context.instruction.declare', args: { capability: 'treasury.payment.execute', value: fx.treasuries.own } }] } });
 let r = o.reply as Reply;
 if (r?.kind !== 'prompt' || !r.prompt?.fields?.some((f) => f.name === 'keep')) fail(`expected the read-back: ${JSON.stringify(o).slice(0, 300)}`);
 o = await post('/harness/ask', { addressee: ALICE, runRef: r.runRef, supplied: [{ stepRef: r.prompt.stepRef, data: { keep: 'yes' } }] });
@@ -34,7 +34,7 @@ if (!bill || bill.doRequests < 1) fail('the record carries no bill');
 
 const stepKeys = Object.keys(bill.byStep);
 if (!stepKeys.some((k) => k === 'plan' || /^s\d+$|^step/.test(k))) fail(`the bill's steps are not step refs: ${stepKeys.join(', ')}`);
-if (JSON.stringify(bill).match(/0x[0-9a-f]{40}|alice3|nathan|usdc/i)) fail('the bill carries content — an address, a name, an argument');
+if (JSON.stringify(bill).match(/0x[0-9a-f]{40}|usdc/i) || JSON.stringify(bill).toLowerCase().includes(fx.treasuries.own.split('.')[0]!) || JSON.stringify(bill).toLowerCase().includes(fx.people.payeeOwner)) fail('the bill carries content — an address, a name, an argument');
 console.log(`  reads by record type: ${JSON.stringify((bill as { byRecord?: Record<string, number> }).byRecord ?? {})} · DO requests by op: ${JSON.stringify((bill as { byOp?: Record<string, number> }).byOp ?? {})}`);
 const spans = await post('/harness/spans', { addressee: ALICE, runRef });
 const names = ((spans.metrics?.vaultCalls ?? []) as Array<{ attributes: Record<string, string>; value: number }>);
