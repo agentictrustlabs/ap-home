@@ -14,7 +14,7 @@ import type { Address } from '@agenticprimitives/types';
 import { namehash } from '@agenticprimitives/agent-naming';
 import { buildTreasuryScope, TREASURY_PROFILES, type TreasuryProfileId } from '@agenticprimitives/treasury-service-agent';
 import { executeCalls, setCapabilities } from '../../connect-client';
-import { signHashFor, type Via } from '../../home/onboarding';
+import { resolveVia, signHashFor, type Via } from '../../home/onboarding';
 import { issueScopedDelegation } from '../../lib/delegation';
 import { useRegisteredName } from '../../lib/reverse-name';
 import { CONTRACTS, CAIP2_NETWORK } from '../../lib/chain';
@@ -25,13 +25,7 @@ import { AddressChip } from '../shared/AddressChip';
 const PROFILES: TreasuryProfileId[] = ['readonly', 'payments', 'markets', 'portfolio', 'yield', 'crossChain', 'full'];
 const YEAR = 60 * 60 * 24 * 365;
 
-const viaForSession = (via: string | undefined): Via => {
-  const v = (via ?? '').toLowerCase();
-  if (v === 'wallet') return 'wallet';
-  if (v === 'google') return 'google';
-  if (v === 'youversion') return 'youversion';
-  return 'passkey';
-};
+const viaForSession = (via: string | undefined): Via => resolveVia(undefined, via);
 
 const overlay: CSSProperties = {
   position: 'fixed', inset: 0, background: 'rgba(15,23,42,.45)', display: 'flex',

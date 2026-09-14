@@ -23,7 +23,7 @@ import { useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { claimName, fetchProfile } from '../../connect-client';
 import { notifyAgentsChanged } from './ManagedAgents';
-import { signHashFor, publishSocialConnectionKindIfNeeded } from '../../home/onboarding';
+import { resolveVia, signHashFor, publishSocialConnectionKindIfNeeded } from '../../home/onboarding';
 import type { Via } from '../../home/onboarding';
 import { useSession } from '../../context/session';
 import { CONNECT_DOMAIN, nameLabel, CLAIMABLE_TLDS, AGENT_NAME_PARENT } from '../../lib/domain';
@@ -34,10 +34,9 @@ const DISMISS_KEY = 'agenticprimitives:demo-sso:claim-name-dismissed';
 /** Map the session's `via` (which may be 'Google' | 'passkey' | 'wallet' | 'Wallet') to the
  *  credential `Via` signHashFor expects. */
 function viaForSession(via: string | undefined): Via {
-  const v = (via ?? 'passkey').toLowerCase();
-  if (v === 'google') return 'google';
-  if (v === 'wallet') return 'wallet';
-  return 'passkey';
+  // Every custody kind, not three of them: an email or phone home is KMS-custodied and must never be
+  // sent to a passkey prompt (the same fix as client-defaults, 2026-09-13).
+  return resolveVia(undefined, via);
 }
 
 export function ClaimPublicNameCard() {

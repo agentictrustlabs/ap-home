@@ -16,7 +16,7 @@
 // site-login grant is minted and BEFORE the code is handed back, so the app's first hand already has the
 // coach; a failure here is logged and never blocks the sign-in — the app's own sheet offers the Coaches page.
 import type { Address } from '@agenticprimitives/types';
-import { signHashFor, type Via } from '../home/onboarding';
+import { resolveVia, signHashFor, type Via } from '../home/onboarding';
 import { SESSION_KEY } from '../context/session';
 import { fetchProfile, getCapabilities, listSkillClaims, saveSkillClaims, setCapabilities, capabilityIdFor } from '../connect-client';
 import { assignDefaultArchetype } from '../home/default-archetype';
@@ -42,13 +42,15 @@ export const CLIENT_DEFAULTS: Record<string, ClientDefaults> = {
   pokernight: { coaches: [{ game: 'poker', service: 'bob-coach.svc' }, { game: 'canasta', service: 'carol-coach.svc' }], treasury: true },
 };
 
-const toVia = (via: string | undefined): Via => {
-  const v = (via ?? '').toLowerCase();
-  if (v === 'wallet') return 'wallet';
-  if (v === 'google') return 'google';
-  if (v === 'youversion') return 'youversion';
-  return 'passkey';
-};
+/**
+ * THE CREDENTIAL ROUTE, from the person's profile first and the session's `via` second — `resolveVia`, the
+ * same resolver every signing surface uses. This used to map only wallet / google / youversion and send
+ * everything else to `passkey`, so a person who arrived by EMAIL (or phone — KMS custody, signed server-side,
+ * no gesture) was routed to a WebAuthn prompt for a passkey they did not have: the prompt failed, the defaults
+ * failed after it, and they sat down with no coach and no money account (2026-09-13, "I came in as email
+ * connected user and it did not give me a coach").
+ */
+const toVia = (credential: string | undefined, via: string | undefined): Via => resolveVia(credential, via);
 
 export interface DefaultsOutcome { applied: string[]; skipped: string[]; error?: string }
 
@@ -72,7 +74,8 @@ export async function applyClientDefaults(clientId: string, onStep?: (line: stri
   const agent = (profile?.agent ? (profile.agent.split(':').pop() as Address) : null) ?? null;
   if (!agent || !profile?.deployed) return { ...out, error: 'the agent is not deployed yet' };
   const games = d.coaches.map((c) => ({ ...c, game: GAMES.find((g) => g.id === c.game)! })).filter((c) => c.game);
-  const signer = () => signHashFor(toVia(via), agent, { token });
+  const route = toVia(profile?.credential, via);
+  const signer = () => signHashFor(route, agent, { token });
 
   // 0. A money account, when the app settles and the person has none. Never a second one; never on failure
   //    a blocked sign-in — the card room's own "Set up your stake" panel remains the recovery path.
@@ -82,7 +85,7 @@ export async function applyClientDefaults(clientId: string, onStep?: (line: stri
       if (mine.length) out.skipped.push('treasury');
       else {
         onStep?.('Making you a money account for the tables…');
-        const made = await createAgentWithBirthrights({ kind: 'person-treasury', parent: agent, person: agent, via: via || 'passkey' }, token, (line) => onStep?.(line));
+        const made = await createAgentWithBirthrights({ kind: 'person-treasury', parent: agent, person: agent, via: route }, token, (line) => onStep?.(line));
         if (made.ok) out.applied.push('treasury'); else { out.error = `treasury: ${made.error}`; }
       }
     } catch (e) {
