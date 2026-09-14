@@ -45,6 +45,7 @@ import { INVITATIONS_RECEIVED_TOOL } from './invitations-received.js';
 import { INBOX_LIST_TOOL, inboxListInvoker } from './inbox-list.js';
 import { WORK_SEARCH_TOOL, workSearchInvoker } from './work-search-tool.js';
 import { GITHUB_TOOLS, GITHUB_ACTS, githubInvoker } from './connectors/github-tools.js';
+import { CALENDAR_TOOLS, CALENDAR_ACTS, calendarInvoker } from './connectors/calendar-tools.js';
 import { CONTACT_INVITE_TOOL, CONTACT_LIST_TOOL, CONTACT_REMOVE_TOOL, contactInviteInvoker, contactListInvoker, contactRemoveInvoker, type ContactDeps } from './contacts.js';
 import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
 import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
@@ -320,6 +321,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   ...COORDINATION_ACTION_TOOLS,
   // Spec 400 W3/W4 — the forge's acts (a connector's; the playbook narrows who offers them).
   ...GITHUB_TOOLS.filter((t) => GITHUB_ACTS.has(t.id)),
+  ...CALENDAR_TOOLS.filter((t) => CALENDAR_ACTS.has(t.id)),
   {
     id: 'treasury.payment.execute',
     verbs: ['send', 'pay', 'transfer', 'wire'],
@@ -1919,7 +1921,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     setBillStep(ctx.step.id ?? `s${ctx.index}`);
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
     // mandate); explicit so a future caller cannot make it reachable quietly.
-    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === 'messaging.topic.post' || GITHUB_ACTS.has(toolId) || toolId === ORG_INVITE_CAPABILITY || toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === 'messaging.topic.post' || GITHUB_ACTS.has(toolId) || CALENDAR_ACTS.has(toolId) || toolId === ORG_INVITE_CAPABILITY || toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
     if (toolId === UNSUPPORTED_TOOL.id) {
       const offered = scopedActionTools(surface, playbook).map((t) => t.capability?.id ?? t.id);
       return { unsupported: true, what: String(args.what ?? ''), available: offered };
@@ -2015,6 +2017,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (toolId === ACCESS_REVOKE_CAPABILITY) return accessRevokeInvoker(deps, env, presented!, person)(toolId, args, ctx);
     if (toolId === ACCESS_AUDIT_CAPABILITY) return accessAuditInvoker(deps, person)(toolId, args, ctx);
     // Spec 400 W3/W4 — GitHub as a connector: reads under the holder's connector, acts under the holder's mandate.
+    if (CALENDAR_TOOLS.some((t) => t.id === toolId)) return calendarInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (GITHUB_TOOLS.some((t) => t.id === toolId)) return githubInvoker({ env: env as unknown as Record<string, unknown>, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (toolId === PROFILE_UPDATE_CAPABILITY) return profileUpdateInvoker(deps, person)(toolId, args, ctx);
     if (toolId === HOUSEHOLD_RECORD_CAPABILITY) return householdRecordInvoker(deps, person)(toolId, args, ctx);
@@ -4529,6 +4532,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(deps.readGrants ? [ACCESS_LIST_TOOL] : []),
     ...(deps.auditGrants && playbook?.tools?.[ACCESS_AUDIT_TOOL.id] ? [mergeContractTool(ACCESS_AUDIT_TOOL, playbook.tools[ACCESS_AUDIT_TOOL.id])] : []),
     ...GITHUB_TOOLS.filter((t) => !GITHUB_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
+    ...CALENDAR_TOOLS.filter((t) => !CALENDAR_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     ...(deps.readSubjectRecord ? [PROFILE_READ_TOOL, HOUSEHOLD_READ_TOOL] : []),
     UNSUPPORTED_TOOL,
   ];

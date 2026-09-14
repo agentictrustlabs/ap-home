@@ -13,7 +13,7 @@ export interface FederatedTokens {
 }
 
 interface StoredFedToken {
-  provider: 'youversion';
+  provider: FederatedProvider;
   edk: string;       // base64 encrypted data key (KMS-wrapped)
   keyId: string;
   keyVersion: string;
@@ -48,11 +48,14 @@ function envelopeProvider(env: EnvelopeEnv): A2AKeyProvider {
     : buildKeyProvider({ backend: 'local-aes' });
 }
 
-function aad(sa: Address): Record<string, string> {
-  return { purpose: 'fed-token', provider: 'youversion', sa: sa.toLowerCase() };
+function aad(sa: Address, provider: FederatedProvider = 'youversion'): Record<string, string> {
+  return { purpose: 'fed-token', provider, sa: sa.toLowerCase() };
 }
 
-const key = (sa: Address): string => `youversion:${sa.toLowerCase()}`;
+/** One record per (provider, person). `youversion` keeps its historical key; a CONNECTOR (spec 400 W4 — Google Calendar
+ *  first) is keyed `connector:<provider>:<sa>`. */
+export type FederatedProvider = 'youversion' | 'google-calendar';
+const key = (sa: Address, provider: FederatedProvider = 'youversion'): string => provider === 'youversion' ? `youversion:${sa.toLowerCase()}` : `connector:${provider}:${sa.toLowerCase()}`;
 
 /** Envelope-encrypt + store a person's YouVersion tokens, keyed by their SA. `expiresInSec` from the
  *  provider's `expires_in`; we stamp an absolute expiry. */
@@ -63,17 +66,18 @@ export async function storeFederatedToken(
   expiresInSec: number | null,
   scope: string | null,
   appKey: string,
+  provider: FederatedProvider = 'youversion',
 ): Promise<void> {
   if (!env.FED_TOKENS) throw new Error('FED_TOKENS not configured');
-  const provider = envelopeProvider(env);
-  const aadContext = aad(sa);
-  const { plaintextDataKey, encryptedDataKey, keyId, keyVersion } = await provider.generateSessionDataKey({ aadContext });
+  const envelope = envelopeProvider(env);
+  const aadContext = aad(sa, provider);
+  const { plaintextDataKey, encryptedDataKey, keyId, keyVersion } = await envelope.generateSessionDataKey({ aadContext });
   const cryptoKey = await crypto.subtle.importKey('raw', fresh(plaintextDataKey), { name: 'AES-GCM' }, false, ['encrypt']);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, cryptoKey, new TextEncoder().encode(JSON.stringify(tokens))));
   const exp = Math.floor(Date.now() / 1000) + (expiresInSec && expiresInSec > 0 ? expiresInSec : 3000);
-  const rec: StoredFedToken = { provider: 'youversion', edk: b64(encryptedDataKey), keyId, keyVersion, iv: b64(iv), ct: b64(ct), exp, scope, appKey };
-  await env.FED_TOKENS.put(key(sa), JSON.stringify(rec));
+  const rec: StoredFedToken = { provider, edk: b64(encryptedDataKey), keyId, keyVersion, iv: b64(iv), ct: b64(ct), exp, scope, appKey };
+  await env.FED_TOKENS.put(key(sa, provider), JSON.stringify(rec));
 }
 
 /** Load + decrypt a person's tokens, or null when none stored. `exp` is the access-token expiry so the
@@ -81,14 +85,15 @@ export async function storeFederatedToken(
 export async function loadFederatedToken(
   env: FedEnv & EnvelopeEnv,
   sa: Address,
+  provider: FederatedProvider = 'youversion',
 ): Promise<{ tokens: FederatedTokens; exp: number; scope: string | null; appKey: string } | null> {
   if (!env.FED_TOKENS) return null;
-  const raw = await env.FED_TOKENS.get(key(sa));
+  const raw = await env.FED_TOKENS.get(key(sa, provider));
   if (!raw) return null;
   const rec = JSON.parse(raw) as StoredFedToken;
-  const provider = envelopeProvider(env);
-  const plaintextDataKey = await provider.decryptSessionDataKey({
-    encryptedDataKey: unb64(rec.edk), aadContext: aad(sa), keyId: rec.keyId, keyVersion: rec.keyVersion,
+  const envelope = envelopeProvider(env);
+  const plaintextDataKey = await envelope.decryptSessionDataKey({
+    encryptedDataKey: unb64(rec.edk), aadContext: aad(sa, provider), keyId: rec.keyId, keyVersion: rec.keyVersion,
   });
   const cryptoKey = await crypto.subtle.importKey('raw', fresh(plaintextDataKey), { name: 'AES-GCM' }, false, ['decrypt']);
   const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fresh(unb64(rec.iv)) }, cryptoKey, fresh(unb64(rec.ct)));
@@ -97,8 +102,8 @@ export async function loadFederatedToken(
 }
 
 /** Delete a person's stored tokens (YouVersion unlink). */
-export async function deleteFederatedToken(env: FedEnv, sa: Address): Promise<void> {
-  await env.FED_TOKENS?.delete(key(sa));
+export async function deleteFederatedToken(env: FedEnv, sa: Address, provider: FederatedProvider = 'youversion'): Promise<void> {
+  await env.FED_TOKENS?.delete(key(sa, provider));
 }
 
 // ─── VaultGrant data-scope records (spec 265 W3) ──────────────────────────────

@@ -16,6 +16,7 @@ import { resolveKmsAgent } from '../../_lib/kms-resolve';
 import { CONNECT_DOMAIN } from '../../../src/lib/domain';
 import { isSocialCustodyAud, isAllowedRelyingOrigin } from '../../../src/lib/oidc-clients';
 import { getServer, json, resolveOrigin, type FnContext } from '../../_lib/server-broker';
+import { connectorBridge } from '../../connect/connector-calendar';
 
 /**
  * App-layer (ADR-0021) return-URL policy: in addition to the exact-match
@@ -77,6 +78,10 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     aud: string;
     rpRedirect?: string;
     linkToken?: string;
+    /** Spec 400 W4 — a CONNECTOR authorization for the signed-in person, not a sign-in. */
+    purpose?: 'calendar';
+    person?: string;
+    returnTo?: string;
   };
 
   // Token exchange (client_secret server-side) + id_token verification.
@@ -91,6 +96,19 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     clientSecret: env.GOOGLE_CLIENT_SECRET,
   });
   if (!result.ok) return json({ error: `OIDC verification failed: ${result.reason}` }, 401);
+
+  // Spec 400 W4 — a connector: the person is the one whose Home session started it (never derived from (iss,sub));
+  // the tokens go to the agent runtime over the custody bridge and are kept under HER SA; the Home keeps none of it.
+  if (stash.purpose === 'calendar' && stash.person) {
+    const tokens = (result as { tokens?: { accessToken: string | null; refreshToken: string | null; expiresIn: number | null; scope: string | null } }).tokens;
+    const back = new URL(stash.returnTo ?? '/settings/connections', resolveOrigin(request, env));
+    if (!tokens?.accessToken) { back.searchParams.set('connector', 'calendar'); back.searchParams.set('error', 'no_token'); return Response.redirect(back.toString(), 302); }
+    const r = await connectorBridge(env, 'custody.connector.store', { person: stash.person, provider: 'google-calendar', access_token: tokens.accessToken, refresh_token: tokens.refreshToken, expires_in: tokens.expiresIn, scope: tokens.scope, account: result.principal.email ?? '' });
+    back.searchParams.set('connector', 'calendar');
+    if (r.status !== 200) back.searchParams.set('error', String((r.body as { error?: string } | null)?.error ?? `HTTP ${r.status}`));
+    else back.searchParams.set('connected', '1');
+    return Response.redirect(back.toString(), 302);
+  }
 
   const principal: CredentialPrincipal = {
     kind: 'oidc',

@@ -10,6 +10,7 @@ import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { ComingSoonState } from '../../../src/components/portal/ComingSoonState';
 import { ConnectedAppCard } from '../../../src/components/portal/ConnectedAppCard';
 import { YouVersionData } from '../../../src/components/portal/YouVersionData';
+import { CalendarConnectCard } from '../../../src/components/portal/CalendarConnectCard';
 import { HomeManifestCard } from '../../../src/components/portal/HomeManifestCard';
 import { DirectoryListingCard } from '../../../src/components/portal/DirectoryListingCard';
 import { AppReadGrants } from '../../../src/components/portal/AppReadGrants';
@@ -29,6 +30,7 @@ export default function AppsPage() {
       title="Connected Apps"
       description={`Apps you've authorized to act on your behalf in the ${whitelabel.brand.community}. See exactly what each can do.`}
     >
+      <CalendarConnectCard />
       <YouVersionData />
       {apps.length === 0 ? (
         <ComingSoonState

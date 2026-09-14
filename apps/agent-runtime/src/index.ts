@@ -14,6 +14,7 @@ import { putRecord, getRecord, listRecords } from './run-records.js';
 import { recordFormOf, rehydrateExecuted } from './artifact-store.js';
 import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken, advanceTrigger, withPause, withBudget, advanced } from './triggers.js';
 import { consumeRuntimeWakes } from './runtime-wake.js';
+import { calendarStatus, disconnectCalendar } from './connectors/google-calendar.js';
 import { appendProgress, readProgress, type ProgressLineV1 } from './harness-progress.js';
 import { Hono, type Context } from 'hono';
 import { setCookie, getCookie } from 'hono/cookie';
@@ -305,6 +306,10 @@ export interface Env {
   // Federated user-data tokens (spec 265) — per-person YouVersion OAuth tokens, KMS-encrypted at rest,
   // keyed by person SA. Read ONLY server-side; never returned to a relying app.
   FED_TOKENS?: KVNamespace;
+  /** Spec 400 W4 — the deployment's Google client, for REFRESHING a connected calendar's token (the same client the
+   *  Home signs in with; the secret a Worker secret). Absent: a connected calendar answers until its access token expires. */
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
 
   // Public config (wrangler.toml [vars])
   RPC_URL: string;
@@ -930,6 +935,7 @@ app.use('*', async (c, next) => {
   // Federated-token custody (spec 265) — server-to-server from the Connect broker / MCP, bridge-HMAC
   // authenticated (no browser cookie).
   if (c.req.path === '/custody/youversion/store-token') return next();
+  if (c.req.path.startsWith('/custody/connector/')) return next(); // spec 400 W4 — bridge-authenticated, server-to-server
   if (c.req.path === '/custody/youversion/fetch') return next();
   if (c.req.path === '/custody/youversion/set-grant') return next();
   if (c.req.path === '/custody/youversion/data-exchange-token') return next();
@@ -7358,6 +7364,60 @@ app.post('/custody/youversion/store-token', async (c) => {
  * endpoint trusts the bridge HMAC (broker/MCP only) and reads by the `sender` SA key. Paths are
  * allowlisted to the documented user-content reads — no arbitrary proxying.
  */
+/**
+ * POST /custody/connector/store-token  (the Home → a2a, BRIDGE-authenticated) — spec 400 W4, Google Calendar first.
+ * Body: { person, provider: 'google-calendar', access_token, refresh_token?, expires_in?, scope?, account? }
+ *
+ * After the person connected her calendar at the Home (an incremental Google authorization with `access_type=offline`),
+ * the Home hands the tokens here; they are envelope-encrypted under HER SA — the person of the Home session that
+ * started the connect, never derived from (iss,sub): an email home may connect a different Google account. The plaintext
+ * never leaves this Worker; the harness's calendar tools read it as her.
+ */
+app.post('/custody/connector/store-token', async (c) => {
+  const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
+  if (!secret) return c.json({ ok: false, error: 'custody_bridge_not_configured' }, 503);
+  if (!c.env.FED_TOKENS) return c.json({ ok: false, error: 'fed_tokens_not_configured' }, 503);
+  const rawBody = await c.req.text();
+  const ev = await verifyBridgeCall({ request: c.req.raw, rawBody, secret, expectedAudience: 'custody.connector.store', nonces: bridgeNonceStore(c.env) });
+  if (!ev.ok) return c.json({ ok: false, error: `unauthorized: ${ev.reason}` }, 401);
+  const body = (() => { try { return JSON.parse(rawBody); } catch { return null; } })() as
+    { person?: string; provider?: string; access_token?: string; refresh_token?: string; expires_in?: number; scope?: string; account?: string } | null;
+  if (!body?.person || !/^0x[0-9a-fA-F]{40}$/.test(body.person) || body.provider !== 'google-calendar' || !body.access_token) {
+    return c.json({ ok: false, error: 'person + provider (google-calendar) + access_token required' }, 400);
+  }
+  try {
+    await storeFederatedToken(c.env, body.person.toLowerCase() as Address, { access: body.access_token, refresh: body.refresh_token ?? null }, body.expires_in ?? null, body.scope ?? null, body.account ?? '', 'google-calendar');
+    return c.json({ ok: true, person: body.person.toLowerCase() });
+  } catch (e) {
+    console.error('[demo-a2a] custody/connector/store-token failed:', e);
+    return c.json({ ok: false, error: 'store_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+/** GET /custody/connector/status?person=…&provider=google-calendar (bridge-auth) · POST /custody/connector/disconnect
+ *  (bridge-auth, { person, provider }) — the Home's Connections screen reads and revokes; the token itself never shows. */
+app.post('/custody/connector/status', async (c) => {
+  const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
+  if (!secret) return c.json({ ok: false, error: 'custody_bridge_not_configured' }, 503);
+  const rawBody = await c.req.text();
+  const ev = await verifyBridgeCall({ request: c.req.raw, rawBody, secret, expectedAudience: 'custody.connector.status', nonces: bridgeNonceStore(c.env) });
+  if (!ev.ok) return c.json({ ok: false, error: `unauthorized: ${ev.reason}` }, 401);
+  const body = (() => { try { return JSON.parse(rawBody); } catch { return null; } })() as { person?: string; provider?: string } | null;
+  if (!body?.person || !/^0x[0-9a-fA-F]{40}$/.test(body.person) || body.provider !== 'google-calendar') return c.json({ ok: false, error: 'person + provider required' }, 400);
+  return c.json({ ok: true, ...(await calendarStatus(c.env, body.person.toLowerCase() as Address)) });
+});
+app.post('/custody/connector/disconnect', async (c) => {
+  const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
+  if (!secret) return c.json({ ok: false, error: 'custody_bridge_not_configured' }, 503);
+  const rawBody = await c.req.text();
+  const ev = await verifyBridgeCall({ request: c.req.raw, rawBody, secret, expectedAudience: 'custody.connector.disconnect', nonces: bridgeNonceStore(c.env) });
+  if (!ev.ok) return c.json({ ok: false, error: `unauthorized: ${ev.reason}` }, 401);
+  const body = (() => { try { return JSON.parse(rawBody); } catch { return null; } })() as { person?: string; provider?: string } | null;
+  if (!body?.person || !/^0x[0-9a-fA-F]{40}$/.test(body.person) || body.provider !== 'google-calendar') return c.json({ ok: false, error: 'person + provider required' }, 400);
+  await disconnectCalendar(c.env, body.person.toLowerCase() as Address);
+  return c.json({ ok: true });
+});
+
 app.post('/custody/youversion/fetch', async (c) => {
   const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
   if (!secret) return c.json({ ok: false, error: 'custody_bridge_not_configured' }, 503);

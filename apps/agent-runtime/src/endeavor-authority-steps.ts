@@ -78,6 +78,7 @@ export const NOT_PLAN_STEPS: readonly string[] = [
   'github.pr.open',
   'github.pr.comment',
   'github.pr.merge',
+  'calendar.event.create',
   'resolution.invitation.request',
   // A PREFERENCE IS NOT WORK. "Payments to me come here" is a standing statement its owner makes about
   // their own tree — nobody assigns it, nothing waits on it, and putting it in a plan would invite an
