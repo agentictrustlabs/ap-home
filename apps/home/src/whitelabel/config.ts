@@ -379,7 +379,9 @@ const faithImpact: WhiteLabelConfig = {
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
     {
-      // Pokernight (poker.faithnet.io) — a Texas Hold'em card room where people and AI Smart Agents
+      // Game Night (gamenight.faithnet.io; "Pokernight" at poker.faithnet.io until 2026-09-14 — the
+      // client id and everything bound to it keep the old name, a product rename is copy and DNS) —
+      // a card room where people and AI Smart Agents
       // sit at the same table. It was self-registered first; this CURATED entry supersedes it
       // (static wins, and a member entry cannot shadow one), which is what it needs for two things a
       // self-service registration cannot have:
@@ -394,8 +396,8 @@ const faithImpact: WhiteLabelConfig = {
       // localhost:5173 is the Vite dev server: the ceremony cannot run against a dev build without a
       // registered http redirect, and the registry allows plain http on localhost only.
       client_id: 'pokernight',
-      name: 'Poker Night',
-      redirect_uris: ['https://poker.faithnet.io/', 'http://localhost:5173/'],
+      name: 'Game Night',
+      redirect_uris: ['https://gamenight.faithnet.io/', 'https://poker.faithnet.io/', 'http://localhost:5173/'],
       // `profile` — the scope that lets this app receive the player's HUMAN name (what they are
       // called, not a `<label>.me` handle). It is an already-advertised scope
       // (`.well-known/openid-configuration`) that nothing consumed until now; the Home puts the
