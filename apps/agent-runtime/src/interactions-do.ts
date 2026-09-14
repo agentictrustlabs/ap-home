@@ -3516,7 +3516,9 @@ export class InteractionsDO {
           // AFTER the answer: a join ceremony waited on the topic being created, read and appended to (several
           // vault operations) before the person could be told they were in.
           const announce = async () => { try { await this.postWelcome(grant, principal, `👋 ${await this.boardNameFor(grant, member)} joined.`, true); } catch { /* the welcome is not the membership */ } };
-          this.state.waitUntil(announce());
+          // A test's fake state has no `waitUntil`; there the line is simply awaited.
+          const later = (this.state as { waitUntil?: (p: Promise<unknown>) => void }).waitUntil;
+          if (typeof later === 'function') later.call(this.state, announce()); else await announce();
           return json({ ok: true, member });
         });
       }
