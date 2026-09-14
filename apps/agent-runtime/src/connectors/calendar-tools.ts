@@ -59,7 +59,7 @@ export function calendarInvoker(deps: CalendarToolDeps, presented: { wire?: { de
   return async (toolId, args) => {
     const holder = await holderOf(deps, args, presented, person);
     const f = deps.fetch ?? fetch;
-    const notConnected = { refused: 'this calendar is not connected — connect Google Calendar at the Home (Settings → Connections)', holder, connected: false };
+    const notConnected = { refused: 'this calendar is not connected — connect Google Calendar at the Home (Connected → Google Calendar)', holder, connected: false };
     switch (toolId) {
       case CALENDAR_STATUS: return { holder, ...(await calendarStatus(deps.env, holder)) };
       case CALENDAR_EVENTS_LIST: {
