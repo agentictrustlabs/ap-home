@@ -427,6 +427,13 @@ const faithImpact: WhiteLabelConfig = {
         'service-agent-wire',
       ],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      // A PERSON AT THE CARD ROOM IS NAMED. The card room addresses a person's agent by its public name and
+      // nothing else — the table asks `alice.me` for advice, records her hands to `alice.me`, and hires her
+      // coach through `alice.me`'s playbook — so a nameless agent (an email or phone home that never claimed a
+      // name) can have no coach and no memory there, however the connect-time defaults went. A person who
+      // arrived by email sat down with the house coach and no way to see why (2026-09-13). Claim the name
+      // on the way in, once, and everything after it works.
+      requireNamedAgent: true,
       // Where the `service-agent-wire` ceremony reads the card room's signing key and hands back the
       // signed wire (`/admin/signer-address`, `/admin/service-wire`). The TABLES worker, because that
       // is the thing that holds the key and reads the club's vault — pokernight has no separate a2a
