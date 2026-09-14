@@ -676,7 +676,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                     <div key={i.messageId}>
                       {agentAuthored && mine && firstOfGroup && (
                         <div style={{ textAlign: 'right', fontSize: '0.68rem', opacity: 0.6, margin: '0.15rem 0.5rem 0.1rem 0' }}>
-                          sent by your assistant
+                          sent by your agent
                         </div>
                       )}
                       <MessageBubble
@@ -685,7 +685,7 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                         time={new Date(i.lastEventAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         verified={!!meta?.signatureSigner}
                         {...(agentAuthored && !mine
-                          ? { showAuthor: true, authorName: meta ? agentLabel(meta.from, view?.names) : 'agent', authorBadge: 'agent' }
+                          ? { showAuthor: true, authorName: meta ? agentLabel(meta.from, view?.names) : 'their agent', authorBadge: 'assistant' }
                           : {})}
                         firstOfGroup={firstOfGroup}
                         lastOfGroup={lastOfGroup}

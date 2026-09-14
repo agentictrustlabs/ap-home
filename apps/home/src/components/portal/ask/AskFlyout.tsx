@@ -111,7 +111,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   useEffect(() => {
     if (!resumeRun || !session) return;
     onResumeUsed?.();
-    void turn({ message: '', addressee, runRef: resumeRun, presented: null, supplied: [], resumable: true }, 'Picking up what your assistant asked…');
+    void turn({ message: '', addressee, runRef: resumeRun, presented: null, supplied: [], resumable: true }, 'Picking up what the assistant asked…');
   }, [resumeRun, session]);
   // Spec 361 I4 — a SCREEN'S COMMAND: run exactly as the command picker runs one (a supplied plan on a fresh
   // run), so a button and a sentence reach the same boundary and the same ceremony. The screen named the act;

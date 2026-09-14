@@ -9,6 +9,7 @@
 // This page was `/organizations`, and the name stopped being true the moment the Home could charter a
 // service: the header said Organizations while the list held a `.svc`. The route moved with the meaning.
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useSession } from '../../../src/context/session';
 import { whitelabel } from '../../../src/whitelabel/config';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
@@ -18,6 +19,9 @@ import { listMyOrgs, type MyOrg } from '../../../src/connect-client';
 
 export default function OrganizationsPage() {
   const { session, agentAddress } = useSession();
+  // agent-vocabulary.md D2 — the nav names the two KINDS (Organizations · Services); this one page serves both, filtered.
+  const kindParam = useSearchParams()?.get('kind');
+  const kind: 'all' | 'org' | 'service' = kindParam === 'org' || kindParam === 'service' ? kindParam : 'all';
   const [orgs, setOrgs] = useState<MyOrg[]>([]);
   const [selected, setSelected] = useState<MyOrg | null>(null);
 
@@ -35,17 +39,23 @@ export default function OrganizationsPage() {
   const a = whitelabel.manageableAgents.find((x) => x.id === 'organization');
   return (
     <SectionShell
-      title={selected ? selected.orgName || 'Organization' : 'Agents'}
+      title={selected ? selected.orgName || 'Organization' : kind === 'org' ? 'Organizations you steward' : kind === 'service' ? 'Services you steward' : 'What you steward'}
       description={
         selected
           ? 'Everything your home knows about this organization, with live reads over your delegations.'
-          : 'Every agent you steward — organizations and teams, workspaces and services. Their own Smart Agents, custodied by you, named by the suffix that says what they are.'
+          : kind === 'org'
+            ? 'Organizations, teams, workspaces, households, churches and circles you steward — each with its members and roster, named by the suffix that says which kind of body it is.'
+            : kind === 'service'
+              ? 'Services you steward — runtimes, treasuries, registries, coaches: software that acts for something, each with a role, named .svc / .treasury / .registry.'
+              : 'The organizations and services you steward — you oversee them and can act for them; your key signs.'
       }
     >
       {selected ? (
         <OrgDetail org={selected} token={session?.token ?? null} onBack={() => setSelected(null)} />
       ) : (
         <OrganizationsManager
+          key={kind}
+          initialFilter={kind}
           token={session?.token ?? null}
           person={agentAddress ?? null}
           via={session?.via ?? ''}

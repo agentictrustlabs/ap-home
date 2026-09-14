@@ -14,7 +14,7 @@ export default function YouPage() {
   // listener exists); this page only says what is happening.
   useEffect(() => { /* nothing to dispatch — see PortalShell */ }, [run]);
   return (
-    <SectionShell title="Your assistant asked" description={run ? 'A run asked through your assistant is waiting on you. It opens here in the Ask; what it needs is said there, and only you can give it.' : 'Nothing is waiting: open this page from the link your assistant gave you.'}>
+    <SectionShell title="An assistant asked" description={run ? 'A run asked through an assistant you connected (Claude, say) is waiting on you. It opens here in the Ask; what it needs is said there, and only you can give it.' : 'Nothing is waiting: open this page from the link the assistant gave you.'}>
       {run ? <p className="muted" style={{ fontSize: '.85rem' }}>Run <code>{run}</code> — if the Ask did not open, press Ask in the top bar; the run is listed under your unfinished asks.</p> : null}
     </SectionShell>
   );

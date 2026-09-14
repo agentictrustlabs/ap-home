@@ -274,16 +274,18 @@ describe('membership is not widened by any of this (spec 318)', () => {
   });
 });
 
-// spec 348 / ADR-0046 — the "You steward" pane lists what you steward, cut on ONE axis. It used to be
-// four different kinds of thing under one heading: a class (Organizations), a role (Treasuries), a
-// relationship (Alliances), and "Workspaces" — which listed an APP's membership organizations and no
-// agent at all, under the same word the substrate uses for a coordinator SA (spec 344/346).
+// spec 348 / ADR-0046 / agent-vocabulary.md R.2–R.3 — the "You steward" pane lists what you steward, by KIND: two
+// items for the two kinds a person stewards (Organizations = org-class, Services = service-class), then the surfaces
+// that are about something other than a kind (Treasuries is about money, Household is a body you keep). What is
+// YOURS rather than stewarded — Contacts, Grants, Search — sits in the person nav's own band; an alliance is an
+// organization's relation and sits in the organization's pane. "Agents" as a list name is gone: every participant is
+// an agent, including the person reading the list.
 describe('the "You steward" pane', () => {
   const items = stewardshipPane({ kind: 'person' })[0]!.items.map((i) => i.id);
 
-  it('has ONE destination for the agents themselves, whatever class they are', () => {
-    expect(items).toContain('agents');
-    expect(items).not.toContain('organizations'); // a page called Organizations cannot hold a .svc
+  it('names the two kinds a person stewards — never "agents" as a list', () => {
+    expect(items).toEqual(expect.arrayContaining(['organizations', 'services']));
+    expect(items).not.toContain('agents');
   });
 
   it('does not list app workspaces — you join those, you do not steward them', () => {
@@ -294,11 +296,15 @@ describe('the "You steward" pane', () => {
     expect(menu.indexOf('workspaces')).toBeGreaterThan(menu.indexOf('apps'));
   });
 
-  it('keeps the surfaces that are about something other than a class of agent', () => {
-    expect(items).toEqual(expect.arrayContaining(['treasuries', 'alliances']));
+  it('keeps the surfaces that are about something other than a kind; what is YOURS is in the person nav', () => {
+    expect(items).toEqual(expect.arrayContaining(['treasuries', 'household']));
+    expect(items).not.toContain('contacts'); expect(items).not.toContain('grants'); expect(items).not.toContain('search'); expect(items).not.toContain('alliances');
+    const nav = labels(buildNav(whitelabel, {}, PERSON));
+    expect(nav).toEqual(expect.arrayContaining(['Contacts', 'Grants', 'Search']));
+    expect(nav).not.toContain('Agents');
   });
 
-  it('an org workspace still gets its own treasury surface', () => {
-    expect(stewardshipPane({ kind: 'org', org: '0x1' })[0]!.items.map((i) => i.id)).toEqual(['org-treasury']);
+  it('an org workspace gets its own treasury surface and its alliances', () => {
+    expect(stewardshipPane({ kind: 'org', org: '0x1' })[0]!.items.map((i) => i.id)).toEqual(['org-treasury', 'alliances']);
   });
 });

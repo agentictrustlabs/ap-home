@@ -27,11 +27,18 @@ export default function AppsPage() {
 
   return (
     <SectionShell
-      title="Connected Apps"
-      description={`Apps you've authorized to act on your behalf in the ${whitelabel.brand.community}. See exactly what each can do.`}
+      title="Connected"
+      description={`Your connected accounts (what your agent may read through) and connected apps (clients of you in the ${whitelabel.brand.community}) — what each can do, and where to revoke it.`}
     >
+      {/* agent-vocabulary.md §2 — CONNECTION is one relation with two shapes: an APP that is a client of you (a relying app,
+          an assistant holding your wire) and an ACCOUNT of yours your agent may read through (a connector). Two panels,
+          one page; neither is a participant. */}
+      <h2 className="ui-h2" style={{ marginTop: 'var(--sp-2)' }}>Connected accounts</h2>
+      <p className="muted" style={{ margin: '0 0 var(--sp-3)', fontSize: 'var(--fs-sm)' }}>Accounts of yours that your agent may read through — each a credential kept for you, revocable here.</p>
       <CalendarConnectCard />
       <YouVersionData />
+      <h2 className="ui-h2" style={{ marginTop: 'var(--sp-5)' }}>Connected apps</h2>
+      <p className="muted" style={{ margin: '0 0 var(--sp-3)', fontSize: 'var(--fs-sm)' }}>Apps and assistants you authorized to act as clients of you — what each may do is a grant, listed here and on Grants.</p>
       {apps.length === 0 ? (
         <ComingSoonState
           icon={<LinkIcon size={40} />}

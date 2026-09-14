@@ -104,24 +104,23 @@ export function RecipientPicker({
   const entries = useMemo<ScopeEntry[]>(() => {
     const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
     const orgs: ScopeEntry[] = [];
-    const spaces: ScopeEntry[] = [];
     for (const a of agents) {
       const id = a.agent.toLowerCase();
       const label = a.name || short(a.agent);
-      if (a.kind === 'team' || a.kind === 'workspace') {
-        spaces.push({ id, scope: 'workspace', label, sub: a.kind === 'team' ? 'team' : 'app workspace', Icon: WorkspaceIcon });
-      } else if (agentClassOf(a.kind) === 'org') {
-        orgs.push({ id, scope: 'organization', label, sub: a.kind === 'org' ? undefined : a.kind, Icon: OrgIcon });
+      // agent-vocabulary.md §3 — ONE bucket for every organization-class kind (org, team, workspace, household, church,
+      // circle); the KIND is the chip beside the name, not a bucket of its own. "Workspaces" as a bucket mixed a team and
+      // an app workspace under the substrate's word for a coordinator SA.
+      if (agentClassOf(a.kind) === 'org') {
+        orgs.push({ id, scope: 'organization', label, sub: a.kind === 'org' ? undefined : a.kind === 'workspace' ? 'app workspace' : a.kind, Icon: a.kind === 'team' || a.kind === 'workspace' ? WorkspaceIcon : OrgIcon });
       }
     }
     const byLabel = (x: ScopeEntry, y: ScopeEntry) => x.label.localeCompare(y.label, undefined, { sensitivity: 'base' });
     return [
       // Spec 401 — CONTACTS FIRST: the people and agents the person let in, from their own vault; the derived scopes
       // (names, organizations, workspaces) follow.
-      { id: 'contacts', scope: 'contacts', label: 'Contacts', sub: 'people and agents you let in', Icon: GlobeIcon },
-      { id: 'names', scope: 'names', label: 'Names', sub: 'naming service', Icon: GlobeIcon },
+      { id: 'contacts', scope: 'contacts', label: 'Contacts', sub: 'people and services you let in', Icon: GlobeIcon },
+      { id: 'names', scope: 'names', label: 'People', sub: 'anyone with a name', Icon: GlobeIcon },
       ...orgs.sort(byLabel),
-      ...spaces.sort(byLabel),
     ];
   }, [agents]);
   const { agentAddress } = useSession();
@@ -178,7 +177,6 @@ export function RecipientPicker({
     { key: 'contacts', title: '', items: entries.filter((e) => e.scope === 'contacts') },
     { key: 'names', title: '', items: entries.filter((e) => e.scope === 'names') },
     { key: 'orgs', title: 'Organizations', items: entries.filter((e) => e.scope === 'organization') },
-    { key: 'spaces', title: 'Workspaces', items: entries.filter((e) => e.scope === 'workspace') },
   ];
   const paneTitle = active.scope === 'contacts' ? 'Your contacts' : active.scope === 'names' ? 'People with a name' : `Members of ${active.label}`;
 

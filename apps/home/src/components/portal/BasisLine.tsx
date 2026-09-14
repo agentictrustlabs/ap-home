@@ -1,5 +1,5 @@
 'use client';
-// THE BASIS LINE — spec 398 §4.4: "acting as ‹you› · in ‹Missio Nexus› · basis: custody". On every mutation screen
+// THE BASIS LINE — spec 398 §4.4: "acting as ‹you› · in ‹Missio Nexus› · basis: stewardship". On every mutation screen
 // and review card, the same two facts and the same words the switcher's caption uses (`actingBasis`). Optional third
 // clause: what THIS act needs (describeRequirement's words) — the requirement, never a role name.
 import { usePathname } from 'next/navigation';
@@ -35,7 +35,7 @@ export function BasisLine({ scope, needs, delegationInHand, style }: { scope?: W
     <div className="basis-line" data-testid="basis-line" data-basis={b.basis} style={{ display: 'flex', gap: '0.45rem', alignItems: 'center', flexWrap: 'wrap', fontSize: '0.72rem', opacity: 0.85, ...(style ?? {}) }} title={b.words}>
       <span>acting as <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><Icon kind={b.actingAs.kind} />{b.actingAs.name ?? short(b.actingAs.address)}</strong></span>
       {!b.same && <span>· in <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><Icon kind={b.in.kind} />{b.in.name ?? short(b.in.address)}</strong></span>}
-      {!b.same && <span>· basis: <strong>{b.basis === 'custody' ? 'custody' : b.basis === 'membership' ? 'membership grant' : b.basis === 'delegation' ? 'delegation in hand' : 'none'}</strong></span>}
+      {!b.same && <span>· basis: <strong>{b.basis === 'stewardship' ? 'stewardship' : b.basis === 'membership' ? 'membership grant' : b.basis === 'delegation' ? 'delegation in hand' : 'none'}</strong></span>}
       {needs && <span>· this act needs <strong>{needs}</strong></span>}
     </div>
   );

@@ -835,7 +835,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
                           body={bodies[m.envelope.id]}
                           time={timeShort(m.envelope.createdAt)}
                           authorName={m.authorName}
-                          authorBadge={m.actor ? 'agent' : undefined}
+                          authorBadge={m.actor ? 'assistant' : undefined}
                           showAuthor={!mine}
                           firstOfGroup={firstOfGroup}
                           lastOfGroup={lastOfGroup}

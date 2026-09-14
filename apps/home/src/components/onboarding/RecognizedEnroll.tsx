@@ -264,7 +264,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       // and signed here by the person's own credential, bound to the server-minted grant like a site login; the
       // relying app receives it on the token exchange and holds it, revocable on chain, in the person's name.
       if (enroll.template === 'ask-as-me') {
-        setGrantProgress({ step: 1, total: 2, label: 'Authorizing your assistant to ask your agent as you…' });
+        setGrantProgress({ step: 1, total: 2, label: 'Authorizing this assistant to ask your agent as you…' });
         const { grant_id: askGrantId, delegate: askDelegate } = await beginEnrollmentGrant(enroll, home.name);
         const askAuth: Auth | undefined = token ? { token } : undefined;
         const signHash = await signHashFor(viaLower as Via, home.address, askAuth);

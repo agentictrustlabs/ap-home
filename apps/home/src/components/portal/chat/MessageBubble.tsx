@@ -19,7 +19,8 @@ export function MessageBubble({
   time: string;
   verified?: boolean;
   authorName?: string;
-  /** Small chip next to the author name (spec 327: "agent" on assistant-authored posts). */
+  /** Small chip next to the author name — the KIND of software that spoke ("assistant" on the organization's assistant's
+   *  posts, a service's role otherwise); never "agent", which the organization is too (agent-vocabulary.md §3). */
   authorBadge?: string;
   showAuthor?: boolean;
   firstOfGroup?: boolean;

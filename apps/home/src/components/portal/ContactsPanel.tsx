@@ -10,7 +10,11 @@ import { useCallback, useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
 import { playbookBehind, playbookBehindWords } from '../../home/playbook-behind';
-import { Section, List, Row, Empty, ErrorNote, Note, Button, Chip, Mono, Meta } from '../../ui';
+import { Section, List, Row, Empty, ErrorNote, Note, Button, Chip, Mono, Meta, FilterChip } from '../../ui';
+
+/** The KIND beside the role (agent-vocabulary.md §1): a typed name says it — .me a person, .svc/.treasury/.registry a service,
+ *  any other suffix an organization; a bare address is unknown until its name is. */
+const kindWords = (name: string | null): string => { const tld = (name ?? '').split('@')[0]?.split('.').pop() ?? ''; return tld === 'me' ? 'person' : tld === 'svc' || tld === 'treasury' || tld === 'registry' ? 'service' : tld ? 'organization' : 'unnamed'; };
 import { AgentName } from '../shared/AgentName';
 import { askCommand } from '../../home/ask-command';
 import { readContactsThroughHarness, CONTACT_ROLES, type ContactRole, type ContactRow } from '../../home/contacts-harness';
@@ -25,6 +29,7 @@ export function ContactsPanel() {
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState('');
   const [who, setWho] = useState('');
+  const [roleFilter, setRoleFilter] = useState<ContactRole | 'all'>('all');
   const [role, setRole] = useState<ContactRole>('friend');
   const [hits, setHits] = useState<Array<{ name?: string | null; smartAgent?: string; displayName?: string | null }>>([]);
   const [picked, setPicked] = useState<{ agent: string; label: string } | null>(null);
@@ -87,16 +92,25 @@ export function ContactsPanel() {
         <Note>Adding a contact is your act: you sign a grant that lets them read your contact profile — nothing else. The role says what they are to you; it authorizes nothing. A person becomes mutual when they add you back; a coach or a runtime is one-way.</Note>
       </Section>
       <Section title="Your contacts" count={rows.length || undefined} aside={removedCount ? <Meta>{removedCount} removed</Meta> : undefined}>
+        {/* agent-vocabulary.md D3 — a role is what the contact is TO YOU; the filter narrows by it. A coach is a contact with
+            role coach: hiring a coaching SERVICE (the study grant, the specialist lines) lives behind that filter. */}
+        {rows.length > 0 && (
+          <div className="ui-filter" style={{ marginBottom: 'var(--sp-2)' }}>
+            <FilterChip active={roleFilter === 'all'} count={rows.length} onClick={() => setRoleFilter('all')}>All</FilterChip>
+            {CONTACT_ROLES.filter((r) => rows.some((c) => c.role === r)).map((r) => <FilterChip key={r} active={roleFilter === r} count={rows.filter((c) => c.role === r).length} onClick={() => setRoleFilter(r)}>{r}</FilterChip>)}
+          </div>
+        )}
+        {roleFilter === 'coach' && <Note>A coach is a service you consult under a study grant. <a href="/coaches">Hire or release a coaching service →</a></Note>}
         {err && <ErrorNote>{err}</ErrorNote>}
         {!loaded && !err && <Meta>Reading your contacts…</Meta>}
         {loaded && !err && rows.length === 0 && <Empty title="No contacts yet.">Add a person, a coach service, or an outside runtime above — or tell your agent: “add bob.me as a contact”.</Empty>}
         {rows.length > 0 && (
           <List>
-            {rows.map((c) => (
+            {rows.filter((c) => roleFilter === 'all' || c.role === roleFilter).map((c) => (
               <Row key={c.contact}
                 title={c.name ? <span title={c.contact}>{c.name}</span> : <AgentName address={c.contact} />}
                 meta={<>{c.since ? `since ${new Date(c.since).toLocaleDateString()}` : null}{c.grantDigest ? <> · grant <Mono title={c.grantDigest}>{c.grantDigest.slice(0, 10)}…</Mono></> : null}</>}
-                side={<><Chip>{c.role}</Chip>{c.mutual === true ? <Chip tone="ok">mutual</Chip> : c.mutual === false ? <Chip>one-way</Chip> : null}<Button size="sm" variant="danger" onClick={() => remove(c)}>Remove</Button></>}
+                side={<><Chip>{c.role}</Chip><Chip>{kindWords(c.name)}</Chip>{c.mutual === true ? <Chip tone="ok">mutual</Chip> : c.mutual === false ? <Chip>one-way</Chip> : null}<Button size="sm" variant="danger" onClick={() => remove(c)}>Remove</Button></>}
               />
             ))}
           </List>

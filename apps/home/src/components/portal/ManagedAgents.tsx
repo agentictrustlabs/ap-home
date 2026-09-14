@@ -532,11 +532,11 @@ function ActivateOrgRow({ org, person, token, onDone }: {
 
 // ── /organizations — orgs + each org's treasury + create ────────────────
 export function OrganizationsManager({
-  token, person, via, onSelect,
-}: { token: string | null; person: string | null; via: string; onSelect?: (orgAgent: string) => void }) {
+  token, person, via, onSelect, initialFilter = 'all',
+}: { token: string | null; person: string | null; via: string; onSelect?: (orgAgent: string) => void; initialFilter?: 'all' | 'org' | 'service' }) {
   // 'roster' (spec 342): this list shows deactivated orgs — it is the route back to activating them.
   const { agents, loaded, version, reload } = useManagedAgents(token, 'roster');
-  const [filter, setFilter] = useState<'all' | 'org' | 'service'>('all');
+  const [filter, setFilter] = useState<'all' | 'org' | 'service'>(initialFilter);
   if (!token || !person) return null;
   // ADR-0046 — the CLASS is the trichotomy (a team is an organization, a treasury is a service); the row
   // says which SUBCLASS it is. The filter groups by class because that is the distinction the substrate

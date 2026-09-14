@@ -10,15 +10,15 @@ describe('acting as / in (398 §4.4)', () => {
     const b = actingBasis({ active: { kind: 'person' }, self: { address: ME, name: 'alice' }, agents: [], classOf });
     expect(b.same).toBe(true); expect(b.basis).toBe('self'); expect(b.caption).toBe('acting as you');
   });
-  it('an org you steward: custody; one you belong to: membership — never a role name', () => {
+  it('an org you steward: stewardship; one you belong to: membership — never a role name, never custody', () => {
     const steward = actingBasis({ active: { kind: 'org', org: ORG }, self: { address: ME }, agents: [{ agent: ORG, kind: 'org', name: 'missio-nexus.org', relationship: 'steward' }], classOf });
-    expect(steward.basis).toBe('custody'); expect(steward.in.name).toBe('missio-nexus.org'); expect(steward.caption).toBe('acting as custodian');
+    expect(steward.basis).toBe('stewardship'); expect(steward.in.name).toBe('missio-nexus.org'); expect(steward.caption).toBe('acting for missio-nexus.org · steward');
     const member = actingBasis({ active: { kind: 'org', org: ORG }, self: { address: ME }, agents: [{ agent: ORG, kind: 'org', relationship: 'member' }], classOf });
-    expect(member.basis).toBe('membership'); expect(member.caption).toBe('member · no custody');
+    expect(member.basis).toBe('membership'); expect(member.caption).toBe('member · not a steward');
     expect(member.words).not.toMatch(/researcher|steward role/);
   });
   it('a delegation in hand is a basis; nothing in hand is none', () => {
     expect(actingBasis({ active: { kind: 'org', org: ORG }, self: { address: ME }, agents: [], classOf, delegationInHand: true }).basis).toBe('delegation');
-    expect(actingBasis({ active: { kind: 'org', org: ORG }, self: { address: ME }, agents: [], classOf }).caption).toBe('visiting · no custody');
+    expect(actingBasis({ active: { kind: 'org', org: ORG }, self: { address: ME }, agents: [], classOf }).caption).toBe('visiting · no standing');
   });
 });

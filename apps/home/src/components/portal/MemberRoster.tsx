@@ -16,6 +16,8 @@ import { List, Row, KeyValue, ErrorNote, LinkButton, Panel, Stats, Stat, SearchI
 import { InboxIcon } from './today-icons';
 
 type KindFilter = 'all' | 'person' | 'agent';
+// agent-vocabulary.md §1: the two kinds a roster holds beside people are SERVICES (a runtime, a coach, a treasury) and
+// organizations (a team); the filter's word is Services — never "agents", which every member is.
 const isAgentType = (t: string) => t === 'service' || t === 'organization';
 const typeWords = (t: string) => (t === 'unknown' ? 'member' : t.replace(/[_-]+/g, ' '));
 
@@ -66,7 +68,7 @@ export function MemberRoster({ agent, title = 'Members' }: { agent: string; titl
       {error && <ErrorNote>{error}</ErrorNote>}
       <Stats>
         <Stat label="Members" value={rows.length} loading={members === null} hint="people and agents admitted" />
-        <Stat label="Agents" value={agents} loading={members === null} hint="services, teams, runtimes" />
+        <Stat label="Services" value={agents} loading={members === null} hint="runtimes, coaches, treasuries" />
         <Stat label="Stewards" value={stewards} loading={members === null} hint="who may act for the organization" />
       </Stats>
       <div className="ui-toolbar">
@@ -74,7 +76,7 @@ export function MemberRoster({ agent, title = 'Members' }: { agent: string; titl
         <div style={{ display: 'flex', gap: 6 }}>
           <FilterChip active={kind === 'all'} onClick={() => setKind('all')}>All</FilterChip>
           <FilterChip active={kind === 'person'} count={members ? rows.length - agents : undefined} onClick={() => setKind('person')}>People</FilterChip>
-          <FilterChip active={kind === 'agent'} count={members ? agents : undefined} onClick={() => setKind('agent')}>Agents</FilterChip>
+          <FilterChip active={kind === 'agent'} count={members ? agents : undefined} onClick={() => setKind('agent')}>Services</FilterChip>
         </div>
       </div>
       <Panel title="Roster" icon={<InboxIcon />} count={shown.length} state={state} rows={5} lead testId="roster"

@@ -156,6 +156,13 @@ export function buildNav(
     { id: 'records-all', label: 'Records', href: href('records'), Icon: DatabaseIcon, status: 'live' },
     // spec 398 §6.1 — three stores, never one label: personal facts · workspace knowledge · run context, each in its vault.
     { id: 'memory', label: 'Memory', href: href('memory'), Icon: DatabaseIcon, status: 'live' },
+    // agent-vocabulary.md R.3 — YOURS, not stewardship: who you let in (spec 401), every grant you issued (400 B4), your
+    // own work by words (400 B5). They used to sit under "You steward", where four of seven items were not stewardship.
+    ...(isPerson ? [
+      { id: 'contacts', label: 'Contacts', href: '/contacts', Icon: UserIcon, status: 'live' as const },
+      { id: 'grants', label: 'Grants', href: '/grants', Icon: ShieldIcon, status: 'live' as const },
+      { id: 'search', label: 'Search', href: '/search', Icon: DatabaseIcon, status: 'live' as const },
+    ] : []),
   ], startsRegion: true });
   // Attestations: person-only today. A managed agent CAN sign statements, so the area applies in
   // principle — but none has an agent-scoped page yet, and §5 says an empty area renders nothing.
@@ -204,31 +211,26 @@ export function stewardshipPane(active: WorkspaceScope = { kind: 'person' }): Se
   // treasury surface is about money — balances and funding — not about listing a role. Alliances stays
   // because it is about a relationship between organizations. App workspaces moved out of stewardship
   // entirely: you join them, you do not steward them.
+  // agent-vocabulary.md R.2/R.3 (2026-09-14): two KINDS, two items. "Agents" as a list name said, to a person, "agents
+  // are those other things" — and every participant is an agent, including her. Organizations (org-class: .org .team
+  // .workspace .household .church .circle) and Services (.svc .treasury .registry, each with a role) are the two kinds
+  // she stewards; the page is one, filtered. Contacts, Grants and Search are NOT stewardship — they are hers — and sit
+  // in the person nav's "Yours" band; Alliances is an organization's relation to other organizations and sits in the
+  // organization's own pane.
   const items: NavItem[] = active.kind === 'person'
     ? [
-        { id: 'agents', label: 'Agents', href: '/agents', Icon: BuildingIcon, status: 'live' },
+        { id: 'organizations', label: 'Organizations', href: '/agents?kind=org', Icon: BuildingIcon, status: 'live' },
+        { id: 'services', label: 'Services', href: '/agents?kind=service', Icon: BotIcon, status: 'live' },
         { id: 'treasuries', label: 'Treasuries', href: '/treasuries', Icon: LandmarkIcon, status: 'live' },
-        // Spec 363 W4 — the people you live with. It sits under "You steward" because that is where a
-        // person looks for the things that are theirs to keep, and it is the same shape as the rest of
-        // this pane: a surface ABOUT something other than a class of agent (Treasuries is about money,
-        // Alliances about a relationship between organizations, this about a household).
-        //
-        // A HOUSEHOLD IS NOT AN AGENT and this row does not make it one (ADR-0046, tbox/household.ttl):
-        // it is a body of people you keep a private record of. Nothing here is chartered, custodied or
-        // deployed, and the page says so.
-        // Spec 401 — CONTACTS: membership on the person agent. The agents you let in (a friend, a coach service, an
-        // outside runtime) with the grant you gave each — the organization's roster, your word for it. Beside Household
-        // because both are bodies of people you keep a private record of; unlike Household, a contact HOLDS a grant.
-        { id: 'contacts', label: 'Contacts', href: '/contacts', Icon: UserIcon, status: 'live' },
-        // Spec 400 W2 (B4) — every grant you issued, one screen, revoke here.
-        { id: 'grants', label: 'Grants', href: '/grants', Icon: ShieldIcon, status: 'live' },
-        // Spec 400 W2 (B5) — search over the person's own work (their tier, their stewardships). Under the top band
-        // on purpose: the top four are the same for every class (398 §4.1).
-        { id: 'search', label: 'Search', href: '/search', Icon: DatabaseIcon, status: 'live' },
+        // Spec 363 W4 — the people you live with: a household is an organization-class body you keep (tbox/household.ttl);
+        // it sits with what you steward because that is what it is.
         { id: 'household', label: 'Household', href: '/household', Icon: UserIcon, status: 'live' },
-        { id: 'alliances', label: 'Alliances', href: '/alliances', Icon: LinkIcon, status: 'live' },
       ]
-    : [{ id: 'org-treasury', label: 'Treasuries', href: orgHref(active.org, 'treasury'), Icon: LandmarkIcon, status: 'live' }];
+    : [
+        { id: 'org-treasury', label: 'Treasuries', href: orgHref(active.org, 'treasury'), Icon: LandmarkIcon, status: 'live' },
+        // An alliance is THIS organization's relation to other organizations (spec 341) — the organization's pane, not the person's.
+        { id: 'alliances', label: 'Alliances', href: `/alliances?org=${active.org.toLowerCase()}`, Icon: LinkIcon, status: 'live' },
+      ];
   return [{ heading: 'You steward', items }];
 }
 
@@ -311,9 +313,8 @@ export function buildSettingsPane(
     // NOT "Discussions" — that is the top band, where you take part. This edits the replies.
     ...(isPerson ? [{ id: 'set-discussion', label: 'Discussion replies', href: '/discussion-replies', Icon: HashIcon, status: 'live' as const }] : []),
     { id: 'set-playbook', label: 'Playbook', href: href('playbook'), Icon: CodeIcon, status: 'live' },
-    // A coaching SERVICE per game, consulted by the person's own agent at a card table under a grant they sign
-    // here. A person's surface only: a service or an organization has no coach.
-    ...(isPerson ? [{ id: 'set-coaches', label: 'Coaches', href: href('coaches'), Icon: AwardIcon, status: 'live' as const }] : []),
+    // Coaches (a coaching SERVICE per game, hired under a study grant) is reached from Contacts — a coach is a contact
+    // with role `coach` (agent-vocabulary.md D3), not a setting; the page stays at /coaches for the hiring acts.
     // spec 398 G3 — a routine as a product: versioned skill + trigger + fresh authority, with its history.
     { id: 'set-routines', label: 'Routines', href: href('routines'), Icon: HistoryIcon, status: 'live' },
   ];
