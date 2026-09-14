@@ -402,6 +402,16 @@
       "timeoutSec": 240
     },
     {
+      "id": "verify-routine-from-sentence",
+      "script": "scripts/verify-routine-from-sentence.mts",
+      "spec": "402 W3",
+      "proves": "a sentence with a clock, said at the person's own agent, is compiled into a routine of her own (never a model): read back as one card in her zone, kept only on her yes as a schedule row on her agent's object beside the playbook's, listed, fired as her agent holding nothing with the answer DELIVERED to her Messages from her agent, and removed on her word",
+      "twin": "a playbook re-sync keeps the declared routine (it is hers, not the playbook's); in her organization's room the routine is refused; a sentence without a clock is asked back",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 300
+    },
+    {
       "id": "verify-mention-into-run",
       "script": "scripts/verify-mention-into-run.mts",
       "spec": "400 W2 (B3)",

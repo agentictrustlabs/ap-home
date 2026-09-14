@@ -309,7 +309,9 @@ export interface AskTurnState {
 export interface UnfinishedRun { runRef: string; message: string; awaiting: { kind: string; prompt: string; stepRef: string } | null; updatedAt: number }
 
 async function post(body: unknown): Promise<{ ok: boolean; reply?: AskReply; resumable?: boolean; error?: string; detail?: string; waiting?: string; unfinishedRuns?: UnfinishedRun[]; unfinishedTotal?: number }> {
-  return postA2a('/a2a/harness/ask', body) as never;
+  // Spec 402 W3 — the person's zone rides on every turn: a routine's clock ("every Monday at 8") is read in her day.
+  const tz = ((): string | undefined => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return undefined; } })();
+  return postA2a('/a2a/harness/ask', tz && body && typeof body === 'object' ? { tz, ...(body as Record<string, unknown>) } : body) as never;
 }
 
 /** Spec 385 W2 — one remembered choice: for THIS word, filling THIS argument of THIS capability, the person
@@ -518,6 +520,14 @@ export interface TriggerRow {
   /** `declared` — written on the SKILL.md trigger itself (398 §5.4); otherwise a steward set it on the row. */
   budget?: { vaultCalls: number; declared?: true };
   lastBill?: { vaultCalls: number; doRequests: number };
+  /** Spec 402 W3 — a routine the person DECLARED from a sentence (hers, not the playbook's): who, when, her words, her zone. */
+  declared?: { by: string; at: number; saidAs: string; when: string; tz: string; name?: string };
+}
+
+/** Spec 402 W3 — remove a routine the person declared (a playbook's routine goes with the playbook). */
+export async function removeTrigger(session: { token: string }, addressee: Address, triggerId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const out = (await postA2a('/a2a/harness/triggers/remove', { session: session.token, addressee, triggerId })) as { ok?: boolean; error?: string };
+  return out.ok ? { ok: true } : { ok: false, error: out.error ?? 'the routine could not be removed' };
 }
 
 /** Spec 398 §5.3 / §5.4 — pause or resume a routine, or set its budget (null clears). Stewards only. */

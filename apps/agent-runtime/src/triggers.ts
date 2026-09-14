@@ -43,6 +43,9 @@ export interface TriggerScheduleV1 {
   budget?: { vaultCalls: number; /** Declared on the SKILL.md trigger (spec 398 §5.4) rather than set by a steward. */ declared?: true };
   /** Spec 396 W3 — what the last firing cost. */
   lastBill?: { vaultCalls: number; doRequests: number };
+  /** Spec 402 W3 — a routine the person DECLARED from a sentence, not the playbook's: who, when, in their words, their
+   *  zone. Survives a playbook re-sync; removable by them. The answer of each firing is delivered to them. */
+  declared?: { by: string; at: number; saidAs: string; when: string; tz: string; name?: string };
 }
 
 /** The schedule rows a playbook's triggers become, first due one interval from now (never immediately —
@@ -168,7 +171,7 @@ export function triggerContext(source: TriggerSource): Record<string, unknown> {
 
 export interface TriggerStoreEnv { A2A_TASKS: DurableObjectNamespace }
 
-async function call(env: TriggerStoreEnv, agent: Address, op: 'trigger-sync' | 'trigger-list' | 'trigger-advance' | 'trigger-rotate', body: unknown): Promise<Record<string, unknown>> {
+async function call(env: TriggerStoreEnv, agent: Address, op: 'trigger-sync' | 'trigger-list' | 'trigger-advance' | 'trigger-rotate' | 'trigger-declare' | 'trigger-remove', body: unknown): Promise<Record<string, unknown>> {
   const stub = env.A2A_TASKS.get(env.A2A_TASKS.idFromName(agent.toLowerCase()));
   const res = await stub.fetch(new Request(`https://a2a-task-do/internal/harness-run/${op}`, { method: 'POST', headers: internalHeaders(env as never), body: JSON.stringify(body) }));
   const out = (await res.json().catch(() => ({}))) as Record<string, unknown> & { ok?: boolean; error?: string };
@@ -182,6 +185,15 @@ export async function syncTriggers(env: TriggerStoreEnv, agent: Address, playboo
   const rows = playbook ? schedulesFor(agent, playbook.digest, playbook.triggers ?? []) : [];
   const out = await call(env, agent, 'trigger-sync', { rows, playbookDigest: playbook?.digest ?? null });
   return { rows: (out.rows as TriggerScheduleV1[] | undefined) ?? [] };
+}
+
+/** Spec 402 W3 — keep a routine the person declared: a schedule row of their own on their agent's object. */
+export async function declareTrigger(env: TriggerStoreEnv, agent: Address, row: TriggerScheduleV1): Promise<TriggerScheduleV1> {
+  const out = await call(env, agent, 'trigger-declare', { row, agent: agent.toLowerCase() });
+  return out.row as TriggerScheduleV1;
+}
+export async function removeTrigger(env: TriggerStoreEnv, agent: Address, triggerId: string): Promise<void> {
+  await call(env, agent, 'trigger-remove', { triggerId });
 }
 
 export async function listTriggers(env: TriggerStoreEnv, agent: Address): Promise<TriggerScheduleV1[]> {

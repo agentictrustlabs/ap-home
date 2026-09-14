@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
-import { listTriggers, listRunRecords, pauseTrigger, fireTrigger, type TriggerRow, type RunRecordRow } from '../../home/ask';
+import { listTriggers, listRunRecords, pauseTrigger, fireTrigger, removeTrigger, type TriggerRow, type RunRecordRow } from '../../home/ask';
 import { assembleRoutines, type RoutineView } from '../../home/routines';
 import { StatePill } from './StatePill';
 import { BusyButton } from '../shared/BusyButton';
@@ -58,6 +58,14 @@ export function RoutinesView({ scope }: { scope: WorkspaceScope }) {
     setBusy(null); await load();
   };
 
+  const remove = async (r: RoutineView) => {
+    if (!session) return;
+    setBusy(`${r.triggerId}:remove`); setErr(null);
+    const out = await removeTrigger(session, agent, r.triggerId);
+    if (!out.ok) setErr(out.error);
+    setBusy(null); await load();
+  };
+
   if (!session) return null;
   return (
     <div data-testid="routines">
@@ -67,13 +75,13 @@ export function RoutinesView({ scope }: { scope: WorkspaceScope }) {
       {unknown && <Unknown read={<>the schedule could not be read ({unknown})</>} testId="routines-unknown" />}
       {err && <ErrorNote>{err}</ErrorNote>}
       {triggers === null && !unknown && <Meta>Reading the schedule…</Meta>}
-      {triggers !== null && routines.length === 0 && !unknown && <Empty title="No routines">This agent&rsquo;s playbook declares no triggers. <a href={workspaceHref(scope, 'playbook')}>Choose a playbook →</a></Empty>}
+      {triggers !== null && routines.length === 0 && !unknown && <Empty title="No routines">Say one to your agent — &ldquo;every Monday at 8, tell me what&rsquo;s on my calendar&rdquo; — or this agent&rsquo;s playbook declares no triggers. <a href={workspaceHref(scope, 'playbook')}>Choose a playbook →</a></Empty>}
       {routines.map((r) => (
         <Card key={r.triggerId} title={<>&ldquo;{r.ask}&rdquo;</>} head={<StatePill state={r.state} native={r.native} />} testId={`routine-${r.triggerId}`}>
           <div data-state={r.state.state} />
           <KeyValue rows={[
             ['trigger', <>{r.source}{r.nextAt ? ` · next ${new Date(r.nextAt).toLocaleString()}` : ''}</>],
-            ['skill', r.playbook ? <>{r.playbook.archetypeId} v{r.playbook.version} · <Mono>{r.playbook.digest.slice(0, 14)}…</Mono> <a href={workspaceHref(scope, 'playbook')}>playbook →</a></> : 'no playbook read — the row names its digest on the runtime', { absent: !r.playbook }],
+            ['skill', r.declared ? <>your own — declared {new Date(r.declared.at).toLocaleDateString()}{r.declared.name ? ` · “${r.declared.name}”` : ''}</> : r.playbook ? <>{r.playbook.archetypeId} v{r.playbook.version} · <Mono>{r.playbook.digest.slice(0, 14)}…</Mono> <a href={workspaceHref(scope, 'playbook')}>playbook →</a></> : 'no playbook read — the row names its digest on the runtime', { absent: !r.playbook }],
             ['authority', r.authority],
             ['budget', <span style={{ display: 'inline-flex', gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap' }}>
               {r.budget ? `${r.budget} vault calls per firing · ${r.budgetBy === 'playbook' ? 'declared by the playbook' : 'set by a steward'}` : 'none set'}{r.lastBill ? ` · last firing cost ${r.lastBill.vaultCalls} vault calls, ${r.lastBill.doRequests} serving requests` : ''}
@@ -89,7 +97,8 @@ export function RoutinesView({ scope }: { scope: WorkspaceScope }) {
               ? <BusyButton busy={busy === `${r.triggerId}:paused`} busyLabel="Resuming…" className="ui-btn ui-btn--primary ui-btn--sm" onClick={() => void change(r, { paused: false })} data-testid="routine-resume">Resume</BusyButton>
               : <BusyButton busy={busy === `${r.triggerId}:paused`} busyLabel="Pausing…" className="ui-btn ui-btn--secondary ui-btn--sm" onClick={() => { const note = typeof window !== 'undefined' ? (window.prompt('Pause this routine? Nothing new starts; what it parked stands. A note (optional):') ?? null) : ''; if (note !== null) void change(r, { paused: true, ...(note.trim() ? { note: note.trim() } : {}) }); }} data-testid="routine-pause">Pause</BusyButton>}
             <BusyButton busy={busy === `${r.triggerId}:fire`} busyLabel="Firing…" className="ui-btn ui-btn--secondary ui-btn--sm" disabled={!!r.paused} onClick={() => void fire(r)} title="Run it now, as the alarm would">Fire now</BusyButton>
-            <Micro>pause ≠ cancel ≠ revoke</Micro>
+            {r.declared && <BusyButton busy={busy === `${r.triggerId}:remove`} busyLabel="Removing…" className="ui-btn ui-btn--ghost ui-btn--sm" onClick={() => { if (typeof window === 'undefined' || window.confirm('Remove this routine? It is yours; nothing else changes.')) void remove(r); }} data-testid="routine-remove" title="Yours to remove — a playbook's routine goes with the playbook">Remove</BusyButton>}
+            <Micro>pause ≠ cancel ≠ revoke{r.declared ? ' ≠ remove' : ''}</Micro>
           </div>
           <details style={{ marginTop: 'var(--sp-3)' }}>
             <summary className="ui-meta" style={{ cursor: 'pointer' }}>history · {r.history.length} firing{r.history.length === 1 ? '' : 's'} on record</summary>

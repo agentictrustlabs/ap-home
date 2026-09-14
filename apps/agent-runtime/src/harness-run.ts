@@ -48,6 +48,8 @@ import { GITHUB_TOOLS, GITHUB_ACTS, githubInvoker } from './connectors/github-to
 import { CALENDAR_TOOLS, CALENDAR_ACTS, calendarInvoker } from './connectors/calendar-tools.js';
 import { MAIL_DRIVE_TOOLS, MAIL_DRIVE_ACTS, mailDriveInvoker } from './connectors/mail-drive-tools.js';
 import { MEMORY_TOOLS, MEMORY_ACTS, MEMORY_LIST_TOOL, memoryFactsInvoker } from './memory-facts-tools.js';
+import { ROUTINE_TOOLS, ROUTINE_ACTS, ROUTINE_LIST, routineInvoker, compiledRoutine } from './routine-tools.js';
+import type { TriggerScheduleV1 } from './triggers.js';
 import { factsForPrompt, factsOf, type RememberedFactsV1 } from '@agenticprimitives/context';
 import { CONTACT_INVITE_TOOL, CONTACT_LIST_TOOL, CONTACT_REMOVE_TOOL, contactInviteInvoker, contactListInvoker, contactRemoveInvoker, type ContactDeps } from './contacts.js';
 import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
@@ -328,6 +330,8 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   ...MAIL_DRIVE_TOOLS.filter((t) => MAIL_DRIVE_ACTS.has(t.id)),
   // Spec 402 W1 — memory that follows the person: remember / forget, self-acting (a note about herself, in her vault).
   ...MEMORY_TOOLS.filter((t) => MEMORY_ACTS.has(t.id)),
+  // Spec 402 W3 — a routine of the person's own, from a sentence: declare / remove, self-acting (her own clock).
+  ...ROUTINE_TOOLS.filter((t) => ROUTINE_ACTS.has(t.id)),
   {
     id: 'treasury.payment.execute',
     verbs: ['send', 'pay', 'transfer', 'wire'],
@@ -828,6 +832,10 @@ export interface HarnessDeps {
    *  where it needs an address: asking a planner to chain a lookup into a later step's args is a
    *  coordination problem we do not need to have, and it answered with a paragraph instead of acting. */
   resolveName?: (name: string) => Promise<string | null>;
+  /** Spec 402 W3 — the person's own routines on her agent's object: list, declare one from a sentence, remove one. */
+  listTriggers?: (agent: string) => Promise<TriggerScheduleV1[]>;
+  declareTrigger?: (agent: string, row: TriggerScheduleV1) => Promise<TriggerScheduleV1>;
+  removeTrigger?: (agent: string, triggerId: string) => Promise<void>;
   /** Send a direct message through the sender's own interactions plane. */
   sendDirectMessage?: (input: {
     sender: Address; recipient: Address; bodyText: string; session: string;
@@ -2029,6 +2037,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (toolId === PROFILE_UPDATE_CAPABILITY) return profileUpdateInvoker(deps, person)(toolId, args, ctx);
     if (toolId === HOUSEHOLD_RECORD_CAPABILITY) return householdRecordInvoker(deps, person)(toolId, args, ctx);
     if (toolId === STANDING_INSTRUCTION_CAPABILITY) return standingInstructionInvoker(deps, person, addressee)(toolId, args, ctx);
+    if (ROUTINE_TOOLS.some((t) => t.id === toolId)) return routineInvoker({ ...(deps.listTriggers ? { listTriggers: deps.listTriggers } : {}), ...(deps.declareTrigger ? { declareTrigger: deps.declareTrigger } : {}), ...(deps.removeTrigger ? { removeTrigger: deps.removeTrigger } : {}) }, person, addressee, (i) => { throw new InputRequired(i); }, (c, ref) => dataFor((c as { supplied?: unknown }).supplied as never, ref))(toolId, args, ctx);
     if (MEMORY_TOOLS.some((t) => t.id === toolId)) return memoryFactsInvoker(deps, person, (ctx as { runRef?: string }).runRef ?? (ctx.idempotencyKey ? ctx.idempotencyKey.split(':').slice(0, -1).join(':') : undefined), addressee)(toolId, args, ctx);
     // Spec 387 W2 — the addressee's own catalog: bound by ITS name's records at call time (cached by the reader),
     // so an unattended run at a service (a gateway's task, a routed ask) reads it exactly as a person's does.
@@ -4447,7 +4456,8 @@ step is then handed to that agent under authority the person grants; leave it ou
           // Spec 376 W2 — "have X …": the executor is peeled off first, and the ask that remains is what the
           // compiled shapes match. A model-planned ask keeps the whole sentence: the planner is taught `$executor`.
           const { executor: named, rest } = executorPrefixOf(pin.intent.goal);
-          const compiled = compiledConsult(rest) ?? compiledRead(rest) ?? compiledFanOut(rest) ?? compiledPayment(rest);
+          // Spec 402 W3 — a sentence with a clock, said at the person's own agent, is a routine to keep (read back first).
+          const compiled = compiledConsult(rest) ?? compiledRead(rest) ?? compiledFanOut(rest) ?? compiledPayment(rest) ?? (input.person && input.addressee && input.person.toLowerCase() === input.addressee.toLowerCase() ? compiledRoutine(rest) : null);
           if (compiled) { plannerUsed = 'compiled'; return withSpecialists(named ? withExecutor(compiled, named) : compiled, playbook?.specialists, pin.tools); }
           plannerUsed = selected.kind;
           if (selected.kind === 'rule-based') return withSpecialists(await selected.planner.plan(pin), playbook?.specialists, pin.tools);
@@ -4558,6 +4568,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...CALENDAR_TOOLS.filter((t) => !CALENDAR_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     ...MAIL_DRIVE_TOOLS.filter((t) => !MAIL_DRIVE_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     ...(deps.readSubjectRecord ? [PROFILE_READ_TOOL, HOUSEHOLD_READ_TOOL, MEMORY_LIST_TOOL] : []),
+    ...(deps.listTriggers ? ROUTINE_TOOLS.filter((t) => t.id === ROUTINE_LIST) : []),
     UNSUPPORTED_TOOL,
   ];
   const harnessLocal = harnessInvoker(deps, env, presentedList, input.mcpInvoke, input.person, input.session, input.surface, input.addressee, playbook);

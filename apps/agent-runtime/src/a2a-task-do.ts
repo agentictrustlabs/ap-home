@@ -862,7 +862,9 @@ export class A2aTaskDO {
         const rows = (body as { rows?: Array<{ triggerId: string; playbookDigest: string; nextAt: number }> } | null)?.rows ?? [];
         const existing = await this.state.storage.list<{ triggerId: string; playbookDigest: string; nextAt: number }>({ prefix: 'harness:trigger:' });
         const keep = new Set(rows.map((r) => tkey(r.triggerId)));
-        const stale = [...existing.keys()].filter((k) => !keep.has(k));
+        // Spec 402 W3 — a DECLARED routine (the person's own, from a sentence) is not the playbook's: a re-sync neither
+        // removes nor replaces it.
+        const stale = [...existing.entries()].filter(([k, v]) => !keep.has(k) && !(v as { declared?: unknown }).declared).map(([k]) => k);
         if (stale.length) await this.state.storage.delete(stale);
         const out: unknown[] = [];
         if (rows[0] && (rows[0] as { agent?: string }).agent) await this.state.storage.put(AGENT_SA_KEY, String((rows[0] as { agent?: string }).agent).toLowerCase());
@@ -900,6 +902,25 @@ export class A2aTaskDO {
         const dead = [...rows.entries()].filter(([, v]) => Number(v?.expiresAt ?? 0) < now).map(([k]) => k);
         if (dead.length) await this.state.storage.delete(dead);
         return Response.json({ ok: true, claimed: true });
+      }
+      // Spec 402 W3 — DECLARE a routine of the person's own (a schedule row with `declared`), and REMOVE one. Only a
+      // declared row can be removed here; the playbook's rows come and go with the playbook.
+      if (op === 'trigger-declare') {
+        const row = (body as { row?: { triggerId?: string; declared?: unknown; nextAt?: number } } | null)?.row;
+        if (!row?.triggerId || !row.declared || typeof row.nextAt !== 'number') return Response.json({ ok: false, error: 'a declared row with a triggerId and nextAt is required' }, { status: 400 });
+        if ((body as { agent?: string }).agent) await this.state.storage.put(AGENT_SA_KEY, String((body as { agent?: string }).agent).toLowerCase());
+        await this.state.storage.put(tkey(row.triggerId), row);
+        await this.armTriggerAlarm();
+        return Response.json({ ok: true, row });
+      }
+      if (op === 'trigger-remove') {
+        const triggerId = String((body as { triggerId?: string } | null)?.triggerId ?? '');
+        const row = (await this.state.storage.get(tkey(triggerId))) as { declared?: unknown } | undefined;
+        if (!triggerId || !row) return Response.json({ ok: false, error: 'no such trigger' }, { status: 404 });
+        if (!row.declared) return Response.json({ ok: false, error: 'only a routine you declared can be removed here — a playbook\'s routine goes with the playbook' }, { status: 400 });
+        await this.state.storage.delete(tkey(triggerId));
+        await this.armTriggerAlarm();
+        return Response.json({ ok: true });
       }
       if (op === 'trigger-list') {
         const rows = [...(await this.state.storage.list<unknown>({ prefix: 'harness:trigger:' })).values()];

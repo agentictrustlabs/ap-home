@@ -27,6 +27,8 @@ export interface RoutineView {
   history: Array<{ runRef: string; at: number; state: ProjectedRunStateV1; native: string; steps: number; receipts: number; bill?: { vaultCalls: number; doRequests: number } }>;
   /** Spec 398 §12 G3 — fresh authority: what a firing does when it reaches an act. */
   authority: string;
+  /** Spec 402 W3 — declared by the person from a sentence; removable by her. */
+  declared: TriggerRow['declared'] | null;
 }
 
 export interface RoutineInputs {
@@ -37,6 +39,7 @@ export interface RoutineInputs {
 }
 
 export function sourceWords(t: TriggerRow): string {
+  if (t.declared) return `${t.declared.when} (${t.declared.tz}) — yours, from "${t.declared.saidAs.slice(0, 80)}${t.declared.saidAs.length > 80 ? '…' : ''}"`;
   if (t.kind === 'event') return `when ${t.on?.event ?? 'an event'} happens on an endeavor`;
   if (t.kind === 'webhook') return 'when a webhook posts (bearer token admits; it grants nothing)';
   if (t.kind === 'message') return `when a message arrives${t.on?.profile ? ` (${t.on.profile})` : ''}`;
@@ -58,8 +61,8 @@ export function assembleRoutines(i: RoutineInputs): RoutineView[] {
       ? stateOf({ kind: 'trigger', lastOutcome: t.lastOutcome ?? 'answered', paused: true })
       : t.lastOutcome ? stateOf({ kind: 'trigger', lastOutcome: t.lastOutcome }) : { state: 'queued' as const, effectUncertain: false };
     return {
-      triggerId: t.triggerId, ask: t.ask, source: sourceWords(t), kind,
-      playbook: i.assignment ? { archetypeId: i.assignment.archetypeId, version: i.assignment.archetypeVersion, digest: i.assignment.definitionDigest, current: true } : null,
+      triggerId: t.triggerId, ask: t.ask, source: sourceWords(t), kind, declared: t.declared ?? null,
+      playbook: t.declared ? null : i.assignment ? { archetypeId: i.assignment.archetypeId, version: i.assignment.archetypeVersion, digest: i.assignment.definitionDigest, current: true } : null,
       state: st, native: t.paused ? `paused by ${t.paused.by}` : t.lastOutcome ?? 'never fired',
       paused: t.paused ?? null, budget: t.budget?.vaultCalls ?? null, budgetBy: t.budget ? (t.budget.declared ? 'playbook' : 'steward') : null, lastBill: t.lastBill ?? null, nextAt: t.nextAt ?? null,
       last: t.lastAt ? { at: t.lastAt, ...(t.lastRunRef ? { runRef: t.lastRunRef } : {}), outcome: t.lastOutcome ?? 'unknown', ...(t.lastSaid ? { said: t.lastSaid } : {}) } : null,

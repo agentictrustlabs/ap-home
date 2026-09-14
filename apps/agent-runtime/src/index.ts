@@ -12,7 +12,7 @@ import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
 import { recordOf, replayingInvoker, traceContextOf, type RunPlannerSummaryV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent, type RunBillV1 } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
 import { recordFormOf, rehydrateExecuted } from './artifact-store.js';
-import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken, advanceTrigger, withPause, withBudget, advanced } from './triggers.js';
+import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken, advanceTrigger, withPause, withBudget, advanced, declareTrigger, removeTrigger } from './triggers.js';
 import { consumeRuntimeWakes } from './runtime-wake.js';
 import { connectorStatus, disconnectConnector, type GoogleProvider } from './connectors/google-token.js';
 import { appendProgress, readProgress, type ProgressLineV1 } from './harness-progress.js';
@@ -2083,7 +2083,17 @@ export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef:
     } as never);
     return { outcome: 'parked', said: spoken, runRef, bill };
   }
-  if (reply.kind === 'answer' || reply.kind === 'done') return { outcome: 'answered', said: reply.kind === 'answer' ? reply.text : spoken, runRef, bill };
+  if (reply.kind === 'answer' || reply.kind === 'done') {
+    const said = reply.kind === 'answer' ? reply.text : spoken;
+    // Spec 402 W3 — a routine the PERSON declared answers TO HER: the answer lands in her own Messages as a note from her
+    // agent (its own rail, in-Worker — a message, never authority), beside the row's lastSaid. Best-effort: a rail not yet
+    // enabled leaves the answer on the row, where Routines shows it.
+    if (row.declared && said) {
+      const note = `${row.declared.name ? `${row.declared.name}: ` : ''}${said}`.slice(0, 4000);
+      await harnessDeps(env, buildAuditSink(env)).sendDirectMessage?.({ sender: agent, recipient: agent, bodyText: note, session: '', asSelf: true, contextRefs: [{ kind: 'routine', id: row.triggerId, label: row.declared.when }] }).catch((e) => console.warn('[routine] answer not delivered:', e instanceof Error ? e.message : String(e)));
+    }
+    return { outcome: 'answered', said, runRef, bill };
+  }
   return { outcome: 'failed', said: reply.kind === 'refused' ? reply.error : spoken, runRef, bill };
 }
 
@@ -2495,6 +2505,18 @@ app.post('/harness/triggers/pause', async (c) => {
   return c.json({ ok: true, trigger: safe });
 });
 
+// POST /harness/triggers/remove { session, addressee, triggerId } — spec 402 W3. Remove a routine the person DECLARED
+// (the DO refuses a playbook's row). Stewards only, like every trigger route.
+app.post('/harness/triggers/remove', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; triggerId?: string } | null;
+  if (!body?.session || !body.addressee || !body.triggerId) return c.json({ ok: false, error: 'session, addressee and triggerId are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const addressee = body.addressee.toLowerCase() as Address;
+  if (!(await mayDriveTriggers(c.env, String(who.sa).toLowerCase() as Address, addressee))) return c.json({ ok: false, error: 'only a steward of this agent may remove its routines' }, 403);
+  try { await removeTrigger(c.env as never, addressee, body.triggerId); } catch (e) { return c.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, 400); }
+  return c.json({ ok: true });
+});
 // POST /harness/triggers/fire { session, addressee, triggerId } — spec 370 P5. Run one trigger now, as
 // the alarm would: the live gate, and a steward's "do it now". Stewards only.
 app.post('/harness/triggers/fire', async (c) => {
@@ -3404,6 +3426,8 @@ app.post('/harness/ask', async (c) => {
     session?: string; addressee?: Address; message?: string; presented?: DelegationWireV1 | DelegationWireV1[] | null;
     supplied?: HarnessRunInput['supplied']; approvals?: HarnessRunInput['approvals']; runRef?: string;
     surface?: HarnessRunInput['surface'];
+    /** Spec 402 W3 — the asker's IANA zone, so a routine's clock is read in their day. */
+    tz?: string;
     /** Spec 361 I4 — a SCREEN's deterministic entry through the SAME conversational boundary: the form
      *  knows its intent and parameters, so no model re-derives them; every gate is unchanged. */
     plan?: HarnessRunInput['plan'];
@@ -3525,7 +3549,9 @@ app.post('/harness/ask', async (c) => {
   // The intent IS the ask: the sentence plus the realm it was asked in. The mandate binds to its digest,
   // so authority granted for this ask covers this ask — retyping the same words in another realm is
   // another intent, and the mandate does not travel.
-  const intent = { goal: turn.message, context: { addressee, asker: who.sa } };
+  // Spec 402 W3 — the asker's zone (`tz`, IANA), when the surface says it: a routine's clock is read in HER day, never UTC's.
+  const tz = typeof body.tz === 'string' && /^[A-Za-z_]+\/[A-Za-z_+-]+$|^UTC$/.test(body.tz) ? body.tz : undefined;
+  const intent = { goal: turn.message, context: { addressee, asker: who.sa, ...(tz ? { tz } : {}) } };
   const audit = buildAuditSink(c.env);
   const askDeps = harnessDeps(c.env, audit, { executionCtx: c.executionCtx });
   if (routedStanding) askDeps.standingContext = routedStanding;
@@ -4647,6 +4673,10 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     ...((): Record<string, unknown> => { const r = nameRecordsReader(env); return r ? { readNameRecords: r } : {}; })(),
     // What an agent PUBLICLY advertises (`atl:capabilities`): `playbook.answer` is listed only for a skill on it.
     advertisedCapabilities: async (agent: Address) => (await readAdvertisedCapabilityIds(env, agent)).split(',').map((s) => s.trim()).filter(Boolean),
+    // Spec 402 W3 — the person's own routines on her agent's task object.
+    listTriggers: (agent: string) => listTriggers(env as never, agent as Address),
+    declareTrigger: (agent: string, row: TriggerScheduleV1) => declareTrigger(env as never, agent as Address, row),
+    removeTrigger: (agent: string, triggerId: string) => removeTrigger(env as never, agent as Address, triggerId),
     resolveName: async (name: string) => {
       if (!env.AGENT_NAME_REGISTRY || !env.AGENT_NAME_UNIVERSAL_RESOLVER) return null;
       const client = new AgentNamingClient({ rpcUrl: env.RPC_URL, chainId: Number(env.CHAIN_ID), registry: env.AGENT_NAME_REGISTRY as Address, universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as Address });
