@@ -583,6 +583,8 @@
         flex-shrink: 0;
       }
       .spinner-lg { width: 2rem; height: 2rem; border-width: 3px; }
+      /* a spinner inside a button sits on the label's line, small, with a gap */
+      .btn .spinner, .btn-primary .spinner, .btn-ghost .spinner { width: .85rem; height: .85rem; margin-right: .4rem; vertical-align: -2px; }
 
       /* ── Steps checklist ────────────────────────────────────────────── */
       .steps { list-style: none; padding: 0; margin: .5rem 0 1rem; }

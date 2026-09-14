@@ -22,6 +22,7 @@
 // offer shows only where the member will return.
 import { useState } from 'react';
 import { useSession } from '../../context/session';
+import { WorkingBar } from '../onboarding/WorkingBar';
 import { secureHomeNoName, activateVault, signHashFor } from '../../home/onboarding';
 import { addPasskeyCredential, claimName, fetchProfile } from '../../connect-client';
 import { CENTRAL_AUTH_DOMAIN, nameLabel } from '../../lib/domain';
@@ -227,7 +228,7 @@ export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
             back in and you can set a fresh one.
           </p>
           <button className="btn-primary" disabled={busy} onClick={() => void createPasskeyNow()}>
-            {busy ? '…' : 'Create a passkey'}
+            {busy ? <><span className="spinner" aria-hidden /> Creating…</> : 'Create a passkey'}
           </button>
           <button className="btn-ghost" disabled={busy} onClick={() => void skipPasskey()}>
             Not now — continue with email
@@ -242,11 +243,11 @@ export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
           </p>
           {!existingName && chosenName && (
             <button className="btn-primary" disabled={busy} onClick={() => void claimForExisting()}>
-              {busy ? '…' : `Name that home ${chosenName} and continue`}
+              {busy ? <><span className="spinner" aria-hidden /> Naming…</> : `Name that home ${chosenName} and continue`}
             </button>
           )}
           <button className={!existingName && chosenName ? 'btn' : 'btn-primary'} disabled={busy} onClick={() => void continueExisting()}>
-            {busy ? '…' : `Continue as ${existingName || 'that home'}`}
+            {busy ? <><span className="spinner" aria-hidden /> Opening…</> : `Continue as ${existingName || 'that home'}`}
           </button>
           <button className="btn-ghost" disabled={busy} onClick={() => { setStep('email'); setEmail(''); setOtp(''); setPendingToken(null); setErr(null); setNote(null); }}>
             Use a different email for {chosenName}
@@ -264,7 +265,7 @@ export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
             style={{ flex: 1, minWidth: 200, padding: '.5rem .7rem', border: '1px solid var(--color-border-strong)', borderRadius: 8 }}
           />
           <button className="btn" data-testid="email-auth-continue" disabled={busy || !email.trim()} onClick={() => void start()}>
-            {busy ? '…' : session ? 'Add email' : 'Continue'}
+            {busy ? <><span className="spinner" aria-hidden /> Sending…</> : session ? 'Add email' : 'Continue'}
           </button>
         </div>
       ) : (
@@ -280,12 +281,13 @@ export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
             style={{ width: 130, padding: '.5rem .7rem', border: '1px solid var(--color-border-strong)', borderRadius: 8, letterSpacing: '2px' }}
           />
           <button className="btn" data-testid="email-auth-verify" disabled={busy || otp.length !== 6} onClick={() => void verify()}>
-            {busy ? '…' : 'Verify'}
+            {busy ? <><span className="spinner" aria-hidden /> Checking…</> : 'Verify'}
           </button>
           <button className="btn-ghost" onClick={() => { setStep('email'); setOtp(''); setErr(null); }}>Back</button>
         </div>
       )}
-      {note && <p data-testid="email-auth-note" style={{ fontSize: '.78rem', color: 'var(--color-text-muted)', margin: '.5rem 0 0' }}>{note}</p>}
+      {busy && <WorkingBar label={step === 'code' ? (note ?? 'Checking your code and opening your home…') : step === 'email' ? 'Sending your code…' : (note ?? 'Working…')} />}
+      {!busy && note && <p data-testid="email-auth-note" style={{ fontSize: '.78rem', color: 'var(--color-text-muted)', margin: '.5rem 0 0' }}>{note}</p>}
       {err && <p data-testid="email-auth-error" style={{ fontSize: '.78rem', color: 'var(--color-danger)', margin: '.5rem 0 0' }}>{err}</p>}
     </div>
   );
