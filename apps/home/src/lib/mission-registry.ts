@@ -98,6 +98,9 @@ export interface MissionRegistryOutcome {
   txHash?: Hex;
   /** `registered` — a new entry; `renewed` — an existing one re-pointed at the new card and extended. */
   act: 'registered' | 'renewed';
+  /** CONFIDENTIAL — the operators' contact, handed to the relying app's server on `/token` (never a public
+   *  read) beside its copy in the org's vault. */
+  contact: string;
 }
 
 export async function enrolMission(input: {
@@ -173,6 +176,6 @@ export async function enrolMission(input: {
 
   return {
     ok: true,
-    registry: { registryId, entryId, org, steward, presence, covenant, cardHash, bindingProofHash, claimHashes, issuedAt, expiresAt, ...(res.txHash ? { txHash: res.txHash } : {}), act: listed ? 'renewed' : 'registered' },
+    registry: { registryId, entryId, org, steward, presence, covenant, cardHash, bindingProofHash, claimHashes, issuedAt, expiresAt, ...(res.txHash ? { txHash: res.txHash } : {}), act: listed ? 'renewed' : 'registered', contact: request.contact },
   };
 }
