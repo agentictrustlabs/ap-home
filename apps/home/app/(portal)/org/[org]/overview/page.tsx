@@ -37,7 +37,7 @@ export default function OrgOverviewPage({ params }: { params: Promise<{ org: str
   const title = orgAgent?.name ? nameLabel(orgAgent.name) : 'Organization';
 
   return (
-    <SectionShell title={title} description={orgAgent ? <>{orgKindWordOf(orgAgent.kind)} · {orgAgent.name || 'unnamed'} · custodied by you</> : undefined}>
+    <SectionShell title={title} description={orgAgent ? <>{orgKindWordOf(orgAgent.kind)} · {orgAgent.name || 'unnamed'} · you steward it</> : undefined}>
       {!loaded ? (
         <Meta>Loading…</Meta>
       ) : !orgAgent ? (

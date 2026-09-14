@@ -370,7 +370,7 @@ export function CreateAgentForm({
         </button>
       </div>
       <p className="onboarding-note" style={{ margin: 0 }}>
-        Deploys an on-chain Smart Agent custodied by you — one {via === 'wallet' ? 'wallet' : 'device'} prompt, gas sponsored.
+        Deploys its own Smart Agent, stewarded by you (your key signs for it) — one {via === 'wallet' ? 'wallet' : 'device'} prompt, gas sponsored.
         {' '}{choice?.blurb ? `${choice.blurb} ` : ''}{nameRequired ? 'It is counterparty-facing, so a name is required.' : 'A name is optional; you can name it later.'}
       </p>
       {err && <p className="onboarding-hint taken" style={{ margin: 0 }}>{err}</p>}
@@ -553,7 +553,7 @@ export function OrganizationsManager({
   // rearranging the page under you.
   const Filter = () => (
     <div className="ui-toolbar">
-      <div className="ui-tabs" role="tablist" aria-label="Filter the agents you steward">
+      <div className="ui-tabs" role="tablist" aria-label="Filter what you steward">
         {([['all', 'All', orgs.length + services.length], ['org', 'Organizations', orgs.length], ['service', 'Services', services.length]] as const).map(([v, l, n]) => (
           <button key={v} type="button" role="tab" aria-selected={filter === v} onClick={() => setFilter(v)} data-testid={`steward-filter-${v}`} className="ui-tab">{l}<span className="ui-count">{n}</span></button>
         ))}
@@ -588,7 +588,7 @@ export function OrganizationsManager({
                 </div>
                 <div style={{ margin: '.45rem 0' }}><AddressChip address={org.agent as `0x${string}`} size="sm" /></div>
                 <p className="manage-card-blurb">
-                  Custodied by you. <ExplorerLink address={org.agent} label="explorer ↗" />
+                  You steward it — your key signs for it. <ExplorerLink address={org.agent} label="explorer ↗" />
                   {onSelect && <> · <button type="button" onClick={() => onSelect(org.agent)} style={{ background: 'none', border: 'none', color: 'var(--color-amber-700)', cursor: 'pointer', padding: 0, minHeight: 0, fontSize: 'inherit' }}>view data →</button></>}
                 </p>
                 {!org.name && <NameAgentForm agent={org.agent} kind="org" parent={person} person={person} token={token} via={via} onDone={reload} />}
@@ -632,7 +632,7 @@ export function OrganizationsManager({
                 <span className="manage-card-badge live">{KIND_LABEL[svc.kind]}</span>
               </div>
               <div style={{ margin: '.45rem 0' }}><AddressChip address={svc.agent as `0x${string}`} size="sm" /></div>
-              <p className="manage-card-blurb">Custodied by you. <ExplorerLink address={svc.agent} label="explorer ↗" /></p>
+              <p className="manage-card-blurb">You steward it — your key signs for it. <ExplorerLink address={svc.agent} label="explorer ↗" /></p>
               {/* M06 (398 §4.4) — the fleet boundary on the services roster too: runs at · may spend · holds. */}
               <FleetLines agent={svc.agent as `0x${string}`} token={token} stewardship />
               {!svc.name && <NameAgentForm agent={svc.agent} kind={svc.kind} parent={svc.parent} person={person} token={token} via={via} onDone={reload} />}

@@ -141,9 +141,9 @@ export function OrgList({ token, heading = true, onSelect }: { token: string | n
               {token && o.relationship !== 'member' && <FleetLines agent={o.orgAgent as `0x${string}`} token={token} stewardship />}
               <p className="manage-card-blurb">
                 {o.relationship === 'member' ? (
-                  <>You belong to this organization as a member (no custody). <ExplorerLink address={o.orgAgent} label="View on explorer ↗" /></>
+                  <>You belong to this organization as a member — not its steward. <ExplorerLink address={o.orgAgent} label="View on explorer ↗" /></>
                 ) : (
-                  <>Created for <b>{o.requestedBy}</b>. Custodied by you; {o.requestedBy} holds only a scoped
+                  <>Created for <b>{o.requestedBy}</b>. You steward it; {o.requestedBy} holds only a scoped
                   delegation. <ExplorerLink address={o.orgAgent} label="View on explorer ↗" /></>
                 )}
               </p>

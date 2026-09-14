@@ -66,7 +66,7 @@ export default function ServiceWorkspacePage({ params }: { params: Promise<{ age
               </div>
               <div style={{ margin: '.45rem 0' }}><AddressChip address={svc.agent as `0x${string}`} size="sm" /></div>
               <p className="manage-card-blurb">
-                Custodied by you.
+                You steward it — your key signs for it.
                 {role === 'workspace'
                   ? ' The member-organization roster lives in this agent’s vault — open Records to read it.'
                   : ' Role-specific actions land here as this service role gets its panel.'}

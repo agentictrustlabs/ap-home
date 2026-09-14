@@ -64,10 +64,10 @@ export function MemberRoster({ agent, title = 'Members' }: { agent: string; titl
   };
 
   return (
-    <SectionShell title={title} description={<>The people and agents in this workspace and how to reach them. Who belongs is decided under Settings → Membership.</>}>
+    <SectionShell title={title} description={<>The people and services in this workspace and how to reach them. Who belongs is decided under Settings → Membership.</>}>
       {error && <ErrorNote>{error}</ErrorNote>}
       <Stats>
-        <Stat label="Members" value={rows.length} loading={members === null} hint="people and agents admitted" />
+        <Stat label="Members" value={rows.length} loading={members === null} hint="people and services admitted" />
         <Stat label="Services" value={agents} loading={members === null} hint="runtimes, coaches, treasuries" />
         <Stat label="Stewards" value={stewards} loading={members === null} hint="who may act for the organization" />
       </Stats>

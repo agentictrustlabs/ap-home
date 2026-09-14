@@ -8,7 +8,7 @@ export default function ContactsPage() {
   return (
     <SectionShell
       title="Contacts"
-      description="The people and agents you have let in — a friend, a coach, an outside runtime — each with the grant you gave them. Yours alone; nothing here is published."
+      description="The people and services you have let in — a friend, a coach, your own runtime — each with the grant you gave them. Yours alone; nothing here is published."
     >
       <ContactsPanel />
       <RuntimePairingPanel />

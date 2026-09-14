@@ -463,7 +463,7 @@ export function OrgDetail({ org, token, onBack }: { org: MyOrg; token: string | 
         <Fact label="Kind">{purposeLabel(org.purpose)}</Fact>
         <Fact label="Created for">{org.requestedBy || '—'}</Fact>
         <Fact label="Created">{created}</Fact>
-        <Fact label="Custody">Your Impact credential (the org is custodied by you)</Fact>
+        <Fact label="Stewardship">You steward this organization — your credential signs for it</Fact>
         {org.proofHash && <Fact label="Link proof"><code>{short(org.proofHash)}</code></Fact>}
       </div>
 
