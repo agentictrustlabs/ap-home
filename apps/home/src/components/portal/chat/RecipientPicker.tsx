@@ -9,6 +9,7 @@
 // (ADR-0010). Picking never authorizes: the first send to a new counterparty still runs the wire
 // ceremony.
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { playbookBehind, playbookBehindWords } from '../../../home/playbook-behind';
 import { agentClassOf } from '../../../lib/agent-class';
 import { useManagedAgents } from '../ManagedAgents';
 import { useSession } from '../../../context/session';
@@ -156,7 +157,7 @@ export function RecipientPicker({
           );
       void load
         .then((r) => { if (!cancelled) setRows(r); })
-        .catch((e) => { if (!cancelled) { setRows([]); setNote(e instanceof Error ? e.message : String(e)); } })
+        .catch((e) => { if (!cancelled) { setRows([]); const msg = e instanceof Error ? e.message : String(e); const behind = playbookBehind(msg); setNote(behind ? playbookBehindWords(behind.toolId) : msg); } })
         .finally(() => { if (!cancelled) setLoading(false); });
     }, active.scope === 'names' && namesQuery ? 250 : 0);
     return () => { cancelled = true; window.clearTimeout(t); };

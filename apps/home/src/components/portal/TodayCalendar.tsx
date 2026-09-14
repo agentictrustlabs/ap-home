@@ -7,6 +7,7 @@ import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
 import { Panel, List, Row, Meta, useReadyReport, type PanelState } from '../../ui';
 import { readCalendarThroughHarness, todayWindow, type CalendarRead } from '../../home/calendar-harness';
+import { playbookBehind } from '../../home/playbook-behind';
 import { ClockIcon } from './today-icons';
 
 const hm = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -27,11 +28,14 @@ export function TodayCalendar({ person }: { person: Address }) {
   }, [session?.token, person]);
 
   const events = read?.connected ? read.events : [];
-  const state: PanelState = read === null && !err ? 'loading' : err ? 'unknown' : read?.connected ? (events.length ? 'ready' : 'empty') : 'empty';
+  const behind = playbookBehind(err);
+  const state: PanelState = read === null && !err ? 'loading' : err && !behind ? 'unknown' : read?.connected ? (events.length ? 'ready' : 'empty') : 'empty';
   return (
     <Panel title="Today on your calendar" icon={<ClockIcon />} count={events.length} state={state} rows={2} testId="today-calendar"
       aside={read?.connected ? <a href="/apps">Connections →</a> : undefined}
-      empty={read?.connected
+      empty={behind
+        ? { icon: <ClockIcon />, title: 'Your playbook predates the calendar', hint: `Your agent still runs the version it was assigned; ${behind.toolId} arrived since. Take the newer version — it is your choice, never silent.`, action: <a className="ui-btn ui-btn--secondary ui-btn--sm" href="/playbook">Review the update</a> }
+        : read?.connected
         ? { icon: <ClockIcon />, title: 'Nothing on your calendar today', hint: 'Ask "what\'s on tomorrow" — or add something, and your agent will ask you to sign it.' }
         : { icon: <ClockIcon />, title: 'Calendar not connected', hint: 'Connect Google Calendar so your agent can answer "what\'s on today" — the credential stays yours, revocable any time.', action: <a className="ui-btn ui-btn--secondary ui-btn--sm" href="/apps">Connect Google Calendar</a> }}
       unknown={{ read: `your calendar could not be read (${err ?? ''})` }}>

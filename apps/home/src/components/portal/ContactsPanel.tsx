@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
+import { playbookBehind, playbookBehindWords } from '../../home/playbook-behind';
 import { Section, List, Row, Empty, ErrorNote, Note, Button, Chip, Mono, Meta } from '../../ui';
 import { AgentName } from '../shared/AgentName';
 import { askCommand } from '../../home/ask-command';
@@ -31,7 +32,7 @@ export function ContactsPanel() {
   const load = useCallback(async () => {
     if (!session || !agentAddress) return;
     const r = await readContactsThroughHarness({ person: agentAddress as Address, session: { token: session.token } });
-    if (r.ok) { setRows(r.contacts); setRemovedCount(r.removed); setErr(''); } else setErr(r.error);
+    if (r.ok) { setRows(r.contacts); setRemovedCount(r.removed); setErr(''); } else { const behind = playbookBehind(r.error); setErr(behind ? playbookBehindWords(behind.toolId) : r.error); }
     setLoaded(true);
   }, [session, agentAddress]);
   useEffect(() => { void load(); }, [load]);
