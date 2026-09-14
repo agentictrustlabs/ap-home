@@ -9,12 +9,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
+import { kindOfName, KIND_WORDS } from '@agenticprimitives/ontology/participant-vocabulary';
 import { playbookBehind, playbookBehindWords } from '../../home/playbook-behind';
 import { Section, List, Row, Empty, ErrorNote, Note, Button, Chip, Mono, Meta, FilterChip } from '../../ui';
 
-/** The KIND beside the role (agent-vocabulary.md §1): a typed name says it — .me a person, .svc/.treasury/.registry a service,
- *  any other suffix an organization; a bare address is unknown until its name is. */
-const kindWords = (name: string | null): string => { const tld = (name ?? '').split('@')[0]?.split('.').pop() ?? ''; return tld === 'me' ? 'person' : tld === 'svc' || tld === 'treasury' || tld === 'registry' ? 'service' : tld ? 'organization' : 'unnamed'; };
+/** The KIND beside the role (agent-vocabulary.md §1) — from the typed name, bound to the T-box's three kinds. */
+const kindWords = (name: string | null): string => { const k = kindOfName(name); return k ? KIND_WORDS[k].one : 'unnamed'; };
 import { AgentName } from '../shared/AgentName';
 import { askCommand } from '../../home/ask-command';
 import { readContactsThroughHarness, CONTACT_ROLES, type ContactRole, type ContactRow } from '../../home/contacts-harness';

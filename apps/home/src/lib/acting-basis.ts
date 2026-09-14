@@ -7,6 +7,7 @@
 // from what the Home already knows (the managed-agent list's relationship, the workspace path); nothing here is
 // authority — the verifier decides on chain, this only says what the person is standing on.
 import type { WorkspaceScope } from './workspace';
+import { BASIS_CAPTION } from '@agenticprimitives/ontology/participant-vocabulary';
 
 export type AgentClass = 'person' | 'org' | 'service';
 export type Basis = 'self' | 'stewardship' | 'membership' | 'delegation' | 'none';
@@ -38,20 +39,20 @@ export function actingBasis(input: {
 }): ActingBasis {
   const me = { address: lc(input.self.address), ...(input.self.name ? { name: input.self.name } : {}), kind: 'person' as const };
   if (input.active.kind === 'person') {
-    return { actingAs: me, in: me, same: true, basis: 'self', caption: 'acting as you', words: 'you, on your own agent — your key signs' };
+    return { actingAs: me, in: me, same: true, basis: 'self', caption: BASIS_CAPTION.self, words: 'you, on your own agent — your key signs' };
   }
   const address = lc(input.active.kind === 'org' ? input.active.org : input.active.agent);
   const known = input.agents.find((a) => lc(a.agent) === address);
   const kind: AgentClass = known ? input.classOf(known.kind) : input.active.kind === 'org' ? 'org' : 'service';
   const ctx = { address, ...(known?.name ? { name: known.name } : {}), kind };
   if (known && known.relationship !== 'member') {
-    return { actingAs: me, in: ctx, same: false, basis: 'stewardship', caption: `acting for ${ctx.name ?? 'this agent'} · steward`, words: 'you steward this agent — its stewardship grant names you; your key signs for it' };
+    return { actingAs: me, in: ctx, same: false, basis: 'stewardship', caption: BASIS_CAPTION.stewardship(ctx.name), words: 'you steward this agent — its stewardship grant names you; your key signs for it' };
   }
   if (known?.relationship === 'member') {
-    return { actingAs: me, in: ctx, same: false, basis: 'membership', caption: 'member · not a steward', words: 'a membership grant — you may take part; an act as this agent needs a steward' };
+    return { actingAs: me, in: ctx, same: false, basis: 'membership', caption: BASIS_CAPTION.membership, words: 'a membership grant — you may take part; an act as this agent needs a steward' };
   }
   if (input.delegationInHand) {
-    return { actingAs: me, in: ctx, same: false, basis: 'delegation', caption: 'delegated · not a steward', words: 'a delegation in hand — scoped to what it names, revocable on chain' };
+    return { actingAs: me, in: ctx, same: false, basis: 'delegation', caption: BASIS_CAPTION.delegation, words: 'a delegation in hand — scoped to what it names, revocable on chain' };
   }
-  return { actingAs: me, in: ctx, same: false, basis: 'none', caption: 'visiting · no standing', words: 'no standing here — you can look, not act' };
+  return { actingAs: me, in: ctx, same: false, basis: 'none', caption: BASIS_CAPTION.none, words: 'no standing here — you can look, not act' };
 }
