@@ -83,14 +83,15 @@ export function RuntimePairingPanel() {
     await load();
   }
 
-  const state: PanelState = pairings === null ? 'loading' : pairings.length ? 'ready' : 'empty';
+  // The form, an approval in flight and a result all live in the body, so the panel is READY whenever one is showing.
+  const state: PanelState = pairings === null ? 'loading' : pairings.length || open || approving || done || err ? 'ready' : 'empty';
   return (
     <Panel
       title="Your runtimes"
       count={pairings?.length}
       state={state}
       aside={<Button size="sm" variant={open ? 'secondary' : 'primary'} onClick={() => setOpen((v) => !v)}>{open ? 'Cancel' : 'Pair a runtime'}</Button>}
-      empty={{ title: 'No runtime paired yet', hint: 'Your own Claude Code, goose or Codex can join a workspace you steward as a member — under grants you sign and can revoke.', action: !open ? <Button size="sm" onClick={() => setOpen(true)}>Pair a runtime</Button> : undefined }}
+      empty={{ title: 'No runtime paired yet', hint: 'Your own Claude Code, goose or Codex can join a workspace you steward as a member — under grants you sign and can revoke.' }}
       testId="runtime-pairing"
     >
       {err && <ErrorNote>{err}</ErrorNote>}

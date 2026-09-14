@@ -382,6 +382,16 @@
       "timeoutSec": 420
     },
     {
+      "id": "verify-runtime-pair",
+      "script": "scripts/verify-runtime-pair.mts",
+      "spec": "400 W1b",
+      "proves": "a runtime joins a workspace with a CODE the custodian minted at her Home and nothing else — no session, no persona key: the code is claimed with a key the runtime generated, the custodian sees the claim (the key, the agent) and approves, her signatures equip the member for THAT key (wire, steward link, vault key, playbook, rail), the record crosses back through the code and the runtime takes it ONCE, then reads its own inbox as the member",
+      "twin": "a second key cannot claim the code; the record cannot be taken twice; a cancelled code is unknown to the runtime",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 300
+    },
+    {
       "id": "verify-mention-into-run",
       "script": "scripts/verify-mention-into-run.mts",
       "spec": "400 W2 (B3)",
