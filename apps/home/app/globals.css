@@ -1748,6 +1748,8 @@ a.ui-row:hover, .ui-row--link:hover { background: var(--color-surface-raised); }
 .ui-panel-aside a { color: var(--color-link); text-decoration: none; font-weight: 600; }
 .ui-panel-aside a:hover { text-decoration: underline; }
 .ui-panel > .ui-list { border: 0; border-radius: 0; box-shadow: none; }
+/* prose or a form inside a panel keeps the panel's inset */
+.ui-panel-body { padding: var(--sp-3) var(--sp-4) var(--sp-4); }
 .ui-panel > .ui-empty, .ui-panel > .ui-skel-rows { border: 0; border-radius: 0; box-shadow: none; }
 .ui-panel + .ui-panel { margin-top: var(--sp-4); }
 /* empty: a calm fact on a sunken ground, an icon, one line, at most one action — never a dashed box */

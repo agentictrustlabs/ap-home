@@ -94,10 +94,10 @@ export function RuntimePairingPanel() {
       empty={{ title: 'No runtime paired yet', hint: 'Your own Claude Code, goose or Codex can join a workspace you steward as a member — under grants you sign and can revoke.' }}
       testId="runtime-pairing"
     >
-      {err && <ErrorNote>{err}</ErrorNote>}
-      {done && <Note>✓ {done} is paired — the runtime is picking up its record now. It is on the workspace roster and its grants are on your Grants screen.</Note>}
+      {err && <div className="ui-panel-body" style={{ paddingBottom: 0 }}><ErrorNote>{err}</ErrorNote></div>}
+      {done && <div className="ui-panel-body" style={{ paddingBottom: 0 }}><Note>✓ {done} is paired — the runtime is picking up its record now. It is on the workspace roster and its grants are on your Grants screen.</Note></div>}
       {open && (
-        <div className="ui-card ui-card--quiet" style={{ padding: 'var(--sp-3) var(--sp-4)', marginBottom: 'var(--sp-3)', display: 'grid', gap: 'var(--sp-3)' }}>
+        <div className="ui-card ui-card--quiet" style={{ padding: 'var(--sp-3) var(--sp-4)', margin: 'var(--sp-3) var(--sp-4)', display: 'grid', gap: 'var(--sp-3)' }}>
           <div style={{ display: 'grid', gap: 6 }}>
             <Micro>Name for the runtime</Micro>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -132,7 +132,7 @@ export function RuntimePairingPanel() {
         </div>
       )}
       {approving && (
-        <div className="ui-card ui-card--quiet" style={{ padding: 'var(--sp-3) var(--sp-4)', marginBottom: 'var(--sp-3)' }}>
+        <div className="ui-card ui-card--quiet" style={{ padding: 'var(--sp-3) var(--sp-4)', margin: 'var(--sp-3) var(--sp-4)' }}>
           <strong style={{ fontSize: 'var(--fs-sm)' }}>Approving {approving}</strong>
           <WorkingBar label={step} />
         </div>

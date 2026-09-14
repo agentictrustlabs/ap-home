@@ -69,6 +69,7 @@ export function CalendarConnectCard({ returnTo = '/apps' }: { returnTo?: string 
   return (
     <Panel title="Google Calendar" state={state} rows={2} testId="calendar-connector"
       aside={status?.connected ? <Chip tone="ok">connected</Chip> : <Chip>not connected</Chip>}>
+      <div className="ui-panel-body">
       {err && <ErrorNote>{err}</ErrorNote>}
       {justConnected && <Note>✓ Connected. Ask “what’s on my calendar today” — or see it on Today.</Note>}
       {busy && <WorkingBar label={busy === 'start' ? 'Taking you to Google…' : 'Disconnecting…'} />}
@@ -97,6 +98,7 @@ export function CalendarConnectCard({ returnTo = '/apps' }: { returnTo?: string 
           <Button variant="primary" size="sm" disabled={!!busy || !session} onClick={() => void start()}>Connect Google Calendar</Button>
         </>
       )}
+      </div>
     </Panel>
   );
 }
