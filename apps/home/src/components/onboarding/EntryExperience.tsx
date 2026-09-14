@@ -1179,7 +1179,7 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
           )}
           {/* A social (OIDC/KMS) custodian is NOT a user wallet — suppress the misleading wallet CTA for it
               (its KMS address only LOOKS like an EOA). */}
-          {showWallet && !socialKind && (
+          {showWallet && walletEnabled && !socialKind && (
             <button className={onlyWallet ? 'btn-primary' : 'btn-ghost onboarding-secondary'} onClick={() => go('wallet')}>
               Continue with wallet
             </button>
