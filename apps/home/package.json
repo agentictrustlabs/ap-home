@@ -14,6 +14,7 @@
   "dependencies": {
     "@agenticprimitives-demo/home-shared": "workspace:*",
     "@agenticprimitives/a2a": "workspace:*",
+    "@agenticprimitives/runtime-member": "workspace:*",
     "@agenticprimitives/agent-account": "workspace:*",
     "@agenticprimitives/agent-naming": "workspace:*",
     "@agenticprimitives/agent-profile": "workspace:*",

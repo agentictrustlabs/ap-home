@@ -81,6 +81,7 @@ import { messagingScopeCovers, messagingScopeDepsFromEnv } from './messaging-sco
 import { wrapSessionSignature } from '@agenticprimitives/a2a';
 // spec 341 §7 — the in-Worker marker, split off the custody secret.
 import { internalHeaders, internalMarker, isInternalCall } from './internal-marker.js';
+import { PAIRING_KEY, PAIRING_INDEX_KEY, PAIRING_TTL_MS, PAIRING_CAP, mintCode, parsePairingOptions, claim as pairingClaim, complete as pairingComplete, take as pairingTake, isExpired as pairingExpired, type PairingStateV1 } from './runtime-pairing.js';
 import { parseRuntimeHost, RUNTIME_HOST_KEY, RUNTIME_WAKES_KEY, RUNTIME_WAKE_PREFIX, RUNTIME_WAKES_CAP, type WakeReceiptV1 } from './runtime-wake.js';
 import type { A2aTransport } from '@agenticprimitives/a2a';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
@@ -1848,7 +1849,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -3341,6 +3342,26 @@ export class InteractionsDO {
           for (const e of evict) await this.state.storage.delete(`${RUNTIME_WAKE_PREFIX}${e}`);
           return json({ ok: true });
         }
+        // internal.runtime.pairing.claim / .take — spec 400 W1b: the RUNTIME's two moves on a pairing code, reached
+        // through the Worker's public /runtime/pair routes (the code is the credential; the DO decides).
+        if (op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take') {
+          const code = String(body.code ?? '').trim();
+          const cur = (await this.state.storage.get(PAIRING_KEY(code))) as PairingStateV1 | undefined;
+          if (!cur) return json({ ok: false, error: 'unknown code — mint one at the Home' }, 404);
+          if (op === 'internal.runtime.pairing.claim') {
+            const r = pairingClaim(cur, { address: String(body.address ?? ''), ...(body.wake !== undefined ? { wake: body.wake } : {}), ...(typeof body.agent === 'string' ? { agent: body.agent } : {}) });
+            if (!r.ok) return json({ ok: false, error: r.error }, 409);
+            await this.state.storage.put(PAIRING_KEY(code), r.next);
+            const { record: _r, ...state } = r.next as PairingStateV1 & { record?: unknown };
+            return json({ ok: true, state });
+          }
+          const r = pairingTake(cur, String(body.address ?? ''));
+          if (!r.ok) return json({ ok: false, error: r.error }, 409);
+          if (r.next) {
+            await this.state.storage.put(PAIRING_KEY(code), r.next);
+          }
+          return json({ ok: true, state: r.state, ...(r.record ? { record: r.record } : {}) });
+        }
         // internal.deliver — append-only merge of a validated envelope (the skill already verified
         // addressing + bodyHash and persisted the body under the delivery grant).
         const envelope = body.envelope as MessageEnvelopeV1 | undefined;
@@ -4022,6 +4043,49 @@ export class InteractionsDO {
         await this.state.storage.put(STANDING_GRANT_KEY(hash), rec);
         await audit.write({ id: crypto.randomUUID(), timestamp: rec.storedAt, action: 'interactions.runtime.standingPut', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'delegation', id: hash } });
         return json({ ok: true, hash });
+      }
+
+      // Spec 400 W1b — PAIRING CODES on the custodian's own object: mint (what the runtime will get, chosen here),
+      // list (the claims waiting for her approval), complete (the record her browser equipped), cancel.
+      if (op === 'runtime.pairing.mint' || op === 'runtime.pairing.list' || op === 'runtime.pairing.complete' || op === 'runtime.pairing.cancel') {
+        if (sessionSa.toLowerCase() !== principal) return json({ error: 'pairing codes are minted on your own agent' }, 403);
+        const index = ((await this.state.storage.get(PAIRING_INDEX_KEY)) as string[] | undefined) ?? [];
+        const now = Date.now();
+        // sweep what has expired — a pairing is a moment
+        const live: string[] = [];
+        for (const c of index) { const st = (await this.state.storage.get(PAIRING_KEY(c))) as PairingStateV1 | undefined; if (!st || pairingExpired(st, now)) await this.state.storage.delete(PAIRING_KEY(c)); else live.push(c); }
+        if (op === 'runtime.pairing.mint') {
+          const options = parsePairingOptions(body.options);
+          if (!options) return json({ error: 'options: { member: <label>.svc, workspace: <label>.org, validForSeconds?, openMandate?: [], messagingTo?: [], wake?: container | poll | { url } }' }, 400);
+          const handle = String(body.handle ?? '').trim() || principal.slice(2, 8);
+          let code = mintCode(handle);
+          for (let i = 0; i < 5 && live.includes(code); i++) code = mintCode(handle);
+          const st: PairingStateV1 = { v: 1, code, state: 'minted', options, mintedAt: new Date(now).toISOString(), expiresAt: new Date(now + PAIRING_TTL_MS).toISOString() };
+          const next = [...live, code]; const evict = next.length > PAIRING_CAP ? next.splice(0, next.length - PAIRING_CAP) : [];
+          for (const e of evict) await this.state.storage.delete(PAIRING_KEY(e));
+          await this.state.storage.put(PAIRING_KEY(code), st); await this.state.storage.put(PAIRING_INDEX_KEY, next);
+          await audit.write({ id: crypto.randomUUID(), timestamp: st.mintedAt, action: 'interactions.runtime.pairingMint', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'runtime-pairing', id: code }, reason: `${options.member} in ${options.workspace}` });
+          return json({ ok: true, pairing: st });
+        }
+        if (op === 'runtime.pairing.list') {
+          const out: PairingStateV1[] = [];
+          for (const c of live) { const st = (await this.state.storage.get(PAIRING_KEY(c))) as PairingStateV1 | undefined; if (st) { const { record: _r, ...rest } = st as PairingStateV1 & { record?: unknown }; out.push(rest as PairingStateV1); } }
+          await this.state.storage.put(PAIRING_INDEX_KEY, live);
+          return json({ ok: true, pairings: out });
+        }
+        const code = String(body.code ?? '').trim();
+        const cur = (await this.state.storage.get(PAIRING_KEY(code))) as PairingStateV1 | undefined;
+        if (!cur || !live.includes(code)) return json({ error: 'unknown or expired code' }, 404);
+        if (op === 'runtime.pairing.cancel') {
+          await this.state.storage.delete(PAIRING_KEY(code)); await this.state.storage.put(PAIRING_INDEX_KEY, live.filter((c) => c !== code));
+          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.runtime.pairingCancel', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'runtime-pairing', id: code } });
+          return json({ ok: true });
+        }
+        const r = pairingComplete(cur, body.record, now);
+        if (!r.ok) return json({ error: r.error }, 409);
+        await this.state.storage.put(PAIRING_KEY(code), r.next); await this.state.storage.put(PAIRING_INDEX_KEY, live);
+        await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.runtime.pairingComplete', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'runtime-pairing', id: code }, reason: cur.options.member });
+        return json({ ok: true });
       }
 
       if (op === 'runtime.host.get' || op === 'runtime.host.put' || op === 'runtime.wake.get') {

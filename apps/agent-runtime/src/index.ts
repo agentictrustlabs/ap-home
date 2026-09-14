@@ -917,6 +917,9 @@ app.use('*', async (c, next) => {
   // It is not a signing oracle: one canonical body, never a caller-supplied digest.
   // Spec 395 — the public provenance projection takes no credentials and returns only anchored digests: no CSRF, like the attestation.
   if (c.req.path === '/peer-attest' || c.req.path === '/provenance/public') return next();
+  // Spec 400 W1b — a runtime's two moves on a pairing code: no browser, no cookie; the code is the credential and
+  // the custodian's own object decides (single use, minutes-lived, first key wins).
+  if (c.req.path === '/runtime/pair/claim' || c.req.path === '/runtime/pair/take') return next();
   // Spec 397 — an `A2A-Session` assertion (spec 372 S3c) is signed over the exact body, bound to this origin
   // and spent once: there is no cookie for CSRF to defend and no ambient authority to forge. Its own
   // verification is the gate; a Home MCP's ask reaches the harness this way, as the person, under their wire.
@@ -2389,6 +2392,29 @@ app.post('/huddles/:op', async (c) => {
   }
   return c.json(out.body, out.status as 200);
 });
+
+// Spec 400 W1b — the RUNTIME's side of a pairing code. The code names the custodian's handle (`alice-XXXXXX`), so
+// the runtime needs only the code and this origin; the custodian's own object decides (claim: first key wins; take:
+// the record once, by that key). The code is the only credential and it grants nothing — every grant in the record
+// the runtime takes is the custodian's signature, revocable on chain. Both routes are the Home's to proxy
+// (`/connect/runtime-pair/*`) so a runtime needs only the Home's URL.
+const pairingRoute = (move: 'claim' | 'take') => async (c: Context<{ Bindings: Env }>) => {
+  const body = (await c.req.json().catch(() => null)) as { code?: string; address?: string; wake?: unknown; agent?: string } | null;
+  const code = String(body?.code ?? '').trim().toLowerCase();
+  const m = /^([a-z0-9][a-z0-9-]{0,62})-([a-z0-9]{6})$/i.exec(code);
+  if (!m || !body?.address) return c.json({ ok: false, error: 'code and address are required' }, 400);
+  const [, handle = '', tail = ''] = m;
+  if (!c.env.AGENT_NAME_REGISTRY || !c.env.AGENT_NAME_UNIVERSAL_RESOLVER) return c.json({ ok: false, error: 'naming is not configured here' }, 503);
+  const client = new AgentNamingClient({ rpcUrl: c.env.RPC_URL, chainId: Number(c.env.CHAIN_ID), registry: c.env.AGENT_NAME_REGISTRY as Address, universalResolver: c.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address });
+  const owner = (await client.resolveName(`${handle}.me`).catch(() => null))?.toLowerCase();
+  if (!owner) return c.json({ ok: false, error: `no Home answers to ${handle}` }, 404);
+  const stub = c.env.INTERACTIONS.get(c.env.INTERACTIONS.idFromName(owner));
+  const codeCased = `${handle}-${tail.toUpperCase()}`;
+  const r = await stub.fetch(new Request(`https://do/interactions/${owner}/internal.runtime.pairing.${move}`, { method: 'POST', headers: internalHeaders(c.env), body: JSON.stringify({ ...body, code: codeCased }) }));
+  return new Response(await r.text(), { status: r.status, headers: { 'content-type': 'application/json' } });
+};
+app.post('/runtime/pair/claim', pairingRoute('claim'));
+app.post('/runtime/pair/take', pairingRoute('take'));
 
 app.post('/harness/triggers', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address } | null;
