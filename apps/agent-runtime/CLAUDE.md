@@ -77,7 +77,11 @@ proxies selected MCP requests during local demos.
   caller continues its own parked run with `metadata.presented` = the chain it derived from a standing grant
   (`presentedOf` → `resumeAsAgent` → `resume.presented`, verified by the harness); `messageInvoker` sends AS the
   agent (its own rail, `internal.messaging.send`, in-Worker) only when the chain's root delegator is that agent
-  (`rootDelegatorOf`). Spec 400 §5.6.
+  (`rootDelegatorOf`). Spec 400 §5.6. **W1b — the pairing code (`src/runtime-pairing.ts`, spec 400 §5.7):** a code the
+  custodian mints on her OWN object (`runtime.pairing.mint/list/complete/cancel`, DO-local, 15 min, single use); the
+  runtime claims and takes through `POST /runtime/pair/{claim,take}` (CSRF-exempt, code-keyed, first key wins) →
+  `internal.runtime.pairing.*`; her browser equips the member (`@agenticprimitives/runtime-member/equip`) and the record
+  crosses back through the code. Gate `verify-runtime-pair`.
 
 ## What this app does not own
 
