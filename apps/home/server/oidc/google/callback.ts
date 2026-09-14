@@ -78,8 +78,10 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     aud: string;
     rpRedirect?: string;
     linkToken?: string;
-    /** Spec 400 W4 — a CONNECTOR authorization for the signed-in person, not a sign-in. */
-    purpose?: 'calendar';
+    /** Spec 400 W4 / 402 W2 — a CONNECTOR authorization for the signed-in person, not a sign-in. */
+    purpose?: 'calendar' | 'connector';
+    connector?: string;
+    provider?: string;
     person?: string;
     returnTo?: string;
   };
@@ -99,12 +101,14 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
 
   // Spec 400 W4 — a connector: the person is the one whose Home session started it (never derived from (iss,sub));
   // the tokens go to the agent runtime over the custody bridge and are kept under HER SA; the Home keeps none of it.
-  if (stash.purpose === 'calendar' && stash.person) {
+  if ((stash.purpose === 'calendar' || stash.purpose === 'connector') && stash.person) {
+    const connector = stash.connector ?? 'calendar';
+    const provider = stash.provider ?? 'google-calendar';
     const tokens = (result as { tokens?: { accessToken: string | null; refreshToken: string | null; expiresIn: number | null; scope: string | null } }).tokens;
-    const back = new URL(stash.returnTo ?? '/settings/connections', resolveOrigin(request, env));
-    if (!tokens?.accessToken) { back.searchParams.set('connector', 'calendar'); back.searchParams.set('error', 'no_token'); return Response.redirect(back.toString(), 302); }
-    const r = await connectorBridge(env, 'custody.connector.store', { person: stash.person, provider: 'google-calendar', access_token: tokens.accessToken, refresh_token: tokens.refreshToken, expires_in: tokens.expiresIn, scope: tokens.scope, account: result.principal.email ?? '' });
-    back.searchParams.set('connector', 'calendar');
+    const back = new URL(stash.returnTo ?? '/apps', resolveOrigin(request, env));
+    if (!tokens?.accessToken) { back.searchParams.set('connector', connector); back.searchParams.set('error', 'no_token'); return Response.redirect(back.toString(), 302); }
+    const r = await connectorBridge(env, 'custody.connector.store', { person: stash.person, provider, access_token: tokens.accessToken, refresh_token: tokens.refreshToken, expires_in: tokens.expiresIn, scope: tokens.scope, account: result.principal.email ?? '' });
+    back.searchParams.set('connector', connector);
     if (r.status !== 200) back.searchParams.set('error', String((r.body as { error?: string } | null)?.error ?? `HTTP ${r.status}`));
     else back.searchParams.set('connected', '1');
     return Response.redirect(back.toString(), 302);

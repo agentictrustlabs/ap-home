@@ -46,6 +46,7 @@ import { INBOX_LIST_TOOL, inboxListInvoker } from './inbox-list.js';
 import { WORK_SEARCH_TOOL, workSearchInvoker } from './work-search-tool.js';
 import { GITHUB_TOOLS, GITHUB_ACTS, githubInvoker } from './connectors/github-tools.js';
 import { CALENDAR_TOOLS, CALENDAR_ACTS, calendarInvoker } from './connectors/calendar-tools.js';
+import { MAIL_DRIVE_TOOLS, MAIL_DRIVE_ACTS, mailDriveInvoker } from './connectors/mail-drive-tools.js';
 import { MEMORY_TOOLS, MEMORY_ACTS, MEMORY_LIST_TOOL, memoryFactsInvoker } from './memory-facts-tools.js';
 import { factsForPrompt, factsOf, type RememberedFactsV1 } from '@agenticprimitives/context';
 import { CONTACT_INVITE_TOOL, CONTACT_LIST_TOOL, CONTACT_REMOVE_TOOL, contactInviteInvoker, contactListInvoker, contactRemoveInvoker, type ContactDeps } from './contacts.js';
@@ -324,6 +325,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   // Spec 400 W3/W4 — the forge's acts (a connector's; the playbook narrows who offers them).
   ...GITHUB_TOOLS.filter((t) => GITHUB_ACTS.has(t.id)),
   ...CALENDAR_TOOLS.filter((t) => CALENDAR_ACTS.has(t.id)),
+  ...MAIL_DRIVE_TOOLS.filter((t) => MAIL_DRIVE_ACTS.has(t.id)),
   // Spec 402 W1 — memory that follows the person: remember / forget, self-acting (a note about herself, in her vault).
   ...MEMORY_TOOLS.filter((t) => MEMORY_ACTS.has(t.id)),
   {
@@ -1925,7 +1927,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     setBillStep(ctx.step.id ?? `s${ctx.index}`);
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
     // mandate); explicit so a future caller cannot make it reachable quietly.
-    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === 'messaging.topic.post' || GITHUB_ACTS.has(toolId) || CALENDAR_ACTS.has(toolId) || toolId === ORG_INVITE_CAPABILITY || toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === 'messaging.topic.post' || GITHUB_ACTS.has(toolId) || CALENDAR_ACTS.has(toolId) || MAIL_DRIVE_ACTS.has(toolId) || toolId === ORG_INVITE_CAPABILITY || toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
     if (toolId === UNSUPPORTED_TOOL.id) {
       const offered = scopedActionTools(surface, playbook).map((t) => t.capability?.id ?? t.id);
       return { unsupported: true, what: String(args.what ?? ''), available: offered };
@@ -2021,6 +2023,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (toolId === ACCESS_REVOKE_CAPABILITY) return accessRevokeInvoker(deps, env, presented!, person)(toolId, args, ctx);
     if (toolId === ACCESS_AUDIT_CAPABILITY) return accessAuditInvoker(deps, person)(toolId, args, ctx);
     // Spec 400 W3/W4 — GitHub as a connector: reads under the holder's connector, acts under the holder's mandate.
+    if (MAIL_DRIVE_TOOLS.some((t) => t.id === toolId)) return mailDriveInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (CALENDAR_TOOLS.some((t) => t.id === toolId)) return calendarInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (GITHUB_TOOLS.some((t) => t.id === toolId)) return githubInvoker({ env: env as unknown as Record<string, unknown>, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (toolId === PROFILE_UPDATE_CAPABILITY) return profileUpdateInvoker(deps, person)(toolId, args, ctx);
@@ -3843,7 +3846,7 @@ async function askReplyForInner(env: HarnessEnv, input: {
     // names it — "you told me on …" is checkable, not a hunch. Only for the person's own agent (the route reads the
     // record then); never rendered as truth about anyone else.
     const remembered = input.memory ? factsOf(input.memory).entries.slice(0, 40) : [];
-    const memoryStep = remembered.length ? ({ step: { toolId: 'person.memory.recall', args: {}, id: 'memory' }, ok: true, result: { tier: 'private', record: 'memory.facts', facts: remembered.map((e) => ({ fact: e.fact, learnedAt: e.learnedAt, source: e.source, ...(e.from ? { from: e.from } : {}) })) } } as unknown as (typeof r.steps)[number]) : null;
+    const memoryStep = remembered.length ? ({ step: { toolId: 'person.memory.recall', args: {}, id: 'memory' }, ok: true, result: { tier: 'private', record: 'memory.facts', note: 'what the asker\'s agent remembers about the asker — use only when the answer rests on it, say "you told me" then, and do not mention memory otherwise', facts: remembered.map((e) => ({ fact: e.fact, learnedAt: e.learnedAt, source: e.source, ...(e.from ? { from: e.from } : {}) })) } } as unknown as (typeof r.steps)[number]) : null;
     const stepsWithMemory = memoryStep ? [...r.steps, memoryStep] : r.steps;
     const evidenceWithMemory = memoryStep ? askEvidence(stepsWithMemory) : evidence;
     let composer = input.composer ?? null;
@@ -3931,6 +3934,7 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'github.pr.comment': ['signature'],
   'github.pr.merge': ['signature'],                 // the mandate — bound to the work the PR names
   'calendar.event.create': ['signature'],           // the mandate — the holder's calendar connector acts (spec 400 W4)
+  'gmail.draft.create': ['signature'],              // the mandate — a draft in the holder's mail (spec 402 W2)
   'resolution.invitation.request': ['signature'],   // the mandate — asking is an act of yours too
   'treasury.primary.declare': ['signature'],        // the mandate — a public statement of yours
   'access.grant.revoke': ['signature'],             // the mandate — taking authority back is an act too
@@ -4552,6 +4556,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(deps.auditGrants && playbook?.tools?.[ACCESS_AUDIT_TOOL.id] ? [mergeContractTool(ACCESS_AUDIT_TOOL, playbook.tools[ACCESS_AUDIT_TOOL.id])] : []),
     ...GITHUB_TOOLS.filter((t) => !GITHUB_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     ...CALENDAR_TOOLS.filter((t) => !CALENDAR_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
+    ...MAIL_DRIVE_TOOLS.filter((t) => !MAIL_DRIVE_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     ...(deps.readSubjectRecord ? [PROFILE_READ_TOOL, HOUSEHOLD_READ_TOOL, MEMORY_LIST_TOOL] : []),
     UNSUPPORTED_TOOL,
   ];

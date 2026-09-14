@@ -54,7 +54,7 @@ function aad(sa: Address, provider: FederatedProvider = 'youversion'): Record<st
 
 /** One record per (provider, person). `youversion` keeps its historical key; a CONNECTOR (spec 400 W4 — Google Calendar
  *  first) is keyed `connector:<provider>:<sa>`. */
-export type FederatedProvider = 'youversion' | 'google-calendar';
+export type FederatedProvider = 'youversion' | 'google-calendar' | 'google-gmail' | 'google-drive';
 const key = (sa: Address, provider: FederatedProvider = 'youversion'): string => provider === 'youversion' ? `youversion:${sa.toLowerCase()}` : `connector:${provider}:${sa.toLowerCase()}`;
 
 /** Envelope-encrypt + store a person's YouVersion tokens, keyed by their SA. `expiresInSec` from the

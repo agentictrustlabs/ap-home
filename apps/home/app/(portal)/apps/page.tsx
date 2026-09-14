@@ -10,7 +10,7 @@ import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { ComingSoonState } from '../../../src/components/portal/ComingSoonState';
 import { ConnectedAppCard } from '../../../src/components/portal/ConnectedAppCard';
 import { YouVersionData } from '../../../src/components/portal/YouVersionData';
-import { CalendarConnectCard } from '../../../src/components/portal/CalendarConnectCard';
+import { ConnectorCard } from '../../../src/components/portal/CalendarConnectCard';
 import { HomeManifestCard } from '../../../src/components/portal/HomeManifestCard';
 import { DirectoryListingCard } from '../../../src/components/portal/DirectoryListingCard';
 import { AppReadGrants } from '../../../src/components/portal/AppReadGrants';
@@ -35,7 +35,9 @@ export default function AppsPage() {
           one page; neither is a participant. */}
       <h2 className="ui-h2" style={{ marginTop: 'var(--sp-2)' }}>Connected accounts</h2>
       <p className="muted" style={{ margin: '0 0 var(--sp-3)', fontSize: 'var(--fs-sm)' }}>Accounts of yours that your agent may read through — each a credential kept for you, revocable here.</p>
-      <CalendarConnectCard />
+      <ConnectorCard name="calendar" />
+      <ConnectorCard name="gmail" />
+      <ConnectorCard name="drive" />
       <YouVersionData />
       <h2 className="ui-h2" style={{ marginTop: 'var(--sp-5)' }}>Connected apps</h2>
       <p className="muted" style={{ margin: '0 0 var(--sp-3)', fontSize: 'var(--fs-sm)' }}>Apps and assistants you authorized to act as clients of you — what each may do is a grant, listed here and on Grants.</p>

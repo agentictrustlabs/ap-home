@@ -14,7 +14,7 @@ import { putRecord, getRecord, listRecords } from './run-records.js';
 import { recordFormOf, rehydrateExecuted } from './artifact-store.js';
 import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken, advanceTrigger, withPause, withBudget, advanced } from './triggers.js';
 import { consumeRuntimeWakes } from './runtime-wake.js';
-import { calendarStatus, disconnectCalendar } from './connectors/google-calendar.js';
+import { connectorStatus, disconnectConnector, type GoogleProvider } from './connectors/google-token.js';
 import { appendProgress, readProgress, type ProgressLineV1 } from './harness-progress.js';
 import { Hono, type Context } from 'hono';
 import { setCookie, getCookie } from 'hono/cookie';
@@ -7418,11 +7418,12 @@ app.post('/custody/connector/store-token', async (c) => {
   if (!ev.ok) return c.json({ ok: false, error: `unauthorized: ${ev.reason}` }, 401);
   const body = (() => { try { return JSON.parse(rawBody); } catch { return null; } })() as
     { person?: string; provider?: string; access_token?: string; refresh_token?: string; expires_in?: number; scope?: string; account?: string } | null;
-  if (!body?.person || !/^0x[0-9a-fA-F]{40}$/.test(body.person) || body.provider !== 'google-calendar' || !body.access_token) {
-    return c.json({ ok: false, error: 'person + provider (google-calendar) + access_token required' }, 400);
+  const GOOGLE_PROVIDERS = new Set(['google-calendar', 'google-gmail', 'google-drive']);
+  if (!body?.person || !/^0x[0-9a-fA-F]{40}$/.test(body.person) || !GOOGLE_PROVIDERS.has(String(body.provider)) || !body.access_token) {
+    return c.json({ ok: false, error: 'person + provider (google-calendar | google-gmail | google-drive) + access_token required' }, 400);
   }
   try {
-    await storeFederatedToken(c.env, body.person.toLowerCase() as Address, { access: body.access_token, refresh: body.refresh_token ?? null }, body.expires_in ?? null, body.scope ?? null, body.account ?? '', 'google-calendar');
+    await storeFederatedToken(c.env, body.person.toLowerCase() as Address, { access: body.access_token, refresh: body.refresh_token ?? null }, body.expires_in ?? null, body.scope ?? null, body.account ?? '', body.provider as GoogleProvider);
     return c.json({ ok: true, person: body.person.toLowerCase() });
   } catch (e) {
     console.error('[demo-a2a] custody/connector/store-token failed:', e);
@@ -7439,8 +7440,9 @@ app.post('/custody/connector/status', async (c) => {
   const ev = await verifyBridgeCall({ request: c.req.raw, rawBody, secret, expectedAudience: 'custody.connector.status', nonces: bridgeNonceStore(c.env) });
   if (!ev.ok) return c.json({ ok: false, error: `unauthorized: ${ev.reason}` }, 401);
   const body = (() => { try { return JSON.parse(rawBody); } catch { return null; } })() as { person?: string; provider?: string } | null;
-  if (!body?.person || !/^0x[0-9a-fA-F]{40}$/.test(body.person) || body.provider !== 'google-calendar') return c.json({ ok: false, error: 'person + provider required' }, 400);
-  return c.json({ ok: true, ...(await calendarStatus(c.env, body.person.toLowerCase() as Address)) });
+  if (!body?.person || !/^0x[0-9a-fA-F]{40}$/.test(body.person) || !/^google-(calendar|gmail|drive)$/.test(String(body.provider))) return c.json({ ok: false, error: 'person + provider required' }, 400);
+  const st = await connectorStatus(c.env, body.person.toLowerCase() as Address, body.provider as GoogleProvider);
+  return c.json({ ok: true, ...st, ...(st.connected ? { canWrite: st.scopes.some((x) => /calendar\.events$|gmail\.compose$/.test(x)) } : {}) });
 });
 app.post('/custody/connector/disconnect', async (c) => {
   const secret = c.env.A2A_CUSTODY_BRIDGE_SECRET;
@@ -7449,8 +7451,8 @@ app.post('/custody/connector/disconnect', async (c) => {
   const ev = await verifyBridgeCall({ request: c.req.raw, rawBody, secret, expectedAudience: 'custody.connector.disconnect', nonces: bridgeNonceStore(c.env) });
   if (!ev.ok) return c.json({ ok: false, error: `unauthorized: ${ev.reason}` }, 401);
   const body = (() => { try { return JSON.parse(rawBody); } catch { return null; } })() as { person?: string; provider?: string } | null;
-  if (!body?.person || !/^0x[0-9a-fA-F]{40}$/.test(body.person) || body.provider !== 'google-calendar') return c.json({ ok: false, error: 'person + provider required' }, 400);
-  await disconnectCalendar(c.env, body.person.toLowerCase() as Address);
+  if (!body?.person || !/^0x[0-9a-fA-F]{40}$/.test(body.person) || !/^google-(calendar|gmail|drive)$/.test(String(body.provider))) return c.json({ ok: false, error: 'person + provider required' }, 400);
+  await disconnectConnector(c.env, body.person.toLowerCase() as Address, body.provider as GoogleProvider);
   return c.json({ ok: true });
 });
 

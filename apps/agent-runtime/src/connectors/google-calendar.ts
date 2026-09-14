@@ -8,10 +8,10 @@
 // client the Home signs in with). A connector's credential is never an agent's: a runtime, a steward or an app asks the
 // harness, which answers as her.
 import type { Address } from 'viem';
-import { loadFederatedToken, storeFederatedToken, deleteFederatedToken } from '../fed-token.js';
+import { accessFor as accessForProvider, connectorStatus, disconnectConnector, googleApi, hasScope, refreshGoogleToken as refresh, type TokenEnv } from './google-token.js';
 
-export interface CalendarEnv { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; FED_TOKENS?: KVNamespace }
-type TokenEnv = Parameters<typeof loadFederatedToken>[0] & CalendarEnv;
+export type CalendarEnv = TokenEnv;
+export const refreshGoogleToken = refresh;
 
 export const CALENDAR_SCOPE_READ = 'https://www.googleapis.com/auth/calendar.readonly';
 export const CALENDAR_SCOPE_EVENTS = 'https://www.googleapis.com/auth/calendar.events';
@@ -19,52 +19,14 @@ const API = 'https://www.googleapis.com/calendar/v3';
 
 export interface CalendarEvent { id: string; summary: string; start: string; end: string; allDay: boolean; location?: string; description?: string; attendees?: Array<{ email: string; response?: string }>; link?: string; organizer?: string; status?: string }
 
-/** Google's own refresh-token exchange (confidential client: id + secret). A refused refresh is a disconnected calendar. */
-export async function refreshGoogleToken(env: CalendarEnv, refresh: string, f: typeof fetch = fetch): Promise<{ access: string; expiresIn: number | null; scope: string | null } | null> {
-  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) return null;
-  const body = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refresh, client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET });
-  const res = await f('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body: body.toString() });
-  if (!res.ok) return null;
-  const j = (await res.json().catch(() => ({}))) as { access_token?: string; expires_in?: number | string; scope?: string };
-  if (!j.access_token) return null;
-  return { access: j.access_token, expiresIn: j.expires_in != null ? Number(j.expires_in) : null, scope: j.scope ?? null };
-}
-
 /** The connection's state, for the Home and the tools: connected (which scopes, which account) or not. */
 export async function calendarStatus(env: TokenEnv, sa: Address): Promise<{ connected: false } | { connected: true; scope: string | null; account: string | null; canWrite: boolean }> {
-  const loaded = await loadFederatedToken(env, sa, 'google-calendar');
-  if (!loaded) return { connected: false };
-  const scope = loaded.scope;
-  return { connected: true, scope, account: loaded.appKey || null, canWrite: !!scope && scope.split(' ').includes(CALENDAR_SCOPE_EVENTS) };
+  const st = await connectorStatus(env, sa, 'google-calendar');
+  return st.connected ? { connected: true, scope: st.scope, account: st.account, canWrite: hasScope(st.scope, CALENDAR_SCOPE_EVENTS) } : { connected: false };
 }
-
-export async function disconnectCalendar(env: TokenEnv, sa: Address): Promise<void> {
-  await deleteFederatedToken(env, sa, 'google-calendar');
-}
-
-/** An access token for the person, refreshed when near expiry (and the refreshed one kept). `null` = not connected. */
-async function accessFor(env: TokenEnv, sa: Address, f: typeof fetch): Promise<{ access: string; scope: string | null } | null> {
-  const loaded = await loadFederatedToken(env, sa, 'google-calendar');
-  if (!loaded) return null;
-  if (loaded.exp - Math.floor(Date.now() / 1000) > 60) return { access: loaded.tokens.access, scope: loaded.scope };
-  if (!loaded.tokens.refresh) return null;
-  const r = await refreshGoogleToken(env, loaded.tokens.refresh, f);
-  if (!r) return null;
-  await storeFederatedToken(env, sa, { access: r.access, refresh: loaded.tokens.refresh }, r.expiresIn, r.scope ?? loaded.scope, loaded.appKey, 'google-calendar');
-  return { access: r.access, scope: r.scope ?? loaded.scope };
-}
-
-async function api(access: string, path: string, init: RequestInit, f: typeof fetch): Promise<Record<string, unknown>> {
-  const res = await f(`${API}${path}`, { ...init, headers: { authorization: `Bearer ${access}`, accept: 'application/json', ...(init.body ? { 'content-type': 'application/json' } : {}), ...(init.headers ?? {}) } });
-  const text = await res.text();
-  let body: Record<string, unknown> = {};
-  try { body = JSON.parse(text) as Record<string, unknown>; } catch { body = { raw: text.slice(0, 200) }; }
-  if (!res.ok) {
-    const err = (body.error as { message?: string; status?: string } | undefined);
-    throw new Error(`Google Calendar ${res.status}: ${err?.message ?? err?.status ?? text.slice(0, 120)}`);
-  }
-  return body;
-}
+export const disconnectCalendar = (env: TokenEnv, sa: Address): Promise<void> => disconnectConnector(env, sa, 'google-calendar');
+const accessFor = (env: TokenEnv, sa: Address, f: typeof fetch) => accessForProvider(env, sa, 'google-calendar', f);
+const api = (access: string, path: string, init: RequestInit, f: typeof fetch) => googleApi(access, `${API}${path}`, init, f, 'Google Calendar');
 
 const eventOf = (e: Record<string, unknown>): CalendarEvent => {
   const start = (e.start as { dateTime?: string; date?: string } | undefined) ?? {};
@@ -95,7 +57,7 @@ export async function listEvents(env: TokenEnv, sa: Address, opts: { timeMin?: s
 export async function createEvent(env: TokenEnv, sa: Address, input: { summary: string; start: string; end: string; allDay?: boolean; location?: string; description?: string; attendees?: string[]; calendarId?: string }, f: typeof fetch = fetch): Promise<CalendarEvent | null> {
   const got = await accessFor(env, sa, f);
   if (!got) return null;
-  if (!got.scope || !got.scope.split(' ').includes(CALENDAR_SCOPE_EVENTS)) throw new Error('this calendar was connected read-only — reconnect it with permission to add events');
+  if (!hasScope(got.scope, CALENDAR_SCOPE_EVENTS)) throw new Error('this calendar was connected read-only — reconnect it with permission to add events');
   const calendar = input.calendarId ?? 'primary';
   const when = (v: string) => (input.allDay ? { date: v.slice(0, 10) } : { dateTime: v });
   const payload: Record<string, unknown> = { summary: input.summary, start: when(input.start), end: when(input.end), ...(input.location ? { location: input.location } : {}), ...(input.description ? { description: input.description } : {}), ...(input.attendees?.length ? { attendees: input.attendees.map((email) => ({ email })) } : {}) };
