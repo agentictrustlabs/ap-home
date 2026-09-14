@@ -27,12 +27,16 @@ import { addPasskeyCredential, claimName, fetchProfile } from '../../connect-cli
 import { CENTRAL_AUTH_DOMAIN, nameLabel } from '../../lib/domain';
 import { seedImpactProfileFields } from '../../profile-store';
 import type { Address } from '@agenticprimitives/types';
+import { whitelabel } from '../../whitelabel/config';
 
 /** Should this host offer the passkey step for a home named `homeName`? Only on a member subdomain
  *  (the passkey's RP = this host — it must be where the member returns), and only when the subdomain
  *  IS the home's name (or the home is nameless — the entry flow claims this subdomain's name for it). */
 function passkeyOfferHost(homeName: string | null | undefined): boolean {
   if (typeof window === 'undefined') return false;
+  // A deployment that does not offer passkeys as a way in never asks for one after the code either — email IS
+  // the credential here (2026-09-13: "email connect took me into a passkey challenge that I do not want").
+  if (!whitelabel.onboarding.credentialMethods.includes('passkey')) return false;
   const h = window.location.hostname;
   if (h === CENTRAL_AUTH_DOMAIN || !h.endsWith(`.${CENTRAL_AUTH_DOMAIN}`)) return false;
   const label = h.slice(0, -(CENTRAL_AUTH_DOMAIN.length + 1));
