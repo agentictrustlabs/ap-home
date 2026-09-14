@@ -96,6 +96,9 @@ export const NOT_PLAN_STEPS: readonly string[] = [
   // Spec 394 — a STANDING INSTRUCTION is the person's own note of a default: self-acting, no mandate, and
   // never work anyone is allocated.
   'context.instruction.declare',
+  // Spec 402 W1 — MEMORY is the person's own note about herself: self-acting, no mandate, never work.
+  'person.memory.remember',
+  'person.memory.forget',
 ];
 
 /** A plan step as the work loop sees it. */

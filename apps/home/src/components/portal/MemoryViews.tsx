@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
-import { listConfirmations, listInstructions, forgetConfirmation, forgetInstruction, listRuns, listRunRecords, type RememberedChoice, type StandingInstruction, type ParkedRun, type RunRecordRow } from '../../home/ask';
+import { listConfirmations, listInstructions, forgetConfirmation, forgetInstruction, listFacts, forgetFact, listRuns, listRunRecords, type RememberedChoice, type StandingInstruction, type ParkedRun, type RunRecordRow, type RememberedFact } from '../../home/ask';
 import { fetchWorkList, type EndeavorRow } from '../../lib/work-client';
 import { assembleMemory, type MemoryItem, type MemoryStore } from '../../home/memory';
 import type { TodayArtifact } from '../../home/today';
@@ -29,6 +29,7 @@ export function MemoryViews({ scope }: { scope: WorkspaceScope }) {
   const workspace = scope.kind === 'org' ? scope.org.toLowerCase() : scope.kind === 'service' ? scope.agent.toLowerCase() : self;
   const [tab, setTab] = useState<MemoryStore>(scope.kind === 'person' ? 'personal' : 'workspace');
   const [confirmations, setConfirmations] = useState<RememberedChoice[]>([]);
+  const [facts, setFacts] = useState<RememberedFact[]>([]);
   const [instructions, setInstructions] = useState<StandingInstruction[]>([]);
   const [endeavors, setEndeavors] = useState<EndeavorRow[]>([]);
   const [artifacts, setArtifacts] = useState<Array<TodayArtifact & { releases?: number; grants?: number }>>([]);
@@ -45,11 +46,12 @@ export function MemoryViews({ scope }: { scope: WorkspaceScope }) {
     const token = session.token;
     const why = (e: unknown) => (e instanceof Error ? e.message : String(e)) || 'unreachable';
     const u: Partial<Record<MemoryStore, string>> = {};
-    const [c, s, runs, recs] = await Promise.all([
+    const [c, s, runs, recs, f] = await Promise.all([
       listConfirmations({ token }).catch((e) => { u.personal = `remembered choices: ${why(e)}`; return []; }), listInstructions({ token }).catch((e) => { u.personal = `standing instructions: ${why(e)}`; return []; }),
       listRuns({ token }, workspace as Address).catch((e) => { u.run = `checkpoints: ${why(e)}`; return []; }), listRunRecords({ token }, workspace as Address).then((r) => r.records).catch((e) => { u.run = `run records: ${why(e)}`; return []; }),
+      listFacts({ token }).catch((e) => { u.personal = `remembered facts: ${why(e)}`; return []; }),
     ]);
-    setConfirmations(c); setInstructions(s); setCheckpoints(runs as never); setRecords(recs);
+    setConfirmations(c); setInstructions(s); setCheckpoints(runs as never); setRecords(recs); setFacts(f);
     if (scope.kind === 'org') { const w = await fetchWorkList(token, workspace).catch((e) => { u.workspace = `the work list: ${why(e)}`; return null; }); setEndeavors(w?.endeavors ?? []); }
     const scopeQ = scope.kind === 'person' ? '' : `?org=${workspace}`;
     const lib = await fetch(`/connect/library${scopeQ}`, { headers: { authorization: `Bearer ${token}` } }).then((r) => { if (!r.ok) throw new Error(`the Library answered ${r.status}`); return r.json(); }).catch((e) => { u.workspace = [u.workspace, `the Library: ${why(e)}`].filter(Boolean).join('; '); return { artifacts: [] }; }) as { artifacts?: Array<{ id: string; name: string; kind?: string; createdAt?: number; version?: number; isFolder?: boolean; releases?: unknown[]; grants?: unknown[] }> };
@@ -59,12 +61,14 @@ export function MemoryViews({ scope }: { scope: WorkspaceScope }) {
   }, [session?.token, self, workspace, scope.kind]);
   useEffect(() => { void load(); }, [load]);
 
-  const views = useMemo(() => assembleMemory({ self, workspace, confirmations, instructions, endeavors, artifacts, records, checkpoints }), [self, workspace, confirmations, instructions, endeavors, artifacts, records, checkpoints]);
+  const views = useMemo(() => assembleMemory({ self, workspace, confirmations, instructions, facts, endeavors, artifacts, records, checkpoints }), [self, workspace, confirmations, instructions, facts, endeavors, artifacts, records, checkpoints]);
 
   const forget = async (it: MemoryItem) => {
     if (!session || !it.ref) return;
     setBusy(it.id); setErr(null);
-    const out = it.kind === 'remembered choice'
+    const out = it.kind === 'remembered fact'
+      ? await forgetFact(session, String(it.ref.id))
+      : it.kind === 'remembered choice'
       ? await forgetConfirmation(session, it.ref as { word: string; capability: string; arg: string; context?: string })
       : await forgetInstruction(session, it.ref as { context: string; capability: string; arg: string });
     setBusy(null);

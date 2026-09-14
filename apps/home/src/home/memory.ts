@@ -9,7 +9,7 @@
 //               promotion to the Library is an ACT with a receipt, never a drag
 // A personal fact never becomes workspace knowledge without a sharing act that leaves a record (T14). Pure: it takes
 // what the clients return and sorts it; it fetches nothing and decides nothing about authority.
-import type { RememberedChoice, StandingInstruction, ParkedRun, RunRecordRow } from './ask';
+import type { RememberedChoice, StandingInstruction, ParkedRun, RunRecordRow, RememberedFact } from './ask';
 import type { TodayArtifact } from './today';
 import type { EndeavorRow } from '../lib/work-client';
 import { stateOf, type ProjectedRunStateV1 } from './run-state';
@@ -44,6 +44,8 @@ export interface MemoryInputs {
   workspace: string;
   confirmations: ReadonlyArray<RememberedChoice>;
   instructions: ReadonlyArray<StandingInstruction>;
+  /** Spec 402 W1 — what the agent remembers about the person, in their words. */
+  facts?: ReadonlyArray<RememberedFact>;
   endeavors: ReadonlyArray<EndeavorRow>;
   artifacts: ReadonlyArray<TodayArtifact & { releases?: number; grants?: number }>;
   records: ReadonlyArray<RunRecordRow>;
@@ -60,6 +62,12 @@ export interface MemoryViews {
 
 export function assembleMemory(i: MemoryInputs): MemoryViews {
   const personal: MemoryItem[] = [
+    ...(i.facts ?? []).map((f) => ({
+      id: `fact:${f.id}`, store: 'personal' as const, kind: 'remembered fact',
+      title: f.fact, detail: `${f.source === 'you' ? 'you told me' : f.source === 'agent' ? 'your agent learned it' : `from ${f.from ?? 'a connected account'}`}${f.tags?.length ? ` · ${f.tags.join(', ')}` : ''}`,
+      at: Date.parse(f.learnedAt), owner: i.self, actions: ['forget' as const, 'correct' as const],
+      ref: { id: f.id },
+    })),
     ...i.confirmations.map((c) => ({
       id: `confirmation:${c.word}:${c.capability}:${c.arg}${c.context ? `@${c.context}` : ''}`, store: 'personal' as const, kind: 'remembered choice',
       title: `“${c.word}” means ${c.label ?? c.agent.slice(0, 10) + '…'}`, detail: `when ${c.capabilityWords} asks for ${c.arg}${c.context ? ` · in room ${c.context.slice(0, 10)}…` : ' · at home'}`,

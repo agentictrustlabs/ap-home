@@ -46,6 +46,8 @@ import { INBOX_LIST_TOOL, inboxListInvoker } from './inbox-list.js';
 import { WORK_SEARCH_TOOL, workSearchInvoker } from './work-search-tool.js';
 import { GITHUB_TOOLS, GITHUB_ACTS, githubInvoker } from './connectors/github-tools.js';
 import { CALENDAR_TOOLS, CALENDAR_ACTS, calendarInvoker } from './connectors/calendar-tools.js';
+import { MEMORY_TOOLS, MEMORY_ACTS, MEMORY_LIST_TOOL, memoryFactsInvoker } from './memory-facts-tools.js';
+import { factsForPrompt, factsOf, type RememberedFactsV1 } from '@agenticprimitives/context';
 import { CONTACT_INVITE_TOOL, CONTACT_LIST_TOOL, CONTACT_REMOVE_TOOL, contactInviteInvoker, contactListInvoker, contactRemoveInvoker, type ContactDeps } from './contacts.js';
 import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
 import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
@@ -322,6 +324,8 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   // Spec 400 W3/W4 — the forge's acts (a connector's; the playbook narrows who offers them).
   ...GITHUB_TOOLS.filter((t) => GITHUB_ACTS.has(t.id)),
   ...CALENDAR_TOOLS.filter((t) => CALENDAR_ACTS.has(t.id)),
+  // Spec 402 W1 — memory that follows the person: remember / forget, self-acting (a note about herself, in her vault).
+  ...MEMORY_TOOLS.filter((t) => MEMORY_ACTS.has(t.id)),
   {
     id: 'treasury.payment.execute',
     verbs: ['send', 'pay', 'transfer', 'wire'],
@@ -2022,6 +2026,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (toolId === PROFILE_UPDATE_CAPABILITY) return profileUpdateInvoker(deps, person)(toolId, args, ctx);
     if (toolId === HOUSEHOLD_RECORD_CAPABILITY) return householdRecordInvoker(deps, person)(toolId, args, ctx);
     if (toolId === STANDING_INSTRUCTION_CAPABILITY) return standingInstructionInvoker(deps, person, addressee)(toolId, args, ctx);
+    if (MEMORY_TOOLS.some((t) => t.id === toolId)) return memoryFactsInvoker(deps, person, (ctx as { runRef?: string }).runRef ?? (ctx.idempotencyKey ? ctx.idempotencyKey.split(':').slice(0, -1).join(':') : undefined), addressee)(toolId, args, ctx);
     // Spec 387 W2 — the addressee's own catalog: bound by ITS name's records at call time (cached by the reader),
     // so an unattended run at a service (a gateway's task, a routed ask) reads it exactly as a person's does.
     if (isCatalogTool(toolId)) return catalogInvoker(await catalogBindingFor(deps, addressee ? String(addressee) : undefined))(toolId, args, ctx);
@@ -2185,6 +2190,8 @@ export interface HarnessRunInput {
    *  planner as words, handed to the resolver for pronouns and repeated names. NEVER part of the intent:
    *  the mandate binds the intent's digest, and a memory that grows between turns would break every resume. */
   conversation?: ConversationMemoryV1 | null;
+  /** Spec 402 W1 — what the asker's agent remembers about the asker; only when the asker addresses their OWN agent. */
+  memory?: RememberedFactsV1 | null;
   /** The mandate(s) the caller presents. `null` is legitimate on an ASK: the run then reports the
    *  authority it would need (`authority-required`) instead of failing — and grants nothing. A LIST is
    *  the spec 358 W4 keyring: a fanned-out plan needs a mandate per item, and each step is judged under
@@ -3551,6 +3558,8 @@ export async function askReplyFor(env: HarnessEnv, input: Parameters<typeof askR
 async function askReplyForInner(env: HarnessEnv, input: {
   /** Spec 371 — the tools the run was offered, for rendering a read's `answer` template. */
   tools?: ToolSpec[];
+  /** Spec 402 W1 — what the asker's agent remembers about the asker: one more observation the composer is grounded in. */
+  memory?: RememberedFactsV1 | null;
   intent: { goal: string }; result: RunResult; addressee: Address;
   /** What the surface said it can render — a prompt it never declared is refused, not stranded. */
   surface?: AskScopeV1;
@@ -3829,10 +3838,18 @@ async function askReplyForInner(env: HarnessEnv, input: {
       const rendered = readSteps.map((o) => renderAnswer(offered.find((t) => t.id === o.step.toolId)!.answer!, o.result));
       if (rendered.every((x): x is string => typeof x === 'string' && x.length > 0)) return withEvidence(rendered.join(' '));
     }
+    // Spec 402 W1 — MEMORY AS EVIDENCE. What the asker's agent remembers about the asker rides into the composer as one
+    // more observation (`person.memory.recall`), so a sentence that rests on it is GROUNDED in it and the reply's evidence
+    // names it — "you told me on …" is checkable, not a hunch. Only for the person's own agent (the route reads the
+    // record then); never rendered as truth about anyone else.
+    const remembered = input.memory ? factsOf(input.memory).entries.slice(0, 40) : [];
+    const memoryStep = remembered.length ? ({ step: { toolId: 'person.memory.recall', args: {}, id: 'memory' }, ok: true, result: { tier: 'private', record: 'memory.facts', facts: remembered.map((e) => ({ fact: e.fact, learnedAt: e.learnedAt, source: e.source, ...(e.from ? { from: e.from } : {}) })) } } as unknown as (typeof r.steps)[number]) : null;
+    const stepsWithMemory = memoryStep ? [...r.steps, memoryStep] : r.steps;
+    const evidenceWithMemory = memoryStep ? askEvidence(stepsWithMemory) : evidence;
     let composer = input.composer ?? null;
     if (input.composerFor) {
       // The evidence is what the composer carries (chars/4, plus its own doctrine); the route names who carries it.
-      const largestBodyChars = r.steps.filter((o) => o.ok && o.result !== undefined).reduce((m, o) => Math.max(m, JSON.stringify(o.result).length), 0);
+      const largestBodyChars = stepsWithMemory.filter((o) => o.ok && o.result !== undefined).reduce((m, o) => Math.max(m, JSON.stringify(o.result).length), 0);
       const need: RouteNeed = { call: 'composer', estimatedTokens: Math.ceil(JSON.stringify(r.steps).length / 4) + 800, ...(largestBodyChars ? { largestBodyChars } : {}) };
       const routed = await input.composerFor(need);
       composer = routed.composer;
@@ -3847,16 +3864,16 @@ async function askReplyForInner(env: HarnessEnv, input: {
       // compositions the person gets the observations, not a third guess.
       // Spec 391 — the evidence is FITTED to the composer's budget here, so the drops are on the trace and the
       // governor below judges the prose against what the model actually saw. Never a slice.
-      const fitted = fitEvidence(r.steps, composer.evidenceBudget ?? 24_000);
+      const fitted = fitEvidence(stepsWithMemory, composer.evidenceBudget ?? 24_000);
       if (input.plannerTrace) input.plannerTrace.composerEvidence = { chars: fitted.chars, of: fitted.of, dropped: fitted.dropped };
-      let text = await composer.compose({ intent: input.intent, observations: r.steps, evidence: fitted.items });
-      let violations = checkGroundedComposition(text, evidence, input.intent.goal);
+      let text = await composer.compose({ intent: input.intent, observations: stepsWithMemory, evidence: fitted.items });
+      let violations = checkGroundedComposition(text, evidenceWithMemory, input.intent.goal);
       if (violations.length) {
         text = await composer.compose({
-          intent: input.intent, observations: r.steps, evidence: fitted.items,
+          intent: input.intent, observations: stepsWithMemory, evidence: fitted.items,
           corrections: violations.map((v) => v.correction),
         });
-        violations = checkGroundedComposition(text, evidence, input.intent.goal);
+        violations = checkGroundedComposition(text, evidenceWithMemory, input.intent.goal);
         if (violations.length) text = groundedFallback(evidence);
       }
       return withEvidence(text);
@@ -3913,6 +3930,7 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'github.pr.open': ['signature'],                  // the mandate — the holder's connector acts
   'github.pr.comment': ['signature'],
   'github.pr.merge': ['signature'],                 // the mandate — bound to the work the PR names
+  'calendar.event.create': ['signature'],           // the mandate — the holder's calendar connector acts (spec 400 W4)
   'resolution.invitation.request': ['signature'],   // the mandate — asking is an act of yours too
   'treasury.primary.declare': ['signature'],        // the mandate — a public statement of yours
   'access.grant.revoke': ['signature'],             // the mandate — taking authority back is an act too
@@ -4375,6 +4393,7 @@ enumerates. "Choose the tool" above means one CAPABILITY — this two-call form 
 fanned out.
 
 ${conversationForPrompt(input.conversation, String(input.addressee ?? ''), conversationTurns)}
+${input.memory ? factsForPrompt(input.memory) : ''}
 
 A step that should happen ONLY IF an earlier read found something adds {"$when": {"ref": "<name>.<path>",
 "exists": true}} (or "exists": false for the other branch) to its arguments — the runtime takes or skips
@@ -4533,7 +4552,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(deps.auditGrants && playbook?.tools?.[ACCESS_AUDIT_TOOL.id] ? [mergeContractTool(ACCESS_AUDIT_TOOL, playbook.tools[ACCESS_AUDIT_TOOL.id])] : []),
     ...GITHUB_TOOLS.filter((t) => !GITHUB_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     ...CALENDAR_TOOLS.filter((t) => !CALENDAR_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
-    ...(deps.readSubjectRecord ? [PROFILE_READ_TOOL, HOUSEHOLD_READ_TOOL] : []),
+    ...(deps.readSubjectRecord ? [PROFILE_READ_TOOL, HOUSEHOLD_READ_TOOL, MEMORY_LIST_TOOL] : []),
     UNSUPPORTED_TOOL,
   ];
   const harnessLocal = harnessInvoker(deps, env, presentedList, input.mcpInvoke, input.person, input.session, input.surface, input.addressee, playbook);

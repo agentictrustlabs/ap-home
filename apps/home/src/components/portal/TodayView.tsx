@@ -14,6 +14,7 @@ import { RunControls } from './runs/RunControls';
 import { workspaceHref, type WorkspaceScope } from '../../lib/workspace';
 import { List, Row, Panel, Stats, Stat, relativeLabel, type PanelState } from '../../ui';
 import { TodayCalendar } from './TodayCalendar';
+import { TodayMemory } from './TodayMemory';
 import { StatePill } from './StatePill';
 import { AlertIcon, ActivityIcon, FileIcon, RepeatIcon, SparkIcon } from './today-icons';
 
@@ -100,6 +101,7 @@ export function TodayView({ scope, children }: { scope: WorkspaceScope; children
       </Panel>
 
       {scope.kind === 'person' && addressee && <TodayCalendar person={addressee as Address} />}
+      {scope.kind === 'person' && <TodayMemory />}
 
       <Panel title="Recent artifacts" icon={<FileIcon />} count={arts.length} state={artifactsState} rows={2} testId="today-recent-artifacts" aside={<a href={libraryHref}>Open the Library →</a>}
         empty={{ icon: <FileIcon />, title: `Nothing new in the last ${RECENT_DAYS} days`, hint: 'Artifacts your runs produce land in the Library and show here.' }}

@@ -324,6 +324,20 @@ export async function listConfirmations(session: { token: string }): Promise<Rem
   return out.ok ? out.entries ?? [] : [];
 }
 
+/** Spec 402 W1 — one remembered FACT: what the person's agent knows about them, in their words, dated, with who said it. */
+export interface RememberedFact { id: string; fact: string; learnedAt: string; source: 'you' | 'agent' | 'connector'; saidAs?: string; runRef?: string; from?: string; tags?: string[] }
+
+/** What the person's agent remembers about them — theirs alone. */
+export async function listFacts(session: { token: string }): Promise<RememberedFact[]> {
+  const out = (await postA2a('/a2a/harness/memory', { session: session.token })) as { ok?: boolean; entries?: RememberedFact[] };
+  return out.ok ? out.entries ?? [] : [];
+}
+/** Forget one remembered fact; a receipt that cited it keeps its citation. */
+export async function forgetFact(session: { token: string }, id: string): Promise<{ ok: true; entries: RememberedFact[] } | { ok: false; error: string }> {
+  const out = (await postA2a('/a2a/harness/memory/forget', { session: session.token, id })) as { ok?: boolean; entries?: RememberedFact[]; error?: string };
+  return out.ok ? { ok: true, entries: out.entries ?? [] } : { ok: false, error: out.error ?? 'the fact could not be forgotten' };
+}
+
 /** Spec 394 — one standing instruction: in THIS room (`any` or an organization's address), when the person does THIS act,
  *  THIS argument defaults to THIS agent unless they say otherwise. Evidence the resolver cites (`standing`), never a
  *  grant; shown so it can be cleared. */

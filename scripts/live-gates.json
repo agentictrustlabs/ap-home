@@ -392,6 +392,16 @@
       "timeoutSec": 300
     },
     {
+      "id": "verify-memory-follows",
+      "script": "scripts/verify-memory-follows.mts",
+      "spec": "402 W1",
+      "proves": "a fact the person tells her own agent ('remember that …') is kept in her vault, listed back with when and who said it, shown by the Home's memory route, and forgotten on her word — gone everywhere; memory that follows the person because every way in asks the same agent",
+      "twin": "her organization's agent, addressed with the same read, does not read her memory (a room keeps its own records); another person's agent remembers nothing of hers",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 240
+    },
+    {
       "id": "verify-mention-into-run",
       "script": "scripts/verify-mention-into-run.mts",
       "spec": "400 W2 (B3)",

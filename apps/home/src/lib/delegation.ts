@@ -382,6 +382,9 @@ export const CONFIRMATION_PREFERENCES_RESOURCE_SCOPE = 'vault:confirmation.prefe
 /** Spec 394 — the person's own STANDING INSTRUCTIONS: a declared default per (room, capability, argument). Evidence the
  *  resolver cites, never a grant. Additive: a grant signed before this scope existed denies the record until re-issued. */
 export const STANDING_INSTRUCTIONS_RESOURCE_SCOPE = 'vault:standing.instructions' as const;
+/** Spec 402 W1 — what the person's agent REMEMBERS about them (`memory.facts`): their own facts, in their own words. Additive,
+ *  like the instructions: a grant signed before this scope existed denies the record until re-issued. */
+export const MEMORY_FACTS_RESOURCE_SCOPE = 'vault:memory.facts' as const;
 /** What the playbook REMEMBERS about the subjects of one skill family (`playbook.memory:<family>`): counts a
  *  review folds in, advice reads back. Behaviour, never authority. Additive: a grant signed before this scope
  *  existed denies the record until re-issued, and the review says so in its reply. */

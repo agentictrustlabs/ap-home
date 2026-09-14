@@ -7,7 +7,7 @@ import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 // State is held in a Durable Object (SessionStoreDO); see ./session-store-do.ts.
 // Env bindings come from c.env (typed via the Bindings interface below).
 
-import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, forgetConfirmation, CONFIRMATION_RECORD, forgetInstruction, STANDING_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1 } from '@agenticprimitives/context';
+import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, forgetConfirmation, CONFIRMATION_RECORD, forgetInstruction, STANDING_RECORD, factsOf, forgetFact, FACTS_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1, type RememberedFactsV1 } from '@agenticprimitives/context';
 import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
 import { recordOf, replayingInvoker, traceContextOf, type RunPlannerSummaryV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent, type RunBillV1 } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
@@ -1710,6 +1710,32 @@ const instructionEntries = (rec: unknown) => {
   const entries = rec && typeof rec === 'object' && (rec as StandingInstructionsV1).type === 'ap.context.standing-instructions.v1' ? (rec as StandingInstructionsV1).entries : [];
   return entries.map((e) => ({ ...e, capabilityWords: CAPABILITY_WORDS[e.capability] ?? e.capability }));
 };
+// Spec 402 W1 — the person's remembered facts: list, and forget one. Their own record; the Home's Memory page and Today.
+app.post('/harness/memory', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string } | null;
+  if (!body?.session) return c.json({ ok: false, error: 'session is required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  if (!deps.readSubjectRecord) return c.json({ ok: false, error: 'the private tier is not configured' }, 503);
+  const rec = factsOf(await deps.readSubjectRecord(String(who.sa).toLowerCase(), FACTS_RECORD).catch(() => null));
+  return c.json({ ok: true, entries: rec.entries });
+});
+app.post('/harness/memory/forget', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; id?: string } | null;
+  if (!body?.session || !body.id) return c.json({ ok: false, error: 'session and id are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  if (!deps.readSubjectRecord || !deps.writeSubjectRecord) return c.json({ ok: false, error: 'the private tier is not configured' }, 503);
+  const me = String(who.sa).toLowerCase();
+  const prev = factsOf(await deps.readSubjectRecord(me, FACTS_RECORD).catch(() => null));
+  const r = forgetFact(prev, String(body.id));
+  if (!r.removed) return c.json({ ok: false, error: 'no remembered fact has that id', entries: prev.entries }, 404);
+  const wrote = await deps.writeSubjectRecord(me, FACTS_RECORD, r.next);
+  if (!wrote.ok) return c.json({ ok: false, error: wrote.error ?? 'the fact could not be forgotten' }, 502);
+  return c.json({ ok: true, entries: r.next.entries, forgotten: r.removed });
+});
 app.post('/harness/instructions', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { session?: string } | null;
   if (!body?.session) return c.json({ ok: false, error: 'session is required' }, 400);
@@ -3508,6 +3534,10 @@ app.post('/harness/ask', async (c) => {
     // that fails to land costs a progress line, never the run.
     // Spec 370 P7 — the asker's own recent turns, from their vault. One read; absent ⇒ no memory.
     const conversation = (await askDeps.readSubjectRecord?.(String(who.sa).toLowerCase(), CONVERSATION_RECORD).catch(() => null)) as ConversationMemoryV1 | null;
+    // Spec 402 W1 — what the asker's agent remembers about the asker, ONLY when the asker addresses their own agent: an
+    // organization's agent does not read a person's memory. One read; absent ⇒ no memory, which narrows nothing.
+    const ownAgent = String(who.sa).toLowerCase() === String(addressee).toLowerCase();
+    const memory: RememberedFactsV1 | null = ownAgent ? factsOf(await askDeps.readSubjectRecord?.(String(who.sa).toLowerCase(), FACTS_RECORD).catch(() => null)) : null;
     let progressSeq = 0;
     let progressChain: Promise<void> = Promise.resolve();
     const askerSa = String(who.sa).toLowerCase() as Address;
@@ -3522,6 +3552,7 @@ app.post('/harness/ask', async (c) => {
       traceContext: traceContextOf(c.req.raw.headers),
       intent, presented: turn.presented, person: who.sa as Address, session: body.session, ...(appCredential ? { appCredential } : {}), runRef, addressee, onProgress: progress,
       conversation: conversation && conversation.type === 'ap.context.conversation-memory.v1' ? conversation : null,
+      ...(memory && memory.entries.length ? { memory } : {}),
       ...(inResponseTo ? { inResponseTo } : {}),
       ...(body.channel === 'voice' ? { channel: 'voice' as const } : {}),
       ...(provider ? { provider } : {}),
@@ -3650,6 +3681,7 @@ app.post('/harness/ask', async (c) => {
     });
     if (structuredRoutes.length) trace.route = { ...(trace.route ?? { policy: 'first' as const }), structured: structuredRoutes };
     const reply = await askReplyFor(c.env as unknown as HarnessEnv, {
+      ...(memory && memory.entries.length ? { memory } : {}),
       intent, result, addressee, composerFor: (need: RouteNeed) => selectComposerRouted(c.env, { ...(provider ? { provider } : {}), need }), deps: askDeps, interactionFor, plannerTrace: trace, tools: offeredTools,
       ...(body.plan ?? stored?.plan ? { suppliedPlan: true } : {}),
       ...(body.surface ? { surface: body.surface } : {}),

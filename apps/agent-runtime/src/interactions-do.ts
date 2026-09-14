@@ -386,10 +386,12 @@ const RESOLUTION_GRANTS_RESOURCE = 'resolution.grants';
 // what it resolved for them into their own vault. Memory, never a general write path.
 // Spec 385 — the scoped confirmation memory is the same kind of thing: the person's agent writing what THEY
 // chose into their own vault, from the resume that supplied the choice; and clearing it when they say so.
+// Spec 402 W1 — `memory.facts` is what the person's agent remembers about THEM: their own words, kept from their own
+// ask (remember / forget), the same door as a standing instruction.
 // Spec 401 — a CONTACT (`contact:<sa>`) is the person's own record of who they let in, written by their agent under
 // their own signed mandate (the act that mints the grant) into their own vault. Its own family: an organization's
 // invitation key stays a delivery-plane write (the fabric firewall), untouched by this door.
-const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run.provenance:', 'run.artifact:', 'confirmation.preferences', 'standing.instructions', 'playbook.memory:', 'cardroom.', 'contact:'] as const;
+const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run.provenance:', 'run.artifact:', 'confirmation.preferences', 'standing.instructions', 'memory.facts', 'playbook.memory:', 'cardroom.', 'contact:'] as const;
 
 const CAPABILITY_RECORDS = new Set(['impact-profile', 'capabilities.data', 'skills.data', 'home.manifest', 'control-events.data', 'archetype.assignment']);
 const CONTROL_EVENTS_RESOURCE = 'control-events.data';
