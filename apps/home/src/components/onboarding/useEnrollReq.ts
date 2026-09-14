@@ -41,6 +41,9 @@ export interface EnrollReq {
   contentSignerTarget?: string; // spec 266 — the single signing identity (e.g. demo-validator.impact) this `content-signer` ceremony authorizes. Per-custodian: you authorize only the SA you connected as.
   prompt?: string; // OIDC `prompt`: 'select_account'/'login' force the custodian chooser instead of silently reusing the active session (multi-custodian admin must never assume an identity).
   requireNamedAgent?: boolean; // relying app requires a unique Impact name before issuing the grant.
+  /** org-create + a registry: the org's registration (presence, affirmed clauses, contact) as the app sent it,
+   *  base64url JSON, parsed and checked by `mission-registry.ts` — see `RelyingApp.missionRegistryConfig`. */
+  registryEntry?: string;
 }
 
 // SEC-005: ALLOWED_RELYING_ORIGINS is now derived from whitelabel.relyingApps[].redirect_uris
@@ -93,6 +96,7 @@ export function parseEnrollReq(): EnrollReq | null {
       contentSignerTarget: p.get('content_signer_target') ?? undefined,
       prompt: p.get('prompt') ?? undefined,
       requireNamedAgent: p.get('require_named_agent') === 'true' || p.get('require_named_agent') === '1',
+      registryEntry: p.get('registry_entry') ?? undefined,
     };
   } catch {
     return null;

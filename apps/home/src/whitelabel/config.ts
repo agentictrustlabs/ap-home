@@ -427,7 +427,14 @@ const faithImpact: WhiteLabelConfig = {
         'workspace-member-invite',
         'workspace-join',
         'service-agent-wire',
+        // A MISSION REGISTERS: an org-create (purpose `mission`) that carries `registry_entry` and ends with
+        // the organization listed in the card room's mission registry (`missionRegistryConfig` below).
+        'org-create',
       ],
+      // THE MISSION REGISTRY (Game Night `docs/MISSION-REGISTRY.md`): `urn:ap:registry:gamenight-missions`
+      // on this chain's AgentRegistryBase, controlled by the card room's registry operator agent. Named
+      // here so the org-create ceremony lists into it and nowhere else.
+      missionRegistryConfig: { registryId: 'urn:ap:registry:gamenight-missions' },
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
       // A PERSON AT THE CARD ROOM IS NAMED. The card room addresses a person's agent by its public name and
       // nothing else — the table asks `alice.me` for advice, records her hands to `alice.me`, and hires her

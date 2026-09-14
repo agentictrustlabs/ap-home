@@ -116,6 +116,13 @@ export interface RelyingApp {
   serviceAgentConfig?: {
     a2aBase: string;
   };
+  /** A relying app that keeps a KIT-BUILT REGISTRY (spec 279) its organizations list into: an `org-create` that
+   *  carries `registry_entry` ends with the org registered there (`src/lib/mission-registry.ts`). The registry
+   *  id is CURATED here, never taken from the request — a write signed by the org's own account must not be
+   *  steerable into somebody else's registry. */
+  missionRegistryConfig?: {
+    registryId: string;
+  };
   /** What a member of THIS app is set up with the first time they connect — see {@link NewMemberOnboarding}.
    *
    *  ABSENT MEANS TODAY'S BEHAVIOUR, EXACTLY. Every app that does not carry this field runs the same
