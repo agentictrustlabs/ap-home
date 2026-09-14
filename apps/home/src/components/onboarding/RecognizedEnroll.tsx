@@ -44,7 +44,7 @@ import { OrgChooser, type OrgChoice } from './OrgChooser';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
 import { knownRelyingClient } from '../../lib/relying-clients';
 import { agentClassOf } from '../../lib/agent-class';
-import { enrolMission, parseRegistryEntry } from '../../lib/mission-registry';
+import { withMissionRegistry } from '../../lib/mission-registry';
 
 type Phase = 'resolving' | 'choose-org' | 'consent' | 'granting' | 'connected' | 'error';
 
@@ -509,26 +509,11 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         // THE MISSION REGISTRY (a relying app's kit-built registry, `missionRegistryConfig`): an org-create that
         // carries `registry_entry` is not done when the org exists — it ends with the org LISTED. The steward
         // signs the covenant as themselves; the org signs its own entry; both prompts are this one ceremony.
-        if (enroll.registryEntry) {
-          const cfg = relyingApp?.missionRegistryConfig;
-          if (!cfg) return fail('this app is not configured to register organizations');
-          const request = parseRegistryEntry(enroll.registryEntry);
-          if (!request) return fail('the registration the app sent could not be read — start again from the app');
-          const orgAgent = (created.org as { orgAgent?: string }).orgAgent as Address | undefined;
-          if (!orgAgent) return fail('no organization to register');
+        {
           const regAuth: Auth | undefined = token ? { token } : undefined;
-          const listed = await enrolMission({
-            config: cfg,
-            request,
-            org: orgAgent,
-            steward: home.address,
-            signAsSteward: await signHashFor(viaLower as Via, home.address, regAuth),
-            signAsOrg: await signHashFor(viaLower as Via, orgAgent, regAuth),
-            stewardship: (created.org as { stewardshipDelegation?: Parameters<typeof enrolMission>[0]['stewardship'] }).stewardshipDelegation,
-            onStep: (label) => setGrantProgress({ step: 2, total: 3, label }),
-          });
+          const listed = await withMissionRegistry({ enroll, relyingApp, org: created.org, steward: home.address, via: viaLower, auth: regAuth, signHashFor: (v, s, a) => signHashFor(v as Via, s, a), onStep: (label) => setGrantProgress({ step: 2, total: 3, label }) });
           if (!listed.ok) return fail(listed.error);
-          created.org = { ...created.org, registry: listed.registry };
+          created.org = listed.org;
         }
         // A TEAM is usable from the first approval or it is not created — the same storage trio
         // workspace-create runs (a team's own roster lives in its own vault). Scoped to field-team

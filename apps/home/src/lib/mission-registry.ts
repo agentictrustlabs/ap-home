@@ -103,6 +103,42 @@ export interface MissionRegistryOutcome {
   contact: string;
 }
 
+/**
+ * THE STEP BOTH ORG-CREATE PATHS TAKE — the recognized ceremony and the journey (a brand-new member creating
+ * their first organization in the same trip). Given the created/chosen org, runs the enrolment and returns
+ * the org payload WITH `registry` on it, or the reason it could not. One place, so a path cannot forget it.
+ */
+export async function withMissionRegistry(input: {
+  enroll: { registryEntry?: string };
+  relyingApp: { missionRegistryConfig?: MissionRegistryConfig } | undefined;
+  org: Record<string, unknown>;
+  steward: Address;
+  via: string;
+  auth: { token: string } | undefined;
+  signHashFor: (via: string, sender: Address, auth: { token: string } | undefined) => Promise<SignHash>;
+  onStep?: (label: string) => void;
+}): Promise<{ ok: true; org: Record<string, unknown> } | { ok: false; error: string }> {
+  if (!input.enroll.registryEntry) return { ok: true, org: input.org };
+  const cfg = input.relyingApp?.missionRegistryConfig;
+  if (!cfg) return { ok: false, error: 'this app is not configured to register organizations' };
+  const request = parseRegistryEntry(input.enroll.registryEntry);
+  if (!request) return { ok: false, error: 'the registration the app sent could not be read — start again from the app' };
+  const orgAgent = (input.org as { orgAgent?: string }).orgAgent as Address | undefined;
+  if (!orgAgent) return { ok: false, error: 'no organization to register' };
+  const listed = await enrolMission({
+    config: cfg,
+    request,
+    org: orgAgent,
+    steward: input.steward,
+    signAsSteward: await input.signHashFor(input.via, input.steward, input.auth),
+    signAsOrg: await input.signHashFor(input.via, orgAgent, input.auth),
+    stewardship: (input.org as { stewardshipDelegation?: DelegationWire }).stewardshipDelegation,
+    onStep: input.onStep,
+  });
+  if (!listed.ok) return listed;
+  return { ok: true, org: { ...input.org, registry: listed.registry } };
+}
+
 export async function enrolMission(input: {
   config: MissionRegistryConfig;
   request: MissionEntryRequest;

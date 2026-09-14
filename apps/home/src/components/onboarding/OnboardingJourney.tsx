@@ -17,7 +17,7 @@ import { WorkingBar } from './WorkingBar';
 // explicitly typed a name, so we honour their choice rather than discard it.
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { createHomeKey, secureHome, openHome, givePermission, createOrganization, personGrantForOrgCreate, continueWithGoogle, continueWithYouVersion, activateVaultIfNeeded, isKmsVia, type Via } from '../../home/onboarding';
+import { createHomeKey, secureHome, openHome, givePermission, createOrganization, personGrantForOrgCreate, continueWithGoogle, continueWithYouVersion, activateVaultIfNeeded, isKmsVia, signHashFor, type Via } from '../../home/onboarding';
 import { clearStandingGrant } from '../../lib/grant-cache';
 import { readSsoCookie } from '../../lib/sso-cookie';
 import { EmailAuthCard } from '../portal/EmailAuthCard';
@@ -27,6 +27,7 @@ import { hasWallet } from '../../lib/wallet';
 import { clearPasskey, forcePhonePasskeyOnce, isUvMissingError, type DemoPasskey } from '../../lib/passkey';
 import { homeLabel, type Home } from '../../home/types';
 import { recordConnectedApp } from '../../lib/connected-apps';
+import { withMissionRegistry } from '../../lib/mission-registry';
 import { whitelabel, fmt, isPaymentTemplate } from '../../whitelabel/config';
 import { CENTRAL_AUTH_DOMAIN } from '../../lib/domain';
 import { useSession } from '../../context/session';
@@ -369,6 +370,12 @@ export function OnboardingJourney({
           existingOrg,
         });
         if (!created.ok) return fail(created.error, 'grant');
+        // THE MISSION REGISTRY step, when the app asked for it — the same one the recognized ceremony runs, so a
+        // brand-new member creating their first organization in this trip is listed too.
+        setBusy('Listing the organization in the registry…');
+        const listed = await withMissionRegistry({ enroll: api.enroll, relyingApp, org: created.org, steward: home.address, via, auth: kmsAuth, signHashFor: (v, s, a) => signHashFor(v as Via, s, a), onStep: (label) => setBusy(label) });
+        if (!listed.ok) return fail(listed.error, 'grant');
+        created.org = listed.org;
         const proved = await personGrantForOrgCreate(home, delegate, via, kmsAuth, created, api.enroll.sessionKey);
         if (!proved.ok) return fail(proved.error, 'grant');
         const orgCode = await api.submitGrant(grant_id, proved.grant, proved.org, proved.sessionDelegation);
