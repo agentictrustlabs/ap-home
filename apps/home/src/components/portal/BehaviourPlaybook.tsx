@@ -250,6 +250,23 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
             )}
           </div>
 
+          {/* A NEWER VERSION of the assigned playbook in the registry — its contracts changed (a capability added, a
+              contract rewritten) and this agent still runs the digest it was assigned. The ask says `unknown_tool` for
+              anything the new contracts offer until the steward re-pins; the choice stays hers (K3: a receipt cites the
+              version), so this is an offer, never a silent upgrade. */}
+          {current && (() => {
+            const same = registry.find((r) => r.definition.archetypeId === current.archetypeId);
+            if (!same || !same.digest || same.digest === current.definitionDigest) return null;
+            const added = same.definition.tools.map((t) => t.id).filter((id) => !current.definition?.tools?.some((t) => t.id === id));
+            return (
+              <div role="status" style={{ margin: '0 0 .8rem', padding: '.55rem .75rem', borderRadius: 8, background: 'var(--st-warn-bg, #fff7e6)', border: '1px solid var(--st-warn-border, #f2d38a)', fontSize: '.8rem' }}>
+                <strong>A newer version of this playbook is in the registry</strong>{added.length ? <> — it adds {added.slice(0, 4).map((id) => <code key={id} className="ui-mono" style={{ margin: '0 2px' }}>{id}</code>)}{added.length > 4 ? ` and ${added.length - 4} more` : ''}</> : ''}.
+                {' '}Until you take it, an ask for those says <code className="ui-mono">unknown_tool</code>.{' '}
+                <button type="button" className="btn-ghost" style={{ padding: '.15rem .55rem', fontSize: '.78rem', marginLeft: '.4rem' }} disabled={busy} onClick={() => { setSelected({ key: same.key, label: same.label, summary: same.summary, definition: same.definition, registry: same }); }}>Review the update</button>
+              </div>
+            );
+          })()}
+
           {/* spec 354 K6 — Bound to release. Whether the CURRENT playbook is the one this agent's public
               card promises. Verifiability is structural: the released card carries the definition digest,
               so anyone can check this playbook version against the corpus. Silent when nothing is
