@@ -214,15 +214,29 @@ export function deliverEnrollCode(enroll: EnrollReq, popupMode: boolean, code: s
   // are about ARRIVING, and arriving is the plain sign-in.
   const plainSignIn = !enroll.template || enroll.template === 'site-login' || isPaymentTemplate(enroll.template);
   if (code && plainSignIn && CLIENT_DEFAULTS[enroll.aud]) {
-    const deadline = new Promise<void>((resolve) => setTimeout(resolve, 60_000));
-    void Promise.race([applyClientDefaults(enroll.aud, (line) => console.log('[client-defaults]', line)).then((o) => { if (o.error) console.warn('[client-defaults]', enroll.aud, o.error); else console.log('[client-defaults]', enroll.aud, 'applied', o.applied, 'skipped', o.skipped); }).catch((e: unknown) => console.warn('[client-defaults]', enroll.aud, e)), deadline])
-      .then(() => deliverEnrollCodeNow(enroll, popupMode, code));
+    // FORCED, AND SAID. The defaults are tried, tried once more if they failed (a vault that was a second
+    // late, a signer that had not warmed), and whatever is still missing goes BACK WITH THE CODE as
+    // `defaults_error`, so the app can tell the person what did not happen and where to finish it —
+    // a person who arrived by email sat down with the house coach and no word about why (2026-09-13).
+    const deadline = new Promise<{ error?: string }>((resolve) => setTimeout(() => resolve({ error: 'timed out after a minute' }), 90_000));
+    const attempt = () => applyClientDefaults(enroll.aud, (line) => console.log('[client-defaults]', line)).catch((e: unknown) => ({ applied: [], skipped: [], error: e instanceof Error ? e.message : String(e) }));
+    void Promise.race([
+      attempt().then(async (o) => {
+        if (!o.error) return o;
+        console.warn('[client-defaults]', enroll.aud, 'first try:', o.error);
+        return attempt();
+      }),
+      deadline,
+    ]).then((o) => {
+      if (o.error) console.warn('[client-defaults]', enroll.aud, o.error); else console.log('[client-defaults]', enroll.aud, 'applied', (o as { applied?: string[] }).applied, 'skipped', (o as { skipped?: string[] }).skipped);
+      deliverEnrollCodeNow(enroll, popupMode, code, o.error);
+    });
     return;
   }
   deliverEnrollCodeNow(enroll, popupMode, code);
 }
 
-function deliverEnrollCodeNow(enroll: EnrollReq, popupMode: boolean, code: string): void {
+function deliverEnrollCodeNow(enroll: EnrollReq, popupMode: boolean, code: string, defaultsError?: string): void {
   if (popupMode && typeof window !== 'undefined' && window.opener && relyingAllowed(enroll.redirectUri)) {
     postEnrollToOpener(enroll, { type: 'AC_SUCCESS', state: enroll.state, code });
     window.close();
@@ -238,6 +252,7 @@ function deliverEnrollCodeNow(enroll: EnrollReq, popupMode: boolean, code: strin
   // return handler (spec 295); harmless to apps that ignore it. (The postMessage path above needs no marker
   // — the opener reads the message's `e.origin`, which IS this minting origin.)
   if (typeof window !== 'undefined') url.searchParams.set('ac_iss', window.location.origin);
+  if (defaultsError) url.searchParams.set('defaults_error', defaultsError.slice(0, 300));
   // spec 257: if we ARE a popup but lost our opener (the OAuth IdP — e.g. Google COOP — severs
   // window.opener on the cross-origin round-trip), we can't postMessage the code back. Redirect
   // THIS popup to the relying app with a relay marker so it hands {code,state} to its same-origin
