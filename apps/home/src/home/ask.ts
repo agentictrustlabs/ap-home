@@ -332,6 +332,11 @@ export async function listFacts(session: { token: string }): Promise<RememberedF
   const out = (await postA2a('/a2a/harness/memory', { session: session.token })) as { ok?: boolean; entries?: RememberedFact[] };
   return out.ok ? out.entries ?? [] : [];
 }
+/** The same read, with the reason when it could not be made (a grant that predates the scope says `record_scope_denied`). */
+export async function listFactsOrWhy(session: { token: string }): Promise<{ ok: true; entries: RememberedFact[] } | { ok: false; error: string }> {
+  const out = (await postA2a('/a2a/harness/memory', { session: session.token })) as { ok?: boolean; entries?: RememberedFact[]; error?: string; detail?: string };
+  return out.ok ? { ok: true, entries: out.entries ?? [] } : { ok: false, error: out.detail ?? out.error ?? 'memory could not be read' };
+}
 /** Forget one remembered fact; a receipt that cited it keeps its citation. */
 export async function forgetFact(session: { token: string }, id: string): Promise<{ ok: true; entries: RememberedFact[] } | { ok: false; error: string }> {
   const out = (await postA2a('/a2a/harness/memory/forget', { session: session.token, id })) as { ok?: boolean; entries?: RememberedFact[]; error?: string };

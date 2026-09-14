@@ -1718,8 +1718,12 @@ app.post('/harness/memory', async (c) => {
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const deps = harnessDeps(c.env, buildAuditSink(c.env));
   if (!deps.readSubjectRecord) return c.json({ ok: false, error: 'the private tier is not configured' }, 503);
-  const rec = factsOf(await deps.readSubjectRecord(String(who.sa).toLowerCase(), FACTS_RECORD).catch(() => null));
-  return c.json({ ok: true, entries: rec.entries });
+  // UNKNOWN IS NOT ZERO (398 §6.3): a read the grant refuses says so — a grant signed before `vault:memory.facts`
+  // existed answers `record_scope_denied`, and the Home offers the refresh; an empty record is a different answer.
+  let raw: unknown;
+  try { raw = await deps.readSubjectRecord(String(who.sa).toLowerCase(), FACTS_RECORD); }
+  catch (e) { const why = e instanceof Error ? e.message : String(e); return c.json({ ok: false, error: /record_scope_denied|scope/i.test(why) ? 'record_scope_denied' : 'memory could not be read', detail: why.slice(0, 200) }, 502); }
+  return c.json({ ok: true, entries: factsOf(raw).entries });
 });
 app.post('/harness/memory/forget', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { session?: string; id?: string } | null;
