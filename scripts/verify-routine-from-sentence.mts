@@ -11,7 +11,7 @@
  * fired ask is itself a supplied-shape read — memory list — so the composer renders, never composes).
  */
 import { personaCustodian } from '@agenticprimitives/runtime-member';
-import { fixture as fx, HOME, skipUnless } from './fixture.mts';
+import { fixture as fx, HOME, skipUnless, resolveOrgAgent } from './fixture.mts';
 
 const R = skipUnless(fx.org, 'an organization the steward stewards');
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
@@ -22,6 +22,7 @@ const H = { 'content-type': 'application/json', origin: HOME, cookie: (csrfRes.h
 const post = async (path: string, body: unknown) => j(await fetch(`${HOME}/a2a${path}`, { method: 'POST', headers: H, body: JSON.stringify(body) }));
 const steward = await personaCustodian(HOME, fx.people.steward);
 const me = steward.agent.toLowerCase();
+const ORG_AGENT = await resolveOrgAgent(steward.bearer, R); // the fixture may name the organization only (the estate does)
 const nonce = Date.now().toString(36);
 const SENTENCE = `every Monday at 8, tell me what you remember about me (gate ${nonce})`;
 console.log(`── ${fx.people.steward} declares a routine from a sentence at her own agent ──`);
@@ -71,7 +72,7 @@ if (!delivered) fail('the routine\'s answer was not delivered to her Messages');
 console.log('  the answer landed in her Messages, from her agent, carrying the routine\'s ref ✓');
 
 // twin B — in her organization's room, a routine of her own is refused; a sentence without a clock is asked back
-const room = await post('/harness/ask', { session: steward.bearer, addressee: R.agent, message: `every day at 9, say hello (gate ${nonce})`, plan: { steps: [{ toolId: 'person.routine.declare', args: { sentence: `every day at 9, say hello (gate ${nonce})` } }] } });
+const room = await post('/harness/ask', { session: steward.bearer, addressee: ORG_AGENT, message: `every day at 9, say hello (gate ${nonce})`, plan: { steps: [{ toolId: 'person.routine.declare', args: { sentence: `every day at 9, say hello (gate ${nonce})` } }] } });
 const roomRes = (room.reply?.result ?? room.reply?.results?.[0]?.result ?? {}) as { refused?: string };
 if (!roomRes.refused && room.reply?.kind !== 'refused') fail(`twin: the organization's agent kept her routine: ${JSON.stringify(room).slice(0, 200)}`);
 const noclock = await post('/harness/ask', { session: steward.bearer, addressee: me, message: 'tell me the news', plan: { steps: [{ toolId: 'person.routine.declare', args: { sentence: 'tell me the news' } }] } });

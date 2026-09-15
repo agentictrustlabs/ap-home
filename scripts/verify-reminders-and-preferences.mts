@@ -12,7 +12,7 @@
  * signature. Twins: preferences in her organization's room are refused; a reminder with no clock is asked back.
  */
 import { personaCustodian } from '@agenticprimitives/runtime-member';
-import { fixture as fx, HOME, A2A, skipUnless } from './fixture.mts';
+import { fixture as fx, HOME, A2A, skipUnless, resolveOrgAgent } from './fixture.mts';
 
 const R = skipUnless(fx.org, 'an organization the steward stewards');
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
@@ -23,6 +23,7 @@ const H = { 'content-type': 'application/json', origin: HOME, cookie: (csrfRes.h
 const post = async (path: string, body: unknown) => j(await fetch(`${HOME}/a2a${path}`, { method: 'POST', headers: H, body: JSON.stringify(body) }));
 const steward = await personaCustodian(HOME, fx.people.steward);
 const me = steward.agent.toLowerCase();
+const ORG_AGENT = await resolveOrgAgent(steward.bearer, R); // the fixture may name the organization only (the estate does)
 const record = async (key: string) => ((await j(await fetch(`${A2A}/interactions/${me}/record.get`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session: steward.bearer, recordType: key }) }))) as { record?: unknown }).record;
 const nonce = Date.now().toString(36);
 console.log(`── ${fx.people.steward}: a reminder, her preferences, the web, an undo ──`);
@@ -93,7 +94,7 @@ if (undo.reply?.kind !== 'authority_required' || undo.reply?.capability !== 'cal
 console.log('  calendar.event.delete on a word → authority_required (her signature) ✓');
 
 // twins
-const room = await post('/harness/ask', { session: steward.bearer, addressee: R.agent, message: 'answer me briefly', plan: { steps: [{ toolId: 'person.preferences.set', args: { style: 'brief' } }] } });
+const room = await post('/harness/ask', { session: steward.bearer, addressee: ORG_AGENT, message: 'answer me briefly', plan: { steps: [{ toolId: 'person.preferences.set', args: { style: 'brief' } }] } });
 const roomRes = (room.reply?.result ?? room.reply?.results?.[0]?.result ?? {}) as { refused?: string };
 if (!roomRes.refused && room.reply?.kind !== 'refused') fail(`twin: the organization's agent kept her preferences: ${JSON.stringify(room).slice(0, 200)}`);
 const noclock = await post('/harness/ask', { session: steward.bearer, addressee: me, message: 'remind me to call bob', plan: { steps: [{ toolId: 'person.routine.declare', args: { sentence: 'remind me to call bob' } }] } });
