@@ -12,7 +12,7 @@
 // person's wire to cover the counterparty (one-prompt ceremony).
 import { searchAgentsKb } from './agent-search';
 
-export type RecipientScope = 'contacts' | 'names' | 'organization' | 'workspace';
+export type RecipientScope = 'contacts' | 'names' | 'organization' | 'workspace' | 'services';
 
 export interface PickedRecipient {
   /** Lowercase 0x address — what the send is addressed to. */

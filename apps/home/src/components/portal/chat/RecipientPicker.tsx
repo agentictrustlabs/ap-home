@@ -104,6 +104,9 @@ export function RecipientPicker({
   const entries = useMemo<ScopeEntry[]>(() => {
     const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
     const orgs: ScopeEntry[] = [];
+    // agent-vocabulary.md §3 — SERVICES as their own bucket: the .svc agents the person stewards (a runtime she paired, a
+    // coach service), addressed directly. Treasuries and registries are not messaged, so they are not here.
+    const services = agents.filter((a) => a.kind === 'service').map((a) => ({ address: a.agent.toLowerCase(), title: a.name || short(a.agent), subtitle: 'service', ...(a.name ? { name: a.name } : {}), scope: 'services' as const }));
     for (const a of agents) {
       const id = a.agent.toLowerCase();
       const label = a.name || short(a.agent);
@@ -121,6 +124,7 @@ export function RecipientPicker({
       { id: 'contacts', scope: 'contacts', label: 'Contacts', sub: 'people and services you let in', Icon: GlobeIcon },
       { id: 'names', scope: 'names', label: 'People', sub: 'anyone with a name', Icon: GlobeIcon },
       ...orgs.sort(byLabel),
+      ...(services.length ? [{ id: 'services', scope: 'services' as const, label: 'Services', sub: `${services.length} you steward`, Icon: WorkspaceIcon }] : []),
     ];
   }, [agents]);
   const { agentAddress } = useSession();
@@ -137,7 +141,9 @@ export function RecipientPicker({
     // frame — a stale list is a wrong list. Names re-queries keep their rows while the filter refines.
     if (active.scope !== 'names' || !namesQuery) setRows(null);
     const t = window.setTimeout(() => {
-      const load: Promise<PickedRecipient[]> = active.scope === 'contacts'
+      const load: Promise<PickedRecipient[]> = active.scope === 'services'
+        ? Promise.resolve(agents.filter((a) => a.kind === 'service').map((a) => ({ address: a.agent.toLowerCase(), title: a.name || `${a.agent.slice(0, 6)}…${a.agent.slice(-4)}`, subtitle: 'service', ...(a.name ? { name: a.name } : {}), scope: 'services' as const })))
+        : active.scope === 'contacts'
         ? (agentAddress ? readContactsThroughHarness({ person: agentAddress as `0x${string}`, session: { token } }).then((r) => (r.ok ? r.contacts.map((c) => ({ address: c.contact.toLowerCase(), title: c.name ?? `${c.contact.slice(0, 6)}…${c.contact.slice(-4)}`, subtitle: c.role, ...(c.name ? { name: c.name } : {}), scope: 'contacts' as const })) : Promise.reject(new Error(r.error)))) : Promise.resolve([]))
         : active.scope === 'names'
         ? listNamedAgents(namesQuery.length >= 2 ? namesQuery : '')
@@ -177,8 +183,9 @@ export function RecipientPicker({
     { key: 'contacts', title: '', items: entries.filter((e) => e.scope === 'contacts') },
     { key: 'names', title: '', items: entries.filter((e) => e.scope === 'names') },
     { key: 'orgs', title: 'Organizations', items: entries.filter((e) => e.scope === 'organization') },
+    { key: 'services', title: '', items: entries.filter((e) => e.scope === 'services') },
   ];
-  const paneTitle = active.scope === 'contacts' ? 'Your contacts' : active.scope === 'names' ? 'People with a name' : `Members of ${active.label}`;
+  const paneTitle = active.scope === 'contacts' ? 'Your contacts' : active.scope === 'names' ? 'People with a name' : active.scope === 'services' ? 'Services you steward' : `Members of ${active.label}`;
 
   return (
     <div className="chat-picker" data-testid="dm-picker">

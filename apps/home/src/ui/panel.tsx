@@ -23,7 +23,7 @@ export function Panel({ title, icon, count, aside, state, rows = 3, lead, empty,
   const autoId = useId();
   useReadyReport(id ?? autoId, state === 'loading');
   return (
-    <section className="ui-panel" {...(testId ? { 'data-testid': testId } : {})} data-state={state}>
+    <section className="ui-panel" {...(testId ? { 'data-testid': testId } : {})} {...(id ? { id } : {})} data-state={state}>
       <div className="ui-panel-head">
         <h2>{icon}{title}{typeof count === 'number' && state === 'ready' && <span className="ui-count">{count}</span>}</h2>
         {aside && <div className="ui-panel-aside">{aside}</div>}

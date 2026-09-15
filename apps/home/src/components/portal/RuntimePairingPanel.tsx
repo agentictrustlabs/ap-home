@@ -93,6 +93,7 @@ export function RuntimePairingPanel() {
       aside={<Button size="sm" variant={open ? 'secondary' : 'primary'} onClick={() => setOpen((v) => !v)}>{open ? 'Cancel' : 'Pair a runtime'}</Button>}
       empty={{ title: 'No runtime paired yet', hint: 'Your own Claude Code, goose or Codex can join a workspace you steward as a member — under grants you sign and can revoke.' }}
       testId="runtime-pairing"
+      id="runtimes"
     >
       {err && <div className="ui-panel-body" style={{ paddingBottom: 0 }}><ErrorNote>{err}</ErrorNote></div>}
       {done && <div className="ui-panel-body" style={{ paddingBottom: 0 }}><Note>✓ {done} is paired — the runtime is picking up its record now. It is on the workspace roster and its grants are on your Grants screen.</Note></div>}
