@@ -1,18 +1,20 @@
 // GMAIL AND DRIVE AS CAPABILITIES — spec 402 W2. Reads are the person's own standing (her connector, her agent answering
-// as her); the one act — a mail DRAFT — needs her mandate (`authorityArg: holder`). Never send, never delete, never
-// write a file in this wave. Whoever asks — her Home, Claude through the Home MCP, a paired runtime — gets the
-// harness's answer as her, never the token.
+// as her); a mail DRAFT needs her mandate (`authorityArg: holder`); SENDING (spec 402 W5) is its own capability at the
+// top of the ladder — a signature, fresh each time, because mail that leaves as her is her acting. Never delete, never
+// write a file. Whoever asks — her Home, Claude through the Home MCP, a paired runtime — gets the harness's answer as
+// her, never the token.
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
-import { searchThreads, readThread, createDraft } from './google-gmail.js';
+import { searchThreads, readThread, createDraft, sendMessage } from './google-gmail.js';
 import { searchFiles, readFile } from './google-drive.js';
 import { connectorStatus, type TokenEnv } from './google-token.js';
 
 export const GMAIL_THREADS_SEARCH = 'gmail.threads.search' as const;
 export const GMAIL_THREAD_READ = 'gmail.thread.read' as const;
 export const GMAIL_DRAFT_CREATE = 'gmail.draft.create' as const;
+export const GMAIL_MESSAGE_SEND = 'gmail.message.send' as const;
 export const DRIVE_FILES_SEARCH = 'drive.files.search' as const;
 export const DRIVE_FILE_READ = 'drive.file.read' as const;
-export const MAIL_DRIVE_ACTS = new Set<string>([GMAIL_DRAFT_CREATE]);
+export const MAIL_DRIVE_ACTS = new Set<string>([GMAIL_DRAFT_CREATE, GMAIL_MESSAGE_SEND]);
 
 const holderArg = { holder: { type: 'string', description: 'Whose account — the person it belongs to (defaults to the asker)' } };
 
@@ -39,6 +41,14 @@ export const MAIL_DRIVE_TOOLS: ToolSpec[] = [
     capability: { id: GMAIL_DRAFT_CREATE, action: 'draft', resourceArg: 'holder', authorityArg: 'holder' },
     risk: 'medium',
     establishes: 'submission',
+  },
+  {
+    id: GMAIL_MESSAGE_SEND,
+    verbs: ['send an email to', 'email the', 'send the draft', 'send it', 'send that email', 'send the email', 'reply to the email saying', 'send a reply'],
+    description: 'SENDS MAIL from the person\'s Gmail as her, under her SIGNATURE for this one message: either `draftId` (a draft she reviewed goes as it is — from gmail.draft.create) or `to`, `subject`, `body` whole (`threadId` to reply in a thread, `cc`). It leaves her account as her: the receipt names the sent message. Never for someone else\'s mail.',
+    inputSchema: { type: 'object', properties: { draftId: { type: 'string', description: 'A draft to send as it is' }, to: { type: 'string' }, subject: { type: 'string' }, body: { type: 'string' }, threadId: { type: 'string' }, cc: { type: 'string' }, ...holderArg } },
+    capability: { id: GMAIL_MESSAGE_SEND, action: 'send', resourceArg: 'holder', authorityArg: 'holder' },
+    risk: 'high',
   },
   {
     id: DRIVE_FILES_SEARCH,
@@ -83,7 +93,15 @@ export function mailDriveInvoker(deps: MailDriveDeps, presented: { wire?: { dele
       case GMAIL_DRAFT_CREATE: {
         const out = await createDraft(deps.env, holder, { to: String(args.to), subject: String(args.subject), body: String(args.body), ...(typeof args.threadId === 'string' ? { threadId: args.threadId } : {}), ...(typeof args.cc === 'string' ? { cc: args.cc } : {}) }, f);
         if (!out) return notConnected('Gmail');
-        return { drafted: true, holder, ...out, note: 'a draft in your Gmail — nothing was sent; send it from Gmail yourself' };
+        // What may follow (spec 368 §3): the draft as it is, sent under her signature — proposed, never done here.
+        return { drafted: true, holder, ...out, note: 'a draft in your Gmail — nothing was sent; send it from Gmail, or say "send it" here and sign', next: { capability: GMAIL_MESSAGE_SEND, args: { draftId: out.draftId }, words: `send it — the draft to ${String(args.to)} as it is`, why: 'it leaves your Gmail as you, so it takes your signature, this once' } };
+      }
+      case GMAIL_MESSAGE_SEND: {
+        const draftId = typeof args.draftId === 'string' ? args.draftId.trim() : '';
+        const whole = { to: String(args.to ?? ''), subject: String(args.subject ?? ''), body: String(args.body ?? ''), ...(typeof args.threadId === 'string' ? { threadId: args.threadId } : {}), ...(typeof args.cc === 'string' ? { cc: args.cc } : {}) };
+        const out = await sendMessage(deps.env, holder, draftId ? { draftId } : whole, f);
+        if (!out) return notConnected('Gmail');
+        return { sent: true, holder, ...out, ...(draftId ? { draftId } : { to: whole.to, subject: whole.subject }), note: `sent from your Gmail as you${draftId ? ' — the draft as it was' : ''}` };
       }
       case DRIVE_FILES_SEARCH: {
         const out = await searchFiles(deps.env, holder, { ...(typeof args.query === 'string' ? { query: args.query } : {}), ...(typeof args.max === 'number' ? { max: args.max } : {}) }, f);

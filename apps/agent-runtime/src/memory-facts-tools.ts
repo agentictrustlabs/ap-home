@@ -19,7 +19,7 @@ export const MEMORY_REMEMBER_TOOL: ToolSpec = {
     + '"my daughter is Ana", "I prefer morning meetings". Use it when the person says remember / keep in mind, or states a durable fact about '
     + 'themselves worth keeping (not a one-off request, not a fact about someone else, not something a record already holds). Args: fact (one or two '
     + 'sentences, in their words), tags (optional words like family, work). It authorizes nothing and is theirs alone.',
-  inputSchema: { type: 'object', properties: { fact: { type: 'string', description: 'The fact, in the person\'s words' }, tags: { type: 'array', items: { type: 'string' } } }, required: ['fact'] },
+  inputSchema: { type: 'object', properties: { fact: { type: 'string', description: 'The fact, in the person\'s words' }, tags: { type: 'array', items: { type: 'string' } }, source: { type: 'string', enum: ['you', 'connector'], description: 'connector when the fact was read off a connected account the person confirmed' }, from: { type: 'string', description: 'Which account, when source is connector (Google Calendar)' } }, required: ['fact'] },
   capability: { id: MEMORY_REMEMBER, action: 'remember', resourceArg: 'record', authorityArg: 'holder' },
   risk: 'low',
   selfAuthorized: true,
@@ -68,7 +68,11 @@ export function memoryFactsInvoker(deps: MemoryFactsDeps, person: string | undef
         return { tier: 'private', record: FACTS_RECORD, count: prev.entries.length, facts: prev.entries.map((e) => ({ id: e.id, fact: e.fact, learnedAt: e.learnedAt, source: e.source, ...(e.from ? { from: e.from } : {}), ...(e.tags?.length ? { tags: e.tags } : {}) })), answer: prev.entries.length ? prev.entries.slice(0, 20).map((e) => `— ${e.fact} (${e.source === 'you' ? 'you told me' : e.source === 'agent' ? 'I learned' : `from ${e.from ?? 'a connected account'}`} ${e.learnedAt.slice(0, 10)})`).join('\n') : 'I remember nothing about you yet — say "remember that …" and I will.' };
       case MEMORY_REMEMBER: {
         const said = String((ctx.intent as { goal?: string }).goal ?? '');
-        const r = rememberFact(prev, { fact: String(args.fact ?? ''), source: 'you', saidAs: said, ...(runRef ? { runRef } : {}), ...(Array.isArray(args.tags) ? { tags: (args.tags as unknown[]).map(String) } : {}) });
+        // Spec 402 W5b — a fact read off her connected account and CONFIRMED by her is kept as the connector's, named:
+        // the card says "from Google Calendar", never "you told me". Only she can say so (this tool is hers alone).
+        const from = typeof args.from === 'string' && args.from.trim() ? args.from.trim().slice(0, 60) : undefined;
+        const source = args.source === 'connector' && from ? 'connector' as const : 'you' as const;
+        const r = rememberFact(prev, { fact: String(args.fact ?? ''), source, ...(source === 'connector' ? { from } : {}), saidAs: said, ...(runRef ? { runRef } : {}), ...(Array.isArray(args.tags) ? { tags: (args.tags as unknown[]).map(String) } : {}) });
         if ('error' in r) throw new Error(r.error);
         const wrote = await deps.writeSubjectRecord(me, FACTS_RECORD, r.next);
         if (!wrote.ok) throw new Error(wrote.error ?? 'the fact could not be kept');
@@ -111,4 +115,36 @@ export function memoryProposalFor(goal: string, remembered: ReadonlyArray<{ fact
   const norm = (x: string) => x.toLowerCase().replace(/\s+/g, ' ').replace(/[.!]+$/, '').trim();
   if (remembered.some((r) => norm(r.fact) === norm(fact) || norm(r.fact).includes(norm(fact)) || norm(fact).includes(norm(r.fact)))) return null;
   return { capability: MEMORY_REMEMBER, args: { fact }, words: `remember that ${fact.replace(/^i /i, 'I ')}`, why: 'you said something about yourself worth keeping — kept only if you say so, in your own vault, forgettable' };
+}
+
+// ── A MEMORY PROPOSED FROM A CONNECTED ACCOUNT — spec 402 W5b ─────────────────────────────────────────
+// What her calendar shows repeating is a habit worth remembering: "Elders meeting every Tuesday at 7:00 PM". It is read
+// off the events her agent just listed AS HER (a `recurring` instance), said back as a proposal, and kept only if she
+// clicks — kept as the CONNECTOR's, named ("from Google Calendar"), so the card never says she told us. Deterministic:
+// the first repeating event not already remembered; a one-off event proposes nothing; mail and files propose nothing
+// (nothing in them is a fact about her the way a standing appointment is).
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+export function connectorMemoryProposal(results: ReadonlyArray<{ toolId: string; result: unknown }>, remembered: ReadonlyArray<{ fact: string }>, tz?: string): { capability: typeof MEMORY_REMEMBER; args: { fact: string; source: 'connector'; from: string }; words: string; why: string } | null {
+  const norm = (x: string) => x.toLowerCase().replace(/\s+/g, ' ').replace(/[.!]+$/, '').trim();
+  for (const r of results) {
+    if (r.toolId !== 'calendar.events.list' || !r.result || typeof r.result !== 'object') continue;
+    const events = (r.result as { events?: Array<{ summary?: string; start?: string; allDay?: boolean; recurring?: boolean; status?: string }> }).events ?? [];
+    for (const e of events) {
+      if (!e.recurring || e.status === 'cancelled' || !e.summary || !e.start) continue;
+      const when = Date.parse(e.start);
+      if (!Number.isFinite(when)) continue;
+      const zone = tz && /^[A-Za-z_]+\/[A-Za-z_+-]+$|^UTC$/.test(tz) ? tz : undefined;
+      let day: string; let time: string;
+      try {
+        const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { ...(zone ? { timeZone: zone } : {}), weekday: 'long', hour: 'numeric', minute: '2-digit' }).formatToParts(when).map((p) => [p.type, p.value]));
+        day = String(parts.weekday ?? ''); time = `${parts.hour ?? ''}:${parts.minute ?? ''} ${parts.dayPeriod ?? ''}`.trim();
+      } catch { day = DAY_NAMES[new Date(when).getUTCDay()] ?? ''; time = ''; }
+      if (!day) continue;
+      const fact = `I have ${e.summary.trim().slice(0, 80)} every ${day}${e.allDay || !time ? '' : ` at ${time}`}`;
+      const summary = norm(e.summary);
+      if (remembered.some((m) => norm(m.fact) === norm(fact) || (norm(m.fact).includes(summary) && /\bevery\b/.test(norm(m.fact))))) continue;
+      return { capability: MEMORY_REMEMBER, args: { fact, source: 'connector', from: 'Google Calendar' }, words: `remember that ${fact}`, why: 'your calendar shows this repeats — kept only if you say so, named as from Google Calendar, forgettable' };
+    }
+  }
+  return null;
 }

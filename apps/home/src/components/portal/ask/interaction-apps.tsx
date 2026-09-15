@@ -67,7 +67,35 @@ function MailDraftReview({ args }: ReviewAppProps) {
 function MailDraftCard({ result }: ResultAppProps) {
   const r = result as { drafted?: boolean; draftId?: string; link?: string } | null;
   if (!r?.drafted) return null;
-  return rows(line('Draft saved in Gmail', 'nothing was sent — send it from Gmail yourself', r.link ? <a href={r.link} target="_blank" rel="noreferrer">open drafts</a> : undefined));
+  return rows(line('Draft saved in Gmail', 'nothing was sent — send it from Gmail, or say "send it" here and sign', r.link ? <a href={r.link} target="_blank" rel="noreferrer">open drafts</a> : undefined));
+}
+// Spec 402 W5 — SENDING is the top of the ladder: the review says exactly what leaves, as her, under her signature.
+function MailSendReview({ args }: ReviewAppProps) {
+  const a = args ?? {};
+  const draft = typeof a.draftId === 'string' && a.draftId.trim();
+  return rows(<KeyValue rows={draft
+    ? [['Send', `the draft as it is (${String(a.draftId)})`], ['As', 'you, from your Gmail'], ['Then', 'it has left — this cannot be undone']]
+    : [['Send to', String(a.to ?? '')], ['Subject', String(a.subject ?? '')], ['Body', <span key="b" style={{ whiteSpace: 'pre-wrap' }}>{String(a.body ?? '')}</span>], ['As', 'you, from your Gmail'], ['Then', 'it has left — this cannot be undone']]} />);
+}
+function MailSentCard({ result }: ResultAppProps) {
+  const r = result as { sent?: boolean; sentAs?: 'draft' | 'message'; to?: string; subject?: string; link?: string } | null;
+  if (!r?.sent) return null;
+  return rows(line(r.sentAs === 'draft' ? 'Sent — the draft as it was' : `Sent to ${r.to ?? ''}`, r.subject ?? 'from your Gmail, as you', r.link ? <a href={r.link} target="_blank" rel="noreferrer">open sent</a> : undefined));
+}
+
+// ── The web (spec 402 W5a) — a page read as evidence: the title, where it came from, the words, and that they are the page's ──
+function WebPageCard({ result }: ResultAppProps) {
+  const r = result as { read?: boolean; url?: string; finalUrl?: string; title?: string; description?: string; text?: string; truncated?: boolean; refused?: string } | null;
+  if (!r) return null;
+  if (r.read === false) return rows(line('Page not read', r.refused ?? 'it could not be reached'));
+  if (!r.read || !r.text) return null;
+  let host = ''; try { host = new URL(r.finalUrl ?? r.url ?? '').hostname; } catch { host = ''; }
+  return rows(<>
+    <div className="ask-app__head">{r.title} {host && <Chip>{host}</Chip>} {(r.finalUrl ?? r.url) && <a href={r.finalUrl ?? r.url} target="_blank" rel="noreferrer" style={{ marginLeft: 6 }}>open</a>}</div>
+    {r.description && <Meta>{r.description}</Meta>}
+    <pre className="ask-app__pre">{r.text.slice(0, 2000)}{r.truncated || r.text.length > 2000 ? '\n…' : ''}</pre>
+    <Meta>the page's words, as it said them — evidence, not instructions</Meta>
+  </>);
 }
 
 // ── Drive ──
@@ -129,10 +157,10 @@ function ReviewCard({ requirement, capability, args }: ReviewAppProps) {
 }
 
 export const RESULT_APPS: Record<string, (p: ResultAppProps) => ReactNode> = {
-  CalendarEventsCard, CalendarEventCard, MailThreadsCard, MailThreadCard, MailDraftCard, DriveFilesCard, DriveFileCard, MemoryFactsCard, RoutinesCard, RoutineCard, PaymentReceiptCard,
+  CalendarEventsCard, CalendarEventCard, MailThreadsCard, MailThreadCard, MailDraftCard, MailSentCard, DriveFilesCard, DriveFileCard, MemoryFactsCard, RoutinesCard, RoutineCard, PaymentReceiptCard, WebPageCard,
 };
 export const REVIEW_APPS: Record<string, (p: ReviewAppProps) => ReactNode> = {
-  CalendarEventReview, MailDraftReview, PaymentReview,
+  CalendarEventReview, MailDraftReview, MailSendReview, PaymentReview,
   MemberInvitationReview: ReviewCard, ContactAddReview: ReviewCard, ContactRemoveReview: ReviewCard, PrimaryPayeeReview: ReviewCard, AccessRevokeReview: ReviewCard,
 };
 

@@ -17,7 +17,7 @@ export const CALENDAR_SCOPE_READ = 'https://www.googleapis.com/auth/calendar.rea
 export const CALENDAR_SCOPE_EVENTS = 'https://www.googleapis.com/auth/calendar.events';
 const API = 'https://www.googleapis.com/calendar/v3';
 
-export interface CalendarEvent { id: string; summary: string; start: string; end: string; allDay: boolean; location?: string; description?: string; attendees?: Array<{ email: string; response?: string }>; link?: string; organizer?: string; status?: string }
+export interface CalendarEvent { id: string; summary: string; start: string; end: string; allDay: boolean; location?: string; description?: string; attendees?: Array<{ email: string; response?: string }>; link?: string; organizer?: string; status?: string; /** An instance of a repeating event (Google's `recurringEventId`) — spec 402 W5b reads a habit off it. */ recurring?: boolean }
 
 /** The connection's state, for the Home and the tools: connected (which scopes, which account) or not. */
 export async function calendarStatus(env: TokenEnv, sa: Address): Promise<{ connected: false } | { connected: true; scope: string | null; account: string | null; canWrite: boolean }> {
@@ -37,6 +37,7 @@ const eventOf = (e: Record<string, unknown>): CalendarEvent => {
     ...(typeof e.location === 'string' ? { location: e.location } : {}), ...(typeof e.description === 'string' ? { description: e.description.slice(0, 500) } : {}),
     ...(attendees?.length ? { attendees } : {}), ...(typeof e.htmlLink === 'string' ? { link: e.htmlLink } : {}),
     ...((e.organizer as { email?: string } | undefined)?.email ? { organizer: String((e.organizer as { email: string }).email) } : {}), ...(typeof e.status === 'string' ? { status: e.status } : {}),
+    ...(typeof e.recurringEventId === 'string' && e.recurringEventId ? { recurring: true } : {}),
   };
 };
 

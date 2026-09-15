@@ -422,6 +422,16 @@
       "timeoutSec": 300
     },
     {
+      "id": "verify-web-read-and-mail-send",
+      "script": "scripts/verify-web-read-and-mail-send.mts",
+      "spec": "402 W5",
+      "proves": "a public page read as EVIDENCE by the person's agent (title, words, marked as the page's — never instructions — with the contract's WebPageCard binding on the reply); and MAIL THAT LEAVES only under her signature: gmail.message.send on a word is authority_required for that capability as her, never a send",
+      "twin": "a link-local address is refused as an OUTCOME the reply states (never fetched); the Gmail READ with the same standing answers at once — 'not connected' is an answer, not a park",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 180
+    },
+    {
       "id": "verify-mention-into-run",
       "script": "scripts/verify-mention-into-run.mts",
       "spec": "400 W2 (B3)",

@@ -47,8 +47,9 @@ import { WORK_SEARCH_TOOL, workSearchInvoker } from './work-search-tool.js';
 import { GITHUB_TOOLS, GITHUB_ACTS, githubInvoker } from './connectors/github-tools.js';
 import { CALENDAR_TOOLS, CALENDAR_ACTS, calendarInvoker } from './connectors/calendar-tools.js';
 import { MAIL_DRIVE_TOOLS, MAIL_DRIVE_ACTS, mailDriveInvoker } from './connectors/mail-drive-tools.js';
-import { MEMORY_TOOLS, MEMORY_ACTS, MEMORY_LIST_TOOL, MEMORY_REMEMBER, memoryFactsInvoker, memoryProposalFor } from './memory-facts-tools.js';
+import { MEMORY_TOOLS, MEMORY_ACTS, MEMORY_LIST_TOOL, MEMORY_REMEMBER, memoryFactsInvoker, memoryProposalFor, connectorMemoryProposal } from './memory-facts-tools.js';
 import { ROUTINE_TOOLS, ROUTINE_ACTS, ROUTINE_LIST, routineInvoker, compiledRoutine } from './routine-tools.js';
+import { WEB_TOOLS, webReadInvoker } from './web-read.js';
 import type { TriggerScheduleV1 } from './triggers.js';
 import { factsForPrompt, factsOf, type RememberedFactsV1 } from '@agenticprimitives/context';
 import { CONTACT_INVITE_TOOL, CONTACT_LIST_TOOL, CONTACT_REMOVE_TOOL, contactInviteInvoker, contactListInvoker, contactRemoveInvoker, type ContactDeps } from './contacts.js';
@@ -2031,6 +2032,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (toolId === ACCESS_REVOKE_CAPABILITY) return accessRevokeInvoker(deps, env, presented!, person)(toolId, args, ctx);
     if (toolId === ACCESS_AUDIT_CAPABILITY) return accessAuditInvoker(deps, person)(toolId, args, ctx);
     // Spec 400 W3/W4 — GitHub as a connector: reads under the holder's connector, acts under the holder's mandate.
+    if (WEB_TOOLS.some((t) => t.id === toolId)) return webReadInvoker()(toolId, args, ctx);
     if (MAIL_DRIVE_TOOLS.some((t) => t.id === toolId)) return mailDriveInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (CALENDAR_TOOLS.some((t) => t.id === toolId)) return calendarInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (GITHUB_TOOLS.some((t) => t.id === toolId)) return githubInvoker({ env: env as unknown as Record<string, unknown>, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
@@ -3864,7 +3866,11 @@ async function askReplyForInner(env: HarnessEnv, input: {
     })();
     // Spec 402 W1b — a memory PROPOSED from the conversation: only at her own agent (memory rode in), only when no memory
     // act ran this turn, only from a closed set of first-person markers; the click is the write.
-    const memoryNext = input.memory !== undefined && !r.steps.some((o) => o.step.toolId === MEMORY_REMEMBER) ? memoryProposalFor(input.intent.goal, factsOf(input.memory).entries) : null;
+    // Spec 402 W5b — or from a CONNECTED ACCOUNT her agent just read as her: a repeating calendar event is a habit worth
+    // keeping, proposed the same way (the click is the write; kept as the connector's, named).
+    const memoryNext = input.memory !== undefined && !r.steps.some((o) => o.step.toolId === MEMORY_REMEMBER)
+      ? (memoryProposalFor(input.intent.goal, factsOf(input.memory).entries) ?? connectorMemoryProposal(r.steps.filter((o) => o.ok && o.result && typeof o.result === 'object').map((o) => ({ toolId: o.step.toolId, result: o.result })), factsOf(input.memory).entries, (input.intent as { context?: { tz?: string } }).context?.tz))
+      : null;
     const withEvidence = (text: string): AskReply => withProv({ kind: 'answer', runRef: r.runRef, text, ...(readApp ? { interaction: readApp } : {}), ...(memoryNext ? { next: memoryNext } : {}), ...(evidence.length ? { evidence } : {}), ...(results.length ? { results } : {}), ...(routed.length ? { routed } : {}) });
     // RENDERED, NOT COMPOSED (spec 371 §2). When every read that ran carries the author's `answer`
     // template and its result has the fields, the reply is the template over the result — the person's
@@ -3969,6 +3975,7 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'github.pr.merge': ['signature'],                 // the mandate — bound to the work the PR names
   'calendar.event.create': ['signature'],           // the mandate — the holder's calendar connector acts (spec 400 W4)
   'gmail.draft.create': ['signature'],              // the mandate — a draft in the holder's mail (spec 402 W2)
+  'gmail.message.send': ['signature'],              // the mandate — mail that LEAVES as the holder is the holder acting (spec 402 W5)
   'resolution.invitation.request': ['signature'],   // the mandate — asking is an act of yours too
   'treasury.primary.declare': ['signature'],        // the mandate — a public statement of yours
   'access.grant.revoke': ['signature'],             // the mandate — taking authority back is an act too
@@ -4592,6 +4599,8 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...GITHUB_TOOLS.filter((t) => !GITHUB_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     ...CALENDAR_TOOLS.filter((t) => !CALENDAR_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     ...MAIL_DRIVE_TOOLS.filter((t) => !MAIL_DRIVE_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
+    // Spec 402 W5a — a public page read as evidence, wherever the playbook carries the contract.
+    ...WEB_TOOLS.flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     // The person's own reads, under their CONTRACTS when the playbook carries them (the result app a contract names
     // rides on the merged tool; spec 402 W4) — the built-in spec otherwise.
     ...(deps.readSubjectRecord ? [PROFILE_READ_TOOL, HOUSEHOLD_READ_TOOL, MEMORY_LIST_TOOL].map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
