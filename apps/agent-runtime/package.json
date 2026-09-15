@@ -26,6 +26,7 @@
     "@agenticprimitives/collaboration": "workspace:*",
     "@agenticprimitives/connect": "workspace:*",
     "@agenticprimitives/connect-auth": "workspace:*",
+    "@agenticprimitives/content-primitives": "workspace:*",
     "@agenticprimitives/content-storage": "workspace:*",
     "@agenticprimitives/context": "workspace:*",
     "@agenticprimitives/coordination": "workspace:*",
