@@ -15,6 +15,8 @@ import { recordFormOf, rehydrateExecuted } from './artifact-store.js';
 import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken, advanceTrigger, withPause, withBudget, advanced, declareTrigger, removeTrigger } from './triggers.js';
 import { consumeRuntimeWakes } from './runtime-wake.js';
 import { connectorStatus, disconnectConnector, type GoogleProvider } from './connectors/google-token.js';
+import { searchThreads } from './connectors/google-gmail.js';
+import { listEvents } from './connectors/google-calendar.js';
 import { appendProgress, readProgress, type ProgressLineV1 } from './harness-progress.js';
 import { Hono, type Context } from 'hono';
 import { setCookie, getCookie } from 'hono/cookie';
@@ -2032,8 +2034,35 @@ async function deliverRoutedOutcome(env: Env, ctx: ExecutionContext | undefined,
   return { delivered: state === 'TASK_STATE_COMPLETED', note: state ? `${state}${said ? `: ${said}` : ''}` : (body?.error?.message ?? `${res.status}`) };
 }
 
-export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef: string, context: Record<string, unknown> = {}): Promise<{ outcome: 'answered' | 'parked' | 'failed'; said?: string; runRef: string; bill?: { vaultCalls: number; doRequests: number } }> {
+export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef: string, context: Record<string, unknown> = {}): Promise<{ outcome: 'answered' | 'parked' | 'failed'; said?: string; runRef: string; bill?: { vaultCalls: number; doRequests: number }; seen?: string[] }> {
   const agent = row.agent.toLowerCase() as Address;
+  // Spec 402 W3b — A CONNECTOR TRIGGER IS A POLL. The clock runs it; the person's own connector is read as her (the
+  // agent IS her SA); only items not fired on before fire the ask, with the items as context; what fired is remembered
+  // on the row (bounded) so an item fires once. Nothing new is an outcome, not a firing: no run, no delivery.
+  if (row.kind === 'connector' && row.on?.connector && !context.connectorItems) {
+    const seen = new Set(row.seen ?? []);
+    let items: Array<{ id: string } & Record<string, unknown>> = [];
+    try {
+      if (row.on.connector === 'google-gmail') {
+        const out = await searchThreads(env as never, agent, { query: row.on.query ?? 'newer_than:1d', max: 10 });
+        if (!out) return { outcome: 'failed', said: 'Gmail is not connected — connect it at the Home (Connected → Gmail), or remove this routine', runRef };
+        items = out.threads.map((t) => ({ id: t.id, subject: t.subject, from: t.from, date: t.date, snippet: t.snippet, unread: t.unread, link: t.link }));
+      } else {
+        const lead = Math.max(5, Number(row.on.leadMinutes ?? 15));
+        const now = Date.now();
+        const out = await listEvents(env as never, agent, { timeMin: new Date(now).toISOString(), timeMax: new Date(now + lead * 60_000).toISOString(), max: 10 });
+        if (!out) return { outcome: 'failed', said: 'Google Calendar is not connected — connect it at the Home (Connected → Google Calendar), or remove this routine', runRef };
+        items = out.events.map((e) => ({ id: e.id, summary: e.summary, start: e.start, end: e.end, location: e.location, attendees: e.attendees, link: e.link }));
+      }
+    } catch (e) {
+      return { outcome: 'failed', said: e instanceof Error ? e.message : String(e), runRef };
+    }
+    const fresh = items.filter((it) => !seen.has(it.id));
+    const nextSeen = [...(row.seen ?? []), ...fresh.map((it) => it.id)].slice(-200);
+    if (!fresh.length) return { outcome: 'answered', said: `nothing new (${items.length} checked)`, runRef, seen: nextSeen };
+    const r = await runUnattendedAsk(env, { ...row, seen: nextSeen }, runRef, { ...context, connectorItems: fresh, connector: row.on.connector });
+    return { ...r, seen: nextSeen };
+  }
   // Spec 400 W2 (B3) — MENTIONS INTO AN OPEN RUN. A message on a thread where this agent already has a run parked for
   // DATA answers that run (spec 370 P1 resume: its plan, what completed, what was supplied — plus these words) instead
   // of opening another beside it. The run is the agent's to remember; the thread is how it is found.
@@ -2063,7 +2092,10 @@ export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef:
   }
   // Spec 375 — what fired this run rides as CONTEXT for the planner (the event's public fields, a webhook's
   // payload, a message's envelope); no verifier reads it, and no party it names is resolved from it.
-  const { reply, spoken, result, bill } = await runAgentAsk(env, { agent, addressee: agent, ask: row.ask, runRef, context: { trigger: row.triggerId, ...context } });
+  const askWords = context.connectorItems
+    ? `${row.ask}\n\nWhat arrived (${row.on?.connector === 'google-gmail' ? 'mail' : 'calendar'}):\n${(context.connectorItems as Array<Record<string, unknown>>).map((it) => `- ${JSON.stringify(it).slice(0, 600)}`).join('\n')}`
+    : row.ask;
+  const { reply, spoken, result, bill } = await runAgentAsk(env, { agent, addressee: agent, ask: askWords, runRef, context: { trigger: row.triggerId, ...context } });
   if (reply.kind === 'prompt' || reply.kind === 'authority_required') {
     const now = Date.now();
     await saveRun(env as never, {
@@ -2532,7 +2564,7 @@ app.post('/harness/triggers/fire', async (c) => {
   const out = await runUnattendedAsk(c.env, row, `trigger-${row.triggerId}-${Date.now().toString(36)}`);
   // A steward's "fire now" is a firing like the alarm's: it lands on the row (last outcome, bill) and the budget judges
   // it (398 §5.4) — before this, a manual firing left no mark, and a budget could only ever be checked by the clock.
-  await advanceTrigger(c.env as never, addressee, advanced(row, out.outcome, out.runRef, out.said, Date.now(), out.bill)).catch(() => undefined);
+  await advanceTrigger(c.env as never, addressee, advanced({ ...row, ...(out.seen ? { seen: out.seen } : {}) }, out.outcome, out.runRef, out.said, Date.now(), out.bill)).catch(() => undefined);
   const { bill: _b, ...rest } = out;
   return c.json({ ok: true, addressee, triggerId: row.triggerId, ...rest, ...(out.bill ? { bill: out.bill } : {}) });
 });

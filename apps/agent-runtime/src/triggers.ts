@@ -18,9 +18,12 @@ export interface TriggerScheduleV1 {
   agent: Address;
   triggerId: string;
   /** Spec 375 — which source fires this row. Absent on rows written before the kinds existed ⇒ schedule. */
-  kind?: 'schedule' | 'event' | 'webhook' | 'message';
-  /** Spec 375 — what fires it: an Endeavor event type, or an exchange profile. */
-  on?: { event?: string; profile?: string };
+  kind?: 'schedule' | 'event' | 'webhook' | 'message' | 'connector';
+  /** Spec 375 — what fires it: an Endeavor event type, or an exchange profile. Spec 402 W3b — a CONNECTOR poll: which
+   *  account, what to match (a Gmail query; a lead time before a calendar event). */
+  on?: { event?: string; profile?: string; connector?: 'google-gmail' | 'google-calendar'; query?: string; leadMinutes?: number };
+  /** Spec 402 W3b — what the last polls already fired on, so an item fires once (ids; bounded). */
+  seen?: string[];
   /** Spec 375 — a webhook row's bearer token: admission for `POST /harness/hooks/<agent>/<id>`, never authority. */
   token?: string;
   ask: string;
@@ -70,7 +73,8 @@ export function schedulesFor(agent: Address, playbookDigest: string, triggers: r
   });
 }
 
-const isSchedule = (r: TriggerScheduleV1): r is TriggerScheduleV1 & { nextAt: number; everyMs: number } => (r.kind ?? 'schedule') === 'schedule' && typeof r.nextAt === 'number';
+/** Clock-driven rows: a schedule, and a connector POLL (spec 402 W3b — the clock runs the poll; the poll decides whether to fire). */
+const isSchedule = (r: TriggerScheduleV1): r is TriggerScheduleV1 & { nextAt: number; everyMs: number } => ((r.kind ?? 'schedule') === 'schedule' || r.kind === 'connector') && typeof r.nextAt === 'number';
 
 /** The schedule rows due now, oldest first. Other kinds are fired by their sources, never by the clock. */
 export function dueNow(rows: readonly TriggerScheduleV1[], now = Date.now()): TriggerScheduleV1[] {

@@ -4,6 +4,8 @@
 // a closed grammar, the rest of the sentence is the ask, verbatim. Anything the grammar does not cover is not guessed:
 // the invoker asks. Nothing here is authority — a routine fires as the agent holding nothing; an act parks.
 export interface RoutineSentence {
+  /** Spec 402 W3b — a CONNECTOR trigger: the clock runs a poll; the poll fires the ask only when something new matches. */
+  connector?: { connector: 'google-gmail'; query: string } | { connector: 'google-calendar'; leadMinutes: number };
   /** The recurrence as the trigger store keeps it (a duration: 1d, 7d, 1h…). */
   every: string;
   everyMs: number;
@@ -61,6 +63,27 @@ export function parseRoutineSentence(sentence: string, opts: { now?: number; tz?
   const now = opts.now ?? Date.now();
   const tz = opts.tz ?? 'UTC';
   const text = sentence.trim().replace(/\s+/g, ' ');
+  // ── Spec 402 W3b — CONNECTOR triggers, first: "when mail arrives from the pastor, …", "when an email about the
+  //    retreat comes in, …", "15 minutes before a calendar event, …". The clock is the poll's; the match is the source's.
+  const mail = /\b(?:when(?:ever)?|each time|every time)\s+(?:an?\s+)?(?:new\s+)?(?:mail|email|e-mail|message)s?\s+(?:arrives?|comes?(?: in)?|lands?|shows? up)(?:\s+from\s+(.+?))?(?:\s+about\s+(.+?))?(?=[,;:—-]|\s+(?:then|please)\b|$)/i.exec(text);
+  if (mail) {
+    // "from the pastor" → from:pastor (an article is not a name; a name with spaces is joined, Gmail matches on either part);
+    // "about the retreat" → the words, articles dropped.
+    const strip = (v: string) => v.replace(/^(the|a|an|my|our)\s+/i, '').trim();
+    const from = strip(mail[1] ?? ''); const about = strip(mail[2] ?? '');
+    const query = [from ? `from:${from.replace(/\s+/g, '')}` : '', about, 'newer_than:2d'].filter(Boolean).join(' ');
+    const ask = text.replace(mail[0], '').replace(/^[\s,;:—-]+|[\s,;:—-]+$/g, '').replace(/^(then|please)\s+/i, '').replace(/^(tell me|let me know|send me|message me|remind me of|remind me|show me|give me)\s+/i, '').trim();
+    if (ask.length < 3) return { error: 'say what to do when it arrives — "summarize it", "draft a reply", "tell me who wrote"' };
+    return { connector: { connector: 'google-gmail', query }, every: '15m', everyMs: 15 * 60_000, firstAt: now + 15 * 60_000, when: mail[0].trim(), ask };
+  }
+  const lead = /\b(?:(\d+)\s*(?:minutes?|mins?|hours?|h)\s+)?before\s+(?:each|every|an?|my|the next)\s+(?:calendar\s+)?(?:event|meeting|appointment)s?\b/i.exec(text);
+  if (lead) {
+    const n = Number(lead[1] ?? 15); const isHours = /hour|h\b/i.test(lead[0].split('before')[0] ?? '');
+    const leadMinutes = Math.min(Math.max(isHours ? n * 60 : n, 5), 24 * 60);
+    const ask = text.replace(lead[0], '').replace(/^[\s,;:—-]+|[\s,;:—-]+$/g, '').replace(/^(then|please)\s+/i, '').replace(/^(tell me|let me know|send me|message me|remind me of|remind me|show me|give me)\s+/i, '').trim();
+    if (ask.length < 3) return { error: 'say what to do before the event — "tell me who is coming", "summarize the last mail from the organizer"' };
+    return { connector: { connector: 'google-calendar', leadMinutes }, every: '5m', everyMs: 5 * 60_000, firstAt: now + 5 * 60_000, when: lead[0].trim(), ask };
+  }
   const clock = /\b(?:(every|each)\s+(day|morning|evening|week|hour|weekday|(\d+)\s+(hours?|days?|weeks?|minutes?)|sunday|monday|tuesday|wednesday|thursday|friday|saturday|sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat)|(daily|weekly|hourly))(?:\s+at\s+((?:\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?)|noon|midday|midnight))?\b/i;
   const m = clock.exec(text);
   if (!m) return { error: 'say when — "every day at 8", "every Monday at 8:30", "every 2 hours", "weekly"' };
@@ -91,6 +114,8 @@ export function parseRoutineSentence(sentence: string, opts: { now?: number; tz?
 
 /** The read-back: what will happen, when first, how often — in words, with the asker's zone. */
 export function routineWords(r: RoutineSentence, tz: string): string {
+  if (r.connector?.connector === 'google-gmail') return `whenever mail matching "${r.connector.query.replace(/ newer_than:\S+/, '')}" arrives (your mail is checked every 15 minutes): "${r.ask}"`;
+  if (r.connector?.connector === 'google-calendar') return `${r.connector.leadMinutes} minutes before each calendar event (your calendar is checked every 5 minutes): "${r.ask}"`;
   const first = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(r.firstAt);
   const cadence = r.every === '1d' ? 'every day' : r.every === '7d' ? 'every week' : r.every === '1h' ? 'every hour' : `every ${r.every.replace(/(\d+)([hdm])/, (_, a, u) => `${a} ${u === 'h' ? 'hour' : u === 'm' ? 'minute' : 'day'}${a === '1' ? '' : 's'}`)}`;
   return `${cadence}, starting ${first} (${tz}): "${r.ask}"`;

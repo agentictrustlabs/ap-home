@@ -35,3 +35,22 @@ describe('a routine from a sentence (spec 402 W3)', () => {
     expect(nextAt(NOW, 8 * 60, TZ, 1)).toBe(Date.parse('2026-09-21T14:00:00Z'));
   });
 });
+
+describe('connector triggers (spec 402 W3b)', () => {
+  it('"when mail arrives from the pastor about the retreat, summarize it" → a Gmail poll', () => {
+    const r = parseRoutineSentence('when mail arrives from the pastor about the retreat, summarize it', { now: NOW, tz: TZ });
+    if ('error' in r) throw new Error(r.error);
+    expect(r.connector).toEqual({ connector: 'google-gmail', query: 'from:pastor retreat newer_than:2d' });
+    expect(r.every).toBe('15m'); expect(r.ask).toBe('summarize it');
+    expect(routineWords(r, TZ)).toContain('whenever mail matching');
+  });
+  it('"15 minutes before each meeting, tell me who is coming" → a calendar poll with a lead', () => {
+    const r = parseRoutineSentence('15 minutes before each meeting, tell me who is coming', { now: NOW, tz: TZ });
+    if ('error' in r) throw new Error(r.error);
+    expect(r.connector).toEqual({ connector: 'google-calendar', leadMinutes: 15 });
+    expect(r.every).toBe('5m'); expect(r.ask).toBe('who is coming');
+    const h = parseRoutineSentence('draft a note to the organizer 1 hour before every event', { now: NOW, tz: TZ });
+    if ('error' in h) throw new Error(h.error);
+    expect(h.connector).toEqual({ connector: 'google-calendar', leadMinutes: 60 });
+  });
+});

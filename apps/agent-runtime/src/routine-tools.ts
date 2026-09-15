@@ -15,10 +15,11 @@ export const ROUTINE_REMOVE = 'person.routine.remove' as const;
 export const ROUTINE_TOOLS: ToolSpec[] = [
   {
     id: ROUTINE_DECLARE,
-    verbs: ['every day', 'every morning', 'every evening', 'every week', 'every monday', 'every tuesday', 'every wednesday', 'every thursday', 'every friday', 'every saturday', 'every sunday', 'every hour', 'daily', 'weekly', 'each day', 'each week', 'on a schedule'],
+    verbs: ['every day', 'every morning', 'every evening', 'every week', 'every monday', 'every tuesday', 'every wednesday', 'every thursday', 'every friday', 'every saturday', 'every sunday', 'every hour', 'daily', 'weekly', 'each day', 'each week', 'on a schedule', 'when mail arrives', 'whenever an email arrives', 'before each meeting', 'before every event'],
     description:
       'KEEPS A ROUTINE of the person\'s own from a sentence with a clock in it — "every Monday at 8, tell me what\'s on my calendar", "every evening summarize my '
-      + 'unread mail", "every 2 hours check for mail from the pastor". Args: sentence (the whole ask, clock included). It is read back before it is kept; each '
+      + 'unread mail" — or a SOURCE in it: "when mail arrives from the pastor, summarize it", "15 minutes before each meeting, tell me who is coming" (the clock '
+      + 'polls the source; only something new fires the ask). Args: sentence (the whole ask, clock or source included). It is read back before it is kept; each '
       + 'firing runs as her agent holding nothing — a read answers and is delivered to her, an act parks for her mandate. It authorizes nothing.',
     inputSchema: { type: 'object', properties: { sentence: { type: 'string', description: 'The whole sentence, clock and all' }, name: { type: 'string', description: 'A short name (optional)' } }, required: ['sentence'] },
     capability: { id: ROUTINE_DECLARE, action: 'declare', resourceArg: 'record', authorityArg: 'holder' },
@@ -91,7 +92,7 @@ export function routineInvoker(deps: RoutineDeps, person: string | undefined, ad
         if (answer !== 'yes') return { kept: false, note: 'nothing was kept' };
         const triggerId = `routine-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
         const name = typeof args.name === 'string' && args.name.trim() ? args.name.trim().slice(0, 60) : undefined;
-        const row: TriggerScheduleV1 = { agent: me as `0x${string}`, triggerId, kind: 'schedule', ask: parsed.ask, every: parsed.every, everyMs: parsed.everyMs, nextAt: parsed.firstAt, playbookDigest: 'declared', declared: { by: me, at: Date.now(), saidAs: sentence, when: parsed.when, tz, ...(name ? { name } : {}) } };
+        const row: TriggerScheduleV1 = { agent: me as `0x${string}`, triggerId, kind: parsed.connector ? 'connector' : 'schedule', ...(parsed.connector ? { on: { ...parsed.connector }, seen: [] } : {}), ask: parsed.ask, every: parsed.every, everyMs: parsed.everyMs, nextAt: parsed.firstAt, playbookDigest: 'declared', declared: { by: me, at: Date.now(), saidAs: sentence, when: parsed.when, tz, ...(name ? { name } : {}) } };
         const kept = await deps.declareTrigger(me, row);
         return { kept: true, id: kept.triggerId, ask: parsed.ask, every: parsed.every, when: parsed.when, firstAt: new Date(parsed.firstAt).toISOString(), tz, words, note: 'your own routine, on your agent\'s clock — it fires as your agent holding nothing; pause or remove it on Routines' };
       }
@@ -103,7 +104,10 @@ export function routineInvoker(deps: RoutineDeps, person: string | undefined, ad
 /** A sentence with a clock in it, said at the person's own agent, is a routine — compiled, never interpreted. */
 export function compiledRoutine(goal: string): { steps: Array<{ toolId: string; args: Record<string, unknown> }>; rationale: string } | null {
   const g = goal.trim();
-  if (!/\b(every|each)\s+(day|morning|evening|week|hour|weekday|\d+\s+(hours?|days?|weeks?|minutes?)|sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b|\b(daily|weekly|hourly)\b/i.test(g)) return null;
+  const clocked = /\b(every|each)\s+(day|morning|evening|week|hour|weekday|\d+\s+(hours?|days?|weeks?|minutes?)|sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b|\b(daily|weekly|hourly)\b/i.test(g);
+  // Spec 402 W3b — a CONNECTOR trigger: "when mail arrives from …", "15 minutes before each meeting …"
+  const sourced = /\b(when(?:ever)?|each time|every time)\s+(?:an?\s+)?(?:new\s+)?(?:mail|email|e-mail|message)s?\s+(?:arrives?|comes?|lands?|shows? up)\b/i.test(g) || /\bbefore\s+(?:each|every|an?|my|the next)\s+(?:calendar\s+)?(?:event|meeting|appointment)s?\b/i.test(g);
+  if (!clocked && !sourced) return null;
   // not a routine: "what do I have every Monday" is a question about the calendar; "remember that every Monday …" is memory
   if (/^(what|which|when|who|do i|is there|how many)\b/i.test(g) || /^remember\b/i.test(g)) return null;
   return { steps: [{ toolId: ROUTINE_DECLARE, args: { sentence: g } }], rationale: 'compiled: a sentence with a clock is a routine (spec 402 W3)' };

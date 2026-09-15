@@ -78,6 +78,22 @@ const noclock = await post('/harness/ask', { session: steward.bearer, addressee:
 if (noclock.reply?.kind !== 'prompt') fail(`twin: a sentence without a clock was not asked back: ${JSON.stringify(noclock).slice(0, 200)}`);
 console.log('  twins: refused in a room; a clockless sentence is asked back ✓');
 
+// 4b. Spec 402 W3b — a CONNECTOR trigger: "when mail arrives from the pastor, summarize it" compiles to a Gmail POLL
+//     (the clock runs it every 15 minutes; only new mail fires the ask). Fired now on a home with no Gmail connected, the
+//     poll says so — an honest failure on the row, never a run and never a guess.
+const mailSentence = `when mail arrives from the pastor about the retreat, summarize it (gate ${nonce})`;
+const m1 = await post('/harness/ask', { session: steward.bearer, addressee: me, message: mailSentence, tz: 'America/Denver' });
+if (m1.reply?.kind !== 'prompt' || !/whenever mail matching/.test(String(m1.reply?.prompt?.prompt))) fail(`connector read-back: ${JSON.stringify(m1).slice(0, 300)}`);
+const m2 = await post('/harness/ask', { session: steward.bearer, addressee: me, runRef: m1.reply.runRef, supplied: [{ stepRef: m1.reply.prompt.stepRef, data: { keep: 'yes' } }] });
+const mailRes = (m2.reply?.result ?? {}) as { kept?: boolean; id?: string };
+if (mailRes.kept !== true || !mailRes.id) fail(`connector keep: ${JSON.stringify(m2).slice(0, 300)}`);
+const mailRow = ((await post('/harness/triggers', { session: steward.bearer, addressee: me })).triggers ?? []).find((t: { triggerId: string }) => t.triggerId === mailRes.id);
+if (mailRow?.kind !== 'connector' || mailRow?.on?.connector !== 'google-gmail' || !/from:pastor/.test(String(mailRow?.on?.query))) fail(`connector row: ${JSON.stringify(mailRow).slice(0, 200)}`);
+const polled = await post('/harness/triggers/fire', { session: steward.bearer, addressee: me, triggerId: mailRes.id });
+if (polled.outcome !== 'failed' || !/Gmail is not connected/.test(String(polled.said))) fail(`connector poll: ${JSON.stringify(polled).slice(0, 300)}`);
+console.log(`  connector routine: kept as a Gmail poll (${mailRow.on.query}); fired with no Gmail connected → "${String(polled.said).slice(0, 60)}…" ✓`);
+await post('/harness/ask', { session: steward.bearer, addressee: me, message: 'stop that routine', plan: { steps: [{ toolId: 'person.routine.remove', args: { id: mailRes.id } }] } });
+
 // 5. removed on her word
 const gone = await post('/harness/ask', { session: steward.bearer, addressee: me, message: 'stop that routine', plan: { steps: [{ toolId: 'person.routine.remove', args: { id: keptRes.id } }] } });
 if (((gone.reply?.result ?? {}) as { removed?: boolean }).removed !== true) fail(`remove: ${JSON.stringify(gone).slice(0, 300)}`);

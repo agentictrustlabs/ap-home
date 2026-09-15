@@ -1418,6 +1418,7 @@ export class A2aTaskDO {
       let bill: { vaultCalls: number; doRequests: number } | undefined;
       try {
         const r = await runUnattendedAsk(this.env, row, runRef);
+        if (r.seen) row.seen = r.seen; // spec 402 W3b — a connector poll remembers what it fired on
         outcome = r.outcome; said = r.said; runRef = r.runRef; bill = r.bill;
       } catch (e) {
         said = e instanceof Error ? e.message : String(e);
