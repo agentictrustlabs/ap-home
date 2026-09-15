@@ -48,7 +48,8 @@
     "@agenticprimitives/orchestration": "0.0.0-alpha.4",
     "@agenticprimitives/registry-kit": "0.0.0-alpha.13",
     "viem": "2.52.2",
-    "@agenticprimitives/runtime-member": "0.0.0-alpha.2"
+    "@agenticprimitives/runtime-member": "0.0.0-alpha.2",
+    "@playwright/test": "^1.49.0"
   },
   "pnpm": {
     "overrides": {
