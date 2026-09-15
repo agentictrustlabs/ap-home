@@ -103,7 +103,7 @@ CHAIN_ID = "34348"
 # 2026-09-15 — xAI's Grok is the ONLY offered model (user's decision): a Grok failure is an error the person sees, never a
 # quiet hand-off to another provider (ADR-0013). Re-offer groq/anthropic by listing them again ("xai,groq,anthropic").
 # XAI_API_KEY is a secret (`wrangler secret put XAI_API_KEY --env production`).
-ORCHESTRATION_LLM = "groq,anthropic"
+ORCHESTRATION_LLM = "xai"
 # Spec 388 — the cheapest OFFERED provider that carries each call, decided before the request from the prompt estimate, the
 # per-request budget and this minute's spend; recorded on the trace with its reason. A route, never a fallback (ADR-0013).
 ORCHESTRATION_ROUTE = "budget"
