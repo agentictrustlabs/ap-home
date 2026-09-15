@@ -24,6 +24,9 @@ export interface TriggerScheduleV1 {
   on?: { event?: string; profile?: string; connector?: 'google-gmail' | 'google-calendar'; query?: string; leadMinutes?: number };
   /** Spec 402 W3b — what the last polls already fired on, so an item fires once (ids; bounded). */
   seen?: string[];
+  /** Spec 323 W6 — a connector row REBUILT from the vault record has no `seen` cursor: its first poll notes what is
+   *  already there and fires on nothing, so a rebuild never replays mail the person was told about at the old object. */
+  primeSeen?: true;
   /** Spec 375 — a webhook row's bearer token: admission for `POST /harness/hooks/<agent>/<id>`, never authority. */
   token?: string;
   ask: string;
@@ -92,8 +95,9 @@ export function nextDue(rows: readonly TriggerScheduleV1[]): number | null {
 export function advanced(row: TriggerScheduleV1, outcome: TriggerScheduleV1['lastOutcome'], runRef: string, said: string | undefined, now = Date.now(), bill?: { vaultCalls: number; doRequests: number }): TriggerScheduleV1 {
   // Spec 398 §5.4 — over budget ⇒ PAUSED, said on the row; the firing that went over still happened (its receipts stand).
   const over = bill && row.budget && bill.vaultCalls > row.budget.vaultCalls;
+  const { primeSeen: _primed, ...rest } = row;
   return {
-    ...row, ...(isSchedule(row) ? { nextAt: now + row.everyMs } : {}), lastAt: now, lastRunRef: runRef, lastOutcome: outcome,
+    ...rest, ...(isSchedule(row) ? { nextAt: now + row.everyMs } : {}), lastAt: now, lastRunRef: runRef, lastOutcome: outcome,
     ...(said ? { lastSaid: said.slice(0, 400) } : {}), ...(bill ? { lastBill: { vaultCalls: bill.vaultCalls, doRequests: bill.doRequests } } : {}),
     ...(over ? { paused: { at: now, by: 'budget' as const, note: `the last firing cost ${bill.vaultCalls} vault calls against a budget of ${row.budget!.vaultCalls}` } } : {}),
   };
@@ -175,7 +179,7 @@ export function triggerContext(source: TriggerSource): Record<string, unknown> {
 
 export interface TriggerStoreEnv { A2A_TASKS: DurableObjectNamespace }
 
-async function call(env: TriggerStoreEnv, agent: Address, op: 'trigger-sync' | 'trigger-list' | 'trigger-advance' | 'trigger-rotate' | 'trigger-declare' | 'trigger-remove', body: unknown): Promise<Record<string, unknown>> {
+async function call(env: TriggerStoreEnv, agent: Address, op: 'trigger-sync' | 'trigger-list' | 'trigger-advance' | 'trigger-rotate' | 'trigger-declare' | 'trigger-remove' | 'trigger-declared-sync', body: unknown): Promise<Record<string, unknown>> {
   const stub = env.A2A_TASKS.get(env.A2A_TASKS.idFromName(agent.toLowerCase()));
   const res = await stub.fetch(new Request(`https://a2a-task-do/internal/harness-run/${op}`, { method: 'POST', headers: internalHeaders(env as never), body: JSON.stringify(body) }));
   const out = (await res.json().catch(() => ({}))) as Record<string, unknown> & { ok?: boolean; error?: string };
@@ -185,10 +189,32 @@ async function call(env: TriggerStoreEnv, agent: Address, op: 'trigger-sync' | '
 
 /** Make the agent's schedule match its playbook: rows for triggers it declares (existing ones keep their
  *  timing when the digest is unchanged), none for triggers it no longer declares, and the alarm armed. */
-export async function syncTriggers(env: TriggerStoreEnv, agent: Address, playbook: { digest: string; triggers?: readonly TriggerV1[] } | null): Promise<{ rows: TriggerScheduleV1[] }> {
+export async function syncTriggers(env: TriggerStoreEnv, agent: Address, playbook: { digest: string; triggers?: readonly TriggerV1[] } | null): Promise<{ rows: TriggerScheduleV1[]; declaredSynced: boolean }> {
   const rows = playbook ? schedulesFor(agent, playbook.digest, playbook.triggers ?? []) : [];
   const out = await call(env, agent, 'trigger-sync', { rows, playbookDigest: playbook?.digest ?? null });
-  return { rows: (out.rows as TriggerScheduleV1[] | undefined) ?? [] };
+  return { rows: (out.rows as TriggerScheduleV1[] | undefined) ?? [], declaredSynced: out.declaredSynced === true };
+}
+
+// ── Spec 323 W6 — DECLARED ROUTINES ARE REBUILT FROM THE RECORD ──────────────────────────────────────
+// The person's `routines.data` (her vault) is the record; the declared rows on her agent's object are its projection.
+// A fresh object (a new deployment, a wiped DO) has none — the first ask at her own agent reads the record once and
+// rebuilds them (`declaredSynced` false ⇒ rebuild), and a steward may force it. Each row's clock is re-compiled from
+// the sentence she said, in her zone; a connector row starts with no `seen` cursor and primes on its first poll.
+export interface DeclaredRoutineEntry { triggerId: string; kind: 'schedule' | 'connector'; on?: { connector: 'google-gmail'; query: string } | { connector: 'google-calendar'; leadMinutes: number }; ask: string; every: string; everyMs: number; declared: { by: string; at: number; saidAs: string; when: string; tz: string; name?: string } }
+
+/** The schedule row a record entry becomes, its clock compiled fresh — `compile` is the sentence grammar (routine-sentence.ts). */
+export function rowOfDeclared(agent: Address, e: DeclaredRoutineEntry, compile: (sentence: string, tz: string) => { firstAt: number } | null, now = Date.now()): TriggerScheduleV1 {
+  const compiled = e.kind === 'schedule' ? compile(e.declared.saidAs, e.declared.tz) : null;
+  const nextAt = compiled?.firstAt ?? now + e.everyMs;
+  return { agent: agent.toLowerCase() as Address, triggerId: e.triggerId, kind: e.kind, ...(e.on ? { on: { ...e.on } } : {}), ...(e.kind === 'connector' ? { seen: [], primeSeen: true as const } : {}), ask: e.ask, every: e.every, everyMs: e.everyMs, nextAt, playbookDigest: 'declared', declared: { ...e.declared } };
+}
+
+/** Make the object's declared rows match the record: rows for every entry (an existing row keeps its clock, cursor and
+ *  pause unless `force`), none for entries the record no longer has, and the object marked as synced from the vault. */
+export async function rebuildDeclaredTriggers(env: TriggerStoreEnv, agent: Address, entries: readonly DeclaredRoutineEntry[], compile: (sentence: string, tz: string) => { firstAt: number } | null, opts: { force?: boolean; now?: number } = {}): Promise<{ rows: TriggerScheduleV1[]; added: number; removed: number }> {
+  const rows = entries.map((e) => rowOfDeclared(agent, e, compile, opts.now));
+  const out = await call(env, agent, 'trigger-declared-sync', { rows, agent: agent.toLowerCase(), force: !!opts.force });
+  return { rows: (out.rows as TriggerScheduleV1[] | undefined) ?? [], added: Number(out.added ?? 0), removed: Number(out.removed ?? 0) };
 }
 
 /** Spec 402 W3 — keep a routine the person declared: a schedule row of their own on their agent's object. */

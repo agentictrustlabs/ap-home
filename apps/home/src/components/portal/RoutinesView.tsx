@@ -7,7 +7,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
-import { listTriggers, listRunRecords, pauseTrigger, fireTrigger, removeTrigger, type TriggerRow, type RunRecordRow } from '../../home/ask';
+import { listTriggers, listRunRecords, pauseTrigger, fireTrigger, removeTrigger, rebuildRoutines, type TriggerRow, type RunRecordRow } from '../../home/ask';
+import { activateInteractionsIfNeeded, resolveVia } from '../../home/onboarding';
 import { assembleRoutines, type RoutineView } from '../../home/routines';
 import { StatePill } from './StatePill';
 import { BusyButton } from '../shared/BusyButton';
@@ -21,7 +22,7 @@ async function readAssignment(token: string, agent: string): Promise<{ archetype
 }
 
 export function RoutinesView({ scope }: { scope: WorkspaceScope }) {
-  const { session, agentAddress } = useSession();
+  const { session, agentAddress, profile } = useSession();
   const agent = (scope.kind === 'org' ? scope.org : scope.kind === 'service' ? scope.agent : agentAddress ?? '').toLowerCase() as Address;
   const [triggers, setTriggers] = useState<TriggerRow[] | null>(null);
   const [records, setRecords] = useState<RunRecordRow[]>([]);
@@ -65,6 +66,28 @@ export function RoutinesView({ scope }: { scope: WorkspaceScope }) {
     if (!out.ok) setErr(out.error);
     setBusy(null); await load();
   };
+  // Spec 323 W6 — her own routines are a RECORD in her vault; the rows here are its projection. Rebuilding is what a
+  // new deployment does on her first ask; a grant that predates the record is refreshed once (her signature).
+  const [rebuilt, setRebuilt] = useState<string | null>(null);
+  const [scopeBehind, setScopeBehind] = useState(false);
+  const rebuild = async () => {
+    if (!session) return;
+    setBusy('rebuild'); setErr(null); setRebuilt(null); setScopeBehind(false);
+    const out = await rebuildRoutines(session, agent, true);
+    setBusy(null);
+    if (!out.ok) { setErr(out.error); setScopeBehind(/record_scope_denied|scope/i.test(out.error)); return; }
+    setRebuilt(`rebuilt from your record — ${out.record} declared, ${out.added} re-created, ${out.removed} dropped`);
+    await load();
+  };
+  const refreshGrant = async () => {
+    if (!session || !agentAddress) return;
+    setBusy('grant'); setErr(null);
+    try {
+      const r = await activateInteractionsIfNeeded(agentAddress as `0x${string}`, resolveVia(profile?.credential, session.via), { token: session.token }, true);
+      if (!r.ok) setErr(r.error ?? 'the grant could not be refreshed'); else { setScopeBehind(false); await rebuild(); }
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    setBusy(null);
+  };
 
   if (!session) return null;
   return (
@@ -74,6 +97,14 @@ export function RoutinesView({ scope }: { scope: WorkspaceScope }) {
       </Note>
       {unknown && <Unknown read={<>the schedule could not be read ({unknown})</>} testId="routines-unknown" />}
       {err && <ErrorNote>{err}</ErrorNote>}
+      {scope.kind === 'person' && (
+        <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap', marginBottom: 'var(--sp-3)' }} data-testid="routines-record">
+          <Micro>Your own routines are kept in your vault and travel with it; this schedule is rebuilt from that record.</Micro>
+          <BusyButton busy={busy === 'rebuild'} busyLabel="Rebuilding…" className="ui-btn ui-btn--ghost ui-btn--sm" onClick={() => void rebuild()} title="Re-compile every clock from your record">Rebuild from my record</BusyButton>
+          {scopeBehind && <BusyButton busy={busy === 'grant'} busyLabel="Refreshing…" className="ui-btn ui-btn--primary ui-btn--sm" onClick={() => void refreshGrant()} title="Your agent's grant predates routines — refresh it once, your signature">Refresh the grant</BusyButton>}
+          {rebuilt && <Micro>{rebuilt}</Micro>}
+        </div>
+      )}
       {triggers === null && !unknown && <Meta>Reading the schedule…</Meta>}
       {triggers !== null && routines.length === 0 && !unknown && <Empty title="No routines">Say one to your agent — &ldquo;every Monday at 8, tell me what&rsquo;s on my calendar&rdquo; — or this agent&rsquo;s playbook declares no triggers. <a href={workspaceHref(scope, 'playbook')}>Choose a playbook →</a></Empty>}
       {routines.map((r) => (

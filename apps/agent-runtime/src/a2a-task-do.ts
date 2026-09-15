@@ -382,6 +382,7 @@ function makeOrchestrateSkill(env: Env, agentSA: Address): SkillHandler {
   };
 }
 
+const ROUTINES_SYNCED_KEY = 'harness:routines:vault-synced';
 const AGENT_SA_KEY = '__a2a_agent_sa';
 const ALARM_DELAY_MS = 1500;
 
@@ -882,7 +883,35 @@ export class A2aTaskDO {
           out.push(row);
         }
         await this.armTriggerAlarm();
-        return Response.json({ ok: true, rows: out });
+        // Spec 323 W6 — whether the declared rows were ever rebuilt from the vault record on this object.
+        const declaredSynced = !!(await this.state.storage.get(ROUTINES_SYNCED_KEY));
+        return Response.json({ ok: true, rows: out, declaredSynced });
+      }
+      // Spec 323 W6 — DECLARED ROWS FROM THE RECORD. The rows given are the person's `routines.data` compiled; this object
+      // keeps exactly those (an existing row keeps its clock/cursor/pause unless forced), drops declared rows the record
+      // no longer has, and remembers that it was rebuilt. The playbook's rows are untouched.
+      if (op === 'trigger-declared-sync') {
+        const b = (body as { rows?: Array<{ triggerId: string; declared?: unknown }>; force?: boolean; agent?: string } | null) ?? {};
+        const rows = Array.isArray(b.rows) ? b.rows.filter((r) => r && r.triggerId && r.declared) : [];
+        if (b.agent) await this.state.storage.put(AGENT_SA_KEY, String(b.agent).toLowerCase());
+        const existing = await this.state.storage.list<Record<string, unknown>>({ prefix: 'harness:trigger:' });
+        const declaredNow = [...existing.entries()].filter(([, v]) => !!v.declared);
+        const want = new Set(rows.map((r) => tkey(r.triggerId)));
+        const gone = declaredNow.filter(([k]) => !want.has(k)).map(([k]) => k);
+        if (gone.length) await this.state.storage.delete(gone);
+        let added = 0;
+        const out: unknown[] = [];
+        for (const r of rows) {
+          const prior = b.force ? undefined : (existing.get(tkey(r.triggerId)) as Record<string, unknown> | undefined);
+          // the record's words win; the object's serving state (clock, seen, pause, last outcome) stays
+          const row = prior ? { ...prior, ask: (r as { ask?: string }).ask, every: (r as { every?: string }).every, everyMs: (r as { everyMs?: number }).everyMs, on: (r as { on?: unknown }).on, declared: r.declared } : r;
+          if (!prior) added++;
+          await this.state.storage.put(tkey(r.triggerId), row);
+          out.push(row);
+        }
+        await this.state.storage.put(ROUTINES_SYNCED_KEY, Date.now());
+        await this.armTriggerAlarm();
+        return Response.json({ ok: true, rows: out, added, removed: gone.length });
       }
       // Spec 372 S3c — THE ASSERTION LEDGER: a wire-signed caller's assertion, spent once. The standard
       // surface's own memory is per isolate, which on a fanned-out edge is no protection at all (a replay

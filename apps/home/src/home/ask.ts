@@ -536,6 +536,13 @@ export async function removeTrigger(session: { token: string }, addressee: Addre
   return out.ok ? { ok: true } : { ok: false, error: out.error ?? 'the routine could not be removed' };
 }
 
+/** Spec 323 W6 — rebuild the person's DECLARED routine rows on her agent from the record in her vault (`routines.data`).
+ *  What a new deployment does on her first ask; `force` re-compiles every clock. Self only. */
+export async function rebuildRoutines(session: { token: string }, addressee: Address, force = false): Promise<{ ok: true; record: number; added: number; removed: number } | { ok: false; error: string }> {
+  const out = (await postA2a('/a2a/harness/triggers/rebuild', { session: session.token, addressee, force })) as { ok?: boolean; error?: string; record?: number; added?: number; removed?: number };
+  return out.ok ? { ok: true, record: out.record ?? 0, added: out.added ?? 0, removed: out.removed ?? 0 } : { ok: false, error: out.error ?? 'the routines could not be rebuilt' };
+}
+
 /** Spec 398 §5.3 / §5.4 — pause or resume a routine, or set its budget (null clears). Stewards only. */
 export async function pauseTrigger(session: { token: string }, addressee: Address, triggerId: string, change: { paused?: boolean; note?: string; budget?: { vaultCalls: number } | null }): Promise<{ ok: true; trigger: TriggerRow } | { ok: false; error: string }> {
   const out = (await postA2a('/a2a/harness/triggers/pause', { session: session.token, addressee, triggerId, ...change })) as { ok?: boolean; error?: string; trigger?: TriggerRow };

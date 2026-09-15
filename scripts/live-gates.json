@@ -432,6 +432,16 @@
       "timeoutSec": 180
     },
     {
+      "id": "verify-portable-home",
+      "script": "scripts/verify-portable-home.mts",
+      "spec": "323 W6",
+      "proves": "everything the person has TRAVELS: with her owner session alone, against the substrate directly (no first Home, no bridge secret, no KV), status names every record scope and record.get returns every record the reference Home renders (profile, relationships, skills, timeline, manifest, confirmations, standing instructions, memory, routines, playbook assignment, recent turns, household); a routine she declared is a RECORD in her vault (routines.data, her words and zone) and a forced rebuild re-creates her agent's schedule row from it with the same id and a fresh clock in her zone; removed at the Home it is gone from record and object",
+      "twin": "another person's session reads none of her records (403, self only); a connector token is a credential, not a record — the read says 'not connected' rather than carrying it",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 240
+    },
+    {
       "id": "verify-mention-into-run",
       "script": "scripts/verify-mention-into-run.mts",
       "spec": "400 W2 (B3)",

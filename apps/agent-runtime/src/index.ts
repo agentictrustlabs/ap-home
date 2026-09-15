@@ -7,12 +7,13 @@ import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 // State is held in a Durable Object (SessionStoreDO); see ./session-store-do.ts.
 // Env bindings come from c.env (typed via the Bindings interface below).
 
-import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, forgetConfirmation, CONFIRMATION_RECORD, forgetInstruction, STANDING_RECORD, factsOf, forgetFact, FACTS_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1, type RememberedFactsV1 } from '@agenticprimitives/context';
+import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, forgetConfirmation, CONFIRMATION_RECORD, forgetInstruction, STANDING_RECORD, factsOf, forgetFact, FACTS_RECORD, routinesOf, dropRoutine, ROUTINES_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1, type RememberedFactsV1 } from '@agenticprimitives/context';
 import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
 import { recordOf, replayingInvoker, traceContextOf, type RunPlannerSummaryV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent, type RunBillV1 } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
 import { recordFormOf, rehydrateExecuted } from './artifact-store.js';
-import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken, advanceTrigger, withPause, withBudget, advanced, declareTrigger, removeTrigger } from './triggers.js';
+import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken, advanceTrigger, withPause, withBudget, advanced, declareTrigger, removeTrigger, rebuildDeclaredTriggers } from './triggers.js';
+import { parseRoutineSentence } from './routine-sentence.js';
 import { consumeRuntimeWakes } from './runtime-wake.js';
 import { connectorStatus, disconnectConnector, type GoogleProvider } from './connectors/google-token.js';
 import { searchThreads } from './connectors/google-gmail.js';
@@ -2057,6 +2058,9 @@ export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef:
     } catch (e) {
       return { outcome: 'failed', said: e instanceof Error ? e.message : String(e), runRef };
     }
+    // Spec 323 W6 — a row rebuilt from the record primes its cursor first: what is already there was told at the old
+    // object (or is older than the rebuild); it is noted, never fired on again.
+    if (row.primeSeen) return { outcome: 'answered', said: `rebuilt from your record — ${items.length} already there noted, none fired; new ones will`, runRef, seen: items.map((it) => it.id).slice(-200) };
     const fresh = items.filter((it) => !seen.has(it.id));
     const nextSeen = [...(row.seen ?? []), ...fresh.map((it) => it.id)].slice(-200);
     if (!fresh.length) return { outcome: 'answered', said: `nothing new (${items.length} checked)`, runRef, seen: nextSeen };
@@ -2546,9 +2550,39 @@ app.post('/harness/triggers/remove', async (c) => {
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const addressee = body.addressee.toLowerCase() as Address;
   if (!(await mayDriveTriggers(c.env, String(who.sa).toLowerCase() as Address, addressee))) return c.json({ ok: false, error: 'only a steward of this agent may remove its routines' }, 403);
+  // Spec 323 W6 — the RECORD first (her own routines live in her vault; the row is its projection).
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  if (String(who.sa).toLowerCase() === addressee && deps.readSubjectRecord && deps.writeSubjectRecord) {
+    const prev = routinesOf(await deps.readSubjectRecord(addressee, ROUTINES_RECORD).catch(() => null));
+    if (prev.entries.some((e) => e.triggerId === body.triggerId)) {
+      const wrote = await deps.writeSubjectRecord(addressee, ROUTINES_RECORD, dropRoutine(prev, body.triggerId));
+      if (!wrote.ok) return c.json({ ok: false, error: wrote.error ?? 'the routine could not be removed from your record' }, 502);
+    }
+  }
   try { await removeTrigger(c.env as never, addressee, body.triggerId); } catch (e) { return c.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, 400); }
   return c.json({ ok: true });
 });
+// POST /harness/triggers/rebuild { session, addressee, force? } — spec 323 W6. Rebuild the person's DECLARED routine rows
+// on her agent's object from the record in her vault (`routines.data`): what a new deployment does on her first ask, and
+// what a steward may force. `force` re-compiles every clock and drops every cursor and pause (a connector row then
+// primes on its first poll). The playbook's rows are untouched. Self only — the record is hers.
+app.post('/harness/triggers/rebuild', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; force?: boolean } | null;
+  if (!body?.session || !body.addressee) return c.json({ ok: false, error: 'session and addressee are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const addressee = body.addressee.toLowerCase() as Address;
+  if (String(who.sa).toLowerCase() !== addressee) return c.json({ ok: false, error: 'declared routines are rebuilt by their owner, at her own agent' }, 403);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  if (!deps.readSubjectRecord) return c.json({ ok: false, error: 'the private tier is not configured' }, 503);
+  let raw: unknown;
+  try { raw = await deps.readSubjectRecord(addressee, ROUTINES_RECORD); } catch (e) { return c.json({ ok: false, error: `your routines record could not be read: ${e instanceof Error ? e.message : String(e)}` }, 502); }
+  const record = routinesOf(raw);
+  const out = await rebuildDeclaredTriggers(c.env as never, addressee, record.entries, compileClock, { force: !!body.force });
+  return c.json({ ok: true, addressee, record: record.entries.length, rows: out.rows, added: out.added, removed: out.removed, forced: !!body.force });
+});
+/** The clock a declared routine's sentence compiles to, now, in her zone — or null when the grammar no longer reads it. */
+const compileClock = (sentence: string, tz: string): { firstAt: number } | null => { const p = parseRoutineSentence(sentence, { tz }); return 'error' in p ? null : { firstAt: p.firstAt }; };
 // POST /harness/triggers/fire { session, addressee, triggerId } — spec 370 P5. Run one trigger now, as
 // the alarm would: the live gate, and a steward's "do it now". Stewards only.
 app.post('/harness/triggers/fire', async (c) => {
@@ -3582,7 +3616,10 @@ app.post('/harness/ask', async (c) => {
   // so authority granted for this ask covers this ask — retyping the same words in another realm is
   // another intent, and the mandate does not travel.
   // Spec 402 W3 — the asker's zone (`tz`, IANA), when the surface says it: a routine's clock is read in HER day, never UTC's.
-  const tz = typeof body.tz === 'string' && /^[A-Za-z_]+\/[A-Za-z_+-]+$|^UTC$/.test(body.tz) ? body.tz : undefined;
+  // A RESUME KEEPS THE ZONE the ask was made in: the routine's read-back said "Tuesday 7 AM (Denver)"; her yes must keep
+  // that clock, not UTC's, whatever surface the yes came from (caught by verify-portable-home, 2026-09-15).
+  const storedTz = (stored?.intent?.context as { tz?: unknown } | undefined)?.tz;
+  const tz = typeof body.tz === 'string' && /^[A-Za-z_]+\/[A-Za-z_+-]+$|^UTC$/.test(body.tz) ? body.tz : typeof storedTz === 'string' && storedTz ? storedTz : undefined;
   const intent = { goal: turn.message, context: { addressee, asker: who.sa, ...(tz ? { tz } : {}) } };
   const audit = buildAuditSink(c.env);
   const askDeps = harnessDeps(c.env, audit, { executionCtx: c.executionCtx });
@@ -3783,6 +3820,8 @@ app.post('/harness/ask', async (c) => {
           : {};
         await saveRun(c.env as never, {
           runRef, message: turn.message, addressee, asker: String(who.sa).toLowerCase() as Address,
+          // the intent WITH its context (the asker's zone), so a resume from any surface rebuilds the same object
+          intent,
           presented: turn.presented, supplied: turn.supplied,
           ...(body.plan ?? stored?.plan ? { plan: body.plan ?? stored?.plan } : {}),
           // WHY THIS RUN EXISTS survives every turn. Rebuilding the checkpoint from the turn alone
@@ -3930,7 +3969,14 @@ app.post('/harness/ask', async (c) => {
     }) : undefined;
     // Spec 370 P5 — the agent's schedule follows its playbook: every ask re-syncs the trigger rows (cheap,
     // idempotent, and the only moment the Worker sees which playbook the agent holds).
-    c.executionCtx.waitUntil(syncTriggers(c.env as never, addressee, askedPlaybook).catch((e: unknown) => console.warn('[triggers] sync failed:', e instanceof Error ? e.message : String(e))));
+    c.executionCtx.waitUntil(syncTriggers(c.env as never, addressee, askedPlaybook).then(async (sync) => {
+      // Spec 323 W6 — a fresh object (a new deployment) has never rebuilt the person's DECLARED rows from her record:
+      // the first ask at her own agent does it, once; from then on the tools write through.
+      if (sync.declaredSynced || !ownAgent || !askDeps.readSubjectRecord) return;
+      const record = routinesOf(await askDeps.readSubjectRecord(addressee, ROUTINES_RECORD).catch(() => null));
+      const out = await rebuildDeclaredTriggers(c.env as never, addressee, record.entries, compileClock);
+      if (out.added || out.removed) console.log(`[triggers] declared rows rebuilt from the record for ${addressee}: +${out.added} −${out.removed}`);
+    }).catch((e: unknown) => console.warn('[triggers] sync failed:', e instanceof Error ? e.message : String(e))));
     // Spec 370 P7 — REMEMBER THE TURN in the asker's own vault: the words, what they came to, and what
     // each party word resolved to, so the next ask can say "him". A write that fails costs a recall.
     // The write LANDS BEFORE THE REPLY LEAVES: a next ask one second later once read the record without

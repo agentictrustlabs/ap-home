@@ -5,6 +5,7 @@
 // the playbook's; each firing is an unattended run as her agent holding nothing — a read answers and the answer is
 // delivered to her; an act parks for her mandate, fresh each time. Removing it is hers too. Nothing here is authority.
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
+import { routinesOf, keepRoutine, dropRoutine, ROUTINES_RECORD, type DeclaredRoutineV1 } from '@agenticprimitives/context';
 import { parseRoutineSentence, routineWords } from './routine-sentence.js';
 import type { TriggerScheduleV1 } from './triggers.js';
 
@@ -52,7 +53,15 @@ export interface RoutineDeps {
   listTriggers?: (agent: string) => Promise<TriggerScheduleV1[]>;
   declareTrigger?: (agent: string, row: TriggerScheduleV1) => Promise<TriggerScheduleV1>;
   removeTrigger?: (agent: string, triggerId: string) => Promise<void>;
+  /** Spec 323 W6 — the RECORD (`routines.data` in her vault); the row on her agent's object is its projection. */
+  readSubjectRecord?: (subject: string, key: string) => Promise<unknown>;
+  writeSubjectRecord?: (subject: string, key: string, record: unknown) => Promise<{ ok: boolean; error?: string }>;
 }
+
+/** The record entry for a schedule row — what she declared, without the serving-plane state (clock, seen, pause). */
+export const routineEntryOf = (row: TriggerScheduleV1): DeclaredRoutineV1 | null => row.declared && row.every && typeof row.everyMs === 'number'
+  ? { triggerId: row.triggerId, kind: row.kind === 'connector' ? 'connector' : 'schedule', ...(row.on ? { on: row.on as DeclaredRoutineV1['on'] } : {}), ask: row.ask, every: row.every, everyMs: row.everyMs, declared: { by: row.declared.by, at: row.declared.at, saidAs: row.declared.saidAs, when: row.declared.when, tz: row.declared.tz, ...(row.declared.name ? { name: row.declared.name } : {}) } }
+  : null;
 
 /** The person's zone, from the ask's context when the surface said it; UTC otherwise (the read-back names it). */
 const zoneOf = (ctx: { intent: unknown }): string => { const c = (ctx.intent as { context?: { tz?: unknown } }).context; return typeof c?.tz === 'string' && c.tz ? c.tz : 'UTC'; };
@@ -74,6 +83,8 @@ export function routineInvoker(deps: RoutineDeps, person: string | undefined, ad
         const words = String(args.words ?? '').trim().toLowerCase();
         const target = id ? mine.find((r) => r.triggerId === id) : words ? mine.find((r) => r.ask.toLowerCase().includes(words) || (r.declared?.saidAs ?? '').toLowerCase().includes(words)) : undefined;
         if (!target) return { removed: false, refused: id ? `no routine of yours has the id ${id}` : words ? `none of your routines mentions "${words}"` : 'say which routine — its id, or words it contains', count: mine.length };
+        // THE RECORD FIRST (spec 323 W6): a routine removed at one Home is gone at every Home because the vault says so.
+        await writeRecord(deps, me, (prev) => dropRoutine(prev, target.triggerId));
         await deps.removeTrigger(me, target.triggerId);
         return { removed: true, id: target.triggerId, ask: target.ask, count: mine.length - 1 };
       }
@@ -93,12 +104,24 @@ export function routineInvoker(deps: RoutineDeps, person: string | undefined, ad
         const triggerId = `routine-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
         const name = typeof args.name === 'string' && args.name.trim() ? args.name.trim().slice(0, 60) : undefined;
         const row: TriggerScheduleV1 = { agent: me as `0x${string}`, triggerId, kind: parsed.connector ? 'connector' : 'schedule', ...(parsed.connector ? { on: { ...parsed.connector }, seen: [] } : {}), ask: parsed.ask, every: parsed.every, everyMs: parsed.everyMs, nextAt: parsed.firstAt, playbookDigest: 'declared', declared: { by: me, at: Date.now(), saidAs: sentence, when: parsed.when, tz, ...(name ? { name } : {}) } };
+        // THE RECORD FIRST (spec 323 W6): her vault holds what she declared; the row on her agent's object is the
+        // projection the alarm runs — rebuilt from the record at any deployment. A record that cannot be written is not
+        // papered over with a row that would be lost with the object.
+        await writeRecord(deps, me, (prev) => keepRoutine(prev, routineEntryOf(row)!));
         const kept = await deps.declareTrigger(me, row);
         return { kept: true, id: kept.triggerId, ask: parsed.ask, every: parsed.every, when: parsed.when, firstAt: new Date(parsed.firstAt).toISOString(), tz, words, note: 'your own routine, on your agent\'s clock — it fires as your agent holding nothing; pause or remove it on Routines' };
       }
       default: throw new Error(`${toolId} is not a routine capability`);
     }
   };
+}
+
+/** Read-modify-write the person's `routines.data`. Says, when the grant predates the scope, what to do about it. */
+async function writeRecord(deps: RoutineDeps, me: string, change: (prev: ReturnType<typeof routinesOf>) => ReturnType<typeof routinesOf>): Promise<void> {
+  if (!deps.readSubjectRecord || !deps.writeSubjectRecord) throw new Error('routines cannot be kept as a record here (the private tier is not configured)');
+  const prev = routinesOf(await deps.readSubjectRecord(me, ROUTINES_RECORD).catch(() => null));
+  const wrote = await deps.writeSubjectRecord(me, ROUTINES_RECORD, change(prev));
+  if (!wrote.ok) throw new Error(/record_scope_denied|scope/i.test(wrote.error ?? '') ? 'your storage grant predates routines — refresh the grant on Today (What your agent knows about you → Refresh the grant), then say it again' : (wrote.error ?? 'the routine could not be kept as a record'));
 }
 
 /** A sentence with a clock in it, said at the person's own agent, is a routine — compiled, never interpreted. */

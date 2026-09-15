@@ -3,7 +3,7 @@ import { routineInvoker, compiledRoutine, ROUTINE_DECLARE, ROUTINE_LIST, ROUTINE
 import type { TriggerScheduleV1 } from '../src/triggers.js';
 
 const ALICE = '0x' + 'a'.repeat(40);
-const store = () => { const rows: TriggerScheduleV1[] = []; return { rows, listTriggers: async () => rows, declareTrigger: async (_a: string, r: TriggerScheduleV1) => { rows.push(r); return r; }, removeTrigger: async (_a: string, id: string) => { const i = rows.findIndex((r) => r.triggerId === id); if (i >= 0) rows.splice(i, 1); } }; };
+const store = () => { const rows: TriggerScheduleV1[] = []; const vault = new Map<string, unknown>(); return { rows, vault, listTriggers: async () => rows, declareTrigger: async (_a: string, r: TriggerScheduleV1) => { rows.push(r); return r; }, removeTrigger: async (_a: string, id: string) => { const i = rows.findIndex((r) => r.triggerId === id); if (i >= 0) rows.splice(i, 1); }, readSubjectRecord: async (s: string, k: string) => vault.get(`${s}:${k}`) ?? null, writeSubjectRecord: async (s: string, k: string, r: unknown) => { vault.set(`${s}:${k}`, r); return { ok: true }; } }; };
 class Asked extends Error { constructor(public input: { prompt: string; fields: Array<{ name: string }> }) { super('asked'); } }
 const ask = (i: never) => { throw new Asked(i); };
 const ctx = (goal: string, supplied: Array<{ stepRef: string; data: Record<string, unknown> }> = []) => ({ intent: { goal, context: { tz: 'America/Denver' } }, step: { id: 's0' }, index: 0, supplied }) as never;
@@ -27,11 +27,15 @@ describe('routines from a sentence (spec 402 W3)', () => {
     const yes = await inv(ROUTINE_DECLARE, { sentence, name: 'Monday brief' }, ctx(sentence, [{ stepRef: 's0', data: { keep: 'yes' } }])) as { kept: boolean; id: string; every: string; tz: string };
     expect(yes.kept).toBe(true); expect(yes.every).toBe('7d'); expect(yes.tz).toBe('America/Denver');
     expect(st.rows[0]!.declared?.saidAs).toBe(sentence); expect(st.rows[0]!.playbookDigest).toBe('declared'); expect(st.rows[0]!.ask).toBe("what's on my calendar");
+    // spec 323 W6 — the RECORD in her vault holds what she declared (the row is its projection)
+    const rec = st.vault.get(`${ALICE.toLowerCase()}:routines.data`) as { type: string; entries: Array<{ triggerId: string; declared: { saidAs: string; tz: string } }> };
+    expect(rec.type).toBe('ap.context.declared-routines.v1'); expect(rec.entries[0]!.triggerId).toBe(yes.id); expect(rec.entries[0]!.declared.tz).toBe('America/Denver');
     const l = await inv(ROUTINE_LIST, {}, ctx('my routines')) as { count: number; answer: string };
     expect(l.count).toBe(1); expect(l.answer).toContain("what's on my calendar");
     const room = await routineInvoker(st, ALICE, '0x' + 'c'.repeat(40), ask, supplied)(ROUTINE_LIST, {}, ctx('x')) as { refused?: string };
     expect(room.refused).toMatch(/your own agent/);
     const rm = await inv(ROUTINE_REMOVE, { words: 'calendar' }, ctx('stop it')) as { removed: boolean };
     expect(rm.removed).toBe(true); expect(st.rows).toHaveLength(0);
+    expect((st.vault.get(`${ALICE.toLowerCase()}:routines.data`) as { entries: unknown[] }).entries).toHaveLength(0);
   });
 });
