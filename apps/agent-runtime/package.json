@@ -26,6 +26,7 @@
     "@agenticprimitives/collaboration": "0.0.0-alpha.4",
     "@agenticprimitives/connect": "1.0.0-alpha.25",
     "@agenticprimitives/connect-auth": "1.0.0-alpha.25",
+    "@agenticprimitives/content-primitives": "1.0.0-alpha.26",
     "@agenticprimitives/content-storage": "1.0.0-alpha.4",
     "@agenticprimitives/context": "0.0.0-alpha.4",
     "@agenticprimitives/coordination": "0.0.0-alpha.8",
