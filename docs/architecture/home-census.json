@@ -349,7 +349,8 @@
       "specs": [
         379,
         336,
-        338
+        338,
+        401
       ],
       "section": "398 §4.5",
       "routes": [
@@ -357,7 +358,9 @@
         "(portal)/find",
         "(portal)/network",
         "(portal)/networks",
-        "(portal)/alliances"
+        "(portal)/alliances",
+        "(portal)/contacts",
+        "(portal)/coaches"
       ],
       "capabilities": [
         "discovery.agents.find",
@@ -374,7 +377,9 @@
       ],
       "gates": [
         "verify-home-mcp-discovery",
-        "verify-ap-gateway"
+        "verify-ap-gateway",
+        "verify-contacts",
+        "verify-runtime-pair"
       ],
       "gaps": [
         "external specialist grants as a Home surface (APUX-022) — 398 G5"
@@ -505,7 +510,10 @@
       "priority": "P1",
       "status": "shipped",
       "specs": [
-        375
+        375,
+        402,
+        403,
+        323
       ],
       "section": "398 G3",
       "routes": [
@@ -525,7 +533,9 @@
         "/harness/triggers",
         "/harness/triggers/fire",
         "/harness/triggers/pause",
-        "/harness/triggers/rotate"
+        "/harness/triggers/rotate",
+        "/harness/triggers/remove",
+        "/harness/triggers/rebuild"
       ],
       "tests": [
         "apps/demo-a2a/test/unit/trigger-kinds.test.ts",
@@ -538,7 +548,10 @@
         "a routine's budget is set by a steward on the row, not yet declared on the SKILL.md trigger (375 contract); save-as-recipe (398 G3) not built"
       ],
       "gates": [
-        "verify-routine-pause"
+        "verify-routine-pause",
+        "verify-routine-from-sentence",
+        "verify-portable-home",
+        "verify-reminders-and-preferences"
       ]
     },
     {
@@ -552,13 +565,17 @@
       "status": "shipped",
       "specs": [
         385,
-        394
+        394,
+        402,
+        403
       ],
       "section": "398 §6.1",
       "components": [
         "components/portal/MemoryViews.tsx",
         "components/portal/ask/AskFlyout.tsx",
-        "home/memory.ts"
+        "home/memory.ts",
+        "components/portal/TodayMemory.tsx",
+        "components/portal/AgentPreferencesPanel.tsx"
       ],
       "capabilities": [
         "context.instruction.declare"
@@ -567,13 +584,17 @@
         "/harness/confirmations",
         "/harness/confirmations/forget",
         "/harness/instructions",
-        "/harness/instructions/forget"
+        "/harness/instructions/forget",
+        "/harness/memory",
+        "/harness/memory/forget",
+        "/harness/preferences"
       ],
       "gates": [
         "verify-standing-instruction",
         "verify-standing-instruction-room",
         "verify-confirmation-room",
-        "verify-home-mcp-instructions"
+        "verify-home-mcp-instructions",
+        "verify-memory-follows"
       ],
       "gaps": [
         "learned preferences (358 W5) — none kept yet; topic snapshots (340) not listed in the workspace view; promotion from Run to Library is not yet an act with a receipt (398 §6.1) — said in the view, not offered"
@@ -629,7 +650,8 @@
         277,
         278,
         356,
-        265
+        265,
+        400
       ],
       "section": "398 §6.1",
       "routes": [
@@ -640,7 +662,8 @@
         "(portal)/visibility",
         "(portal)/org/[org]/records",
         "(portal)/org/[org]/data",
-        "(portal)/service/[agent]/records"
+        "(portal)/service/[agent]/records",
+        "(portal)/search"
       ],
       "capabilities": [
         "household.data"
@@ -872,13 +895,16 @@
       "specs": [
         277,
         295,
-        397
+        397,
+        400
       ],
       "section": "398 §2.3",
       "routes": [
         "(portal)/apps",
         "(portal)/org/[org]/access",
-        "(portal)/service/[agent]/access"
+        "(portal)/service/[agent]/access",
+        "(portal)/grants",
+        "(portal)/org/[org]/grants"
       ],
       "capabilities": [
         "access.grant.revoke"
@@ -890,7 +916,8 @@
       "gates": [
         "verify-grant-revocation",
         "verify-home-mcp-revoke",
-        "verify-home-mcp-authority"
+        "verify-home-mcp-authority",
+        "verify-grants-admin"
       ]
     },
     {
