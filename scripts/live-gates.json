@@ -412,6 +412,16 @@
       "timeoutSec": 300
     },
     {
+      "id": "verify-ask-app",
+      "script": "scripts/verify-ask-app.mts",
+      "spec": "402 W4",
+      "proves": "an app inside the Ask, in a real browser: the contract names a result component (registry → person-steward → her pinned playbook), the harness carries the binding and the step's rows on the answer, and the Home's registry renders the name over them — the memory app with the fact she just told her agent",
+      "twin": "a read whose contract names no result component renders no app; the sentence stands alone",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 300
+    },
+    {
       "id": "verify-mention-into-run",
       "script": "scripts/verify-mention-into-run.mts",
       "spec": "400 W2 (B3)",
