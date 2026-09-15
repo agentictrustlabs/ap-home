@@ -44,7 +44,7 @@ import { writeOrganizationMembership } from '../lib/membership-write';
 import { getClient } from '../lib/oidc-clients';
 import { buildApprovedSiteDelegation, buildApprovedOperationalIntentDelegation, buildApprovedOrgReadDelegation, buildApprovedSelfVaultGrant, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, issueServiceAgentWireDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type SelfVaultGrantConfig, type VaultKeyCeremonyParams } from '../lib/delegation';
 import { vaultWriteWithDelegation, vaultReadWithDelegation } from '../lib/vault-client';
-import { saveStandingGrant, loadStandingGrant } from '../lib/grant-cache';
+import { saveStandingGrant, loadStandingGrant, saveStandingGrantWithSelfVault, loadStandingGrantWithSelfVault } from '../lib/grant-cache';
 import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
 import { ensureCsrfToken, csrfHeaders } from '../csrf';
 import type { DemoPasskey } from '../lib/passkey';
@@ -891,6 +891,9 @@ export async function givePermission(
    *  it in THIS SAME ceremony: delegator = delegate = home.address, no org, no relationship
    *  write. Lets a person publish under their own identity without becoming a fake "org". */
   selfVaultScope?: SelfVaultGrantConfig,
+  /** Opt-in per client (registry standingGrant: with-self-vault). Absent means the rules below are
+   *  exactly what they always were, so no other app's ceremony changes. */
+  reuse?: { reuseWithSelfVault?: boolean },
 ): Promise<Result<{ grant: unknown; sessionDelegation?: DelegationWire; paymentDelegation?: DelegationWire; pullDelegation?: DelegationWire; settlementHash?: Hex; selfVaultGrant?: DelegationWire; reused?: boolean }>> {
   try {
     // REUSE the standing grant when this browser already minted one for (person, delegate) and the
@@ -904,6 +907,14 @@ export async function givePermission(
     if (!sessionKeyAddress && !payment && !selfVaultScope) {
       const standing = loadStandingGrant(home.address, delegate);
       if (standing) return { ok: true, grant: standing, reused: true };
+    }
+    // The opted-in variant (registry `standingGrant: 'with-self-vault'`): a self-vault ceremony whose
+    // two digests (site + self-vault) are fixed for the client, so the approval userOp would be a
+    // byte-identical repeat. Keyed on the scope too, so a widened scope mints fresh. Same fallback
+    // as above if /oidc/grant refuses the reuse. Absent the opt-in this branch never runs.
+    if (!sessionKeyAddress && !payment && selfVaultScope && reuse?.reuseWithSelfVault) {
+      const standing = loadStandingGrantWithSelfVault(home.address, delegate, selfVaultScope);
+      if (standing) return { ok: true, grant: standing.wire, selfVaultGrant: standing.selfVaultGrant, reused: true };
     }
     const signHash = await signHashFor(via, home.address, auth);
     // B4 — batch the person-SA grants (site + the DEL-001 session leaf) via APPROVED-HASH: build both as
@@ -981,6 +992,10 @@ export async function givePermission(
     // never cached (see the matching read-side condition above).
     if (!sessionKeyAddress && !payment && !selfVaultScope) {
       saveStandingGrant(home.address, delegate, wire, Date.now() + 365 * 86_400_000);
+    }
+    if (!sessionKeyAddress && !payment && selfVaultScope && reuse?.reuseWithSelfVault && selfVaultApp) {
+      // Both grants carry 365-day validity; the cache's own 30-day margin (grant-cache.ts) applies on read.
+      saveStandingGrantWithSelfVault(home.address, delegate, selfVaultScope, wire, toWire(selfVaultApp.delegation), Date.now() + 365 * 86_400_000);
     }
     return {
       ok: true,

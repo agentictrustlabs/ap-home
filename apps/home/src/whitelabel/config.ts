@@ -342,6 +342,15 @@ const faithImpact: WhiteLabelConfig = {
         resources: ['vault:gather27:listing'],
         ops: ['read', 'write'],
       },
+      // Sign-in performance, measured live 2026-09-15: pressing Allow to the popup closing took 31 s,
+      // of which ~18 s was the community-messaging wire provisioned once per managed org and ~11 s
+      // the related-orgs read that only feeds it. Gather registers no messaging capability, so it
+      // gets neither. Gated HERE, per client: every other app is untouched (whitelabel/provisioning.test.ts).
+      provisioning: { communityMessaging: false },
+      // ...and 4.4 s was an on-chain approval of two digests that never change between sign-ins
+      // (site grant + self-vault grant). Reuse the standing grant instead; a refused reuse still
+      // falls back to a fresh mint (RecognizedEnroll).
+      standingGrant: 'with-self-vault',
     },
     // skills-corpus — the SKILL.md ceremony/admin surface (owner claims a skillset).
     {

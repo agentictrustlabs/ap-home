@@ -42,6 +42,17 @@ export interface RelyingApp {
     resources: string[];
     ops: ('read' | 'write')[];
   };
+  /** OPTIONAL — what Home sets up for the person on a plain sign-in BEYOND the grant itself. Absent
+   *  means everything, which is exactly what every client gets today; a client may only turn a leg
+   *  OFF, never widen one. `communityMessaging: false` skips the community-messaging wire (and the
+   *  related-orgs read that only feeds it) for an app that registers no messaging capability. */
+  provisioning?: { communityMessaging?: false };
+  /** OPTIONAL — `'with-self-vault'` lets the plain sign-in REUSE its standing grant even though the
+   *  client declares a self_vault_grant. Both approved digests (site + self-vault) are fixed for a
+   *  given client, so the on-chain approval userOp is identical every time; reusing skips it. Absent
+   *  keeps the existing rule: a self-vault ceremony is per-connect. /oidc/grant re-verifies on every
+   *  use either way, so this is never a bypass. */
+  standingGrant?: 'with-self-vault';
   /** App logo for the consent screen — comes from THIS registered config, never a request
    *  param (anti-spoof). Optional; falls back to an initial badge. */
   logo?: string;

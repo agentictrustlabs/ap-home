@@ -33,6 +33,7 @@ import { readSsoCookie, setSsoCookie, clearSsoCookie } from '../../lib/sso-cooki
 import { nameLabel, subdomainHandle, personalAuthOrigin } from '../../lib/domain';
 import { recordConnectedApp } from '../../lib/connected-apps';
 import { provisionCommunityMessaging } from '../../lib/messaging-ceremony';
+import { provisionsCommunityMessaging, reusesStandingGrantWithSelfVault } from '../../whitelabel/provisioning';
 import { setFedcmLoginStatus } from '../../context/session';
 import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, deliverCollectResult, type EnrollApi, isCeremonyTemplate, isDeployTemplate } from './useEnrollReq';
 import { BrandShield } from '../shared/BrandShield';
@@ -302,7 +303,10 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       // ONE managed-agents projection read serves both the treasury resolution (payment apps only)
       // and the messaging leg after the grant — it used to be fetched twice, serially, at ~1.5–3s
       // a call. Started here so it overlaps the grant ceremony instead of extending it.
-      const managedPromise: Promise<Awaited<ReturnType<typeof listManagedAgents>>> = token
+      // ...and NOT started at all for a client that consumes neither: the read is ~11 s on a home
+      // with many orgs, and for Gather it fed nothing (whitelabel/provisioning.ts).
+      const wantsManaged = Boolean(relyingApp?.paymentConfig) || provisionsCommunityMessaging(enroll.aud);
+      const managedPromise: Promise<Awaited<ReturnType<typeof listManagedAgents>>> = token && wantsManaged
         ? listManagedAgents(token).catch((e) => {
             console.warn('[connect] listManagedAgents failed (projection unavailable):', e);
             return [] as Awaited<ReturnType<typeof listManagedAgents>>;
@@ -600,7 +604,8 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         // spec 345 — a self-vault grant rides this SAME plain sign-in when the client declares one.
         const selfVaultScope = whitelabel.relyingApps.find((a) => a.client_id === enroll.aud)?.self_vault_grant;
         lapCeremony('template leg done');
-        let granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey, payment, selfVaultScope);
+        const reuse = { reuseWithSelfVault: reusesStandingGrantWithSelfVault(enroll.aud) };
+        let granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey, payment, selfVaultScope, reuse);
         if (!granted.ok) return fail(granted.error);
         lapCeremony(`permission given${granted.reused ? ' (reused)' : ''}`);
         try {
@@ -612,7 +617,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           if (!granted.reused) throw e;
           console.warn('[connect] standing grant refused — clearing cache and minting fresh:', e);
           clearStandingGrant(home.address, delegate);
-          granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey, payment, selfVaultScope);
+          granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey, payment, selfVaultScope, reuse);
           if (!granted.ok) return fail(granted.error);
           code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation, granted.selfVaultGrant);
         }
@@ -631,7 +636,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       // Same consent as connect: storage, delivery, and a SCOPED wire — the communities they belong
       // to plus, for a named home, the named-to-named class — so the first send from the app is not
       // a second ceremony. One signature; the gate resolves membership and namedness live.
-      if (token && (enroll.template === 'site-login' || enroll.aud === 'commons-app')) {
+      if (token && provisionsCommunityMessaging(enroll.aud) && (enroll.template === 'site-login' || enroll.aud === 'commons-app')) {
         try {
           const named = !!home.name?.trim();
           // Site-login reuses the projection read started before the grant leg — one fetch, not two.
