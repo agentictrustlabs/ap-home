@@ -27,6 +27,7 @@ const record = async (key: string) => ((await j(await fetch(`${A2A}/interactions
 const nonce = Date.now().toString(36);
 console.log(`── ${fx.people.steward}: a reminder, her preferences, the web, an undo ──`);
 
+const got0 = await post('/harness/preferences', { session: steward.bearer });
 // 1. a reminder, compiled and read back
 const SENTENCE = `in 20 minutes remind me to call the pastor (gate ${nonce})`;
 const first = await post('/harness/ask', { session: steward.bearer, addressee: me, message: SENTENCE, tz: 'America/Denver' });
@@ -46,7 +47,8 @@ console.log(`  kept ${keptRes.id} — once, at ${new Date(entry.at).toISOString(
 // 2. fired now: delivered verbatim, the nudge stated, then gone from both
 const fired = await post('/harness/triggers/fire', { session: steward.bearer, addressee: me, triggerId: keptRes.id });
 if (fired.ok !== true || fired.outcome !== 'answered' || !/^Reminder: call the pastor/.test(String(fired.said))) fail(`fire: ${JSON.stringify(fired).slice(0, 300)}`);
-if (!/emailed alice@|not emailed \(/.test(String(fired.said))) fail(`the nudge's outcome was not stated: "${fired.said}"`);
+// the nudge's outcome: emailed (a rail, an address), or nothing said (no rail on this deployment, or no address) — never a guess
+if (got0.emailRail && got0.email && !/emailed /.test(String(fired.said))) fail(`a rail and an address, yet the nudge's outcome was not stated: "${fired.said}"`);
 console.log(`  fired → "${String(fired.said).slice(0, 110)}" ✓`);
 let delivered = false;
 for (let i = 0; i < 10 && !delivered; i++) {

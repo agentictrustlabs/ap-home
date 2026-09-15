@@ -2132,7 +2132,9 @@ export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef:
       const prev = routinesOf(await deps.readSubjectRecord(agent, ROUTINES_RECORD).catch(() => null));
       if (prev.entries.some((e) => e.triggerId === row.triggerId)) await deps.writeSubjectRecord(agent, ROUTINES_RECORD, dropRoutine(prev, row.triggerId)).catch(() => undefined);
     }
-    return { outcome: 'answered', said: `${said}${mailed.sent ? ` · emailed ${mailed.to}` : mailed.why === 'declined' || mailed.why === 'no_address' ? '' : ` · not emailed (${mailed.why})`}`, runRef, done: true };
+    // Mail is spoken of when it went, or when it should have and did not; silence when she declined it, has no address,
+    // or the deployment has no rail (Settings says so once — not every reminder).
+    return { outcome: 'answered', said: `${said}${mailed.sent ? ` · emailed ${mailed.to}` : mailed.why === 'failed' ? ` · not emailed (${mailed.detail ?? 'the rail refused'})` : ''}`, runRef, done: true };
   }
   // Spec 375 — what fired this run rides as CONTEXT for the planner (the event's public fields, a webhook's
   // payload, a message's envelope); no verifier reads it, and no party it names is resolved from it.

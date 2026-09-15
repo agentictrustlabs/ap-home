@@ -33,11 +33,13 @@ export async function preferencesFor(deps: NudgeDeps, agent: Address): Promise<P
 
 /** Send one nudge, or say precisely why not. Never throws. */
 export async function nudge(deps: NudgeDeps, input: NudgeInput): Promise<NudgeOutcome> {
-  const sender = emailSender(deps.env);
-  if (!sender) return { sent: false, why: 'no_email_rail' };
+  // HER PREFERENCE FIRST: a person who turned nudges off is told nothing about mail, whatever the deployment has
+  // (a rail-less estate answered "not emailed (no_email_rail)" on a reminder she had asked to keep quiet).
   if (!deps.readSubjectRecord) return { sent: false, why: 'no_private_tier' };
   const prefs = await preferencesFor(deps, input.agent);
   if (!mayNudge(prefs, input.kind)) return { sent: false, why: 'declined' };
+  const sender = emailSender(deps.env);
+  if (!sender) return { sent: false, why: 'no_email_rail' };
   const to = await emailOf(deps, input.agent);
   if (!to) return { sent: false, why: 'no_address' };
   const home = (deps.env.ALLOWED_ORIGINS?.split(',')[0] ?? 'https://www.faithnet.me').trim();
