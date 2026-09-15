@@ -30,6 +30,7 @@ import { yesNo, matchChoice, listenAfter, plainSpeech, navigationIntent, closest
 import { ask, hear, warmHearing, readProgress, type ProgressLine, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, homeModels, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField, type AskModelOption, listConfirmations, forgetConfirmation, type RememberedChoice, listInstructions, forgetInstruction, type StandingInstruction } from '../../../home/ask';
 import type { AskSelection } from '../../../home/ask-selection';
 import { resolveNavigationTarget } from '../../../lib/interaction-registry';
+import { resultApp, reviewApp } from './interaction-apps';
 import type { AskCommand } from '../../../home/ask-command';
 
 /** Spec 377 — where this browser remembers which model the person picked for the Ask. */
@@ -1068,9 +1069,14 @@ function ReplyView({ reply, realm, addressee, onNext }: { reply: AskReply; realm
     // reply as evidence — one line per member: "asked X's agent … — it declined: <their reason>", "skipped X:
     // no consultability grant". The organization's composed sentence may summarise; these are the words.
     const consults = ((reply as { evidence?: AskEvidence[] }).evidence ?? []).filter((e) => e.toolId === 'organization.member.consult' && e.interpretation);
+    // Spec 402 W4 — THE APP INSIDE THE ASK: the answered read's contract names a result component; it renders here over
+    // that step's result, beside the sentence. An unknown name renders nothing and the sentence stands.
+    const appStep = reply.interaction?.result ? (reply.results ?? []).find((x) => x.toolId === reply.interaction?.toolId) ?? (reply.results ?? [])[0] : undefined;
+    const app = appStep ? resultApp(reply.interaction?.result, { result: appStep.result, toolId: appStep.toolId }) : null;
     return (
       <div>
         <span>{reply.text}</span>
+        {app}
         {consults.length > 0 && (
           <ul style={{ margin: '6px 0 0', paddingLeft: 16, fontSize: 11.5 }} data-testid="ask-consults">
             {consults.map((c, i) => <li key={i} className="muted">{c.interpretation}</li>)}
@@ -1084,8 +1090,10 @@ function ReplyView({ reply, realm, addressee, onNext }: { reply: AskReply; realm
   if (reply.kind === 'waiting') return <span>{reply.text}</span>;
   if (reply.kind === 'done') {
     const r = reply.result as { name?: string; agent?: string; txHash?: string; alreadyCreated?: boolean } | null;
+    const doneApp = resultApp(reply.interaction?.result, { result: reply.result });
     return (
       <div>
+        {doneApp}
         {/* Spec 367 §6 — the reply claims what the evidence ESTABLISHED and no more: an invitation is "submitted",
             not "done"; a payment is "done, on chain". The words come from the agent's fulfillment record. */}
         <div>{r?.alreadyCreated ? `${r?.name ?? 'It'} already exists.` : reply.fulfillment ? (reply.fulfillment.established === 'submission' ? `Submitted — ${reply.fulfillment.words}.` : `Done — ${r?.name ? `${r.name} is live` : reply.fulfillment.words}.`) : `Done — ${r?.name ?? 'it'} is live.`}</div>
@@ -1241,6 +1249,8 @@ function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest
           they picked. When exactly ONE did, nobody was asked anything — which is precisely the case where a
           wrong resolution goes unnoticed until after the signature. So the words and what they became are
           shown together, and a person who typed "nathan" can see which Nathan they are about to authorize. */}
+      {/* Spec 402 W4 — the REVIEW app the capability's contract names: what she is about to sign, in the act's own shape. */}
+      {reply.interaction?.review && reviewApp(reply.interaction.review, { requirement: reply.requirement, capability: reply.capability, ...(reply.parties ? { args: Object.fromEntries(reply.parties.map((p) => [p.arg, p.label ?? p.raw])) } : {}) })}
       {!!reply.parties?.length && (
         <div style={{ marginTop: 8 }} data-testid="ask-parties">
           {reply.parties.map((p) => (

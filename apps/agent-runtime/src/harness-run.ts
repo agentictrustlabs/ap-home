@@ -2417,6 +2417,10 @@ export function askEvidence(steps: RunResult['steps']): AskEvidence[] {
  *  the finished thing. One shape, so a surface never has to guess which of four states it is in. */
 export type AskReplyVariant =
   | { kind: 'answer'; text: string; runRef: string;
+      /** Spec 361 / 402 W4 — APPS INSIDE THE ASK: the first read step whose contract names a RESULT component, so the
+       *  surface can render that component over the step's result beside the sentence. The app's registry resolves the
+       *  name; an unknown name renders nothing and the sentence stands. `toolId` says which result it is over. */
+      interaction?: { result?: string; navigationTarget?: string; toolId?: string };
       /** Spec 366 — WHICH STEPS WERE ANSWERED BY ANOTHER AGENT, and how: the subject's agent, how it was
        *  reached, its run and its receipts. Evidence a surface can show and a record can cite (M8). */
       routed?: RoutedStepV1[];
@@ -2434,6 +2438,8 @@ export type AskReplyVariant =
        */
       results?: Array<{ toolId: string; result: unknown }> }
   | { kind: 'authority_required'; runRef: string; requirement: MandateRequirementV1; delegate: Address; delegator: Address; capability: string; stepRef: string; summary: string;
+      /** Spec 361 / 402 W4 — the required capability's REVIEW component (from its contract), rendered before she signs. */
+      interaction?: { review?: string; navigationTarget?: string };
       /** Spec 374 W2 — this authority is the SUBJECT'S request, relayed: the step waits at that agent, and
        *  the mandate the asker grants travels there on resume. Absent ⇒ a local step. */
       routedAt?: { agent: Address; name?: string; runRef: string };
@@ -3695,6 +3701,7 @@ async function askReplyForInner(env: HarnessEnv, input: {
       delegate: (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address,
       capability: r.required.capability.id, stepRef: r.required.stepRef,
       summary: `${r.required.capability.id} on ${delegator}`,
+      ...((): Record<string, unknown> => { const ix = input.interactionFor?.[r.required.capability.id]; return ix?.review || ix?.navigationTarget ? { interaction: { ...(ix.review ? { review: ix.review } : {}), ...(ix.navigationTarget ? { navigationTarget: ix.navigationTarget } : {}) } } : {}; })(),
       ...(standing ? { standing } : {}), ...(note ? { note } : {}),
       ...(standingUnavailable ? { standingUnavailable } : {}),
       // Only the parties this STEP actually names — a run that resolved three things does not get to
@@ -3840,7 +3847,17 @@ async function askReplyForInner(env: HarnessEnv, input: {
       .filter((o) => o.ok && o.result && typeof o.result === 'object' && (input.suppliedPlan || isCatalogTool(o.step.toolId)))
       .map((o) => ({ toolId: o.step.toolId, result: o.result }));
     const routed = routedStepsOf(r.steps);
-    const withEvidence = (text: string): AskReply => withProv({ kind: 'answer', runRef: r.runRef, text, ...(evidence.length ? { evidence } : {}), ...(results.length ? { results } : {}), ...(routed.length ? { routed } : {}) });
+    // Spec 402 W4 — the first answered read whose contract names a RESULT app: its binding rides on the reply, with the
+    // step it is over, so the surface renders the app beside the sentence. The app's registry decides what the name means.
+    const readApp = ((): { result?: string; navigationTarget?: string; toolId?: string } | undefined => {
+      for (const o of r.steps) {
+        if (!o.ok || o.skipped) continue;
+        const ix = input.interactionFor?.[o.step.toolId];
+        if (ix?.result) return { result: ix.result, ...(ix.navigationTarget ? { navigationTarget: ix.navigationTarget } : {}), toolId: o.step.toolId };
+      }
+      return undefined;
+    })();
+    const withEvidence = (text: string): AskReply => withProv({ kind: 'answer', runRef: r.runRef, text, ...(readApp ? { interaction: readApp } : {}), ...(evidence.length ? { evidence } : {}), ...(results.length ? { results } : {}), ...(routed.length ? { routed } : {}) });
     // RENDERED, NOT COMPOSED (spec 371 §2). When every read that ran carries the author's `answer`
     // template and its result has the fields, the reply is the template over the result — the person's
     // unit, no interpretation, no model. The composer is for reads that declare no sentence.

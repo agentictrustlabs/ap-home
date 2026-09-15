@@ -74,12 +74,16 @@ export type AskReplyVariant =
       /** Spec 361 — the structured result, when THIS surface supplied the plan. A screen renders rows;
        *  parsing the composed sentence would make it disagree with the record eventually. */
       results?: Array<{ toolId: string; result: unknown }>;
+      /** Spec 402 W4 — APPS INSIDE THE ASK: the answered read's RESULT component (from its contract) and which step it is over. */
+      interaction?: { result?: string; navigationTarget?: string; toolId?: string };
       /** HOW IT KNOWS. When a step wrote a query to answer, the query comes back with the answer —
        *  otherwise "the directory does not list any organizations" and "I searched names for the word
        *  'organizations' and matched none" are the same sentence to a reader, and only one of them is
        *  true (spec 357 §4). Display only; it decides nothing. */
       evidence?: AskEvidence[] }
   | { kind: 'authority_required'; runRef: string; requirement: MandateRequirementV1; delegate: Address; delegator: Address; capability: string; stepRef: string; summary: string;
+      /** Spec 402 W4 — the required capability's REVIEW component, rendered before she signs. */
+      interaction?: { review?: string; navigationTarget?: string };
       /** What the ASKER is to the delegator, derived by the agent from evidence the chain confirms
        *  (spec 353 S5). It explains; it never decides — custody at grant time does that. */
       standing?: { relation: 'self' | 'steward' | 'member' | 'none'; because: string; canGrant: boolean };
