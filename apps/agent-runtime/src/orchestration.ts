@@ -91,7 +91,7 @@ const RULE_BASED_PLANNER: Planner = createRuleBasedPlanner([
 ]);
 
 /** The env subset the planner selection needs. */
-export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | 'ORCHESTRATION_MODEL' | 'GROQ_API_KEY' | 'ORCHESTRATION_GROQ_MODEL' | 'ORCHESTRATION_GROQ_BASE_URL' | 'ORCHESTRATION_GROQ_PROMPT_BUDGET' | 'OPENAI_API_KEY' | 'ORCHESTRATION_OPENAI_MODEL' | 'ORCHESTRATION_OPENAI_BASE_URL' | 'ORCHESTRATION_OPENAI_PROMPT_BUDGET'> & { COMPOSER_MAX_TOKENS?: string; ORCHESTRATION_ROUTE?: string; ORCHESTRATION_GROQ_TPM?: string; ORCHESTRATION_OPENAI_TPM?: string } & Partial<Pick<Env, 'PROVIDER_METER' | 'A2A_INTERNAL_MARKER'>>;
+export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | 'ORCHESTRATION_MODEL' | 'GROQ_API_KEY' | 'ORCHESTRATION_GROQ_MODEL' | 'ORCHESTRATION_GROQ_BASE_URL' | 'ORCHESTRATION_GROQ_PROMPT_BUDGET' | 'OPENAI_API_KEY' | 'ORCHESTRATION_OPENAI_MODEL' | 'ORCHESTRATION_OPENAI_BASE_URL' | 'ORCHESTRATION_OPENAI_PROMPT_BUDGET' | 'XAI_API_KEY' | 'ORCHESTRATION_XAI_MODEL' | 'ORCHESTRATION_XAI_BASE_URL' | 'ORCHESTRATION_XAI_PROMPT_BUDGET'> & { COMPOSER_MAX_TOKENS?: string; ORCHESTRATION_ROUTE?: string; ORCHESTRATION_GROQ_TPM?: string; ORCHESTRATION_OPENAI_TPM?: string; ORCHESTRATION_XAI_TPM?: string } & Partial<Pick<Env, 'PROVIDER_METER' | 'A2A_INTERNAL_MARKER'>>;
 
 // ── WHICH MODEL PROPOSES — spec 377 ──────────────────────────────────────────────────────────────────────
 //
@@ -101,8 +101,8 @@ export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | '
 // not credentialed throws, a provider that is named and not offered is refused, and neither lands on another.
 
 /** The providers this app knows how to construct. The id is what a turn names and the trace records. */
-export type LlmProvider = 'anthropic' | 'groq' | 'openai';
-export const LLM_PROVIDERS: readonly LlmProvider[] = ['anthropic', 'groq', 'openai'];
+export type LlmProvider = 'anthropic' | 'groq' | 'openai' | 'xai';
+export const LLM_PROVIDERS: readonly LlmProvider[] = ['anthropic', 'groq', 'openai', 'xai'];
 /** What `selectPlanner` reports having chosen. */
 export type PlannerKind = LlmProvider | 'rule-based';
 
@@ -122,9 +122,16 @@ export const GROQ_DEFAULTS = { model: 'openai/gpt-oss-120b', baseUrl: 'https://a
  *  ceiling in `selectPlanner`. Override with ORCHESTRATION_OPENAI_MODEL / _BASE_URL. */
 export const OPENAI_DEFAULTS = { model: 'gpt-5-mini', baseUrl: 'https://api.openai.com/v1' } as const;
 
-const PROVIDER_LABEL: Record<LlmProvider, string> = { anthropic: 'Claude (Anthropic)', groq: 'GPT-OSS 120B (Groq, free)', openai: 'GPT-5 mini (OpenAI)' };
-const PROVIDER_FREE: Record<LlmProvider, boolean> = { anthropic: false, groq: true, openai: false };
-const PROVIDER_KEY: Record<LlmProvider, keyof PlannerEnv> = { anthropic: 'ANTHROPIC_API_KEY', groq: 'GROQ_API_KEY', openai: 'OPENAI_API_KEY' };
+/** xAI is a FOURTH configuration of the same adapter (2026-09-15). `grok-4.20-0309-non-reasoning` calls tools under
+ *  `tool_choice: 'required'` and takes `max_tokens` (verified live); it spends no reasoning tokens, so the planner
+ *  ceiling needs no headroom and `reasoning_effort` is NOT sent (the host rejects it on the 4.x models). The reasoning
+ *  siblings (`grok-4.6`) bill their thinking outside the completion bound — name one with ORCHESTRATION_XAI_MODEL and
+ *  widen the ceiling if you do. Override the host with ORCHESTRATION_XAI_BASE_URL. */
+export const XAI_DEFAULTS = { model: 'grok-4.20-0309-non-reasoning', baseUrl: 'https://api.x.ai/v1' } as const;
+
+const PROVIDER_LABEL: Record<LlmProvider, string> = { anthropic: 'Claude (Anthropic)', groq: 'GPT-OSS 120B (Groq, free)', openai: 'GPT-5 mini (OpenAI)', xai: 'Grok 4.20 (xAI)' };
+const PROVIDER_FREE: Record<LlmProvider, boolean> = { anthropic: false, groq: true, openai: false, xai: false };
+const PROVIDER_KEY: Record<LlmProvider, keyof PlannerEnv> = { anthropic: 'ANTHROPIC_API_KEY', groq: 'GROQ_API_KEY', openai: 'OPENAI_API_KEY', xai: 'XAI_API_KEY' };
 
 /** The ordered allowlist. An entry this app cannot construct THROWS: a typo must not silently drop a model. */
 export function llmAllowlist(env: PlannerEnv): LlmProvider[] {
@@ -158,6 +165,7 @@ export function plannerPromptBudget(env: PlannerEnv, provider: LlmProvider | nul
   // OpenAI's paid tiers bound a MINUTE, not a request, and a 400k-context model is not the binding
   // constraint on any prompt this app builds — so no bound unless a deployment names one.
   if (provider === 'openai') { const n = Number(env.ORCHESTRATION_OPENAI_PROMPT_BUDGET); return Number.isFinite(n) && n > 0 ? Math.floor(n) : null; }
+  if (provider === 'xai') { const n = Number(env.ORCHESTRATION_XAI_PROMPT_BUDGET); return Number.isFinite(n) && n > 0 ? Math.floor(n) : null; }
   if (provider !== 'groq') return null;
   const raw = Number(env.ORCHESTRATION_GROQ_PROMPT_BUDGET);
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : GROQ_FREE_PLAN_PROMPT_BUDGET;
@@ -186,7 +194,7 @@ export interface RouteNeed {
   largestBodyChars?: number;
 }
 /** Each provider's composer evidence cap (the same numbers `selectComposer` builds them with). */
-export const COMPOSER_EVIDENCE_CAP: Record<LlmProvider, number> = { anthropic: 24_000, openai: 24_000, groq: 12_000 };
+export const COMPOSER_EVIDENCE_CAP: Record<LlmProvider, number> = { anthropic: 24_000, openai: 24_000, groq: 12_000, xai: 24_000 };
 export interface RouteDecision {
   provider: LlmProvider | null;
   /** Why, in words a trace reader can check against the numbers beside it. */
@@ -199,6 +207,7 @@ export function providerTpm(env: PlannerEnv, p: LlmProvider): number | null {
   // OpenAI meters a minute too, but at tier-1 volumes (hundreds of thousands of tokens) it is never the
   // reason a call routes elsewhere. Unmetered here unless a deployment names its own ceiling.
   if (p === 'openai') { const n = Number(env.ORCHESTRATION_OPENAI_TPM); return Number.isFinite(n) && n > 0 ? Math.floor(n) : null; }
+  if (p === 'xai') { const n = Number(env.ORCHESTRATION_XAI_TPM); return Number.isFinite(n) && n > 0 ? Math.floor(n) : null; }
   if (p !== 'groq') return null;
   const raw = Number(env.ORCHESTRATION_GROQ_TPM);
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : GROQ_FREE_PLAN_TPM;
@@ -343,6 +352,7 @@ export function widestPromptBudget(env: PlannerEnv, requested?: LlmProvider): nu
 export function modelFor(env: PlannerEnv, p: LlmProvider): string {
   if (p === 'anthropic') return env.ORCHESTRATION_MODEL || ANTHROPIC_DEFAULT_MODEL;
   if (p === 'openai') return env.ORCHESTRATION_OPENAI_MODEL || OPENAI_DEFAULTS.model;
+  if (p === 'xai') return env.ORCHESTRATION_XAI_MODEL || XAI_DEFAULTS.model;
   return env.ORCHESTRATION_GROQ_MODEL || GROQ_DEFAULTS.model;
 }
 
@@ -401,6 +411,11 @@ function openAiClient(env: PlannerEnv): OpenAiCompatLike {
   // the host's rule travelling as configuration, not a preference. The 429 wait stays the adapter's default —
   // a paid tier's minute is not the free plan's, and a long wait here would hide a real rate problem.
   return createFetchOpenAiCompatClient({ apiKey: env.OPENAI_API_KEY!, baseUrl: env.ORCHESTRATION_OPENAI_BASE_URL || OPENAI_DEFAULTS.baseUrl, tokenLimitParam: 'max_completion_tokens' });
+}
+
+export function xaiClient(env: PlannerEnv): OpenAiCompatLike {
+  // Plain `max_tokens`, the adapter's default 429 wait: a paid API whose limits are per account, not a free minute.
+  return createFetchOpenAiCompatClient({ apiKey: env.XAI_API_KEY!, baseUrl: env.ORCHESTRATION_XAI_BASE_URL || XAI_DEFAULTS.baseUrl });
 }
 
 /** spec 327 §4b / 334 §6 — prepend the org's steward-authored playbook AS CONTEXT, keeping the
@@ -465,6 +480,13 @@ export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string; 
       ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
     });
   }
+  if (p === 'xai') {
+    return createOpenAiCompatComposer({
+      client: xaiClient(env), model: modelFor(env, 'xai'), label: 'xai',
+      maxEvidenceChars: 24_000, ...maxTokens,
+      ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
+    });
+  }
   if (p === 'groq') {
     return createOpenAiCompatComposer({
       client: groqClient(env), model: modelFor(env, 'groq'), label: 'groq',
@@ -505,6 +527,15 @@ export function selectPlanner(env: PlannerEnv, opts?: { systemPrompt?: string; m
       reasoningEffort: 'low',
     });
     return { planner, kind: 'openai', model: modelFor(env, 'openai') };
+  }
+  if (p === 'xai') {
+    const planner = createOpenAiCompatPlanner({
+      client: xaiClient(env), model: modelFor(env, 'xai'), label: 'xai',
+      ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
+      ...(opts?.maxTokens ? { maxTokens: opts.maxTokens } : {}),
+      // no reasoning_effort: the default model does not reason and the host refuses the parameter on 4.x
+    });
+    return { planner, kind: 'xai', model: modelFor(env, 'xai') };
   }
   if (p === 'groq') {
     const planner = createOpenAiCompatPlanner({

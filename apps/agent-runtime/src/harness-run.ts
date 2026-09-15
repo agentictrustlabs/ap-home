@@ -2497,7 +2497,7 @@ export type AskReplyVariant =
  */
 export interface PlannerTraceV1 {
   /** Who proposed the plan: the screen (supplied), a compiled one-correct-plan shape, or the model. */
-  planner: 'supplied' | 'compiled' | 'anthropic' | 'groq' | 'openai' | 'rule-based' | string;
+  planner: 'supplied' | 'compiled' | 'anthropic' | 'groq' | 'openai' | 'xai' | 'rule-based' | string;
   /** Spec 377 — the concrete model the planner ran (`openai/gpt-oss-120b`, `claude-haiku-4-5-20251001`). Absent
    *  for supplied / compiled / rule-based plans. Display only. */
   model?: string;

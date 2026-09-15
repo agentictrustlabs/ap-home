@@ -270,6 +270,12 @@ export interface Env {
   ORCHESTRATION_OPENAI_BASE_URL?: string;
   ORCHESTRATION_OPENAI_PROMPT_BUDGET?: string;
   ORCHESTRATION_OPENAI_TPM?: string;
+  /** 2026-09-15 — the fourth offered provider: xAI's Grok (OpenAI-compatible host; the key is a secret). */
+  XAI_API_KEY?: string;
+  ORCHESTRATION_XAI_MODEL?: string;
+  ORCHESTRATION_XAI_BASE_URL?: string;
+  ORCHESTRATION_XAI_PROMPT_BUDGET?: string;
+  ORCHESTRATION_XAI_TPM?: string;
   REALTIMEKIT_ACCOUNT_ID?: string;
   REALTIMEKIT_APP_ID?: string;
   REALTIMEKIT_API_TOKEN?: string;

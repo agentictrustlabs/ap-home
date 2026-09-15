@@ -6,7 +6,7 @@
 // WHICH vendor answers the one structured model call — the same provider the turn plans with (spec 377),
 // so the two adapter packages (`orchestration-anthropic`, `orchestration-openai-compat`) remain the only
 // vendor-touching ones.
-import { defaultProvider, providerConfigured, modelFor, GROQ_DEFAULTS, OPENAI_DEFAULTS, OPENAI_REASONING_HEADROOM, routePolicy, routeProvider, llmAllowlist, type PlannerEnv, type LlmProvider, type RouteDecision } from './orchestration.js';
+import { defaultProvider, providerConfigured, modelFor, GROQ_DEFAULTS, OPENAI_DEFAULTS, XAI_DEFAULTS, OPENAI_REASONING_HEADROOM, routePolicy, routeProvider, llmAllowlist, type PlannerEnv, type LlmProvider, type RouteDecision } from './orchestration.js';
 import { createFetchAnthropicClient } from '@agenticprimitives/orchestration-anthropic';
 import { createFetchOpenAiCompatClient, createOpenAiCompatStructuredCall } from '@agenticprimitives/orchestration-openai-compat';
 import type { DiscoveryFetch, StructuredCall } from '@agenticprimitives/context';
@@ -59,6 +59,12 @@ function providerStructuredCall(env: ModelEnv, p: LlmProvider): StructuredCall {
     return createOpenAiCompatStructuredCall({
       client: createFetchOpenAiCompatClient({ apiKey: env.OPENAI_API_KEY!, baseUrl: env.ORCHESTRATION_OPENAI_BASE_URL || OPENAI_DEFAULTS.baseUrl, tokenLimitParam: 'max_completion_tokens' }),
       model: modelFor(env, 'openai'), label: 'openai', reasoningEffort: 'low', maxTokens: 1500 + OPENAI_REASONING_HEADROOM,
+    });
+  }
+  if (p === 'xai') {
+    return createOpenAiCompatStructuredCall({
+      client: createFetchOpenAiCompatClient({ apiKey: env.XAI_API_KEY!, baseUrl: env.ORCHESTRATION_XAI_BASE_URL || XAI_DEFAULTS.baseUrl }),
+      model: modelFor(env, 'xai'), label: 'xai',
     });
   }
   if (p === 'groq') {
