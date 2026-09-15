@@ -1,7 +1,7 @@
 # Spec 315 — Home workspace switcher: person / org / app scoped navigation
 
 **Status:** W1 SHIPPED · **Depends on:** spec 275 (multi-agent management), spec 310 (Home control
-plane), spec 234 (white-label site) · **App:** `apps/demo-sso-next`
+plane), spec 234 (white-label site) · **App:** `apps/home`
 
 ## Reference: smart-agent patterns to port
 

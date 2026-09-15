@@ -11,7 +11,7 @@
 // SECURITY: the secret VALUE is never logged and never read from argv (which leaks via shell
 // history / process listings) — it comes from an env var or stdin. Failures throw (fail-closed).
 //
-//   tsx scripts/deploy-secrets.ts cloudflare --worker demo-mcp --env production --name GCP_SERVICE_ACCOUNT_JSON
+//   tsx scripts/deploy-secrets.ts cloudflare --worker home-vault --env production --name GCP_SERVICE_ACCOUNT_JSON
 //   tsx scripts/deploy-secrets.ts vercel --project demo-sso-next --name DEMO_MCP_URL --target production
 //   # value piped on stdin (default) or from --value-env <ENV_VAR>; never on the command line.
 
@@ -36,7 +36,7 @@ export async function readSecretValue(valueEnvVar: string | undefined): Promise<
 // ─── Cloudflare Worker secret (via wrangler, value on stdin — no echo) ──────
 
 export interface CloudflareSecretTarget {
-  /** Worker app directory (so wrangler.toml resolves), e.g. apps/demo-mcp. */
+  /** Worker app directory (so wrangler.toml resolves), e.g. apps/vault. */
   cwd: string;
   /** wrangler --env (e.g. production). */
   env?: string;
@@ -140,7 +140,7 @@ async function main(): Promise<void> {
   const value = dryRun ? '<dry-run>' : await readSecretValue(arg('--value-env'));
 
   if (target === 'cloudflare') {
-    const worker = arg('--worker') ?? 'demo-mcp';
+    const worker = arg('--worker') ?? 'home-vault';
     const env = arg('--env');
     const cwd = arg('--cwd') ?? `apps/${worker}`;
     console.log(`cloudflare: ${name} → worker ${worker}${env ? ` (--env ${env})` : ''}${dryRun ? ' [dry-run]' : ''}`);

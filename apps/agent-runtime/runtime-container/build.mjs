@@ -1,7 +1,7 @@
 // Pack @agenticprimitives/runtime-member and the CLOSURE of its workspace dependencies (deps + peers, transitively)
 // into ./tarballs for the Container image (spec 400 W1c). `pnpm pack` rewrites `workspace:*` to real versions, so
 // the image installs the tarballs with npm like any consumer would — the Container is a consumer of the kit, not a
-// checkout of the monorepo. Run: `node runtime-container/build.mjs` (from apps/demo-a2a) after the workspace is built.
+// checkout of the monorepo. Run: `node runtime-container/build.mjs` (from apps/agent-runtime) after the workspace is built.
 import { readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';

@@ -73,13 +73,13 @@ composer's words are checked against evidence, not trusted.
 | handle | `mintHandle` / `verifyHandle` (HMAC over anchor, name, cardUrl, endpoint, cardDigest, registry; 24 h) | `gateway/handle.ts` |
 | A2A client | `fetchCard` · `sendMessage` (metadata.flowId) · `translateTask` · signed headers via `wrapSessionSignature` | `gateway/a2a-client.ts` |
 | registry search | `planFindServices` (deterministic ARD body) · `findServices` | `src/plan.ts`, `src/catalog.ts` |
-| edge admission | signature → `sessionWirePrincipal` → principal | `apps/demo-edge`, `packages/a2a/src/standard/*` |
-| the agent's surface | the `harness.ask` executor: `askAsAgent` → `runAgentAsk`; `trace` + `results` artifacts | `apps/demo-a2a/src/standard-a2a.ts` |
-| the run | `runUnderMandate` → `loadPlaybook` → planner → `harnessInvoker` → `askReplyFor` | `apps/demo-a2a/src/harness-run.ts` |
-| the catalog binding | `catalogBindingFor` (nameOf → `readNameRecords` → `mcpEndpoint`) · `CATALOG_TOOLS` · `catalogInvoker` | `apps/demo-a2a/src/catalog-tools.ts` |
+| edge admission | signature → `sessionWirePrincipal` → principal | `apps/edge`, `packages/a2a/src/standard/*` |
+| the agent's surface | the `harness.ask` executor: `askAsAgent` → `runAgentAsk`; `trace` + `results` artifacts | `apps/agent-runtime/src/standard-a2a.ts` |
+| the run | `runUnderMandate` → `loadPlaybook` → planner → `harnessInvoker` → `askReplyFor` | `apps/agent-runtime/src/harness-run.ts` |
+| the catalog binding | `catalogBindingFor` (nameOf → `readNameRecords` → `mcpEndpoint`) · `CATALOG_TOOLS` · `catalogInvoker` | `apps/agent-runtime/src/catalog-tools.ts` |
 | the content MCP | `searchResources` · `listTopics` · `getResource`; profile `TOOLS` | `apps/demo-content-catalog/src/{catalog,profile,index}.ts` |
 | the playbook | archetype `content-catalog` + skills `catalog-resource-search/topic-list/resource-get` | `~/skills/archetypes/content-catalog`, `~/skills/skills/agentic-trust/catalog-*` |
-| the trace | `buildFlowTrace` · `flowIdOf` (agent side); `flowIdFor` · `logHop` (gateway side) | `apps/demo-a2a/src/flow-trace.ts`, `gateway/tools.ts` |
+| the trace | `buildFlowTrace` · `flowIdOf` (agent side); `flowIdFor` · `logHop` (gateway side) | `apps/agent-runtime/src/flow-trace.ts`, `gateway/tools.ts` |
 
 ## 4. Instrumentation: the flow trace
 

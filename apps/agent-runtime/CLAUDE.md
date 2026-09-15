@@ -35,7 +35,7 @@ proxies selected MCP requests during local demos.
   VERIFIED here, never signed here; publication plans return `{to,value,data}` calls the Home executes with
   the custodian, then `recordPublication` verifies with `readContract` only. Service-agent callers get
   `STEWARD_DEFAULT_SCOPES`; `SEPARATION_OF_DUTIES=strict` refuses editor-approves. Guide:
-  `apps/demo-sso-next/docs/agent-cards/guide.md`.
+  `apps/home/docs/agent-cards/guide.md`.
 
 - **The harness under a mandate** (spec 350 W2, `src/harness-run.ts`, route `POST /harness/run {session, intent,
   presented, approvals?, supplied?, runRef?}`): `treasury.payment.execute` redeems the mandate on chain from
@@ -87,7 +87,7 @@ proxies selected MCP requests during local demos.
 
 - Package delegation semantics → `packages/delegation`.
 - MCP middleware primitives → `packages/mcp-runtime`.
-- MCP tool implementation → `apps/demo-mcp`.
+- MCP tool implementation → `apps/vault`.
 - Browser UX → `apps/demo-web*`.
 - Contract source → `packages/contracts`.
 
@@ -105,7 +105,7 @@ the knowledge/memory tiers (`ask-discovery.ts` + `@agenticprimitives/context` + 
 
 ## Validate
 
-`pnpm --filter @agenticprimitives-demo/a2a typecheck` + `pnpm --filter @agenticprimitives-demo/a2a test`.
+`pnpm --filter @ap-home/agent-runtime typecheck` + `pnpm --filter @ap-home/agent-runtime test`.
 
 ## Deploy — NEVER bare `wrangler deploy`
 

@@ -2,17 +2,17 @@
   "$comment": "Spec 398 §1 / §12 G0 — THE HOME CENSUS as data. One row per capability family the Home ships (or the review asked for): its review ids (H-rows, APUX items, M-rows from the 2026-09-10 workbook), what is TRUE about it today (shipped | partial | absent), and every binding a row claims — Home routes, Home components, capability ids the runtime offers, harness endpoints, unit tests, nightly live gates. scripts/check-home-census.mts verifies every claimed binding against the tree and reports what the tree has that no row claims (the census diff). A P0 row that is `shipped` must bind every kind it claims; a `partial` row names what is absent in `gaps`; an `absent` row binds nothing and names the 398 section that builds it. This file moves to ap-home at 399 W2 with `roots` re-pointed (apps/home, apps/agent-runtime).",
   "version": "2026-09-11.1",
   "roots": {
-    "home": "apps/demo-sso-next",
-    "homeApp": "apps/demo-sso-next/app",
-    "homeSrc": "apps/demo-sso-next/src",
-    "runtime": "apps/demo-a2a",
-    "runtimeIndex": "apps/demo-a2a/src/index.ts",
+    "home": "apps/home",
+    "homeApp": "apps/home/app",
+    "homeSrc": "apps/home/src",
+    "runtime": "apps/agent-runtime",
+    "runtimeIndex": "apps/agent-runtime/src/index.ts",
     "liveGates": "scripts/live-gates.json",
     "skillsCorpus": "~/skills",
     "capabilitySources": [
-      "apps/demo-a2a/src",
-      "packages/context/src",
-      "packages/harness/src"
+      "apps/agent-runtime/src",
+      "apps/agent-runtime/node_modules/@agenticprimitives/context/dist",
+      "apps/agent-runtime/node_modules/@agenticprimitives/harness/dist"
     ]
   },
   "rows": [
@@ -47,9 +47,9 @@
         "(portal)/org/[org]/agent"
       ],
       "tests": [
-        "apps/demo-sso-next/src/context/session-restore.test.ts",
-        "apps/demo-sso-next/src/csrf.test.ts",
-        "apps/demo-sso-next/src/whitelabel/sign-in-methods.test.ts"
+        "apps/home/src/context/session-restore.test.ts",
+        "apps/home/src/csrf.test.ts",
+        "apps/home/src/whitelabel/sign-in-methods.test.ts"
       ]
     },
     {
@@ -83,10 +83,10 @@
         "lib/workspace.ts"
       ],
       "tests": [
-        "apps/demo-sso-next/src/components/portal/nav-routes.test.ts",
-        "apps/demo-sso-next/src/components/portal/nav.test.ts",
-        "apps/demo-sso-next/src/lib/acting-basis.test.ts",
-        "apps/demo-sso-next/src/lib/org-membership-union.test.ts"
+        "apps/home/src/components/portal/nav-routes.test.ts",
+        "apps/home/src/components/portal/nav.test.ts",
+        "apps/home/src/lib/acting-basis.test.ts",
+        "apps/home/src/lib/org-membership-union.test.ts"
       ],
       "gaps": [
         "the basis line is on the Ask's authority card, decisions, the endeavor detail, the request composer, invitations, join requests, treasury funding and the Card Studio's publish; M06's three lines (runs at · may spend · holds) on the organization roster — not yet on the services roster or the member rows (398 §4.4)"
@@ -131,11 +131,11 @@
         "/harness/hear"
       ],
       "tests": [
-        "apps/demo-sso-next/src/home/ask.test.ts",
-        "apps/demo-sso-next/src/components/portal/ask/voice-text.test.ts",
-        "apps/demo-a2a/test/ask-vocabulary.test.ts",
-        "apps/demo-a2a/test/mandate-words.test.ts",
-        "apps/demo-a2a/test/voice.test.ts"
+        "apps/home/src/home/ask.test.ts",
+        "apps/home/src/components/portal/ask/voice-text.test.ts",
+        "apps/agent-runtime/test/ask-vocabulary.test.ts",
+        "apps/agent-runtime/test/mandate-words.test.ts",
+        "apps/agent-runtime/test/voice.test.ts"
       ],
       "gates": [
         "verify-route",
@@ -188,15 +188,15 @@
         "/harness/approve"
       ],
       "tests": [
-        "apps/demo-a2a/test/chartered-agents.test.ts",
-        "apps/demo-a2a/test/harness-team-create.test.ts",
-        "apps/demo-a2a/test/org-wire.test.ts",
-        "apps/demo-sso-next/src/components/onboarding/OrgChooser.test.ts",
-        "apps/demo-sso-next/src/home/roster-contract.test.ts",
-        "apps/demo-sso-next/src/lib/email-invite-home.test.ts",
-        "apps/demo-sso-next/src/lib/invitation-check.test.ts",
-        "apps/demo-sso-next/src/lib/invite-copy.test.ts",
-        "apps/demo-sso-next/src/lib/new-member.test.ts",
+        "apps/agent-runtime/test/chartered-agents.test.ts",
+        "apps/agent-runtime/test/harness-team-create.test.ts",
+        "apps/agent-runtime/test/org-wire.test.ts",
+        "apps/home/src/components/onboarding/OrgChooser.test.ts",
+        "apps/home/src/home/roster-contract.test.ts",
+        "apps/home/src/lib/email-invite-home.test.ts",
+        "apps/home/src/lib/invitation-check.test.ts",
+        "apps/home/src/lib/invite-copy.test.ts",
+        "apps/home/src/lib/new-member.test.ts",
         "scripts/check-invitation-audit.mts"
       ],
       "gates": [
@@ -249,11 +249,11 @@
         "/harness/approve"
       ],
       "tests": [
-        "apps/demo-a2a/test/endeavor-authority-steps.test.ts",
-        "apps/demo-a2a/test/endeavor-intake.test.ts",
-        "apps/demo-a2a/test/endeavors.test.ts",
-        "apps/demo-a2a/test/unit/endeavor-committed-steps.test.ts",
-        "apps/demo-sso-next/src/home/work-item.test.ts"
+        "apps/agent-runtime/test/endeavor-authority-steps.test.ts",
+        "apps/agent-runtime/test/endeavor-intake.test.ts",
+        "apps/agent-runtime/test/endeavors.test.ts",
+        "apps/agent-runtime/test/unit/endeavor-committed-steps.test.ts",
+        "apps/home/src/home/work-item.test.ts"
       ],
       "gates": [
         "verify-endeavor-decision",
@@ -303,11 +303,11 @@
         "messaging.direct.send"
       ],
       "tests": [
-        "apps/demo-sso-next/src/lib/messaging-wire.test.ts",
-        "apps/demo-a2a/test/messaging-scope.test.ts",
-        "apps/demo-a2a/test/interactions-do-channels.test.ts",
-        "apps/demo-sso-next/server/connect/channels-steward-proof.test.ts",
-        "apps/demo-sso-next/src/components/portal/chat/rail-date.test.ts"
+        "apps/home/src/lib/messaging-wire.test.ts",
+        "apps/agent-runtime/test/messaging-scope.test.ts",
+        "apps/agent-runtime/test/interactions-do-channels.test.ts",
+        "apps/home/server/connect/channels-steward-proof.test.ts",
+        "apps/home/src/components/portal/chat/rail-date.test.ts"
       ],
       "gates": [
         "verify-home-mcp-room"
@@ -334,7 +334,7 @@
         "components/portal/huddle/HuddleDock.tsx"
       ],
       "tests": [
-        "apps/demo-a2a/test/unit/realtimekit.test.ts"
+        "apps/agent-runtime/test/unit/realtimekit.test.ts"
       ]
     },
     {
@@ -370,10 +370,10 @@
         "resolution.invitation.request"
       ],
       "tests": [
-        "apps/demo-a2a/test/unit/external-agent.test.ts",
-        "apps/demo-a2a/test/unit/engagement-answer.test.ts",
-        "apps/demo-a2a/test/unit/engagement-trust.test.ts",
-        "apps/demo-a2a/test/resolution-grant-use.test.ts"
+        "apps/agent-runtime/test/unit/external-agent.test.ts",
+        "apps/agent-runtime/test/unit/engagement-answer.test.ts",
+        "apps/agent-runtime/test/unit/engagement-trust.test.ts",
+        "apps/agent-runtime/test/resolution-grant-use.test.ts"
       ],
       "gates": [
         "verify-home-mcp-discovery",
@@ -415,11 +415,11 @@
         "/harness/vocabulary"
       ],
       "tests": [
-        "apps/demo-a2a/test/ask-vocabulary.test.ts",
-        "apps/demo-a2a/test/capability-ids.test.ts",
-        "apps/demo-a2a/test/card-mounted-skills.test.ts",
-        "apps/demo-sso-next/src/components/portal/capabilities/editor.test.ts",
-        "apps/demo-sso-next/src/home/retry.test.ts"
+        "apps/agent-runtime/test/ask-vocabulary.test.ts",
+        "apps/agent-runtime/test/capability-ids.test.ts",
+        "apps/agent-runtime/test/card-mounted-skills.test.ts",
+        "apps/home/src/components/portal/capabilities/editor.test.ts",
+        "apps/home/src/home/retry.test.ts"
       ],
       "gaps": [
         "398 §7.2 — every agentic-trust contract declares idempotency + result.kind, every agentic-trust archetype compiles them from its contracts (0 fallback rows), the vocabulary publishes them; the parity pair runs as check:interaction-coverage:behaviour"
@@ -477,16 +477,14 @@
         "/harness/spans"
       ],
       "tests": [
-        "apps/demo-a2a/test/a2a-task-do.test.ts",
-        "apps/demo-a2a/test/harness-progress.test.ts",
-        "apps/demo-a2a/test/harness-runs.test.ts",
-        "apps/demo-a2a/test/harness-workflow-core.test.ts",
-        "apps/demo-a2a/test/unit/artifact-store.test.ts",
-        "apps/demo-a2a/test/unit/run-export.test.ts",
-        "apps/demo-sso-next/src/home/recipe.test.ts",
-        "apps/demo-sso-next/src/home/run-state.test.ts",
-        "packages/harness/test/unit/recipe.test.ts",
-        "packages/harness/test/unit/run-state.test.ts"
+        "apps/agent-runtime/test/a2a-task-do.test.ts",
+        "apps/agent-runtime/test/harness-progress.test.ts",
+        "apps/agent-runtime/test/harness-runs.test.ts",
+        "apps/agent-runtime/test/harness-workflow-core.test.ts",
+        "apps/agent-runtime/test/unit/artifact-store.test.ts",
+        "apps/agent-runtime/test/unit/run-export.test.ts",
+        "apps/home/src/home/recipe.test.ts",
+        "apps/home/src/home/run-state.test.ts"
       ],
       "gates": [
         "verify-cancel",
@@ -538,11 +536,10 @@
         "/harness/triggers/rebuild"
       ],
       "tests": [
-        "apps/demo-a2a/test/unit/trigger-kinds.test.ts",
-        "apps/demo-a2a/test/unit/triggers.test.ts",
-        "apps/demo-sso-next/src/home/routines.test.ts",
-        "apps/demo-sso-next/src/home/triggers.test.ts",
-        "packages/capability-claims/test/unit/harness-contract.test.ts"
+        "apps/agent-runtime/test/unit/trigger-kinds.test.ts",
+        "apps/agent-runtime/test/unit/triggers.test.ts",
+        "apps/home/src/home/routines.test.ts",
+        "apps/home/src/home/triggers.test.ts"
       ],
       "gaps": [
         "a routine's budget is set by a steward on the row, not yet declared on the SKILL.md trigger (375 contract); save-as-recipe (398 G3) not built"
@@ -605,7 +602,7 @@
         "(portal)/service/[agent]/memory"
       ],
       "tests": [
-        "apps/demo-sso-next/src/home/memory.test.ts"
+        "apps/home/src/home/memory.test.ts"
       ]
     },
     {
@@ -627,8 +624,8 @@
         "(portal)/service/[agent]/library"
       ],
       "tests": [
-        "apps/demo-sso-next/server/connect/library.test.ts",
-        "apps/demo-sso-next/src/home/artifact-identity.test.ts"
+        "apps/home/server/connect/library.test.ts",
+        "apps/home/src/home/artifact-identity.test.ts"
       ],
       "gaps": [
         "replicate as an act (an authorized copy in another vault) is not offered — said so on the card (398 §6.2); the linked work item is absent on every artifact (§4.3); stale is a state on the Library's freshness badge but the \"no organizations of 37\" rule (§6.3 — never render unknown as zero) is a ratchet (check:unknown-not-zero, ceiling 6 — Today, Memory and the run listing say which read failed)"
@@ -672,9 +669,9 @@
         "/harness/records"
       ],
       "tests": [
-        "apps/demo-sso-next/src/lib/read-grants.test.ts",
-        "apps/demo-a2a/test/interactions-do-scoped-read.test.ts",
-        "apps/demo-sso-next/src/lib/typed-claim-paths.test.ts"
+        "apps/home/src/lib/read-grants.test.ts",
+        "apps/agent-runtime/test/interactions-do-scoped-read.test.ts",
+        "apps/home/src/lib/typed-claim-paths.test.ts"
       ]
     },
     {
@@ -697,7 +694,7 @@
         "household.member.record"
       ],
       "tests": [
-        "apps/demo-a2a/test/household-next.test.ts"
+        "apps/agent-runtime/test/household-next.test.ts"
       ],
       "gates": [
         "verify-home-mcp-people"
@@ -725,7 +722,7 @@
         "profile.contact.update"
       ],
       "tests": [
-        "apps/demo-sso-next/src/lib/profile-location.test.ts"
+        "apps/home/src/lib/profile-location.test.ts"
       ]
     },
     {
@@ -755,11 +752,11 @@
         "treasury.balance.read"
       ],
       "tests": [
-        "apps/demo-sso-next/src/lib/treasury-ceremony.test.ts",
-        "apps/demo-sso-next/src/lib/coins.test.ts",
-        "apps/demo-a2a/test/value-rail.test.ts",
-        "apps/demo-a2a/test/unit/balance-read.test.ts",
-        "apps/demo-a2a/test/unit/payment-purpose.test.ts"
+        "apps/home/src/lib/treasury-ceremony.test.ts",
+        "apps/home/src/lib/coins.test.ts",
+        "apps/agent-runtime/test/value-rail.test.ts",
+        "apps/agent-runtime/test/unit/balance-read.test.ts",
+        "apps/agent-runtime/test/unit/payment-purpose.test.ts"
       ],
       "gates": [
         "verify-receipt-recompute",
@@ -786,11 +783,11 @@
         "(portal)/service/[agent]/playbook"
       ],
       "tests": [
-        "apps/demo-a2a/test/playbook.test.ts",
-        "apps/demo-a2a/test/playbook-injection.test.ts",
-        "apps/demo-a2a/test/archetype-skill.test.ts",
-        "apps/demo-sso-next/src/lib/archetype-grant.test.ts",
-        "apps/demo-a2a/test/unit/specialists.test.ts"
+        "apps/agent-runtime/test/playbook.test.ts",
+        "apps/agent-runtime/test/playbook-injection.test.ts",
+        "apps/agent-runtime/test/archetype-skill.test.ts",
+        "apps/home/src/lib/archetype-grant.test.ts",
+        "apps/agent-runtime/test/unit/specialists.test.ts"
       ]
     },
     {
@@ -833,13 +830,13 @@
         "components/studio/Inspector.tsx"
       ],
       "tests": [
-        "apps/demo-sso-next/src/lib/studio-flow.test.ts",
-        "apps/demo-sso-next/src/lib/studio-view.test.ts",
-        "apps/demo-sso-next/src/components/studio/card-save-wiring.test.ts",
-        "apps/demo-sso-next/src/lib/publish-to-card.test.ts",
-        "apps/demo-sso-next/src/lib/card-changed.test.ts",
-        "apps/demo-sso-next/src/lib/publish-gate.test.ts",
-        "apps/demo-a2a/test/agent-card-studio.test.ts"
+        "apps/home/src/lib/studio-flow.test.ts",
+        "apps/home/src/lib/studio-view.test.ts",
+        "apps/home/src/components/studio/card-save-wiring.test.ts",
+        "apps/home/src/lib/publish-to-card.test.ts",
+        "apps/home/src/lib/card-changed.test.ts",
+        "apps/home/src/lib/publish-gate.test.ts",
+        "apps/agent-runtime/test/agent-card-studio.test.ts"
       ],
       "gaps": [
         "the Inspector inspects cards, not runs (H46) — the run inspector is 398 §5.2"
@@ -877,11 +874,11 @@
         "(portal)/service/[agent]/network"
       ],
       "tests": [
-        "apps/demo-sso-next/src/lib/qualified-agent-name.test.ts",
-        "apps/demo-sso-next/src/lib/typed-tld.test.ts",
-        "apps/demo-sso-next/src/lib/name-change.test.ts",
-        "apps/demo-a2a/test/typed-naming-endpoints.test.ts",
-        "apps/demo-a2a/test/public-graph.test.ts"
+        "apps/home/src/lib/qualified-agent-name.test.ts",
+        "apps/home/src/lib/typed-tld.test.ts",
+        "apps/home/src/lib/name-change.test.ts",
+        "apps/agent-runtime/test/typed-naming-endpoints.test.ts",
+        "apps/agent-runtime/test/public-graph.test.ts"
       ]
     },
     {
@@ -910,8 +907,8 @@
         "access.grant.revoke"
       ],
       "tests": [
-        "apps/demo-sso-next/server/connect/self-grant.test.ts",
-        "apps/demo-sso-next/src/lib/discovery-authority.test.ts"
+        "apps/home/server/connect/self-grant.test.ts",
+        "apps/home/src/lib/discovery-authority.test.ts"
       ],
       "gates": [
         "verify-grant-revocation",
@@ -998,10 +995,7 @@
         "the component registry (398 §10.5) serves 9 items at /registry with their contracts; it is not yet reachable through the Developer MCP (which answers from the install only) and the items are not yet installable by the shadcn CLI end to end (the files reference the Home's own imports)",
         "`ap upgrade` stops for review when a pinned definition's authority or effects change (398 §10.3) — shipped; the estate pins five archetypes at extraction; `ap test --interaction-coverage` / `--ask-truth` modes are still not wired (399 W1)"
       ],
-      "tests": [
-        "packages/devkit/test/definitions.test.ts",
-        "packages/devkit/test/developer-mcp.test.ts"
-      ],
+      "tests": [],
       "notes": null,
       "components": [
         "registry/registry.json"
@@ -1058,9 +1052,9 @@
         "/harness/vocabulary"
       ],
       "tests": [
-        "apps/demo-sso-next/src/components/portal/nav.test.ts",
-        "apps/demo-sso-next/src/home/attention.test.ts",
-        "apps/demo-sso-next/src/home/today.test.ts"
+        "apps/home/src/components/portal/nav.test.ts",
+        "apps/home/src/home/attention.test.ts",
+        "apps/home/src/home/today.test.ts"
       ],
       "gates": [
         "verify-golden-journey"

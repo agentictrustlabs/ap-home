@@ -10,7 +10,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 const CEILING = 6;
-const ROOTS = ['apps/demo-sso-next/src', 'apps/demo-sso-next/app'];
+const ROOTS = ['apps/home/src', 'apps/home/app'];
 const PATTERN = /catch\(\(\) => \[\]\)|catch\(\(\) => \{ if \(live\) set[A-Za-z]+\(\[\]\)|catch\(\(\) => set[A-Za-z]+\(\[\]\)\)|catch\(\(\) => \(\{ artifacts: \[\] \}\)\)/g;
 const hits: string[] = [];
 const walk = (d: string) => { for (const n of readdirSync(d)) { const p = join(d, n); const st = statSync(p); if (st.isDirectory()) { if (n !== 'node_modules') walk(p); } else if (/\.(ts|tsx)$/.test(n) && !/\.test\./.test(n)) { const src = readFileSync(p, 'utf8'); src.split('\n').forEach((line, i) => { if (PATTERN.test(line)) hits.push(`${p}:${i + 1}`); PATTERN.lastIndex = 0; }); } } };

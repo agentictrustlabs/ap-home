@@ -8,15 +8,13 @@
  *
  * Usage:
  *   tsx scripts/gen-dev-vars.ts                    # network=anvil
- *   DEPLOY_NETWORK=base-sepolia tsx scripts/gen-dev-vars.ts
+ *   DEPLOY_NETWORK=faithchain tsx scripts/gen-dev-vars.ts   (this repository is faithchain-only; anvil is the local stand-in)
  *
  * Generated files:
- *   apps/demo-a2a/.dev.vars
- *   apps/demo-mcp/.dev.vars
- *   apps/demo-edge/.dev.vars       (admission gateway: chain/contracts/origins + the dev gateway-assertion secret)
- *   apps/demo-web-pro/.env.local, apps/demo-web-recovery/.env.local
- *   apps/demo-sso-next/.env.local   (the local Home — broker key, chain, KV, custody bridge)
- *   apps/demo-web/.env.local        (points the relying app at the local Home)
+ *   apps/agent-runtime/.dev.vars
+ *   apps/vault/.dev.vars
+ *   apps/edge/.dev.vars       (admission gateway: chain/contracts/origins + the dev gateway-assertion secret)
+ *   apps/home/.env.local   (the local Home — broker key, chain, KV, custody bridge)
  *
  * All are gitignored — they hold dev-only secrets too.
  *
@@ -33,13 +31,14 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 
 const REPO_ROOT = join(import.meta.dirname ?? __dirname, '..');
 const NETWORK = process.env.DEPLOY_NETWORK ?? 'anvil';
-const DEPLOYMENTS_PATH = join(REPO_ROOT, 'packages', 'contracts', `deployments-${NETWORK}.json`);
+// The deployments file ships inside the published contracts package, never a workspace path.
+const DEPLOYMENTS_PATH = join(REPO_ROOT, 'node_modules', '@agenticprimitives', 'contracts', `deployments-${NETWORK}.json`);
 const LOCAL = NETWORK === 'anvil';
 const HOME_ORIGIN = process.env.HOME_ORIGIN ?? 'http://localhost:5373';
 const LOCAL_RPC_URL = process.env.LOCAL_RPC_URL ?? 'http://127.0.0.1:8545';
-const A2A_URL = LOCAL ? 'http://127.0.0.1:8787' : 'https://demo-a2a-production.richardpedersen3.workers.dev';
-const MCP_URL = LOCAL ? 'http://127.0.0.1:8788' : 'https://demo-mcp-production.richardpedersen3.workers.dev';
-const EDGE_URL = LOCAL ? 'http://127.0.0.1:8789' : 'https://demo-edge-production.richardpedersen3.workers.dev';
+const A2A_URL = LOCAL ? 'http://127.0.0.1:8787' : 'https://home-a2a.faithnet.io';
+const MCP_URL = LOCAL ? 'http://127.0.0.1:8788' : 'https://home-vault.faithnet.io';
+const EDGE_URL = LOCAL ? 'http://127.0.0.1:8789' : 'https://home-edge.faithnet.io';
 /** Browser origins of the local apps that call the workers directly or via proxies. */
 const LOCAL_ORIGINS = [
   'http://127.0.0.1:5173', 'http://localhost:5173', // demo-web
@@ -105,7 +104,7 @@ function readDotEnvValue(filePath: string, key: string): string | undefined {
 
 /** The local Home's ES256 broker key. Generated once, then reused from the existing .env.local so
  *  sessions/id_tokens survive a regen. Dev only — production keys are generated with
- *  apps/demo-sso-next/scripts/gen-broker-key.mjs and stored as a Sensitive Vercel env. */
+ *  apps/home/scripts/gen-broker-key.mjs and stored as a Sensitive Vercel env. */
 function localBrokerJwk(envLocalPath: string): string {
   const existing = readDotEnvValue(envLocalPath, 'BROKER_PRIVATE_JWK');
   if (existing && existing.startsWith('{')) return existing;
@@ -123,20 +122,20 @@ const DEV_SECRETS = {
   A2A_SESSION_SECRET: '0x' + 'cc'.repeat(32),
   // Anvil[0] private key. Public knowledge; safe for dev.
   A2A_MASTER_PRIVATE_KEY: '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
-  // Audit C1: shared MAC secret used by demo-a2a (caller) AND
-  // demo-mcp (verifier) to authenticate the A2A→MCP service envelope.
+  // Audit C1: shared MAC secret used by home-runtime (caller) AND
+  // home-vault (verifier) to authenticate the A2A→MCP service envelope.
   // Same 32-byte hex on both .dev.vars files so the HMAC subkeys match.
   A2A_MAC_SECRET: '0x' + 'dd'.repeat(32),
-  // SEC-010: the Home → demo-a2a custody bridge secret (/custody/oidc/resolve). Same value in
-  // demo-a2a's .dev.vars and the Home's .env.local.
+  // SEC-010: the Home → home-runtime custody bridge secret (/custody/oidc/resolve). Same value in
+  // home-runtime's .dev.vars and the Home's .env.local.
   A2A_CUSTODY_BRIDGE_SECRET: '0x' + 'ff'.repeat(32),
-  // spec 288 §4: the edge-minted GatewayAssertion HMAC secret — same value on demo-edge (signer) and
-  // demo-a2a / demo-mcp (verifiers). Locally the origins do not REQUIRE the assertion; setting it lets
+  // spec 288 §4: the edge-minted GatewayAssertion HMAC secret — same value on home-edge (signer) and
+  // home-runtime / home-vault (verifiers). Locally the origins do not REQUIRE the assertion; setting it lets
   // the edge path be exercised end-to-end.
   GATEWAY_ASSERTION_SECRET: '0x' + 'ab'.repeat(32),
 };
 
-/** The Home's own client_id — the `aud` of custody-grade sessions demo-a2a's broker gate pins. */
+/** The Home's own client_id — the `aud` of custody-grade sessions home-runtime's broker gate pins. */
 const HOME_AUD = 'demo-sso';
 
 function writeDotEnv(filePath: string, content: Record<string, string>, opts?: { preserveExtra?: boolean }): void {
@@ -169,7 +168,7 @@ const a2aVars: Record<string, string> = {
   ALLOWED_METHODS_ENFORCER: d.allowedMethodsEnforcer,
   VALUE_ENFORCER: d.valueEnforcer,
   // PAYMASTER: only present when deployments JSON has the address.
-  // Without it, demo-a2a's /session/deploy returns 409 and the frontend
+  // Without it, home-runtime's /session/deploy returns 409 and the frontend
   // falls back to counterfactual mode.
   ...(d.smartAgentPaymaster ? { PAYMASTER: d.smartAgentPaymaster } : {}),
   // UNIVERSAL_SIGNATURE_VALIDATOR: only present when deployments JSON
@@ -189,7 +188,7 @@ const a2aVars: Record<string, string> = {
   ...(d.quorumEnforcer             ? { QUORUM_ENFORCER:               d.quorumEnforcer             } : {}),
   ...(d.approvedHashRegistry       ? { APPROVED_HASH_REGISTRY:        d.approvedHashRegistry       } : {}),
   ...(d.paymentEnforcer            ? { PAYMENT_ENFORCER:              d.paymentEnforcer            } : {}),
-  // The local Home (demo-sso-next) as the OIDC broker demo-a2a's custody gate trusts (spec 235/294).
+  // The local Home (demo-sso-next) as the OIDC broker home-runtime's custody gate trusts (spec 235/294).
   // .dev.vars overrides wrangler.toml [vars], so ALLOWED_ORIGINS also admits the Home's origin (its
   // /a2a/* rewrite forwards the browser Origin).
   ...(LOCAL
@@ -215,7 +214,7 @@ const mcpVars: Record<string, string> = {
   // wrangler.toml [vars] pins the Base Sepolia validator; the local deployment's must win (ERC-1271 /
   // ERC-6492 checks on delegations + vault-key authorizations resolve through it).
   ...(d.universalSignatureValidator ? { UNIVERSAL_SIGNATURE_VALIDATOR: d.universalSignatureValidator } : {}),
-  // Audit C1: shared MAC secret matching demo-a2a's value above.
+  // Audit C1: shared MAC secret matching home-runtime's value above.
   A2A_MAC_SECRET: DEV_SECRETS.A2A_MAC_SECRET,
   // spec 277 Phase 6: HS256 signing secret for the demo OAuth ingress
   // (authorization endpoint + /mcp bearer validation). Deterministic dev value;
@@ -225,16 +224,16 @@ const mcpVars: Record<string, string> = {
   // locally (fail-closed behind this flag). Mirrors wrangler.toml [vars].
   DEMO_OAUTH_MINT_ENABLED: 'true',
   // Dev-only per-person vault KEKs derived locally (no GCP Cloud KMS on a workstation). Refused in
-  // production by demo-mcp (vault-key.ts `localKekEnabled`). Never a real deployment value.
+  // production by home-vault (vault-key.ts `localKekEnabled`). Never a real deployment value.
   ...(LOCAL ? { DEMO_VAULT_LOCAL_KEK_SECRET: '0x' + '99'.repeat(32) } : {}),
 };
 
 // preserveExtra: the AKCS backend lines (A2A_KMS_BACKEND / AKCS_*) are written by the sibling
 // faithkms repo (`just demo-stack-init`) and must survive a regen.
-writeDotEnv(join(REPO_ROOT, 'apps', 'demo-a2a', '.dev.vars'), a2aVars, { preserveExtra: true });
-writeDotEnv(join(REPO_ROOT, 'apps', 'demo-mcp', '.dev.vars'), { ...mcpVars, GATEWAY_ASSERTION_SECRET: DEV_SECRETS.GATEWAY_ASSERTION_SECRET }, { preserveExtra: true });
+writeDotEnv(join(REPO_ROOT, 'apps', 'agent-runtime', '.dev.vars'), a2aVars, { preserveExtra: true });
+writeDotEnv(join(REPO_ROOT, 'apps', 'vault', '.dev.vars'), { ...mcpVars, GATEWAY_ASSERTION_SECRET: DEV_SECRETS.GATEWAY_ASSERTION_SECRET }, { preserveExtra: true });
 
-// The Agentic Edge (spec 288 §6): public-config discovery doc + admission in front of demo-a2a/demo-mcp.
+// The Agentic Edge (spec 288 §6): public-config discovery doc + admission in front of home-runtime/home-vault.
 // Its wrangler.toml top-level (dev) block binds MCP/A2A to the sibling `wrangler dev` sessions.
 const edgeVars: Record<string, string> = {
   CHAIN_ID: String(d.chainId),
@@ -245,66 +244,14 @@ const edgeVars: Record<string, string> = {
   EDGE_ALLOWED_ORIGINS: LOCAL_ORIGINS.join(','),
   GATEWAY_ASSERTION_SECRET: DEV_SECRETS.GATEWAY_ASSERTION_SECRET,
 };
-writeDotEnv(join(REPO_ROOT, 'apps', 'demo-edge', '.dev.vars'), edgeVars, { preserveExtra: true });
+writeDotEnv(join(REPO_ROOT, 'apps', 'edge', '.dev.vars'), edgeVars, { preserveExtra: true });
 
-// demo-web-pro's vite dev server reads .env.local at startup; vars must be
-// VITE_-prefixed to be inlined into the bundle. Network-dependent — runs
-// against whichever chain the contracts were last deployed to.
-const webProVars: Record<string, string> = {
-  VITE_CHAIN_ID: String(d.chainId),
-  VITE_FACTORY_ADDRESS: d.agentAccountFactory,
-  VITE_DELEGATION_MANAGER: d.delegationManager,
-  VITE_DEMO_A2A_URL: NETWORK === 'anvil'
-    ? 'http://127.0.0.1:8787'
-    : 'https://demo-a2a-production.richardpedersen3.workers.dev',
-  VITE_DEMO_MCP_URL: NETWORK === 'anvil'
-    ? 'http://127.0.0.1:8788'
-    : 'https://demo-mcp-production.richardpedersen3.workers.dev',
-  // spec 288 — the native MCP panel routes through the Agentic Edge; spec 311 — the authority epoch the
-  // client guards its stored sessions with. Both were only set by deploy-cloudflare.ts before.
-  VITE_DEMO_EDGE_URL: EDGE_URL,
-  ...(d.deploymentEpoch ? { VITE_DEPLOYMENT_EPOCH: d.deploymentEpoch } : {}),
-  // The Home origin (demo-sso-next) — demo-web-pro offers its demo people (Alice, Bob) as quick-connect
-  // seats when this is set. Locally the Home is at HOME_ORIGIN; unset in prod builds without a Home.
-  ...(LOCAL ? { VITE_BROKER_ORIGIN: HOME_ORIGIN } : {}),
-  ...(d.custodyPolicy   ? { VITE_CUSTODY_POLICY:    d.custodyPolicy   } : {}),
-  ...(d.quorumEnforcer       ? { VITE_QUORUM_ENFORCER:        d.quorumEnforcer       } : {}),
-  ...(d.approvedHashRegistry ? { VITE_APPROVED_HASH_REGISTRY: d.approvedHashRegistry } : {}),
-  ...(d.entryPoint           ? { VITE_ENTRY_POINT:             d.entryPoint           } : {}),
-  ...(d.smartAgentPaymaster  ? { VITE_SMART_AGENT_PAYMASTER:   d.smartAgentPaymaster  } : {}),
-  ...(d.deployer             ? { VITE_DEPLOYER:                d.deployer             } : {}),
-  ...(d.timestampEnforcer       ? { VITE_TIMESTAMP_ENFORCER:        d.timestampEnforcer       } : {}),
-  ...(d.valueEnforcer           ? { VITE_VALUE_ENFORCER:            d.valueEnforcer           } : {}),
-  ...(d.allowedTargetsEnforcer  ? { VITE_ALLOWED_TARGETS_ENFORCER:  d.allowedTargetsEnforcer  } : {}),
-  ...(d.allowedMethodsEnforcer  ? { VITE_ALLOWED_METHODS_ENFORCER:  d.allowedMethodsEnforcer  } : {}),
-  // NS/RL/ID Phase 3 stack — naming + relationships + identity profile
-  // contracts. Surface to demo so the read-side hooks can construct
-  // their clients without bundling the deployments JSON.
-  ...(d.agentNameRegistry          ? { VITE_AGENT_NAME_REGISTRY:           d.agentNameRegistry          } : {}),
-  ...(d.agentNameResolver          ? { VITE_AGENT_NAME_RESOLVER:           d.agentNameResolver          } : {}),
-  ...(d.agentNameUniversalResolver ? { VITE_AGENT_NAME_UNIVERSAL_RESOLVER: d.agentNameUniversalResolver } : {}),
-  ...(d.agentRelationship          ? { VITE_AGENT_RELATIONSHIP:            d.agentRelationship          } : {}),
-  ...(d.relationshipTypeRegistry   ? { VITE_RELATIONSHIP_TYPE_REGISTRY:    d.relationshipTypeRegistry   } : {}),
-  ...(d.agentProfileResolver       ? { VITE_AGENT_PROFILE_RESOLVER:        d.agentProfileResolver       } : {}),
-  ...(d.ontologyTermRegistry       ? { VITE_ONTOLOGY_TERM_REGISTRY:        d.ontologyTermRegistry       } : {}),
-  ...(d.shapeRegistry              ? { VITE_SHAPE_REGISTRY:                d.shapeRegistry              } : {}),
-  ...(d.permissionlessSubregistry  ? { VITE_PERMISSIONLESS_SUBREGISTRY:    d.permissionlessSubregistry  } : {}),
-  // Use the same RPC the workers use so reads stay in sync with writes
-  // (avoids the "schedule succeeded but the read RPC doesn't see it yet"
-  // class of bug that mis-signs apply hashes as eta=0).
-  ...(process.env.BASE_SEPOLIA_RPC && NETWORK === 'base-sepolia'
-    ? { VITE_RPC_URL: process.env.BASE_SEPOLIA_RPC }
-    : {}),
-};
-writeDotEnv(join(REPO_ROOT, 'apps', 'demo-web-pro', '.env.local'), webProVars);
-// Recovery demo uses the exact same env shape as demo-web-pro — same
-// chain, same contracts, same workers; the apps differ only in story.
-writeDotEnv(join(REPO_ROOT, 'apps', 'demo-web-recovery', '.env.local'), webProVars);
+// (demo-web-pro / demo-web-recovery .env.local generation left with those apps — not in this repository.)
 
-// The local Home (apps/demo-sso-next) + the relying app that connects to it (apps/demo-web). Only for
-// a local network: against base-sepolia the deployed Home at impact-agent.me is the Home.
+// The local Home (apps/home) + the relying app that connects to it (apps/demo-web). Only for
+// a local network: against faithchain the deployed Home at faithnet.me is the Home.
 if (LOCAL) {
-  const homeEnvPath = join(REPO_ROOT, 'apps', 'demo-sso-next', '.env.local');
+  const homeEnvPath = join(REPO_ROOT, 'apps', 'home', '.env.local');
   const homeVars: Record<string, string> = {
     BROKER_PRIVATE_JWK: localBrokerJwk(homeEnvPath),
     BROKER_KID: 'broker-local',
@@ -328,7 +275,7 @@ if (LOCAL) {
     DEV_OTP_ECHO: '1',
   };
   // The demo people (Alice, Nathan, …) as quick-connect identities, once
-  // apps/demo-sso-next/scripts/provision-demo-personas-local.ts has deployed their Smart Agents on this chain. Their
+  // apps/home/scripts/provision-demo-personas-local.ts has deployed their Smart Agents on this chain. Their
   // custodian keys are the roster's public demo keys; DEMO_SIGNER_SECRET gates the server-to-server
   // signer (/connect/demo-sign, /connect/demo-provision) for local demo apps.
   const localRoster = join(REPO_ROOT, 'demo', 'personas.local.json');
@@ -337,17 +284,10 @@ if (LOCAL) {
     homeVars.DEMO_PERSONA_KEYS = JSON.stringify(roster);
     homeVars.DEMO_SIGNER_SECRET = 'local-demo-signer-' + 'ab'.repeat(16);
   } else {
-    console.warn('gen-dev-vars: demo/personas.local.json missing — quick-connect (demo personas) stays off. Run: pnpm --filter @agenticprimitives-demo/sso-next exec tsx scripts/provision-demo-personas-local.ts');
+    console.warn('gen-dev-vars: demo/personas.local.json missing — quick-connect (demo personas) stays off. Run: pnpm --filter @ap-home/home exec tsx scripts/provision-demo-personas-local.ts');
   }
   writeDotEnv(homeEnvPath, homeVars, { preserveExtra: true });
 
-  writeDotEnv(join(REPO_ROOT, 'apps', 'demo-web', '.env.local'), {
-    VITE_CHAIN_ID: String(d.chainId),
-    VITE_BROKER_ORIGIN: HOME_ORIGIN,
-    VITE_SOCIAL_AUD: 'demo-web',
-    ...(d.agentNameRegistry          ? { VITE_AGENT_NAME_REGISTRY:           d.agentNameRegistry          } : {}),
-    ...(d.agentNameUniversalResolver ? { VITE_AGENT_NAME_UNIVERSAL_RESOLVER: d.agentNameUniversalResolver } : {}),
-  });
 }
 
 console.log(`gen-dev-vars: wrote .dev.vars + .env.local (network=${NETWORK}${LOCAL ? `, home=${HOME_ORIGIN}` : ''})`);

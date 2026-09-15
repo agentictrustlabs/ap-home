@@ -257,7 +257,7 @@ consent; the Home is the *issuance UX*, the authority is the existing delegation
   `GET/POST /connect/inbox` (session-gated view + read/archive/transition). UI: `/inbox` portal page —
   folders/unread/summary badges, pending-approvals queue, sender-proposed action cards rendered with
   native components (buttons = lifecycle transitions; they grant nothing). Demo guides:
-  `apps/demo-sso-next/docs/home-inbox/guide.md` + `docs/messaging-interactions/guide.md`; both
+  `apps/home/docs/home-inbox/guide.md` + `docs/messaging-interactions/guide.md`; both
   capabilities promoted to the active cross-cutting index.
 - **W4 — Connected apps + managed agents.** SHIPPED. `src/home/control-plane.ts` projects issued
   delegations onto `ConnectedAppGrantV1` (status/expiry from the delegation's own timestamp caveat,

@@ -12,7 +12,7 @@
 #   ESTIMATE_GAS_CAP — hex gas bound injected into eth_estimateGas when the call sets none
 #                      (Besu returns an empty 200 without one on heavy calls and errors when the
 #                      cap equals the block gas limit). Empty = never inject (non-Besu chains).
-name = "chain-rpc-gateway"
+name = "home-rpc"
 main = "src/index.ts"
 compatibility_date = "2026-06-01"
 
@@ -30,28 +30,25 @@ class_name = "RateLimiter"
 tag = "v1"
 new_sqlite_classes = ["RateLimiter"]
 
-# ─────────────────────────────────────────────────────────────────────────────────────────────────
-# Deployment envs. CUTOVER RULE for every env: the Worker name is what the TOKENS KV, the RateLimiter
-# DO storage and the custom domain are bound to — never rename it (every issued app token would 401).
-# Token issuance is an operator action (no code, no secrets in git):
-#   wrangler kv key put --binding TOKENS --env <env> "t:<sha256(token)>" '{"app":"<name>","readRps":20,"writeRps":0}'
-# ─────────────────────────────────────────────────────────────────────────────────────────────────
-[env.faithnet]
-name = "faithchain-rpc-gateway"
-workers_dev = true
-
-[[env.faithnet.routes]]
-pattern = "rpc.faithnet.io"
-custom_domain = true
-
-[env.faithnet.vars]
+# ── THIS ESTATE — Home on faithchain (chain 34348), `[env.production]`. Derived from Ring 0's [env.faithnet]
+#    by scripts/split/derive-ap-home-env.py (ap-home-estate.json) at extraction; hand-maintained after the cut.
+#    Worker `home-rpc` at https://home-rpc.faithnet.io — its own DOs, KV and D1; the Home at https://home-rho-orpin.vercel.app.
+#    This is NOT Faithnet: Faithnet is Ring 0's deployment of the same app and is never deployed from here.
+[env.production]
+name = "home-rpc"
+workers_dev = false
+[env.production.vars]
 ORIGIN = "https://faithchain-rpc.agentkg.io"
 ESTIMATE_GAS_CAP = "0x2dc6c0"
 
-[[env.faithnet.kv_namespaces]]
+[[env.production.kv_namespaces]]
 binding = "TOKENS"
-id = "efc60d50844441b5b585873605b1888b"
+id = "cb0ffa6d074941e48f50367616843d07"
 
-[[env.faithnet.durable_objects.bindings]]
+[[env.production.durable_objects.bindings]]
 name = "RATE"
 class_name = "RateLimiter"
+
+[[env.production.routes]]
+pattern = "home-rpc.faithnet.io"
+custom_domain = true

@@ -9,7 +9,7 @@
 **Spec of record:** [`specs/347-a2a-agent-card-and-projection-studio.md`](../../../../specs/347-a2a-agent-card-and-projection-studio.md) §3, §4.3, §4.4, §9
 **ADR of record:** [ADR-0062](../../../../docs/architecture/decisions/0062-agent-card-projection-publication-binding.md)
 **Renders (portable, UI-framework-neutral):** `packages/home/src/agent-management/{card-editor-manifest,projection-center-manifest,action-cards,permissions}.ts`
-**App (this doc):** `apps/demo-sso-next` — Next.js App Router, light corporate palette (Warm Civic Light — no dark mode)
+**App (this doc):** `apps/home` — Next.js App Router, light corporate palette (Warm Civic Light — no dark mode)
 **Status:** SHIPPED and functionally complete end-to-end (create → validate → release → approve → sign →
 publish → verify), components live under `src/components/studio/*`. This doc has been revised in place as the
 build diverged from the original design in specific, documented spots — see the "Status change from the

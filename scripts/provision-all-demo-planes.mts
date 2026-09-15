@@ -16,10 +16,10 @@
  * genesis signature, and Home org-create always provisioned them — this script closes out the agents
  * created before either.
  */
-import { toWire, issueInteractionsDelegation, issueInboxDeliveryDelegation, issueSessionDelegation } from '../apps/demo-sso-next/src/lib/delegation';
-import { buildVaultKeyAuthorization } from '../apps/demo-sso-next/src/lib/delegation';
+import { toWire, issueInteractionsDelegation, issueInboxDeliveryDelegation, issueSessionDelegation } from '../apps/home/src/lib/delegation';
+import { buildVaultKeyAuthorization } from '../apps/home/src/lib/delegation';
 import { keccak256, toBytes } from 'viem';
-import { MCP_SERVER_ID } from '../apps/demo-sso-next/src/lib/inbox-delivery';
+import { MCP_SERVER_ID } from '../apps/home/src/lib/inbox-delivery';
 import type { Address, Hex } from 'viem';
 
 const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';

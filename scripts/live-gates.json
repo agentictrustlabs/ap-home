@@ -1,6 +1,6 @@
 {
-  "$comment": "Spec 392 — THE LIVE GATES LEDGER. Every wave's live verify script, with the authority twin it carries, run nightly against faithnet by scripts/live-gates.mts. No secrets: the demo personas sign in openly and sign through the Home's persona-sign. `required` gates fail the run; the rest report. `paced` gates make model calls on a metered plan and are spaced out.",
-  "home": "https://www.faithnet.me",
+  "$comment": "Spec 392 — THE LIVE GATES LEDGER. Every wave's live verify script, with the authority twin it carries, run nightly against this estate by scripts/live-gates.mts. No secrets: the demo personas sign in openly and sign through the Home's persona-sign. `required` gates fail the run; the rest report. `paced` gates make model calls on a metered plan and are spaced out.",
+  "home": "https://home-rho-orpin.vercel.app",
   "gates": [
     {
       "id": "verify-route",
@@ -501,5 +501,6 @@
       "paced": false,
       "timeoutSec": 420
     }
-  ]
+  ],
+  "fixture": "scripts/fixture.estate.json"
 }

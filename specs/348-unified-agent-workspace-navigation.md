@@ -10,7 +10,7 @@
 **Depends on:** spec 315 (workspace routing), spec 328 (agent config UX v2), spec 334 (coordination work
 surface), spec 338 §20 (visibility), spec 342 (org lifecycle), spec 346 (typed naming), spec 347 (Agent
 Card & Projection Studio)
-**Applies to:** `apps/demo-sso-next` only. No package changes. The nav is app-layer white-label
+**Applies to:** `apps/home` only. No package changes. The nav is app-layer white-label
 composition (ADR-0021) — this spec constrains its SHAPE, never its vocabulary.
 
 ## 0. The problem

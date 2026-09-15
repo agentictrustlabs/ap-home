@@ -9,12 +9,12 @@
  * who has no standing. The church's own agent answers the first from its roster and refuses the second
  * in its own words; both come back as the task's `subject-answer` artifact, read by the same reader the
  * in-process hop uses. The SENDER half (a Worker choosing this wire for a foreign host) is proved in
- * `apps/demo-a2a/test/unit/subject-hop.test.ts`; live it needs a second deployment.
+ * `apps/agent-runtime/test/unit/subject-hop.test.ts`; live it needs a second deployment.
  */
 import type { Address } from 'viem';
 import { subjectAsk } from '@agenticprimitives/a2a';
 import { sendSubjectAskOverWire } from '@agenticprimitives/a2a';
-import { readSubjectReply } from '../apps/demo-a2a/src/harness-run.js';
+import { readSubjectReply } from '../apps/agent-runtime/src/harness-run.js';
 
 const HOME = 'https://faithnet.me';
 const CHURCH_NAME = 'alice-home-church.impact';

@@ -11,7 +11,7 @@ import { CodeBadge, FieldBadgeChip, inputStyle, iconButtonStyle } from './ui';
 
 /**
  * "Restore inherited" — SERVICE GAP: `agent-profile`'s `acceptInherited` exists but no Studio op exposes it
- * (`apps/demo-a2a/src/agent-card-studio.ts` maps every patch to `applyOverride`). The affordance stays
+ * (`apps/agent-runtime/src/agent-card-studio.ts` maps every patch to `applyOverride`). The affordance stays
  * visible so the model is legible, and says exactly why it can't act rather than doing something else.
  */
 const RESTORE_UNAVAILABLE =

@@ -3,7 +3,7 @@
 The Studio lets a steward author, release, sign and publish a managed agent's **A2A Agent Card**, then project a
 released card into the **AP Naming** records and the **AP Registry** entry — with every record in the agent's own
 vault, every side effect approval-gated, and every signature made by the party that holds the key. This guide
-covers the service contract the UI is built on (`apps/demo-a2a/src/agent-card-studio.ts`) and the typed Home
+covers the service contract the UI is built on (`apps/agent-runtime/src/agent-card-studio.ts`) and the typed Home
 client (`src/studio-client.ts`). Spec of record: [spec 347](../../../../specs/347-a2a-agent-card-and-projection-studio.md) ·
 [ADR-0062](../../../../docs/architecture/decisions/0062-agent-card-projection-publication-binding.md).
 

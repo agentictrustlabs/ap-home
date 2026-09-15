@@ -2,9 +2,9 @@
   "lockVersion": 1,
   "packages": {
     "@agenticprimitives/devkit": "0.0.0-alpha.6",
-    "@agenticprimitives/evaluation": "0.0.0-alpha.6",
-    "@agenticprimitives/a2a": "0.0.0-alpha.6",
-    "@agenticprimitives/mcp-protocol": "0.0.0-alpha.6"
+    "@agenticprimitives/evaluation": "0.0.0-alpha.3",
+    "@agenticprimitives/a2a": "0.0.0-alpha.23",
+    "@agenticprimitives/mcp-protocol": "0.0.0-alpha.3"
   },
   "rules": {
     "coordination-vs-orchestration": "sha256:f2754939240133643e020043fac5b7e97b2ca250e0824771d19ca578976defd6",
@@ -25,30 +25,91 @@
   },
   "doctor": {
     "webNoDirectMcp": {
-      "browserApps": [],
+      "browserApps": [
+        "apps/home"
+      ],
       "allowMarkers": [
         "@external-mcp-client-demo"
       ]
     },
     "noPrivateKeys": {
       "roots": [
-        "apps",
-        "examples"
+        "apps"
       ],
-      "allowedIn": [],
-      "toleratedEnvNames": []
+      "allowedIn": [
+        {
+          "file": "apps/agent-runtime/src/config.ts",
+          "why": "local-aes dev backend reads A2A_MASTER_PRIVATE_KEY only when A2A_KMS_BACKEND=local-aes; production is gcp-kms (deferred KMS migration, memory project_demo_a2a_kms_deferred)"
+        },
+        {
+          "file": "apps/agent-runtime/scripts/canonical-a2a-e2e.ts",
+          "why": "e2e harness mints an ephemeral SIWE persona; never an identity, never deployed"
+        },
+        {
+          "file": "apps/home-mcp/src/index.ts",
+          "why": "home-mcp-raw-delegate-key (findings.yaml, accepted-risk): the ask-as-me delegate key holds no authority of its own; KMS signer + client re-registration scheduled (spec 397)"
+        },
+        {
+          "file": "apps/home/scripts/provision-demo-personas-local.ts",
+          "why": "local-chain provisioner with published dev keys"
+        },
+        {
+          "file": "apps/home/scripts/provision-service-agent-local.ts",
+          "why": "local-chain provisioner with published dev keys"
+        },
+        {
+          "file": "apps/home/scripts/provision-typed-service-agent.ts",
+          "why": "one-run operator CLI; key from env, never written"
+        },
+        {
+          "file": "apps/home/scripts/set-typed-name-records.ts",
+          "why": "one-run operator CLI"
+        },
+        {
+          "file": "apps/home/scripts/publish-capabilities.ts",
+          "why": "one-run operator CLI"
+        },
+        {
+          "file": "apps/home/scripts/link-service-steward-local.ts",
+          "why": "one-run operator CLI"
+        },
+        {
+          "file": "apps/vault/scripts/native-mcp-smoke.ts",
+          "why": "dev smoke script with throwaway EOAs"
+        },
+        {
+          "file": "apps/home/server/_lib/demo-custody.ts",
+          "why": "testnet demo-persona custody from DEMO_PERSONA_KEYS"
+        },
+        {
+          "file": "apps/home/server/connect/demo-accounts.ts",
+          "why": "derives the seeded persona custodian address"
+        }
+      ],
+      "toleratedEnvNames": [
+        {
+          "name": "A2A_MASTER_PRIVATE_KEY",
+          "why": "the local-aes dev backend signing key; unused under gcp-kms"
+        },
+        {
+          "name": "A2A_INTERACTIONS_SESSION_PRIVATE_KEY",
+          "why": "workstation-only InteractionsDO session signer when no Cloud KMS is present"
+        }
+      ]
     },
     "noHmacHomeBridge": {
-      "dir": "apps",
+      "dir": "apps/home",
       "hmacCall": "bridgeInteractions",
       "sessionRpcCall": "callInteractions",
       "ceilings": {
         "hmac": 0,
-        "total": 0
+        "total": 47
       }
     },
     "noCrossSubjectVaultReads": {
-      "roots": [],
+      "roots": [
+        "apps/agent-runtime/src"
+      ],
       "exemptFiles": [
         "self-only.ts"
       ],
@@ -56,32 +117,105 @@
     },
     "failOpenKnobs": {
       "roots": [
-        "apps",
-        "examples"
+        "apps"
       ],
-      "allowlist": []
+      "allowlist": [
+        {
+          "file": "apps/vault/src/index.ts",
+          "knob": "allowUnboundSessionToken",
+          "why": "persona/operator-key demo path (accepted testnet hole C-1, spec 248)"
+        },
+        {
+          "file": "apps/vault/src/kas.ts",
+          "knob": "allowUnsignedGrant",
+          "why": "in-process self-authored grant; real authority is the spec-278 vault-key authorization"
+        },
+        {
+          "file": "apps/vault/src/kas.ts",
+          "knob": "allowUnboundGrant",
+          "why": "N-4: same in-process single-use grant"
+        },
+        {
+          "file": "apps/agent-runtime/src/index.ts",
+          "knob": "developmentMode",
+          "why": "test/dev session verification; production wires expectedIss/expectedAud"
+        },
+        {
+          "file": "apps/vault/wrangler.toml",
+          "knob": "DEMO_VAULT_PROVISION_ENABLED",
+          "why": "registers the KEK provision route; the route is proof-gated by default"
+        }
+      ]
     },
     "internalMarkerSplit": {
-      "src": "apps",
+      "src": "apps/agent-runtime/src",
       "secret": "A2A_CUSTODY_BRIDGE_SECRET",
       "marker": "x-ap-internal",
-      "budget": {}
+      "budget": {
+        "index.ts": "unbounded",
+        "interactions-do.ts": 1
+      }
     },
     "custodianCoverage": {
-      "skip": "ap-home carries no Home custody surface yet — enable when a Home moves in (specs 294/295)"
+      "matrix": "docs/architecture/connection-custodian-matrix.md",
+      "matrixKinds": [
+        "siwe",
+        "passkey",
+        "social"
+      ],
+      "homeVia": "apps/demo-sso-next/src/home/onboarding.ts",
+      "viaRequired": [
+        "passkey",
+        "wallet"
+      ],
+      "viaSocialAny": [
+        "google",
+        "youversion"
+      ],
+      "relyingApp": {
+        "dir": "apps/demo-web/src",
+        "entryFiles": [
+          "main.tsx",
+          "connect.ts",
+          "App.tsx"
+        ],
+        "mustImport": "@agenticprimitives/connect-client"
+      },
+      "providerNamedCustody": [
+        "google",
+        "youversion"
+      ],
+      "browserApps": [
+        "apps/demo-web",
+        "apps/demo-org",
+        "apps/demo-gs",
+        "apps/demo-jp"
+      ],
+      "skip": "the relying-app half names demo-web — enable when examples/ lands (split-status item 6)"
     },
     "archetypeCatalog": {
-      "skip": "ap-home carries no archetype catalog yet — enable when a Home moves in (spec 354 §3)"
+      "module": "apps/home/src/lib/archetype-catalog.ts",
+      "exportName": "ARCHETYPE_CATALOG",
+      "expected": {
+        "treasury-steward": "0x00f5b03b5724864c5b8edf11048baa6693b520647594997bbffc2fa41391fc0e",
+        "bookkeeper": "0xce101b9c3ba2df0ae0a969a1d058a34727a581a5a848d509f617eae68bbde219",
+        "org-steward": "0xf00d3aef88f5d6a6c3e4021d714fbee0851e15ac5bfe1df5dbeb9d77f459fa52"
+      }
     },
     "capabilityVocabulary": {
       "homeGlobs": [
-        "apps/**/*.{ts,tsx}"
+        "apps/home/app/**/*.{ts,tsx}",
+        "apps/home/src/**/*.{ts,tsx}"
       ],
-      "packagesGlob": "packages/*/src/**/*.ts",
-      "wireAllowed": []
+      "packagesGlob": "packages-none/**/*.ts",
+      "wireAllowed": [
+        "apps/home/src/components/studio/Inspector.tsx",
+        "apps/agent-runtime/src/",
+        "apps/home/src/whitelabel/"
+      ]
     },
     "demoPersonOrgDistinct": {
-      "skip": "ap-home carries no persona roster yet — enable when @agenticprimitives-demo/estate is consumed (spec 399 §2.6)"
+      "roster": "demo/personas.json"
     },
     "rulesDrift": {
       "cursorRules": ".cursor/rules",
@@ -92,6 +226,651 @@
     "lockCoherent": {
       "allowWorkspace": false,
       "scope": "@agenticprimitives/"
+    }
+  },
+  "definitions": {
+    "agentic-trust/org-steward": {
+      "registry": "https://skills-a2a-production.richardpedersen3.workers.dev",
+      "context": "agentic-trust",
+      "archetype": "org-steward",
+      "digest": "0xbc5261c80e1e68dcfd6b27f5ff466c77a31fecb358973cd881cd830d054a36f2",
+      "version": "1.0.0",
+      "authority": {
+        "access.grant.revoke": {
+          "risk": "medium",
+          "action": "revoke",
+          "resourceArg": "manager",
+          "authorityArg": "holder",
+          "idempotency": "one-per-request"
+        },
+        "access.grants.audit": {
+          "idempotency": "replay-safe"
+        },
+        "context.instruction.declare": {
+          "risk": "low",
+          "action": "execute",
+          "resourceArg": "record",
+          "authorityArg": "holder",
+          "idempotency": "one-per-resource-version"
+        },
+        "coordination.commitment.reallocate": {
+          "risk": "medium",
+          "action": "reallocate",
+          "resourceArg": "org",
+          "authorityArg": "org",
+          "idempotency": "one-per-request"
+        },
+        "coordination.commitment.withdraw": {
+          "risk": "medium",
+          "action": "withdraw",
+          "resourceArg": "org",
+          "authorityArg": "org",
+          "idempotency": "one-per-request"
+        },
+        "coordination.contribution.allocate": {
+          "risk": "medium",
+          "action": "allocate",
+          "resourceArg": "org",
+          "authorityArg": "org",
+          "idempotency": "one-per-request"
+        },
+        "coordination.contribution.propose": {
+          "risk": "medium",
+          "action": "propose",
+          "resourceArg": "org",
+          "authorityArg": "proposer",
+          "idempotency": "one-per-request"
+        },
+        "coordination.decision.record": {
+          "risk": "medium",
+          "action": "record",
+          "resourceArg": "org",
+          "authorityArg": "org",
+          "idempotency": "one-per-request"
+        },
+        "coordination.decision.request": {
+          "risk": "medium",
+          "action": "request",
+          "resourceArg": "org",
+          "authorityArg": "org",
+          "idempotency": "one-per-request"
+        },
+        "coordination.endeavor.get": {
+          "idempotency": "replay-safe"
+        },
+        "coordination.endeavor.list": {
+          "idempotency": "replay-safe"
+        },
+        "coordination.milestone.achieve": {
+          "risk": "medium",
+          "action": "achieve",
+          "resourceArg": "org",
+          "authorityArg": "org",
+          "idempotency": "one-per-request"
+        },
+        "coordination.step.satisfy": {
+          "risk": "medium",
+          "action": "satisfy",
+          "resourceArg": "org",
+          "authorityArg": "org",
+          "idempotency": "one-per-request"
+        },
+        "discovery.agent.inspect": {
+          "idempotency": "replay-safe"
+        },
+        "discovery.agents.find": {
+          "idempotency": "replay-safe"
+        },
+        "engagement.agent.invoke": {
+          "idempotency": "replay-safe"
+        },
+        "github.pr.comment": {
+          "risk": "low",
+          "action": "github.pr.comment",
+          "resourceArg": "holder",
+          "authorityArg": "holder",
+          "idempotency": "one-per-request"
+        },
+        "github.pr.merge": {
+          "risk": "high",
+          "action": "github.pr.merge",
+          "resourceArg": "holder",
+          "authorityArg": "holder",
+          "idempotency": "one-per-request"
+        },
+        "github.pr.open": {
+          "risk": "medium",
+          "action": "github.pr.open",
+          "resourceArg": "holder",
+          "authorityArg": "holder",
+          "idempotency": "one-per-request"
+        },
+        "github.pr.read": {
+          "idempotency": "replay-safe"
+        },
+        "github.repo.read": {
+          "idempotency": "replay-safe"
+        },
+        "messaging.direct.send": {
+          "risk": "low",
+          "action": "send",
+          "resourceArg": "recipient",
+          "authorityArg": "sender",
+          "idempotency": "one-per-request"
+        },
+        "organization.membership.invite": {
+          "risk": "medium",
+          "action": "invite",
+          "resourceArg": "org",
+          "authorityArg": "org",
+          "idempotency": "one-per-request"
+        },
+        "organization.membership.list": {
+          "idempotency": "replay-safe"
+        },
+        "organization.team.create": {
+          "risk": "medium",
+          "action": "create",
+          "resourceArg": "parent",
+          "idempotency": "one-per-request"
+        },
+        "person.invitations.list": {
+          "idempotency": "replay-safe"
+        },
+        "service.create": {
+          "risk": "medium",
+          "action": "create",
+          "resourceArg": "parent",
+          "idempotency": "one-per-request"
+        },
+        "treasury.balance.read": {
+          "idempotency": "replay-safe"
+        },
+        "treasury.fund": {
+          "risk": "low",
+          "action": "fund",
+          "resourceArg": "asset",
+          "authorityArg": "funder",
+          "idempotency": "one-per-request"
+        },
+        "treasury.payment.execute": {
+          "risk": "high",
+          "action": "execute",
+          "resourceArg": "asset",
+          "authorityArg": "payer",
+          "idempotency": "one-per-request"
+        },
+        "treasury.primary.declare": {
+          "risk": "medium",
+          "action": "declare",
+          "resourceArg": "record",
+          "authorityArg": "holder",
+          "idempotency": "one-per-resource-version"
+        },
+        "vault.records.query": {
+          "idempotency": "replay-safe"
+        }
+      },
+      "pinnedAt": "2026-09-15T20:28:08.246Z"
+    },
+    "agentic-trust/person-steward": {
+      "registry": "https://skills-a2a-production.richardpedersen3.workers.dev",
+      "context": "agentic-trust",
+      "archetype": "person-steward",
+      "digest": "0x8b36070724c496bf87b1289fc01f127223e24b3ea2f877273024108aec5206ff",
+      "version": "1.0.0",
+      "authority": {
+        "access.grant.revoke": {
+          "risk": "medium",
+          "action": "revoke",
+          "resourceArg": "manager",
+          "authorityArg": "holder",
+          "idempotency": "one-per-request"
+        },
+        "access.grants.audit": {
+          "idempotency": "replay-safe"
+        },
+        "calendar.event.create": {
+          "risk": "medium",
+          "action": "calendar.event.create",
+          "resourceArg": "holder",
+          "authorityArg": "holder",
+          "idempotency": "one-per-request"
+        },
+        "calendar.event.delete": {
+          "risk": "medium",
+          "action": "calendar.event.delete",
+          "resourceArg": "holder",
+          "authorityArg": "holder",
+          "idempotency": "one-per-request"
+        },
+        "calendar.events.list": {
+          "idempotency": "replay-safe"
+        },
+        "calendar.status": {
+          "idempotency": "replay-safe"
+        },
+        "cardroom.consult": {},
+        "cardroom.memory": {},
+        "cardroom.style": {},
+        "cardroom.table.read": {},
+        "context.instruction.declare": {
+          "risk": "low",
+          "action": "execute",
+          "resourceArg": "record",
+          "authorityArg": "holder",
+          "idempotency": "one-per-resource-version"
+        },
+        "discovery.agent.inspect": {
+          "idempotency": "replay-safe"
+        },
+        "discovery.agents.find": {
+          "idempotency": "replay-safe"
+        },
+        "drive.file.read": {
+          "idempotency": "replay-safe"
+        },
+        "drive.files.search": {
+          "idempotency": "replay-safe"
+        },
+        "engagement.agent.invoke": {
+          "idempotency": "replay-safe"
+        },
+        "gmail.draft.create": {
+          "risk": "medium",
+          "action": "gmail.draft.create",
+          "resourceArg": "holder",
+          "authorityArg": "holder",
+          "idempotency": "one-per-request"
+        },
+        "gmail.draft.delete": {
+          "risk": "low",
+          "action": "gmail.draft.delete",
+          "resourceArg": "holder",
+          "authorityArg": "holder",
+          "idempotency": "one-per-request"
+        },
+        "gmail.message.send": {
+          "risk": "high",
+          "action": "gmail.message.send",
+          "resourceArg": "holder",
+          "authorityArg": "holder",
+          "idempotency": "one-per-request"
+        },
+        "gmail.thread.read": {
+          "idempotency": "replay-safe"
+        },
+        "gmail.threads.search": {
+          "idempotency": "replay-safe"
+        },
+        "household.create": {
+          "risk": "medium",
+          "action": "create",
+          "resourceArg": "parent",
+          "idempotency": "one-per-request"
+        },
+        "household.member.record": {
+          "risk": "low",
+          "action": "execute",
+          "resourceArg": "record",
+          "authorityArg": "holder",
+          "idempotency": "one-per-resource-version"
+        },
+        "messaging.direct.send": {
+          "risk": "low",
+          "action": "send",
+          "resourceArg": "recipient",
+          "authorityArg": "sender",
+          "idempotency": "one-per-request"
+        },
+        "organization.create": {
+          "risk": "medium",
+          "action": "create",
+          "resourceArg": "parent",
+          "idempotency": "one-per-request"
+        },
+        "organization.membership.invite": {
+          "risk": "medium",
+          "action": "invite",
+          "resourceArg": "org",
+          "authorityArg": "org",
+          "idempotency": "one-per-request"
+        },
+        "organization.membership.list": {
+          "idempotency": "replay-safe"
+        },
+        "person.contact.invite": {
+          "risk": "medium",
+          "action": "invite",
+          "resourceArg": "contact",
+          "authorityArg": "person",
+          "idempotency": "one-per-request"
+        },
+        "person.contact.list": {
+          "idempotency": "replay-safe"
+        },
+        "person.contact.remove": {
+          "risk": "medium",
+          "action": "revoke",
+          "resourceArg": "manager",
+          "authorityArg": "person",
+          "idempotency": "one-per-request"
+        },
+        "person.invitations.list": {
+          "idempotency": "replay-safe"
+        },
+        "person.memory.forget": {
+          "risk": "low",
+          "action": "execute",
+          "idempotency": "replay-safe"
+        },
+        "person.memory.list": {
+          "idempotency": "replay-safe"
+        },
+        "person.memory.remember": {
+          "risk": "low",
+          "action": "execute",
+          "idempotency": "replay-safe"
+        },
+        "person.preferences.get": {
+          "idempotency": "replay-safe"
+        },
+        "person.preferences.set": {
+          "risk": "low",
+          "action": "execute",
+          "idempotency": "replay-safe"
+        },
+        "person.routine.declare": {
+          "risk": "low",
+          "action": "execute",
+          "idempotency": "one-per-request"
+        },
+        "person.routine.list": {
+          "idempotency": "replay-safe"
+        },
+        "person.routine.remove": {
+          "risk": "low",
+          "action": "execute",
+          "idempotency": "replay-safe"
+        },
+        "person.work.search": {
+          "idempotency": "replay-safe"
+        },
+        "profile.contact.update": {
+          "risk": "low",
+          "action": "execute",
+          "resourceArg": "record",
+          "authorityArg": "holder",
+          "idempotency": "one-per-resource-version"
+        },
+        "resolution.invitation.request": {
+          "risk": "low",
+          "action": "request",
+          "resourceArg": "owner",
+          "authorityArg": "requester",
+          "idempotency": "one-per-request"
+        },
+        "service.create": {
+          "risk": "medium",
+          "action": "create",
+          "resourceArg": "parent",
+          "idempotency": "one-per-request"
+        },
+        "treasury.balance.read": {
+          "idempotency": "replay-safe"
+        },
+        "treasury.create": {
+          "risk": "medium",
+          "action": "create",
+          "resourceArg": "parent",
+          "idempotency": "one-per-request"
+        },
+        "treasury.fund": {
+          "risk": "low",
+          "action": "fund",
+          "resourceArg": "asset",
+          "authorityArg": "funder",
+          "idempotency": "one-per-request"
+        },
+        "treasury.payment.execute": {
+          "risk": "high",
+          "action": "execute",
+          "resourceArg": "asset",
+          "authorityArg": "payer",
+          "idempotency": "one-per-request"
+        },
+        "treasury.primary.declare": {
+          "risk": "medium",
+          "action": "declare",
+          "resourceArg": "record",
+          "authorityArg": "holder",
+          "idempotency": "one-per-resource-version"
+        },
+        "vault.records.query": {
+          "idempotency": "replay-safe"
+        },
+        "web.page.read": {
+          "idempotency": "replay-safe"
+        },
+        "web.search": {
+          "idempotency": "replay-safe"
+        }
+      },
+      "pinnedAt": "2026-09-15T20:28:09.470Z"
+    },
+    "agentic-trust/coordinator": {
+      "registry": "https://skills-a2a-production.richardpedersen3.workers.dev",
+      "context": "agentic-trust",
+      "archetype": "coordinator",
+      "digest": "0xf58f615e66fa09c5d22739779fc4755619d51826b3100b2cd64219e03397adbd",
+      "version": "1.0.0",
+      "authority": {
+        "context.instruction.declare": {
+          "risk": "low",
+          "action": "execute",
+          "resourceArg": "record",
+          "authorityArg": "holder",
+          "idempotency": "one-per-resource-version"
+        },
+        "coordination.commitment.reallocate": {
+          "risk": "medium",
+          "action": "reallocate",
+          "resourceArg": "org",
+          "authorityArg": "org",
+          "idempotency": "one-per-request"
+        },
+        "coordination.commitment.withdraw": {
+          "risk": "medium",
+          "action": "withdraw",
+          "resourceArg": "org",
+          "authorityArg": "org",
+          "idempotency": "one-per-request"
+        },
+        "coordination.contribution.allocate": {
+          "risk": "medium",
+          "action": "allocate",
+          "resourceArg": "org",
+          "authorityArg": "org",
+          "idempotency": "one-per-request"
+        },
+        "coordination.contribution.propose": {
+          "risk": "medium",
+          "action": "propose",
+          "resourceArg": "org",
+          "authorityArg": "proposer",
+          "idempotency": "one-per-request"
+        },
+        "coordination.decision.record": {
+          "risk": "medium",
+          "action": "record",
+          "resourceArg": "org",
+          "authorityArg": "org",
+          "idempotency": "one-per-request"
+        },
+        "coordination.decision.request": {
+          "risk": "medium",
+          "action": "request",
+          "resourceArg": "org",
+          "authorityArg": "org",
+          "idempotency": "one-per-request"
+        },
+        "coordination.endeavor.get": {
+          "idempotency": "replay-safe"
+        },
+        "coordination.endeavor.list": {
+          "idempotency": "replay-safe"
+        },
+        "coordination.endeavor.request": {
+          "risk": "medium",
+          "action": "request",
+          "resourceArg": "org",
+          "authorityArg": "requester",
+          "idempotency": "one-per-request"
+        },
+        "coordination.endeavor.satisfy": {
+          "risk": "medium",
+          "action": "satisfy",
+          "resourceArg": "org",
+          "authorityArg": "org",
+          "idempotency": "one-per-request"
+        },
+        "coordination.milestone.achieve": {
+          "risk": "medium",
+          "action": "achieve",
+          "resourceArg": "org",
+          "authorityArg": "org",
+          "idempotency": "one-per-request"
+        },
+        "coordination.step.satisfy": {
+          "risk": "medium",
+          "action": "satisfy",
+          "resourceArg": "org",
+          "authorityArg": "org",
+          "idempotency": "one-per-request"
+        },
+        "messaging.direct.send": {
+          "risk": "low",
+          "action": "send",
+          "resourceArg": "recipient",
+          "authorityArg": "sender",
+          "idempotency": "one-per-request"
+        },
+        "messaging.topic.post": {
+          "risk": "low",
+          "action": "messaging.topic.post",
+          "resourceArg": "org",
+          "authorityArg": "sender",
+          "idempotency": "one-per-request"
+        },
+        "organization.membership.list": {
+          "idempotency": "replay-safe"
+        }
+      },
+      "pinnedAt": "2026-09-15T20:28:10.017Z"
+    },
+    "agentic-trust/treasury-steward": {
+      "registry": "https://skills-a2a-production.richardpedersen3.workers.dev",
+      "context": "agentic-trust",
+      "archetype": "treasury-steward",
+      "digest": "0xaa90e54436cba5b761dca4c26146e7057359abc8773d8ff0a728ee0c987547a9",
+      "version": "1.0.0",
+      "authority": {
+        "treasury.balance.read": {
+          "idempotency": "replay-safe"
+        },
+        "treasury.fund": {
+          "risk": "low",
+          "action": "fund",
+          "resourceArg": "asset",
+          "authorityArg": "funder",
+          "idempotency": "one-per-request"
+        },
+        "treasury.payment.execute": {
+          "risk": "high",
+          "action": "execute",
+          "resourceArg": "asset",
+          "authorityArg": "payer",
+          "idempotency": "one-per-request"
+        },
+        "treasury.primary.declare": {
+          "risk": "medium",
+          "action": "declare",
+          "resourceArg": "record",
+          "authorityArg": "holder",
+          "idempotency": "one-per-resource-version"
+        },
+        "vault.records.query": {
+          "idempotency": "replay-safe"
+        }
+      },
+      "pinnedAt": "2026-09-15T20:28:10.382Z"
+    },
+    "agentic-trust/household-steward": {
+      "registry": "https://skills-a2a-production.richardpedersen3.workers.dev",
+      "context": "agentic-trust",
+      "archetype": "household-steward",
+      "digest": "0x4fc55a78653456e08467fb7cb87e273cc5818997dbbb8f5cdfb5d90f9497db51",
+      "version": "1.0.0",
+      "authority": {
+        "access.grant.revoke": {
+          "risk": "medium",
+          "action": "revoke",
+          "resourceArg": "manager",
+          "authorityArg": "holder",
+          "idempotency": "one-per-request"
+        },
+        "messaging.direct.send": {
+          "risk": "low",
+          "action": "send",
+          "resourceArg": "recipient",
+          "authorityArg": "sender",
+          "idempotency": "one-per-request"
+        },
+        "organization.membership.invite": {
+          "risk": "medium",
+          "action": "invite",
+          "resourceArg": "org",
+          "authorityArg": "org",
+          "idempotency": "one-per-request"
+        },
+        "organization.membership.list": {
+          "idempotency": "replay-safe"
+        },
+        "treasury.balance.read": {
+          "idempotency": "replay-safe"
+        },
+        "treasury.create": {
+          "risk": "medium",
+          "action": "create",
+          "resourceArg": "parent",
+          "idempotency": "one-per-request"
+        },
+        "treasury.fund": {
+          "risk": "low",
+          "action": "fund",
+          "resourceArg": "asset",
+          "authorityArg": "funder",
+          "idempotency": "one-per-request"
+        },
+        "treasury.payment.execute": {
+          "risk": "high",
+          "action": "execute",
+          "resourceArg": "asset",
+          "authorityArg": "payer",
+          "idempotency": "one-per-request"
+        },
+        "treasury.primary.declare": {
+          "risk": "medium",
+          "action": "declare",
+          "resourceArg": "record",
+          "authorityArg": "holder",
+          "idempotency": "one-per-resource-version"
+        },
+        "vault.records.query": {
+          "idempotency": "replay-safe"
+        }
+      },
+      "pinnedAt": "2026-09-15T20:28:10.750Z"
     }
   }
 }

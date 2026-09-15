@@ -52,7 +52,7 @@ import { ensureCsrfToken, csrfHeaders } from './csrf';
 
 export type { DelegationWire, SignHash };
 
-// ─── Wire shapes (mirror `apps/demo-a2a/src/agent-card-studio.ts`) ───────────────────────────────────
+// ─── Wire shapes (mirror `apps/agent-runtime/src/agent-card-studio.ts`) ───────────────────────────────────
 
 /** Every mutation carries these (spec 347 §9). `newMutation()` mints the ids. */
 export interface StudioMutation {

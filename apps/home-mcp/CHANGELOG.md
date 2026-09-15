@@ -1,4 +1,4 @@
-# @agenticprimitives-demo/home-mcp
+# @ap-home/home-mcp
 
 ## 0.0.1-alpha.4
 

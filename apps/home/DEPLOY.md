@@ -14,12 +14,12 @@ setup; after it, `vercel --prod` redeploys.
 
    
 
-2. **Link the project** (run from `apps/demo-sso-next`)
+2. **Link the project** (run from `apps/home`)
    ```bash
-   cd apps/demo-sso-next && vercel link
+   cd apps/home && vercel link
    ```
    In the Vercel dashboard → Project → **Settings → General → Root Directory =
-   `apps/demo-sso-next`**. (`vercel.json` here already sets the monorepo install +
+   `apps/home`**. (`vercel.json` here already sets the monorepo install +
    build commands — it builds `packages/*` first because their `dist/` is
    gitignored, then `next build`.)
 

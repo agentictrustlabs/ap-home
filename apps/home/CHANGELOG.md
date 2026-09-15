@@ -1,4 +1,4 @@
-# @agenticprimitives-demo/sso-next
+# @ap-home/home
 
 ## 0.0.2-alpha.30
 
@@ -13,7 +13,7 @@
   - @agenticprimitives/connect-auth@1.0.0-alpha.25
   - @agenticprimitives/identity-directory@1.0.0-alpha.25
   - @agenticprimitives/verifiable-credentials@0.0.0-alpha.22
-  - @agenticprimitives-demo/home-shared@0.0.1-alpha.0
+  - @ap-home/shared@0.0.1-alpha.0
   - @agenticprimitives/home@0.0.0-alpha.14
   - @agenticprimitives/agent-account@1.0.0-alpha.25
   - @agenticprimitives/agent-naming@1.0.0-alpha.25

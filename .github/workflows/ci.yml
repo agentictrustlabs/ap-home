@@ -18,14 +18,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --no-frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
       - name: ap doctor
         run: pnpm exec ap doctor --json > doctor-report.json || (cat doctor-report.json; exit 1)
       - name: ap doctor --rules (projection drift)
         run: pnpm exec ap doctor --rules
+      - name: the gates read their roster from the fixture
+        run: pnpm check:gate-fixture
       - uses: actions/upload-artifact@v4
         if: always()
         with:

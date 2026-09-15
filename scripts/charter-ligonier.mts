@@ -26,9 +26,9 @@ const fail = (m: string): never => { console.error(`\n✗ ${m}`); process.exit(1
 const naming = new AgentNamingClient({ rpcUrl: 'https://a2a.faithnet.io/rpc', chainId: CHAIN, registry: '0x60E949D52660A9D4143ecB0fdA56c0457f20aED9', universalResolver: '0xF343054e046A4145ccae499ECB28197394eE0798' });
 // The credential that will custody what alice charters — the demo persona's own EOA, the one the Home holds
 // for her (what the flyout fills into a `credential` field via `connectedCredential`).
-const personaKeys = (() => { try { const env = readFileSync(resolvePath('apps/demo-sso-next/.env.local'), 'utf8'); const m = /^DEMO_PERSONA_KEYS=(.*)$/m.exec(env); return m ? JSON.parse(m[1]!.trim().replace(/^['"]|['"]$/g, '')) as Record<string, { eoaAddress?: string }> : {}; } catch { return {}; } })();
+const personaKeys = (() => { try { const env = readFileSync(resolvePath('apps/home/.env.local'), 'utf8'); const m = /^DEMO_PERSONA_KEYS=(.*)$/m.exec(env); return m ? JSON.parse(m[1]!.trim().replace(/^['"]|['"]$/g, '')) as Record<string, { eoaAddress?: string }> : {}; } catch { return {}; } })();
 const ALICE_EOA = (personaKeys.alice?.eoaAddress ?? '').toLowerCase();
-if (!/^0x[0-9a-f]{40}$/.test(ALICE_EOA)) fail('alice\'s custodian EOA is not in apps/demo-sso-next/.env.local (DEMO_PERSONA_KEYS)');
+if (!/^0x[0-9a-f]{40}$/.test(ALICE_EOA)) fail('alice\'s custodian EOA is not in apps/home/.env.local (DEMO_PERSONA_KEYS)');
 // CUSTODIAN=0x… names another credential to custody what is chartered (spec 387: the gateway agent's own key).
 const CUSTODIAN = (process.env.CUSTODIAN ?? ALICE_EOA).toLowerCase();
 if (!/^0x[0-9a-f]{40}$/.test(CUSTODIAN)) fail('CUSTODIAN must be an EOA address');

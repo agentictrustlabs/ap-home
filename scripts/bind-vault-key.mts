@@ -7,7 +7,7 @@
  *
  *   npx tsx scripts/bind-vault-key.mts <custodian-handle> <agent-address> [more agents…]
  */
-import { buildVaultKeyAuthorization, type VaultKeyCeremonyParams } from '../apps/demo-sso-next/src/lib/delegation';
+import { buildVaultKeyAuthorization, type VaultKeyCeremonyParams } from '../apps/home/src/lib/delegation';
 import { keccak256, toBytes, type Address, type Hex } from 'viem';
 
 const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';

@@ -1,11 +1,11 @@
-# Cloudflare Worker config for demo-mcp.
+# Cloudflare Worker config for home-vault.
 #
 # Local dev:  wrangler dev (uses local D1 SQLite at .wrangler/state-mcp/v3/d1/)
-# Production: wrangler deploy + wrangler d1 migrations apply demo-mcp
+# Production: wrangler deploy + wrangler d1 migrations apply home-vault
 #
 # D1 holds profiles + token_usage (JTI replay tracking).
 
-name = "demo-mcp"
+name = "home-vault"
 main = "src/index.ts"
 compatibility_date = "2026-05-19"
 compatibility_flags = ["nodejs_compat"]
@@ -16,7 +16,7 @@ local_protocol = "http"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "demo-mcp"
+database_name = "home-vault"
 database_id = "a7c95b56-8753-47ae-a044-446d5d37cf58"   # overwrite per env in production
 migrations_dir = "migrations"
 
@@ -44,96 +44,21 @@ DEMO_VAULT_PROVISION_SKIP_PROOF = "false"
 # AgenticInvocationProofV1. Fail-closed — 404s unless 'true'. Requires UNIVERSAL_SIGNATURE_VALIDATOR.
 DEMO_NATIVE_MCP_ENABLED = "true"
 # The on-chain ECDSA/ERC-1271/6492 validator. Binding enforcement FAILS CLOSED without it — the code
-# asks for it, this file only ever mentioned it in a comment, and demo-a2a has carried the same
+# asks for it, this file only ever mentioned it in a comment, and home-runtime has carried the same
 # address all along. It went unnoticed because the deployed build predated the enforcement: the next
 # deploy activated a check whose configuration had never been added, and every coordination vault
-# read began failing with "internal error". Same value as demo-a2a + contracts/deployments.
+# read began failing with "internal error". Same value as home-runtime + contracts/deployments.
 UNIVERSAL_SIGNATURE_VALIDATOR = "0x3bc65655d4b6fb57731A256fcd47Db2F8Fe36907"
 
-# ──────────────────────────────────────────────────────────────────────────
-# Production environment — Worker name: "demo-mcp-production"
-#
-# Deploy via `pnpm deploy:cloudflare`. Contract addresses are injected via
-# `--var` flags from deployments-base-sepolia.json at deploy time.
-#
-# REQUIRED ONE-TIME SETUP — paste the production D1 database_id below after:
-#   wrangler d1 create demo-mcp
-#   wrangler d1 migrations apply demo-mcp --remote --env production
-# The deploy script re-runs `migrations apply` on every deploy (idempotent).
-# ──────────────────────────────────────────────────────────────────────────
+# ── THIS ESTATE — Home on faithchain (chain 34348), `[env.production]`. Derived from Ring 0's [env.faithnet]
+#    by scripts/split/derive-ap-home-env.py (ap-home-estate.json) at extraction; hand-maintained after the cut.
+#    Worker `home-vault` at https://home-vault.faithnet.io — its own DOs, KV and D1; the Home at https://home-rho-orpin.vercel.app.
+#    This is NOT Faithnet: Faithnet is Ring 0's deployment of the same app and is never deployed from here.
+[env.production]
+name = "home-vault"
+workers_dev = false
 
 [env.production.vars]
-# The on-chain ECDSA/ERC-1271/6492 validator. Binding enforcement FAILS CLOSED without it — the code
-# asks for it, this file only ever mentioned it in a comment, and demo-a2a has carried the same
-# address all along. It went unnoticed because the deployed build predated the enforcement: the next
-# deploy activated a check whose configuration had never been added, and every coordination vault
-# read began failing with "internal error". Same value as demo-a2a + contracts/deployments.
-UNIVERSAL_SIGNATURE_VALIDATOR = "0x3bc65655d4b6fb57731A256fcd47Db2F8Fe36907"
-# The contract every revocation read is aimed at — `Env` declares it required and four call sites read
-# it, but it was never set here, so `to: undefined` made every read THROW. The resilient reader is
-# fail-closed by construction (an unconfirmable read comes back revoked:true, source='fail-closed:*'),
-# so a missing address did not read as misconfiguration: it read as "this delegation is revoked", and
-# rejected with "revocation check unavailable; refusing to verify". Exactly the USV omission above,
-# one line down, surfaced by the same deploy — the reader is only BUILT once USV is present.
-# Canonical Base Sepolia value: packages/contracts/deployments-base-sepolia.json, matching demo-a2a.
-# (demo-edge production carries 0x3a8E2c… instead — a different deployment, and worth reconciling.)
-DELEGATION_MANAGER = "0x9eD1dC0FD2284fcd4967beeF3317129fee7a92e5"
-# The caveat enforcers, and the THIRD omission of this exact shape in this one block. The evaluator
-# keys its dispatch table by enforcer ADDRESS and denies anything it cannot name — so with these four
-# unset, every caveat on every delegation resolved to "caveat denied (unknown enforcer)" and no token
-# could authorize anything. `Env` declares all four required and baseConfig reads all four; none was
-# ever set here. Canonical values: packages/contracts/deployments-base-sepolia.json, identical to
-# demo-a2a production. A missing address is indistinguishable from a hostile one BY DESIGN (that is
-# what fail-closed means), which is why all three of these read as auth failures rather than config.
-TIMESTAMP_ENFORCER = "0xBb8fF9c82417189c6EfeBbB369e9dd9d651aa0f3"
-ALLOWED_TARGETS_ENFORCER = "0xb06252FaD1D41B9943c73ec696Af70F268581625"
-ALLOWED_METHODS_ENFORCER = "0xa076b759D6785bA5E67016e399Af651fC2ABC811"
-VALUE_ENFORCER = "0x3D2abD6c7C1319f2bbA96B3b76A7e0d92C620A39"
-# RPC_URL intentionally omitted — see apps/demo-a2a/wrangler.toml for
-# the rationale. Set as a wrangler secret instead.
-CHAIN_ID = "84532"
-MCP_AUDIENCE = "urn:mcp:server:person"
-# Testnet demo: enable the open /oauth/token demo authorization endpoint (mock
-# seed data only). A real production deployment removes this + wires a real AS.
-DEMO_OAUTH_MINT_ENABLED = "false"
-# Testnet demo: enable on-demand KEK provisioning (the one-click ceremony auto-provisions).
-# A real production deployment OMITS this — provisioning is operator-only, out of band.
-DEMO_VAULT_PROVISION_ENABLED = "true"
-# mcp-provision-unauth-prod: testnet-only skip of the owner-control proof so the live one-click ceremony
-# auto-provisions. A real production deployment OMITS this ⇒ proof enforced (ERC-1271 over the challenge).
-DEMO_VAULT_PROVISION_SKIP_PROOF = "false"
-# spec 287: enable the public native MCP ingress (/mcp/native) with exact-invocation proof.
-DEMO_NATIVE_MCP_ENABLED = "true"
-# spec 290 §8: per-Smart-Agent hard-budget unit cap enforced on the native path (demo value).
-SA_BUDGET_LIMIT_UNITS = "50000"   # must match demo-a2a — one shared budget DO per SA
-# spec 288 §6 — edge-mode flag. DEFAULT "false" so an edge-less deploy works (direct /mcp + /mcp/native
-# allowed). `deploy-cloudflare.ts` OVERRIDES this to "true" via --var when EDGE_REQUIRED=true, which makes
-# both MCP ingress surfaces REQUIRE a valid edge GatewayAssertion (direct → 401; the web routes through the
-# edge). Deploy-controlled, NOT baked here — so the one toggle flips the whole flow.
-DEMO_REQUIRE_GATEWAY_ASSERTION = "false"
-
-[[env.production.d1_databases]]
-binding = "DB"
-database_name = "demo-mcp"
-database_id = "a7c95b56-8753-47ae-a044-446d5d37cf58"
-migrations_dir = "migrations"
-
-# spec 290 §8 — the authoritative per-SA hard-budget store. demo-mcp hosts + enforces it (it is the
-# authority point with the verified principal). One DO instance per Smart Agent shard.
-[[env.production.durable_objects.bindings]]
-name = "SA_BUDGET"
-class_name = "SmartAgentBudgetDO"
-
-[[env.production.migrations]]
-tag = "v1"
-new_sqlite_classes = ["SmartAgentBudgetDO"]
-
-# ── FAITHNET (Azure faithchain 34348) — parallel universe; gcp-kms custody, fresh D1. ──
-[env.faithnet]
-name = "demo-mcp-faithnet"
-workers_dev = true
-
-[env.faithnet.vars]
 UNIVERSAL_SIGNATURE_VALIDATOR = "0xeDd56f500325D4701B9985A34e5Fa6EED6716137"
 DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
 TIMESTAMP_ENFORCER = "0x73A7B878168b7DE48677617179A8bE894f0Dfe96"
@@ -148,29 +73,30 @@ DEMO_VAULT_PROVISION_SKIP_PROOF = "false"
 DEMO_NATIVE_MCP_ENABLED = "true"
 SA_BUDGET_LIMIT_UNITS = "50000"
 DEMO_REQUIRE_GATEWAY_ASSERTION = "false"
-# AKCS — both halves of the A2A→MCP hop must agree on the MAC mechanism. demo-a2a generates service
-# MACs from the tenant MAC root; a demo-mcp still on gcp-kms verified with a local A2A_MAC_SECRET and
+# AKCS — both halves of the A2A→MCP hop must agree on the MAC mechanism. home-runtime generates service
+# MACs from the tenant MAC root; a home-vault still on gcp-kms verified with a local A2A_MAC_SECRET and
 # rejected every call ("service-mac rejected"). MAC keys are derived from the tenant root, so there is
 # no key id here — only the tenant.
 A2A_KMS_BACKEND = "agentic-kms"
 AKCS_BASE_URL = "https://akcs-pilot.faithnet.io"
 AKCS_TENANT_ID = "faithnet"
 # AKCS_TOKEN is a SECRET (wrangler secret put).
+VAULT_SERVER_ID = "home-vault"
 
-[[env.faithnet.d1_databases]]
+[[env.production.d1_databases]]
 binding = "DB"
-database_name = "demo-mcp-faithnet"
-database_id = "68afe2d0-412b-4c6f-b265-1794775d24a3"
+database_name = "home-vault"
+database_id = "c32c66cb-b8a7-4471-a0cf-0cb7d80a5a5c"
 migrations_dir = "migrations"
 
-[[env.faithnet.durable_objects.bindings]]
+[[env.production.durable_objects.bindings]]
 name = "SA_BUDGET"
 class_name = "SmartAgentBudgetDO"
 
-[[env.faithnet.migrations]]
+[[env.production.migrations]]
 tag = "v1"
 new_sqlite_classes = ["SmartAgentBudgetDO"]
 
-[[env.faithnet.routes]]
-pattern = "mcp.faithnet.io"
+[[env.production.routes]]
+pattern = "home-vault.faithnet.io"
 custom_domain = true

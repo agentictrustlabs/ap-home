@@ -1,4 +1,4 @@
-# @agenticprimitives-demo/edge
+# @ap-home/edge
 
 ## 0.0.1-alpha.7
 

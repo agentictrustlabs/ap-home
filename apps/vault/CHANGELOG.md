@@ -1,4 +1,4 @@
-# @agenticprimitives-demo/mcp
+# @ap-home/vault
 
 ## 0.0.2-alpha.23
 

@@ -63,7 +63,7 @@ GCP is consulted only for `VERIFICATION_RECEIPT_KMS_KEY`, unset here) and `GROQ_
 
 The estate has its own roster (`demo/personas.estate.local.json`, gitignored — `home-vercel.md` §3): Smart Agents on
 faithchain, `<handle>.me` names, vault keys bound at `home-vault` under server id `home-vault`. Provision with Ring 0's
-`apps/demo-sso-next/scripts/provision-demo-personas-local.ts` (`ROSTER=… LOCAL_ROSTER=… AGENT_NAME_PARENT=me
+`apps/home/scripts/provision-demo-personas-local.ts` (`ROSTER=… LOCAL_ROSTER=… AGENT_NAME_PARENT=me
 RPC_URL=… MCP_URL=https://home-vault.faithnet.io`), then `scripts/provision-all-demo-planes.mts <handles…>` at the Home
 (interactions + delivery planes). An organization is chartered at the Home by one of them (the org-create ceremony).
 

@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
 # set-cloudflare-secrets.sh
 #
-# One-time setup: generates + sets the production secrets the demo-a2a +
-# demo-mcp Workers need. Re-run is safe but overwrites existing values.
+# One-time setup: generates + sets the production secrets the home-runtime +
+# home-vault Workers need. Re-run is safe but overwrites existing values.
 #
 # Secrets generated internally and piped directly to `wrangler secret put`
 # via stdin — they never appear in stdout, transcript, or shell history.
 # The only thing printed is the A2A master EOA's PUBLIC address so you can
 # verify the key was generated.
 #
-# demo-a2a (Worker):
+# home-runtime (Worker):
 #   SESSION_JWT_SECRETS    — kid:hex64 (HS256 session signing)
 #   CSRF_SECRET            — 0x-prefixed hex64 (HMAC for CSRF tokens)
 #   A2A_SESSION_SECRET     — 0x-prefixed hex64 (AAD-bound payload encryption)
 #   A2A_MASTER_PRIVATE_KEY — secp256k1 private key (fresh EOA, demo-only)
-#   RPC_URL                — Base Sepolia RPC (sourced from .env.deploy.local)
+#   RPC_URL                — the faithchain RPC gateway URL (+ app token), from the environment
 #
-# demo-mcp (Worker):
-#   RPC_URL                — Base Sepolia RPC (same value as demo-a2a)
+# home-vault (Worker):
+#   RPC_URL                — Base Sepolia RPC (same value as home-runtime)
 #
 # Without RPC_URL on either Worker, viem throws
 # `UrlRequiredError: No URL was provided to the Transport` the first time
@@ -31,8 +31,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# ap-home deploys ONE estate — Home on faithchain, `[env.production]` (scripts/split/ap-home-estate.json in Ring 0 says which
+# Workers, hosts and ids). Never Faithnet: that is Ring 0's deployment of the same apps.
 ENV=${ENV:-production}
-APP_DIR=apps/demo-a2a
+APP_DIR=apps/agent-runtime
 
 for cmd in openssl wrangler cast node; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "ERROR: $cmd not found in PATH"; exit 1; }
@@ -46,13 +48,13 @@ wrangler whoami >/dev/null 2>&1 || { echo "ERROR: not logged into Cloudflare. Ru
 if [ -f .env.deploy.local ]; then
   set -a; source .env.deploy.local; set +a
 fi
-if [ -z "${BASE_SEPOLIA_RPC:-}" ]; then
-  echo "ERROR: BASE_SEPOLIA_RPC not set (expected in .env.deploy.local)."
+if [ -z "${RPC_URL:-}" ]; then
+  echo "ERROR: RPC_URL not set — the faithchain RPC gateway URL with its app token."
   echo "  Without it RPC_URL cannot be pushed to either Worker."
   exit 1
 fi
 
-echo "Setting demo-a2a Worker secrets (env=$ENV)…"
+echo "Setting home-runtime Worker secrets (env=$ENV)…"
 
 # 1. SESSION_JWT_SECRETS  ("kid:hex" format expected by connect-auth.sessions)
 KID="prodkid$(openssl rand -hex 4)"
@@ -73,9 +75,9 @@ echo "  ✓ A2A_SESSION_SECRET"
 # 3b. A2A_INTERNAL_MARKER (spec 341 §7) — the in-Worker DO↔DO marker.
 #     Generated HERE and never written anywhere: setter and checker are the same deployed Worker, so
 #     nothing else ever needs to know it. It used to be A2A_CUSTODY_BRIDGE_SECRET, which meant a leak
-#     of the Home↔demo-a2a custody secret also opened `internal.*` against any principal — one value
+#     of the Home↔home-runtime custody secret also opened `internal.*` against any principal — one value
 #     carrying two very different trust levels. Rotating this one now affects nothing else.
-#     demo-a2a ONLY: the Home has no use for it and must not be given it.
+#     home-runtime ONLY: the Home has no use for it and must not be given it.
 printf '0x%s' "$(openssl rand -hex 32)" \
   | (cd "$APP_DIR" && wrangler secret put A2A_INTERNAL_MARKER --env "$ENV") >/dev/null
 echo "  ✓ A2A_INTERNAL_MARKER"
@@ -137,26 +139,26 @@ printf '%s' "$CUSTODY_JSON" | node -e 'process.stdout.write(JSON.parse(require("
 unset CUSTODY_JSON
 echo "  ✓ A2A_CUSTODY_ROOT_KEY  (fresh — the never-rotate OIDC custody root, split from the relay signer)"
 
-# 5. RPC_URL — set on BOTH demo-a2a and demo-mcp. Each Worker's
+# 5. RPC_URL — set on BOTH home-runtime and home-vault. Each Worker's
 #    `c.env.RPC_URL` feeds viem's http() transport; without it, every
-#    on-chain read fails with `UrlRequiredError`. demo-a2a uses it for
-#    the relayer + sponsored userOps; demo-mcp uses it for delegation
+#    on-chain read fails with `UrlRequiredError`. home-runtime uses it for
+#    the relayer + sponsored userOps; home-vault uses it for delegation
 #    on-chain checks (ERC-1271, revoke status) inside the PII read path.
-printf '%s' "$BASE_SEPOLIA_RPC" \
+printf '%s' "$RPC_URL" \
   | (cd "$APP_DIR" && wrangler secret put RPC_URL --env "$ENV") >/dev/null
-echo "  ✓ RPC_URL  (demo-a2a)"
+echo "  ✓ RPC_URL  (home-runtime)"
 
-printf '%s' "$BASE_SEPOLIA_RPC" \
-  | (cd apps/demo-mcp && wrangler secret put RPC_URL --env "$ENV") >/dev/null
-echo "  ✓ RPC_URL  (demo-mcp)"
+printf '%s' "$RPC_URL" \
+  | (cd apps/vault && wrangler secret put RPC_URL --env "$ENV") >/dev/null
+echo "  ✓ RPC_URL  (home-vault)"
 
 # 6. (removed) VAULT_MASTER_KEY — spec 278 P4 deleted the global vault master key. The
 #    vault is now per-person-keyed: each person's KEK lives in GCP Cloud KMS and is
-#    resolved from their VaultKeyBinding. demo-mcp uses GCP_SERVICE_ACCOUNT_JSON (set
+#    resolved from their VaultKeyBinding. home-vault uses GCP_SERVICE_ACCOUNT_JSON (set
 #    above when the gcp-kms backend is selected) to wield those per-person KEKs. There
 #    is no global key to seed (VKB-D1).
 
-# 7. OAUTH_SIGNING_SECRET — demo-mcp ONLY. HS256 signing secret for the OAuth
+# 7. OAUTH_SIGNING_SECRET — home-vault ONLY. HS256 signing secret for the OAuth
 #    ingress (spec 277 Phase 6): the demo authorization endpoint mints tokens
 #    with it and /mcp validates bearer tokens against it. Honored from
 #    $OAUTH_SIGNING_SECRET if set; otherwise a fresh 32-byte value is generated.
@@ -164,17 +166,17 @@ echo "  ✓ RPC_URL  (demo-mcp)"
 #    never trusted as authority (the entitlement→KAS→audit chain re-runs server-side).
 OAUTH_SIGNING_SECRET="${OAUTH_SIGNING_SECRET:-$(openssl rand -hex 32)}"
 printf '%s' "$OAUTH_SIGNING_SECRET" \
-  | (cd apps/demo-mcp && wrangler secret put OAUTH_SIGNING_SECRET --env "$ENV") >/dev/null
+  | (cd apps/vault && wrangler secret put OAUTH_SIGNING_SECRET --env "$ENV") >/dev/null
 unset OAUTH_SIGNING_SECRET
-echo "  ✓ OAUTH_SIGNING_SECRET  (demo-mcp)"
+echo "  ✓ OAUTH_SIGNING_SECRET  (home-vault)"
 
-# 8. GATEWAY_ASSERTION_SECRET — the spec-288 §6 edge admission HMAC. The SAME value MUST be on demo-edge
-#    (signer) + demo-mcp + demo-a2a (verifiers). The edge is ON by default, so the verifiers REQUIRE a valid
+# 8. GATEWAY_ASSERTION_SECRET — the spec-288 §6 edge admission HMAC. The SAME value MUST be on home-edge
+#    (signer) + home-vault + home-runtime (verifiers). The edge is ON by default, so the verifiers REQUIRE a valid
 #    assertion — a mismatch/absence → 401 on every edge-fronted request. Honored from
 #    $GATEWAY_ASSERTION_SECRET if set; else a fresh value is generated and set consistently across all three.
 #    printf '%s' (no trailing newline) — the edge signer does NOT .trim(), so a newline would break the HMAC.
 GATEWAY_ASSERTION_SECRET="${GATEWAY_ASSERTION_SECRET:-$(openssl rand -hex 32)}"
-for ga_app in demo-edge demo-mcp demo-a2a; do
+for ga_app in edge vault agent-runtime; do
   printf '%s' "$GATEWAY_ASSERTION_SECRET" \
     | (cd "apps/$ga_app" && wrangler secret put GATEWAY_ASSERTION_SECRET --env "$ENV") >/dev/null
   echo "  ✓ GATEWAY_ASSERTION_SECRET  ($ga_app)"
@@ -188,4 +190,4 @@ echo "   never printed. Address is safe to share publicly.)"
 echo ""
 echo "Verify with:"
 echo "  cd $APP_DIR && wrangler secret list --env $ENV"
-echo "  cd apps/demo-mcp && wrangler secret list --env $ENV"
+echo "  cd apps/vault && wrangler secret list --env $ENV"

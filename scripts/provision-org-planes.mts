@@ -27,8 +27,8 @@ import {
   issueInteractionsDelegation,
   issueSessionDelegation,
   toWire,
-} from '../apps/demo-sso-next/src/lib/delegation.js';
-import { MCP_SERVER_ID } from '../apps/demo-sso-next/src/lib/inbox-delivery.js';
+} from '../apps/home/src/lib/delegation.js';
+import { MCP_SERVER_ID } from '../apps/home/src/lib/inbox-delivery.js';
 
 const A2A = process.env.A2A_BASE ?? 'https://demo-a2a-production.richardpedersen3.workers.dev';
 const INTERACTIONS_SERVICE_SA = (process.env.INTERACTIONS_SERVICE_SA

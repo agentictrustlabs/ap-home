@@ -32,7 +32,7 @@ it; the mandate is still asked and signed exactly as if nothing were remembered.
 | **the write** | `rememberConfirmation(prefs, { word, capability, arg, agent, label, runRef, at })` — pure; the caller (the ask route) invokes it ONLY on the trusted resume that supplied a choice a prompt raised | same |
 | **the read** | `preferredChoice(prefs, { word, capability, arg }, candidates)` — the remembered agent IF it is still among `candidates` (revalidated), else `null`. Scope is exact: a different capability or arg does not match | same |
 | **the resolver seam** | `PartyLookups.preferredChoice?(word, arg) => Promise<{ agent; label? } \| null>` — consulted in the ambiguity branches BEFORE the rolling `chosenBefore`, so a durable scoped preference outranks a decayed window; cited `hint: "remembered: you chose X for this before"` | `packages/context/src/party-resolution.ts` |
-| **the pending scope** | when the resolver raises a choice prompt, the checkpoint's `awaiting` carries `{ word, capability, arg }`; the resume that answers it is the trusted event the ask route writes from | `apps/demo-a2a/src/harness-runs.ts`, `harness-run.ts`, `index.ts` |
+| **the pending scope** | when the resolver raises a choice prompt, the checkpoint's `awaiting` carries `{ word, capability, arg }`; the resume that answers it is the trusted event the ask route writes from | `apps/agent-runtime/src/harness-runs.ts`, `harness-run.ts`, `index.ts` |
 
 ## 3. Boundaries (the drift to refuse)
 

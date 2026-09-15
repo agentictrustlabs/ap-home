@@ -41,7 +41,7 @@ export function targetLabel(family: string): string {
 
 // ── scopes (RENDER-ONLY mirror of the service's derivation; guide.md "The transport") ────────────
 
-/** Mirror of `OP_SCOPE` in `apps/demo-a2a/src/agent-card-studio.ts`. Used to name a missing scope in a
+/** Mirror of `OP_SCOPE` in `apps/agent-runtime/src/agent-card-studio.ts`. Used to name a missing scope in a
  *  disabled control's title — never to decide authority (the server refuses with 403 `scope_not_held`). */
 export const STUDIO_OP_SCOPE = {
   'card.list': 'agent.card.read',

@@ -5,8 +5,8 @@
  * addresses (and byte-identical signatures) as the existing `local-aes` derivation from
  * A2A_MASTER_PRIVATE_KEY, and that envelope + MAC work against the configured AKCS.
  *
- *   pnpm --filter @agenticprimitives-demo/a2a exec tsx scripts/akcs-shadow-check.mts                       # reads apps/demo-a2a/.dev.vars
- *   pnpm --filter @agenticprimitives-demo/a2a exec tsx scripts/akcs-shadow-check.mts subjects.json         # [{iss,sub,rotation}] to compare
+ *   pnpm --filter @ap-home/agent-runtime exec tsx scripts/akcs-shadow-check.mts                       # reads apps/agent-runtime/.dev.vars
+ *   pnpm --filter @ap-home/agent-runtime exec tsx scripts/akcs-shadow-check.mts subjects.json         # [{iss,sub,rotation}] to compare
  *
  * Exit code 1 on any mismatch. Never prints key material.
  */
@@ -20,7 +20,7 @@ const vars = Object.fromEntries(
     .map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]),
 );
 for (const k of ['AKCS_BASE_URL', 'AKCS_TENANT_ID', 'AKCS_TOKEN', 'A2A_MASTER_PRIVATE_KEY']) {
-  if (!vars[k]) throw new Error(`missing ${k} in apps/demo-a2a/.dev.vars (run faithkms: just demo-stack-init)`);
+  if (!vars[k]) throw new Error(`missing ${k} in apps/agent-runtime/.dev.vars (run faithkms: just demo-stack-init)`);
 }
 process.env.NODE_ENV = 'development';
 const agenticKms = {

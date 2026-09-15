@@ -3,14 +3,14 @@
 # Deploy: wrangler deploy --env production
 #
 # The edge is the public ingress; it runs admission (edge-runtime + edge-cloudflare) and dispatches
-# admitted bytes to demo-mcp / demo-a2a over Service Bindings. It owns NO authority (ADR-0043) — the
+# admitted bytes to home-vault / home-runtime over Service Bindings. It owns NO authority (ADR-0043) — the
 # downstream Workers still run the full Web3 pipeline.
 #
-# Route lockdown (making demo-a2a/demo-mcp private) is sequenced LAST and gated on a caller-migration
+# Route lockdown (making home-runtime/home-vault private) is sequenced LAST and gated on a caller-migration
 # checklist (spec 288 §6) — NOT done here; the downstream Workers keep their current public exposure
 # until every caller is repointed at the edge.
 
-name = "demo-edge"
+name = "home-edge"
 main = "src/index.ts"
 compatibility_date = "2026-05-19"
 compatibility_flags = ["nodejs_compat"]
@@ -18,19 +18,19 @@ compatibility_flags = ["nodejs_compat"]
 # ──────────────────────────────────────────────────────────────────────────
 # Local development (top-level = the default env used by `wrangler dev`).
 #
-# `scripts/dev.sh` runs demo-a2a (:8787), demo-mcp (:8788) and this edge (:8789) as sibling
+# `scripts/dev.sh` runs home-runtime (:8787), home-vault (:8788) and this edge (:8789) as sibling
 # `wrangler dev` sessions; the Service Bindings below resolve through wrangler's local dev registry
-# to the Workers NAMED demo-mcp / demo-a2a (their top-level `name`). Non-secret local values
-# (chain, contracts, origins) come from apps/demo-edge/.dev.vars written by scripts/gen-dev-vars.ts.
+# to the Workers NAMED home-vault / home-runtime (their top-level `name`). Non-secret local values
+# (chain, contracts, origins) come from apps/edge/.dev.vars written by scripts/gen-dev-vars.ts.
 # Production keeps its own block under [env.production] — nothing here is inherited by it.
 # ──────────────────────────────────────────────────────────────────────────
 [[services]]
 binding = "MCP"
-service = "demo-mcp"
+service = "home-vault"
 
 [[services]]
 binding = "A2A"
-service = "demo-a2a"
+service = "home-runtime"
 
 [[durable_objects.bindings]]
 name = "SA_BUDGET"
@@ -49,38 +49,21 @@ simple = { limit = 120, period = 60 }
 port = 8789
 local_protocol = "http"
 
+# ── THIS ESTATE — Home on faithchain (chain 34348), `[env.production]`. Derived from Ring 0's [env.faithnet]
+#    by scripts/split/derive-ap-home-env.py (ap-home-estate.json) at extraction; hand-maintained after the cut.
+#    Worker `home-edge` at https://home-edge.faithnet.io — its own DOs, KV and D1; the Home at https://home-rho-orpin.vercel.app.
+#    This is NOT Faithnet: Faithnet is Ring 0's deployment of the same app and is never deployed from here.
 [env.production]
-# Give the edge a public workers.dev URL for the smoke test (wrangler defaults workers_dev=false).
-workers_dev = true
-
+name = "home-edge"
+workers_dev = false
 [env.production.vars]
-# Public on-chain config for the /.well-known/agentic-authorization discovery doc (Base Sepolia).
-# These are public addresses (app layer, ADR-0021) — safe to inline.
-#
-# ALL THREE were a generation behind: this doc TELLS CALLERS which contracts to trust, so it was
-# advertising an older EntryPoint / DelegationManager / UniversalSignatureValidator than the ones
-# demo-a2a and demo-mcp actually verify against — a client that believed the profile would build
-# delegations no relying service would accept. Each old address is a real deployed contract of the
-# right role (the USV byte-identical, the EntryPoint the same size, the DM one build older), which is
-# why nothing ever errored: the profile was coherent, just not current.
-#
-# Now the canonical set from packages/contracts/deployments-base-sepolia.json, matching demo-a2a and
-# demo-mcp. Keep these three moving TOGETHER — a mixed-generation profile is worse than a stale one.
-CHAIN_ID = "84532"
-ENTRY_POINT = "0x96E37dD695840AF7781E669bdca9d79E4d7d8040"
-DELEGATION_MANAGER = "0x9eD1dC0FD2284fcd4967beeF3317129fee7a92e5"
-UNIVERSAL_SIGNATURE_VALIDATOR = "0x3bc65655d4b6fb57731A256fcd47Db2F8Fe36907"
-# Per-Smart-Agent hard-budget unit cap (spec 290 §8 — demo value).
+CHAIN_ID = "34348"
+ENTRY_POINT = "0xf7855250B3363AB7649B10957d8908A9AFcdD4B5"
+DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
+UNIVERSAL_SIGNATURE_VALIDATOR = "0xeDd56f500325D4701B9985A34e5Fa6EED6716137"
 SA_BUDGET_LIMIT_UNITS = "10"
-# OPS-EDGE-PROBE-PROD-1 (2026-07-05 completeness audit): the /budget/probe smoke-test runs BEFORE the
-# admission + Stage-1 rate-limiter, so enabling it publicly is an unauth, unthrottled write into the
-# SmartAgentBudgetDO. Left UNSET in production ⇒ the route 404s (src/index.ts:189). Enable only in a
-# transient dev/diagnostic env, never on a public deployment.
-# Browser Origins allowed to call the edge (so browser callers can be repointed at it — route-lockdown
-# prerequisite). App config (ADR-0021). `https://*.suffix` wildcards supported.
-EDGE_ALLOWED_ORIGINS = "https://agenticprimitives-demo-pro.pages.dev,https://agenticprimitives-demo.pages.dev,https://agenticprimitives-demo-org.pages.dev,https://agenticprimitives-demo-jp.pages.dev,https://agenticprimitives-demo-gs.pages.dev,https://*.impact-agent.io,https://*.impact-agent.me"
+EDGE_ALLOWED_ORIGINS = "http://localhost:5175,https://home-rho-orpin.vercel.app"
 
-# The authoritative per-SA hard-budget store (spec 290 §8). One DO per Smart Agent shard.
 [[env.production.durable_objects.bindings]]
 name = "SA_BUDGET"
 class_name = "SmartAgentBudgetDO"
@@ -89,99 +72,20 @@ class_name = "SmartAgentBudgetDO"
 tag = "v1"
 new_sqlite_classes = ["SmartAgentBudgetDO"]
 
-# Stage-1 abuse limiter (local, permissive, eventually-consistent — abuse only, fail-soft).
 [[env.production.ratelimits]]
-name = "EDGE_LIMITER"
-namespace_id = "2881"
-simple = { limit = 120, period = 60 }
-
-# Service Bindings to the private origins (same Cloudflare account). The edge dispatches here;
-# there is no public hop. Service names match the deployed --env production Workers.
-[[env.production.services]]
-binding = "MCP"
-service = "demo-mcp-production"
-
-[[env.production.services]]
-binding = "A2A"
-service = "demo-a2a-production"
-
-# DEPLOY WITH `--env production`. The real Worker is `demo-edge-production`; the service bindings to
-# demo-mcp/demo-a2a live under [env.production] ONLY. A bare `wrangler deploy` publishes a SEPARATE,
-# binding-less Worker named `demo-edge` whose dispatch then loops and returns Cloudflare error 1042.
-
-# ── FAITHNET (faithchain 34348) — edge in front of demo-a2a/mcp faithnet ──
-[env.faithnet]
-name = "demo-edge-faithnet"
-workers_dev = true
-
-[[env.faithnet.routes]]
-pattern = "edge.faithnet.io"
-custom_domain = true
-
-[env.faithnet.vars]
-CHAIN_ID = "34348"
-ENTRY_POINT = "0xf7855250B3363AB7649B10957d8908A9AFcdD4B5"
-DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
-UNIVERSAL_SIGNATURE_VALIDATOR = "0xeDd56f500325D4701B9985A34e5Fa6EED6716137"
-SA_BUDGET_LIMIT_UNITS = "10"
-EDGE_ALLOWED_ORIGINS = "https://faithnet.me,https://www.faithnet.me,https://gather27-web-faithnet.richardpedersen3.workers.dev,https://gather27-web-churchglobal.richardpedersen3.workers.dev,http://localhost:5175"
-
-[[env.faithnet.durable_objects.bindings]]
-name = "SA_BUDGET"
-class_name = "SmartAgentBudgetDO"
-
-[[env.faithnet.migrations]]
-tag = "v1"
-new_sqlite_classes = ["SmartAgentBudgetDO"]
-
-[[env.faithnet.ratelimits]]
 name = "EDGE_LIMITER"
 namespace_id = "2882"
 simple = { limit = 120, period = 60 }
 
-[[env.faithnet.services]]
+[[env.production.services]]
 binding = "MCP"
-service = "demo-mcp-faithnet"
+service = "home-vault"
 
-[[env.faithnet.services]]
+[[env.production.services]]
 binding = "A2A"
-service = "demo-a2a-faithnet"
+service = "home-runtime"
 
-# ── FAITHNET B — the edge in front of the SECOND deployment (demo-a2a-faithnet-b); same chain, same Home ──
-[env.faithnet-b]
-name = "demo-edge-faithnet-b"
-workers_dev = true
 
-[[env.faithnet-b.routes]]
-pattern = "edge-b.faithnet.io"
+[[env.production.routes]]
+pattern = "home-edge.faithnet.io"
 custom_domain = true
-
-[env.faithnet-b.vars]
-CHAIN_ID = "34348"
-ENTRY_POINT = "0xf7855250B3363AB7649B10957d8908A9AFcdD4B5"
-DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
-UNIVERSAL_SIGNATURE_VALIDATOR = "0xeDd56f500325D4701B9985A34e5Fa6EED6716137"
-SA_BUDGET_LIMIT_UNITS = "10"
-EDGE_ALLOWED_ORIGINS = "https://faithnet.me,https://www.faithnet.me,https://gather27-web-faithnet.richardpedersen3.workers.dev,https://gather27-web-churchglobal.richardpedersen3.workers.dev,http://localhost:5175"
-
-[[env.faithnet-b.durable_objects.bindings]]
-name = "SA_BUDGET"
-class_name = "SmartAgentBudgetDO"
-
-[[env.faithnet-b.migrations]]
-tag = "v1"
-new_sqlite_classes = ["SmartAgentBudgetDO"]
-
-[[env.faithnet-b.ratelimits]]
-name = "EDGE_LIMITER"
-# A rate-limit namespace is one configuration per Worker on the account; B has its own.
-namespace_id = "2883"
-simple = { limit = 120, period = 60 }
-
-[[env.faithnet-b.services]]
-binding = "MCP"
-service = "demo-mcp-faithnet"
-
-[[env.faithnet-b.services]]
-binding = "A2A"
-service = "demo-a2a-faithnet-b"

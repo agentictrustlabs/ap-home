@@ -3,9 +3,9 @@
 #
 #   1. Anvil on :8545
 #   2. forge script Deploy.s.sol → deployments-anvil.json
-#   3. gen-dev-vars.ts → .dev.vars for demo-a2a + demo-mcp
-#   4. wrangler d1 migrations apply demo-mcp --local
-#   5. wrangler dev for demo-a2a (:8787) + demo-mcp (:8788) + demo-edge (:8789) + vite dev for demo-web (:5173)
+#   3. gen-dev-vars.ts → .dev.vars for home-runtime + home-vault
+#   4. wrangler d1 migrations apply home-vault --local
+#   5. wrangler dev for home-runtime (:8787) + home-vault (:8788) + home-edge (:8789) + vite dev for demo-web (:5173)
 #
 # Ctrl-C cleans everything up.
 
@@ -60,14 +60,14 @@ echo "[3/5] Generating .dev.vars for demo Workers…"
 pnpm tsx scripts/gen-dev-vars.ts
 
 # 4. Apply D1 migrations to the local SQLite
-echo "[4/5] Applying D1 migrations to local demo-mcp database…"
-(cd apps/demo-mcp && CI=1 pnpm d1:migrate:local) || echo "  (D1 migrate failed — wrangler dev will retry on startup)"
+echo "[4/5] Applying D1 migrations to local home-vault database…"
+(cd apps/vault && CI=1 pnpm d1:migrate:local) || echo "  (D1 migrate failed — wrangler dev will retry on startup)"
 
 # 5. Start workers + web
-echo "[5/5] Starting demo-a2a (:8787) + demo-mcp (:8788) + demo-edge (:8789) + demo-web (:5173) + demo-web-pro (:5273) + demo-web-recovery (:5373)…"
-pnpm --filter @agenticprimitives-demo/a2a dev &
-pnpm --filter @agenticprimitives-demo/mcp dev &
-pnpm --filter @agenticprimitives-demo/edge dev &
+echo "[5/5] Starting home-runtime (:8787) + home-vault (:8788) + home-edge (:8789) + demo-web (:5173) + demo-web-pro (:5273) + demo-web-recovery (:5373)…"
+pnpm --filter @ap-home/agent-runtime dev &
+pnpm --filter @ap-home/vault dev &
+pnpm --filter @ap-home/edge dev &
 pnpm --filter @agenticprimitives-demo/web dev &
 pnpm --filter @agenticprimitives-demo/web-pro dev &
 pnpm --filter @agenticprimitives-demo/web-recovery dev &
@@ -78,9 +78,9 @@ cat <<EOF
 demo-web           http://127.0.0.1:5173
 demo-web-pro       http://127.0.0.1:5273
 demo-web-recovery  http://127.0.0.1:5373
-demo-a2a           http://127.0.0.1:8787/health  (Cloudflare Worker via wrangler dev)
-demo-mcp           http://127.0.0.1:8788/health  (Cloudflare Worker via wrangler dev)
-demo-edge          http://127.0.0.1:8789/.well-known/agentic-authorization  (admission gateway; Service Bindings → demo-a2a/demo-mcp)
+home-runtime           http://127.0.0.1:8787/health  (Cloudflare Worker via wrangler dev)
+home-vault           http://127.0.0.1:8788/health  (Cloudflare Worker via wrangler dev)
+home-edge          http://127.0.0.1:8789/.well-known/agentic-authorization  (admission gateway; Service Bindings → home-runtime/home-vault)
 local chain        http://127.0.0.1:$ANVIL_PORT  (faithnet or anvil)
 ────────────────────────────────────────────────────────────
 

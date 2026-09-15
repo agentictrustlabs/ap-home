@@ -8,7 +8,7 @@
  * issues it there the way the Home does — the steward's custodian signs (the org validates ERC-1271) and
  * ONE post lands it — without an org name it enables the steward's own agent.
  */
-import { buildInteractionsGrantForScript } from '../apps/demo-sso-next/src/lib/delegation';
+import { buildInteractionsGrantForScript } from '../apps/home/src/lib/delegation';
 
 const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
 const A2A = (process.env.A2A_URL ?? 'https://a2a.faithnet.io').replace(/\/$/, '');

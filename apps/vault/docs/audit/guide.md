@@ -2,7 +2,7 @@
 
 This guide walks through adopting agenticprimitives' append-only audit trail in your own MCP server (or A2A worker, or any consumer of the platform's primitives). It pairs with [spec 206](../../../../specs/206-audit.md), which is the architect's design doc.
 
-The canonical implementation lives in this app (`apps/demo-mcp/`) — `composeSinks(console, d1)` with a PII guardrail wrapped around the D1 sink, correlation-stitched across the a2a → mcp service boundary. You can run the demo, hit `/tools/get_profile`, then `wrangler d1 execute demo-mcp --remote --command "SELECT … FROM audit_events"` to see the trail.
+The canonical implementation lives in this app (`apps/vault/`) — `composeSinks(console, d1)` with a PII guardrail wrapped around the D1 sink, correlation-stitched across the a2a → mcp service boundary. You can run the demo, hit `/tools/get_profile`, then `wrangler d1 execute demo-mcp --remote --command "SELECT … FROM audit_events"` to see the trail.
 
 ## What you get
 
@@ -25,7 +25,7 @@ Rows are correlation-stitched: demo-a2a generates an `X-Correlation-Id` per requ
 
 ## Setting up audit in your app
 
-Five minutes, three steps. Patterns lifted directly from `apps/demo-mcp/src/index.ts`.
+Five minutes, three steps. Patterns lifted directly from `apps/vault/src/index.ts`.
 
 ### 1. Compose your sinks
 

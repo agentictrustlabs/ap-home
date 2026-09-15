@@ -12,7 +12,7 @@
  * A real person re-issues by clicking through their Home. This is the DEMO-ESTATE equivalent: the Home
  * holds these personas' custodian keys, so the same signature can be made server-side.
  */
-import { buildInteractionsGrantForScript } from '../apps/demo-sso-next/src/lib/delegation';
+import { buildInteractionsGrantForScript } from '../apps/home/src/lib/delegation';
 
 const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
 const HANDLES = process.argv.slice(2).length ? process.argv.slice(2)

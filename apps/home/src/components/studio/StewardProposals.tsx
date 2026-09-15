@@ -4,7 +4,7 @@
 // validate, preview and explain; it can never sign, publish, transact, or mark anything verified
 // (`STEWARD_FORBIDDEN_SCOPES`).
 //
-// SERVICE GAP (this wave): no Studio operation returns steward proposals — `apps/demo-a2a/src/
+// SERVICE GAP (this wave): no Studio operation returns steward proposals — `apps/agent-runtime/src/
 // agent-card-studio.ts` exposes card/release/projection/binding ops only, and a service-agent caller
 // writes into the draft directly under `STEWARD_DEFAULT_SCOPES` rather than into a proposal queue. The
 // renderer below is complete and takes its list as a prop; with no source wired it renders the honest
