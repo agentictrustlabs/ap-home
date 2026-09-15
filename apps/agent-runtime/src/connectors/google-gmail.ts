@@ -97,3 +97,13 @@ export async function sendMessage(env: TokenEnv, sa: Address, input: SendInput, 
   const m = await api(got.access, '/messages/send', { method: 'POST', body: JSON.stringify({ raw: utf8ToB64url(lines.join('\r\n')), ...(input.threadId ? { threadId: input.threadId } : {}) }) }, f);
   return { messageId: String(m.id ?? ''), threadId: String(m.threadId ?? ''), link: `https://mail.google.com/mail/u/0/#sent/${String(m.threadId ?? m.id ?? '')}`, sentAs: 'message' };
 }
+
+/** Spec 403 W5 — DISCARD a draft: the undo of `createDraft`, under the person's mandate. `null` = not connected. */
+export async function deleteDraft(env: TokenEnv, sa: Address, draftId: string, f: typeof fetch = fetch): Promise<{ deleted: true; draftId: string } | null> {
+  const got = await accessFor(env, sa, f);
+  if (!got) return null;
+  if (!hasScope(got.scope, GMAIL_SCOPE_COMPOSE)) throw new Error('mail was connected read-only — reconnect it with permission to write drafts');
+  if (!draftId.trim()) throw new Error('which draft? — its id, from the draft receipt');
+  await api(got.access, `/drafts/${encodeURIComponent(draftId)}`, { method: 'DELETE' }, f);
+  return { deleted: true, draftId };
+}

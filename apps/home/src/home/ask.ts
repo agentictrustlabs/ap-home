@@ -517,7 +517,7 @@ export async function listRuns(session: { token: string }, addressee: Address): 
 /** Spec 370 P5 / 375 — one row of the agent's schedule: what its playbook asks on its own, fired by what, and
  *  what the last firing reached. A webhook row carries its bearer token (admission, never authority). */
 export interface TriggerRow {
-  triggerId: string; kind?: 'schedule' | 'event' | 'webhook' | 'message'; ask: string;
+  triggerId: string; kind?: 'schedule' | 'event' | 'webhook' | 'message' | 'connector' | 'once'; ask: string;
   every?: string; nextAt?: number; on?: { event?: string; profile?: string }; token?: string;
   lastAt?: number; lastRunRef?: string; lastOutcome?: 'answered' | 'parked' | 'failed'; lastSaid?: string;
   /** Spec 398 §5.3 — paused: nothing new starts; by a steward, or by the budget (§5.4). */
@@ -534,6 +534,14 @@ export interface TriggerRow {
 export async function removeTrigger(session: { token: string }, addressee: Address, triggerId: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const out = (await postA2a('/a2a/harness/triggers/remove', { session: session.token, addressee, triggerId })) as { ok?: boolean; error?: string };
   return out.ok ? { ok: true } : { ok: false, error: out.error ?? 'the routine could not be removed' };
+}
+
+/** Spec 403 W2/W4 — the person's preferences: nudges by email and how her agent answers. GET without `set`. */
+export interface PersonPreferencesView { notify?: { email?: boolean; routines?: boolean }; answer?: { style?: 'brief' | 'full'; language?: string; callMe?: string }; updatedAt?: string }
+export type PreferencesChange = { notify?: { email?: boolean | null; routines?: boolean | null }; answer?: { style?: 'brief' | 'full' | null; language?: string | null; callMe?: string | null } };
+export async function personPreferences(session: { token: string }, set?: PreferencesChange): Promise<{ ok: true; preferences: PersonPreferencesView; emailRail: boolean; email: string | null } | { ok: false; error: string }> {
+  const out = (await postA2a('/a2a/harness/preferences', { session: session.token, ...(set ? { set } : {}) })) as { ok?: boolean; error?: string; preferences?: PersonPreferencesView; emailRail?: boolean; email?: string | null };
+  return out.ok ? { ok: true, preferences: out.preferences ?? {}, emailRail: !!out.emailRail, email: out.email ?? null } : { ok: false, error: out.error ?? 'the preferences could not be read' };
 }
 
 /** Spec 323 W6 — rebuild the person's DECLARED routine rows on her agent from the record in her vault (`routines.data`).

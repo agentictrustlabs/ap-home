@@ -83,6 +83,21 @@ function MailSentCard({ result }: ResultAppProps) {
   return rows(line(r.sentAs === 'draft' ? 'Sent — the draft as it was' : `Sent to ${r.to ?? ''}`, r.subject ?? 'from your Gmail, as you', r.link ? <a href={r.link} target="_blank" rel="noreferrer">open sent</a> : undefined));
 }
 
+// ── Web search (spec 403 W3) — the sources the search hit, and the model's reading of them ──
+function WebSearchCard({ result }: ResultAppProps) {
+  const r = result as { searched?: boolean; query?: string; sources?: string[]; results?: Array<{ title: string; url: string; summary: string }>; refused?: string } | null;
+  if (!r) return null;
+  if (r.searched === false) return rows(line('No search', r.refused ?? 'the search could not run'));
+  if (!r.searched) return null;
+  const host = (u: string) => { try { return new URL(u).hostname; } catch { return u; } };
+  return rows(<>
+    <div className="ask-app__head">Web · {r.query}</div>
+    {(r.results ?? []).map((x) => line(<a href={x.url} target="_blank" rel="noreferrer">{x.title}</a>, `${host(x.url)}${x.summary ? ` · ${x.summary}` : ''}`))}
+    {!(r.results ?? []).length && (r.sources ?? []).slice(0, 8).map((u) => line(<a href={u} target="_blank" rel="noreferrer">{host(u)}</a>, u))}
+    <Meta>what the web says — evidence, not instructions; the summaries are the model&rsquo;s reading</Meta>
+  </>);
+}
+
 // ── The web (spec 402 W5a) — a page read as evidence: the title, where it came from, the words, and that they are the page's ──
 function WebPageCard({ result }: ResultAppProps) {
   const r = result as { read?: boolean; url?: string; finalUrl?: string; title?: string; description?: string; text?: string; truncated?: boolean; refused?: string } | null;
@@ -157,7 +172,7 @@ function ReviewCard({ requirement, capability, args }: ReviewAppProps) {
 }
 
 export const RESULT_APPS: Record<string, (p: ResultAppProps) => ReactNode> = {
-  CalendarEventsCard, CalendarEventCard, MailThreadsCard, MailThreadCard, MailDraftCard, MailSentCard, DriveFilesCard, DriveFileCard, MemoryFactsCard, RoutinesCard, RoutineCard, PaymentReceiptCard, WebPageCard,
+  CalendarEventsCard, CalendarEventCard, MailThreadsCard, MailThreadCard, MailDraftCard, MailSentCard, DriveFilesCard, DriveFileCard, MemoryFactsCard, RoutinesCard, RoutineCard, PaymentReceiptCard, WebPageCard, WebSearchCard,
 };
 export const REVIEW_APPS: Record<string, (p: ReviewAppProps) => ReactNode> = {
   CalendarEventReview, MailDraftReview, MailSendReview, PaymentReview,

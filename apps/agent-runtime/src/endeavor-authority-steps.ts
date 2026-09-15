@@ -81,6 +81,8 @@ export const NOT_PLAN_STEPS: readonly string[] = [
   'calendar.event.create',
   'gmail.draft.create',
   'gmail.message.send',
+  'calendar.event.delete',
+  'gmail.draft.delete',
   'resolution.invitation.request',
   // A PREFERENCE IS NOT WORK. "Payments to me come here" is a standing statement its owner makes about
   // their own tree — nobody assigns it, nothing waits on it, and putting it in a plan would invite an
@@ -104,6 +106,8 @@ export const NOT_PLAN_STEPS: readonly string[] = [
   // Spec 402 W3 — a ROUTINE of the person's own is her clock, not work: self-acting, no mandate.
   'person.routine.declare',
   'person.routine.remove',
+  // Spec 403 — her preferences are her own settings: self-acting, no mandate, never work.
+  'person.preferences.set',
 ];
 
 /** A plan step as the work loop sees it. */

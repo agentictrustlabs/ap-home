@@ -4,7 +4,7 @@
 // write a file. Whoever asks — her Home, Claude through the Home MCP, a paired runtime — gets the harness's answer as
 // her, never the token.
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
-import { searchThreads, readThread, createDraft, sendMessage } from './google-gmail.js';
+import { searchThreads, readThread, createDraft, sendMessage, deleteDraft } from './google-gmail.js';
 import { searchFiles, readFile } from './google-drive.js';
 import { connectorStatus, type TokenEnv } from './google-token.js';
 
@@ -14,7 +14,8 @@ export const GMAIL_DRAFT_CREATE = 'gmail.draft.create' as const;
 export const GMAIL_MESSAGE_SEND = 'gmail.message.send' as const;
 export const DRIVE_FILES_SEARCH = 'drive.files.search' as const;
 export const DRIVE_FILE_READ = 'drive.file.read' as const;
-export const MAIL_DRIVE_ACTS = new Set<string>([GMAIL_DRAFT_CREATE, GMAIL_MESSAGE_SEND]);
+export const GMAIL_DRAFT_DELETE = 'gmail.draft.delete' as const;
+export const MAIL_DRIVE_ACTS = new Set<string>([GMAIL_DRAFT_CREATE, GMAIL_MESSAGE_SEND, GMAIL_DRAFT_DELETE]);
 
 const holderArg = { holder: { type: 'string', description: 'Whose account — the person it belongs to (defaults to the asker)' } };
 
@@ -49,6 +50,14 @@ export const MAIL_DRIVE_TOOLS: ToolSpec[] = [
     inputSchema: { type: 'object', properties: { draftId: { type: 'string', description: 'A draft to send as it is' }, to: { type: 'string' }, subject: { type: 'string' }, body: { type: 'string' }, threadId: { type: 'string' }, cc: { type: 'string' }, ...holderArg } },
     capability: { id: GMAIL_MESSAGE_SEND, action: 'send', resourceArg: 'holder', authorityArg: 'holder' },
     risk: 'high',
+  },
+  {
+    id: GMAIL_DRAFT_DELETE,
+    verbs: ['discard the draft', 'delete the draft', 'throw away the draft', 'undo the draft'],
+    description: 'DISCARDS ONE DRAFT in the person\'s Gmail under her mandate — by `draftId` (from the draft receipt). The undo of gmail.draft.create; nothing sent is touched.',
+    inputSchema: { type: 'object', properties: { draftId: { type: 'string' }, ...holderArg }, required: ['draftId'] },
+    capability: { id: GMAIL_DRAFT_DELETE, action: 'delete', resourceArg: 'holder', authorityArg: 'holder' },
+    risk: 'low',
   },
   {
     id: DRIVE_FILES_SEARCH,
@@ -95,6 +104,11 @@ export function mailDriveInvoker(deps: MailDriveDeps, presented: { wire?: { dele
         if (!out) return notConnected('Gmail');
         // What may follow (spec 368 §3): the draft as it is, sent under her signature — proposed, never done here.
         return { drafted: true, holder, ...out, note: 'a draft in your Gmail — nothing was sent; send it from Gmail, or say "send it" here and sign', next: { capability: GMAIL_MESSAGE_SEND, args: { draftId: out.draftId }, words: `send it — the draft to ${String(args.to)} as it is`, why: 'it leaves your Gmail as you, so it takes your signature, this once' } };
+      }
+      case GMAIL_DRAFT_DELETE: {
+        const out = await deleteDraft(deps.env, holder, String(args.draftId ?? ''), f);
+        if (!out) return notConnected('Gmail');
+        return { deleted: true, holder, draftId: out.draftId, note: 'the draft is gone; nothing was sent' };
       }
       case GMAIL_MESSAGE_SEND: {
         const draftId = typeof args.draftId === 'string' ? args.draftId.trim() : '';

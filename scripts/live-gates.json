@@ -442,6 +442,16 @@
       "timeoutSec": 240
     },
     {
+      "id": "verify-reminders-and-preferences",
+      "script": "scripts/verify-reminders-and-preferences.mts",
+      "spec": "403 W1-W5",
+      "proves": "a REMINDER from a sentence ('in 20 minutes remind me to call the pastor') is compiled (never a model), read back in her zone, kept on her yes as a ONCE row and a record entry with its moment; fired now it is delivered to her Messages verbatim, its email nudge is STATED (sent, or why not), and it is gone from the row and the record; her PREFERENCES ('answer me briefly, call me Ali') are kept as her record and read by the route; with email nudges off a reminder fires to Messages alone; web.search returns the search's sources with the WebSearchCard binding; calendar.event.delete on a word parks for her signature",
+      "twin": "preferences said in her organization's room are refused; a reminder with no clock is asked back in reminder words",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 300
+    },
+    {
       "id": "verify-mention-into-run",
       "script": "scripts/verify-mention-into-run.mts",
       "spec": "400 W2 (B3)",

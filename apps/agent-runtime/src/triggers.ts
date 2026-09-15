@@ -18,7 +18,7 @@ export interface TriggerScheduleV1 {
   agent: Address;
   triggerId: string;
   /** Spec 375 — which source fires this row. Absent on rows written before the kinds existed ⇒ schedule. */
-  kind?: 'schedule' | 'event' | 'webhook' | 'message' | 'connector';
+  kind?: 'schedule' | 'event' | 'webhook' | 'message' | 'connector' | 'once';
   /** Spec 375 — what fires it: an Endeavor event type, or an exchange profile. Spec 402 W3b — a CONNECTOR poll: which
    *  account, what to match (a Gmail query; a lead time before a calendar event). */
   on?: { event?: string; profile?: string; connector?: 'google-gmail' | 'google-calendar'; query?: string; leadMinutes?: number };
@@ -77,7 +77,7 @@ export function schedulesFor(agent: Address, playbookDigest: string, triggers: r
 }
 
 /** Clock-driven rows: a schedule, and a connector POLL (spec 402 W3b — the clock runs the poll; the poll decides whether to fire). */
-const isSchedule = (r: TriggerScheduleV1): r is TriggerScheduleV1 & { nextAt: number; everyMs: number } => ((r.kind ?? 'schedule') === 'schedule' || r.kind === 'connector') && typeof r.nextAt === 'number';
+const isSchedule = (r: TriggerScheduleV1): r is TriggerScheduleV1 & { nextAt: number; everyMs: number } => ((r.kind ?? 'schedule') === 'schedule' || r.kind === 'connector' || r.kind === 'once') && typeof r.nextAt === 'number';
 
 /** The schedule rows due now, oldest first. Other kinds are fired by their sources, never by the clock. */
 export function dueNow(rows: readonly TriggerScheduleV1[], now = Date.now()): TriggerScheduleV1[] {
@@ -200,10 +200,16 @@ export async function syncTriggers(env: TriggerStoreEnv, agent: Address, playboo
 // A fresh object (a new deployment, a wiped DO) has none — the first ask at her own agent reads the record once and
 // rebuilds them (`declaredSynced` false ⇒ rebuild), and a steward may force it. Each row's clock is re-compiled from
 // the sentence she said, in her zone; a connector row starts with no `seen` cursor and primes on its first poll.
-export interface DeclaredRoutineEntry { triggerId: string; kind: 'schedule' | 'connector'; on?: { connector: 'google-gmail'; query: string } | { connector: 'google-calendar'; leadMinutes: number }; ask: string; every: string; everyMs: number; declared: { by: string; at: number; saidAs: string; when: string; tz: string; name?: string } }
+export interface DeclaredRoutineEntry { triggerId: string; kind: 'schedule' | 'connector' | 'once'; at?: number; on?: { connector: 'google-gmail'; query: string } | { connector: 'google-calendar'; leadMinutes: number }; ask: string; every: string; everyMs: number; declared: { by: string; at: number; saidAs: string; when: string; tz: string; name?: string } }
 
 /** The schedule row a record entry becomes, its clock compiled fresh — `compile` is the sentence grammar (routine-sentence.ts). */
-export function rowOfDeclared(agent: Address, e: DeclaredRoutineEntry, compile: (sentence: string, tz: string) => { firstAt: number } | null, now = Date.now()): TriggerScheduleV1 {
+export function rowOfDeclared(agent: Address, e: DeclaredRoutineEntry, compile: (sentence: string, tz: string) => { firstAt: number } | null, now = Date.now()): TriggerScheduleV1 | null {
+  // Spec 403 W1 — a reminder keeps its MOMENT on the record (re-compiling "tomorrow at 3" later would move it); one
+  // whose moment has passed is not rebuilt (the caller drops the stale entry).
+  if (e.kind === 'once') {
+    if (typeof e.at !== 'number' || e.at <= now) return null;
+    return { agent: agent.toLowerCase() as Address, triggerId: e.triggerId, kind: 'once', ask: e.ask, every: 'once', everyMs: 0, nextAt: e.at, playbookDigest: 'declared', declared: { ...e.declared } };
+  }
   const compiled = e.kind === 'schedule' ? compile(e.declared.saidAs, e.declared.tz) : null;
   const nextAt = compiled?.firstAt ?? now + e.everyMs;
   return { agent: agent.toLowerCase() as Address, triggerId: e.triggerId, kind: e.kind, ...(e.on ? { on: { ...e.on } } : {}), ...(e.kind === 'connector' ? { seen: [], primeSeen: true as const } : {}), ask: e.ask, every: e.every, everyMs: e.everyMs, nextAt, playbookDigest: 'declared', declared: { ...e.declared } };
@@ -211,10 +217,11 @@ export function rowOfDeclared(agent: Address, e: DeclaredRoutineEntry, compile: 
 
 /** Make the object's declared rows match the record: rows for every entry (an existing row keeps its clock, cursor and
  *  pause unless `force`), none for entries the record no longer has, and the object marked as synced from the vault. */
-export async function rebuildDeclaredTriggers(env: TriggerStoreEnv, agent: Address, entries: readonly DeclaredRoutineEntry[], compile: (sentence: string, tz: string) => { firstAt: number } | null, opts: { force?: boolean; now?: number } = {}): Promise<{ rows: TriggerScheduleV1[]; added: number; removed: number }> {
-  const rows = entries.map((e) => rowOfDeclared(agent, e, compile, opts.now));
+export async function rebuildDeclaredTriggers(env: TriggerStoreEnv, agent: Address, entries: readonly DeclaredRoutineEntry[], compile: (sentence: string, tz: string) => { firstAt: number } | null, opts: { force?: boolean; now?: number } = {}): Promise<{ rows: TriggerScheduleV1[]; added: number; removed: number; stale: string[] }> {
+  const rows = entries.map((e) => rowOfDeclared(agent, e, compile, opts.now)).filter((r): r is TriggerScheduleV1 => !!r);
   const out = await call(env, agent, 'trigger-declared-sync', { rows, agent: agent.toLowerCase(), force: !!opts.force });
-  return { rows: (out.rows as TriggerScheduleV1[] | undefined) ?? [], added: Number(out.added ?? 0), removed: Number(out.removed ?? 0) };
+  const kept = new Set(rows.map((r) => r.triggerId));
+  return { rows: (out.rows as TriggerScheduleV1[] | undefined) ?? [], added: Number(out.added ?? 0), removed: Number(out.removed ?? 0), stale: entries.filter((e) => !kept.has(e.triggerId)).map((e) => e.triggerId) };
 }
 
 /** Spec 402 W3 — keep a routine the person declared: a schedule row of their own on their agent's object. */

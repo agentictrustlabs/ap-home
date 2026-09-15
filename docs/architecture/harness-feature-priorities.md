@@ -405,3 +405,20 @@ hand-offs, triggers with budgets — the harness and A2A ARE the multi-agent env
 Parity: channels/DMs/threads, pairing, specs + conformance. Behind: mentions into open runs (the feel), search, the
 review loop on a forge, connectors. Admission of existing runtimes (W1a) is done — it answered one question only.
 
+
+## 8. The person's agent — remaining gaps, analysed and closed (2026-09-15)
+
+[Spec 403](../../specs/403-the-persons-agent-remaining-gaps.md) §1 scores the Home as *the person's agent* against
+ChatGPT / Claude / Gemini / the automation agents, family by family, and §2 orders the gaps by *would she notice its
+absence in the first week* over cost. Ahead: memory (hers, proposed never silent), portability, authority. At par:
+connectors (four), recurring routines, apps in the conversation, voice, history-as-runs. Behind — and closed in this
+wave: **one-time reminders** (W1: "remind me tomorrow at 3 …" compiled into a `once` row + a record entry with its
+moment; delivered verbatim at the hour, then gone), **nudges when she is away** (W2: a reminder, an act parked for her
+signature — and routine answers only if she says — emailed on the spec 365 rail under `person.preferences`, to the
+address on her profile; the outcome stated on the row), **web search** (W3: `web.search` on xAI's Agent Tools — the
+search's sources as evidence, the model's summaries said as such, `WebSearchCard`), **answer preferences** (W4: brief /
+full, language, what to call her — on the composer's prompt at her own agent; Settings → Ask; or just say it), **undo**
+(W5: `calendar.event.delete`, `gmail.draft.delete` under her signature, proposed as `next` on the create receipts).
+Gate `verify-reminders-and-preferences`. Still behind, in order: files of her own in the Ask (W6), Slack/Notion (each a
+platform app registration first), external MCP servers as connectors (a spec of its own — the authority question in
+403 §6).

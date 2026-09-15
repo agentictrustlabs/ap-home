@@ -54,3 +54,31 @@ describe('connector triggers (spec 402 W3b)', () => {
     expect(h.connector).toEqual({ connector: 'google-calendar', leadMinutes: 60 });
   });
 });
+
+describe('a reminder, once (spec 403 W1)', () => {
+  it('reads tomorrow / in N / on a weekday / on a date / at a time; a bare small hour is the afternoon; the words are hers', () => {
+    const r = parseRoutineSentence('remind me tomorrow at 3 to call the pastor', { now: NOW, tz: TZ });
+    if ('error' in r) throw new Error(r.error);
+    expect(r.once).toBe(true); expect(r.every).toBe('once'); expect(r.ask).toBe('call the pastor');
+    expect(new Date(r.firstAt).toISOString()).toBe('2026-09-15T21:00:00.000Z'); // Tue 15:00 Denver
+    expect(routineWords(r, TZ)).toBe('once, Tuesday, Sep 15, 3:00 PM (America/Denver): "call the pastor"');
+    const m = parseRoutineSentence('in 20 minutes tell me to check the oven', { now: NOW, tz: TZ });
+    if ('error' in m) throw new Error(m.error);
+    expect(m.firstAt).toBe(NOW + 20 * 60_000); expect(m.ask).toBe('check the oven');
+    const w = parseRoutineSentence('on Thursday at 7pm remind me about the elders meeting', { now: NOW, tz: TZ });
+    if ('error' in w) throw new Error(w.error);
+    expect(new Date(w.firstAt).toISOString()).toBe('2026-09-18T01:00:00.000Z'); expect(w.ask).toBe('the elders meeting');
+    const d = parseRoutineSentence('remind me on Sep 17 at noon to pay the venue', { now: NOW, tz: TZ });
+    if ('error' in d) throw new Error(d.error);
+    expect(new Date(d.firstAt).toISOString()).toBe('2026-09-17T18:00:00.000Z');
+    const t = parseRoutineSentence('remind me at 8am to pray', { now: NOW, tz: TZ }); // 09:00 now → tomorrow 08:00
+    if ('error' in t) throw new Error(t.error);
+    expect(new Date(t.firstAt).toISOString()).toBe('2026-09-15T14:00:00.000Z');
+    // a cadence is never a reminder; a reminder with no clock is asked for one in reminder words
+    const e = parseRoutineSentence('every day at 8 tell me the news', { now: NOW, tz: TZ });
+    if ('error' in e) throw new Error(e.error);
+    expect(e.once).toBeUndefined();
+    const none = parseRoutineSentence('remind me to call bob', { now: NOW, tz: TZ });
+    expect('error' in none && none.error).toMatch(/tomorrow at 3/);
+  });
+});

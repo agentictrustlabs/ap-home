@@ -401,7 +401,7 @@ describe('ceremony negotiation (spec 353 S4)', () => {
     // with, a standing instruction — spec 394 — and, spec 402, what their agent remembers about them). The Home's forms ask for nothing either, and a
     // conversation that demanded a signature the button does not would make talking the expensive way. Every
     // other action here binds authority a person signs, and none of them is offered.
-    expect(ids.sort()).toEqual(['context.instruction.declare', 'household.member.record', 'person.memory.forget', 'person.memory.remember', 'person.routine.declare', 'person.routine.remove', 'profile.contact.update']);
+    expect(ids.sort()).toEqual(['context.instruction.declare', 'household.member.record', 'person.memory.forget', 'person.memory.remember', 'person.preferences.set', 'person.routine.declare', 'person.routine.remove', 'profile.contact.update']);
     expect(scopedActionTools({ ceremonies: ['data', 'confirmation', 'signature'] }).length).toBeGreaterThan(0);
   });
 

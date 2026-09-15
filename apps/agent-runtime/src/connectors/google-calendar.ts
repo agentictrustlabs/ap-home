@@ -65,3 +65,13 @@ export async function createEvent(env: TokenEnv, sa: Address, input: { summary: 
   const body = await api(got.access, `/calendars/${encodeURIComponent(calendar)}/events`, { method: 'POST', body: JSON.stringify(payload) }, f);
   return eventOf(body);
 }
+
+/** Spec 403 W5 — REMOVE one event: the undo of `createEvent`, under the person's mandate. Needs the events scope. `null` = not connected. */
+export async function deleteEvent(env: TokenEnv, sa: Address, input: { id: string; calendarId?: string }, f: typeof fetch = fetch): Promise<{ deleted: true; id: string } | null> {
+  const got = await accessFor(env, sa, f);
+  if (!got) return null;
+  if (!hasScope(got.scope, CALENDAR_SCOPE_EVENTS)) throw new Error('this calendar was connected read-only — reconnect it with permission to change events');
+  if (!input.id.trim()) throw new Error('which event? — its id, from the calendar read or the receipt');
+  await api(got.access, `/calendars/${encodeURIComponent(input.calendarId ?? 'primary')}/events/${encodeURIComponent(input.id)}`, { method: 'DELETE' }, f);
+  return { deleted: true, id: input.id };
+}

@@ -3,12 +3,13 @@
 // hers, kept by the Worker, read by nothing but these; the harness's receipt is the record of each act. Whoever asks
 // — her Home, Claude through the Home MCP, a paired runtime — gets the harness's answer AS her, never the token.
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
-import { calendarStatus, listEvents, createEvent } from './google-calendar.js';
+import { calendarStatus, listEvents, createEvent, deleteEvent } from './google-calendar.js';
 
 export const CALENDAR_EVENTS_LIST = 'calendar.events.list' as const;
 export const CALENDAR_EVENT_CREATE = 'calendar.event.create' as const;
 export const CALENDAR_STATUS = 'calendar.status' as const;
-export const CALENDAR_ACTS = new Set<string>([CALENDAR_EVENT_CREATE]);
+export const CALENDAR_EVENT_DELETE = 'calendar.event.delete' as const;
+export const CALENDAR_ACTS = new Set<string>([CALENDAR_EVENT_CREATE, CALENDAR_EVENT_DELETE]);
 
 const holderArg = { holder: { type: 'string', description: 'Whose calendar — the person it belongs to (defaults to the asker)' } };
 
@@ -35,6 +36,14 @@ export const CALENDAR_TOOLS: ToolSpec[] = [
     capability: { id: CALENDAR_EVENT_CREATE, action: 'create', resourceArg: 'holder', authorityArg: 'holder' },
     risk: 'medium',
     establishes: 'submission',
+  },
+  {
+    id: CALENDAR_EVENT_DELETE,
+    verbs: ['remove from my calendar', 'delete the event', 'cancel the event', 'take it off my calendar', 'undo that event'],
+    description: 'REMOVES ONE EVENT from the person\'s Google Calendar under her mandate — by `id` (from the calendar read or the create receipt). The undo of calendar.event.create.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' }, calendarId: { type: 'string' }, ...holderArg }, required: ['id'] },
+    capability: { id: CALENDAR_EVENT_DELETE, action: 'delete', resourceArg: 'holder', authorityArg: 'holder' },
+    risk: 'medium',
   },
 ];
 
@@ -70,7 +79,13 @@ export function calendarInvoker(deps: CalendarToolDeps, presented: { wire?: { de
       case CALENDAR_EVENT_CREATE: {
         const out = await createEvent(deps.env, holder, { summary: String(args.summary), start: String(args.start), end: String(args.end), ...(args.allDay === true ? { allDay: true } : {}), ...(typeof args.location === 'string' ? { location: args.location } : {}), ...(typeof args.description === 'string' ? { description: args.description } : {}), ...(Array.isArray(args.attendees) ? { attendees: (args.attendees as unknown[]).map(String) } : {}) }, f);
         if (!out) return notConnected;
-        return { created: true, holder, event: out };
+        // What may follow (spec 368 §3 / 403 W5): the undo, proposed on the receipt — never done here.
+        return { created: true, holder, event: out, next: { capability: CALENDAR_EVENT_DELETE, args: { id: out.id }, words: `undo — remove "${out.summary}" from your calendar`, why: 'the event as it was just added, taken back under your signature' } };
+      }
+      case CALENDAR_EVENT_DELETE: {
+        const out = await deleteEvent(deps.env, holder, { id: String(args.id ?? ''), ...(typeof args.calendarId === 'string' ? { calendarId: args.calendarId } : {}) }, f);
+        if (!out) return notConnected;
+        return { deleted: true, holder, id: out.id, note: 'removed from your calendar' };
       }
       default: throw new Error(`${toolId} is not a calendar capability`);
     }

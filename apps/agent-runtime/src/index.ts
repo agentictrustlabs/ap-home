@@ -7,13 +7,14 @@ import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 // State is held in a Durable Object (SessionStoreDO); see ./session-store-do.ts.
 // Env bindings come from c.env (typed via the Bindings interface below).
 
-import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, forgetConfirmation, CONFIRMATION_RECORD, forgetInstruction, STANDING_RECORD, factsOf, forgetFact, FACTS_RECORD, routinesOf, dropRoutine, ROUTINES_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1, type RememberedFactsV1 } from '@agenticprimitives/context';
+import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, forgetConfirmation, CONFIRMATION_RECORD, forgetInstruction, STANDING_RECORD, factsOf, forgetFact, FACTS_RECORD, routinesOf, dropRoutine, ROUTINES_RECORD, preferencesOf, setPreferences, answerPreferencesForPrompt, PREFERENCES_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1, type RememberedFactsV1 } from '@agenticprimitives/context';
 import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
 import { recordOf, replayingInvoker, traceContextOf, type RunPlannerSummaryV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent, type RunBillV1 } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
 import { recordFormOf, rehydrateExecuted } from './artifact-store.js';
 import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken, advanceTrigger, withPause, withBudget, advanced, declareTrigger, removeTrigger, rebuildDeclaredTriggers } from './triggers.js';
 import { parseRoutineSentence } from './routine-sentence.js';
+import { nudge, emailOf } from './nudges.js';
 import { consumeRuntimeWakes } from './runtime-wake.js';
 import { connectorStatus, disconnectConnector, type GoogleProvider } from './connectors/google-token.js';
 import { searchThreads } from './connectors/google-gmail.js';
@@ -1749,6 +1750,26 @@ app.post('/harness/memory/forget', async (c) => {
   if (!wrote.ok) return c.json({ ok: false, error: wrote.error ?? 'the fact could not be forgotten' }, 502);
   return c.json({ ok: true, entries: r.next.entries, forgotten: r.removed });
 });
+// Spec 403 W2/W4 — HER PREFERENCES: may her agent email her (reminders, parked acts; routines only if she says), and how
+// it answers. GET/PUT with her session; the record is hers (`person.preferences`, in her vault).
+app.post('/harness/preferences', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; set?: { notify?: { email?: boolean | null; routines?: boolean | null }; answer?: { style?: 'brief' | 'full' | null; language?: string | null; callMe?: string | null } } } | null;
+  if (!body?.session) return c.json({ ok: false, error: 'session is required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  if (!deps.readSubjectRecord || !deps.writeSubjectRecord) return c.json({ ok: false, error: 'the private tier is not configured' }, 503);
+  const me = String(who.sa).toLowerCase();
+  let raw: unknown;
+  try { raw = await deps.readSubjectRecord(me, PREFERENCES_RECORD); }
+  catch (e) { const why = e instanceof Error ? e.message : String(e); return c.json({ ok: false, error: /record_scope_denied|scope/i.test(why) ? 'record_scope_denied' : why }, 502); }
+  const email = await emailOf({ env: c.env as never, readSubjectRecord: deps.readSubjectRecord }, me as Address);
+  if (!body.set) return c.json({ ok: true, preferences: preferencesOf(raw), emailRail: !!emailSender(c.env as unknown as EmailEnv), email });
+  const next = setPreferences(preferencesOf(raw), body.set);
+  const wrote = await deps.writeSubjectRecord(me, PREFERENCES_RECORD, next);
+  if (!wrote.ok) return c.json({ ok: false, error: /record_scope_denied|scope/i.test(wrote.error ?? '') ? 'record_scope_denied' : (wrote.error ?? 'the preferences could not be kept') }, 502);
+  return c.json({ ok: true, preferences: next, emailRail: !!emailSender(c.env as unknown as EmailEnv), email });
+});
 app.post('/harness/instructions', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { session?: string } | null;
   if (!body?.session) return c.json({ ok: false, error: 'session is required' }, 400);
@@ -2041,7 +2062,7 @@ async function deliverRoutedOutcome(env: Env, ctx: ExecutionContext | undefined,
   return { delivered: state === 'TASK_STATE_COMPLETED', note: state ? `${state}${said ? `: ${said}` : ''}` : (body?.error?.message ?? `${res.status}`) };
 }
 
-export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef: string, context: Record<string, unknown> = {}): Promise<{ outcome: 'answered' | 'parked' | 'failed'; said?: string; runRef: string; bill?: { vaultCalls: number; doRequests: number }; seen?: string[] }> {
+export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef: string, context: Record<string, unknown> = {}): Promise<{ outcome: 'answered' | 'parked' | 'failed'; said?: string; runRef: string; bill?: { vaultCalls: number; doRequests: number }; seen?: string[]; /** Spec 403 W1 — a reminder fired: the caller drops the row. */ done?: true }> {
   const agent = row.agent.toLowerCase() as Address;
   // Spec 402 W3b — A CONNECTOR TRIGGER IS A POLL. The clock runs it; the person's own connector is read as her (the
   // agent IS her SA); only items not fired on before fire the ask, with the items as context; what fired is remembered
@@ -2100,6 +2121,19 @@ export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef:
       return { outcome: 'failed', said: cont.reply.kind === 'refused' ? cont.reply.error : cont.spoken, runRef: stored.runRef, bill: cont.bill };
     }
   }
+  // Spec 403 W1 — A REMINDER IS HER OWN NOTE, read back at the hour: no planner, no run — the words go to her Messages
+  // from her agent (and to her email under her preference), the record entry is dropped, and the caller drops the row.
+  if (row.kind === 'once') {
+    const said = `Reminder: ${row.ask}`;
+    const deps = harnessDeps(env, buildAuditSink(env));
+    await deps.sendDirectMessage?.({ sender: agent, recipient: agent, bodyText: said, session: '', asSelf: true, contextRefs: [{ kind: 'routine', id: row.triggerId, label: row.declared?.when ?? 'reminder' }] }).catch((e) => console.warn('[reminder] not delivered:', e instanceof Error ? e.message : String(e)));
+    const mailed = await nudge({ env: env as never, ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}) }, { agent, kind: 'reminder', subject: `Reminder: ${row.ask.slice(0, 80)}`, text: `${row.ask}\n\n(you asked ${row.declared?.when ? `"${row.declared.when}"` : 'for this'} — it is now)`, link: `${(env.ALLOWED_ORIGINS?.split(',')[0] ?? 'https://www.faithnet.me').trim()}/messages` });
+    if (row.declared && deps.readSubjectRecord && deps.writeSubjectRecord) {
+      const prev = routinesOf(await deps.readSubjectRecord(agent, ROUTINES_RECORD).catch(() => null));
+      if (prev.entries.some((e) => e.triggerId === row.triggerId)) await deps.writeSubjectRecord(agent, ROUTINES_RECORD, dropRoutine(prev, row.triggerId)).catch(() => undefined);
+    }
+    return { outcome: 'answered', said: `${said}${mailed.sent ? ` · emailed ${mailed.to}` : mailed.why === 'declined' || mailed.why === 'no_address' ? '' : ` · not emailed (${mailed.why})`}`, runRef, done: true };
+  }
   // Spec 375 — what fired this run rides as CONTEXT for the planner (the event's public fields, a webhook's
   // payload, a message's envelope); no verifier reads it, and no party it names is resolved from it.
   const askWords = context.connectorItems
@@ -2123,6 +2157,11 @@ export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef:
       expiresAt: now + (row.everyMs ?? AWAIT_WINDOW_MS.data),
       createdAt: now, updatedAt: now,
     } as never);
+    // Spec 403 W2 — an act her agent reached unattended waits for HER; she is told where she is not looking.
+    if (reply.kind === 'authority_required') {
+      const deps = harnessDeps(env, buildAuditSink(env));
+      void nudge({ env: env as never, ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}) }, { agent, kind: 'parked', subject: `Your agent needs your signature: ${(CAPABILITY_WORDS[reply.capability ?? ''] ?? reply.capability ?? 'an act').slice(0, 80)}`, text: `${row.declared?.name ? `${row.declared.name}: ` : ''}${row.ask}\n\n${spoken ?? ''}\n\nThe act is parked until you sign it at your Home.`, link: `${(env.ALLOWED_ORIGINS?.split(',')[0] ?? 'https://www.faithnet.me').trim()}/work` }).catch(() => undefined);
+    }
     return { outcome: 'parked', said: spoken, runRef, bill };
   }
   if (reply.kind === 'answer' || reply.kind === 'done') {
@@ -2132,7 +2171,10 @@ export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef:
     // enabled leaves the answer on the row, where Routines shows it.
     if (row.declared && said) {
       const note = `${row.declared.name ? `${row.declared.name}: ` : ''}${said}`.slice(0, 4000);
-      await harnessDeps(env, buildAuditSink(env)).sendDirectMessage?.({ sender: agent, recipient: agent, bodyText: note, session: '', asSelf: true, contextRefs: [{ kind: 'routine', id: row.triggerId, label: row.declared.when }] }).catch((e) => console.warn('[routine] answer not delivered:', e instanceof Error ? e.message : String(e)));
+      const deps = harnessDeps(env, buildAuditSink(env));
+      await deps.sendDirectMessage?.({ sender: agent, recipient: agent, bodyText: note, session: '', asSelf: true, contextRefs: [{ kind: 'routine', id: row.triggerId, label: row.declared.when }] }).catch((e) => console.warn('[routine] answer not delivered:', e instanceof Error ? e.message : String(e)));
+      // Spec 403 W2 — and to her email, only if she said routines may (default: her Messages alone).
+      void nudge({ env: env as never, ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}) }, { agent, kind: 'routine', subject: `${row.declared.name ?? row.ask}`.slice(0, 100), text: note.slice(0, 1500), link: `${(env.ALLOWED_ORIGINS?.split(',')[0] ?? 'https://www.faithnet.me').trim()}/messages` }).catch(() => undefined);
     }
     return { outcome: 'answered', said, runRef, bill };
   }
@@ -2585,7 +2627,9 @@ app.post('/harness/triggers/rebuild', async (c) => {
   try { raw = await deps.readSubjectRecord(addressee, ROUTINES_RECORD); } catch (e) { return c.json({ ok: false, error: `your routines record could not be read: ${e instanceof Error ? e.message : String(e)}` }, 502); }
   const record = routinesOf(raw);
   const out = await rebuildDeclaredTriggers(c.env as never, addressee, record.entries, compileClock, { force: !!body.force });
-  return c.json({ ok: true, addressee, record: record.entries.length, rows: out.rows, added: out.added, removed: out.removed, forced: !!body.force });
+  // Spec 403 W1 — a reminder whose hour passed while no object was serving her is not rebuilt; the record lets it go.
+  if (out.stale.length && deps.writeSubjectRecord) await deps.writeSubjectRecord(addressee, ROUTINES_RECORD, out.stale.reduce((r, id) => dropRoutine(r, id), record)).catch(() => undefined);
+  return c.json({ ok: true, addressee, record: record.entries.length, rows: out.rows, added: out.added, removed: out.removed, stale: out.stale, forced: !!body.force });
 });
 /** The clock a declared routine's sentence compiles to, now, in her zone — or null when the grammar no longer reads it. */
 const compileClock = (sentence: string, tz: string): { firstAt: number } | null => { const p = parseRoutineSentence(sentence, { tz }); return 'error' in p ? null : { firstAt: p.firstAt }; };
@@ -2604,7 +2648,8 @@ app.post('/harness/triggers/fire', async (c) => {
   const out = await runUnattendedAsk(c.env, row, `trigger-${row.triggerId}-${Date.now().toString(36)}`);
   // A steward's "fire now" is a firing like the alarm's: it lands on the row (last outcome, bill) and the budget judges
   // it (398 §5.4) — before this, a manual firing left no mark, and a budget could only ever be checked by the clock.
-  await advanceTrigger(c.env as never, addressee, advanced({ ...row, ...(out.seen ? { seen: out.seen } : {}) }, out.outcome, out.runRef, out.said, Date.now(), out.bill)).catch(() => undefined);
+  if (out.done) await removeTrigger(c.env as never, addressee, row.triggerId).catch(() => undefined);
+  else await advanceTrigger(c.env as never, addressee, advanced({ ...row, ...(out.seen ? { seen: out.seen } : {}) }, out.outcome, out.runRef, out.said, Date.now(), out.bill)).catch(() => undefined);
   const { bill: _b, ...rest } = out;
   return c.json({ ok: true, addressee, triggerId: row.triggerId, ...rest, ...(out.bill ? { bill: out.bill } : {}) });
 });
@@ -3642,7 +3687,11 @@ app.post('/harness/ask', async (c) => {
     // Spec 402 W1 — what the asker's agent remembers about the asker, ONLY when the asker addresses their own agent: an
     // organization's agent does not read a person's memory. One read; absent ⇒ no memory, which narrows nothing.
     const ownAgent = String(who.sa).toLowerCase() === String(addressee).toLowerCase();
-    const memory: RememberedFactsV1 | null = ownAgent ? factsOf(await askDeps.readSubjectRecord?.(String(who.sa).toLowerCase(), FACTS_RECORD).catch(() => null)) : null;
+    const [memoryRaw, prefsRaw] = ownAgent ? await Promise.all([askDeps.readSubjectRecord?.(String(who.sa).toLowerCase(), FACTS_RECORD).catch(() => null), askDeps.readSubjectRecord?.(String(who.sa).toLowerCase(), PREFERENCES_RECORD).catch(() => null)]) : [null, null];
+    const memory: RememberedFactsV1 | null = ownAgent ? factsOf(memoryRaw) : null;
+    // Spec 403 W4 — how she wants answers (brief, a language, what to call her): one line on the composer's prompt,
+    // at her own agent only. Behaviour, never authority.
+    const answerLine = ownAgent ? answerPreferencesForPrompt(preferencesOf(prefsRaw)) : '';
     let progressSeq = 0;
     let progressChain: Promise<void> = Promise.resolve();
     const askerSa = String(who.sa).toLowerCase() as Address;
@@ -3787,7 +3836,7 @@ app.post('/harness/ask', async (c) => {
     if (structuredRoutes.length) trace.route = { ...(trace.route ?? { policy: 'first' as const }), structured: structuredRoutes };
     const reply = await askReplyFor(c.env as unknown as HarnessEnv, {
       ...(memory ? { memory } : {}),
-      intent, result, addressee, composerFor: (need: RouteNeed) => selectComposerRouted(c.env, { ...(provider ? { provider } : {}), need }), deps: askDeps, interactionFor, plannerTrace: trace, tools: offeredTools,
+      intent, result, addressee, composerFor: (need: RouteNeed) => selectComposerRouted(c.env, { ...(provider ? { provider } : {}), ...(answerLine ? { systemPrompt: answerLine } : {}), need }), deps: askDeps, interactionFor, plannerTrace: trace, tools: offeredTools,
       ...(body.plan ?? stored?.plan ? { suppliedPlan: true } : {}),
       ...(body.surface ? { surface: body.surface } : {}),
       resolveName: (name) => askDeps.resolveName?.(name) ?? Promise.resolve(null),

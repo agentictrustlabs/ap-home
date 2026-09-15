@@ -39,6 +39,7 @@ export interface RoutineInputs {
 }
 
 export function sourceWords(t: TriggerRow): string {
+  if (t.kind === 'once' && t.declared) return `once — a reminder${t.nextAt ? `, ${new Date(t.nextAt).toLocaleString()}` : ''} (${t.declared.tz}) — yours, from "${t.declared.saidAs.slice(0, 80)}${t.declared.saidAs.length > 80 ? '…' : ''}"; gone after it fires`;
   if (t.declared) return `${t.declared.when} (${t.declared.tz}) — yours, from "${t.declared.saidAs.slice(0, 80)}${t.declared.saidAs.length > 80 ? '…' : ''}"`;
   if (t.kind === 'event') return `when ${t.on?.event ?? 'an event'} happens on an endeavor`;
   if (t.kind === 'webhook') return 'when a webhook posts (bearer token admits; it grants nothing)';

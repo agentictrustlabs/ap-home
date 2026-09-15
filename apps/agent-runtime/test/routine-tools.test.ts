@@ -39,3 +39,12 @@ describe('routines from a sentence (spec 402 W3)', () => {
     expect((st.vault.get(`${ALICE.toLowerCase()}:routines.data`) as { entries: unknown[] }).entries).toHaveLength(0);
   });
 });
+
+describe('a reminder compiles (spec 403 W1)', () => {
+  it('"remind me …" and a tell-me with a one-shot clock compile; a question does not', () => {
+    expect(compiledRoutine('remind me tomorrow at 3 to call the pastor')?.rationale).toMatch(/fires once/);
+    expect(compiledRoutine('in 20 minutes tell me to check the oven')?.steps[0]!.toolId).toBe(ROUTINE_DECLARE);
+    expect(compiledRoutine('tell me what is on my calendar')).toBeNull();
+    expect(compiledRoutine('what do I have tomorrow')).toBeNull();
+  });
+});

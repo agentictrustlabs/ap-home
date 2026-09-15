@@ -50,6 +50,8 @@ import { MAIL_DRIVE_TOOLS, MAIL_DRIVE_ACTS, mailDriveInvoker } from './connector
 import { MEMORY_TOOLS, MEMORY_ACTS, MEMORY_LIST_TOOL, MEMORY_REMEMBER, memoryFactsInvoker, memoryProposalFor, connectorMemoryProposal } from './memory-facts-tools.js';
 import { ROUTINE_TOOLS, ROUTINE_ACTS, ROUTINE_LIST, routineInvoker, compiledRoutine } from './routine-tools.js';
 import { WEB_TOOLS, webReadInvoker } from './web-read.js';
+import { WEB_SEARCH_TOOLS, webSearchInvoker } from './web-search.js';
+import { PREFERENCES_TOOLS, PREFERENCES_ACTS, PREFERENCES_GET, preferencesInvoker } from './preferences-tools.js';
 import type { TriggerScheduleV1 } from './triggers.js';
 import { factsForPrompt, factsOf, type RememberedFactsV1 } from '@agenticprimitives/context';
 import { CONTACT_INVITE_TOOL, CONTACT_LIST_TOOL, CONTACT_REMOVE_TOOL, contactInviteInvoker, contactListInvoker, contactRemoveInvoker, type ContactDeps } from './contacts.js';
@@ -333,6 +335,8 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   ...MEMORY_TOOLS.filter((t) => MEMORY_ACTS.has(t.id)),
   // Spec 402 W3 — a routine of the person's own, from a sentence: declare / remove, self-acting (her own clock).
   ...ROUTINE_TOOLS.filter((t) => ROUTINE_ACTS.has(t.id)),
+  // Spec 403 W2/W4 — her preferences (how her agent answers and reaches her), self-acting.
+  ...PREFERENCES_TOOLS.filter((t) => PREFERENCES_ACTS.has(t.id)),
   {
     id: 'treasury.payment.execute',
     verbs: ['send', 'pay', 'transfer', 'wire'],
@@ -2033,6 +2037,8 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (toolId === ACCESS_AUDIT_CAPABILITY) return accessAuditInvoker(deps, person)(toolId, args, ctx);
     // Spec 400 W3/W4 — GitHub as a connector: reads under the holder's connector, acts under the holder's mandate.
     if (WEB_TOOLS.some((t) => t.id === toolId)) return webReadInvoker()(toolId, args, ctx);
+    if (WEB_SEARCH_TOOLS.some((t) => t.id === toolId)) return webSearchInvoker(env as never)(toolId, args, ctx);
+    if (PREFERENCES_TOOLS.some((t) => t.id === toolId)) return preferencesInvoker({ ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}) }, person, addressee)(toolId, args, ctx);
     if (MAIL_DRIVE_TOOLS.some((t) => t.id === toolId)) return mailDriveInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (CALENDAR_TOOLS.some((t) => t.id === toolId)) return calendarInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (GITHUB_TOOLS.some((t) => t.id === toolId)) return githubInvoker({ env: env as unknown as Record<string, unknown>, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
@@ -3976,6 +3982,8 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'calendar.event.create': ['signature'],           // the mandate — the holder's calendar connector acts (spec 400 W4)
   'gmail.draft.create': ['signature'],              // the mandate — a draft in the holder's mail (spec 402 W2)
   'gmail.message.send': ['signature'],              // the mandate — mail that LEAVES as the holder is the holder acting (spec 402 W5)
+  'calendar.event.delete': ['signature'],           // the mandate — the undo is an act on her calendar too (spec 403 W5)
+  'gmail.draft.delete': ['signature'],
   'resolution.invitation.request': ['signature'],   // the mandate — asking is an act of yours too
   'treasury.primary.declare': ['signature'],        // the mandate — a public statement of yours
   'access.grant.revoke': ['signature'],             // the mandate — taking authority back is an act too
@@ -4601,10 +4609,13 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...MAIL_DRIVE_TOOLS.filter((t) => !MAIL_DRIVE_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     // Spec 402 W5a — a public page read as evidence, wherever the playbook carries the contract.
     ...WEB_TOOLS.flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
+    // Spec 403 W3 — a web search as evidence, wherever the playbook carries the contract.
+    ...WEB_SEARCH_TOOLS.flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     // The person's own reads, under their CONTRACTS when the playbook carries them (the result app a contract names
     // rides on the merged tool; spec 402 W4) — the built-in spec otherwise.
     ...(deps.readSubjectRecord ? [PROFILE_READ_TOOL, HOUSEHOLD_READ_TOOL, MEMORY_LIST_TOOL].map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
     ...(deps.listTriggers ? ROUTINE_TOOLS.filter((t) => t.id === ROUTINE_LIST).map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
+    ...(deps.readSubjectRecord ? PREFERENCES_TOOLS.filter((t) => t.id === PREFERENCES_GET).map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
     UNSUPPORTED_TOOL,
   ];
   const harnessLocal = harnessInvoker(deps, env, presentedList, input.mcpInvoke, input.person, input.session, input.surface, input.addressee, playbook);
