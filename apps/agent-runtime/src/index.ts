@@ -3743,7 +3743,7 @@ app.post('/harness/ask', async (c) => {
     });
     if (structuredRoutes.length) trace.route = { ...(trace.route ?? { policy: 'first' as const }), structured: structuredRoutes };
     const reply = await askReplyFor(c.env as unknown as HarnessEnv, {
-      ...(memory && memory.entries.length ? { memory } : {}),
+      ...(memory ? { memory } : {}),
       intent, result, addressee, composerFor: (need: RouteNeed) => selectComposerRouted(c.env, { ...(provider ? { provider } : {}), need }), deps: askDeps, interactionFor, plannerTrace: trace, tools: offeredTools,
       ...(body.plan ?? stored?.plan ? { suppliedPlan: true } : {}),
       ...(body.surface ? { surface: body.surface } : {}),

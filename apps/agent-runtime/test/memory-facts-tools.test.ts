@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { memoryFactsInvoker, MEMORY_REMEMBER, MEMORY_LIST, MEMORY_FORGET } from '../src/memory-facts-tools.js';
+import { memoryFactsInvoker, memoryProposalFor, MEMORY_REMEMBER, MEMORY_LIST, MEMORY_FORGET } from '../src/memory-facts-tools.js';
 
 const ALICE = '0x' + 'a'.repeat(40);
 const store = () => { const m = new Map<string, unknown>(); return { readSubjectRecord: async (s: string, k: string) => m.get(`${s}:${k}`) ?? null, writeSubjectRecord: async (s: string, k: string, r: unknown) => { m.set(`${s}:${k}`, r); return { ok: true }; }, m }; };
@@ -31,5 +31,19 @@ describe('memory that follows the person (spec 402 W1)', () => {
     await expect(memoryFactsInvoker(store(), undefined)(MEMORY_LIST, {}, ctx('x'))).rejects.toThrow(/signed-in person/);
     await expect(memoryFactsInvoker({}, ALICE)(MEMORY_LIST, {}, ctx('x'))).rejects.toThrow(/private tier/);
     await expect(memoryFactsInvoker(store(), ALICE)(MEMORY_REMEMBER, { fact: 'x' }, ctx('x'))).rejects.toThrow(/few words/);
+  });
+});
+
+describe('a memory proposed from the conversation (spec 402 W1b)', () => {
+  it('a first-person durable statement proposes; a question, a request, a known fact do not', () => {
+    expect(memoryProposalFor("I lead the Thursday circle in Greeley, what's on my calendar?", [])).toBeNull(); // a question
+    const p = memoryProposalFor('I lead the Thursday circle in Greeley. Who else is in it?', []);
+    expect(p?.args.fact).toBe('I lead the Thursday circle in Greeley'); expect(p?.words).toBe('remember that I lead the Thursday circle in Greeley');
+    expect(memoryProposalFor('my daughter is Ana and she starts school Monday', [])?.args.fact).toBe('my daughter is Ana and she starts school Monday');
+    expect(memoryProposalFor('pay bob 10 usdc', [])).toBeNull();
+    expect(memoryProposalFor('remember that I prefer mornings', [])).toBeNull();
+    expect(memoryProposalFor('every Monday at 8 tell me the news', [])).toBeNull();
+    expect(memoryProposalFor('I prefer morning meetings', [{ fact: 'I prefer morning meetings' }])).toBeNull();
+    expect(memoryProposalFor('thanks, that helps', [])).toBeNull();
   });
 });

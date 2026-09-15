@@ -1077,6 +1077,15 @@ function ReplyView({ reply, realm, addressee, onNext }: { reply: AskReply; realm
       <div>
         <span>{reply.text}</span>
         {app}
+        {/* Spec 402 W1b — a memory PROPOSED from what she said: one click keeps it; nothing is written until then. */}
+        {reply.next && (
+          <div style={{ marginTop: 6 }} data-testid="ask-next">
+            <button type="button" className="btn" style={{ fontSize: 12, padding: '4px 10px', minHeight: 0 }} onClick={() => onNext?.(reply.next!)}>
+              {reply.next.words.charAt(0).toUpperCase() + reply.next.words.slice(1)} →
+            </button>
+            {reply.next.why && <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{reply.next.why}</div>}
+          </div>
+        )}
         {consults.length > 0 && (
           <ul style={{ margin: '6px 0 0', paddingLeft: 16, fontSize: 11.5 }} data-testid="ask-consults">
             {consults.map((c, i) => <li key={i} className="muted">{c.interpretation}</li>)}

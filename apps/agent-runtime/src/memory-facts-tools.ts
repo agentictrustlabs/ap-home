@@ -90,3 +90,25 @@ export function memoryFactsInvoker(deps: MemoryFactsDeps, person: string | undef
 }
 
 export type { RememberedFactsV1 };
+
+// ── A MEMORY PROPOSED FROM THE CONVERSATION — spec 402 W1b ────────────────────────────────────────────
+// ChatGPT learns a fact silently from what you say; ours PROPOSES. When the person, at her own agent, states something
+// durable about herself in passing — "I lead the Thursday circle", "my daughter is Ana", "I prefer mornings" — the reply
+// carries a one-click `next` ("remember that …") and nothing is written until she clicks. Deterministic: a closed set of
+// first-person markers, no model; a question, a request, or a fact already remembered proposes nothing.
+const FACT_MARKERS = /\b(i am (?:a|an|the|not|from|in|on|at)\b|i'm (?:a|an|the|not|from|in|on|at|allergic)\b|i prefer\b|i (?:really )?(?:like|love|hate|dislike|enjoy)\b|i don't (?:like|eat|drink)\b|i lead\b|i run\b|i teach\b|i serve\b|i work (?:at|for|as|in)\b|i live (?:in|at|on)\b|i go by\b|call me\b|my (?:daughter|son|kids?|children|wife|husband|spouse|partner|mother|mom|father|dad|parents|sister|brother|pastor|church|team|circle|small group|birthday|anniversary|allergy|allergies|doctor|dentist|car|dog|cat)\b|i (?:was born|grew up|got married|retired)\b|i usually\b|i always\b|i never\b)/i;
+const NOT_A_FACT = /^(what|which|when|where|who|why|how|do|does|did|is|are|can|could|would|should|will|remember|forget|tell|show|find|send|pay|invite|add|remove|draft|schedule|every|each|when(?:ever)?)\b|\?\s*$/i;
+
+export function memoryProposalFor(goal: string, remembered: ReadonlyArray<{ fact: string }>): { capability: typeof MEMORY_REMEMBER; args: { fact: string }; words: string; why: string } | null {
+  const text = goal.trim().replace(/\s+/g, ' ');
+  if (text.length < 8 || text.length > 400) return null;
+  // the clause that carries the marker — split on sentence ends and semicolons; a clause that is a question or a
+  // request ("what's on my calendar?", "pay bob") proposes nothing, whatever else the sentence says
+  const clause = text.split(/(?<=[.!;?])\s+/).find((c) => FACT_MARKERS.test(c) && !NOT_A_FACT.test(c.trim())) ?? '';
+  if (!clause) return null;
+  const fact = clause.replace(/^(?:also|and|by the way|btw|fyi|oh|well|so),?\s+/i, '').replace(/[.!;]+$/, '').trim();
+  if (fact.length < 8) return null;
+  const norm = (x: string) => x.toLowerCase().replace(/\s+/g, ' ').replace(/[.!]+$/, '').trim();
+  if (remembered.some((r) => norm(r.fact) === norm(fact) || norm(r.fact).includes(norm(fact)) || norm(fact).includes(norm(r.fact)))) return null;
+  return { capability: MEMORY_REMEMBER, args: { fact }, words: `remember that ${fact.replace(/^i /i, 'I ')}`, why: 'you said something about yourself worth keeping — kept only if you say so, in your own vault, forgettable' };
+}

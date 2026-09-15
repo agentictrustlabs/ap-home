@@ -76,6 +76,8 @@ export type AskReplyVariant =
       results?: Array<{ toolId: string; result: unknown }>;
       /** Spec 402 W4 — APPS INSIDE THE ASK: the answered read's RESULT component (from its contract) and which step it is over. */
       interaction?: { result?: string; navigationTarget?: string; toolId?: string };
+      /** Spec 402 W1b — a memory the agent PROPOSES from what the person said about herself; one click, nothing written until then. */
+      next?: { capability: string; args: Record<string, unknown>; words: string; why?: string };
       /** HOW IT KNOWS. When a step wrote a query to answer, the query comes back with the answer —
        *  otherwise "the directory does not list any organizations" and "I searched names for the word
        *  'organizations' and matched none" are the same sentence to a reader, and only one of them is

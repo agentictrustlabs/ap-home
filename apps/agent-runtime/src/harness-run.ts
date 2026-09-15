@@ -47,7 +47,7 @@ import { WORK_SEARCH_TOOL, workSearchInvoker } from './work-search-tool.js';
 import { GITHUB_TOOLS, GITHUB_ACTS, githubInvoker } from './connectors/github-tools.js';
 import { CALENDAR_TOOLS, CALENDAR_ACTS, calendarInvoker } from './connectors/calendar-tools.js';
 import { MAIL_DRIVE_TOOLS, MAIL_DRIVE_ACTS, mailDriveInvoker } from './connectors/mail-drive-tools.js';
-import { MEMORY_TOOLS, MEMORY_ACTS, MEMORY_LIST_TOOL, memoryFactsInvoker } from './memory-facts-tools.js';
+import { MEMORY_TOOLS, MEMORY_ACTS, MEMORY_LIST_TOOL, MEMORY_REMEMBER, memoryFactsInvoker, memoryProposalFor } from './memory-facts-tools.js';
 import { ROUTINE_TOOLS, ROUTINE_ACTS, ROUTINE_LIST, routineInvoker, compiledRoutine } from './routine-tools.js';
 import type { TriggerScheduleV1 } from './triggers.js';
 import { factsForPrompt, factsOf, type RememberedFactsV1 } from '@agenticprimitives/context';
@@ -2421,6 +2421,9 @@ export type AskReplyVariant =
        *  surface can render that component over the step's result beside the sentence. The app's registry resolves the
        *  name; an unknown name renders nothing and the sentence stands. `toolId` says which result it is over. */
       interaction?: { result?: string; navigationTarget?: string; toolId?: string };
+      /** Spec 402 W1b — WHAT MAY FOLLOW an answer: a memory the agent PROPOSES from what the person said about herself
+       *  ("remember that I lead the Thursday circle") — one click, nothing written until she clicks. */
+      next?: NextActV1;
       /** Spec 366 — WHICH STEPS WERE ANSWERED BY ANOTHER AGENT, and how: the subject's agent, how it was
        *  reached, its run and its receipts. Evidence a surface can show and a record can cite (M8). */
       routed?: RoutedStepV1[];
@@ -3859,7 +3862,10 @@ async function askReplyForInner(env: HarnessEnv, input: {
       }
       return undefined;
     })();
-    const withEvidence = (text: string): AskReply => withProv({ kind: 'answer', runRef: r.runRef, text, ...(readApp ? { interaction: readApp } : {}), ...(evidence.length ? { evidence } : {}), ...(results.length ? { results } : {}), ...(routed.length ? { routed } : {}) });
+    // Spec 402 W1b — a memory PROPOSED from the conversation: only at her own agent (memory rode in), only when no memory
+    // act ran this turn, only from a closed set of first-person markers; the click is the write.
+    const memoryNext = input.memory !== undefined && !r.steps.some((o) => o.step.toolId === MEMORY_REMEMBER) ? memoryProposalFor(input.intent.goal, factsOf(input.memory).entries) : null;
+    const withEvidence = (text: string): AskReply => withProv({ kind: 'answer', runRef: r.runRef, text, ...(readApp ? { interaction: readApp } : {}), ...(memoryNext ? { next: memoryNext } : {}), ...(evidence.length ? { evidence } : {}), ...(results.length ? { results } : {}), ...(routed.length ? { routed } : {}) });
     // RENDERED, NOT COMPOSED (spec 371 §2). When every read that ran carries the author's `answer`
     // template and its result has the fields, the reply is the template over the result — the person's
     // unit, no interpretation, no model. The composer is for reads that declare no sentence.
