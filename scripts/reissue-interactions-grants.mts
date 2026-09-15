@@ -12,9 +12,16 @@
  * A real person re-issues by clicking through their Home. This is the DEMO-ESTATE equivalent: the Home
  * holds these personas' custodian keys, so the same signature can be made server-side.
  */
-import { buildInteractionsGrantForScript } from '../apps/home/src/lib/delegation';
+import { buildInteractionsGrantForScript } from '../apps/demo-sso-next/src/lib/delegation';
 
 const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
+// ANOTHER ESTATE'S HOME NEEDS ITS OWN VAULT ID AND SERVICE AGENT — the grant names the vault server and the delegate,
+// and the Home's defaults are Faithnet's. Run against ap-home's estate without these, every persona's grant named
+// `demo-mcp` and every record read there was refused `record_scope_denied` (2026-09-15).
+if (process.env.HOME_URL && !/faithnet\.me$/.test(new URL(HOME).host) && (!process.env.NEXT_PUBLIC_VAULT_SERVER_ID || !process.env.NEXT_PUBLIC_INTERACTIONS_SERVICE_SA)) {
+  console.error(`✗ ${HOME} is not Faithnet — set NEXT_PUBLIC_VAULT_SERVER_ID and NEXT_PUBLIC_INTERACTIONS_SERVICE_SA to that estate's (ap-home: home-vault, apps/agent-runtime/wrangler.toml INTERACTIONS_SERVICE_SA)`);
+  process.exit(2);
+}
 const HANDLES = process.argv.slice(2).length ? process.argv.slice(2)
   : ['alice', 'bob', 'carol', 'dave', 'elena', 'nathan', 'david', 'jpreg', 'imbreg'];
 
