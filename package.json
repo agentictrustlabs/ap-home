@@ -2,7 +2,7 @@
   "name": "ap-home",
   "version": "0.0.0",
   "private": true,
-  "description": "ap-home — Home: the person's / organization's agent and the Home that governs it (spec 234/310/348/398), on published @agenticprimitives/* packages (ADR-0063, spec 399 W2).",
+  "description": "ap-home \u2014 Home: the person's / organization's agent and the Home that governs it (spec 234/310/348/398), on published @agenticprimitives/* packages (ADR-0063, spec 399 W2).",
   "type": "module",
   "engines": {
     "node": ">=22.18",
@@ -47,7 +47,8 @@
     "@agenticprimitives/key-custody": "1.0.0-alpha.25",
     "@agenticprimitives/orchestration": "0.0.0-alpha.4",
     "@agenticprimitives/registry-kit": "0.0.0-alpha.13",
-    "viem": "2.52.2"
+    "viem": "2.52.2",
+    "@agenticprimitives/runtime-member": "0.0.0-alpha.2"
   },
   "pnpm": {
     "overrides": {
