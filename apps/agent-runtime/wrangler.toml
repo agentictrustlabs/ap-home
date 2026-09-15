@@ -232,10 +232,10 @@ instance_type = "basic"
 # by this same Worker, which POSTs /wake to the member's Container (or URL). No content, no authority in a message.
 [[env.production.queues.producers]]
 binding = "RUNTIME_WAKE"
-queue = "runtime-wake-faithnet"
+queue = "runtime-wake-home-runtime"
 
 [[env.production.queues.consumers]]
-queue = "runtime-wake-faithnet"
+queue = "runtime-wake-home-runtime"
 max_batch_size = 10
 max_batch_timeout = 2
 max_retries = 2
