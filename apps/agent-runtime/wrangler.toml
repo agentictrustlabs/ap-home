@@ -429,9 +429,10 @@ CHAIN_ID = "34348"
 # OPENAI_API_KEY is a secret (`wrangler secret put`), never a --var; ORCHESTRATION_OPENAI_MODEL / _PROMPT_BUDGET / _TPM are optional.
 # 2026-09-10 (later): the OpenAI account has NO CREDITS (HTTP 429 credit_balance_exhausted on the first routed planner call) and the
 # route surfaces that, never skips it (ADR-0013) — so openai is OFF the offer until credits are added. Flip to "groq,openai,anthropic".
-# 2026-09-15 — xAI's Grok leads (user's ask): unbudgeted, so the route stops at it for every call; groq and anthropic stay
-# offered and reachable by name. XAI_API_KEY is a secret (`wrangler secret put XAI_API_KEY --env faithnet`).
-ORCHESTRATION_LLM = "xai,groq,anthropic"
+# 2026-09-15 — xAI's Grok is the ONLY offered model (user's decision): a Grok failure is an error the person sees, never a
+# quiet hand-off to another provider (ADR-0013). Re-offer groq/anthropic by listing them again ("xai,groq,anthropic").
+# XAI_API_KEY is a secret (`wrangler secret put XAI_API_KEY --env faithnet`).
+ORCHESTRATION_LLM = "xai"
 # Spec 388 — the cheapest OFFERED provider that carries each call, decided before the request from the prompt estimate, the
 # per-request budget and this minute's spend; recorded on the trace with its reason. A route, never a fallback (ADR-0013).
 ORCHESTRATION_ROUTE = "budget"
