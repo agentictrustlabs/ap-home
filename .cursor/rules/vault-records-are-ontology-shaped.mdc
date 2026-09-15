@@ -1,0 +1,90 @@
+---
+description: Vault records are ontology-shaped: record keys bind to T-box classes by IRI
+alwaysApply: true
+---
+
+# Vault records are ontology-shaped, so a question can read them without interpreting them
+
+**Canonical rule — all agents.** Spec: [356 §2.1](../../../specs/356-ontology-grounded-vault-questions.md).
+Gate: `pnpm check:ontology-bindings`. Ledger: `npx tsx scripts/vault-ontology-coverage.mts`.
+Sibling rule: [ontology-drives-behavior](ontology-drives-behavior.md) — that one is about BEHAVIOUR;
+this one is about the DATA the behaviour reads.
+
+## The rule
+
+**A record an agent stores should be readable BY the ontology, not interpreted INTO it.** Two halves:
+
+1. **The KEY binds to a class.** `org.membership:member:<sa>` IS an `aporg:OrganizationMembership`.
+   Declared in `packages/ontology/src/vault-records.ts`, checked against the T-box at build.
+2. **The FIELDS are the properties.** `memberAgent`, `organizationAgent`, `hasRoleAssignment` — the same
+   names the T-box uses, declared in the binding's `properties` map and checked the same way.
+
+When both hold, "who are the members" is a lookup. When they do not, something has to know that `orgAgent`
+means the member here and the organization there — and that something is a person reading code, or a model
+guessing. Both were happening.
+
+## Entity or index — say which
+
+A binding carries a `role`:
+
+- `entity` (default) — a THING the ontology describes. A question may be answered from it.
+- `index` — a projection over entities: an index, a cursor, a name map, an event log. **Never askable.**
+  A question answered from an index is a question answered from a cache, and the cache is what goes
+  stale (ADR-0055).
+
+A record type in neither list is UNCLASSIFIED — a gap, not a decision. The ledger prints those.
+
+## What this prevents, concretely
+
+- **Membership existed in the T-box and nowhere in a vault** (finding ORG-MEM-1). Invitations were being
+  read as membership, which the T-box explicitly forbids — an invitation is an *enrollment instrument*,
+  and satisfying one creates no membership. The only complete roster was a Home KV cache of a record
+  nothing ever wrote.
+- **A reader guessed a shape and was believed.** `directory.data` is an array; the roster reader asked for
+  `doc.listings` and answered "0 members" for every organization, forever. Zero is plausible.
+- **Bindings invented vocabulary.** `apcoord:EndeavorEvent` and `aps:` (for `skill#`) were both wrong and
+  both shipped, because the gate did not read record bindings until 2026-09-05.
+
+## Rules
+
+- **Never invent a class to make a binding compile.** Add the term to the T-box with the comment saying
+  what it means and what it is NOT, or bind to the term that already says it. If neither fits, the record
+  stays unclassified and appears in the ledger — that is the honest state.
+- **One parser per record shape.** A shape belongs in one module every reader shares
+  (`directory-rows.ts`, `relationship-rows.ts`), because a reader that guesses will guess plausibly.
+- **A binding narrows what a question can MEAN; it never widens what an asker may SEE.** Authority stays
+  the delegation, per record, where it always was (spec 277, ADR-0041).
+- **Write the record where the agent that must answer for it can read it.** Membership belongs in the
+  organization's own vault — not in a Home cache, and not only in the member's.
+
+## The anchor is `~/skills/ontology/agentic-trust`
+
+**That ontology is the anchor, and it is kept current.** It is the browsable, cross-domain T-box behind
+GraphDB (`skills-contexts`, served at skills.faithnet.io) that faith, family-office, commerce and the
+rest align to. Its own header states the relationship — *"stay grounded in, never fork"* — and it cites
+this repo's namespaces by `rdfs:seeAlso` wherever it restates one of our ideas in its own shape.
+
+**A term that says how the DOMAIN is shaped belongs in both.** Add it here (bound by IRI, checked by
+`check:ontology-bindings`), then reflect it there in that repo's shape with `rdfs:seeAlso` back to our
+IRI, cluster it in `clusters.ttl`, and push:
+
+```bash
+npx tsx scripts/check-skills-ontology-sync.ts          # what is here and not there
+cd ~/skills && GRAPHDB_USER=… GRAPHDB_PASSWORD=… python3 scripts/sync_ontology.py push --direct
+```
+
+**Where the line runs.** Not "domain vs implementation" — that reading is too coarse and got the
+registry wrong. **A value two parties must AGREE ON belongs in the anchor; one only our own code passes
+to itself does not.** A registry's binding-proof hash, card digest and lifecycle-log chaining look like
+implementation and are nothing of the sort: a registry is a STANDARDS SURFACE (spec 279 / ADR-0038, the
+ARD and ACP work), and an implementor of the standard has to agree with us on exactly those terms. As of
+2026-09-05 all 946 terms are reflected. The judgement is a person's;
+the report exists to make the list short enough to make it. A concept only the implementation knows is a
+concept the anchor cannot cluster, show, or reason over beside the domain ontologies, which is most of
+the reason the anchor exists.
+
+## Where the gaps are
+
+`npx tsx scripts/vault-ontology-coverage.mts alice nathan bob` surveys the live estate and prints every
+record family, bound or not. It is a report rather than a build gate: it needs real vaults. Run it after
+adding a record type, and bind what it lists.

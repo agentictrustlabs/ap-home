@@ -1,0 +1,89 @@
+---
+description: Service agents sign with a DELEGATE key under a ceremony-minted wire — never custody the identity they act as (ADR-0019)
+alwaysApply: true
+---
+
+# Service-agent A2A signing: the key is a DELEGATE, never the identity
+
+**Applies to every service that signs A2A messages as an agent identity** — in this repo and in every
+derived repo (`verifiable-content-demo`, `skills`, and any future one).
+
+## One sentence
+
+A relying service NEVER custodies the agent identity it acts as: the identity is custodied outside
+the service, a **ceremony** mints a narrow **wire** (`identity SA → the service's KMS session key`),
+and the service signs with the session key and presents the wire — so possession of the service's
+credentials can never be possession of the identity.
+→ ADR-0019 · [spec 329 §3.1](../../../specs/329-consultability-and-routing.md) · `apps/demo-a2a/src/session-wire.ts`
+
+## Why this keeps getting re-derived (read this part)
+
+The existing rail — `pnpm check:no-app-private-keys` — stops at *"use KMS, don't hold a raw key."*
+**That check passes for the wrong architecture.** An app can use KMS correctly, hold no raw key, and
+still be the custodian: if the KMS key IS the identity's key, whoever holds the service-account
+credential can sign anything as that identity, forever, with nothing to revoke.
+
+"No held key" is not the property. **"Not the custodian" is the property.** They are not the same
+sentence, and every time only the first one is written down, the second is re-derived — usually
+wrongly, and usually with passing tests.
+
+## The pattern
+
+1. **The identity is custodied outside the service.** A named account (`<name>.impact`) whose
+   custodian is a person or org, reachable through a Home ceremony. Not the relying app.
+2. **A ceremony mints the wire.** The custodian signs `identity SA → the service's KMS session key`:
+   `allowedMethods` = **exactly one** skill selector (never `A2A_ANY_SKILL`), `allowedTargets` pinned,
+   timestamp-bounded. The service stores the wire; it is a credential, not a secret.
+3. **The service signs with the session key and wraps.** `wrapSessionSignature(wire, sig)` →
+   the `0x51` session-wrapped form. The KMS key signs each digest on demand; no raw key at rest.
+4. **The gate verifies per message**, fail-closed: delegator === the claimed signer, wire live,
+   one selector matching the requested skill, ECDSA recovers to the wire's delegate, wire
+   ERC-1271-valid against the delegator, wire **unrevoked on-chain**.
+
+## What this buys, stated as the difference
+
+| | key IS the identity | key is a DELEGATE (this rule) |
+| --- | --- | --- |
+| custody | the relying service | the named account's custodian, outside it |
+| compromise | you are that agent, for anything, forever | a delegate, only where a wire says so |
+| revocation | re-mint the identity + every grant naming it | the custodian revokes one wire |
+| audit | "the service signed" | "this session key signed under this wire" |
+
+## What it does NOT buy — say this out loud
+
+**The GCP service-account secret does not disappear.** `demo-bible-mcp` and `impact-a2a` both carry
+`GCP_SERVICE_ACCOUNT_JSON` as a wrangler secret, and that is correct. The secret still exists; what
+changes is what it controls — a revocable delegate instead of an identity. Anyone who expects this
+pattern to remove the secret has misread it and will "fix" it back the wrong way.
+
+## Two implementations to copy, not reinvent
+
+- **`verifiable-content-demo`, the content-signer ceremony.** The issuer SA is custodied by its owner;
+  the ceremony signs a leaf `issuer SA → KMS key address`; the corpus service stores it and signs with
+  the key, and a verifier "roots trust in the SA (ERC-1271) while the signer is the HSM key"
+  (`apps/demo-bible-a2a/src/index.ts`).
+- **`demo-a2a`, the session wire.** An org's DO holds no org key; `signAsOrg` signs with the
+  interactions-session KMS key and wraps with the steward-minted wire (`src/session-wire.ts`).
+
+`session-wire.ts` is **skill-agnostic** — pass the skill to pin, never hardcode one. It was
+consult-only for a while, and that is exactly what forced the next service toward custodying its own
+identity because "there was no other path".
+
+## Rules
+
+1. **Never configure a KMS key as the service's own agent identity.** If a service signs as
+   `X_AGENT_SA`, the key it signs with must be a delegate of `X_AGENT_SA`, not `X_AGENT_SA` itself.
+2. **Signing an A2A message as an identity requires a wire.** `hashA2aMessage(...)` + a bare signer,
+   with no wire presented, is the violation. Reviewers: grep for that pair.
+3. **One selector per wire, never `A2A_ANY_SKILL`.** A wire is per-rail. Pin the skill the request
+   names wherever the request names one.
+4. **The wire is stored, the identity is not.** A service may hold wires (they are revocable and
+   narrow). It may never hold anything that grants the identity itself.
+5. **No new signing path without naming its custodian.** If you cannot say who custodies the identity
+   and how they revoke, the design is not finished.
+
+## Before writing any of it
+
+`ls ~/agenticprimitives/packages` and grep the two implementations above. Both problems — the
+ceremony and the wrapped signature — are solved; the cost of checking is two greps, and the cost of
+skipping it has twice been an identity that had to be withdrawn.

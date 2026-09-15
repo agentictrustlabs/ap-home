@@ -1,0 +1,40 @@
+# The env layout every app in this repository follows (spec 399 §5.3). Copy into apps/<app>/wrangler.toml.
+#
+#   [env.env-a]         a LIVE environment Ring 0 deploys until the cut — names, bindings, DO classes and migration
+#   [env.env-b]         tags are copied VERBATIM from the Ring-0 config and never renamed (a rename orphans DO storage)
+#   [env.env-a-split]   the SHADOW environment this repository deploys during the parallel run: fresh DOs, its own
+#                       secrets, its own hostnames; nightly live gates run against it until seven nights are green
+#
+# Secrets are never in this file: scripts/set-cloudflare-secrets.sh sets them per env from the operator's shell.
+name = "<worker-name>"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+[vars]
+ALLOWED_ORIGINS = ""
+
+[env.env-a]
+name = "<worker-name>"
+routes = [{ pattern = "<live-host-a>/*", custom_domain = true }]
+[env.env-a.vars]
+ALLOWED_ORIGINS = ""
+
+[env.env-b]
+name = "<worker-name>-b"
+routes = [{ pattern = "<live-host-b>/*", custom_domain = true }]
+[env.env-b.vars]
+ALLOWED_ORIGINS = ""
+
+[env.env-a-split]
+name = "<worker-name>-split"
+routes = [{ pattern = "<shadow-host>/*", custom_domain = true }]
+[env.env-a-split.vars]
+ALLOWED_ORIGINS = ""
+
+# Durable Objects: the SAME class names and migration tags as the live config — copied, never edited.
+# [[durable_objects.bindings]]
+# name = "<BINDING>"
+# class_name = "<ClassName>"
+# [[migrations]]
+# tag = "<tag-as-in-ring-0>"
+# new_sqlite_classes = ["<ClassName>"]

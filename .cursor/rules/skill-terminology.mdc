@@ -1,0 +1,83 @@
+---
+description: Capability as canonical noun; qualify every standards-specific "skill" (ADR-0050, ADR-0051)
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# Capability terminology (ADR-0050 + ADR-0051)
+
+**Capability** is the stable semantic noun. Bare **skill** is ambiguous — always qualify.
+
+## One sentence
+
+OASF skills **classify** capabilities; A2A AgentSkills **advertise** capabilities; Agent Skill packages **implement** procedural knowledge for capabilities.
+
+## Layer map
+
+| Layer | Term | Standards object |
+| --- | --- | --- |
+| Canonical | **CapabilityDefinition** | AP-owned semantic outcome |
+| Classification | **OASF skill taxon** | OASF record taxonomy |
+| Advertisement | **A2A AgentSkill** / **A2A advertised capability** | Agent Card `skills[]` |
+| Playbook | **Agent Skill package** / **SKILL.md package** | Agent Skills standard |
+| Operation | **MCP tool** | Typed executable invocation |
+| Credential | **capability claim** / **SkillClaimCredential** | Private VC (spec 251) |
+
+## Packages
+
+| Package | Meaning |
+| --- | --- |
+| `@agenticprimitives/capability-claims` | Capability claim VCs + vocabulary types |
+| `@agenticprimitives/agent-skills` | **Deprecated alias** — re-exports `capability-claims` |
+
+`@agenticprimitives/capability-claims` is **not** Agent Skill packages (`SKILL.md`).
+
+## Ontology
+
+| Namespace | Canonical | Deprecated alias |
+| --- | --- | --- |
+| `aps:` | `CapabilityDefinition`, `CapabilityGrounding` | `AgentSkillDefinition`, `SkillGrounding` |
+| `apguide:` | `AgentSkillPackage` | `AgentGuidanceSkill` |
+
+## Style rule
+
+Outside code implementing a particular standard's types, **skill must have a qualifier**.
+
+| Avoid | Use |
+| --- | --- |
+| register the skill | register the **OASF skill taxon** / publish the **A2A AgentSkill** |
+| load the skill | load the **Agent Skill package** |
+| verify the skill | verify the **capability claim credential** |
+
+## UI
+
+Prefer **Capabilities** with sub-sections: advertised, classifications, runtime playbooks, operations, credentials.
+
+**Source:** ADR-0051, vocabulary-map.md, spec 325 §2.2 (see agent-rules/README.md).
+
+## The advertisement layer is CAPABILITY (ADR-0051, 2026-09-01)
+
+Three names. One meaning each. They are not interchangeable and the collision between them is the whole
+reason this rule exists.
+
+| Name | What it is | Where the word `skills` is allowed |
+| --- | --- | --- |
+| **Capability** (`AdvertisedCapabilityV1`) | What the agent CAN DO. The word in the profile, the vault, on chain, in discovery, in every UI. | — |
+| **Protocol features** (`ProtocolFeatureSetV1`) | A2A's streaming / push / extensions flags. The wire calls this object `capabilities`, which is the collision. | — |
+| **Agent Skill package / playbook** | SKILL.md procedural guidance for a harness. | — |
+
+`skill` without a qualifier means **playbook only**. `skills[]` is A2A's name for capabilities and is
+legitimate in exactly two places: `@agenticprimitives/agent-profile/a2a` (the wire types and the projector
+that writes them) and a raw-JSON inspector showing a steward the literal document. Anywhere else it is a
+defect. Enforced by `pnpm check:capability-vocabulary`.
+
+**The system of record is `profile.capabilities[]`.** The A2A card's `skills[]` and ARD's `capabilities[]`
+are projections of it; the A2A projector is their only writer. On chain the record is `atl:capabilities`
+(ids only — the chain proves WHICH capabilities are claimed, not their prose). `atl:skills` is that same
+rail under its old name: read when the new one is empty, never written. That is a documented migration,
+not a fallback (ADR-0013) — same contract, same owner, same value, only the key moved.
+
+What this replaced, and why it mattered: the card editor had a section titled **Capabilities** holding
+protocol flags, next to one titled **Skills** holding what the agent can do. Backwards twice over, in the
+one screen where a steward decides what the world sees.

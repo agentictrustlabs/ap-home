@@ -1,0 +1,116 @@
+{
+  "$comment": "THE ap-home ESTATE \u2014 the one deployment the product repo makes: Home on faithchain, `[env.production]` in each apps/*/wrangler.toml, DERIVED from Ring 0's [env.faithnet] by scripts/split/derive-ap-home-env.py at extraction (until the cut; hand-maintained after). This is NOT Faithnet: Faithnet (www.faithnet.me, demo-*-faithnet) is Ring 0's deployment of the same apps and is never deployed from ap-home. What is faithnet's here is only the DNS zone (faithnet.io \u2014 the account's; Worker\u2192Worker calls need custom domains, CF error 1042) and the AKCS pilot (the KMS operator's tenant + caller identity, shared with faithnet until the operator binds one for this estate). Ids are not secrets.",
+  "env": "production",
+  "chain": {
+    "id": 34348,
+    "name": "faithchain"
+  },
+  "zone": "faithnet.io",
+  "home": "https://home-rho-orpin.vercel.app",
+  "vaultServerId": "home-vault",
+  "workers": {
+    "agent-runtime": "home-runtime",
+    "vault": "home-vault",
+    "edge": "home-edge",
+    "home-mcp": "home-mcp",
+    "rpc-gateway": "home-rpc"
+  },
+  "hosts": {
+    "agent-runtime": "home-a2a.faithnet.io",
+    "vault": "home-vault.faithnet.io",
+    "edge": "home-edge.faithnet.io",
+    "home-mcp": "home-mcp.faithnet.io",
+    "rpc-gateway": "home-rpc.faithnet.io"
+  },
+  "$comment_storage": "Created by the runbook (docs/runbooks/estate.md \u00a71); the derivation fills these ids in. Never a Ring-0 estate's id \u2014 audit every derived block for one.",
+  "kv": {
+    "rpc-gateway": {
+      "TOKENS": "cb0ffa6d074941e48f50367616843d07"
+    },
+    "agent-runtime": {
+      "BRIDGE_NONCES": "d3bfacf02426456b94c5b494bcc2f3df",
+      "SUBJECT_SA_MAP": "f120a8a915e04ce18d3f5c2036064aa2",
+      "FED_TOKENS": "2acb78971d114775b73173005e812292",
+      "RELEASED_CARDS": "7057ec011345459a9b8c35841c41c64e"
+    }
+  },
+  "d1": {
+    "vault": {
+      "name": "home-vault",
+      "id": "c32c66cb-b8a7-4471-a0cf-0cb7d80a5a5c"
+    }
+  },
+  "$comment_vars": "Vars whose faithnet value names something faithnet OWNS, re-pointed at this estate; everything not listed is copied (chain contracts, AKCS, budgets, model settings). `drop` removes a var the estate has no value for \u2014 email: no zone of its own is onboarded to Email Sending, so the invitation rail is unconfigured (fail-closed) until one is (`EMAIL_FROM` + the send_email binding, or SENDGRID_API_KEY).",
+  "vars": {
+    "agent-runtime": {
+      "VAULT_SERVER_ID": "home-vault",
+      "MCP_URL": "https://home-vault.faithnet.io",
+      "DEMO_EDGE_URL": "https://home-edge.faithnet.io",
+      "BROKER_ISS": "https://home-rho-orpin.vercel.app",
+      "BROKER_JWKS_URL": "https://home-rho-orpin.vercel.app/jwks",
+      "ALLOWED_ORIGINS": "http://localhost:5175,http://127.0.0.1:5175,https://home-rho-orpin.vercel.app",
+      "A2A_PUBLIC_BASE_DOMAIN": "home-a2a.faithnet.io",
+      "AGENT_NAME_PARENTS": "me",
+      "ORCHESTRATION_LLM": "groq,anthropic"
+    },
+    "vault": {
+      "VAULT_SERVER_ID": "home-vault"
+    },
+    "edge": {
+      "EDGE_ALLOWED_ORIGINS": "http://localhost:5175,https://home-rho-orpin.vercel.app"
+    },
+    "home-mcp": {
+      "AGENT_HOST_PATTERN": "https://{label}.home-a2a.faithnet.io",
+      "HOME_ORIGIN": "https://home-rho-orpin.vercel.app",
+      "BROKER_JWKS_URL": "https://home-rho-orpin.vercel.app/jwks",
+      "A2A_ORIGIN": "https://home-a2a.faithnet.io"
+    }
+  },
+  "drop": {
+    "agent-runtime": [
+      "EMAIL_ZONES",
+      "EMAIL_FROM",
+      "EMAIL_FROM_NAME"
+    ]
+  },
+  "dropSections": {
+    "agent-runtime": [
+      "send_email"
+    ]
+  },
+  "$comment_shared": "Stays as faithnet's on purpose: ARD_REGISTRY_ORIGIN / DISCOVERY_MCP (discovery.faithnet.io \u2014 the public KB, world-readable, another product's); AKCS_* (the pilot's tenant; the shared caller identity is the open trust item); INTERACTIONS_SERVICE_SA / HARNESS_AGENT_SA / AKCS_*_KEY_ID (service agents custodied by that caller identity \u2014 they become this estate's own when the operator binds it); PUBLIC_GRAPH_URL (agentkg.io).",
+  "$comment_agent_hosts": "Per-agent hosts (`<label>.home-a2a.faithnet.io` \u2014 A2A_PUBLIC_BASE_DOMAIN on the runtime, AGENT_HOST_PATTERN on home-mcp) answer only once a wildcard DNS record `*.home-a2a.faithnet.io` and a route `*.home-a2a.faithnet.io/*` on home-runtime exist (the shape faithnet.ai has). Until then every agent is reached by its RECORDS through the edge (the rule anyway); only home-mcp's `ap://person/agent-card` resource needs the host.",
+  "$comment_rewrites": "Comment lines in the derived block that told Ring 0's story, retold for this estate (applied per line, first match wins).",
+  "commentRewrites": [
+    [
+      "Bound to the FAITHNET discovery worker on",
+      "Bound to faithnet's discovery Worker on"
+    ],
+    [
+      "purpose: the production one projects Base Sepolia, and answering a faithnet question from another chain's",
+      "purpose: it is the one that indexes faithchain, this estate's chain; answering from another chain's"
+    ],
+    [
+      "demo-a2a",
+      "home-runtime"
+    ],
+    [
+      "demo-mcp",
+      "home-vault"
+    ],
+    [
+      "demo-edge",
+      "home-edge"
+    ]
+  ],
+  "$comment_llm": "The estate holds a Groq key (GROQ_API_KEY secret, 2026-09-12) and an Anthropic key: ORCHESTRATION_LLM names both and ORCHESTRATION_ROUTE=budget picks per call (spec 388). Names ONLY providers whose keys the estate holds (ADR-0013).",
+  "skillsRegistry": "https://skills-a2a-production.richardpedersen3.workers.dev",
+  "definitions": [
+    "agentic-trust/org-steward",
+    "agentic-trust/person-steward",
+    "agentic-trust/coordinator",
+    "agentic-trust/treasury-steward",
+    "agentic-trust/household-steward"
+  ],
+  "$comment_definitions": "Spec 398 \u00a710.3 \u2014 the archetype definitions the product relies on, pinned at extraction (agentic.lock.json#definitions) with every tool's authority shape; `ap upgrade` stops for review when any of it changes at the registry. The registry is ~/skills' skills-a2a (faithnet's deployment of it \u2014 shared with the estate on purpose, like discovery)."
+}

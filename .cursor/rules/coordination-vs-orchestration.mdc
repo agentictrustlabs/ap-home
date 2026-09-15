@@ -1,0 +1,36 @@
+---
+description: Coordination (between agents, discovery, capability level) vs orchestration (within agent, SKILL.md + tools)
+alwaysApply: true
+---
+
+# Coordination vs orchestration (ADR-0044 + ADR-0054)
+
+Two planning planes. Never collapse them. Full doc: `docs/architecture/coordination-vs-orchestration.md`.
+
+## One sentence
+
+**Agentic coordination** schedules work **between agents** (durable Endeavor + shared CoordinationPlan, participants resolved through **discovery** at the **capability level**); **agent orchestration** sequences work **within one agent** (run-specific ExecutionPlan, informed by **Agent Skill packages / `SKILL.md`** and injected MCP tools).
+
+## Plane map
+
+| | Coordination | Orchestration |
+| --- | --- | --- |
+| Scope | between agents, multi-principal | within one agent, one executor |
+| Package | `@agenticprimitives/coordination` | `@agenticprimitives/orchestration` (+ `-anthropic` adapter) |
+| Ontology | `apcoord:` | `apexec:` (+ `apguide:` playbooks) |
+| Plan | `CoordinationPlan` — durable, versioned, adopted by decision | `ExecutionPlan` — one goal, one run |
+| Actors | found via discovery: `agent-naming`, `registry-kit`, `apdisc:` capability matching | given: harness-activated `SKILL.md` packages + `ToolInvoker` tools |
+| Needs stated as | `aps:Capability` requirement on a `PlanStep` | MCP tool invocation guided by a playbook |
+| Binding act | signed `ContributionCommitment` against an exact plan revision hash | `p-plan:correspondsToStep` + qualified association |
+
+## Rules
+
+1. **Name the plane.** Bare "scheduling" is ambiguous: say **allocation** (between agents) or **step ordering** (within a run).
+2. **Discovery is coordination-plane only.** The orchestration core never imports/queries naming, registry, or `apdisc:` — tools and playbooks are injected through its ports.
+3. **Coordination speaks capabilities; orchestration speaks tools/playbooks.** MCP tool ids and `SKILL.md` content never appear in `apcoord:` records; capability requirements never appear in `ToolSpec`s.
+4. **`CoordinationPlan` ≠ `apexec:ExecutionPlan`.** Related only through compilation provenance (`prov:wasDerivedFrom` + `ep-plan:isDecomposedAsPlan` + `p-plan:correspondsToStep`). Never subclass or synonymize.
+5. **No back-edges.** `coordination` and `orchestration` never import each other; the a2a runtime composes both.
+6. **Runs never mutate coordination state.** Execution outcomes enter an Endeavor only as signed commands through the coordination reducer.
+7. **Neither plane is authority** (ADR-0054 §4): allocation, commitment, adoption, playbook activation grant nothing; no gate reads `apcoord:`/`apexec:` terms.
+
+**Source:** ADR-0044, ADR-0054, spec 330, spec 332, `plan.ttl`, coordination-vs-orchestration.md.

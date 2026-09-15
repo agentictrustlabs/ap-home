@@ -1,0 +1,87 @@
+---
+description: Define the capability model once; UX behaviour and agent surfaces are generated from it (specs 354/355/359)
+alwaysApply: true
+---
+
+# One capability model. Generate the UX and the agent surfaces from it — never teach them separately
+
+**Canonical rule — all agents.** Specs: [354](../../../specs/354-archetype-driven-agent-behavior.md)
+(playbooks), [355](../../../specs/355-ontology-driven-ask-and-orchestration.md) (ontology drives
+behaviour), [352](../../../specs/352-ask-capability-program.md)/[353](../../../specs/353-app-scoped-ask.md)
+(the Ask). Gates: `pnpm check:agent-skills`, `pnpm check:ontology-bindings`.
+
+## The rule
+
+> **Define the application's capability model ONCE. Generate both the UX behaviour and the agent
+> skill/discovery surfaces from that same semantic definition.**
+>
+> **Never build the UX first and then separately teach Ask how the application works.**
+
+The Ask in Home must be able to drive **everything the Home UX can drive** — and that equivalence is not
+achieved by writing the feature twice. It is achieved because both are projections of one model:
+
+| Layer | What it is | Who owns it |
+| --- | --- | --- |
+| **Ontology** (`packages/ontology/tbox/*.ttl`) | how the domain is SHAPED — the classes, the relations, the record bindings | this repo, bound by IRI |
+| **Capability** (ADR-0051 id + label) | what the agent ADVERTISES it can do — the branding/discovery half | the domain's Build → Capabilities |
+| **SKILL.md execution contract** (`SkillExecutionContractV1`) | HOW it runs — risk, requirement type, which arg carries the resource, which arg names whose authority, approvals policy, evidence, effects | the domain's Build → Skills |
+| **Compiled definition** (`AgentHarnessDefinitionV1`) | the two joined, by digest | `~/skills` compiler; consumed, never authored, by this repo |
+
+From that one model come **all** of:
+
+- the **Ask's tool set** (`scopedActionTools` ∩ the playbook's capability ids),
+- the **published vocabulary** a surface builds its scope from (`/harness/vocabulary?agent=`),
+- the **A2A agent card** skills and the discovery projection,
+- the **mandate requirement** each act asks for, and the **risk floor** it cannot go under,
+- **what follows the act** (spec 360 declared effects — the receipt, the notification),
+- and the **UX affordance** in Home.
+
+A button and an ask that do the same thing must be reading the same declaration. If adding a feature
+means writing an invoker *and then* adding it to a vocabulary list *and then* adding a UI handler, the
+model is not doing its job — that triplication is the smell this rule names.
+
+## Why — the bugs this rule is made of
+
+**Money moved and nobody was told.** The Treasury playbook said *"every payment leaves a receipt"* in its
+`evidence:` frontmatter. That compiled into `evidenceRequirements` — and **nothing read that field.** The
+UX had been built (a payment happens) and the declaration was decoration. A person paid another person
+and neither got so much as a message. (Spec 360 §0.)
+
+**The archetype's skills drove nothing.** `skills:includesSkill` was read into `ArchetypeFacts.skills`,
+and `compileArchetype` never referenced it — every runtime shape came from `CAPABILITY_PROFILE`, a
+hand-maintained TypeScript table. The Build → Skills area let a domain author write a contract that no
+running agent would ever consult.
+
+**The cost is quadratic and it compounds.** Membership took a day of hand-built readers, parsers and
+gates; the payment fan-out took a week. The Home spans nine domains. At the artisanal rate — build the
+UX, then teach the Ask, then teach discovery — covering them is quarters of work that competitors ship
+as configuration (spec 359 §0).
+
+## What it looks like when followed
+
+Adding *"notify the payee on transfer"* is an **`effects:` block in a SKILL.md** — not an invoker change,
+not a UI handler, not a new Ask verb. The compiler carries it into the definition, the harness discharges
+it, and the receipt appears in both parties' vaults and their thread.
+
+Reassigning a treasury agent to a read-only Bookkeeper archetype removes payments from **both** the Ask's
+offers and its published vocabulary, with **no code change** and no change to any authority gate.
+
+## The line this rule does NOT cross
+
+**Behaviour is generated; authority never is.** A capability model says what an agent KNOWS HOW to do and
+what a surface may OFFER. It grants nothing. The mandate, its caveats, and the on-chain enforcers decide
+what MAY happen, and no generated surface is consulted by a verifier (spec 354 §1, spec 353 §4,
+ADR-0041). Generating the UX and the agent surfaces from one model makes them *honest about the same
+things* — it must never make either of them *authoritative*.
+
+## How to comply
+
+1. Model the domain fact in the T-box; bind it by IRI (`ontology-drives-behavior.md`).
+2. Declare the capability (id + label) in the domain — the advertisement.
+3. Write the SKILL.md execution contract for the skill that realises it — risk, requirement, args,
+   approvals, evidence, effects. Link it to the archetype (`skills:includesSkill`).
+4. Let the compiler produce the definition. **Do not** hand-add a row to `CAPABILITY_PROFILE`; that table
+   is a fallback for capabilities no skill defines yet, and every use of it emits a warning naming the
+   capability, so the remaining hand-kept rows stay visible rather than quietly permanent.
+5. Consume the definition in the Ask, the vocabulary, the card and the UX. If a surface needs something
+   the definition cannot express, **extend the contract schema** — do not special-case the surface.

@@ -1,0 +1,97 @@
+{
+  "lockVersion": 1,
+  "packages": {
+    "@agenticprimitives/devkit": "0.0.0-alpha.6",
+    "@agenticprimitives/evaluation": "0.0.0-alpha.6",
+    "@agenticprimitives/a2a": "0.0.0-alpha.6",
+    "@agenticprimitives/mcp-protocol": "0.0.0-alpha.6"
+  },
+  "rules": {
+    "coordination-vs-orchestration": "sha256:f2754939240133643e020043fac5b7e97b2ca250e0824771d19ca578976defd6",
+    "demo-person-org-distinct": "sha256:533f89b8c8e55d3a252c30ea06a772ae51c789512abe3cfcd42b1167adc7dc4d",
+    "external-registry-integrations": "sha256:1e23b29977d0248c78c82f0aa90d3b5fbd7e2eb2bb9e21c2ad28259d0eb8dec6",
+    "hard-rules": "sha256:896eb2060b9c30957de002a09d3a7cb72e30d0876e2e27979630759c373051e9",
+    "one-capability-model-generates-both": "sha256:50d46f01e41c2ffa2dc12732e9c77609d4fbeb2c174588345d8999a11aa6428a",
+    "ontology-drives-behavior": "sha256:1324bb1aec2d8242b2fffe490e9ff05b963ccb295d258bb08f8de911c1f25c00",
+    "service-agent-signing": "sha256:3f41d62dc56a18789b7c54cfbaf2446afcf7956c52c2b855720fdc1300519d7f",
+    "skill-terminology": "sha256:c28873bc0594c790987d817d83335674510ad91fbe785fc1f23a771da7f7f3b3",
+    "vault-and-ontology": "sha256:825116963a4845bf358f3446ea5d4aad64436b2bd06ce878082daf5a23ea58f5",
+    "vault-records-are-ontology-shaped": "sha256:6a739d1a10d5b62e4ab5ed910fdccc67b9c024dd519c9c3e1fea916b3899a90b"
+  },
+  "devkit": "0.0.0-alpha.6",
+  "template": {
+    "name": "product-repo",
+    "revision": "2026-09-11.1"
+  },
+  "doctor": {
+    "webNoDirectMcp": {
+      "browserApps": [],
+      "allowMarkers": [
+        "@external-mcp-client-demo"
+      ]
+    },
+    "noPrivateKeys": {
+      "roots": [
+        "apps",
+        "examples"
+      ],
+      "allowedIn": [],
+      "toleratedEnvNames": []
+    },
+    "noHmacHomeBridge": {
+      "dir": "apps",
+      "hmacCall": "bridgeInteractions",
+      "sessionRpcCall": "callInteractions",
+      "ceilings": {
+        "hmac": 0,
+        "total": 0
+      }
+    },
+    "noCrossSubjectVaultReads": {
+      "roots": [],
+      "exemptFiles": [
+        "self-only.ts"
+      ],
+      "gate": "subjectOfRead|routedSubjectFor"
+    },
+    "failOpenKnobs": {
+      "roots": [
+        "apps",
+        "examples"
+      ],
+      "allowlist": []
+    },
+    "internalMarkerSplit": {
+      "src": "apps",
+      "secret": "A2A_CUSTODY_BRIDGE_SECRET",
+      "marker": "x-ap-internal",
+      "budget": {}
+    },
+    "custodianCoverage": {
+      "skip": "ap-home carries no Home custody surface yet — enable when a Home moves in (specs 294/295)"
+    },
+    "archetypeCatalog": {
+      "skip": "ap-home carries no archetype catalog yet — enable when a Home moves in (spec 354 §3)"
+    },
+    "capabilityVocabulary": {
+      "homeGlobs": [
+        "apps/**/*.{ts,tsx}"
+      ],
+      "packagesGlob": "packages/*/src/**/*.ts",
+      "wireAllowed": []
+    },
+    "demoPersonOrgDistinct": {
+      "skip": "ap-home carries no persona roster yet — enable when @agenticprimitives-demo/estate is consumed (spec 399 §2.6)"
+    },
+    "rulesDrift": {
+      "cursorRules": ".cursor/rules",
+      "lock": "agentic.lock.json",
+      "agentsMd": "AGENTS.md",
+      "claudeMd": "CLAUDE.md"
+    },
+    "lockCoherent": {
+      "allowWorkspace": false,
+      "scope": "@agenticprimitives/"
+    }
+  }
+}

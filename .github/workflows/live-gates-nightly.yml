@@ -1,0 +1,46 @@
+name: live-gates-nightly
+
+# Spec 392 / spec 399 §5.4: the product's live gates, nightly, against its SHADOW deployment during the parallel
+# run and against the live environment after the cut. The runner is @agenticprimitives/evaluation's
+# (`ap test --live-gates`); the gates are DATA in live-gates.json. Artifact-only: the report is uploaded, the run
+# is red when a `required` gate fails. Conformance of the same deployment runs beside it.
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    inputs:
+      home:
+        description: 'HOME_URL to run against (defaults to live-gates.json#home)'
+        required: false
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      HOME_URL: ${{ github.event.inputs.home }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: live gates
+        run: pnpm exec ap test --live-gates live-gates.json --json > live-gates-report.json || (cat live-gates-report.json; exit 1)
+      - name: A2A conformance of the deployment
+        if: env.A2A_URL != ''
+        env:
+          A2A_URL: ${{ vars.A2A_URL }}
+        run: pnpm exec ap conform a2a "$A2A_URL"
+      - name: MCP conformance of the deployment
+        if: env.MCP_URL != ''
+        env:
+          MCP_URL: ${{ vars.MCP_URL }}
+        run: pnpm exec ap conform mcp "$MCP_URL"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-gates-report
+          path: live-gates-report.json

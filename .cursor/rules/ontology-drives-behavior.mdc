@@ -1,0 +1,63 @@
+---
+description: Domain relationships live in the ontology T-box, not in prompts or app tables (spec 355)
+alwaysApply: true
+---
+
+# Domain relationships live in the ontology, not in prompts or tables
+
+**Canonical rule — all agents.** Cursor mirror: `.cursor/rules/ontology-drives-behavior.mdc`.
+Spec: [355](../../../specs/355-ontology-driven-ask-and-orchestration.md). Gate: `pnpm check:ontology-bindings`.
+
+## The rule
+
+**A claim about how the domain is shaped belongs in `packages/ontology/tbox/*.ttl`, bound by IRI from
+code. It does not belong in a prompt, a SKILL.md, a lookup table in an app, or an inline heuristic.**
+
+If behaviour depends on a fact like *"a treasury belongs to the agent that holds it"*, *"an inbox belongs
+to a person"*, or *"an organization pays from its own balance"* — that fact is ontology. Name the term,
+say in its `rdfs:comment` what it means and what it does NOT mean, then bind to its IRI.
+
+## Why — the bug this rule is made of
+
+The Ask had to turn *"send alice 20 USDC"* into an address. It used a rule nobody had written down: **look
+for a treasury whose NAME resembles the person's** — `alice` → `alice.treasury`.
+
+Nothing in the ontology said that. Nothing in the estate did it either: Alice's treasury is called
+`alice2.treasury`. The guess found nothing, and a payment that should have worked dead-ended with a
+question the person could not answer.
+
+The real relationship — *the treasury is chartered under the person who holds it* — existed as a `parent`
+field in one app's records, a suffix table in another, and a sentence in a prompt. Three encodings of one
+fact, none of them checkable against each other, and the one the resolver used was wrong.
+
+**A string-similarity heuristic standing in for a modelled relationship is the specific failure this rule
+exists to prevent.** It is seductive because it works in the demo data and it is unfalsifiable in code.
+
+## How to comply
+
+1. **Model it.** Add the class or property to the T-box with a comment that says what it means, and — for
+   anything near authority — what it is *not*. `ap:charteredUnder` says plainly: never authority; the
+   child holds its own custody; a resolver may follow it, a verifier may not read it as permission.
+2. **Bind by IRI.** Reference it from `packages/ontology/src/party-roles.ts` (or the equivalent binding
+   for your concern), never by re-describing it.
+3. **Let the gate hold you to it.** `check:ontology-bindings` fails the build when an IRI is not declared
+   in the T-box, or is declared as the wrong kind. The code may not invent domain vocabulary.
+4. **Mirror it.** The `~/skills` `agentic-trust` T-box grounds on AP terms; add the `at:` counterpart with
+   `rdfs:seeAlso` and push it to GraphDB (`scripts/sync_ontology.py push`).
+
+## Applies especially to LLM-facing surfaces
+
+A planner prompt is the most tempting place to write a domain rule and the worst place to keep one: it is
+invisible to every gate, it drifts silently, and a model will apply it confidently to cases it was never
+meant for. **Prompts say how to behave; the ontology says how the world is shaped.** When a prompt needs a
+domain fact, it should be rendered FROM the ontology binding (as the Ask's party words and type
+preferences now are), not written into the prose.
+
+## Drift triggers — STOP
+
+- *"Just check if the name starts with…"* — **HARD STOP.** That is a relationship. Model it.
+- *"Add it to the system prompt so the planner knows"* — **STOP.** Add it to the T-box and render the
+  prompt from the binding.
+- *"A table in this app is simpler than a new ontology term"* — it is, once. It is a second opinion about
+  the domain from then on, and this rule exists because one of those was wrong in production.
+- *"The ontology doesn't have a term for this"* — then the term is missing. Adding it IS the work.

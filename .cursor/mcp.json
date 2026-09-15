@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "ap-dev": { "command": "npx", "args": ["ap", "mcp", "--root", "."] }
+  }
+}
