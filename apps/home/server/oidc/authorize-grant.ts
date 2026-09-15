@@ -28,6 +28,7 @@ import { clientAllowsRedirect, clientAllowsTemplate, getClientDelegate } from '.
 // Curated white-label entries AND member-registered ones, in that order (server/_lib/oidc-registry.ts).
 import { resolveClient, isAllowedRelyingOriginAsync } from '../_lib/oidc-registry';
 import { sharesProfileName } from '../../src/lib/new-member';
+import { sharesEmailClaim } from '../../src/whitelabel/provisioning';
 
 const GRANT_TTL_SEC = 600; // 10 min — covers ceremony + one retry
 
@@ -45,6 +46,11 @@ interface AuthorizeGrantBody {
    *  otherwise, so a tampered SPA cannot hand a member's name to an app that was never permitted
    *  it. This is not a handle: accounts on this path stay nameless in the naming service. */
   profile_name?: string;
+  /** The member's verified email, read the same way over their own session and honoured ONLY for a
+   *  client the REGISTRY names it for (idTokenClaims). Same reason as the name: the server cannot
+   *  read the vault record, and a tampered SPA must not be able to hand an address to an app that
+   *  was never permitted one. */
+  profile_email?: string;
 }
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
@@ -101,6 +107,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       // deriving permission from one would let any origin that can form a URL ask for a member's
       // name. Same rule as the app's name and logo at consent — registry, never the URL.
       profile_name: sharesProfileName(client) ? (body.profile_name ?? '').trim().slice(0, 80) : '',
+      // Same rule for the member's email, gated on the registry's `idTokenClaims` rather than a
+      // requested scope, and for the same reason: a request parameter is attacker-supplied, so
+      // deriving permission from one would let any origin that can form a URL ask for a contact
+      // address. 254 is the practical ceiling on an address.
+      profile_email: sharesEmailClaim(client) ? (body.profile_email ?? '').trim().toLowerCase().slice(0, 254) : '',
       // SEC-001 anti-spoof: the delegate this grant binds to is taken FROM THE REGISTRY,
       // not from the request. The SPA reads this back in the response and uses it when
       // constructing the delegation; /oidc/grant verifies the supplied delegation's
@@ -131,6 +142,8 @@ export interface StoredEnrollmentGrant {
   agent_name: string;
   /** The member's human profile name, when the client is registry-scoped for `profile`. '' otherwise. */
   profile_name?: string;
+  /** The member's email, when the client's registry entry names the claim. '' otherwise. */
+  profile_email?: string;
   delegate: `0x${string}`;
   code_challenge: string;
   nonce: string;

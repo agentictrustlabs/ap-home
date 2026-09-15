@@ -36,25 +36,41 @@ function homeToken(): string {
   return readSsoCookie()?.token ?? '';
 }
 
-async function read(): Promise<string> {
-  const token = homeToken();
-  if (!token) return '';
-  const profile = await fetchProfile(token);
-  const addr = profile?.agent?.split(':').pop();
-  if (!addr || !/^0x[0-9a-fA-F]{40}$/.test(addr)) return '';
-  const stored = await loadImpactProfile(addr as `0x${string}`);
-  return personDisplayName(stored.contact);
+/** What one vault read yields. Either field may be '' — neither is required to sign in. */
+export interface ConnectProfile {
+  readonly name: string;
+  readonly email: string;
 }
 
-/** The member's human name, or '' when there isn't one / it can't be read in time. Never throws. */
-export async function profileNameForConnect(): Promise<string> {
+const NOTHING: ConnectProfile = { name: '', email: '' };
+
+async function read(): Promise<ConnectProfile> {
+  const token = homeToken();
+  if (!token) return NOTHING;
+  const profile = await fetchProfile(token);
+  const addr = profile?.agent?.split(':').pop();
+  if (!addr || !/^0x[0-9a-fA-F]{40}$/.test(addr)) return NOTHING;
+  const stored = await loadImpactProfile(addr as `0x${string}`);
+  return { name: personDisplayName(stored.contact), email: (stored.contact?.email ?? '').trim().toLowerCase() };
+}
+
+/**
+ * The member's name and verified email, as far as this browser can read them. ONE read for both —
+ * they live in the same vault record, and the caller gates each field separately against what the
+ * client is registered for.
+ *
+ * Absent fields are normal, not an error: the email is seeded best-effort at sign-in and a member
+ * whose vault key bind has not landed simply has none. Same rule as the name — worth one screen of
+ * setup, never worth a sign-in.
+ */
+export async function profileForConnect(): Promise<ConnectProfile> {
   try {
     return await Promise.race([
       read(),
-      new Promise<string>((resolve) => setTimeout(() => resolve(''), LOOKUP_TIMEOUT_MS)),
+      new Promise<ConnectProfile>((resolve) => setTimeout(() => resolve(NOTHING), LOOKUP_TIMEOUT_MS)),
     ]);
   } catch (e) {
-    console.warn('[connect] profile name unavailable — connecting without it:', e);
-    return '';
+    console.warn('[connect] profile unavailable — connecting without it:', e);
+    return NOTHING;
   }
 }

@@ -18,6 +18,7 @@
 // ordinary create ceremony (`createAgentWithBirthrights`) and the ordinary profile write
 // (`seedImpactProfileFields`) rather than growing a second implementation of either.
 import type { MemberCurrency, NewMemberOnboarding, RelyingApp } from '../whitelabel/schema';
+import { sharesEmailClaim } from '../whitelabel/provisioning';
 
 /** How the member is asked for their human name: not at all, offered, or insisted on. */
 export type NameAsk = 'off' | 'optional' | 'required';
@@ -220,6 +221,22 @@ export function withProfileNameConsent<T extends { canDo: string[]; cannotDo: st
 ): T {
   if (!sharesProfileName(app)) return template;
   const line = 'See the name you go by, so it can show you to other people by name';
+  if (template.canDo.includes(line)) return template;
+  return { ...template, canDo: [...template.canDo, line] };
+}
+
+/**
+ * The same disclosure for the email claim, and it matters more: an address handed over silently is
+ * exactly what the name version exists to prevent, and an email is the more consequential of the
+ * two. Pure, idempotent, and it returns the template UNCHANGED for every app without the claim, so
+ * no other app's consent copy moves.
+ */
+export function withEmailClaimConsent<T extends { canDo: string[]; cannotDo: string[] }>(
+  template: T,
+  app?: Pick<RelyingApp, 'idTokenClaims'> | null,
+): T {
+  if (!sharesEmailClaim(app)) return template;
+  const line = 'See the email address you signed in with, so it does not have to ask you for it again';
   if (template.canDo.includes(line)) return template;
   return { ...template, canDo: [...template.canDo, line] };
 }

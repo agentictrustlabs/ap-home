@@ -85,7 +85,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       // accepting an unknown delegation.
       return jsonCors({ error: 'no enrollment binding for this delegation; re-enroll required' }, request, 401);
     }
-    const bind = JSON.parse(bindRaw) as { client_id: string; agent_name?: string; profile_name?: string };
+    const bind = JSON.parse(bindRaw) as { client_id: string; agent_name?: string; profile_name?: string; profile_email?: string };
     if (bind.client_id !== body.client_id) {
       return jsonCors({ error: 'delegation was issued for a different client; re-enroll required' }, request, 401);
     }
@@ -100,6 +100,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         // Same rule as /oidc/grant: the `<label>.me` handle when there is one, the member's human
         // profile name when there isn't, nothing when there is neither.
         agentName: nameClaimForIdToken(body.agent_name ?? bind.agent_name, bind.profile_name),
+        // Whatever /oidc/grant was permitted to mint, this mints too — the binding is the record of
+        // what that client was allowed, and re-deciding it here from a request body would be a
+        // second gate that could disagree with the first.
+        ...(bind.profile_email ? { email: bind.profile_email } : {}),
         ttlSeconds: ttl,
       },
       signer,

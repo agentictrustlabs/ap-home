@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { whitelabel } from './config';
-import { provisionsCommunityMessaging, reusesStandingGrantWithSelfVault } from './provisioning';
+import { provisionsCommunityMessaging, reusesStandingGrantWithSelfVault, sharesEmailClaim } from './provisioning';
 
 const others = whitelabel.relyingApps.filter((a) => a.client_id !== 'gather-app');
 
@@ -48,5 +48,42 @@ describe('standing-grant reuse with a self-vault grant', () => {
     }
     expect(reusesStandingGrantWithSelfVault('no-such-app')).toBe(false);
     expect(reusesStandingGrantWithSelfVault(undefined)).toBe(false);
+  });
+});
+
+/**
+ * The email claim is the one flag here that turns something ON rather than off, so it gets the
+ * hardest version of this suite: not just "every other client is unchanged" but "the token payload
+ * for every other client is byte-identical", which is what an absent claim means.
+ */
+describe('the email claim on the id_token', () => {
+  it('gather-app carries it — the listing form stops asking for an address sign-in already knows', () => {
+    expect(sharesEmailClaim(whitelabel.relyingApps.find((a) => a.client_id === 'gather-app'))).toBe(true);
+  });
+
+  it('no other client carries it, so no other token gains a field', () => {
+    for (const app of others) {
+      expect(sharesEmailClaim(app), `${app.client_id} changed`).toBe(false);
+    }
+  });
+
+  it('exactly one client declares the field, and declares only email', () => {
+    const declared = whitelabel.relyingApps.filter((a) => a.idTokenClaims !== undefined);
+    expect(declared.map((a) => a.client_id)).toEqual(['gather-app']);
+    for (const a of declared) expect(a.idTokenClaims).toEqual(['email']);
+  });
+
+  it('an absent, empty or unknown declaration shares nothing', () => {
+    expect(sharesEmailClaim(undefined)).toBe(false);
+    expect(sharesEmailClaim(null)).toBe(false);
+    expect(sharesEmailClaim({ idTokenClaims: undefined })).toBe(false);
+    expect(sharesEmailClaim({ idTokenClaims: [] })).toBe(false);
+  });
+
+  it('a client the member registered themselves can never grant itself one', () => {
+    // relying-clients.ts rebuilds a member registration field by field and idTokenClaims is not
+    // among them, so the object simply has no such property. This pins the consequence.
+    const selfRegistered = { client_id: 'made-up', name: 'Made Up', redirect_uris: [], allowed_scopes: ['openid'] };
+    expect(sharesEmailClaim(selfRegistered as never)).toBe(false);
   });
 });

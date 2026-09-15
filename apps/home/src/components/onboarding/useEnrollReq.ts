@@ -15,7 +15,8 @@ import type { Address } from '@agenticprimitives/types';
 import { knownRelyingClient, primeRelyingClient, relyingOriginAllowed } from '../../lib/relying-clients';
 import { writePendingEnroll } from './pending-enroll';
 import { sharesProfileName } from '../../lib/new-member';
-import { profileNameForConnect } from '../../lib/connect-profile-name';
+import { profileForConnect } from '../../lib/connect-profile-name';
+import { sharesEmailClaim } from '../../whitelabel/provisioning';
 
 export interface EnrollReq {
   aud: string; // = client_id
@@ -157,7 +158,15 @@ export async function beginEnrollmentGrant(
   // credential family instead of whichever one someone remembered to wire.
   //
   // Costs nothing for an unscoped client: `sharesProfileName` is false, and no read happens at all.
-  const profileName = sharesProfileName(knownRelyingClient(enroll.aud)) ? await profileNameForConnect() : '';
+  //
+  // The email rides the same read for a client the registry names it for (R5.3) — one vault round
+  // trip answers both, and each field is gated on its own registered permission.
+  const relying = knownRelyingClient(enroll.aud);
+  const wantsName = sharesProfileName(relying);
+  const wantsEmail = sharesEmailClaim(relying);
+  const profile = wantsName || wantsEmail ? await profileForConnect() : { name: '', email: '' };
+  const profileName = wantsName ? profile.name : '';
+  const profileEmail = wantsEmail ? profile.email : '';
   const r = await fetch('/oidc/authorize-grant', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -169,6 +178,7 @@ export async function beginEnrollmentGrant(
       code_challenge_method: 'S256',
       agent_name: resolvedName,
       ...(profileName ? { profile_name: profileName } : {}),
+      ...(profileEmail ? { profile_email: profileEmail } : {}),
       delegation_template: enroll.template,
     }),
   });

@@ -351,6 +351,12 @@ const faithImpact: WhiteLabelConfig = {
       // (site grant + self-vault grant). Reuse the standing grant instead; a refused reuse still
       // falls back to a fresh mint (RecognizedEnroll).
       standingGrant: 'with-self-vault',
+      // Gather asks a host for an email twice today: once to sign in, once on the listing form. The
+      // second one was a different address nobody reconciled, so it is being removed and the signed-in
+      // address takes its place (R5.3, 2026-09-15). The value is the member's OWN verified email off
+      // their vault profile, handed over at /oidc/authorize-grant and re-gated there against this list;
+      // consent says so on the sheet. Only this client: whitelabel/provisioning.test.ts pins that.
+      idTokenClaims: ['email'],
     },
     // skills-corpus — the SKILL.md ceremony/admin surface (owner claims a skillset).
     {

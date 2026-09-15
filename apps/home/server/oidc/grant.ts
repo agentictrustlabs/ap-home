@@ -136,6 +136,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const sub = toCanonicalAgentId(CHAIN_ID, body.delegation.delegator);
   const { signer } = await getServer(env);
   const profileName = (grant.profile_name ?? '').trim();
+  // Already gated at /oidc/authorize-grant against the client's registered `idTokenClaims`, so an
+  // unpermitted client's grant carries '' here and the claim is simply absent from the payload.
+  const profileEmail = (grant.profile_email ?? '').trim();
   const idToken = await mintIdToken(
     {
       iss,
@@ -143,6 +146,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       aud: grant.client_id,
       nonce: grant.nonce || undefined,
       agentName: nameClaimForIdToken(grant.agent_name, profileName),
+      ...(profileEmail ? { email: profileEmail } : {}),
       ttlSeconds: ttl,
     },
     signer,
@@ -157,7 +161,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // The profile name rides the binding too: /token's SILENT RE-AUTH mints from this record, not
     // from a grant, so without it a nameless member would have a name on their first token and none
     // on every one after — the seat label would vanish the moment the app refreshed its session.
-    JSON.stringify({ client_id: grant.client_id, agent_name: grant.agent_name, profile_name: profileName }),
+    // The email rides it for exactly the same reason as the name: a silent re-auth mints from this
+    // record, so leaving it off would put the claim on the first token and on none of the ones after.
+    JSON.stringify({ client_id: grant.client_id, agent_name: grant.agent_name, profile_name: profileName, profile_email: profileEmail }),
     { expirationTtl: ttl },
   );
 

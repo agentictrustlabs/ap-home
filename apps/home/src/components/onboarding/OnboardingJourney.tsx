@@ -39,7 +39,7 @@ import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
 import { NewMemberSetup } from './NewMemberSetup';
-import { coinMandateLeg, grantsCoinAtConnect, newMemberPlan, planIsEmpty, withCurrencyConsent, withProfileNameConsent } from '../../lib/new-member';
+import { coinMandateLeg, grantsCoinAtConnect, newMemberPlan, planIsEmpty, withCurrencyConsent, withEmailClaimConsent, withProfileNameConsent } from '../../lib/new-member';
 
 export type JourneyVariant = 'enroll-new' | 'enroll-existing' | 'self-serve';
 
@@ -697,8 +697,11 @@ export function OnboardingJourney({
   // member connects, and the next connect asks again.
   if ((screen === 'grant' || screen === 'new-member') && api?.enroll) {
     const tpl = withCurrencyConsent(
-      withProfileNameConsent(
-        whitelabel.delegationTemplates[api.enroll.template] ?? { canDo: [], cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'] },
+      withEmailClaimConsent(
+        withProfileNameConsent(
+          whitelabel.delegationTemplates[api.enroll.template] ?? { canDo: [], cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'] },
+          relyingApp,
+        ),
         relyingApp,
       ),
       relyingApp,

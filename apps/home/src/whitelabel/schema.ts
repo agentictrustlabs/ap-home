@@ -53,6 +53,17 @@ export interface RelyingApp {
    *  keeps the existing rule: a self-vault ceremony is per-connect. /oidc/grant re-verifies on every
    *  use either way, so this is never a bypass. */
   standingGrant?: 'with-self-vault';
+  /** OPTIONAL — private contact claims this client's id_token may carry, beyond identity. Absent
+   *  means none, which is what every client gets today.
+   *
+   *  NOTE THE POLARITY. Its two neighbours above can only turn a leg OFF; this one turns something
+   *  ON, so it is the field to look at hardest in review. Naming a claim here is the ONLY way an app
+   *  receives it, and it still does not produce the value: the email lives in the member's own
+   *  encrypted vault, the broker cannot decrypt it, and it reaches the token only because the
+   *  member's own session handed it over (the `profile_name` rail — see connect-profile-name.ts).
+   *  A client the member registered themselves can never carry this: those are rebuilt field by
+   *  field in relying-clients.ts and this field is not among them. */
+  idTokenClaims?: readonly 'email'[];
   /** App logo for the consent screen — comes from THIS registered config, never a request
    *  param (anti-spoof). Optional; falls back to an initial badge. */
   logo?: string;

@@ -40,7 +40,7 @@ import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
 import { CeremonyProgress } from './CeremonyProgress';
-import { coinMandateLeg, grantsCoinAtConnect, withCurrencyConsent, withProfileNameConsent } from '../../lib/new-member';
+import { coinMandateLeg, grantsCoinAtConnect, withCurrencyConsent, withEmailClaimConsent, withProfileNameConsent } from '../../lib/new-member';
 import { OrgChooser, type OrgChoice } from './OrgChooser';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
 import { knownRelyingClient } from '../../lib/relying-clients';
@@ -760,11 +760,14 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
   // the same list as everything else it can do. The setup screen discloses it to a member who is
   // typing the name now; this is what a RETURNING member (whose name is already on file, and who
   // never sees that screen) gets to read before authorizing. No-op for every unscoped app.
-  const baseTpl = withProfileNameConsent(
-    whitelabel.delegationTemplates[enroll.template] ?? {
-      canDo: [],
-      cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'],
-    },
+  const baseTpl = withEmailClaimConsent(
+    withProfileNameConsent(
+      whitelabel.delegationTemplates[enroll.template] ?? {
+        canDo: [],
+        cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'],
+      },
+      relyingApp,
+    ),
     relyingApp,
   );
   // The coin's consent lines belong to the plain sign-in, where the coin is granted (see the mandate leg).
