@@ -13,7 +13,10 @@ const XAI_RESPONSES = 'https://api.x.ai/v1/responses';
 export const WEB_SEARCH_TOOLS: ToolSpec[] = [
   {
     id: WEB_SEARCH,
-    answers: ['search the web for', 'what is the news on', 'find pages about', 'look up on the web', 'what does the internet say about', 'latest on', 'who is', 'what is'],
+    // NEVER a bare "who is" / "what is": question admission (spec 371) holds a plan to the read whose `answers` name the
+    // question, and those two words are every records question there is — "who is the steward of soup-kitchen.org" was
+    // refused for not searching the web (caught by the estate ledger, 2026-09-15). The web is asked for BY NAME.
+    answers: ['search the web for', 'what is the news on', 'find pages about', 'look up on the web', 'what does the internet say about', 'latest news on', 'search online for'],
     description: 'SEARCHES the public web for `query` (words; `max` caps the results, default 5) and returns the SOURCES the search hit (urls) with titles and one-line summaries, so the answer can cite them; follow with web.page.read on a source that matters. A lookup as anyone on the web: no account of the person\'s. Says when no search provider is configured. Not for anything in her own records or connectors — those have their own reads.',
     inputSchema: { type: 'object', properties: { query: { type: 'string' }, max: { type: 'integer' } }, required: ['query'] },
     establishes: 'lookup',

@@ -3018,7 +3018,10 @@ export async function resolveStepArgs(
       // service's — the steward who finishes it signs FOR that agent, never quietly as themselves (spec 400 W1 / 375 W2:
       // the runtime's reply, resumed at its custodian's Home, was re-addressed "from" the custodian, who was then asked
       // "that would send the message to you — who did you mean?").
-      const admitsRealm = !!realmSuffix && (typesHere.length === 0 || typesHere.includes(realmSuffix));
+      // …unless the ontology says the act is the ASKER'S OWN wherever it is made (an offer — spec 393 W2): the room never
+      // fills it. Declared on the party role (`ownAct`), read here, decided by nothing else.
+      const ownAct = partyRole(where.capabilityId ?? where.toolId, arg)?.ownAct === true;
+      const admitsRealm = !ownAct && !!realmSuffix && (typesHere.length === 0 || typesHere.includes(realmSuffix));
       if (where.addressee && admitsRealm && where.addressee.toLowerCase() !== where.subject.toLowerCase()) {
         out[arg] = where.addressee.toLowerCase();
         lookups.onResolved?.({ arg, raw: partyWord(arg), agent: where.addressee.toLowerCase(), hint: realmSuffix === 'svc' ? 'this service agent — its own act, signed by its custodian' : 'the organization you are standing in', via: 'context' });
