@@ -275,3 +275,9 @@ class_name = "HarnessApprovalWorkflow"
 [[env.production.routes]]
 pattern = "home-a2a.faithnet.io"
 custom_domain = true
+
+# Per-agent hosts (<label>.home-a2a.faithnet.io): the route is here; the DNS record `*.home-a2a.faithnet.io` (proxied) is the
+# operator's — until it exists, agents are reached by their records through the edge (the rule anyway).
+[[env.production.routes]]
+pattern = "*.home-a2a.faithnet.io/*"
+zone_name = "faithnet.io"
