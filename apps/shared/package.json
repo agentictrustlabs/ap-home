@@ -1,6 +1,6 @@
 {
   "name": "@agenticprimitives-demo/home-shared",
-  "version": "0.0.0",
+  "version": "0.0.1-alpha.0",
   "private": true,
   "description": "What the Home and its agent runtime must agree on by construction — the product's own record namespaces appended to the interactions grant (spec 334 §6 / 399 §4). One module, two consumers; a scope added on one side without the other was the drift that made an enabled-looking organization 409 on its first write.",
   "type": "module",
