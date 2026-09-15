@@ -3843,8 +3843,10 @@ async function askReplyForInner(env: HarnessEnv, input: {
     // receipt where it can be checked.
     // Spec 387 W2 — a CATALOG read's items are the deliverable itself (a resource set the caller acts on, each
     // item with its link), so they ride back as rows for any caller, not only a screen's supplied plan.
+    // Spec 402 W4 — a read whose contract names a RESULT APP is the deliverable too: its rows ride back for any caller, so
+    // the app can render over them beside the sentence (the same reason a catalog read's do).
     const results = r.steps
-      .filter((o) => o.ok && o.result && typeof o.result === 'object' && (input.suppliedPlan || isCatalogTool(o.step.toolId)))
+      .filter((o) => o.ok && o.result && typeof o.result === 'object' && (input.suppliedPlan || isCatalogTool(o.step.toolId) || !!input.interactionFor?.[o.step.toolId]?.result))
       .map((o) => ({ toolId: o.step.toolId, result: o.result }));
     const routed = routedStepsOf(r.steps);
     // Spec 402 W4 — the first answered read whose contract names a RESULT app: its binding rides on the reply, with the
@@ -4584,8 +4586,10 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...GITHUB_TOOLS.filter((t) => !GITHUB_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     ...CALENDAR_TOOLS.filter((t) => !CALENDAR_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     ...MAIL_DRIVE_TOOLS.filter((t) => !MAIL_DRIVE_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
-    ...(deps.readSubjectRecord ? [PROFILE_READ_TOOL, HOUSEHOLD_READ_TOOL, MEMORY_LIST_TOOL] : []),
-    ...(deps.listTriggers ? ROUTINE_TOOLS.filter((t) => t.id === ROUTINE_LIST) : []),
+    // The person's own reads, under their CONTRACTS when the playbook carries them (the result app a contract names
+    // rides on the merged tool; spec 402 W4) — the built-in spec otherwise.
+    ...(deps.readSubjectRecord ? [PROFILE_READ_TOOL, HOUSEHOLD_READ_TOOL, MEMORY_LIST_TOOL].map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
+    ...(deps.listTriggers ? ROUTINE_TOOLS.filter((t) => t.id === ROUTINE_LIST).map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
     UNSUPPORTED_TOOL,
   ];
   const harnessLocal = harnessInvoker(deps, env, presentedList, input.mcpInvoke, input.person, input.session, input.surface, input.addressee, playbook);
