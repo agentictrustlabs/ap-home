@@ -550,7 +550,8 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
     setCommand(null);
     setAnswers({});
     const draft = draftRun; setDraftRun(null);
-    const said = Object.entries(args).filter(([, v]) => v !== '' && v !== undefined && v !== false).map(([k, v]) => `${k}: ${String(v)}`).join(', ');
+    // A structured argument (the files a build left, handed to the PR) is said by its size, never stringified.
+    const said = Object.entries(args).filter(([, v]) => v !== '' && v !== undefined && v !== false).map(([k, v]) => `${k}: ${Array.isArray(v) ? `${v.length} ${k === 'files' ? 'file' : 'item'}${v.length === 1 ? '' : 's'}` : typeof v === 'object' && v !== null ? '…' : String(v)}`).join(', ');
     const message = draft?.message ?? `${cap.label ?? cap.id}${said ? ` — ${said}` : ''}`;
     setThread((t) => [...t, { role: 'you', text: draft ? `${message} (edited: ${said})` : message }]);
     const surface = await homeScope(realm, addressee, selection ?? undefined);

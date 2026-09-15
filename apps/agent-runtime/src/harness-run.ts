@@ -51,6 +51,7 @@ import { MEMORY_TOOLS, MEMORY_ACTS, MEMORY_LIST_TOOL, MEMORY_REMEMBER, memoryFac
 import { ROUTINE_TOOLS, ROUTINE_ACTS, ROUTINE_LIST, routineInvoker, compiledRoutine } from './routine-tools.js';
 import { WEB_TOOLS, webReadInvoker } from './web-read.js';
 import { WEB_SEARCH_TOOLS, webSearchInvoker } from './web-search.js';
+import { BUILD_TOOLS, BUILD_ACTS, buildInvoker } from './build-tools.js';
 import { PREFERENCES_TOOLS, PREFERENCES_ACTS, PREFERENCES_GET, preferencesInvoker } from './preferences-tools.js';
 import type { TriggerScheduleV1 } from './triggers.js';
 import { factsForPrompt, factsOf, type RememberedFactsV1 } from '@agenticprimitives/context';
@@ -331,6 +332,8 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   ...GITHUB_TOOLS.filter((t) => GITHUB_ACTS.has(t.id)),
   ...CALENDAR_TOOLS.filter((t) => CALENDAR_ACTS.has(t.id)),
   ...MAIL_DRIVE_TOOLS.filter((t) => MAIL_DRIVE_ACTS.has(t.id)),
+  // Spec 398 §9 / ap-build B3 — a build run: the WORKSPACE's act, done in the Build service's sandbox.
+  ...BUILD_TOOLS.filter((t) => BUILD_ACTS.has(t.id)),
   // Spec 402 W1 — memory that follows the person: remember / forget, self-acting (a note about herself, in her vault).
   ...MEMORY_TOOLS.filter((t) => MEMORY_ACTS.has(t.id)),
   // Spec 402 W3 — a routine of the person's own, from a sentence: declare / remove, self-acting (her own clock).
@@ -1940,7 +1943,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     setBillStep(ctx.step.id ?? `s${ctx.index}`);
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
     // mandate); explicit so a future caller cannot make it reachable quietly.
-    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === 'messaging.topic.post' || GITHUB_ACTS.has(toolId) || CALENDAR_ACTS.has(toolId) || MAIL_DRIVE_ACTS.has(toolId) || toolId === ORG_INVITE_CAPABILITY || toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === 'messaging.topic.post' || GITHUB_ACTS.has(toolId) || BUILD_ACTS.has(toolId) || CALENDAR_ACTS.has(toolId) || MAIL_DRIVE_ACTS.has(toolId) || toolId === ORG_INVITE_CAPABILITY || toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
     if (toolId === UNSUPPORTED_TOOL.id) {
       const offered = scopedActionTools(surface, playbook).map((t) => t.capability?.id ?? t.id);
       return { unsupported: true, what: String(args.what ?? ''), available: offered };
@@ -2041,6 +2044,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (PREFERENCES_TOOLS.some((t) => t.id === toolId)) return preferencesInvoker({ ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}) }, person, addressee)(toolId, args, ctx);
     if (MAIL_DRIVE_TOOLS.some((t) => t.id === toolId)) return mailDriveInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (CALENDAR_TOOLS.some((t) => t.id === toolId)) return calendarInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
+    if (BUILD_TOOLS.some((t) => t.id === toolId)) return buildInvoker({ env: env as never, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}), ...(deps.survey ? { survey: deps.survey } : {}), ...(deps.readRecords ? { readRecords: deps.readRecords } : {}) }, (presented ?? null) as never, addressee)(toolId, args, ctx);
     if (GITHUB_TOOLS.some((t) => t.id === toolId)) return githubInvoker({ env: env as unknown as Record<string, unknown>, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (toolId === PROFILE_UPDATE_CAPABILITY) return profileUpdateInvoker(deps, person)(toolId, args, ctx);
     if (toolId === HOUSEHOLD_RECORD_CAPABILITY) return householdRecordInvoker(deps, person)(toolId, args, ctx);
@@ -3982,6 +3986,7 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'github.pr.open': ['signature'],                  // the mandate — the holder's connector acts
   'github.pr.comment': ['signature'],
   'github.pr.merge': ['signature'],                 // the mandate — bound to the work the PR names
+  'build.run': ['signature'],                       // the mandate — the workspace's steward signs for THIS task (spec 398 §9 / ap-build B3)
   'calendar.event.create': ['signature'],           // the mandate — the holder's calendar connector acts (spec 400 W4)
   'gmail.draft.create': ['signature'],              // the mandate — a draft in the holder's mail (spec 402 W2)
   'gmail.message.send': ['signature'],              // the mandate — mail that LEAVES as the holder is the holder acting (spec 402 W5)
@@ -4610,6 +4615,8 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...GITHUB_TOOLS.filter((t) => !GITHUB_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     ...CALENDAR_TOOLS.filter((t) => !CALENDAR_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     ...MAIL_DRIVE_TOOLS.filter((t) => !MAIL_DRIVE_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
+    // Spec 398 §9 — the workspace's build runs, read wherever the playbook carries the contract.
+    ...BUILD_TOOLS.filter((t) => !BUILD_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     // Spec 402 W5a — a public page read as evidence, wherever the playbook carries the contract.
     ...WEB_TOOLS.flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     // Spec 403 W3 — a web search as evidence, wherever the playbook carries the contract.

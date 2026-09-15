@@ -162,6 +162,40 @@ function PaymentReceiptCard({ result }: ResultAppProps) {
   if (!r?.txHash) return null;
   return rows(<KeyValue rows={[['Paid', `${r.usdc ?? r.amount ?? ''} USDC`], ['To', r.payeeName ?? r.payee ?? ''], ...(r.memo ? [['For', String(r.memo)] as [ReactNode, ReactNode]] : []), ['Transaction', <Mono key="t">{String(r.txHash).slice(0, 18)}…</Mono>]]} />);
 }
+// ── Build (spec 398 §9 / ap-build B3) — what a build run left: the files, the evidence as recorded, what may follow ──
+type BuildArtifact = { runId: string; repository: string; base: string; task: string; summary: string; files: Array<{ path: string; content: string }>; evidence: { command: string; exitCode: number; ran: boolean; outputTail: string; durationMs: number }; model: string; digest: string; sandbox?: { totalMs: number; cloneMs: number } };
+function BuildArtifactView({ result }: ResultAppProps) {
+  const r = result as { built?: boolean; refused?: string; artifact?: BuildArtifact; record?: string } | null;
+  if (!r) return null;
+  if (r.refused) return rows(line('Not built', r.refused));
+  if (!r.built || !r.artifact) return null;
+  const a = r.artifact;
+  const cmd = a.evidence.command.split(';').pop()?.trim() ?? a.evidence.command;
+  return rows(<>
+    <div className="ask-app__head">Built · {a.repository}@{a.base} <Chip>{a.model}</Chip></div>
+    {a.summary && <Meta>the model says: {a.summary}</Meta>}
+    {a.files.map((f) => line(<Mono>{f.path}</Mono>, `${f.content.length.toLocaleString()} chars · whole file`))}
+    {line(<span><Chip tone={a.evidence.exitCode === 0 ? 'ok' : 'danger'}>{cmd} · exit {a.evidence.exitCode}</Chip></span>, `evidence as recorded in the sandbox (${a.evidence.durationMs} ms)${a.sandbox ? ` · build ${a.sandbox.totalMs} ms` : ''}`)}
+    {a.evidence.outputTail && <pre className="ask-app__text" style={{ whiteSpace: 'pre-wrap', margin: 0, fontSize: 11, maxHeight: 160, overflow: 'auto' }}>{a.evidence.outputTail.slice(-800)}</pre>}
+    <Meta>nothing pushed or deployed{r.record ? ` · record ${r.record}` : ''}</Meta>
+  </>);
+}
+function BuildRunsCard({ result }: ResultAppProps) {
+  const r = result as { runs?: Array<{ runId: string; repository: string; task: string; files: string[]; evidence: { command: string; exitCode: number }; builtAt: string }>; refused?: string } | null;
+  if (!r) return null;
+  if (r.refused) return rows(line('Build runs not read', r.refused));
+  if (!r.runs) return null;
+  return rows(<>
+    <div className="ask-app__head">Build runs</div>
+    {r.runs.length === 0 && <Meta>Nothing built yet.</Meta>}
+    {r.runs.map((x) => line(`${x.repository} — ${x.task.length > 90 ? `${x.task.slice(0, 90)}…` : x.task}`, `${x.files.join(', ')} · ${day(x.builtAt)}`, <Chip tone={x.evidence.exitCode === 0 ? 'ok' : 'danger'}>exit {x.evidence.exitCode}</Chip>))}
+  </>);
+}
+function BuildRunReview({ requirement, args }: ReviewAppProps) {
+  const a = args ?? {};
+  return rows(<KeyValue rows={[['Build in', `${String(a.repository ?? '?')}${a.base ? `@${String(a.base)}` : ''}`], ['Task', String(a.task ?? '')], ['For', String(a.workspace ?? 'this workspace')], ['Under', `a mandate for ${requirement.actions.join(', ')} — the sandbox builds; nothing is pushed or deployed`]]} />);
+}
+
 function PaymentReview({ requirement, args }: ReviewAppProps) {
   const a = args ?? {};
   return rows(<KeyValue rows={[['Pay', `${a.usdc ?? a.amount ?? '?'} USDC`], ['To', String(a.payee ?? '?')], ...(a.memo ? [['For', String(a.memo)] as [ReactNode, ReactNode]] : []), ['Under', `a mandate for ${requirement.actions.join(', ')} until ${new Date(requirement.validUntil * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`]]} />);
@@ -172,10 +206,10 @@ function ReviewCard({ requirement, capability, args }: ReviewAppProps) {
 }
 
 export const RESULT_APPS: Record<string, (p: ResultAppProps) => ReactNode> = {
-  CalendarEventsCard, CalendarEventCard, MailThreadsCard, MailThreadCard, MailDraftCard, MailSentCard, DriveFilesCard, DriveFileCard, MemoryFactsCard, RoutinesCard, RoutineCard, PaymentReceiptCard, WebPageCard, WebSearchCard,
+  CalendarEventsCard, CalendarEventCard, MailThreadsCard, MailThreadCard, MailDraftCard, MailSentCard, DriveFilesCard, DriveFileCard, MemoryFactsCard, RoutinesCard, RoutineCard, PaymentReceiptCard, WebPageCard, WebSearchCard, BuildArtifactView, BuildRunsCard,
 };
 export const REVIEW_APPS: Record<string, (p: ReviewAppProps) => ReactNode> = {
-  CalendarEventReview, MailDraftReview, MailSendReview, PaymentReview,
+  CalendarEventReview, MailDraftReview, MailSendReview, PaymentReview, BuildRunReview,
   MemberInvitationReview: ReviewCard, ContactAddReview: ReviewCard, ContactRemoveReview: ReviewCard, PrimaryPayeeReview: ReviewCard, AccessRevokeReview: ReviewCard,
 };
 

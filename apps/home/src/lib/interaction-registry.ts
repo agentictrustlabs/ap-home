@@ -47,6 +47,9 @@ export function resolveNavigationTarget(target: string, realm: InteractionRealm)
       return { href: '/settings', label: 'Open settings' };
     case 'work':
       return org ? { href: `/org/${org}/work`, label: 'Open work' } : { href: '/work', label: 'Open work' };
+    case 'build':
+      // Spec 398 §9 — a WORKSPACE's surface: the build runs are the organization's records.
+      return org ? { href: `/org/${org}/build`, label: 'Open build' } : null;
     default:
       return null;
   }

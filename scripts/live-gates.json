@@ -492,6 +492,16 @@
       "timeoutSec": 420
     },
     {
+      "id": "verify-build-run",
+      "script": "scripts/verify-build-run.mts",
+      "spec": "398 §9 / ap-build B3",
+      "proves": "a build run under the WORKSPACE's mandate (authority_required names the organization; one signature): the Build service clones the repository into a Cloudflare Sandbox, the model writes whole files, the repository's tests are RUN and recorded (command + exit code — evidence, never an assertion), the artifact lands as build.run:<id> in the organization's vault (the declared effect; build.run.list reads it back), and the reply PROPOSES the submission — github.pr.open with the files — which the steward takes as a separate signed act: the PR's body names the build record; nothing deployed",
+      "twin": "a build with no mandate parks for the workspace's authority and the service is never called; the reply never says deployed, merged or tests pass",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 420
+    },
+    {
       "id": "verify-contacts",
       "script": "scripts/verify-contacts.mts",
       "spec": "401 C1",

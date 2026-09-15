@@ -144,6 +144,10 @@ export function buildNav(
   if (active.kind !== 'service') {
     groups.push({ items: [{ id: 'work', label: 'Work', href: href('work'), Icon: CheckCircleIcon, status: 'live' }] });
   }
+  // ── Build (spec 398 §9 / ap-build B3): the workspace's build runs — an ORGANIZATION's surface, its steward's. ──
+  if (active.kind === 'org') {
+    groups.push({ items: [{ id: 'build', label: 'Build', href: href('build'), Icon: CodeIcon, status: 'live' }] });
+  }
 
   // ── Stewardship (§2.2): what this agent stewards FOR someone. A service is stewarded, it does not
   //    steward. Collapsed by default — it is a directory, not a destination. ─────────────────────────

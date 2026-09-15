@@ -270,6 +270,43 @@
       ]
     },
     {
+      "id": "home.build",
+      "review": [
+        "APUX-050",
+        "APUX-052"
+      ],
+      "title": "Build — a build run in a sandbox under the workspace's mandate; files + recorded test evidence as the artifact; the PR a proposed separate act",
+      "priority": "P1",
+      "status": "partial",
+      "specs": [
+        398
+      ],
+      "section": "398 §9",
+      "routes": [
+        "(portal)/org/[org]/build"
+      ],
+      "capabilities": [
+        "build.run",
+        "build.run.list"
+      ],
+      "endpoints": [
+        "/harness/ask"
+      ],
+      "tests": [
+        "apps/demo-a2a/test/unit/build-tools.test.ts"
+      ],
+      "gates": [
+        "verify-build-run"
+      ],
+      "gaps": [
+        "public repositories only (B2's attach ceremony brings the deploy key); no editor attached through ACP; the artifact's thread projection on the work item (B4) and build.review / build.promote (B4/B5) not built — a build never deploys"
+      ],
+      "components": [
+        "components/portal/BuildView.tsx",
+        "components/portal/ask/interaction-apps.tsx"
+      ]
+    },
+    {
       "id": "home.messaging",
       "review": [
         "H13",

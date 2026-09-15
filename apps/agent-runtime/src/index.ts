@@ -277,6 +277,9 @@ export interface Env {
   ORCHESTRATION_XAI_BASE_URL?: string;
   ORCHESTRATION_XAI_PROMPT_BUDGET?: string;
   ORCHESTRATION_XAI_TPM?: string;
+  /** Spec 398 §9 / ap-build B3 — the Build service (a sandbox the operator provides); both secrets. */
+  BUILD_SERVICE_URL?: string;
+  BUILD_SERVICE_TOKEN?: string;
   REALTIMEKIT_ACCOUNT_ID?: string;
   REALTIMEKIT_APP_ID?: string;
   REALTIMEKIT_API_TOKEN?: string;

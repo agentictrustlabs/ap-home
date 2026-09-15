@@ -774,3 +774,18 @@ export function capabilityWords(id: string): string {
   }
   return id;
 }
+
+// ── Build (spec 398 §9 / ap-build B3) — the workspace's build runs, read through the same boundary a sentence would ──
+export interface BuildRunRow { runId: string; record: string; repository: string; base: string; task: string; summary: string; files: string[]; evidence: { command: string; exitCode: number }; model: string; builtAt: string; runRef: string; workItem?: string }
+/** The build runs a workspace left (a supplied plan — `build.run.list` at the organization; the reply's structured result). */
+export async function listBuildRuns(session: { token: string }, workspace: Address): Promise<{ ok: true; runs: BuildRunRow[] } | { ok: false; error: string }> {
+  try {
+    const out = await ask(session, { message: 'what has been built', addressee: workspace, runRef: `build-list-${Date.now().toString(36)}`, presented: null, supplied: [], plan: { steps: [{ toolId: 'build.run.list', args: { workspace } }] } });
+    const r = out.reply;
+    if (r.kind !== 'answer') return { ok: false, error: r.kind === 'authority_required' ? 'reading the build runs asked for authority — a read never should' : `the agent answered ${r.kind}` };
+    const result = (r.results ?? []).find((x) => x.toolId === 'build.run.list')?.result as { runs?: BuildRunRow[]; refused?: string } | undefined;
+    if (!result) return { ok: false, error: 'the agent answered without the runs (build.run.list is not on its playbook)' };
+    if (result.refused) return { ok: false, error: result.refused };
+    return { ok: true, runs: result.runs ?? [] };
+  } catch (e) { return { ok: false, error: e instanceof Error ? e.message : String(e) }; }
+}

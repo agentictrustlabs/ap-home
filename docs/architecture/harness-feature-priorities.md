@@ -422,3 +422,18 @@ full, language, what to call her — on the composer's prompt at her own agent; 
 Gate `verify-reminders-and-preferences`. Still behind, in order: files of her own in the Ask (W6), Slack/Notion (each a
 platform app registration first), external MCP servers as connectors (a spec of its own — the authority question in
 403 §6).
+
+## 9. Home Build — the first build run (2026-09-15, ap-build B3 half one)
+
+The Build product's service half is live and reachable from Faithnet: [spec 398 §9.5](../../specs/398-agentic-primitives-ux-strategy.md)
+records what landed. The shape to hold: **the sandbox is where generated code runs and the runtime is where authority is
+decided** — the Build service (`~/ap-build/apps/build-service`, `build.faithnet.io`) verifies a bearer and nothing else
+(D15), holds the model key so the sandbox never does (T24), and returns the files with the test command, its exit code
+and its output as RECORDED (T28); the runtime's `build.run` is the WORKSPACE's act under its steward's mandate, the
+artifact is a record in the workspace's vault (`apexec:BuildArtifact`, `build.run:<id>`), and the PR is a SEPARATE
+proposed act under the forge connector (spec 367 §6 — a branch pushed is a submission). Against the field: Cursor /
+Copilot Workspace / Devin run the loop and hold the credentials themselves; ours is the same loop with the credential in
+the platform, the authorization in a signature, and the evidence in a record the reviewer reads rather than an assertion
+the agent makes. Gate `verify-build-run` (Missio Nexus · `agentictrustlabs/ap-forge-sandbox`); Home → org → Build.
+Next in order: a private repository through B2's attach ceremony (a deploy key held as a wire), `build.review` with the
+diff AND the recorded evidence on the work item (B4), `build.promote` as the steward's signature over the exact tuple (B5).

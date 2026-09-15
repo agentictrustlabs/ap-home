@@ -543,6 +543,20 @@ effect (§5.3).
 Nothing in §9 starts before G1–G2 exit (§12). The review's caution against a new IDE is adopted: no editor of our
 own beyond diff/file view; the loop is the thing.
 
+**Landed 2026-09-15 (ap-build B3, the first half — gate `verify-build-run`, census row `home.build`, partial).** The
+Build service is `~/ap-build/apps/build-service` (Worker `ap-build-service`, `https://build.faithnet.io`): `POST
+/runs` under the runtime's bearer clones a PUBLIC repository into a Cloudflare Sandbox (SDK + image pinned together,
+B0), the workspace's model writes WHOLE files (the key is the service's, never in the sandbox — T24), the
+repository's test script runs (or a syntax check of what changed) and its command, exit code and output tail are
+RECORDED (T28), and the artifact returns. The runtime's `build.run` (org-steward / coordinator archetypes; R2, the
+WORKSPACE's mandate — `resourceArg`/`authorityArg: workspace`, since a mandate's resource is an agent, never a string)
+calls it, and the declared effect lands `build.run:<id>` (`apexec:BuildArtifact`) in the workspace's vault; the
+reply PROPOSES the submission as `next: github.pr.open` with the files, taken as a separate signed act under the
+forge connector (spec 367 §6). `build.run.list` reads the runs back; Home → org → **Build** (`/org/[org]/build`)
+lists them with the evidence chip and hands a task to the Ask. Nothing deploys (T29). Open: a private repository
+(B2's attach — a deploy key as a wire), an editor attached through ACP, the thread projection on the work item and
+`build.review` / `build.promote` (B4/B5).
+
 ---
 
 ## 10. The Developer Kit
