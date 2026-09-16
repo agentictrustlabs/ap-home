@@ -462,6 +462,16 @@
       "timeoutSec": 240
     },
     {
+      "id": "verify-devkit-starter",
+      "script": "scripts/verify-devkit-starter.mts",
+      "spec": "398 §10 / G2",
+      "proves": "the Developer Kit from a clean machine: `create-app --template home-client` into an empty directory, `pnpm install` from the REGISTRY at the exact devkit pin, `ap doctor` clean (12 rules), typecheck, the starter's unit tests, `next build`, and the two acts live against the estate's Home MCP — a read answered under the person's standing, an act parked for HER signature at her Home (grant_link) — in about 90 s",
+      "twin": "continuing the parked run before she signs parks again; the app held a bearer bound to /mcp and nothing else (no signing call in the protocol file)",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 600
+    },
+    {
       "id": "verify-mention-into-run",
       "script": "scripts/verify-mention-into-run.mts",
       "spec": "400 W2 (B3)",

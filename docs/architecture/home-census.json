@@ -1070,17 +1070,22 @@
         "registry/[[...path]]"
       ],
       "gaps": [
+        "G2's clean-machine exit RUNS (2026-09-16, `verify-devkit-starter`: the home-client starter generated, installed from the registry, doctor clean, built, the two acts live in ~90 s) — with the WORKSPACE generator; `npx @agenticprimitives/create-app` reaches it at the next publish (create-app alpha.7). Still open: the typed client + generated parity tests from the contract (398 §7), a hosted docs/llms.txt for coding agents, a Claude Code / Codex skill for 'add a capability'",
         "`ap mcp` is registered in the product template (.mcp.json, .cursor/mcp.json) but the devkit alpha that ships it is not published yet, and the clean-machine CI job (T21) does not exercise it",
         "the component registry (398 §10.5) serves 9 items at /registry with their contracts; it is not yet reachable through the Developer MCP (which answers from the install only) and the items are not yet installable by the shadcn CLI end to end (the files reference the Home's own imports)",
         "`ap upgrade` stops for review when a pinned definition's authority or effects change (398 §10.3) — shipped; the estate pins five archetypes at extraction; `ap test --interaction-coverage` / `--ask-truth` modes are still not wired (399 W1)"
       ],
       "tests": [
         "packages/devkit/test/definitions.test.ts",
-        "packages/devkit/test/developer-mcp.test.ts"
+        "packages/devkit/test/developer-mcp.test.ts",
+        "packages/create-app/test/unit/create-app.test.ts"
       ],
       "notes": null,
       "components": [
         "registry/registry.json"
+      ],
+      "gates": [
+        "verify-devkit-starter"
       ]
     },
     {

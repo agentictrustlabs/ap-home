@@ -107,7 +107,8 @@ export async function askTool(env: ToolEnv, person: Person, args: Record<string,
 
 export function grantLinkTool(env: ToolEnv, person: Person, args: Record<string, unknown>): Record<string, unknown> {
   const run = String(args.run ?? '').trim();
-  if (!/^run-[0-9a-f-]+$/i.test(run)) return { error: 'run must be a runRef (run-…)' };
+  // A run's reference is the harness's (`run-…`) or the one THIS server minted for a streamed ask and the harness adopted (`ask-…`).
+  if (!/^(run|ask)-[0-9A-Za-z_-]+$/.test(run)) return { error: 'run must be a runRef (run-… or ask-…)' };
   // The Home's own origin: the page routes by the person's session, whichever host they signed in at.
   return { url: `${env.HOME_ORIGIN}/you?run=${encodeURIComponent(run)}`, note: 'Only the person can sign here, with the credential that custodies their agent. Once they have, call ask with this run to finish it.' };
 }
