@@ -52,6 +52,7 @@ import { ROUTINE_TOOLS, ROUTINE_ACTS, ROUTINE_LIST, routineInvoker, compiledRout
 import { WEB_TOOLS, webReadInvoker } from './web-read.js';
 import { WEB_SEARCH_TOOLS, webSearchInvoker } from './web-search.js';
 import { BUILD_TOOLS, BUILD_ACTS, buildInvoker } from './build-tools.js';
+import { MCP_CONNECTOR_PREFIX, MCP_CONNECTORS_LIST, MCP_CONNECTORS_LIST_TOOL, isMcpTool, isMcpConnectorRecord, mcpConnectorTools, mcpConnectorInvoker, type McpConnectorRecordV1 } from './connectors/mcp-connector.js';
 import { PREFERENCES_TOOLS, PREFERENCES_ACTS, PREFERENCES_GET, preferencesInvoker } from './preferences-tools.js';
 import type { TriggerScheduleV1 } from './triggers.js';
 import { factsForPrompt, factsOf, type RememberedFactsV1 } from '@agenticprimitives/context';
@@ -2044,6 +2045,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (PREFERENCES_TOOLS.some((t) => t.id === toolId)) return preferencesInvoker({ ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}) }, person, addressee)(toolId, args, ctx);
     if (MAIL_DRIVE_TOOLS.some((t) => t.id === toolId)) return mailDriveInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (CALENDAR_TOOLS.some((t) => t.id === toolId)) return calendarInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
+    if (isMcpTool(toolId) || toolId === MCP_CONNECTORS_LIST) return mcpConnectorInvoker({ env: env as never, readConnectors: (h) => mcpConnectorsOf(deps, h), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, addressee)(toolId, args, ctx);
     if (BUILD_TOOLS.some((t) => t.id === toolId)) return buildInvoker({ env: env as never, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}), ...(deps.survey ? { survey: deps.survey } : {}), ...(deps.readRecords ? { readRecords: deps.readRecords } : {}) }, (presented ?? null) as never, addressee)(toolId, args, ctx);
     if (GITHUB_TOOLS.some((t) => t.id === toolId)) return githubInvoker({ env: env as unknown as Record<string, unknown>, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (toolId === PROFILE_UPDATE_CAPABILITY) return profileUpdateInvoker(deps, person)(toolId, args, ctx);
@@ -4023,13 +4025,18 @@ const ONCHAIN_CALLS_FOR: Record<string, readonly Hex[]> = {
 
 /** Ceremonies every surface is assumed to render: it is a conversation, so it can ask and be answered. */
 const ASSUMED_CEREMONIES = ['data', 'confirmation'];
+/** The ceremonies an act needs: the table, or — for a capability compiled from an attached MCP server (spec 404,
+ *  `mcp.<id>.<tool>`) — the holder's signature, the same rung as any act on a connector. */
+export function ceremoniesFor(capabilityId: string): string[] {
+  return CAPABILITY_CEREMONIES[capabilityId] ?? (isMcpTool(capabilityId) ? ['signature'] : []);
+}
 
 /** Can this surface complete this capability? Silence means yes — a surface that has not said what it
  *  renders is not narrowed by its silence (the same rule as `capabilities`). */
 export function surfaceCanRender(capabilityId: string, ceremonies?: string[]): boolean {
   if (!ceremonies?.length) return true;
   const renders = new Set([...ASSUMED_CEREMONIES, ...ceremonies]);
-  return (CAPABILITY_CEREMONIES[capabilityId] ?? []).every((c) => renders.has(c));
+  return ceremoniesFor(capabilityId).every((c) => renders.has(c));
 }
 
 /**
@@ -4067,7 +4074,7 @@ export function askDescriptors(playbook?: { capabilityIds: Set<string>; tools?: 
         riskTier: (t.risk ?? 'medium') as SurfaceRiskTier,
         // What this one may ASK A PERSON for, beyond its risk floor. `organization.team.create` is medium
         // and still needs a signature — see CAPABILITY_CEREMONIES.
-        ...(CAPABILITY_CEREMONIES[id]?.length ? { ceremonies: CAPABILITY_CEREMONIES[id] as SurfaceCeremony[] } : {}),
+        ...(ceremoniesFor(id).length ? { ceremonies: ceremoniesFor(id) as SurfaceCeremony[] } : {}),
       },
       // `key-required`, not `never-retry`: every authority-bearing step here derives its on-chain nonce
       // from the intent, so the SAME ask retried settles once and a second submission reverts. Retrying
@@ -4183,6 +4190,17 @@ export function askVocabulary(
 // contract's disagreement on an authority field is SAID (the author believes it is in force).
 export function mergeContractTool(builtin: ToolSpec, contract: DefinitionToolV1 | undefined): ToolSpec {
   return composeMergeContractTool(builtin, contract, (d) => console.warn(`[playbook] contract for ${d.capability} declares ${d.field}=${d.contract}; the running capability binds ${String(d.running)} and that is what the verifier compares — the contract's value is NOT applied`));
+}
+
+/** Spec 404 — the external MCP servers a holder attached, from HER records (`connector.mcp:*`). Read on every ask, never
+ *  memoised: a connector removed must be gone on the very next ask in every isolate (removal is final), and an in-isolate
+ *  memo would keep a stranger's tool callable for a minute after she took it away. One survey per ask is the price. */
+export async function mcpConnectorsOf(deps: { survey?: (subject: string) => Promise<Array<{ recordType: string }>>; readRecords?: (subject: string, keys: string[]) => Promise<Record<string, unknown>> }, holder: string | undefined): Promise<McpConnectorRecordV1[]> {
+  if (!holder || !deps.survey || !deps.readRecords) return [];
+  const keys = (await deps.survey(holder.toLowerCase())).map((r) => r.recordType).filter((k) => k.startsWith(MCP_CONNECTOR_PREFIX));
+  if (!keys.length) return [];
+  const recs = await deps.readRecords(holder.toLowerCase(), keys);
+  return keys.map((k) => recs[k]).filter(isMcpConnectorRecord).filter((r) => !(r as { removedAt?: string }).removedAt);
 }
 
 export function scopedActionTools(surface?: AskScopeV1, playbook?: { capabilityIds: Set<string>; tools?: Record<string, DefinitionToolV1> } | null): ToolSpec[] {
@@ -4561,6 +4579,10 @@ step is then handed to that agent under authority the person grants; leave it ou
   const catalog = await catalogOnce;
   mark('catalog');
   const catalogTools = catalog ? CATALOG_TOOLS.map((t) => mergeContractTool(t, playbook?.tools?.[t.id])) : [];
+  // Spec 404 — the addressee's OWN external MCP connectors: compiled from its records, never narrowed by the playbook
+  // (they are the holder's, not the archetype's); a read is her standing, an act her mandate at risk high.
+  const mcpConnectors = await mcpConnectorsOf(deps, input.addressee ? String(input.addressee) : undefined);
+  const mcpTools = mcpConnectors.length ? [...mcpConnectorTools(mcpConnectors), (playbook?.tools?.[MCP_CONNECTORS_LIST] ? mergeContractTool(MCP_CONNECTORS_LIST_TOOL, playbook.tools[MCP_CONNECTORS_LIST]!) : MCP_CONNECTORS_LIST_TOOL)] : (playbook?.tools?.[MCP_CONNECTORS_LIST] && deps.survey ? [mergeContractTool(MCP_CONNECTORS_LIST_TOOL, playbook.tools[MCP_CONNECTORS_LIST]!)] : []);
   // A QUESTION OF JUDGEMENT over material the message carried (`playbook.answer`). Listed ONLY when the
   // message names a skill and the addressee's profile publicly advertises it — an agent answers exactly
   // the questions it has said it answers — and when there is a model to answer with. Neither ⇒ absent.
@@ -4572,7 +4594,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   const playbookAnswer = playbookAnswerAvailable({ call: structuredCallFor(env as never, input.provider), material, advertised }) ? [PLAYBOOK_ANSWER_TOOL] : [];
   const tools = [
     ...playbookAnswer,
-    ...scopedActionTools(input.surface, playbook), ...catalogTools, ...ASK_DISCOVERY_TOOLS,
+    ...scopedActionTools(input.surface, playbook), ...catalogTools, ...mcpTools, ...ASK_DISCOVERY_TOOLS,
     ...(kbQuestionAvailable({ call: structuredCallFor(env as never, input.provider) }) ? [KB_QUESTION_TOOL] : []),
     // Spec 379 — an outside A2A 1.0 agent may ANSWER inside a run; its words are an observation.
     EXTERNAL_AGENT_TOOL,

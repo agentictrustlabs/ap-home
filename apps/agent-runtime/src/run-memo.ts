@@ -59,3 +59,4 @@ export async function forget(key: string): Promise<void> {
   const cache = shared();
   if (cache) { try { await cache.delete(urlOf(key)); } catch { /* nothing to forget */ } }
 }
+

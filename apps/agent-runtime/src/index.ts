@@ -17,6 +17,7 @@ import { parseRoutineSentence } from './routine-sentence.js';
 import { nudge, emailOf } from './nudges.js';
 import { consumeRuntimeWakes } from './runtime-wake.js';
 import { connectorStatus, disconnectConnector, type GoogleProvider } from './connectors/google-token.js';
+import { probeMcpServer, keepMcpToken, dropMcpToken, MCP_CONNECTOR_PREFIX, isMcpConnectorRecord, mcpToolId, type McpConnectorRecordV1 } from './connectors/mcp-connector.js';
 import { searchThreads } from './connectors/google-gmail.js';
 import { listEvents } from './connectors/google-calendar.js';
 import { appendProgress, readProgress, type ProgressLineV1 } from './harness-progress.js';
@@ -1772,6 +1773,51 @@ app.post('/harness/preferences', async (c) => {
   const wrote = await deps.writeSubjectRecord(me, PREFERENCES_RECORD, next);
   if (!wrote.ok) return c.json({ ok: false, error: /record_scope_denied|scope/i.test(wrote.error ?? '') ? 'record_scope_denied' : (wrote.error ?? 'the preferences could not be kept') }, 502);
   return c.json({ ok: true, preferences: next, emailRail: !!emailSender(c.env as unknown as EmailEnv), email });
+});
+// POST /harness/connectors/mcp { session, op: attach|list|remove, holder?, name, url, token?, reads?, id? } — spec 404.
+// An external MCP server as a connector of the HOLDER (the session's own agent, or an organization it stewards): the
+// runtime probes it, compiles its tools (every one an act unless the server or the holder says read), keeps the record in
+// the holder's vault and the credential beside the Google tokens — returned to no one. The Home reads and removes here.
+app.post('/harness/connectors/mcp', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; op?: 'attach' | 'list' | 'remove'; holder?: string; name?: string; url?: string; token?: string | null; reads?: string[]; id?: string } | null;
+  if (!body?.session || !body.op) return c.json({ ok: false, error: 'session and op are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const me = String(who.sa).toLowerCase() as Address;
+  const holder = (body.holder && /^0x[0-9a-fA-F]{40}$/.test(body.holder) ? body.holder.toLowerCase() : me) as Address;
+  if (holder !== me && !(await mayDriveTriggers(c.env, me, holder))) return c.json({ ok: false, error: 'only the holder or a steward of the organization attaches its connectors' }, 403);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  if (!deps.survey || !deps.readRecords || !deps.writeSubjectRecord) return c.json({ ok: false, error: 'the private tier is not configured' }, 503);
+  const readAll = async (): Promise<McpConnectorRecordV1[]> => {
+    const keys = (await deps.survey!(holder)).map((r) => r.recordType).filter((k) => k.startsWith(MCP_CONNECTOR_PREFIX));
+    const recs = keys.length ? await deps.readRecords!(holder, keys) : {};
+    return keys.map((k) => recs[k]).filter(isMcpConnectorRecord);
+  };
+  const view = (r: McpConnectorRecordV1) => ({ id: r.id, name: r.name, url: r.url, attachedAt: r.attachedAt, hasToken: r.hasToken, server: r.server, removedAt: (r as { removedAt?: string }).removedAt ?? null, tools: r.tools.map((t) => ({ name: t.name, description: t.description, kind: t.kind, why: t.why, capability: mcpToolId(r.id, t.name) })) });
+  try {
+    if (body.op === 'list') return c.json({ ok: true, holder, connectors: (await readAll()).filter((r) => !(r as { removedAt?: string }).removedAt).map(view) });
+    if (body.op === 'attach') {
+      if (!body.name || !body.url) return c.json({ ok: false, error: 'name and url are required' }, 400);
+      if (body.token && !c.env.FED_TOKENS) return c.json({ ok: false, error: 'this deployment keeps no connector credentials (FED_TOKENS)' }, 503);
+      const record = await probeMcpServer({ name: body.name, url: body.url, token: body.token ?? null, ...(Array.isArray(body.reads) ? { reads: body.reads.map(String) } : {}) });
+      if (body.token) await keepMcpToken(c.env as never, holder, record.id, body.token.trim());
+      else await dropMcpToken(c.env as never, holder, record.id).catch(() => undefined);
+      const wrote = await deps.writeSubjectRecord(holder, `${MCP_CONNECTOR_PREFIX}${record.id}`, record);
+      if (!wrote.ok) return c.json({ ok: false, error: /record_scope_denied|scope/i.test(wrote.error ?? '') ? 'record_scope_denied' : (wrote.error ?? 'the connector could not be kept') }, 502);
+      return c.json({ ok: true, holder, connector: view(record) });
+    }
+    if (body.op === 'remove') {
+      const rec = (await readAll()).find((r) => r.id === body.id);
+      if (!rec) return c.json({ ok: false, error: 'no such connector' }, 404);
+      await dropMcpToken(c.env as never, holder, rec.id).catch(() => undefined);
+      const wrote = await deps.writeSubjectRecord(holder, `${MCP_CONNECTOR_PREFIX}${rec.id}`, { ...rec, tools: [], hasToken: false, removedAt: new Date().toISOString() });
+      if (!wrote.ok) return c.json({ ok: false, error: wrote.error ?? 'the connector could not be removed' }, 502);
+      return c.json({ ok: true, holder, removed: rec.id });
+    }
+    return c.json({ ok: false, error: 'op must be attach, list or remove' }, 400);
+  } catch (e) {
+    return c.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, 502);
+  }
 });
 app.post('/harness/instructions', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { session?: string } | null;

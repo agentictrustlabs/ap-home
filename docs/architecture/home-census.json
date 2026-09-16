@@ -961,6 +961,42 @@
       ]
     },
     {
+      "id": "home.connectors-mcp",
+      "review": [
+        "APUX-030"
+      ],
+      "title": "External MCP servers as connectors — any server attached as the holder's, its tools compiled (acts by default under her mandate; reads where the server or she says), the credential the runtime's",
+      "priority": "P0",
+      "status": "shipped",
+      "specs": [
+        404
+      ],
+      "section": "404 §1–§2",
+      "routes": [
+        "(portal)/apps"
+      ],
+      "capabilities": [
+        "mcp.connectors.list"
+      ],
+      "endpoints": [
+        "/harness/connectors/mcp",
+        "/harness/ask"
+      ],
+      "tests": [
+        "apps/demo-a2a/test/unit/mcp-connector.test.ts"
+      ],
+      "gates": [
+        "verify-mcp-connector"
+      ],
+      "gaps": [
+        "OAuth-flow attach (a server that wants an authorization code); resources and prompts; listChanged re-probe; Slack/Notion as first-party connectors (W2)"
+      ],
+      "components": [
+        "components/portal/McpConnectorsCard.tsx",
+        "components/portal/ask/interaction-apps.tsx"
+      ]
+    },
+    {
       "id": "home.provenance",
       "review": [
         "H38"

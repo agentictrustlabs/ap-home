@@ -452,6 +452,16 @@
       "timeoutSec": 300
     },
     {
+      "id": "verify-mcp-connector",
+      "script": "scripts/verify-mcp-connector.mts",
+      "spec": "404 W1",
+      "proves": "an external MCP server (Ligonier's catalog, on another account) attached as the PERSON's connector: the runtime probes it and compiles its tools — every tool an act at risk high under her mandate unless the server's readOnlyHint or her own declaration says read; an act parks for HER authority (the server's credential authorizes nothing) and runs under her signature; what comes back is untrusted evidence with the McpToolCard binding; a declared read answers under her standing with no signature; mcp.connectors.list names the server and each tool's kind and why; the record is hers (connector.mcp:<id>)",
+      "twin": "an act on the connector without her mandate never reaches the server; a removed connector's tool is refused as removed on the next ask, never guessed; no credential shape in any reply",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 240
+    },
+    {
       "id": "verify-mention-into-run",
       "script": "scripts/verify-mention-into-run.mts",
       "spec": "400 W2 (B3)",

@@ -814,3 +814,14 @@ export async function listBranches(session: { token: string }, workspace: Addres
   const r = await readAt<{ defaultBranch: string; branches?: string[] }>(session, workspace, 'github.repo.read', { holder: workspace, repo }, `what branches does ${repo} have`);
   return r.ok ? { ok: true, defaultBranch: r.result.defaultBranch, branches: r.result.branches ?? [r.result.defaultBranch] } : r;
 }
+
+// ── External MCP servers as connectors (spec 404) — attached at the runtime, the credential kept there, never here ──
+export interface McpConnectorToolView { name: string; description: string; kind: 'read' | 'act'; why: 'annotation' | 'declared' | 'default'; capability: string }
+export interface McpConnectorView { id: string; name: string; url: string; attachedAt: string; hasToken: boolean; server: { name: string | null; version: string | null; protocolVersion: string | null; instructions: string | null }; tools: McpConnectorToolView[] }
+export async function mcpConnectors(session: { token: string }, op: 'list', holder?: Address): Promise<{ ok: true; connectors: McpConnectorView[] } | { ok: false; error: string }>;
+export async function mcpConnectors(session: { token: string }, op: 'attach', holder: Address | undefined, input: { name: string; url: string; token?: string; reads?: string[] }): Promise<{ ok: true; connector: McpConnectorView } | { ok: false; error: string }>;
+export async function mcpConnectors(session: { token: string }, op: 'remove', holder: Address | undefined, input: { id: string }): Promise<{ ok: true } | { ok: false; error: string }>;
+export async function mcpConnectors(session: { token: string }, op: 'list' | 'attach' | 'remove', holder?: Address, input?: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const out = (await postA2a('/a2a/harness/connectors/mcp', { session: session.token, op, ...(holder ? { holder } : {}), ...(input ?? {}) })) as { ok?: boolean; error?: string } & Record<string, unknown>;
+  return out.ok ? { ok: true, ...out } : { ok: false, error: out.error ?? 'the runtime did not answer' };
+}

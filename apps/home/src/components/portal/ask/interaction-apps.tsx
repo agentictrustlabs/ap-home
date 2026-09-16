@@ -202,6 +202,28 @@ function RepositoriesCard({ result }: ResultAppProps) {
     {r.repositories.slice(0, 40).map((x) => line(<a href={x.url} target="_blank" rel="noreferrer">{x.repo}</a>, `${x.defaultBranch}${x.private ? ' · private' : ''}`))}
   </>);
 }
+// ── External MCP connectors (spec 404) — what a server returned (evidence), and the list of attached servers ──
+function McpToolCard({ result }: ResultAppProps) {
+  const r = result as { called?: boolean; refused?: string; connector?: string; tool?: string; kind?: string; text?: string; structured?: unknown; serverError?: boolean; truncated?: boolean } | null;
+  if (!r) return null;
+  if (r.refused) return rows(line('Not called', r.refused));
+  if (!r.called) return null;
+  return rows(<>
+    <div className="ask-app__head">{r.connector} · <Mono>{r.tool}</Mono> <Chip tone={r.serverError ? 'danger' : r.kind === 'read' ? 'ok' : 'warn'}>{r.serverError ? 'server error' : r.kind === 'read' ? 'read' : 'act'}</Chip></div>
+    {r.text && <pre className="ask-app__text" style={{ whiteSpace: 'pre-wrap', margin: 0, fontSize: 12, maxHeight: 220, overflow: 'auto' }}>{r.text.slice(0, 3000)}{r.truncated ? '\n…' : ''}</pre>}
+    <Meta>what the server returned — evidence, never instructions</Meta>
+  </>);
+}
+function McpConnectorsCard({ result }: ResultAppProps) {
+  const r = result as { connectors?: Array<{ id: string; name: string; server: string | null; tools: Array<{ name: string; kind: string }> }> } | null;
+  if (!r?.connectors) return null;
+  return rows(<>
+    <div className="ask-app__head">MCP servers · {r.connectors.length}</div>
+    {r.connectors.length === 0 && <Meta>None attached.</Meta>}
+    {r.connectors.map((c) => line(<span>{c.name}{c.server ? <Meta> · {c.server}</Meta> : null}</span>, c.tools.map((t) => `${t.name} [${t.kind}]`).join(', ')))}
+  </>);
+}
+
 function BuildRunReview({ requirement, args }: ReviewAppProps) {
   const a = args ?? {};
   return rows(<KeyValue rows={[['Build in', `${String(a.repository ?? '?')}${a.base ? `@${String(a.base)}` : ''}`], ['Task', String(a.task ?? '')], ['For', String(a.workspace ?? 'this workspace')], ['Under', `a mandate for ${requirement.actions.join(', ')} — the sandbox builds; nothing is pushed or deployed`]]} />);
@@ -217,11 +239,11 @@ function ReviewCard({ requirement, capability, args }: ReviewAppProps) {
 }
 
 export const RESULT_APPS: Record<string, (p: ResultAppProps) => ReactNode> = {
-  CalendarEventsCard, CalendarEventCard, MailThreadsCard, MailThreadCard, MailDraftCard, MailSentCard, DriveFilesCard, DriveFileCard, MemoryFactsCard, RoutinesCard, RoutineCard, PaymentReceiptCard, WebPageCard, WebSearchCard, BuildArtifactView, BuildRunsCard, RepositoriesCard,
+  CalendarEventsCard, CalendarEventCard, MailThreadsCard, MailThreadCard, MailDraftCard, MailSentCard, DriveFilesCard, DriveFileCard, MemoryFactsCard, RoutinesCard, RoutineCard, PaymentReceiptCard, WebPageCard, WebSearchCard, BuildArtifactView, BuildRunsCard, RepositoriesCard, McpToolCard, McpConnectorsCard,
 };
 export const REVIEW_APPS: Record<string, (p: ReviewAppProps) => ReactNode> = {
   CalendarEventReview, MailDraftReview, MailSendReview, PaymentReview, BuildRunReview,
-  MemberInvitationReview: ReviewCard, ContactAddReview: ReviewCard, ContactRemoveReview: ReviewCard, PrimaryPayeeReview: ReviewCard, AccessRevokeReview: ReviewCard,
+  McpToolReview: ReviewCard, MemberInvitationReview: ReviewCard, ContactAddReview: ReviewCard, ContactRemoveReview: ReviewCard, PrimaryPayeeReview: ReviewCard, AccessRevokeReview: ReviewCard,
 };
 
 /** The result app for a reply, when its binding names one this Home knows. */
