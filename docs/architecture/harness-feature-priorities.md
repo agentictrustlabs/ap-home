@@ -437,3 +437,7 @@ the platform, the authorization in a signature, and the evidence in a record the
 the agent makes. Gate `verify-build-run` (Missio Nexus · `agentictrustlabs/ap-forge-sandbox`); Home → org → Build.
 Next in order: a private repository through B2's attach ceremony (a deploy key held as a wire), `build.review` with the
 diff AND the recorded evidence on the work item (B4), `build.promote` as the steward's signature over the exact tuple (B5).
+
+## 10. The master gap analysis against the studios (2026-09-15)
+
+The whole offering — Ring 0, ap-home, ap-build, the Developer Kit and the coding-agent tooling — scored against the platform, work and build studios in one table, then ordered: [master-gap-analysis-2026-09.md](master-gap-analysis-2026-09.md). P0 = the reach wave (external MCP servers as connectors under her grant → Slack/Notion; files + org documents under grant; the kit's clean-machine G2 exit with the typed-client and parity projections; Build B2/B4/B5). P1 = the surface wave (embeddable Ask + AG-UI, Slack/Teams entrances, evals as a product, estate admin + budgets, federation G4–G6). P2 = authoring in the Home, supply, conformance, multimodal.
