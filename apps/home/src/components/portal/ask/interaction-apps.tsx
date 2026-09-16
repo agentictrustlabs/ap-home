@@ -191,6 +191,17 @@ function BuildRunsCard({ result }: ResultAppProps) {
     {r.runs.map((x) => line(`${x.repository} — ${x.task.length > 90 ? `${x.task.slice(0, 90)}…` : x.task}`, `${x.files.join(', ')} · ${day(x.builtAt)}`, <Chip tone={x.evidence.exitCode === 0 ? 'ok' : 'danger'}>exit {x.evidence.exitCode}</Chip>))}
   </>);
 }
+function RepositoriesCard({ result }: ResultAppProps) {
+  const r = result as { connected?: boolean; repositories?: Array<{ repo: string; defaultBranch: string; private: boolean; url: string }>; total?: number; truncated?: boolean; refused?: string } | null;
+  if (!r) return null;
+  if (r.refused) return rows(line('No connector', r.refused));
+  if (!r.repositories) return null;
+  return rows(<>
+    <div className="ask-app__head">Repositories the connector can write to · {r.total}{r.truncated ? ` (first ${r.repositories.length})` : ''}</div>
+    {r.repositories.length === 0 && <Meta>None.</Meta>}
+    {r.repositories.slice(0, 40).map((x) => line(<a href={x.url} target="_blank" rel="noreferrer">{x.repo}</a>, `${x.defaultBranch}${x.private ? ' · private' : ''}`))}
+  </>);
+}
 function BuildRunReview({ requirement, args }: ReviewAppProps) {
   const a = args ?? {};
   return rows(<KeyValue rows={[['Build in', `${String(a.repository ?? '?')}${a.base ? `@${String(a.base)}` : ''}`], ['Task', String(a.task ?? '')], ['For', String(a.workspace ?? 'this workspace')], ['Under', `a mandate for ${requirement.actions.join(', ')} — the sandbox builds; nothing is pushed or deployed`]]} />);
@@ -206,7 +217,7 @@ function ReviewCard({ requirement, capability, args }: ReviewAppProps) {
 }
 
 export const RESULT_APPS: Record<string, (p: ResultAppProps) => ReactNode> = {
-  CalendarEventsCard, CalendarEventCard, MailThreadsCard, MailThreadCard, MailDraftCard, MailSentCard, DriveFilesCard, DriveFileCard, MemoryFactsCard, RoutinesCard, RoutineCard, PaymentReceiptCard, WebPageCard, WebSearchCard, BuildArtifactView, BuildRunsCard,
+  CalendarEventsCard, CalendarEventCard, MailThreadsCard, MailThreadCard, MailDraftCard, MailSentCard, DriveFilesCard, DriveFileCard, MemoryFactsCard, RoutinesCard, RoutineCard, PaymentReceiptCard, WebPageCard, WebSearchCard, BuildArtifactView, BuildRunsCard, RepositoriesCard,
 };
 export const REVIEW_APPS: Record<string, (p: ReviewAppProps) => ReactNode> = {
   CalendarEventReview, MailDraftReview, MailSendReview, PaymentReview, BuildRunReview,

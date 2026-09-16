@@ -9,7 +9,7 @@ import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
 import { PageHead, Section, List, Row, Card, Empty, ErrorNote, Note, Button, Chip, Mono, Meta, SkeletonRows } from '../../ui';
 import { askCommand } from '../../home/ask-command';
-import { listBuildRuns, type BuildRunRow } from '../../home/ask';
+import { listBuildRuns, listRepositories, listBranches, type BuildRunRow, type RepositoryRow } from '../../home/ask';
 
 const when = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? iso : d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); };
 const lastCmd = (c: string) => c.split(';').pop()?.trim() ?? c;
@@ -21,6 +21,14 @@ export function BuildView({ org }: { org: Address }) {
   const [repository, setRepository] = useState('');
   const [base, setBase] = useState('');
   const [task, setTask] = useState('');
+  // THE PICKER'S LISTS come from the workspace's own forge connector, through the Ask (`github.repos.list`,
+  // `github.repo.read`) — the repositories its credential can write to, which are exactly the ones a submission could
+  // land on. `other` lets a public repository outside them be typed: it builds, and the PR step says why it cannot.
+  const [repos, setRepos] = useState<RepositoryRow[] | null>(null);
+  const [reposError, setReposError] = useState<string | null>(null);
+  const [other, setOther] = useState(false);
+  const [branches, setBranches] = useState<{ repo: string; defaultBranch: string; list: string[] } | null>(null);
+  const [branchesBusy, setBranchesBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!session) return;
@@ -29,6 +37,19 @@ export function BuildView({ org }: { org: Address }) {
     if (r.ok) setRuns(r.runs); else { setRuns([]); setError(r.error); }
   }, [session, org]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (!session) return;
+    let live = true;
+    void listRepositories({ token: session.token }, org).then((r) => { if (!live) return; if (r.ok) { setRepos(r.repositories); if (!r.repositories.length) setOther(true); } else { setRepos([]); setReposError(r.error); setOther(true); } });
+    return () => { live = false; };
+  }, [session, org]);
+  // Branches follow the picked repository (only for one the connector lists; a typed one keeps the default branch).
+  useEffect(() => {
+    if (!session || other || !repository || !/^[\w.-]+\/[\w.-]+$/.test(repository)) { setBranches(null); return; }
+    let live = true; setBranchesBusy(true);
+    void listBranches({ token: session.token }, org, repository).then((r) => { if (!live) return; setBranchesBusy(false); if (r.ok) { setBranches({ repo: repository, defaultBranch: r.defaultBranch, list: r.branches }); setBase((b) => (b && r.branches.includes(b) ? b : '')); } else setBranches(null); });
+    return () => { live = false; };
+  }, [session, org, repository, other]);
   useEffect(() => {
     const onDone = () => { void load(); };
     window.addEventListener('ap:ask-done', onDone);
@@ -47,9 +68,28 @@ export function BuildView({ org }: { org: Address }) {
       <PageHead title="Build" description="What this workspace's agent built — each run in a sandbox, its files and its test evidence as recorded. A build never deploys." />
       <Card title="Run a build task" testId="build-task-form">
         <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)' }}>
-          <label style={{ display: 'grid', gap: 4 }}><Meta>Repository</Meta><input id="build-repository" className="ui-input" placeholder="owner/name (public)" value={repository} onChange={(e) => setRepository(e.target.value)} data-testid="build-repository" /></label>
-          <label style={{ display: 'grid', gap: 4 }}><Meta>Branch</Meta><input id="build-base" className="ui-input" placeholder="main" value={base} onChange={(e) => setBase(e.target.value)} data-testid="build-base" /></label>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <Meta>Repository{repos && repos.length > 0 && !other ? ` · ${repos.length} the connector can write to` : ''}</Meta>
+            {repos === null ? <select className="ui-input" disabled><option>Reading the connector’s repositories…</option></select>
+              : other ? <input id="build-repository" className="ui-input" placeholder="owner/name (a public repository)" value={repository} onChange={(e) => setRepository(e.target.value)} data-testid="build-repository" />
+              : <select id="build-repository" className="ui-input" value={repository} onChange={(e) => { if (e.target.value === '__other') { setOther(true); setRepository(''); setBase(''); } else setRepository(e.target.value); }} data-testid="build-repository">
+                  <option value="">Pick a repository…</option>
+                  {repos.map((r) => <option key={r.repo} value={r.repo}>{r.repo}{r.private ? ' (private)' : ''}</option>)}
+                  <option value="__other">Another public repository…</option>
+                </select>}
+            {other && repos && repos.length > 0 && <button type="button" className="ghost" style={{ justifySelf: 'start', display: 'inline', padding: 0, minHeight: 0, fontSize: 'var(--fs-sm)' }} onClick={() => { setOther(false); setRepository(''); setBase(''); }}>Back to the connector’s repositories</button>}
+          </label>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <Meta>Branch{branchesBusy ? ' · reading…' : ''}</Meta>
+            {branches && branches.repo === repository && !other
+              ? <select id="build-base" className="ui-input" value={base} onChange={(e) => setBase(e.target.value)} data-testid="build-base">
+                  {branches.list.map((b) => <option key={b} value={b === branches.defaultBranch ? '' : b}>{b}{b === branches.defaultBranch ? ' (default)' : ''}</option>)}
+                </select>
+              : <input id="build-base" className="ui-input" placeholder="main" value={base} onChange={(e) => setBase(e.target.value)} data-testid="build-base" />}
+          </label>
         </div>
+        {reposError && <Meta>The connector’s repositories could not be read — {reposError}. A public repository can still be typed; the pull request needs a connector that can write to it.</Meta>}
+        {other && !reposError && <Meta>A repository outside the connector’s list builds in the sandbox; the pull request step will say it cannot be opened there.</Meta>}
         <label style={{ display: 'grid', gap: 4, marginTop: 8 }}><Meta>Task — in your words</Meta><textarea id="build-task" className="ui-input" rows={3} placeholder="add a CONTRIBUTING.md that says every change here is a pull request opened by an agent under a mandate" value={task} onChange={(e) => setTask(e.target.value)} data-testid="build-task" /></label>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
           <Button variant="primary" onClick={run} disabled={!repoOk || !task.trim()} data-testid="build-run">Build under the workspace&rsquo;s mandate</Button>

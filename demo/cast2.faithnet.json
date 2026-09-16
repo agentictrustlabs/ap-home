@@ -1,0 +1,14 @@
+{
+  "purpose": "the hold'em coaching service in the faithnet estate — chartered by a person, custodied by that person (an operator note, not a persona)",
+  "chainId": 34348,
+  "custodian": {
+    "handle": "alice",
+    "sa": "0xb0d11ce19b756a682e78b4904cd8d832303b3d11"
+  },
+  "service": {
+    "name": "belvedere-players.svc",
+    "sa": "0x69d95f199a8e90d760ff1108298552763a4cc3c5",
+    "charteredUnder": "alice.me"
+  },
+  "charteredAt": "2026-09-15T23:46:25.020Z"
+}

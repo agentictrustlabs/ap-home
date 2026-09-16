@@ -11,6 +11,7 @@
     "skillsCorpus": "~/skills",
     "capabilitySources": [
       "apps/demo-a2a/src",
+      "apps/demo-a2a/src/connectors",
       "packages/context/src",
       "packages/harness/src"
     ]
@@ -287,13 +288,15 @@
       ],
       "capabilities": [
         "build.run",
-        "build.run.list"
+        "build.run.list",
+        "github.repos.list"
       ],
       "endpoints": [
         "/harness/ask"
       ],
       "tests": [
-        "apps/demo-a2a/test/unit/build-tools.test.ts"
+        "apps/demo-a2a/test/unit/build-tools.test.ts",
+        "apps/demo-a2a/test/github-connector.test.ts"
       ],
       "gates": [
         "verify-build-run"

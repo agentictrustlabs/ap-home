@@ -57,12 +57,36 @@ const b64 = (s: string): string => btoa(String.fromCharCode(...new TextEncoder()
 export interface ForgeIo { api: GithubApi; repo: { owner: string; name: string } }
 
 /** Read a repository: its default branch, the newest open PRs, one file when asked. */
+/** The repositories the subject's credential can WRITE to — what a PR could be opened on; a Home's picker lists exactly
+ *  these, because a repository outside them is one the submission would be refused on. Read-only, bounded, never the
+ *  token. `q` narrows by words in the name. */
+export async function listRepositories(api: GithubApi, opts: { q?: string; max?: number } = {}): Promise<{ repositories: Array<{ repo: string; defaultBranch: string; private: boolean; url: string; pushedAt: string | null; description: string | null }>; total: number; truncated: boolean }> {
+  const max = Math.min(Math.max(opts.max ?? 60, 1), 200);
+  const rows: Array<{ full_name: string; default_branch: string; private: boolean; html_url: string; pushed_at: string | null; description: string | null; permissions?: { push?: boolean } }> = [];
+  for (let page = 1; page <= 4 && rows.length < 400; page++) {
+    const r = await api.call<typeof rows | { message?: string }>('GET', `/user/repos?affiliation=owner,collaborator,organization_member&sort=pushed&per_page=100&page=${page}`);
+    if (!r.ok) throw new Error(`GitHub: ${(r.data as { message?: string })?.message ?? `repositories read failed (${r.status})`}`);
+    const arr = Array.isArray(r.data) ? r.data : [];
+    rows.push(...arr);
+    if (arr.length < 100) break;
+  }
+  const q = (opts.q ?? '').trim().toLowerCase();
+  const writable = rows.filter((x) => x.permissions?.push !== false).filter((x) => !q || x.full_name.toLowerCase().includes(q));
+  return {
+    repositories: writable.slice(0, max).map((x) => ({ repo: x.full_name, defaultBranch: x.default_branch, private: x.private, url: x.html_url, pushedAt: x.pushed_at, description: x.description })),
+    total: writable.length, truncated: writable.length > max,
+  };
+}
+
 export async function readRepo(io: ForgeIo, path?: string): Promise<Record<string, unknown>> {
   const r = await io.api.call<{ default_branch?: string; full_name?: string; private?: boolean; html_url?: string; message?: string }>('GET', `/repos/${io.repo.owner}/${io.repo.name}`);
   if (!r.ok) throw new Error(`GitHub: ${r.data?.message ?? `repository read failed (${r.status})`}`);
   const prs = await io.api.call<Array<{ number: number; title: string; state: string; html_url: string; head: { ref: string }; body?: string }>>('GET', `/repos/${io.repo.owner}/${io.repo.name}/pulls?state=open&per_page=10`);
+  // The branches a build can start from (bounded to the first 100, the default branch first).
+  const br = await io.api.call<Array<{ name: string; commit?: { sha?: string } }>>('GET', `/repos/${io.repo.owner}/${io.repo.name}/branches?per_page=100`);
+  const branches = (Array.isArray(br.data) ? br.data : []).map((b) => b.name).sort((a, b) => (a === r.data.default_branch ? -1 : b === r.data.default_branch ? 1 : a.localeCompare(b)));
   const out: Record<string, unknown> = {
-    repo: r.data.full_name, defaultBranch: r.data.default_branch, url: r.data.html_url, private: r.data.private,
+    repo: r.data.full_name, defaultBranch: r.data.default_branch, url: r.data.html_url, private: r.data.private, branches,
     openPullRequests: (Array.isArray(prs.data) ? prs.data : []).map((p) => ({ number: p.number, title: p.title, branch: p.head.ref, url: p.html_url, ...(prBindingOf(p.body) ? { binding: prBindingOf(p.body) } : {}) })),
   };
   if (path) {

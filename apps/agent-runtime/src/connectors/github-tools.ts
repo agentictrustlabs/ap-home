@@ -5,9 +5,10 @@
 // merge (PROMOTION — refused unless the mandate's intent names the PR and the intent the work was opened under).
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import { intentDigest } from '@agenticprimitives/delegation';
-import { githubApi, githubTokenFor, parseRepo, readRepo, openPullRequest, commentOnPullRequest, readPullRequest, mergePullRequest, type GithubEnv } from './github.js';
+import { githubApi, githubTokenFor, parseRepo, readRepo, listRepositories, openPullRequest, commentOnPullRequest, readPullRequest, mergePullRequest, type GithubEnv } from './github.js';
 
 export const GITHUB_REPO_READ = 'github.repo.read' as const;
+export const GITHUB_REPOS_LIST = 'github.repos.list' as const;
 export const GITHUB_PR_OPEN = 'github.pr.open' as const;
 export const GITHUB_PR_COMMENT = 'github.pr.comment' as const;
 export const GITHUB_PR_READ = 'github.pr.read' as const;
@@ -18,9 +19,16 @@ const holderArg = { holder: { type: 'string', description: 'Whose GitHub connect
 
 export const GITHUB_TOOLS: ToolSpec[] = [
   {
+    id: GITHUB_REPOS_LIST,
+    answers: ['which repositories', 'list the repositories', 'what repos do we have', 'the repositories we can build in', 'our github repos'],
+    description: 'LISTS the GitHub repositories the subject\'s connector can WRITE to — the ones a build or a pull request could land on — each with its default branch; `q` narrows by name, `max` caps the count. Never reads their contents. Args: q (optional), max (optional), holder (whose connector).',
+    inputSchema: { type: 'object', properties: { q: { type: 'string', description: 'Words in the repository name (optional)' }, max: { type: 'integer' }, ...holderArg } },
+    establishes: 'lookup',
+  },
+  {
     id: GITHUB_REPO_READ,
     answers: ['what is in the repository', 'open pull requests', 'read the repo', 'show the file', 'what branches'],
-    description: 'READS a GitHub repository the subject holds a connector for: its default branch, the open pull requests (each with the intent binding it was opened under, if any), and one file when `path` is given. Args: repo (owner/name), path (optional), holder (whose connector).',
+    description: 'READS a GitHub repository the subject holds a connector for: its default branch, its branches, the open pull requests (each with the intent binding it was opened under, if any), and one file when `path` is given. Args: repo (owner/name), path (optional), holder (whose connector).',
     inputSchema: { type: 'object', properties: { repo: { type: 'string', description: 'owner/name' }, path: { type: 'string', description: 'A file path to read (optional)' }, ...holderArg }, required: ['repo'] },
     establishes: 'lookup',
   },
@@ -80,13 +88,17 @@ async function subjectOf(deps: GithubToolDeps, args: Record<string, unknown>, pr
 
 export function githubInvoker(deps: GithubToolDeps, presented: { wire?: { delegator?: string } } | null, person: string | undefined): ToolInvoker {
   return async (toolId, args, ctx) => {
-    const repo = parseRepo(String(args.repo ?? ''));
-    if (!repo) throw new Error(`repo must be owner/name (got ${String(args.repo ?? '')})`);
     const subject = await subjectOf(deps, args, presented, person);
     const token = githubTokenFor(deps.env, subject.name);
     if (!token) return { refused: `${subject.name ?? subject.address} holds no GitHub connector on this deployment — a steward connects one (the credential is kept by the platform, never by an agent)` };
-    const io = { api: githubApi(token, deps.fetch), repo };
     const holder = subject.address;
+    if (toolId === GITHUB_REPOS_LIST) {
+      const out = await listRepositories(githubApi(token, deps.fetch), { ...(typeof args.q === 'string' ? { q: args.q } : {}), ...(typeof args.max === 'number' ? { max: args.max } : {}) });
+      return { holder, connected: true, ...out, answer: out.repositories.length ? `${out.total} repositor${out.total === 1 ? 'y' : 'ies'} the connector can write to${out.truncated ? ` (first ${out.repositories.length})` : ''}:\n${out.repositories.map((r) => `${r.repo} (${r.defaultBranch}${r.private ? ', private' : ''})`).join('\n')}` : 'The connector can write to no repository.' };
+    }
+    const repo = parseRepo(String(args.repo ?? ''));
+    if (!repo) throw new Error(`repo must be owner/name (got ${String(args.repo ?? '')})`);
+    const io = { api: githubApi(token, deps.fetch), repo };
     switch (toolId) {
       case GITHUB_REPO_READ: return { holder, ...(await readRepo(io, typeof args.path === 'string' ? args.path : undefined)) };
       case GITHUB_PR_READ: return { holder, ...(await readPullRequest(io, Number(args.number))) };

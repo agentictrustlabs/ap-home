@@ -2,7 +2,7 @@
 // only under a mandate bound to THAT intent (another intent's mandate is refused); an unbound PR cannot be promoted;
 // the credential is the Worker's per-subject secret, absent ⇒ no connector (never a guess); the token never leaves.
 import { describe, it, expect } from 'vitest';
-import { githubTokenFor, prBindingLine, prBindingOf, openPullRequest, mergePullRequest, readPullRequest, type GithubApi } from '../src/connectors/github.js';
+import { githubTokenFor, prBindingLine, prBindingOf, openPullRequest, mergePullRequest, readPullRequest, readRepo, listRepositories, type GithubApi } from '../src/connectors/github.js';
 
 function fakeForge() {
   const prs = new Map<number, { number: number; title: string; body: string; state: string; merged: boolean; head: { ref: string; sha: string } }>();
@@ -13,6 +13,9 @@ function fakeForge() {
       calls.push(`${method} ${path}`);
       const b = body as Record<string, unknown>;
       if (method === 'GET' && path === '/repos/o/r') return { ok: true, status: 200, data: { default_branch: 'main', full_name: 'o/r' } };
+      if (method === 'GET' && path === '/repos/o/r/branches?per_page=100') return { ok: true, status: 200, data: [{ name: 'feature/x' }, { name: 'main' }, { name: 'ap/work-1' }] };
+      if (method === 'GET' && path.startsWith('/repos/o/r/pulls?state=open')) return { ok: true, status: 200, data: [] };
+      if (method === 'GET' && path.startsWith('/user/repos?')) return { ok: true, status: 200, data: path.includes('page=1') ? [{ full_name: 'o/r', default_branch: 'main', private: false, html_url: 'https://gh/o/r', pushed_at: '2026-09-15T00:00:00Z', description: null, permissions: { push: true } }, { full_name: 'o/readonly', default_branch: 'main', private: true, html_url: 'https://gh/o/readonly', pushed_at: null, description: 'x', permissions: { push: false } }, { full_name: 'acme/site', default_branch: 'trunk', private: true, html_url: 'https://gh/acme/site', pushed_at: null, description: null, permissions: { push: true } }] : [] };
       if (method === 'GET' && path === '/repos/o/r/git/ref/heads/main') return { ok: true, status: 200, data: { object: { sha: 'base' } } };
       if (method === 'POST' && path === '/repos/o/r/git/refs') return { ok: true, status: 201, data: {} };
       if (method === 'GET' && path.startsWith('/repos/o/r/contents/')) return { ok: false, status: 404, data: {} };
@@ -32,6 +35,14 @@ function fakeForge() {
 const D1 = `0x${'a'.repeat(64)}`; const D2 = `0x${'b'.repeat(64)}`;
 
 describe('GitHub connector (W3/W4)', () => {
+  it('lists the repositories the credential can WRITE to (the picker\'s list), narrowed by words; the read carries the branches, default first', async () => {
+    const f = fakeForge();
+    const all = await listRepositories(f.api);
+    expect(all.repositories.map((r) => r.repo)).toEqual(['o/r', 'acme/site']); expect(all.total).toBe(2); expect(all.truncated).toBe(false);
+    expect((await listRepositories(f.api, { q: 'site' })).repositories.map((r) => r.repo)).toEqual(['acme/site']);
+    const read = await readRepo({ api: f.api, repo: { owner: 'o', name: 'r' } });
+    expect(read.branches).toEqual(['main', 'ap/work-1', 'feature/x']); expect(read.defaultBranch).toBe('main');
+  });
   it('the credential is the subject\'s Worker secret, or nothing', () => {
     expect(githubTokenFor({ AP_CONNECTOR_GITHUB_TOKEN_MISSIO_NEXUS_ORG: 'ghp_x' }, 'missio-nexus.org')).toBe('ghp_x');
     expect(githubTokenFor({ AP_CONNECTOR_GITHUB_TOKEN_MISSIO_NEXUS_ORG: 'ghp_x' }, 'alice.me')).toBeNull();

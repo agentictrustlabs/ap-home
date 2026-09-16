@@ -789,3 +789,28 @@ export async function listBuildRuns(session: { token: string }, workspace: Addre
     return { ok: true, runs: result.runs ?? [] };
   } catch (e) { return { ok: false, error: e instanceof Error ? e.message : String(e) }; }
 }
+
+// ── The Build picker's lists (spec 398 §9): what the workspace's forge connector can write to, and a repository's branches ──
+export interface RepositoryRow { repo: string; defaultBranch: string; private: boolean; url: string; pushedAt: string | null; description: string | null }
+/** ONE supplied-plan read at the workspace; the structured result of the named tool, or why not. */
+async function readAt<T>(session: { token: string }, workspace: Address, toolId: string, args: Record<string, unknown>, words: string): Promise<{ ok: true; result: T } | { ok: false; error: string }> {
+  try {
+    const out = await ask(session, { message: words, addressee: workspace, runRef: `read-${toolId}-${Date.now().toString(36)}`, presented: null, supplied: [], plan: { steps: [{ toolId, args }] } });
+    const r = out.reply;
+    if (r.kind !== 'answer') return { ok: false, error: r.kind === 'authority_required' ? `${toolId} asked for authority — a read never should` : `the agent answered ${r.kind}` };
+    const result = (r.results ?? []).find((x) => x.toolId === toolId)?.result as (T & { refused?: string }) | undefined;
+    if (!result) return { ok: false, error: `the agent answered without a result (${toolId} is not on its playbook)` };
+    if (result.refused) return { ok: false, error: result.refused };
+    return { ok: true, result };
+  } catch (e) { return { ok: false, error: e instanceof Error ? e.message : String(e) }; }
+}
+/** The repositories the workspace's GitHub connector can WRITE to — the only ones a submission could land on. */
+export async function listRepositories(session: { token: string }, workspace: Address, q?: string): Promise<{ ok: true; repositories: RepositoryRow[]; total: number; truncated: boolean } | { ok: false; error: string }> {
+  const r = await readAt<{ repositories: RepositoryRow[]; total: number; truncated: boolean }>(session, workspace, 'github.repos.list', { holder: workspace, ...(q ? { q } : {}), max: 200 }, 'which repositories can we build in');
+  return r.ok ? { ok: true, repositories: r.result.repositories ?? [], total: r.result.total ?? 0, truncated: !!r.result.truncated } : r;
+}
+/** One repository's branches (default first), through the same connector. */
+export async function listBranches(session: { token: string }, workspace: Address, repo: string): Promise<{ ok: true; defaultBranch: string; branches: string[] } | { ok: false; error: string }> {
+  const r = await readAt<{ defaultBranch: string; branches?: string[] }>(session, workspace, 'github.repo.read', { holder: workspace, repo }, `what branches does ${repo} have`);
+  return r.ok ? { ok: true, defaultBranch: r.result.defaultBranch, branches: r.result.branches ?? [r.result.defaultBranch] } : r;
+}

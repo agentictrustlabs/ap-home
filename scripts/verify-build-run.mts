@@ -11,7 +11,9 @@
  *   2. the artifact is a RECORD in the organization's vault — `build.run.list` reads it back (the declared effect landed);
  *   3. takes the proposed next act: the PR opens on the forge under the organization's connector, its body naming the
  *      build record and the evidence; the files on the branch are the artifact's;
- *   4. the twin: a build with no mandate parks for the WORKSPACE's authority — the service is never called.
+ *   4. the twin: a build with no mandate parks for the WORKSPACE's authority — the service is never called;
+ *   5. the picker's lists: `github.repos.list` names the repositories the connector can WRITE to (the forge among them)
+ *      and `github.repo.read` carries the branches, default first — reads, no mandate, no token in any reply.
  * What it does not claim: that the change is good (a reviewer's job, B4) or that anything was promoted (T29).
  */
 import { randomBytes } from 'node:crypto';
@@ -63,6 +65,16 @@ const bare = await ask(`in ${F.repo} add a greeting (${nonce})`, 'build.run', { 
 if (bare.reply.kind !== 'authority_required') fail(`a build without a mandate did not park for authority: ${JSON.stringify(bare.reply).slice(0, 300)}`);
 if (bare.reply.delegator?.toLowerCase() !== org) fail(`the mandate asked is ${bare.reply.delegator}'s, not the workspace's`);
 console.log(`  twin: a build with no mandate → authority_required of the workspace (${fx.org.handle}); nothing built`);
+
+// ── 5. the picker's lists — what the Build screen's dropdowns are made of ──
+const repos = await ask('which repositories can we build in', 'github.repos.list', { holder: fx.org.handle });
+const rl = repos.result as { repositories?: Array<{ repo: string; defaultBranch: string }>; total?: number };
+if (repos.reply.kind !== 'answer' || !rl.repositories?.some((r) => r.repo.toLowerCase() === F.repo.toLowerCase())) fail(`the connector's repositories do not list the forge ${F.repo}: ${JSON.stringify(repos.reply).slice(0, 300)}`);
+if (/gh[posr]_[A-Za-z0-9]{10,}/.test(JSON.stringify(repos.reply))) fail('a token appeared in the repositories reply');
+const br = await ask(`what branches does ${F.repo} have`, 'github.repo.read', { holder: fx.org.handle, repo: F.repo });
+const bl = br.result as { defaultBranch?: string; branches?: string[] };
+if (!bl.branches?.length || bl.branches[0] !== bl.defaultBranch) fail(`the repository read carries no branches (default first): ${JSON.stringify(br.result).slice(0, 300)}`);
+console.log(`  picker: ${rl.total} repositor${rl.total === 1 ? 'y' : 'ies'} the connector can write to (${F.repo} among them) · ${F.repo}: ${bl.branches!.length} branch(es), default ${bl.defaultBranch}`);
 
 // ── 1. the build, under the workspace's mandate ──
 const task = `add notes/build-${nonce}.md — a short markdown note titled "Build ${nonce}" saying this file was written by a build run in a sandbox and lists two things a reviewer should check`;
