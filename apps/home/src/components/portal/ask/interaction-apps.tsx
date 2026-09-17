@@ -248,6 +248,36 @@ function LibraryFileCard({ result }: ResultAppProps) {
   </>);
 }
 
+function BuildReviewCard({ result }: ResultAppProps) {
+  const r = result as { refused?: string; runId?: string; repository?: string; files?: Array<{ path: string; chars: number }>; evidence?: { command: string; exitCode: number; outputTail: string; recorded: boolean }; assertion?: { by: string; summary: string }; pullRequest?: { number: number; url: string; state: string; merged: boolean; headSha: string | null; checksVerdict: string; reviews: Array<{ user: string; state: string }> } | null; ready?: boolean } | null;
+  if (!r) return null;
+  if (r.refused) return rows(line('No review', r.refused));
+  if (!r.runId || !r.evidence) return null;
+  const cmd = r.evidence.command.split(';').pop()?.trim() ?? r.evidence.command;
+  return rows(<>
+    <div className="ask-app__head">Build {r.runId} · {r.repository} {r.ready && <Chip tone="ok">ready to promote</Chip>}</div>
+    {(r.files ?? []).map((f) => line(<Mono>{f.path}</Mono>, `${f.chars.toLocaleString()} chars`))}
+    {line(<span><Chip tone={r.evidence.exitCode === 0 ? 'ok' : 'danger'}>{cmd} · exit {r.evidence.exitCode}</Chip></span>, 'evidence — recorded in the sandbox')}
+    {r.assertion && line(<span><Chip>assertion</Chip> {r.assertion.summary}</span>, `${r.assertion.by} — the model's own claim, apart from the evidence`)}
+    {r.pullRequest ? line(<a href={r.pullRequest.url} target="_blank" rel="noreferrer">PR #{r.pullRequest.number}</a>, `${r.pullRequest.merged ? 'merged' : r.pullRequest.state} · head ${(r.pullRequest.headSha ?? '').slice(0, 10)} · checks ${r.pullRequest.checksVerdict} · ${r.pullRequest.reviews.length} review(s)`) : line('No pull request yet', 'open one from the build reply')}
+  </>);
+}
+function BuildPromotionCard({ result }: ResultAppProps) {
+  const r = result as { promoted?: boolean; refused?: string; runId?: string; pullRequest?: number; mergeSha?: string | null; tuple?: { commit: string; configDigest: string; environment: string; migration: string }; record?: string | null } | null;
+  if (!r) return null;
+  if (r.refused) return rows(line('Not promoted', r.refused));
+  if (!r.promoted || !r.tuple) return null;
+  return rows(<>
+    <div className="ask-app__head">Promoted · build {r.runId} <Chip tone="ok">PR #{r.pullRequest} merged</Chip></div>
+    <KeyValue rows={[['Commit', <Mono key="c">{r.tuple.commit.slice(0, 12)}</Mono>], ['Config', <Mono key="d">{r.tuple.configDigest.slice(0, 19)}…</Mono>], ['Environment', r.tuple.environment], ['Migration', r.tuple.migration], ['Merge', <Mono key="m">{(r.mergeSha ?? '').slice(0, 12)}</Mono>], ...(r.record ? [['Record', <Mono key="r">{r.record}</Mono>] as [ReactNode, ReactNode]] : [])]} />
+    <Meta>the signature was over this exact tuple — a promotion of another commit is another act</Meta>
+  </>);
+}
+function BuildPromoteReview({ requirement, args }: ReviewAppProps) {
+  const a = args ?? {};
+  return rows(<KeyValue rows={[['Promote build', String(a.runId ?? '?')], ['At commit', String(a.commit ?? '?')], ['Reaches', 'the repository\'s default branch (the environment)'], ['Under', `a mandate for ${requirement.actions.join(', ')} — bound to this run and this commit; refused if the forge shows another`]]} />);
+}
+
 function BuildRunReview({ requirement, args }: ReviewAppProps) {
   const a = args ?? {};
   return rows(<KeyValue rows={[['Build in', `${String(a.repository ?? '?')}${a.base ? `@${String(a.base)}` : ''}`], ['Task', String(a.task ?? '')], ['For', String(a.workspace ?? 'this workspace')], ['Under', `a mandate for ${requirement.actions.join(', ')} — the sandbox builds; nothing is pushed or deployed`]]} />);
@@ -263,10 +293,10 @@ function ReviewCard({ requirement, capability, args }: ReviewAppProps) {
 }
 
 export const RESULT_APPS: Record<string, (p: ResultAppProps) => ReactNode> = {
-  CalendarEventsCard, CalendarEventCard, MailThreadsCard, MailThreadCard, MailDraftCard, MailSentCard, DriveFilesCard, DriveFileCard, MemoryFactsCard, RoutinesCard, RoutineCard, PaymentReceiptCard, WebPageCard, WebSearchCard, BuildArtifactView, BuildRunsCard, RepositoriesCard, McpToolCard, McpConnectorsCard, LibraryFilesCard, LibraryFileCard,
+  CalendarEventsCard, CalendarEventCard, MailThreadsCard, MailThreadCard, MailDraftCard, MailSentCard, DriveFilesCard, DriveFileCard, MemoryFactsCard, RoutinesCard, RoutineCard, PaymentReceiptCard, WebPageCard, WebSearchCard, BuildArtifactView, BuildRunsCard, RepositoriesCard, McpToolCard, McpConnectorsCard, LibraryFilesCard, LibraryFileCard, BuildReviewCard, BuildPromotionCard,
 };
 export const REVIEW_APPS: Record<string, (p: ReviewAppProps) => ReactNode> = {
-  CalendarEventReview, MailDraftReview, MailSendReview, PaymentReview, BuildRunReview,
+  CalendarEventReview, MailDraftReview, MailSendReview, PaymentReview, BuildRunReview, BuildPromoteReview,
   McpToolReview: ReviewCard, MemberInvitationReview: ReviewCard, ContactAddReview: ReviewCard, ContactRemoveReview: ReviewCard, PrimaryPayeeReview: ReviewCard, AccessRevokeReview: ReviewCard,
 };
 

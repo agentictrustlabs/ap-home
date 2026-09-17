@@ -553,9 +553,18 @@ WORKSPACE's mandate — `resourceArg`/`authorityArg: workspace`, since a mandate
 calls it, and the declared effect lands `build.run:<id>` (`apexec:BuildArtifact`) in the workspace's vault; the
 reply PROPOSES the submission as `next: github.pr.open` with the files, taken as a separate signed act under the
 forge connector (spec 367 §6). `build.run.list` reads the runs back; Home → org → **Build** (`/org/[org]/build`)
-lists them with the evidence chip and hands a task to the Ask. Nothing deploys (T29). Open: a private repository
-(B2's attach — a deploy key as a wire), an editor attached through ACP, the thread projection on the work item and
-`build.review` / `build.promote` (B4/B5).
+lists them with the evidence chip and hands a task to the Ask. Nothing deploys (T29).
+
+**B2 · B4 · B5 landed 2026-09-16 (the same gate).** B2: a PRIVATE repository builds — the runtime fetches its archive under
+the workspace's forge connector (the API hop carries the credential; the pre-signed codeload hop carries none) and hands
+BYTES to the Build service, so the sandbox holds files, no remote, no token (T24 kept whole; `source: archive`, the base
+commit named). B4: `build.review` returns the recorded evidence (command · exit · output) APART from the model's summary
+(rendered as an assertion) with the forge's checks and reviews on the PR opened from the run; `BuildReviewCard`, the
+Build page's Review button. B5: `build.promote` (R3, the ladder's second signature) merges the PR into the default branch
+— the environment today — only when the ask names the run AND the commit at the PR's head, the checks neither fail nor
+run, and the PR carries its opening intent; it leaves `build.promotion:<id>` (`apexec:BuildPromotion`) with the exact
+tuple (commit · config digest · environment · migration). Open: an editor attached through ACP, a deployment target
+with a preview and a real config/migration on the tuple, recovery (B6), the artifact on the work item's thread.
 
 ---
 

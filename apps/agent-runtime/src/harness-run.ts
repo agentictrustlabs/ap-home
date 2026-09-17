@@ -2048,7 +2048,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (CALENDAR_TOOLS.some((t) => t.id === toolId)) return calendarInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (LIBRARY_TOOLS.some((t) => t.id === toolId)) { if (!deps.readSubjectRecord) throw new Error('the private tier is not configured'); return libraryInvoker({ readSubjectRecord: deps.readSubjectRecord }, addressee)(toolId, args, ctx); }
     if (isMcpTool(toolId) || toolId === MCP_CONNECTORS_LIST) return mcpConnectorInvoker({ env: env as never, readConnectors: (h) => mcpConnectorsOf(deps, h), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, addressee)(toolId, args, ctx);
-    if (BUILD_TOOLS.some((t) => t.id === toolId)) return buildInvoker({ env: env as never, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}), ...(deps.survey ? { survey: deps.survey } : {}), ...(deps.readRecords ? { readRecords: deps.readRecords } : {}) }, (presented ?? null) as never, addressee)(toolId, args, ctx);
+    if (BUILD_TOOLS.some((t) => t.id === toolId)) return buildInvoker({ env: env as never, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}), ...(deps.survey ? { survey: deps.survey } : {}), ...(deps.readRecords ? { readRecords: deps.readRecords } : {}), ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}) }, (presented ?? null) as never, addressee)(toolId, args, ctx);
     if (GITHUB_TOOLS.some((t) => t.id === toolId)) return githubInvoker({ env: env as unknown as Record<string, unknown>, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (toolId === PROFILE_UPDATE_CAPABILITY) return profileUpdateInvoker(deps, person)(toolId, args, ctx);
     if (toolId === HOUSEHOLD_RECORD_CAPABILITY) return householdRecordInvoker(deps, person)(toolId, args, ctx);
@@ -2372,6 +2372,8 @@ export const CAPABILITY_WORDS: Record<string, string> = {
   'github.pr.open': 'open a pull request on GitHub',
   'github.pr.comment': 'comment on a pull request',
   'github.pr.merge': 'promote (merge) a pull request',
+  'build.run': 'run a build task for the workspace in a sandbox',
+  'build.promote': 'promote a build — merge its pull request under a signature over the exact commit',
   'access.grant.revoke': 'revoke an app\'s access on chain',
   'profile.contact.update': 'change your own contact details',
   'household.member.record': 'record who is in your household',
@@ -2559,6 +2561,8 @@ const RESOURCE_ARG_FOR: Record<string, string> = {
   'github.pr.open': 'holder',
   'github.pr.comment': 'holder',
   'github.pr.merge': 'holder',
+  'build.run': 'workspace',
+  'build.promote': 'workspace',
   'coordination.endeavor.request': 'org',
   'coordination.contribution.propose': 'org',
   'coordination.contribution.allocate': 'org',
@@ -3991,6 +3995,7 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'github.pr.comment': ['signature'],
   'github.pr.merge': ['signature'],                 // the mandate — bound to the work the PR names
   'build.run': ['signature'],                       // the mandate — the workspace's steward signs for THIS task (spec 398 §9 / ap-build B3)
+  'build.promote': ['signature'],                   // the mandate — the steward's signature over the exact tuple (commit · config · environment · migration), T29
   'calendar.event.create': ['signature'],           // the mandate — the holder's calendar connector acts (spec 400 W4)
   'gmail.draft.create': ['signature'],              // the mandate — a draft in the holder's mail (spec 402 W2)
   'gmail.message.send': ['signature'],              // the mandate — mail that LEAVES as the holder is the holder acting (spec 402 W5)

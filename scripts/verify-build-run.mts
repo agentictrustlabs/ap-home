@@ -12,7 +12,11 @@
  *   3. takes the proposed next act: the PR opens on the forge under the organization's connector, its body naming the
  *      build record and the evidence; the files on the branch are the artifact's;
  *   4. the twin: a build with no mandate parks for the WORKSPACE's authority — the service is never called;
- *   5. the picker's lists: `github.repos.list` names the repositories the connector can WRITE to (the forge among them)
+ *   5. B2/B4/B5 — a PRIVATE repository builds (the runtime fetched its archive under the workspace's connector; the
+ *      artifact says `source: archive`; no credential in any reply); `build.review` shows the recorded evidence APART
+ *      from the model's assertion and the forge's checks on the PR; `build.promote` with the WRONG commit is refused
+ *      before the forge is touched; with the run and the commit named it merges, and the tuple is the record;
+ *   6. the picker's lists: `github.repos.list` names the repositories the connector can WRITE to (the forge among them)
  *      and `github.repo.read` carries the branches, default first — reads, no mandate, no token in any reply.
  * What it does not claim: that the change is good (a reviewer's job, B4) or that anything was promoted (T29).
  */
@@ -54,6 +58,11 @@ async function approve(runRef: string, rep: Reply): Promise<Reply> {
 async function ask(message: string, toolId: string, args: Record<string, unknown>, act = false): Promise<{ reply: Reply; result: Record<string, unknown> }> {
   let r = (await post('/harness/ask', { session: steward.bearer, addressee: org, message, plan: { steps: [{ toolId, args }] } })).reply as Reply;
   if (r.kind === 'authority_required' && act) r = await approve(r.runRef!, r);
+  // A HIGH-risk act (a promotion) climbs the ladder to a second party: the steward standing there signs the approval digest.
+  const p = r as Reply & { prompt?: { kind?: string; stepRef?: string; digest?: Hex; signer?: string } };
+  if (act && p.kind === 'prompt' && p.prompt?.kind === 'signature' && p.prompt.digest && p.prompt.stepRef) {
+    r = (await post('/harness/ask', { session: steward.bearer, addressee: org, runRef: p.runRef, supplied: [{ stepRef: p.prompt.stepRef, signature: { digest: p.prompt.digest, signer: steward.agent.toLowerCase(), signature: await steward.signDigest(p.prompt.digest) } }] })).reply as Reply;
+  }
   const result = (r.results ?? []).find((x) => x.toolId === toolId)?.result as Record<string, unknown> | undefined;
   return { reply: r, result: result ?? (r.result as Record<string, unknown> | undefined) ?? {} };
 }
@@ -106,5 +115,34 @@ const ev = evidence.result as { body?: string; title?: string; files?: unknown[]
 const body = String(ev.body ?? (evidence.result as { pullRequest?: { body?: string } }).pullRequest?.body ?? '');
 if (body && !body.includes(b.record!)) fail(`the PR body does not name the build record ${b.record}: ${body.slice(0, 200)}`);
 console.log(`  submitted: #${pr.number} ${pr.url} — the body names ${b.record}${body ? '' : ' (body not read back by github.pr.read; the opener wrote it)'}`);
+
+// ── 5. B2 · B4 · B5 on the PRIVATE repository ──
+if (F.privateRepo) {
+  const ptask = `add notes/private-${nonce}.md — a short note titled "Private build ${nonce}" saying this repository is private and its archive reached the sandbox without a credential`;
+  const pb = await ask(`in ${F.privateRepo} ${ptask}`, 'build.run', { workspace: fx.org.handle, repository: F.privateRepo, task: ptask }, true);
+  const pr2 = pb.result as { built?: boolean; source?: string; baseCommit?: string; artifact?: { runId: string; files: Array<{ path: string; content: string }> }; refused?: string };
+  if (!pr2.built || pr2.source !== 'archive' || !pr2.baseCommit) fail(`the private repository did not build from an archive: ${JSON.stringify(pb.reply).slice(0, 400)}`);
+  if (/gh[posr]_[A-Za-z0-9]{10,}/.test(JSON.stringify(pb.reply))) fail('a credential appeared in the build reply');
+  console.log(`  B2: ${F.privateRepo} built from an ARCHIVE fetched under the connector (base ${pr2.baseCommit.slice(0, 10)}) · run ${pr2.artifact!.runId}`);
+  const pnext = pb.reply.next ?? (pb.result as { next?: Next }).next;
+  const popened = await ask(pnext!.words, 'github.pr.open', { ...pnext!.args, holder: fx.org.handle }, true);
+  const ppr = popened.result as { opened?: boolean; number?: number };
+  if (!ppr.opened || !ppr.number) fail(`the private PR did not open: ${JSON.stringify(popened.reply).slice(0, 300)}`);
+  // B4 — review: evidence apart from assertion; the forge's checks
+  const rv = await ask(`review build ${pr2.artifact!.runId}`, 'build.review', { workspace: fx.org.handle, runId: pr2.artifact!.runId });
+  const rr = rv.result as { evidence?: { recorded: boolean; exitCode: number }; assertion?: { note: string }; pullRequest?: { number: number; headSha: string; checksVerdict: string }; ready?: boolean };
+  if (!rr.evidence?.recorded || !rr.assertion?.note || rr.pullRequest?.number !== ppr.number || !rr.pullRequest.headSha) fail(`the review did not carry evidence, assertion and the PR: ${JSON.stringify(rv.result).slice(0, 400)}`);
+  console.log(`  B4: review — evidence exit ${rr.evidence.exitCode} (recorded) · assertion apart · PR #${rr.pullRequest.number} at ${rr.pullRequest.headSha.slice(0, 10)} · checks ${rr.pullRequest.checksVerdict} · ready ${rr.ready}`);
+  // B5 twin — the wrong commit is refused before the forge merges
+  const wrong = await ask(`promote build ${pr2.artifact!.runId} at commit 0000000`, 'build.promote', { workspace: fx.org.handle, runId: pr2.artifact!.runId, commit: '0000000' }, true);
+  if ((wrong.result as { promoted?: boolean }).promoted || !/tuple names commit/.test(JSON.stringify(wrong.reply))) fail(`the wrong commit was not refused for the tuple: ${JSON.stringify(wrong.reply).slice(0, 300)}`);
+  console.log('  B5 twin: a promotion naming another commit → refused (the tuple)');
+  // B5 — the promotion, bound to the run and the commit
+  const head = rr.pullRequest.headSha.slice(0, 7);
+  const promoted = await ask(`promote build ${pr2.artifact!.runId} at commit ${head}`, 'build.promote', { workspace: fx.org.handle, runId: pr2.artifact!.runId, commit: head }, true);
+  const pm = promoted.result as { promoted?: boolean; mergeSha?: string; tuple?: { commit: string; environment: string }; record?: string };
+  if (!pm.promoted || !pm.record) fail(`the promotion did not land: ${JSON.stringify(promoted.reply).slice(0, 400)}`);
+  console.log(`  B5: promoted — merged ${pm.mergeSha?.slice(0, 10)} into ${pm.tuple?.environment} under the tuple (commit ${pm.tuple?.commit.slice(0, 10)}) · record ${pm.record}`);
+} else console.log('  B2/B4/B5: skipped — no private forge repository in the fixture (forge.privateRepo)');
 
 console.log(`\n✓ spec 398 §9 / ap-build B3 on ${CHAIN_NAME}: a build run under the workspace's mandate — the repository cloned into a sandbox, the change written by the model, the tests RECORDED, the artifact a record in the workspace's vault, the submission a separate act the reply proposed and the steward signed; nothing deployed; without the mandate nothing built.`);

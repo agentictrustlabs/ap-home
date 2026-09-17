@@ -524,12 +524,12 @@
     {
       "id": "verify-build-run",
       "script": "scripts/verify-build-run.mts",
-      "spec": "398 §9 / ap-build B3",
-      "proves": "a build run under the WORKSPACE's mandate (authority_required names the organization; one signature): the Build service clones the repository into a Cloudflare Sandbox, the model writes whole files, the repository's tests are RUN and recorded (command + exit code — evidence, never an assertion), the artifact lands as build.run:<id> in the organization's vault (the declared effect; build.run.list reads it back), and the reply PROPOSES the submission — github.pr.open with the files — which the steward takes as a separate signed act: the PR's body names the build record; nothing deployed; the Build picker's lists — github.repos.list names the repositories the connector can WRITE to (the forge among them) and github.repo.read carries the branches, default first — are reads with no token in any reply",
-      "twin": "a build with no mandate parks for the workspace's authority and the service is never called; the reply never says deployed, merged or tests pass",
+      "spec": "398 §9 / ap-build B2–B5",
+      "proves": "a build run under the WORKSPACE's mandate (authority_required names the organization; one signature): the Build service clones the repository into a Cloudflare Sandbox, the model writes whole files, the repository's tests are RUN and recorded (command + exit code — evidence, never an assertion), the artifact lands as build.run:<id> in the organization's vault (the declared effect; build.run.list reads it back), and the reply PROPOSES the submission — github.pr.open with the files — which the steward takes as a separate signed act: the PR's body names the build record; nothing deployed; the Build picker's lists — github.repos.list names the repositories the connector can WRITE to (the forge among them) and github.repo.read carries the branches, default first — are reads with no token in any reply; B2: a PRIVATE repository builds from an archive the runtime fetched under the workspace's connector (source: archive, the base commit named; no credential in any reply); B4: build.review returns the recorded evidence apart from the model's assertion with the forge's checks on the PR opened from the run; B5: build.promote merges under a mandate bound to the run AND the commit at the PR head, and leaves build.promotion:<id> with the exact tuple (commit · config digest · environment · migration)",
+      "twin": "a build with no mandate parks for the workspace's authority and the service is never called; the reply never says deployed, merged or tests pass; a promotion naming another commit is refused before the forge is touched (the tuple)",
       "required": true,
       "paced": false,
-      "timeoutSec": 420
+      "timeoutSec": 600
     },
     {
       "id": "verify-contacts",

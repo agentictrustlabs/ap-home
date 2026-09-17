@@ -65,7 +65,7 @@ export function BuildView({ org }: { org: Address }) {
 
   return (
     <>
-      <PageHead title="Build" description="What this workspace's agent built — each run in a sandbox, its files and its test evidence as recorded. A build never deploys." />
+      <PageHead title="Build" description="What this workspace's agent built — each run in a sandbox, its files and its test evidence as recorded; review with the evidence; promote under a signature over the exact commit." />
       <Card title="Run a build task" testId="build-task-form">
         <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)' }}>
           <label style={{ display: 'grid', gap: 4 }}>
@@ -107,13 +107,14 @@ export function BuildView({ org }: { org: Address }) {
                 side={<span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
                   <Chip tone={r.evidence.exitCode === 0 ? 'ok' : 'danger'} title={r.evidence.command}>{lastCmd(r.evidence.command)} · exit {r.evidence.exitCode}</Chip>
                   <Mono title={r.record}>{r.runId}</Mono>
+                  <Button size="sm" onClick={() => askCommand({ toolId: 'build.review', args: { workspace: org, runId: r.runId }, message: `review build ${r.runId}` })}>Review</Button>
                   <Button size="sm" onClick={() => again(r)}>Again</Button>
                 </span>} />
             ))}
           </List>
         )}
       </Section>
-      <Note>Evidence is what RAN — the repository&rsquo;s test script when it has one, else a syntax check of what changed — with its exit code. A pull request opened from a run names the run; merging it is a promotion, a steward&rsquo;s own signature.</Note>
+      <Note>Evidence is what RAN — the repository&rsquo;s test script when it has one, else a syntax check of what changed — with its exit code. <strong>Review</strong> shows it apart from what the model claims, with the forge&rsquo;s checks on the pull request. A promotion (&ldquo;promote build &lt;run&gt; at commit &lt;sha&gt;&rdquo; in the Ask) is a steward&rsquo;s signature over that exact commit — the one act that reaches the branch. A private repository builds when the workspace holds a GitHub connector: its archive is fetched here, the sandbox never sees the credential.</Note>
     </>
   );
 }

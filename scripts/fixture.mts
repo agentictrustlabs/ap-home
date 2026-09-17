@@ -74,7 +74,7 @@ export interface GateFixtureV1 {
    *  `ap runtime join … --wake container --days 30`, its record + key as the Worker's secrets); null = no Container. */
   containerRuntime: { member: string; workspace: string } | null;
   /** Spec 400 W3/W4 — a GitHub repository `org` holds a connector for (the Worker secret AP_CONNECTOR_GITHUB_TOKEN_<ORG>); null = no forge. */
-  forge: { repo: string } | null;
+  forge: { repo: string; /** B2 — a PRIVATE repository the connector can read (the archive path); absent ⇒ the B2 leg is skipped. */ privateRepo?: string } | null;
   /** The deployment's hosts the runtime member speaks to: the standard surface (edge) and the runtime. */
   edge: string;
   /** Names that resolve NOWHERE — the twins that must be refused by name. */
@@ -100,7 +100,7 @@ export const FAITHNET_FIXTURE: GateFixtureV1 = {
   skillsRegistry: 'https://skills-a2a-production.richardpedersen3.workers.dev',
   acpRuntime: { member: 'goose-1.svc', workspace: 'missio-nexus.org' },
   containerRuntime: { member: 'goose-2.svc', workspace: 'missio-nexus.org' },
-  forge: { repo: 'agentictrustlabs/ap-forge-sandbox' },
+  forge: { repo: 'agentictrustlabs/ap-forge-sandbox', privateRepo: 'agentictrustlabs/ap-forge-private' },
   edge: 'https://edge.faithnet.io',
   absent: { org: 'nobody-here-zz.org', svc: 'nobody-here-zz.svc' },
 };

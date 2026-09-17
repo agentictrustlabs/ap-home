@@ -129,14 +129,14 @@ export async function commentOnPullRequest(io: ForgeIo, number: number, body: st
 }
 
 /** The evidence a promotion reads: the PR's state, its binding, its checks (the forge's tests), its reviews. */
-export async function readPullRequest(io: ForgeIo, number: number): Promise<{ number: number; title: string; state: string; merged: boolean; mergeable: boolean | null; url: string; branch: string; binding: { intentDigest: string; runRef: string } | null; checks: Array<{ name: string; status: string; conclusion: string | null }>; reviews: Array<{ user: string; state: string }>; comments: number }> {
+export async function readPullRequest(io: ForgeIo, number: number): Promise<{ number: number; title: string; state: string; merged: boolean; mergeable: boolean | null; url: string; branch: string; headSha: string; binding: { intentDigest: string; runRef: string } | null; checks: Array<{ name: string; status: string; conclusion: string | null }>; reviews: Array<{ user: string; state: string }>; comments: number }> {
   const repo = `/repos/${io.repo.owner}/${io.repo.name}`;
   const pr = await io.api.call<{ number: number; title: string; state: string; merged: boolean; mergeable: boolean | null; html_url: string; head: { ref: string; sha: string }; body?: string; comments?: number; message?: string }>('GET', `${repo}/pulls/${number}`);
   if (!pr.ok) throw new Error(`GitHub: pull request ${number} not read (${pr.data?.message ?? pr.status})`);
   const checks = await io.api.call<{ check_runs?: Array<{ name: string; status: string; conclusion: string | null }> }>('GET', `${repo}/commits/${pr.data.head.sha}/check-runs`);
   const reviews = await io.api.call<Array<{ user?: { login?: string }; state: string }>>('GET', `${repo}/pulls/${number}/reviews`);
   return {
-    number: pr.data.number, title: pr.data.title, state: pr.data.state, merged: pr.data.merged, mergeable: pr.data.mergeable, url: pr.data.html_url, branch: pr.data.head.ref,
+    number: pr.data.number, title: pr.data.title, state: pr.data.state, merged: pr.data.merged, mergeable: pr.data.mergeable, url: pr.data.html_url, branch: pr.data.head.ref, headSha: pr.data.head.sha,
     binding: prBindingOf(pr.data.body), checks: checks.data?.check_runs ?? [], reviews: (Array.isArray(reviews.data) ? reviews.data : []).map((r) => ({ user: r.user?.login ?? '?', state: r.state })), comments: pr.data.comments ?? 0,
   };
 }

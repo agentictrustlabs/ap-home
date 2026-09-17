@@ -79,6 +79,7 @@ export const NOT_PLAN_STEPS: readonly string[] = [
   'github.pr.comment',
   'github.pr.merge',
   'build.run',
+  'build.promote',
   'calendar.event.create',
   'gmail.draft.create',
   'gmail.message.send',

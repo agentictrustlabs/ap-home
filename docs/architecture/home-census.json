@@ -276,9 +276,9 @@
         "APUX-050",
         "APUX-052"
       ],
-      "title": "Build — a build run in a sandbox under the workspace's mandate; files + recorded test evidence as the artifact; the PR a proposed separate act",
+      "title": "Build — a build run in a sandbox under the workspace's mandate (public by clone, private by an archive fetched under the workspace's connector); review with recorded evidence apart from assertion; promotion under a signature over the exact commit",
       "priority": "P1",
-      "status": "partial",
+      "status": "shipped",
       "specs": [
         398
       ],
@@ -289,6 +289,8 @@
       "capabilities": [
         "build.run",
         "build.run.list",
+        "build.review",
+        "build.promote",
         "github.repos.list"
       ],
       "endpoints": [
@@ -302,7 +304,7 @@
         "verify-build-run"
       ],
       "gaps": [
-        "public repositories only (B2's attach ceremony brings the deploy key); no editor attached through ACP; the artifact's thread projection on the work item (B4) and build.review / build.promote (B4/B5) not built — a build never deploys"
+        "no editor attached through ACP (B2's second half); the environment a promotion reaches is the default branch — a deployment target (preview URL, config, migration) attached to the workspace is B5's next; recovery controls (B6) not built; the artifact's thread projection on the work item"
       ],
       "components": [
         "components/portal/BuildView.tsx",
