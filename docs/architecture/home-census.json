@@ -1080,22 +1080,26 @@
       "section": "398 §10",
       "routes": [
         "(portal)/developer",
+        "(portal)/developer/evals",
         "llms.txt",
         "registry/[[...path]]"
       ],
       "gaps": [
+        "P1.3 evals as a product (2026-09-16): `ap eval <cases.eval.json>` (cases as data, deterministic judge, a persona or a session, `--report`), `ap eval --from-runs` (a dataset from an agent's live runs), `evals/faithnet.eval.json` (5 cases: the authority twins + truthfulness, 5/5 live), the Evals screen (/developer/evals: recurring failures first, gates by night, the latest ap eval) folded by `scripts/build-evals-dashboard.mts`. Open: experiments compared side by side (two reports diffed); the nightly writing its report into the repo needs GitHub Actions billing",
         "G2's clean-machine exit RUNS (2026-09-16, `verify-devkit-starter`: the home-client starter generated, installed from the registry, doctor clean, built, the two acts live in ~90 s) — with the WORKSPACE generator; `npx @agenticprimitives/create-app` reaches it at the next publish (create-app alpha.7). Also 09-16: `ap generate client|cli|parity` (398 §7.2 projections through the kit), `/llms.txt` on the Home (the coding agent's entrance), the `ap-add-capability` Claude Code skill in the starter and in Ring 0. Open: `npx` reach at the next publish; measured time-to-first-verified-outcome across developers",
         "`ap mcp` is registered in the product template (.mcp.json, .cursor/mcp.json) but the devkit alpha that ships it is not published yet, and the clean-machine CI job (T21) does not exercise it",
         "the component registry (398 §10.5) serves 9 items at /registry with their contracts; it is not yet reachable through the Developer MCP (which answers from the install only) and the items are not yet installable by the shadcn CLI end to end (the files reference the Home's own imports)",
         "`ap upgrade` stops for review when a pinned definition's authority or effects change (398 §10.3) — shipped; the estate pins five archetypes at extraction; `ap test --interaction-coverage` / `--ask-truth` modes are still not wired (399 W1)"
       ],
       "tests": [
+        "packages/create-app/test/unit/create-app.test.ts",
         "packages/devkit/test/definitions.test.ts",
         "packages/devkit/test/developer-mcp.test.ts",
-        "packages/create-app/test/unit/create-app.test.ts"
+        "packages/evaluation/test/unit/eval-file.test.ts"
       ],
       "notes": null,
       "components": [
+        "components/portal/EvalsDashboard.tsx",
         "registry/registry.json"
       ],
       "gates": [

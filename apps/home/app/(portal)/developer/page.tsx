@@ -13,6 +13,7 @@ export default function DeveloperPage() {
       title="Your apps"
       description="Register an app you're building so it can send people to this Home to sign in."
     >
+      <p style={{ margin: '0 0 var(--sp-4)', fontSize: 'var(--fs-sm)' }}><a href="/developer/evals">Evals →</a> what the live gates and the truth cases said, night by night · <a href="/llms.txt">/llms.txt</a> — the coding agent&rsquo;s entrance to this estate.</p>
       <DeveloperApps />
     </SectionShell>
   );
