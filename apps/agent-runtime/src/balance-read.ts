@@ -18,7 +18,11 @@ export const BALANCE_READ_TOOL: ToolSpec = {
   id: BALANCE_READ_CAPABILITY,
   description: 'The current balance of a treasury or organization, read on chain, in USDC. Names the account; when none is named, every treasury the person holds. A READ: no authority is spent.',
   inputSchema: { type: 'object', properties: { account: { type: 'string', description: 'The treasury or organization — its address or its name (alice2.treasury). Omit for all of your own treasuries.' } } },
-  answers: ['balance', 'how much', 'how much money', 'funds', 'what do i hold', 'holds'],
+  // NOT the bare verb. `answers` words are matched as whole words anywhere in the sentence, and "holds" is
+  // ordinary English — "whoever holds testimony", "the register holds a name" — so on its own it demanded a
+  // treasury read of a murder-mystery character and then of a researcher in the marches, and denied every
+  // run. A fact word has to be one only a money question uses.
+  answers: ['balance', 'how much', 'how much money', 'funds', 'what do i hold', 'what it holds', 'holds in'],
   // Spec 366 R2 — a TREASURY is a subject: "what is alice3.treasury's balance", asked at alice.me, is
   // answered by alice3.treasury's own agent under its own realm rule (371 §2.1), not read across.
   subject: 'account',
