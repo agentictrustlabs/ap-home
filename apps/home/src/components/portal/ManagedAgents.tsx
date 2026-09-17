@@ -25,7 +25,7 @@ import { vaultWriteWithDelegation } from '../../lib/vault-client';
 import { COINS, shown, type Coin } from '../../lib/coins';
 import { CONTRACTS } from '../../lib/chain';
 import { AddressChip } from '../shared/AddressChip';
-import { BuildingIcon, LandmarkIcon } from '../shared/Icons';
+import { BuildingIcon, LandmarkIcon, UserIcon } from '../shared/Icons';
 import { ConnectTreasuryModal } from './ConnectTreasuryModal';
 import { ConnectedHosts } from './ConnectedHosts';
 import { agentClassOf, orgKindWordOf, creatableKinds, type CreatableKind } from '../../lib/agent-class';
@@ -534,10 +534,10 @@ function ActivateOrgRow({ org, person, token, onDone }: {
 // ── /organizations — orgs + each org's treasury + create ────────────────
 export function OrganizationsManager({
   token, person, via, onSelect, initialFilter = 'all',
-}: { token: string | null; person: string | null; via: string; onSelect?: (orgAgent: string) => void; initialFilter?: 'all' | 'org' | 'service' }) {
+}: { token: string | null; person: string | null; via: string; onSelect?: (orgAgent: string) => void; initialFilter?: 'all' | 'org' | 'service' | 'person' }) {
   // 'roster' (spec 342): this list shows deactivated orgs — it is the route back to activating them.
   const { agents, loaded, version, reload } = useManagedAgents(token, 'roster');
-  const [filter, setFilter] = useState<'all' | 'org' | 'service'>(initialFilter);
+  const [filter, setFilter] = useState<'all' | 'org' | 'service' | 'person'>(initialFilter);
   if (!token || !person) return null;
   // ADR-0046 — the CLASS is the trichotomy (a team is an organization, a treasury is a service); the row
   // says which SUBCLASS it is. The filter groups by class because that is the distinction the substrate
@@ -545,17 +545,22 @@ export function OrganizationsManager({
   const orgs = agents.filter((a) => agentClassOf(a.kind) === 'org');
   // A treasury is shown INSIDE the organization it belongs to, so it would read twice here.
   const services = agents.filter((a) => agentClassOf(a.kind) === 'service' && a.kind !== 'org-treasury');
+  // OTHER PEOPLE OF YOURS — person-class agents this custodian holds besides the one they are signed in as
+  // (a trail name, a pen name, a character in a game). They fell through both filters above and so appeared
+  // on no page at all: chartered, custodied, named on chain, and invisible to the person who owns them.
+  const people = agents.filter((a) => agentClassOf(a.kind) === 'person');
   const treasuryFor = (org: string) => agents.find((a) => a.kind === 'org-treasury' && lc(a.parent) === lc(org));
   const claimable = (k: AgentKind) => !!typedTldForKind(k);
-  const showOrgs = filter !== 'service';
-  const showServices = filter !== 'org';
+  const showPeople = filter === 'all' || filter === 'person';
+  const showOrgs = filter === 'all' || filter === 'org';
+  const showServices = filter === 'all' || filter === 'service';
   // The filter NARROWS a page that already shows its own structure — it is not the structure. With
   // everything shown, the two classes read as headed sections; picking one hides the other rather than
   // rearranging the page under you.
   const Filter = () => (
     <div className="ui-toolbar">
       <div className="ui-tabs" role="tablist" aria-label="Filter what you steward">
-        {([['all', 'All', orgs.length + services.length], ['org', 'Organizations', orgs.length], ['service', 'Services', services.length]] as const).map(([v, l, n]) => (
+        {([['all', 'All', people.length + orgs.length + services.length], ['person', 'People', people.length], ['org', 'Organizations', orgs.length], ['service', 'Services', services.length]] as const).map(([v, l, n]) => (
           <button key={v} type="button" role="tab" aria-selected={filter === v} onClick={() => setFilter(v)} data-testid={`steward-filter-${v}`} className="ui-tab">{l}<span className="ui-count">{n}</span></button>
         ))}
       </div>
@@ -573,6 +578,22 @@ export function OrganizationsManager({
         <>
         <Filter />
         <div className="manage-grid">
+          {/* YOUR OWN PEOPLE lead, because they are you. Each is a name of yours with its own vault; the
+              one you are signed in as is not in this list — it is the home you are standing in. */}
+          {showPeople && people.length > 0 && <Heading n={people.length}>People</Heading>}
+          {showPeople && people.map((who) => (
+            <div className="manage-card" key={who.agent}>
+              <div className="manage-card-head">
+                <span className="manage-card-icon"><UserIcon size={17} /></span>
+                <span className="manage-card-label">{who.name || 'Unnamed person'}</span>
+                <span className="manage-card-badge live">person</span>
+              </div>
+              <p className="manage-card-blurb">
+                Another name of yours, with a vault of its own. Your home opens as {person ? 'your own' : 'your default'} person
+                unless you choose otherwise.
+              </p>
+            </div>
+          ))}
           {showOrgs && orgs.length > 0 && <Heading n={orgs.length}>Organizations</Heading>}
           {showOrgs && orgs.map((org) => {
             const t = treasuryFor(org.agent);
