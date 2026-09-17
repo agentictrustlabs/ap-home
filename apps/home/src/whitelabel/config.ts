@@ -445,6 +445,11 @@ const faithImpact: WhiteLabelConfig = {
         // A MISSION REGISTERS: an org-create (purpose `mission`) that carries `registry_entry` and ends with
         // the organization listed in the card room's mission registry (`missionRegistryConfig` below).
         'org-create',
+        // A CHARACTER IS A PERSON OF YOURS. Taking a part in Mystery Night charters another person agent in
+        // the player's OWN home — person-class, `.me`-named, never their default — with a vault of its own
+        // for what that character comes to know. Idempotent by name, which is what lets the same character
+        // come back for the next game rather than starting over as a stranger with the same face.
+        'person-create',
       ],
       // THE MISSION REGISTRY (Game Night `docs/MISSION-REGISTRY.md`): `urn:ap:registry:gamenight-missions`
       // on this chain's AgentRegistryBase, controlled by the card room's registry operator agent. Named

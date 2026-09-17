@@ -24,7 +24,7 @@ const walletEnabled = whitelabel.onboarding.credentialMethods.includes('wallet')
 const passkeyEnabled = whitelabel.onboarding.credentialMethods.includes('passkey');
 const emailEnabled = whitelabel.onboarding.credentialMethods.includes('email');
 const phoneEnabled = whitelabel.onboarding.credentialMethods.includes('phone');
-import { useEnrollReq, type EnrollApi, isCeremonyTemplate } from './useEnrollReq';
+import { useEnrollReq, type EnrollApi, isCeremonyTemplate, isDeployTemplate } from './useEnrollReq';
 import { OnboardingJourney } from './OnboardingJourney';
 import { DemoPeopleFold } from './DemoPeopleFold';
 import { RecognizedEnroll } from './RecognizedEnroll';
@@ -297,7 +297,9 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
       // checked for NAMELESS enrolls, so pinned connects always fell through to name resolution —
       // which cannot one-tap (and for an EOA-ambiguous home showed the credential entry every time).
       // org-create keeps its dedicated named flow below.
-      if (api.enroll!.template !== 'org-create' && api.enroll!.template !== 'workspace-create' && readSsoCookie()) {
+      // THE HELPER, not the list: this pair and the one below are exactly the drift `isDeployTemplate`
+      // was written to stop, and they had already fallen behind it.
+      if (!isDeployTemplate(api.enroll!.template) && readSsoCookie()) {
         setView({ k: 'enroll-recognized' });
         return;
       }
@@ -311,7 +313,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
         setView({ k: 'incomplete', name: api.enroll!.name });
         return;
       }
-      if (api.enroll!.template === 'org-create' || api.enroll!.template === 'workspace-create') {
+      if (isDeployTemplate(api.enroll!.template)) {
         // org-create assumes an existing member; resolve their person agent. Routed by TEMPLATE,
         // not `orgBase`: a chooser-mode request (spec 246 select-existing) carries NO org_base —
         // the member picks/creates the org HERE (OrgConsent's choose step).
