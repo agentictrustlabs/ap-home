@@ -1062,6 +1062,63 @@
       ]
     },
     {
+      "id": "home.as-persona",
+      "review": [
+        "M06"
+      ],
+      "title": "Another of your names — a persona (relationship 'self') opened AS itself: its own Today, Ask, memory, messages, routines, library, card, naming, network, playbook, records, trust graph — the same surfaces, under the other name",
+      "priority": "P1",
+      "status": "shipped",
+      "specs": [
+        398
+      ],
+      "section": "the persona realm (23c17dea, 40acecba)",
+      "routes": [
+        "(portal)/as/[agent]",
+        "(portal)/as/[agent]/access",
+        "(portal)/as/[agent]/activities",
+        "(portal)/as/[agent]/ask",
+        "(portal)/as/[agent]/capabilities",
+        "(portal)/as/[agent]/card",
+        "(portal)/as/[agent]/card/[cardResourceId]",
+        "(portal)/as/[agent]/card/[cardResourceId]/history",
+        "(portal)/as/[agent]/card/[cardResourceId]/listing/[family]",
+        "(portal)/as/[agent]/card/[cardResourceId]/names",
+        "(portal)/as/[agent]/card/[cardResourceId]/projections",
+        "(portal)/as/[agent]/card/[cardResourceId]/releases",
+        "(portal)/as/[agent]/library",
+        "(portal)/as/[agent]/memory",
+        "(portal)/as/[agent]/messages",
+        "(portal)/as/[agent]/naming",
+        "(portal)/as/[agent]/network",
+        "(portal)/as/[agent]/playbook",
+        "(portal)/as/[agent]/profile",
+        "(portal)/as/[agent]/records",
+        "(portal)/as/[agent]/registry",
+        "(portal)/as/[agent]/routines",
+        "(portal)/as/[agent]/settings",
+        "(portal)/as/[agent]/trust-graph"
+      ],
+      "capabilities": [],
+      "endpoints": [
+        "/harness/ask"
+      ],
+      "tests": [
+        "apps/demo-sso-next/src/lib/acting-basis.test.ts",
+        "apps/demo-sso-next/src/components/portal/nav-routes.test.ts"
+      ],
+      "gates": [],
+      "gaps": [
+        "no live gate yet for opening a persona and acting under its name; the persona's playbook assignment and vault planes are provisioned by scripts (charter-cast, activate-cast-vaults), not by the Home's own ceremony"
+      ],
+      "components": [
+        "components/portal/AgentSwitcher.tsx",
+        "components/portal/WorkspaceAction.tsx",
+        "lib/workspace.ts",
+        "lib/acting-basis.ts"
+      ]
+    },
+    {
       "id": "home.estate",
       "review": [
         "APUX-040",
