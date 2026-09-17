@@ -4406,6 +4406,29 @@ The person has ALREADY granted authority to ${holding} for this exact ask. That 
   // the payment fan-out for compiling it: a model given N members emitted one call and the composer promised
   // the rest. The organization phrase and the question clause are read from the sentence; who each member
   // is comes from the roster, and whether they are asked at all from their own opt-in, at the step.
+  /**
+   * A NAMED SKILL IS NOT A PLANNING PROBLEM (2026-09-17).
+   *
+   * When a message names a skill this agent's card ADVERTISES, `playbook.answer` is offered and is the tool
+   * that answers it — the material is in the message and the judgement is the playbook's. Choosing it still
+   * cost a planner turn: the whole tool list, the whole doctrine, sent to a model to be told the one thing
+   * the envelope already said. Two model calls for one answer, on the clock of every turn.
+   *
+   * Mystery Night is that shape at volume — eight characters, each asked `mystery.act` on every beat of
+   * every act — and halving it is the difference between a night that costs what a night should and one
+   * nobody runs twice.
+   *
+   * IT IS NOT A SHORTCUT PAST A DECISION, which is why it is compiled rather than guessed: `playbookAnswer`
+   * is non-empty only when the message named a skill AND the card advertises it AND a structured call is
+   * configured, so by the time this matches there is exactly one tool that can answer and the planner's only
+   * possible output is the one written here. The ANSWER is still the model's, once, under the archetype's
+   * own instructions — what is saved is the turn spent deciding to ask it.
+   */
+  const compiledSkillAnswer = (): Plan | null =>
+    playbookAnswer.length === 0
+      ? null
+      : { steps: [{ toolId: PLAYBOOK_ANSWER_TOOL.id, args: {}, id: 's0' }], rationale: 'compiled: the message named an advertised skill' };
+
   const compiledConsult = (goal: string): Plan | null => {
     const c = consultAskOf(goal);
     if (!c) return null;
@@ -4497,7 +4520,7 @@ step is then handed to that agent under authority the person grants; leave it ou
           // compiled shapes match. A model-planned ask keeps the whole sentence: the planner is taught `$executor`.
           const { executor: named, rest } = executorPrefixOf(pin.intent.goal);
           // Spec 402 W3 — a sentence with a clock, said at the person's own agent, is a routine to keep (read back first).
-          const compiled = compiledConsult(rest) ?? compiledRead(rest) ?? compiledFanOut(rest) ?? compiledPayment(rest) ?? (input.person && input.addressee && input.person.toLowerCase() === input.addressee.toLowerCase() ? compiledRoutine(rest) : null);
+          const compiled = compiledSkillAnswer() ?? compiledConsult(rest) ?? compiledRead(rest) ?? compiledFanOut(rest) ?? compiledPayment(rest) ?? (input.person && input.addressee && input.person.toLowerCase() === input.addressee.toLowerCase() ? compiledRoutine(rest) : null);
           if (compiled) { plannerUsed = 'compiled'; return withSpecialists(named ? withExecutor(compiled, named) : compiled, playbook?.specialists, pin.tools); }
           plannerUsed = selected.kind;
           if (selected.kind === 'rule-based') return withSpecialists(await selected.planner.plan(pin), playbook?.specialists, pin.tools);
