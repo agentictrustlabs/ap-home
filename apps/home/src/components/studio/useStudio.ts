@@ -57,7 +57,7 @@ function useChangeTick(): number {
  *  DOWN to these: `.team`/`.church`/`.circle` are org-class, `.svc`/`.workspace`/`.treasury`/`.registry`
  *  are service-class, `.me` is the person. A card belongs to the AGENT, so the Studio is the same in all
  *  three — only how the agent and its authority are resolved differs. */
-export type StudioScopeKind = 'person' | 'org' | 'service';
+export type StudioScopeKind = 'person' | 'persona' | 'org' | 'service';
 
 export interface StudioAgent {
   session: Session | null;
@@ -82,7 +82,9 @@ export interface StudioAgent {
 export function useStudioAgent(kind: StudioScopeKind, address: string): StudioAgent {
   const { session, profile, agentAddress } = useSession();
   const token = session?.token ?? null;
-  const { agents, loaded: agentsLoaded } = useManagedAgents(kind === 'service' ? token : null, 'any');
+  // A PERSONA is resolved the same way a service is — out of the managed-agent list, by address — because
+  // that is what it is: an agent this person custodies. Only its CLASS differs.
+  const { agents, loaded: agentsLoaded } = useManagedAgents(kind === 'service' || kind === 'persona' ? token : null, 'any');
   const [orgs, setOrgs] = useState<MyOrg[] | null>(null);
   const [selfGrant, setSelfGrant] = useState<DelegationWire | null>(null);
   const [selfLoaded, setSelfLoaded] = useState(false);
@@ -104,18 +106,29 @@ export function useStudioAgent(kind: StudioScopeKind, address: string): StudioAg
   }, [kind, token]);
 
   const svc = kind === 'service' ? agents.find((a) => agentClassOf(a.kind) === 'service' && lc(a.agent) === lc(address)) : undefined;
+  /**
+   * A PERSONA'S CARD IS ITS OWN. The line above this used to read "a person can steward another agent, but
+   * they cannot hold a second person's card", and that is no longer true: a second person agent of the same
+   * human — a trail name, a part in a play — has a card, and the card is how anything finds it. Without this
+   * the Studio resolved nothing for one and every discovery surface under `/as/<address>` was a dead page.
+   *
+   * It signs on the SAME stewardship wire a service does. The custodian is one credential either way; what
+   * the wire proves is control of the agent, not what class the agent is.
+   */
+  const persona = kind === 'persona' ? agents.find((a) => agentClassOf(a.kind) === 'person' && lc(a.agent) === lc(address)) : undefined;
+  const held = svc ?? persona;
   const org = kind === 'org' ? orgs?.find((o) => lc(o.orgAgent) === lc(address)) : undefined;
-  // The person's Studio is their own, and only ever their own: a person can steward another agent, but
-  // they cannot hold a second person's card. The person route carries no address (there is exactly one
-  // person here — the signed-in one), so an empty `address` means "me"; a non-empty one must still match.
+  // The person's Studio is their own, and only ever their own. The person route carries no address (there is
+  // exactly one person here — the signed-in one), so an empty `address` means "me"; a non-empty one must
+  // still match. Another NAME of theirs is a different route (`persona`), never this one.
   const isSelf = kind === 'person' && !!agentAddress && (address === '' || lc(agentAddress) === lc(address));
 
-  const sa = (kind === 'person' ? (isSelf ? (agentAddress as Address) : null) : (svc?.agent ?? org?.orgAgent ?? null)) as Address | null;
+  const sa = (kind === 'person' ? (isSelf ? (agentAddress as Address) : null) : (held?.agent ?? org?.orgAgent ?? null)) as Address | null;
   const delegation = kind === 'person'
     ? selfGrant
-    : (((svc?.stewardshipDelegation as DelegationWire | undefined) ?? org?.stewardshipDelegation ?? null) ?? null);
-  const relationship = kind === 'person' ? 'self' : ((svc?.relationship ?? org?.relationship ?? 'steward') as 'steward' | 'member');
-  const loaded = kind === 'person' ? selfLoaded : kind === 'service' ? agentsLoaded : orgs !== null;
+    : (((held?.stewardshipDelegation as DelegationWire | undefined) ?? org?.stewardshipDelegation ?? null) ?? null);
+  const relationship = kind === 'person' ? 'self' : ((held?.relationship ?? org?.relationship ?? 'steward') as 'steward' | 'member');
+  const loaded = kind === 'person' ? selfLoaded : kind === 'service' || kind === 'persona' ? agentsLoaded : orgs !== null;
 
   const scopes = useMemo(
     () => (delegation ? studioScopesFor({ principalKind: 'human', relationship }) : []),

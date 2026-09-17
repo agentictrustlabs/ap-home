@@ -154,7 +154,8 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
           addressee={askAddressee!} addresseeLabel={askLabel}
           // The app knows where you are standing and what you are to this agent; the Ask should not have
           // to infer it from a sentence.
-          realm={{ kind: active.kind }}
+          // The Ask asks what CLASS of agent you are addressing, and a persona is person-class: you are it.
+          realm={{ kind: active.kind === 'persona' ? 'person' : active.kind }}
           selection={askSelection}
           onClose={() => setAskOpen(false)}
         />

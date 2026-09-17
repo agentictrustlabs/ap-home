@@ -12,7 +12,7 @@ import { activateInteractionsIfNeeded, resolveVia } from '../../home/onboarding'
 import { assembleRoutines, type RoutineView } from '../../home/routines';
 import { StatePill } from './StatePill';
 import { BusyButton } from '../shared/BusyButton';
-import { workspaceHref, type WorkspaceScope } from '../../lib/workspace';
+import { workspaceHref, type WorkspaceScope, workspaceAgent } from '../../lib/workspace';
 import { Card, KeyValue, Empty, Unknown, ErrorNote, Meta, Micro, Mono, Note, Button } from '../../ui';
 
 async function readAssignment(token: string, agent: string): Promise<{ archetypeId: string; archetypeVersion: string; definitionDigest: string } | null> {
@@ -23,7 +23,7 @@ async function readAssignment(token: string, agent: string): Promise<{ archetype
 
 export function RoutinesView({ scope }: { scope: WorkspaceScope }) {
   const { session, agentAddress, profile } = useSession();
-  const agent = (scope.kind === 'org' ? scope.org : scope.kind === 'service' ? scope.agent : agentAddress ?? '').toLowerCase() as Address;
+  const agent = workspaceAgent(scope, agentAddress ?? '') as Address;
   const [triggers, setTriggers] = useState<TriggerRow[] | null>(null);
   const [records, setRecords] = useState<RunRecordRow[]>([]);
   const [assignment, setAssignment] = useState<{ archetypeId: string; archetypeVersion: string; definitionDigest: string } | null>(null);

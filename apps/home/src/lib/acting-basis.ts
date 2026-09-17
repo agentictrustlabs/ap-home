@@ -41,6 +41,23 @@ export function actingBasis(input: {
   if (input.active.kind === 'person') {
     return { actingAs: me, in: me, same: true, basis: 'self', caption: BASIS_CAPTION.self, words: 'you, on your own agent — your key signs' };
   }
+  /**
+   * A PERSONA IS NOT "YOU, IN SOMETHING" — it is you under another of your names, so the PRINCIPAL is the
+   * persona, not the connected person standing inside it. That is the whole difference from an org: there is
+   * no second party and no grant between you and yourself, which is why the basis is `self` and `same` is
+   * true. Only the NAME changes, and the name is the point — so the caption says which one, where an org's
+   * says on what authority.
+   */
+  if (input.active.kind === 'persona') {
+    const a = lc(input.active.agent);
+    const row = input.agents.find((x) => lc(x.agent) === a);
+    const as = { address: a, ...(row?.name ? { name: row.name } : {}), kind: 'person' as const };
+    return {
+      actingAs: as, in: as, same: true, basis: 'self',
+      caption: BASIS_CAPTION.persona(row?.name),
+      words: 'another name of yours — the same key signs, under a different name, into its own vault',
+    };
+  }
   const address = lc(input.active.kind === 'org' ? input.active.org : input.active.agent);
   const known = input.agents.find((a) => lc(a.agent) === address);
   const kind: AgentClass = known ? input.classOf(known.kind) : input.active.kind === 'org' ? 'org' : 'service';

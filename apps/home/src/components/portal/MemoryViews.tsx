@@ -14,7 +14,7 @@ import { assembleMemory, type MemoryItem, type MemoryStore } from '../../home/me
 import type { TodayArtifact } from '../../home/today';
 import { StatePill } from './StatePill';
 import { AgentName } from '../shared/AgentName';
-import { workspaceHref, type WorkspaceScope } from '../../lib/workspace';
+import { workspaceHref, type WorkspaceScope, workspaceAgent } from '../../lib/workspace';
 import { List, Row, Empty, Unknown, ErrorNote, Meta, Micro, Note, Button, LinkButton } from '../../ui';
 
 const STORES: Array<{ id: MemoryStore; label: string; owner: string; hint: string }> = [
@@ -26,7 +26,7 @@ const STORES: Array<{ id: MemoryStore; label: string; owner: string; hint: strin
 export function MemoryViews({ scope }: { scope: WorkspaceScope }) {
   const { session, agentAddress } = useSession();
   const self = (agentAddress ?? '').toLowerCase();
-  const workspace = scope.kind === 'org' ? scope.org.toLowerCase() : scope.kind === 'service' ? scope.agent.toLowerCase() : self;
+  const workspace = workspaceAgent(scope, self);
   const [tab, setTab] = useState<MemoryStore>(scope.kind === 'person' ? 'personal' : 'workspace');
   const [confirmations, setConfirmations] = useState<RememberedChoice[]>([]);
   const [facts, setFacts] = useState<RememberedFact[]>([]);

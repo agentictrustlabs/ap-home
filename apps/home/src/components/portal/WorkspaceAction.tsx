@@ -19,6 +19,15 @@ export function WorkspaceAction() {
       </button>
     );
   }
+  // A PERSONA gets the same offer as you do: another of your names may steward organizations of its own —
+  // which is the whole reason for switching into it rather than just reading its vault.
+  if (active.kind === 'persona') {
+    return (
+      <button type="button" className="ui-btn ui-btn--secondary ui-btn--sm" onClick={() => router.push('/agents')} title="Create a new organization">
+        Add organization
+      </button>
+    );
+  }
   if (active.kind === 'org') {
     return (
       <button type="button" className="ui-btn ui-btn--secondary ui-btn--sm" onClick={() => router.push(orgHref(active.org, 'membership'))} title="Invite someone to this organization">

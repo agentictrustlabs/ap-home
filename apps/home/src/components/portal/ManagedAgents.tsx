@@ -611,8 +611,13 @@ export function OrganizationsManager({
                 <span className="manage-card-label">{who.name || 'Unnamed person'}</span>
                 <span className="manage-card-badge">person</span>
               </div>
+              <div style={{ margin: '.45rem 0' }}><AddressChip address={who.agent as `0x${string}`} size="sm" /></div>
+              {/* A WAY IN, like every organization row has. These cards listed the names and did nothing with
+                  them, so the one page that admits you have other names was also the one place you could not
+                  go to one. */}
               <p className="manage-card-blurb">
-                Another name of yours, with a vault of its own — and never the one your home opens as.
+                Another name of yours, with a vault of its own — and never the one your home opens as.{' '}
+                <a href={`/as/${who.agent}`}>Act as this name →</a>
               </p>
             </div>
           ))}

@@ -16,13 +16,15 @@ export interface RecipeSaveTarget {
 const b64 = (s: string): string => (typeof btoa === 'function' ? btoa(unescape(encodeURIComponent(s))) : Buffer.from(s, 'utf8').toString('base64'));
 
 /** Where and as what the draft is saved — pure, so the target is testable without a Library. */
-export function recipeSaveTarget(recipe: Pick<RecipeDraft, 'fileName' | 'skillMd'>, scope: { kind: 'person' } | { kind: 'org'; org: string } | { kind: 'service'; agent: string }): RecipeSaveTarget {
-  const org = scope.kind === 'org' ? scope.org.toLowerCase() : scope.kind === 'service' ? scope.agent.toLowerCase() : null;
+export function recipeSaveTarget(recipe: Pick<RecipeDraft, 'fileName' | 'skillMd'>, scope: { kind: 'person' } | { kind: 'persona'; agent: string } | { kind: 'org'; org: string } | { kind: 'service'; agent: string }): RecipeSaveTarget {
+  // The Library is keyed by the AGENT the run belonged to, whatever class it is — only the href differs,
+  // because each class serves its Library under its own workspace prefix.
+  const org = scope.kind === 'org' ? scope.org.toLowerCase() : scope.kind === 'service' || scope.kind === 'persona' ? scope.agent.toLowerCase() : null;
   return {
     scopeQuery: org ? `?org=${org}` : '',
     folder: 'recipes',
     artifact: { name: recipe.fileName, kind: 'skill', source: 'blob', folder: 'recipes', contentType: 'text/markdown', bytesB64: b64(recipe.skillMd) },
-    libraryHref: `${org ? (scope.kind === 'org' ? `/org/${org}/library` : `/service/${org}/library`) : '/library'}?folder=recipes`,
+    libraryHref: `${org ? (scope.kind === 'org' ? `/org/${org}/library` : scope.kind === 'persona' ? `/as/${org}/library` : `/service/${org}/library`) : '/library'}?folder=recipes`,
   };
 }
 

@@ -6,7 +6,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { A2A_CARD_EDITOR_MANIFEST } from '@agenticprimitives/home';
 import { SectionShell } from '../portal/SectionShell';
-import { orgHref, serviceHref } from '../../lib/workspace';
+import { orgHref, serviceHref, personaHref } from '../../lib/workspace';
 import { CardList } from './CardList';
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -64,6 +64,7 @@ export function studioBasePath(kind: StudioScopeKind, agent: string): string {
   // The person's own workspace is the portal root, so their Studio is `/card` — no address in the path,
   // because there is only ever one person here and it is the one signed in.
   if (kind === 'person') return '/card';
+  if (kind === 'persona') return personaHref(agent, 'card');
   return kind === 'org' ? orgHref(agent, 'card') : serviceHref(agent, 'card');
 }
 

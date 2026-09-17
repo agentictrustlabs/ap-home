@@ -12,7 +12,7 @@ import { useMemo, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSession } from '../../context/session';
 import { useManagedAgents } from './ManagedAgents';
-import { parseWorkspacePath, orgHref, serviceHref } from '../../lib/workspace';
+import { parseWorkspacePath, orgHref, serviceHref, personaHref } from '../../lib/workspace';
 import { agentClassOf, orgKindWordOf, kindWordOf, authorityLineage } from '../../lib/agent-class';
 import { UserIcon, BuildingIcon, LandmarkIcon, CheckIcon } from '../shared/Icons';
 import { nameLabel } from '../../lib/domain';
@@ -56,9 +56,14 @@ export function AgentSwitcher() {
 
   const activeOrg = active.kind === 'org' ? allOrgs.find((o) => lc(o.agent) === lc(active.org)) : undefined;
   const activeService = active.kind === 'service' ? services.find((t) => lc(t.agent) === lc(active.agent)) : undefined;
+  const activePersona = active.kind === 'persona' ? people.find((p) => lc(p.agent) === lc(active.agent)) : undefined;
   const triggerName =
     active.kind === 'org' ? (activeOrg?.name ? nameLabel(activeOrg.name) : short(active.org))
     : active.kind === 'service' ? (activeService?.name ? nameLabel(activeService.name) : short(active.agent))
+    // A PERSONA NAMES ITSELF IN THE TRIGGER. It used to fall through to `personLabel` — the connected
+    // person — so selecting another of your names put THEIR name back in the button and the switch looked
+    // as though it had been refused.
+    : active.kind === 'persona' ? (activePersona?.name ? nameLabel(activePersona.name) : short(active.agent))
     : personLabel;
   // spec 318 / 398 §4.4: the caption states the RELATIONSHIP truthfully — a member org is authority-only (never
   // custody), an org not in the list at all is a guest visit — from the ONE function every basis line renders from.
@@ -143,8 +148,12 @@ export function AgentSwitcher() {
             icon={<UserIcon size={17} />}
             title={who.name ? nameLabel(who.name) : short(who.agent)}
             sub="person · a name of yours, with its own vault"
-            activeRow={false}
-            onClick={() => go('/agents?kind=person')}
+            activeRow={active.kind === 'persona' && lc(active.agent) === lc(who.agent)}
+            // SWITCHING TO A NAME OF YOURS, not going to look at a list of them. This row sent everybody to
+            // `/agents?kind=person` — the index — which is not a workspace path, so the switcher re-derived
+            // `person` from the URL and put the connected person back in the trigger: picking a persona
+            // selected the default instead of it.
+            onClick={() => go(personaHref(who.agent))}
           />
         ))}
 

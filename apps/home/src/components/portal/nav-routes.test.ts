@@ -53,6 +53,10 @@ const SCOPES = [
   ['person', { kind: 'person' } as const],
   ['org', { kind: 'org', org: '0xe26157068af46629691e2ab19726bf61476e6b6c' } as const],
   ['service', { kind: 'service', agent: '0x3d653cbab0c99b1513439758eb2eac2039caa6e1' } as const],
+  // A PERSONA — another name of the same human, under `/as/<address>`. It is person-CLASS, so the nav offers
+  // it the person's shape; anything in that shape with no agent-scoped page must be withheld rather than
+  // linked, and this is what says so.
+  ['persona', { kind: 'persona', agent: '0xcc2a1645a6cc450a48585d86c4631cfa178aa262' } as const],
 ] as const;
 
 describe('every nav item resolves to a real route', () => {

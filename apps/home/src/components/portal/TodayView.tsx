@@ -11,7 +11,7 @@ import { assembleToday, type Today, type TodayItem } from '../../home/today';
 import { useTodayReads } from '../../home/use-today-inputs';
 import { useMyWork } from './work/useWork';
 import { RunControls } from './runs/RunControls';
-import { workspaceHref, type WorkspaceScope } from '../../lib/workspace';
+import { workspaceHref, type WorkspaceScope, workspaceAgent } from '../../lib/workspace';
 import { List, Row, Panel, Stats, Stat, relativeLabel, type PanelState } from '../../ui';
 import { TodayCalendar } from './TodayCalendar';
 import { TodayMemory } from './TodayMemory';
@@ -44,11 +44,10 @@ function stateOf(loading: boolean, failed: string | undefined, count: number): P
   return count ? 'ready' : 'empty';
 }
 
-/** Which agent Today is ABOUT: the person's own, or the workspace's organization / service. */
+/** Which agent Today is ABOUT: the person's own, one of their other names, or the workspace's org / service. */
 function addresseeOf(scope: WorkspaceScope, self: string | null | undefined): string | null {
-  if (scope.kind === 'org') return scope.org.toLowerCase();
-  if (scope.kind === 'service') return scope.agent.toLowerCase();
-  return self ? self.toLowerCase() : null;
+  if (scope.kind === 'person') return self ? self.toLowerCase() : null;
+  return workspaceAgent(scope, self ?? '') || null;
 }
 
 export function TodayView({ scope, children }: { scope: WorkspaceScope; children?: React.ReactNode }) {
@@ -100,6 +99,9 @@ export function TodayView({ scope, children }: { scope: WorkspaceScope; children
         <List>{active.map((it) => <ItemRow key={it.id} item={it} {...(ctx ? { ctx } : {})} />)}</List>
       </Panel>
 
+      {/* YOUR calendar and YOUR memory, and only on your own Today. A persona has a vault of its own but it
+          is not a second diary: these read the connected person's, and showing them under another of your
+          names would say that name owns them. */}
       {scope.kind === 'person' && addressee && <TodayCalendar person={addressee as Address} />}
       {scope.kind === 'person' && <TodayMemory />}
 

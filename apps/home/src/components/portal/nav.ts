@@ -2,7 +2,7 @@
 // switcher selected (spec 315). The white-label config still decides which optional SERVICES exist
 // (devices / connected apps drive the user menu); it no longer decides the shape of the left nav.
 import type { WhiteLabelConfig } from '../../whitelabel/schema';
-import type { WorkspaceScope } from '../../lib/workspace';
+import { isPersonClassScope, isSelfScope, personaHref, type WorkspaceScope } from '../../lib/workspace';
 import { orgHref, serviceHref, workspaceHref } from '../../lib/workspace';
 import {
   UserIcon, BuildingIcon, LandmarkIcon, DatabaseIcon, TagIcon, AwardIcon, LinkIcon, ShieldIcon, HistoryIcon, HomeIcon,
@@ -82,7 +82,10 @@ export function buildNav(
    *  (§5's empty rule). The caller knows the agent's kind; the nav should not re-derive it. */
   hasMembers = false,
 ): NavGroup[] {
-  const isPerson = active.kind === 'person';
+  // PERSON-CLASS, not "is you": a persona wants the surfaces a person has (contacts, grants, attestations,
+  // a search over its own records) because it IS a person agent — it just is not the one your home opens as.
+  const isPerson = isPersonClassScope(active);
+  const isSelf = isSelfScope(active);
   const href = (page: string): string => workspaceHref(active, page);
   const backHome: NavGroup = {
     items: [{ id: 'back-home', label: 'Back to your home', href: '/', Icon: HomeIcon, status: 'live' }],
@@ -91,7 +94,11 @@ export function buildNav(
 
   // ── the top band: the same four questions of any agent ────────────────────────────────────────────
   //    what needs me today · who is talking to it · what has it done · what does it hold
-  const overviewHref = isPerson ? '/' : active.kind === 'service' ? serviceHref(active.agent) : orgHref(active.org, 'overview');
+  const overviewHref =
+    active.kind === 'person' ? '/'
+    : active.kind === 'persona' ? personaHref(active.agent)
+    : active.kind === 'service' ? serviceHref(active.agent)
+    : orgHref(active.org, 'overview');
   // No context heading: it rendered `alice-home-church` as `ALICE-HOME-CHURCH` (a user-supplied name run
   // through a label style), and existed for org/service but not person — so every row shifted 27px when
   // you switched workspace. The topbar switcher already says whose workspace this is, and the Settings
@@ -141,7 +148,9 @@ export function buildNav(
   }
 
   // ── Work (§2.1b): a participation surface beside the band, not inside it — the four stay four. ────
-  if (active.kind !== 'service') {
+  //    Not a persona's: `MyWorkView` is the connected person's work across the organizations SHE belongs to,
+  //    and a persona belongs to none yet.
+  if (active.kind !== 'service' && active.kind !== 'persona') {
     groups.push({ items: [{ id: 'work', label: 'Work', href: href('work'), Icon: CheckCircleIcon, status: 'live' }] });
   }
   // ── Build (spec 398 §9 / ap-build B3): the workspace's build runs — an ORGANIZATION's surface, its steward's. ──
@@ -162,7 +171,14 @@ export function buildNav(
     { id: 'memory', label: 'Memory', href: href('memory'), Icon: DatabaseIcon, status: 'live' },
     // agent-vocabulary.md R.3 — YOURS, not stewardship: who you let in (spec 401), every grant you issued (400 B4), your
     // own work by words (400 B5). They used to sit under "You steward", where four of seven items were not stewardship.
-    ...(isPerson ? [
+    /**
+     * YOURS, and only on your own home — NOT a persona's. These three panels read the connected person from
+     * the session and take no agent, so under another of your names they would show YOUR contacts and YOUR
+     * grants with that name in the title bar: the same data wearing a second identity, which is the one thing
+     * a second identity must never be. A persona has its own vault, card and playbook below; it gets these
+     * when each panel can be pointed at an agent, and not before.
+     */
+    ...(isSelf ? [
       { id: 'contacts', label: 'Contacts', href: '/contacts', Icon: UserIcon, status: 'live' as const },
       { id: 'grants', label: 'Grants', href: '/grants', Icon: ShieldIcon, status: 'live' as const },
       { id: 'search', label: 'Search', href: '/search', Icon: DatabaseIcon, status: 'live' as const },
@@ -170,7 +186,8 @@ export function buildNav(
   ], startsRegion: true });
   // Attestations: person-only today. A managed agent CAN sign statements, so the area applies in
   // principle — but none has an agent-scoped page yet, and §5 says an empty area renders nothing.
-  if (isPerson) {
+  // Same rule as the three above: the page is the connected person's and takes no agent.
+  if (isSelf) {
     groups.push({ items: [
       { id: 'attestations-all', label: 'Attestations', href: '/attestations', Icon: AwardIcon, status: 'live' },
     ] });
@@ -196,7 +213,8 @@ export function buildNav(
   // alter the thing you were working in.
   groups.push({ items: [{ id: 'settings', label: 'Settings', href: href('settings'), Icon: SettingsIcon, status: 'live', opensPane: 'settings' }] });
 
-  if (!isPerson) groups.push(backHome);
+  // A persona is somewhere you WENT, so it gets the way back; your own home is already home.
+  if (!isSelf) groups.push(backHome);
   return groups.filter((g) => g.items.length > 0);
 }
 
@@ -204,6 +222,15 @@ export function buildNav(
  *  it does not steward, so it has none. */
 export function stewardshipPane(active: WorkspaceScope = { kind: 'person' }): SettingsGroup[] {
   if (active.kind === 'service') return [];
+  /**
+   * A PERSONA STEWARDS NOTHING YET, and saying so by showing nothing is the §5 rule this file already keeps:
+   * an empty area renders nothing, and the caller drops the Stewardship row when this returns none. It is a
+   * real limit rather than an oversight — chartering hangs a new agent off the connected person, so there is
+   * no way yet for one of your other names to hold an organization of its own. When there is, this returns
+   * that name's list. Guarded here and not left to fall through: the branch below reads `active.org`, which a
+   * persona does not have.
+   */
+  if (active.kind === 'persona') return [];
   // ONE destination for the agents themselves, then the surfaces that are ABOUT something other than a
   // class of agent. The four items here used to be four different kinds of thing wearing one heading:
   // a class (Organizations), a role (Treasuries), a relationship (Alliances) — and "Workspaces", which
