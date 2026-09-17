@@ -144,6 +144,11 @@ export const CHILD_AGENT_KINDS = [
   // Spec 372 S3 — the Smart Agent an OUTSIDE RUNTIME acts as (Claude Code, Goose, a bot): a Service-class
   // agent chartered under a person or an organization. Chartering grants it nothing; a delegation does.
   { capability: 'service.create', tld: 'svc', noun: 'service agent', parentNoun: 'a person or an organization' },
+  // ANOTHER PERSON OF THEIR OWN — person-class, `.me`-named, custodied by the same credential, and never
+  // their default (`ap:DefaultPersonChoice`). A trail name, a pen name, a character in a game: each is a
+  // person-shaped agent with its own card, its own vault and its own memory of the people it met under that
+  // name. Chartered under the PERSON because that is whose it is; nothing above them exists to charter it.
+  { capability: 'person.create', tld: 'me', noun: 'person', parentNoun: 'a person (their own realm)' },
 ] as const;
 
 /** The KIND a created agent is recorded as in its owner's tree. Usually the noun; a treasury is named for
@@ -152,6 +157,9 @@ export const CHILD_AGENT_KINDS = [
 export function recordedKind(noun: string, parent: string, person?: string): string {
   // The Home's tree kinds (`AgentKind`): a service agent is recorded as `service`, whatever the prose says.
   if (noun === 'service agent') return 'service';
+  // A person of theirs is recorded as `person` — the one kind that is person-CLASS, so it lists under
+  // "other people of yours" rather than among the things they steward.
+  if (noun === 'person') return 'person';
   if (noun !== 'treasury') return noun;
   return person && parent.toLowerCase() === person.toLowerCase() ? 'person-treasury' : 'org-treasury';
 }
@@ -2337,6 +2345,7 @@ export const CAPABILITY_WORDS: Record<string, string> = {
   'organization.create': 'create organizations',
   'household.create': 'create a household',
   'service.create': 'charter service agents',
+  'person.create': 'add another person of your own',
   'treasury.create': 'create treasuries',
   'organization.membership.invite': 'invite members',
   'coordination.endeavor.list': 'see what the organization is working on',
@@ -3960,6 +3969,7 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'organization.create': ['signature'],
   'household.create': ['signature'],
   'service.create': ['signature'],
+  'person.create': ['signature'],
   'treasury.create': ['signature'],
   'organization.membership.invite': ['signature'],  // the org signs the invitation grant
   'coordination.endeavor.request': ['signature'],   // the mandate — asking as you is an act of yours
