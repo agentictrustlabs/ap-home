@@ -406,7 +406,7 @@ const CONTROL_EVENTS_CAP = 200; // ring buffer — the person's portable timelin
 // projection traceable back to its authoritative OrganizationMembership Situation. `relationship:'member'`
 // here is a projection LABEL, never authority (ADR-0048 #3): the delegations it carries are the authority
 // artifacts issued BECAUSE of membership; the membership itself is the SituationV2 the provenance points to.
-interface RelationshipEntryV1 { org: string; relationship: 'member' | 'steward'; orgName?: string; kind?: string; parent?: string; delegationHash?: string; delegations?: IncomingDelegation[]; membershipId?: string; membershipSituationHash?: string; enrollmentDecisionRef?: string; updatedAt: string }
+interface RelationshipEntryV1 { org: string; relationship: 'member' | 'steward' | 'self'; orgName?: string; kind?: string; parent?: string; delegationHash?: string; delegations?: IncomingDelegation[]; membershipId?: string; membershipSituationHash?: string; enrollmentDecisionRef?: string; updatedAt: string }
 interface RelationshipsDocV1 { orgs: Record<string, RelationshipEntryV1> }
 
 // apmsg:DiscussionInvitation row (restricted topics only) — a directed proposal, NOT a participation;
@@ -4944,7 +4944,17 @@ export class InteractionsDO {
               // steward ⊇ member: a subsequent 'member' merge must NEVER downgrade an existing steward (spec
               // 324 W3 fix — recording the creator as a member was silently stripping their steward inbox
               // control, resolveInboxOwner then 403'd them from their own application queue).
-              relationship: entry?.relationship === 'steward' || prev?.relationship === 'steward' ? 'steward' : 'member',
+              //
+              // 'self' sits OUTSIDE that order rather than above or below it. A persona — another name
+              // for the same human — is not a stronger stewardship or a weaker membership; there is no
+              // second party in it at all. So it is sticky in both directions: once an entry says the
+              // agent is this person, no later merge that merely forgot to say so turns it into a
+              // relationship with somebody else. Without this the coercion below read 'self' as
+              // 'member', and a persona came back as an org the person is a member of.
+              relationship:
+                entry?.relationship === 'self' || prev?.relationship === 'self' ? 'self'
+                : entry?.relationship === 'steward' || prev?.relationship === 'steward' ? 'steward'
+                : 'member',
               ...(entry?.orgName ? { orgName: String(entry.orgName) } : {}),
               ...(entry?.kind ? { kind: String(entry.kind) } : prev?.kind ? { kind: prev.kind } : {}),
               ...(entry?.parent ? { parent: String(entry.parent).toLowerCase() } : prev?.parent ? { parent: prev.parent } : {}),

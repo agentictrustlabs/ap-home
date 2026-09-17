@@ -93,7 +93,9 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
         requestedBy: 'home-reconcile',
         siteDelegation: null,
         proofHash: null,
-        ...(entry.relationship === 'steward' && wire ? { stewardshipDelegation: wire } : {}),
+        // A persona's wire is stewardship-SHAPED (agent → custodian read), because that is the only
+        // credential a second person agent of yours ever mints for you — so 'self' lands in the same slot.
+        ...((entry.relationship === 'steward' || entry.relationship === 'self') && wire ? { stewardshipDelegation: wire } : {}),
         ...(entry.relationship === 'member' && wire ? { memberAccessDelegation: wire } : {}),
         // spec 323 W1-tail — faithful tree shape from the vault (kind/parent), not a flattened default.
         kind: entry.kind ?? 'org',
@@ -201,7 +203,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
           const wire = o.stewardshipDelegation ?? o.membershipDelegation ?? null;
           await mergeRelationshipEntry(env, person, token, {
             org: String(o.orgAgent),
-            relationship: o.relationship === 'member' ? 'member' : 'steward',
+            relationship: o.relationship === 'self' ? 'self' : o.relationship === 'member' ? 'member' : 'steward',
             ...(o.orgName ? { orgName: String(o.orgName) } : {}),
             ...(o.kind ? { kind: String(o.kind) } : {}),
             ...(o.parent ? { parent: String(o.parent) } : {}),
@@ -235,9 +237,15 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // read/oversee the agent's vault). Persisted so OrgDetail can read a home-created org's data.
     stewardshipDelegation?: unknown;
     membershipDelegation?: unknown;
-    // steward (custody) vs member (authority-only). Defaults steward for legacy creator links.
+    // steward (custody) vs member (authority-only) vs self. Defaults steward for legacy creator links.
     // External seeds (e.g. tracker demo) MUST send relationship:'member' for non-custodians.
-    relationship?: 'steward' | 'member';
+    //
+    // 'self' is the PERSONA case and it is not a third flavour of stewardship: the agent is ANOTHER
+    // NAME FOR THE SAME HUMAN (a trail name, a part in a play), so there is nobody on the other side
+    // of the relationship to steward. It is written down rather than inferred from `kind:'person'`
+    // because a person could legitimately steward a person agent that is NOT them — a dependent's, an
+    // estate's — and a tree that cannot tell those apart cannot say which agent is the person reading it.
+    relationship?: 'steward' | 'member' | 'self';
     /** Org-context display name the member shares (shown on the steward's roster / delegated-idx). */
     displayName?: string;
     /**
@@ -388,10 +396,19 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // only orgName) NEVER clobbers fields it doesn't carry — delegations, proofHash, custody persist.
   const existing = JSON.parse((await env.AUTH_CODES.get(`related:${person}:${org}`)) ?? '{}') as Record<string, unknown>;
   const pick = <T,>(next: T | undefined, prev: unknown, dflt: T): T => (next !== undefined ? next : (prev as T) ?? dflt);
-  const relationship: 'steward' | 'member' = body?.relationship === 'member'
-    || (existing.relationship as string | undefined) === 'member'
-    ? 'member'
-    : (body?.relationship === 'steward' ? 'steward' : ((existing.relationship as 'steward' | 'member' | undefined) ?? 'steward'));
+  // A caller that NAMES a relationship decides it; one that names nothing keeps what is stored; a
+  // link that has never carried one is a legacy creator link and reads as steward. 'member' keeps its
+  // old stickiness (an authority-only seed must not be silently promoted to custody by a later
+  // partial save that omits the field), and 'self' is likewise sticky: a persona does not stop being
+  // the same human because some later write forgot to say so.
+  const REL = ['steward', 'member', 'self'] as const;
+  type Rel = (typeof REL)[number];
+  const asked = REL.includes(body?.relationship as Rel) ? (body?.relationship as Rel) : undefined;
+  const stored = REL.includes(existing.relationship as Rel) ? (existing.relationship as Rel) : undefined;
+  const relationship: Rel =
+    asked === 'member' || stored === 'member' ? 'member'
+    : asked === 'self' || stored === 'self' ? 'self'
+    : (asked ?? stored ?? 'steward');
   const displayName = typeof body?.displayName === 'string' ? body.displayName.trim().slice(0, 80) : '';
   // spec 342 — validate the projected status against the closed codelist; absent leaves the
   // existing value alone (a partial re-save must not silently reactivate a retired org).
