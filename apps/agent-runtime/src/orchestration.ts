@@ -6,7 +6,7 @@
 //     where the browser holds a server-side session rather than a signable A2A message).
 // Both run the IDENTICAL orchestration core over a delegation-bound invoker — the planner chooses WHICH tool;
 // every composed MCP call rides the supplied delegation (authority unchanged, ADR-0041).
-import { runIntent, createRuleBasedPlanner, type Planner, type ToolSpec, type ToolInvoker, type RunResult, type AnswerComposer } from '@agenticprimitives/orchestration';
+import { runIntent, createRuleBasedPlanner, OrchestrationError, type Planner, type ToolSpec, type ToolInvoker, type RunResult, type AnswerComposer } from '@agenticprimitives/orchestration';
 import { createAnthropicPlanner, createAnthropicComposer, createFetchAnthropicClient, DEFAULT_PLANNER_MODEL as ANTHROPIC_DEFAULT_MODEL } from '@agenticprimitives/orchestration-anthropic';
 import { createOpenAiCompatPlanner, createOpenAiCompatComposer, createFetchOpenAiCompatClient, type OpenAiCompatLike } from '@agenticprimitives/orchestration-openai-compat';
 import type { Address } from 'viem';
@@ -560,6 +560,51 @@ export function selectPlanner(env: PlannerEnv, opts?: { systemPrompt?: string; m
   return { planner: RULE_BASED_PLANNER, kind: 'rule-based' };
 }
 
+/**
+ * RULES FIRST, A MODEL ONLY WHEN THE RULES CANNOT DECIDE (2026-09-17).
+ *
+ * `selectPlanner` reaches the rule-based planner ONLY when no provider is configured at all, so on any
+ * credentialed deployment every intent costs a model call — including the ones that are not questions.
+ * An app driving this at volume ("read vault record cardroom.hand", "list vault records") was paying a
+ * planner turn to be told what a regular expression already knew, and a game with eight characters
+ * talking to each other is exactly that shape at exactly that volume.
+ *
+ * WHICH RULES MAY PRE-EMPT A MODEL, and why it is not all of them. The anchored, app-driven goals are
+ * machine-written: a program composed them from a record type it already knew, so matching one is a
+ * certainty rather than a guess. The fuzzy keyword rules exist to give a MODELLESS deployment something
+ * reasonable, and they are too eager to sit in front of a model — `/profile|pii|personal/` would swallow
+ * "summarise my profile and draft an intro", which a model should answer and a single tool call cannot.
+ * So: the anchored ones short-circuit, the fuzzy ones stay the fallback they were written to be.
+ *
+ * A DEPLOYMENT CAN TURN IT OFF (`ORCHESTRATION_PREPLAN="off"`), and nothing about authority changes either
+ * way — the same delegation-bound invoker runs the same tools; only who chose them differs, and the trace
+ * says which.
+ */
+const PREPLANNED: RegExp[] = [/^read vault record /i, /^list vault records$/i];
+
+export function preplanEnabled(env: { ORCHESTRATION_PREPLAN?: string }): boolean {
+  return String(env.ORCHESTRATION_PREPLAN ?? '').trim().toLowerCase() !== 'off';
+}
+
+/** Wrap a model planner so a goal the anchored rules already answer never reaches it. */
+export function rulesFirst(model: Planner, enabled = true): Planner {
+  return {
+    async plan(input) {
+      const goal = input.intent.goal ?? '';
+      if (enabled && PREPLANNED.some((re) => re.test(goal.trim()))) {
+        try {
+          return await RULE_BASED_PLANNER.plan(input);
+        } catch (e) {
+          // The rule matched the words and could not build a plan — an unexposed tool, say. That is the
+          // model's turn, not an error: falling through is the whole point of trying the cheap one first.
+          if (!(e instanceof OrchestrationError) || e.code !== 'no_plan') throw e;
+        }
+      }
+      return model.plan(input);
+    },
+  };
+}
+
 /** Run an intent through the shared orchestration core. `invoke` is the delegation-bound MCP composer (the
  *  authority boundary) — the caller supplies it (the skill wraps `ctx.mcp.callTool`; the relayer wraps
  *  `callMcpToolViaDelegation`). Returns the run result + which planner ran. */
@@ -568,9 +613,12 @@ export async function runOrchestration(
   args: { goal: string; principal: Address; invoke: ToolInvoker },
 ): Promise<{ result: RunResult; plannerKind: PlannerKind }> {
   const { planner, kind } = selectPlanner(env);
+  // A goal the anchored rules already answer never reaches the model — see `rulesFirst`. When no model was
+  // selected at all the planner IS the rule-based one and this wraps nothing.
+  const chosen = kind === 'rule-based' ? planner : rulesFirst(planner, preplanEnabled(env as { ORCHESTRATION_PREPLAN?: string }));
   const result = await runIntent(
     { goal: args.goal, context: { principal: args.principal } },
-    { planner, tools: ORCHESTRATION_TOOLS, invoke: args.invoke },
+    { planner: chosen, tools: ORCHESTRATION_TOOLS, invoke: args.invoke },
   );
   return { result, plannerKind: kind };
 }
