@@ -482,6 +482,16 @@
       "timeoutSec": 240
     },
     {
+      "id": "verify-operator-view",
+      "script": "scripts/verify-operator-view.mts",
+      "spec": "406 W1",
+      "proves": "the operator view over the evidence: a finished run lands in the OPS index (D1) with its kind, capability, bill, latency, provider and failure class — numbers and ids, never the words of the ask — and one indexed read aggregates the estate (every agent the steward stewards) by day, capability, provider, agent and failure class with p50/p95; a rebuild from the run records is idempotent (a projection, never the record)",
+      "twin": "a member cannot read an organization's operations (403); the words of the ask never reach the index; the run the index names is in the record store — the evidence is elsewhere and reachable",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 300
+    },
+    {
       "id": "verify-devkit-starter",
       "script": "scripts/verify-devkit-starter.mts",
       "spec": "398 §10 / G2",

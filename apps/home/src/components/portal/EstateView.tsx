@@ -72,7 +72,7 @@ export function EstateView() {
   const week = (days?: BudgetDay[]) => (days ?? []).reduce((acc, d) => ({ asks: acc.asks + d.asks, vaultCalls: acc.vaultCalls + d.vaultCalls }), { asks: 0, vaultCalls: 0 });
   return (
     <>
-      <PageHead title="Estate" description="Everything you steward, on one screen: what each agent runs, where, what it may spend, what it did this week — and the budget you set on it. A budget bounds how much; a mandate still decides each act." />
+      <PageHead title="Estate" description="Everything you steward, on one screen: what each agent runs, where, what it may spend, what it did this week — and the budget you set on it. A budget bounds how much; a mandate still decides each act." actions={<a href="/estate/ops" className="ui-btn ui-btn--secondary">Operations →</a>} />
       {error && <ErrorNote>{error}</ErrorNote>}
       <Section title="Agents" count={rows.length} testId="estate-agents">
         {!loaded ? <SkeletonRows rows={3} lead /> : rows.length === 0 ? <Empty title="Nothing to steward yet">Charter an organization or a service and it appears here.</Empty> : (

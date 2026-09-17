@@ -833,3 +833,31 @@ export async function agentBudget(session: { token: string }, agent: Address, se
   const out = (await postA2a('/a2a/harness/budget', { session: session.token, addressee: agent, days, ...(set ? { set } : {}) })) as { ok?: boolean; error?: string; budget?: AgentBudgetView; days?: BudgetDay[] };
   return out.ok && out.budget ? { ok: true, budget: out.budget, days: out.days ?? [] } : { ok: false, error: out.error ?? 'the runtime did not answer' };
 }
+
+// ── The operator view (spec 406 W1) — a projection over the run records; every row names a run whose evidence is elsewhere ──
+export interface OpsSummaryView {
+  window: { since: number; until: number }; agents: string[];
+  totals: { runs: number; answered: number; parked: number; prompted: number; refused: number; errored: number; canceled: number; routed: number; vaultCalls: number; doRequests: number; steps: number; receipts: number; p50Ms: number | null; p95Ms: number | null };
+  byDay: Array<{ day: string; runs: number; answered: number; parked: number; errored: number; vaultCalls: number }>;
+  byCapability: Array<{ capability: string; runs: number; answered: number; parked: number; errored: number; p50Ms: number | null }>;
+  byProvider: Array<{ provider: string; runs: number; p50Ms: number | null; p95Ms: number | null }>;
+  byAgent: Array<{ agent: string; runs: number; answered: number; parked: number; errored: number; vaultCalls: number }>;
+  byFailure: Array<{ failureClass: string; runs: number; sample: string | null }>;
+  recent: Array<{ run_ref: string; at: number; agent: string; kind: string; capability: string | null; provider: string | null; duration_ms: number | null; vault_calls: number; failure_class: string | null }>;
+}
+export async function operatorView(session: { token: string }, input: { scope: 'agent' | 'estate'; addressee?: Address; window?: '24h' | '7d' | '30d' }): Promise<{ ok: true; summary: OpsSummaryView | null } | { ok: false; error: string }> {
+  const out = (await postA2a('/a2a/harness/ops', { session: session.token, ...input })) as { ok?: boolean; error?: string; summary?: OpsSummaryView | null };
+  return out.ok ? { ok: true, summary: out.summary ?? null } : { ok: false, error: out.error ?? 'the runtime did not answer' };
+}
+/** Rebuild the operator index from the records — eight agents per call; walks until the runtime says there is no next. */
+export async function rebuildOperatorIndex(session: { token: string }, scope: { scope: 'agent' | 'estate'; addressee?: Address }, onProgress?: (done: number, total: number) => void): Promise<{ ok: true; agents: number; indexed: number } | { ok: false; error: string }> {
+  let offset: number | null = 0; let agents = 0; let indexed = 0;
+  while (offset !== null) {
+    const out = (await postA2a('/a2a/harness/ops', { session: session.token, ...scope, rebuild: true, offset })) as { ok?: boolean; error?: string; rebuilt?: Array<{ agent: string; records: number; indexed: number }>; next?: number | null; total?: number };
+    if (!out.ok) return { ok: false, error: out.error ?? 'the runtime did not answer' };
+    agents += out.rebuilt?.length ?? 0; indexed += (out.rebuilt ?? []).reduce((a, r) => a + r.indexed, 0);
+    onProgress?.(agents, out.total ?? agents);
+    offset = out.next ?? null;
+  }
+  return { ok: true, agents, indexed };
+}

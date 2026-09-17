@@ -17,6 +17,8 @@ import { parseRoutineSentence } from './routine-sentence.js';
 import { nudge, emailOf } from './nudges.js';
 import { consumeRuntimeWakes } from './runtime-wake.js';
 import { connectorStatus, disconnectConnector, type GoogleProvider } from './connectors/google-token.js';
+import { queryOps } from './ops-index.js';
+import { rebuildOpsIndex } from './run-records.js';
 import { BUDGET_RECORD, budgetOf, overBudget, budgetCounters, countAsk } from './agent-budget.js';
 import { probeMcpServer, keepMcpToken, dropMcpToken, MCP_CONNECTOR_PREFIX, isMcpConnectorRecord, mcpToolId, type McpConnectorRecordV1 } from './connectors/mcp-connector.js';
 import { searchThreads } from './connectors/google-gmail.js';
@@ -260,6 +262,8 @@ export interface Env {
   SESSIONS: DurableObjectNamespace;
   // Per-agent A2A Task runtime (spec 269 W5) — sharded idFromName(agentSA).
   A2A_TASKS: DurableObjectNamespace;
+  /** Spec 406 W1 — the operator view's index (D1): a projection over the run records, rebuilt on request. */
+  OPS?: D1Database;
   INTERACTIONS: DurableObjectNamespace;
   /** Spec 378 — one huddle room per scope key. */
   HUDDLES?: DurableObjectNamespace;
@@ -1841,6 +1845,38 @@ app.post('/harness/budget', async (c) => {
   }
   const days = await budgetCounters(c.env as never, agent, Math.min(Math.max(Number(body.days ?? 7), 1), 31));
   return c.json({ ok: true, agent, budget: current, days });
+});
+// POST /harness/ops { session, scope: 'agent'|'estate', addressee?, window?: '24h'|'7d'|'30d' } — spec 406 W1. THE OPERATOR
+// VIEW: counts, kinds, capabilities, providers, latency percentiles, the bill and the failure classes over the agents the
+// caller stewards (or one). A projection over the records; every row names a run whose evidence is elsewhere.
+app.post('/harness/ops', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; scope?: 'agent' | 'estate'; addressee?: string; window?: string; rebuild?: boolean } | null;
+  if (!body?.session) return c.json({ ok: false, error: 'session is required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  if (!c.env.OPS) return c.json({ ok: false, error: 'this deployment keeps no operator index (OPS)' }, 503);
+  const me = String(who.sa).toLowerCase() as Address;
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  let agents: string[];
+  if (body.scope === 'agent') {
+    const a = String(body.addressee ?? me).toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(a)) return c.json({ ok: false, error: 'addressee must be an address' }, 400);
+    if (a !== me && !(await mayDriveTriggers(c.env, me, a as Address))) return c.json({ ok: false, error: 'only a steward reads an agent\'s operations' }, 403);
+    agents = [a];
+  } else {
+    const doc = await deps.readSubjectRecord?.(me, 'relationships.data').catch(() => null);
+    agents = [me, ...relationshipRows(doc).filter((r) => r.relationship === 'steward').map((r) => r.agent.toLowerCase())];
+  }
+  if (body.rebuild) {
+    // Bounded per call: eight agents at a time (one DO read + one D1 batch each); the Home walks the rest.
+    const offset = Math.max(0, Number((body as { offset?: number }).offset ?? 0));
+    const slice = agents.slice(offset, offset + 8);
+    const out = await Promise.all(slice.map(async (a) => ({ agent: a, ...(await rebuildOpsIndex(c.env as never, a as Address).catch(() => ({ records: 0, indexed: 0 }))) })));
+    return c.json({ ok: true, rebuilt: out, next: offset + slice.length < agents.length ? offset + slice.length : null, total: agents.length });
+  }
+  const ms = body.window === '24h' ? 86_400_000 : body.window === '30d' ? 30 * 86_400_000 : 7 * 86_400_000;
+  const summary = await queryOps(c.env, { agents, since: Date.now() - ms });
+  return c.json({ ok: true, scope: body.scope ?? 'estate', window: body.window ?? '7d', summary });
 });
 app.post('/harness/instructions', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { session?: string } | null;

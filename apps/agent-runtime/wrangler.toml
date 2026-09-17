@@ -558,6 +558,13 @@ instance_type = "basic"
 
 # Spec 400 W1c — the wake queue: produced after a message is ADMITTED into a member that declared a host; consumed
 # by this same Worker, which POSTs /wake to the member's Container (or URL). No content, no authority in a message.
+# Spec 406 W1 — THE OPERATOR VIEW'S INDEX: one row per finished run (numbers and ids, never words), a serving-plane
+# projection rebuilt from the run records on request. Not the evidence: the record, the receipts and the PROV bundle are.
+[[env.faithnet.d1_databases]]
+binding = "OPS"
+database_name = "harness-ops-faithnet"
+database_id = "dbdd6b71-f008-4a34-bb01-1cb195021993"
+
 [[env.faithnet.queues.producers]]
 binding = "RUNTIME_WAKE"
 queue = "runtime-wake-faithnet"

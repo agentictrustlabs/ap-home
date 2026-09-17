@@ -1029,8 +1029,13 @@ export class A2aTaskDO {
         const ttl = recordRetention(this.env).doDays * 24 * 3600_000;
         const stale = rows.filter((r) => now - Number(r.at ?? 0) > ttl).map((r) => rkey(String(r.runRef)));
         if (stale.length) await this.state.storage.delete(stale);
+        // Spec 406 W1 — `full: true` keeps each step's ids and verdicts (never its args or results) for the operator
+        // index's rebuild: one call per agent instead of one per run.
+        const full = (body as { full?: boolean } | null)?.full === true;
         const live = rows.filter((r) => now - Number(r.at ?? 0) <= ttl)
-          .map(({ presented: _p, events: _e, ...rest }): Record<string, unknown> => ({ ...rest, steps: (rest.steps as unknown[] | undefined)?.length ?? 0, receipts: (rest.receipts as unknown[] | undefined)?.length ?? 0 }))
+          .map(({ presented: _p, events: _e, ...rest }): Record<string, unknown> => full
+            ? { ...rest, steps: ((rest.steps as Array<Record<string, unknown>> | undefined) ?? []).map((st) => ({ stepRef: st.stepRef, toolId: st.toolId, ok: st.ok, ...(st.error ? { error: st.error } : {}), ...(st.skipped ? { skipped: true } : {}) })), receipts: ((rest.receipts as unknown[] | undefined) ?? []).length }
+            : ({ ...rest, steps: (rest.steps as unknown[] | undefined)?.length ?? 0, receipts: (rest.receipts as unknown[] | undefined)?.length ?? 0 }))
           .sort((a, b) => Number(b.at ?? 0) - Number(a.at ?? 0));
         return Response.json({ ok: true, records: live, retention: recordRetention(this.env) });
       }

@@ -38,7 +38,13 @@ export function RunHistory({ token, addressee, limit = 60 }: { token: string; ad
   useEffect(() => {
     let live = true;
     setRows(null); setUnknown(null);
-    void listRunRecords({ token }, addressee).then((r) => { if (live) setRows(r.records.sort((a, b) => b.at - a.at)); }).catch((e) => { if (live) { setUnknown(e instanceof Error ? e.message : String(e)); setRows([]); } });
+    void listRunRecords({ token }, addressee).then((r) => {
+      if (!live) return;
+      const sorted = r.records.sort((a, b) => b.at - a.at);
+      setRows(sorted);
+      // Spec 406 W1 — `?run=<runRef>` (the operator view's rows link here): open THAT run's inspector — the evidence.
+      try { const want = new URL(window.location.href).searchParams.get('run'); const hit = want ? sorted.find((x) => x.runRef === want) : undefined; if (hit) setOpen(hit); } catch { /* no URL */ }
+    }).catch((e) => { if (live) { setUnknown(e instanceof Error ? e.message : String(e)); setRows([]); } });
     return () => { live = false; };
   }, [token, addressee]);
 
