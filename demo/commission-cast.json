@@ -1,0 +1,13 @@
+{
+  "note": "demo/commission-cast.faithnet.json",
+  "var": "COMMISSION_CAST",
+  "cast": [
+    { "role": "returnee",   "character": "Ilse Varrow",       "handle": "elena",  "label": "ilse-elena" },
+    { "role": "household",  "character": "Teodor Maske",      "handle": "dave",   "label": "teodor-dave" },
+    { "role": "agency",     "character": "Margit Sollen",     "handle": "carol",  "label": "margit-carol" },
+    { "role": "funder",     "character": "Anselm Dray",       "handle": "bob",    "label": "anselm-bob" },
+    { "role": "researcher", "character": "Dr Wren Ashcombe",  "handle": "alice",  "label": "wren-alice" },
+    { "role": "convener",   "character": "Bram Oakes",        "handle": "nathan", "label": "bram-nathan" },
+    { "role": "adversary",  "character": "Caspar Lune",       "handle": "david",  "label": "caspar-david" }
+  ]
+}

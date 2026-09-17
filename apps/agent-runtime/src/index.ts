@@ -3108,6 +3108,17 @@ app.post('/harness/authorize', async (c) => {
     const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
     const { receipt } = await accountClient(c.env).submitCallUserOp(op, relayerAccount);
     const inner = detectInnerOpFailure(receipt as never, { sender: delegator });
+    /**
+     * A RECEIPT WITH NOBODY'S EVENT IN IT IS NOT A REVERT (2026-09-17). A shared bundler batches, and the
+     * receipt handed back for our submission can carry ANOTHER sender's UserOperationEvent and none of ours —
+     * seen live: four persona charters in a row reported "the approval batch reverted: no revert reason" while
+     * every one of the named transactions was `status 0x1` with a `success = true` event for a different
+     * sender, and the approvals had landed. "Our op is not in this receipt" is a different fact from "our op
+     * reverted", and reporting the second for the first sent a script hunting a revert that never happened.
+     * Reported as what it is; the caller checks the outcome by its effect (a name that resolves, a hash
+     * that is approved) rather than by this receipt.
+     */
+    if (!inner.ok && inner.matched === false) return c.json({ ok: true, txHash: receipt.transactionHash, unmatched: true, sendersSeen: inner.sendersSeen ?? [] });
     if (!inner.ok) return c.json({ ok: false, error: `the approval batch reverted: ${inner.revertReason ?? 'no revert reason'} (tx ${receipt.transactionHash})` }, 502);
     return c.json({ ok: true, txHash: receipt.transactionHash });
   }
