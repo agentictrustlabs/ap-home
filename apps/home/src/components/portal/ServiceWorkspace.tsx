@@ -1,6 +1,11 @@
 'use client';
-// Service-workspace Manage pages (ADR-0046). Same stewardship read as org Records/Access —
-// the workspace (or treasury) owns the vault; you oversee it via workspace → you.
+// Manage pages for an agent you HOLD (ADR-0046). Same stewardship read as org Records/Access — the agent
+// owns its vault; you oversee it on the wire it signed to you (agent → you).
+//
+// NOT services only, despite the file's name. It filtered to service-class, so a PERSONA — another name of
+// the same human, which is person-class — resolved to nothing and every page under `/as/<address>` said
+// "You don't manage a service agent at this address" about an agent the person plainly holds. What these
+// pages need is a stewardship wire, and what a wire proves is CONTROL, not what class the thing is.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSession } from '../../context/session';
 import { useManagedAgents } from './ManagedAgents';
@@ -16,9 +21,15 @@ const lc = (s: string) => s.toLowerCase();
 function useServiceAgent(agent: string) {
   const { session } = useSession();
   const { agents, loaded } = useManagedAgents(session?.token ?? null, 'any');
-  const svc = agents.find((a) => agentClassOf(a.kind) === 'service' && lc(a.agent) === lc(agent));
+  // By ADDRESS, whatever class: a service, a persona — anything in your tree addressed by its own SA. An
+  // organization has its own pages and never reaches here, so no class test is needed to keep it out.
+  const svc = agents.find((a) => lc(a.agent) === lc(agent));
   return { session, loaded, svc };
 }
+
+/** What to CALL the thing on these pages — the class word, so a persona is never described as a service. */
+const wordFor = (kind: Parameters<typeof agentClassOf>[0]): string =>
+  agentClassOf(kind) === 'person' ? 'name of yours' : kind === 'workspace' ? 'workspace agent' : kind === 'team' ? 'team' : 'service agent';
 
 export function ServiceRecordsSection({ agent }: { agent: string }) {
   const { session, loaded, svc } = useServiceAgent(agent);
@@ -27,7 +38,7 @@ export function ServiceRecordsSection({ agent }: { agent: string }) {
   if (!svc) {
     return (
       <SectionShell title="Records">
-        <p className="manage-card-blurb">You don&apos;t manage a service agent at this address.</p>
+        <p className="manage-card-blurb">You don&apos;t hold an agent at this address.</p>
       </SectionShell>
     );
   }
@@ -36,8 +47,8 @@ export function ServiceRecordsSection({ agent }: { agent: string }) {
     <SectionShell title="Records">
       {d ? (
         <VaultReader
-          title={svc.kind === 'workspace' ? 'Workspace records' : 'Service records'}
-          hint="Every record in this agent’s vault, read with your stewardship delegation (service → you). The agent owns the data; you oversee it."
+          title={agentClassOf(svc.kind) === 'person' ? 'Its records' : svc.kind === 'workspace' ? 'Workspace records' : 'Service records'}
+          hint="Every record in this agent’s vault, read with your stewardship delegation (the agent → you). The agent owns the data; you oversee it."
           delegation={d}
         />
       ) : (
@@ -59,7 +70,7 @@ export function ServiceAccessSection({ agent }: { agent: string }) {
   if (!svc) {
     return (
       <SectionShell title="Access">
-        <p className="manage-card-blurb">You don&apos;t manage a service agent at this address.</p>
+        <p className="manage-card-blurb">You don&apos;t hold an agent at this address.</p>
       </SectionShell>
     );
   }
@@ -67,7 +78,7 @@ export function ServiceAccessSection({ agent }: { agent: string }) {
   return (
     <SectionShell title="Access">
       <p className="manage-card-blurb" style={{ margin: '0 0 .8rem' }}>
-        The scoped, revocable delegations between you and this service agent — the authority behind Records.
+        The scoped, revocable delegations between you and this agent — the authority behind Records.
       </p>
       {d ? (
         <div className="manage-grid">
@@ -140,11 +151,11 @@ export function ServicePlaybookSection({ agent }: { agent: string }) {
   if (!svc) {
     return (
       <SectionShell title="Playbook">
-        <p className="manage-card-blurb">You don&apos;t manage a service agent at this address.</p>
+        <p className="manage-card-blurb">You don&apos;t hold an agent at this address.</p>
       </SectionShell>
     );
   }
-  const what = svc.kind === 'workspace' ? 'workspace agent' : svc.kind === 'team' ? 'team' : 'service';
+  const what = wordFor(svc.kind);
   return (
     <SectionShell title="Playbook">
       <BehaviourPlaybook agent={svc.agent} kind={svc.kind} name={svc.name || undefined} />

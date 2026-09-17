@@ -69,7 +69,10 @@ export function AgentSwitcher() {
   // custody), an org not in the list at all is a guest visit — from the ONE function every basis line renders from.
   const caption = actingBasis({
     active, self: { address: agentAddress ?? '' }, classOf: (k) => agentClassOf(k as Parameters<typeof agentClassOf>[0]),
-    agents: agents.map((a) => ({ agent: a.agent, kind: a.kind, ...(a.relationship ? { relationship: a.relationship } : {}) })),
+    // `name` too — `BasisLine` has always passed it and this did not, so every caption that names an agent
+    // fell back to its generic: a persona read "acting as another name of yours" when it could have said
+    // which, and a stewarded org read "acting for this agent".
+    agents: agents.map((a) => ({ agent: a.agent, kind: a.kind, ...(a.name ? { name: nameLabel(a.name) } : {}), ...(a.relationship ? { relationship: a.relationship } : {}) })),
   }).caption;
 
   const go = (href: string) => { router.push(href); setOpen(false); };

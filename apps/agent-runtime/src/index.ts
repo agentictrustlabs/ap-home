@@ -2319,12 +2319,22 @@ export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef:
   return { outcome: 'failed', said: reply.kind === 'refused' ? reply.error : spoken, runRef, bill };
 }
 
-/** May this session see or fire an agent's triggers: the agent's own session, or a steward by the caller's own links. */
-async function mayDriveTriggers(env: Env, caller: Address, agent: Address): Promise<boolean> {
+/**
+ * DOES THIS CALLER HOLD THIS AGENT — its own session, or a steward by the caller's own links.
+ *
+ * `relationshipRows` reads a persona's `self` as steward-strength, because a persona's custodian holds
+ * exactly the custody a steward holds; the word differs, the control does not.
+ */
+async function mayOverseeAgent(env: Env, caller: Address, agent: Address): Promise<boolean> {
   if (caller.toLowerCase() === agent.toLowerCase()) return true;
   const deps = harnessDeps(env, buildAuditSink(env));
   const doc = await deps.readSubjectRecord?.(caller.toLowerCase(), 'relationships.data').catch(() => null);
   return relationshipRows(doc).some((r) => r.agent.toLowerCase() === agent.toLowerCase() && r.relationship === 'steward');
+}
+
+/** May this session see or fire an agent's triggers: the agent's own session, or a steward. */
+async function mayDriveTriggers(env: Env, caller: Address, agent: Address): Promise<boolean> {
+  return mayOverseeAgent(env, caller, agent);
 }
 
 // POST /harness/triggers { session, addressee } — spec 370 P5. The agent's schedule: what its playbook asks
@@ -2820,14 +2830,30 @@ app.post('/harness/records', async (c) => {
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const addressee = body.addressee.toLowerCase() as Address;
   const caller = String(who.sa).toLowerCase();
+  /**
+   * TWO CLAIMS ON A RUN, not one. "A run is looked back on by whoever asked it" keeps one asker's runs from
+   * another's — but the agent's CUSTODIAN has a different and stronger claim on the same rows: it is her
+   * agent, her tokens were spent thinking, and she is answerable for what it did.
+   *
+   * Asking alone was the whole test, so an agent that only ever answers OTHER PEOPLE had a permanently empty
+   * history at its own home. That is exactly what a persona cast in a game is: the card room asks it as the
+   * house, so every run it has ever done was filtered out of its custodian's view and Activities showed
+   * nothing for an agent in the middle of a night.
+   *
+   * Custody is proved the way every steward-gated read here proves it — the caller's own links — never by
+   * the addressee's say-so.
+   */
+  const holds = await mayOverseeAgent(c.env, caller as Address, addressee).catch(() => false);
   if (body.runRef) {
     const rec = await getRecord(c.env as never, addressee, body.runRef);
     if (!rec) return c.json({ ok: false, error: 'no such record' }, 404);
-    if (String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() !== caller) return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
+    const asked = String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() === caller;
+    if (!asked && !holds) return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
     const { presented: _p, ...shown } = rec;
     return c.json({ ok: true, record: shown });
   }
-  const records = (await listRecords(c.env as never, addressee)).filter((r) => String(((r.intent as { context?: { asker?: string } } | undefined)?.context?.asker) ?? '').toLowerCase() === caller);
+  const all = await listRecords(c.env as never, addressee);
+  const records = holds ? all : all.filter((r) => String(((r.intent as { context?: { asker?: string } } | undefined)?.context?.asker) ?? '').toLowerCase() === caller);
   // Spec 381 — the retention is part of the listing: how long the object keeps these, and where the durable half lives.
   return c.json({ ok: true, records, retention: recordRetention(c.env) });
 });
@@ -2842,7 +2868,13 @@ app.post('/harness/spans', async (c) => {
   const addressee = body.addressee.toLowerCase() as Address;
   const rec = await getRecord(c.env as never, addressee, body.runRef);
   if (!rec) return c.json({ ok: false, error: 'no such record' }, 404);
-  if (String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()) return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
+  // The asker, OR the agent's custodian — the same two claims `/harness/records` admits. The Inspector opens
+  // these from a row that listing already showed, so a narrower gate here would hand a person a run they can
+  // see in the list and cannot open.
+  if (String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()
+      && !(await mayOverseeAgent(c.env, String(who.sa).toLowerCase() as Address, addressee).catch(() => false))) {
+    return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
+  }
   try {
     const spans = await firewalledSpans(rec);
     return c.json({ ok: true, spans, metrics: firewalledMetrics(rec), retention: recordRetention(c.env), exporter: c.env.OTEL_EXPORTER_OTLP_ENDPOINT ? 'otlp-http' : 'none', export: rec.export ?? null, hasProvenance: hasProvenanceRef(addressee, body.runRef) });
@@ -2872,7 +2904,13 @@ app.post('/harness/provenance', async (c) => {
     if (carried && typeof carried === 'object' && (body.format === 'jsonld' || !body.format)) return c.json({ ok: true, hasProvenance: hasProvenanceRef(addressee, body.runRef), carried: true, provenance: carried });
     return c.json({ ok: false, error: 'no such record' }, 404);
   }
-  if (String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()) return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
+  // The asker, OR the agent's custodian — the same two claims `/harness/records` admits. The Inspector opens
+  // these from a row that listing already showed, so a narrower gate here would hand a person a run they can
+  // see in the list and cannot open.
+  if (String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()
+      && !(await mayOverseeAgent(c.env, String(who.sa).toLowerCase() as Address, addressee).catch(() => false))) {
+    return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
+  }
   const ref = hasProvenanceRef(addressee, body.runRef);
   if (body.format === 'prov-n') return c.json({ ok: true, hasProvenance: ref, provN: await provenanceProvNOf(c.env, addressee, rec), export: rec.export?.provenance ?? null });
   // Spec 398 §5.2 — the inspector's record form: what the run left (artifacts), decided, spent authority on, cost.
