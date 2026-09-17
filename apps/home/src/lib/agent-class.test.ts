@@ -67,3 +67,20 @@ describe('chartering an agent', () => {
     expect(byKind['person-treasury']).toBe(false);
   });
 });
+
+/**
+ * THE NAME RECORD'S CLASS IS THE AGENT'S CLASS (spec 346 §3.6).
+ *
+ * Both claim paths used to enumerate the org kinds by hand and send everything else as 'service'. That was
+ * invisible while every chartered kind really was org or service — and the moment a person joined the list it
+ * meant chartering one would declare `atl:agentType person` on chain and then claim a `.me` name saying
+ * service-class, which the typed claim refuses outright. A classifier, not a list, is what stops that
+ * happening again for the next kind.
+ */
+describe('the class a claim records', () => {
+  it('is person for a person, org for every org-shaped kind, service for the rest', () => {
+    expect(agentClassOf('person')).toBe('person');
+    for (const k of ['org', 'team', 'circle', 'church', 'household'] as const) expect(agentClassOf(k)).toBe('org');
+    for (const k of ['service', 'workspace', 'person-treasury', 'org-treasury'] as const) expect(agentClassOf(k)).toBe('service');
+  });
+});
