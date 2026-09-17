@@ -1062,6 +1062,42 @@
       ]
     },
     {
+      "id": "home.estate",
+      "review": [
+        "APUX-040",
+        "M06"
+      ],
+      "title": "Estate — everything the person stewards on one screen: playbook · fleet lines · grants · this week's asks and vault calls · the budget she sets (enforced at the door)",
+      "priority": "P1",
+      "status": "shipped",
+      "specs": [
+        398,
+        396
+      ],
+      "section": "gap analysis P1.4",
+      "routes": [
+        "(portal)/estate"
+      ],
+      "capabilities": [],
+      "endpoints": [
+        "/harness/budget",
+        "/harness/ask"
+      ],
+      "tests": [
+        "apps/demo-a2a/test/unit/agent-budget.test.ts"
+      ],
+      "gates": [
+        "verify-agent-budget"
+      ],
+      "gaps": [
+        "a MODEL budget (tokens / planner calls per day) beside asks and vault calls — the meter is deployment-wide (spec 388), not per agent yet; spend in currency is the treasury mandate's, shown elsewhere; an estate-wide policy (one rule for all agents) is not modelled"
+      ],
+      "components": [
+        "components/portal/EstateView.tsx",
+        "components/portal/FleetLines.tsx"
+      ]
+    },
+    {
       "id": "home.developer",
       "review": [
         "H41",

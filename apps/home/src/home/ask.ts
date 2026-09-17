@@ -825,3 +825,11 @@ export async function mcpConnectors(session: { token: string }, op: 'list' | 'at
   const out = (await postA2a('/a2a/harness/connectors/mcp', { session: session.token, op, ...(holder ? { holder } : {}), ...(input ?? {}) })) as { ok?: boolean; error?: string } & Record<string, unknown>;
   return out.ok ? { ok: true, ...out } : { ok: false, error: out.error ?? 'the runtime did not answer' };
 }
+
+// ── The agent's budget (P1.4) — declared by its steward, counted by the day at the runtime ──
+export interface AgentBudgetView { type: 'ap.agent-budget.v1'; asksPerDay: number | null; vaultCallsPerDay: number | null; note?: string; setBy?: string; setAt?: string }
+export interface BudgetDay { day: string; asks: number; vaultCalls: number; doRequests: number }
+export async function agentBudget(session: { token: string }, agent: Address, set?: { asksPerDay?: number | null; vaultCallsPerDay?: number | null; note?: string }, days = 7): Promise<{ ok: true; budget: AgentBudgetView; days: BudgetDay[] } | { ok: false; error: string }> {
+  const out = (await postA2a('/a2a/harness/budget', { session: session.token, addressee: agent, days, ...(set ? { set } : {}) })) as { ok?: boolean; error?: string; budget?: AgentBudgetView; days?: BudgetDay[] };
+  return out.ok && out.budget ? { ok: true, budget: out.budget, days: out.days ?? [] } : { ok: false, error: out.error ?? 'the runtime did not answer' };
+}

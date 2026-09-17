@@ -989,7 +989,33 @@ export class A2aTaskDO {
         // canceled — a plausible falsehood about the one fact the person acted on.)
         const prior = (await this.state.storage.get(rkey(rec.runRef))) as { canceled?: unknown } | undefined;
         await this.state.storage.put(rkey(rec.runRef), prior?.canceled && !rec.canceled ? { ...rec, canceled: prior.canceled } : rec);
+        // P1.4 — THE DAY'S COUNTERS: the run's bill lands on the day it was recorded, once per run (the export writes the
+        // record again). Serving-plane; a wipe is a rebuild from the records.
+        if (!prior) {
+          const bill = (rec as { bill?: { vaultCalls?: number; doRequests?: number }; at?: number }).bill;
+          const day = new Date(Number((rec as { at?: number }).at ?? Date.now())).toISOString().slice(0, 10);
+          const bk = `harness:budget:${day}`;
+          const cur = ((await this.state.storage.get(bk)) as { asks?: number; vaultCalls?: number; doRequests?: number } | undefined) ?? {};
+          await this.state.storage.put(bk, { asks: cur.asks ?? 0, vaultCalls: (cur.vaultCalls ?? 0) + Number(bill?.vaultCalls ?? 0), doRequests: (cur.doRequests ?? 0) + Number(bill?.doRequests ?? 0) });
+        }
         return Response.json({ ok: true });
+      }
+      if (op === 'budget-ask') {
+        const day = String((body as { day?: string } | null)?.day ?? new Date().toISOString().slice(0, 10));
+        const bk = `harness:budget:${day}`;
+        const cur = ((await this.state.storage.get(bk)) as { asks?: number; vaultCalls?: number; doRequests?: number } | undefined) ?? {};
+        await this.state.storage.put(bk, { asks: (cur.asks ?? 0) + 1, vaultCalls: cur.vaultCalls ?? 0, doRequests: cur.doRequests ?? 0 });
+        return Response.json({ ok: true });
+      }
+      if (op === 'budget-get') {
+        const days = Math.min(Math.max(Number((body as { days?: number } | null)?.days ?? 7), 1), 31);
+        const out: Array<{ day: string; asks: number; vaultCalls: number; doRequests: number }> = [];
+        for (let i = 0; i < days; i++) {
+          const day = new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10);
+          const cur = ((await this.state.storage.get(`harness:budget:${day}`)) as { asks?: number; vaultCalls?: number; doRequests?: number } | undefined) ?? {};
+          out.push({ day, asks: cur.asks ?? 0, vaultCalls: cur.vaultCalls ?? 0, doRequests: cur.doRequests ?? 0 });
+        }
+        return Response.json({ ok: true, days: out });
       }
       if (op === 'record-get') {
         if (!body?.runRef) return Response.json({ ok: false, error: 'runRef required' }, { status: 400 });

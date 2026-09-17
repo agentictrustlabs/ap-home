@@ -472,6 +472,16 @@
       "timeoutSec": 240
     },
     {
+      "id": "verify-agent-budget",
+      "script": "scripts/verify-agent-budget.mts",
+      "spec": "gap analysis P1.4",
+      "proves": "an agent's budget — asks and vault calls per UTC day — declared by its steward as the agent's own record (agent.budget, apctx:AgentBudget), counted by the day on the agent's task object from every run's bill, and enforced at the door of /harness/ask BEFORE a model is called: one ask within budget answers, the next is refused 429 with the numbers; clearing the budget answers again",
+      "twin": "a member (not a steward) cannot set the organization's budget (403); a resume of a parked run is not a fresh ask and is neither counted nor refused",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 240
+    },
+    {
       "id": "verify-devkit-starter",
       "script": "scripts/verify-devkit-starter.mts",
       "spec": "398 §10 / G2",

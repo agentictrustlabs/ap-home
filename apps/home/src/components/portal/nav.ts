@@ -362,6 +362,8 @@ export function buildUserMenu(wl: WhiteLabelConfig): NavItem[] {
     items.push({ id: 'workspaces', label: 'App workspaces', href: '/workspaces', Icon: GlobeIcon, status: 'live' });
     items.push({ id: 'developer', label: 'Your apps', href: '/developer', Icon: CodeIcon, status: 'live' });
   }
+  // P1.4 — everything the person stewards, one screen; budgets set here.
+  items.push({ id: 'estate', label: 'Estate', href: '/estate', Icon: BuildingIcon, status: 'live' });
   items.push({ id: 'network', label: 'Network', href: '/network', Icon: GlobeIcon, status: 'live' });
   return items;
 }

@@ -17,6 +17,7 @@ import { parseRoutineSentence } from './routine-sentence.js';
 import { nudge, emailOf } from './nudges.js';
 import { consumeRuntimeWakes } from './runtime-wake.js';
 import { connectorStatus, disconnectConnector, type GoogleProvider } from './connectors/google-token.js';
+import { BUDGET_RECORD, budgetOf, overBudget, budgetCounters, countAsk } from './agent-budget.js';
 import { probeMcpServer, keepMcpToken, dropMcpToken, MCP_CONNECTOR_PREFIX, isMcpConnectorRecord, mcpToolId, type McpConnectorRecordV1 } from './connectors/mcp-connector.js';
 import { searchThreads } from './connectors/google-gmail.js';
 import { listEvents } from './connectors/google-calendar.js';
@@ -1818,6 +1819,28 @@ app.post('/harness/connectors/mcp', async (c) => {
   } catch (e) {
     return c.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, 502);
   }
+});
+// POST /harness/budget { session, addressee, set?: { asksPerDay, vaultCallsPerDay, note } } — P1.4. The agent's declared
+// budget (its own vault, `agent.budget`) and the day's counters; a steward (or the agent's own person) sets it.
+app.post('/harness/budget', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: string; set?: { asksPerDay?: number | null; vaultCallsPerDay?: number | null; note?: string }; days?: number } | null;
+  if (!body?.session || !body.addressee || !/^0x[0-9a-fA-F]{40}$/.test(body.addressee)) return c.json({ ok: false, error: 'session and addressee are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const me = String(who.sa).toLowerCase() as Address;
+  const agent = body.addressee.toLowerCase() as Address;
+  if (agent !== me && !(await mayDriveTriggers(c.env, me, agent))) return c.json({ ok: false, error: 'only the agent\'s own person or a steward reads or sets its budget' }, 403);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  if (!deps.readSubjectRecord || !deps.writeSubjectRecord) return c.json({ ok: false, error: 'the private tier is not configured' }, 503);
+  let current = budgetOf(await deps.readSubjectRecord(agent, BUDGET_RECORD).catch(() => null));
+  if (body.set) {
+    const next = budgetOf({ ...current, ...body.set, setBy: me, setAt: new Date().toISOString() });
+    const wrote = await deps.writeSubjectRecord(agent, BUDGET_RECORD, next);
+    if (!wrote.ok) return c.json({ ok: false, error: /record_scope_denied|scope/i.test(wrote.error ?? '') ? 'record_scope_denied' : (wrote.error ?? 'the budget could not be kept') }, 502);
+    current = next;
+  }
+  const days = await budgetCounters(c.env as never, agent, Math.min(Math.max(Number(body.days ?? 7), 1), 31));
+  return c.json({ ok: true, agent, budget: current, days });
 });
 app.post('/harness/instructions', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { session?: string } | null;
@@ -3637,6 +3660,21 @@ app.post('/harness/ask', async (c) => {
   // Spec 397 — what a routed hop from this run presents in place of a session: the admission evidence, verbatim.
   const appCredential = viaApp?.ok && !forwardedCred && /^A2A-Session\s/i.test(c.req.header('authorization') ?? '') ? { authorization: c.req.header('authorization')!, body: rawAsk } : undefined;
   if (!c.env.HARNESS_AGENT_SA) return c.json({ ok: false, error: 'HARNESS_AGENT_SA not configured' }, 503);
+  // P1.4 — THE AGENT'S BUDGET, at the door: a FRESH ask (not a resume) against the steward's declared limits and the
+  // day's counters, before a model is called or a step runs. Over ⇒ said, 429; never a silent degrade.
+  if (body.message?.trim() && !body.runRef) {
+    const bdeps = harnessDeps(c.env, buildAuditSink(c.env));
+    const braw = bdeps.readSubjectRecord ? await bdeps.readSubjectRecord(String(body.addressee).toLowerCase(), BUDGET_RECORD).catch(() => null) : null;
+    if (braw) {
+      const budget = budgetOf(braw);
+      if (budget.asksPerDay !== null || budget.vaultCallsPerDay !== null) {
+        const [todayCounters] = await budgetCounters(c.env as never, body.addressee as Address, 1);
+        const why = todayCounters ? overBudget(budget, todayCounters) : null;
+        if (why) return c.json({ ok: false, reply: { kind: 'refused', error: why, budget: { asksPerDay: budget.asksPerDay, vaultCallsPerDay: budget.vaultCallsPerDay, today: todayCounters } } }, 429);
+      }
+    }
+    c.executionCtx.waitUntil(countAsk(c.env as never, body.addressee as Address));
+  }
   // Spec 377 — which model this turn runs on, decided BEFORE any run state is touched. A listed-but-keyless
   // provider throws here (a configuration error, loud), an unoffered one is refused with the offer named.
   const chosen = resolveProvider(c.env, body.model);
