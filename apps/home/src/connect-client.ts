@@ -51,6 +51,8 @@ import { buildApprovedSiteDelegation,
 import { requestReindex } from './lib/reindex';
 import { buildRelatedAgentCredential, relatedAgentProofHash } from '@agenticprimitives/related-agents';
 import { demoCustodySignHash, isDemoCustodyHome } from './lib/persona-custody';
+// agent-class imports only TYPES from here, so this pair is erased at runtime and cycles nothing.
+import { agentClassOf } from './lib/agent-class';
 
 /** A function that signs a 32-byte hash (EOA personal_sign or WebAuthn). */
 export type SignHash = (hash: Hex) => Promise<Hex>;
@@ -1609,7 +1611,11 @@ export async function createManagedAgent(
   let name = '';
   if (wantName) {
     const claim = await buildClaimCallData(input.label!, child, onStep, true, {
-      agentKind: input.kind === 'org' || input.kind === 'team' || input.kind === 'circle' || input.kind === 'church' || input.kind === 'household' ? 'org' : 'service',
+      // THE CLASS COMES FROM THE CLASSIFIER, not from a list kept by hand here. Both this and the naming
+      // path used to enumerate the org kinds and send everything else as 'service', so a person would have
+      // claimed a `.me` name declaring itself service-class — which the typed claim refuses outright
+      // (spec 346 §3.6: the suffix, the on-chain type and the name record's class must agree).
+      agentKind: agentClassOf(input.kind),
       displayName: `${input.label!.replace(/\.(impact|demo\.agent)$/i, '')}.${typedTldForKind(input.kind)?.tld ?? AGENT_NAME_PARENT}`,
     }, typedTldForKind(input.kind) ?? {});
     if (!claim.ok) return { ok: false, error: claim.error };
@@ -1713,7 +1719,7 @@ export async function nameManagedAgent(
   const signHash: SignHash = signer;
 
   const claim = await buildClaimCallData(input.label, input.agent, onStep, true, {
-    agentKind: input.kind === 'org' ? 'org' : 'service',
+    agentKind: agentClassOf(input.kind), // see the note at the charter path — one classifier, never a list
     displayName: `${input.label.replace(/\.(impact|demo\.agent)$/i, '')}.${typedTldForKind(input.kind)?.tld ?? AGENT_NAME_PARENT}`,
   }, typedTldForKind(input.kind) ?? {}); // EXACT or fail
   if (!claim.ok) return { ok: false, error: claim.error };

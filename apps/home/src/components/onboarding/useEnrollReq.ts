@@ -449,9 +449,17 @@ export function useEnrollReq(): EnrollApi {
  */
 export const CEREMONY_TEMPLATES = ['content-signer', 'subscription-collect', 'service-agent-wire'] as const;
 
-/** Templates that deploy a new agent (org or workspace) rather than minting a site-login grant. */
+/**
+ * Templates that DEPLOY A NEW AGENT rather than minting a site-login grant.
+ *
+ * `person-create` — ANOTHER PERSON OF THE CONNECTED CUSTODIAN'S OWN. A relying app asks for it when
+ * somebody takes on a name inside it: a character in a game, a handle in a community. The agent is
+ * person-class, `.me`-named, custodied by the same credential, and NEVER the default — their own name stays
+ * the one their Home opens as. It is idempotent by LABEL: asking twice for the same name is asking about the
+ * same person, which is what lets the same character come back for the next game with everything it learned.
+ */
 export function isDeployTemplate(template: string | undefined | null): boolean {
-  return template === 'org-create' || template === 'workspace-create';
+  return template === 'org-create' || template === 'workspace-create' || template === 'person-create';
 }
 
 export function isCeremonyTemplate(template: string | undefined | null): boolean {

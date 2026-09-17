@@ -28,7 +28,7 @@ import { MCP_SERVER_ID } from '../../lib/inbox-delivery';
 import { clearStandingGrant } from '../../lib/grant-cache';
 import { homeLabel, type Home } from '../../home/types';
 import { whitelabel, fmt, isPaymentTemplate } from '../../whitelabel/config';
-import { createManagedAgent, fetchProfile, listManagedAgents, resolveTreasuryByConvention } from '../../connect-client';
+import { createManagedAgent, fetchProfile, listManagedAgents, resolveHomeNameForLabel, resolveTreasuryByConvention } from '../../connect-client';
 import { readSsoCookie, setSsoCookie, clearSsoCookie } from '../../lib/sso-cookie';
 import { nameLabel, subdomainHandle, personalAuthOrigin } from '../../lib/domain';
 import { recordConnectedApp } from '../../lib/connected-apps';
@@ -82,7 +82,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
     hint?: string;
   }>({
     step: 1,
-    total: 5,
+    total: 3,
     label: 'Starting…',
     hint: 'This can take a moment.',
   });
@@ -443,7 +443,76 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       }
 
       let code: string;
-      if (enroll.template === 'workspace-create') {
+      // Set by the plain sign-in branch alone. The vault-key leg below is shared with every template,
+      // and each of those already narrates itself — so the final step is only ours to name when the
+      // sign-in branch did the narrating.
+      let narratedSignIn = false;
+      if (enroll.template === 'person-create') {
+        /**
+         * ANOTHER PERSON OF YOUR OWN, asked for by a relying app (spec: ap:DefaultPersonChoice).
+         *
+         * Somebody takes a name inside an app — a character in a game, a handle in a community — and that
+         * name becomes an agent of theirs: person-class, `.me`-named, custodied by the same credential,
+         * with a vault of its own so what it learns is ITS memory rather than a smear across their own.
+         *
+         * IT IS NEVER THE DEFAULT. Their own name stays the one their Home opens as; this one is somebody
+         * they can switch to. Chartering a person must not quietly change who you are when you sign in.
+         *
+         * IDEMPOTENT BY LABEL, which is the whole point of doing it this way. The second game asks for the
+         * same name and gets the same agent — the character comes back with everything it knew — rather than
+         * a twin with an empty vault. A label that resolves to somebody ELSE'S agent is refused rather than
+         * joined: names are global, and two people cannot be the same character.
+         */
+        const label = (enroll.orgBase ?? '').trim();
+        if (label.length < 3) return fail('Name this person — at least 3 characters.');
+        if (!token) return fail('Your Home session is needed to add another person.');
+        const already = await resolveHomeNameForLabel(label);
+        let personAgent: Address;
+        let personName: string;
+        if (already) {
+          const mine = await listManagedAgents(token).catch(() => []);
+          if (!mine.some((m) => m.agent.toLowerCase() === already.agent.toLowerCase())) {
+            return fail(`“${label}” is already somebody else’s name.`);
+          }
+          personAgent = already.agent;
+          personName = already.name;
+        } else {
+          const created = await createManagedAgent(
+            { kind: 'person', label, parent: home.address, person: home.address, via: viaLower },
+            token,
+            (st) => setGrantProgress({ step: 1, total: 2, label: st }),
+          );
+          if (!created.ok) return fail(created.error);
+          personAgent = created.result.agent;
+          personName = created.result.name;
+          // A PERSON OF YOURS HAS A VAULT OF THEIR OWN, and it is required rather than best-effort: what
+          // this person learns is the reason they exist, and one that cannot remember is a name with
+          // nothing behind it.
+          setGrantProgress({ step: 2, total: 2, label: 'Giving them somewhere to remember…' });
+          const bound = await activateVaultIfNeeded(personAgent, viaLower as Via, auth);
+          if (!bound.ok) return fail(bound.error);
+          const delivery = await activateInboxDeliveryIfNeeded(personAgent, viaLower as Via, auth);
+          if (!delivery.ok) console.warn('[person-create] delivery grant not provisioned:', delivery.error);
+          const ix = await activateInteractionsIfNeeded(personAgent, viaLower as Via, auth);
+          if (!ix.ok) console.warn('[person-create] interactions grant not provisioned:', ix.error);
+        }
+        const proved = await personGrantForOrgCreate(home, delegate, viaLower, auth, {
+          org: {
+            orgAgent: personAgent,
+            orgName: personName,
+            kind: 'person',
+            purpose: enroll.purpose ?? 'persona',
+            person: home.address,
+            // NEITHER STEWARDED NOR A MEMBERSHIP: it is them, under another name.
+            relationship: 'self',
+          },
+          // No stewardship delegation: you do not oversee yourself. An organization signs one to its
+          // steward because it has no session of its own; another person of yours has one — theirs.
+          grant: undefined,
+        }, enroll.sessionKey);
+        if (!proved.ok) return fail(proved.error);
+        code = await submitEnrollGrant(grant_id, proved.grant, proved.org, proved.sessionDelegation);
+      } else if (enroll.template === 'workspace-create') {
         const name = (enroll.orgBase ?? orgSel?.orgName ?? '').trim();
         if (name.length < 3) return fail('Name this field workspace — at least 3 characters.');
         if (!token) return fail('Your Home session is needed to create a workspace.');
@@ -605,9 +674,15 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         const selfVaultScope = whitelabel.relyingApps.find((a) => a.client_id === enroll.aud)?.self_vault_grant;
         lapCeremony('template leg done');
         const reuse = { reuseWithSelfVault: reusesStandingGrantWithSelfVault(enroll.aud) };
+        // Say what is happening. This branch used to run from Allow to done — a sponsored userOp, two
+        // on-chain verifications with retry ladders, a vault bind — under one frozen 'Starting…', which
+        // is the longest silence in the product. Same legs, narrated.
+        narratedSignIn = true;
+        setGrantProgress({ step: 1, total: 3, label: 'Signing your permission…' });
         let granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey, payment, selfVaultScope, reuse);
         if (!granted.ok) return fail(granted.error);
         lapCeremony(`permission given${granted.reused ? ' (reused)' : ''}`);
+        setGrantProgress({ step: 2, total: 3, label: 'Confirming it on the chain…' });
         try {
           code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation, granted.selfVaultGrant);
           lapCeremony('code minted');
@@ -622,6 +697,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation, granted.selfVaultGrant);
         }
       }
+      if (narratedSignIn) setGrantProgress({ step: 3, total: 3, label: 'Enabling your storage…' });
       // spec 278 — bind the member's per-person vault key during connect, for EVERY custody type. A
       // relying-app-first member (connects here, never runs the full journey / the /vault-key portal) would
       // otherwise have NO binding, so their first vault read/write at the relying app fails closed with
