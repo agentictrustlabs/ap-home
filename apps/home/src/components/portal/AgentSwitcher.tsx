@@ -13,7 +13,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useSession } from '../../context/session';
 import { useManagedAgents } from './ManagedAgents';
 import { parseWorkspacePath, orgHref, serviceHref } from '../../lib/workspace';
-import { agentClassOf, orgKindWordOf, serviceRoleOf, authorityLineage } from '../../lib/agent-class';
+import { agentClassOf, orgKindWordOf, kindWordOf, authorityLineage } from '../../lib/agent-class';
 import { UserIcon, BuildingIcon, LandmarkIcon, CheckIcon } from '../shared/Icons';
 import { nameLabel } from '../../lib/domain';
 import { Popover } from '../shared/ui';
@@ -46,7 +46,7 @@ export function AgentSwitcher() {
   const lineageFor = (a: (typeof agents)[number]) =>
     // The KIND WORD leads (workspace · you → …): every row answers "what class of agent is this"
     // in place, the same way org rows lead with organization/team.
-    `${serviceRoleOf(a.kind)} · ${authorityLineage(a, agents, 'you', agentAddress ?? undefined)
+    `${kindWordOf(a.kind)} · ${authorityLineage(a, agents, 'you', agentAddress ?? undefined)
       .map((n) => (n === 'you' || n === 'unnamed' ? n : nameLabel(n)))
       .join(' → ')}`;
 

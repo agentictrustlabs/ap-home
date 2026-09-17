@@ -6,6 +6,9 @@ import type { AgentKind, ManagedAgent } from '../connect-client';
 
 /** Classify an app-level managed-agent kind into the closed Person/Org/Service set. */
 export function agentClassOf(kind: AgentKind): AgentType {
+  // ANOTHER PERSON OF YOURS IS A PERSON. It is the one kind whose class is not org and not service, and it
+  // is the reason this function could not simply be "org, else service" any more.
+  if (kind === 'person') return 'person';
   // A team IS an organization (at:Team ⊑ at:Organization) — org-class with a distinct kind word.
   return kind === 'org' || kind === 'team' || kind === 'circle' || kind === 'church' || kind === 'household' ? 'org' : 'service';
 }
@@ -15,8 +18,22 @@ export function orgKindWordOf(kind: AgentKind): string {
   return kind === 'team' || kind === 'circle' || kind === 'church' || kind === 'household' ? kind : 'organization';
 }
 
+/**
+ * THE ONE WORD A ROW SHOWS for any kind — the subclass where that says more than the class does, and
+ * "person" for another person of yours. Exported because two surfaces had grown the same expression
+ * independently and a person would have rendered as an empty string in both: `serviceRoleOf` returns no
+ * role for a person, correctly, and neither caller had a branch for that.
+ */
+export function kindWordOf(kind: AgentKind): string {
+  if (kind === 'person') return 'person';
+  return agentClassOf(kind) === 'org' ? orgKindWordOf(kind) : serviceRoleOf(kind);
+}
+
 /** The service ROLE an app-level kind carries (open set; label-only, never branched as a class). */
 export function serviceRoleOf(kind: AgentKind): string {
+  // A PERSON CARRIES NO SERVICE ROLE. The role set labels service-class agents; handing a person one would
+  // declare `atl:serviceRole` on a person SA and fail the typed claim closed (spec 346 §3.6).
+  if (kind === 'person') return '';
   return kind === 'person-treasury' || kind === 'org-treasury' ? 'treasury' : kind;
 }
 
@@ -53,6 +70,7 @@ export interface CreatableKind {
 }
 
 const FROM_PERSON: CreatableKind[] = [
+  { kind: 'person', label: 'Another person of yours', blurb: 'A name of your own for one part of your life — a trail name, a pen name, a character in a game. Its own agent, its own vault, custodied by you; one of your people is the one your home opens as.', nameRequired: true },
   { kind: 'org', label: 'Organization', blurb: 'An organization you control — its own Smart Agent and name.', nameRequired: true },
   { kind: 'team', label: 'Team', blurb: 'A team under you. A team IS an organization, with a narrower remit.', nameRequired: true },
   { kind: 'workspace', label: 'Workspace', blurb: 'A coordinator for work across people and teams.', nameRequired: true },

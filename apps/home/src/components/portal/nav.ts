@@ -74,7 +74,7 @@ export function buildNav(
   // spec 318: 'member' = authority-only — the nav shows ONLY the surfaces membership grants
   // (discussions/work); every custody surface is steward-only and its server re-verifies control anyway
   // (defense in depth, never nav-only).
-  orgRelationship: 'steward' | 'member' = 'steward',
+  orgRelationship: 'steward' | 'member' | 'self' = 'steward',
   /** Display name of the active org/service workspace — headed into the sidebar so you always know where you are. */
   workspaceName?: string,
   /** Does this workspace COORDINATE PEOPLE? An organization always does. A service agent does when it is
@@ -238,7 +238,7 @@ export function stewardshipPane(active: WorkspaceScope = { kind: 'person' }): Se
 export function paneGroups(
   pane: PaneId,
   active: WorkspaceScope = { kind: 'person' },
-  orgRelationship: 'steward' | 'member' = 'steward',
+  orgRelationship: 'steward' | 'member' | 'self' = 'steward',
 ): SettingsGroup[] {
   return pane === 'stewardship' ? stewardshipPane(active) : buildSettingsPane(active, orgRelationship);
 }
@@ -255,7 +255,7 @@ export function paneGroups(
  */
 export function buildSettingsPane(
   active: WorkspaceScope = { kind: 'person' },
-  orgRelationship: 'steward' | 'member' = 'steward',
+  orgRelationship: 'steward' | 'member' | 'self' = 'steward',
   /** Does anything in the naming service resolve to this agent? Several surfaces depend on it: a card is
    *  served at an address derived from the NAME, and a directory entry names that card. Shown-but-
    *  disabled rather than hidden — a person should see what becomes available, and why it is not yet. */

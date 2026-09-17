@@ -19,6 +19,8 @@ export interface KvLike {
 const oidcKey = (iss: string, sub: string): string => `facet:oidc:${iss}#${sub}`;
 const credKey = (kind: string, id: string): string => `facet:cred:${kind}:${id}`;
 const rotationKey = (iss: string, sub: string): string => `rotation:${iss}#${sub}`;
+/** `ap:DefaultPersonChoice` — which of the people this credential custodies its home opens as. */
+const defaultPersonKey = (kind: string, id: string): string => `default-person:${kind}:${id}`;
 
 async function readLinks(kv: KvLike, key: string): Promise<EvidenceLink[]> {
   const raw = await kv.get(key);
@@ -169,8 +171,46 @@ export async function recordCredentialFacet(
 
 /** Standalone read of a credential->agent facet. Needed for passkey login to resolve a passkey that is a
  *  SECONDARY custodian of a KMS/social home (phone/email/google) — whose SA is NOT derived from the passkey,
- *  so derivation alone lands on the wrong (passkey-direct) address. Returns the first linked agent or null. */
+ *  so derivation alone lands on the wrong (passkey-direct) address. Returns the CHOSEN agent (see
+ *  `readDefaultPerson`) and otherwise the first linked one. */
 export async function readCredentialFacet(kv: KvLike, kind: string, id: string): Promise<CanonicalAgentId | null> {
   const links = await readLinks(kv, credKey(kind, id));
+  if (links.length === 0) return null;
+  const chosen = await readDefaultPerson(kv, kind, id);
+  // The choice only counts while it still names one of this credential's own agents: a pin left behind by an
+  // agent that is no longer linked must not resolve, and must not be silently "corrected" into another.
+  if (chosen && links.some((l) => l.agent === chosen)) return chosen;
   return links[0]?.agent ?? null;
+}
+
+/** Every agent this credential custodies, in the order they were enrolled. The set a choice is made FROM. */
+export async function listCredentialAgents(kv: KvLike, kind: string, id: string): Promise<CanonicalAgentId[]> {
+  return [...new Set((await readLinks(kv, credKey(kind, id))).map((l) => l.agent))];
+}
+
+/**
+ * WHICH OF MY PEOPLE AM I, BY DEFAULT — `ap:DefaultPersonChoice` (core.ttl).
+ *
+ * A custodian may hold several person agents: their own name, and a trail name, a pen name, a part in a
+ * game. Until this existed the Home resolved whichever was linked FIRST, which is an accident of enrolment
+ * order rather than an answer.
+ *
+ * THE PIN IS A PREFERENCE AND IT IS NOT APPEND-ONLY, unlike the links it chooses between. That is the whole
+ * distinction: the links are evidence of custody and may never be rewritten (SEC-009), while this is the
+ * custodian saying which of them they meant, and saying it again later is the normal case rather than
+ * tampering. It can introduce nothing — `setDefaultPerson` refuses an agent the credential does not already
+ * custody, so no write here can bridge a credential to an agent that enrolment did not.
+ */
+export async function readDefaultPerson(kv: KvLike, kind: string, id: string): Promise<CanonicalAgentId | null> {
+  const raw = await kv.get(defaultPersonKey(kind, id));
+  return raw ? (raw as CanonicalAgentId) : null;
+}
+
+/** Choose. Refuses an agent this credential does not already custody — the pin selects, it never links. */
+export async function setDefaultPerson(kv: KvLike, kind: string, id: string, agent: CanonicalAgentId): Promise<void> {
+  const links = await readLinks(kv, credKey(kind, id));
+  if (!links.some((l) => l.agent === agent)) {
+    throw new Error('default_person_not_custodied: choose one of the agents this credential already holds');
+  }
+  await kv.put(defaultPersonKey(kind, id), agent);
 }
