@@ -169,6 +169,8 @@ import { answerProbe } from './engagement-answer.js';
 import type { MessageV1 } from '@agenticprimitives/a2a/standard';
 import { signAsAgent } from './consult-rail.js';
 import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, provenanceViewOf, firewalledMetrics, publicProvenanceOf } from './run-export.js';
+import { runProvenanceRecordKey } from '@agenticprimitives/orchestration';
+import { bundleDigest, ANCHOR_ABI } from './receipt-anchor.js';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
@@ -615,6 +617,8 @@ export interface Env {
   /** Spec 350 — the SA this agent acts as under a mandate; per chain, custodied by the interactions-session key. */
   HARNESS_AGENT_SA?: string;
   DIGEST_BINDING_ENFORCER?: string;
+  /** Spec 406 W2/W3 — the ReceiptAnchorRegistry on this chain (a carried bundle's anchor is read from it). */
+  RECEIPT_ANCHOR_REGISTRY?: string;
   PAYMENT_ENFORCER?: string;
   MOCK_USDC?: string;
   /** Gateway adoption (ADR-0055 amendment): `'on'` runs the shadow comparison for ops the ledger has at
@@ -1770,6 +1774,30 @@ app.post('/harness/preferences', async (c) => {
   if (!wrote.ok) return c.json({ ok: false, error: /record_scope_denied|scope/i.test(wrote.error ?? '') ? 'record_scope_denied' : (wrote.error ?? 'the preferences could not be kept') }, 502);
   return c.json({ ok: true, preferences: next, emailRail: !!emailSender(c.env as unknown as EmailEnv), email });
 });
+// POST /harness/records/import { session, recordType, record } — spec 406 W3. A person CARRIES a record she holds into
+// her vault at THIS Home: provenance and receipt records only (`run.provenance:<runRef>`, `payment.receipt:<tx>`), her
+// own vault under her own grant. The record is verified by its shape and by what it names, never rewritten: a bundle
+// whose digest is anchored on the chain verifies here exactly as where it was made — the anchors are the chain's.
+app.post('/harness/records/import', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; recordType?: string; record?: unknown } | null;
+  if (!body?.session || !body.recordType || body.record === undefined) return c.json({ ok: false, error: 'session, recordType and record are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const me = String(who.sa).toLowerCase() as Address;
+  const key = String(body.recordType);
+  if (!/^(run\.provenance:|payment\.receipt:)[A-Za-z0-9._:-]{1,200}$/.test(key)) return c.json({ ok: false, error: 'only provenance and receipt records travel this way (run.provenance:<runRef>, payment.receipt:<tx>)' }, 400);
+  const rec = body.record as Record<string, unknown>;
+  if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return c.json({ ok: false, error: 'the record must be an object' }, 400);
+  if (key.startsWith('run.provenance:') && !('@context' in rec || '@graph' in rec)) return c.json({ ok: false, error: 'a provenance record is a JSON-LD document (@context / @graph)' }, 400);
+  if (JSON.stringify(rec).length > 400_000) return c.json({ ok: false, error: 'the record is larger than a carried record may be (400 KB)' }, 413);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  if (!deps.writeSubjectRecord || !deps.readSubjectRecord) return c.json({ ok: false, error: 'the private tier is not configured' }, 503);
+  const prior = await deps.readSubjectRecord(me, key).catch(() => null);
+  if (prior) return c.json({ ok: false, error: `${key} is already in your vault here — a carried record is never overwritten`, existing: true }, 409);
+  const wrote = await deps.writeSubjectRecord(me, key, rec);
+  if (!wrote.ok) return c.json({ ok: false, error: /record_scope_denied|scope/i.test(wrote.error ?? '') ? 'record_scope_denied' : (wrote.error ?? 'the record could not be kept') }, 502);
+  return c.json({ ok: true, agent: me, recordType: key, hasProvenance: key.startsWith('run.provenance:') ? { agent: me, recordType: key, public: { route: '/provenance/public', agent: me, runRef: key.slice('run.provenance:'.length) } } : undefined });
+});
 app.post('/harness/instructions', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { session?: string } | null;
   if (!body?.session) return c.json({ ok: false, error: 'session is required' }, 400);
@@ -2728,7 +2756,14 @@ app.post('/harness/provenance', async (c) => {
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const addressee = body.addressee.toLowerCase() as Address;
   const rec = await getRecord(c.env as never, addressee, body.runRef);
-  if (!rec) return c.json({ ok: false, error: 'no such record' }, 404);
+  if (!rec) {
+    // Spec 406 W3 — THE VAULT IS THE RECORD (ADR-0055): a run that did not run HERE may still have its provenance here —
+    // a bundle its owner carried in. The task object's copy is a cache; the vault's is the document. Served as it is.
+    const vdeps = harnessDeps(c.env, buildAuditSink(c.env));
+    const carried = vdeps.readSubjectRecord ? await vdeps.readSubjectRecord(addressee, runProvenanceRecordKey(body.runRef)).catch(() => null) : null;
+    if (carried && typeof carried === 'object' && (body.format === 'jsonld' || !body.format)) return c.json({ ok: true, hasProvenance: hasProvenanceRef(addressee, body.runRef), carried: true, provenance: carried });
+    return c.json({ ok: false, error: 'no such record' }, 404);
+  }
   if (String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()) return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
   const ref = hasProvenanceRef(addressee, body.runRef);
   if (body.format === 'prov-n') return c.json({ ok: true, hasProvenance: ref, provN: await provenanceProvNOf(c.env, addressee, rec), export: rec.export?.provenance ?? null });
@@ -2774,7 +2809,20 @@ app.post('/provenance/public', async (c) => {
   if (!body?.agent || !body.runRef || !/^0x[0-9a-fA-F]{40}$/.test(body.agent)) return c.json({ ok: false, error: 'agent (an address) and runRef are required' }, 400);
   const agent = body.agent.toLowerCase() as Address;
   const rec = await getRecord(c.env as never, agent, body.runRef);
-  if (!rec) return c.json({ ok: false, error: 'no such record' }, 404);
+  if (!rec) {
+    // Spec 406 W3 — a CARRIED bundle: nothing about it is trusted from the carrier. Its digest is recomputed and the
+    // registry is READ on the chain; what the chain says (who anchored it, when, under which intent) is the projection.
+    const vdeps = harnessDeps(c.env, buildAuditSink(c.env));
+    const carried = vdeps.readSubjectRecord ? await vdeps.readSubjectRecord(agent, runProvenanceRecordKey(body.runRef)).catch(() => null) : null;
+    if (!carried || typeof carried !== 'object') return c.json({ ok: false, error: 'no such record' }, 404);
+    if (!c.env.RECEIPT_ANCHOR_REGISTRY || !c.env.RPC_URL) return c.json({ ok: true, agent, runRef: body.runRef, carried: true, rows: [], refused: [], anchor: null, note: 'this deployment cannot read the anchor registry' });
+    const digest = bundleDigest(carried);
+    const client = createPublicClient({ transport: http(c.env.RPC_URL) });
+    const a = await client.readContract({ address: c.env.RECEIPT_ANCHOR_REGISTRY as Address, abi: ANCHOR_ABI, functionName: 'anchorOf', args: [digest] }).catch(() => null);
+    const anchored = a && a.anchoredBy !== '0x0000000000000000000000000000000000000000';
+    const chainId = Number(c.env.CHAIN_ID);
+    return c.json({ ok: true, agent, runRef: body.runRef, carried: true, rows: [], refused: [], anchor: anchored ? { digest, registry: c.env.RECEIPT_ANCHOR_REGISTRY.toLowerCase(), anchoredBy: a!.anchoredBy.toLowerCase(), at: Number(a!.at), intentDigest: a!.intentDigest, mandateRef: a!.mandateRef, ...(Number.isFinite(chainId) && chainId > 0 ? { chainId } : {}), readFrom: 'chain' } : null, verify: { bundleDigest: 'keccak256 over the stable JSON of the bundle you hold must equal anchor.digest', anchoredBy: 'the runtime agent that anchored it — the acting agent of the run, not this Home' } });
+  }
   const projection = await publicProvenanceOf(c.env, agent, rec);
   return c.json({
     ok: true, agent, runRef: body.runRef, ...projection,
