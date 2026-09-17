@@ -82,7 +82,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
     hint?: string;
   }>({
     step: 1,
-    total: 5,
+    total: 3,
     label: 'Starting…',
     hint: 'This can take a moment.',
   });
@@ -443,6 +443,10 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       }
 
       let code: string;
+      // Set by the plain sign-in branch alone. The vault-key leg below is shared with every template,
+      // and each of those already narrates itself — so the final step is only ours to name when the
+      // sign-in branch did the narrating.
+      let narratedSignIn = false;
       if (enroll.template === 'workspace-create') {
         const name = (enroll.orgBase ?? orgSel?.orgName ?? '').trim();
         if (name.length < 3) return fail('Name this field workspace — at least 3 characters.');
@@ -605,9 +609,15 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         const selfVaultScope = whitelabel.relyingApps.find((a) => a.client_id === enroll.aud)?.self_vault_grant;
         lapCeremony('template leg done');
         const reuse = { reuseWithSelfVault: reusesStandingGrantWithSelfVault(enroll.aud) };
+        // Say what is happening. This branch used to run from Allow to done — a sponsored userOp, two
+        // on-chain verifications with retry ladders, a vault bind — under one frozen 'Starting…', which
+        // is the longest silence in the product. Same legs, narrated.
+        narratedSignIn = true;
+        setGrantProgress({ step: 1, total: 3, label: 'Signing your permission…' });
         let granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey, payment, selfVaultScope, reuse);
         if (!granted.ok) return fail(granted.error);
         lapCeremony(`permission given${granted.reused ? ' (reused)' : ''}`);
+        setGrantProgress({ step: 2, total: 3, label: 'Confirming it on the chain…' });
         try {
           code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation, granted.selfVaultGrant);
           lapCeremony('code minted');
@@ -622,6 +632,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation, granted.selfVaultGrant);
         }
       }
+      if (narratedSignIn) setGrantProgress({ step: 3, total: 3, label: 'Enabling your storage…' });
       // spec 278 — bind the member's per-person vault key during connect, for EVERY custody type. A
       // relying-app-first member (connects here, never runs the full journey / the /vault-key portal) would
       // otherwise have NO binding, so their first vault read/write at the relying app fails closed with

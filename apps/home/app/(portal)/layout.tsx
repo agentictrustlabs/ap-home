@@ -3,11 +3,10 @@
 // the onboarding/sign-in EntryExperience when not authed (or mid relying-app enrollment),
 // the PortalShell when authed. Mirrors the old App.tsx `if (enrollReq){…}` early-return:
 // an enrollment takes precedence over any stale session.
+import dynamic from 'next/dynamic';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { SessionProvider, useSession } from '../../src/context/session';
 import { activateVaultIfNeeded } from '../../src/home/onboarding';
-import { PortalShell } from '../../src/components/portal/PortalShell';
-import { notifyAgentsChanged } from '../../src/components/portal/ManagedAgents';
 import { EntryExperience } from '../../src/components/onboarding/EntryExperience';
 import { GoogleSecureHome } from '../../src/components/onboarding/GoogleSecureHome';
 import { GoogleEnrollResume, readPendingEnroll } from '../../src/components/onboarding/GoogleEnrollResume';
@@ -22,6 +21,20 @@ function FullBleedSpinner() {
     </div>
   );
 }
+
+// The SIGNED-IN portal, loaded only when somebody is signed in.
+//
+// This gate renders one of two branches and used to import both eagerly, so a visitor who is NOT
+// signed in — every relying-app consent screen comes through here — downloaded the whole portal to
+// be shown a consent sheet. PortalShell pulls HuddleProvider, and that pulls the WebRTC client:
+// 624 KB of video conferencing on the sign-in path, measured off the live deployment.
+//
+// ssr:false costs nothing here: the gate already refuses to render authed content server-side
+// (the mounted check below), and the same FullBleedSpinner covers the load, so the swap is unseen.
+const PortalShell = dynamic(() => import('../../src/components/portal/PortalShell').then((m) => m.PortalShell), {
+  ssr: false,
+  loading: () => <FullBleedSpinner />,
+});
 
 // A relying app redirected here for enrollment/consent (spec 230) — takes precedence over
 // any stale session, mirroring the old App.tsx `if (enrollReq){…}` early return.
@@ -96,6 +109,7 @@ function Gate({ children }: { children: ReactNode }) {
         await new Promise((r) => setTimeout(r, 3000));
         await refreshProfile();
       }
+      const { notifyAgentsChanged } = await import('../../src/components/portal/ManagedAgents');
       notifyAgentsChanged();
     })();
   }, [phase, agentDeployed, agentName, session?.token, refreshProfile]);

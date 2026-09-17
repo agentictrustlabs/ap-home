@@ -92,31 +92,34 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
 
   // ERC-1271 + timestamp-window verification. On success returns the canonical EIP-712
   // digest, which we use as the silent-reauth binding key.
-  const v = await verifyDelegation(env, body.delegation);
+  //
+  // ALL of them AT ONCE. These are independent proofs — different delegators, different digests,
+  // none derived from another — and each one carries its own bounded retry ladder against
+  // read-replica lag (verify-delegation.ts), because `approveGrantHashes` landed a userOp seconds
+  // ago. Run one after another, a plain sign-in carrying a self-vault grant pays two of those
+  // ladders end to end; run together it pays one. The checks below keep their original order, so a
+  // request with more than one bad proof still fails with the same message it always did.
+  const [v, payV, pullV, selfV] = await Promise.all([
+    verifyDelegation(env, body.delegation),
+    // spec 272/243 — an x402 payment delegation, verified independently (ERC-1271 + window against
+    // ITS delegator = the person's treasury SA). NOT delegate-matched to the client (its delegate is
+    // the OPEN sentinel / the payee treasury). Reject an invalid one rather than silently dropping it.
+    body.paymentDelegation ? verifyDelegation(env, body.paymentDelegation) : null,
+    // spec 272 recurring — same independent verification for the standing subscription PULL mandate.
+    body.pullDelegation ? verifyDelegation(env, body.pullDelegation) : null,
+    // spec 345 — the self-vault grant is delegator = delegate = the SAME person; verified on its own
+    // rather than trusted because the site delegation checked out. NOT delegate-matched to the client
+    // (its delegate is the person, not client.delegate).
+    body.selfVaultGrant ? verifyDelegation(env, body.selfVaultGrant) : null,
+  ]);
   if (!v.ok) return json({ error: `delegation proof failed: ${v.reason}` }, 401);
-
-  // spec 272/243 — if an x402 payment delegation rode along, verify it independently (ERC-1271 +
-  // window against ITS delegator = the person's treasury SA). It is NOT delegate-matched to the
-  // client (its delegate is the OPEN sentinel / the payee treasury). Reject an invalid one rather
-  // than silently dropping it.
-  if (body.paymentDelegation) {
-    const pv = await verifyDelegation(env, body.paymentDelegation);
-    if (!pv.ok) return json({ error: `payment delegation proof failed: ${pv.reason}` }, 401);
-  }
-  // spec 272 recurring — same independent verification for the standing subscription PULL mandate.
-  if (body.pullDelegation) {
-    const pv = await verifyDelegation(env, body.pullDelegation);
-    if (!pv.ok) return json({ error: `pull delegation proof failed: ${pv.reason}` }, 401);
-  }
-  // spec 345 — the self-vault grant is delegator = delegate = the SAME person; verify it
-  // independently (ERC-1271 + window) rather than trusting it because the site delegation checked
-  // out. It is NOT delegate-matched to the client (its delegate is the person, not client.delegate).
+  if (payV && !payV.ok) return json({ error: `payment delegation proof failed: ${payV.reason}` }, 401);
+  if (pullV && !pullV.ok) return json({ error: `pull delegation proof failed: ${pullV.reason}` }, 401);
   if (body.selfVaultGrant) {
     if (body.selfVaultGrant.delegator.toLowerCase() !== body.delegation.delegator.toLowerCase()) {
       return json({ error: 'self-vault grant delegator does not match the connecting person' }, 401);
     }
-    const sv = await verifyDelegation(env, body.selfVaultGrant);
-    if (!sv.ok) return json({ error: `self-vault grant proof failed: ${sv.reason}` }, 401);
+    if (selfV && !selfV.ok) return json({ error: `self-vault grant proof failed: ${selfV.reason}` }, 401);
   }
 
   // Mint the id_token bound to the grant's client + nonce + agent_name.
