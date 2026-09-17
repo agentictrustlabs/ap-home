@@ -1,0 +1,63 @@
+{
+  "purpose": "the cast of Snowfall at the Belvedere — each character a PERSON agent of a real demo person, never their default (an operator note, not a persona)",
+  "chainId": 34348,
+  "cast": [
+    {
+      "role": "concierge",
+      "character": "Émile Rossi",
+      "name": "emile-elena.me",
+      "sa": "0xcc2a1645a6cc450a48585d86c4631cfa178aa262",
+      "custodian": "elena"
+    },
+    {
+      "role": "heiress",
+      "character": "Delphine Aubert",
+      "name": "delphine-alice.me",
+      "sa": "0x96d935537f80e0222853630e960539a9de1c1cf8",
+      "custodian": "alice"
+    },
+    {
+      "role": "instructor",
+      "character": "Kai Brunner",
+      "name": "kai-bob.me",
+      "sa": "0x5df846734c8455b036dd4253e8f520e33e80cdc5",
+      "custodian": "bob"
+    },
+    {
+      "role": "doctor",
+      "character": "Dr Halloran",
+      "name": "halloran-carol.me",
+      "sa": "0xa4e4ccfc560bcb4f5e5e0dabcad680829b2f6a68",
+      "custodian": "carol"
+    },
+    {
+      "role": "chef",
+      "character": "Marek Novák",
+      "name": "marek-dave.me",
+      "sa": "0xe494c60c1c2025bc951430d326e1c34601f27737",
+      "custodian": "dave"
+    },
+    {
+      "role": "journalist",
+      "character": "Nadia Kowal",
+      "name": "nadia-nathan.me",
+      "sa": "0x7a8dd8bd21fd2c3e73050e89994e05943a1c3453",
+      "custodian": "nathan"
+    },
+    {
+      "role": "guide",
+      "character": "Sofia Lindqvist",
+      "name": "sofia-david.me",
+      "sa": "0x8f50575ddca315e980d3c055c323d2d9c97bb1de",
+      "custodian": "david"
+    },
+    {
+      "role": "widow",
+      "character": "Mme Perrin",
+      "name": "perrin-alice.me",
+      "sa": "0x3ff4918575af25ff789d216c42183f2161e8fef3",
+      "custodian": "alice"
+    }
+  ],
+  "charteredAt": "2026-09-17T14:00:53.213Z"
+}
