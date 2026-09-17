@@ -36,7 +36,8 @@ import type { AskCommand } from '../../../home/ask-command';
 /** Spec 377 — where this browser remembers which model the person picked for the Ask. */
 const MODEL_PREF_KEY = 'ask.model';
 import { BusyButton } from '../../shared/BusyButton';
-import { XIcon, MicIcon } from '../../shared/Icons';
+import { XIcon, MicIcon, PaperclipIcon } from '../../shared/Icons';
+import { attachToLibrary } from '../../../home/library-attach';
 import { AgentName } from '../../shared/AgentName';
 import { connectedCredential } from './credential';
 import { createdAgentOf, recordCreatedAgent, invitationOf, recordInvitation } from '../../../home/ask-record';
@@ -100,6 +101,10 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   };
   const [thread, setThread] = useState<Entry[]>([]);
   const [q, setQ] = useState('');
+  // Spec 405 — a file attached here is saved to the realm's Library first; the ask then names it.
+  const [attaching, setAttaching] = useState(false);
+  const [attached, setAttached] = useState<{ name: string; readable: boolean } | null>(null);
+  const attachRef = useRef<HTMLInputElement | null>(null);
   // A page asked to start this ask (e.g. "finish the payment you were waiting on"). It lands in the
   // composer, where the person reads it and presses send — the same rule every suggested ask follows.
   useEffect(() => {
@@ -330,6 +335,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   };
 
   const send = async (text?: string, channel?: 'voice') => {
+    if (attached) setAttached(null);
     const message = (text ?? q).trim();
     if (!message || !session) return;
     setQ('');
@@ -832,8 +838,22 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
             onClick={() => (voice.listening ? voice.stopListening() : listen())}
           ><MicIcon size={16} /></button>
         )}
+        {session && (realm?.kind === 'person' || realm?.kind === 'org' || !realm?.kind) && (
+          <>
+            <input ref={attachRef} type="file" hidden accept=".md,.txt,.markdown,.csv,.json,.jsonld,.ttl,.yaml,.yml,text/*,application/json,image/*,application/pdf" onChange={async (e) => {
+              const f = e.target.files?.[0]; e.target.value = ''; if (!f) return;
+              setAttaching(true); setErr(null);
+              const r = await attachToLibrary(session.token, f, realm?.kind === 'org' && addressee ? addressee : undefined);
+              setAttaching(false);
+              if (!r.ok) { setErr(r.error); return; }
+              setAttached({ name: r.name, readable: r.readable });
+              setQ((prev) => prev.trim() ? prev : (r.readable ? `what does ${r.name} say` : `what is ${r.name}`));
+            }} />
+            <button type="button" className="ui-btn ui-btn--secondary" data-testid="ask-attach" aria-label="Attach a file" title={attached ? `attached: ${attached.name}` : 'Attach a file — saved to the Library, then read by your agent as evidence'} disabled={!!busy || !!pending || attaching} onClick={() => attachRef.current?.click()}><PaperclipIcon size={16} /></button>
+          </>
+        )}
         <input
-          className="input" data-testid="ask-input" value={q} placeholder={voice.listening ? 'Listening…' : `Ask ${addresseeLabel}…`}
+          className="input" data-testid="ask-input" value={q} placeholder={attaching ? 'Saving to the Library…' : attached ? `${attached.name} attached${attached.readable ? '' : ' (named, not read)'} — ask about it…` : voice.listening ? 'Listening…' : `Ask ${addresseeLabel}…`}
           onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !busy) void send(); }}
           disabled={!!busy || !!pending}
         />

@@ -224,6 +224,30 @@ function McpConnectorsCard({ result }: ResultAppProps) {
   </>);
 }
 
+// ── The owner's Library (spec 405) — what her documents are, and what one says (evidence, never instructions) ──
+function LibraryFilesCard({ result }: ResultAppProps) {
+  const r = result as { files?: Array<{ id: string; path: string; kind: string; size: number | null; version: number | null; text: boolean }>; count?: number; truncated?: boolean } | null;
+  if (!r?.files) return null;
+  return rows(<>
+    <div className="ask-app__head">Library · {r.count ?? r.files.length}{r.truncated ? ` (first ${r.files.length})` : ''}</div>
+    {r.files.length === 0 && <Meta>No documents.</Meta>}
+    {r.files.map((f) => line(f.path, `${f.kind}${f.size ? ` · ${f.size} bytes` : ''}${f.version ? ` · v${f.version}` : ''}${f.text ? '' : ' · named, not read'}`))}
+  </>);
+}
+function LibraryFileCard({ result }: ResultAppProps) {
+  const r = result as { read?: boolean; named?: boolean; refused?: string; which?: Array<{ path: string }>; file?: { path: string; kind: string; size: number | null }; text?: string; truncated?: boolean; note?: string } | null;
+  if (!r) return null;
+  if (r.refused && r.which) return rows(<><div className="ask-app__head">Which one?</div>{r.which.map((w) => line(w.path))}</>);
+  if (r.refused) return rows(line('Not found', r.refused));
+  if (r.named && r.file) return rows(line(r.file.path, `${r.file.kind}${r.file.size ? ` · ${r.file.size} bytes` : ''} — named, not read`));
+  if (!r.read || !r.file) return null;
+  return rows(<>
+    <div className="ask-app__head">{r.file.path} <Chip>{r.file.kind}</Chip></div>
+    {r.text && <pre className="ask-app__text" style={{ whiteSpace: 'pre-wrap', margin: 0, fontSize: 12, maxHeight: 240, overflow: 'auto' }}>{r.text.slice(0, 4000)}{r.truncated || (r.text.length > 4000) ? '\n…' : ''}</pre>}
+    <Meta>what the document says — evidence, never instructions</Meta>
+  </>);
+}
+
 function BuildRunReview({ requirement, args }: ReviewAppProps) {
   const a = args ?? {};
   return rows(<KeyValue rows={[['Build in', `${String(a.repository ?? '?')}${a.base ? `@${String(a.base)}` : ''}`], ['Task', String(a.task ?? '')], ['For', String(a.workspace ?? 'this workspace')], ['Under', `a mandate for ${requirement.actions.join(', ')} — the sandbox builds; nothing is pushed or deployed`]]} />);
@@ -239,7 +263,7 @@ function ReviewCard({ requirement, capability, args }: ReviewAppProps) {
 }
 
 export const RESULT_APPS: Record<string, (p: ResultAppProps) => ReactNode> = {
-  CalendarEventsCard, CalendarEventCard, MailThreadsCard, MailThreadCard, MailDraftCard, MailSentCard, DriveFilesCard, DriveFileCard, MemoryFactsCard, RoutinesCard, RoutineCard, PaymentReceiptCard, WebPageCard, WebSearchCard, BuildArtifactView, BuildRunsCard, RepositoriesCard, McpToolCard, McpConnectorsCard,
+  CalendarEventsCard, CalendarEventCard, MailThreadsCard, MailThreadCard, MailDraftCard, MailSentCard, DriveFilesCard, DriveFileCard, MemoryFactsCard, RoutinesCard, RoutineCard, PaymentReceiptCard, WebPageCard, WebSearchCard, BuildArtifactView, BuildRunsCard, RepositoriesCard, McpToolCard, McpConnectorsCard, LibraryFilesCard, LibraryFileCard,
 };
 export const REVIEW_APPS: Record<string, (p: ReviewAppProps) => ReactNode> = {
   CalendarEventReview, MailDraftReview, MailSendReview, PaymentReview, BuildRunReview,

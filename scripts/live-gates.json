@@ -462,6 +462,16 @@
       "timeoutSec": 240
     },
     {
+      "id": "verify-files-of-her-own",
+      "script": "scripts/verify-files-of-her-own.mts",
+      "spec": "405 W1",
+      "proves": "the owner's Library read by the owner's agent: a markdown note saved to alice's Library (the Ask's attach saves the same way) is READ by her agent as untrusted evidence with the LibraryFileCard binding; an image is NAMED, not read (no extractor, no guess); library.files.list lists both with bodies stripped; a document in Missio Nexus's Library is read by the organization's own agent when asked AT the organization",
+      "twin": "her note asked for at the organization is not found there — the organization's Library is not hers; no body rides the list",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 240
+    },
+    {
       "id": "verify-devkit-starter",
       "script": "scripts/verify-devkit-starter.mts",
       "spec": "398 §10 / G2",

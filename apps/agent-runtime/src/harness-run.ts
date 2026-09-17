@@ -52,6 +52,7 @@ import { ROUTINE_TOOLS, ROUTINE_ACTS, ROUTINE_LIST, routineInvoker, compiledRout
 import { WEB_TOOLS, webReadInvoker } from './web-read.js';
 import { WEB_SEARCH_TOOLS, webSearchInvoker } from './web-search.js';
 import { BUILD_TOOLS, BUILD_ACTS, buildInvoker } from './build-tools.js';
+import { LIBRARY_TOOLS, libraryInvoker } from './library-tools.js';
 import { MCP_CONNECTOR_PREFIX, MCP_CONNECTORS_LIST, MCP_CONNECTORS_LIST_TOOL, isMcpTool, isMcpConnectorRecord, mcpConnectorTools, mcpConnectorInvoker, type McpConnectorRecordV1 } from './connectors/mcp-connector.js';
 import { PREFERENCES_TOOLS, PREFERENCES_ACTS, PREFERENCES_GET, preferencesInvoker } from './preferences-tools.js';
 import type { TriggerScheduleV1 } from './triggers.js';
@@ -2045,6 +2046,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (PREFERENCES_TOOLS.some((t) => t.id === toolId)) return preferencesInvoker({ ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}) }, person, addressee)(toolId, args, ctx);
     if (MAIL_DRIVE_TOOLS.some((t) => t.id === toolId)) return mailDriveInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (CALENDAR_TOOLS.some((t) => t.id === toolId)) return calendarInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
+    if (LIBRARY_TOOLS.some((t) => t.id === toolId)) { if (!deps.readSubjectRecord) throw new Error('the private tier is not configured'); return libraryInvoker({ readSubjectRecord: deps.readSubjectRecord }, addressee)(toolId, args, ctx); }
     if (isMcpTool(toolId) || toolId === MCP_CONNECTORS_LIST) return mcpConnectorInvoker({ env: env as never, readConnectors: (h) => mcpConnectorsOf(deps, h), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, addressee)(toolId, args, ctx);
     if (BUILD_TOOLS.some((t) => t.id === toolId)) return buildInvoker({ env: env as never, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}), ...(deps.survey ? { survey: deps.survey } : {}), ...(deps.readRecords ? { readRecords: deps.readRecords } : {}) }, (presented ?? null) as never, addressee)(toolId, args, ctx);
     if (GITHUB_TOOLS.some((t) => t.id === toolId)) return githubInvoker({ env: env as unknown as Record<string, unknown>, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
@@ -4641,6 +4643,8 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...BUILD_TOOLS.filter((t) => !BUILD_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     // Spec 402 W5a — a public page read as evidence, wherever the playbook carries the contract.
     ...WEB_TOOLS.flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
+    // Spec 405 — the addressee's own Library, read as evidence, wherever the playbook carries the contracts.
+    ...(deps.readSubjectRecord ? LIBRARY_TOOLS.flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])) : []),
     // Spec 403 W3 — a web search as evidence, wherever the playbook carries the contract.
     ...WEB_SEARCH_TOOLS.flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     // The person's own reads, under their CONTRACTS when the playbook carries them (the result app a contract names

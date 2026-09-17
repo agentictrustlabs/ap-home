@@ -47,6 +47,9 @@ export function resolveNavigationTarget(target: string, realm: InteractionRealm)
       return { href: '/settings', label: 'Open settings' };
     case 'work':
       return org ? { href: `/org/${org}/work`, label: 'Open work' } : { href: '/work', label: 'Open work' };
+    case 'library':
+      // Spec 405 — the owner's Library: hers, or the organization's.
+      return org ? { href: `/org/${org}/library`, label: 'Open library' } : { href: '/library', label: 'Open library' };
     case 'connected':
       // Spec 404 — the person's connectors live on her Connected screen.
       return realm.kind === 'person' || !realm.kind ? { href: '/apps', label: 'Open connected' } : null;

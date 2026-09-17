@@ -658,7 +658,8 @@
       "status": "shipped",
       "specs": [
         310,
-        391
+        391,
+        405
       ],
       "section": "398 §6.2",
       "routes": [
@@ -667,6 +668,7 @@
         "(portal)/service/[agent]/library"
       ],
       "tests": [
+        "apps/demo-a2a/test/unit/library-tools.test.ts",
         "apps/demo-sso-next/server/connect/library.test.ts",
         "apps/demo-sso-next/src/home/artifact-identity.test.ts"
       ],
@@ -674,7 +676,16 @@
         "replicate as an act (an authorized copy in another vault) is not offered — said so on the card (398 §6.2); the linked work item is absent on every artifact (§4.3); stale is a state on the Library's freshness badge but the \"no organizations of 37\" rule (§6.3 — never render unknown as zero) is a ratchet (check:unknown-not-zero, ceiling 6 — Today, Memory and the run listing say which read failed)"
       ],
       "components": [
-        "home/artifact-identity.ts"
+        "components/portal/ask/interaction-apps.tsx",
+        "home/artifact-identity.ts",
+        "home/library-attach.ts"
+      ],
+      "capabilities": [
+        "library.file.read",
+        "library.files.list"
+      ],
+      "gates": [
+        "verify-files-of-her-own"
       ]
     },
     {
