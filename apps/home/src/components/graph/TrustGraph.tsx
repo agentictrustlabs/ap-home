@@ -24,11 +24,9 @@ import {
 import { useSession } from '../../context/session';
 import { useManagedAgents } from '../portal/ManagedAgents';
 import { nameLabel } from '../../lib/domain';
-import { agentClassOf, orgKindWordOf, serviceRoleOf } from '../../lib/agent-class';
+import { agentClassOf, kindWordOf } from '../../lib/agent-class';
 
-/** The word under an agent's node: its subclass when that says more than the class does. */
-const kindWordOf = (kind: Parameters<typeof agentClassOf>[0]): string =>
-  agentClassOf(kind) === 'org' ? orgKindWordOf(kind) : serviceRoleOf(kind);
+/** The word under an agent's node: its subclass when that says more than the class does (`kindWordOf`). */
 import {
   buildPersonGraphLive,
   CUSTODIAN_ID,

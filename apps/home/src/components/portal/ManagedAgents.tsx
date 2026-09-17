@@ -38,6 +38,7 @@ const ERC20_BALANCE_ABI = [
 const lc = (s: string) => s.toLowerCase();
 
 const KIND_LABEL: Record<AgentKind, string> = {
+  person: 'Another person of yours',
   'person-treasury': 'Personal treasury',
   org: 'Organization',
   team: 'Team',

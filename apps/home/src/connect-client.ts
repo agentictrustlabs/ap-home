@@ -1468,7 +1468,18 @@ export async function createChildAgentForSite(
 // `service` is the GENERIC service agent (`.svc`): a workspace, treasury and registry are service-class
 // too, but they carry a role the substrate knows about, and this one is the plain one (ADR-0046 — the
 // class is the trichotomy, the role is a label).
-export type AgentKind = 'person-treasury' | 'org' | 'org-treasury' | 'workspace' | 'team' | 'circle' | 'church' | 'household' | 'service';
+//
+// `person` — ANOTHER PERSON OF YOUR OWN. A custodian is not limited to one: somebody walks a long trail and
+// is known on it as Summit, somebody writes under another name, somebody plays a part in a game for six
+// evenings and wants what that character learned kept in its own vault rather than muddled into theirs.
+// Each is a person-shaped agent of its own — its own `.me` name, its own card, its own vault, its own memory
+// of the people it has met under that name — custodied by the same credential, and one of them is the
+// DEFAULT its Home opens as (`ap:DefaultPersonChoice`; `lib/default-person.ts`).
+//
+// It is NOT a second root: the credential is the same, so nothing here is a new identity to recover, and the
+// choice between them permits nothing. Moving to another of your people is a change of CONTEXT, not of
+// power — every act still runs under a mandate signed for that request, by that agent.
+export type AgentKind = 'person' | 'person-treasury' | 'org' | 'org-treasury' | 'workspace' | 'team' | 'circle' | 'church' | 'household' | 'service';
 
 export interface ManagedAgent {
   agent: Address;
@@ -1479,8 +1490,12 @@ export interface ManagedAgent {
   createdAt: number | null;
   proofHash?: string;
   /** spec 318: 'steward' = custodial control (default); 'member' = authority-only (channels +
-   *  switcher visibility, never inbox/data/treasury control). */
-  relationship?: 'steward' | 'member';
+   *  switcher visibility, never inbox/data/treasury control).
+   *  'self' = ANOTHER PERSON OF THE SAME CUSTODIAN — neither stewarded nor a membership: it is them, under
+   *  a different name. Distinguished because a steward oversees somebody else's agent and a member belongs
+   *  to an organization, and this is neither; reading it as 'steward' would file your own trail name under
+   *  things you look after. */
+  relationship?: 'steward' | 'member' | 'self';
   /** App-level purpose tag written when the person↔org link was created (e.g. `commons:community`). */
   purpose?: string;
   /**
@@ -1925,7 +1940,7 @@ export async function listManagedAgents(sessionToken: string, surface: OrgSurfac
     parent: (o.parent ?? ('' as Address)) as Address,
     createdAt: o.createdAt,
     proofHash: o.proofHash,
-    relationship: (o.relationship === 'member' ? 'member' : 'steward') as 'steward' | 'member',
+    relationship: (o.relationship === 'member' ? 'member' : o.relationship === 'self' ? 'self' : 'steward') as 'steward' | 'member' | 'self',
     ...(o.purpose ? { purpose: o.purpose } : {}),
     ...(o.stewardshipDelegation ? { stewardshipDelegation: o.stewardshipDelegation } : {}),
     ...(o.status ? { status: o.status as OrgLifecycleStatus } : {}),

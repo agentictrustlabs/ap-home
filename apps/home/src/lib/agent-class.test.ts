@@ -1,11 +1,11 @@
 // What a person can charter, and what the substrate then calls it (ADR-0046 / spec 346).
 import { describe, expect, it } from 'vitest';
-import { agentClassOf, serviceRoleOf, orgKindWordOf, creatableKinds } from './agent-class';
+import { agentClassOf, serviceRoleOf, orgKindWordOf, kindWordOf, creatableKinds } from './agent-class';
 import { typedTldForKind } from '../connect-client';
 
 const all = () => true;
 // The suffix a kind names regardless of provisioning (mirrors typedTldForKind's own table).
-const kindSuffix = (k: string) => ({ org: 'org', circle: 'circle', church: 'church', household: 'household', team: 'team', workspace: 'workspace', 'person-treasury': 'treasury', 'org-treasury': 'treasury', service: 'svc' } as Record<string, string>)[k];
+const kindSuffix = (k: string) => ({ person: 'me', org: 'org', circle: 'circle', church: 'church', household: 'household', team: 'team', workspace: 'workspace', 'person-treasury': 'treasury', 'org-treasury': 'treasury', service: 'svc' } as Record<string, string>)[k];
 
 describe('chartering an agent', () => {
   it('offers every typed root, and each kind claims the suffix that names its type', () => {
@@ -21,6 +21,22 @@ describe('chartering an agent', () => {
     for (const c of creatableKinds('person', all)) expect(['me', 'org', 'team', 'svc', 'workspace', 'treasury', 'church', 'circle', 'household']).toContain(kindSuffix(c.kind));
     expect(typedTldForKind('service')).toEqual({ tld: 'svc', serviceRole: 'service' });
     expect(typedTldForKind('team')?.tld).toBe('team');
+  });
+
+  /**
+   * ANOTHER PERSON OF YOURS is chartered like anything else and is the one kind that is person-CLASS: a
+   * trail name, a pen name, a part in a game. It claims `.me` like your first one, and it carries no service
+   * role — declaring one on a person SA would fail the typed claim closed (spec 346 §3.6).
+   */
+  it('offers another person of yours, person-class, claiming .me and carrying no service role', () => {
+    const person = creatableKinds('person', all);
+    expect(person.map((c) => c.kind)).toContain('person');
+    expect(typedTldForKind('person')).toEqual({ tld: 'me' });
+    expect(agentClassOf('person')).toBe('person');
+    expect(serviceRoleOf('person')).toBe('');
+    expect(kindWordOf('person')).toBe('person');
+    // and it is not offered under an ORGANIZATION: an org does not have people of its own.
+    expect(creatableKinds('org', all).map((c) => c.kind)).not.toContain('person');
   });
 
   it('never offers a kind whose typed root this chain has not provisioned', () => {

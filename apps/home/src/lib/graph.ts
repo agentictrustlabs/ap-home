@@ -109,7 +109,8 @@ export interface LivePerson {
     kindWord?: string;
     /** spec 318 — 'steward' (custodial, default) draws a stewardship edge;
      *  'member' (authority-only) draws a membership edge instead. */
-    relationship?: 'steward' | 'member';
+    /** 'self' — another person of the same custodian: it is them, under a different name. */
+    relationship?: 'steward' | 'member' | 'self';
   }[];
 }
 
