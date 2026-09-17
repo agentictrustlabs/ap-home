@@ -45,6 +45,11 @@ export const AUTHORITY_BEARING_CAPABILITIES: readonly string[] = [
   'household.create',
   // Spec 372 S3 — a service agent (the identity an outside runtime acts as) is chartered the same way.
   'service.create',
+  // Another PERSON of their own (a trail name, a pen name, a part in a game) is chartered in the same realm
+  // and under the same credential as a household or a service, so it is the same class of step. Assignable
+  // in the only sense that matters here: the step names the person whose realm it is, and only they can
+  // sign it — which is true of chartering an organization too.
+  'person.create',
   'organization.membership.invite',
   'treasury.create',
   'treasury.payment.execute',

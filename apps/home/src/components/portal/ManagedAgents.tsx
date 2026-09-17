@@ -26,6 +26,7 @@ import { COINS, shown, type Coin } from '../../lib/coins';
 import { CONTRACTS } from '../../lib/chain';
 import { AddressChip } from '../shared/AddressChip';
 import { BuildingIcon, LandmarkIcon, UserIcon } from '../shared/Icons';
+import { useRegisteredName } from '../../lib/reverse-name';
 import { ConnectTreasuryModal } from './ConnectTreasuryModal';
 import { ConnectedHosts } from './ConnectedHosts';
 import { agentClassOf, orgKindWordOf, creatableKinds, type CreatableKind } from '../../lib/agent-class';
@@ -548,9 +549,12 @@ export function OrganizationsManager({
   // OTHER PEOPLE OF YOURS — person-class agents this custodian holds besides the one they are signed in as
   // (a trail name, a pen name, a character in a game). They fell through both filters above and so appeared
   // on no page at all: chartered, custodied, named on chain, and invisible to the person who owns them.
-  const people = agents.filter((a) => agentClassOf(a.kind) === 'person');
+  const others = agents.filter((a) => agentClassOf(a.kind) === 'person');
   const treasuryFor = (org: string) => agents.find((a) => a.kind === 'org-treasury' && lc(a.parent) === lc(org));
   const claimable = (k: AgentKind) => !!typedTldForKind(k);
+  // The connected person's own name, for the row that is them. A home with no name yet still has a person.
+  const selfRegistered = useRegisteredName((person ?? null) as `0x${string}` | null);
+  const selfName = selfRegistered.name ?? '';
   const showPeople = filter === 'all' || filter === 'person';
   const showOrgs = filter === 'all' || filter === 'org';
   const showServices = filter === 'all' || filter === 'service';
@@ -560,7 +564,7 @@ export function OrganizationsManager({
   const Filter = () => (
     <div className="ui-toolbar">
       <div className="ui-tabs" role="tablist" aria-label="Filter what you steward">
-        {([['all', 'All', people.length + orgs.length + services.length], ['person', 'People', people.length], ['org', 'Organizations', orgs.length], ['service', 'Services', services.length]] as const).map(([v, l, n]) => (
+        {([['all', 'All', 1 + others.length + orgs.length + services.length], ['person', 'People', 1 + others.length], ['org', 'Organizations', orgs.length], ['service', 'Services', services.length]] as const).map(([v, l, n]) => (
           <button key={v} type="button" role="tab" aria-selected={filter === v} onClick={() => setFilter(v)} data-testid={`steward-filter-${v}`} className="ui-tab">{l}<span className="ui-count">{n}</span></button>
         ))}
       </div>
@@ -578,19 +582,37 @@ export function OrganizationsManager({
         <>
         <Filter />
         <div className="manage-grid">
-          {/* YOUR OWN PEOPLE lead, because they are you. Each is a name of yours with its own vault; the
-              one you are signed in as is not in this list — it is the home you are standing in. */}
-          {showPeople && people.length > 0 && <Heading n={people.length}>People</Heading>}
-          {showPeople && people.map((who) => (
+          {/*
+            * YOUR OWN PEOPLE LEAD, AND YOU ARE THE FIRST OF THEM.
+            *
+            * The first cut listed only the OTHERS, so a custodian who had chartered none saw "People 0" on a
+            * page that was showing them their own home — true of the list and false of the person reading
+            * it, who plainly has at least one. You are a person of yours; you are simply the DEFAULT one,
+            * which is a fact worth stating rather than a row worth hiding. It is also where the choice
+            * between them belongs once there is more than one to choose.
+            */}
+          {showPeople && <Heading n={1 + others.length}>People</Heading>}
+          {showPeople && (
+            <div className="manage-card" key="self">
+              <div className="manage-card-head">
+                <span className="manage-card-icon"><UserIcon size={17} /></span>
+                <span className="manage-card-label">{selfName || 'You'}</span>
+                <span className="manage-card-badge live">default</span>
+              </div>
+              <p className="manage-card-blurb">
+                The person your home opens as. Everything that needs to reach YOU addresses this one.
+              </p>
+            </div>
+          )}
+          {showPeople && others.map((who) => (
             <div className="manage-card" key={who.agent}>
               <div className="manage-card-head">
                 <span className="manage-card-icon"><UserIcon size={17} /></span>
                 <span className="manage-card-label">{who.name || 'Unnamed person'}</span>
-                <span className="manage-card-badge live">person</span>
+                <span className="manage-card-badge">person</span>
               </div>
               <p className="manage-card-blurb">
-                Another name of yours, with a vault of its own. Your home opens as {person ? 'your own' : 'your default'} person
-                unless you choose otherwise.
+                Another name of yours, with a vault of its own — and never the one your home opens as.
               </p>
             </div>
           ))}
