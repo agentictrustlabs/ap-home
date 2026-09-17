@@ -1084,15 +1084,19 @@
       "endpoints": [
         "/harness/ask",
         "/harness/budget",
-        "/harness/ops"
+        "/harness/ops",
+        "/harness/records/import"
       ],
       "tests": [
         "apps/demo-a2a/test/unit/agent-budget.test.ts",
-        "apps/demo-a2a/test/unit/ops-index.test.ts"
+        "apps/demo-a2a/test/unit/ops-index.test.ts",
+        "apps/demo-a2a/test/unit/receipt-anchor.test.ts"
       ],
       "gates": [
         "verify-agent-budget",
-        "verify-operator-view"
+        "verify-operator-view",
+        "verify-receipt-anchor",
+        "verify-record-carried"
       ],
       "gaps": [
         "a MODEL budget (tokens / planner calls per day) beside asks and vault calls — the meter is deployment-wide (spec 388), not per agent yet; spend in currency is the treasury mandate's, shown elsewhere; an estate-wide policy (one rule for all agents) is not modelled"

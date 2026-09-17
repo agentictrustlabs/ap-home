@@ -18,6 +18,7 @@ import { nudge, emailOf } from './nudges.js';
 import { consumeRuntimeWakes } from './runtime-wake.js';
 import { connectorStatus, disconnectConnector, type GoogleProvider } from './connectors/google-token.js';
 import { queryOps } from './ops-index.js';
+import { anchorCallData, bundleDigest, ANCHOR_ABI } from './receipt-anchor.js';
 import { rebuildOpsIndex } from './run-records.js';
 import { BUDGET_RECORD, budgetOf, overBudget, budgetCounters, countAsk } from './agent-budget.js';
 import { probeMcpServer, keepMcpToken, dropMcpToken, MCP_CONNECTOR_PREFIX, isMcpConnectorRecord, mcpToolId, type McpConnectorRecordV1 } from './connectors/mcp-connector.js';
@@ -172,7 +173,8 @@ import type { CandidateSource } from '@agenticprimitives/intent-engagement';
 import { answerProbe } from './engagement-answer.js';
 import type { MessageV1 } from '@agenticprimitives/a2a/standard';
 import { signAsAgent } from './consult-rail.js';
-import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, provenanceViewOf, firewalledMetrics, publicProvenanceOf } from './run-export.js';
+import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, provenanceViewOf, firewalledMetrics, publicProvenanceOf, type RunExportDeps } from './run-export.js';
+import { runProvenanceRecordKey } from '@agenticprimitives/orchestration';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
@@ -624,6 +626,8 @@ export interface Env {
   /** Spec 350 — the SA this agent acts as under a mandate; per chain, custodied by the interactions-session key. */
   HARNESS_AGENT_SA?: string;
   DIGEST_BINDING_ENFORCER?: string;
+  /** Spec 406 W2 — the ReceiptAnchorRegistry on this chain; absent ⇒ runs are not anchored (said on the report). */
+  RECEIPT_ANCHOR_REGISTRY?: string;
   PAYMENT_ENFORCER?: string;
   MOCK_USDC?: string;
   /** Gateway adoption (ADR-0055 amendment): `'on'` runs the shadow comparison for ops the ledger has at
@@ -1878,6 +1882,30 @@ app.post('/harness/ops', async (c) => {
   const summary = await queryOps(c.env, { agents, since: Date.now() - ms });
   return c.json({ ok: true, scope: body.scope ?? 'estate', window: body.window ?? '7d', summary });
 });
+// POST /harness/records/import { session, recordType, record } — spec 406 W3. A person CARRIES a record she holds into
+// her vault at THIS Home: provenance and receipt records only (`run.provenance:<runRef>`, `payment.receipt:<tx>`), her
+// own vault under her own grant. The record is verified by its shape and by what it names, never rewritten: a bundle
+// whose digest is anchored on the chain verifies here exactly as where it was made — the anchors are the chain's.
+app.post('/harness/records/import', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; recordType?: string; record?: unknown } | null;
+  if (!body?.session || !body.recordType || body.record === undefined) return c.json({ ok: false, error: 'session, recordType and record are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const me = String(who.sa).toLowerCase() as Address;
+  const key = String(body.recordType);
+  if (!/^(run\.provenance:|payment\.receipt:)[A-Za-z0-9._:-]{1,200}$/.test(key)) return c.json({ ok: false, error: 'only provenance and receipt records travel this way (run.provenance:<runRef>, payment.receipt:<tx>)' }, 400);
+  const rec = body.record as Record<string, unknown>;
+  if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return c.json({ ok: false, error: 'the record must be an object' }, 400);
+  if (key.startsWith('run.provenance:') && !('@context' in rec || '@graph' in rec)) return c.json({ ok: false, error: 'a provenance record is a JSON-LD document (@context / @graph)' }, 400);
+  if (JSON.stringify(rec).length > 400_000) return c.json({ ok: false, error: 'the record is larger than a carried record may be (400 KB)' }, 413);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  if (!deps.writeSubjectRecord || !deps.readSubjectRecord) return c.json({ ok: false, error: 'the private tier is not configured' }, 503);
+  const prior = await deps.readSubjectRecord(me, key).catch(() => null);
+  if (prior) return c.json({ ok: false, error: `${key} is already in your vault here — a carried record is never overwritten`, existing: true }, 409);
+  const wrote = await deps.writeSubjectRecord(me, key, rec);
+  if (!wrote.ok) return c.json({ ok: false, error: /record_scope_denied|scope/i.test(wrote.error ?? '') ? 'record_scope_denied' : (wrote.error ?? 'the record could not be kept') }, 502);
+  return c.json({ ok: true, agent: me, recordType: key, hasProvenance: key.startsWith('run.provenance:') ? { agent: me, recordType: key, public: { route: '/provenance/public', agent: me, runRef: key.slice('run.provenance:'.length) } } : undefined });
+});
 app.post('/harness/instructions', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { session?: string } | null;
   if (!body?.session) return c.json({ ok: false, error: 'session is required' }, 400);
@@ -2077,7 +2105,7 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
       const kept = await recordFormOf(env, deps, input.addressee, input.runRef, result as never);
       const record = recordOf({ runRef: input.runRef, intent, result: kept.result, events, presented: (input.resume?.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), ...(input.traceContext ? { traceContext: input.traceContext } : {}), planner: plannerSummaryOf(trace), ...(input.receivedAt ? { receivedAt: input.receivedAt } : {}), offloaded: kept.offloaded, bill });
       await putRecord(env as never, input.addressee, record);
-      await exportRun(env, { writeSubjectRecord: deps.writeSubjectRecord }, input.addressee, record)
+      await exportRun(env, { writeSubjectRecord: deps.writeSubjectRecord, ...(anchorPortFor(env, deps) ? { anchor: anchorPortFor(env, deps)! } : {}) }, input.addressee, record)
         .then((r) => putRecord(env as never, input.addressee, { ...record, export: r })).catch(() => undefined);
     } catch (e) { console.warn('[runAgentAsk] record not kept:', e instanceof Error ? e.message : String(e)); }
   })();
@@ -2136,7 +2164,7 @@ async function resumeFromCommitment(env: Env, input: { addressee: Address; debto
     const intent = { goal: hit.message, context: { addressee: input.addressee, asker: hit.asker } };
     const record = recordOf({ runRef: hit.runRef, intent, result: result as never, events, presented: (hit.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })) });
     await putRecord(env as never, input.addressee, record).catch(() => undefined);
-    await exportRun(env, { writeSubjectRecord: harnessDeps(env, buildAuditSink(env)).writeSubjectRecord }, input.addressee, record)
+    await exportRun(env, (() => { const d = harnessDeps(env, buildAuditSink(env)); const a = anchorPortFor(env, d); return { writeSubjectRecord: d.writeSubjectRecord, ...(a ? { anchor: a } : {}) }; })(), input.addressee, record)
       .then((r) => putRecord(env as never, input.addressee, { ...record, export: r })).catch(() => undefined);
   }
   return { ok: true, runRef: hit.runRef, said: spoken || reply.text || '' };
@@ -2836,7 +2864,14 @@ app.post('/harness/provenance', async (c) => {
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const addressee = body.addressee.toLowerCase() as Address;
   const rec = await getRecord(c.env as never, addressee, body.runRef);
-  if (!rec) return c.json({ ok: false, error: 'no such record' }, 404);
+  if (!rec) {
+    // Spec 406 W3 — THE VAULT IS THE RECORD (ADR-0055): a run that did not run HERE may still have its provenance here —
+    // a bundle its owner carried in. The task object's copy is a cache; the vault's is the document. Served as it is.
+    const vdeps = harnessDeps(c.env, buildAuditSink(c.env));
+    const carried = vdeps.readSubjectRecord ? await vdeps.readSubjectRecord(addressee, runProvenanceRecordKey(body.runRef)).catch(() => null) : null;
+    if (carried && typeof carried === 'object' && (body.format === 'jsonld' || !body.format)) return c.json({ ok: true, hasProvenance: hasProvenanceRef(addressee, body.runRef), carried: true, provenance: carried });
+    return c.json({ ok: false, error: 'no such record' }, 404);
+  }
   if (String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() !== String(who.sa).toLowerCase()) return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
   const ref = hasProvenanceRef(addressee, body.runRef);
   if (body.format === 'prov-n') return c.json({ ok: true, hasProvenance: ref, provN: await provenanceProvNOf(c.env, addressee, rec), export: rec.export?.provenance ?? null });
@@ -2882,10 +2917,25 @@ app.post('/provenance/public', async (c) => {
   if (!body?.agent || !body.runRef || !/^0x[0-9a-fA-F]{40}$/.test(body.agent)) return c.json({ ok: false, error: 'agent (an address) and runRef are required' }, 400);
   const agent = body.agent.toLowerCase() as Address;
   const rec = await getRecord(c.env as never, agent, body.runRef);
-  if (!rec) return c.json({ ok: false, error: 'no such record' }, 404);
+  if (!rec) {
+    // Spec 406 W3 — a CARRIED bundle: nothing about it is trusted from the carrier. Its digest is recomputed and the
+    // registry is READ on the chain; what the chain says (who anchored it, when, under which intent) is the projection.
+    const vdeps = harnessDeps(c.env, buildAuditSink(c.env));
+    const carried = vdeps.readSubjectRecord ? await vdeps.readSubjectRecord(agent, runProvenanceRecordKey(body.runRef)).catch(() => null) : null;
+    if (!carried || typeof carried !== 'object') return c.json({ ok: false, error: 'no such record' }, 404);
+    if (!c.env.RECEIPT_ANCHOR_REGISTRY || !c.env.RPC_URL) return c.json({ ok: true, agent, runRef: body.runRef, carried: true, rows: [], refused: [], anchor: null, note: 'this deployment cannot read the anchor registry' });
+    const digest = bundleDigest(carried);
+    const client = createPublicClient({ transport: http(c.env.RPC_URL) });
+    const a = await client.readContract({ address: c.env.RECEIPT_ANCHOR_REGISTRY as Address, abi: ANCHOR_ABI, functionName: 'anchorOf', args: [digest] }).catch(() => null);
+    const anchored = a && a.anchoredBy !== '0x0000000000000000000000000000000000000000';
+    const chainId = Number(c.env.CHAIN_ID);
+    return c.json({ ok: true, agent, runRef: body.runRef, carried: true, rows: [], refused: [], anchor: anchored ? { digest, registry: c.env.RECEIPT_ANCHOR_REGISTRY.toLowerCase(), anchoredBy: a!.anchoredBy.toLowerCase(), at: Number(a!.at), intentDigest: a!.intentDigest, mandateRef: a!.mandateRef, ...(Number.isFinite(chainId) && chainId > 0 ? { chainId } : {}), readFrom: 'chain' } : null, verify: { bundleDigest: 'keccak256 over the stable JSON of the bundle you hold must equal anchor.digest', anchoredBy: 'the runtime agent that anchored it — the acting agent of the run, not this Home' } });
+  }
   const projection = await publicProvenanceOf(c.env, agent, rec);
+  // Spec 406 W2 — the RUN's anchor: the bundle's digest in the registry, from the harness agent (digests and addresses only).
+  const anchor = rec.export?.anchor && 'digest' in rec.export.anchor ? rec.export.anchor : null;
   return c.json({
-    ok: true, agent, runRef: body.runRef, ...projection,
+    ok: true, agent, runRef: body.runRef, ...projection, ...(anchor ? { anchor } : {}),
     verify: { receiptDigest: 'sha256 over the canonical step receipt you hold must equal the row\'s receiptDigest', anchoredBy: 'the transaction hash must exist on the chain the agent lives on', run: 'the row\'s run IRI is derived from the runRef your receipt\'s hasProvenance named' },
   });
 });
@@ -4209,7 +4259,7 @@ app.post('/harness/ask', async (c) => {
       // Spec 381 — THE EXPORT: the durable half into the acting agent's vault, the spans to a collector when
       // one is named. Off the run's path; a failed export is logged, never a failed ask.
       // The report goes back ONTO the record: whether the provenance landed is read from it, never guessed.
-      c.executionCtx.waitUntil(exportRun(c.env, { writeSubjectRecord: askDeps.writeSubjectRecord }, addressee, record)
+      c.executionCtx.waitUntil(exportRun(c.env, { writeSubjectRecord: askDeps.writeSubjectRecord, ...(anchorPortFor(c.env, askDeps) ? { anchor: anchorPortFor(c.env, askDeps)! } : {}) }, addressee, record)
         .then((r) => putRecord(c.env as never, addressee, { ...record, export: r }))
         .catch((e) => console.warn('[harness/ask] export:', e instanceof Error ? e.message : String(e))));
     }
@@ -4919,6 +4969,17 @@ export function probeSenderFor(env: Env, requester: Address, executionCtx?: Exec
 /** Spec 384 W3 — candidates from the public tier for a campaign run by `requester` (never itself). */
 export function candidateSourceFor(env: Env, requester: Address): CandidateSource {
   return discoveryCandidateSource(discoveryFetchFor(env), { exclude: [requester] });
+}
+
+/** Spec 406 W2 — the export's anchor port: the harness agent anchors a bundle's digest in the registry; absent config ⇒ no port. */
+function anchorPortFor(env: Env, deps: Pick<HarnessDeps, 'executeAsServiceSa'>): RunExportDeps['anchor'] | undefined {
+  const registry = env.RECEIPT_ANCHOR_REGISTRY; const sa = env.HARNESS_AGENT_SA;
+  if (!registry || !/^0x[0-9a-fA-F]{40}$/.test(registry) || !sa || !deps.executeAsServiceSa) return undefined;
+  return async (digest, intentDigest, mandateRef) => {
+    const { txHash } = await deps.executeAsServiceSa!(sa.toLowerCase() as Address, anchorCallData(registry as Address, digest, intentDigest, mandateRef));
+    const chainId = Number(env.CHAIN_ID);
+    return { txHash, registry: registry.toLowerCase() as Address, anchoredBy: sa.toLowerCase() as Address, ...(Number.isFinite(chainId) && chainId > 0 ? { chainId } : {}) };
+  };
 }
 
 export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: ExecutionContext } = {}): HarnessDeps {

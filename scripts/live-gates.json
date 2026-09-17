@@ -492,6 +492,26 @@
       "timeoutSec": 300
     },
     {
+      "id": "verify-receipt-anchor",
+      "script": "scripts/verify-receipt-anchor.mts",
+      "spec": "406 W2",
+      "proves": "every finished run is ANCHORED on chain: its PROV bundle's digest (keccak256 over stable JSON) in the ReceiptAnchorRegistry (faithchain 0x0e3393…) from the runtime's harness agent, bound to the intent digest and the mandate — a read with no transaction of its own included; the public projection carries the anchor; the holder recomputes the digest from the bundle and (with RPC_URL) reads anchorOf(digest) on the chain: the harness agent, a block time, the intent",
+      "twin": "a bundle altered in transit hashes to a digest the registry does not hold; no word of the ask reaches the projection",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 240
+    },
+    {
+      "id": "verify-record-carried",
+      "script": "scripts/verify-record-carried.mts",
+      "spec": "406 W3",
+      "proves": "the record TRAVELS: alice — the same Smart Agent at two Homes — carries her run's PROV bundle from Faithnet (read under her session) into her vault at the ap-home estate (POST /harness/records/import, her own vault under her own grant); the second Home serves it (the vault is the record) and its public projection reads the anchor FROM THE CHAIN by recomputing the digest — Faithnet's harness agent, the time, the intent; nothing the carrier said is trusted",
+      "twin": "a bundle altered in transit is hers to keep but finds no anchor (anchor: null); a record that is not provenance or a receipt is refused at the door",
+      "required": false,
+      "paced": false,
+      "timeoutSec": 300
+    },
+    {
       "id": "verify-devkit-starter",
       "script": "scripts/verify-devkit-starter.mts",
       "spec": "398 §10 / G2",

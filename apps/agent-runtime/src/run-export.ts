@@ -4,6 +4,9 @@
 // file is where they LAND, which is deployment: the provenance record into the acting agent's vault through
 // its own effect-write door, and the spans to an OTLP/HTTP collector when this deployment names one.
 // Neither is on the run's path — a record that failed to export costs an export, never the run.
+import { bundleDigest, ZERO32 } from './receipt-anchor.js';
+import { intentDigest } from '@agenticprimitives/delegation';
+import type { Hex, Address } from 'viem';
 import { assertFirewalled, assertMetricsFirewalled, otlpTracesOf, otlpMetricsOf, metricsOf, provenanceOf, runProvenanceRecordKey, spansOf, type RunRecordV1, type RunExportReportV1, type RunMetricsV1, type SpanV1 } from '@agenticprimitives/orchestration';
 import { projectHarnessRunProvenance, toJsonLd, toProvN, type ProvenanceRecordV1, projectPublicProvenance, type PublicProvenanceProjection } from '@agenticprimitives/provenance';
 import { RUN_PROVENANCE_CONTEXT } from '@agenticprimitives/ontology';
@@ -88,6 +91,8 @@ export async function firewalledSpans(record: RunRecordV1): Promise<SpanV1[]> {
 export interface RunExportDeps {
   /** The acting agent's own effect-write door (`internal.coordination.vaultWrite`, ADR-0055). */
   writeSubjectRecord?: (subject: string, recordType: string, record: unknown) => Promise<{ ok: boolean; error?: string }>;
+  /** Spec 406 W2 — anchor the bundle's digest on chain from the runtime's harness agent; absent ⇒ not anchored, said. */
+  anchor?: (digest: Hex, intentDigest: Hex, mandateRef: Hex) => Promise<{ txHash: Hex; registry: Address; anchoredBy: Address; chainId?: number }>;
   fetch?: typeof fetch;
 }
 
@@ -98,14 +103,25 @@ export async function exportRun(env: RunExportEnv, deps: RunExportDeps, agent: s
   const recordType = runProvenanceRecordKey(record.runRef);
   const report: RunExportReport = { at: Date.now(), provenance: { written: false, recordType }, spans: { count: 0, sent: false } };
   // The durable half, into the vault of the agent whose authority was spent — through ITS door, under ITS grant.
+  let prov: Record<string, unknown> | null = null;
   if (deps.writeSubjectRecord) {
     try {
-      const prov = await provenanceGraphOf(env, agent, record);
+      prov = await provenanceGraphOf(env, agent, record);
       const out = await deps.writeSubjectRecord(agent.toLowerCase(), recordType, prov);
       report.provenance.written = out.ok;
       if (!out.ok && out.error) report.provenance.error = out.error;
     } catch (e) { report.provenance.error = e instanceof Error ? e.message : String(e); }
   } else report.provenance.error = 'no vault write door';
+  // Spec 406 W2 — THE ANCHOR: the bundle's digest on chain, bound to the intent and the mandate, from the harness agent.
+  // Every finished run, transaction of its own or not. A failure is said on the report; the record stands.
+  if (deps.anchor) {
+    try {
+      const digest = bundleDigest(prov ?? (await provenanceGraphOf(env, agent, record)));
+      const mandateRef = (record.presented?.[0]?.ref as Hex | undefined) ?? ZERO32;
+      const out = await deps.anchor(digest, intentDigest(record.intent as never) as Hex, /^0x[0-9a-f]{64}$/i.test(mandateRef) ? mandateRef : ZERO32);
+      report.anchor = { digest, registry: out.registry, anchoredBy: out.anchoredBy, txHash: out.txHash, ...(out.chainId ? { chainId: out.chainId } : {}) };
+    } catch (e) { report.anchor = { error: e instanceof Error ? e.message : String(e) }; }
+  }
   // The spans — firewalled before they leave, sent only where this deployment says.
   try {
     const spans = await firewalledSpans(record);

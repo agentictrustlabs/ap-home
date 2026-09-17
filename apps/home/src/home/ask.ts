@@ -448,9 +448,11 @@ export async function listRunRecords(session: { token: string }, addressee: Addr
 /** Spec 395 — the run's PUBLIC projection: its anchored outcomes (digests and ids through the S1 firewall), readable by
  *  anyone with no session. What a counterparty holding a receipt can verify against; nothing the run was about. */
 export interface AnchoredOutcome { '@id': string; run: string; anchoredBy: string; assurance: string; receiptDigest?: string; chainDigest?: string; intentDigest?: string; playbook?: string; capability?: string; completionState: string; endedAt?: string }
-export async function fetchPublicProvenance(agent: Address, runRef: string): Promise<{ rows: AnchoredOutcome[]; refused: Array<{ activity: string; reason: string }> } | { error: string }> {
-  const out = (await postA2a('/a2a/provenance/public', { agent, runRef })) as { ok?: boolean; error?: string; rows?: AnchoredOutcome[]; refused?: Array<{ activity: string; reason: string }> };
-  return out.ok ? { rows: out.rows ?? [], refused: out.refused ?? [] } : { error: out.error ?? 'the public projection could not be read' };
+/** Spec 406 W2 — the RUN's anchor: its PROV bundle's digest in the ReceiptAnchorRegistry, from the harness agent. */
+export interface RunAnchor { digest: string; registry: string; anchoredBy: string; txHash?: string; chainId?: number }
+export async function fetchPublicProvenance(agent: Address, runRef: string): Promise<{ rows: AnchoredOutcome[]; refused: Array<{ activity: string; reason: string }>; anchor?: RunAnchor } | { error: string }> {
+  const out = (await postA2a('/a2a/provenance/public', { agent, runRef })) as { ok?: boolean; error?: string; rows?: AnchoredOutcome[]; refused?: Array<{ activity: string; reason: string }>; anchor?: RunAnchor };
+  return out.ok ? { rows: out.rows ?? [], refused: out.refused ?? [], ...(out.anchor ? { anchor: out.anchor } : {}) } : { error: out.error ?? 'the public projection could not be read' };
 }
 
 /** Spec 389 W3 — THE RUN AS A PROV GRAPH: the JSON-LD document the agent's vault holds (rebuilt from the record), or
