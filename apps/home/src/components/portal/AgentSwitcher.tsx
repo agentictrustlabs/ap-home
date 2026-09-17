@@ -36,6 +36,10 @@ export function AgentSwitcher() {
   const orgs = allOrgs.filter((a) => a.relationship !== 'member');
   const memberOrgs = allOrgs.filter((a) => a.relationship === 'member');
   const services = agents.filter((a) => agentClassOf(a.kind) === 'service');
+  // OTHER PEOPLE OF YOURS. They are person-class, so they matched neither filter above and the dropdown
+  // showed one hardcoded row — "your home" — and then jumped to organizations. A custodian who had
+  // chartered a second person could not see it anywhere, which is the same as not having it.
+  const people = agents.filter((a) => agentClassOf(a.kind) === 'person');
 
   if (!session || !profile) return null;
 
@@ -128,6 +132,21 @@ export function AgentSwitcher() {
           activeRow={active.kind === 'person'}
           onClick={() => go('/')}
         />
+
+        {/* EACH IS A NAME OF YOURS, not something you look after: the caption says whose vault it is rather
+            than the "you → …" lineage an org row carries, because there is no chain of authority to draw
+            between you and yourself. */}
+        {people.length > 0 && heading('Other people of yours')}
+        {people.map((who) => (
+          <Row
+            key={who.agent}
+            icon={<UserIcon size={17} />}
+            title={who.name ? nameLabel(who.name) : short(who.agent)}
+            sub="person · a name of yours, with its own vault"
+            activeRow={false}
+            onClick={() => go('/agents?kind=person')}
+          />
+        ))}
 
         {orgs.length > 0 && heading('Organizations you steward')}
         {orgs.map((o) => (

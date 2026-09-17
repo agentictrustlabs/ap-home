@@ -21,7 +21,8 @@ export default function OrganizationsPage() {
   const { session, agentAddress } = useSession();
   // agent-vocabulary.md D2 — the nav names the two KINDS (Organizations · Services); this one page serves both, filtered.
   const kindParam = useSearchParams()?.get('kind');
-  const kind: 'all' | 'org' | 'service' = kindParam === 'org' || kindParam === 'service' ? kindParam : 'all';
+  const kind: 'all' | 'org' | 'service' | 'person' =
+    kindParam === 'org' || kindParam === 'service' || kindParam === 'person' ? kindParam : 'all';
   const [orgs, setOrgs] = useState<MyOrg[]>([]);
   const [selected, setSelected] = useState<MyOrg | null>(null);
 
@@ -39,7 +40,12 @@ export default function OrganizationsPage() {
   const a = whitelabel.manageableAgents.find((x) => x.id === 'organization');
   return (
     <SectionShell
-      title={selected ? selected.orgName || 'Organization' : kind === 'org' ? 'Organizations you steward' : kind === 'service' ? 'Services you steward' : 'What you steward'}
+      title={selected ? selected.orgName || 'Organization'
+        : kind === 'org' ? 'Organizations you steward'
+        : kind === 'service' ? 'Services you steward'
+        // NOT "steward": you do not look after yourself. These are names of yours.
+        : kind === 'person' ? 'Other people of yours'
+        : 'What you steward'}
       description={
         selected
           ? 'Everything your home knows about this organization, with live reads over your delegations.'
@@ -47,7 +53,9 @@ export default function OrganizationsPage() {
             ? 'Organizations, teams, workspaces, households, churches and circles you steward — each with its members and roster, named by the suffix that says which kind of body it is.'
             : kind === 'service'
               ? 'Services you steward — runtimes, treasuries, registries, coaches: software that acts for something, each with a role, named .svc / .treasury / .registry.'
-              : 'The organizations and services you steward — you oversee them and can act for them; your key signs.'
+              : kind === 'person'
+                ? 'Other names you are known by — a trail name, a pen name, a character in a game. Each is a person agent of your own with its own vault, custodied by the same credential as the home you are standing in, and never the one it opens as.'
+                : 'The organizations and services you steward — you oversee them and can act for them; your key signs. And your own other people, each a name of yours.'
       }
     >
       {selected ? (
