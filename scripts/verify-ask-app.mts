@@ -53,7 +53,7 @@ try {
   if (!text.includes('I sing in the choir')) fail(`the app rendered but not over her fact: "${text.slice(0, 200)}"`);
   console.log('  the memory app rendered in the Ask, with her fact ✓');
   // twin — a read with no result component renders no app: the roster of her organization (organization.membership.list names none)
-  await input.fill('who are the members of missio nexus');
+  await input.fill(`who are the members of ${fx.org.name}`);
   await page.keyboard.press('Enter');
   await page.waitForTimeout(20000);
   const apps = await page.locator('[data-testid="ask-app"]').count();

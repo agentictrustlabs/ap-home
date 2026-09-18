@@ -82,7 +82,7 @@ export function McpConnectorsCard() {
           <div style={{ display: 'grid', gap: 8, marginTop: 'var(--sp-3)' }} data-testid="mcp-attach-form">
             <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'minmax(0,1fr) minmax(0,2fr)' }}>
               <label style={{ display: 'grid', gap: 4 }}><Meta>Name</Meta><input id="mcp-name" className="ui-input" placeholder="e.g. Ligonier catalog" value={name} onChange={(e) => setName(e.target.value)} /></label>
-              <label style={{ display: 'grid', gap: 4 }}><Meta>Server URL (https, Streamable HTTP)</Meta><input id="mcp-url" className="ui-input" placeholder="https://…/mcp" value={url} onChange={(e) => setUrl(e.target.value)} /></label>
+              <label style={{ display: 'grid', gap: 4 }}><Meta>Server URL (https, Streamable HTTP)</Meta><input id="mcp-url" className="ui-input" placeholder="https://example.org/…" value={url} onChange={(e) => setUrl(e.target.value)} /></label>
             </div>
             <label style={{ display: 'grid', gap: 4 }}><Meta>Bearer token (optional — kept by the runtime, never shown again)</Meta><input id="mcp-token" className="ui-input" type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} /></label>
             <label style={{ display: 'grid', gap: 4 }}><Meta>Tools you declare are READS (comma-separated tool names; everything else is an act you sign)</Meta><input id="mcp-reads" className="ui-input" placeholder="search_resources, list_topics" value={reads} onChange={(e) => setReads(e.target.value)} /></label>
