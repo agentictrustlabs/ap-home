@@ -66,6 +66,19 @@ export function gatherSurfaceOrigins(plural: string | undefined, singular: strin
   return out;
 }
 
+/** The footer links, from `NEXT_PUBLIC_FOOTER_LINKS` (a JSON array of `{label, href}`) or the defaults. A value
+ *  that does not parse to such an array is refused loudly at build, never silently swapped for the defaults. */
+export function footerLinks(raw: string | undefined, defaults: ReadonlyArray<{ label: string; href: string }>): ReadonlyArray<{ label: string; href: string }> {
+  const v = (raw ?? '').trim();
+  if (!v) return defaults;
+  let parsed: unknown;
+  try { parsed = JSON.parse(v); } catch { throw new Error('NEXT_PUBLIC_FOOTER_LINKS is not JSON'); }
+  if (!Array.isArray(parsed) || !parsed.every((l) => l && typeof l === 'object' && typeof (l as { label?: unknown }).label === 'string' && typeof (l as { href?: unknown }).href === 'string' && /^https:\/\//.test((l as { href: string }).href))) {
+    throw new Error('NEXT_PUBLIC_FOOTER_LINKS must be a JSON array of { label, href } with https hrefs');
+  }
+  return parsed as ReadonlyArray<{ label: string; href: string }>;
+}
+
 const faithImpact: WhiteLabelConfig = {
   id: 'faith-impact',
   brand: {
@@ -77,6 +90,19 @@ const faithImpact: WhiteLabelConfig = {
   },
   // Domains stay sourced from lib/domain.ts (the ADR-0021 single source of hostnames).
   domains: { connect: CONNECT_DOMAIN, a2a: A2A_DOMAIN, nameParent: AGENT_NAME_PARENT },
+  // The footer cross-links (the substrate, the skills library, the studio that designs the ontologies).
+  // Outbound only, and only to sites of ours: the SEO these carry runs both ways, and a Home never links
+  // out to a stranger. `NEXT_PUBLIC_FOOTER_LINKS='[{"label":"…","href":"https://…"}]'` replaces the set.
+  footer: {
+    credit: process.env.NEXT_PUBLIC_FOOTER_CREDIT || 'Built on Agentic Primitives — authority for agents that the agent cannot exceed.',
+    links: footerLinks(process.env.NEXT_PUBLIC_FOOTER_LINKS, [
+      { label: 'Agentic Primitives', href: 'https://agenticprimitives.dev' },
+      { label: 'Ontology & namespaces', href: 'https://agenticprimitives.dev/ontology' },
+      { label: 'Developers', href: 'https://agenticprimitives.dev/developers' },
+      { label: 'Skills library', href: 'https://skills.faithnet.io' },
+      { label: 'Rich Canvas — ontology studio', href: 'https://richcanvas3.com' },
+    ]),
+  },
   onboarding: {
     // The ways in, in the order the front door offers them (2026-09-13: Google · email; wallet, passkey, phone
     // and YouVersion are OFF — a passkey cannot sign on faithchain, and the door stays two doors, both nameless).

@@ -331,6 +331,16 @@ export interface WhiteLabelConfig {
   };
   /** Deployment domains — sourced from lib/domain.ts (the ADR-0021 single source). */
   domains: { connect: string; a2a: string; nameParent: string };
+  /**
+   * The Home's footer: where this Home's substrate, its ontologies and its maker live. Rendered under every
+   * portal section and under the sign-in card; a deployment sets `NEXT_PUBLIC_FOOTER_LINKS` (JSON array of
+   * `{ label, href }`) to replace the defaults. Cross-links, never a menu: nothing here is a route of the Home.
+   */
+  footer: {
+    /** The one-line credit before the links, e.g. "Built on Agentic Primitives". */
+    credit: string;
+    links: ReadonlyArray<{ label: string; href: string; /** rel for an outbound link; defaults to noopener. */ rel?: string }>;
+  };
   onboarding: {
     credentialMethods: Array<'passkey' | 'wallet' | 'google' | 'youversion' | 'email' | 'phone'>;
   };

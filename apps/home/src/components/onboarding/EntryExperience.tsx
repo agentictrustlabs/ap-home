@@ -1,4 +1,5 @@
 'use client';
+import { HomeFooter } from '../shared/HomeFooter';
 import { WorkingBar } from './WorkingBar';
 // Full-bleed entry experience shown by the portal gate when NOT authed (or mid relying-app
 // enrollment). Routes: relying-app enroll (new / existing / org-create) and self-serve
@@ -526,6 +527,7 @@ function Shell({ children, compact }: { children: React.ReactNode; compact?: boo
   return (
     <div className="onboarding-screen">
       <div className={compact ? 'onboarding-card enroll-compact' : 'onboarding-card'}>{children}</div>
+      <HomeFooter compact />
     </div>
   );
 }

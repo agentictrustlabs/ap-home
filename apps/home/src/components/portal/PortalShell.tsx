@@ -2,6 +2,7 @@
 // The authenticated portal chrome: topbar (brand + workspace switcher + identity) + sidebar
 // (desktop) / bottom-nav (mobile) + the routed section as <main>. The active WORKSPACE is
 // derived from the URL (spec 315) and scopes the left nav: person / org / connected app.
+import { HomeFooter } from '../shared/HomeFooter';
 import { useState, type ReactNode, useEffect} from 'react';
 import { ReadyProvider } from '../../ui/ready';
 import { usePathname, useSearchParams } from 'next/navigation';
@@ -140,6 +141,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
             </div>
           )}
           <ReadyProvider key={pathname}>{children}</ReadyProvider>
+          <HomeFooter />
         </main>
       </div>
       <PortalBottomNav groups={groups} tabs={tabs} panes={panes} workspaceName={workspaceName} />
