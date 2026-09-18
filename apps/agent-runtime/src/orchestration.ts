@@ -91,7 +91,7 @@ const RULE_BASED_PLANNER: Planner = createRuleBasedPlanner([
 ]);
 
 /** The env subset the planner selection needs. */
-export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | 'ORCHESTRATION_MODEL' | 'GROQ_API_KEY' | 'ORCHESTRATION_GROQ_MODEL' | 'ORCHESTRATION_GROQ_BASE_URL' | 'ORCHESTRATION_GROQ_PROMPT_BUDGET' | 'OPENAI_API_KEY' | 'ORCHESTRATION_OPENAI_MODEL' | 'ORCHESTRATION_OPENAI_BASE_URL' | 'ORCHESTRATION_OPENAI_PROMPT_BUDGET' | 'XAI_API_KEY' | 'ORCHESTRATION_XAI_MODEL' | 'ORCHESTRATION_XAI_BASE_URL' | 'ORCHESTRATION_XAI_PROMPT_BUDGET'> & { COMPOSER_MAX_TOKENS?: string; ORCHESTRATION_ROUTE?: string; ORCHESTRATION_GROQ_TPM?: string; ORCHESTRATION_OPENAI_TPM?: string; ORCHESTRATION_XAI_TPM?: string } & Partial<Pick<Env, 'PROVIDER_METER' | 'A2A_INTERNAL_MARKER'>>;
+export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | 'ORCHESTRATION_MODEL' | 'GROQ_API_KEY' | 'ORCHESTRATION_GROQ_MODEL' | 'ORCHESTRATION_GROQ_BASE_URL' | 'ORCHESTRATION_GROQ_PROMPT_BUDGET' | 'OPENAI_API_KEY' | 'ORCHESTRATION_OPENAI_MODEL' | 'ORCHESTRATION_OPENAI_BASE_URL' | 'ORCHESTRATION_OPENAI_PROMPT_BUDGET' | 'XAI_API_KEY' | 'ORCHESTRATION_XAI_MODEL' | 'ORCHESTRATION_XAI_BASE_URL' | 'ORCHESTRATION_XAI_PROMPT_BUDGET'> & { GEMINI_API_KEY?: string; ORCHESTRATION_GEMINI_MODEL?: string; ORCHESTRATION_GEMINI_PLANNER_MODEL?: string; ORCHESTRATION_GEMINI_BASE_URL?: string; ORCHESTRATION_GEMINI_PROMPT_BUDGET?: string; ORCHESTRATION_GEMINI_TPM?: string } & { COMPOSER_MAX_TOKENS?: string; ORCHESTRATION_ROUTE?: string; ORCHESTRATION_GROQ_TPM?: string; ORCHESTRATION_OPENAI_TPM?: string; ORCHESTRATION_XAI_TPM?: string } & Partial<Pick<Env, 'PROVIDER_METER' | 'A2A_INTERNAL_MARKER'>>;
 
 // ── WHICH MODEL PROPOSES — spec 377 ──────────────────────────────────────────────────────────────────────
 //
@@ -101,8 +101,8 @@ export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | '
 // not credentialed throws, a provider that is named and not offered is refused, and neither lands on another.
 
 /** The providers this app knows how to construct. The id is what a turn names and the trace records. */
-export type LlmProvider = 'anthropic' | 'groq' | 'openai' | 'xai';
-export const LLM_PROVIDERS: readonly LlmProvider[] = ['anthropic', 'groq', 'openai', 'xai'];
+export type LlmProvider = 'anthropic' | 'groq' | 'openai' | 'xai' | 'gemini';
+export const LLM_PROVIDERS: readonly LlmProvider[] = ['anthropic', 'groq', 'openai', 'xai', 'gemini'];
 /** What `selectPlanner` reports having chosen. */
 export type PlannerKind = LlmProvider | 'rule-based';
 
@@ -129,9 +129,29 @@ export const OPENAI_DEFAULTS = { model: 'gpt-5-mini', baseUrl: 'https://api.open
  *  widen the ceiling if you do. Override the host with ORCHESTRATION_XAI_BASE_URL. */
 export const XAI_DEFAULTS = { model: 'grok-4.20-0309-non-reasoning', baseUrl: 'https://api.x.ai/v1' } as const;
 
-const PROVIDER_LABEL: Record<LlmProvider, string> = { anthropic: 'Claude (Anthropic)', groq: 'GPT-OSS 120B (Groq, free)', openai: 'GPT-5 mini (OpenAI)', xai: 'Grok 4.20 (xAI)' };
-const PROVIDER_FREE: Record<LlmProvider, boolean> = { anthropic: false, groq: true, openai: false, xai: false };
-const PROVIDER_KEY: Record<LlmProvider, keyof PlannerEnv> = { anthropic: 'ANTHROPIC_API_KEY', groq: 'GROQ_API_KEY', openai: 'OPENAI_API_KEY', xai: 'XAI_API_KEY' };
+/**
+ * Gemini is a FIFTH configuration of the same vendor-neutral adapter (2026-09-17), through Google's own
+ * OpenAI-compatible surface — verified live with `tool_choice: 'required'`, which is what a planner needs.
+ *
+ * TWO MODELS, BECAUSE THE TWO CALLS ARE NOT THE SAME JOB. Choosing which tool to run is a routing decision over
+ * a short prompt and is the cheapest thing the harness does; writing the reply is the thing a person reads. So
+ * this provider names a `plannerModel` as well as a `model`, and `modelFor` takes the CALL — the first per-call
+ * model split in this file, and the reason the parameter exists.
+ *
+ * THE 2.5 GENERATION IS CLOSED TO NEW KEYS. `gemini-2.5-flash` and `-flash-lite` answer a model LIST and then
+ * refuse a completion with "no longer available to new users. Please update your code to use
+ * models/gemini-3.5-…" — measured 2026-09-17. The 3.5 pair is the live equivalent and is what these defaults
+ * name; `-latest` aliases exist but a floating alias is not a thing to pin a deployment to.
+ */
+export const GEMINI_DEFAULTS = {
+  model: 'gemini-3.5-flash',
+  plannerModel: 'gemini-3.5-flash-lite',
+  baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+} as const;
+
+const PROVIDER_LABEL: Record<LlmProvider, string> = { anthropic: 'Claude (Anthropic)', groq: 'GPT-OSS 120B (Groq, free)', openai: 'GPT-5 mini (OpenAI)', xai: 'Grok 4.20 (xAI)', gemini: 'Gemini 3.5 Flash (Google)' };
+const PROVIDER_FREE: Record<LlmProvider, boolean> = { anthropic: false, groq: true, openai: false, xai: false, gemini: false };
+const PROVIDER_KEY: Record<LlmProvider, keyof PlannerEnv> = { anthropic: 'ANTHROPIC_API_KEY', groq: 'GROQ_API_KEY', openai: 'OPENAI_API_KEY', xai: 'XAI_API_KEY', gemini: 'GEMINI_API_KEY' };
 
 /** The ordered allowlist. An entry this app cannot construct THROWS: a typo must not silently drop a model. */
 export function llmAllowlist(env: PlannerEnv): LlmProvider[] {
@@ -166,6 +186,7 @@ export function plannerPromptBudget(env: PlannerEnv, provider: LlmProvider | nul
   // constraint on any prompt this app builds — so no bound unless a deployment names one.
   if (provider === 'openai') { const n = Number(env.ORCHESTRATION_OPENAI_PROMPT_BUDGET); return Number.isFinite(n) && n > 0 ? Math.floor(n) : null; }
   if (provider === 'xai') { const n = Number(env.ORCHESTRATION_XAI_PROMPT_BUDGET); return Number.isFinite(n) && n > 0 ? Math.floor(n) : null; }
+  if (provider === 'gemini') { const n = Number(env.ORCHESTRATION_GEMINI_PROMPT_BUDGET); return Number.isFinite(n) && n > 0 ? Math.floor(n) : null; }
   if (provider !== 'groq') return null;
   const raw = Number(env.ORCHESTRATION_GROQ_PROMPT_BUDGET);
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : GROQ_FREE_PLAN_PROMPT_BUDGET;
@@ -194,7 +215,7 @@ export interface RouteNeed {
   largestBodyChars?: number;
 }
 /** Each provider's composer evidence cap (the same numbers `selectComposer` builds them with). */
-export const COMPOSER_EVIDENCE_CAP: Record<LlmProvider, number> = { anthropic: 24_000, openai: 24_000, groq: 12_000, xai: 24_000 };
+export const COMPOSER_EVIDENCE_CAP: Record<LlmProvider, number> = { anthropic: 24_000, openai: 24_000, groq: 12_000, xai: 24_000, gemini: 24_000 };
 export interface RouteDecision {
   provider: LlmProvider | null;
   /** Why, in words a trace reader can check against the numbers beside it. */
@@ -208,6 +229,7 @@ export function providerTpm(env: PlannerEnv, p: LlmProvider): number | null {
   // reason a call routes elsewhere. Unmetered here unless a deployment names its own ceiling.
   if (p === 'openai') { const n = Number(env.ORCHESTRATION_OPENAI_TPM); return Number.isFinite(n) && n > 0 ? Math.floor(n) : null; }
   if (p === 'xai') { const n = Number(env.ORCHESTRATION_XAI_TPM); return Number.isFinite(n) && n > 0 ? Math.floor(n) : null; }
+  if (p === 'gemini') { const n = Number(env.ORCHESTRATION_GEMINI_TPM); return Number.isFinite(n) && n > 0 ? Math.floor(n) : null; }
   if (p !== 'groq') return null;
   const raw = Number(env.ORCHESTRATION_GROQ_TPM);
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : GROQ_FREE_PLAN_TPM;
@@ -349,7 +371,17 @@ export function widestPromptBudget(env: PlannerEnv, requested?: LlmProvider): nu
 }
 
 /** The concrete model a provider runs — reported on the trace, never re-derived there. */
-export function modelFor(env: PlannerEnv, p: LlmProvider): string {
+/**
+ * WHICH MODEL CARRIES THIS CALL. `call` is optional and only one provider reads it: choosing a tool is a
+ * routing decision over a short prompt, and writing the reply is what a person reads, so a provider may name a
+ * cheaper model for the planner than for the composer. Every other provider answers the same either way.
+ */
+export function modelFor(env: PlannerEnv, p: LlmProvider, call?: RouteNeed['call']): string {
+  if (p === 'gemini') {
+    return call === 'planner'
+      ? env.ORCHESTRATION_GEMINI_PLANNER_MODEL || env.ORCHESTRATION_GEMINI_MODEL || GEMINI_DEFAULTS.plannerModel
+      : env.ORCHESTRATION_GEMINI_MODEL || GEMINI_DEFAULTS.model;
+  }
   if (p === 'anthropic') return env.ORCHESTRATION_MODEL || ANTHROPIC_DEFAULT_MODEL;
   if (p === 'openai') return env.ORCHESTRATION_OPENAI_MODEL || OPENAI_DEFAULTS.model;
   if (p === 'xai') return env.ORCHESTRATION_XAI_MODEL || XAI_DEFAULTS.model;
@@ -411,6 +443,11 @@ function openAiClient(env: PlannerEnv): OpenAiCompatLike {
   // the host's rule travelling as configuration, not a preference. The 429 wait stays the adapter's default —
   // a paid tier's minute is not the free plan's, and a long wait here would hide a real rate problem.
   return createFetchOpenAiCompatClient({ apiKey: env.OPENAI_API_KEY!, baseUrl: env.ORCHESTRATION_OPENAI_BASE_URL || OPENAI_DEFAULTS.baseUrl, tokenLimitParam: 'max_completion_tokens' });
+}
+
+export function geminiClient(env: PlannerEnv): OpenAiCompatLike {
+  providerConfigured(env, 'gemini');
+  return createFetchOpenAiCompatClient({ apiKey: env.GEMINI_API_KEY!, baseUrl: env.ORCHESTRATION_GEMINI_BASE_URL || GEMINI_DEFAULTS.baseUrl });
 }
 
 export function xaiClient(env: PlannerEnv): OpenAiCompatLike {
@@ -480,6 +517,13 @@ export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string; 
       ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
     });
   }
+  if (p === 'gemini') {
+    return createOpenAiCompatComposer({
+      client: geminiClient(env), model: modelFor(env, 'gemini', 'composer'), label: 'gemini',
+      maxEvidenceChars: 24_000, ...maxTokens,
+      ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
+    });
+  }
   if (p === 'xai') {
     return createOpenAiCompatComposer({
       client: xaiClient(env), model: modelFor(env, 'xai'), label: 'xai',
@@ -527,6 +571,17 @@ export function selectPlanner(env: PlannerEnv, opts?: { systemPrompt?: string; m
       reasoningEffort: 'low',
     });
     return { planner, kind: 'openai', model: modelFor(env, 'openai') };
+  }
+  if (p === 'gemini') {
+    // The ROUTER: the cheapest model that reliably picks a tool under `tool_choice: 'required'`. It spends no
+    // reasoning tokens outside the completion bound, so the ceiling needs no headroom.
+    const model = modelFor(env, 'gemini', 'planner');
+    const planner = createOpenAiCompatPlanner({
+      client: geminiClient(env), model, label: 'gemini',
+      ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
+      maxTokens: opts?.maxTokens ?? 1024,
+    });
+    return { planner, kind: 'gemini', model };
   }
   if (p === 'xai') {
     const planner = createOpenAiCompatPlanner({

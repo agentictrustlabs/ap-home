@@ -285,6 +285,19 @@ export interface Env {
   ORCHESTRATION_XAI_BASE_URL?: string;
   ORCHESTRATION_XAI_PROMPT_BUDGET?: string;
   ORCHESTRATION_XAI_TPM?: string;
+  /**
+   * 2026-09-17 — the fifth offered provider: Google's Gemini, through its own OpenAI-compatible surface.
+   * TWO MODELS, because the two calls are different jobs and this is where the bill is: the ROUTER
+   * (`ORCHESTRATION_GEMINI_PLANNER_MODEL`, default `gemini-3.5-flash-lite`) only has to pick a tool, and the
+   * COMPOSER (`ORCHESTRATION_GEMINI_MODEL`, default `gemini-3.5-flash`) writes what a person reads. The 2.5
+   * generation is closed to new keys — it lists and then refuses, pointing at 3.5.
+   */
+  GEMINI_API_KEY?: string;
+  ORCHESTRATION_GEMINI_MODEL?: string;
+  ORCHESTRATION_GEMINI_PLANNER_MODEL?: string;
+  ORCHESTRATION_GEMINI_BASE_URL?: string;
+  ORCHESTRATION_GEMINI_PROMPT_BUDGET?: string;
+  ORCHESTRATION_GEMINI_TPM?: string;
   /** Spec 398 §9 / ap-build B3 — the Build service (a sandbox the operator provides); both secrets. */
   BUILD_SERVICE_URL?: string;
   BUILD_SERVICE_TOKEN?: string;
