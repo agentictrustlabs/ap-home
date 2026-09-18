@@ -56,7 +56,7 @@ console.log(`  ${SECOND_HOME}: ${key} written to her vault there (${imported.bod
 // ── 3. served there; the anchor read from the chain ──
 const served = await B.post('/harness/provenance', { session: B.me.bearer, addressee: agent, runRef, format: 'jsonld' });
 if (served.body.ok !== true || !served.body.carried || digestOf(served.body.provenance) !== pubA.anchor.digest) fail(`the second Home does not serve the carried bundle as it was: ${JSON.stringify(served.body).slice(0, 300)}`);
-const pubB = await B.post('/provenance/public', { agent, runRef });
+const pubB = await B.post('/provenance/public', { agent, runRef, anchoredBy: pubA.anchor.anchoredBy });
 const anchorB = pubB.body.anchor as { digest: string; anchoredBy: string; at: number; intentDigest: string; readFrom: string } | null;
 if (!pubB.body.carried || !anchorB || anchorB.readFrom !== 'chain' || anchorB.digest !== pubA.anchor.digest || anchorB.anchoredBy.toLowerCase() !== pubA.anchor.anchoredBy.toLowerCase()) fail(`the second Home's public projection does not read the anchor from the chain: ${JSON.stringify(pubB.body).slice(0, 300)}`);
 console.log(`  ${SECOND_HOME}: served as carried · anchor read FROM THE CHAIN — by ${anchorB.anchoredBy.slice(0, 10)}… (Faithnet's harness agent) at ${new Date(anchorB.at * 1000).toISOString()} · intent ${anchorB.intentDigest.slice(0, 14)}…`);
@@ -66,7 +66,7 @@ const tampered = { ...(bundle as object), carriedNote: 'altered in transit' };
 const tRef = `${runRef}-tampered`;
 const imp2 = await B.post('/harness/records/import', { session: B.me.bearer, recordType: `run.provenance:${tRef}`, record: tampered });
 if (imp2.body.ok !== true) fail(`the tampered bundle could not even be kept (it is hers to keep): ${JSON.stringify(imp2.body).slice(0, 200)}`);
-const pubT = await B.post('/provenance/public', { agent, runRef: tRef });
+const pubT = await B.post('/provenance/public', { agent, runRef: tRef, anchoredBy: pubA.anchor.anchoredBy });
 if (pubT.body.anchor !== null) fail(`a tampered bundle found an anchor: ${JSON.stringify(pubT.body).slice(0, 200)}`);
 const refused = await B.post('/harness/records/import', { session: B.me.bearer, recordType: 'memory.facts', record: { entries: [] } });
 if (refused.status !== 400) fail(`a non-provenance record was taken as carried: ${refused.status}`);

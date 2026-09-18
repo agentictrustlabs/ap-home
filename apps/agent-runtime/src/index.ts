@@ -68,6 +68,8 @@ import {
   buildExecuteBatchCallData,
   SaMismatchError,
   entryPointAbi,
+  buildApproveHashCall as buildApproveHashKeyCall,
+  readCustodyEpoch,
 } from '@agenticprimitives/agent-account';
 import { getRelayerAccount, getPaymasterTopupAccount } from './relayer';
 import { AgentNamingClient, buildSubregistryRegisterCall, buildSetPrimaryNameCall, buildDeclareAgentTypeCalls, agentProfileResolverTypeAbi, derivedTypeForTld, isAgentTld, canonicalTld, agentNameRegistryAbi, namehash, parseAgentName, InvalidNameError as NamingInvalidNameError } from '@agenticprimitives/agent-naming';
@@ -2964,7 +2966,7 @@ app.post('/harness/recipe', async (c) => {
 // is on the chain). Nothing of what the run was ABOUT is here, and no gate reads a row. The private graph stays behind
 // /harness/provenance for the asker alone.
 app.post('/provenance/public', async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { agent?: string; runRef?: string } | null;
+  const body = (await c.req.json().catch(() => null)) as { agent?: string; runRef?: string; anchoredBy?: string } | null;
   if (!body?.agent || !body.runRef || !/^0x[0-9a-fA-F]{40}$/.test(body.agent)) return c.json({ ok: false, error: 'agent (an address) and runRef are required' }, 400);
   const agent = body.agent.toLowerCase() as Address;
   const rec = await getRecord(c.env as never, agent, body.runRef);
@@ -2975,9 +2977,13 @@ app.post('/provenance/public', async (c) => {
     const carried = vdeps.readSubjectRecord ? await vdeps.readSubjectRecord(agent, runProvenanceRecordKey(body.runRef)).catch(() => null) : null;
     if (!carried || typeof carried !== 'object') return c.json({ ok: false, error: 'no such record' }, 404);
     if (!c.env.RECEIPT_ANCHOR_REGISTRY || !c.env.RPC_URL) return c.json({ ok: true, agent, runRef: body.runRef, carried: true, rows: [], refused: [], anchor: null, note: 'this deployment cannot read the anchor registry' });
+    // R917-C-3 (spec 408 §1.5): anchors are keyed by WHO anchored, so the reader names the runtime agent the receipt
+    // it holds says anchored the bundle; the chain then confirms or denies THAT row. A claim, never a gate.
+    if (!body.anchoredBy || !/^0x[0-9a-fA-F]{40}$/.test(body.anchoredBy)) return c.json({ ok: false, error: 'anchoredBy (the runtime agent the receipt names as the anchorer) is required to read a carried bundle\'s anchor' }, 400);
+    const anchoredBy = body.anchoredBy.toLowerCase() as Address;
     const digest = bundleDigest(carried);
     const client = createPublicClient({ transport: http(c.env.RPC_URL) });
-    const a = await client.readContract({ address: c.env.RECEIPT_ANCHOR_REGISTRY as Address, abi: ANCHOR_ABI, functionName: 'anchorOf', args: [digest] }).catch(() => null);
+    const a = await client.readContract({ address: c.env.RECEIPT_ANCHOR_REGISTRY as Address, abi: ANCHOR_ABI, functionName: 'anchorOf', args: [anchoredBy, digest] }).catch(() => null);
     const anchored = a && a.anchoredBy !== '0x0000000000000000000000000000000000000000';
     const chainId = Number(c.env.CHAIN_ID);
     return c.json({ ok: true, agent, runRef: body.runRef, carried: true, rows: [], refused: [], anchor: anchored ? { digest, registry: c.env.RECEIPT_ANCHOR_REGISTRY.toLowerCase(), anchoredBy: a!.anchoredBy.toLowerCase(), at: Number(a!.at), intentDigest: a!.intentDigest, mandateRef: a!.mandateRef, ...(Number.isFinite(chainId) && chainId > 0 ? { chainId } : {}), readFrom: 'chain' } : null, verify: { bundleDigest: 'keccak256 over the stable JSON of the bundle you hold must equal anchor.digest', anchoredBy: 'the runtime agent that anchored it — the acting agent of the run, not this Home' } });
@@ -3139,7 +3145,9 @@ app.post('/harness/authorize', async (c) => {
   // Phase A — build.
   const digests = (body.digests ?? []).filter((d) => /^0x[0-9a-fA-F]{64}$/.test(String(d)));
   if (!digests.length || digests.length > 8) return c.json({ ok: false, error: '1–8 digests required' }, 400);
-  const calls = digests.map((d) => orgApproveHashCall(c.env, d as Hex));
+  // R917-C-2: an EXISTING account approves under its current custody epoch — read, never assumed.
+  const epoch = await readCustodyEpoch(createPublicClient({ transport: http(c.env.RPC_URL) }), delegator);
+  const calls = digests.map((d) => orgApproveHashCall(c.env, d as Hex, epoch));
   const { userOp, userOpHash } = await accountClient(c.env).buildCallUserOp({
     sender: delegator, callData: buildExecuteBatchCallData(calls), paymaster: c.env.PAYMASTER as Address,
     callGasLimit: 300_000n,
@@ -4923,8 +4931,8 @@ function teamGenesisDeps(env: Env, audit: AuditSink): TeamGenesisDeps {
         ...(await declareTypeCallsFor(env, child, root.tld)),
         buildSubregistryRegisterCall({ subregistry: root.subregistry, label, newOwner: child }),
         buildSetPrimaryNameCall({ registry: env.AGENT_NAME_REGISTRY as Address, node: namehash(name) }),
-        orgApproveHashCall(env, grant.digest),
-        ...(planes ? planes.digests.map((d: Hex) => orgApproveHashCall(env, d)) : []),
+        orgApproveHashCall(env, grant.digest, 0n), // the child is deployed in this batch: custody epoch 0
+        ...(planes ? planes.digests.map((d: Hex) => orgApproveHashCall(env, d, 0n)) : []),
       ];
       let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
       if (env.PAYMASTER_VERIFYING_SIGNER) {
@@ -6853,9 +6861,6 @@ app.post('/custody/oidc/bootstrap', async (c) => {
 
 /** spec 256 — the 0x03 approved-hash sentinel wire signature (spec 253). */
 const ORG_GRANT_SENTINEL: Hex = '0x03';
-const ORG_APPROVE_HASH_ABI = [
-  { type: 'function', name: 'approveHash', stateMutability: 'nonpayable', inputs: [{ name: 'hash', type: 'bytes32' }], outputs: [] },
-] as const;
 
 /** Server-side port of demo-sso-next `buildApprovedSiteDelegation` (spec 253): build an
  *  `org → delegate` least-privilege site delegation, compute its canonical `hashDelegation` digest,
@@ -6922,12 +6927,11 @@ function buildUnsignedSiteGrant(
   return { d, digest };
 }
 
-function orgApproveHashCall(env: Env, digest: Hex): { to: Address; value: bigint; data: Hex } {
-  return {
-    to: env.APPROVED_HASH_REGISTRY as Address,
-    value: 0n,
-    data: encodeFunctionData({ abi: ORG_APPROVE_HASH_ABI, functionName: 'approveHash', args: [digest] }),
-  };
+/** R917-C-2 (spec 408 §1.2): the account approves the EPOCH-BOUND key, never the raw digest. `epoch` is stated
+ *  by the caller — `0n` for an account being DEPLOYED in the same batch (a counterfactual account has no
+ *  custody history), `readCustodyEpoch` for an existing one. */
+function orgApproveHashCall(env: Env, digest: Hex, epoch: bigint): { to: Address; value: bigint; data: Hex } {
+  return buildApproveHashKeyCall(env.APPROVED_HASH_REGISTRY as Address, digest, epoch);
 }
 
 /** spec 271 W0b (ADR-0035 pillar 1/2) — recover an SA's KMS custodian from { authenticated owner session,
@@ -7048,14 +7052,14 @@ app.post('/custody/oidc/bootstrap-org', async (c) => {
 
     // The org's outbound grants (spec 253) — org is the delegator of all three; person→org membership deferred.
     const siteGrant = buildOrgGrant(c.env, orgSA, body.delegate);
-    const approveCalls: Array<{ to: Address; value: bigint; data: Hex }> = [orgApproveHashCall(c.env, siteGrant.digest)];
+    const approveCalls: Array<{ to: Address; value: bigint; data: Hex }> = [orgApproveHashCall(c.env, siteGrant.digest, 0n)]; // deployed in this batch: epoch 0
     let brokerGrant: ReturnType<typeof buildOrgGrant> | undefined;
     if (body.grantOrg && body.grantOrg.toLowerCase() !== body.delegate.toLowerCase()) {
       brokerGrant = buildOrgGrant(c.env, orgSA, body.grantOrg);
-      approveCalls.push(orgApproveHashCall(c.env, brokerGrant.digest));
+      approveCalls.push(orgApproveHashCall(c.env, brokerGrant.digest, 0n));
     }
     const stewardship = buildOrgGrant(c.env, orgSA, person);
-    approveCalls.push(orgApproveHashCall(c.env, stewardship.digest));
+    approveCalls.push(orgApproveHashCall(c.env, stewardship.digest, 0n));
 
     const root = subregistryForTld(c.env, body.tld);
     if (!root.ok) return c.json({ ok: false, error: root.error }, 503);
@@ -7293,7 +7297,7 @@ app.post('/custody/oidc/bootstrap-agent', async (c) => {
       calls.push(buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node! }));
       claimedName = `${body.label!.toLowerCase()}.${root.typed ? root.tld : (c.env.AGENT_NAME_PARENT || AGENT_NAME_PARENT)}`;
     }
-    calls.push(orgApproveHashCall(c.env, stewardship.digest));
+    calls.push(orgApproveHashCall(c.env, stewardship.digest, 0n)); // deployed in this batch: epoch 0
     const callData = buildExecuteBatchCallData(calls);
 
     let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;

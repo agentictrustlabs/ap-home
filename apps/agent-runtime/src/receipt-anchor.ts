@@ -3,13 +3,14 @@
 // same account that redeems mandates — with the intent digest the run was asked under and the mandate it presented.
 // A run that left no transaction of its own (a read, a message, a build) is anchored too. What reaches the chain:
 // three digests and the agent's address; never a word. A counterparty who holds the bundle recomputes the digest and
-// reads `anchorOf` with `readContract` (ADR-0012) — no runtime, no vault, no vendor between them and the proof.
+// reads `anchorOf(agent, digest)` with `readContract` (ADR-0012) — no runtime, no vault, no vendor between them and the proof.
 import { encodeFunctionData, keccak256, toBytes, type Address, type Hex } from 'viem';
 
 export const ANCHOR_ABI = [
   { type: 'function', name: 'anchor', stateMutability: 'nonpayable', inputs: [{ name: 'receiptDigest', type: 'bytes32' }, { name: 'intentDigest', type: 'bytes32' }, { name: 'mandateRef', type: 'bytes32' }], outputs: [] },
-  { type: 'function', name: 'anchorOf', stateMutability: 'view', inputs: [{ name: 'receiptDigest', type: 'bytes32' }], outputs: [{ type: 'tuple', components: [{ name: 'anchoredBy', type: 'address' }, { name: 'at', type: 'uint64' }, { name: 'intentDigest', type: 'bytes32' }, { name: 'mandateRef', type: 'bytes32' }] }] },
-  { type: 'function', name: 'isAnchored', stateMutability: 'view', inputs: [{ name: 'receiptDigest', type: 'bytes32' }], outputs: [{ type: 'bool' }] },
+  // R917-C-3 (spec 408 §1.5): rows are keyed by WHO anchored — the reader names the agent from the receipt it holds.
+  { type: 'function', name: 'anchorOf', stateMutability: 'view', inputs: [{ name: 'anchoredBy', type: 'address' }, { name: 'receiptDigest', type: 'bytes32' }], outputs: [{ type: 'tuple', components: [{ name: 'anchoredBy', type: 'address' }, { name: 'at', type: 'uint64' }, { name: 'intentDigest', type: 'bytes32' }, { name: 'mandateRef', type: 'bytes32' }] }] },
+  { type: 'function', name: 'isAnchored', stateMutability: 'view', inputs: [{ name: 'anchoredBy', type: 'address' }, { name: 'receiptDigest', type: 'bytes32' }], outputs: [{ type: 'bool' }] },
 ] as const;
 const EXECUTE_ABI = [{ type: 'function', name: 'execute', stateMutability: 'nonpayable', inputs: [{ name: 'target', type: 'address' }, { name: 'value', type: 'uint256' }, { name: 'data', type: 'bytes' }], outputs: [] }] as const;
 
