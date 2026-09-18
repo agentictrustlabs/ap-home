@@ -62,6 +62,8 @@ const noindexHeaders = privateSections.map((section) => ({
 
 // ONE canonical host. `NEXT_PUBLIC_HOME_ORIGIN` (src/lib/domain.ts) names the origin a Home is known by; when it
 // is set, the other of apex/`www.` redirects to it permanently so the site indexes once. Unset ⇒ no redirect.
+// Passkeys are rpId = hostname (src/lib/passkey.ts): a credential registered on the OTHER host was already unusable
+// on this one; the redirect makes that host unreachable rather than half-working, which is the honest state.
 const HOME_ORIGIN = (process.env.NEXT_PUBLIC_HOME_ORIGIN || '').replace(/\/$/, '');
 const canonicalHostRedirects = (() => {
   if (!HOME_ORIGIN) return [];
