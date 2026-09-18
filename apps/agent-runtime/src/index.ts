@@ -2520,7 +2520,7 @@ function clubRosterSecretOk(env: Env, authorization: string): boolean {
  * bound to this URL's origin, this method and these exact bytes, spent once. Then `clubTurn`: a vault read or
  * a vault put, no model. A direct route rather than the task surface because a club page is drawn from this
  * answer on every load and the task machinery's seconds are not what a page-load should cost; the AUTHORITY is
- * the same wire either way. Body: `{ method: 'club.act', club, skill: 'club.read' | 'club.write', input }`.
+ * the same wire either way. Body: `{ method: 'club.act', club, skill: 'club.read' | 'club.write' | 'club.topic', input }`.
  */
 app.post('/clubs/act', async (c) => {
   const raw = await c.req.text();
@@ -2547,6 +2547,10 @@ app.post('/clubs/act', async (c) => {
     readRecords: async (subject, recordTypes) => {
       const out = await callInteractionsInternal(c.env, subject, 'internal.coordination.vaultQuery', { recordTypes }).catch(() => null);
       return (out as { records?: Record<string, unknown> } | null)?.records ?? {};
+    },
+    openTopic: async (subject, title) => {
+      const out = await callInteractionsInternal(c.env, subject, 'internal.channels.create', { title });
+      return { channelId: String(out.channelId), title: String(out.title ?? title), created: out.created === true };
     },
     ...(deps.nameOf ? { nameOf: deps.nameOf } : {}),
     ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}),

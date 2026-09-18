@@ -24,7 +24,10 @@ import { deriveStanding, membershipRows, type StandingDeps } from '@agenticprimi
 /** The two verbs. Selectors are not the gate (the wire pins `harness.ask`); the NAME is what this dispatches on. */
 export const CLUB_READ_SKILL = 'club.read' as const;
 export const CLUB_WRITE_SKILL = 'club.write' as const;
-export const CLUB_SKILLS = [CLUB_READ_SKILL, CLUB_WRITE_SKILL] as const;
+/** The club opens a TOPIC on its own board for a night (2026-09-18): the night's talk then lands where the club's
+ *  people already talk, as posts from each character's own agent. Idempotent by title. */
+export const CLUB_TOPIC_SKILL = 'club.topic' as const;
+export const CLUB_SKILLS = [CLUB_READ_SKILL, CLUB_WRITE_SKILL, CLUB_TOPIC_SKILL] as const;
 
 /** The three records, by the short name the card room uses on the wire. */
 export const CLUB_RECORDS = {
@@ -34,9 +37,9 @@ export const CLUB_RECORDS = {
 } as const;
 export type ClubRecordName = keyof typeof CLUB_RECORDS;
 
-export function clubSkillOf(skill: string | null | undefined): typeof CLUB_READ_SKILL | typeof CLUB_WRITE_SKILL | null {
+export function clubSkillOf(skill: string | null | undefined): (typeof CLUB_SKILLS)[number] | null {
   const s = (skill ?? '').toLowerCase();
-  return s === CLUB_READ_SKILL ? CLUB_READ_SKILL : s === CLUB_WRITE_SKILL ? CLUB_WRITE_SKILL : null;
+  return CLUB_SKILLS.find((k) => k === s) ?? null;
 }
 
 export interface ClubDeps extends StandingDeps {
@@ -45,6 +48,8 @@ export interface ClubDeps extends StandingDeps {
   /** The workspace's own record inventory and a batched read of chosen keys — how the roster is found. */
   survey: (subject: string) => Promise<Array<{ recordType: string }>>;
   readRecords: (subject: string, recordTypes: string[]) => Promise<Record<string, unknown>>;
+  /** The organization opens (or finds, by title) an open topic on its own board — `internal.channels.create`. */
+  openTopic?: (subject: string, title: string) => Promise<{ channelId: string; title: string; created: boolean }>;
   nameOf?: (address: string) => Promise<string | null>;
   /** A short in-isolate memo (the Worker's `remembered`, a minute): the founder's name and a POSITIVE standing are
    *  remembered — a club page is read several times a minute by the same person, and each derivation is a tree
@@ -123,6 +128,20 @@ export async function clubTurn(deps: ClubDeps, input: { caller: string; club: st
     if (founder && deps.nameOf) (out as ClubReadOut & { founderName?: string | null }).founderName = await remember(`name:${founder}`, () => deps.nameOf!(founder)).catch(() => null);
     console.log(`[club.read] ${Date.now() - t0}ms`);
     return { kind: 'answer', data: out as unknown as Record<string, unknown> };
+  }
+
+  // club.topic — the night's topic on the club's board, opened once and found by its title thereafter. The card
+  // room keeps the channel id on the night; the club's board keeps the talk.
+  if (skill === CLUB_TOPIC_SKILL) {
+    const title = typeof m.title === 'string' ? m.title.trim().slice(0, 80) : '';
+    if (!title) return { kind: 'refused', text: 'club.topic carries the topic\'s title' };
+    if (!deps.openTopic) return { kind: 'refused', text: 'this club cannot open topics here' };
+    try {
+      const t = await deps.openTopic(club, title);
+      return { kind: 'answer', data: { club, channelId: t.channelId, title: t.title, created: t.created } };
+    } catch (e) {
+      return { kind: 'refused', text: e instanceof Error ? e.message : String(e) };
+    }
   }
 
   // club.write — one of the three records, replaced whole. The card room composes the record; the club's
