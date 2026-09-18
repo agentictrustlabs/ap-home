@@ -1839,3 +1839,19 @@ input:not([type=checkbox]):not([type=radio]), select, textarea { border-color: v
 .ui-panel .ui-list { box-shadow: none; }
 /* the artifact drawer is wider — a document reads at 640 */
 .ui-drawer--wide { width: min(680px, 100vw); }
+
+/* ── /about — the public page (server-rendered; the same screen frame as the sign-in card) ──────────────── */
+.about-screen { justify-content: flex-start; padding-block: 2.5rem; }
+.about-page { width: 100%; max-width: 640px; display: flex; flex-direction: column; gap: 2rem; color: var(--color-text-body); }
+.about-hero { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 0.6rem; }
+.about-hero h1 { font-size: 2rem; margin: 0; letter-spacing: -0.01em; color: var(--color-text-primary); }
+.about-tagline { margin: 0; font-weight: 600; color: var(--color-text-muted); }
+.about-lede { margin: 0; max-width: 56ch; line-height: 1.55; }
+.about-cta { margin: 0.5rem 0 0; }
+.about-button { display: inline-block; padding: 0.7rem 1.2rem; border-radius: 999px; background: var(--color-amber-600); color: #fff; font-weight: 600; text-decoration: none; }
+.about-button:hover { filter: brightness(0.95); }
+.about-page section h2 { font-size: 1.15rem; margin: 0 0 0.5rem; color: var(--color-text-primary); }
+.about-page section p { margin: 0; line-height: 1.6; }
+.about-list { margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.6rem; line-height: 1.55; }
+.about-page a { color: var(--color-amber-700); }
+.about-page code { font-size: 0.9em; }

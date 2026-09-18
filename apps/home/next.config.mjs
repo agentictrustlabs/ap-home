@@ -1,3 +1,7 @@
+import { readdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 /** @type {import('next').NextConfig} */
 const DEMO_A2A_URL = process.env.DEMO_A2A_URL || 'https://demo-a2a-production.richardpedersen3.workers.dev';
 // spec 278 P5: the vault-key ceremony POSTs the signed VaultKeyAuthorization to demo-mcp's
@@ -37,6 +41,34 @@ const securityHeaders = [
   // and process-spectre surfaces.
   { key: 'Cross-Origin-Opener-Policy', value: 'same-origin-allow-popups' },
 ];
+
+// WHAT A SEARCH ENGINE MAY INDEX (src/seo/site.ts is the list of record; robots.txt and the sitemap read it).
+// A Home is private: every portal section shows a sign-in card to a visitor without a session, and the machine
+// doors are not pages. Rather than trust a crawler to honour robots.txt, every route that is NOT one of the
+// public three is stamped `X-Robots-Tag: noindex` — enumerated from the app directory at build time, so a
+// section added tomorrow is private by construction and never indexed as "Sign in to <brand>".
+const APP_DIR = join(dirname(fileURLToPath(import.meta.url)), 'app');
+const PUBLIC_TOP_LEVEL = new Set(['about', 'llms.txt', 'robots.ts', 'sitemap.ts', 'icon.tsx', 'opengraph-image.tsx']);
+const routeDirs = (dir) => readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith('_')).map((d) => d.name);
+const privateSections = [
+  ...routeDirs(APP_DIR).filter((n) => !n.startsWith('(') && !PUBLIC_TOP_LEVEL.has(n)),
+  ...routeDirs(join(APP_DIR, '(portal)')),
+  'a2a', // the rewrite to the runtime (not a page; never indexed)
+];
+const noindexHeaders = privateSections.map((section) => ({
+  source: `/${section}/:path*`,
+  headers: [{ key: 'X-Robots-Tag', value: 'noindex, nofollow' }],
+}));
+
+// ONE canonical host. `NEXT_PUBLIC_HOME_ORIGIN` (src/lib/domain.ts) names the origin a Home is known by; when it
+// is set, the other of apex/`www.` redirects to it permanently so the site indexes once. Unset ⇒ no redirect.
+const HOME_ORIGIN = (process.env.NEXT_PUBLIC_HOME_ORIGIN || '').replace(/\/$/, '');
+const canonicalHostRedirects = (() => {
+  if (!HOME_ORIGIN) return [];
+  const host = new URL(HOME_ORIGIN).host;
+  const other = host.startsWith('www.') ? host.slice(4) : `www.${host}`;
+  return [{ source: '/:path*', has: [{ type: 'host', value: other }], destination: `${HOME_ORIGIN}/:path*`, permanent: true }];
+})();
 
 const nextConfig = {
   reactStrictMode: true,
@@ -78,12 +110,16 @@ const nextConfig = {
       { source: '/mcp-bind/:path*', destination: `${DEMO_MCP_URL}/:path*` },
     ];
   },
+  async redirects() {
+    return canonicalHostRedirects;
+  },
   async headers() {
     return [
       {
         source: '/(.*)',
         headers: securityHeaders,
       },
+      ...noindexHeaders,
       // Remote-signer arrival (?signer=remote&opener=<allowlisted> on the front door only): the
       // opener relationship IS the transport — the relying app's tab holds the demo persona's key
       // and signs over postMessage (src/lib/remote-signer.ts, exact-origin gated). COOP
