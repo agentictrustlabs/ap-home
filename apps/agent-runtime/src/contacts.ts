@@ -97,7 +97,7 @@ export const CONTACT_RECORD_PREFIX = 'contact:';
 export const contactRecordType = (contact: string): string => `${CONTACT_RECORD_PREFIX}${contact.toLowerCase()}`;
 
 export interface ContactDeps {
-  env: { CHAIN_ID?: string; DELEGATION_MANAGER?: string; HARNESS_AGENT_SA?: string; VAULT_SERVER_ID?: string; TIMESTAMP_ENFORCER?: string; VALUE_ENFORCER?: string; DIGEST_BINDING_ENFORCER?: string };
+  env: { CHAIN_ID?: string; DELEGATION_MANAGER?: string; HARNESS_AGENT_SA?: string; VAULT_SERVER_ID?: string; TIMESTAMP_ENFORCER?: string; VALUE_ENFORCER?: string; DIGEST_BINDING_ENFORCER?: string; CONTRACTS_GENERATION?: string };
   enforcers: { timestamp: Address; value: Address; digestBinding: Address };
   vaultServerId: string;
   readSubjectRecord?: (subject: string, recordType: string) => Promise<unknown>;
@@ -110,9 +110,10 @@ export interface ContactDeps {
   /** The person's SA executes a call under their redeemed mandate (the revoke) — the same path access.grant.revoke uses. */
   executeAsServiceSa?: (serviceSa: Address, callData: Hex) => Promise<{ txHash: string }>;
   /** The mandate's digest-binding caveat argued for THIS step (the harness's own helper, injected). */
-  digestBindingArgsFor: (caveat: Caveat, digests: { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex }) => Hex;
-  /** Spec 408 §1.4/§2.3 — the digests a step presents at redemption, with its single-use nonce and the plan digest. */
-  stepDigests: (args: Record<string, unknown>, intent: Hex, stepRef: string, plan?: Hex) => { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex };
+  digestBindingArgsFor: (caveat: Caveat, digests: { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex; generation?: 1 | 2 }) => Hex;
+  /** Spec 408 §1.4/§2.3 — the digests a step presents at redemption, with its single-use nonce, the plan digest and
+   *  the estate's contract generation (1 ⇒ the digest alone). */
+  stepDigests: (args: Record<string, unknown>, intent: Hex, stepRef: string, plan?: Hex, generation?: 1 | 2) => { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex; generation: 1 | 2 };
 }
 
 const roleOf = (raw: unknown): ContactRole => {
@@ -229,7 +230,7 @@ export function contactRemoveInvoker(deps: ContactDeps, presented: MandatePresen
     const digest = intentDigest(ctx.intent);
     const stepRef = ctx.step.id ?? `s${ctx.index}`;
     const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === deps.enforcers.digestBinding.toLowerCase()
-      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: deps.digestBindingArgsFor(c as Caveat, deps.stepDigests(args, digest, stepRef, ctx.planDigest as Hex | undefined)) }
+      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: deps.digestBindingArgsFor(c as Caveat, deps.stepDigests(args, digest, stepRef, ctx.planDigest as Hex | undefined, deps.env.CONTRACTS_GENERATION === '2' ? 2 : 1)) }
       : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
     const redeem = encodeFunctionData({ abi: REDEEM_ABI, functionName: 'redeemDelegation', args: [[{ delegator: wire.delegator, delegate: wire.delegate, authority: wire.authority as Hex, caveats, salt: wire.salt, signature: wire.signature as Hex }], dm, 0n, inner] });
     const callData = encodeFunctionData({ abi: EXECUTE_ABI, functionName: 'execute', args: [dm, 0n, redeem] });

@@ -34,7 +34,7 @@ describe('routines from a sentence (spec 402 W3)', () => {
     expect(l.count).toBe(1); expect(l.answer).toContain("what's on my calendar");
     const room = await routineInvoker(st, ALICE, '0x' + 'c'.repeat(40), ask, supplied)(ROUTINE_LIST, {}, ctx('x')) as { refused?: string };
     expect(room.refused).toMatch(/your own agent/);
-    const rm = await inv(ROUTINE_REMOVE, { words: 'calendar' }, ctx('stop it')) as { removed: boolean };
+    const rm = await inv(ROUTINE_REMOVE, { words: 'calendar' }, ctx('stop the calendar one')) as { removed: boolean };
     expect(rm.removed).toBe(true); expect(st.rows).toHaveLength(0);
     expect((st.vault.get(`${ALICE.toLowerCase()}:routines.data`) as { entries: unknown[] }).entries).toHaveLength(0);
   });

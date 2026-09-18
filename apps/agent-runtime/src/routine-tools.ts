@@ -7,6 +7,7 @@
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import { routinesOf, keepRoutine, dropRoutine, ROUTINES_RECORD, type DeclaredRoutineV1 } from '@agenticprimitives/context';
 import { parseRoutineSentence, routineWords } from './routine-sentence.js';
+import { requirePersonsTurn } from './persons-turn.js';
 import type { TriggerScheduleV1 } from './triggers.js';
 
 export const ROUTINE_DECLARE = 'person.routine.declare' as const;
@@ -80,6 +81,8 @@ export function routineInvoker(deps: RoutineDeps, person: string | undefined, ad
       case ROUTINE_LIST:
         return { count: mine.length, routines: mine.map((r) => ({ id: r.triggerId, name: r.declared?.name, when: r.declared?.when, every: r.every, once: r.kind === 'once', ask: r.ask, nextAt: r.nextAt ? new Date(r.nextAt).toISOString() : null, paused: !!r.paused, last: r.lastOutcome ? { outcome: r.lastOutcome, at: r.lastAt ? new Date(r.lastAt).toISOString() : null, said: r.lastSaid } : null })), answer: mine.length ? mine.map((r) => `— ${r.declared?.when ?? r.every}: ${r.ask}${r.nextAt ? ` (next ${new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(r.nextAt)})` : ''}${r.paused ? ' — paused' : ''}`).join('\n') : 'You have no routines yet — say "every Monday at 8, tell me what\'s on my calendar".' };
       case ROUTINE_REMOVE: {
+        // Spec 409 §4 (R917-H-5): a routine is removed on the PERSON'S turn, by words she used or by id after a read-back.
+        requirePersonsTurn({ ctx, toolId, what: 'remove a routine', ...(typeof args.words === 'string' && args.words.trim() ? { saidWords: args.words } : {}) });
         const id = typeof args.id === 'string' ? args.id : '';
         const words = String(args.words ?? '').trim().toLowerCase();
         const target = id ? mine.find((r) => r.triggerId === id) : words ? mine.find((r) => r.ask.toLowerCase().includes(words) || (r.declared?.saidAs ?? '').toLowerCase().includes(words)) : undefined;

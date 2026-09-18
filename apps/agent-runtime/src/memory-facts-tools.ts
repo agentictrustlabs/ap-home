@@ -6,6 +6,7 @@
 // Home MCP, a paired runtime — because each asks the same agent; an organization's agent does not read it.
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import { rememberFact, forgetFact, factsOf, FACTS_RECORD, type RememberedFactsV1 } from '@agenticprimitives/context';
+import { requirePersonsTurn } from './persons-turn.js';
 
 export const MEMORY_REMEMBER = 'person.memory.remember' as const;
 export const MEMORY_LIST = 'person.memory.list' as const;
@@ -68,6 +69,9 @@ export function memoryFactsInvoker(deps: MemoryFactsDeps, person: string | undef
         return { tier: 'private', record: FACTS_RECORD, count: prev.entries.length, facts: prev.entries.map((e) => ({ id: e.id, fact: e.fact, learnedAt: e.learnedAt, source: e.source, ...(e.from ? { from: e.from } : {}), ...(e.tags?.length ? { tags: e.tags } : {}) })), answer: prev.entries.length ? prev.entries.slice(0, 20).map((e) => `— ${e.fact} (${e.source === 'you' ? 'you told me' : e.source === 'agent' ? 'I learned' : `from ${e.from ?? 'a connected account'}`} ${e.learnedAt.slice(0, 10)})`).join('\n') : 'I remember nothing about you yet — say "remember that …" and I will.' };
       case MEMORY_REMEMBER: {
         const said = String((ctx.intent as { goal?: string }).goal ?? '');
+        // Spec 409 §4 (R917-H-1): a fact is written on the PERSON'S turn, in her words, or it is read back first —
+        // never by an unattended run, never on words the planner took from a page or a server.
+        requirePersonsTurn({ ctx, toolId, what: `remember "${String(args.fact ?? '').slice(0, 160)}"`, saidWords: String(args.fact ?? '') });
         // Spec 402 W5b — a fact read off her connected account and CONFIRMED by her is kept as the connector's, named:
         // the card says "from Google Calendar", never "you told me". Only she can say so (this tool is hers alone).
         const from = typeof args.from === 'string' && args.from.trim() ? args.from.trim().slice(0, 60) : undefined;
@@ -79,6 +83,7 @@ export function memoryFactsInvoker(deps: MemoryFactsDeps, person: string | undef
         return { remembered: true, updated: r.updated, id: r.entry.id, fact: r.entry.fact, tier: 'private', record: FACTS_RECORD, count: r.next.entries.length, note: r.updated ? 'I already had that — refreshed.' : 'Kept in your own vault; forget it any time on Memory.' };
       }
       case MEMORY_FORGET: {
+        requirePersonsTurn({ ctx, toolId, what: 'forget a remembered fact', ...(typeof args.words === 'string' && args.words.trim() ? { saidWords: args.words } : {}) });
         const id = typeof args.id === 'string' && args.id ? args.id : null;
         const words = String(args.words ?? '').trim().toLowerCase();
         const target = id ? prev.entries.find((e) => e.id === id) : words ? prev.entries.find((e) => e.fact.toLowerCase().includes(words)) : undefined;

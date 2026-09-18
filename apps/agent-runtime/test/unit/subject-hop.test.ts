@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { subjectAsk, AP_SUBJECT_ASK_EXTENSION_URI } from '@agenticprimitives/a2a';
 import type { AgentCardV1 } from '@agenticprimitives/a2a/standard';
+import { markInWorker } from '../../src/internal-marker.js';
 import { standardServerFor } from '../../src/standard-a2a.js';
 import { sendSubjectAskOverWire, a2aEndpointOf, subjectAskOf, subjectAskMessage } from '@agenticprimitives/a2a';
 import { readSubjectReply } from '../../src/harness-run.js';
@@ -150,10 +151,11 @@ describe('the delivered answer', () => {
         return answer.inResponseTo.operationId === 'run-bob:s0' ? { ok: true, runRef: 'run-bob', said: 'The invitation went out.' } : { ok: false, reason: 'no run waits on that' };
       },
     });
-    const send = (answer: unknown, headers: Record<string, string>) => server.handle(new Request('https://bob.faithnet.ai/api/a2a', {
+    // R917-E-4 (spec 409 §6): the in-Worker door is the in-isolate mark on the Request, never the header.
+    const send = (answer: unknown, headers: Record<string, string>, inWorker = true) => server.handle((inWorker ? markInWorker : (r: Request) => r)(new Request('https://bob.faithnet.ai/api/a2a', {
       method: 'POST', headers: { 'content-type': 'application/json', 'a2a-version': '1.0', ...headers },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'SendMessage', params: { message: subjectAnswerMessage(answer as never) } }),
-    })).then((r) => r.json() as Promise<{ result?: { task?: { status: { state: string; message?: { parts: Array<{ text?: string }> } } } }; error?: { code: number } }>);
+    }))).then((r) => r.json() as Promise<{ result?: { task?: { status: { state: string; message?: { parts: Array<{ text?: string }> } } } }; error?: { code: number } }>);
 
     // The debtor, through the marker: the run resumes.
     const ok = await send(delivered, { 'x-ap-internal': MARKER, 'x-ap-internal-agent': CHURCH });
@@ -165,9 +167,12 @@ describe('the delivered answer', () => {
     expect(none.result?.task?.status.state).toBe('TASK_STATE_REJECTED');
     expect(none.result?.task?.status.message?.parts[0]?.text).toMatch(/nothing this agent is waiting on/);
 
-    // Naming an agent WITHOUT the marker is nobody: the door stays shut before any method runs.
-    const shut = await send(delivered, { 'x-ap-internal-agent': CHURCH });
+    // Naming an agent WITHOUT the mark is nobody: the door stays shut before any method runs — and the header
+    // alone, over a socket, even with the right value, is not the mark (R917-E-4).
+    const shut = await send(delivered, { 'x-ap-internal-agent': CHURCH }, false);
     expect(shut.error?.code ?? 0).not.toBe(0);
+    const spoofed = await send(delivered, { 'x-ap-internal': MARKER, 'x-ap-internal-agent': CHURCH }, false);
+    expect(spoofed.error?.code ?? 0).not.toBe(0);
     expect(calls.length).toBe(2);
   });
 });

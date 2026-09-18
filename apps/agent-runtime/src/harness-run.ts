@@ -31,6 +31,7 @@
 // the service SA executes `execute(DM, 0, redeem…)` and the DM calls back into the payer SA. No key for
 // the payer is ever held here; the mandate is the only authority, and it is checked per step, on chain
 // AND off.
+import { contractsGenerationOf, type ContractsGeneration } from '@agenticprimitives/agent-account';
 import { CONTACT_FIELDS, CONTACT_FIELD_ARGS } from '@agenticprimitives/ontology';
 import { bindSelectedOffer, type SelectedOfferBindingV1 } from './engagement-campaign.js';
 import type { TriggerV1 } from '@agenticprimitives/capability-claims';
@@ -111,6 +112,8 @@ import { vaultServerId } from './vault-server-id.js';
 
 
 export interface HarnessEnv {
+  /** Spec 408 — the estate's contract generation ("1" pre-spec-408, "2" spec 408); absent ⇒ "1". */
+  CONTRACTS_GENERATION?: string;
   /** Spec 397 W2 — the ARD registry this agent finds other agents in (`POST /search`); absent ⇒ no find tool. */
   ARD_REGISTRY_ORIGIN?: string;
   /** The Home origins this agent serves — the first is used for links a person can follow. */
@@ -1332,21 +1335,23 @@ async function refuseUnlessTreasury(deps: HarnessDeps, agent: string, end: strin
  * admitted the step. The step's own digests are what is presented; a kind the step cannot present is refused
  * here, before a transaction is sent.
  */
-function digestBindingArgsFor(c: Caveat, digests: { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex }): Hex {
+function digestBindingArgsFor(c: Caveat, digests: { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex; generation?: ContractsGeneration }): Hex {
   const { kind } = decodeDigestBindingTerms(c.terms as Hex);
   const presented = kind === 'intent' ? digests.intent : kind === 'offer' ? digests.offer : kind === 'plan' ? digests.plan : digests.projection;
   if (!presented) throw new Error(`the mandate binds ${kind === 'offer' ? 'an offer' : kind === 'plan' ? 'a plan' : 'a projection'} this step does not name — nothing was redeemed`);
-  // R917-C-4 (spec 408 §1.4): the step's nonce rides with the digest, so THIS step redeems once on chain.
-  return encodeDigestBindingArgs(presented, digests.stepNonce);
+  // R917-C-4 (spec 408 §1.4): the step's nonce rides with the digest, so THIS step redeems once on chain — on a
+  // generation-2 estate. Generation 1's enforcer takes the digest alone (a deployment fact, never a retry).
+  return encodeDigestBindingArgs(presented, digests.generation === 1 ? { generation: 1 } : { generation: 2, stepNonce: digests.stepNonce });
 }
 /** The digests a step presents at redemption, and its single-use nonce (`keccak256("<intentDigest>:<stepRef>")` —
  *  the payment nonce's own derivation). `plan` is the digest of the plan this run executes (spec 408 §2.3). */
-const stepDigests = (args: Record<string, unknown>, intent: Hex, stepRef: string, plan?: Hex): { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex } => ({
+const stepDigests = (args: Record<string, unknown>, intent: Hex, stepRef: string, plan?: Hex, generation: ContractsGeneration = 2): { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex; generation: ContractsGeneration } => ({
   intent,
   ...(typeof args.offerDigest === 'string' && /^0x[0-9a-fA-F]{64}$/.test(args.offerDigest) ? { offer: args.offerDigest as Hex } : {}),
   ...(typeof args.projectionDigest === 'string' && /^0x[0-9a-fA-F]{64}$/.test(args.projectionDigest) ? { projection: args.projectionDigest as Hex } : {}),
   ...(plan ? { plan } : {}),
   stepNonce: digestBindingStepNonce(intent, stepRef),
+  generation,
 });
 
 async function partyAddress(value: unknown, deps: HarnessDeps, what: string): Promise<Address> {
@@ -1401,7 +1406,7 @@ export function fundInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Manda
     const amount = fundingAmount(args);
     const digest = intentDigest(ctx.intent);
     const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === harnessEnforcers(env).digestBinding.toLowerCase()
-      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest, ctx.step.id ?? `s${ctx.index}`, ctx.planDigest as Hex | undefined)) }
+      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest, ctx.step.id ?? `s${ctx.index}`, ctx.planDigest as Hex | undefined, contractsGenerationOf({ contractsGeneration: env.CONTRACTS_GENERATION }))) }
       : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
     const mint = encodeFunctionData({ abi: MINT_ABI, functionName: 'mint', args: [treasury, amount] });
     const redeem = encodeFunctionData({ abi: REDEEM_ABI, functionName: 'redeemDelegation', args: [[{ delegator: wire.delegator, delegate: wire.delegate, authority: wire.authority as Hex, caveats, salt: wire.salt, signature: wire.signature as Hex }], asset, 0n, mint] });
@@ -1502,7 +1507,7 @@ export function primaryPayeeInvoker(deps: HarnessDeps, env: HarnessEnv, presente
       // R917-C-4: one step, several redemptions (clear the previous primary, mark the new one) — each is its own
       // single-use nonce (`<stepRef>#<k>`), so a replay of the step reverts on chain and the two calls do not.
       const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === harnessEnforcers(env).digestBinding.toLowerCase()
-        ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest, `${ctx.step.id ?? `s${ctx.index}`}#${k}`, ctx.planDigest as Hex | undefined)) }
+        ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest, `${ctx.step.id ?? `s${ctx.index}`}#${k}`, ctx.planDigest as Hex | undefined, contractsGenerationOf({ contractsGeneration: env.CONTRACTS_GENERATION }))) }
         : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
       const redeem = encodeFunctionData({ abi: REDEEM_ABI, functionName: 'redeemDelegation', args: [[{ delegator: wire.delegator, delegate: wire.delegate, authority: wire.authority as Hex, caveats, salt: wire.salt, signature: wire.signature as Hex }], call.target, 0n, call.data] });
       const callData = encodeFunctionData({ abi: EXECUTE_ABI, functionName: 'execute', args: [dm, 0n, redeem] });
@@ -1573,7 +1578,7 @@ export function accessRevokeInvoker(deps: HarnessDeps, env: HarnessEnv, presente
     const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
     const digest = intentDigest(ctx.intent);
     const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === harnessEnforcers(env).digestBinding.toLowerCase()
-      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest, ctx.step.id ?? `s${ctx.index}`, ctx.planDigest as Hex | undefined)) }
+      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest, ctx.step.id ?? `s${ctx.index}`, ctx.planDigest as Hex | undefined, contractsGenerationOf({ contractsGeneration: env.CONTRACTS_GENERATION }))) }
       : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
     // The person's own SA makes the call (the DelegationManager only lets the owner revoke), reached by
     // redeeming their mandate — the same shape a payment uses, with the target being the manager itself.
@@ -2134,7 +2139,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     const caveats = wire.caveats.map((c) => {
       const e = c.enforcer.toLowerCase();
       if (e === enforcers.payment!.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: paymentArgs };
-      if (e === enforcers.digestBinding.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest, stepRef, ctx.planDigest as Hex | undefined)) };
+      if (e === enforcers.digestBinding.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest, stepRef, ctx.planDigest as Hex | undefined, contractsGenerationOf({ contractsGeneration: env.CONTRACTS_GENERATION }))) };
       return { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex };
     });
     // Again, at the moment of acting: the balance may have moved since the preview, and a revert with no
@@ -2154,7 +2159,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
       const linkCaveats = link.caveats.map((c) => {
         const e = c.enforcer.toLowerCase();
         if (e === enforcers.payment!.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: encodeAbiParameters([{ type: 'bytes32' }, { type: 'bytes32' }, { type: 'bytes32' }], [bound, nonce, keccak256(toBytes(`${hashDelegation(link, Number(env.CHAIN_ID), dm)}:${stepRef}`))]) };
-        if (e === enforcers.digestBinding.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, bound, stepRef, ctx.planDigest as Hex | undefined)) };
+        if (e === enforcers.digestBinding.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, bound, stepRef, ctx.planDigest as Hex | undefined, contractsGenerationOf({ contractsGeneration: env.CONTRACTS_GENERATION }))) };
         return { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex };
       });
       chain.push({ delegator: link.delegator, delegate: link.delegate, authority: link.authority as Hex, caveats: linkCaveats, salt: link.salt, signature: link.signature as Hex });
@@ -5136,7 +5141,9 @@ step is then handed to that agent under authority the person grants; leave it ou
       ]),
       // spec 360 — what the playbook promised FOLLOWS a successful step. Isolated by the loop: an effect
       // that cannot be delivered never fails the act that produced it.
-      effectSink: declaredEffectSink(
+      // R917-H-4 (spec 409 §8): a REPLAY re-derives verdicts and runs nothing — so nothing follows it either. A
+      // replayed payment re-writing the payee's receipt and re-sending the DM was an effect with no act behind it.
+      ...(input.replayOf ? {} : { effectSink: declaredEffectSink(
         {
           ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}),
           ...(deps.sendDirectMessage ? { sendDirectMessage: deps.sendDirectMessage } : {}),
@@ -5159,7 +5166,7 @@ step is then handed to that agent under authority the person grants; leave it ou
           },
         },
         { ...(input.session ? { session: input.session } : {}), ...(env.MOCK_USDC ? { usdc: env.MOCK_USDC } : {}), ...(input.person ? { person: input.person } : {}) },
-      ),
+      ) }),
     },
     // WHOSE PLAYBOOK DECLARES WHAT FOLLOWS — spec 360, resolved PER STEP.
     //

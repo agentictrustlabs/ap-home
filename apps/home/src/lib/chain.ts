@@ -13,6 +13,7 @@
 // deployments module so a contracts redeploy auto-propagates here without any per-app sync (this
 // used to require touching three chain.ts files in lockstep — see 2026-06-01 deploy session).
 
+import { contractsGenerationOf } from '@agenticprimitives/agent-account';
 import { defineChain, type Chain } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import type { Address } from '@agenticprimitives/types';
@@ -112,6 +113,10 @@ const addr = (k: string): Address => (DEPLOYED[k] ?? '0x000000000000000000000000
 /** Deployed contracts for CHAIN_ID. Single source of truth: `packages/contracts/deployments-<network>.json`
  *  (Base Sepolia via the `@agenticprimitives/contracts/deployments/base-sepolia` subpath; anything else via
  *  NEXT_PUBLIC_CONTRACTS_JSON). Keys absent from a local deployment resolve to the zero address. */
+/** Spec 408 — the contract generation this estate runs (1 pre-spec-408, 2 spec 408): a deployment fact read from the
+ *  deployments JSON, never inferred from a failed read. */
+export const CONTRACTS_GENERATION = contractsGenerationOf(DEPLOYED as { contractsGeneration?: unknown });
+
 export const CONTRACTS = {
   entryPoint: addr('entryPoint'),
   agentAccountFactory: addr('agentAccountFactory'),

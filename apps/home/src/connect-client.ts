@@ -24,7 +24,7 @@ import {
   buildExecuteBatchCallData,
   AgentAccountClient,
   buildApproveHashCall as buildApproveHashKeyCall,
-  readCustodyEpoch,
+  readApprovalScheme,
   type ContractCall,
 } from '@agenticprimitives/agent-account';
 import {
@@ -42,7 +42,7 @@ import { x402, computeMandateId, type PaymentMandate, type Hex32 } from '@agenti
 import { connectWallet, connectWalletAccounts, personalSign, rememberHomeEoa, recallHomeEoa, connectedAccountsSilent, rememberSessionCustodian, recallSessionCustodian } from './lib/wallet';
 import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, connectAssertionDiscoverable, loadPasskey, clearPasskey, passkeyRpId, type DemoPasskey } from './lib/passkey';
 import { ensureCsrfToken, csrfHeaders } from './csrf';
-import { CONTRACTS, DEFAULT_RPC_URL, CHAIN, CHAIN_ID, PERMISSIONLESS_SUBREGISTRIES } from './lib/chain';
+import { CONTRACTS, CONTRACTS_GENERATION, DEFAULT_RPC_URL, CHAIN, CHAIN_ID, PERMISSIONLESS_SUBREGISTRIES } from './lib/chain';
 import { buildRegisterEntryCall, hashBindingProofBody, type RegistryId, type RegistryEntryId } from '@agenticprimitives/registry-kit';
 import { hashAgentCard, type AgentCard, agentProfileResolverAbi, buildRegisterProfileCall } from '@agenticprimitives/agent-profile';
 import { recordOrgMembership } from './lib/org-membership';
@@ -1022,7 +1022,7 @@ async function buildClaimCallData(
  *  deploy-time builder may assume. A DEPLOYED account approves through `approveGrantHashes`, which reads
  *  its current epoch first. */
 function buildApproveHashCall(digest: Hex): ContractCall {
-  return buildApproveHashKeyCall(CONTRACTS.approvedHashRegistry, digest, 0n);
+  return buildApproveHashKeyCall(CONTRACTS.approvedHashRegistry, digest, CONTRACTS_GENERATION === 1 ? { generation: 1 } : { generation: 2, epoch: 0n });
 }
 
 /** B4 — pre-approve a set of the DELEGATOR's own grant digests in ONE userOp on the delegator SA: batch an
@@ -1038,8 +1038,8 @@ export async function approveGrantHashes(
   if (digests.length === 0) return { ok: true };
   // R917-C-2: a deployed account approves under its CURRENT custody epoch (0 if it has no code yet).
   const pc = createPublicClient({ chain: CHAIN, transport: http(DEFAULT_RPC_URL) });
-  const epoch = await readCustodyEpoch(pc, delegator);
-  const callData = buildExecuteBatchCallData(digests.map((d) => buildApproveHashKeyCall(CONTRACTS.approvedHashRegistry, d, epoch)));
+  const scheme = await readApprovalScheme(pc, delegator, CONTRACTS_GENERATION);
+  const callData = buildExecuteBatchCallData(digests.map((d) => buildApproveHashKeyCall(CONTRACTS.approvedHashRegistry, d, scheme)));
   const res = await executeCall(delegator, signHash, callData);
   return res.ok ? { ok: true } : { ok: false, error: res.error };
 }

@@ -108,6 +108,10 @@ export interface HarnessRunCheckpointV1 {
    *  message on that thread opened it. What a later mention on the same thread finds the run by: a run parked for
    *  DATA there takes the mention as its answer instead of a new run opening beside it. */
   thread?: string;
+  /** Spec 409 §5 (R917-E-2) — the SENDER whose message opened this run on its thread. A later message on the thread
+   *  continues the run only from this sender; anyone else's words open a run of their own, never answer a question
+   *  this one asked. */
+  threadPeer?: string;
   createdAt: number;
   updatedAt: number;
 }

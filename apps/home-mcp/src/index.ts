@@ -38,6 +38,14 @@ export interface Env {
   TOKEN_SECRET?: string;
 }
 
+/** R917-E-5 (spec 409 §7) — the secret that seals every connected person's wire. FAIL CLOSED: unset or empty is an
+ *  error, never a literal (`'unset'` once stood in, so an unprovisioned Worker sealed wires anyone could open). */
+function tokenSecret(env: Pick<Env, 'TOKEN_SECRET'>): string {
+  const v = (env.TOKEN_SECRET ?? '').trim();
+  if (!v) throw new Error('TOKEN_SECRET is not provisioned — the Home MCP seals no wire and serves no connection until it is (spec 409 §7)');
+  return v;
+}
+
 const app = new Hono<{ Bindings: Env }>();
 const SERVER_INFO = { name: SERVER.name, version: SERVER.version };
 const CAPABILITIES = { tools: { listChanged: false }, resources: { subscribe: false, listChanged: false } };
@@ -120,7 +128,7 @@ async function connectFromHome(env: Env, exchange: { id_token?: string; delegati
   // The wire is OURS to hold only if it names this Worker's key as delegate and the person as delegator.
   if (wire.delegator.toLowerCase() !== agent) return { ok: false, error: 'the delegation is not the connecting person\'s' };
   if (!key || wire.delegate.toLowerCase() !== key) return { ok: false, error: 'the delegation does not name this Home MCP\'s key' };
-  const kek = await kekFrom(env.TOKEN_SECRET ?? 'unset');
+  const kek = await kekFrom(tokenSecret(env));
   const sealed = await sealWire(kek, wire);
   const prior = await store(env).getPerson(v.claims.sub);
   // A person's clients are bounded: a registration is unprivileged, and a wire is worth guarding from being handed to
@@ -183,7 +191,7 @@ app.post('/oauth/revoke', async (c) => revokeEndpoint(c.env, store(c.env), new U
 async function personOf(env: Env, sub: string): Promise<Person | null> {
   const row = await store(env).getPerson(sub);
   if (!row || !env.HOME_MCP_PRIVATE_KEY) return null;
-  const wire = await openWire(await kekFrom(env.TOKEN_SECRET ?? 'unset'), row.wire_enc, row.wire_iv);
+  const wire = await openWire(await kekFrom(tokenSecret(env)), row.wire_enc, row.wire_iv);
   return { sub, identity: { agent: row.agent, privateKey: env.HOME_MCP_PRIVATE_KEY as Hex, wire }, ...(row.agent_name ? { agentName: row.agent_name } : {}) };
 }
 

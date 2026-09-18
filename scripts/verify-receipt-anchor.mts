@@ -25,7 +25,10 @@ const post = async (path: string, body: unknown) => j(await fetch(`${HOME}/a2a${
 // The same canonical form the runtime digests (stable keys, no whitespace, undefineds dropped) — a holder needs no library.
 const stable = (v: unknown): string => v === null || typeof v !== 'object' ? JSON.stringify(v) : Array.isArray(v) ? `[${v.map(stable).join(',')}]` : `{${Object.keys(v as object).sort().filter((k) => (v as Record<string, unknown>)[k] !== undefined).map((k) => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`).join(',')}}`;
 const digestOf = (bundle: unknown): Hex => keccak256(toBytes(stable(bundle)));
-const ANCHOR_ABI = [{ type: 'function', name: 'anchorOf', stateMutability: 'view', inputs: [{ name: 'anchoredBy', type: 'address' }, { name: 'receiptDigest', type: 'bytes32' }], outputs: [{ type: 'tuple', components: [{ name: 'anchoredBy', type: 'address' }, { name: 'at', type: 'uint64' }, { name: 'intentDigest', type: 'bytes32' }, { name: 'mandateRef', type: 'bytes32' }] }] }] as const;
+const GEN = process.env.CONTRACTS_GENERATION === '2' ? 2 : 1; // spec 408: the estate's contract generation (faithchain runs 1 until its registry is redeployed)
+const ANCHOR_ABI = GEN === 2
+  ? [{ type: 'function', name: 'anchorOf', stateMutability: 'view', inputs: [{ name: 'anchoredBy', type: 'address' }, { name: 'receiptDigest', type: 'bytes32' }], outputs: [{ type: 'tuple', components: [{ name: 'anchoredBy', type: 'address' }, { name: 'at', type: 'uint64' }, { name: 'intentDigest', type: 'bytes32' }, { name: 'mandateRef', type: 'bytes32' }] }] }]
+  : [{ type: 'function', name: 'anchorOf', stateMutability: 'view', inputs: [{ name: 'receiptDigest', type: 'bytes32' }], outputs: [{ type: 'tuple', components: [{ name: 'anchoredBy', type: 'address' }, { name: 'at', type: 'uint64' }, { name: 'intentDigest', type: 'bytes32' }, { name: 'mandateRef', type: 'bytes32' }] }] }] as const;
 console.log(`── receipt anchor · ${fx.people.steward} ${me.agent} ──`);
 
 // ── 1. a read; its export anchors the bundle ──
@@ -48,13 +51,14 @@ const RPC = process.env.RPC_URL;
 if (RPC) {
   const chain = defineChain({ id: 34348, name: 'faithchain', nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 }, rpcUrls: { default: { http: [RPC] } } });
   const client = createPublicClient({ chain, transport: http(RPC) });
-  const a = await client.readContract({ address: pub.anchor.registry as Hex, abi: ANCHOR_ABI, functionName: 'anchorOf', args: [pub.anchor.anchoredBy as Hex, recomputed] });
+  const readAnchor = (digest: Hex) => client.readContract({ address: pub.anchor.registry as Hex, abi: ANCHOR_ABI as never, functionName: 'anchorOf', args: (GEN === 2 ? [pub.anchor.anchoredBy as Hex, digest] : [digest]) as never } as never) as Promise<{ anchoredBy: Hex; at: bigint; intentDigest: Hex }>;
+  const a = await readAnchor(recomputed);
   if (a.anchoredBy.toLowerCase() !== pub.anchor.anchoredBy.toLowerCase() || !a.at) fail(`the chain does not hold the anchor as projected: ${JSON.stringify(a)}`);
   const rcpt = await client.getTransactionReceipt({ hash: pub.anchor.txHash });
   console.log(`  chain: anchorOf(agent, digest) → by ${a.anchoredBy.slice(0, 10)}… at ${new Date(Number(a.at) * 1000).toISOString()} · intent ${a.intentDigest.slice(0, 14)}… · tx ${rcpt.status} in block ${rcpt.blockNumber}`);
   // ── 3. the twin: a tampered bundle is not anchored ──
   const tampered = digestOf({ ...(doc as object), tampered: true });
-  const t = await client.readContract({ address: pub.anchor.registry as Hex, abi: ANCHOR_ABI, functionName: 'anchorOf', args: [pub.anchor.anchoredBy as Hex, tampered] });
+  const t = await readAnchor(tampered);
   if (t.anchoredBy !== '0x0000000000000000000000000000000000000000') fail('a tampered bundle found an anchor');
   console.log('  twin: a bundle altered in transit → no anchor on the chain');
 } else console.log('  chain: NOT CHECKED — set RPC_URL to a node of chain 34348 to read anchorOf(agent, digest) yourself (the digest equality above is the gate here)');

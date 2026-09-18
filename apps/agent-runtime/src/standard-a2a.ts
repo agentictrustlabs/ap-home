@@ -52,7 +52,7 @@ import {
   settlementForReplyKind, settleTask,
   type AgentCardV1, type ExecutionContext, type Principal, type StandardServer, type SessionWirePrincipalDeps, type StandardTaskStore, type DelegatedRpc,
 } from '@agenticprimitives/a2a/standard';
-import { internalHeaders, isInternalCall, type InternalMarkerEnv } from './internal-marker.js';
+import { internalHeaders, markInWorker, isInWorkerRequest, type InternalMarkerEnv } from './internal-marker.js';
 import { subjectAskOf, subjectAnswerOf, handoffOf, routedRunRefFor, SUBJECT_ANSWER_ARTIFACT, type HandoffV1, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
 
 export interface StandardMountDeps {
@@ -145,7 +145,9 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
       first: (request) => {
         const internalAgent = request.headers.get('x-ap-internal-agent');
         if (!internalAgent || !/^0x[0-9a-fA-F]{40}$/.test(internalAgent)) return undefined;
-        return isInternalCall(request, deps.env) ? { kind: 'agent', agent: internalAgent.toLowerCase() } : null;
+        // R917-E-4 (spec 409 §6): the in-isolate MARK, never the header — a request over a socket can name an
+        // agent in a header, but it cannot be in this isolate's WeakSet.
+        return isInWorkerRequest(request) ? { kind: 'agent', agent: internalAgent.toLowerCase() } : null;
       },
       wire: byWire,
       bearer: async (token) => { const who = await deps.verifySession(token); return who.ok ? { agent: who.sa.toLowerCase(), session: token } : null; },
@@ -287,7 +289,7 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           const wholeAsk = ask.request.capability === 'harness.ask';
           const body = JSON.stringify({ ...(session ? { session } : {}), addressee: agent, message: ask.request.goal, ...(wholeAsk ? {} : { plan: { steps: [{ toolId: ask.request.capability, args: ask.request.args }] } }), subjectAsk: ask, ...(ask.continue ? {} : { runRef: routedRunRefFor(ask.correlation) }) });
           await ctx.working();
-          const res = await deps.appFetch(new Request(`https://${host}/harness/ask`, { method: 'POST', headers: internalHeaders(deps.env, { 'content-type': 'application/json', accept: 'application/json', ...traceHeadersOf(ctx.headers) }), body }), deps.env);
+          const res = await deps.appFetch(markInWorker(new Request(`https://${host}/harness/ask`, { method: 'POST', headers: internalHeaders(deps.env, { 'content-type': 'application/json', accept: 'application/json', ...traceHeadersOf(ctx.headers) }), body })), deps.env);
           const envelope = (await res.json().catch(() => null)) as (AskEnvelope & { subjectAnswer?: { outcome?: string; said?: string } }) | null;
           if (!envelope) { await ctx.fail([{ text: `the ask answered ${res.status} with no envelope` }]); return; }
           await ctx.artifact({ name: SUBJECT_ANSWER_ARTIFACT, parts: [{ data: envelope }] });
@@ -309,7 +311,7 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
         const supplied: SuppliedInputV1[] | undefined = runRef && promptStep && data ? [{ stepRef: promptStep, data }] : undefined;
         const body = JSON.stringify({ session, addressee: agent, ...(message ? { message } : {}), ...(runRef ? { runRef } : {}), ...(supplied ? { supplied } : {}) });
         await ctx.working();
-        const res = await deps.appFetch(new Request(`https://${host}/harness/ask`, { method: 'POST', headers: internalHeaders(deps.env, { 'content-type': 'application/json', accept: 'application/json', ...traceHeadersOf(ctx.headers) }), body }), deps.env);
+        const res = await deps.appFetch(markInWorker(new Request(`https://${host}/harness/ask`, { method: 'POST', headers: internalHeaders(deps.env, { 'content-type': 'application/json', accept: 'application/json', ...traceHeadersOf(ctx.headers) }), body })), deps.env);
         const env = (await res.json().catch(() => null)) as AskEnvelope | null;
         if (!env || env.ok === false || !env.reply) { await ctx.fail([{ text: [env?.error ?? `the ask answered ${res.status}`, env?.detail].filter(Boolean).join(': ') }]); return; }
         const r = env.reply;

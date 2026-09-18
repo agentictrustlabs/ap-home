@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { deriveMandate, paymentHandler, registerDefaultSubsetHandlers, hashDelegation, ROOT_AUTHORITY, PAYMENT_RAR_TYPE, buildDigestBindingCaveat, type Delegation, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import { handoff, validateHandoff } from '@agenticprimitives/a2a';
 import { handoffMessage, handoffOf } from '@agenticprimitives/a2a';
+import { markInWorker } from '../../src/internal-marker.js';
 import { standardServerFor } from '../../src/standard-a2a.js';
 import type { AgentCardV1 } from '@agenticprimitives/a2a/standard';
 
@@ -59,10 +60,12 @@ describe('the door at the specialist', () => {
     verifySession: async () => ({ ok: false, status: 401, error: 'no' }),
     runHandoff: async (input) => { calls.push(input); return { ok: true, reply: { kind: 'done', result: { txHash: '0xtx' }, text: 'paid' } }; },
   });
-  const send = (server: ReturnType<typeof build>, headers: Record<string, string>) => server.handle(new Request('https://runtime-c3s0-svc.faithnet.ai/api/a2a', {
+  // R917-E-4 (spec 409 §6): the in-Worker door is the in-isolate MARK on the Request object, never a header. A test
+  // that marks the request stands in for the in-isolate caller; one that only sends the header stands in for a socket.
+  const send = (server: ReturnType<typeof build>, headers: Record<string, string>, inWorker = true) => server.handle((inWorker ? markInWorker : (r: Request) => r)(new Request('https://runtime-c3s0-svc.faithnet.ai/api/a2a', {
     method: 'POST', headers: { 'content-type': 'application/json', 'a2a-version': '1.0', ...headers },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'SendMessage', params: { message: handoffMessage(h) } }),
-  })).then((r) => r.json() as Promise<{ result?: { task?: { status: { state: string; message?: { parts: Array<{ text?: string }> } }; artifacts?: Array<{ name?: string }> } }; error?: { code: number } }>);
+  }))).then((r) => r.json() as Promise<{ result?: { task?: { status: { state: string; message?: { parts: Array<{ text?: string }> } }; artifacts?: Array<{ name?: string }> } }; error?: { code: number } }>);
 
   it('runs the step for the parent agent that calls, and answers with the subject-answer artifact', async () => {
     const calls: unknown[] = [];
@@ -77,8 +80,11 @@ describe('the door at the specialist', () => {
     const other = await send(build(calls), { 'x-ap-internal': MARKER, 'x-ap-internal-agent': TREASURY });
     expect(other.result?.task?.status.state).toBe('TASK_STATE_REJECTED');
     expect(other.result?.task?.status.message?.parts[0]?.text).toMatch(/parent other than its caller/);
-    const shut = await send(build(calls), { 'x-ap-internal-agent': ALICE });
+    const shut = await send(build(calls), { 'x-ap-internal-agent': ALICE }, false);
     expect(shut.error?.code ?? 0).not.toBe(0);
+    // The header ALONE, over a socket — even with the right value — opens nothing (R917-E-4).
+    const spoofed = await send(build(calls), { 'x-ap-internal': MARKER, 'x-ap-internal-agent': ALICE }, false);
+    expect(spoofed.error?.code ?? 0).not.toBe(0);
     expect(calls.length).toBe(0);
   });
 });

@@ -6,12 +6,32 @@
 // reads `anchorOf(agent, digest)` with `readContract` (ADR-0012) — no runtime, no vault, no vendor between them and the proof.
 import { encodeFunctionData, keccak256, toBytes, type Address, type Hex } from 'viem';
 
+const ANCHOR_TUPLE = { type: 'tuple', components: [{ name: 'anchoredBy', type: 'address' }, { name: 'at', type: 'uint64' }, { name: 'intentDigest', type: 'bytes32' }, { name: 'mandateRef', type: 'bytes32' }] } as const;
 export const ANCHOR_ABI = [
   { type: 'function', name: 'anchor', stateMutability: 'nonpayable', inputs: [{ name: 'receiptDigest', type: 'bytes32' }, { name: 'intentDigest', type: 'bytes32' }, { name: 'mandateRef', type: 'bytes32' }], outputs: [] },
   // R917-C-3 (spec 408 §1.5): rows are keyed by WHO anchored — the reader names the agent from the receipt it holds.
-  { type: 'function', name: 'anchorOf', stateMutability: 'view', inputs: [{ name: 'anchoredBy', type: 'address' }, { name: 'receiptDigest', type: 'bytes32' }], outputs: [{ type: 'tuple', components: [{ name: 'anchoredBy', type: 'address' }, { name: 'at', type: 'uint64' }, { name: 'intentDigest', type: 'bytes32' }, { name: 'mandateRef', type: 'bytes32' }] }] },
+  { type: 'function', name: 'anchorOf', stateMutability: 'view', inputs: [{ name: 'anchoredBy', type: 'address' }, { name: 'receiptDigest', type: 'bytes32' }], outputs: [ANCHOR_TUPLE] },
   { type: 'function', name: 'isAnchored', stateMutability: 'view', inputs: [{ name: 'anchoredBy', type: 'address' }, { name: 'receiptDigest', type: 'bytes32' }], outputs: [{ type: 'bool' }] },
 ] as const;
+/** The generation-1 registry (pre-spec-408): one row per digest, whoever anchored first. */
+export const ANCHOR_ABI_GEN1 = [
+  { type: 'function', name: 'anchorOf', stateMutability: 'view', inputs: [{ name: 'receiptDigest', type: 'bytes32' }], outputs: [ANCHOR_TUPLE] },
+] as const;
+export interface AnchorRow { anchoredBy: Address; at: bigint; intentDigest: Hex; mandateRef: Hex }
+/** Read an anchor on either generation. On generation 1 the row is the digest's alone and `anchoredBy` is what the
+ *  chain says — the caller compares it to the agent the receipt names. */
+export async function readAnchor(
+  client: { readContract(args: never): Promise<unknown> },
+  registry: Address,
+  generation: 1 | 2,
+  anchoredBy: Address,
+  digest: Hex,
+): Promise<AnchorRow> {
+  const row = generation === 1
+    ? await client.readContract({ address: registry, abi: ANCHOR_ABI_GEN1, functionName: 'anchorOf', args: [digest] } as never)
+    : await client.readContract({ address: registry, abi: ANCHOR_ABI, functionName: 'anchorOf', args: [anchoredBy, digest] } as never);
+  return row as AnchorRow;
+}
 const EXECUTE_ABI = [{ type: 'function', name: 'execute', stateMutability: 'nonpayable', inputs: [{ name: 'target', type: 'address' }, { name: 'value', type: 'uint256' }, { name: 'data', type: 'bytes' }], outputs: [] }] as const;
 
 /** Deterministic JSON: keys sorted at every level, no whitespace — the same bytes from any holder of the same document. */

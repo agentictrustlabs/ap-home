@@ -3,6 +3,7 @@
 // (`person.preferences`). Refused in a room (an organization's agent keeps no preferences of hers). Never authority.
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import { preferencesOf, setPreferences, PREFERENCES_RECORD } from '@agenticprimitives/context';
+import { requirePersonsTurn } from './persons-turn.js';
 
 export const PREFERENCES_SET = 'person.preferences.set' as const;
 export const PREFERENCES_GET = 'person.preferences.get' as const;
@@ -35,7 +36,7 @@ export interface PreferencesDeps {
 }
 
 export function preferencesInvoker(deps: PreferencesDeps, person: string | undefined, addressee: string | undefined): ToolInvoker {
-  return async (toolId, args) => {
+  return async (toolId, args, ctx) => {
     if (!person) throw new Error('preferences are kept as you, and there is no signed-in person on this run');
     if (addressee && addressee.toLowerCase() !== person.toLowerCase()) return { refused: 'your preferences are kept by your own agent only — ask at your home, not in this room' };
     if (!deps.readSubjectRecord || !deps.writeSubjectRecord) throw new Error('preferences cannot be kept here (the private tier is not configured)');
@@ -53,6 +54,9 @@ export function preferencesInvoker(deps: PreferencesDeps, person: string | undef
       answer: { ...(args.style !== undefined ? { style: clear(args.style) ? null : (args.style as 'brief' | 'full') } : {}), ...(args.language !== undefined ? { language: clear(args.language) ? null : String(args.language) } : {}), ...(args.callMe !== undefined ? { callMe: clear(args.callMe) ? null : String(args.callMe) } : {}) },
       notify: { ...(yesNo(args.emailNudges) !== undefined ? { email: yesNo(args.emailNudges)! } : {}), ...(yesNo(args.routineEmails) !== undefined ? { routines: yesNo(args.routineEmails)! } : {}) },
     };
+    // Spec 409 §4 (R917-H-5): a preference changes on the PERSON'S turn — `emailNudges: no` from a fired run or after a
+    // page was read would silence the signature nudges she relies on. Parked with a read-back otherwise.
+    requirePersonsTurn({ ctx, toolId, what: `change your preferences (${Object.keys({ ...change.answer, ...change.notify }).join(', ')})` });
     if (!Object.keys(change.answer).length && !Object.keys(change.notify).length) return { changed: false, refused: 'say what to change — "answer me briefly", "call me Ali", "answer in Spanish", "stop emailing me"', preferences: prev };
     const next = setPreferences(prev, change);
     const wrote = await deps.writeSubjectRecord(me, PREFERENCES_RECORD, next);

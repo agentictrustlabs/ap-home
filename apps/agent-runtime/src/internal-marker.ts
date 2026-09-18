@@ -42,12 +42,40 @@ export function internalMarker(env: InternalMarkerEnv): string | null {
 }
 
 /** Does this request carry the in-Worker marker? False when unprovisioned — never "no marker configured
- *  therefore allow". */
+ *  therefore allow". FOR DURABLE OBJECT STUBS ONLY (unreachable from outside): a Worker route that must know
+ *  whether a request is in-Worker asks `isInWorkerRequest` (spec 409 §6), never this. Constant-time compare. */
 export function isInternalCall(request: { headers: { get(name: string): string | null } }, env: InternalMarkerEnv): boolean {
   const marker = internalMarker(env);
   if (!marker) return false;
   const presented = request.headers.get('x-ap-internal');
-  return typeof presented === 'string' && presented.length === marker.length && presented === marker;
+  return typeof presented === 'string' && constantTimeEqual(presented, marker);
+}
+
+function constantTimeEqual(a: string, b: string): boolean {
+  const x = new TextEncoder().encode(a); const y = new TextEncoder().encode(b);
+  let diff = x.length ^ y.length;
+  for (let i = 0; i < Math.max(x.length, y.length); i++) diff |= (x[i % x.length] ?? 0) ^ (y[i % y.length] ?? 0);
+  return diff === 0;
+}
+
+// ── R917-E-4 (spec 409 §6): THE ROUTER-SIDE MARK IS NOT HTTP-BORNE ────────────────────────────────────
+//
+// The public router (`/harness/ask`, `/harness/progress`, `/api/a2a`, the gateway-assertion skip) used to consult
+// the header marker too — so a value that leaked, or a `workers.dev` direct path, made the marker a bearer token
+// over the network, which the comment above says it never is. An in-isolate call to the router is
+// `app.fetch(request)` on the SAME Request object the caller built; a WeakSet of those objects is a mark nothing
+// arriving over a socket can carry. The header still rides for the DO stubs, which cannot be reached from outside.
+const IN_WORKER = new WeakSet<Request>();
+
+/** Mark a Request the caller is about to hand to `app.fetch` in this isolate. Returns it for chaining. */
+export function markInWorker<R extends Request>(request: R): R {
+  IN_WORKER.add(request);
+  return request;
+}
+
+/** Was this Request built in this isolate and handed straight to the router (never over a socket)? */
+export function isInWorkerRequest(request: Request): boolean {
+  return IN_WORKER.has(request);
 }
 
 /** Headers for an outbound in-Worker call. THROWS when unprovisioned, so a caller cannot send a request
