@@ -1,0 +1,13 @@
+{
+  "note": "demo/greeley-cast.faithnet.json",
+  "var": "COMMISSION_CAST",
+  "cast": [
+    { "role": "returnee",   "character": "Naw Paw Htoo",      "handle": "elena",  "label": "naw-elena" },
+    { "role": "household",  "character": "Abdi Mberwa",       "handle": "dave",   "label": "abdi-dave" },
+    { "role": "agency",     "character": "Dale Kirkpatrick",  "handle": "carol",  "label": "dale-carol" },
+    { "role": "funder",     "character": "Marguerite Vance",  "handle": "bob",    "label": "marguerite-bob" },
+    { "role": "researcher", "character": "Ruth Calloway",     "handle": "alice",  "label": "ruth-alice" },
+    { "role": "convener",   "character": "Pastor Tom Reyes",  "handle": "nathan", "label": "tom-nathan" },
+    { "role": "welcomer",   "character": "Bonnie Ahlgren",    "handle": "david",  "label": "bonnie-david" }
+  ]
+}
