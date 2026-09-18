@@ -182,7 +182,7 @@ async function buildBatchedPersonPlaneGrants(sa: Address): Promise<{ digests: He
     try {
       const sk = (await fetch(`/a2a/agent/interactions-session-key`).then((r) => r.json()).catch(() => null)) as { ok?: boolean; address?: string } | null;
       if (sk?.ok && sk.address && /^0x[0-9a-fA-F]{40}$/.test(sk.address)) {
-        const leaf = buildApprovedSessionDelegation(sa, sk.address as Address);
+        const leaf = buildApprovedSessionDelegation(sa, sk.address as Address, [INTERACTIONS_SERVICE_SA, ...(DELIVERY_SERVICE_SA ? [DELIVERY_SERVICE_SA] : [])]); // spec 408 §2.1
         digests.push(leaf.digest);
         leafWire = toWire(leaf.delegation);
       }
@@ -924,7 +924,8 @@ export async function givePermission(
     // person SA's ERC-1271 `0x03` branch (UniversalSignatureValidator → ApprovedHashRegistry) — identical to
     // the org-create outbound grants, and to a signed leaf for the binding checks. (spec 253 + 270 v4 W2.)
     const siteApp = buildApprovedSiteDelegation(home.address, delegate);
-    const sessionApp = sessionKeyAddress ? buildApprovedSessionDelegation(home.address, sessionKeyAddress) : undefined;
+    // Spec 408 §2.1 — the relying app's session key presents the person's delegations to THAT app's SA only.
+    const sessionApp = sessionKeyAddress ? buildApprovedSessionDelegation(home.address, sessionKeyAddress, [delegate]) : undefined;
     // spec 345 — the self-vault grant folds into the SAME batch: delegator = delegate = home.address,
     // never touching org/stewardship machinery. NEVER call projectStewardRelationshipToVault for this.
     const selfVaultApp = selfVaultScope ? buildApprovedSelfVaultGrant(home.address, selfVaultScope) : undefined;
@@ -1076,7 +1077,8 @@ export async function authorizeContentSigningForOwner(
       try {
         // Sign AS the issuer SA (the owner custodies it). The leaf binds issuerSa → its KMS key address.
         const signHash = await signHashFor(via, s.issuerSa, auth);
-        const leaf = toWire(await issueSessionDelegation(s.issuerSa, s.delegateKey, signHash, oneYear));
+        // Spec 408 §2.1 — the signing key acts AS the issuer: it presents the issuer's own authority, to the issuer.
+        const leaf = toWire(await issueSessionDelegation(s.issuerSa, s.delegateKey, signHash, [s.issuerSa], oneYear));
         const stored = (await fetch(`${base}/admin/store-content-signer`, {
           method: 'POST', headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ id_token: opts.idToken, issuerName: s.issuerName, issuerSa: s.issuerSa, delegateKey: s.delegateKey, delegationLeaf: leaf }),
@@ -1391,7 +1393,8 @@ export async function activateInteractionsIfNeeded(
     try {
       const sk = (await fetch(`/a2a/agent/interactions-session-key`).then((r) => r.json()).catch(() => null)) as { ok?: boolean; address?: string } | null;
       if (sk?.ok && sk.address && /^0x[0-9a-fA-F]{40}$/.test(sk.address)) {
-        sessionLeafWire = toWire(await issueSessionDelegation(principal, sk.address as Address, signHash));
+        // Spec 408 §2.1 — the DO's session key presents the person's grants to the two service agents only.
+        sessionLeafWire = toWire(await issueSessionDelegation(principal, sk.address as Address, signHash, [INTERACTIONS_SERVICE_SA, ...(DELIVERY_SERVICE_SA ? [DELIVERY_SERVICE_SA] : [])]));
       }
     } catch { /* session-key fetch/sign hiccup — DO falls back to the server-mint bridge; grant still lands */ }
     await ensureCsrfToken();

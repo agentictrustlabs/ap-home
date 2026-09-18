@@ -105,6 +105,8 @@ export function buildGenesisPlanes(
   // `session_leaf_required` — enabled-looking and unusable (the provision script's own warning).
   const leaf = buildSessionDelegation({
     delegator: child, sessionKeyAddress, validUntil,
+    // Spec 408 §2.1 — the session key presents the child's plane wires to the two service agents and nobody else.
+    presentsTo: [interactionsServiceSA, deliveryServiceSA],
     salt: stewardship.salt + 3n,
     chainId, delegationManager: dm,
     enforcers: { timestamp: ts, value: val },

@@ -11,6 +11,8 @@ const tasks = createMemoryTaskStore();
 const server = createStandardA2aServer({
   card: clockCard() as AgentCardV1,
   tasks,
+  // Spec 408 §2.5 — a fixture agent with one caller: every task is that caller's, declared rather than defaulted.
+  visibility: 'single-tenant',
   executor: {
     execute: async (ctx) => {
       const text = ctx.message.parts.map((p) => (typeof p.text === 'string' ? p.text : '')).join(' ').trim();

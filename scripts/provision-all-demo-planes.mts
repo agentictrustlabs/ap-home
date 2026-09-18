@@ -118,7 +118,7 @@ for (const handle of HANDLES) {
     try {
       if (needIx) {
         const d = await issueInteractionsDelegation(t.sa as Address, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID, sign);
-        const leaf = await issueSessionDelegation(t.sa as Address, sk.address as Address, sign);
+        const leaf = await issueSessionDelegation(t.sa as Address, sk.address as Address, sign, [INTERACTIONS_SERVICE_SA]); // spec 408 §2.1
         const res = await j(await fetch(`${HOME}/a2a/interactions/${t.sa}/grant`, { method: 'POST', headers: H, body: JSON.stringify({ delegation: toWire(d), sessionLeaf: toWire(leaf) }) }));
         if (res.ok !== true) throw new Error(`grant: ${res.error ?? JSON.stringify(res).slice(0, 100)}`);
       }

@@ -74,7 +74,7 @@ export const CONTACT_REMOVE_TOOL: ToolSpec = {
   inputSchema: { type: 'object', properties: { contact: { type: 'string', description: 'Who to remove, as the ask names them' }, person: { type: 'string', description: 'Whose contacts — the person asking. Omit.' }, manager: { type: 'string', description: 'The delegation manager the revocation is a call to — filled by the agent, never by the planner.' } }, required: ['contact'] },
   // Remove IS a revocation: a call to the DelegationManager (the RESOURCE, as access.grant.revoke declares it); which grant
   // dies travels in the calldata — the contact is resolved as a party (its role below) but is not the caveat's location.
-  capability: { id: CONTACT_REMOVE_CAPABILITY, action: 'revoke', resourceArg: 'manager', authorityArg: 'person' },
+  capability: { id: CONTACT_REMOVE_CAPABILITY, action: 'revoke', resourceArg: 'manager', authorityArg: 'person', redeemsOnChain: true }, // spec 408 §2.2: redeemed through the DM
   risk: 'medium',
 };
 
@@ -110,8 +110,9 @@ export interface ContactDeps {
   /** The person's SA executes a call under their redeemed mandate (the revoke) — the same path access.grant.revoke uses. */
   executeAsServiceSa?: (serviceSa: Address, callData: Hex) => Promise<{ txHash: string }>;
   /** The mandate's digest-binding caveat argued for THIS step (the harness's own helper, injected). */
-  digestBindingArgsFor: (caveat: Caveat, digests: { intent: Hex; offer?: Hex; projection?: Hex }) => Hex;
-  stepDigests: (args: Record<string, unknown>, intent: Hex) => { intent: Hex; offer?: Hex; projection?: Hex };
+  digestBindingArgsFor: (caveat: Caveat, digests: { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex }) => Hex;
+  /** Spec 408 §1.4/§2.3 — the digests a step presents at redemption, with its single-use nonce and the plan digest. */
+  stepDigests: (args: Record<string, unknown>, intent: Hex, stepRef: string, plan?: Hex) => { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex };
 }
 
 const roleOf = (raw: unknown): ContactRole => {
@@ -226,8 +227,9 @@ export function contactRemoveInvoker(deps: ContactDeps, presented: MandatePresen
     const dm = deps.env.DELEGATION_MANAGER as Address;
     const serviceSa = (deps.env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
     const digest = intentDigest(ctx.intent);
+    const stepRef = ctx.step.id ?? `s${ctx.index}`;
     const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === deps.enforcers.digestBinding.toLowerCase()
-      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: deps.digestBindingArgsFor(c as Caveat, deps.stepDigests(args, digest)) }
+      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: deps.digestBindingArgsFor(c as Caveat, deps.stepDigests(args, digest, stepRef, ctx.planDigest as Hex | undefined)) }
       : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
     const redeem = encodeFunctionData({ abi: REDEEM_ABI, functionName: 'redeemDelegation', args: [[{ delegator: wire.delegator, delegate: wire.delegate, authority: wire.authority as Hex, caveats, salt: wire.salt, signature: wire.signature as Hex }], dm, 0n, inner] });
     const callData = encodeFunctionData({ abi: EXECUTE_ABI, functionName: 'execute', args: [dm, 0n, redeem] });

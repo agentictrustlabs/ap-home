@@ -109,7 +109,7 @@ async function main(): Promise<void> {
     if (!sk?.ok || !/^0x[0-9a-fA-F]{40}$/.test(sk.address ?? '')) {
       throw new Error('no interactions-session key advertised — the grant would store and every vault op would 409');
     }
-    const leaf = await issueSessionDelegation(orgSA, sk.address as Address, signHash);
+    const leaf = await issueSessionDelegation(orgSA, sk.address as Address, signHash, [INTERACTIONS_SERVICE_SA, DELIVERY_SERVICE_SA]); // spec 408 §2.1
     await post('grant', { delegation: toWire(d), sessionLeaf: toWire(leaf) });
     console.log(`  ✓ interactions plane (+ session leaf → ${sk.address!.slice(0, 10)}…)`);
   }

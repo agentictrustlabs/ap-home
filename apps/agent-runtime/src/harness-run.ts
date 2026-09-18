@@ -78,7 +78,7 @@ import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep,
 // Spec 353 — the scope schema is Ring 0 now (spec 399 §4); this app keeps exporting it for its callers.
 export type { AskScopeV1 } from '@agenticprimitives/harness';
 import {
-  hashDelegation, intentDigest, encodeDigestBindingArgs, decodeDigestBindingTerms, decodeTimestampTerms, buildCaveat, buildVaultRecordScopeCaveat,
+  hashDelegation, intentDigest, encodeDigestBindingArgs, digestBindingStepNonce, decodeDigestBindingTerms, decodeTimestampTerms, buildCaveat, buildVaultRecordScopeCaveat,
   encodeTimestampTerms, encodeValueTerms, ROOT_AUTHORITY, CAPABILITY_RAR_TYPE, PAYMENT_RAR_TYPE,
   type Caveat, type Delegation, type EnforcerAddresses, type MandateRequirementV1, methodSelector, deriveMandate, readMandate, readDigestBindings, registerDefaultSubsetHandlers } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
@@ -384,7 +384,8 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     },
     // The step ACTS ON the token and needs the PAYER's authority. Conflating them asks a person to grant
     // authority as an ERC-20 contract, which nothing can sign.
-    capability: { id: 'treasury.payment.execute', action: 'execute', resourceArg: 'asset', authorityArg: 'payer' },
+    // Spec 408 §2.2 — REDEEMS ON CHAIN: `DelegationManager.redeemDelegation`, where every enforcer fires.
+    capability: { id: 'treasury.payment.execute', action: 'execute', resourceArg: 'asset', authorityArg: 'payer', redeemsOnChain: true },
     // Spec 363 W5 — the questions this act lets the substrate answer instead of asking: which account
     // pays (when its owner marked one), and who a bare first name means (when their household says).
     // A contract may restate or narrow this; naming none would mean asking every time, which is safe
@@ -469,7 +470,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
       required: ['treasury'],
     },
     // It acts on the TOKEN and needs the FUNDER's authority — the same split a payment has.
-    capability: { id: 'treasury.fund', action: 'fund', resourceArg: 'asset', authorityArg: 'funder' },
+    capability: { id: 'treasury.fund', action: 'fund', resourceArg: 'asset', authorityArg: 'funder', redeemsOnChain: true }, // spec 408 §2.2
     risk: 'low',
   },
   {
@@ -497,7 +498,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
       },
       required: ['treasury'],
     },
-    capability: { id: PRIMARY_PAYEE_CAPABILITY, action: 'declare', resourceArg: 'record', authorityArg: 'holder' },
+    capability: { id: PRIMARY_PAYEE_CAPABILITY, action: 'declare', resourceArg: 'record', authorityArg: 'holder', redeemsOnChain: true }, // spec 408 §2.2
     // A preference is not a payment: it moves nothing and can be reversed by the same person in one act.
     // It IS public and it IS on chain, which is why it takes a mandate rather than nothing at all.
     risk: 'medium',
@@ -630,7 +631,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
         holder: { type: 'string', description: 'Whose grant this is (the agent that issued it)' },
       },
     },
-    capability: { id: ACCESS_REVOKE_CAPABILITY, action: 'revoke', resourceArg: 'manager', authorityArg: 'holder' },
+    capability: { id: ACCESS_REVOKE_CAPABILITY, action: 'revoke', resourceArg: 'manager', authorityArg: 'holder', redeemsOnChain: true }, // spec 408 §2.2
     risk: 'medium',
     interaction: { navigationTarget: 'settings' },
   },
@@ -1331,16 +1332,21 @@ async function refuseUnlessTreasury(deps: HarnessDeps, agent: string, end: strin
  * admitted the step. The step's own digests are what is presented; a kind the step cannot present is refused
  * here, before a transaction is sent.
  */
-function digestBindingArgsFor(c: Caveat, digests: { intent: Hex; offer?: Hex; projection?: Hex }): Hex {
+function digestBindingArgsFor(c: Caveat, digests: { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex }): Hex {
   const { kind } = decodeDigestBindingTerms(c.terms as Hex);
-  const presented = kind === 'intent' ? digests.intent : kind === 'offer' ? digests.offer : digests.projection;
-  if (!presented) throw new Error(`the mandate binds ${kind === 'offer' ? 'an offer' : 'a projection'} this step does not name — nothing was redeemed`);
-  return encodeDigestBindingArgs(presented);
+  const presented = kind === 'intent' ? digests.intent : kind === 'offer' ? digests.offer : kind === 'plan' ? digests.plan : digests.projection;
+  if (!presented) throw new Error(`the mandate binds ${kind === 'offer' ? 'an offer' : kind === 'plan' ? 'a plan' : 'a projection'} this step does not name — nothing was redeemed`);
+  // R917-C-4 (spec 408 §1.4): the step's nonce rides with the digest, so THIS step redeems once on chain.
+  return encodeDigestBindingArgs(presented, digests.stepNonce);
 }
-const stepDigests = (args: Record<string, unknown>, intent: Hex): { intent: Hex; offer?: Hex; projection?: Hex } => ({
+/** The digests a step presents at redemption, and its single-use nonce (`keccak256("<intentDigest>:<stepRef>")` —
+ *  the payment nonce's own derivation). `plan` is the digest of the plan this run executes (spec 408 §2.3). */
+const stepDigests = (args: Record<string, unknown>, intent: Hex, stepRef: string, plan?: Hex): { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex } => ({
   intent,
   ...(typeof args.offerDigest === 'string' && /^0x[0-9a-fA-F]{64}$/.test(args.offerDigest) ? { offer: args.offerDigest as Hex } : {}),
   ...(typeof args.projectionDigest === 'string' && /^0x[0-9a-fA-F]{64}$/.test(args.projectionDigest) ? { projection: args.projectionDigest as Hex } : {}),
+  ...(plan ? { plan } : {}),
+  stepNonce: digestBindingStepNonce(intent, stepRef),
 });
 
 async function partyAddress(value: unknown, deps: HarnessDeps, what: string): Promise<Address> {
@@ -1395,7 +1401,7 @@ export function fundInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Manda
     const amount = fundingAmount(args);
     const digest = intentDigest(ctx.intent);
     const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === harnessEnforcers(env).digestBinding.toLowerCase()
-      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest)) }
+      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest, ctx.step.id ?? `s${ctx.index}`, ctx.planDigest as Hex | undefined)) }
       : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
     const mint = encodeFunctionData({ abi: MINT_ABI, functionName: 'mint', args: [treasury, amount] });
     const redeem = encodeFunctionData({ abi: REDEEM_ABI, functionName: 'redeemDelegation', args: [[{ delegator: wire.delegator, delegate: wire.delegate, authority: wire.authority as Hex, caveats, salt: wire.salt, signature: wire.signature as Hex }], asset, 0n, mint] });
@@ -1491,11 +1497,13 @@ export function primaryPayeeInvoker(deps: HarnessDeps, env: HarnessEnv, presente
     const dm = env.DELEGATION_MANAGER as Address;
     const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
     const digest = intentDigest(ctx.intent);
-    const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === harnessEnforcers(env).digestBinding.toLowerCase()
-      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest)) }
-      : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
     const txHashes: string[] = [];
-    for (const call of calls) {
+    for (const [k, call] of calls.entries()) {
+      // R917-C-4: one step, several redemptions (clear the previous primary, mark the new one) — each is its own
+      // single-use nonce (`<stepRef>#<k>`), so a replay of the step reverts on chain and the two calls do not.
+      const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === harnessEnforcers(env).digestBinding.toLowerCase()
+        ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest, `${ctx.step.id ?? `s${ctx.index}`}#${k}`, ctx.planDigest as Hex | undefined)) }
+        : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
       const redeem = encodeFunctionData({ abi: REDEEM_ABI, functionName: 'redeemDelegation', args: [[{ delegator: wire.delegator, delegate: wire.delegate, authority: wire.authority as Hex, caveats, salt: wire.salt, signature: wire.signature as Hex }], call.target, 0n, call.data] });
       const callData = encodeFunctionData({ abi: EXECUTE_ABI, functionName: 'execute', args: [dm, 0n, redeem] });
       const { txHash } = await deps.executeAsServiceSa(serviceSa, callData);
@@ -1565,7 +1573,7 @@ export function accessRevokeInvoker(deps: HarnessDeps, env: HarnessEnv, presente
     const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
     const digest = intentDigest(ctx.intent);
     const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === harnessEnforcers(env).digestBinding.toLowerCase()
-      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest)) }
+      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest, ctx.step.id ?? `s${ctx.index}`, ctx.planDigest as Hex | undefined)) }
       : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
     // The person's own SA makes the call (the DelegationManager only lets the owner revoke), reached by
     // redeeming their mandate — the same shape a payment uses, with the target being the manager itself.
@@ -2126,7 +2134,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     const caveats = wire.caveats.map((c) => {
       const e = c.enforcer.toLowerCase();
       if (e === enforcers.payment!.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: paymentArgs };
-      if (e === enforcers.digestBinding.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest)) };
+      if (e === enforcers.digestBinding.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest, stepRef, ctx.planDigest as Hex | undefined)) };
       return { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex };
     });
     // Again, at the moment of acting: the balance may have moved since the preview, and a revert with no
@@ -2146,7 +2154,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
       const linkCaveats = link.caveats.map((c) => {
         const e = c.enforcer.toLowerCase();
         if (e === enforcers.payment!.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: encodeAbiParameters([{ type: 'bytes32' }, { type: 'bytes32' }, { type: 'bytes32' }], [bound, nonce, keccak256(toBytes(`${hashDelegation(link, Number(env.CHAIN_ID), dm)}:${stepRef}`))]) };
-        if (e === enforcers.digestBinding.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, bound)) };
+        if (e === enforcers.digestBinding.toLowerCase()) return { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, bound, stepRef, ctx.planDigest as Hex | undefined)) };
         return { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex };
       });
       chain.push({ delegator: link.delegator, delegate: link.delegate, authority: link.authority as Hex, caveats: linkCaveats, salt: link.salt, signature: link.signature as Hex });
@@ -3677,7 +3685,9 @@ async function askReplyForInner(env: HarnessEnv, input: {
       const refusal = await preconditionRefusal({ capability: required.capability.id, args, env, deps: input.deps, addressee: input.addressee });
       if (refusal) return { kind: 'refused', runRef: r.runRef, outcome: 'denied', error: refusal, receipts: r.receipts };
     }
-    const requirement = mandateRequirementForStep({ required, intent: input.intent, requirementType: REQUIREMENT_TYPE_FOR(r.required.capability.id) });
+    // Spec 408 §2.3 — the requirement binds the PLAN the run parked with: the mandate the person signs is for
+    // these steps, and a resume that presents another plan is refused (`plan-mismatch`).
+    const requirement = await mandateRequirementForStep({ required, intent: input.intent, plan: r.plan, requirementType: REQUIREMENT_TYPE_FOR(r.required.capability.id) });
     // THE CALLS THIS AUTHORITY MAKES. A capability mandate's `actions` are capability ids, whose synthetic
     // selectors mean something to the verifier and nothing to the chain — so a capability that redeems its
     // mandate against a contract must also name the real function it calls, or `AllowedMethodsEnforcer`

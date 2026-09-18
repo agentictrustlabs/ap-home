@@ -25,7 +25,7 @@ import type { Address, Hex } from '@agenticprimitives/types';
 import { interactionsGrantScopes } from '@agenticprimitives/fabric/interactions';
 import { CHAIN_ID, CONTRACTS } from './chain';
 import { INTERACTIONS_APP_SCOPES } from '@agenticprimitives-demo/home-shared';
-import { INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from './inbox-delivery';
+import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from './inbox-delivery';
 
 type SignHash = (hash: Hex) => Promise<Hex>;
 
@@ -502,7 +502,8 @@ export async function buildInteractionsGrantForScript(
   let sessionLeaf: DelegationWire | undefined;
   const sk = await get('/agent/interactions-session-key').catch(() => null);
   if (sk?.ok && sk.address && /^0x[0-9a-fA-F]{40}$/.test(sk.address)) {
-    sessionLeaf = toWire(await issueSessionDelegation(principal as Address, sk.address as Address, signHash as (h: Hex) => Promise<Hex>));
+    // Spec 408 §2.1 — the DO's session key presents the person's grants to the two service agents only.
+    sessionLeaf = toWire(await issueSessionDelegation(principal as Address, sk.address as Address, signHash as (h: Hex) => Promise<Hex>, [service, ...(DELIVERY_SERVICE_SA ? [DELIVERY_SERVICE_SA] : [])]));
   }
   return { grant: toWire(delegation), ...(sessionLeaf ? { sessionLeaf } : {}) };
 }
@@ -1219,11 +1220,14 @@ export async function issueSessionDelegation(
   personAgent: Address,
   sessionKeyAddress: Address,
   signHash: SignHash,
+  /** Spec 408 §2.1 — the delegates this session key may present the principal's delegations to. */
+  presentsTo: readonly Address[],
   validitySeconds = 60 * 60 * 12, // 12h session
 ): Promise<Delegation> {
   const { leaf, digest } = buildSessionDelegation({
     delegator: personAgent,
     sessionKeyAddress,
+    presentsTo,
     validUntil: Math.floor(Date.now() / 1000) + validitySeconds,
     enforcers: { timestamp: CONTRACTS.timestampEnforcer, value: CONTRACTS.valueEnforcer },
     chainId: CHAIN_ID,
@@ -1243,11 +1247,14 @@ export async function issueSessionDelegation(
 export function buildApprovedSessionDelegation(
   personAgent: Address,
   sessionKeyAddress: Address,
+  /** Spec 408 §2.1 — the delegates this session key may present the principal's delegations to. */
+  presentsTo: readonly Address[],
   validitySeconds = 60 * 60 * 12,
 ): { delegation: Delegation; digest: Hex } {
   const { leaf, digest } = buildSessionDelegation({
     delegator: personAgent,
     sessionKeyAddress,
+    presentsTo,
     validUntil: Math.floor(Date.now() / 1000) + validitySeconds,
     enforcers: { timestamp: CONTRACTS.timestampEnforcer, value: CONTRACTS.valueEnforcer },
     chainId: CHAIN_ID,

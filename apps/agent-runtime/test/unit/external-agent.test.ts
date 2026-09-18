@@ -7,7 +7,7 @@ import { externalExecutorsReadOnly, type ToolSpec } from '@agenticprimitives/orc
 import { externalAgentInvoker, EXTERNAL_AGENT_TOOL } from '../../src/external-agent.js';
 
 const card: AgentCardV1 = { name: 'clock.external', description: 'tells the time', version: '1', supportedInterfaces: [{ url: 'https://clock.example/a2a', protocolBinding: 'JSONRPC', protocolVersion: '1.0' }], capabilities: {}, defaultInputModes: ['text/plain'], defaultOutputModes: ['text/plain'], skills: [], provider: { organization: 'clock', url: 'https://clock.example' } };
-const server = createStandardA2aServer({ card, tasks: createMemoryTaskStore(), executor: { execute: async (ctx) => { const t = ctx.message.parts.map((p) => p.text ?? '').join(' '); await ctx.complete([{ text: `you asked “${t}”; it is noon` }]); } } });
+const server = createStandardA2aServer({ card, tasks: createMemoryTaskStore(), visibility: 'single-tenant', executor: { execute: async (ctx) => { const t = ctx.message.parts.map((p) => p.text ?? '').join(' '); await ctx.complete([{ text: `you asked “${t}”; it is noon` }]); } } });
 const cardText = JSON.stringify(card);
 const fetchImpl = (async (url: string, init?: RequestInit) => {
   if (url === 'https://clock.example/card') return new Response(cardText, { headers: { 'content-type': 'application/json' } });

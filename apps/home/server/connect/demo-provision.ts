@@ -96,7 +96,8 @@ export const onRequestPut = async ({ request, env }: FnContext): Promise<Respons
       try {
         const sk = (await fetch(`${base}/agent/interactions-session-key`).then((r) => r.json())) as { ok?: boolean; address?: string };
         if (sk?.ok && sk.address && /^0x[0-9a-fA-F]{40}$/.test(sk.address)) {
-          sessionLeaf = toWire(await issueSessionDelegation(principal, sk.address as Address, sign));
+          // Spec 408 §2.1 — the DO's session key presents the persona's grants to the two service agents only.
+          sessionLeaf = toWire(await issueSessionDelegation(principal, sk.address as Address, sign, [interactionsSa, ...(deliverySa ? [deliverySa] : [])]));
         }
       } catch { /* no session key configured — the bridge covers it */ }
       const r = await fetch(`${base}/interactions/${principal.toLowerCase()}/grant`, {
