@@ -1,6 +1,6 @@
 {
   "name": "@agenticprimitives-demo/home-mcp",
-  "version": "0.0.1-alpha.4",
+  "version": "0.0.1-alpha.5",
   "private": true,
   "description": "Home MCP (spec 397): a public, conformant remote MCP server that is an OAuth 2.1 authorization server for MCP clients AND a registered relying app of the Home — Claude.ai's entrance to a person's own agent. Holds the person's ask-as-me delegation, never a bearer; reaches only the person's agent, as them.",
   "type": "module",

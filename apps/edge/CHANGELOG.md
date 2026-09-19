@@ -1,5 +1,18 @@
 # @agenticprimitives-demo/edge
 
+## 0.0.1-alpha.8
+
+### Patch Changes
+
+- Updated dependencies [56c97c3]
+  - @agenticprimitives/admission@0.0.0-alpha.7
+  - @agenticprimitives/agentic-authorization@0.0.0-alpha.4
+  - @agenticprimitives/edge-cloudflare@0.0.0-alpha.8
+  - @agenticprimitives/edge-runtime@0.0.0-alpha.8
+  - @agenticprimitives/rate-control-cloudflare@0.0.0-alpha.5
+  - @agenticprimitives/rate-control@0.0.0-alpha.5
+  - @agenticprimitives/surface-catalog@0.0.0-alpha.5
+
 ## 0.0.1-alpha.7
 
 ### Patch Changes

@@ -1,5 +1,31 @@
 # @agenticprimitives-demo/mcp
 
+## 0.0.2-alpha.24
+
+### Patch Changes
+
+- Updated dependencies [56c97c3]
+  - @agenticprimitives/agent-naming@1.0.0-alpha.26
+  - @agenticprimitives/audit@1.0.0-alpha.26
+  - @agenticprimitives/chain-state-viem@0.0.0-alpha.6
+  - @agenticprimitives/chain-state@0.0.0-alpha.4
+  - @agenticprimitives/delegation@1.0.0-alpha.26
+  - @agenticprimitives/edge-runtime@0.0.0-alpha.8
+  - @agenticprimitives/entitlements@0.0.0-alpha.5
+  - @agenticprimitives/key-authorization@0.0.0-alpha.10
+  - @agenticprimitives/key-custody@1.0.0-alpha.26
+  - @agenticprimitives/mcp-oauth@0.0.0-alpha.8
+  - @agenticprimitives/mcp-protocol@0.0.0-alpha.4
+  - @agenticprimitives/mcp-runtime@1.0.0-alpha.26
+  - @agenticprimitives/rate-control-cloudflare@0.0.0-alpha.5
+  - @agenticprimitives/rate-control@0.0.0-alpha.5
+  - @agenticprimitives/surface-catalog@0.0.0-alpha.5
+  - @agenticprimitives/tool-policy@1.0.0-alpha.26
+  - @agenticprimitives/types@1.0.0-alpha.26
+  - @agenticprimitives/vault@0.0.0-alpha.5
+  - @agenticprimitives/verifiable-credentials@0.0.0-alpha.23
+  - @agenticprimitives/verification-receipts@0.0.0-alpha.7
+
 ## 0.0.2-alpha.23
 
 ### Patch Changes
