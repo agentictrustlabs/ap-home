@@ -7,7 +7,7 @@
 // serialize a BigInt" against every real delegation — caught in the browser, not by a test. Hence the
 // BigInt fields below: the fixture is shaped like the real thing on purpose.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { budgetedDelegationToken } from '../src/index.js';
+import { budgetedDelegationToken, forgetBudgetedToken } from '../src/index.js';
 
 const DELEGATOR = '0x3D653CbAB0C99B1513439758eb2eAc2039caa6E1';
 const DELEGATE = '0x1dba4a27c53d7babda99513080223fb3bfc4bad1';
@@ -74,5 +74,23 @@ describe('the minted delegation token is reused within its budget', () => {
   it('concurrent callers share ONE mint instead of racing to sign', async () => {
     await Promise.all([0, 1, 2, 3].map(() => budgetedDelegationToken(args(delegation({ salt: 106n })))));
     expect(mints).toBe(1);
+  });
+
+  it('every sharer of an in-flight mint is a USE — a wave of seven cannot spend the token past its limit', async () => {
+    // Seven concurrent hops: one mint, seven presentations. With six safe uses, the ledger is already
+    // over its margin, so the very next hop mints again rather than presenting the same jti an eighth time.
+    const d = delegation({ salt: 107n });
+    await Promise.all([0, 1, 2, 3, 4, 5, 6].map(() => budgetedDelegationToken(args(d))));
+    expect(mints).toBe(1);
+    await budgetedDelegationToken(args(d));
+    expect(mints).toBe(2);
+  });
+
+  it('a token demo-mcp refused is forgotten, so the next hop mints afresh', async () => {
+    const d = delegation({ salt: 108n });
+    const t = await budgetedDelegationToken(args(d));
+    forgetBudgetedToken(t);
+    await budgetedDelegationToken(args(d));
+    expect(mints).toBe(2);
   });
 });

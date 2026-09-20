@@ -8735,7 +8735,7 @@ export async function callMcpToolBound(args: {
   // afresh for every vault hop — an InteractionsDO `channels.read` is seven hops, so seven KMS signatures
   // in series (~0.6 s each on AKCS) before a single byte of the topic came back. Reused within its
   // budget; the leaf is part of the key, so a token never serves another principal's leaf.
-  const token = await budgetedDelegationToken({
+  const mint = () => budgetedDelegationToken({
     delegation: args.grant,
     sessionDelegation: args.sessionLeaf,
     signerAddress: signer.address as Address,
@@ -8743,7 +8743,7 @@ export async function callMcpToolBound(args: {
     auditSink,
     correlationId,
   });
-  return forwardMcpToken({
+  const forward = (token: string) => forwardMcpToken({
     env: args.env,
     toolName: args.toolName,
     token,
@@ -8752,6 +8752,14 @@ export async function callMcpToolBound(args: {
     auditSink,
     correlationId,
   });
+  const token = await mint();
+  const first = await forward(token);
+  if (first.status !== 401) return first;
+  // A 401 on a token this ledger may have over-spent: forget it, mint once more, present once more. A
+  // second 401 is the answer (a real credential failure, or the limiter) and is surfaced as such.
+  forgetBudgetedToken(token);
+  const fresh = await mint();
+  return fresh === token ? first : forward(fresh);
 }
 
 /** A minted delegation token is a BUDGETED grant, not a one-shot: it carries a 300s TTL and
@@ -8797,7 +8805,17 @@ export async function budgetedDelegationToken(args: {
     return hit.token;
   }
   const flying = mintsInFlight.get(key);
-  if (flying) return flying;   // concurrent hops share ONE mint instead of racing to sign
+  if (flying) {
+    // Concurrent hops share ONE mint instead of racing to sign — and EACH IS A USE. A sharer that was
+    // not counted let a wave of seven reads spend the token once in this ledger and seven times in
+    // demo-mcp's; the six "safe" hits that followed pushed the same jti past its limit of ten, and every
+    // hop on the estate answered "auth failed" until the token aged out. Found live, 2026-09-20.
+    return flying.then((token) => {
+      const h = mintedTokens.get(key);
+      if (h && h.token === token) h.uses += 1;
+      return token;
+    });
+  }
   const p = (async (): Promise<string> => {
     const { token } = await mintDelegationToken(
       {
@@ -8823,6 +8841,13 @@ export async function budgetedDelegationToken(args: {
   } finally {
     mintsInFlight.delete(key);
   }
+}
+
+/** A reused token demo-mcp refuses for its BUDGET (usage limit / jti consumed — the refusal is opaque on the
+ *  wire, so any 401 on a REUSED token is taken as one) is dropped from the ledger, so the next hop mints
+ *  afresh instead of presenting the dead token for the rest of its window. Never called for a fresh mint. */
+export function forgetBudgetedToken(token: string): void {
+  for (const [key, hit] of mintedTokens) if (hit.token === token) mintedTokens.delete(key);
 }
 
 /** CRIT-2 W3 (audit 2026-07-13) — SERVER-SIDE client-mint for the A2aTaskDO seams (orchestrate + FR-3.4
