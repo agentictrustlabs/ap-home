@@ -32,7 +32,7 @@
 // the payer is ever held here; the mandate is the only authority, and it is checked per step, on chain
 // AND off.
 import { contractsGenerationOf, type ContractsGeneration } from '@agenticprimitives/agent-account';
-import { CONTACT_FIELDS, CONTACT_FIELD_ARGS } from '@agenticprimitives/ontology';
+import { CONTACT_FIELDS, CONTACT_FIELD_ARGS, ONTOLOGY_MANIFEST_DIGEST } from '@agenticprimitives/ontology';
 import { bindSelectedOffer, type SelectedOfferBindingV1 } from './engagement-campaign.js';
 import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
@@ -81,7 +81,7 @@ export type { AskScopeV1 } from '@agenticprimitives/harness';
 import {
   hashDelegation, intentDigest, encodeDigestBindingArgs, digestBindingStepNonce, decodeDigestBindingTerms, decodeTimestampTerms, buildCaveat, buildVaultRecordScopeCaveat,
   encodeTimestampTerms, encodeValueTerms, ROOT_AUTHORITY, CAPABILITY_RAR_TYPE, PAYMENT_RAR_TYPE,
-  type Caveat, type Delegation, type EnforcerAddresses, type MandateRequirementV1, methodSelector, deriveMandate, readMandate, readDigestBindings, registerDefaultSubsetHandlers } from '@agenticprimitives/delegation';
+  type Caveat, type Delegation, type EnforcerAddresses, type MandateRequirementV1, methodSelector, deriveMandate, readMandate, readDigestBindings, registerDefaultSubsetHandlers, NO_SEMANTICS_DIGEST, type VersionBindingV1 } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 import { RELATIONSHIP_TYPE, ROLE } from '@agenticprimitives/agent-relationships';
 import type { AuditSink } from '@agenticprimitives/audit';
@@ -2216,7 +2216,7 @@ export interface HarnessRunInput {
   /** Spec 390 W2 — the W3C Trace Context the request arrived with, so a routed hop this run makes carries the
    *  SAME trace outbound (the caller's, not one derived here). Recorded on the run record; read by no gate. */
   traceContext?: TraceContextV1 | null;
-  intent: { goal: string; constraints?: Record<string, unknown>; context?: Record<string, unknown> };
+  intent: { goal: string; constraints?: Record<string, unknown>; context?: Record<string, unknown>; /** Spec 410 §5 — set here, after the playbook is known; bound by the intent digest (`delegation.VersionBindingV1`). */ versions?: { ontologyManifestDigest: string; semanticsDigest: string } };
   /** The message's DATA part naming a skill — the material `playbook.answer` reasons over. Never in the intent: it is
    *  what the person can already see, not what they asked, and it must not bind a mandate's digest. */
   material?: Record<string, unknown> | null;
@@ -4302,9 +4302,14 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   const firstPresented = presentedList[0] ?? null;
   const validator = env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
 
+  // Spec 410 §5 — the versions this runtime RUNS WITH: the T-box manifest digest, and the compiled definition's
+  // digest once the playbook is loaded (below). The verifier reads them at verify time and recomputes the
+  // intent digest under them; the intent is stamped with the same values before any mandate is minted.
+  let currentVersions: VersionBindingV1 | null = null;
   const verifier = delegationMandateVerifier({
     actor: (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address,
     enforcers,
+    currentVersions: () => currentVersions,
     // Spec 383 — every wire this turn presented, so a child is verified with its parents or refused.
     presentedAll: () => (input.presented == null ? [] : Array.isArray(input.presented) ? input.presented : [input.presented]).map((w) => w as unknown as Delegation),
     checks: {
@@ -4389,6 +4394,11 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
     : null;
   const playbook = await loadPlaybook(rememberedRecord, String(input.addressee ?? ''), console.log).catch(() => null);
   mark('playbook');
+  // Spec 410 §5 — stamp the intent with the versions it is acted under. The mandate a Home mints for this run
+  // digests the whole intent (RFC 8785), so the versions are bound; a resume under a moved T-box or definition
+  // is refused by the verifier with the moved one named (`version-moved`), never silently reinterpreted.
+  currentVersions = { ontologyManifestDigest: ONTOLOGY_MANIFEST_DIGEST as Hex, semanticsDigest: (playbook?.digest ?? NO_SEMANTICS_DIGEST) as Hex };
+  input.intent.versions = currentVersions;
   const first = Array.isArray(input.presented) ? input.presented[0] ?? null : input.presented;
   const holding = first ? mandateCapabilityWords(first) : null;
   const systemPrompt = holding
