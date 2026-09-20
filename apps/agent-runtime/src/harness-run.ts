@@ -1343,8 +1343,10 @@ function digestBindingArgsFor(c: Caveat, digests: { intent: Hex; offer?: Hex; pr
   // generation-2 estate. Generation 1's enforcer takes the digest alone (a deployment fact, never a retry).
   return encodeDigestBindingArgs(presented, digests.generation === 1 ? { generation: 1 } : { generation: 2, stepNonce: digests.stepNonce });
 }
-/** The digests a step presents at redemption, and its single-use nonce (`keccak256("<intentDigest>:<stepRef>")` —
- *  the payment nonce's own derivation). `plan` is the digest of the plan this run executes (spec 408 §2.3). */
+/** The digests a step presents at redemption, and its single-use nonce (`keccak256("<intentDigest>:<operation>")` —
+ *  the step's DECLARED idempotency key when it carries one, else its step ref (spec 410 §3: two identical payments are
+ *  two operations; one retried is one); the payment nonce's own derivation). `plan` is the digest of the plan this run
+ *  executes (spec 408 §2.3). */
 const stepDigests = (args: Record<string, unknown>, intent: Hex, stepRef: string, plan?: Hex, generation: ContractsGeneration = 2): { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex; generation: ContractsGeneration } => ({
   intent,
   ...(typeof args.offerDigest === 'string' && /^0x[0-9a-fA-F]{64}$/.test(args.offerDigest) ? { offer: args.offerDigest as Hex } : {}),
@@ -1406,7 +1408,7 @@ export function fundInvoker(deps: HarnessDeps, env: HarnessEnv, presented: Manda
     const amount = fundingAmount(args);
     const digest = intentDigest(ctx.intent);
     const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === harnessEnforcers(env).digestBinding.toLowerCase()
-      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest, ctx.step.id ?? `s${ctx.index}`, ctx.planDigest as Hex | undefined, contractsGenerationOf({ contractsGeneration: env.CONTRACTS_GENERATION }))) }
+      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest, ctx.step.idempotencyKey ?? ctx.step.id ?? `s${ctx.index}`, ctx.planDigest as Hex | undefined, contractsGenerationOf({ contractsGeneration: env.CONTRACTS_GENERATION }))) }
       : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
     const mint = encodeFunctionData({ abi: MINT_ABI, functionName: 'mint', args: [treasury, amount] });
     const redeem = encodeFunctionData({ abi: REDEEM_ABI, functionName: 'redeemDelegation', args: [[{ delegator: wire.delegator, delegate: wire.delegate, authority: wire.authority as Hex, caveats, salt: wire.salt, signature: wire.signature as Hex }], asset, 0n, mint] });
@@ -1578,7 +1580,7 @@ export function accessRevokeInvoker(deps: HarnessDeps, env: HarnessEnv, presente
     const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
     const digest = intentDigest(ctx.intent);
     const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === harnessEnforcers(env).digestBinding.toLowerCase()
-      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest, ctx.step.id ?? `s${ctx.index}`, ctx.planDigest as Hex | undefined, contractsGenerationOf({ contractsGeneration: env.CONTRACTS_GENERATION }))) }
+      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: digestBindingArgsFor(c, stepDigests(args, digest, ctx.step.idempotencyKey ?? ctx.step.id ?? `s${ctx.index}`, ctx.planDigest as Hex | undefined, contractsGenerationOf({ contractsGeneration: env.CONTRACTS_GENERATION }))) }
       : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
     // The person's own SA makes the call (the DelegationManager only lets the owner revoke), reached by
     // redeeming their mandate — the same shape a payment uses, with the target being the manager itself.
@@ -2133,7 +2135,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     // intent), not a second run. With the nonce bound to the intent, a replay reverts NonceReused on chain
     // whatever the run ref — the idempotency the loop asked for becomes an on-chain guarantee.
     // DigestBindingEnforcer: the intent digest this run is acting under — the commitment.
-    const stepRef = ctx.step.id ?? `s${ctx.index}`;
+    const stepRef = ctx.step.idempotencyKey ?? ctx.step.id ?? `s${ctx.index}`; // spec 410 §3 — the nonce's logical identity
     const nonce = keccak256(toBytes(`${digest}:${stepRef}`));
     const paymentArgs = encodeAbiParameters([{ type: 'bytes32' }, { type: 'bytes32' }, { type: 'bytes32' }], [digest, nonce, keccak256(toBytes(`${paymentPresented.ref}:${stepRef}`))]);
     const caveats = wire.caveats.map((c) => {

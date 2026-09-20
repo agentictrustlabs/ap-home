@@ -229,7 +229,7 @@ export function contactRemoveInvoker(deps: ContactDeps, presented: MandatePresen
     const dm = deps.env.DELEGATION_MANAGER as Address;
     const serviceSa = (deps.env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
     const digest = intentDigest(ctx.intent);
-    const stepRef = ctx.step.id ?? `s${ctx.index}`;
+    const stepRef = ctx.step.idempotencyKey ?? ctx.step.id ?? `s${ctx.index}`; // spec 410 §3 — the nonce's logical identity
     const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === deps.enforcers.digestBinding.toLowerCase()
       ? { enforcer: c.enforcer, terms: c.terms as Hex, args: deps.digestBindingArgsFor(c as Caveat, deps.stepDigests(args, digest, stepRef, ctx.planDigest as Hex | undefined, contractsGenerationOf({ contractsGeneration: deps.env.CONTRACTS_GENERATION }))) }
       : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
