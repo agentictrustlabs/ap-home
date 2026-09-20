@@ -6,6 +6,7 @@
 // holder's own declaration says it is a read — a stranger's server gets no benefit of the doubt. What the server returns
 // is EVIDENCE (`untrusted: true`), never instructions. The server's OAuth authorizes nothing (ADR-0041): the holder's
 // grant does, per act, and the receipt is the record.
+import { ADAPTER } from '../adapter-declarations.js';
 import type { Address } from 'viem';
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import { loadFederatedToken, storeFederatedToken, deleteFederatedToken } from '../fed-token.js';
@@ -205,7 +206,7 @@ export function mcpConnectorTools(records: McpConnectorRecordV1[]): ToolSpec[] {
     const interaction = { result: 'McpToolCard', navigationTarget: 'connected' };
     return kind === 'read'
       ? { id, answers: [`${words(t.name)} on ${r.name}`, `${r.name} ${words(t.name)}`, ...(t.description ? [t.description.slice(0, 80).toLowerCase()] : [])], description: desc, inputSchema: schema, establishes: 'lookup', interaction }
-      : { id, verbs: [`${words(t.name)} on ${r.name}`, `${r.name} ${words(t.name)}`], description: desc, inputSchema: schema, capability: { id, action: 'call', resourceArg: 'holder', authorityArg: 'holder' }, risk: 'high', establishes: 'submission', interaction: { ...interaction, review: 'McpToolReview' } };
+      : { id, verbs: [`${words(t.name)} on ${r.name}`, `${r.name} ${words(t.name)}`], description: desc, inputSchema: schema, capability: { id, action: 'call', resourceArg: 'holder', authorityArg: 'holder' }, risk: 'high', establishes: 'submission', adapter: ADAPTER.unknown, interaction: { ...interaction, review: 'McpToolReview' } };
   }));
 }
 

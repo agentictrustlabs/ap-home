@@ -57,7 +57,7 @@ export interface RoutineDeps {
   removeTrigger?: (agent: string, triggerId: string) => Promise<void>;
   /** Spec 323 W6 — the RECORD (`routines.data` in her vault); the row on her agent's object is its projection. */
   readSubjectRecord?: (subject: string, key: string) => Promise<unknown>;
-  writeSubjectRecord?: (subject: string, key: string, record: unknown) => Promise<{ ok: boolean; error?: string }>;
+  writeSubjectRecord?: (subject: string, key: string, record: unknown, operationId?: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 /** The record entry for a schedule row — what she declared, without the serving-plane state (clock, seen, pause). */
@@ -88,7 +88,7 @@ export function routineInvoker(deps: RoutineDeps, person: string | undefined, ad
         const target = id ? mine.find((r) => r.triggerId === id) : words ? mine.find((r) => r.ask.toLowerCase().includes(words) || (r.declared?.saidAs ?? '').toLowerCase().includes(words)) : undefined;
         if (!target) return { removed: false, refused: id ? `no routine of yours has the id ${id}` : words ? `none of your routines mentions "${words}"` : 'say which routine — its id, or words it contains', count: mine.length };
         // THE RECORD FIRST (spec 323 W6): a routine removed at one Home is gone at every Home because the vault says so.
-        await writeRecord(deps, me, (prev) => dropRoutine(prev, target.triggerId));
+        await writeRecord(deps, me, (prev) => dropRoutine(prev, target.triggerId), ctx.operationId);
         await deps.removeTrigger(me, target.triggerId);
         return { removed: true, id: target.triggerId, ask: target.ask, count: mine.length - 1 };
       }
@@ -111,7 +111,7 @@ export function routineInvoker(deps: RoutineDeps, person: string | undefined, ad
         // THE RECORD FIRST (spec 323 W6): her vault holds what she declared; the row on her agent's object is the
         // projection the alarm runs — rebuilt from the record at any deployment. A record that cannot be written is not
         // papered over with a row that would be lost with the object.
-        await writeRecord(deps, me, (prev) => keepRoutine(prev, routineEntryOf(row)!));
+        await writeRecord(deps, me, (prev) => keepRoutine(prev, routineEntryOf(row)!), ctx.operationId);
         const kept = await deps.declareTrigger(me, row);
         return { kept: true, id: kept.triggerId, ask: parsed.ask, every: parsed.every, when: parsed.when, firstAt: new Date(parsed.firstAt).toISOString(), tz, words, ...(parsed.once ? { once: true } : {}), note: parsed.once ? 'a reminder of your own — your agent will tell you at the hour, then it is gone; remove it on Routines before then' : 'your own routine, on your agent\'s clock — it fires as your agent holding nothing; pause or remove it on Routines' };
       }
@@ -121,10 +121,10 @@ export function routineInvoker(deps: RoutineDeps, person: string | undefined, ad
 }
 
 /** Read-modify-write the person's `routines.data`. Says, when the grant predates the scope, what to do about it. */
-async function writeRecord(deps: RoutineDeps, me: string, change: (prev: ReturnType<typeof routinesOf>) => ReturnType<typeof routinesOf>): Promise<void> {
+async function writeRecord(deps: RoutineDeps, me: string, change: (prev: ReturnType<typeof routinesOf>) => ReturnType<typeof routinesOf>, operationId?: string): Promise<void> {
   if (!deps.readSubjectRecord || !deps.writeSubjectRecord) throw new Error('routines cannot be kept as a record here (the private tier is not configured)');
   const prev = routinesOf(await deps.readSubjectRecord(me, ROUTINES_RECORD).catch(() => null));
-  const wrote = await deps.writeSubjectRecord(me, ROUTINES_RECORD, change(prev));
+  const wrote = await deps.writeSubjectRecord(me, ROUTINES_RECORD, change(prev), operationId);
   if (!wrote.ok) throw new Error(/record_scope_denied|scope/i.test(wrote.error ?? '') ? 'your storage grant predates routines — refresh the grant on Today (What your agent knows about you → Refresh the grant), then say it again' : (wrote.error ?? 'the routine could not be kept as a record'));
 }
 

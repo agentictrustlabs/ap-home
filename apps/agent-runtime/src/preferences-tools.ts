@@ -32,7 +32,7 @@ export const PREFERENCES_ACTS = new Set<string>([PREFERENCES_SET]);
 
 export interface PreferencesDeps {
   readSubjectRecord?: (subject: string, key: string) => Promise<unknown>;
-  writeSubjectRecord?: (subject: string, key: string, record: unknown) => Promise<{ ok: boolean; error?: string }>;
+  writeSubjectRecord?: (subject: string, key: string, record: unknown, operationId?: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 export function preferencesInvoker(deps: PreferencesDeps, person: string | undefined, addressee: string | undefined): ToolInvoker {
@@ -59,7 +59,7 @@ export function preferencesInvoker(deps: PreferencesDeps, person: string | undef
     requirePersonsTurn({ ctx, toolId, what: `change your preferences (${Object.keys({ ...change.answer, ...change.notify }).join(', ')})` });
     if (!Object.keys(change.answer).length && !Object.keys(change.notify).length) return { changed: false, refused: 'say what to change — "answer me briefly", "call me Ali", "answer in Spanish", "stop emailing me"', preferences: prev };
     const next = setPreferences(prev, change);
-    const wrote = await deps.writeSubjectRecord(me, PREFERENCES_RECORD, next);
+    const wrote = await deps.writeSubjectRecord(me, PREFERENCES_RECORD, next, ctx.operationId);
     if (!wrote.ok) throw new Error(/record_scope_denied|scope/i.test(wrote.error ?? '') ? 'your storage grant predates preferences — refresh the grant on Today, then say it again' : (wrote.error ?? 'the preferences could not be kept'));
     return { changed: true, tier: 'private', record: PREFERENCES_RECORD, preferences: next, answer: `Done — your agent ${words(next)}.` };
   };

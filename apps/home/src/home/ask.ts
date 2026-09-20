@@ -475,6 +475,8 @@ export interface RunInspectorStep {
   effects?: Array<{ produces: string; ok: boolean }>;
   decisions?: Array<{ point: string; ruleId: string }>;
   errorClass?: string;
+  /** Spec 410 §2 — what the adapter saw: which end committed this and the provider's own reference. */
+  observation?: { outcome: 'attempted' | 'accepted' | 'committed' | 'confirmed'; providerRef?: string; observedAt: string };
 }
 export interface RunInspectorRecord {
   runRef: string; endedAt: string; agent: string; asker?: string; outcome: string; chainId?: number;

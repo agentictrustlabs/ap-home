@@ -295,6 +295,11 @@ const STANDING_GRANT_KEY = (ref: string): string => `standing.grant:${ref.toLowe
 interface StandingGrantRecord { wire: IncomingDelegation; hash: string; capabilities: string[]; locations: string[]; holder: string; holderName?: string; validUntil: number; storedAt: string }
 
 const MESSAGING_WIRE_KEY = 'messaging.wire';
+// Spec 410 §3 — THE OPERATION LEDGER: `op:<operationId>` → what this object did for that logical operation (a send's
+// envelope id, a write's record type). A serving-plane pointer, rebuildable from the vault and the threads (ADR-0055);
+// what it buys is the reconcile: a retry after a lost response finds the operation here and does not act twice.
+const OP_LEDGER_KEY = (operationId: string): string => `op:${operationId}`;
+interface OpLedgerRecord { kind: 'send' | 'write'; ref: string; at: string }
 /** TWO artifacts, because the gate asks two questions. `wire` (person → session key) authorizes the key
  *  to produce signatures that count as the person's, and travels INSIDE each signature. `transport`
  *  (person → person) authorizes the skill against the named recipients, and is what
@@ -804,6 +809,13 @@ export class InteractionsDO {
    *  PRINCIPAL-signed, binding the interactions-session KMS key) AND that key is configured,
    *  CLIENT-MINT a bound token (callMcpToolBound, enforceBinding) — the leaf's delegator MUST equal
    *  this grant's delegator (the principal / token sub), else it's not the right principal's leaf. */
+  /** Spec 410 §3 — remember what this object did for a logical operation, when the caller named one. */
+  private async recordOperation(body: Record<string, unknown>, kind: OpLedgerRecord['kind'], ref: string): Promise<void> {
+    const opId = typeof body.operationId === 'string' ? body.operationId.trim() : '';
+    if (!opId || opId.length > 200) return;
+    await this.state.storage.put(OP_LEDGER_KEY(opId), { kind, ref, at: new Date().toISOString() } satisfies OpLedgerRecord);
+  }
+
   private async mcpVaultTool(
     grant: IncomingDelegation,
     toolName: 'get_vault_record' | 'get_vault_records' | 'set_vault_record' | 'list_vault_record',
@@ -1856,7 +1868,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.channels.create' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'internal.wire.current' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.channels.create' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'internal.wire.current' || op === 'internal.op.lookup' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -2092,6 +2104,7 @@ export class InteractionsDO {
           }
           try {
             await this.writeDoc(g, recordType, body.record);
+            await this.recordOperation(body, 'write', recordType); // spec 410 §3 — so a retry finds this write before writing again
             return json({ ok: true, recordType });
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
@@ -2377,6 +2390,13 @@ export class InteractionsDO {
           }
           return json({ ok: true, grants: rows });
         }
+        // Spec 410 §3 — DID THIS OPERATION ALREADY HAPPEN HERE? The reconcile's read; `found: null` is absent.
+        if (op === 'internal.op.lookup') {
+          const opId = String(body.operationId ?? '').trim();
+          if (!opId) return json({ error: 'operationId required' }, 400);
+          const rec = (await this.state.storage.get(OP_LEDGER_KEY(opId))) as OpLedgerRecord | undefined;
+          return json({ ok: true, found: rec ?? null });
+        }
         // Spec 410 §1.2 step 4 — THE HEAD OF A WIRE'S LINEAGE, for the delegate that holds a stale copy. Reads this
         // principal's `delegation.lineage:*` records (the vault, ADR-0055), walks `supersedes` to the head, and
         // answers ONLY the delegate the wire names. `unknown` when no record mentions the hash: the router then
@@ -2610,6 +2630,7 @@ export class InteractionsDO {
             await store.putBody({ messageId: r.envelope.id, bytes: new TextEncoder().encode(bodyText), contentType: 'text/plain', classification: 'internal', resource: r.envelope.body.resource });
             await this.writeDoc(g, TOPIC_RESOURCE(channelId), composed[0]!.messages);
             await this.indexForSearch(r.envelope.id, { kind: 'topic', at: r.envelope.createdAt, snippet: '', ref: { org: principal, channelId, messageId: r.envelope.id, from: authorAddr, fromName: authorName, title: entry.title } }, bodyText);
+            await this.recordOperation(body, 'send', r.envelope.id);
             return json({ ok: true, messageId: r.envelope.id });
           });
         }
@@ -3877,6 +3898,7 @@ export class InteractionsDO {
           // Spec 400 W2 (B3) — every MEMBER AGENT the post names hears it: the mention is admitted into that
           // member's inbox on the topic's thread, post-commit, fire-and-forget (audited, never queued).
           this.dispatchMentions({ entry, channelId, principal, grant, posterCaip: sessionCaip, posterName: name ?? 'Steward', bodyText: String(body.bodyText ?? '').trim(), messageId: r.envelope.id });
+          await this.recordOperation(body, 'send', r.envelope.id);
           return json({ ok: true, messageId: r.envelope.id });
         });
       }
@@ -4879,6 +4901,7 @@ export class InteractionsDO {
         // Self-send: the delivered copy IS the record. Writing a second one would double the thread.
         if (recipient === principal) {
           await audit.write({ id: crypto.randomUUID(), timestamp: envelope.createdAt, action: 'interactions.messaging.send', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'message', id: envelope.id } });
+          await this.recordOperation(body, 'send', envelope.id);
           return json({ ok: true, messageId: envelope.id, conversationId: envelope.conversationId, taskId });
         }
 
@@ -4901,6 +4924,7 @@ export class InteractionsDO {
           upsertConversation(doc, { ...descriptor, owner: envelope.from });
           await this.writeDoc(grant, INBOX_RESOURCE, doc);
           await audit.write({ id: crypto.randomUUID(), timestamp: envelope.createdAt, action: 'interactions.messaging.send', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'message', id: envelope.id } });
+          await this.recordOperation(body, 'send', envelope.id);
           return json({ ok: true, messageId: envelope.id, conversationId: envelope.conversationId, taskId });
         });
       }

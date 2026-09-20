@@ -5170,24 +5170,24 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     // (their own post, as the Home does it); an AGENT — the run's own under a chain rooted at it, or one the person
     // stewards — posts through the org's in-Worker `internal.channels.post` naming itself as the member author: the
     // org's object checks the invitation record; the harness already verified the mandate.
-    postTopic: async ({ org, channelId, sender, senderName, bodyText, session, stewardship, asSelf }) => {
+    postTopic: async ({ org, channelId, sender, senderName, bodyText, session, stewardship, asSelf, operationId }) => {
       const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(org.toLowerCase()));
       const agentPost = asSelf || !!stewardship;
       const res = await stub.fetch(new Request(`https://do/interactions/${org.toLowerCase()}/${agentPost ? 'internal.channels.post' : 'channels.post'}`, {
         method: 'POST', headers: agentPost ? internalHeaders(env) : { 'content-type': 'application/json' },
-        body: JSON.stringify(agentPost ? { channelId, bodyText, member: sender.toLowerCase(), ...(senderName ? { memberName: senderName } : {}) } : { session, channelId, bodyText }),
+        body: JSON.stringify(agentPost ? { channelId, bodyText, member: sender.toLowerCase(), ...(senderName ? { memberName: senderName } : {}), ...(operationId ? { operationId } : {}) } : { session, channelId, bodyText, ...(operationId ? { operationId } : {}) }),
       }));
       const out = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; messageId?: string };
       if (res.ok && out.ok !== false) return { ok: true as const, ...(out.messageId ? { messageId: out.messageId } : {}) };
       return { ok: false as const, error: out.error ?? `the post could not be made (${res.status})` };
     },
-    sendDirectMessage: async ({ sender, recipient, bodyText, session, contextRefs, stewardship, asSelf }) => {
+    sendDirectMessage: async ({ sender, recipient, bodyText, session, contextRefs, stewardship, asSelf, operationId }) => {
       const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(sender.toLowerCase()));
       // Spec 400 W2a — the agent's OWN rail driven in-Worker after the harness verified a chain rooted at it: the
       // internal op, the internal marker, no session (the DO admits the marker for `internal.*` only).
       const res = await stub.fetch(new Request(`https://do/interactions/${sender.toLowerCase()}/${asSelf ? 'internal.messaging.send' : 'messaging.send'}`, {
         method: 'POST', headers: asSelf ? internalHeaders(env) : { 'content-type': 'application/json' },
-        body: JSON.stringify({ ...(asSelf ? {} : { session }), recipient: recipient.toLowerCase(), bodyText, ...(stewardship ? { stewardship } : {}), ...(contextRefs?.length ? { contextRefs } : {}) }),
+        body: JSON.stringify({ ...(asSelf ? {} : { session }), recipient: recipient.toLowerCase(), bodyText, ...(stewardship ? { stewardship } : {}), ...(contextRefs?.length ? { contextRefs } : {}), ...(operationId ? { operationId } : {}) }),
       }));
       const out = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; code?: string; messageId?: string };
       if (res.ok && out.ok !== false) return { ok: true as const, ...(out.messageId ? { messageId: out.messageId } : {}) };
@@ -5240,6 +5240,12 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
         .catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
       const r = out as { ok?: boolean; removed?: true; role?: string; kin?: string; household?: string; count?: number; error?: string };
       return { ok: r.ok === true, ...(r.removed ? { removed: true as const } : {}), ...(r.role ? { role: r.role } : {}), ...(r.kin ? { kin: r.kin } : {}), ...(r.household ? { household: r.household } : {}), ...(typeof r.count === 'number' ? { count: r.count } : {}), ...(r.error ? { error: r.error } : {}) };
+    },
+    // Spec 410 §3 — the reconcile's read: what the subject's object did for a logical operation, or null.
+    lookupOperation: async (subject: string, operationId: string) => {
+      const out = await callInteractionsInternal(env, subject, 'internal.op.lookup', { operationId });
+      const f = (out as { found?: { kind: 'send' | 'write'; ref: string; at: string } | null }).found;
+      return f ?? null;
     },
     // Spec 400 W2 (B4) — the grants screen's read and the revocation's expansion, on the subject's own object.
     auditGrants: async (subject: string) => {
@@ -5341,10 +5347,10 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     // spec 360 E5 — deposit a declared-effect artifact in a principal's OWN vault, written by that
     // principal's own grant inside their own DO. Allowlisted by record type there: this cannot be
     // pointed at an arbitrary record, which is the whole reason it is safe to call for a counterparty.
-    writeSubjectRecord: async (subject: string, recordType: string, record: unknown) => {
+    writeSubjectRecord: async (subject: string, recordType: string, record: unknown, operationId?: string) => {
       forgetMemo(subject, recordType); // spec 396 W4 — the run's own write drops its read memo
       try {
-        const out = await callInteractionsInternal(env, subject, 'internal.coordination.vaultWrite', { recordType, record });
+        const out = await callInteractionsInternal(env, subject, 'internal.coordination.vaultWrite', { recordType, record, ...(operationId ? { operationId } : {}) });
         return { ok: (out as { ok?: boolean }).ok === true, ...(((out as { error?: string }).error) ? { error: (out as { error?: string }).error! } : {}) };
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : String(e) };

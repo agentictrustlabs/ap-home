@@ -11,6 +11,7 @@
 // THE SAME MECHANISM, THE PERSON'S WORD. `person.contact.invite` is the organization's invitation with the person as
 // the principal: the mandate's delegator is the person themselves (self — canGrant), the grant is theirs to the
 // contact, the record lands in their vault. The invoker below is thin on purpose; what differs is named.
+import { ADAPTER } from './adapter-declarations.js';
 import { contractsGenerationOf } from '@agenticprimitives/agent-account';
 import { encodeFunctionData, keccak256, toBytes, type Address, type Hex } from 'viem';
 import { InputRequired, signatureFor, type ToolInvoker, type ToolSpec, type MandatePresentation, type SuppliedInputV1 } from '@agenticprimitives/orchestration';
@@ -30,6 +31,7 @@ export const CONTACT_RESOURCE_SCOPE = 'vault:profile.contact';
 
 export const CONTACT_INVITE_TOOL: ToolSpec = {
   id: CONTACT_INVITE_CAPABILITY,
+  adapter: ADAPTER.sync,
   verbs: ['add as a contact', 'add contact', 'add to my contacts', 'make a contact', 'befriend'],
   establishes: 'submission',
   description:
@@ -66,6 +68,7 @@ export const CONTACT_LIST_TOOL: ToolSpec = {
 
 export const CONTACT_REMOVE_TOOL: ToolSpec = {
   id: CONTACT_REMOVE_CAPABILITY,
+  adapter: ADAPTER.chain,
   verbs: ['remove contact', 'remove from my contacts', 'drop contact', 'fire', 'unfriend'],
   establishes: 'submission',
   description:
@@ -102,7 +105,7 @@ export interface ContactDeps {
   enforcers: { timestamp: Address; value: Address; digestBinding: Address };
   vaultServerId: string;
   readSubjectRecord?: (subject: string, recordType: string) => Promise<unknown>;
-  writeSubjectRecord?: (subject: string, recordType: string, record: unknown) => Promise<{ ok: boolean; error?: string }>;
+  writeSubjectRecord?: (subject: string, recordType: string, record: unknown, operationId?: string) => Promise<{ ok: boolean; error?: string }>;
   survey?: (subject: string) => Promise<Array<{ recordType: string }>>;
   readRecords?: (subject: string, recordTypes: string[]) => Promise<Record<string, unknown>>;
   nameOf?: (address: string) => Promise<string | null>;
@@ -171,7 +174,7 @@ export function contactInviteInvoker(deps: ContactDeps, presented: MandatePresen
       mutual = (inbox?.envelopes ?? []).some((e) => (String(e.from ?? '').match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() === contact && (e.contextRefs ?? []).some((r) => r.kind === 'contact' && r.id.toLowerCase() === me));
     }
     const record: ContactRecordV1 = { type: 'ap.contact.v1', contact, role, delegation, grantDigest, status: 'contact', createdAt: Date.now(), ...(mutual !== undefined ? { mutual } : {}) };
-    const wrote = await deps.writeSubjectRecord(me, contactRecordType(contact), record);
+    const wrote = await deps.writeSubjectRecord(me, contactRecordType(contact), record, ctx.operationId);
     if (!wrote.ok) throw new Error(`the contact could not be recorded: ${wrote.error ?? 'write refused'}`);
     // WHAT FOLLOWS (spec 360): the contact is TOLD — a message from the person carrying the reference the Home renders
     // as "accept" (a person adds you back; an agent needs nothing). An effect never fails the act; it is reported.
@@ -237,7 +240,7 @@ export function contactRemoveInvoker(deps: ContactDeps, presented: MandatePresen
     const callData = encodeFunctionData({ abi: EXECUTE_ABI, functionName: 'execute', args: [dm, 0n, redeem] });
     const { txHash } = await deps.executeAsServiceSa(serviceSa, callData);
     const next: ContactRecordV1 = { ...rec, status: 'removed', removedAt: Date.now() };
-    const wrote = await deps.writeSubjectRecord(me, contactRecordType(contact), next);
+    const wrote = await deps.writeSubjectRecord(me, contactRecordType(contact), next, ctx.operationId);
     return { removed: true, contact, role: rec.role, grantDigest: rec.grantDigest, txHash, recorded: wrote.ok, note: 'the grant is revoked on chain — every gate refuses it from the next request; the contact is marked removed in your records' };
   };
 }

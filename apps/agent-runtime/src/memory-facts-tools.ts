@@ -52,7 +52,7 @@ export const MEMORY_ACTS = new Set<string>([MEMORY_REMEMBER, MEMORY_FORGET]);
 
 export interface MemoryFactsDeps {
   readSubjectRecord?: (subject: string, key: string) => Promise<unknown>;
-  writeSubjectRecord?: (subject: string, key: string, record: unknown) => Promise<{ ok: boolean; error?: string }>;
+  writeSubjectRecord?: (subject: string, key: string, record: unknown, operationId?: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 export function memoryFactsInvoker(deps: MemoryFactsDeps, person: string | undefined, runRef?: string, addressee?: string): ToolInvoker {
@@ -78,7 +78,7 @@ export function memoryFactsInvoker(deps: MemoryFactsDeps, person: string | undef
         const source = args.source === 'connector' && from ? 'connector' as const : 'you' as const;
         const r = rememberFact(prev, { fact: String(args.fact ?? ''), source, ...(source === 'connector' ? { from } : {}), saidAs: said, ...(runRef ? { runRef } : {}), ...(Array.isArray(args.tags) ? { tags: (args.tags as unknown[]).map(String) } : {}) });
         if ('error' in r) throw new Error(r.error);
-        const wrote = await deps.writeSubjectRecord(me, FACTS_RECORD, r.next);
+        const wrote = await deps.writeSubjectRecord(me, FACTS_RECORD, r.next, ctx.operationId);
         if (!wrote.ok) throw new Error(wrote.error ?? 'the fact could not be kept');
         return { remembered: true, updated: r.updated, id: r.entry.id, fact: r.entry.fact, tier: 'private', record: FACTS_RECORD, count: r.next.entries.length, note: r.updated ? 'I already had that — refreshed.' : 'Kept in your own vault; forget it any time on Memory.' };
       }
@@ -89,7 +89,7 @@ export function memoryFactsInvoker(deps: MemoryFactsDeps, person: string | undef
         const target = id ? prev.entries.find((e) => e.id === id) : words ? prev.entries.find((e) => e.fact.toLowerCase().includes(words)) : undefined;
         if (!target) return { forgotten: false, refused: id ? `no remembered fact has the id ${id}` : words ? `nothing I remember contains "${words}"` : 'say which fact — its id, or words it contains', count: prev.entries.length };
         const r = forgetFact(prev, target.id);
-        const wrote = await deps.writeSubjectRecord(me, FACTS_RECORD, r.next);
+        const wrote = await deps.writeSubjectRecord(me, FACTS_RECORD, r.next, ctx.operationId);
         if (!wrote.ok) throw new Error(wrote.error ?? 'the fact could not be forgotten');
         return { forgotten: true, id: target.id, fact: target.fact, tier: 'private', record: FACTS_RECORD, count: r.next.entries.length };
       }

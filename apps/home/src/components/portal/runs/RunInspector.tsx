@@ -17,6 +17,9 @@ import { canSaveAsRecipe } from '@agenticprimitives/harness/recipe';
 import { usePathname } from 'next/navigation';
 import { parseWorkspacePath } from '../../../lib/workspace';
 
+/** Spec 410 §2 — the four words a receipt attests, said so a stranger reads them right. */
+const ATTESTS: Record<'attempted' | 'accepted' | 'committed' | 'confirmed', string> = { attempted: 'attempted — nothing came back to vouch for it', accepted: 'accepted by the provider, not yet committed', committed: 'committed by the provider', confirmed: 'confirmed — read back' };
+
 const short = (v: unknown, n = 14): string => { const t = String(v ?? ''); return t.length > n ? `${t.slice(0, n - 4)}…${t.slice(-3)}` : t; };
 const kb = (b: number): string => (b >= 1024 ? `${(b / 1024).toFixed(1)} kB` : `${b} B`);
 
@@ -108,6 +111,8 @@ export function RunInspector({ token, addressee, runRef, goal, open = true }: { 
               {s.actor?.actingAgent && s.actor.actingAgent.toLowerCase() !== rec.agent.toLowerCase() ? ` · acted by ${short(s.actor.actingAgent, 12)}` : ''}
               {s.delegatedTo ? ` · handed to ${short(s.delegatedTo, 12)}${s.delegatedToRun ? ` (run ${short(s.delegatedToRun, 16)})` : ''}` : ''}
               {s.errorClass ? ` · ${s.errorClass}` : ''}
+              {/* Spec 410 §2 — the one word the receipt attests, and the provider's reference. "confirmed" alone means read back. */}
+              {s.observation ? ` · ${ATTESTS[s.observation.outcome]}${s.observation.providerRef ? ` (${short(s.observation.providerRef, 18)})` : ''}` : ''}
               {s.receiptDigest ? ` · receipt ${short(s.receiptDigest)}` : ''}
             </span>
           </div>

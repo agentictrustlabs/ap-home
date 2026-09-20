@@ -62,7 +62,8 @@ import { CONTACT_INVITE_TOOL, CONTACT_LIST_TOOL, CONTACT_REMOVE_TOOL, contactInv
 import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
 import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
-import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence } from '@agenticprimitives/orchestration';
+import { ADAPTER } from './adapter-declarations.js';
+import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer } from '@agenticprimitives/orchestration';
 import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, standingFor, declareInstruction, forgetInstruction, instructionContextOf, STANDING_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
@@ -282,6 +283,8 @@ export const ACCESS_AUDIT_TOOL: ToolSpec = {
 
 export const INVITE_TOOL: ToolSpec = {
   id: ORG_INVITE_CAPABILITY,
+
+  adapter: ADAPTER.sync,
   verbs: ['invite', 'add', 'bring'],
   // Spec 367 §6 — an invitation is recorded, never a membership: the invitee's joining establishes that.
   establishes: 'submission',
@@ -355,6 +358,8 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   ...PREFERENCES_TOOLS.filter((t) => PREFERENCES_ACTS.has(t.id)),
   {
     id: 'treasury.payment.execute',
+
+    adapter: ADAPTER.chain,
     verbs: ['send', 'pay', 'transfer', 'wire'],
     description: 'Pay USDC from one treasury (or organization) to another. Requires a payment mandate from the PAYER. Args: payer (the paying treasury/org SA — whose authority this needs), payee (recipient SA, NAME, or the words the person used — "bob", "my daughter", "sarah" all work: the payee is resolved from the asker\'s own household and links, so pass what they said), usdc (the amount AS THE PERSON SAID IT, in whole USDC — "20", "12.50"; never smallest units, never converted).',
     inputSchema: {
@@ -400,6 +405,8 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   RESOLUTION_REQUEST_TOOL,
   {
     id: 'messaging.direct.send',
+
+    adapter: ADAPTER.sync,
     verbs: ['message', 'text', 'write to', 'tell', 'dm', 'send a message', 'send a note'],
     description:
       'Send a DIRECT MESSAGE to another agent — a person, an organization, anyone with an inbox. Use this '
@@ -422,6 +429,8 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   },
   {
     id: 'messaging.topic.post',
+
+    adapter: ADAPTER.sync,
     verbs: ['post in', 'post to the topic', 'reply in the topic', 'answer in the thread', 'say in the topic'],
     description:
       'POST IN A TOPIC of an organization — a reply in the thread where something was said to you (spec 400 W2: a '
@@ -442,6 +451,8 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   },
   {
     id: 'treasury.fund',
+
+    adapter: ADAPTER.chain,
     verbs: ['fund', 'top up', 'add funds', 'deposit'],
     description:
       'Fund a treasury with DEMO USDC (a faucet mint, not a transfer — no one is debited). Requires a '
@@ -482,6 +493,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     // stranger's agent can honour it. It grants nothing: nobody may spend from the marked treasury, and
     // no gate reads the role — the resolver uses it to stop asking a payer a question only you can answer.
     id: PRIMARY_PAYEE_CAPABILITY,
+    adapter: ADAPTER.chain,
     verbs: ['set my primary', 'make my primary', 'mark my primary', 'use my treasury'],
     description:
       'Say which of the owner\'s treasuries plays a standing role: the one that RECEIVES payments to '
@@ -516,6 +528,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     // Recording somebody as your spouse does not let you spend their money. The household answers "who
     // did you mean" and nothing else.
     id: HOUSEHOLD_RECORD_CAPABILITY,
+    adapter: ADAPTER.sync,
     verbs: ['add', 'record', 'put'],
     description:
       'Record someone as part of this person\'s household — the private note of who they live with. '
@@ -551,6 +564,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     // only from the person's supplied yes (the 385 trusted-event rule): a planner's reading of "from now on"
     // writes nothing.
     id: STANDING_INSTRUCTION_CAPABILITY,
+    adapter: ADAPTER.sync,
     verbs: ['from now on', 'always', 'by default', 'default to', 'standing instruction', 'stop defaulting', 'no longer default'],
     description:
       'Keep a STANDING INSTRUCTION — this person\'s own default for an argument of one of their acts, in this room. '
@@ -584,6 +598,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     // `low` and NOT informational: it writes. A receipt records it, and the ladder does not ask a second
     // party to approve somebody correcting their own phone number.
     id: PROFILE_UPDATE_CAPABILITY,
+    adapter: ADAPTER.sync,
     // "set street address to …" opens with "set" and names no "my": the verbs are the bare imperatives too.
     verbs: ['update my', 'change my', 'set my', 'edit my', 'set', 'update', 'change', 'edit', 'correct', 'record my'],
     // THE FIELDS ARE THE RECORD'S (spec 371 §2.2): every argument comes from the ontology's one list, so an
@@ -618,6 +633,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     // (ADR-0041). It is `medium` because it takes authority AWAY — the failure mode is losing access
     // you meant to keep, which the person can restore by granting again.
     id: ACCESS_REVOKE_CAPABILITY,
+    adapter: ADAPTER.chain,
     verbs: ['revoke', 'remove access', 'disconnect', 'cut off'],
     description:
       'Revoke ON CHAIN a grant this agent issued, so it stops working everywhere rather than only here: an '
@@ -869,11 +885,13 @@ export interface HarnessDeps {
     /** Spec 400 W2a — the sender is the run's own agent, under a mandate chain rooted at it (a standing grant its
      *  custodian signed); no session — the app drives the agent's own rail in-Worker. Set only by `messageInvoker`. */
     asSelf?: true;
+    /** Spec 410 §3 — the step's logical operation identity; the sender's object records the envelope under it. */
+    operationId?: string;
   }) => Promise<{ ok: true; messageId?: string } | { ok: false; error: string }>;
   /** Spec 400 W2 (B3) — post in an organization's topic as `sender`: a person under their session, or an agent
    *  (the run's own under a chain rooted at it, or one the person stewards) as a MEMBER of that organization —
    *  the org's object checks the invitation record and authors the post as the member. */
-  postTopic?: (input: { org: Address; channelId: string; sender: Address; senderName?: string | null; bodyText: string; session: string; stewardship?: unknown; asSelf?: true }) => Promise<{ ok: true; messageId?: string } | { ok: false; error: string }>;
+  postTopic?: (input: { org: Address; channelId: string; sender: Address; senderName?: string | null; bodyText: string; session: string; stewardship?: unknown; asSelf?: true; operationId?: string }) => Promise<{ ok: true; messageId?: string } | { ok: false; error: string }>;
   /** Public directory search — for QUESTIONS about who exists (`find_agents`), never to fill a party in an
    *  action: a directory hit proves an agent exists, not that this person knows them (spec 352 §7). */
   findAgents?: (terms: string) => Promise<Array<{ name?: string | null; smartAgent?: string; displayName?: string | null }>>;
@@ -881,9 +899,12 @@ export interface HarnessDeps {
   readSubjectRecord?: (subject: string, recordType: string) => Promise<unknown>;
   /** spec 360 E5 — deposit ONE declared-effect artifact in a principal's own vault. Allowlisted by record
    *  type at the DO; the caller carries no write authority (the principal's own grant performs it). */
-  writeSubjectRecord?: (subject: string, recordType: string, record: unknown) => Promise<{ ok: boolean; error?: string }>;
+  writeSubjectRecord?: (subject: string, recordType: string, record: unknown, /** spec 410 §3 — the operation ledger's key */ operationId?: string) => Promise<{ ok: boolean; error?: string }>;
   /** Append one entry to a subject's own record — how a request reaches the person who must decide it. */
   appendSubjectRecord?: (subject: string, recordType: string, entry: unknown) => Promise<{ ok: boolean; error?: string }>;
+  /** Spec 410 §3 — the reconcile's read: what `subject`'s object did for a logical operation, or null. Throws when it
+   *  cannot be asked (the loop records that as indeterminate, never as absent). */
+  lookupOperation?: (subject: string, operationId: string) => Promise<{ kind: 'send' | 'write'; ref: string; at: string } | null>;
   /** Held resolution grants this asker can actually use — checked, not merely held (spec 338 §4). */
   verifyGrant?: (held: unknown, type: string, asker: string, session?: string) => Promise<Array<{ targetAgent?: string; owner: string; ownerName?: string; label?: string }>>;
   /** Close the note in the ASKER'S OWN vault that was waiting on this — spec 338 §7, the far end of a
@@ -1077,6 +1098,54 @@ export function readSubjectReply(envelope: (AskReplyEnvelopeV1 & { subjectAnswer
     ? `it asked “${reply.prompt?.prompt ?? ''}” (${reply.prompt?.kind ?? 'prompt'}${reply.prompt?.fields?.length ? `: ${reply.prompt.fields.map((f) => f.name).join(', ')}` : ''})`
     : (reply.summary ?? reply.text ?? reply.kind ?? '');
   return { ok: false, refused: `${who} needs more before it can answer — ${said}`.trim(), ...(runRef ? { runRef } : {}) };
+}
+
+/**
+ * Spec 410 §3 — THE RECONCILE PORT, one lookup per effect kind, keyed on the step's logical operation identity:
+ *
+ *   payment   the PaymentEnforcer's nonce slot for (delegator, delegation hash, intent-derived nonce) — the one
+ *             authority that already decided whether THIS payment settled; true ⇒ found, CONFIRMED by a chain read.
+ *   send      the sender's object's operation ledger (`op:<operationId>` → the envelope id it recorded).
+ *   write     the subject's object's operation ledger (→ the record type it wrote).
+ *
+ * A read that throws is INDETERMINATE (the loop does nothing this attempt); a tool nobody bound is absent. The A2A
+ * hop is not reconciled here yet: a routed step's receiver names its own run, and the sender-side lookup by
+ * operation id is the next slice (spec 410 §3, ledger THESIS-3).
+ */
+export function harnessReconcilePort(deps: HarnessDeps, env: HarnessEnv, presentedList: MandatePresentation[], intent: { goal: string; context?: Record<string, unknown> }, addressee: string): ReturnType<typeof reconcileByTool> {
+  const enforcers = harnessEnforcers(env);
+  const ledger = (subjectOf: (req: ReconcileRequest) => string | Promise<string>, kind: 'send' | 'write') => async (req: ReconcileRequest): Promise<ReconcileAnswer> => {
+    if (!deps.lookupOperation) return { status: 'absent' };
+    const subject = (await subjectOf(req)).toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(subject)) return { status: 'absent' };
+    const found = await deps.lookupOperation(subject, req.operationId); // throws ⇒ indeterminate (reconcileByTool)
+    if (!found || found.kind !== kind) return { status: 'absent' };
+    return { status: 'found', output: kind === 'send' ? { sent: true, messageId: found.ref, reconciled: true } : { kept: true, record: found.ref, reconciled: true }, observation: { outcome: 'confirmed', providerRef: found.ref, observedAt: found.at, evidence: [{ kind: 'read-back', ref: `the ${kind === 'send' ? "sender's" : "subject's"} object recorded this operation at ${found.at}` }] } };
+  };
+  const self = (): string => addressee;
+  const payment = async (req: ReconcileRequest): Promise<ReconcileAnswer> => {
+    if (!enforcers.payment) return { status: 'absent' };
+    const wire = (presentedList.length > 1 ? selectByPayee({ capability: { id: 'treasury.payment.execute' }, args: req.args }, presentedList, enforcers.payment) : presentedList[0])?.wire as Delegation | undefined;
+    if (!wire) return { status: 'absent' };
+    const digest = intentDigest(intent);
+    const nonce = keccak256(toBytes(`${digest}:${req.step.idempotencyKey ?? req.stepRef}`));
+    const dHash = hashDelegation(wire, Number(env.CHAIN_ID), env.DELEGATION_MANAGER as Address);
+    const used = (await deps.readContract({ address: enforcers.payment as Address, abi: IS_NONCE_USED_ABI, functionName: 'isNonceUsed', args: [wire.delegator, dHash, nonce] })) as boolean; // throws ⇒ indeterminate
+    if (!used) return { status: 'absent' };
+    return { status: 'found', output: { alreadySettled: true, outcome: 'committed', effectIdentity: `${dHash}:${nonce}`, reconciled: true }, observation: { outcome: 'confirmed', providerRef: `${dHash}:${nonce}`, observedAt: new Date().toISOString(), evidence: [{ kind: 'chain-read', ref: 'PaymentEnforcer.isNonceUsed: this exact payment had already settled' }] } };
+  };
+  return reconcileByTool({
+    'treasury.payment.execute': payment,
+    'messaging.direct.send': ledger(self, 'send'),
+    'messaging.topic.post': ledger((req) => partyAddress(req.args.org, deps, 'the organization'), 'send'), // the ORG's object records the post
+    [STANDING_INSTRUCTION_CAPABILITY]: ledger(self, 'write'),
+    [HOUSEHOLD_RECORD_CAPABILITY]: ledger(self, 'write'),
+    [MEMORY_REMEMBER]: ledger(self, 'write'),
+    'person.memory.forget': ledger(self, 'write'),
+    'person.contact.invite': ledger(self, 'write'),
+    'person.contact.remove': ledger(self, 'write'),
+    ...Object.fromEntries([...PREFERENCES_ACTS, ...ROUTINE_ACTS].map((id) => [id, ledger(self, 'write')])),
+  });
 }
 
 export function harnessEnforcers(env: HarnessEnv): EnforcerAddresses {
@@ -1637,7 +1706,7 @@ export function standingInstructionInvoker(deps: HarnessDeps, person: Address | 
     const forget = isFlagTrue(args.forget);
     if (forget) {
       const prev = (await deps.readSubjectRecord(me, STANDING_RECORD).catch(() => null)) as StandingInstructionsV1 | null;
-      const wrote = await deps.writeSubjectRecord(me, STANDING_RECORD, forgetInstruction(prev, { context, capability: act.id, arg }));
+      const wrote = await deps.writeSubjectRecord(me, STANDING_RECORD, forgetInstruction(prev, { context, capability: act.id, arg }), ctx.operationId);
       if (!wrote.ok) throw new Error(wrote.error ?? 'the standing instruction could not be cleared');
       return { cleared: true, capability: act.id, arg, context, tier: 'private', record: STANDING_RECORD, note: `the next time you ${CAPABILITY_WORDS[act.id] ?? act.id}, the ${arg} is asked for again` };
     }
@@ -1665,7 +1734,7 @@ export function standingInstructionInvoker(deps: HarnessDeps, person: Address | 
     if (answer !== 'yes') return { kept: false, capability: act.id, arg, note: 'nothing was kept' };
     const prev = (await deps.readSubjectRecord(me, STANDING_RECORD).catch(() => null)) as StandingInstructionsV1 | null;
     const next = declareInstruction(prev, { context, capability: act.id, arg, value, ...(label ? { label } : {}), saidAs: sentence });
-    const wrote = await deps.writeSubjectRecord(me, STANDING_RECORD, next);
+    const wrote = await deps.writeSubjectRecord(me, STANDING_RECORD, next, ctx.operationId);
     if (!wrote.ok) throw new Error(wrote.error ?? 'the standing instruction could not be kept');
     return {
       kept: true, capability: act.id, arg, value, ...(label ? { label } : {}), context, tier: 'private', record: STANDING_RECORD,
@@ -1876,7 +1945,7 @@ export function messageInvoker(deps: HarnessDeps, presented: MandatePresentation
         fields: [{ name: 'message', label: 'Message', type: 'text', required: true, hint: 'they will see it in their inbox, from you' }],
       });
     }
-    const out = await deps.sendDirectMessage({ sender, recipient, bodyText: text, session: session ?? '', ...(stewardship ? { stewardship } : {}), ...(asSelf ? { asSelf: true as const } : {}) });
+    const out = await deps.sendDirectMessage({ sender, recipient, bodyText: text, session: session ?? '', ...(stewardship ? { stewardship } : {}), ...(asSelf ? { asSelf: true as const } : {}), operationId: ctx.operationId });
     if (!out.ok) throw new Error(out.error);
     return { sent: true, recipient, from: sender, ...(sender !== person ? { drivenBy: person } : {}), ...(asSelf ? { underStandingGrant: true } : {}), message: text, ...(out.messageId ? { messageId: out.messageId } : {}) };
   };
@@ -1910,7 +1979,7 @@ export function topicPostInvoker(deps: HarnessDeps, presented: MandatePresentati
     const text = String(supplied.message ?? args.message ?? '').trim();
     if (!text) throw new InputRequired({ kind: 'data', stepRef, toolId, prompt: 'What should the post say?', fields: [{ name: 'message', label: 'Message', type: 'text', required: true }] });
     const senderName = deps.nameOf ? await deps.nameOf(sender).catch(() => null) : null;
-    const out = await deps.postTopic({ org, channelId, sender, senderName, bodyText: text, session: session ?? '', ...(stewardship ? { stewardship } : {}), ...(asSelf ? { asSelf: true as const } : {}) });
+    const out = await deps.postTopic({ org, channelId, sender, senderName, bodyText: text, session: session ?? '', ...(stewardship ? { stewardship } : {}), ...(asSelf ? { asSelf: true as const } : {}), operationId: ctx.operationId });
     if (!out.ok) throw new Error(out.error);
     return { posted: true, org, channelId, from: sender, ...(sender !== person ? { drivenBy: person } : {}), ...(asSelf ? { underStandingGrant: true } : {}), message: text, ...(out.messageId ? { messageId: out.messageId } : {}) };
   };
@@ -1963,7 +2032,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
   // redeems the one whose caveat names the step's payee — the same selection the verifier used, so what
   // is redeemed is exactly what was judged.
   const presented: MandatePresentation | null = presentedAll[0] ?? null;
-  return async (toolId, args, ctx) => {
+  const raw: ToolInvoker = async (toolId, args, ctx) => {
     // Spec 396 W3 — the DO calls this step makes are charged to it on the run's bill.
     setBillStep(ctx.step.id ?? `s${ctx.index}`);
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
@@ -2206,6 +2275,50 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     }
     return { txHash, asset, payee, amount: amount.toString(), payer: rootPayer, outcome: 'committed', effectIdentity: `${dHash}:${nonce}` };
   };
+  // Spec 410 §2 — every family says what it saw, at the one boundary they all cross.
+  return async (toolId, args, ctx) => observeResult(toolId, await raw(toolId, args, ctx));
+}
+
+/**
+ * Spec 410 §2 — WHAT EACH ADAPTER FAMILY CAN VOUCH FOR, from the shape of what it returned. Named per family,
+ * never inferred from success: a value that proves nothing stays a raw value and the loop records `attempted`.
+ *
+ *   chain effects      `txHash` — the bundler client waited for the transaction receipt: the chain was READ after
+ *                      the submit, so the effect is CONFIRMED and the tx hash is the provider's reference.
+ *   payment, settled   `alreadySettled` — the enforcer's nonce slot said this exact payment had happened: a
+ *                      reconcile, CONFIRMED, the effect identity as the reference.
+ *   messaging          `messageId` — the sender's object delivered to the recipient's gate synchronously and
+ *                      recorded (deliver-or-409); COMMITTED by the provider, not read back.
+ *   vault writes       `record` + kept/remembered/updated/changed/forgotten/cleared — the object answered ok for
+ *                      that record type: COMMITTED, the record type as the reference.
+ *   invitation         `invited` — a submission: the organization RECORDED the invitation (ACCEPTED); a membership
+ *                      is what the invitee's acceptance establishes, not this.
+ *   github / calendar  `url` / `event.id` — the provider returned the created object: COMMITTED. A draft is ACCEPTED.
+ *   mail
+ *   MCP connector      `called` — an outside server said something; nothing proves a commit: ACCEPTED at most.
+ *   routed / hand-off  `via.runRef` — the receiver's run; COMMITTED when its receipts came back, else ACCEPTED.
+ */
+export function observeResult(toolId: string, result: unknown): unknown {
+  if (isToolInvocationResult(result) || !result || typeof result !== 'object' || Array.isArray(result)) return result;
+  const r = result as Record<string, unknown>;
+  const str = (k: string): string | undefined => (typeof r[k] === 'string' && (r[k] as string).length ? (r[k] as string) : undefined);
+  const txHash = str('txHash');
+  if (txHash) return observed(result, 'confirmed', { providerRef: txHash, evidence: [{ kind: 'chain-read', ref: 'the bundler client waited for the transaction receipt before returning' }] });
+  if (r.alreadySettled === true) return observed(result, 'confirmed', { ...(str('effectIdentity') ? { providerRef: str('effectIdentity') } : {}), evidence: [{ kind: 'reconcile', ref: 'PaymentEnforcer.isNonceUsed: this exact payment had already settled' }] });
+  if ((r.sent === true || r.posted === true) && str('messageId')) return observed(result, 'committed', { providerRef: str('messageId'), evidence: [{ kind: 'response-digest', ref: 'the sender\'s object delivered to the recipient\'s gate and recorded the envelope' }] });
+  if (str('record') && (r.kept === true || r.remembered === true || r.updated === true || r.changed === true || r.forgotten === true || r.cleared === true)) return observed(result, 'committed', { providerRef: str('record'), evidence: [{ kind: 'response-digest', ref: `the vault answered ok for ${str('record')}` }] });
+  if (r.invited === true) return observed(result, 'accepted', { ...(str('grantDigest') ? { providerRef: str('grantDigest') } : {}), evidence: [{ kind: 'response-digest', ref: 'the organization recorded the invitation; membership is what the acceptance establishes' }] });
+  if (r.added === true && str('grantDigest')) return observed(result, 'committed', { providerRef: str('grantDigest'), evidence: [{ kind: 'response-digest', ref: 'the contact record and its grant were written to the vault' }] });
+  if ((r.opened === true || r.commented === true || r.promoted === true) && str('url')) return observed(result, 'committed', { providerRef: str('url'), evidence: [{ kind: 'response-digest', ref: 'GitHub returned the object it created' }] });
+  if (r.created === true && r.event && typeof r.event === 'object' && typeof (r.event as { id?: unknown }).id === 'string') return observed(result, 'committed', { providerRef: String((r.event as { id: string }).id), evidence: [{ kind: 'response-digest', ref: 'the calendar returned the event it created' }] });
+  if (r.deleted === true && str('id')) return observed(result, 'committed', { providerRef: str('id'), evidence: [{ kind: 'response-digest', ref: 'the provider answered the delete' }] });
+  if (r.sent === true && str('threadId')) return observed(result, 'committed', { providerRef: str('messageId') ?? str('threadId'), evidence: [{ kind: 'response-digest', ref: 'the mail provider returned the sent message' }] });
+  if (r.drafted === true) return observed(result, 'accepted', { ...(str('draftId') ? { providerRef: str('draftId') } : {}), evidence: [{ kind: 'response-digest', ref: 'a draft is held, not sent' }] });
+  if (r.called === true && str('connector')) return observed(result, 'accepted', { evidence: [{ kind: 'response-digest', ref: `an outside MCP server (${str('connector')}) answered; nothing proves it committed` }] });
+  const via = r.via as { runRef?: unknown; receipts?: unknown } | undefined;
+  if (via && typeof via.runRef === 'string') return observed(result, Array.isArray(via.receipts) && via.receipts.length ? 'committed' : 'accepted', { providerRef: via.runRef, evidence: [{ kind: 'response-digest', ref: Array.isArray(via.receipts) && via.receipts.length ? `the receiver's run returned ${via.receipts.length} receipt(s)` : 'the receiver holds the step' }] });
+  void toolId;
+  return result;
 }
 
 /** PaymentEnforcer.isNonceUsed — the on-chain idempotency read (spec 358 W4-tail). readContract only. */
@@ -4891,7 +5004,7 @@ step is then handed to that agent under authority the person grants; leave it ou
           throw new Error(`${exName} did not run the step: ${answer.refused ?? 'no answer'}`);
         }
         const rH = (answer.result && typeof answer.result === 'object') ? (answer.result as Record<string, unknown>) : { result: answer.result };
-        return { ...rH, via: viaH, note: `${String(rH.note ?? '')} Done by ${exName} under a child mandate this agent attenuated from yours — say so in one clause.`.trim() };
+        return observeResult(toolId, { ...rH, via: viaH, note: `${String(rH.note ?? '')} Done by ${exName} under a child mandate this agent attenuated from yours — say so in one clause.`.trim() });
       }
       // Spec 397 W2 — FIND: the registry, deterministically; a read of public facts.
       if (toolId === DISCOVERY_FIND_CAPABILITY) return discoveryFindInvoker({ registryOrigin: env.ARD_REGISTRY_ORIGIN, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) })(toolId, args, ctx);
@@ -5047,7 +5160,7 @@ step is then handed to that agent under authority the person grants; leave it ou
           note: `Said by ${who}'s own agent, answering as itself — relay its words and every link it gave, name it as the source, add nothing beside it. An observation, never a record of this agent's.`,
         };
       }
-      return { ...r, via: answer.via, note: `${String(r.note ?? '')} Answered by ${who}'s own agent — say so in one clause.`.trim() };
+      return observeResult(toolId, { ...r, via: answer.via, note: `${String(r.note ?? '')} Answered by ${who}'s own agent — say so in one clause.`.trim() });
     },
     // WHAT WAS DECIDED FOR THE PERSON, onto the receipt (spec 363 W6). The resolver reports each party it
     // decided rather than asked, WITH the rule that answered; this hands those to the loop for the step
@@ -5131,6 +5244,9 @@ step is then handed to that agent under authority the person grants; leave it ou
       },
       mandateVerifier: verifier, policyEvaluator: policy,
       approvalPort: suppliedApprovalsPort(deps, env, input.approvals ?? [], input.supplied, input.person, presentedList), receiptSink,
+      // Spec 410 §3 — RECONCILE BEFORE ACT, per effect kind. Asked before every non-read step whether THIS operation
+      // already happened; a lost response after a commit is found here and never becomes a second effect.
+      reconcile: harnessReconcilePort(deps, env, presentedList, input.intent, String(input.addressee ?? '').toLowerCase()),
       // PLAN ADMISSION (spec 367 W1) — the plan's SHAPE, judged from declarations before any step runs:
       // an instruction must be answered by an act (`verbs` on the action tools); a placeholder is not an
       // argument; a step whose tool declares a `subject` may not leave it empty when the sentence names
