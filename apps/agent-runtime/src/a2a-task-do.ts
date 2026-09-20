@@ -38,6 +38,7 @@ import { createViemChainProvider } from '@agenticprimitives/chain-state-viem';
 // behind the Planner port (the chain-state-viem pattern), selected by env at request time.
 import { runOrchestration } from './orchestration.js';
 import { endeavorRequestFromA2aTask, parseEndeavorRequestInput, parseEndeavorStateInput, ENDEAVOR_REQUEST_SKILL_ID, ENDEAVOR_STATE_SKILL_ID } from './endeavor-intake.js';
+import { classifyProviderFailure, providerFailureNotice } from './provider-outage.js';
 import { handleDiscussionRespond, topicReplyGuidance, type DiscussionRespondInput } from './discussion-skill.js';
 import { draftEndeavorPlan } from './endeavor-plan-skill.js';
 import { executeEndeavorStep, synthesizeEndeavorOutcome, gatherReferenceContext } from './endeavor-work-skill.js';
@@ -1256,7 +1257,17 @@ export class A2aTaskDO {
         if (!turn.posted) {
           const cause = turn.result.error ?? 'assistant turn completed without posting a reply';
           console.error(`[discussion-respond] 502 — no reply posted (step=turn outcome=${turn.result.outcome} planner=${turn.plannerKind}): ${cause}`);
-          return Response.json({ ok: false, error: cause, plannerKind: turn.plannerKind }, { status: 502 });
+          // A provider out of credit / over quota is a failure the PERSON can address — the assistant says
+          // so in the topic, with the console to fix it at (provider-outage.ts). Still a failed dispatch:
+          // the 502 stands and the audit records it; nothing is retried (ADR-0013).
+          const failure = classifyProviderFailure(turn.plannerKind, cause, this.env as unknown as Record<string, unknown>);
+          const notice = providerFailureNotice(p.displayName || 'The assistant', failure);
+          let noticeMessageId: string | undefined;
+          if (notice) {
+            try { noticeMessageId = (await io.post(notice)).messageId; }
+            catch (e) { console.error(`[discussion-respond] the provider-failure notice could not be posted: ${e instanceof Error ? e.message : String(e)}`); }
+          }
+          return Response.json({ ok: false, error: cause, plannerKind: turn.plannerKind, providerFailure: failure.kind, ...(noticeMessageId ? { noticeMessageId } : {}) }, { status: 502 });
         }
         return Response.json({ ok: true, messageId: turn.messageId, plannerKind: turn.plannerKind, asked: 0 });
       } catch (e) {

@@ -438,7 +438,11 @@ CHAIN_ID = "34348"
 # 2026-09-15 — xAI's Grok is the ONLY offered model (user's decision): a Grok failure is an error the person sees, never a
 # quiet hand-off to another provider (ADR-0013). Re-offer groq/anthropic by listing them again ("xai,groq,anthropic").
 # XAI_API_KEY is a secret (`wrangler secret put XAI_API_KEY --env faithnet`).
-ORCHESTRATION_LLM = "xai"
+# 2026-09-20 — the xAI team ran out of credits (HTTP 403 "used all available credits or reached its monthly spending
+# limit"), which failed every Ask turn on the estate. Gemini (8aba978e: gemini-3.5-flash-lite plans, gemini-3.5-flash
+# composes) is now the ONLY offered model, the same one-provider stance as 09-15. GEMINI_API_KEY is a secret
+# (`wrangler secret put GEMINI_API_KEY --env faithnet`). Re-offer Grok with "gemini,xai" once its credits are back.
+ORCHESTRATION_LLM = "gemini"
 # Spec 388 — the cheapest OFFERED provider that carries each call, decided before the request from the prompt estimate, the
 # per-request budget and this minute's spend; recorded on the trace with its reason. A route, never a fallback (ADR-0013).
 ORCHESTRATION_ROUTE = "budget"
