@@ -4,6 +4,9 @@
 //   GET             → { ok, grants: [{ clientId, appName, template, delegate, delegation, issuedAt, validUntil }] }
 //   POST { clientId, revoked: true } → forget the row after the person revoked the wire on chain (the chain is
 //   the record; a row for a revoked wire is a stale pointer).
+//   POST { clientId, delegation } → REPLACE the row's wire after a credential rotation re-issued it (spec 410 §1.2:
+//   same terms, same salt, the account's approved-digest sentinel). The row stays a pointer; the lineage record in
+//   the person's vault is what the delegate's refresh reads.
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { getClient } from '../../src/lib/oidc-clients';
@@ -42,10 +45,22 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
   const person = await personFrom(request, env);
   if (!person) return json({ error: 'session required' }, 401);
-  const body = (await request.json().catch(() => null)) as { clientId?: string; revoked?: boolean } | null;
-  if (!body?.clientId || body.revoked !== true) return json({ error: 'clientId and revoked: true are required' }, 400);
+  const body = (await request.json().catch(() => null)) as { clientId?: string; revoked?: boolean; delegation?: Row['delegation'] & { delegator?: string; delegate?: string; signature?: string } } | null;
+  if (!body?.clientId) return json({ error: 'clientId is required' }, 400);
   const key = `app-grants:${person}`;
   const rows = JSON.parse((await env.AUTH_CODES.get(key)) ?? '[]') as Row[];
-  await env.AUTH_CODES.put(key, JSON.stringify(rows.filter((r) => r.clientId !== body.clientId)));
-  return json({ ok: true });
+  if (body.revoked === true) {
+    await env.AUTH_CODES.put(key, JSON.stringify(rows.filter((r) => r.clientId !== body.clientId)));
+    return json({ ok: true });
+  }
+  if (body.delegation && typeof body.delegation === 'object') {
+    const row = rows.find((r) => r.clientId === body.clientId);
+    if (!row) return json({ error: 'no grant row for that client' }, 404);
+    // The replacement is the SAME wire re-issued: same delegator (this person), same delegate; only the signature
+    // (now the sentinel) may differ. Anything else is a new grant, which is not what this door is for.
+    if (String(body.delegation.delegator ?? '').toLowerCase() !== person || String(body.delegation.delegate ?? '').toLowerCase() !== String(row.delegate).toLowerCase()) return json({ error: 'the replacement must be the same wire re-issued (same delegator and delegate)' }, 400);
+    await env.AUTH_CODES.put(key, JSON.stringify(rows.map((r) => (r.clientId === body.clientId ? { ...r, delegation: body.delegation } : r))));
+    return json({ ok: true, replaced: true });
+  }
+  return json({ error: 'revoked: true or a replacement delegation is required' }, 400);
 };

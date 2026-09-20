@@ -26,7 +26,10 @@ import {
   buildApproveHashCall as buildApproveHashKeyCall,
   readApprovalScheme,
   type ContractCall,
+  buildRotationBatch,
+  type CredentialRef,
 } from '@agenticprimitives/agent-account';
+import { buildRevokeDelegationCall, type Delegation } from '@agenticprimitives/delegation';
 import {
   buildProposeEdgeCall,
   buildConfirmEdgeCall,
@@ -769,7 +772,7 @@ export async function passkeyLogin(registerIfMissing = true): Promise<PasskeyOut
  *
  *  `passkeyRpId()` already carries the SSR/localhost/whitelabel fallbacks, so hashing it is correct on
  *  every host. (No fallback — ADR-0013 single mechanism: one consistent value end-to-end.) */
-async function derivePasskeyRpIdHash(): Promise<Hex> {
+export async function derivePasskeyRpIdHash(): Promise<Hex> {
   const rpId = passkeyRpId();
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(rpId));
   const arr = Array.from(new Uint8Array(buf));
@@ -2916,6 +2919,60 @@ export async function executeCalls(
 ): Promise<{ ok: true; txHash?: Hex } | { ok: false; error: string }> {
   if (calls.length === 0) return { ok: true };
   return executeCall(sa, signHash, buildExecuteBatchCallData(calls));
+}
+
+// ─── Spec 410 §1.2 — the ROTATION ceremony's chain primitives ───────────────────────────────────────────────
+// Rotation = add the new credential → retire the old → re-approve every standing approved-digest wire under the new
+// custody epoch, in ONE userOp signed by the OLD credential as its last act. The batch's order is the SDK's
+// (`buildRotationBatch`), the key derivation is the account's (`approveDigest`), and this estate must run contracts
+// generation 3 — an older estate has no `approveDigest`, and pretending with a computed future-epoch key is the
+// exact hole generation 3 closes (THESIS-1a). Governed accounts (custody mode > 0) rotate through the custody
+// policy's `RotateCredential` action under quorum, which is not this ceremony.
+
+/** Register a NEW passkey on this device and return it as the credential the rotation adds. Overwrites this
+ *  device's stored passkey (as `registerPasskey` always has) — the caller keeps the old one to restore on failure. */
+export async function registerPasskeyCredentialRef(label: string): Promise<{ ref: Extract<CredentialRef, { kind: 'passkey' }>; passkey: DemoPasskey }> {
+  const pk = await registerPasskey(label);
+  const rpIdHash = await derivePasskeyRpIdHash();
+  return { ref: { kind: 'passkey', credentialIdDigest: pk.credentialIdDigest, x: pk.pubKeyX, y: pk.pubKeyY, rpIdHash }, passkey: pk };
+}
+
+/** The account's custody mode from the canonical CustodyPolicy (0 = self-governing person; 1–3 governed). */
+export async function readCustodyMode(personAgent: Address): Promise<number> {
+  const pc = createPublicClient({ chain: CHAIN, transport: http('/a2a/rpc') });
+  const cp = CONTRACTS.custodyPolicy;
+  if (!cp || /^0x0{40}$/.test(cp)) return 0;
+  try {
+    return Number(await pc.readContract({ address: cp, abi: [{ type: 'function', name: 'custodyMode', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'uint8' }] }] as const, functionName: 'custodyMode', args: [personAgent] }));
+  } catch { return 0; }
+}
+
+/** Whether THIS estate can perform the rotation ceremony at all, and why not when it cannot. */
+export function rotationAvailability(): { ok: true } | { ok: false; reason: string } {
+  if (CONTRACTS_GENERATION !== 3) return { ok: false, reason: `rotation is not available on this estate yet — its contracts are generation ${CONTRACTS_GENERATION}, and the ceremony needs generation 3 (spec 410 §1)` };
+  return { ok: true };
+}
+
+/** ONE userOp: add → retire → approveDigest × N, signed by the OLD credential (`signHash`). */
+export async function rotateCredential(
+  personAgent: Address,
+  signHash: SignHash,
+  input: { add: CredentialRef; retire: { kind: 'custodian'; address: Address } | { kind: 'passkey'; credentialIdDigest: Hex }; reapprove: readonly Hex[];
+    /** Wires the person STRUCK from the reviewed list: revoked on chain in the same batch, so the strike is said
+     *  where every verifier reads it, not only implied by the missing re-approval. */
+    revoke?: readonly DelegationWire[] },
+): Promise<{ ok: true; txHash?: Hex } | { ok: false; error: string }> {
+  const avail = rotationAvailability();
+  if (!avail.ok) return { ok: false, error: avail.reason };
+  let calls: ContractCall[];
+  try {
+    calls = buildRotationBatch({ scheme: { generation: 3, account: personAgent }, add: input.add, retire: input.retire, reapprove: input.reapprove });
+    for (const w of input.revoke ?? []) {
+      const d: Delegation = { delegator: w.delegator, delegate: w.delegate, authority: w.authority, caveats: w.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })), salt: BigInt(String(w.salt)), signature: w.signature };
+      calls.push(buildRevokeDelegationCall(d, CONTRACTS.delegationManager));
+    }
+  } catch (e) { return { ok: false, error: e instanceof Error ? e.message : String(e) }; }
+  return executeCall(personAgent, signHash, buildExecuteBatchCallData(calls), { attempts: 5 });
 }
 
 export async function setCapabilities(

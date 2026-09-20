@@ -21,7 +21,7 @@ import { CONTACT_FIELD_ARGS, contactField, precisionOf } from '@agenticprimitive
 import { createPublicClient, http, decodeAbiParameters, type Address, type Hex } from 'viem';
 import { chainFor } from './chain';
 import { kinTermFor, householdRoleFor } from '@agenticprimitives/ontology';
-import { hashDelegation, decodeVaultRecordScopeTerms, vaultRecordScopeAllows, VAULT_RECORD_SCOPE_ENFORCER, type Delegation, type VaultRecordScopeGrant } from '@agenticprimitives/delegation';
+import { hashDelegation, decodeVaultRecordScopeTerms, vaultRecordScopeAllows, VAULT_RECORD_SCOPE_ENFORCER, type Delegation, type VaultRecordScopeGrant, currentWireOf, LINEAGE_RECORD_PREFIX, type DelegationLineageV1 } from '@agenticprimitives/delegation';
 import { PrincipalGatewayDO } from '@agenticprimitives/fabric/cloudflare';
 import { buildMountedGatewayDeps } from './gateway-mount.js';
 import { loadPlaybook, countedOp, countVaultCall } from '@agenticprimitives/harness';
@@ -391,7 +391,7 @@ const RESOLUTION_GRANTS_RESOURCE = 'resolution.grants';
 // Spec 401 — a CONTACT (`contact:<sa>`) is the person's own record of who they let in, written by their agent under
 // their own signed mandate (the act that mints the grant) into their own vault. Its own family: an organization's
 // invitation key stays a delivery-plane write (the fabric firewall), untouched by this door.
-const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run.provenance:', 'run.artifact:', 'build.run:', 'build.promotion:', 'connector.mcp:', 'agent.budget', 'confirmation.preferences', 'standing.instructions', 'memory.facts', 'routines.data', 'person.preferences', 'playbook.memory:', 'cardroom.', 'contact:'] as const;
+const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run.provenance:', 'run.artifact:', 'build.run:', 'build.promotion:', 'connector.mcp:', 'agent.budget', 'confirmation.preferences', 'standing.instructions', 'memory.facts', 'routines.data', 'person.preferences', 'playbook.memory:', 'cardroom.', 'contact:', 'delegation.lineage:'] as const; // spec 410 §1.2 — a wire re-issued for a rotation, in the delegator's own vault
 
 const CAPABILITY_RECORDS = new Set(['impact-profile', 'capabilities.data', 'skills.data', 'home.manifest', 'control-events.data', 'archetype.assignment']);
 const CONTROL_EVENTS_RESOURCE = 'control-events.data';
@@ -1371,8 +1371,14 @@ export class InteractionsDO {
     sessionCaip: string,
     body: Record<string, unknown>,
   ): Promise<{ admitted: boolean; steward: boolean; listed: boolean; you: string | null }> {
-    const listingName = await this.memberName(grant, principal, sessionCaip);
-    const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
+    // The listing read, the steward proof (two chain reads) and the local-names doc do not depend on one
+    // another; issued together they cost one round trip, not three. Names are read before admission is
+    // decided — the read is under the ORG's grant either way and nothing of it leaves for a refused caller.
+    const [listingName, steward, names] = await Promise.all([
+      this.memberName(grant, principal, sessionCaip),
+      this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined),
+      this.readLocalNames(grant),
+    ]);
     const memberAccess =
       listingName || steward
         ? false
@@ -1387,7 +1393,6 @@ export class InteractionsDO {
     if (!listingName && !steward && !memberAccess && !recordedName) {
       return { admitted: false, steward: false, listed: false, you: null };
     }
-    const names = await this.readLocalNames(grant);
     const local = names[sessionSa.toLowerCase()];
     const localName = typeof local === 'string' && local.trim() ? local.trim() : null;
     let publicName: string | null = null;
@@ -1851,7 +1856,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.channels.create' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.channels.create' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'internal.wire.current' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -2319,22 +2324,42 @@ export class InteractionsDO {
         // contacts (a person's), standing grants to runtimes, the study grant to a coach. Each row: who holds it,
         // what it permits, its digest, when, and whether the chain says it is revoked. A list; never the wires.
         if (op === 'internal.grants.audit') {
-          const rows: Array<{ kind: string; holder: string; holderName?: string; what: string; digest: string; issuedAt?: string; revoked: boolean; source: string }> = [];
+          // Spec 410 §1.2 — `signed` says what a credential ROTATION does with each wire: an approved-digest wire
+          // is re-approved as-is under the new epoch; a key-signed one is re-issued (its key is being retired).
+          const rows: Array<{ kind: string; holder: string; holderName?: string; what: string; digest: string; issuedAt?: string; revoked: boolean; source: string; signed: 'approved-digest' | 'key' }> = [];
           const revokedOf = async (digest: string): Promise<boolean> => {
             try { return (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [digest as Hex] })) as boolean; } catch { return true; }
           };
+          const signedOf = (w: { signature?: string } | undefined): 'approved-digest' | 'key' => (String(w?.signature ?? '').toLowerCase() === '0x03' ? 'approved-digest' : 'key');
+          const hashOf = (w: IncomingDelegation): string => hashDelegation({ ...w, salt: BigInt(String(w.salt)), caveats: w.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
           for (const [, v] of await this.state.storage.list({ prefix: READ_GRANT_KEY('') })) {
             const rec = v as ReadGrantRecord;
-            rows.push({ kind: 'app', holder: rec.clientId, what: 'reads the records the grant scopes', digest: rec.hash, issuedAt: rec.storedAt, revoked: await revokedOf(rec.hash), source: 'read.grant' });
+            rows.push({ kind: 'app', holder: rec.clientId, what: 'reads the records the grant scopes', digest: rec.hash, issuedAt: rec.storedAt, revoked: await revokedOf(rec.hash), source: 'read.grant', signed: signedOf(rec.wire) });
           }
           for (const [, v] of await this.state.storage.list({ prefix: STANDING_GRANT_KEY('') })) {
             const rec = v as StandingGrantRecord;
-            rows.push({ kind: 'runtime', holder: rec.holder, ...(rec.holderName ? { holderName: rec.holderName } : {}), what: `${rec.capabilities.join(', ')}${rec.locations.length ? ` to ${rec.locations.length} recipient(s)` : ' to anyone'} until ${new Date(rec.validUntil * 1000).toISOString().slice(0, 10)}`, digest: rec.hash, issuedAt: rec.storedAt, revoked: await revokedOf(rec.hash), source: 'standing.grant' });
+            rows.push({ kind: 'runtime', holder: rec.holder, ...(rec.holderName ? { holderName: rec.holderName } : {}), what: `${rec.capabilities.join(', ')}${rec.locations.length ? ` to ${rec.locations.length} recipient(s)` : ' to anyone'} until ${new Date(rec.validUntil * 1000).toISOString().slice(0, 10)}`, digest: rec.hash, issuedAt: rec.storedAt, revoked: await revokedOf(rec.hash), source: 'standing.grant', signed: signedOf(rec.wire) });
           }
           const study = await this.state.storage.list({ prefix: STUDY_GRANT_KEY('') });
           for (const [k, v] of study) {
             const rec = v as { wire?: IncomingDelegation; hash?: string; storedAt?: string; delegate?: string };
-            if (rec.hash) rows.push({ kind: 'coach', holder: rec.delegate ?? rec.wire?.delegate ?? '', holderName: k.slice(STUDY_GRANT_KEY('').length), what: 'reads the study records; appends notes', digest: rec.hash, ...(rec.storedAt ? { issuedAt: rec.storedAt } : {}), revoked: await revokedOf(rec.hash), source: 'study.grant' });
+            if (rec.hash) rows.push({ kind: 'coach', holder: rec.delegate ?? rec.wire?.delegate ?? '', holderName: k.slice(STUDY_GRANT_KEY('').length), what: 'reads the study records; appends notes', digest: rec.hash, ...(rec.storedAt ? { issuedAt: rec.storedAt } : {}), revoked: await revokedOf(rec.hash), source: 'study.grant', signed: signedOf(rec.wire) });
+          }
+          // Spec 410 §1.2 — THE PLANE WIRES this object custodies for its principal (onboarding's batch): the
+          // interactions grant, its session leaf, the inbox-delivery grant, the messaging wire. All approved-digest;
+          // all void the moment a credential is retired, so a rotation must re-approve every one of them.
+          const plane: Array<[IncomingDelegation | undefined, string, string]> = [
+            [st0.grant, 'interactions grant — lets this agent read and write your records', 'plane.interactions'],
+            [st0.sessionLeaf, 'session leaf — lets this agent act under its session key', 'plane.session'],
+            [st0.deliveryGrant, 'inbox delivery — lets the delivery service write to your inbox', 'plane.delivery'],
+          ];
+          const msg = (await this.state.storage.get(MESSAGING_WIRE_KEY)) as MessagingWireRecord | undefined;
+          if (msg?.wire) plane.push([msg.wire, 'messaging wire — lets your agent send as you', 'plane.messaging']);
+          if (msg?.transport) plane.push([msg.transport, 'messaging transport — the delivery leg of the messaging wire', 'plane.messaging.transport']);
+          for (const [w, what, source] of plane) {
+            if (!w?.delegator || w.delegator.toLowerCase() !== principal) continue;
+            const digest = hashOf(w);
+            rows.push({ kind: 'plane', holder: w.delegate.toLowerCase(), what, digest, revoked: await revokedOf(digest), source, signed: signedOf(w) });
           }
           // Vault-resident families (the survey names them; the records decode): members and contacts.
           const survey = await this.mcpVaultTool(g, 'list_vault_record', {}).then((r) => r.json()).catch(() => ({})) as { records?: Array<{ record_type: string }> };
@@ -2347,10 +2372,33 @@ export class InteractionsDO {
               const digest = rec.grantDigest ?? hashDelegation({ ...wire, salt: BigInt(String(wire.salt)), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
               const member = k.startsWith('org.invite:agent:');
               if (member && rec.status === 'removed') continue;
-              rows.push({ kind: member ? 'member' : 'contact', holder: (member ? k.slice('org.invite:agent:'.length) : String(rec.contact ?? wire.delegate)).toLowerCase(), what: member ? `member access${rec.role ? ` (${rec.role})` : ''}${rec.status ? ` · ${rec.status}` : ''}` : `contact (${rec.role ?? 'contact'})${rec.status === 'removed' ? ' · removed' : ''}`, digest, ...(rec.createdAt ? { issuedAt: new Date(rec.createdAt).toISOString() } : {}), revoked: rec.status === 'removed' ? true : await revokedOf(digest), source: k });
+              rows.push({ kind: member ? 'member' : 'contact', holder: (member ? k.slice('org.invite:agent:'.length) : String(rec.contact ?? wire.delegate)).toLowerCase(), what: member ? `member access${rec.role ? ` (${rec.role})` : ''}${rec.status ? ` · ${rec.status}` : ''}` : `contact (${rec.role ?? 'contact'})${rec.status === 'removed' ? ' · removed' : ''}`, digest, ...(rec.createdAt ? { issuedAt: new Date(rec.createdAt).toISOString() } : {}), revoked: rec.status === 'removed' ? true : await revokedOf(digest), source: k, signed: signedOf(wire) });
             }
           }
           return json({ ok: true, grants: rows });
+        }
+        // Spec 410 §1.2 step 4 — THE HEAD OF A WIRE'S LINEAGE, for the delegate that holds a stale copy. Reads this
+        // principal's `delegation.lineage:*` records (the vault, ADR-0055), walks `supersedes` to the head, and
+        // answers ONLY the delegate the wire names. `unknown` when no record mentions the hash: the router then
+        // reports the original as current or gone from what the chain says about it.
+        if (op === 'internal.wire.current') {
+          const want = String(body.hash ?? '').toLowerCase();
+          const delegate = String(body.delegate ?? '').toLowerCase();
+          if (!/^0x[0-9a-f]{64}$/.test(want) || !/^0x[0-9a-f]{40}$/.test(delegate)) return json({ error: 'hash and delegate required' }, 400);
+          const survey = await this.mcpVaultTool(g, 'list_vault_record', {}).then((r) => r.json()).catch(() => ({})) as { records?: Array<{ record_type: string }> };
+          const keys = (survey.records ?? []).map((r) => r.record_type).filter((k) => k.startsWith(LINEAGE_RECORD_PREFIX));
+          const records: DelegationLineageV1[] = [];
+          if (keys.length) {
+            const got = await this.mcpVaultTool(g, 'get_vault_records', { recordTypes: keys.slice(0, 200) }).then((r) => r.json()).catch(() => ({})) as { records?: Record<string, unknown> };
+            for (const v of Object.values(got.records ?? {})) { const r = v as DelegationLineageV1; if (r?.type === 'ap.delegation-lineage.v1' && r.wire?.delegator?.toLowerCase() === principal) records.push(r); }
+          }
+          const answer = currentWireOf(records, want as Hex, delegate as Address);
+          if (answer.status === 'unknown') {
+            let revoked = true;
+            try { revoked = (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [want as Hex] })) as boolean; } catch { revoked = true; }
+            return json({ ok: true, status: revoked ? 'gone' : 'current', hash: want, wire: null });
+          }
+          return json({ ok: true, status: answer.status, hash: answer.hash, wire: answer.wire, ...(answer.status === 'superseded' ? { supersededFrom: answer.supersededFrom } : {}) });
         }
         // The WIRE of any grant this agent issued, by digest — asked for only by a revocation about to expand it.
         if (op === 'internal.grant.byDigest') {
@@ -2480,18 +2528,23 @@ export class InteractionsDO {
           // storage path as the session-gated channels.read; reachable ONLY via the internal marker.
           const channelId = String(body.channelId ?? '');
           if (!channelId) return json({ error: 'channelId required' }, 400);
-          const index = await this.readDoc<ChannelV1[]>(g, CONVERSATION_INDEX_RESOURCE, []);
+          const limit = Math.min(Math.max(Number(body.limit ?? ASSISTANT_READ_LIMIT) || ASSISTANT_READ_LIMIT, 1), ASSISTANT_READ_LIMIT);
+          // The index, the topic and the playbook (spec 327 §4b — the context read carries it; absent ⇒
+          // the built-in default, a config default, not a fallback) are three independent documents: one
+          // wave, then the bodies of the entries kept. This read sits on the answering turn's critical
+          // path, so its four serial hops were four seconds a person waited for every question.
+          const [index, all, skill] = await Promise.all([
+            this.readDoc<ChannelV1[]>(g, CONVERSATION_INDEX_RESOURCE, []),
+            this.readDoc<ChannelMessageEntryV1[]>(g, TOPIC_RESOURCE(channelId), []),
+            this.readDoc<AssistantSkillDocV1 | null>(g, ASSISTANT_SKILL_RESOURCE, null),
+          ]);
           const entry = index.find((c) => c.descriptor.id === channelId);
           if (!entry) return json({ error: 'unknown channel' }, 404);
-          const limit = Math.min(Math.max(Number(body.limit ?? ASSISTANT_READ_LIMIT) || ASSISTANT_READ_LIMIT, 1), ASSISTANT_READ_LIMIT);
-          const messages = (await this.readDoc<ChannelMessageEntryV1[]>(g, TOPIC_RESOURCE(channelId), [])).slice(-limit);
+          const messages = all.slice(-limit);
           // ONE batched, hash-verified body read (same seam as the session-gated channels.read);
           // fail-closed omit per body — an unverifiable body renders empty, never fails the turn.
           const bodyById = await this.readTopicBodies(g, messages.map((m) => m.envelope)).catch(() => ({} as Record<string, string>));
           const rows = messages.map((m) => ({ id: m.envelope.id, from: m.envelope.from, authorName: m.authorName, ...(m.actor ? { actor: m.actor } : {}), createdAt: m.envelope.createdAt, bodyText: (bodyById[m.envelope.id] ?? '').slice(0, ASSISTANT_BODY_CLIP) }));
-          // spec 327 §4b — the assistant's context read also carries the org playbook (one round trip;
-          // absent ⇒ the turn uses the built-in default playbook — a config default, not a fallback).
-          const skill = await this.readDoc<AssistantSkillDocV1 | null>(g, ASSISTANT_SKILL_RESOURCE, null);
           return json({ ok: true, title: entry.title, messages: rows, ...(skill?.markdown ? { skillMarkdown: skill.markdown } : {}) });
         }
         if (op === 'internal.channels.create') {
@@ -2538,7 +2591,10 @@ export class InteractionsDO {
           const prov = body.prov && typeof body.prov === 'object' ? (body.prov as ConsultProvenanceV1) : undefined;
           const audit = buildAuditSink(this.env);
           return this.serialize(async () => { // ARCH-H1 — same single-writer append as every board post
-            const index = await this.readDoc<ChannelV1[]>(g, CONVERSATION_INDEX_RESOURCE, []);
+            const [index, messages] = await Promise.all([ // the topic's id is known: both docs in one wave
+              this.readDoc<ChannelV1[]>(g, CONVERSATION_INDEX_RESOURCE, []),
+              this.readDoc<ChannelMessageEntryV1[]>(g, TOPIC_RESOURCE(channelId), []),
+            ]);
             const entry = index.find((c) => c.descriptor.id === channelId);
             if (!entry) return json({ error: 'unknown channel' }, 404);
             const assistant = entry.assistant;
@@ -2546,7 +2602,6 @@ export class InteractionsDO {
             const authorAddr = member && member !== principal ? member : principal;
             const authorCaip = caip10(Number(this.env.CHAIN_ID ?? 84532), authorAddr as Address) as AnyMessageEnvelope['from'];
             const authorName = member && member !== principal ? (memberName || member.slice(0, 10)) : (assistant?.displayName || memberName || principal.slice(0, 10));
-            const messages = await this.readDoc<ChannelMessageEntryV1[]>(g, TOPIC_RESOURCE(channelId), []);
             const composed: ChannelV1[] = [{ ...entry, messages }];
             const r = await appendBoardPost(composed, { channelId, from: authorCaip, authorName, bodyText, actor: authorCaip, ...(extraRefs.length ? { contextRefs: extraRefs } : {}), ...(prov ? { prov } : {}) });
             if (!r.ok) return json({ error: r.error }, 400);
@@ -3674,17 +3729,30 @@ export class InteractionsDO {
       }
 
       if (op === 'channels.list' || op === 'channels.read') {
-        const presence = await this.communityPresence(grant, principal, sessionSa, sessionCaip, body);
+        // A read is a WAVE, not a chain. The presence proofs, the index, the invitations and the one topic's
+        // messages are independent documents; read in series (as they were) a `channels.read` was seven
+        // vault round trips end to end — five seconds on the estate — and a poll paid it every three
+        // seconds. The admission decision still gates what is RETURNED: a refused caller gets the 403 and
+        // nothing of what was read alongside it (every read is under the org's grant, as before).
+        const topicId = op === 'channels.read' && typeof body.channelId === 'string' ? body.channelId : null;
+        const [presence, index0, invitations, messages] = await Promise.all([
+          this.communityPresence(grant, principal, sessionSa, sessionCaip, body),
+          this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []),
+          this.readDoc<DiscussionInvitationRowV1[]>(grant, DISCUSSION_INVITATIONS_RESOURCE, []),
+          topicId ? this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, TOPIC_RESOURCE(topicId), []) : Promise.resolve([] as { envelope: MessageEnvelopeV1; authorName: string }[]),
+        ]);
         if (!presence.admitted) {
           return json({ error: 'join this community first — a member-access grant, a current directory listing, or stewardship is required' }, 403);
         }
         const steward = presence.steward;
-        // Every board opens with a Welcome topic (created here if the organization has none yet).
-        await this.ensureWelcomeTopic(grant, principal).catch(() => null);
+        // Every board opens with a Welcome topic (created here if the organization has none yet). The index
+        // just read answers whether one exists; only a board without one pays the create.
+        const index = index0.some((c) => c.title.trim().toLowerCase() === 'welcome')
+          ? index0
+          : await this.ensureWelcomeTopic(grant, principal).then(() => this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, [])).catch(() => index0);
         // Conversation/topic split (§10): descriptors from conversation.index; ONE topic's messages from its own doc.
-        const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
         const bodies: Record<string, string> = {};
-        const pendingInvites = (await this.readDoc<DiscussionInvitationRowV1[]>(grant, DISCUSSION_INVITATIONS_RESOURCE, []))
+        const pendingInvites = invitations
           .filter((i) => i.invitedAgent.toLowerCase() === sessionSa.toLowerCase() && i.status === 'invited')
           .map((i) => i.topicId);
         const invited = new Set(pendingInvites);
@@ -3704,9 +3772,8 @@ export class InteractionsDO {
             interaction: interactionViewOfChannel(c),
             messages: [] as { envelope: MessageEnvelopeV1; authorName: string }[],
           }));
-        if (op === 'channels.read' && typeof body.channelId === 'string') {
-          const messages = await this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, TOPIC_RESOURCE(body.channelId), []);
-          wire = wire.map((c) => (c.descriptor.id === body.channelId ? { ...c, messages } : c));
+        if (topicId) {
+          wire = wire.map((c) => (c.descriptor.id === topicId ? { ...c, messages } : c));
           // Bodies load at the envelope's OWN resource (channel namespace) — never re-normalized.
           // ONE batched round-trip for the whole topic (was one delegated read PER MESSAGE — the
           // O(board size) per-poll amplification behind the 2026-07-18 "auth failed" regression).
@@ -3769,14 +3836,18 @@ export class InteractionsDO {
         // Board split (W3): only the ONE channel doc is read + rewritten — same-channel conflicts only.
         const channelId = String(body.channelId ?? '');
         return this.serialize(async () => { // ARCH-H1 — serialize the channel append (many members → one channel doc)
-          const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
+          // The index and the topic doc are read together (the topic's id is already known); the gate below
+          // still decides before anything is appended or written.
+          const [index, messages] = await Promise.all([
+            this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []),
+            this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, TOPIC_RESOURCE(channelId), []),
+          ]);
           const entry = index.find((c) => c.descriptor.id === channelId);
           if (!entry) return json({ error: 'unknown channel' }, 404);
           // Post gate: OPEN topic ⇒ the org-member gate above suffices (participation is derived from
           // membership). RESTRICTED topic ⇒ only its PARTICIPANTS post — the members[] projection of the
           // accepted DiscussionParticipation situations (the steward/custodian facilitates every topic).
           if (!canSeeChannel(entry, sessionSa, posterSteward)) return json({ error: 'not a participant of this restricted topic — ask a facilitator for an invitation' }, 403);
-          const messages = await this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, TOPIC_RESOURCE(channelId), []);
           const composed: ChannelV1[] = [{ ...entry, messages }];
           const r = await appendBoardPost(composed, { channelId, from: sessionCaip as AnyMessageEnvelope['from'], authorName: name ?? 'Steward', bodyText: String(body.bodyText ?? '') });
           if (!r.ok) return json({ error: r.error }, r.error === 'unknown channel' ? 404 : 400);

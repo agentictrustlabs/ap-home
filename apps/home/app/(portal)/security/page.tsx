@@ -14,6 +14,8 @@ import {
   stepUpToAgent,
 } from '../../../src/connect-client';
 import { loadPasskey } from '../../../src/lib/passkey';
+import { reviewedList, rotateThisDevicePasskey, type ReviewedWire, type RotationOutcome } from '../../../src/home/rotation';
+import { rotationAvailability } from '../../../src/connect-client';
 import { resolveVia, signHashFor } from '../../../src/home/onboarding';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { ComingSoonState } from '../../../src/components/portal/ComingSoonState';
@@ -58,6 +60,8 @@ export default function SecurityPage() {
   const [add, setAdd] = useState<{ step?: string; done?: string; error?: string } | null>(null);
   const [showApprove, setShowApprove] = useState(false);
   const [stepUpMsg, setStepUpMsg] = useState<string | null>(null);
+  // Spec 410 §1.2 — the rotation ceremony: replace this device's passkey and keep every standing wire.
+  const [rotate, setRotate] = useState<{ open?: boolean; loading?: boolean; wires?: ReviewedWire[]; warnings?: string[]; keep?: Set<string>; label?: string; step?: string; error?: string; done?: RotationOutcome }>({});
 
   // Google = login-grade. Managing security needs a custody credential → step up first.
   if (via === 'Google') {
@@ -131,6 +135,28 @@ export default function SecurityPage() {
     }
   };
 
+  // Spec 410 §1.2 — open the ceremony: compute the reviewed list from the agent's audit + the Home's app grants.
+  const openRotation = async () => {
+    if (!personAgent || !session) return;
+    setRotate({ open: true, loading: true, label: `${profile?.name ?? 'My'} passkey (${new Date().toISOString().slice(0, 10)})` });
+    const r = await reviewedList({ person: personAgent, session: { token: session.token } });
+    if (!r.ok) { setRotate((x) => ({ ...x, loading: false, error: r.error })); return; }
+    setRotate((x) => ({ ...x, loading: false, wires: r.wires, warnings: r.warnings, keep: new Set(r.wires.map((w) => w.digest.toLowerCase())) }));
+  };
+  const toggleKeep = (digest: string) => setRotate((x) => { const keep = new Set(x.keep ?? []); const k = digest.toLowerCase(); if (keep.has(k)) keep.delete(k); else keep.add(k); return { ...x, keep }; });
+  const runRotation = async () => {
+    if (!personAgent || !session || !rotate.wires) return;
+    setRotate((x) => ({ ...x, step: 'Starting…', error: undefined }));
+    try {
+      const signHash = await currentAuthorizer();
+      const r = await rotateThisDevicePasskey({ person: personAgent, session: { token: session.token }, signHash, wires: rotate.wires, keep: rotate.keep ?? new Set(), label: rotate.label || 'My passkey', onStep: (step) => setRotate((x) => ({ ...x, step })) });
+      if (r.ok) { setRotate((x) => ({ ...x, step: undefined, done: r.outcome })); readCredentialCounts(personAgent).then(setCounts).catch(() => {}); }
+      else setRotate((x) => ({ ...x, step: undefined, error: r.error }));
+    } catch (e) {
+      setRotate((x) => ({ ...x, step: undefined, error: e instanceof Error ? e.message : 'rotation failed' }));
+    }
+  };
+
   // Removal uses the CURRENT credential to sign `execute(self, removeX)`. The contract blocks
   // removing your last method, so you can't lock yourself out (CannotRemoveLastCustodian).
   const removeWallet = async () => {
@@ -192,6 +218,62 @@ export default function SecurityPage() {
           </button>
         )}
         {add?.error && <p className="onboarding-hint taken" style={{ marginTop: '.5rem' }}>{add.error}</p>}
+
+        {/* Spec 410 §1.2 — ROTATION: replace this device's passkey and keep every standing wire, in one signature.
+            Distinct from "remove" below: a removal alone voids every wire (the custody epoch, spec 408); the
+            ceremony re-approves them under the new epoch in the same transaction. */}
+        {via === 'passkey' && loadPasskey() && !rotate.open && (
+          <button className="btn-ghost onboarding-secondary" style={{ marginTop: '.4rem', marginLeft: '.5rem' }} onClick={openRotation}>
+            Replace this device’s passkey
+          </button>
+        )}
+        <Dialog
+          open={!!rotate.open}
+          onClose={() => { if (!rotate.step) setRotate({}); }}
+          title="Replace this device’s passkey"
+          description="A new passkey is created on this device and the old one retired. Everything you have granted — apps, your agent’s planes, contacts — is re-approved under the new key in the same signature, so nothing you connected has to reconnect. Untick anything you want to stop."
+        >
+          {rotate.done ? (
+            <Stack gap={0.5}>
+              <p className="onboarding-hint ok">✓ Passkey replaced — {rotate.done.reapproved} grant{rotate.done.reapproved === 1 ? '' : 's'} re-approved{rotate.done.reissued ? `, ${rotate.done.reissued} re-issued` : ''}{rotate.done.struck ? `, ${rotate.done.struck} revoked` : ''}. Your home, name and connected apps are unchanged.</p>
+              {rotate.done.warnings.map((w, i) => <p key={i} className="onboarding-hint taken" style={{ fontSize: '.85rem' }}>{w}</p>)}
+              <Row gap={0.5} justify="flex-end"><button className="btn-primary" style={{ width: 'auto' }} onClick={() => setRotate({})}>Done</button></Row>
+            </Stack>
+          ) : rotate.step ? (
+            <Row gap={0.4} className="muted"><span className="spinner" /> {rotate.step}</Row>
+          ) : rotate.loading ? (
+            <Row gap={0.4} className="muted"><span className="spinner" /> Reading everything you have granted…</Row>
+          ) : !rotationAvailability().ok ? (
+            <p className="muted" style={{ fontSize: '.85rem' }}>{(rotationAvailability() as { ok: false; reason: string }).reason}</p>
+          ) : (
+            <Stack gap={0.6}>
+              <Field label="Name for the new passkey" hint="Shown in your list of sign-in methods.">
+                <input className="onboarding-input" value={rotate.label ?? ''} onChange={(e) => setRotate((x) => ({ ...x, label: e.target.value }))} />
+              </Field>
+              <div>
+                <p style={{ fontSize: '.85rem', margin: '0 0 .35rem' }}><b>Grants that will be kept</b> ({rotate.keep?.size ?? 0} of {rotate.wires?.length ?? 0})</p>
+                {(rotate.wires ?? []).length === 0 && <p className="muted" style={{ fontSize: '.85rem' }}>You have not granted anything your agent can enumerate.</p>}
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0, maxHeight: '16rem', overflowY: 'auto' }}>
+                  {(rotate.wires ?? []).map((w) => (
+                    <li key={w.digest} style={{ display: 'flex', gap: '.5rem', alignItems: 'flex-start', padding: '.3rem 0', borderBottom: '1px solid var(--line, #eee)' }}>
+                      <input type="checkbox" checked={rotate.keep?.has(w.digest.toLowerCase()) ?? false} onChange={() => toggleKeep(w.digest)} style={{ marginTop: '.2rem' }} />
+                      <span style={{ fontSize: '.85rem' }}>
+                        <b>{w.holderName ?? shortAddr(w.holder)}</b> <span className="muted">· {w.kind}</span><br />
+                        <span className="muted">{w.what}{w.signed === 'key' ? ' · re-issued under the new key' : ''}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              {(rotate.warnings ?? []).map((w, i) => <p key={i} className="muted" style={{ fontSize: '.8rem', margin: 0 }}>{w}</p>)}
+              <Row gap={0.5} justify="flex-end">
+                <button className="btn-ghost onboarding-secondary" onClick={() => setRotate({})}>Cancel</button>
+                <button className="btn-primary" style={{ width: 'auto' }} onClick={runRotation}>Replace passkey</button>
+              </Row>
+            </Stack>
+          )}
+          {rotate.error && <p className="onboarding-hint taken" style={{ marginTop: '.5rem' }}>{rotate.error}</p>}
+        </Dialog>
 
         {/* Remove (replace a lost device) — symmetric onlySelf op, signed by the current credential.
             A destructive action → a focus-trapped Dialog (shared/ui) rather than an inline block. */}

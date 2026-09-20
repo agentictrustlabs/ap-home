@@ -3132,6 +3132,48 @@ app.post('/harness/durable', async (c) => {
   return c.json({ ok: true, runRef, executor: 'workflow' });
 });
 
+// Spec 410 §1.2 step 4 — WIRE REFRESH: a delegate whose wire stopped validating asks the delegator's agent for
+// the head of that wire's lineage. A credential rotation re-issues a key-signed wire as an approved-digest one
+// (same terms, same salt, `0x03`); the delegate holds a stale object and this is where it gets the current one.
+//
+// WHO MAY ASK: the delegate the wire names, proving it by signing the `A2A-Session` assertion DIRECTLY with its
+// own key or account (ERC-1271 / 6492 / ECDSA through the UniversalSignatureValidator) — never wire-wrapped, since
+// the wire is what it no longer has. Body: `{ method: 'wires/refresh', delegator, hash }`; the assertion binds the
+// body, the audience and the moment, and is spent once. Answers: `current` (the object you hold stands),
+// `superseded` (+ the wire to hold now), `gone` (struck from the reviewed list — a revocation; authorize again at
+// the Home). Nothing here authorizes: the wire returned was approved by the delegator's account, on chain.
+app.post('/wires/refresh', async (c) => {
+  const validator = c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
+  if (!validator || !c.env.DELEGATION_MANAGER) return c.json({ ok: false, error: 'the wire gate is not configured' }, 503);
+  const raw = await c.req.text();
+  let body: { method?: string; delegator?: string; hash?: string } | null = null;
+  try { body = JSON.parse(raw) as { method?: string; delegator?: string; hash?: string }; } catch { return c.json({ ok: false, error: 'body must be JSON' }, 400); }
+  const delegator = String(body?.delegator ?? '').toLowerCase();
+  const hash = String(body?.hash ?? '').toLowerCase();
+  if (body?.method !== 'wires/refresh' || !/^0x[0-9a-f]{40}$/.test(delegator) || !/^0x[0-9a-f]{64}$/.test(hash)) return c.json({ ok: false, error: 'method wires/refresh, delegator and hash are required' }, 400);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  const principal = sessionWirePrincipal({
+    enforcers: { timestamp: c.env.TIMESTAMP_ENFORCER ?? '0x0000000000000000000000000000000000000000', allowedMethods: c.env.ALLOWED_METHODS_ENFORCER ?? '0x0000000000000000000000000000000000000000' },
+    verifyDelegationSig: async () => false, // a wire-wrapped assertion is refused here: the wire is what is being refreshed
+    isRevoked: async () => true,
+    verifyAgentSignature: async (agent, digest, signature) => (await deps.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [agent, digest, signature] })) === true,
+    claim: async (digest, expiresAt) => {
+      const stub = c.env.A2A_TASKS.get(c.env.A2A_TASKS.idFromName(delegator));
+      const res = await stub.fetch(new Request('https://a2a-task-do/internal/harness-run/assertion-claim', { method: 'POST', headers: internalHeaders(c.env as never, { 'content-type': 'application/json' }), body: JSON.stringify({ digest, expiresAt }) }));
+      const out = (await res.json().catch(() => ({}))) as { ok?: boolean; claimed?: boolean };
+      return out.ok === true && out.claimed === true;
+    },
+    onRefused: (reason, who) => console.warn(`[wires/refresh] refused for ${who ?? '?'}: ${reason}`),
+  });
+  const p = await principal(new Request(c.req.url, { method: 'POST', headers: { authorization: c.req.header('authorization') ?? '', 'content-type': 'application/json' }, body: raw }));
+  if (!p) return c.json({ ok: false, error: 'the delegate\'s own signature did not verify' }, 401);
+  const out = await callInteractionsInternal(c.env, delegator, 'internal.wire.current', { hash, delegate: p.agent }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+  const r = out as { ok?: boolean; status?: string; hash?: string; wire?: unknown; supersededFrom?: string; error?: string };
+  if (!r.ok) return c.json({ ok: false, error: r.error ?? 'the delegator\'s agent could not answer' }, 502);
+  if (r.status === 'gone') return c.json({ ok: false, status: 'gone', hash, error: 'this wire was struck or revoked at its Home — authorize again there' }, 410);
+  return c.json({ ok: true, status: r.status, hash: r.hash, wire: r.wire ?? null, ...(r.supersededFrom ? { supersededFrom: r.supersededFrom } : {}) });
+});
+
 // POST /harness/authorize — spec 361 I4, the ONE-PROMPT ceremony. Phase A ({session, delegator,
 // digests[]}) builds a sponsored userOp FROM the delegator SA whose callData is executeBatch of
 // approveHash for every digest — the spec-253 mechanism, applied to an existing SA. Phase B
@@ -8689,20 +8731,18 @@ export async function callMcpToolBound(args: {
   const auditSink = buildAuditSink(args.env);
   const correlationId = crypto.randomUUID();
   const signer = await interactionsSessionAccount(args.env);
-  const { token } = await mintDelegationToken(
-    {
-      iss: 'demo-a2a',
-      aud: MCP_AUDIENCE,
-      sub: args.grant.delegator, // the principal SA (grant delegator) — demo-mcp keys the record here
-      delegation: toDelegationStruct(args.grant),
-      sessionKeyAddress: signer.address as Address,
-      sessionDelegation: toDelegationStruct(args.sessionLeaf),
-      ttlSeconds: 300,
-      usageLimit: 10,
-    },
-    (msg) => signer.signMessage({ message: msg }),
-    { auditSink, correlationId },
-  );
+  // The bound token is BUDGETED like the proof-path one (300 s, 10 uses) and was likewise being minted
+  // afresh for every vault hop — an InteractionsDO `channels.read` is seven hops, so seven KMS signatures
+  // in series (~0.6 s each on AKCS) before a single byte of the topic came back. Reused within its
+  // budget; the leaf is part of the key, so a token never serves another principal's leaf.
+  const token = await budgetedDelegationToken({
+    delegation: args.grant,
+    sessionDelegation: args.sessionLeaf,
+    signerAddress: signer.address as Address,
+    signMessage: (msg) => signer.signMessage({ message: msg }),
+    auditSink,
+    correlationId,
+  });
   return forwardMcpToken({
     env: args.env,
     toolName: args.toolName,
@@ -8734,6 +8774,8 @@ const mintsInFlight = new Map<string, Promise<string>>();
 
 export async function budgetedDelegationToken(args: {
   delegation: IncomingDelegation;
+  /** The principal-signed DEL-001 session leaf (bound path) — keyed and carried; absent on the proof path. */
+  sessionDelegation?: IncomingDelegation;
   signerAddress: Address;
   signMessage: (message: string) => Promise<`0x${string}`>;
   auditSink: ReturnType<typeof buildAuditSink>;
@@ -8741,10 +8783,11 @@ export async function budgetedDelegationToken(args: {
 }): Promise<string> {
   const principal = args.delegation.delegator as Address;
   const struct = toDelegationStruct(args.delegation);
+  const leaf = args.sessionDelegation ? toDelegationStruct(args.sessionDelegation) : undefined;
   // A delegation struct carries BigInts (salt, caveat terms); plain JSON.stringify THROWS on those, so
   // the key is built with an explicit bigint encoding. The suffix keeps 1n distinct from the string "1".
   const key = JSON.stringify(
-    [principal.toLowerCase(), args.signerAddress.toLowerCase(), struct],
+    [principal.toLowerCase(), args.signerAddress.toLowerCase(), struct, leaf ?? null],
     (_k, v) => (typeof v === 'bigint' ? `${v.toString()}n` : (v as unknown)),
   );
   const now = Date.now();
@@ -8763,6 +8806,7 @@ export async function budgetedDelegationToken(args: {
         sub: principal, // demo-mcp keys the record by the delegator (the principal SA)
         delegation: struct,
         sessionKeyAddress: args.signerAddress,
+        ...(leaf ? { sessionDelegation: leaf } : {}),
         ttlSeconds: MINTED_TOKEN_TTL_SECONDS,
         usageLimit: MINTED_TOKEN_USAGE_LIMIT,
       },

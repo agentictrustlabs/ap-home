@@ -15,7 +15,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import type { Hex } from 'viem';
 import { HomeMcpStoreDO, Store, kekFrom, openWire, sealWire, randomToken, sha256b64, type PersonRow, type ElicitAnswer } from './store.js';
 import { sseFrame, progressNotification, elicitationFor, isJsonRpcResponse } from './stream.js';
-import { progressAsPerson } from './a2a.js';
+import { progressAsPerson, refreshWire } from './a2a.js';
 import { authorizationServerMetadata, parseAuthorize, registerClient, tokenEndpoint, revokeEndpoint, bearerOf, PENDING_TTL_MS } from './oauth.js';
 import { TOOLS, askTool, grantLinkTool, discoverTool, engageTool, inspectTool, runTool, myRunsTool, needsReauthorization, type Person } from './tools.js';
 import { SERVER, SCOPES } from './whitelabel.js';
@@ -35,6 +35,9 @@ export interface Env {
    *  revocable grant. A raw Worker secret today; audit home-mcp-raw-delegate-key (accepted-risk) schedules the
    *  KMS-backed signer + the client's delegate re-registration at the Home. */
   HOME_MCP_PRIVATE_KEY?: string;
+  /** Spec 410 §1.2 — the estate the ask-as-me wire is hashed on, for the wire refresh (vars, never inferred). */
+  CHAIN_ID?: string;
+  DELEGATION_MANAGER?: string;
   TOKEN_SECRET?: string;
 }
 
@@ -202,15 +205,36 @@ class ConnectionRefused extends Error { constructor(readonly words: string) { su
 /** ONE tool call, whichever transport carries it. */
 async function callTool(env: Env, person: Person, name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
   console.log(`[home-mcp] tools/call ${name} as ${person.agentName ?? person.identity.agent}`);
-  const done = (out: Record<string, unknown>) => { if (needsReauthorization(out)) throw new ConnectionRefused(String(out.error)); return toolResult(out, 'error' in out); };
-  if (name === 'ask') return done(await askTool(env, person, args));
-  if (name === 'discover_agents') return done(await discoverTool(env, person, args));
-  if (name === 'inspect_agent') return done(await inspectTool(env, person, args));
-  if (name === 'engage') return done(await engageTool(env, person, args));
-  if (name === 'my_runs') return done(await myRunsTool(env, person, args));
-  if (name === 'run') return done(await runTool(env, person, args));
-  if (name === 'grant_link') return done(grantLinkTool(env, person, args));
-  throw new RpcError(RPC_ERROR.METHOD_NOT_FOUND, `unknown tool ${name}`);
+  const run = async (p: Person): Promise<Record<string, unknown>> => {
+    if (name === 'ask') return askTool(env, p, args);
+    if (name === 'discover_agents') return discoverTool(env, p, args);
+    if (name === 'inspect_agent') return inspectTool(env, p, args);
+    if (name === 'engage') return engageTool(env, p, args);
+    if (name === 'my_runs') return myRunsTool(env, p, args);
+    if (name === 'run') return runTool(env, p, args);
+    if (name === 'grant_link') return grantLinkTool(env, p, args);
+    throw new RpcError(RPC_ERROR.METHOD_NOT_FOUND, `unknown tool ${name}`);
+  };
+  let out = await run(person);
+  // Spec 410 §1.2 step 4 — her agent refused the wire. Before the connection ends, ask once whether a credential
+  // rotation at her Home re-issued it: `superseded` → hold the new object and retry this one call; anything else
+  // → the refusal stands and the host re-authorizes.
+  if (needsReauthorization(out) && env.CHAIN_ID && env.DELEGATION_MANAGER) {
+    const fresh = await refreshWire(person.identity, env.A2A_ORIGIN, { chainId: Number(env.CHAIN_ID), delegationManager: env.DELEGATION_MANAGER as Hex }).catch((e: unknown) => ({ status: 'unavailable' as const, error: e instanceof Error ? e.message : String(e) }));
+    if (fresh.status === 'superseded') {
+      const row = await store(env).getPerson(person.sub);
+      if (row) {
+        const sealed = await sealWire(await kekFrom(tokenSecret(env)), fresh.wire);
+        await store(env).putPerson({ ...row, wire_enc: sealed.enc, wire_iv: sealed.iv });
+      }
+      console.log(`[home-mcp] wire refreshed for ${person.agentName ?? person.identity.agent} (superseded → ${fresh.hash.slice(0, 12)}…)`);
+      out = await run({ ...person, identity: { ...person.identity, wire: fresh.wire } });
+    } else {
+      console.log(`[home-mcp] wire refresh for ${person.agentName ?? person.identity.agent}: ${fresh.status}${fresh.status === 'unavailable' ? ` (${fresh.error})` : ''}`);
+    }
+  }
+  if (needsReauthorization(out)) throw new ConnectionRefused(String(out.error));
+  return toolResult(out, 'error' in out);
 }
 
 /** The connection is over: every token of this person for this client dies, the person row goes; the next request meets the challenge. */

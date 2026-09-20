@@ -21,6 +21,9 @@ new_sqlite_classes = ["HomeMcpStoreDO"]
 [vars]
 HOME_ORIGIN = "http://localhost:5373"
 A2A_ORIGIN = "http://localhost:8787"
+# Spec 410 §1.2 — the estate the ask-as-me wire is hashed on, for the wire refresh after a credential rotation.
+CHAIN_ID = "31337"
+DELEGATION_MANAGER = ""
 AGENT_HOST_PATTERN = "http://localhost:8787"
 CLIENT_ID = "home-mcp"
 DEMO_CONNECT_ENABLED = "true"
@@ -41,6 +44,9 @@ HOME_ORIGIN = "https://www.faithnet.me"
 BROKER_JWKS_URL = "https://www.faithnet.me/jwks"
 # Where a person's agent answers `/harness/ask` (the assertion's audience is this origin).
 A2A_ORIGIN = "https://a2a.faithnet.io"
+# Spec 410 §1.2 — the estate the ask-as-me wire is hashed on (faithchain), for the wire refresh after a rotation.
+CHAIN_ID = "34348"
+DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
 # The Home MCP's OWN registration at the Home (`whitelabel.relyingApps`); its key's address is the delegate there.
 CLIENT_ID = "home-mcp"
 # The demo personas may connect with no browser (the live gates; spec 392's rule: they sign in openly).

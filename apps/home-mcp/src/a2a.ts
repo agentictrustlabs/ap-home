@@ -6,9 +6,43 @@
 import { wrapSessionSignature, type DelegationWireV1 } from '@agenticprimitives/a2a';
 import { callerAssertionDigest, requestBodyHash, sessionAuthorizationHeader, STANDARD_SURFACE_SKILL, type CallerAssertionV1 } from '@agenticprimitives/a2a/standard';
 import { sign as signRaw } from 'viem/accounts';
+import { hashDelegation, type Delegation } from '@agenticprimitives/delegation';
 import type { Hex } from 'viem';
 
 export interface PersonIdentity { agent: string; privateKey: Hex; wire: DelegationWireV1 }
+
+/** Spec 410 §1.2 step 4 — what a refresh learns about the wire this Worker holds. */
+export type WireRefresh =
+  | { status: 'current' }
+  | { status: 'superseded'; wire: DelegationWireV1; hash: string }
+  | { status: 'gone' }
+  | { status: 'unavailable'; error: string };
+
+/**
+ * THE WIRE REFRESH. Her agent refused the wire — but a credential ROTATION at her Home re-issues a key-signed wire
+ * as an approved-digest one with the same terms, and the object this Worker holds is merely stale. Before ending
+ * the connection, ask her agent for the head of the wire's lineage, signing the assertion DIRECTLY with this
+ * Worker's key (the wire is what is in question, so it cannot wrap the signature). `superseded` carries the
+ * object to hold now; `gone` means she struck it from the reviewed list, which is a revocation — the host
+ * re-authorizes at her Home. Nothing here is authority: the wire returned was approved by her account on chain.
+ */
+export async function refreshWire(id: PersonIdentity, a2aOrigin: string, chain: { chainId: number; delegationManager: Hex }, fetchImpl: typeof fetch = fetch): Promise<WireRefresh> {
+  const d: Delegation = { delegator: id.wire.delegator, delegate: id.wire.delegate, authority: id.wire.authority, caveats: id.wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })), salt: BigInt(id.wire.salt), signature: id.wire.signature };
+  const hash = hashDelegation(d, chain.chainId, chain.delegationManager);
+  const nonce = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const raw = JSON.stringify({ method: 'wires/refresh', nonce, delegator: id.wire.delegator.toLowerCase(), hash });
+  const base: Omit<CallerAssertionV1, 'signature'> = { agent: id.wire.delegate.toLowerCase(), method: 'wires/refresh', bodyHash: requestBodyHash(raw), issuedAt: Math.floor(Date.now() / 1000), audience: new URL(a2aOrigin).origin };
+  const signature = await signRaw({ hash: callerAssertionDigest(base), privateKey: id.privateKey, to: 'hex' });
+  let res: Response;
+  try {
+    res = await fetchImpl(`${a2aOrigin}/wires/refresh`, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', authorization: sessionAuthorizationHeader({ ...base, signature }) }, body: raw });
+  } catch (e) { return { status: 'unavailable', error: e instanceof Error ? e.message : String(e) }; }
+  const out = (await res.json().catch(() => null)) as { ok?: boolean; status?: string; wire?: DelegationWireV1 | null; hash?: string; error?: string } | null;
+  if (res.status === 410 || out?.status === 'gone') return { status: 'gone' };
+  if (!res.ok || !out?.ok) return { status: 'unavailable', error: String(out?.error ?? `wires/refresh answered ${res.status}`) };
+  if (out.status === 'superseded' && out.wire && out.hash) return { status: 'superseded', wire: out.wire, hash: out.hash };
+  return { status: 'current' };
+}
 
 export interface AskBody { addressee: string; message?: string; runRef?: string; supplied?: unknown[]; plan?: unknown; model?: string }
 

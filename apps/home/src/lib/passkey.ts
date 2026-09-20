@@ -127,6 +127,12 @@ export function loadPasskey(): DemoPasskey | null {
     return null;
   }
 }
+/** Put a passkey back as THIS device's stored passkey — the rotation ceremony restores the retired one when its
+ *  batch fails after `registerPasskey` has already overwritten storage with the new one (spec 410 §1.2). */
+export function storePasskey(p: DemoPasskey): void {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(toStored(p)));
+}
+
 export function clearPasskey(): void {
   localStorage.removeItem(STORAGE_KEY);
 }
