@@ -129,6 +129,8 @@ export interface HarnessEnv {
    *  interactions-session key. Not INTERACTIONS_SERVICE_SA: that address is what existing grants name. */
   HARNESS_AGENT_SA?: string;
   DIGEST_BINDING_ENFORCER?: string;
+  /** Spec 410 §7 — PayloadClassesEnforcer (generation 3); absent on an older estate. */
+  PAYLOAD_CLASSES_ENFORCER?: string;
   PAYMENT_ENFORCER?: string;
   MOCK_USDC?: string;
   /** The AgentRelationship record — where `ap:charteredUnder` edges and their roles live. */

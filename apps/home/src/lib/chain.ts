@@ -148,6 +148,7 @@ export const CONTRACTS = {
   // spec 350 §2 — DigestBindingEnforcer binds a MANDATE to the one ask it was granted for. Present
   // only where the harness is deployed; absent ⇒ the Ask cannot mint authority here (and says so).
   digestBindingEnforcer: addr('digestBindingEnforcer'),
+  payloadClassesEnforcer: addr('payloadClassesEnforcer'), // spec 410 §7 (generation 3)
 } as const satisfies Record<string, Address>;
 
 /** spec 346 — per-suffix PermissionlessSubregistry map (`me org team svc workspace treasury registry`), present only on

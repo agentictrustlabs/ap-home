@@ -646,6 +646,8 @@ export interface Env {
   /** Spec 350 — the SA this agent acts as under a mandate; per chain, custodied by the interactions-session key. */
   HARNESS_AGENT_SA?: string;
   DIGEST_BINDING_ENFORCER?: string;
+  /** Spec 410 §7 — PayloadClassesEnforcer (generation 3). */
+  PAYLOAD_CLASSES_ENFORCER?: string;
   /** Spec 406 W2 — the ReceiptAnchorRegistry on this chain; absent ⇒ runs are not anchored (said on the report). */
   RECEIPT_ANCHOR_REGISTRY?: string;
   PAYMENT_ENFORCER?: string;

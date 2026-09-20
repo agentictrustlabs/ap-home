@@ -28,5 +28,7 @@ export function enforcersFromEnv(env: Record<string, string | undefined>): Enfor
     allowedMethods: req(env.ALLOWED_METHODS_ENFORCER),
     ...(addr(env.QUORUM_ENFORCER) ? { recovery: addr(env.QUORUM_ENFORCER) } : {}),
     ...(addr(env.PAYMENT_ENFORCER) ? { payment: addr(env.PAYMENT_ENFORCER) } : {}),
+    // Spec 410 §7 — the information-flow caveat's enforcer (generation 3); absent on an older estate.
+    ...(addr(env.PAYLOAD_CLASSES_ENFORCER) ? { payloadClasses: addr(env.PAYLOAD_CLASSES_ENFORCER) } : {}),
   };
 }
