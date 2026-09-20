@@ -904,6 +904,9 @@ export interface HarnessDeps {
   writeSubjectRecord?: (subject: string, recordType: string, record: unknown, /** spec 410 §3 — the operation ledger's key */ operationId?: string) => Promise<{ ok: boolean; error?: string }>;
   /** Append one entry to a subject's own record — how a request reaches the person who must decide it. */
   appendSubjectRecord?: (subject: string, recordType: string, entry: unknown) => Promise<{ ok: boolean; error?: string }>;
+  /** Spec 410 §8 — one logical write into BOTH parties' vaults (a countersigned relationship credential or its revocation);
+   *  the second copy that cannot be written voids the first. */
+  writeSharedRecord?: (parties: [string, string], recordType: string, record: unknown, operationId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   /** Spec 410 §3 — the reconcile's read: what `subject`'s object did for a logical operation, or null. Throws when it
    *  cannot be asked (the loop records that as indeterminate, never as absent). */
   lookupOperation?: (subject: string, operationId: string) => Promise<{ kind: 'send' | 'write'; ref: string; at: string } | null>;

@@ -396,7 +396,7 @@ const RESOLUTION_GRANTS_RESOURCE = 'resolution.grants';
 // Spec 401 — a CONTACT (`contact:<sa>`) is the person's own record of who they let in, written by their agent under
 // their own signed mandate (the act that mints the grant) into their own vault. Its own family: an organization's
 // invitation key stays a delivery-plane write (the fabric firewall), untouched by this door.
-const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run.provenance:', 'run.artifact:', 'build.run:', 'build.promotion:', 'connector.mcp:', 'agent.budget', 'confirmation.preferences', 'standing.instructions', 'memory.facts', 'routines.data', 'person.preferences', 'playbook.memory:', 'cardroom.', 'contact:', 'delegation.lineage:'] as const; // spec 410 §1.2 — a wire re-issued for a rotation, in the delegator's own vault
+const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run.provenance:', 'run.artifact:', 'build.run:', 'build.promotion:', 'connector.mcp:', 'agent.budget', 'confirmation.preferences', 'standing.instructions', 'memory.facts', 'routines.data', 'person.preferences', 'playbook.memory:', 'cardroom.', 'contact:', 'delegation.lineage:', 'relationships.credential:', 'relationships.revocation:'] as const; // spec 410 §8 — each party's copy, in its own vault // spec 410 §1.2 — a wire re-issued for a rotation, in the delegator's own vault
 
 const CAPABILITY_RECORDS = new Set(['impact-profile', 'capabilities.data', 'skills.data', 'home.manifest', 'control-events.data', 'archetype.assignment']);
 const CONTROL_EVENTS_RESOURCE = 'control-events.data';

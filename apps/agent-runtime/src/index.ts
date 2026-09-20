@@ -5243,6 +5243,20 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       const r = out as { ok?: boolean; removed?: true; role?: string; kin?: string; household?: string; count?: number; error?: string };
       return { ok: r.ok === true, ...(r.removed ? { removed: true as const } : {}), ...(r.role ? { role: r.role } : {}), ...(r.kin ? { kin: r.kin } : {}), ...(r.household ? { household: r.household } : {}), ...(typeof r.count === 'number' ? { count: r.count } : {}), ...(r.error ? { error: r.error } : {}) };
     },
+    // Spec 410 §8 — THE RULE FOR SHARED RECORDS: each principal holds its side; nothing is one party's alone if two
+    // signed it. One logical operation over two vaults: the second copy that cannot be written voids the first
+    // (compensation), so neither vault is left holding a one-sided credential.
+    writeSharedRecord: async (parties: [string, string], recordType: string, record: unknown, operationId: string) => {
+      const [a, b] = parties.map((p) => p.toLowerCase());
+      const first = await callInteractionsInternal(env, a!, 'internal.coordination.vaultWrite', { recordType, record, operationId: `${operationId}:a` }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+      if ((first as { ok?: boolean }).ok !== true) return { ok: false as const, error: `the first copy could not be written: ${String((first as { error?: string }).error ?? 'unknown')}` };
+      const second = await callInteractionsInternal(env, b!, 'internal.coordination.vaultWrite', { recordType, record, operationId: `${operationId}:b` }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+      if ((second as { ok?: boolean }).ok !== true) {
+        await callInteractionsInternal(env, a!, 'internal.coordination.vaultWrite', { recordType, record: { ...(record as Record<string, unknown>), voided: `the counterparty's copy could not be written (${String((second as { error?: string }).error ?? 'unknown')})` }, operationId: `${operationId}:a:void` }).catch(() => null);
+        return { ok: false as const, error: `the second copy could not be written; the first was voided: ${String((second as { error?: string }).error ?? 'unknown')}` };
+      }
+      return { ok: true as const };
+    },
     // Spec 410 §3 — the reconcile's read: what the subject's object did for a logical operation, or null.
     lookupOperation: async (subject: string, operationId: string) => {
       const out = await callInteractionsInternal(env, subject, 'internal.op.lookup', { operationId });
