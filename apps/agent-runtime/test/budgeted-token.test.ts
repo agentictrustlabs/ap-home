@@ -80,10 +80,21 @@ describe('the minted delegation token is reused within its budget', () => {
     // Seven concurrent hops: one mint, seven presentations. With six safe uses, the ledger is already
     // over its margin, so the very next hop mints again rather than presenting the same jti an eighth time.
     const d = delegation({ salt: 107n });
-    await Promise.all([0, 1, 2, 3, 4, 5, 6].map(() => budgetedDelegationToken(args(d))));
-    expect(mints).toBe(1);
-    await budgetedDelegationToken(args(d));
+    const tokens = await Promise.all([0, 1, 2, 3, 4, 5, 6].map(() => budgetedDelegationToken(args(d))));
+    // Six hops share the first mint (the minter + five sharers = the safe budget); the seventh mints again.
     expect(mints).toBe(2);
+    expect(new Set(tokens).size).toBe(2);
+    expect(tokens.filter((t) => t === tokens[0]).length).toBeLessThanOrEqual(6);
+    await budgetedDelegationToken(args(d));
+    expect(mints).toBe(2); // the second token still has budget
+  });
+
+  it('a wave of twelve never presents one token more than its safe budget', async () => {
+    const d = delegation({ salt: 109n });
+    const tokens = await Promise.all(Array.from({ length: 12 }, () => budgetedDelegationToken(args(d))));
+    const counts = new Map<string, number>();
+    for (const t of tokens) counts.set(t, (counts.get(t) ?? 0) + 1);
+    for (const n of counts.values()) expect(n).toBeLessThanOrEqual(6);
   });
 
   it('a token demo-mcp refused is forgotten, so the next hop mints afresh', async () => {

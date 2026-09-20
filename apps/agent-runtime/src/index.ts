@@ -8778,7 +8778,7 @@ const MINTED_TOKEN_USAGE_LIMIT = 10;
 const MINTED_TOKEN_SAFE_USES = 6;
 const MINTED_TOKEN_REFRESH_MARGIN_MS = 60_000;
 const mintedTokens = new Map<string, { token: string; expiresAt: number; uses: number }>();
-const mintsInFlight = new Map<string, Promise<string>>();
+const mintsInFlight = new Map<string, { promise: Promise<string>; sharers: number }>();
 
 export async function budgetedDelegationToken(args: {
   delegation: IncomingDelegation;
@@ -8805,12 +8805,14 @@ export async function budgetedDelegationToken(args: {
     return hit.token;
   }
   const flying = mintsInFlight.get(key);
-  if (flying) {
-    // Concurrent hops share ONE mint instead of racing to sign — and EACH IS A USE. A sharer that was
-    // not counted let a wave of seven reads spend the token once in this ledger and seven times in
-    // demo-mcp's; the six "safe" hits that followed pushed the same jti past its limit of ten, and every
-    // hop on the estate answered "auth failed" until the token aged out. Found live, 2026-09-20.
-    return flying.then((token) => {
+  // Concurrent hops share ONE mint instead of racing to sign — and EACH IS A USE, and only as many as the
+  // budget holds. A sharer that was not counted let a wave of seven reads spend the token once in this
+  // ledger and seven times in demo-mcp's; the six "safe" hits that followed pushed the same jti past its
+  // limit of ten, and every hop on the estate answered "auth failed" until the token aged out. Found
+  // live, 2026-09-20. A wave wider than the budget starts a second mint for the overflow.
+  if (flying && flying.sharers + 1 < MINTED_TOKEN_SAFE_USES) {
+    flying.sharers += 1;
+    return flying.promise.then((token) => {
       const h = mintedTokens.get(key);
       if (h && h.token === token) h.uses += 1;
       return token;
@@ -8835,11 +8837,12 @@ export async function budgetedDelegationToken(args: {
     mintedTokens.set(key, { token, expiresAt: Date.now() + MINTED_TOKEN_TTL_SECONDS * 1000, uses: 1 });
     return token;
   })();
-  mintsInFlight.set(key, p);
+  const entry = { promise: p, sharers: 0 };
+  mintsInFlight.set(key, entry);
   try {
     return await p;
   } finally {
-    mintsInFlight.delete(key);
+    if (mintsInFlight.get(key) === entry) mintsInFlight.delete(key);
   }
 }
 
