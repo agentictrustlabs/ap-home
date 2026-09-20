@@ -553,25 +553,48 @@ async function sigVerdictKey(input: SignatureInput): Promise<string> {
  * counterfactual verdict re-checks). Revocation + acceptance PASS THROUGH unchanged — they MUST stay
  * fresh (ADR-0013 revocation-freshness invariant; a durable "not revoked" would never expire).
  */
+/** The isolate's copy of the durable verdicts. The D1 row says a signature was valid on chain and is kept
+ *  forever (a signature over a fixed digest does not become invalid), so remembering the same fact here for
+ *  a bounded while weakens nothing — and it turns the two D1 round trips every gated call paid for the root
+ *  and the leaf into none. Bounded in size and in time; a miss here still goes to D1, then to the chain. */
+const SIG_VERDICT_MEMO_MS = 10 * 60_000;
+const SIG_VERDICT_MEMO_MAX = 5_000;
+const sigVerdictMemo = new Map<string, number>();
+function sigVerdictRemembered(key: string): boolean {
+  const until = sigVerdictMemo.get(key);
+  if (until === undefined) return false;
+  if (until > Date.now()) return true;
+  sigVerdictMemo.delete(key);
+  return false;
+}
+function rememberSigVerdict(key: string): void {
+  if (sigVerdictMemo.size >= SIG_VERDICT_MEMO_MAX) sigVerdictMemo.clear(); // an isolate is not a store
+  sigVerdictMemo.set(key, Date.now() + SIG_VERDICT_MEMO_MS);
+}
+
 function withDurableSigCache(env: Env, base: ChainAuthorityReader): ChainAuthorityReader {
   const chainId = Number(env.CHAIN_ID);
+  const remembered = (source: string) => ({
+    valid: true,
+    deployed: true,
+    // source must NOT start with 'fail-closed' (token.ts treats that as unconfirmable).
+    evidence: { chainId, blockNumber: 0n, blockHash: `0x${'0'.repeat(64)}` as `0x${string}`, observedAt: 0, source },
+  });
   return {
     isDelegationRevoked: (hash, risk) => base.isDelegationRevoked(hash, risk),
     isSessionDelegationAccepted: (principal, hash, risk) => base.isSessionDelegationAccepted(principal, hash, risk),
     async verifySmartAgentSignature(input, risk) {
       const key = await sigVerdictKey(input);
+      if (sigVerdictRemembered(key)) return remembered('memo:demo-mcp-sig');
       try {
         if (await hasSigVerdict(env.DB, key)) {
-          return {
-            valid: true,
-            deployed: true,
-            // source must NOT start with 'fail-closed' (token.ts treats that as unconfirmable).
-            evidence: { chainId, blockNumber: 0n, blockHash: `0x${'0'.repeat(64)}`, observedAt: 0, source: 'durable-cache:demo-mcp-sig' },
-          };
+          rememberSigVerdict(key);
+          return remembered('durable-cache:demo-mcp-sig');
         }
       } catch { /* cache-read failure → fall through to the real on-chain verify */ }
       const r = await base.verifySmartAgentSignature(input, risk);
       if (r.valid && r.deployed) {
+        rememberSigVerdict(key);
         try { await putSigVerdict(env.DB, key, chainId); } catch { /* best-effort cache write */ }
       }
       return r;
