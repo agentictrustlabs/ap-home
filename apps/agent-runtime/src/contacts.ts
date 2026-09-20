@@ -11,6 +11,7 @@
 // THE SAME MECHANISM, THE PERSON'S WORD. `person.contact.invite` is the organization's invitation with the person as
 // the principal: the mandate's delegator is the person themselves (self — canGrant), the grant is theirs to the
 // contact, the record lands in their vault. The invoker below is thin on purpose; what differs is named.
+import { contractsGenerationOf } from '@agenticprimitives/agent-account';
 import { encodeFunctionData, keccak256, toBytes, type Address, type Hex } from 'viem';
 import { InputRequired, signatureFor, type ToolInvoker, type ToolSpec, type MandatePresentation, type SuppliedInputV1 } from '@agenticprimitives/orchestration';
 import { buildCaveat, buildVaultRecordScopeCaveat, encodeTimestampTerms, encodeValueTerms, decodeTimestampTerms, hashDelegation, intentDigest, ROOT_AUTHORITY, type Caveat, type Delegation } from '@agenticprimitives/delegation';
@@ -110,10 +111,10 @@ export interface ContactDeps {
   /** The person's SA executes a call under their redeemed mandate (the revoke) — the same path access.grant.revoke uses. */
   executeAsServiceSa?: (serviceSa: Address, callData: Hex) => Promise<{ txHash: string }>;
   /** The mandate's digest-binding caveat argued for THIS step (the harness's own helper, injected). */
-  digestBindingArgsFor: (caveat: Caveat, digests: { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex; generation?: 1 | 2 }) => Hex;
+  digestBindingArgsFor: (caveat: Caveat, digests: { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex; generation?: 1 | 2 | 3 }) => Hex;
   /** Spec 408 §1.4/§2.3 — the digests a step presents at redemption, with its single-use nonce, the plan digest and
    *  the estate's contract generation (1 ⇒ the digest alone). */
-  stepDigests: (args: Record<string, unknown>, intent: Hex, stepRef: string, plan?: Hex, generation?: 1 | 2) => { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex; generation: 1 | 2 };
+  stepDigests: (args: Record<string, unknown>, intent: Hex, stepRef: string, plan?: Hex, generation?: 1 | 2 | 3) => { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex; generation: 1 | 2 | 3 };
 }
 
 const roleOf = (raw: unknown): ContactRole => {
@@ -230,7 +231,7 @@ export function contactRemoveInvoker(deps: ContactDeps, presented: MandatePresen
     const digest = intentDigest(ctx.intent);
     const stepRef = ctx.step.id ?? `s${ctx.index}`;
     const caveats = wire.caveats.map((c) => (c.enforcer.toLowerCase() === deps.enforcers.digestBinding.toLowerCase()
-      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: deps.digestBindingArgsFor(c as Caveat, deps.stepDigests(args, digest, stepRef, ctx.planDigest as Hex | undefined, deps.env.CONTRACTS_GENERATION === '2' ? 2 : 1)) }
+      ? { enforcer: c.enforcer, terms: c.terms as Hex, args: deps.digestBindingArgsFor(c as Caveat, deps.stepDigests(args, digest, stepRef, ctx.planDigest as Hex | undefined, contractsGenerationOf({ contractsGeneration: deps.env.CONTRACTS_GENERATION }))) }
       : { enforcer: c.enforcer, terms: c.terms as Hex, args: (c.args ?? '0x') as Hex }));
     const redeem = encodeFunctionData({ abi: REDEEM_ABI, functionName: 'redeemDelegation', args: [[{ delegator: wire.delegator, delegate: wire.delegate, authority: wire.authority as Hex, caveats, salt: wire.salt, signature: wire.signature as Hex }], dm, 0n, inner] });
     const callData = encodeFunctionData({ abi: EXECUTE_ABI, functionName: 'execute', args: [dm, 0n, redeem] });

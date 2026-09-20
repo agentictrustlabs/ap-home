@@ -1021,8 +1021,10 @@ async function buildClaimCallData(
  *  is the EPOCH-BOUND key — a counterfactual account is at custody epoch 0, which is the only epoch this
  *  deploy-time builder may assume. A DEPLOYED account approves through `approveGrantHashes`, which reads
  *  its current epoch first. */
-function buildApproveHashCall(digest: Hex): ContractCall {
-  return buildApproveHashKeyCall(CONTRACTS.approvedHashRegistry, digest, CONTRACTS_GENERATION === 1 ? { generation: 1 } : { generation: 2, epoch: 0n });
+function buildApproveHashCall(digest: Hex, account: Address): ContractCall {
+  // Spec 410 §1 (generation 3): a self-call on the account being deployed — it derives the key on chain.
+  const scheme = CONTRACTS_GENERATION === 1 ? { generation: 1 as const } : CONTRACTS_GENERATION === 3 ? { generation: 3 as const, account } : { generation: 2 as const, epoch: 0n };
+  return buildApproveHashKeyCall(CONTRACTS.approvedHashRegistry, digest, scheme);
 }
 
 /** B4 — pre-approve a set of the DELEGATOR's own grant digests in ONE userOp on the delegator SA: batch an
@@ -1327,15 +1329,15 @@ export async function createChildAgentForSite(
   // MEMBERSHIP (person → org) is the one grant the org CAN'T approve (its delegator is the
   // PERSON SA), so it is DEFERRED — re-minted later from the person's home or on first need.
   const siteGrant = buildApprovedSiteDelegation(childAgent, delegateSA);
-  const approveCalls: ContractCall[] = [buildApproveHashCall(siteGrant.digest)];
+  const approveCalls: ContractCall[] = [buildApproveHashCall(siteGrant.digest, childAgent)];
 
   let brokerGrant: ReturnType<typeof buildApprovedSiteDelegation> | undefined;
   if (cOpts.grantOrg && cOpts.grantOrg.toLowerCase() !== delegateSA.toLowerCase()) {
     brokerGrant = buildApprovedSiteDelegation(childAgent, cOpts.grantOrg);
-    approveCalls.push(buildApproveHashCall(brokerGrant.digest));
+    approveCalls.push(buildApproveHashCall(brokerGrant.digest, childAgent));
   }
   const stewardship = buildApprovedSiteDelegation(childAgent, personAgent);
-  approveCalls.push(buildApproveHashCall(stewardship.digest));
+  approveCalls.push(buildApproveHashCall(stewardship.digest, childAgent));
 
   // The OPERATIONAL INTENT grant (org → the app's service agent), folded into the same batch so it
   // costs no extra signature. Minted ONLY when the relying app declares a dedicated service SA:
@@ -1345,7 +1347,7 @@ export async function createChildAgentForSite(
   let operationalGrant: ReturnType<typeof buildApprovedOperationalIntentDelegation> | undefined;
   if (operationalSA && operationalSA.toLowerCase() !== delegateSA.toLowerCase()) {
     operationalGrant = buildApprovedOperationalIntentDelegation(childAgent, operationalSA);
-    approveCalls.push(buildApproveHashCall(operationalGrant.digest));
+    approveCalls.push(buildApproveHashCall(operationalGrant.digest, childAgent));
   }
 
   // The ORG READ grant (org → the app's workspace agent), same batch, same reasoning — and the same
@@ -1354,7 +1356,7 @@ export async function createChildAgentForSite(
   let orgReadGrant: ReturnType<typeof buildApprovedOrgReadDelegation> | undefined;
   if (orgReadCfg && orgReadCfg.delegate.toLowerCase() !== delegateSA.toLowerCase()) {
     orgReadGrant = buildApprovedOrgReadDelegation(childAgent, orgReadCfg.delegate as Address, orgReadCfg);
-    approveCalls.push(buildApproveHashCall(orgReadGrant.digest));
+    approveCalls.push(buildApproveHashCall(orgReadGrant.digest, childAgent));
   }
 
   // spec 321 W0 — credential mirror: the contract FORBIDS an SA as custodian (custody is
@@ -1635,7 +1637,7 @@ export async function createManagedAgent(
   const mirrorCalls: ContractCall[] = mirrorCSub
     ? [{ to: child, value: 0n, data: encodeFunctionData({ abi: ADD_CUSTODIAN_ABI, functionName: 'addCustodian', args: [mirrorCSub] }) }]
     : [];
-  const deployCallData = buildExecuteBatchCallData([...claimCalls, buildApproveHashCall(stewardship.digest), ...mirrorCalls]);
+  const deployCallData = buildExecuteBatchCallData([...claimCalls, buildApproveHashCall(stewardship.digest, child), ...mirrorCalls]);
 
   onStep?.(wantName ? 'Deploying your agent — name + access grant…' : 'Deploying your agent (unnamed)…');
   // deploy + claim exact name + approve stewardship — ONE signature from the root credential.
@@ -2601,7 +2603,7 @@ export async function deployAndClaimAgent(
   // spec 253 batching — fold the person's plane-grant approveHash(digest) calls into the SAME deploy
   // userOp (deploy + claim + approve-all), so those grants need no separate signature (one passkey prompt).
   const callData = extraApproveDigests.length
-    ? buildExecuteBatchCallData([...claim.calls, ...extraApproveDigests.map(buildApproveHashCall)])
+    ? buildExecuteBatchCallData([...claim.calls, ...extraApproveDigests.map((d) => buildApproveHashCall(d, sa))])
     : claim.callData;
   const dep = await bootstrapWithPasskey(passkey, onStep, callData);
   if (!dep.ok) return { ok: false, error: dep.error };
@@ -2675,7 +2677,7 @@ export async function signupWithName(
   // ONE wallet prompt, no per-grant signature.
   const extra = buildExtra ? await buildExtra(sa) : undefined;
   const deployCallData = extra && extra.digests.length
-    ? buildExecuteBatchCallData([...claim.calls, ...extra.digests.map(buildApproveHashCall)])
+    ? buildExecuteBatchCallData([...claim.calls, ...extra.digests.map((d) => buildApproveHashCall(d, sa))])
     : claim.callData;
   const dep = await bootstrapWithWallet(address, onStep, deployCallData);
   if (!dep.ok) return { ok: false, error: dep.error };
@@ -2710,7 +2712,7 @@ export async function signupWalletNoName(
   if (!deployed) {
     const extra = buildExtra ? await buildExtra(sa) : undefined;
     const deployCallData = extra && extra.digests.length
-      ? buildExecuteBatchCallData(extra.digests.map(buildApproveHashCall))
+      ? buildExecuteBatchCallData(extra.digests.map((d) => buildApproveHashCall(d, sa)))
       : undefined;
     const dep = await bootstrapWithWallet(address, onStep, deployCallData);
     if (!dep.ok) return { ok: false, error: dep.error };

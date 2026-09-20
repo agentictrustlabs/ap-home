@@ -23,7 +23,7 @@ export interface AnchorRow { anchoredBy: Address; at: bigint; intentDigest: Hex;
 export async function readAnchor(
   client: { readContract(args: never): Promise<unknown> },
   registry: Address,
-  generation: 1 | 2,
+  generation: 1 | 2 | 3, // generation 3 (spec 410) keeps generation 2's `anchorOf(agent, digest)` shape
   anchoredBy: Address,
   digest: Hex,
 ): Promise<AnchorRow> {

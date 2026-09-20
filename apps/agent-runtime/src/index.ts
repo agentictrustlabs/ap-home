@@ -3185,7 +3185,7 @@ app.post('/harness/authorize', async (c) => {
   if (!digests.length || digests.length > 8) return c.json({ ok: false, error: '1–8 digests required' }, 400);
   // R917-C-2: an EXISTING account approves under its current custody epoch — read, never assumed.
   const epoch = contractsGeneration(c.env) === 2 ? await readCustodyEpoch(createPublicClient({ transport: http(c.env.RPC_URL) }), delegator) : 0n;
-  const calls = digests.map((d) => orgApproveHashCall(c.env, d as Hex, epoch));
+  const calls = digests.map((d) => orgApproveHashCall(c.env, d as Hex, epoch, delegator));
   const { userOp, userOpHash } = await accountClient(c.env).buildCallUserOp({
     sender: delegator, callData: buildExecuteBatchCallData(calls), paymaster: c.env.PAYMASTER as Address,
     callGasLimit: 300_000n,
@@ -4979,8 +4979,8 @@ function teamGenesisDeps(env: Env, audit: AuditSink): TeamGenesisDeps {
         ...(await declareTypeCallsFor(env, child, root.tld)),
         buildSubregistryRegisterCall({ subregistry: root.subregistry, label, newOwner: child }),
         buildSetPrimaryNameCall({ registry: env.AGENT_NAME_REGISTRY as Address, node: namehash(name) }),
-        orgApproveHashCall(env, grant.digest, 0n), // the child is deployed in this batch: custody epoch 0
-        ...(planes ? planes.digests.map((d: Hex) => orgApproveHashCall(env, d, 0n)) : []),
+        orgApproveHashCall(env, grant.digest, 0n, child), // the child is deployed in this batch: custody epoch 0
+        ...(planes ? planes.digests.map((d: Hex) => orgApproveHashCall(env, d, 0n, child)) : []),
       ];
       let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
       if (env.PAYMASTER_VERIFYING_SIGNER) {
@@ -6978,8 +6978,10 @@ function buildUnsignedSiteGrant(
 /** R917-C-2 (spec 408 §1.2): the account approves the EPOCH-BOUND key, never the raw digest. `epoch` is stated
  *  by the caller — `0n` for an account being DEPLOYED in the same batch (a counterfactual account has no
  *  custody history), `readCustodyEpoch` for an existing one. */
-function orgApproveHashCall(env: Env, digest: Hex, epoch: bigint): { to: Address; value: bigint; data: Hex } {
-  return buildApproveHashKeyCall(env.APPROVED_HASH_REGISTRY as Address, digest, contractsGeneration(env) === 1 ? { generation: 1 } : { generation: 2, epoch });
+function orgApproveHashCall(env: Env, digest: Hex, epoch: bigint, account: Address): { to: Address; value: bigint; data: Hex } {
+  // Spec 410 §1 (generation 3): a self-call on `account` — it derives the key on chain; `epoch` is unused there.
+  const g = contractsGeneration(env);
+  return buildApproveHashKeyCall(env.APPROVED_HASH_REGISTRY as Address, digest, g === 1 ? { generation: 1 } : g === 3 ? { generation: 3, account } : { generation: 2, epoch });
 }
 /** Spec 408 — the estate's contract generation, a deployment fact (`CONTRACTS_GENERATION`); absent ⇒ 1. */
 export function contractsGeneration(env: Pick<Env, 'CONTRACTS_GENERATION'>): ContractsGeneration {
@@ -7104,14 +7106,14 @@ app.post('/custody/oidc/bootstrap-org', async (c) => {
 
     // The org's outbound grants (spec 253) — org is the delegator of all three; person→org membership deferred.
     const siteGrant = buildOrgGrant(c.env, orgSA, body.delegate);
-    const approveCalls: Array<{ to: Address; value: bigint; data: Hex }> = [orgApproveHashCall(c.env, siteGrant.digest, 0n)]; // deployed in this batch: epoch 0
+    const approveCalls: Array<{ to: Address; value: bigint; data: Hex }> = [orgApproveHashCall(c.env, siteGrant.digest, 0n, orgSA)]; // deployed in this batch: epoch 0
     let brokerGrant: ReturnType<typeof buildOrgGrant> | undefined;
     if (body.grantOrg && body.grantOrg.toLowerCase() !== body.delegate.toLowerCase()) {
       brokerGrant = buildOrgGrant(c.env, orgSA, body.grantOrg);
-      approveCalls.push(orgApproveHashCall(c.env, brokerGrant.digest, 0n));
+      approveCalls.push(orgApproveHashCall(c.env, brokerGrant.digest, 0n, orgSA));
     }
     const stewardship = buildOrgGrant(c.env, orgSA, person);
-    approveCalls.push(orgApproveHashCall(c.env, stewardship.digest, 0n));
+    approveCalls.push(orgApproveHashCall(c.env, stewardship.digest, 0n, orgSA));
 
     const root = subregistryForTld(c.env, body.tld);
     if (!root.ok) return c.json({ ok: false, error: root.error }, 503);
@@ -7349,7 +7351,7 @@ app.post('/custody/oidc/bootstrap-agent', async (c) => {
       calls.push(buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node! }));
       claimedName = `${body.label!.toLowerCase()}.${root.typed ? root.tld : (c.env.AGENT_NAME_PARENT || AGENT_NAME_PARENT)}`;
     }
-    calls.push(orgApproveHashCall(c.env, stewardship.digest, 0n)); // deployed in this batch: epoch 0
+    calls.push(orgApproveHashCall(c.env, stewardship.digest, 0n, childSA)); // deployed in this batch: epoch 0
     const callData = buildExecuteBatchCallData(calls);
 
     let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
