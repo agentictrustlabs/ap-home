@@ -1186,7 +1186,9 @@ export class A2aTaskDO {
       // handler has NO routing tools.
       const audit = buildAuditSink(this.env);
       const io = {
-        readTopic: () => call('internal.channels.read', { channelId: p.channelId }),
+        // The turn embeds the last 8 messages at 300 chars each (discussion-skill CONTEXT_MESSAGES /
+        // CONTEXT_CLIP); reading the default 20 bodies to keep 8 clips was the widest read on the turn.
+        readTopic: () => call('internal.channels.read', { channelId: p.channelId, limit: 8 }),
         // spec 334 §6 gather phase for the @ask turn: read ONE of the org's OWN records owner-self
         // through the read-only coordination grant (recordType OPAQUE — the org's playbook names
         // the domain records, never this platform). Non-throwing: a scope-denied / unenabled read

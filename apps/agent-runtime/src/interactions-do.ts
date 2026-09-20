@@ -3777,7 +3777,17 @@ export class InteractionsDO {
           // Bodies load at the envelope's OWN resource (channel namespace) — never re-normalized.
           // ONE batched round-trip for the whole topic (was one delegated read PER MESSAGE — the
           // O(board size) per-poll amplification behind the 2026-07-18 "auth failed" regression).
-          Object.assign(bodies, await this.readTopicBodies(grant, messages.map((m) => m.envelope)));
+          // `after: <messageId>` is a poller's cursor: a topic whose LAST entry is still that message
+          // has nothing new to show, so the bodies hop is not paid — the envelopes still come back, so
+          // the caller sees the same topic it saw; only the bytes it already holds are not re-read.
+          // With a cursor the poller already holds every body up to it, so only the NEWER envelopes are
+          // fetched (each body is its own record — `topicBodyResource(channel, message)` — so the batch is
+          // exactly those). A topic that has been asked a hundred questions was re-fetching a hundred
+          // briefs on every poll; a cursor unknown to the topic is treated as no cursor.
+          const after = typeof body.after === 'string' ? body.after : '';
+          const at = after ? messages.findIndex((m) => m.envelope.id === after) : -1;
+          const fresh = at >= 0 ? messages.slice(at + 1) : messages;
+          if (fresh.length > 0) Object.assign(bodies, await this.readTopicBodies(grant, fresh.map((m) => m.envelope)));
         }
         return json({ ok: true, channels: wire, bodies, you: presence.you ?? '', steward, invitedTopicIds: pendingInvites });
       }
@@ -3823,25 +3833,27 @@ export class InteractionsDO {
       }
 
       if (op === 'channels.post') {
-        const presence = await this.communityPresence(grant, principal, sessionSa, sessionCaip, body);
-        if (!presence.admitted) {
-          return json({ error: 'join this community first — a member-access grant, a current directory listing, or stewardship is required' }, 403);
-        }
-        if (!presence.you) {
-          return json({ error: 'choose a name this community will know you by before posting', code: 'local_name_required' }, 403);
-        }
-        const name = presence.you;
-        // A named member posts as themselves; an unnamed steward still facilitates restricted topics.
-        const posterSteward = !presence.listed && presence.steward;
+        // The presence proofs (a listing read + ERC-1271, the steward wire's two chain reads) and the two
+        // board documents are independent: the proofs start now and are JOINED under the write lock, before
+        // anything is appended or written. Nothing of the board reaches a caller the proofs refuse.
+        const presenceP = this.communityPresence(grant, principal, sessionSa, sessionCaip, body);
         // Board split (W3): only the ONE channel doc is read + rewritten — same-channel conflicts only.
         const channelId = String(body.channelId ?? '');
         return this.serialize(async () => { // ARCH-H1 — serialize the channel append (many members → one channel doc)
-          // The index and the topic doc are read together (the topic's id is already known); the gate below
-          // still decides before anything is appended or written.
-          const [index, messages] = await Promise.all([
+          const [presence, index, messages] = await Promise.all([
+            presenceP,
             this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []),
             this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, TOPIC_RESOURCE(channelId), []),
           ]);
+          if (!presence.admitted) {
+            return json({ error: 'join this community first — a member-access grant, a current directory listing, or stewardship is required' }, 403);
+          }
+          if (!presence.you) {
+            return json({ error: 'choose a name this community will know you by before posting', code: 'local_name_required' }, 403);
+          }
+          const name = presence.you;
+          // A named member posts as themselves; an unnamed steward still facilitates restricted topics.
+          const posterSteward = !presence.listed && presence.steward;
           const entry = index.find((c) => c.descriptor.id === channelId);
           if (!entry) return json({ error: 'unknown channel' }, 404);
           // Post gate: OPEN topic ⇒ the org-member gate above suffices (participation is derived from

@@ -59,6 +59,16 @@ const READ_ORG_RECORD_TOOL: ToolSpec = {
   },
 };
 
+/** A playbook may say the facts ARRIVE WITH THE GOAL and there is nothing to gather — a line reading
+ *  `Gather: none` (case-insensitive; anything may follow on the line). The gather phase is a model call
+ *  plus whatever reads the model then makes, ~3–4 s on a turn's critical path, and for an agent whose
+ *  every question already carries its reference block (a brief composed by the caller from the records
+ *  it was authorized to read) that call reads nothing and the person waits for it. The steward who
+ *  authors the playbook decides; the platform only honours the declaration. */
+export function playbookDeclinesGather(playbook: string | undefined): boolean {
+  return /^\s*gather\s*:\s*none\b/im.test(String(playbook ?? ''));
+}
+
 /** spec 334 §6 gather phase — let the model author read-only queries against the PUBLIC graph and
  *  collect the results into a compact digest that the write turn reasons over. Runs ONLY with an LLM
  *  planner and a configured public endpoint (the rule-based planner cannot author SPARQL); otherwise
@@ -77,6 +87,7 @@ export async function gatherReferenceContext(
   const graphOn = !!String(env.PUBLIC_GRAPH_URL ?? '').trim();
   const orgReadsOn = !!input.readOrgRecord;
   if (!graphOn && !orgReadsOn) return '';
+  if (playbookDeclinesGather(input.playbook)) return '';
   const { planner, kind } = selectPlanner(env, { systemPrompt: withPlaybook(input.playbook, GATHER_CONTRACT), maxTokens: 1500 });
   if (kind === 'rule-based') return ''; // only the LLM can author a query / pick a record; the template cannot.
 
