@@ -136,6 +136,8 @@ export interface HarnessEnv {
   /** The AgentRelationship record — where `ap:charteredUnder` edges and their roles live. */
   AGENT_RELATIONSHIP?: string;
   [k: string]: unknown;
+  /** Spec 410 §10 — the ontology manifest digest this ESTATE adopted by governance (apgov:AdoptedVersion); absent ⇒ the package's own. */
+  ADOPTED_ONTOLOGY_MANIFEST_DIGEST?: string;
 }
 
 /** The action tools this agent exposes to the harness, WITH their capability declarations. Risk and
@@ -4517,7 +4519,11 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   // Spec 410 §5 — stamp the intent with the versions it is acted under. The mandate a Home mints for this run
   // digests the whole intent (RFC 8785), so the versions are bound; a resume under a moved T-box or definition
   // is refused by the verifier with the moved one named (`version-moved`), never silently reinterpreted.
-  currentVersions = { ontologyManifestDigest: ONTOLOGY_MANIFEST_DIGEST as Hex, semanticsDigest: (playbook?.digest ?? NO_SEMANTICS_DIGEST) as Hex };
+  // Spec 410 §10 — the ESTATE's adopted manifest when its governance has adopted one (`ADOPTED_ONTOLOGY_MANIFEST_DIGEST`,
+  // a deployment fact from an `apgov:AdoptedVersion` proposal), else the package's own; never a guess between them.
+  const adopted = String(env.ADOPTED_ONTOLOGY_MANIFEST_DIGEST ?? '').trim();
+  if (adopted && !/^0x[0-9a-fA-F]{64}$/.test(adopted)) throw new Error('ADOPTED_ONTOLOGY_MANIFEST_DIGEST is set but is not a bytes32 digest — the estate\'s adopted ontology version is a deployment fact, stated exactly or not at all');
+  currentVersions = { ontologyManifestDigest: (adopted || ONTOLOGY_MANIFEST_DIGEST) as Hex, semanticsDigest: (playbook?.digest ?? NO_SEMANTICS_DIGEST) as Hex };
   input.intent.versions = currentVersions;
   const first = Array.isArray(input.presented) ? input.presented[0] ?? null : input.presented;
   const holding = first ? mandateCapabilityWords(first) : null;

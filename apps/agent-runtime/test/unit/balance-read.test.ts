@@ -11,20 +11,20 @@ const deps = {
 
 describe('the balance read', () => {
   it('unnamed: every treasury the person holds, one line each, in USDC — never a base figure', async () => {
-    const r = await balanceReadInvoker(deps, ALICE, ALICE)('treasury.balance.read', {}, { intent: { goal: 'what is my balance' }, step: { toolId: 'treasury.balance.read', args: {} }, index: 0 }) as { items: Array<{ label: string; display: string; usdc: string }>; count: number };
+    const r = await balanceReadInvoker(deps, ALICE, ALICE)('treasury.balance.read', {}, { intent: { goal: 'what is my balance' }, step: { toolId: 'treasury.balance.read', args: {} }, index: 0, operationId: 'op-0' }) as { items: Array<{ label: string; display: string; usdc: string }>; count: number };
     expect(r.count).toBe(2);
     expect(r.items.map((i) => [i.label, i.display, i.usdc])).toEqual([['alice2.treasury', '12 USDC', '12'], ['alice3.treasury', '0 USDC', '0']]);
     expect(JSON.stringify(r)).not.toMatch(/12000000/);
     expect(renderAnswer(BALANCE_READ_TOOL.answer!, r)).toBe('alice2.treasury holds 12 USDC. alice3.treasury holds 0 USDC.');
   });
   it('inside a treasury or an organization, an unnamed question is about THAT realm — never the asker\'s other accounts', async () => {
-    const r = await balanceReadInvoker({ ...deps, nameOf: async () => 'alice3.treasury' }, T2 as never, ALICE)('treasury.balance.read', {}, { intent: { goal: 'what is the balance' }, step: { toolId: 'x', args: {} }, index: 0 }) as { items: Array<{ label: string }> };
+    const r = await balanceReadInvoker({ ...deps, nameOf: async () => 'alice3.treasury' }, T2 as never, ALICE)('treasury.balance.read', {}, { intent: { goal: 'what is the balance' }, step: { toolId: 'x', args: {} }, index: 0, operationId: 'op-0' }) as { items: Array<{ label: string }> };
     expect(r.items.map((i) => i.label)).toEqual(['alice3.treasury']);
   });
   it('named: that account; a name that did not resolve is refused by name, never guessed', async () => {
-    const one = await balanceReadInvoker({ ...deps, nameOf: async () => 'alice2.treasury' }, ALICE, ALICE)('treasury.balance.read', { account: T1 }, { intent: { goal: 'x' }, step: { toolId: 'x', args: {} }, index: 0 }) as { items: Array<{ label: string }> };
+    const one = await balanceReadInvoker({ ...deps, nameOf: async () => 'alice2.treasury' }, ALICE, ALICE)('treasury.balance.read', { account: T1 }, { intent: { goal: 'x' }, step: { toolId: 'x', args: {} }, index: 0, operationId: 'op-0' }) as { items: Array<{ label: string }> };
     expect(one.items.map((i) => i.label)).toEqual(['alice2.treasury']);
-    const bad = await balanceReadInvoker(deps, ALICE, ALICE)('treasury.balance.read', { account: 'bobs money' }, { intent: { goal: 'x' }, step: { toolId: 'x', args: {} }, index: 0 }) as { count: number; reason: string };
+    const bad = await balanceReadInvoker(deps, ALICE, ALICE)('treasury.balance.read', { account: 'bobs money' }, { intent: { goal: 'x' }, step: { toolId: 'x', args: {} }, index: 0, operationId: 'op-0' }) as { count: number; reason: string };
     expect(bad.count).toBe(0);
     expect(bad.reason).toMatch(/does not know an account called/);
   });
