@@ -32,7 +32,7 @@
 // the payer is ever held here; the mandate is the only authority, and it is checked per step, on chain
 // AND off.
 import { contractsGenerationOf, type ContractsGeneration } from '@agenticprimitives/agent-account';
-import { CONTACT_FIELDS, CONTACT_FIELD_ARGS, ONTOLOGY_MANIFEST_DIGEST } from '@agenticprimitives/ontology';
+import { CONTACT_FIELDS, CONTACT_FIELD_ARGS, ONTOLOGY_MANIFEST_DIGEST, outcomeClassOf as ontologyOutcomeClassOf } from '@agenticprimitives/ontology';
 import { bindSelectedOffer, type SelectedOfferBindingV1 } from './engagement-campaign.js';
 import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
@@ -63,7 +63,7 @@ import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
 import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
 import { ADAPTER } from './adapter-declarations.js';
-import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer } from '@agenticprimitives/orchestration';
+import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance } from '@agenticprimitives/orchestration';
 import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, standingFor, declareInstruction, forgetInstruction, instructionContextOf, STANDING_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
@@ -5258,6 +5258,11 @@ step is then handed to that agent under authority the person grants; leave it ou
         // Spec 379 — a step aimed at an OUTSIDE executor (a card URL, or an address this deployment does not
         // serve) may run only a read; an act there is refused before anything is spent.
         externalExecutorsReadOnly((ex) => /^https:\/\//.test(ex) || (/^0x[0-9a-fA-F]{40}$/.test(ex) && !!deps.isServedHere && !deps.isServedHere(ex))),
+        // Spec 410 §6 — an OPEN intent's stated outcome (`intent.constraints.outcome`) bounds what may be OFFERED: an
+        // effect the outcome does not entail, a bounded argument outside what was stated, a write carrying what the
+        // outcome does not entail disclosing — refused here, before any signature is asked for. The ontology says
+        // what an outcome entails (`outcomeClassOf`); a planner prompt never does.
+        outcomeConformance(ontologyOutcomeClassOf),
         instructionNeedsAct,
         noPlaceholders,
         dependenciesProvided,
