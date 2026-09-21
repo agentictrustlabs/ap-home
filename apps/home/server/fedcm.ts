@@ -275,9 +275,11 @@ export const onAssertion = async ({ request, env }: FnContext): Promise<Response
   let profileName = ''; let profileEmail = '';
   if (shares.name || shares.email) {
     const addr = addressFromSub(hs.sub);
-    const rec = addr ? await readCapabilityRecord<{ firstName?: string; lastName?: string; email?: string }>(env, addr, hs.custodyToken, 'impact-profile').catch(() => null) : null;
-    if (shares.name) profileName = [rec?.firstName, rec?.lastName].filter((x) => typeof x === 'string' && x.trim()).join(' ').trim().slice(0, 80);
-    if (shares.email) profileEmail = String(rec?.email ?? '').trim().toLowerCase().slice(0, 254);
+    // The record is `{ v, contact: { firstName, lastName, email, … } }` (profile-store.ts) — the fields sit under `contact`.
+    const rec = addr ? await readCapabilityRecord<{ contact?: { firstName?: string; lastName?: string; email?: string } }>(env, addr, hs.custodyToken, 'impact-profile').catch(() => null) : null;
+    const c = rec?.contact ?? {};
+    if (shares.name) profileName = [c.firstName, c.lastName].filter((x) => typeof x === 'string' && x.trim()).join(' ').trim().slice(0, 80);
+    if (shares.email) profileEmail = String(c.email ?? '').trim().toLowerCase().slice(0, 254);
   }
   const idToken = await mintIdToken(
     {
