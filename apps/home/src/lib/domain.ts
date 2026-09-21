@@ -32,6 +32,13 @@ export const DEMO_EDGE_ORIGIN_DEFAULT = process.env.NEXT_PUBLIC_DEMO_EDGE_ORIGIN
  *  Ring 0's estates were provisioned under. */
 export const VAULT_SERVER_ID = process.env.NEXT_PUBLIC_VAULT_SERVER_ID || 'demo-mcp';
 
+/** THE HOME MCP's origin (spec 397) — the Worker Claude.ai connects to as a custom connector, which then puts the
+ *  person's question to their own agent under the `ask-as-me` wire. One constant: the whitelabel config registers
+ *  `${HOME_MCP_ORIGIN}/oauth/callback` as the `home-mcp` client's redirect URI, and the front door prints
+ *  `${HOME_MCP_ORIGIN}/mcp` as the connector URL — a deployment that runs its own Worker sets
+ *  `NEXT_PUBLIC_HOME_MCP_ORIGIN` once. Unset ⇒ faithnet's, the estate Ring 0 deploys. */
+export const HOME_MCP_ORIGIN = (process.env.NEXT_PUBLIC_HOME_MCP_ORIGIN || 'https://home-mcp-faithnet.richardpedersen3.workers.dev').replace(/\/+$/, '');
+
 /** Alias kept for existing imports. */
 export const CENTRAL_AUTH_DOMAIN = CONNECT_DOMAIN;
 /** Platform (apex) Connect origin — landing + bootstrap default. */

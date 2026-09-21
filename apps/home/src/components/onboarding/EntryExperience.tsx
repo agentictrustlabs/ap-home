@@ -35,6 +35,8 @@ import { BrandShield } from '../shared/BrandShield';
 import { ConsentSheet } from '../shared/ConsentSheet';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { HomeResolvedView } from './HomeResolvedView';
+import { AgentReachFold } from './AgentReachFold';
+import { socialButtonsForNamedHome } from '../../lib/named-home-door';
 import { RequiredNameGate } from './RequiredNameGate';
 import { NewMemberSetup } from './NewMemberSetup';
 import { isNewHomeMoment, newMemberPlan, planIsEmpty, type NewMemberPlan } from '../../lib/new-member';
@@ -1020,13 +1022,10 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
   const socialKind: 'google' | 'youversion' | 'email' | 'phone' | null =
     info?.connectionKind === 'google' || info?.connectionKind === 'youversion' ||
     info?.connectionKind === 'email' || info?.connectionKind === 'phone' ? info.connectionKind : null;
-  // Robustness (esp. faithnet, where the on-chain connectionKind publish is best-effort and can
-  // fail/defer): a KMS/social-custodied home with an UNPUBLISHED kind looks like a plain EOA home
-  // (hasEoa, no passkey), so the screen would offer only wallet/email/phone and lock a Google/
-  // YouVersion member out of their own subdomain. When the kind is ABSENT and the home is
-  // EOA-custodied with no passkey, also offer the social sign-ins as a secondary fallback — they
-  // resolve THIS home via its OIDC facet. Wallet stays offered (it may genuinely be an EOA home).
-  const socialFallback = !socialKind && !!info?.hasEoa && !info?.hasPasskey;
+  // Which social buttons the door shows — the published kind's own as primary, else (kind unpublished, EOA
+  // custodian, no passkey) the deployment's open social ways in as a secondary fallback: `named-home-door.ts`.
+  // Wallet stays offered on the fallback (it may genuinely be an EOA home).
+  const socialButtons = info ? socialButtonsForNamedHome({ connectionKind: info.connectionKind, hasEoa: info.hasEoa, hasPasskey: info.hasPasskey, methods: whitelabel.onboarding.credentialMethods }) : [];
   // PASSKEY-FIRST DEVICE: this browser holds a local passkey for this host AND the home has a
   // passkey custodian on-chain → the passkey is the fastest way in (the member enrolled it — via
   // the email-card offer or elsewhere — precisely so return visits skip the code/OIDC hop). Make
@@ -1139,7 +1138,9 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
           {onCreate && (
             <button className="btn-primary" onClick={() => onCreate(name)}>Create {nameLabel(name)}</button>
           )}
-          <button className={onCreate ? 'btn-ghost onboarding-secondary' : 'btn-primary'} onClick={() => continueWithGoogle(name)}>Create it with Google</button>
+          {googleEnabled && (
+            <button className={onCreate ? 'btn-ghost onboarding-secondary' : 'btn-primary'} onClick={() => continueWithGoogle(name)}>Create it with Google</button>
+          )}
         </>
       ) : (
         // A named-home sign-in uses THIS home's own credential(s). Google is NOT shown — it
@@ -1157,13 +1158,13 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
               )}
             </p>
           )}
-          {/* Social (OIDC/KMS) custodian → the credential's own sign-in is the primary CTA. */}
-          {(socialKind === 'youversion' || socialFallback) && (
-            <button className={socialKind === 'youversion' ? 'btn-primary' : 'btn-ghost onboarding-secondary'} onClick={() => continueWithYouVersion(name)}>Continue with YouVersion</button>
-          )}
-          {(socialKind === 'google' || socialFallback) && (
-            <button className={socialKind === 'google' ? 'btn-primary' : 'btn-ghost onboarding-secondary'} onClick={() => continueWithGoogle(name)}>Continue with Google</button>
-          )}
+          {/* Social (OIDC/KMS) custodian → the credential's own sign-in is the primary CTA; the unpublished-kind
+              fallback offers only the social ways in THIS deployment opens (`named-home-door.ts` says why). */}
+          {socialButtons.map(({ provider, primary }) => (
+            <button key={provider} className={primary ? 'btn-primary' : 'btn-ghost onboarding-secondary'} onClick={() => (provider === 'youversion' ? continueWithYouVersion(name) : continueWithGoogle(name))}>
+              Continue with {provider === 'youversion' ? 'YouVersion' : 'Google'}
+            </button>
+          ))}
           {/* Say WHY the passkey buttons are absent. Silently dropping them from a home that HAS passkeys
               reads as the home losing them; this is a property of the chain, and it is not the member's
               to fix. */}
@@ -1202,6 +1203,9 @@ function SignInView({ name, onSession, onCreate }: { name: string; onSession: (t
         </>
       )}
       {err && <p className="onboarding-hint taken">{err}</p>}
+      {/* The agent behind this door is public (card, endpoint, address) — say so to whoever arrives, with the
+          way Claude reaches it. Only once the home is known to exist: an unclaimed name has no agent. */}
+      {info?.exists !== false && info?.agent && <AgentReachFold name={name} agent={info.agent} />}
     </Shell>
   );
 }

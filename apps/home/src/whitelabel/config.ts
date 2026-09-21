@@ -3,7 +3,7 @@
 // site (ADR-0021 — app level, never packages). The member-facing lexicon is documented in
 // docs/portal-lexicon.md; this config is its single source of truth. Swapping verticals is a
 // new config, not a code change.
-import { A2A_DOMAIN, AGENT_NAME_PARENT, CONNECT_DOMAIN, VAULT_SERVER_ID } from '../lib/domain';
+import { A2A_DOMAIN, AGENT_NAME_PARENT, CONNECT_DOMAIN, HOME_MCP_ORIGIN, VAULT_SERVER_ID } from '../lib/domain';
 import type { WhiteLabelConfig } from './schema';
 
 /**
@@ -131,13 +131,14 @@ const faithImpact: WhiteLabelConfig = {
     // a delegation from the person to the Home MCP's key pinned to `harness.ask` — the right to put a question
     // to their agent as them, revocable on chain, and nothing more. `delegate` is that key (the Worker's
     // secret's address), the same shape as an agent's session wire.
-    // Which Worker and which key are THIS deployment's: `NEXT_PUBLIC_HOME_MCP_ORIGIN` (its origin) and
-    // `NEXT_PUBLIC_HOME_MCP_DELEGATE` (its key's address); unset ⇒ faithnet's, the estate Ring 0 deploys.
+    // Which Worker and which key are THIS deployment's: `HOME_MCP_ORIGIN` (src/lib/domain.ts — its origin, the same
+    // one the front door prints as the connector URL) and `NEXT_PUBLIC_HOME_MCP_DELEGATE` (its key's address); unset
+    // ⇒ faithnet's, the estate Ring 0 deploys.
     {
       client_id: 'home-mcp',
       name: 'Claude (Home MCP)',
       redirect_uris: [
-        `${process.env.NEXT_PUBLIC_HOME_MCP_ORIGIN || 'https://home-mcp-faithnet.richardpedersen3.workers.dev'}/oauth/callback`,
+        `${HOME_MCP_ORIGIN}/oauth/callback`,
         'http://localhost:8797/oauth/callback',
       ],
       allowed_scopes: ['openid', 'agent'],
