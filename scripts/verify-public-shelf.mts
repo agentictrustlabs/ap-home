@@ -10,10 +10,15 @@
  *   3. the TWIN: the draft asked for BY ID on the same lane is "not on the shelf" and no byte of it leaves; a message with
  *      no public skill on the lane is still refused (401) — the door did not open for anything else;
  *   4. her Home's `/published` and `/published/<id>` render the same shelf and the same page for anyone;
- *   5. her own Ask answers "what have I made public" through the same read (`library.public.list`).
+ *   5. her own Ask answers "what have I made public" through the same read (`library.public.list`);
+ *   6. W5 — HER AGENT WRITES: `library.file.save` (public) + `library.file.publish` through /harness/ask land a page in her
+ *      vault with a release signed under her agent's session leaf; the stranger's lane serves it with the release;
+ *   7. Claude's door: the Home MCP's `public_shelf` tool reads her shelf (and one document) exactly as the stranger did,
+ *      connected as ANOTHER person — a public read spends nothing of theirs.
  */
+import { createHash, randomBytes } from 'node:crypto';
 import { personaCustodian } from '@agenticprimitives/runtime-member';
-import { fixture as fx, HOME } from './fixture.mts';
+import { fixture as fx, HOME, HOME_MCP } from './fixture.mts';
 
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 250), _status: r.status }; } };
 const fail = (m: string): never => { console.error(`\n✗ ${m}`); process.exit(1); };
@@ -85,6 +90,38 @@ const own = ((ask.reply?.results ?? []) as Array<{ toolId: string; result: { fil
 if (ask.reply?.kind !== 'answer' || !own?.files?.some((x) => x.id === `pg-${nonce}`)) fail(`her Ask did not answer from the shelf: ${JSON.stringify(ask.reply ?? ask).slice(0, 400)}`);
 console.log('  her Ask · library.public.list: the same shelf');
 
+// ── 6. W5 — her agent writes: save (public) + publish, through her own harness ──
+const written = await j(await fetch(`${HOME}/a2a/harness/ask`, { method: 'POST', headers: H, body: JSON.stringify({ session: me.bearer, addressee: me.agent, message: `keep this page as Agent page ${nonce}`, plan: { steps: [{ toolId: 'library.file.save', args: { id: `ag-${nonce}`, name: `Agent page ${nonce}.md`, folder, text: `# Agent page\n\nWritten by my agent — the word is tamarind-${nonce}.`, accessPolicy: 'public' } }] } }) }));
+const wr = (written.reply?.result ?? {}) as { saved?: boolean; file?: { id: string; version: number } };
+if (written.reply?.kind !== 'done' || wr.saved !== true || wr.file?.id !== `ag-${nonce}`) fail(`her agent did not save the page: ${JSON.stringify(written.reply ?? written).slice(0, 400)}`);
+const released = await j(await fetch(`${HOME}/a2a/harness/ask`, { method: 'POST', headers: H, body: JSON.stringify({ session: me.bearer, addressee: me.agent, message: `publish a release of my page ${nonce}`, plan: { steps: [{ toolId: 'library.file.publish', args: { id: `ag-${nonce}` } }] } }) }));
+const rl = (released.reply?.result ?? {}) as { published?: boolean; release?: { version: string; signed: boolean; signature?: string } };
+if (released.reply?.kind !== 'done' || rl.published !== true || rl.release?.version !== '1.0.0' || rl.release.signed !== true || !String(rl.release.signature).startsWith('0x51')) fail(`her agent did not release the page under its session leaf: ${JSON.stringify(released.reply ?? released).slice(0, 400)}`);
+const agentRead = await lane({ skill: 'library.public.read', id: `ag-${nonce}` });
+const ar = agentRead.body.result?.parts?.find((p) => p.data)?.data as { read?: boolean; text?: string; file?: { release?: { signed: boolean } } } | undefined;
+if (ar?.read !== true || !String(ar.text).includes(`tamarind-${nonce}`) || ar.file?.release?.signed !== true) fail(`the agent-written page is not on the stranger's lane with its release: ${JSON.stringify(agentRead.body).slice(0, 300)}`);
+console.log(`  W5 · her agent saved + released the page (session-leaf signature); the stranger reads it with the release`);
+
+// ── 7. Claude's door: the Home MCP's public_shelf, connected as the MEMBER (not the owner) ──
+const b64u = (b: Buffer) => b.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const mcpPost = (path: string, body: unknown, headers: Record<string, string> = {}) => fetch(`${HOME_MCP}${path}`, { method: 'POST', headers: { 'content-type': typeof body === 'string' ? 'application/x-www-form-urlencoded' : 'application/json', ...headers }, body: typeof body === 'string' ? body : JSON.stringify(body) });
+const reg = await j(await mcpPost('/oauth/register', { client_name: `verify-public-shelf-${nonce}`, redirect_uris: ['https://claude.ai/api/mcp/auth_callback'] }));
+const v = b64u(randomBytes(48));
+const conn = await j(await mcpPost('/oauth/demo-connect', { handle: fx.people.member, client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_challenge: b64u(createHash('sha256').update(v).digest()), resource: `${HOME_MCP}/mcp` }));
+if (!conn.code) fail(`demo-connect ${fx.people.member}: ${JSON.stringify(conn).slice(0, 200)}`);
+const tok = await j(await mcpPost('/oauth/token', new URLSearchParams({ grant_type: 'authorization_code', code: conn.code, client_id: reg.client_id, redirect_uri: 'https://claude.ai/api/mcp/auth_callback', code_verifier: v, resource: `${HOME_MCP}/mcp` }).toString()));
+if (!tok.access_token) fail(`token: ${JSON.stringify(tok).slice(0, 200)}`);
+const mcpCall = async (args: Record<string, unknown>) => { const r = await j(await mcpPost('/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'public_shelf', arguments: args } }, { authorization: `Bearer ${tok.access_token}` })); return (r.result?.structuredContent ?? {}) as Record<string, unknown>; };
+const shelfViaMcp = await mcpCall({ agent: `${fx.people.steward}.me`, folder });
+const mcpFiles = (shelfViaMcp.files ?? []) as Array<{ id: string }>;
+if (!mcpFiles.some((x) => x.id === `ag-${nonce}`) || mcpFiles.some((x) => x.id === `dr-${nonce}`)) fail(`public_shelf through the Home MCP is wrong: ${JSON.stringify(shelfViaMcp).slice(0, 300)}`);
+const docViaMcp = await mcpCall({ agent: `${fx.people.steward}.me`, id: `ag-${nonce}` });
+if (docViaMcp.read !== true || !String(docViaMcp.text).includes(`tamarind-${nonce}`) || docViaMcp.untrusted !== true) fail(`public_shelf read through the Home MCP is wrong: ${JSON.stringify(docViaMcp).slice(0, 300)}`);
+const privateViaMcp = await mcpCall({ agent: `${fx.people.steward}.me`, id: `dr-${nonce}` });
+if (privateViaMcp.read !== false || JSON.stringify(privateViaMcp).includes('quince')) fail(`the private draft leaked through the Home MCP: ${JSON.stringify(privateViaMcp).slice(0, 200)}`);
+await mcpPost('/oauth/revoke', new URLSearchParams({ token: tok.access_token, client_id: reg.client_id }).toString()).catch(() => undefined);
+console.log(`  Claude's door · public_shelf as ${fx.people.member}: ${fx.people.steward}'s shelf and the page, the draft not on it`);
+
 // tidy: the folder and everything under it
 await lib({ action: 'delete', id: f.artifact.id });
-console.log(`\n✓ spec 412: public by the owner's word (folder cascade, a private word holds); served by her agent to a stranger over A2A with no credential; the private draft never leaves; her Home's /published shows the same; her own Ask reads the same shelf.`);
+console.log(`\n✓ spec 412: public by the owner's word (folder cascade, a private word holds); served by her agent to a stranger over A2A with no credential; the private draft never leaves; her Home's /published shows the same; her own Ask reads the same shelf; her agent writes and releases as her (W5); Claude reads it through the Home MCP.`);
