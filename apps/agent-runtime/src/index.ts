@@ -648,6 +648,8 @@ export interface Env {
   DIGEST_BINDING_ENFORCER?: string;
   /** Spec 410 §7 — PayloadClassesEnforcer (generation 3). */
   PAYLOAD_CLASSES_ENFORCER?: string;
+  /** Spec 410 §7 — TreasurySpendPolicy (generation 3): read for `remaining()` before a payment is offered for signature. */
+  TREASURY_SPEND_POLICY?: string;
   /** Spec 410 §10 — the ontology manifest digest the estate adopted by governance; absent ⇒ the package's own. */
   ADOPTED_ONTOLOGY_MANIFEST_DIGEST?: string;
   /** Spec 406 W2 — the ReceiptAnchorRegistry on this chain; absent ⇒ runs are not anchored (said on the report). */

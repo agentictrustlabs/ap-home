@@ -29,6 +29,11 @@ export interface PreconditionInput {
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
+/** Spec 410 §7 — `TreasurySpendPolicy.remaining(account)`: what the current window can still carry, and the ceiling. */
+export const REMAINING_ABI = [
+  { type: 'function', name: 'remaining', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: 'left', type: 'uint256' }, { name: 'ceiling', type: 'uint256' }] },
+] as const;
+
 async function usdcBalance(deps: HarnessDeps, token: Address, who: Address): Promise<bigint | null> {
   return (await deps.readContract({ address: token, abi: erc20Abi as never, functionName: 'balanceOf', args: [who] }).catch(() => null)) as bigint | null;
 }
@@ -45,6 +50,21 @@ async function paymentPrecondition(input: PreconditionInput): Promise<string | n
   // "send 2 usdc" leaves `amount` unset (it is `usdc`), and reading only `amount` made this pass silently.
   const amount = (() => { try { return fundingAmount(input.args); } catch { return 0n; } })();
   if (!/^0x[0-9a-f]{40}$/.test(token) || !/^0x[0-9a-f]{40}$/.test(payer) || amount <= 0n) return null;
+
+  // Spec 410 §7 — THE AGGREGATE LIMIT AT THE RESOURCE, read before anyone signs: a treasury under a spend policy
+  // has a ceiling per window, and `remaining()` says how much of it is left. A payment the window cannot carry
+  // is refused here with the numbers, instead of after a signature at `BudgetExceeded`. Honesty, never authority:
+  // the hook decides at commit whatever this said. Absent policy (`installed` false ⇒ remaining is the max) or an
+  // estate without the contract ⇒ nothing to say.
+  const policy = String(input.env.TREASURY_SPEND_POLICY ?? '').toLowerCase();
+  if (/^0x[0-9a-f]{40}$/.test(policy)) {
+    const rem = (await input.deps.readContract({ address: policy as Address, abi: REMAINING_ABI as never, functionName: 'remaining', args: [payer] }).catch(() => null)) as { left: bigint; ceiling: bigint } | readonly [bigint, bigint] | null;
+    const left = rem === null ? null : Array.isArray(rem) ? rem[0] : (rem as { left: bigint }).left;
+    const ceiling = rem === null ? null : Array.isArray(rem) ? rem[1] : (rem as { ceiling: bigint }).ceiling;
+    if (left !== null && ceiling !== null && ceiling > 0n && left < amount) {
+      return `${short(payer)} may spend ${formatUnits(left, 6)} more USDC in this window (its ceiling is ${formatUnits(ceiling, 6)}) and this needs ${formatUnits(amount, 6)}. Nothing was authorized; the window's limit is the treasury's own policy.`;
+    }
+  }
 
   const held = await usdcBalance(input.deps, token, payer);
   if (held === null || held >= amount) return null; // unreadable ⇒ do not block; the chain still decides

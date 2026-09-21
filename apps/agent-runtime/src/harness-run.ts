@@ -131,6 +131,8 @@ export interface HarnessEnv {
   DIGEST_BINDING_ENFORCER?: string;
   /** Spec 410 §7 — PayloadClassesEnforcer (generation 3); absent on an older estate. */
   PAYLOAD_CLASSES_ENFORCER?: string;
+  /** Spec 410 §7 — TreasurySpendPolicy (generation 3): the Ask reads `remaining()` before a payment is offered for signature. */
+  TREASURY_SPEND_POLICY?: string;
   PAYMENT_ENFORCER?: string;
   MOCK_USDC?: string;
   /** The AgentRelationship record — where `ap:charteredUnder` edges and their roles live. */
