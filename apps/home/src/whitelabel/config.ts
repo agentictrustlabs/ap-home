@@ -774,7 +774,9 @@ const faithImpact: WhiteLabelConfig = {
         'https://demo-publishing-web.richardpedersen3.workers.dev/',
         'http://localhost:5177/',
       ],
-      allowed_scopes: ['openid', 'agent'],
+      // `profile`: the person's HUMAN name rides on `agent_name` for a nameless account, so the one-time
+      // "About you" step starts from what they are called rather than 0x…. Registry-gated like pokernight's.
+      allowed_scopes: ['openid', 'profile', 'agent'],
       // org-create: a publisher's ORGANIZATION is chosen from the Home roster, never typed; establishing
       // a new one is the Home's org-create ceremony (chooser mode), launched from the wizard's "About you".
       allowed_delegation_templates: ['site-login', 'org-create'],
