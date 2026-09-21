@@ -759,15 +759,17 @@ const faithImpact: WhiteLabelConfig = {
       allowed_delegation_templates: ['site-login'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
-    // Source Publishing (verifiable-content-demo apps/demo-publishing-*) — people publish their own sources
-    // from their own Home library; publishing is the library's `publish` release, replicated by the site.
-    // site-login only; no PII at the broker. Quick connect (the sample people) needs this client_id to
-    // exist, and the popup/redirect ceremony needs the exact redirect_uri — read the web worker's
-    // hostname from its deploy output, never guessed.
+    // Source Publishing / OpenBook (verifiable-content-demo apps/demo-publishing-*) — stewards publish
+    // complete works from their own Home library; publishing is the library's `publish` release over the
+    // work manifest, archived by the site. site-login only; no PII at the broker. Quick connect (the sample
+    // people) needs this client_id to exist, and the popup/redirect ceremony needs the exact redirect_uri.
+    // Lives on the FAITHNET estate (publishing.faithnet.io); the workers.dev origin is its fallback host.
+    // FIRST on purpose: the front-channel sign-out takes the first https URI per client.
     {
       client_id: 'source-publishing',
       name: 'Source Publishing',
       redirect_uris: [
+        'https://publishing.faithnet.io/',
         'https://demo-publishing-web.richardpedersen3.workers.dev/',
         'http://localhost:5177/',
       ],
