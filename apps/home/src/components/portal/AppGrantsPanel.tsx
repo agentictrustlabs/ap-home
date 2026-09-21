@@ -22,9 +22,21 @@ export function AppGrantsPanel() {
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     if (!session?.token) return;
-    void listAppGrants(session.token).then(setGrants).catch(() => setGrants([]));
+    void listAppGrants(session.token)
+      .then(setGrants)
+      .catch((e: unknown) => { setGrants(null); setErr(`Connected assistants could not be read: ${e instanceof Error ? e.message : 'the listing failed'}`); });
   }, [session?.token]);
-  if (!session || !agentAddress || grants === null || grants.length === 0) return null;
+  if (!session || !agentAddress) return null;
+  if (grants === null && err) {
+    // The read failed: say so where the list would be — an empty panel would read as "none" (398 §6.3).
+    return (
+      <div style={{ marginTop: '1.5rem' }} data-testid="app-grants">
+        <h3 style={{ margin: '0 0 .3rem', fontSize: '.95rem' }}>Connected assistants</h3>
+        <p className="error" data-testid="app-grants-failed" style={{ fontSize: '.82rem' }}>{err}</p>
+      </div>
+    );
+  }
+  if (grants === null || grants.length === 0) return null;
   const revoke = async (g: AppGrant) => {
     if (!window.confirm(`Revoke ${g.appName}? It takes effect immediately on chain — its next ask is refused at your agent.`)) return;
     setBusy(g.clientId); setErr(null);

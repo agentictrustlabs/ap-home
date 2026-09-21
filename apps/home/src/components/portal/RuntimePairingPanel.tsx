@@ -37,7 +37,9 @@ export function RuntimePairingPanel() {
   const load = useCallback(async () => {
     if (!session?.token || !me) return;
     try {
-      const [o, p] = await Promise.all([listManagedAgents(session.token, 'any').catch(() => []), listPairings(me, session.token)]);
+      // Both reads must answer: a stewarded-org listing that failed is not "no organizations" (398 §6.3) — it
+      // lands in the catch below and is said, like the pairings read already was.
+      const [o, p] = await Promise.all([listManagedAgents(session.token, 'any'), listPairings(me, session.token)]);
       setOrgs(o.filter((a) => a.relationship === 'steward' && a.kind !== 'service' && a.kind !== 'person-treasury' && a.kind !== 'org-treasury').map((a) => ({ agent: a.agent, name: a.name, ...(a.stewardshipDelegation ? { stewardshipDelegation: a.stewardshipDelegation } : {}) })));
       setPairings(p);
       setErr('');

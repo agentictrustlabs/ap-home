@@ -81,8 +81,14 @@ export default function CapabilitiesPage() {
       if (!live || !g) return;
       setGrant(g);
       if (!mayPatchDraft(studioScopesFor({ principalKind: 'human', relationship: 'self' }))) return;
-      const cards = await cardsFor(g).catch(() => []);
-      if (live) setCardTarget(soleCardTarget(cards));
+      try {
+        const cards = await cardsFor(g);
+        if (live) setCardTarget(soleCardTarget(cards));
+      } catch (e) {
+        // The card listing failed: the "also put it on the card" option is withheld AND the reason is
+        // said, rather than the option quietly missing as if there were no card (398 §6.3).
+        if (live) setErr(`The agent's cards could not be read, so publishing to a card is not offered: ${e instanceof Error ? e.message : 'the listing failed'}`);
+      }
     })();
     return () => { live = false; };
   }, [session?.token]);

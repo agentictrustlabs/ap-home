@@ -20,6 +20,8 @@ export function DemoPeopleFold({ enroll, appName, onSession }: {
   const [personas, setPersonas] = useState<readonly DemoPersona[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  /** The listing itself failed — said in the fold's place, never rendered as "no demo people" (398 §6.3). */
+  const [listErr, setListErr] = useState<string | null>(null);
   // Localhost always; or any deployment that opts in via NEXT_PUBLIC_ENABLE_DEMO_PEOPLE=true
   // (the faithnet pilot Home shows demo people; production leaves it unset and stays clean).
   const local =
@@ -30,9 +32,17 @@ export function DemoPeopleFold({ enroll, appName, onSession }: {
     void fetch('/connect/demo-personas')
       .then((r) => r.json())
       .then((d: { personas?: DemoPersona[] }) => setPersonas(d.personas ?? []))
-      .catch(() => setPersonas([]));
+      .catch((e: unknown) => setListErr(e instanceof Error ? e.message : 'the demo people could not be listed'));
   }, [local]);
-  if (!local || personas === null || personas.length === 0) return null;
+  if (!local) return null;
+  if (listErr) {
+    return (
+      <p className="muted" data-testid="demo-people-fold-failed" style={{ margin: '1.2rem auto 0', maxWidth: 420, fontSize: '.78rem' }}>
+        The demo people could not be listed just now ({listErr}) — this Home may still have them.
+      </p>
+    );
+  }
+  if (personas === null || personas.length === 0) return null;
   return (
     <details className="demo-people-fold" style={{ margin: '1.2rem auto 0', maxWidth: 420, width: '100%', fontSize: '.8rem', color: 'var(--color-text-muted, #475569)', textAlign: 'left' }}>
       <summary style={{ cursor: 'pointer', listStyle: 'none', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '.78rem', fontWeight: 500 }}>

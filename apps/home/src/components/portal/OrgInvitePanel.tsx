@@ -60,7 +60,14 @@ export function OrgInvitePanel({ org }: { org: string }) {
 
   const search = useCallback(async () => {
     if (!query.trim()) return;
-    setHits(await searchAgentsKb(query.trim()).catch(() => []));
+    setErr(null);
+    try {
+      setHits(await searchAgentsKb(query.trim()));
+    } catch (e) {
+      // A search that failed is not "no one matched" (398 §6.3): say which read failed.
+      setHits([]);
+      setErr(`The agent search could not be run: ${e instanceof Error ? e.message : 'the knowledge base did not answer'}`);
+    }
   }, [query]);
 
   const inviteAgent = useCallback(async (hit: AgentSearchHit) => {
