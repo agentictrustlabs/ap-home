@@ -33,7 +33,7 @@ a wiped store means "authorize again") · `src/a2a.ts` (`askAsPerson`) · `src/t
 `npx tsc --noEmit -p .` + `npx vitest run` (the AS: DCR, PKCE, resource binding, rotation, revocation). Live gates
 `verify-home-mcp` (W1) · `-browser-path` · `-discovery` (W2) · `-authority` (W3: signed at her Home via /you?run=) · `-stream` (W3) · `-revoke` (W4: Connected assistants → on chain) · `-instructions`. Deploy `npx wrangler deploy --env faithnet`; secrets
 `HOME_MCP_PRIVATE_KEY` (its address is the `delegate` on the Home's `home-mcp` client registration) and `TOKEN_SECRET`.
-Live: `https://home-mcp-faithnet.richardpedersen3.workers.dev` (the faithnet.io zone is at its domain limit).
+Live: `https://home-mcp.faithnet.io` (the faithnet.io zone is at its domain limit).
 
 ## Key rotation (runbook)
 
