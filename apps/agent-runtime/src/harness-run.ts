@@ -32,7 +32,7 @@
 // the payer is ever held here; the mandate is the only authority, and it is checked per step, on chain
 // AND off.
 import { contractsGenerationOf, type ContractsGeneration } from '@agenticprimitives/agent-account';
-import { CONTACT_FIELDS, CONTACT_FIELD_ARGS, ONTOLOGY_MANIFEST_DIGEST, outcomeClassOf as ontologyOutcomeClassOf } from '@agenticprimitives/ontology';
+import { CONTACT_FIELDS, CONTACT_FIELD_ARGS, ONTOLOGY_MANIFEST_DIGEST, OUTCOME_CLASSES, outcomeClassOf as ontologyOutcomeClassOf } from '@agenticprimitives/ontology';
 import { bindSelectedOffer, type SelectedOfferBindingV1 } from './engagement-campaign.js';
 import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
@@ -63,7 +63,7 @@ import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
 import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
 import { ADAPTER, CARRIES } from './adapter-declarations.js';
-import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance } from '@agenticprimitives/orchestration';
+import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent } from '@agenticprimitives/orchestration';
 import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, standingFor, declareInstruction, forgetInstruction, instructionContextOf, STANDING_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
@@ -4555,6 +4555,14 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   if (adopted && !/^0x[0-9a-fA-F]{64}$/.test(adopted)) throw new Error('ADOPTED_ONTOLOGY_MANIFEST_DIGEST is set but is not a bytes32 digest — the estate\'s adopted ontology version is a deployment fact, stated exactly or not at all');
   currentVersions = { ontologyManifestDigest: (adopted || ONTOLOGY_MANIFEST_DIGEST) as Hex, semanticsDigest: (playbook?.digest ?? NO_SEMANTICS_DIGEST) as Hex };
   input.intent.versions = currentVersions;
+  // Spec 410 §6 — THE ASK'S CLASSIFIER: does the sentence name an OPEN intent of a published outcome class? Rendered
+  // from the ontology's own words (`OUTCOME_CLASSES[].words`), deterministic, stamped once: the stated outcome rides
+  // in `intent.constraints.outcome`, the mandate digests it, and `outcomeConformance` refuses every consequential
+  // effect the class does not entail before anything reaches the signature sheet. A closed intent stays unstamped.
+  if (!input.intent.constraints?.outcome) {
+    const stated = classifyOpenIntent(input.intent.goal, OUTCOME_CLASSES);
+    if (stated) input.intent.constraints = { ...(input.intent.constraints ?? {}), outcome: stated };
+  }
   const first = Array.isArray(input.presented) ? input.presented[0] ?? null : input.presented;
   const holding = first ? mandateCapabilityWords(first) : null;
   const systemPrompt = holding
