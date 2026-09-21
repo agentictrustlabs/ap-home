@@ -9,6 +9,7 @@ import { ExplorerLink } from '../shared/ExplorerLink';
 import { decodeAbiParameters } from 'viem';
 import type { Address } from '@agenticprimitives/types';
 import { listMyReceivedDelegations, revokeGrantedDelegation, type MyOrg, type ReceivedDelegation } from '../../connect-client';
+import { revokeRelationshipCredential } from '../../lib/org-membership';
 import { useSession } from '../../context/session';
 import { OrgArchetypeGrantsPanel } from './OrgArchetypeGrantsPanel';
 import { resolveVia, signHashFor } from '../../home/onboarding';
@@ -363,6 +364,14 @@ export function OrgMembers({ org, token }: { org: MyOrg; token: string | null })
         const rev = await revokeGrantedDelegation(b.memberAccessDelegation, sign);
         if (!rev.ok) setErr(`member removed, but the on-chain grant revoke failed: ${rev.error}`);
       }
+      // Spec 410 §8 — DEPARTURE: the organization's unilateral revocation of the membership credential, signed as
+      // the org by the steward, written to both vaults (hers may refuse — the revocation stands on the org's copy).
+      // Best-effort like the grant revoke: the removal already stands; a miss is said, never hidden.
+      try {
+        const sign = await signHashFor(resolveVia(profile?.credential, session.via), org.orgAgent as Address, { token: session.token });
+        const rv = await revokeRelationshipCredential({ session: { token: session.token }, org: org.orgAgent as Address, member: member as Address, as: 'object', sign, reason: 'removed by a steward' });
+        if (!rv.ok && !/no membership credential/.test(rv.error)) setErr((prev) => `${prev ? `${prev} · ` : ''}the membership credential was not revoked: ${rv.error}`);
+      } catch (e) { setErr((prev) => `${prev ? `${prev} · ` : ''}the membership credential was not revoked: ${e instanceof Error ? e.message : String(e)}`); }
       reload();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));

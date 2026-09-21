@@ -45,6 +45,24 @@ export async function countersignRelationship(offer: RelationshipOfferV1, sign: 
   return out.ok && out.digest ? { ok: true, digest: out.digest } : { ok: false, error: out.error ?? `HTTP ${res.status}` };
 }
 
+/** Spec 410 §8 — DEPARTURE: revoke the membership credential. The organization signs alone when the member is gone
+ *  (`unilateral: 'object'`, the steward's key through the org's ERC-1271); the member signs alone when she leaves
+ *  (`unilateral: 'subject'`). Written to both vaults; a unilateral one stands on the signer's copy regardless. */
+export async function revokeRelationshipCredential(input: { session: { token: string }; org: Address; member: Address; as: 'object' | 'subject'; sign: SignHash; reason?: string }): Promise<{ ok: true; credential: string; note?: string } | { ok: false; error: string }> {
+  await ensureCsrfToken();
+  // The digest is over the revocation body the agent builds; the client asks for it first so the party signs exactly
+  // what will be recorded — one round trip to learn the credential and the body, one to submit the signature.
+  const holder = input.as === 'object' ? input.org : input.member;
+  const revokedAt = new Date().toISOString();
+  const preview = await fetch('/a2a/relationships/credential/revoke/preview', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', ...csrfHeaders() }, body: JSON.stringify({ session: input.session.token, holder, subject: input.member, object: input.org, revokedAt, unilateral: input.as, ...(input.reason ? { reason: input.reason } : {}) }) });
+  const pv = (await preview.json().catch(() => ({}))) as { ok?: boolean; credential?: string; digest?: string; error?: string };
+  if (!pv.ok || !pv.digest || !pv.credential) return { ok: false, error: pv.error ?? 'no membership credential to revoke' };
+  const signature = await input.sign(pv.digest as `0x${string}`);
+  const res = await fetch('/a2a/relationships/credential/revoke', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', ...csrfHeaders() }, body: JSON.stringify({ session: input.session.token, holder, credential: pv.credential, revokedAt, unilateral: input.as, ...(input.reason ? { reason: input.reason } : {}), signatures: input.as === 'object' ? { object: signature } : { subject: signature } }) });
+  const out = (await res.json().catch(() => ({}))) as { ok?: boolean; credential?: string; note?: string; error?: string };
+  return out.ok && out.credential ? { ok: true, credential: out.credential, ...(out.note ? { note: out.note } : {}) } : { ok: false, error: out.error ?? `HTTP ${res.status}` };
+}
+
 export async function recordOrgMembership(
   member: Address,
   org: string,

@@ -19,7 +19,7 @@ import { consumeRuntimeWakes } from './runtime-wake.js';
 import { connectorStatus, disconnectConnector, type GoogleProvider } from './connectors/google-token.js';
 import { queryOps } from './ops-index.js';
 import { anchorCallData, bundleDigest, readAnchor } from './receipt-anchor.js';
-import { relationshipCredentialDigest, verifyRelationshipCredential, relationshipCredentialRecordType, type RelationshipCredentialBodyV1, type RelationshipCredentialV1 } from '@agenticprimitives/agent-relationships';
+import { relationshipCredentialDigest, verifyRelationshipCredential, relationshipCredentialRecordType, relationshipRevocationDigest, relationshipRevocationRecordType, type RelationshipCredentialBodyV1, type RelationshipCredentialV1, type RelationshipRevocationV1 } from '@agenticprimitives/agent-relationships';
 import { openDispute, appendDisputeExchange, disputeRecordType, runDisputeRecordType, runDisputePointer, type DisputeInteractionV1, type DisputeExchangeV1 } from './dispute.js';
 import { stewardTermCurie, decodeStewardTerm } from '@agenticprimitives/ontology';
 /** Spec 410 §10 — the term registry's two reads a dispute needs to know who the steward is. */
@@ -3234,6 +3234,82 @@ app.post('/relationships/credential/accept', async (c) => {
   const w = await deps.writeSharedRecord([credential.subject, credential.object], relationshipCredentialRecordType(digest), credential, `relationship:${digest}`);
   if (!w.ok) return c.json({ ok: false, error: w.error }, 502);
   return c.json({ ok: true, digest, recordType: relationshipCredentialRecordType(digest) });
+});
+
+// POST /relationships/credential/revoke — spec 410 §8, DEPARTURE. A revocation is a new record: two-sided when both
+// parties sign it, or the organization's alone when the member is gone (`unilateral: 'object'`), or the member's
+// alone when she leaves (`unilateral: 'subject'`) — labelled, never hidden. Written to BOTH vaults; a unilateral one
+// stands on the signer's copy even when the counterparty's vault refuses (the departed member keeps her copy and
+// the revocation; the organization's records were never hers). The signer signs the revocation's digest with the
+// party's own credential (the organization through its steward's key, ERC-1271); nothing in the body is believed.
+// { session, holder, subject, object, signatures: { subject?, object? }, unilateral?, reason? } — the credential is
+// found in the holder's vault by its parties (the latest for that pair).
+/** Spec 410 §8 — what a party would sign: the credential (latest for the pair in the holder's vault) and the digest of
+ *  the revocation body as this agent will record it, for the SAME instant and reason the submit will carry. */
+app.post('/relationships/credential/revoke/preview', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; holder?: string; subject?: string; object?: string; revokedAt?: string; unilateral?: 'subject' | 'object'; reason?: string } | null;
+  if (!body?.session || !body.holder || !body.subject || !body.object) return c.json({ ok: false, error: 'session, holder, subject and object are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  if (!deps.readSubjectRecord) return c.json({ ok: false, error: 'this deployment cannot read the record' }, 503);
+  const holder = String(body.holder).toLowerCase();
+  const survey = (await callInteractionsInternal(c.env, holder, 'internal.coordination.vaultSurvey', {}).catch(() => null)) as { records?: Array<{ recordType: string }> } | null;
+  const found: RelationshipCredentialV1[] = [];
+  for (const k of (survey?.records ?? []).map((r) => r.recordType).filter((k) => k.startsWith('relationships.credential:'))) {
+    const rec = (await deps.readSubjectRecord(holder, k).catch(() => null)) as RelationshipCredentialV1 | null;
+    if (rec?.type === 'ap.relationship-credential.v1' && rec.subject.toLowerCase() === String(body.subject).toLowerCase() && rec.object.toLowerCase() === String(body.object).toLowerCase()) found.push(rec);
+  }
+  const credential = found.sort((a, b) => b.issuedAt.localeCompare(a.issuedAt))[0];
+  if (!credential) return c.json({ ok: false, error: 'no membership credential for that pair in the holder\'s vault' }, 404);
+  const credDigest = relationshipCredentialDigest(credential);
+  const revokedAt = body.revokedAt && /^\d{4}-\d{2}-\d{2}T/.test(body.revokedAt) ? body.revokedAt : new Date().toISOString();
+  const digest = relationshipRevocationDigest({ type: 'ap.relationship-revocation.v1', credential: credDigest, revokedAt, ...(body.unilateral ? { unilateral: body.unilateral } : {}), ...(body.reason ? { reason: String(body.reason).slice(0, 400) } : {}) });
+  return c.json({ ok: true, credential: credDigest, revokedAt, digest });
+});
+app.post('/relationships/credential/revoke', async (c) => {
+  const validator = c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
+  if (!validator) return c.json({ ok: false, error: 'the signature validator is not configured' }, 503);
+  const body = (await c.req.json().catch(() => null)) as { session?: string; holder?: string; subject?: string; object?: string; credential?: string; revokedAt?: string; signatures?: { subject?: string; object?: string }; unilateral?: 'subject' | 'object'; reason?: string } | null;
+  if (!body?.session || !body.holder || !body.signatures || (!body.signatures.subject && !body.signatures.object)) return c.json({ ok: false, error: 'session, holder and at least one signature are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  if (!deps.readSubjectRecord || !deps.writeSubjectRecord) return c.json({ ok: false, error: 'this deployment cannot read or write the record' }, 503);
+  const holder = String(body.holder).toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(holder)) return c.json({ ok: false, error: 'holder must be an address' }, 400);
+  // The credential: by digest when named, else the latest for the pair in the holder's vault.
+  let credential: RelationshipCredentialV1 | null = null;
+  if (body.credential && /^0x[0-9a-fA-F]{64}$/.test(body.credential)) credential = (await deps.readSubjectRecord(holder, relationshipCredentialRecordType(body.credential as Hex)).catch(() => null)) as RelationshipCredentialV1 | null;
+  else if (body.subject && body.object) {
+    const survey = (await callInteractionsInternal(c.env, holder, 'internal.coordination.vaultSurvey', {}).catch(() => null)) as { records?: Array<{ recordType: string; updatedAt?: string }> } | null;
+    const keys = (survey?.records ?? []).filter((r) => r.recordType.startsWith('relationships.credential:')).map((r) => r.recordType);
+    const found: RelationshipCredentialV1[] = [];
+    for (const k of keys) { const rec = (await deps.readSubjectRecord(holder, k).catch(() => null)) as RelationshipCredentialV1 | null; if (rec?.type === 'ap.relationship-credential.v1' && rec.subject.toLowerCase() === String(body.subject).toLowerCase() && rec.object.toLowerCase() === String(body.object).toLowerCase()) found.push(rec); }
+    credential = found.sort((a, b) => b.issuedAt.localeCompare(a.issuedAt))[0] ?? null;
+  }
+  if (!credential) return c.json({ ok: false, error: 'no such credential in the holder\'s vault' }, 404);
+  const credDigest = relationshipCredentialDigest(credential);
+  const revocation: Omit<RelationshipRevocationV1, 'signatures'> = { type: 'ap.relationship-revocation.v1', credential: credDigest, revokedAt: body.revokedAt && /^\d{4}-\d{2}-\d{2}T/.test(body.revokedAt) ? body.revokedAt : new Date().toISOString(), ...(body.unilateral ? { unilateral: body.unilateral } : {}), ...(body.reason ? { reason: String(body.reason).slice(0, 400) } : {}) };
+  const digest = relationshipRevocationDigest(revocation);
+  const verifySig = async (signer: Address, d: Hex, sig: Hex) => (await deps.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [signer, d, sig] })) === true;
+  const sigs: RelationshipRevocationV1['signatures'] = {};
+  if (body.signatures.subject) { if (!(await verifySig(credential.subject, digest, body.signatures.subject as Hex).catch(() => false))) return c.json({ ok: false, error: 'the member\'s signature did not verify' }, 403); sigs.subject = body.signatures.subject as Hex; }
+  if (body.signatures.object) { if (!(await verifySig(credential.object, digest, body.signatures.object as Hex).catch(() => false))) return c.json({ ok: false, error: 'the organization\'s signature did not verify' }, 403); sigs.object = body.signatures.object as Hex; }
+  if (body.unilateral === 'object' && !sigs.object) return c.json({ ok: false, error: 'a unilateral revocation by the organization carries its signature' }, 400);
+  if (body.unilateral === 'subject' && !sigs.subject) return c.json({ ok: false, error: 'a unilateral revocation by the member carries her signature' }, 400);
+  if (!body.unilateral && !(sigs.subject && sigs.object)) return c.json({ ok: false, error: 'a two-sided revocation carries both signatures; say `unilateral` when one party is gone' }, 400);
+  // The session must be one of the signers' principals: the member, or a steward signing as the organization.
+  const me = String(who.sa).toLowerCase();
+  if (me !== credential.subject.toLowerCase() && !sigs.object) return c.json({ ok: false, error: 'you are neither the member nor signing as the organization' }, 403);
+  const record: RelationshipRevocationV1 = { ...revocation, signatures: sigs };
+  const recordType = relationshipRevocationRecordType(credDigest);
+  const first = body.unilateral === 'subject' ? credential.subject : credential.object;
+  const second = first === credential.subject ? credential.object : credential.subject;
+  const w1 = await deps.writeSubjectRecord(first, recordType, record, `relationship:${credDigest}:revoke:1`).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+  if (!w1.ok) return c.json({ ok: false, error: `the signer's copy could not be written: ${'error' in w1 ? w1.error : 'unknown'}` }, 502);
+  const w2 = await deps.writeSubjectRecord(second, recordType, record, `relationship:${credDigest}:revoke:2`).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+  return c.json({ ok: true, credential: credDigest, recordType, copies: { [first]: true, [second]: w2.ok }, ...(!w2.ok ? { note: `the counterparty's copy could not be written (${'error' in w2 ? w2.error : 'unknown'}); the revocation stands on the signer's copy${body.unilateral ? '' : ' — say `unilateral` if they are gone'}` } : {}) });
 });
 
 // ─── Spec 410 §10 — THE DISPUTE PATH ──────────────────────────────────────────────────────────────────────
