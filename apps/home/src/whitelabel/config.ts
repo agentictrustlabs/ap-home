@@ -636,7 +636,14 @@ const faithImpact: WhiteLabelConfig = {
     {
       client_id: 'bible-explorer',
       name: 'Bible Explorer',
-      redirect_uris: ['https://demo-bible-ontology-production.richardpedersen3.workers.dev/', 'http://localhost:5673/'],
+      redirect_uris: [
+        // faithnet universe (chain 34348) — explorer.faithnet.io, present only when the deploy sets it
+        // (same env-gating as field-app). FIRST on purpose: the front-channel sign-out takes the first
+        // https URI per client.
+        ...(process.env.NEXT_PUBLIC_BIBLE_EXPLORER_ORIGIN ? [process.env.NEXT_PUBLIC_BIBLE_EXPLORER_ORIGIN] : []),
+        'https://demo-bible-ontology-production.richardpedersen3.workers.dev/',
+        'http://localhost:5673/',
+      ],
       allowed_scopes: ['openid', 'agent'],
       // spec 272/243 — `x402-pay`: the member authorizes (once) a capped payment delegation from
       // their person-treasury to the lbsb licensed-scripture treasury, redeemed per paid read (x402).
@@ -645,8 +652,10 @@ const faithImpact: WhiteLabelConfig = {
       // x402 push: USDC lands at the lbsb-treasury SA; the reader redeems at access time (OPEN delegate).
       // 0.001 USDC/read (1000 atomic, 6-dp mock USDC), 1.0 USDC aggregate cap per delegation.
       paymentConfig: {
-        payee: '0x17320bF2DAe8820157530c634B9bB76f6Eb72004',
-        asset: '0x6cfF706bA1461a9ef9F5aaf8f1581301805FbF92',
+        // A DIFFERENT treasury + USDC PER IDENTITY UNIVERSE: the faithnet deploy sets these to
+        // lbsb-treasury.impact on faithchain + faithchain's mock USDC; unset = base-sepolia's.
+        payee: (process.env.NEXT_PUBLIC_LBSB_TREASURY || '0x17320bF2DAe8820157530c634B9bB76f6Eb72004') as `0x${string}`,
+        asset: (process.env.NEXT_PUBLIC_LBSB_USDC || '0x6cfF706bA1461a9ef9F5aaf8f1581301805FbF92') as `0x${string}`,
         maxAmountPerCharge: '60000', // 0.06 USDC — covers the largest tier (Plus); the UI picks the amount
         maxAggregate: '6000000',     // 6 USDC across the delegation's life
         maxRedemptionsPerWindow: 1000,
@@ -660,7 +669,11 @@ const faithImpact: WhiteLabelConfig = {
     {
       client_id: 'demo-corpus',
       name: 'Demo Corpus',
-      redirect_uris: ['https://demo-corpus-production.richardpedersen3.workers.dev/'],
+      redirect_uris: [
+        // faithnet universe — corpus.faithnet.io, env-gated like the explorer above; first on purpose.
+        ...(process.env.NEXT_PUBLIC_DEMO_CORPUS_ORIGIN ? [process.env.NEXT_PUBLIC_DEMO_CORPUS_ORIGIN] : []),
+        'https://demo-corpus-production.richardpedersen3.workers.dev/',
+      ],
       allowed_scopes: ['openid', 'agent'],
       // spec 272 recurring — `subscription-collect`: the corpus OWNER redeems DUE subscribers' standing
       // pull mandates (owner-online, no held key), signed as the collection treasury they custody.
@@ -670,10 +683,12 @@ const faithImpact: WhiteLabelConfig = {
       // The owner-custodied lbsb collection treasury (= lbsb-treasury.impact, the pull mandates' delegate)
       // and the content service exposing the owner-gated due/collected endpoints.
       collectionConfig: {
-        treasury: '0x17320bF2DAe8820157530c634B9bB76f6Eb72004',
-        asset: '0x6cfF706bA1461a9ef9F5aaf8f1581301805FbF92',
+        // Per identity universe, same as the explorer's paymentConfig: the faithnet deploy names
+        // lbsb-treasury.impact on faithchain, faithchain's mock USDC and scripture.faithnet.io.
+        treasury: (process.env.NEXT_PUBLIC_LBSB_TREASURY || '0x17320bF2DAe8820157530c634B9bB76f6Eb72004') as `0x${string}`,
+        asset: (process.env.NEXT_PUBLIC_LBSB_USDC || '0x6cfF706bA1461a9ef9F5aaf8f1581301805FbF92') as `0x${string}`,
         edition: 'lbsb',
-        a2aBase: 'https://demo-bible-a2a-production.richardpedersen3.workers.dev',
+        a2aBase: process.env.NEXT_PUBLIC_SCRIPTURE_A2A_BASE || 'https://demo-bible-a2a-production.richardpedersen3.workers.dev',
       },
     },
     // UUPG+ Alliance Engagement Tracker (agentictrustlabs/uupg — the ported demo-uupg) — connects via
