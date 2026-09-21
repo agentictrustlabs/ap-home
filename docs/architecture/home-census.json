@@ -23,7 +23,7 @@
         "H01",
         "H02"
       ],
-      "title": "Sign in, the person's Home, the identity a session names",
+      "title": "Sign in, the person's Home, the identity a session names — and the credential ceremonies: rotation, the Home-to-Home move (spec 410 §1.2)",
       "priority": "P0",
       "status": "shipped",
       "specs": [
@@ -31,7 +31,8 @@
         257,
         259,
         295,
-        311
+        311,
+        410
       ],
       "section": "398 §2.2",
       "routes": [
@@ -45,12 +46,19 @@
         "link",
         "(portal)/org/[org]/settings",
         "(portal)/service/[agent]/settings",
-        "(portal)/org/[org]/agent"
+        "(portal)/org/[org]/agent",
+        "move"
       ],
       "tests": [
         "apps/demo-sso-next/src/context/session-restore.test.ts",
         "apps/demo-sso-next/src/csrf.test.ts",
-        "apps/demo-sso-next/src/whitelabel/sign-in-methods.test.ts"
+        "apps/demo-sso-next/src/whitelabel/sign-in-methods.test.ts",
+        "apps/demo-sso-next/src/home/move.test.ts",
+        "apps/demo-sso-next/src/home/rotation.test.ts"
+      ],
+      "components": [
+        "home/move.ts",
+        "home/rotation.ts"
       ]
     },
     {
@@ -1014,16 +1022,19 @@
       "review": [
         "H38"
       ],
-      "title": "Receipts and provenance — PROV-O bundles, public projection, counterparty recompute",
+      "title": "Receipts and provenance — PROV-O bundles, public projection, counterparty recompute, the dispute on the receipt (spec 410 §10)",
       "priority": "P1",
       "status": "shipped",
       "specs": [
         389,
-        395
+        395,
+        410
       ],
       "section": "398 §2.4",
       "endpoints": [
-        "/harness/provenance"
+        "/harness/provenance",
+        "/harness/dispute",
+        "/harness/dispute/exchange"
       ],
       "gates": [
         "verify-provenance-hop",
@@ -1032,6 +1043,13 @@
       ],
       "gaps": [
         "the publicly-verifiable badge on the timeline row — 398 §2.4/§5.2"
+      ],
+      "components": [
+        "components/portal/runs/DisputePanel.tsx",
+        "home/dispute.ts"
+      ],
+      "tests": [
+        "apps/demo-a2a/test/unit/dispute.test.ts"
       ]
     },
     {
@@ -1173,7 +1191,7 @@
         "H44",
         "H45"
       ],
-      "title": "Developer entry — create-app, agentic.lock.json, doctor, rules projection, Developer MCP",
+      "title": "Developer entry — create-app, agentic.lock.json, doctor, rules projection, Developer MCP; the public entry pages (about, llms.txt)",
       "priority": "P1",
       "status": "partial",
       "specs": [
@@ -1185,7 +1203,8 @@
         "(portal)/developer",
         "(portal)/developer/evals",
         "llms.txt",
-        "registry/[[...path]]"
+        "registry/[[...path]]",
+        "about"
       ],
       "gaps": [
         "P1.3 evals as a product (2026-09-16): `ap eval <cases.eval.json>` (cases as data, deterministic judge, a persona or a session, `--report`), `ap eval --from-runs` (a dataset from an agent's live runs), `evals/faithnet.eval.json` (5 cases: the authority twins + truthfulness, 5/5 live), the Evals screen (/developer/evals: recurring failures first, gates by night, the latest ap eval) folded by `scripts/build-evals-dashboard.mts`. Open: experiments compared side by side (two reports diffed); the nightly writing its report into the repo needs GitHub Actions billing",
