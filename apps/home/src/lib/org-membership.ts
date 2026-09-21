@@ -8,6 +8,8 @@ import { issueMemberProfileAccessDelegation, toWire } from './delegation';
 import { MCP_SERVER_ID } from './inbox-delivery';
 import { ensureCsrfToken, csrfHeaders } from '../csrf';
 import type { RelationshipOfferV1 } from '../home/ask-record';
+import { relationshipCredentialDigest, termsDigestOf, type RelationshipCredentialBodyV1 } from '@agenticprimitives/agent-relationships';
+import { CHAIN_ID } from './chain';
 
 export type SignHash = (h: `0x${string}`) => Promise<`0x${string}`>;
 
@@ -30,6 +32,24 @@ export class WrongHomeForInviteError extends Error {
     );
     this.name = 'WrongHomeForInviteError';
   }
+}
+
+/** Spec 410 §8 — THE FOUNDER'S OWN CREDENTIAL. At creation the organization's custodian IS the founder, so both
+ *  signatures are hers: one signature over the credential's digest validates through her account AND the new
+ *  organization's (the same credential custodies both). Issued right after she is recorded as the first member. */
+export async function issueFounderCredential(person: Address, org: Address, sign: SignHash, bearer: string, terms: Record<string, unknown> = { role: 'founder' }, /** a signer bound to the ORGANIZATION when the custodian signs per account (the KMS path); a device credential's raw signature validates through both */ signAsOrg?: SignHash): Promise<{ ok: true; digest: string } | { ok: false; error: string }> {
+  const body: RelationshipCredentialBodyV1 = { type: 'ap.relationship-credential.v1', kind: 'has-member', subject: person.toLowerCase() as Address, object: org.toLowerCase() as Address, chainId: CHAIN_ID, issuedAt: new Date().toISOString(), termsDigest: termsDigestOf(terms) };
+  const digest = relationshipCredentialDigest(body);
+  const subjectSignature = await sign(digest);
+  const objectSignature = signAsOrg ? await signAsOrg(digest) : subjectSignature;
+  await ensureCsrfToken();
+  const res = await fetch('/a2a/relationships/credential/accept', {
+    method: 'POST', credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ session: bearer, offer: { ...body, terms, digest, signatures: { object: objectSignature } }, subjectSignature }),
+  });
+  const out = (await res.json().catch(() => ({}))) as { ok?: boolean; digest?: string; error?: string };
+  return out.ok && out.digest ? { ok: true, digest: out.digest } : { ok: false, error: out.error ?? `HTTP ${res.status}` };
 }
 
 /** Spec 410 §8 — sign the organization's offer as the member and have the agent write both copies. */

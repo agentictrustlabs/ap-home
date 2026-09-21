@@ -48,7 +48,7 @@ import { ensureCsrfToken, csrfHeaders } from './csrf';
 import { CONTRACTS, CONTRACTS_GENERATION, DEFAULT_RPC_URL, CHAIN, CHAIN_ID, PERMISSIONLESS_SUBREGISTRIES } from './lib/chain';
 import { buildRegisterEntryCall, hashBindingProofBody, type RegistryId, type RegistryEntryId } from '@agenticprimitives/registry-kit';
 import { hashAgentCard, type AgentCard, agentProfileResolverAbi, buildRegisterProfileCall } from '@agenticprimitives/agent-profile';
-import { recordOrgMembership } from './lib/org-membership';
+import { recordOrgMembership, issueFounderCredential } from './lib/org-membership';
 import { filterByLifecycle, filterMyOrgsByLifecycle, type OrgLifecycleStatus, type OrgSurface } from './lib/org-lifecycle';
 import { buildApprovedSiteDelegation,
   buildApprovedOperationalIntentDelegation, buildApprovedOrgReadDelegation, issueOrgReadDelegation,
@@ -1700,6 +1700,9 @@ export async function createManagedAgent(
   if (input.kind === 'org' || input.kind === 'team' || input.kind === 'circle' || input.kind === 'church' || input.kind === 'household') {
     onStep?.('Adding you as the first member…');
     await recordOrgMembership(input.person, child, signHash, sessionToken);
+    // Spec 410 §8 — the founder's own membership credential: both signatures are hers at creation. Best-effort.
+    try { const f = await issueFounderCredential(input.person, child, signHash, sessionToken); if (!f.ok) console.warn('[org-create] the founder\'s membership credential was not issued:', f.error); }
+    catch (e) { console.warn('[org-create] the founder\'s membership credential was not issued:', e); }
   }
   return { ok: true, result: { agent: child, name, kind: input.kind, parent: input.parent, stewardshipDelegation: toWire(stewardship.delegation) } };
 }
@@ -1829,6 +1832,10 @@ async function createManagedAgentSocial(
   if (input.kind === 'org') {
     onStep?.('Adding you as the first member…');
     await recordOrgMembership(input.person, child, googleSignHash(input.person, sessionToken), sessionToken);
+    // Spec 410 §8 — the founder's own membership credential. The KMS custodian signs for the SAs it custodies: the
+    // person's signature comes from her signer; the organization's from a signer bound to the organization.
+    try { const f = await issueFounderCredential(input.person, child, googleSignHash(input.person, sessionToken), sessionToken, { role: 'founder' }, googleSignHash(child, sessionToken)); if (!f.ok) console.warn('[org-create] the founder\'s membership credential was not issued:', f.error); }
+    catch (e) { console.warn('[org-create] the founder\'s membership credential was not issued:', e); }
   }
   return { ok: true, result: { agent: child, name, kind: input.kind, parent: input.parent, stewardshipDelegation: b.stewardshipDelegation } };
 }
