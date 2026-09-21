@@ -79,6 +79,10 @@ export interface RelyingApp {
    *  holds a site delegate for sign-in but asks the person's agent from a DIFFERENT key (a Worker's own
    *  custody key that signs `A2A-Session` assertions). Absent ⇒ `delegate`, as the Home MCP's entry has it. */
   ask_delegate?: `0x${string}`;
+  /** Spec 412 — the top-level Library folders THIS app writes into a person's vault (`publishing/…`, `field/…`), so the
+   *  Library can say which app a folder belongs to instead of leaving a bare word. Declared by the app's registration —
+   *  the app knows where it writes — never inferred from a name. */
+  libraryFolders?: readonly string[];
   /** spec 294 — when true, a social (OIDC) sign-in under THIS client_id yields a KMS-CUSTODIED
    *  Smart Agent directly (custody-grade), instead of the default login-grade relying-app path
    *  where members onboard via the Personal Home. A deliberate, registered exception for

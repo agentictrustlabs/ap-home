@@ -302,6 +302,7 @@ const faithImpact: WhiteLabelConfig = {
       // production's). It must equal field-a2a's KMS_SIGNER_ADDRESS or the wire names a key the
       // Worker cannot present.
       ask_delegate: (process.env.NEXT_PUBLIC_FIELD_ASK_DELEGATE || '0xb6fb1ce89c3d3d8da7df378ed5cdc6e79cdc9260') as `0x${string}`,
+      libraryFolders: ['field'],
       // field-service.impact — a DIFFERENT SA per identity universe (the faithnet deploy sets
       // NEXT_PUBLIC_FIELD_SERVICE_SA to the SA minted on 34348; default is base-sepolia's).
       operational_delegate:
@@ -803,6 +804,7 @@ const faithImpact: WhiteLabelConfig = {
       // `NEXT_PUBLIC_PUBLISHING_ASK_DELEGATE` for another estate. It must equal that Worker's key or the wire names a
       // key the gateway cannot present.
       ask_delegate: (process.env.NEXT_PUBLIC_PUBLISHING_ASK_DELEGATE || '0x94E58bE2CfdD0418E03059BC8596E6f20579c77b') as `0x${string}`,
+      libraryFolders: ['publishing'],
     },
   ],
   // Consent disclosure per template — the human-readable can/cannot shown at the permission

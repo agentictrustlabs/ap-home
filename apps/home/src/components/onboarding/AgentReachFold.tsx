@@ -110,7 +110,7 @@ export function AgentReachFold({ name, agent }: { name: string; agent: Address }
         <div style={{ fontWeight: 600, fontSize: '.8rem', color: 'var(--color-text, #1c1917)' }}>Published by {label}</div>
         {shelf.state === 'reading' && <p style={{ margin: '.2rem 0 0', opacity: 0.7 }}>asking {label}&apos;s agent…</p>}
         {shelf.state === 'unreachable' && <p style={{ margin: '.2rem 0 0' }} data-testid="agent-reach-shelf-unreachable">the shelf could not be read just now ({shelf.why})</p>}
-        {shelf.state === 'read' && shelf.count === 0 && <p style={{ margin: '.2rem 0 0', opacity: 0.7 }}>nothing public yet</p>}
+        {shelf.state === 'read' && shelf.count === 0 && <p style={{ margin: '.2rem 0 0', opacity: 0.7 }}>nothing public yet — {label} makes a file or folder public in the Library at this Home, and their agent serves it here</p>}
         {shelf.state === 'read' && shelf.count > 0 && (
           <ul style={{ margin: '.25rem 0 0', paddingLeft: '1.1rem' }}>
             {shelf.files.slice(0, 5).map((f) => (

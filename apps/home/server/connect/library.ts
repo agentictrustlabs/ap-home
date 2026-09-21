@@ -251,6 +251,9 @@ interface LibraryScope {
   ok: true;
   owner: string;
   ownerKind: AgentKind;
+  /** Person scope only — where the catalog was READ from: her vault, or this Home's KV cache because the vault answered
+   *  nothing (never enabled, or written only by an app whose token cannot write it). Said on the GET as `source`. */
+  source?: () => 'vault' | 'cache' | undefined;
   /** Person scope only — whether the LAST catalog write reached the vault (`true`), or stopped at this Home's KV
    *  cache (`false`). A relying app's token may read records and never write them (`read_grant_read_only`), so
    *  a library driven by an app lands here and nowhere the person's agent reads — said on the response as
@@ -369,12 +372,15 @@ async function scopeFor(request: Request, env: FnContext['env'], person: string,
   // the DATA model.
   const { readCapabilityRecord, writeCapabilityRecord } = await import('../lib/capability-record');
   let landed: boolean | undefined;
+  let source: 'vault' | 'cache' | undefined;
   return {
     ok: true, owner: person, ownerKind: 'person',
     landed: () => landed,
+    source: () => source,
     read: async () => {
       const auth = await readCapabilityRecord<LibraryArtifact[]>(env, person, bearer, 'content.catalog');
-      if (Array.isArray(auth)) { await env.AUTH_CODES.put(`library:${person}`, JSON.stringify(auth)); return auth; }
+      if (Array.isArray(auth)) { source = 'vault'; await env.AUTH_CODES.put(`library:${person}`, JSON.stringify(auth)); return auth; }
+      source = 'cache';
       return JSON.parse((await env.AUTH_CODES.get(`library:${person}`)) ?? '[]') as LibraryArtifact[];
     },
     write: async (list) => {
@@ -383,7 +389,9 @@ async function scopeFor(request: Request, env: FnContext['env'], person: string,
     },
     putRecord: async (recordType, data) => {
       await env.AUTH_CODES.put(`library:${person}:${recordType}`, JSON.stringify(data));
-      await writeCapabilityRecord(env, person, bearer, recordType, data);
+      // The vault's verdict is thrown so `sync` can name the record that stayed behind; `save` catches it (best-effort
+      // there, the catalog stays authoritative) exactly as before.
+      if (!(await writeCapabilityRecord(env, person, bearer, recordType, data))) throw new Error('the vault did not accept the record');
     },
     delRecord: async (recordType) => {
       await env.AUTH_CODES.delete(`library:${person}:${recordType}`);
@@ -408,7 +416,10 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   const artifacts = withEffectiveAccessPolicy(withEffectiveGrants(await scope.read()));
   // Pending access requests addressed to this owner (the "someone wants access" inbox).
   const requests = (await readRequests(env, scope.owner)).filter((r) => r.status === 'pending');
-  return jsonCors({ owner: scope.owner, ownerKind: scope.ownerKind, artifacts, requests }, request);
+  // Spec 412 — `source` says whether this list is her VAULT's (what her agent serves) or this Home's cache (what an app
+  // wrote under a token that cannot write her vault); the Library offers `sync` in the second case.
+  const source = scope.source?.();
+  return jsonCors({ owner: scope.owner, ownerKind: scope.ownerKind, artifacts, requests, ...(source ? { source } : {}) }, request);
 };
 
 // POST — one of: save (upsert artifact), delete (by id), grant (give an agent access to an artifact),
@@ -599,6 +610,21 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       await appendControlEvent(env, person as Address, 'credential-issued', [], (request.headers.get('authorization') ?? '').slice(7)).catch(() => undefined);
       return jsonCors({ ok: true, artifact: art, release, ...vaultWord(scope) }, request);
     }
+    case 'sync': {
+      // Spec 412 — MOVE THIS HOME'S CACHE INTO HER VAULT, under her own session. A relying app's token reads records and
+      // never writes them, so everything such an app saved (a work's manifest, a profile) lived only in this Home's KV,
+      // where her agent — which reads her vault — never saw it. Under her session the writes land: the catalog and
+      // every document's record. Idempotent; refused for an org scope (an org's plane refuses or accepts per write).
+      if (scope.ownerKind !== 'person' || !scope.source) return jsonCors({ error: 'sync is the person\'s own act on their own vault' }, request, 400);
+      const wrote: string[] = []; const failed: string[] = [];
+      await scope.write(list);
+      if (scope.landed?.() === false) return jsonCors({ error: 'the vault did not accept the catalog — is the interactions plane enabled for this agent?', vault: 'cache-only' }, request, 503);
+      for (const a of list) {
+        if (a.isFolder) continue;
+        try { await writeArtifactRecordStrict(scope, a); wrote.push(a.id); } catch (e) { failed.push(`${a.id}: ${e instanceof Error ? e.message : 'failed'}`); }
+      }
+      return jsonCors({ ok: failed.length === 0, synced: wrote.length, failed, vault: 'landed' }, request);
+    }
     case 'visibility': {
       // Spec 412 — the owner declares who may read: `public` (anyone, through the owner's agent's public lane) or
       // `private` (the default — grants and releases untouched). On a folder it cascades to everything under it; a
@@ -634,6 +660,16 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       return jsonCors({ error: `unknown action "${body.action}"` }, request, 400);
   }
 };
+
+/** The same record write, but THROWING when it does not land — `sync` must say which document stayed behind. */
+async function writeArtifactRecordStrict(scope: LibraryScope, a: LibraryArtifact): Promise<void> {
+  if (a.isFolder) return;
+  await scope.putRecord(`content.artifact.${a.id}`, {
+    id: a.id, kind: a.kind, name: a.name, source: a.source, contentType: a.contentType,
+    bytesB64: a.bytesB64, pointer: a.pointer, commitment: a.contentCommitment, version: a.version,
+    ...(a.accessPolicy ? { accessPolicy: a.accessPolicy } : {}),
+  });
+}
 
 /** Persist an artifact's per-artifact content record — `content.artifact.<id>` (ADR-0055): the
  *  addressable, servable content view (bytes/pointer/type/commitment). Written on save so

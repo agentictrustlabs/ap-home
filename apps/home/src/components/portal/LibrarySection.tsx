@@ -12,6 +12,11 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useSession } from '../../context/session';
 import { nameLabel, personalAuthOrigin } from '../../lib/domain';
+import { whitelabel } from '../../whitelabel/config';
+
+/** Spec 412 — which connected APP a top-level folder belongs to, from the registry (an app declares where it writes). */
+const APP_FOLDERS: ReadonlyMap<string, string> = new Map(whitelabel.relyingApps.flatMap((a) => (a.libraryFolders ?? []).map((f) => [f, a.name ?? a.client_id] as [string, string])));
+const appOfFolder = (folder: string): string | null => APP_FOLDERS.get(folder.split('/')[0] ?? '') ?? null;
 import { SectionShell } from './SectionShell';
 import { cardSty, btnSty, btnPrimarySty, mono, mutedText, errorText, inputSty, badgeStyle, modalOverlaySty, infoBannerSty, shortAddr, type BadgeKind } from './theme';
 import { artifactIdentity } from '../../home/artifact-identity';
@@ -124,6 +129,10 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
   const [items, setItems] = useState<Artifact[]>([]);
   const [sharedItems, setSharedItems] = useState<Artifact[]>([]);
   const [requests, setRequests] = useState<{ requester: string; artifactId: string; artifactName?: string; actions: string[]; at: number }[]>([]);
+  // Spec 412 — where the list came from: her vault (what her agent serves), or this Home's cache (what an app wrote under a
+  // token that cannot write her vault). `cache` offers to move it; said, never hidden.
+  const [source, setSource] = useState<'vault' | 'cache' | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sharedLoading, setSharedLoading] = useState(false);
   useReadyReport('library-vault', loading);
@@ -165,7 +174,7 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
 
   const load = useCallback(async () => {
     setErr(null);
-    try { const b = await api('GET'); setItems(b.artifacts ?? []); setRequests(b.requests ?? []); setForbidden(false); }
+    try { const b = await api('GET'); setItems(b.artifacts ?? []); setRequests(b.requests ?? []); setSource((b.source as 'vault' | 'cache' | undefined) ?? null); setForbidden(false); }
     catch (e) { if ((e as { forbidden?: boolean }).forbidden) setForbidden(true); else setErr((e as Error).message); }
     finally { setLoading(false); }
   }, [api]);
@@ -192,7 +201,9 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
   const q = query.trim().toLowerCase();
   const searching = q.length > 0;
   const rows = useMemo(() => {
-    if (lens === 'public') return [] as Artifact[];
+    // Spec 412 — the PUBLIC SHELF lens: what anyone can read of this vault, served by its agent — the entries whose
+    // effective policy is public, flat (a folder's public word shows on each document under it as its own chip).
+    if (lens === 'public') return items.filter((a) => a.effectiveAccessPolicy === 'public' && !a.isFolder && (!searching || a.name.toLowerCase().includes(q))).sort((a, b) => b.createdAt - a.createdAt);
     const source = lens === 'shared' ? sharedItems : items;
     let arr = lens === 'shared'
       ? (searching ? source.filter((a) => a.name.toLowerCase().includes(q)) : source)
@@ -248,6 +259,15 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
   }, [api]);
   const requestAccess = useCallback(async (a: Artifact, actions: string[]) => { await api('POST', { action: 'request-access', ownerScope: a.sharedBy, id: a.id, actions, artifactName: a.name }); }, [api]);
   const publish = async (id: string) => { try { await api('POST', { action: 'publish', org: orgSa, id }); await load(); } catch (e) { setErr((e as Error).message); } };
+  // Spec 412 — move this Home's cache into her vault, under her own session (the catalog + every document's record).
+  const syncToVault = async () => {
+    setSyncing(true); setErr(null);
+    try {
+      const r = await api('POST', { action: 'sync' });
+      if (r.failed?.length) setErr(`${r.synced} moved; not moved: ${(r.failed as string[]).join(' · ')}`);
+      await load();
+    } catch (e) { setErr((e as Error).message); } finally { setSyncing(false); }
+  };
   // Spec 412 — public / private is the owner's declaration on the record; the owner's agent serves what is public.
   const setVisibility = async (id: string, accessPolicy: AccessPolicy) => { try { await api('POST', { action: 'visibility', org: orgSa, id, accessPolicy }); await load(); } catch (e) { setErr((e as Error).message); } };
   // Where a public document of the PERSON's is read by anyone: her Home's `/published/<id>`. An organization's shelf is
@@ -285,11 +305,27 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
             <div style={{ flex: 1 }} />
             <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, ...inputSty, padding: '.35rem .5rem' }}>
               <Icon name="search" size={14} style={{ color: 'var(--color-text-muted)' }} />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`Search ${lens === 'vault' ? 'this vault' : lens === 'shared' ? 'shared items' : 'public releases'}…`} style={{ border: 'none', outline: 'none', background: 'transparent', color: 'inherit', width: 160 }} />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`Search ${lens === 'vault' ? 'this vault' : lens === 'shared' ? 'shared items' : 'your public shelf'}…`} style={{ border: 'none', outline: 'none', background: 'transparent', color: 'inherit', width: 160 }} />
             </label>
             {shelfHref && <a href={shelfHref} target="_blank" rel="noreferrer" data-testid="public-shelf-link" style={{ ...btnSty, display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none' }} title="What anyone can read of your Library — served by your own agent over A2A, the same way a stranger would read it">Your public shelf ↗</a>}
             {writable && <button style={{ ...btnPrimarySty, display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setUploadOpen(true)}><Icon name="plus" size={14} />Add to vault</button>}
           </div>
+          {/* Spec 412 — THE CACHE IS NOT THE VAULT. An app that saved here under its own token could not write your vault, so
+              your agent (and your public shelf) never saw these. One act under your own session moves them. */}
+          {!orgSa && source === 'cache' && items.length > 0 && (
+            <div className="ui-card ui-card--quiet" data-testid="library-cache-banner" style={{ padding: 'var(--sp-3) var(--sp-4)', marginBottom: '.6rem', display: 'flex', gap: '.8rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ flex: 1, minWidth: 240, fontSize: 13 }}>
+                <b>These {items.filter((a) => !a.isFolder).length} items are in this Home&apos;s cache, not your vault.</b> An app saved them under its own token, which cannot write your vault — so your agent cannot read them and none of them can be public yet. Moving them is your own act, under your session.
+              </span>
+              <Button variant="primary" size="sm" disabled={syncing} onClick={() => void syncToVault()} data-testid="library-sync">{syncing ? 'Moving…' : 'Move to my vault'}</Button>
+            </div>
+          )}
+          {/* An app-owned folder says so: `publishing` is a bare word until the registry names who writes it. */}
+          {lens === 'vault' && path.length > 0 && appOfFolder(path[0]!) && (
+            <p style={{ ...mutedText, fontSize: 12, margin: '0 0 .5rem' }} data-testid="folder-app-note">
+              <b>{path[0]}</b> is written by <b>{appOfFolder(path[0]!)}</b> — an app you connected. It saves here through your own agent, as you; what it saved is yours to make public, share or remove.
+            </p>
+          )}
 
           {/* filters */}
           {lens !== 'public' && (
@@ -311,8 +347,8 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
           {/* list + detail */}
           <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              {lens === 'public'
-                ? <FederatedPlaceholder lens="public" />
+              {lens === 'public' && rows.length === 0
+                ? <PublicShelfEmpty shelfHref={shelfHref} />
                 : (lens === 'vault' && loading) || (lens === 'shared' && sharedLoading) ? <LibrarySkeleton />
                 : rows.length === 0 ? (
                   <div className="ui-panel">
@@ -398,14 +434,18 @@ function FolderTree({ nodes, path, onGo, counts }: {
           onClick={() => onGo(n.path.split('/'))}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onGo(n.path.split('/')); } }}
           style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 13,
-            padding: '.28rem .5rem', paddingLeft: `${0.5 + depth * 0.75}rem`,
+            // Top-level folders sit flush with "All items" (they are its rows, not a level under it); a child steps in.
+            padding: '.28rem .5rem', paddingLeft: `${0.5 + (depth - 1) * 0.9}rem`,
             background: on ? 'var(--color-surface-sunken)' : 'transparent',
             color: 'var(--color-text-primary)', fontWeight: on ? 600 : 500 }}>
           <span onClick={(e) => { e.stopPropagation(); if (hasKids) setOpen((s) => { const n2 = new Set(s); n2.has(n.path) ? n2.delete(n.path) : n2.add(n.path); return n2; }); }}
             style={{ width: 12, flexShrink: 0, color: 'var(--color-text-muted)', fontSize: 10, textAlign: 'center' }}
             aria-hidden={!hasKids}>{hasKids ? (expanded ? '▾' : '▸') : ''}</span>
           <Icon name="folder" size={14} style={{ flexShrink: 0, color: 'var(--color-text-muted)' }} />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{n.name}</span>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }} title={depth === 1 && appOfFolder(n.name) ? `${n.name} — written by ${appOfFolder(n.name)}, an app you connected` : n.name}>
+            {n.name}
+            {depth === 1 && appOfFolder(n.name) && <span style={{ ...mutedText, fontSize: 10, marginLeft: 6 }}>{appOfFolder(n.name)}</span>}
+          </span>
           {/* DIRECT files only, deliberately. A subtree total would show 7 on a collapsed parent and
               5 on the child inside it, which reads as double counting; direct counts stay consistent
               however the tree is expanded. A folder holding only subfolders shows nothing, which is
@@ -449,6 +489,7 @@ function ScopeRail({ lens, onLens, orgLabel, ownerLabel, sharedCount, items, pat
   lens: Lens; onLens: (l: Lens) => void; orgLabel?: string; ownerLabel: string; sharedCount: number;
   items: Artifact[]; path: string[]; onGo: (segs: string[]) => void;
 }) {
+  const publicCount = items.filter((a) => !a.isFolder && a.effectiveAccessPolicy === 'public').length;
   const item = (key: Lens, icon: IconName, label: string, sub: string) => {
     const on = lens === key;
     return (
@@ -478,9 +519,9 @@ function ScopeRail({ lens, onLens, orgLabel, ownerLabel, sharedCount, items, pat
       {heading('Scope')}
       {orgLabel
         ? item('vault', 'org', ownerLabel === 'This organization' ? 'This organization' : orgLabel, 'Organization vault · Steward')
-        : item('vault', 'vault', 'My vault', 'Person vault · Owner')}
-      {item('shared', 'shared', 'Shared with me', sharedCount > 0 ? `${sharedCount} grants` : 'Inbound grants')}
-      {item('public', 'public', 'Public releases', 'Published network-wide')}
+        : item('vault', 'vault', 'My vault', 'Everything you keep')}
+      {item('shared', 'shared', 'Shared with me', sharedCount > 0 ? `${sharedCount} grants from others` : 'What others granted you')}
+      {item('public', 'public', 'Public shelf', publicCount > 0 ? `${publicCount} anyone can read` : 'What anyone can read')}
       {/* The tree belongs to the VAULT lens — "shared with me" and "public releases" are flat inbound
           views with no folder hierarchy of their own to walk. */}
       {lens === 'vault' && (
@@ -495,7 +536,7 @@ function ScopeRail({ lens, onLens, orgLabel, ownerLabel, sharedCount, items, pat
 }
 
 function Breadcrumb({ lens, path, onGo }: { lens: Lens; path: string[]; onGo: (segs: string[]) => void }) {
-  if (lens !== 'vault') return <b style={{ fontSize: 14 }}>{lens === 'shared' ? 'Shared with me' : 'Public releases'}</b>;
+  if (lens !== 'vault') return <b style={{ fontSize: 14 }}>{lens === 'shared' ? 'Shared with me' : 'Public shelf'}</b>;
   return (
     <nav aria-label="Breadcrumb" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 14, flexWrap: 'wrap' }}>
       <button style={crumbSty} onClick={() => onGo([])}>All items</button>
@@ -562,6 +603,21 @@ function ArtifactList({ rows, selectedId, ownerLabel, onOpen, onDescend, onDelet
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function PublicShelfEmpty({ shelfHref }: { shelfHref: string | null }) {
+  return (
+    <div style={{ ...cardSty, padding: '1.6rem' }} data-testid="public-shelf-empty">
+      <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem' }}>
+        <Icon name="public" size={20} style={{ color: 'var(--color-text-muted)' }} />
+        <h3 style={{ margin: 0 }}>Nothing public yet</h3>
+      </div>
+      <p style={{ ...mutedText, marginTop: '.5rem', maxWidth: 520 }}>
+        Your public shelf is what anyone in the world can read of this Library — served by your own agent over A2A, and shown at your Home&apos;s <code>/published</code> page. Open a file or a folder in <b>My vault</b> and choose <b>Make public</b>; a public folder makes everything under it public.
+      </p>
+      {shelfHref && <p style={{ ...mutedText, marginTop: '.5rem' }}><a href={shelfHref} target="_blank" rel="noreferrer">See your shelf as anyone would ↗</a></p>}
     </div>
   );
 }
