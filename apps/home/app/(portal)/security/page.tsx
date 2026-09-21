@@ -15,6 +15,7 @@ import {
 } from '../../../src/connect-client';
 import { loadPasskey } from '../../../src/lib/passkey';
 import { reviewedList, rotateThisDevicePasskey, type ReviewedWire, type RotationOutcome } from '../../../src/home/rotation';
+import { parseMoveTicket, ticketRefToCredentialRef, type MoveTicketV1, type PasskeyCredentialRef } from '../../../src/home/move';
 import { rotationAvailability } from '../../../src/connect-client';
 import { resolveVia, signHashFor } from '../../../src/home/onboarding';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
@@ -61,7 +62,9 @@ export default function SecurityPage() {
   const [showApprove, setShowApprove] = useState(false);
   const [stepUpMsg, setStepUpMsg] = useState<string | null>(null);
   // Spec 410 §1.2 — the rotation ceremony: replace this device's passkey and keep every standing wire.
-  const [rotate, setRotate] = useState<{ open?: boolean; loading?: boolean; wires?: ReviewedWire[]; warnings?: string[]; keep?: Set<string>; label?: string; step?: string; error?: string; done?: RotationOutcome }>({});
+  const [rotate, setRotate] = useState<{ open?: boolean; loading?: boolean; wires?: ReviewedWire[]; warnings?: string[]; keep?: Set<string>; label?: string; step?: string; error?: string; done?: RotationOutcome;
+    /** Spec 410 §1.2 step 5 — a MOVE: the new passkey comes from another Home's ticket, pasted here. */
+    move?: boolean; ticketText?: string; ticket?: MoveTicketV1 }>({});
 
   // Google = login-grade. Managing security needs a custody credential → step up first.
   if (via === 'Google') {
@@ -136,9 +139,9 @@ export default function SecurityPage() {
   };
 
   // Spec 410 §1.2 — open the ceremony: compute the reviewed list from the agent's audit + the Home's app grants.
-  const openRotation = async () => {
+  const openRotation = async (move = false) => {
     if (!personAgent || !session) return;
-    setRotate({ open: true, loading: true, label: `${profile?.name ?? 'My'} passkey (${new Date().toISOString().slice(0, 10)})` });
+    setRotate({ open: true, loading: true, move, label: `${profile?.name ?? 'My'} passkey (${new Date().toISOString().slice(0, 10)})` });
     const r = await reviewedList({ person: personAgent, session: { token: session.token } });
     if (!r.ok) { setRotate((x) => ({ ...x, loading: false, error: r.error })); return; }
     setRotate((x) => ({ ...x, loading: false, wires: r.wires, warnings: r.warnings, keep: new Set(r.wires.map((w) => w.digest.toLowerCase())) }));
@@ -149,7 +152,14 @@ export default function SecurityPage() {
     setRotate((x) => ({ ...x, step: 'Starting…', error: undefined }));
     try {
       const signHash = await currentAuthorizer();
-      const r = await rotateThisDevicePasskey({ person: personAgent, session: { token: session.token }, signHash, wires: rotate.wires, keep: rotate.keep ?? new Set(), label: rotate.label || 'My passkey', onStep: (step) => setRotate((x) => ({ ...x, step })) });
+      // Spec 410 §1.2 step 5 — a move: the ticket's passkey is added instead of one created here.
+      let add: { ref: PasskeyCredentialRef; home: string } | undefined;
+      if (rotate.move) {
+        const parsed = parseMoveTicket(rotate.ticketText ?? '', { agent: personAgent, origin: window.location.origin });
+        if (!parsed.ok) { setRotate((x) => ({ ...x, step: undefined, error: parsed.error })); return; }
+        add = { ref: ticketRefToCredentialRef(parsed.ticket.ref), home: new URL(parsed.ticket.home).origin };
+      }
+      const r = await rotateThisDevicePasskey({ person: personAgent, session: { token: session.token }, signHash, wires: rotate.wires, keep: rotate.keep ?? new Set(), label: rotate.label || 'My passkey', onStep: (step) => setRotate((x) => ({ ...x, step })), ...(add ? { add } : {}) });
       if (r.ok) { setRotate((x) => ({ ...x, step: undefined, done: r.outcome })); readCredentialCounts(personAgent).then(setCounts).catch(() => {}); }
       else setRotate((x) => ({ ...x, step: undefined, error: r.error }));
     } catch (e) {
@@ -223,19 +233,27 @@ export default function SecurityPage() {
             Distinct from "remove" below: a removal alone voids every wire (the custody epoch, spec 408); the
             ceremony re-approves them under the new epoch in the same transaction. */}
         {via === 'passkey' && loadPasskey() && !rotate.open && (
-          <button className="btn-ghost onboarding-secondary" style={{ marginTop: '.4rem', marginLeft: '.5rem' }} onClick={openRotation}>
-            Replace this device’s passkey
-          </button>
+          <>
+            <button className="btn-ghost onboarding-secondary" style={{ marginTop: '.4rem', marginLeft: '.5rem' }} onClick={() => void openRotation(false)}>
+              Replace this device’s passkey
+            </button>
+            {/* Spec 410 §1.2 step 5 — a Home-to-Home move IS this ceremony with the new key from the other Home. */}
+            <button className="btn-ghost onboarding-secondary" style={{ marginTop: '.4rem', marginLeft: '.5rem' }} onClick={() => void openRotation(true)}>
+              Move to another Home
+            </button>
+          </>
         )}
         <Dialog
           open={!!rotate.open}
           onClose={() => { if (!rotate.step) setRotate({}); }}
-          title="Replace this device’s passkey"
-          description="A new passkey is created on this device and the old one retired. Everything you have granted — apps, your agent’s planes, contacts — is re-approved under the new key in the same signature, so nothing you connected has to reconnect. Untick anything you want to stop."
+          title={rotate.move ? 'Move to another Home' : 'Replace this device’s passkey'}
+          description={rotate.move
+            ? 'At the other Home, open “Move your Home here”, create a passkey there and paste its ticket below. One signature here adds that passkey, retires this device’s, and re-approves everything you have granted — so nothing you connected has to reconnect. It is not a recovery: nothing was lost, and the other Home is trusted with a public key and nothing else.'
+            : 'A new passkey is created on this device and the old one retired. Everything you have granted — apps, your agent’s planes, contacts — is re-approved under the new key in the same signature, so nothing you connected has to reconnect. Untick anything you want to stop.'}
         >
           {rotate.done ? (
             <Stack gap={0.5}>
-              <p className="onboarding-hint ok">✓ Passkey replaced — {rotate.done.reapproved} grant{rotate.done.reapproved === 1 ? '' : 's'} re-approved{rotate.done.reissued ? `, ${rotate.done.reissued} re-issued` : ''}{rotate.done.struck ? `, ${rotate.done.struck} revoked` : ''}. Your home, name and connected apps are unchanged.</p>
+              <p className="onboarding-hint ok">✓ {rotate.done.movedTo ? `Moved — sign in at ${rotate.done.movedTo} with the passkey you created there` : 'Passkey replaced'} — {rotate.done.reapproved} grant{rotate.done.reapproved === 1 ? '' : 's'} re-approved{rotate.done.reissued ? `, ${rotate.done.reissued} re-issued` : ''}{rotate.done.struck ? `, ${rotate.done.struck} revoked` : ''}. Your agent, name and connected apps are unchanged.</p>
               {rotate.done.warnings.map((w, i) => <p key={i} className="onboarding-hint taken" style={{ fontSize: '.85rem' }}>{w}</p>)}
               <Row gap={0.5} justify="flex-end"><button className="btn-primary" style={{ width: 'auto' }} onClick={() => setRotate({})}>Done</button></Row>
             </Stack>
@@ -247,9 +265,15 @@ export default function SecurityPage() {
             <p className="muted" style={{ fontSize: '.85rem' }}>{(rotationAvailability() as { ok: false; reason: string }).reason}</p>
           ) : (
             <Stack gap={0.6}>
-              <Field label="Name for the new passkey" hint="Shown in your list of sign-in methods.">
-                <input className="onboarding-input" value={rotate.label ?? ''} onChange={(e) => setRotate((x) => ({ ...x, label: e.target.value }))} />
-              </Field>
+              {rotate.move ? (
+                <Field label="The other Home’s ticket" hint="Pasted from “Move your Home here” at the other Home. It carries a public key and nothing secret.">
+                  <textarea className="onboarding-input" rows={3} value={rotate.ticketText ?? ''} onChange={(e) => setRotate((x) => ({ ...x, ticketText: e.target.value, error: undefined }))} placeholder="ap.home-move-ticket…" />
+                </Field>
+              ) : (
+                <Field label="Name for the new passkey" hint="Shown in your list of sign-in methods.">
+                  <input className="onboarding-input" value={rotate.label ?? ''} onChange={(e) => setRotate((x) => ({ ...x, label: e.target.value }))} />
+                </Field>
+              )}
               <div>
                 <p style={{ fontSize: '.85rem', margin: '0 0 .35rem' }}><b>Grants that will be kept</b> ({rotate.keep?.size ?? 0} of {rotate.wires?.length ?? 0})</p>
                 {(rotate.wires ?? []).length === 0 && <p className="muted" style={{ fontSize: '.85rem' }}>You have not granted anything your agent can enumerate.</p>}
@@ -268,7 +292,7 @@ export default function SecurityPage() {
               {(rotate.warnings ?? []).map((w, i) => <p key={i} className="muted" style={{ fontSize: '.8rem', margin: 0 }}>{w}</p>)}
               <Row gap={0.5} justify="flex-end">
                 <button className="btn-ghost onboarding-secondary" onClick={() => setRotate({})}>Cancel</button>
-                <button className="btn-primary" style={{ width: 'auto' }} onClick={runRotation}>Replace passkey</button>
+                <button className="btn-primary" style={{ width: 'auto' }} disabled={!!rotate.move && !(rotate.ticketText ?? '').trim()} onClick={runRotation}>{rotate.move ? 'Move (sign once here)' : 'Replace passkey'}</button>
               </Row>
             </Stack>
           )}
