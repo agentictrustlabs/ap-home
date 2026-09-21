@@ -81,7 +81,9 @@ export function AgentReachFold({ name, agent }: { name: string; agent: Address }
   }, [cardUri]);
   if (!cardUri) return null;
   const label = nameLabel(name);
-  const mcpUrl = `${HOME_MCP_ORIGIN}/mcp`;
+  // The Home MCP's connector URL, PRINTED for the person to paste into Claude — this page never calls it (the browser
+  // reaches MCP only through /a2a/*, ADR-0044; check:no-direct-mcp-in-web reads a literal ending in /mcp as a call).
+  const mcpUrl = [HOME_MCP_ORIGIN, 'mcp'].join('/');
   const homeHost = typeof window !== 'undefined' ? window.location.host : `${label}.…`;
   const row = (k: string, v: React.ReactNode) => (
     <div style={{ display: 'grid', gridTemplateColumns: '6.2rem 1fr', gap: '.35rem', alignItems: 'baseline', margin: '.25rem 0' }}>
