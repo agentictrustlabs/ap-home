@@ -177,7 +177,7 @@ import type { CandidateSource } from '@agenticprimitives/intent-engagement';
 import { answerProbe } from './engagement-answer.js';
 import type { MessageV1 } from '@agenticprimitives/a2a/standard';
 import { signAsAgent } from './consult-rail.js';
-import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, provenanceViewOf, firewalledMetrics, publicProvenanceOf, type RunExportDeps } from './run-export.js';
+import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, provenanceViewOf, firewalledMetrics, publicProvenanceOf, runAnchorRecordKey, type RunExportDeps } from './run-export.js';
 import { runProvenanceRecordKey } from '@agenticprimitives/orchestration';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
@@ -652,6 +652,9 @@ export interface Env {
   ADOPTED_ONTOLOGY_MANIFEST_DIGEST?: string;
   /** Spec 406 W2 — the ReceiptAnchorRegistry on this chain; absent ⇒ runs are not anchored (said on the report). */
   RECEIPT_ANCHOR_REGISTRY?: string;
+  /** Spec 410 §4.4 — this estate's `AgenticGovernance`; with CHAIN_ID it is the estate id every run bundle carries
+   *  (`apexec:estate`), so a record carried to a Home in another estate says where the act happened. */
+  AGENTIC_GOVERNANCE?: string;
   PAYMENT_ENFORCER?: string;
   MOCK_USDC?: string;
   /** Gateway adoption (ADR-0055 amendment): `'on'` runs the shadow comparison for ops the ledger has at
@@ -3018,11 +3021,21 @@ app.post('/provenance/public', async (c) => {
     const vdeps = harnessDeps(c.env, buildAuditSink(c.env));
     const carried = vdeps.readSubjectRecord ? await vdeps.readSubjectRecord(agent, runProvenanceRecordKey(body.runRef)).catch(() => null) : null;
     if (!carried || typeof carried !== 'object') return c.json({ ok: false, error: 'no such record' }, 404);
-    if (!c.env.RECEIPT_ANCHOR_REGISTRY || !c.env.RPC_URL) return c.json({ ok: true, agent, runRef: body.runRef, carried: true, rows: [], refused: [], anchor: null, note: 'this deployment cannot read the anchor registry' });
+    // Spec 410 §4.4 — THE CITATION beside the bundle says where it is anchored. An act performed in ANOTHER estate is
+    // anchored on that estate's chain; this deployment reads its own. Say so — never read the wrong registry and
+    // report "not anchored", and never fetch a chain the deployment was not configured for (ADR-0013).
+    const cite = vdeps.readSubjectRecord ? await vdeps.readSubjectRecord(agent, runAnchorRecordKey(body.runRef)).catch(() => null) as { digest?: string; registry?: string; anchoredBy?: string; estate?: string; txHash?: string } | null : null;
+    const citedChain = typeof cite?.registry === 'string' && cite.registry.startsWith('eip155:') ? Number(cite.registry.split(':')[1]) : null;
+    const hereChain = Number(c.env.CHAIN_ID);
+    if (cite && citedChain && Number.isFinite(hereChain) && citedChain !== hereChain) {
+      return c.json({ ok: true, agent, runRef: body.runRef, carried: true, rows: [], refused: [], anchor: null, citation: cite, note: `the record says it was anchored on chain ${citedChain} (estate ${cite.estate ?? 'unnamed'}); this deployment reads chain ${hereChain} and does not read other estates' registries — verify at that estate, with the digest and the anchorer the citation names` });
+    }
+    if (!c.env.RECEIPT_ANCHOR_REGISTRY || !c.env.RPC_URL) return c.json({ ok: true, agent, runRef: body.runRef, carried: true, rows: [], refused: [], anchor: null, ...(cite ? { citation: cite } : {}), note: 'this deployment cannot read the anchor registry' });
     // R917-C-3 (spec 408 §1.5): anchors are keyed by WHO anchored, so the reader names the runtime agent the receipt
     // it holds says anchored the bundle; the chain then confirms or denies THAT row. A claim, never a gate.
-    if (!body.anchoredBy || !/^0x[0-9a-fA-F]{40}$/.test(body.anchoredBy)) return c.json({ ok: false, error: 'anchoredBy (the runtime agent the receipt names as the anchorer) is required to read a carried bundle\'s anchor' }, 400);
-    const anchoredBy = body.anchoredBy.toLowerCase() as Address;
+    const namedAnchorer = body.anchoredBy ?? cite?.anchoredBy;
+    if (!namedAnchorer || !/^0x[0-9a-fA-F]{40}$/.test(namedAnchorer)) return c.json({ ok: false, error: 'anchoredBy (the runtime agent the receipt names as the anchorer) is required to read a carried bundle\'s anchor' }, 400);
+    const anchoredBy = namedAnchorer.toLowerCase() as Address;
     const digest = bundleDigest(carried);
     const client = createPublicClient({ transport: http(c.env.RPC_URL) });
     const a = await readAnchor(client, c.env.RECEIPT_ANCHOR_REGISTRY as Address, contractsGeneration(c.env), anchoredBy, digest).catch(() => null);

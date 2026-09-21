@@ -2,6 +2,7 @@
 // only when one is named, a declared retention, and a firewall failure that refuses instead of leaking.
 import { describe, expect, it } from 'vitest';
 import type { RunRecordV1 } from '@agenticprimitives/orchestration';
+import { estateIdOf } from '@agenticprimitives/estate-projection';
 import { exportRun, recordRetention, firewalledSpans, DEFAULT_RECORD_RETENTION_DAYS } from '../../src/run-export.js';
 
 const ALICE = '0xb0d11ce19b756a682e78b4904cd8d832303b3d11';
@@ -64,6 +65,27 @@ describe('exportRun', () => {
     const { provenanceGraphOf } = await import('../../src/run-export.js');
     const doc = await provenanceGraphOf({ CHAIN_ID: '34348' }, ALICE, record) as { wasAttributedTo: string };
     expect(doc.wasAttributedTo).toBe(`urn:ap:agent:eip155:34348:${ALICE}`);
+  });
+  it('spec 410 §4.4 — with its governance declared, the bundle says WHICH ESTATE the run was performed in, and the anchor leaves a chain-qualified citation beside it', async () => {
+    const writes: Array<{ recordType: string; record: unknown }> = [];
+    const GOV = '0x0a6000000000000000000000000000000000000a';
+    const r = await exportRun({ CHAIN_ID: '84532', AGENTIC_GOVERNANCE: GOV }, {
+      writeSubjectRecord: async (_s, recordType, rec) => { writes.push({ recordType, record: rec }); return { ok: true }; },
+      anchor: async () => ({ txHash: `0x${'ee'.repeat(32)}`, registry: '0x0000000000000000000000000000000000000bbb', anchoredBy: '0x0b60000000000000000000000000000000000009', chainId: 84532 }),
+    }, ALICE, record);
+    const expectedEstate = estateIdOf(84532, GOV);
+    const prov = writes[0]!.record as { graph: Array<Record<string, unknown>> };
+    expect(prov.graph.find((n) => n['id'] === 'urn:ap:prov:act:run-x')!['estate']).toBe(expectedEstate);
+    // The citation: the SECOND record, keyed beside the bundle, naming the registry with its chain and the estate —
+    // what a Home in another estate reads to know where to look. A bundle cannot carry its own digest's anchor.
+    expect(r.anchorRecord).toEqual({ written: true, recordType: 'run.anchor:run-x' });
+    expect(writes[1]!.recordType).toBe('run.anchor:run-x');
+    expect(writes[1]!.record).toMatchObject({ runRef: 'run-x', registry: 'eip155:84532:0x0000000000000000000000000000000000000bbb', anchoredBy: '0x0b60000000000000000000000000000000000009', estate: expectedEstate, txHash: `0x${'ee'.repeat(32)}` });
+    expect((writes[1]!.record as { digest: string }).digest).toBe(r.anchor && 'digest' in r.anchor ? r.anchor.digest : 'no anchor');
+    // Undeclared governance ⇒ not stamped (never guessed from the chain id alone) and the citation names no estate.
+    const bare = await exportRun({ CHAIN_ID: '84532' }, { writeSubjectRecord: async (_s, recordType, rec) => { writes.push({ recordType, record: rec }); return { ok: true }; } }, ALICE, record);
+    expect(bare.anchorRecord).toBeUndefined();
+    expect((writes[2]!.record as { graph: Array<Record<string, unknown>> }).graph.find((n) => n['id'] === 'urn:ap:prov:act:run-x')!['estate']).toBeUndefined();
   });
   it('spec 390 — the ids on the spans are the ids in the graph, both ways', async () => {
     const { provenanceGraphOf } = await import('../../src/run-export.js');

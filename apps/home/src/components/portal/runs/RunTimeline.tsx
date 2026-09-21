@@ -5,7 +5,7 @@
 // download so the person can take them elsewhere. Read on demand; nothing is fetched for a run nobody opens.
 import { useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { fetchSpans, fetchProvenance, type SpanRow, fetchPublicProvenance, type AnchoredOutcome, type RunAnchor } from '../../../home/ask';
+import { fetchSpans, fetchProvenance, type SpanRow, fetchPublicProvenance, type AnchoredOutcome, type RunAnchor, type RunAnchorCitation } from '../../../home/ask';
 
 const ATTR = {
   step: 'ap.step.ref', status: 'ap.step.status', capability: 'ap.capability.id', risk: 'ap.risk',
@@ -34,6 +34,8 @@ export function RunTimeline({ token, addressee, runRef, open }: { token: string;
   // Spec 395 — what of this run ANYONE can verify: its anchored outcomes, read from the public route (no session).
   const [anchored, setAnchored] = useState<AnchoredOutcome[] | null>(null);
   const [runAnchor, setRunAnchor] = useState<RunAnchor | null>(null);
+  // Spec 410 §4.4 — an act performed in ANOTHER estate: the vault's citation says which chain anchored it.
+  const [elsewhere, setElsewhere] = useState<{ citation: RunAnchorCitation; note?: string } | null>(null);
   const load = async () => {
     setState((s) => ({ ...s, status: 'loading' }));
     const out = await fetchSpans({ token }, addressee, runRef);
@@ -42,6 +44,7 @@ export function RunTimeline({ token, addressee, runRef, open }: { token: string;
     const pub = await fetchPublicProvenance(addressee, runRef);
     setAnchored('error' in pub ? [] : pub.rows);
     setRunAnchor('error' in pub ? null : pub.anchor ?? null);
+    setElsewhere(!('error' in pub) && pub.citation && !pub.anchor ? { citation: pub.citation, ...(pub.note ? { note: pub.note } : {}) } : null);
   };
   if (open && state.status === 'idle') void load();
   const save = (text: string, name: string, type: string) => {
@@ -74,6 +77,11 @@ export function RunTimeline({ token, addressee, runRef, open }: { token: string;
           {runAnchor && (
             <div data-testid="run-anchor" title="The run's PROV bundle, hashed canonically (stable-key JSON, keccak256), is anchored in the ReceiptAnchorRegistry by the runtime's harness agent — bound to the intent digest. Anyone holding the bundle recomputes and reads anchorOf(digest) on the chain.">
               <strong>anchored on chain</strong> bundle {runAnchor.digest.slice(0, 14)}… · by {runAnchor.anchoredBy.slice(0, 10)}…{runAnchor.txHash ? ` · tx ${runAnchor.txHash.slice(0, 12)}…` : ''}{runAnchor.chainId ? ` · chain ${runAnchor.chainId}` : ''}
+            </div>
+          )}
+          {elsewhere && (
+            <div data-testid="run-anchor-elsewhere" title={elsewhere.note ?? 'This act was performed in another estate; its receipt is anchored on that estate\'s chain. Verify there with the digest and the anchorer the citation names.'}>
+              <strong>anchored in another estate</strong>{elsewhere.citation.registry ? ` · ${elsewhere.citation.registry.startsWith('eip155:') ? `chain ${elsewhere.citation.registry.split(':')[1]}` : elsewhere.citation.registry}` : ''}{elsewhere.citation.estate ? ` · estate ${elsewhere.citation.estate.slice(0, 12)}…` : ''}{elsewhere.citation.digest ? ` · bundle ${elsewhere.citation.digest.slice(0, 14)}…` : ''}{elsewhere.citation.anchoredBy ? ` · by ${elsewhere.citation.anchoredBy.slice(0, 10)}…` : ''} — this Home reads its own estate's chain; verify at that one
             </div>
           )}
           {anchored && anchored.length > 0 && (

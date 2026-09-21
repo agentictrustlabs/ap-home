@@ -450,9 +450,12 @@ export async function listRunRecords(session: { token: string }, addressee: Addr
 export interface AnchoredOutcome { '@id': string; run: string; anchoredBy: string; assurance: string; receiptDigest?: string; chainDigest?: string; intentDigest?: string; playbook?: string; capability?: string; completionState: string; endedAt?: string }
 /** Spec 406 W2 — the RUN's anchor: its PROV bundle's digest in the ReceiptAnchorRegistry, from the harness agent. */
 export interface RunAnchor { digest: string; registry: string; anchoredBy: string; txHash?: string; chainId?: number }
-export async function fetchPublicProvenance(agent: Address, runRef: string): Promise<{ rows: AnchoredOutcome[]; refused: Array<{ activity: string; reason: string }>; anchor?: RunAnchor } | { error: string }> {
-  const out = (await postA2a('/a2a/provenance/public', { agent, runRef })) as { ok?: boolean; error?: string; rows?: AnchoredOutcome[]; refused?: Array<{ activity: string; reason: string }>; anchor?: RunAnchor };
-  return out.ok ? { rows: out.rows ?? [], refused: out.refused ?? [], ...(out.anchor ? { anchor: out.anchor } : {}) } : { error: out.error ?? 'the public projection could not be read' };
+/** Spec 410 §4.4 — the CITATION beside a carried bundle: where it is anchored (chain-qualified) and in which estate.
+ *  Present when the act was performed in another estate than the one this Home's runtime reads. */
+export interface RunAnchorCitation { digest?: string; registry?: string; anchoredBy?: string; estate?: string; txHash?: string }
+export async function fetchPublicProvenance(agent: Address, runRef: string): Promise<{ rows: AnchoredOutcome[]; refused: Array<{ activity: string; reason: string }>; anchor?: RunAnchor; citation?: RunAnchorCitation; note?: string } | { error: string }> {
+  const out = (await postA2a('/a2a/provenance/public', { agent, runRef })) as { ok?: boolean; error?: string; rows?: AnchoredOutcome[]; refused?: Array<{ activity: string; reason: string }>; anchor?: RunAnchor; citation?: RunAnchorCitation; note?: string };
+  return out.ok ? { rows: out.rows ?? [], refused: out.refused ?? [], ...(out.anchor ? { anchor: out.anchor } : {}), ...(out.citation ? { citation: out.citation } : {}), ...(out.note ? { note: out.note } : {}) } : { error: out.error ?? 'the public projection could not be read' };
 }
 
 /** Spec 389 W3 — THE RUN AS A PROV GRAPH: the JSON-LD document the agent's vault holds (rebuilt from the record), or
