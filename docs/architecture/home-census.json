@@ -682,10 +682,11 @@
         "published/shelf"
       ],
       "tests": [
+        "apps/demo-a2a/test/unit/library-public-shelf.test.ts",
         "apps/demo-a2a/test/unit/library-tools.test.ts",
+        "apps/demo-a2a/test/unit/library-writes.test.ts",
         "apps/demo-sso-next/server/connect/library.test.ts",
-        "apps/demo-sso-next/src/home/artifact-identity.test.ts",
-        "apps/demo-a2a/test/unit/library-public-shelf.test.ts"
+        "apps/demo-sso-next/src/home/artifact-identity.test.ts"
       ],
       "gaps": [
         "replicate as an act (an authorized copy in another vault) is not offered — said so on the card (398 §6.2); the linked work item is absent on every artifact (§4.3); stale is a state on the Library's freshness badge but the \"no organizations of 37\" rule (§6.3 — never render unknown as zero) is a ratchet (check:unknown-not-zero, ceiling 6 — Today, Memory and the run listing say which read failed)"
@@ -698,7 +699,10 @@
         "components/onboarding/AgentReachFold.tsx"
       ],
       "capabilities": [
+        "library.file.publish",
         "library.file.read",
+        "library.file.save",
+        "library.file.visibility",
         "library.files.list",
         "library.public.list",
         "library.public.read"

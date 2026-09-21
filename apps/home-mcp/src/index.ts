@@ -17,7 +17,7 @@ import { HomeMcpStoreDO, Store, kekFrom, openWire, sealWire, randomToken, sha256
 import { sseFrame, progressNotification, elicitationFor, isJsonRpcResponse } from './stream.js';
 import { progressAsPerson, refreshWire } from './a2a.js';
 import { authorizationServerMetadata, parseAuthorize, registerClient, tokenEndpoint, revokeEndpoint, bearerOf, PENDING_TTL_MS } from './oauth.js';
-import { TOOLS, askTool, grantLinkTool, discoverTool, engageTool, inspectTool, runTool, myRunsTool, needsReauthorization, type Person } from './tools.js';
+import { TOOLS, askTool, grantLinkTool, discoverTool, engageTool, inspectTool, publicShelfTool, runTool, myRunsTool, needsReauthorization, type Person } from './tools.js';
 import { SERVER, SCOPES } from './whitelabel.js';
 
 export { HomeMcpStoreDO };
@@ -215,6 +215,7 @@ async function callTool(env: Env, person: Person, name: string, args: Record<str
     if (name === 'ask') return askTool(env, p, args);
     if (name === 'discover_agents') return discoverTool(env, p, args);
     if (name === 'inspect_agent') return inspectTool(env, p, args);
+    if (name === 'public_shelf') return publicShelfTool(env, p, args);
     if (name === 'engage') return engageTool(env, p, args);
     if (name === 'my_runs') return myRunsTool(env, p, args);
     if (name === 'run') return runTool(env, p, args);

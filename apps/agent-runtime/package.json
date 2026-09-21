@@ -50,6 +50,7 @@
     "@agenticprimitives/types": "workspace:*",
     "@agenticprimitives/vault": "workspace:*",
     "@agenticprimitives/verification-receipts": "workspace:*",
+    "@agenticprimitives/verifiable-credentials": "workspace:*",
     "@cloudflare/containers": "^0.3.7",
     "hono": "^4.12.33",
     "viem": "^2.52.2",

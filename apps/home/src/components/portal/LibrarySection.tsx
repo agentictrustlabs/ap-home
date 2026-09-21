@@ -257,6 +257,8 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
 
   const writable = lens === 'vault';
   const title = orgSa ? 'Organization Library' : 'Library';
+  // Spec 412 — where the world reads what she made public: her Home's /published, rendered from her agent's public lane.
+  const shelfHref = orgSa ? null : '/published';
 
   if (forbidden) return (
     <SectionShell title="Organization Library">
@@ -285,6 +287,7 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
               <Icon name="search" size={14} style={{ color: 'var(--color-text-muted)' }} />
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`Search ${lens === 'vault' ? 'this vault' : lens === 'shared' ? 'shared items' : 'public releases'}…`} style={{ border: 'none', outline: 'none', background: 'transparent', color: 'inherit', width: 160 }} />
             </label>
+            {shelfHref && <a href={shelfHref} target="_blank" rel="noreferrer" data-testid="public-shelf-link" style={{ ...btnSty, display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none' }} title="What anyone can read of your Library — served by your own agent over A2A, the same way a stranger would read it">Your public shelf ↗</a>}
             {writable && <button style={{ ...btnPrimarySty, display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setUploadOpen(true)}><Icon name="plus" size={14} />Add to vault</button>}
           </div>
 

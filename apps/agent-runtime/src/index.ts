@@ -5375,6 +5375,8 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     readContract: (a) => pub.readContract(a as never) as Promise<unknown>,
     audit,
     teamGenesis: teamGenesisDeps(env, audit),
+    // Spec 412 W5 — a Library release is signed AS its owner under the owner's session leaf (spec 384's signer).
+    signAsAgent: (agent, digest) => signAsAgent(env, agent, digest),
     // Spec 387 W2 — a name's published records (the catalog binding reads `atl:mcpEndpoint`); one 60s-cached reader.
     ...((): Record<string, unknown> => { const r = nameRecordsReader(env); return r ? { readNameRecords: r } : {}; })(),
     // What an agent PUBLICLY advertises (`atl:capabilities`): `playbook.answer` is listed only for a skill on it.

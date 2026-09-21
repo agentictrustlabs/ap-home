@@ -779,8 +779,15 @@ const faithImpact: WhiteLabelConfig = {
       allowed_scopes: ['openid', 'profile', 'agent'],
       // org-create: a publisher's ORGANIZATION is chosen from the Home roster, never typed; establishing
       // a new one is the Home's org-create ceremony (chooser mode), launched from the wizard's "About you".
-      allowed_delegation_templates: ['site-login', 'org-create'],
+      // Spec 412 W5 — `ask-as-me`: the person's wire to the publishing gateway's OWN key, pinned to harness.ask.
+      // Publishing a work asks HER AGENT to save the text and the manifest into her Library and to mint the release
+      // — her agent writes as her; the app never holds a write grant on her vault (spec 341 §4.3b stands).
+      allowed_delegation_templates: ['site-login', 'org-create', 'ask-as-me'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      // The key demo-publishing-a2a signs A2A-Session assertions with (`PUBLISHING_PRIVATE_KEY` on that Worker);
+      // `NEXT_PUBLIC_PUBLISHING_ASK_DELEGATE` for another estate. It must equal that Worker's key or the wire names a
+      // key the gateway cannot present.
+      ask_delegate: (process.env.NEXT_PUBLIC_PUBLISHING_ASK_DELEGATE || '0x94E58bE2CfdD0418E03059BC8596E6f20579c77b') as `0x${string}`,
     },
   ],
   // Consent disclosure per template — the human-readable can/cannot shown at the permission
