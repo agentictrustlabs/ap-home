@@ -26,6 +26,7 @@ import { registerPasskeyCredentialRef, rotateCredential, rotationAvailability, r
 import type { DelegationWire } from '../lib/delegation';
 import { auditGrantsThroughHarness, type GrantRow } from './grants-harness';
 import { ensureCsrfToken, csrfHeaders } from '../csrf';
+import { readPersonRecord } from '../profile-store';
 
 export interface ReviewedWire {
   /** The delegation hash — what the batch approves, what a strike revokes. */
@@ -40,6 +41,9 @@ export interface ReviewedWire {
   wire?: DelegationWire;
   /** The `app-grants` client the wire belongs to, when it is one. */
   clientId?: string;
+  /** Spec 410 §1.2 — a key-signed wire the AGENT holds in one of HER vault records (`contact:<sa>`): read from that
+   *  record so it can be re-issued here, and written back to it once the batch lands. */
+  recordType?: string;
   source: string;
 }
 
@@ -56,6 +60,15 @@ export async function reviewedList(input: { person: Address; session: { token: s
     if (g.revoked) continue;
     if (!g.signed) { warnings.push(`${g.holderName ?? g.holder} (${g.kind}): your agent did not say how this wire is signed — it will be re-approved, and if it was key-signed it will need re-issuing from its screen`); }
     byDigest.set(g.digest.toLowerCase(), { digest: g.digest as Hex, kind: g.kind, holder: g.holder, ...(g.holderName ? { holderName: g.holderName } : {}), what: g.what, signed: g.signed ?? 'approved-digest', source: g.source });
+  }
+  // Spec 410 §1.2 — KEY-SIGNED WIRES THE AGENT HOLDS in her own vault records (a contact's access grant lives in
+  // `contact:<sa>`): read the record so the wire can be re-issued here rather than re-authorized at its screen.
+  for (const w of byDigest.values()) {
+    if (w.signed !== 'key' || w.wire || !w.source.startsWith('contact:')) continue;
+    try {
+      const rec = (await readPersonRecord(input.person, w.source)) as { type?: string; delegation?: DelegationWire; status?: string } | null;
+      if (rec?.type === 'ap.contact.v1' && rec.delegation && rec.status !== 'removed' && digestOf(rec.delegation).toLowerCase() === w.digest.toLowerCase()) { w.wire = rec.delegation; w.recordType = w.source; }
+    } catch { /* unreadable ⇒ the ceremony says so below, as before */ }
   }
   await ensureCsrfToken();
   const res = await fetch('/connect/app-grants', { headers: { authorization: `Bearer ${input.session.token}`, ...csrfHeaders() }, credentials: 'include' });
@@ -118,6 +131,7 @@ export async function rotateThisDevicePasskey(input: {
   const reapprove: Hex[] = [];
   const lineages: DelegationLineageV1[] = [];
   const replacements: Array<{ clientId: string; wire: LineageWire }> = [];
+  const recordReplacements: Array<{ recordType: string; wire: LineageWire; digest: Hex }> = [];
   for (const w of kept) {
     if (w.signed === 'key') {
       if (w.wire && w.clientId) {
@@ -125,6 +139,12 @@ export async function rotateThisDevicePasskey(input: {
         reapprove.push(r.digest);
         lineages.push(r.lineage);
         replacements.push({ clientId: w.clientId, wire: r.wire });
+      } else if (w.wire && w.recordType) {
+        // A contact's wire from her own record: re-issued the same way, written back to the record after the batch.
+        const r = reissueForRotation(toLineageWire(w.wire), CHAIN_ID, CONTRACTS.delegationManager);
+        reapprove.push(r.digest);
+        lineages.push(r.lineage);
+        recordReplacements.push({ recordType: w.recordType, wire: r.wire, digest: r.digest });
       } else {
         warnings.push(`${w.holderName ?? w.holder} (${w.kind}) is a key-signed wire your agent holds — re-authorize it from its own screen after this rotation`);
       }
@@ -158,6 +178,14 @@ export async function rotateThisDevicePasskey(input: {
   for (const l of lineages) {
     const r = await fetch(`/a2a/interactions/${input.person.toLowerCase()}/record.put`, { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', ...csrfHeaders() }, body: JSON.stringify({ session: input.session.token, recordType: lineageRecordType(l.hash), record: l }) });
     if (!r.ok) warnings.push(`the lineage record for ${l.hash.slice(0, 12)}… could not be written — the delegate will be asked to re-authorize instead of refreshing`);
+  }
+  for (const rep of recordReplacements) {
+    try {
+      const rec = (await readPersonRecord(input.person, rep.recordType)) as Record<string, unknown> | null;
+      const next = { ...(rec ?? {}), delegation: { ...rep.wire, salt: rep.wire.salt }, grantDigest: rep.digest };
+      const r = await fetch(`/a2a/interactions/${input.person.toLowerCase()}/record.put`, { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', ...csrfHeaders() }, body: JSON.stringify({ session: input.session.token, recordType: rep.recordType, record: next }) });
+      if (!r.ok) warnings.push(`the re-issued wire for ${rep.recordType} could not be written back to your record — the contact will be asked to refresh instead`);
+    } catch (e) { warnings.push(`the re-issued wire for ${rep.recordType} could not be written back: ${e instanceof Error ? e.message : String(e)}`); }
   }
   for (const rep of replacements) {
     const r = await fetch('/connect/app-grants', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', authorization: `Bearer ${input.session.token}`, ...csrfHeaders() }, body: JSON.stringify({ clientId: rep.clientId, delegation: rep.wire }) });

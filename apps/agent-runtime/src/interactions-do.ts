@@ -5252,8 +5252,13 @@ export class InteractionsDO {
         // The coach's notes are in HER cabinet and are hers to clear (a wrong note is hers to remove, a fired
         // coach's notes are hers to keep or drop); the hand record is written by the arrangement only.
         const ownStudyRecord = /^cardroom\.(?:[a-z0-9-]+\.)?(style|read|note)$/.test(recordType) || recordType === 'cardroom.profile';
-        if (op === 'record.put' && !CAPABILITY_RECORDS.has(recordType) && !recordType.startsWith('content.') && !ownStudyRecord) {
-          return json({ error: `recordType must be a capability record, a content.* record, or the person's own cardroom.style / cardroom.read` }, 400);
+        // Spec 410 §1.2 — the rotation ceremony's own writes, by the person over her session: a wire's lineage
+        // (`delegation.lineage:<hash>`, the head a delegate refreshes to) and a contact's re-issued wire (`contact:<sa>`).
+        // Found live: the ceremony wrote lineage through this op and this gate refused it, so every re-issued wire was
+        // "recorded" as a warning. Self-gated like the rest; the record is hers.
+        const ownRotationRecord = recordType.startsWith('delegation.lineage:') || recordType.startsWith('contact:');
+        if (op === 'record.put' && !CAPABILITY_RECORDS.has(recordType) && !recordType.startsWith('content.') && !ownStudyRecord && !ownRotationRecord) {
+          return json({ error: `recordType must be a capability record, a content.* record, the person's own cardroom.style / cardroom.read, or a rotation record (delegation.lineage:*, contact:*)` }, 400);
         }
         if (op === 'record.get') {
           const r = await this.vaultFor(recordGrant).read<unknown>({ owner: '', resource: recordType });
