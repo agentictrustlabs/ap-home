@@ -5,7 +5,8 @@
 import type { Metadata } from 'next';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { publicDocumentOf, splitFrontMatter } from '../../../src/lib/public-shelf';
+import { publicDocumentOf, shelfOf, splitFrontMatter } from '../../../src/lib/public-shelf';
+import { RecordDocument, recordSummary, recordTitle } from '../_record';
 import { whitelabel } from '../../../src/whitelabel/config';
 import { labelFor, ShelfFrame, Unreadable } from '../_shelf';
 
@@ -18,11 +19,12 @@ export async function generateMetadata({ params, searchParams }: Params): Promis
   const label = await labelFor(await searchParams);
   if (!label) return { title: { absolute: `Published — ${whitelabel.brand.name}` } };
   const r = await publicDocumentOf(label, id);
-  const title = r.ok && r.value ? (splitFrontMatter(r.value.text ?? '').meta.title || r.value.file.name.replace(/\.(md|json|jsonld|ttl)$/i, '')) : 'Not on the shelf';
+  const title = r.ok && r.value ? (splitFrontMatter(r.value.text ?? '').meta.title || (r.value.file.kind === 'json-ld' ? recordTitle(parseJson(r.value.text) as never) : null) || r.value.file.name.replace(/\.(md|json|jsonld|ttl)$/i, '')) : 'Not on the shelf';
   return { title: { absolute: `${title} — ${label}` }, ...(r.ok && r.value ? { description: `Published by ${label} at their ${whitelabel.brand.name} Home.` } : {}) };
 }
 
 const shortHex = (h: string) => (h.length > 18 ? `${h.slice(0, 10)}…${h.slice(-6)}` : h);
+const parseJson = (text: string | undefined): unknown => { try { return text ? JSON.parse(text) : null; } catch { return null; } };
 
 export default async function PublishedDocumentPage({ params, searchParams }: Params) {
   const { id } = await params;
@@ -41,17 +43,43 @@ export default async function PublishedDocumentPage({ params, searchParams }: Pa
   }
   const { file, text, bytesB64, contentType } = r.value;
   const { meta, body: rawBody } = splitFrontMatter(text ?? '');
-  const title = meta.title || file.name.replace(/\.(md|json|jsonld|ttl)$/i, '');
   const isMarkdown = file.kind === 'md' || /markdown/.test(file.contentType ?? '');
+  // A JSON-LD record (a work's manifest, a profile) is read as a document: its title heads the page, its facts are a
+  // table, its parts a list — never a code block. The readable TEXT of a work, when the shelf holds it beside the
+  // manifest (`<slug>.md` / `<slug>-preview.md`), is offered first; a manifest alone says the text is not on the shelf.
+  const record = (file.kind === 'json-ld' && typeof text === 'string' && !r.value.truncated ? parseJson(text) : null) as Record<string, unknown> | null;
+  const title = meta.title || (record ? recordTitle(record as never) : null) || file.name.replace(/\.(md|json|jsonld|ttl)$/i, '');
+  const summary = meta.summary || (record ? recordSummary(record as never) : null);
+  let textPage: { id: string; name: string } | null = null;
+  let manifestPage: { id: string; name: string } | null = null;
+  if (file.kind === 'json-ld' || isMarkdown) {
+    const slug = file.name.replace(/\.(md)$/i, '').replace(/-preview$/, '');
+    const shelf = await shelfOf(label, file.folder || undefined);
+    if (shelf.ok) {
+      const siblings = shelf.value.files.filter((f) => !f.isFolder && f.folder === file.folder && f.id !== file.id);
+      textPage = siblings.find((f) => f.kind === 'md' && (f.name === `${slug}.md` || f.name === `${slug}-preview.md`)) ?? null;
+      manifestPage = siblings.find((f) => f.kind === 'json-ld' && f.name === slug) ?? null;
+    }
+  }
   // The frame already says the title: a body that opens with the same `# title` would say it twice. Headings inside
   // the body sit under the page's own h1, so each is rendered one level down.
   const body = rawBody.replace(new RegExp(`^\\s*#\\s+${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\n`), '');
   return (
     <ShelfFrame label={label} title={title}>
       <section data-testid="shelf-document" data-id={file.id}>
-        {meta.summary && <p className="about-lede">{meta.summary}</p>}
+        {summary && <p className="about-lede">{summary}</p>}
+        {record !== null && (
+          <p style={{ fontSize: '.9rem', margin: '0 0 .6rem' }} data-testid="shelf-record-kind">
+            This is the work&apos;s <b>signed manifest</b> — what was published, part by part, each bound by its fingerprint.
+            {textPage
+              ? <> Read the text: <a href={`/published/${encodeURIComponent(textPage.id)}${sp.name ? `?name=${encodeURIComponent(label)}` : ''}`}>{textPage.name.replace(/\.md$/, '')} →</a></>
+              : <> The text itself is not on this shelf — it was published before the shelf held text; republishing the work from the publisher&apos;s studio puts it here.</>}
+          </p>
+        )}
+        {record ? <RecordDocument doc={record as never} /> : null}
         {typeof text === 'string' && isMarkdown && <div className="published-body"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ h1: ({ children }) => <h2>{children}</h2>, h2: ({ children }) => <h3>{children}</h3>, h3: ({ children }) => <h4>{children}</h4> }}>{body}</ReactMarkdown></div>}
-        {typeof text === 'string' && !isMarkdown && <pre style={{ whiteSpace: 'pre-wrap', fontSize: '.85rem' }}>{text}</pre>}
+        {typeof text === 'string' && !isMarkdown && !record && <pre style={{ whiteSpace: 'pre-wrap', fontSize: '.85rem' }}>{text}</pre>}
+        {isMarkdown && manifestPage && <p style={{ fontSize: '.82rem', opacity: 0.75, marginTop: '1rem' }}>The signed manifest of this work — every part by fingerprint — is <a href={`/published/${encodeURIComponent(manifestPage.id)}${sp.name ? `?name=${encodeURIComponent(label)}` : ''}`}>beside it on the shelf →</a></p>}
         {typeof bytesB64 === 'string' && /^image\//.test(contentType ?? '') && <img alt={file.name} src={`data:${contentType};base64,${bytesB64}`} style={{ maxWidth: '100%' }} />}
         {typeof bytesB64 === 'string' && !/^image\//.test(contentType ?? '') && <p>{file.name} — {contentType ?? file.kind}, {file.size ?? '?'} bytes; not rendered here.</p>}
         {r.value.truncated && <p style={{ fontSize: '.82rem', opacity: 0.7 }}>Shown up to the agent&apos;s read bound ({r.value.chars} characters in all).</p>}
