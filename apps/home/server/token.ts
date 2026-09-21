@@ -104,6 +104,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         // what that client was allowed, and re-deciding it here from a request body would be a
         // second gate that could disagree with the first.
         ...(bind.profile_email ? { email: bind.profile_email } : {}),
+        ...(bind.profile_name ? { name: bind.profile_name } : {}),
         ttlSeconds: ttl,
       },
       signer,

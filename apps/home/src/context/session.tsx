@@ -53,6 +53,7 @@ interface SessionCtx {
 // correct new-factory identity. `undefined` current epoch does NOT gate (only invalidate when knowable).
 import { DEPLOYMENT_EPOCH } from '../lib/chain';
 import { shouldRestoreFromUrl } from './session-restore';
+import { ensurePlaybook } from '../home/ensure-playbook';
 function epochStale(stored: string | undefined): boolean {
   if (!DEPLOYMENT_EPOCH) return false; // unknowable → don't gate
   return stored !== DEPLOYMENT_EPOCH; // stale (differs) OR unstamped (absent) → reconnect
@@ -174,6 +175,12 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, []);
   const refreshPersonName = useCallback(async () => { await readPersonName(profile); }, [profile, readPersonName]);
   useEffect(() => { if (phase === 'authed') void readPersonName(profile); }, [phase, profile, readPersonName]);
+  // Spec 354 §3 self-heal — a deployed person agent with no playbook gets the estate's default, once per session.
+  useEffect(() => {
+    const addr = profile?.agent ? (profile.agent.split(':').pop() ?? '') : '';
+    if (phase !== 'authed' || !session?.token || !profile?.deployed || !/^0x[0-9a-fA-F]{40}$/.test(addr)) return;
+    void ensurePlaybook(addr, session.token);
+  }, [phase, session?.token, profile?.agent, profile?.deployed]);
 
   // On mount: handle a Google return (?code / connect_status), else restore a stored session.
   useEffect(() => {

@@ -150,6 +150,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       nonce: grant.nonce || undefined,
       agentName: nameClaimForIdToken(grant.agent_name, profileName),
       ...(profileEmail ? { email: profileEmail } : {}),
+      // The standard `name` claim: the HUMAN name for a profile-scoped client, beside `agent_name` (the handle when
+      // there is one) — so an app that greets a person by name does not have to tell a handle from a name.
+      ...(profileName ? { name: profileName } : {}),
       ttlSeconds: ttl,
     },
     signer,

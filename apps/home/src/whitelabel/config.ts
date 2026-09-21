@@ -795,6 +795,9 @@ const faithImpact: WhiteLabelConfig = {
       // `profile`: the person's HUMAN name rides on `agent_name` for a nameless account, so the one-time
       // "About you" step starts from what they are called rather than 0x…. Registry-gated like pokernight's.
       allowed_scopes: ['openid', 'profile', 'agent'],
+      // The email rides the id_token too (registry-gated, consent line added at the grant): the publisher profile's
+      // "email — stays in your library" starts from the one the person signed in with instead of an empty box.
+      idTokenClaims: ['email'],
       // org-create: a publisher's ORGANIZATION is chosen from the Home roster, never typed; establishing
       // a new one is the Home's org-create ceremony (chooser mode), launched from the wizard's "About you".
       // Spec 412 W5 — `ask-as-me`: the person's wire to the publishing gateway's OWN key, pinned to harness.ask.

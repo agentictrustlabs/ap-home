@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { whitelabel } from './config';
 import { provisionsCommunityMessaging, reusesStandingGrantWithSelfVault, sharesEmailClaim } from './provisioning';
 
-const others = whitelabel.relyingApps.filter((a) => a.client_id !== 'gather-app');
+const others = whitelabel.relyingApps.filter((a) => a.client_id !== 'gather-app' && a.client_id !== 'source-publishing');
 
 describe('community messaging on sign-in', () => {
   it('gather-app opts out — it registers no messaging capability and the leg cost 18 s', () => {
@@ -67,9 +67,9 @@ describe('the email claim on the id_token', () => {
     }
   });
 
-  it('exactly one client declares the field, and declares only email', () => {
+  it('exactly two clients declare the field (gather-app; source-publishing since 2026-09-21 — its publisher profile starts from the sign-in email), and declare only email', () => {
     const declared = whitelabel.relyingApps.filter((a) => a.idTokenClaims !== undefined);
-    expect(declared.map((a) => a.client_id)).toEqual(['gather-app']);
+    expect(declared.map((a) => a.client_id).sort()).toEqual(['gather-app', 'source-publishing']);
     for (const a of declared) expect(a.idTokenClaims).toEqual(['email']);
   });
 
