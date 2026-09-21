@@ -36,6 +36,18 @@ export function typeSlugForCreatedKind(kind: string): string {
   return k;
 }
 
+/** The default archetype's CURRENT compiled definition, as the registry serves it now — its id and digest, or null. */
+export async function currentDefaultArchetype(kind: string): Promise<{ archetypeId: string; digest: string } | null> {
+  const target = DEFAULT_ARCHETYPE[typeSlugForCreatedKind(kind)];
+  if (!target) return null;
+  try {
+    const r = await fetch(`${SKILLS_REGISTRY_ORIGIN.replace(/\/$/, '')}/context/contexts/${target.context}/archetypes/${target.archetype}/definition`);
+    if (!r.ok) return null;
+    const body = (await r.json()) as { definition?: AgentHarnessDefinitionV1; digest?: string };
+    return body.definition?.archetypeId && body.digest ? { archetypeId: body.definition.archetypeId, digest: body.digest } : null;
+  } catch { return null; }
+}
+
 /**
  * Assign the default archetype for `kind` to a newly created agent. Returns what happened, for the
  * caller's log — never throws.

@@ -10,7 +10,7 @@
 // to their own vault, replaceable on Behaviour → Playbook. Behaviour, never authority: a playbook grants nothing.
 // Best-effort and said: a registry that cannot be reached leaves the bare harness standing and a console line.
 import { definitionDigest, validateAgentHarnessDefinition, type AgentHarnessDefinitionV1 } from '@agenticprimitives/capability-claims';
-import { assignDefaultArchetype } from './default-archetype';
+import { assignDefaultArchetype, currentDefaultArchetype } from './default-archetype';
 
 const done = new Set<string>();
 
@@ -31,7 +31,18 @@ export async function ensurePlaybook(agent: string, token: string): Promise<void
     if (!rec?.archetypeId || !rec.definitionDigest || !rec.definition) why = 'no playbook';
     else if (definitionDigest(rec.definition) !== rec.definitionDigest) why = `its definition does not hash to the pinned digest (${rec.archetypeId})`;
     else { const v = validateAgentHarnessDefinition(rec.definition); if (!v.ok) why = `its definition no longer validates (${rec.archetypeId}: ${v.errors[0]})`; }
-    if (!why) return; // assigned and sound — the person's choice stands
+    // THE DEFAULT FOLLOWS THE CORPUS. An assignment is a digest-pinned SNAPSHOT of the definition as compiled when it was
+    // made; a domain author attaching a new contract later (the Library reads, 2026-09-21) changes the corpus, not the
+    // snapshot — so an agent assigned person-steward last month runs last month's person-steward and refuses this
+    // month's capabilities as unknown tools. For the ESTATE'S DEFAULT archetype the current compiled definition is
+    // what the person accepted (they chose nothing — the estate did), so it is moved forward here. An archetype the
+    // person chose themselves is theirs: left as pinned, and said when it is behind.
+    if (!why && rec?.archetypeId && rec.definitionDigest) {
+      const current = await currentDefaultArchetype('person');
+      if (current && current.archetypeId === rec.archetypeId && current.digest !== rec.definitionDigest) why = `the default playbook has moved on (${rec.archetypeId} ${rec.definitionDigest.slice(0, 10)}… → ${current.digest.slice(0, 10)}…)`;
+      else if (current && current.archetypeId !== rec.archetypeId) { console.info(`[playbook] ${rec.archetypeId} is the person's own choice — left as pinned`); return; }
+    }
+    if (!why) return; // assigned and current — nothing to do
     const a = await assignDefaultArchetype(key, 'person', token);
     console.info(a.ok ? `[playbook] ${why} — assigned the estate's default (${a.archetypeId}); change it on Behaviour → Playbook` : `[playbook] ${why}, and the default could not be assigned: ${a.reason} — the bare harness stands`);
   } catch (e) {
