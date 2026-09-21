@@ -3998,6 +3998,25 @@ app.post('/harness/ask', async (c) => {
       return c.json({ ok: false, error: 'this run expired while waiting — ask again', expired: true }, 410);
     }
     if (!stored && !body.message?.trim()) return c.json({ ok: false, error: 'no such run to resume — ask again' }, 404);
+    // Spec 410 §3 — THE A2A HOP RECONCILED AT THE RECEIVER. A routed ask names its run (the sender chose the ref before
+    // it asked) and its logical operation. If THIS agent already ran that operation to completion — the answer was
+    // lost on the way back, and the sender is asking again — the recorded answer is returned and nothing runs twice.
+    // The record's own receipts say which operation they answered; a different operation under the same ref is a
+    // different ask and is refused rather than answered from the wrong record. A run that failed is not "done":
+    // it runs again (the effect did not happen), which is what a retry is for.
+    if (inResponseTo && !stored && body.message?.trim()) {
+      const done = await getRecord(c.env as never, addressee, body.runRef).catch(() => null);
+      if (done && done.outcome === 'completed') {
+        const answered = (done.receipts as Array<{ binding?: { correlation?: { inResponseTo?: { operationId?: string } } } }>).find((rc) => rc.binding?.correlation?.inResponseTo?.operationId)?.binding?.correlation?.inResponseTo?.operationId ?? null;
+        if (answered && answered !== inResponseTo.operationId) return c.json({ ok: false, error: `run ${body.runRef} already answered operation ${answered}; this ask names ${inResponseTo.operationId} — a different operation is a different run` }, 409);
+        const wanted = body.plan?.steps?.[0]?.toolId;
+        const hit = (wanted ? done.steps.find((st) => st.toolId === wanted && st.ok) : undefined) ?? done.steps.find((st) => st.ok && !st.skipped);
+        const receipts = done.receipts.map((rc) => ({ stepRef: rc.stepRef, ...(rc.capability?.id ? { capability: rc.capability.id } : {}), status: rc.status, ...(rc.binding ? { binding: rc.binding } : {}) }));
+        const said = `already done — this operation ran here at ${new Date(done.at).toISOString()}; this is its recorded answer, not a second act`;
+        const answer = subjectAnswer({ agent: addressee, inResponseTo: { operationId: inResponseTo.operationId, runRef: inResponseTo.runRef, stepRef: inResponseTo.stepRef }, outcome: 'answer', result: hit?.result ?? { done: true, reconciled: true }, said, run: { runRef: body.runRef, receipts } });
+        return c.json({ ok: true, addressee, reply: { kind: 'answer', text: said, results: done.steps.filter((st) => st.ok && !st.skipped).map((st) => ({ toolId: st.toolId, result: st.result })), runRef: body.runRef, receipts, reconciled: true }, runRef: body.runRef, hasProvenance: hasProvenanceRef(addressee, body.runRef), resumable: false, subjectAnswer: answer, reconciled: true });
+      }
+    }
   }
   let satisfied: { stepId: string; ok: boolean; error?: string } | undefined;
   // Spec 374 §4 — when this run was a routed act another agent waited on: whether its outcome reached
@@ -5636,6 +5655,19 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     const body = (await res.json().catch(() => null)) as { ok?: boolean; lines?: Array<{ seq: number; said: string; stepRef?: string; terminal?: boolean }>; terminal?: boolean; known?: boolean } | null;
     if (!body?.ok) return { lines: [], terminal: true, known: false };
     return { lines: body.lines ?? [], terminal: !!body.terminal, known: !!body.known };
+  };
+  // Spec 410 §3 — the A2A hop's reconcile read: a receiver served HERE has its run record and its progress in this
+  // Worker; a receiver elsewhere is `unreadable` (its own door answers a repeated ask from its record).
+  deps.readSubjectRun = async (subject, runRef) => {
+    const name = await deps.nameOf?.(subject).catch(() => null) ?? null;
+    const at = subjectAddress(name, name ? await nameRecordsOf(name) : null, subjectAddressEnv(env));
+    if (at.where !== 'here') return { state: 'unreadable', reason: at.where === 'nowhere' ? at.refused : 'served elsewhere' };
+    const rec = await getRecord(env as never, subject, runRef);
+    if (rec) { const hit = rec.steps.find((st) => st.ok && !st.skipped); return { state: 'done', outcome: rec.outcome, at: rec.at, ...(hit ? { result: hit.result } : {}), receipts: rec.receipts.length }; }
+    // No record yet: a run that has started narrates itself; known and not terminal ⇒ still running.
+    const live = await loadRun(env as never, subject, runRef).catch(() => null);
+    if (live) return { state: 'running' };
+    return { state: 'absent' };
   };
   deps.askSubjectAgent = async ({ subject, toolId, args, goal, session, appCredential, asker, via: routeVia, correlation, continue: cont, runRef: receiverRunRef, trace }) => {
     const name = await deps.nameOf?.(subject).catch(() => null) ?? null;

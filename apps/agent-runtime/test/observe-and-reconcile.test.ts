@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { isToolInvocationResult } from '@agenticprimitives/orchestration';
 import { ROOT_AUTHORITY, intentDigest, hashDelegation } from '@agenticprimitives/delegation';
 import { keccak256, toBytes, type Address, type Hex } from 'viem';
-import { observeResult, harnessReconcilePort, STANDING_INSTRUCTION_CAPABILITY } from '../src/harness-run.js';
+import { observeResult, harnessReconcilePort, receiverRunRefFor, STANDING_INSTRUCTION_CAPABILITY } from '../src/harness-run.js';
 
 const obs = (v: unknown) => { const r = observeResult('t', v); if (!isToolInvocationResult(r)) throw new Error('expected an observation'); return r.observation; };
 
@@ -71,6 +71,31 @@ describe('harnessReconcilePort', () => {
     const sent = harnessReconcilePort({ lookupOperation: async () => ({ kind: 'send', ref: 'm-7', at: 't' }) } as never, env, [], intent, ME);
     const a = await sent.reconcile(req('messaging.direct.send'));
     expect(a.status).toBe('found'); if (a.status === 'found') expect(a.observation.providerRef).toBe('m-7');
+  });
+  it('spec 410 §3 — the A2A hop: a routed step is reconciled against the RECEIVER\'s run, named before the ask', async () => {
+    const ORG = '0x0a60000000000000000000000000000000000009' as Address;
+    const routedReq = (stepRef = 's0') => ({ operationId: `run-1:${stepRef}`, runRef: 'run-1', stepRef, step: { toolId: 'organization.membership.add', args: { org: ORG } }, tool: { id: 'organization.membership.add', description: '', subject: 'org', capability: { id: 'organization.membership.add', action: 'add', resourceArg: 'org' } }, args: { org: ORG } }) as never;
+    const runs: Record<string, Awaited<ReturnType<NonNullable<Parameters<typeof harnessReconcilePort>[0]['readSubjectRun']>>>> = {};
+    const port = harnessReconcilePort({ readSubjectRun: async (subject: string, runRef: string) => (subject === ORG ? runs[runRef] ?? { state: 'absent' } : { state: 'unreadable', reason: 'served elsewhere' }) } as never, env, [], intent, ME);
+    // Never started ⇒ absent: the step is asked.
+    expect((await port.reconcile(routedReq())).status).toBe('absent');
+    // The receiver ran it to completion and the answer was lost ⇒ found, with the recorded answer; no second ask.
+    runs[receiverRunRefFor('run-1', 's0')] = { state: 'done', outcome: 'completed', at: 1_788_920_800_000, result: { added: true }, receipts: 1 };
+    const a = await port.reconcile(routedReq());
+    expect(a.status).toBe('found');
+    if (a.status === 'found') { expect(a.observation.outcome).toBe('confirmed'); expect(a.observation.providerRef).toBe(receiverRunRefFor('run-1', 's0')); expect(a.output).toMatchObject({ routed: true, result: { added: true }, reconciled: true }); }
+    // Still running there ⇒ indeterminate: asking again would be a second act.
+    runs[receiverRunRefFor('run-1', 's1')] = { state: 'running' };
+    const r = await port.reconcile(routedReq('s1'));
+    expect(r.status).toBe('indeterminate'); if (r.status === 'indeterminate') expect(r.reason).toMatch(/still running/);
+    // A run that failed there did not have its effect ⇒ absent (a retry is for exactly this).
+    runs[receiverRunRefFor('run-1', 's2')] = { state: 'done', outcome: 'failed', at: 1, receipts: 1 };
+    expect((await port.reconcile(routedReq('s2'))).status).toBe('absent');
+    // A continuation of a run parked at the receiver is ONE ask resumed, never reconciled as a second.
+    const cont = harnessReconcilePort({ readSubjectRun: async () => ({ state: 'running' }) } as never, env, [], intent, ME, { routedAt: { s0: { runRef: 'routed-run-1-s0' } } });
+    expect((await cont.reconcile(routedReq())).status).toBe('absent');
+    // A step whose subject is this agent itself is not routed: the fallback has no opinion.
+    expect((await port.reconcile({ ...(routedReq() as object), args: { org: ME } } as never)).status).toBe('absent');
   });
   it('a payment is found when the enforcer\'s nonce slot for (delegator, delegation hash, intent-derived nonce) is used', async () => {
     const seen: unknown[] = [];

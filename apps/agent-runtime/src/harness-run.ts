@@ -912,6 +912,10 @@ export interface HarnessDeps {
   /** Spec 410 §3 — the reconcile's read: what `subject`'s object did for a logical operation, or null. Throws when it
    *  cannot be asked (the loop records that as indeterminate, never as absent). */
   lookupOperation?: (subject: string, operationId: string) => Promise<{ kind: 'send' | 'write'; ref: string; at: string } | null>;
+  /** Spec 410 §3 — the A2A hop's reconcile read: the receiver's run for a routed step, when the receiver is served HERE
+   *  (in-process; a receiver elsewhere answers `unreadable` and its own record-backed idempotency covers the re-ask).
+   *  `done` carries the recorded answer; `running` says the receiver has not finished; `absent` that it never started. */
+  readSubjectRun?: (subject: Address, runRef: string) => Promise<{ state: 'done'; outcome: string; at: number; result?: unknown; receipts: number } | { state: 'running' } | { state: 'absent' } | { state: 'unreadable'; reason: string }>;
   /** Held resolution grants this asker can actually use — checked, not merely held (spec 338 §4). */
   verifyGrant?: (held: unknown, type: string, asker: string, session?: string) => Promise<Array<{ targetAgent?: string; owner: string; ownerName?: string; label?: string }>>;
   /** Close the note in the ASKER'S OWN vault that was waiting on this — spec 338 §7, the far end of a
@@ -1030,6 +1034,12 @@ export interface SubjectAnswerV1 {
 /** Spec 376 — the step in words, for the sub-intent: the capability's phrase, else the tool's id. */
 function toolWordsFor(tool: ToolSpec): string { return (tool.capability?.id && CAPABILITY_WORDS[tool.capability.id]) || tool.answer || tool.id; }
 
+/** Appendix M8 / spec 410 §3 — THE RECEIVER'S RUN REF FOR A ROUTED STEP, named by the sender before it asks: the same
+ *  function names it for the hop and for the reconcile, so a retry looks for the run the first attempt started. */
+export function receiverRunRefFor(senderRunRef: string, stepRef: string): string {
+  return `routed-${senderRunRef}-${stepRef}`.replace(/[^A-Za-z0-9._:-]/g, '_');
+}
+
 export function routedSubjectFor(tool: { subject?: string } | undefined, args: Record<string, unknown>, addressee: Address | undefined): Address | null {
   if (!tool?.subject) return null;
   const v = String(args[tool.subject] ?? '').trim().toLowerCase();
@@ -1115,11 +1125,15 @@ export function readSubjectReply(envelope: (AskReplyEnvelopeV1 & { subjectAnswer
  *   send      the sender's object's operation ledger (`op:<operationId>` → the envelope id it recorded).
  *   write     the subject's object's operation ledger (→ the record type it wrote).
  *
- * A read that throws is INDETERMINATE (the loop does nothing this attempt); a tool nobody bound is absent. The A2A
- * hop is not reconciled here yet: a routed step's receiver names its own run, and the sender-side lookup by
- * operation id is the next slice (spec 410 §3, ledger THESIS-3).
+ *   routed    (the fallback, any tool) the RECEIVER's run for the step — the sender named its ref before it asked
+ *             (`receiverRunRefFor`), so a retry finds the run the first attempt started: completed ⇒ found with the
+ *             recorded answer; still running ⇒ indeterminate (no second ask); failed or never started ⇒ absent.
+ *             A receiver served elsewhere is `absent` here and reconciled at ITS door: `/harness/ask` answers a
+ *             repeated (runRef, operationId) from its record instead of running again.
+ *
+ * A read that throws is INDETERMINATE (the loop does nothing this attempt); a tool nobody bound is absent.
  */
-export function harnessReconcilePort(deps: HarnessDeps, env: HarnessEnv, presentedList: MandatePresentation[], intent: { goal: string; context?: Record<string, unknown> }, addressee: string): ReturnType<typeof reconcileByTool> {
+export function harnessReconcilePort(deps: HarnessDeps, env: HarnessEnv, presentedList: MandatePresentation[], intent: { goal: string; context?: Record<string, unknown> }, addressee: string, opts: { /** Spec 374 W2 — steps already parked at their subject: this turn CONTINUES that run, which is not a second ask. */ routedAt?: Record<string, { runRef: string }> } = {}): ReturnType<typeof reconcileByTool> {
   const enforcers = harnessEnforcers(env);
   const ledger = (subjectOf: (req: ReconcileRequest) => string | Promise<string>, kind: 'send' | 'write') => async (req: ReconcileRequest): Promise<ReconcileAnswer> => {
     if (!deps.lookupOperation) return { status: 'absent' };
@@ -1141,6 +1155,16 @@ export function harnessReconcilePort(deps: HarnessDeps, env: HarnessEnv, present
     if (!used) return { status: 'absent' };
     return { status: 'found', output: { alreadySettled: true, outcome: 'committed', effectIdentity: `${dHash}:${nonce}`, reconciled: true }, observation: { outcome: 'confirmed', providerRef: `${dHash}:${nonce}`, observedAt: new Date().toISOString(), evidence: [{ kind: 'chain-read', ref: 'PaymentEnforcer.isNonceUsed: this exact payment had already settled' }] } };
   };
+  const routed = async (req: ReconcileRequest): Promise<ReconcileAnswer> => {
+    const subject = routedSubjectFor(req.tool as { subject?: string }, req.args, addressee as Address);
+    if (!subject || !deps.readSubjectRun) return { status: 'absent' };
+    if (opts.routedAt?.[req.stepRef]) return { status: 'absent' }; // a continuation of the receiver's parked run — one ask, resumed
+    const run = await deps.readSubjectRun(subject, receiverRunRefFor(req.runRef, req.stepRef)); // throws ⇒ indeterminate
+    if (run.state === 'running') return { status: 'indeterminate', reason: `${subject} is still running this step (${receiverRunRefFor(req.runRef, req.stepRef)}); asking again would be a second act` };
+    if (run.state !== 'done' || run.outcome !== 'completed') return { status: 'absent' };
+    const at = new Date(run.at).toISOString();
+    return { status: 'found', output: { routed: true, runRef: receiverRunRefFor(req.runRef, req.stepRef), result: run.result ?? { done: true }, reconciled: true }, observation: { outcome: 'confirmed', providerRef: receiverRunRefFor(req.runRef, req.stepRef), observedAt: at, evidence: [{ kind: 'read-back', ref: `${subject} recorded a completed run for this step at ${at} (${run.receipts} receipt${run.receipts === 1 ? '' : 's'})` }] } };
+  };
   return reconcileByTool({
     'treasury.payment.execute': payment,
     'messaging.direct.send': ledger(self, 'send'),
@@ -1152,7 +1176,7 @@ export function harnessReconcilePort(deps: HarnessDeps, env: HarnessEnv, present
     'person.contact.invite': ledger(self, 'write'),
     'person.contact.remove': ledger(self, 'write'),
     ...Object.fromEntries([...PREFERENCES_ACTS, ...ROUTINE_ACTS].map((id) => [id, ledger(self, 'write')])),
-  });
+  }, routed);
 }
 
 export function harnessEnforcers(env: HarnessEnv): EnforcerAddresses {
@@ -5063,7 +5087,7 @@ step is then handed to that agent under authority the person grants; leave it ou
       const correlation = { operationId: `${input.runRef ?? 'run'}:${stepRef}`, runRef: input.runRef ?? 'run', stepRef, intentDigest };
       // Appendix M8 — THE RECEIVER'S RUN IS NAMED BEFORE IT ANSWERS, so its progress can be read while it
       // runs and this run's record can cite it. A continuation reads the run it continues.
-      const receiverRunRef = cont ? cont.runRef : `routed-${correlation.runRef}-${stepRef}`.replace(/[^A-Za-z0-9._:-]/g, '_');
+      const receiverRunRef = cont ? cont.runRef : receiverRunRefFor(correlation.runRef, stepRef);
       // Appendix M8 — THE SUBJECT'S OWN LINES, RELAYED. While the hop is in flight, the receiver's progress
       // is read under the asker's session and each sentence lands in THIS run's stream, prefixed with
       // the receiver's name: "missio-nexus.org: Reading who belongs…". Words only — its record stays its own.
@@ -5257,7 +5281,7 @@ step is then handed to that agent under authority the person grants; leave it ou
       approvalPort: suppliedApprovalsPort(deps, env, input.approvals ?? [], input.supplied, input.person, presentedList), receiptSink,
       // Spec 410 §3 — RECONCILE BEFORE ACT, per effect kind. Asked before every non-read step whether THIS operation
       // already happened; a lost response after a commit is found here and never becomes a second effect.
-      reconcile: harnessReconcilePort(deps, env, presentedList, input.intent, String(input.addressee ?? '').toLowerCase()),
+      reconcile: harnessReconcilePort(deps, env, presentedList, input.intent, String(input.addressee ?? '').toLowerCase(), { ...(input.routedAt ? { routedAt: input.routedAt } : {}) }),
       // PLAN ADMISSION (spec 367 W1) — the plan's SHAPE, judged from declarations before any step runs:
       // an instruction must be answered by an act (`verbs` on the action tools); a placeholder is not an
       // argument; a step whose tool declares a `subject` may not leave it empty when the sentence names

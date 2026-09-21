@@ -300,6 +300,12 @@ const MESSAGING_WIRE_KEY = 'messaging.wire';
 // what it buys is the reconcile: a retry after a lost response finds the operation here and does not act twice.
 const OP_LEDGER_KEY = (operationId: string): string => `op:${operationId}`;
 interface OpLedgerRecord { kind: 'send' | 'write'; ref: string; at: string }
+/** How long the ledger answers for an operation. A retry later than this finds ABSENT and may act again — said on
+ *  every lookup (`retentionDays`) so a caller can tell "never happened" from "too old to know". Rows past it are
+ *  swept lazily: a bounded page on each write, and any expired row a lookup lands on. */
+export const OP_LEDGER_RETENTION_DAYS = 30;
+const OP_LEDGER_SWEEP_PAGE = 64;
+const opLedgerExpired = (rec: OpLedgerRecord, now: number): boolean => now - Date.parse(rec.at) > OP_LEDGER_RETENTION_DAYS * 86_400_000;
 /** TWO artifacts, because the gate asks two questions. `wire` (person → session key) authorizes the key
  *  to produce signatures that count as the person's, and travels INSIDE each signature. `transport`
  *  (person → person) authorizes the skill against the named recipients, and is what
@@ -814,6 +820,14 @@ export class InteractionsDO {
     const opId = typeof body.operationId === 'string' ? body.operationId.trim() : '';
     if (!opId || opId.length > 200) return;
     await this.state.storage.put(OP_LEDGER_KEY(opId), { kind, ref, at: new Date().toISOString() } satisfies OpLedgerRecord);
+    await this.sweepOpLedger();
+  }
+  /** Spec 410 §3 — the ledger's expiry: one bounded page of `op:` rows per write, the expired ones deleted. */
+  private async sweepOpLedger(): Promise<void> {
+    const now = Date.now();
+    const page = await this.state.storage.list<OpLedgerRecord>({ prefix: 'op:', limit: OP_LEDGER_SWEEP_PAGE });
+    const dead = [...page.entries()].filter(([, rec]) => rec && typeof rec.at === 'string' && opLedgerExpired(rec, now)).map(([k]) => k);
+    if (dead.length) await this.state.storage.delete(dead);
   }
 
   private async mcpVaultTool(
@@ -2395,7 +2409,9 @@ export class InteractionsDO {
           const opId = String(body.operationId ?? '').trim();
           if (!opId) return json({ error: 'operationId required' }, 400);
           const rec = (await this.state.storage.get(OP_LEDGER_KEY(opId))) as OpLedgerRecord | undefined;
-          return json({ ok: true, found: rec ?? null });
+          // An expired row is ABSENT — and deleted now — with the retention said, so a caller can tell the two apart.
+          if (rec && opLedgerExpired(rec, Date.now())) { await this.state.storage.delete(OP_LEDGER_KEY(opId)); return json({ ok: true, found: null, retentionDays: OP_LEDGER_RETENTION_DAYS, expired: true }); }
+          return json({ ok: true, found: rec ?? null, retentionDays: OP_LEDGER_RETENTION_DAYS });
         }
         // Spec 410 §1.2 step 4 — THE HEAD OF A WIRE'S LINEAGE, for the delegate that holds a stale copy. Reads this
         // principal's `delegation.lineage:*` records (the vault, ADR-0055), walks `supersedes` to the head, and
