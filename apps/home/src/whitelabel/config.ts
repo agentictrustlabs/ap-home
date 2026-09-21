@@ -774,7 +774,9 @@ const faithImpact: WhiteLabelConfig = {
         'http://localhost:5177/',
       ],
       allowed_scopes: ['openid', 'agent'],
-      allowed_delegation_templates: ['site-login'],
+      // org-create: a publisher's ORGANIZATION is chosen from the Home roster, never typed; establishing
+      // a new one is the Home's org-create ceremony (chooser mode), launched from the wizard's "About you".
+      allowed_delegation_templates: ['site-login', 'org-create'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
   ],
