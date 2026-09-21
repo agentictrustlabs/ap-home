@@ -19,7 +19,7 @@ const isAddress = (s: string): boolean => /^0x[0-9a-fA-F]{40}$/.test(s);
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
   const body = (await request.json().catch(() => null)) as
-    | { org?: string; agent?: string; memberAccessDelegation?: { delegator?: string; delegate?: string; signature?: string }; kin?: string; role?: string }
+    | { org?: string; agent?: string; memberAccessDelegation?: { delegator?: string; delegate?: string; signature?: string }; kin?: string; role?: string; relationshipOffer?: { subject?: string; object?: string; digest?: string } }
     | null;
   const org = (body?.org ?? '').toLowerCase();
   const agent = (body?.agent ?? '').toLowerCase();
@@ -52,7 +52,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // Household facets (spec 368) ride on the record so redemption can put them on the membership. Declarative.
     const kin = typeof body?.kin === 'string' ? body.kin.trim().toLowerCase().slice(0, 40) : '';
     const role = typeof body?.role === 'string' ? body.role.trim().toLowerCase().slice(0, 40) : '';
-    await vault.set(`org.invite:agent:${agent}`, { delegation: mad, createdAt: Date.now(), status: 'pending', ...(kin ? { kin } : {}), ...(role ? { role } : {}) });
+    // Spec 410 §8 — the organization's side of the membership credential rides with the invitation, and only when it
+    // names THIS organization and THIS invitee (anything else is inert, never re-targeted).
+    const offer = body?.relationshipOffer;
+    const offerFits = !!offer && (offer.subject ?? '').toLowerCase() === agent && (offer.object ?? '').toLowerCase() === org && /^0x[0-9a-fA-F]{64}$/.test(String(offer.digest ?? ''));
+    await vault.set(`org.invite:agent:${agent}`, { delegation: mad, createdAt: Date.now(), status: 'pending', ...(kin ? { kin } : {}), ...(role ? { role } : {}), ...(offerFits ? { relationshipOffer: offer } : {}) });
   } catch (e) {
     return json({ error: 'could not store the invitation in the organization vault', detail: String(e instanceof Error ? e.message : e) }, 502);
   }

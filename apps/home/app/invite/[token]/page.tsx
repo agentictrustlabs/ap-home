@@ -11,6 +11,7 @@ import { orgHref } from '../../../src/lib/workspace';
 import { EmailAuthCard } from '../../../src/components/portal/EmailAuthCard';
 import { secureHomeNoName, activateVault, signHashFor, resolveVia } from '../../../src/home/onboarding';
 import { recordOrgMembership } from '../../../src/lib/org-membership';
+import type { RelationshipOfferV1 } from '../../../src/home/ask-record';
 import { emailInviteNeedsSignOut } from '../../../src/lib/email-invite-home';
 import { inviteAcceptLabel, inviteHeadline, inviteLead } from '../../../src/lib/invite-copy';
 import { claimName } from '../../../src/connect-client';
@@ -183,7 +184,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ token, org: invite?.org }),
       });
-      const d = (await r.json().catch(() => ({}))) as { ok?: boolean; status?: string; token?: string; error?: unknown; memberAccessDelegation?: { delegate?: string } | null };
+      const d = (await r.json().catch(() => ({}))) as { ok?: boolean; status?: string; token?: string; error?: unknown; memberAccessDelegation?: { delegate?: string } | null; relationshipOffer?: RelationshipOfferV1 | null };
       if (r.ok && d.status === 'needs-otp') { setOtpFallback(true); return; }
       if (!r.ok || !d.ok || !d.token) throw new Error(asMsg(d.error, 'could not accept the invitation'));
       const res = await secureHomeNoName({ token: d.token });
@@ -216,7 +217,7 @@ export default function InviteRedeemPage({ params }: { params: Promise<{ token: 
       });
       const pj = (await pub.json().catch(() => ({}))) as { ok?: boolean; error?: unknown };
       if (!pub.ok || !pj.ok) throw new Error(asMsg(pj.error, `join failed (${pub.status})`));
-      await recordOrgMembership(res.home.address, invite.org.toLowerCase(), sign, d.token, d.memberAccessDelegation, name); // KMS-signed — no device prompt
+      await recordOrgMembership(res.home.address, invite.org.toLowerCase(), sign, d.token, d.memberAccessDelegation, name, d.relationshipOffer ?? null); // KMS-signed — no device prompt
       // A nameless member's reach is exactly the scope-class rule: co-members of this org (the org-SA
       // class, resolved live at the gate) plus the person who invited them. No registry class — they
       // hold no public name for the named-to-named scope to stand on.

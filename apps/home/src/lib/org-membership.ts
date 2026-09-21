@@ -6,6 +6,8 @@ import type { Address } from '@agenticprimitives/types';
 import { writeOrganizationMembership } from './membership-write';
 import { issueMemberProfileAccessDelegation, toWire } from './delegation';
 import { MCP_SERVER_ID } from './inbox-delivery';
+import { ensureCsrfToken, csrfHeaders } from '../csrf';
+import type { RelationshipOfferV1 } from '../home/ask-record';
 
 export type SignHash = (h: `0x${string}`) => Promise<`0x${string}`>;
 
@@ -30,6 +32,19 @@ export class WrongHomeForInviteError extends Error {
   }
 }
 
+/** Spec 410 §8 — sign the organization's offer as the member and have the agent write both copies. */
+export async function countersignRelationship(offer: RelationshipOfferV1, sign: SignHash, bearer: string): Promise<{ ok: true; digest: string } | { ok: false; error: string }> {
+  const subjectSignature = await sign(offer.digest as `0x${string}`);
+  await ensureCsrfToken();
+  const res = await fetch('/a2a/relationships/credential/accept', {
+    method: 'POST', credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ session: bearer, offer, subjectSignature }),
+  });
+  const out = (await res.json().catch(() => ({}))) as { ok?: boolean; digest?: string; error?: string };
+  return out.ok && out.digest ? { ok: true, digest: out.digest } : { ok: false, error: out.error ?? `HTTP ${res.status}` };
+}
+
 export async function recordOrgMembership(
   member: Address,
   org: string,
@@ -41,6 +56,9 @@ export async function recordOrgMembership(
   /** spec 321 item-2 — the display name the member chose at join; shown on the steward's roster
    *  card (a vault-resident member.profile will replace this once generic owner writes exist). */
   displayName?: string,
+  /** Spec 410 §8 — the organization's side of the membership credential, when the redeem handed it over (the
+   *  in-app path finds it in the organization's invitation record server-side). */
+  relationshipOffer?: RelationshipOfferV1 | null,
 ): Promise<void> {
   const t0 = Date.now();
   const lap = (what: string) => console.info(`[org-membership] ${what} +${Date.now() - t0}ms`);
@@ -71,7 +89,7 @@ export async function recordOrgMembership(
     if (memberAccess && !madMatches) {
       throw new WrongHomeForInviteError(member, (memberAccess.delegate ?? '') as Address);
     }
-    await fetch('/connect/org-membership', {
+    const joined = await fetch('/connect/org-membership', {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` },
       body: JSON.stringify({
@@ -79,9 +97,21 @@ export async function recordOrgMembership(
         delegation: toWire(d),
         ...(madMatches ? { memberAccessDelegation: memberAccess } : {}),
         ...(displayName?.trim() ? { displayName: displayName.trim().slice(0, 80) } : {}),
+        ...(relationshipOffer ? { relationshipOffer } : {}),
       }),
     });
     lap('org-membership recorded');
+    // Spec 410 §8 — THE COUNTERSIGNATURE. The organization signed the credential's digest when it invited; the
+    // member signs the same digest now, and the agent verifies both on chain and writes one copy into each vault.
+    // Best-effort like the rest of this ceremony: a membership stands without it, and the miss is logged by name.
+    const joinedBody = (await joined.json().catch(() => ({}))) as { relationshipOffer?: RelationshipOfferV1 };
+    const offer = joinedBody.relationshipOffer ?? relationshipOffer ?? null;
+    if (offer && (offer.subject ?? '').toLowerCase() === member.toLowerCase() && (offer.object ?? '').toLowerCase() === org.toLowerCase()) {
+      try {
+        const out = await countersignRelationship(offer, sign, bearer);
+        lap(out.ok ? `membership credential countersigned (${out.digest.slice(0, 12)}…)` : `membership credential NOT countersigned: ${out.error}`);
+      } catch (e) { console.warn('[org-membership] the membership credential could not be countersigned:', e); }
+    }
     // spec 322 W3d — AUTHORITATIVE person-plane write-through via the member's own InteractionsDO:
     // their relationships doc + the per-org profile card (the server's `related:*` KV is a
     // projection/cache of this). A 409 here (person hasn't enabled interactions yet) is expected —

@@ -19,6 +19,7 @@ import { consumeRuntimeWakes } from './runtime-wake.js';
 import { connectorStatus, disconnectConnector, type GoogleProvider } from './connectors/google-token.js';
 import { queryOps } from './ops-index.js';
 import { anchorCallData, bundleDigest, readAnchor } from './receipt-anchor.js';
+import { relationshipCredentialDigest, verifyRelationshipCredential, relationshipCredentialRecordType, type RelationshipCredentialBodyV1, type RelationshipCredentialV1 } from '@agenticprimitives/agent-relationships';
 import { rebuildOpsIndex } from './run-records.js';
 import { BUDGET_RECORD, budgetOf, overBudget, budgetCounters, countAsk } from './agent-budget.js';
 import { probeMcpServer, keepMcpToken, dropMcpToken, toolsDiff, MCP_CONNECTOR_PREFIX, isMcpConnectorRecord, mcpToolId, type McpConnectorRecordV1 } from './connectors/mcp-connector.js';
@@ -3193,6 +3194,39 @@ app.post('/wires/refresh', async (c) => {
   return c.json({ ok: true, status: r.status, hash: r.hash, wire: r.wire ?? null, ...(r.supersededFrom ? { supersededFrom: r.supersededFrom } : {}) });
 });
 
+// POST /relationships/credential/accept — spec 410 §8, THE MEMBER'S COUNTERSIGNATURE. The organization signed the
+// membership credential's digest in its invitation prompt (the `0x03` sentinel through its ERC-1271); the member,
+// on joining, signs the same digest with her own credential. This route verifies BOTH against each party's Smart
+// Agent through the UniversalSignatureValidator, then writes one copy into each vault as one logical operation
+// (`writeSharedRecord`: the second write failing voids the first). The session names the member; the offer names
+// the organization; nothing in the body is believed — every signature is checked on chain.
+app.post('/relationships/credential/accept', async (c) => {
+  const validator = c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
+  if (!validator) return c.json({ ok: false, error: 'the signature validator is not configured' }, 503);
+  const body = (await c.req.json().catch(() => null)) as { session?: string; offer?: RelationshipCredentialBodyV1 & { digest?: string; terms?: Record<string, unknown>; signatures?: { object?: string } }; subjectSignature?: string } | null;
+  if (!body?.session || !body.offer || typeof body.subjectSignature !== 'string') return c.json({ ok: false, error: 'session, offer and subjectSignature are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const me = String(who.sa).toLowerCase() as Address;
+  const o = body.offer;
+  if (o.type !== 'ap.relationship-credential.v1' || !['has-member', 'steward-of', 'chartered-under'].includes(o.kind) || !/^0x[0-9a-fA-F]{40}$/.test(String(o.subject)) || !/^0x[0-9a-fA-F]{40}$/.test(String(o.object))) return c.json({ ok: false, error: 'the offer is not a relationship credential body' }, 400);
+  if (String(o.subject).toLowerCase() !== me) return c.json({ ok: false, error: 'this credential is offered to someone else — you can countersign only your own' }, 403);
+  if (Number(o.chainId) !== Number(c.env.CHAIN_ID)) return c.json({ ok: false, error: `the offer names chain ${o.chainId}; this estate is chain ${c.env.CHAIN_ID}` }, 400);
+  const body0: RelationshipCredentialBodyV1 = { type: o.type, kind: o.kind, subject: String(o.subject).toLowerCase() as Address, object: String(o.object).toLowerCase() as Address, chainId: Number(o.chainId), issuedAt: String(o.issuedAt), termsDigest: String(o.termsDigest).toLowerCase() as Hex, ...(o.edgeRef ? { edgeRef: String(o.edgeRef).toLowerCase() as Hex } : {}) };
+  const digest = relationshipCredentialDigest(body0);
+  if (o.digest && String(o.digest).toLowerCase() !== digest.toLowerCase()) return c.json({ ok: false, error: 'the offer\'s digest does not match its body' }, 400);
+  const objectSig = String(o.signatures?.object ?? '0x03') as Hex;
+  const credential: RelationshipCredentialV1 = { ...body0, ...(o.terms && typeof o.terms === 'object' ? { terms: o.terms as Record<string, unknown> } : {}), signatures: { subject: body.subjectSignature as Hex, object: objectSig } };
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  const verifySig = async (signer: Address, d: Hex, sig: Hex) => (await deps.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [signer, d, sig] })) === true;
+  const v = await verifyRelationshipCredential(credential, verifySig);
+  if (!v.ok) return c.json({ ok: false, error: v.reason }, 403);
+  if (!deps.writeSharedRecord) return c.json({ ok: false, error: 'this deployment cannot write a shared record' }, 503);
+  const w = await deps.writeSharedRecord([credential.subject, credential.object], relationshipCredentialRecordType(digest), credential, `relationship:${digest}`);
+  if (!w.ok) return c.json({ ok: false, error: w.error }, 502);
+  return c.json({ ok: true, digest, recordType: relationshipCredentialRecordType(digest) });
+});
+
 // POST /harness/authorize — spec 361 I4, the ONE-PROMPT ceremony. Phase A ({session, delegator,
 // digests[]}) builds a sponsored userOp FROM the delegator SA whose callData is executeBatch of
 // approveHash for every digest — the spec-253 mechanism, applied to an existing SA. Phase B
@@ -5582,8 +5616,8 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     const agent = String(r.body.agent ?? '').toLowerCase();
     return /^0x[0-9a-f]{40}$/.test(agent) ? (agent as Address) : null;
   };
-  deps.deliverEmailInvitation = async ({ org, email, memberAccessDelegation, session }) => {
-    const r = await homeCall('/connect/org-invite/email', session, { org, email, memberAccessDelegation });
+  deps.deliverEmailInvitation = async ({ org, email, memberAccessDelegation, relationshipOffer, session }) => {
+    const r = await homeCall('/connect/org-invite/email', session, { org, email, memberAccessDelegation, ...(relationshipOffer ? { relationshipOffer } : {}) });
     if (r.status >= 200 && r.status < 300 && r.body.ok !== false) return { ok: true, ...(r.body.delivery ? { delivery: String(r.body.delivery) } : {}) };
     return { ok: false, error: String(r.body.error ?? `the Home refused the invitation (${r.status})`) };
   };

@@ -63,6 +63,7 @@ import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
 import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
 import { ADAPTER, CARRIES } from './adapter-declarations.js';
+import { relationshipCredentialDigest, termsDigestOf, type RelationshipCredentialBodyV1 } from '@agenticprimitives/agent-relationships';
 import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent } from '@agenticprimitives/orchestration';
 import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, standingFor, declareInstruction, forgetInstruction, instructionContextOf, STANDING_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
@@ -945,7 +946,7 @@ export interface HarnessDeps {
   predictAgentForEmail?: (input: { org: Address; email: string; session: string }) => Promise<Address | null>;
   /** WHAT FOLLOWS an email invitation (spec 360): the invitation record in the org's vault and the link,
    *  delivered by mail from the organization. Never the act itself — the grant is the act. */
-  deliverEmailInvitation?: (input: { org: Address; email: string; memberAccessDelegation: unknown; session: string }) => Promise<{ ok: boolean; delivery?: string; error?: string }>;
+  deliverEmailInvitation?: (input: { org: Address; email: string; memberAccessDelegation: unknown; /** Spec 410 §8 — the organization's side of the membership credential, for the invitee to countersign. */ relationshipOffer?: unknown; session: string }) => Promise<{ ok: boolean; delivery?: string; error?: string }>;
   /**
    * Spec 366 R1 — ASK THE SUBJECT'S OWN AGENT. A step about another agent (an organization's roster,
    * asked at a person's agent) is sent to that agent's harness as the same step, with the asker's own
@@ -1313,6 +1314,22 @@ export function inviteGrantForRequirement(
 }
 
 /**
+ * Spec 410 §8 — THE ORGANIZATION'S SIDE OF THE MEMBERSHIP CREDENTIAL, derived with the invitation. The body both
+ * parties will sign (`has-member`, the invitee, the organization, the chain, the invitation's own instant, the
+ * facets by digest) is fixed here so the requirement and the invoker derive the SAME digest: the organization
+ * approves it in the one-prompt batch beside the access grant (its signature is the `0x03` sentinel), and the
+ * member countersigns at acceptance. Deterministic from the mandate's `validAfter`, never from the clock.
+ */
+export function relationshipOfferFor(env: HarnessEnv, org: Address, invitee: Address, validAfter: number, facets?: { kin?: string; role?: string }): { body: RelationshipCredentialBodyV1; digest: Hex; terms?: Record<string, unknown> } {
+  const terms = facets && Object.keys(facets).length ? { ...(facets.kin ? { kin: facets.kin } : {}), ...(facets.role ? { role: facets.role } : {}) } : undefined;
+  const body: RelationshipCredentialBodyV1 = {
+    type: 'ap.relationship-credential.v1', kind: 'has-member', subject: invitee.toLowerCase() as Address, object: org.toLowerCase() as Address,
+    chainId: Number(env.CHAIN_ID), issuedAt: new Date(validAfter * 1000).toISOString(), termsDigest: termsDigestOf(terms),
+  };
+  return { body, digest: relationshipCredentialDigest(body), ...(terms ? { terms } : {}) };
+}
+
+/**
  * `organization.membership.invite`. Derives the grant, asks the steward to sign it, and returns it for the
  * surface to store in the org's vault. It does NOT make anyone a member: the invitee redeems it on join,
  * which is the whole reason the org-side capability is the INVITATION and not the membership.
@@ -1357,6 +1374,15 @@ export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, p
     const salt = BigInt(keccak256(toBytes(`${digest}:${stepRef}:invite:${invitee}`)));
     const grant = buildInviteGrant(env, org, invitee, salt, validUntil);
     const grantDigest = hashDelegation(grant, chainId, dm);
+    // Spec 410 §8 — the organization's side of the membership credential, approved in the same batch as the grant
+    // (or not: an older Home approves the grant alone, and the offer is then absent and SAID, never inferred).
+    const offer = relationshipOfferFor(env, org, invitee, Number(decodeTimestampTerms(ts.terms as Hex).validAfter), facets);
+    const relationshipOffer = deps?.readContract
+      ? ((await deps.readContract({ address: org, abi: [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'bytes4' }] }], functionName: 'isValidSignature', args: [offer.digest, '0x03'] }).catch(() => null)) === '0x1626ba7e'
+        ? { ...offer.body, ...(offer.terms ? { terms: offer.terms } : {}), digest: offer.digest, signatures: { object: '0x03' as Hex } }
+        : null)
+      : null;
+    const offerNote = relationshipOffer ? {} : { relationshipOfferNote: 'the organization did not approve the membership credential in this prompt; the membership will be recorded without the two-sided credential' };
 
     // ONE-PROMPT PATH (spec 361 I4): the surface may have already approveHash'd this exact digest in
     // the SAME org userOp that approved the mandate's — one custodian signature for both. The org's
@@ -1377,9 +1403,9 @@ export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, p
         // mail from the organization (spec 360 — an effect never fails the act; it is reported).
         const inviteeEmail = typeof args.inviteeEmail === 'string' ? args.inviteeEmail : undefined;
         const delivered = inviteeEmail && deps?.deliverEmailInvitation && session
-          ? await deps.deliverEmailInvitation({ org, email: inviteeEmail, memberAccessDelegation: approvedWire, session }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
+          ? await deps.deliverEmailInvitation({ org, email: inviteeEmail, memberAccessDelegation: approvedWire, ...(relationshipOffer ? { relationshipOffer } : {}), session }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
           : undefined;
-        return { org, invitee, memberAccessDelegation: approvedWire, grantDigest, invited: true, approvedHash: true, ...(inviteeEmail ? {} : { told: await tell(org, invitee) }), ...(facets ? { facets } : {}), ...(inviteeEmail ? { inviteeEmail, emailDelivery: delivered ?? { ok: false, error: 'email delivery is not wired on this agent' } } : {}) };
+        return { org, invitee, memberAccessDelegation: approvedWire, grantDigest, invited: true, approvedHash: true, ...(inviteeEmail ? {} : { told: await tell(org, invitee) }), ...(facets ? { facets } : {}), ...(relationshipOffer ? { relationshipOffer } : {}), ...offerNote, ...(inviteeEmail ? { inviteeEmail, emailDelivery: delivered ?? { ok: false, error: 'email delivery is not wired on this agent' } } : {}) };
       }
     }
 
@@ -1395,7 +1421,7 @@ export function inviteInvoker(env: HarnessEnv, presented: MandatePresentation, p
     // The invitation is the SIGNED grant. Storing it is the surface's half (the org's vault); returning
     // it unsigned-but-claimed would be an invitation that verifies nowhere.
     const wireOut: DelegationWireV1 = { ...grant, salt: salt.toString(), signature: signed.signature as Hex };
-    return { org, invitee, memberAccessDelegation: wireOut, grantDigest, invited: true, ...(facets ? { facets } : {}), told: await tell(org, invitee) };
+    return { org, invitee, memberAccessDelegation: wireOut, grantDigest, invited: true, ...(facets ? { facets } : {}), ...(relationshipOffer ? { relationshipOffer } : {}), ...offerNote, told: await tell(org, invitee) };
   };
 }
 
@@ -3861,8 +3887,14 @@ async function askReplyForInner(env: HarnessEnv, input: {
       const org = String(args.org ?? '').toLowerCase();
       const invitee = String(args.invitee ?? '').toLowerCase();
       if (/^0x[0-9a-f]{40}$/.test(org) && /^0x[0-9a-f]{40}$/.test(invitee)) {
-        const g = inviteGrantForRequirement(env, { intentDigest: requirement.intentDigest, validAfter: requirement.validAfter ?? Math.floor(Date.now() / 1000) - 60 }, org as Address, invitee as Address, r.required.stepRef);
+        const validAfter = requirement.validAfter ?? Math.floor(Date.now() / 1000) - 60;
+        const g = inviteGrantForRequirement(env, { intentDigest: requirement.intentDigest, validAfter }, org as Address, invitee as Address, r.required.stepRef);
         alsoApprove.push({ purpose: `the invitation grant ${org.slice(0, 10)}… → ${invitee.slice(0, 10)}…`, digest: g.digest });
+        // Spec 410 §8 — the organization's side of the two-sided membership credential, in the same prompt: what the
+        // member countersigns at acceptance, each then holding a copy in its own vault.
+        const facets = { ...(typeof args.kin === 'string' && args.kin.trim() ? { kin: args.kin.trim().toLowerCase() } : {}), ...(typeof args.role === 'string' && args.role.trim() ? { role: args.role.trim().toLowerCase() } : {}) };
+        const offer = relationshipOfferFor(env, org as Address, invitee as Address, validAfter, facets);
+        alsoApprove.push({ purpose: `the membership credential ${org.slice(0, 10)}… ⇄ ${invitee.slice(0, 10)}… (the organization's signature; the member countersigns on joining)`, digest: offer.digest });
       }
     }
     // WHOSE authority: the step's declared `authority` (the payer), else the resource it acts on (the

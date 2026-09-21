@@ -149,6 +149,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         org?: string;
         email?: string;
         memberAccessDelegation?: { delegator?: string; delegate?: string; signature?: string };
+        /** Spec 410 §8 — the organization's side of the membership credential, for the invitee to countersign. */
+        relationshipOffer?: { subject?: string; object?: string; digest?: string };
         /** Where the invitee continues after joining — validated against a registered app origin. */
         returnUrl?: string;
         /** Optional client_id when the steward is on a Home session and naming the destination app. */
@@ -222,6 +224,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     await vault.set(`org.invite:${token}`, {
       emailHash: await emailHash(email), createdAt: Date.now(), expiresAt, status: 'pending',
       ...(mad ? { memberAccessDelegation: mad } : {}),
+      ...(body?.relationshipOffer && (body.relationshipOffer.object ?? '').toLowerCase() === org && (body.relationshipOffer.subject ?? '').toLowerCase() === (mad?.delegate ?? '').toLowerCase() ? { relationshipOffer: body.relationshipOffer } : {}),
       ...(returnUrl ? { returnUrl } : {}),
       ...(appName ? { appName } : {}),
       ...(namedApp ? { app: namedApp } : {}),

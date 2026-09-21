@@ -39,6 +39,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // the bootstrap to the invited address; without it (or if unreachable) the invitee verifies via OTP.
   let emailHash: string | null = null;
   let memberAccessDelegation: unknown = null; // spec 321 W2 — the steward's pre-signed org→invitee grant
+  let relationshipOffer: unknown = null; // spec 410 §8 — the organization's side of the membership credential
   let inviteRec: Record<string, unknown> | null = null;
   try {
     const vault = await orgVault(env, org);
@@ -47,6 +48,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     if (typeof rec.expiresAt === 'number' && rec.expiresAt < Date.now()) return json({ error: 'this invitation has expired' }, 404);
     emailHash = rec.emailHash ?? null;
     memberAccessDelegation = rec.memberAccessDelegation ?? null;
+    relationshipOffer = rec.relationshipOffer ?? null;
     inviteRec = rec;
   } catch { /* vault unreachable — fall through to needs-otp */ }
   if (!emailHash) return json({ status: 'needs-otp', org });
@@ -90,5 +92,5 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // spec 321 W2: hand the invitee the steward's pre-signed member-access grant. Counterfactual by
   // construction — its delegate is the address derived from this SAME (iss='email', sub) pair, so it
   // matches the home just resolved; the client still checks delegate == its person before recording.
-  return json({ ok: true, status: 'issued', token: sessionToken, org, memberAccessDelegation });
+  return json({ ok: true, status: 'issued', token: sessionToken, org, memberAccessDelegation, ...(relationshipOffer ? { relationshipOffer } : {}) });
 };

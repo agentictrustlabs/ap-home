@@ -34,6 +34,10 @@ function labelFor(recordType: string): string {
   };
   if (exact[recordType]) return exact[recordType];
   if (recordType.startsWith('member.profile:')) return 'Member profile';
+  // Spec 410 §8 — the countersigned form of a relationship: one credential, two signatures, this vault's copy.
+  if (recordType.startsWith('relationships.credential:')) return 'Membership credential (countersigned)';
+  if (recordType.startsWith('relationships.revocation:')) return 'Membership credential revoked';
+  if (recordType.startsWith('run.anchor:')) return 'Run anchor (where its receipt is anchored)';
   if (recordType.startsWith('org.membership:')) return 'Org membership';
   if (recordType.startsWith('conversation.') || recordType.startsWith('topic.')) return 'Conversation';
   if (recordType.startsWith('message.body:')) return 'Message body';
@@ -87,6 +91,24 @@ export function PersonVaultReader() {
     return () => { cancelled = true; };
   }, [agentAddress]);
 
+  /** Spec 410 §8 — PRESENT a countersigned relationship: the credential with its TERMS WITHHELD (the signed body commits
+   *  to them by digest), as a file the counterparty verifies against both Smart Agents' signatures — never by reading
+   *  the chain's edge, never by asking this Home. What leaves: kind, the two parties, when, the two signatures. */
+  const present = useCallback(async (recordType: string) => {
+    if (!agentAddress) return;
+    try {
+      const data = (await readPersonRecord(agentAddress, recordType)) as Record<string, unknown> | null;
+      if (!data) return;
+      const { terms: _withheld, ...presentation } = data; void _withheld;
+      const text = JSON.stringify({ ...presentation, presentedAt: new Date().toISOString(), verify: 'both signatures over the RFC 8785 digest of the body, each against its party\'s Smart Agent (ERC-1271 / 6492) — the terms are withheld on purpose; the body commits to them by termsDigest' }, null, 2);
+      const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+      const a = document.createElement('a'); a.href = url; a.download = `${recordType.replace(/[^A-Za-z0-9._-]/g, '_')}.presentation.json`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      setBodies((b) => ({ ...b, [recordType]: `(error: ${e instanceof Error ? e.message : 'read failed'})` }));
+    }
+  }, [agentAddress]);
+
   const show = useCallback(async (recordType: string) => {
     setOpen((o) => ({ ...o, [recordType]: !o[recordType] }));
     if (bodies[recordType] || !agentAddress) return;
@@ -132,7 +154,10 @@ export function PersonVaultReader() {
               key={r.record_type}
               title={labelFor(r.record_type)}
               meta={<><Mono>{r.record_type}</Mono>{r.updated_at ? ` · ${r.updated_at}` : ''}</>}
-              side={<Button size="sm" variant="ghost" onClick={() => void show(r.record_type)}>{open[r.record_type] ? 'Hide' : 'Show'}</Button>}
+              side={<>
+                {r.record_type.startsWith('relationships.credential:') && <Button size="sm" variant="ghost" title="Download this credential with its terms withheld, for a counterparty to verify" onClick={() => void present(r.record_type)}>Present</Button>}
+                {' '}<Button size="sm" variant="ghost" onClick={() => void show(r.record_type)}>{open[r.record_type] ? 'Hide' : 'Show'}</Button>
+              </>}
             >
               {open[r.record_type] && (
                 <pre className="ui-mono" style={{ background: 'var(--color-surface-sunken)', padding: '8px 10px', borderRadius: 8, overflowX: 'auto', margin: '6px 0 0', whiteSpace: 'pre-wrap' }}>

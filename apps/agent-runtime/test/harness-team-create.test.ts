@@ -2,9 +2,9 @@
 // asks for what it lacks, derives the genesis from the ask, checks what came back signed IS what it derived,
 // and only then submits. The substrate is faked; the protocol is what is under test.
 import { describe, expect, it, vi } from 'vitest';
-import { buildCaveat, encodeTimestampTerms, intentDigest, type Delegation } from '@agenticprimitives/delegation';
+import { buildCaveat, encodeTimestampTerms, decodeTimestampTerms, intentDigest, type Delegation } from '@agenticprimitives/delegation';
 import { isInputRequired, type InvokeContext, type MandatePresentation } from '@agenticprimitives/orchestration';
-import { childAgentCreateInvoker, inviteInvoker, askReplyFor, fundingAmount, scopedActionTools, UNSUPPORTED_TOOL, CAPABILITY_CEREMONIES, surfaceCanRender, type TeamGenesisDeps, type HarnessEnv, type GenesisUserOpJson } from '../src/harness-run.js';
+import { childAgentCreateInvoker, inviteInvoker, relationshipOfferFor, askReplyFor, fundingAmount, scopedActionTools, UNSUPPORTED_TOOL, CAPABILITY_CEREMONIES, surfaceCanRender, type TeamGenesisDeps, type HarnessEnv, type GenesisUserOpJson } from '../src/harness-run.js';
 
 const env: HarnessEnv = {
   CHAIN_ID: '34348', DELEGATION_MANAGER: '0x710cb1bF08C234Df397e0910331e0A29710EF4F7',
@@ -275,6 +275,24 @@ describe('inviting a member (organization.membership.invite)', () => {
     const done = await caught(inv([{ stepRef: 's0', signature: { digest: p.digest, signer: ORG, signature: '0xsig' } }]));
     expect(done.ok).toBe(true);
     expect(done.v).toMatchObject({ org: ORG, invitee: INVITEE, invited: true, memberAccessDelegation: { delegator: ORG, delegate: INVITEE, signature: '0xsig' } });
+  });
+
+  it('spec 410 §8 — the organization\'s side of the membership credential rides with the invitation when the prompt approved it, and is SAID absent when it did not', async () => {
+    const validAfter = Number(decodeTimestampTerms((orgWire.caveats.find((c) => c.enforcer.toLowerCase() === (env.TIMESTAMP_ENFORCER ?? '').toLowerCase())!).terms as `0x${string}`).validAfter);
+    const offer = relationshipOfferFor(env, ORG as `0x${string}`, INVITEE as `0x${string}`, validAfter, { kin: 'sibling' });
+    expect(offer.body).toMatchObject({ type: 'ap.relationship-credential.v1', kind: 'has-member', subject: INVITEE, object: ORG, chainId: Number(env.CHAIN_ID), issuedAt: new Date(validAfter * 1000).toISOString() });
+    expect(offer.terms).toEqual({ kin: 'sibling' });
+    expect(relationshipOfferFor(env, ORG as `0x${string}`, INVITEE as `0x${string}`, validAfter, { kin: 'sibling' }).digest).toBe(offer.digest); // deterministic: the requirement and the invoker agree
+    expect(relationshipOfferFor(env, ORG as `0x${string}`, INVITEE as `0x${string}`, validAfter).digest).not.toBe(offer.digest); // the terms are in the digest
+    // The org approved BOTH digests in one prompt: the invoker finds the grant and the credential approved on chain.
+    const approvedAll = { readContract: async ({ functionName }: { functionName: string }) => (functionName === 'isValidSignature' ? '0x1626ba7e' : null) } as never;
+    const both = await inviteInvoker(env, { ref: '0xm', wire: orgWire }, PERSON, approvedAll)('organization.membership.invite', { org: ORG, invitee: INVITEE, kin: 'sibling' }, ctxWith(undefined));
+    expect(both).toMatchObject({ invited: true, approvedHash: true, relationshipOffer: { kind: 'has-member', subject: INVITEE, object: ORG, digest: offer.digest, terms: { kin: 'sibling' }, signatures: { object: '0x03' } } });
+    // The grant approved but not the credential (an older Home): the offer is absent and the reason is on the result.
+    const grantOnly = { readContract: async ({ functionName, args }: { functionName: string; args: unknown[] }) => (functionName === 'isValidSignature' && String(args[0]).toLowerCase() !== offer.digest.toLowerCase() ? '0x1626ba7e' : '0xffffffff') } as never;
+    const one = await inviteInvoker(env, { ref: '0xm', wire: orgWire }, PERSON, grantOnly)('organization.membership.invite', { org: ORG, invitee: INVITEE, kin: 'sibling' }, ctxWith(undefined)) as Record<string, unknown>;
+    expect(one.relationshipOffer).toBeUndefined();
+    expect(String(one.relationshipOfferNote)).toMatch(/did not approve the membership credential/);
   });
 
   it('refuses the invitations that mean nothing', async () => {

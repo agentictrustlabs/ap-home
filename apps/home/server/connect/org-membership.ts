@@ -63,14 +63,19 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // Household facets the invitation carried (spec 368) — read from the org's own record, never from the
   // joiner's body: how they are related is the founder's statement, made when they invited.
   let facets: { kin?: string; role?: string } = {};
-  if (!mad) {
+  // Spec 410 §8 — the organization's side of the membership credential, from the in-app invitation record (the
+  // email path hands it over at redeem and the joiner posts it). Returned to the joiner to countersign; nothing
+  // here signs for anyone.
+  let relationshipOffer: unknown = (body as { relationshipOffer?: unknown } | null)?.relationshipOffer ?? null;
+  if (!mad || !relationshipOffer) {
     try {
       // spec 341 §5.5b — the invitee CLAIMS the invite addressed to them: `orgVault` routes an
       // `org.invite:agent:*` read to `invite.claim`, where the AGENT derives the key from the session.
       // The address below is not sent — passing one would re-open the hole that op closes.
       const vault = await orgVault(env, org, token);
-      const rec = vault ? ((await vault.get(`org.invite:agent:${person}`)) as { delegation?: typeof mad; status?: string; kin?: string; role?: string } | null) : null;
-      if (rec?.delegation && rec.status !== 'removed') mad = rec.delegation;
+      const rec = vault ? ((await vault.get(`org.invite:agent:${person}`)) as { delegation?: typeof mad; status?: string; kin?: string; role?: string; relationshipOffer?: unknown } | null) : null;
+      if (!mad && rec?.delegation && rec.status !== 'removed') mad = rec.delegation;
+      if (!relationshipOffer && rec?.relationshipOffer && rec.status !== 'removed') relationshipOffer = rec.relationshipOffer;
       if (rec) facets = { ...(typeof rec.kin === 'string' ? { kin: rec.kin } : {}), ...(typeof rec.role === 'string' ? { role: rec.role } : {}) };
     } catch { /* unreachable — membership still records; the grant can be re-looked-up later */ }
   }
@@ -151,5 +156,6 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // The membership stands on the signed grant; this is the organization's own note of it.
     membershipError = e instanceof Error ? e.message : String(e);
   }
-  return json({ ok: true, memberAccess: madValid, membershipRecorded, ...(membershipError ? { membershipError } : {}) });
+  const offerFits = !!relationshipOffer && typeof relationshipOffer === 'object' && String((relationshipOffer as { subject?: string }).subject ?? '').toLowerCase() === person && String((relationshipOffer as { object?: string }).object ?? '').toLowerCase() === org;
+  return json({ ok: true, memberAccess: madValid, membershipRecorded, ...(membershipError ? { membershipError } : {}), ...(offerFits ? { relationshipOffer } : {}) });
 };

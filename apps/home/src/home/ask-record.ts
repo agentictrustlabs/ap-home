@@ -37,6 +37,15 @@ export interface IssuedInvitation {
   invited: true;
   /** Household invitations (spec 368): kinship + role, carried onto the membership at redemption. */
   facets?: { kin?: string; role?: string };
+  /** Spec 410 §8 — the organization's side of the two-sided membership credential (its signature is the approved
+   *  digest), for the invitee to countersign on joining. Absent when the prompt did not approve it — said, not implied. */
+  relationshipOffer?: RelationshipOfferV1;
+}
+/** The organization-signed body of a membership credential, as the invitation carries it (spec 410 §8). */
+export interface RelationshipOfferV1 {
+  type: 'ap.relationship-credential.v1'; kind: 'has-member' | 'steward-of' | 'chartered-under';
+  subject: string; object: string; chainId: number; issuedAt: string; termsDigest: string; edgeRef?: string;
+  terms?: Record<string, unknown>; digest: string; signatures: { object: string };
 }
 
 export function invitationOf(result: unknown): IssuedInvitation | null {
@@ -54,7 +63,7 @@ export async function recordInvitation(inv: IssuedInvitation, sessionToken: stri
   const res = await fetch('/connect/org-invite/agent', {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${sessionToken}` },
-    body: JSON.stringify({ org: inv.org.toLowerCase(), agent: inv.invitee.toLowerCase(), memberAccessDelegation: inv.memberAccessDelegation, ...(inv.facets ?? {}) }),
+    body: JSON.stringify({ org: inv.org.toLowerCase(), agent: inv.invitee.toLowerCase(), memberAccessDelegation: inv.memberAccessDelegation, ...(inv.facets ?? {}), ...(inv.relationshipOffer ? { relationshipOffer: inv.relationshipOffer } : {}) }),
   }).catch((e: unknown) => ({ ok: false, status: 0, json: async () => ({ error: String(e) }) }) as unknown as Response);
   if (!res.ok) {
     const b = (await res.json().catch(() => ({}))) as { error?: string };
