@@ -18,6 +18,8 @@ import { clearStandingGrant } from '../../lib/grant-cache';
 import { setSsoCookie } from '../../lib/sso-cookie';
 import { setFedcmLoginStatus } from '../../context/session';
 import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, isCeremonyTemplate } from './useEnrollReq';
+import { signHashFor } from '../../home/onboarding';
+import { issueAskAsMeDelegation, toWire } from '../../lib/delegation';
 import { listManagedAgents, resolveTreasuryByConvention } from '../../connect-client';
 import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
@@ -128,6 +130,24 @@ export function GoogleEnrollResume() {
     try {
       // SEC-001: server-mint the enrollment grant FIRST; use the registry-derived delegate.
       const { grant_id, delegate } = await beginEnrollmentGrant(enroll, home.name);
+      // Spec 397 / 412 W5 — `ask-as-me` on the Google return: the SAME wire RecognizedEnroll mints — person → the app's
+      // asking key, pinned to harness.ask, time-boxed, signed by the member's Google custodian (KMS) — and NOT the site
+      // grant. This path minted a site-login delegation for every template (found live 2026-09-21: a Google-custodied
+      // publisher's "wire" carried timestamp + value + allowedTargets and no allowedMethods, so her agent refused every
+      // ask and the site could never publish for her).
+      if (enroll.template === 'ask-as-me') {
+        const signHash = await signHashFor('google', home.address, { token });
+        const wire = await issueAskAsMeDelegation(home.address, delegate, signHash);
+        const askCode = await submitEnrollGrant(grant_id, toWire(wire));
+        setSsoCookie(token, 'Google');
+        setFedcmLoginStatus('logged-in');
+        const askTpl = whitelabel.delegationTemplates[enroll.template];
+        recordConnectedApp(home.address, { clientId: enroll.aud, appName, appDomain: appHost, logo: relyingApp?.logo, canDo: askTpl?.canDo ?? [], cannotDo: askTpl?.cannotDo ?? [], grantedAt: Date.now(), expiresAt: askTpl?.expiryDays ? Date.now() + askTpl.expiryDays * 86_400_000 : undefined });
+        setPhase('connected');
+        clearStash();
+        setTimeout(() => deliverEnrollCode(enroll, pending!.popupMode, askCode), 400);
+        return;
+      }
       // spec 272/243 — x402-pay: this OAuth-return path is the TERMINAL leg for every social re-auth
       // (the nameless-connect forced chooser routes here), so it MUST run the payment leg too — it
       // previously connected site-login-only, silently skipping the charge (2026-07-17). Resolve the
