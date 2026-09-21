@@ -1097,3 +1097,93 @@
 .channels-feed-header { background: var(--color-surface); }
 .channels-feed-header strong { font-size: var(--fs-lg); font-weight: 700; color: var(--color-text-primary); }
 .channels-members { background: var(--color-surface-raised); }
+
+/* ── The inbox shape (2026-09-20): one filter row, attention pinned in the rail, conversations by day ─────────── */
+
+/* All · Needs you · Unread — pills only when their count is above zero; the selected one reads as the section. */
+.chat-rail-filters {
+  display: flex;
+  gap: 4px;
+  padding: 0.45rem 0.7rem;
+  border-bottom: 1px solid var(--color-border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.chat-rail-filter {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.chat-rail-filter:hover { color: var(--color-text-primary); background: var(--color-surface-sunken); }
+.chat-rail-filter[aria-selected="true"] { background: var(--color-surface); color: var(--color-text-primary); border-color: var(--color-border); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+.chat-rail-filter__count { font-size: 0.7rem; font-weight: 700; color: var(--color-text-faint); }
+.chat-rail-filter--act .chat-rail-filter__count { background: var(--color-amber-600); color: #fff; border-radius: 999px; padding: 0 6px; line-height: 1.5; }
+
+/* The day sections of the rail: a quiet label, sticky while its rows scroll under it. */
+.chat-rail-group__label {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.35rem 0.85rem 0.2rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-faint);
+  background: var(--color-surface-raised);
+}
+/* An unread conversation is told by weight and a dot, not by a badge alone. */
+.chat-rail-item--unread .chat-rail-item__preview { color: var(--color-text-primary); }
+.chat-rail-item--unread { box-shadow: inset 3px 0 0 var(--color-amber-400); }
+.chat-rail-item--unread.chat-rail-item--active { box-shadow: inset 3px 0 0 var(--color-amber-500), inset 0 0 0 1px var(--color-border); }
+
+/* What needs you, pinned above the conversations: three folded groups, each row one object with one action. */
+.chat-attention-groups { border-bottom: 1px solid var(--color-border); background: var(--color-surface); }
+.chat-attention-group + .chat-attention-group { border-top: 1px solid var(--color-border); }
+.chat-attention-group__head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.45rem 0.85rem;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  text-align: left;
+}
+.chat-attention-group__head:hover { color: var(--color-text-primary); }
+.chat-attention-group__chev { width: 0.8em; color: var(--color-text-faint); }
+.chat-attention-group__label { flex: 1; }
+.chat-attention-group__count { font-weight: 700; color: var(--color-text-faint); }
+.chat-attention-group__count--act { background: var(--color-amber-600); color: #fff; border-radius: 999px; padding: 0 7px; font-size: 0.68rem; line-height: 1.6; }
+.chat-attention-group--needs-you .chat-attention-group__head { color: var(--color-amber-700); }
+.chat-attention-card {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.5rem 0.85rem 0.55rem 1.55rem;
+  border-top: 1px solid var(--color-border);
+}
+.chat-attention-card__body { flex: 1; min-width: 0; }
+.chat-attention-card__title { font-size: 0.86rem; font-weight: 600; color: var(--color-text-primary); text-decoration: none; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-attention-card__title:hover { text-decoration: underline; }
+.chat-attention-card__title--btn { appearance: none; border: 0; background: transparent; padding: 0; font: inherit; font-weight: 600; cursor: pointer; text-align: left; width: 100%; }
+.chat-attention-card__detail { font-size: 0.74rem; color: var(--color-text-muted); margin-top: 0.1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-attention-card__side { flex: none; display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; justify-content: flex-end; max-width: 55%; }

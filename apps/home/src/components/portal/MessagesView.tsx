@@ -24,7 +24,7 @@ import { MessageComposer } from './chat/MessageComposer';
 import { messagePreview } from './chat/message-content';
 import { useAvatar } from './chat/use-avatar';
 import { useManagedAgents } from './ManagedAgents';
-import { railDate } from './chat/rail-date';
+import { railDate, railGroup, type RailGroup } from './chat/rail-date';
 import { RecipientPicker } from './chat/RecipientPicker';
 import type { PickedRecipient } from '../../lib/recipient-directory';
 import { ApproveMessaging } from './ApproveMessaging';
@@ -32,7 +32,8 @@ import { MessagingWireRequiredError } from '../../lib/messaging-send';
 import { isAllowedRelyingOrigin } from '../../lib/oidc-clients';
 import { ShareWayChip, ContinuePaymentChip } from './chat/ActionChips';
 import { SkeletonRows, useReadyReport } from '../../ui';
-import { AttentionBar } from './AttentionBar';
+import { AttentionGroups } from './AttentionBar';
+import { assembleAttention, needsYouCount } from '../../home/attention';
 import { useTodayReads } from '../../home/use-today-inputs';
 import { useMyWork } from './work/useWork';
 import type { AttentionInputs } from '../../home/attention';
@@ -362,11 +363,30 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
     };
   }, [view, reads.parked, reads.artifacts, reads.triggers, reads.vocabulary, bundles, me, dms, titleFor, previewFor, targetAgent]);
 
+  // THE RAIL'S ONE FILTER ROW (inbox shape, 2026-09-20): All · Needs you · Unread. A pill is drawn only when its
+  // count is above zero — a zero is not information, it is noise — and "Needs you" is the one figure this screen
+  // may badge. "Unread" narrows the conversations; "Needs you" shows the attention groups unfolded and nothing else.
+  const [railView, setRailView] = useState<'all' | 'needs-you' | 'unread'>('all');
+  const needsYou = useMemo(() => (attentionInputs ? needsYouCount(assembleAttention(attentionInputs)) : 0), [attentionInputs]);
+  const unreadTotal = useMemo(() => dms.reduce((n, d) => n + (d.unread > 0 ? 1 : 0), 0), [dms]);
+  useEffect(() => { if ((railView === 'needs-you' && needsYou === 0) || (railView === 'unread' && unreadTotal === 0)) setRailView('all'); }, [railView, needsYou, unreadTotal]);
   const filteredDms = useMemo(() => {
     const q = railFilter.trim().toLowerCase();
-    if (!q) return dms;
-    return dms.filter((d) => titleFor(d).toLowerCase().includes(q) || previewFor(d).toLowerCase().includes(q));
-  }, [dms, railFilter, titleFor, previewFor]);
+    const base = railView === 'unread' ? dms.filter((d) => d.unread > 0) : dms;
+    if (!q) return base;
+    return base.filter((d) => titleFor(d).toLowerCase().includes(q) || previewFor(d).toLowerCase().includes(q));
+  }, [dms, railFilter, railView, titleFor, previewFor]);
+  // Conversations grouped by when they last moved — Today · Yesterday · This week · Earlier — each label drawn once.
+  const groupedDms = useMemo(() => {
+    const now = new Date();
+    const out: Array<{ group: RailGroup; dms: typeof filteredDms }> = [];
+    for (const dm of filteredDms) {
+      const g = railGroup(dm.lastEventAt, now);
+      const last = out[out.length - 1];
+      if (last && last.group === g) last.dms.push(dm); else out.push({ group: g, dms: [dm] });
+    }
+    return out;
+  }, [filteredDms]);
 
   useEffect(() => {
     if (!view || !activeDm) return;
@@ -480,16 +500,6 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
       />
       {error && <p style={{ color: 'var(--color-danger)' }}>{error}</p>}
 
-      {/* Spec 398 §5.5 — ATTENTION, NOT NOTIFICATIONS: six filters, one card per object, one action set each. */}
-      {attentionInputs && me && (
-        <AttentionBar
-          inputs={attentionInputs} token={session.token} addressee={me as Address} onCanceled={reads.dropRun}
-          renderCaseActions={(id) => { const c = view?.cases.find((x) => x.id === id); return c ? caseActions(c) : null; }}
-          onOpenDm={openDm}
-          onOpenCase={(id) => { const c = view?.cases.find((x) => x.id === id); const key = c ? dmForCase(c) : null; if (key) openDm(key); }}
-        />
-      )}
-
       {delivery.enabled === false && (
         <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', border: '1px solid var(--color-sage-500)', background: 'var(--color-sage-50)', borderRadius: 10, padding: '0.5rem 0.8rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '0.83rem', color: 'var(--color-sage-700)' }}>
@@ -536,32 +546,53 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
           </div>
           <div className="chat-rail-search">
             <input
-              placeholder="Find a DM…"
+              placeholder="Search conversations"
               value={railFilter}
               onChange={(e) => setRailFilter(e.target.value)}
-              aria-label="Find a direct message"
+              aria-label="Search conversations"
             />
           </div>
+          {(needsYou > 0 || unreadTotal > 0) && (
+            <div className="chat-rail-filters" role="tablist" aria-label="Show">
+              <button type="button" role="tab" className="chat-rail-filter" aria-selected={railView === 'all'} onClick={() => setRailView('all')}>All</button>
+              {needsYou > 0 && <button type="button" role="tab" className="chat-rail-filter chat-rail-filter--act" aria-selected={railView === 'needs-you'} data-testid="attention-needs-you-filter" onClick={() => setRailView('needs-you')}>Needs you<span className="chat-rail-filter__count">{needsYou}</span></button>}
+              {unreadTotal > 0 && <button type="button" role="tab" className="chat-rail-filter" aria-selected={railView === 'unread'} data-testid="attention-unread-filter" onClick={() => setRailView('unread')}>Unread<span className="chat-rail-filter__count">{unreadTotal}</span></button>}
+            </div>
+          )}
           <div className="chat-rail-list">
+            {/* Spec 398 §5.5 — ATTENTION, NOT NOTIFICATIONS, pinned above the conversations: needs you (open) · waiting · finished. */}
+            {attentionInputs && me && railView !== 'unread' && (
+              <AttentionGroups
+                inputs={attentionInputs} token={session.token} addressee={me as Address} onCanceled={reads.dropRun}
+                {...(railView === 'needs-you' ? { only: 'all-open' as const } : {})}
+                renderCaseActions={(id) => { const c = view?.cases.find((x) => x.id === id); return c ? caseActions(c) : null; }}
+                onOpenDm={openDm}
+                onOpenCase={(id) => { const c = view?.cases.find((x) => x.id === id); const key = c ? dmForCase(c) : null; if (key) openDm(key); }}
+              />
+            )}
+            {railView === 'needs-you' ? null : (<>
             {view === null && <div style={{ padding: 8 }}><SkeletonRows rows={6} lead /></div>}
             {view !== null && dms.length === 0 && (
               <p className="chat-rail-empty">
-                No direct messages yet.{' '}
+                No conversations yet.{' '}
                 <button type="button" className="ghost" style={{ display: 'inline', padding: 0, minHeight: 0 }} onClick={startCompose}>Start one</button>
               </p>
             )}
-            {filteredDms.length === 0 && dms.length > 0 && railFilter.trim() ? (
-              <p className="chat-rail-empty">No matches for &ldquo;{railFilter.trim()}&rdquo;</p>
+            {filteredDms.length === 0 && dms.length > 0 && (railFilter.trim() || railView === 'unread') ? (
+              <p className="chat-rail-empty">{railFilter.trim() ? <>No matches for &ldquo;{railFilter.trim()}&rdquo;</> : 'Nothing unread.'}</p>
             ) : null}
-            {filteredDms.map((dm) => {
+            {groupedDms.map(({ group, dms: rows }) => (<div key={group} className="chat-rail-group">
+            <div className="chat-rail-group__label" aria-hidden>{group}</div>
+            {rows.map((dm) => {
               const title = titleFor(dm);
               const isPending = dm.hasPending || (() => { const c = caseFor(dm); return !!c && PENDING_STATES.includes(c.state); })();
               return (
                 <button
                   key={dm.key}
                   type="button"
-                  className={`chat-rail-item${dm.key === activeKey ? ' chat-rail-item--active' : ''}`}
+                  className={`chat-rail-item${dm.key === activeKey ? ' chat-rail-item--active' : ''}${dm.unread > 0 ? ' chat-rail-item--unread' : ''}`}
                   onClick={() => openDm(dm.key)}
+                  aria-label={`${title}${dm.unread > 0 ? `, ${dm.unread} unread` : ''}`}
                 >
                   <DmAvatar addr={dm.counterparties.length === 1 ? dm.counterparties[0]! : null} title={title} />
                   <div className="chat-rail-item__meta">
@@ -580,6 +611,8 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
                 </button>
               );
             })}
+            </div>))}
+            </>)}
           </div>
         </div>
 

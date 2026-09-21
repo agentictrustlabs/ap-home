@@ -1,6 +1,6 @@
 // Spec 398 §5.5 — six filters, each a different thing; a decision is one card wherever it came from.
 import { describe, it, expect } from 'vitest';
-import { assembleAttention, attentionCounts, type AttentionInputs } from './attention';
+import { assembleAttention, attentionCounts, attentionGroups, needsYouCount, type AttentionInputs } from './attention';
 
 const NOW = Date.UTC(2026, 8, 12, 12);
 const ME = 'eip155:34348:0x2222222222222222222222222222222222222222';
@@ -31,5 +31,21 @@ describe('attention (398 §5.5)', () => {
     ] });
     expect(a.decision.map((d) => d.caseId)).toEqual(['c1']);
     expect(a.decision[0]!.state?.state).toBe('awaiting-approval');
+  });
+
+  it('the inbox shows three groups from the six — needs you (open), waiting, finished — and never an empty one', () => {
+    const a = assembleAttention({ ...base(),
+      parked: [
+        { runRef: 'r1', message: 'pay the rent', awaiting: { kind: 'signature', prompt: 'sign', stepRef: 's0' }, updatedAt: NOW, state: 'awaiting-approval' },
+        { runRef: 'r2', message: 'which David?', awaiting: { kind: 'data', prompt: 'which', stepRef: 's0' }, updatedAt: NOW - 5, state: 'awaiting-input' },
+        { runRef: 'r3', message: 'ask the treasury', awaiting: { kind: 'commitment', prompt: 'waiting', stepRef: 's0' }, updatedAt: NOW, state: 'blocked' },
+      ],
+      dms: [{ key: 'dm1', title: 'Bob', unread: 2, lastEventAt: new Date(NOW).toISOString() }],
+    });
+    const g = attentionGroups(a);
+    expect(g.map((x) => `${x.id}:${x.items.length}:${x.open ? 'open' : 'folded'}`)).toEqual(['needs-you:2:open', 'waiting:1:folded']);
+    expect(g[0]!.items.map((i) => i.id)).toEqual(['run:r1', 'run:r2']); // newest first
+    expect(needsYouCount(a)).toBe(2);
+    expect(attentionGroups(assembleAttention(base()))).toEqual([]);
   });
 });

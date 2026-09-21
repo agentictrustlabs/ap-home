@@ -291,8 +291,16 @@ const faithImpact: WhiteLabelConfig = {
         'workspace-member-invite',
         'workspace-join',
         'service-agent-wire',
+        // Spec 397 — the person's wire to field-a2a's OWN key, pinned to harness.ask: Field's Ask, off the
+        // workspace's screens (DMs, Activity, Files), puts the question to the person's own agent as them.
+        'ask-as-me',
       ],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      // The key field-a2a signs A2A-Session assertions with — its AKCS custody key, a DIFFERENT one per
+      // universe (faithnet sets NEXT_PUBLIC_FIELD_ASK_DELEGATE to the 34348 key; the default is
+      // production's). It must equal field-a2a's KMS_SIGNER_ADDRESS or the wire names a key the
+      // Worker cannot present.
+      ask_delegate: (process.env.NEXT_PUBLIC_FIELD_ASK_DELEGATE || '0xb6fb1ce89c3d3d8da7df378ed5cdc6e79cdc9260') as `0x${string}`,
       // field-service.impact — a DIFFERENT SA per identity universe (the faithnet deploy sets
       // NEXT_PUBLIC_FIELD_SERVICE_SA to the SA minted on 34348; default is base-sepolia's).
       operational_delegate:

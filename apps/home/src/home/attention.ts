@@ -67,3 +67,24 @@ export function assembleAttention(input: AttentionInputs): Record<AttentionFilte
 export function attentionCounts(a: Record<AttentionFilter, AttentionItem[]>): Array<{ id: AttentionFilter; label: string; count: number }> {
   return ATTENTION_FILTERS.map((f) => ({ id: f.id, label: f.label, count: a[f.id].length }));
 }
+
+// ─── The inbox's THREE groups (the UX of 2026-09-20) ───────────────────────────────────────────────────────────────
+// Six filters is the MODEL (each a different thing); it is not the SHAPE of the screen. An inbox shows what needs
+// you first, folds what is merely waiting or finished, and treats "unread" as a filter on the conversations, not as
+// a bucket beside them. So the rail renders three groups from the six: NEEDS YOU (decision + input — you act, now),
+// WAITING (blocked + failed routine — you wait, or you look), FINISHED (artifacts — you may look). Unread stays a
+// filter. A group with nothing in it does not appear; a count of zero is never shown.
+export type AttentionGroupId = 'needs-you' | 'waiting' | 'finished';
+export interface AttentionGroup { id: AttentionGroupId; label: string; hint: string; items: AttentionItem[]; /** Open by default: only what needs you. */ open: boolean }
+
+export function attentionGroups(a: Record<AttentionFilter, AttentionItem[]>): AttentionGroup[] {
+  const byTime = (xs: AttentionItem[]) => [...xs].sort((x, y) => (y.at ?? 0) - (x.at ?? 0));
+  const groups: AttentionGroup[] = [
+    { id: 'needs-you', label: 'Needs you', hint: 'a signature, an approval, a question your agent stopped to ask', items: byTime([...a.decision, ...a.input]), open: true },
+    { id: 'waiting', label: 'Waiting', hint: 'on someone else, or a routine that failed its last run', items: byTime([...a.blocked, ...a['failed-routine']]), open: false },
+    { id: 'finished', label: 'Finished', hint: 'what recent runs left in the Library', items: byTime(a.artifact), open: false },
+  ];
+  return groups.filter((g) => g.items.length > 0);
+}
+/** The number that needs the person's act — the one figure an inbox may badge. */
+export const needsYouCount = (a: Record<AttentionFilter, AttentionItem[]>): number => a.decision.length + a.input.length;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { railDate } from './rail-date';
+import { railDate, railGroup } from './rail-date';
 
 const now = new Date(2026, 7, 28, 15, 0, 0); // Fri Aug 28 2026, local
 
@@ -20,5 +20,14 @@ describe('railDate', () => {
   });
   it('is empty for garbage', () => {
     expect(railDate('nope', now)).toBe('');
+  });
+
+  it('railGroup — the rail\'s sections: Today · Yesterday · This week · Earlier', () => {
+    const now = new Date(2026, 8, 20, 15, 0, 0);
+    expect(railGroup(new Date(2026, 8, 20, 9).toISOString(), now)).toBe('Today');
+    expect(railGroup(new Date(2026, 8, 19, 23).toISOString(), now)).toBe('Yesterday');
+    expect(railGroup(new Date(2026, 8, 15).toISOString(), now)).toBe('This week');
+    expect(railGroup(new Date(2026, 8, 1).toISOString(), now)).toBe('Earlier');
+    expect(railGroup('garbage', now)).toBe('Earlier');
   });
 });

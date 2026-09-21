@@ -1,47 +1,43 @@
 'use client';
-// ATTENTION, NOT NOTIFICATIONS — spec 398 §5.5. Six chips above the Messages rail: needs my decision · needs my input ·
-// blocked · failed routine · finished artifact · unread. Each shows a count; one is open at a time; a card is ONE
-// object with ONE action set — an inbox case keeps its approve/decline actions (rendered by the caller), a parked
-// run its cancel, everything else opens where it is acted on. Unread is a filter here, not a badge on a decision.
+// ATTENTION, NOT NOTIFICATIONS — spec 398 §5.5, in the shape of an inbox (2026-09-20). What needs the person sits at
+// the TOP OF THE RAIL, pinned above the conversations, in three folded groups: NEEDS YOU (decisions and questions —
+// open by default), WAITING (on someone else, or a failed routine), FINISHED (artifacts). A group with nothing in it
+// is not drawn; a count of zero is never shown; "unread" is a filter on the conversations, not a group beside them.
+// Each card is ONE object with ONE action set — an inbox case keeps its approve/decline actions (rendered by the
+// caller), a parked run its cancel, everything else opens where it is acted on. Six filters remain the MODEL
+// (`attention.ts`); this is only how the screen folds them.
 import { useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { assembleAttention, attentionCounts, ATTENTION_FILTERS, type AttentionFilter, type AttentionInputs, type AttentionItem } from '../../home/attention';
+import { assembleAttention, attentionGroups, type AttentionGroupId, type AttentionInputs, type AttentionItem } from '../../home/attention';
 import { StatePill } from './StatePill';
 import { RunControls } from './runs/RunControls';
-import { List, Row, Button } from '../../ui';
+import { Button } from '../../ui';
 
-export function AttentionBar({ inputs, token, addressee, onCanceled, renderCaseActions, onOpenDm, onOpenCase }: {
-  inputs: AttentionInputs; token: string; addressee: Address; onCanceled: (runRef: string) => void;
+export function AttentionGroups({ inputs, token, addressee, only, onCanceled, renderCaseActions, onOpenDm, onOpenCase }: {
+  inputs: AttentionInputs; token: string; addressee: Address;
+  /** Show these groups only (the "Needs you" filter shows every group, all unfolded); absent ⇒ the pinned strip. */
+  only?: 'all-open';
+  onCanceled: (runRef: string) => void;
   renderCaseActions: (caseId: string) => React.ReactNode; onOpenDm: (key: string) => void; onOpenCase: (caseId: string) => void;
 }) {
-  const attention = useMemo(() => assembleAttention(inputs), [inputs]);
-  const counts = attentionCounts(attention);
-  const first = counts.find((c) => c.count > 0)?.id ?? null;
-  const [picked, setPicked] = useState<AttentionFilter | null>(null);
-  const open = picked && attention[picked].length > 0 ? picked : first;
-  const total = counts.reduce((n, c) => n + c.count, 0);
-  if (total === 0) return null;
-  const items = open ? attention[open] : [];
-  const hint = ATTENTION_FILTERS.find((f) => f.id === open)?.hint;
+  const groups = useMemo(() => attentionGroups(assembleAttention(inputs)), [inputs]);
+  const [folded, setFolded] = useState<Partial<Record<AttentionGroupId, boolean>>>({});
+  if (groups.length === 0) return null;
   return (
-    <div className="ui-section" data-testid="attention-bar" style={{ marginBottom: 'var(--sp-4)' }}>
-      <div className="ui-toolbar" style={{ marginBottom: 'var(--sp-2)' }}>
-        <div className="ui-tabs" role="tablist" aria-label="What needs your attention">
-          {counts.map((c) => (
-            <button
-              key={c.id} type="button" role="tab" data-testid={`attention-${c.id}`} data-count={c.count}
-              className="ui-tab" aria-selected={open === c.id}
-              onClick={() => setPicked(c.id)} disabled={c.count === 0} title={ATTENTION_FILTERS.find((f) => f.id === c.id)?.hint}
-            >
-              {c.label}<span className="ui-count">{c.count}</span>
+    <div className="chat-attention-groups" data-testid="attention-bar">
+      {groups.map((g) => {
+        const open = only === 'all-open' ? true : (folded[g.id] === undefined ? g.open : !folded[g.id]);
+        return (
+          <section key={g.id} className={`chat-attention-group chat-attention-group--${g.id}`} data-testid={`attention-${g.id}`} data-count={g.items.length}>
+            <button type="button" className="chat-attention-group__head" aria-expanded={open} title={g.hint} onClick={() => setFolded((f) => ({ ...f, [g.id]: open }))} /* folded = it was open */>
+              <span className="chat-attention-group__chev" aria-hidden>{open ? '▾' : '▸'}</span>
+              <span className="chat-attention-group__label">{g.label}</span>
+              <span className={`chat-attention-group__count${g.id === 'needs-you' ? ' chat-attention-group__count--act' : ''}`}>{g.items.length}</span>
             </button>
-          ))}
-        </div>
-        {hint && <span className="ui-meta">{hint}</span>}
-      </div>
-      <List>
-        {items.map((it) => <AttentionRow key={it.id} item={it} token={token} addressee={addressee} onCanceled={onCanceled} renderCaseActions={renderCaseActions} onOpenDm={onOpenDm} onOpenCase={onOpenCase} />)}
-      </List>
+            {open && g.items.map((it) => <AttentionRow key={it.id} item={it} token={token} addressee={addressee} onCanceled={onCanceled} renderCaseActions={renderCaseActions} onOpenDm={onOpenDm} onOpenCase={onOpenCase} />)}
+          </section>
+        );
+      })}
     </div>
   );
 }
@@ -51,14 +47,20 @@ function AttentionRow({ item, token, addressee, onCanceled, renderCaseActions, o
   renderCaseActions: (caseId: string) => React.ReactNode; onOpenDm: (key: string) => void; onOpenCase: (caseId: string) => void;
 }) {
   const href = item.href ?? (item.askSeed ? `/ask?seed=${encodeURIComponent(item.askSeed)}` : undefined);
-  const side = (
-    <>
-      {item.state && <StatePill state={item.state} {...(item.native ? { native: item.native } : {})} compact />}
-      {item.caseId && renderCaseActions(item.caseId)}
-      {item.caseId && <Button size="sm" variant="ghost" onClick={() => onOpenCase(item.caseId!)}>Open thread</Button>}
-      {item.dmKey && <Button size="sm" variant="ghost" onClick={() => onOpenDm(item.dmKey!)}>Open</Button>}
-      {item.runRef && <RunControls token={token} addressee={addressee} runRef={item.runRef} compact onCanceled={() => onCanceled(item.runRef!)} />}
-    </>
+  const open = item.caseId ? () => onOpenCase(item.caseId!) : item.dmKey ? () => onOpenDm(item.dmKey!) : undefined;
+  return (
+    <div className="chat-attention-card" data-testid="attention-card">
+      <div className="chat-attention-card__body">
+        {href ? <a className="chat-attention-card__title" href={href}>{item.title}</a> : open ? <button type="button" className="chat-attention-card__title chat-attention-card__title--btn" onClick={open}>{item.title}</button> : <span className="chat-attention-card__title">{item.title}</span>}
+        {item.detail && <div className="chat-attention-card__detail">{item.detail}</div>}
+      </div>
+      <div className="chat-attention-card__side">
+        {item.state && <StatePill state={item.state} {...(item.native ? { native: item.native } : {})} compact />}
+        {item.caseId && renderCaseActions(item.caseId)}
+        {item.caseId && <Button size="sm" variant="ghost" onClick={() => onOpenCase(item.caseId!)}>Thread</Button>}
+        {item.dmKey && <Button size="sm" variant="ghost" onClick={() => onOpenDm(item.dmKey!)}>Open</Button>}
+        {item.runRef && <RunControls token={token} addressee={addressee} runRef={item.runRef} compact onCanceled={() => onCanceled(item.runRef!)} />}
+      </div>
+    </div>
   );
-  return <Row title={item.title} meta={item.detail} side={side} {...(href ? { titleHref: href } : {})} testId="attention-card" />;
 }

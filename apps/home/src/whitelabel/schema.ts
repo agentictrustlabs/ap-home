@@ -75,6 +75,10 @@ export interface RelyingApp {
    *  treated as untrusted hint and MUST match this. Address format: 0x-prefixed 20-byte hex.
    *  (SEC-001 closure — the broker no longer accepts attacker-chosen delegates.) */
   delegate: `0x${string}`;
+  /** Spec 397 — the key an `ask-as-me` wire names for THIS client when it is not `delegate`: an app that
+   *  holds a site delegate for sign-in but asks the person's agent from a DIFFERENT key (a Worker's own
+   *  custody key that signs `A2A-Session` assertions). Absent ⇒ `delegate`, as the Home MCP's entry has it. */
+  ask_delegate?: `0x${string}`;
   /** spec 294 — when true, a social (OIDC) sign-in under THIS client_id yields a KMS-CUSTODIED
    *  Smart Agent directly (custody-grade), instead of the default login-grade relying-app path
    *  where members onboard via the Personal Home. A deliberate, registered exception for

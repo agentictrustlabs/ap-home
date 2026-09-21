@@ -299,6 +299,13 @@ mobile). The filter model on `/messages`: **needs my decision · needs my input 
 finished artifact · unread**. A card is one object with one action set; approving from email and from Home resolve
 the same record (T16: no duplicate or stale cards). Presence, mentions and subscriptions are G2+ (APUX-021).
 
+**The shape on screen (2026-09-20) is an inbox, not a filter bar.** The six remain the MODEL (`home/attention.ts`);
+the rail folds them into three groups pinned above the conversations — **Needs you** (decision + input, open by
+default; the one count the screen badges), **Waiting** (blocked + failed routine, folded), **Finished** (artifacts,
+folded) — and one filter row, **All · Needs you · Unread**, where a pill appears only when its count is above zero.
+Unread is a filter on the conversations (bold, a dot, the badge) and never a group beside them. Conversations are
+sectioned by day (Today · Yesterday · This week · Earlier). A zero is never drawn; an empty group is not a group.
+
 ---
 
 ## 6. Memory, artifacts and the Library
