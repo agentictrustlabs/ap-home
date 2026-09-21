@@ -27,7 +27,9 @@ type Source = 'blob' | 'graphdb' | 'vault' | 'external';
 type Sort = 'name' | 'kind' | 'newest' | 'freshness';
 type AccessMode = 'Owned' | 'Read-through' | 'Replica' | 'Public' | 'Projection';
 type Freshness = 'Live' | 'Signed' | 'Cached' | 'Stale' | 'Unavailable';
-type Lens = 'vault' | 'shared' | 'public';
+// Where you are: your own vault (navigated by FOLDER) or the place other vaults granted you into. "Public" is not a place —
+// it is a property of a file or folder — so it is a FILTER on wherever you are, never a third lens.
+type Lens = 'vault' | 'shared';
 interface Grant { grantee: { address: string; kind: string; label?: string }; actions: string[]; grantedAt: number; revoked?: boolean; entitlementId?: string; resource?: string; signed?: boolean; inheritedFrom?: string; delegation?: { caveats?: unknown[] } }
 interface Release { canonicalId: string; version: string; bundleRoot: string; owner: string; publisher: string; riskTier: string; releaseId: string; signed: boolean; publishedAt: number }
 type AccessPolicy = 'public' | 'private';
@@ -145,6 +147,9 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<Sort>('name');
   const [kindFilter, setKindFilter] = useState<Kind | 'all'>('all');
+  // Spec 412 — "Public only": the entries anyone can read, across the whole vault (a shelf is flat; a folder's public
+  // word shows on each document under it as its own chip).
+  const [publicOnly, setPublicOnly] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
   const cwd = path.join('/');
@@ -194,6 +199,7 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
 
   const tree = useMemo(() => buildTree(items), [items]);
   const allFolders = useMemo(() => ['', ...flattenPaths(tree).sort()], [tree]);
+  const publicCount = useMemo(() => items.filter((a) => !a.isFolder && a.effectiveAccessPolicy === 'public').length, [items]);
   const selected = useMemo(() => [...items, ...sharedItems].find((x) => x.id === selectedId) ?? null, [items, sharedItems, selectedId]);
 
   // The current lens's rows. `vault` = your own vault at the current folder (or a search across it);
@@ -201,9 +207,7 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
   const q = query.trim().toLowerCase();
   const searching = q.length > 0;
   const rows = useMemo(() => {
-    // Spec 412 — the PUBLIC SHELF lens: what anyone can read of this vault, served by its agent — the entries whose
-    // effective policy is public, flat (a folder's public word shows on each document under it as its own chip).
-    if (lens === 'public') return items.filter((a) => a.effectiveAccessPolicy === 'public' && !a.isFolder && (!searching || a.name.toLowerCase().includes(q))).sort((a, b) => b.createdAt - a.createdAt);
+    if (lens === 'vault' && publicOnly) return items.filter((a) => a.effectiveAccessPolicy === 'public' && !a.isFolder && (!searching || a.name.toLowerCase().includes(q)) && (kindFilter === 'all' || a.kind === kindFilter)).sort((a, b) => b.createdAt - a.createdAt);
     const source = lens === 'shared' ? sharedItems : items;
     let arr = lens === 'shared'
       ? (searching ? source.filter((a) => a.name.toLowerCase().includes(q)) : source)
@@ -232,7 +236,7 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
         : sort === 'freshness' ? freshnessOf(a).localeCompare(freshnessOf(b))
         : a.name.localeCompare(b.name);
     });
-  }, [items, sharedItems, lens, cwd, q, searching, sort, kindFilter]);
+  }, [items, sharedItems, lens, cwd, q, searching, sort, kindFilter, publicOnly]);
 
   // actions
   const select = (id: string | null) => setSelectedId(id);
@@ -295,8 +299,7 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
       {/* Explicit text color so every descendant inherits a defined token — never a white ambient
           (e.g. a browser/OS dark-mode default) on our light surfaces. */}
       <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', color: 'var(--color-text-body)' }}>
-        <ScopeRail lens={lens} onLens={(l) => { setLens(l); setSelectedId(null); setPath([]); }} orgLabel={orgSa ? shortAddr(orgSa) : undefined} ownerLabel={ownerLabel} sharedCount={0}
-          items={items} path={path} onGo={goTo} />
+        <FolderRail lens={lens} onLens={(l) => { setLens(l); setSelectedId(null); setPath([]); setPublicOnly(false); }} items={items} path={path} onGo={(segs) => { setLens('vault'); setPublicOnly(false); goTo(segs); }} />
 
         <div style={{ flex: 1, minWidth: 0 }}>
           {/* toolbar */}
@@ -328,9 +331,16 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
           )}
 
           {/* filters */}
-          {lens !== 'public' && (
+          {(
             <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem', flexWrap: 'wrap', marginBottom: '.5rem' }}>
               <Tabs value={kindFilter} onChange={setKindFilter} label="Kind" items={(['all', ...KINDS] as const).map((k) => ({ id: k, label: k === 'all' ? 'All' : KIND_META[k].plural }))} />
+              {lens === 'vault' && (
+                <button type="button" aria-pressed={publicOnly} data-testid="public-only" onClick={() => setPublicOnly((v) => !v)}
+                  title="Only what anyone can read — served by your own agent; the same list a stranger gets"
+                  style={{ ...btnSty, display: 'inline-flex', alignItems: 'center', gap: 5, ...(publicOnly ? { background: 'var(--color-surface-sunken)', borderColor: 'var(--color-text-faint)' } : {}) }}>
+                  <Icon name="public" size={13} />Public only{publicCount > 0 ? ` · ${publicCount}` : ''}
+                </button>
+              )}
               <div style={{ flex: 1 }} />
               <span style={{ ...mutedText, fontSize: 12 }}>Sort</span>
               <select style={{ ...inputSty, fontSize: 12, padding: '.3rem .4rem' }} value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
@@ -347,7 +357,7 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
           {/* list + detail */}
           <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              {lens === 'public' && rows.length === 0
+              {lens === 'vault' && publicOnly && rows.length === 0 && !loading
                 ? <PublicShelfEmpty shelfHref={shelfHref} />
                 : (lens === 'vault' && loading) || (lens === 'shared' && sharedLoading) ? <LibrarySkeleton />
                 : rows.length === 0 ? (
@@ -485,25 +495,12 @@ function FolderTree({ nodes, path, onGo, counts }: {
   );
 }
 
-function ScopeRail({ lens, onLens, orgLabel, ownerLabel, sharedCount, items, path, onGo }: {
-  lens: Lens; onLens: (l: Lens) => void; orgLabel?: string; ownerLabel: string; sharedCount: number;
-  items: Artifact[]; path: string[]; onGo: (segs: string[]) => void;
+/** A path no folder can have (a folder name never holds a slash), so the tree lights nothing while a place outside it is open. */
+const NOWHERE = ['/'];
+
+function FolderRail({ lens, onLens, items, path, onGo }: {
+  lens: Lens; onLens: (l: Lens) => void; items: Artifact[]; path: string[]; onGo: (segs: string[]) => void;
 }) {
-  const publicCount = items.filter((a) => !a.isFolder && a.effectiveAccessPolicy === 'public').length;
-  const item = (key: Lens, icon: IconName, label: string, sub: string) => {
-    const on = lens === key;
-    return (
-      <button key={key} role="option" aria-selected={on} onClick={() => onLens(key)}
-        style={{ display: 'flex', gap: '.55rem', alignItems: 'flex-start', width: '100%', textAlign: 'left', padding: '.5rem .6rem', border: 'none', cursor: 'pointer', minHeight: 0, borderRadius: 0, filter: 'none',
-          borderLeft: `3px solid ${on ? 'var(--color-amber-500)' : 'transparent'}`, background: on ? 'var(--color-surface-sunken)' : 'transparent', color: 'var(--color-text-primary)' }}>
-        <Icon name={icon} size={17} style={{ marginTop: 1 }} />
-        <span style={{ minWidth: 0 }}>
-          <span style={{ display: 'block', fontWeight: on ? 700 : 600, fontSize: 13 }}>{label}</span>
-          <span style={{ display: 'block', ...mutedText, fontSize: 11 }}>{sub}</span>
-        </span>
-      </button>
-    );
-  };
   // One pass over the artifacts rather than a scan per node: a vault with many folders would
   // otherwise walk the whole list once for every row it draws.
   const fileCounts = useMemo(() => {
@@ -514,29 +511,32 @@ function ScopeRail({ lens, onLens, orgLabel, ownerLabel, sharedCount, items, pat
   const heading = (s: string) => (
     <div style={{ ...mutedText, fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', padding: '.3rem .7rem' }}>{s}</div>
   );
+  const sharedOn = lens === 'shared';
   return (
-    <div role="listbox" aria-label="Scope" style={{ ...cardSty, padding: '.4rem 0', width: 232, flexShrink: 0, color: 'var(--color-text-body)' }}>
-      {heading('Scope')}
-      {orgLabel
-        ? item('vault', 'org', ownerLabel === 'This organization' ? 'This organization' : orgLabel, 'Organization vault · Steward')
-        : item('vault', 'vault', 'My vault', 'Everything you keep')}
-      {item('shared', 'shared', 'Shared with me', sharedCount > 0 ? `${sharedCount} grants from others` : 'What others granted you')}
-      {item('public', 'public', 'Public shelf', publicCount > 0 ? `${publicCount} anyone can read` : 'What anyone can read')}
-      {/* The tree belongs to the VAULT lens — "shared with me" and "public releases" are flat inbound
-          views with no folder hierarchy of their own to walk. */}
-      {lens === 'vault' && (
-        <>
-          <div style={{ borderTop: '1px solid var(--color-border)', margin: '.4rem 0' }} />
-          {heading('Folders')}
-          <FolderTree nodes={buildTree(items).children} path={path} onGo={onGo} counts={fileCounts} />
-        </>
-      )}
+    <div aria-label="Folders" style={{ ...cardSty, padding: '.4rem 0', width: 232, flexShrink: 0, color: 'var(--color-text-body)' }}>
+      {heading('Folders')}
+      {/* THE FOLDERS ARE THE NAVIGATION. The vault is a tree; "public" is a property a file or folder carries (a
+          filter above the list, a chip on the row), and the workspace switcher in the header already says whose
+          vault this is — so there is no scope rail to explain, only the tree and one mounted place beneath it. */}
+      <FolderTree nodes={buildTree(items).children} path={sharedOn ? NOWHERE : path} onGo={onGo} counts={fileCounts} />
+      <div style={{ borderTop: '1px solid var(--color-border)', margin: '.4rem 0' }} />
+      {/* Shared with me: a PLACE, not a folder of yours — what other vaults granted you into, flat, read live from theirs. */}
+      <div role="treeitem" aria-selected={sharedOn} tabIndex={0} data-testid="shared-place"
+        onClick={() => onLens('shared')}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onLens('shared'); } }}
+        style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 13, padding: '.28rem .5rem',
+          background: sharedOn ? 'var(--color-surface-sunken)' : 'transparent', color: 'var(--color-text-primary)', fontWeight: sharedOn ? 600 : 500 }}
+        title="What other vaults granted you — read live from theirs, never copied here">
+        <span style={{ width: 12, flexShrink: 0 }} />
+        <Icon name="shared" size={14} style={{ flexShrink: 0, color: 'var(--color-text-muted)' }} />
+        <span style={{ flex: 1 }}>Shared with me</span>
+      </div>
     </div>
   );
 }
 
 function Breadcrumb({ lens, path, onGo }: { lens: Lens; path: string[]; onGo: (segs: string[]) => void }) {
-  if (lens !== 'vault') return <b style={{ fontSize: 14 }}>{lens === 'shared' ? 'Shared with me' : 'Public shelf'}</b>;
+  if (lens !== 'vault') return <b style={{ fontSize: 14 }}>Shared with me</b>;
   return (
     <nav aria-label="Breadcrumb" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 14, flexWrap: 'wrap' }}>
       <button style={crumbSty} onClick={() => onGo([])}>All items</button>
