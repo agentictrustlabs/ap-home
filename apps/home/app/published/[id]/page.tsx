@@ -40,14 +40,17 @@ export default async function PublishedDocumentPage({ params, searchParams }: Pa
     );
   }
   const { file, text, bytesB64, contentType } = r.value;
-  const { meta, body } = splitFrontMatter(text ?? '');
+  const { meta, body: rawBody } = splitFrontMatter(text ?? '');
   const title = meta.title || file.name.replace(/\.(md|json|jsonld|ttl)$/i, '');
   const isMarkdown = file.kind === 'md' || /markdown/.test(file.contentType ?? '');
+  // The frame already says the title: a body that opens with the same `# title` would say it twice. Headings inside
+  // the body sit under the page's own h1, so each is rendered one level down.
+  const body = rawBody.replace(new RegExp(`^\\s*#\\s+${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\n`), '');
   return (
     <ShelfFrame label={label} title={title}>
       <section data-testid="shelf-document" data-id={file.id}>
         {meta.summary && <p className="about-lede">{meta.summary}</p>}
-        {typeof text === 'string' && isMarkdown && <div className="published-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown></div>}
+        {typeof text === 'string' && isMarkdown && <div className="published-body"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ h1: ({ children }) => <h2>{children}</h2>, h2: ({ children }) => <h3>{children}</h3>, h3: ({ children }) => <h4>{children}</h4> }}>{body}</ReactMarkdown></div>}
         {typeof text === 'string' && !isMarkdown && <pre style={{ whiteSpace: 'pre-wrap', fontSize: '.85rem' }}>{text}</pre>}
         {typeof bytesB64 === 'string' && /^image\//.test(contentType ?? '') && <img alt={file.name} src={`data:${contentType};base64,${bytesB64}`} style={{ maxWidth: '100%' }} />}
         {typeof bytesB64 === 'string' && !/^image\//.test(contentType ?? '') && <p>{file.name} — {contentType ?? file.kind}, {file.size ?? '?'} bytes; not rendered here.</p>}
