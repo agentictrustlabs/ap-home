@@ -24,7 +24,7 @@
 // SEC-001 closure.
 
 import { getServer, json, resolveOrigin, type FnContext } from '../_lib/server-broker';
-import { clientAllowsRedirect, clientAllowsTemplate, getClientDelegate } from '../../src/lib/oidc-clients';
+import { clientAllowsRedirect, clientAllowsTemplate, getClientDelegateFor } from '../../src/lib/oidc-clients';
 // Curated white-label entries AND member-registered ones, in that order (server/_lib/oidc-registry.ts).
 import { resolveClient, isAllowedRelyingOriginAsync } from '../_lib/oidc-registry';
 import { sharesProfileName } from '../../src/lib/new-member';
@@ -116,7 +116,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       // not from the request. The SPA reads this back in the response and uses it when
       // constructing the delegation; /oidc/grant verifies the supplied delegation's
       // delegate equals this stored value.
-      delegate: getClientDelegate(client),
+      delegate: getClientDelegateFor(client, body.delegation_template),
       code_challenge: body.code_challenge,
       nonce: body.nonce ?? '',
       delegation_template: body.delegation_template,
@@ -124,7 +124,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     }),
     { expirationTtl: GRANT_TTL_SEC },
   );
-  return json({ grant_id, delegate: getClientDelegate(client), expires_in: GRANT_TTL_SEC });
+  return json({ grant_id, delegate: getClientDelegateFor(client, body.delegation_template), expires_in: GRANT_TTL_SEC });
 };
 
 function generateGrantId(): string {

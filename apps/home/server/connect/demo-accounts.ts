@@ -108,8 +108,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // person → the client's key, pinned to harness.ask. A template the registry does not allow the client is refused.
   const template = (body?.delegation_template ?? '').trim();
   if (template && !clientAllowsTemplate(client, template)) return json({ error: `delegation_template "${template}" not allowed for ${clientId}` }, 400);
+  const askDelegate = (client.ask_delegate ?? client.delegate) as Address; // spec 397: the app's asking key, when it has one
   const delegation = template === 'ask-as-me'
-    ? await issueAskAsMeDelegation(sa, client.delegate as Address, signHash)
+    ? await issueAskAsMeDelegation(sa, askDelegate, signHash)
     : await issueSiteDelegation(sa, client.delegate as Address, signHash, SITE_DELEGATION_TTL);
   const digest = hashDelegation(delegation, CHAIN_ID, CONTRACTS.delegationManager);
   // Spec 397 W4 — a person-level app wire (ask-as-me) is listed under Connected assistants like a browser-made one,
@@ -118,7 +119,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     const key = `app-grants:${sa.toLowerCase()}`;
     const rows = JSON.parse((await env.AUTH_CODES.get(key)) ?? '[]') as Array<{ clientId: string }>;
     const next = rows.filter((r) => r.clientId !== clientId);
-    next.unshift({ clientId, template, delegate: client.delegate, delegation: toWire(delegation), issuedAt: Date.now() } as never);
+    next.unshift({ clientId, template, delegate: askDelegate, delegation: toWire(delegation), issuedAt: Date.now() } as never);
     await env.AUTH_CODES.put(key, JSON.stringify(next.slice(0, 50)));
   }
 

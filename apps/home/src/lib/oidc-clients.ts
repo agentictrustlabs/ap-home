@@ -71,3 +71,9 @@ export function isAllowedRelyingOrigin(redirectUri: string): boolean {
 export function getClientDelegate(client: OidcClient): `0x${string}` {
   return client.delegate;
 }
+
+/** Spec 397 — the delegate a grant under `template` binds to: the client's `ask_delegate` for `ask-as-me`
+ *  when the registry names one, else the site delegate. The registry decides, never the request. */
+export function getClientDelegateFor(client: OidcClient, template: string | undefined): `0x${string}` {
+  return template === 'ask-as-me' && client.ask_delegate ? client.ask_delegate : client.delegate;
+}
