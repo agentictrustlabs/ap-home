@@ -9,6 +9,7 @@ import { routinesOf, keepRoutine, dropRoutine, ROUTINES_RECORD, type DeclaredRou
 import { parseRoutineSentence, routineWords } from './routine-sentence.js';
 import { requirePersonsTurn } from './persons-turn.js';
 import type { TriggerScheduleV1 } from './triggers.js';
+import { ADAPTER, CARRIES } from './adapter-declarations.js';
 
 export const ROUTINE_DECLARE = 'person.routine.declare' as const;
 export const ROUTINE_LIST = 'person.routine.list' as const;
@@ -26,7 +27,7 @@ export const ROUTINE_TOOLS: ToolSpec[] = [
       + 'firing runs as her agent holding nothing — a read answers and is delivered to her, an act parks for her mandate. It authorizes nothing.',
     inputSchema: { type: 'object', properties: { sentence: { type: 'string', description: 'The whole sentence, clock and all' }, name: { type: 'string', description: 'A short name (optional)' } }, required: ['sentence'] },
     capability: { id: ROUTINE_DECLARE, action: 'declare', resourceArg: 'record', authorityArg: 'holder' },
-    risk: 'low',
+    risk: 'low', adapter: ADAPTER.sync, carries: CARRIES.routine,
     selfAuthorized: true,
     interaction: { navigationTarget: 'routines' },
   },
@@ -44,7 +45,7 @@ export const ROUTINE_TOOLS: ToolSpec[] = [
     description: 'REMOVES one routine the person declared — by id (from person.routine.list) or by words it contains. A playbook\'s routine cannot be removed this way.',
     inputSchema: { type: 'object', properties: { id: { type: 'string' }, words: { type: 'string' } } },
     capability: { id: ROUTINE_REMOVE, action: 'remove', resourceArg: 'record', authorityArg: 'holder' },
-    risk: 'low',
+    risk: 'low', adapter: ADAPTER.sync,
     selfAuthorized: true,
     interaction: { navigationTarget: 'routines' },
   },

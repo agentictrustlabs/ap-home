@@ -11,7 +11,7 @@
 // THE SAME MECHANISM, THE PERSON'S WORD. `person.contact.invite` is the organization's invitation with the person as
 // the principal: the mandate's delegator is the person themselves (self — canGrant), the grant is theirs to the
 // contact, the record lands in their vault. The invoker below is thin on purpose; what differs is named.
-import { ADAPTER } from './adapter-declarations.js';
+import { ADAPTER, CARRIES } from './adapter-declarations.js';
 import { contractsGenerationOf } from '@agenticprimitives/agent-account';
 import { encodeFunctionData, keccak256, toBytes, type Address, type Hex } from 'viem';
 import { InputRequired, signatureFor, type ToolInvoker, type ToolSpec, type MandatePresentation, type SuppliedInputV1 } from '@agenticprimitives/orchestration';
@@ -31,7 +31,7 @@ export const CONTACT_RESOURCE_SCOPE = 'vault:profile.contact';
 
 export const CONTACT_INVITE_TOOL: ToolSpec = {
   id: CONTACT_INVITE_CAPABILITY,
-  adapter: ADAPTER.sync,
+  adapter: ADAPTER.sync, carries: CARRIES.contact,
   verbs: ['add as a contact', 'add contact', 'add to my contacts', 'make a contact', 'befriend'],
   establishes: 'submission',
   description:

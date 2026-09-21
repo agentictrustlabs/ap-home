@@ -15,6 +15,7 @@ import type { Address } from 'viem';
 import type { ToolInvoker, ToolSpec } from '@agenticprimitives/orchestration';
 import { deriveStanding, relationshipRows, subjectOfRead, type StandingDeps } from '@agenticprimitives/context';
 import type { CoordinationEventV1 } from '@agenticprimitives/coordination';
+import { ADAPTER, CARRIES } from './adapter-declarations.js';
 import {
   COORDINATION_INDEX_RESOURCE, coordinationEventsResource, reduceEventLog, visibleEndeavorRows, endeavorViewFor,
   type CoordinationIndexDocV1,
@@ -68,7 +69,7 @@ export const ENDEAVOR_REQUEST_TOOL: ToolSpec = {
   // the harness's default would spend the ORGANIZATION's mandate to ask the organization something. The acting
   // party is declared — the requester, resolved to the asker (an ontology party role, never the room they stand in).
   capability: { id: ENDEAVOR_REQUEST_CAPABILITY, action: 'request', resourceArg: 'org', authorityArg: 'requester' },
-  risk: 'medium',
+  risk: 'medium', adapter: ADAPTER.sync, carries: CARRIES.coordination,
   establishes: 'submission',
 };
 
@@ -83,7 +84,7 @@ export const CONTRIBUTION_PROPOSE_TOOL: ToolSpec = {
   // member's offer, which a member cannot grant and a steward should not. The acting party is declared: the
   // proposer, resolved to the asker (ontology party role, never the room they stand in).
   capability: { id: CONTRIBUTION_PROPOSE_CAPABILITY, action: 'propose', resourceArg: 'org', authorityArg: 'proposer' },
-  risk: 'medium',
+  risk: 'medium', adapter: ADAPTER.sync,
   establishes: 'submission',
 };
 
@@ -94,7 +95,7 @@ export const CONTRIBUTION_ALLOCATE_TOOL: ToolSpec = {
   description: 'Allocate an endeavor\'s plan steps to a participant who proposed for them — the organization\'s decision, made by a steward. Args: org, endeavorId, proposalRef (prop_…), participant (the person), steps.',
   inputSchema: { type: 'object', properties: { ...ORG_ARG, endeavorId: { type: 'string' }, proposalRef: { type: 'string', description: 'The proposal being allocated (prop_…).' }, participant: { type: 'string', description: 'The person allocated — address or name.' }, steps: { type: 'array', items: { type: 'string' } } }, required: ['org', 'endeavorId', 'proposalRef', 'participant', 'steps'] },
   capability: { id: CONTRIBUTION_ALLOCATE_CAPABILITY, action: 'allocate', resourceArg: 'org', authorityArg: 'org' },
-  risk: 'medium',
+  risk: 'medium', adapter: ADAPTER.sync,
   establishes: 'authoritative',
 };
 
@@ -105,7 +106,7 @@ export const ENDEAVOR_SATISFY_TOOL: ToolSpec = {
   description: 'Mark an endeavor satisfied — its outcome confirmed and the work closed. Args: org, endeavorId, note (what was achieved). The organization\'s act, by a steward or the endeavor\'s coordinator.',
   inputSchema: { type: 'object', properties: { ...ORG_ARG, endeavorId: { type: 'string' }, note: { type: 'string', description: 'What came of it, in a sentence.' } }, required: ['org', 'endeavorId'] },
   capability: { id: ENDEAVOR_SATISFY_CAPABILITY, action: 'satisfy', resourceArg: 'org', authorityArg: 'org' },
-  risk: 'medium',
+  risk: 'medium', adapter: ADAPTER.sync,
   establishes: 'authoritative',
 };
 
@@ -116,7 +117,7 @@ export const MILESTONE_ACHIEVE_TOOL: ToolSpec = {
   description: 'Record a milestone of an endeavor\'s adopted plan as ACHIEVED, with a note of how its criteria were met. Args: org, endeavorId, milestoneId (from the plan), note. The organization\'s act by a steward, or the participant\'s own; the record refuses a milestone the plan does not define or one already achieved.',
   inputSchema: { type: 'object', properties: { ...ORG_ARG, endeavorId: { type: 'string' }, milestoneId: { type: 'string', description: 'The milestone id from the adopted plan.' }, note: { type: 'string', description: 'How the criteria were met, in a sentence — the achievement evidence.' } }, required: ['org', 'endeavorId', 'milestoneId'] },
   capability: { id: MILESTONE_ACHIEVE_CAPABILITY, action: 'achieve', resourceArg: 'org', authorityArg: 'org' },
-  risk: 'medium',
+  risk: 'medium', adapter: ADAPTER.sync,
   establishes: 'authoritative',
 };
 
@@ -127,7 +128,7 @@ export const STEP_SATISFY_TOOL: ToolSpec = {
   description: 'Record ONE plan step of an endeavor as SATISFIED, with a note of what was done — the completion evidence. Args: org, endeavorId, stepId (from the adopted plan), note. By the organization\'s steward or an active participant (the one doing the work); the record refuses a step the plan does not name. Not the endeavor itself — coordination.endeavor.satisfy closes the whole endeavor.',
   inputSchema: { type: 'object', properties: { ...ORG_ARG, endeavorId: { type: 'string' }, stepId: { type: 'string', description: 'The step_* id from the adopted plan.' }, note: { type: 'string', description: 'What was done, in a sentence — the completion evidence.' } }, required: ['org', 'endeavorId', 'stepId', 'note'] },
   capability: { id: STEP_SATISFY_CAPABILITY, action: 'satisfy', resourceArg: 'org', authorityArg: 'org' },
-  risk: 'medium',
+  risk: 'medium', adapter: ADAPTER.sync,
   establishes: 'authoritative',
 };
 
@@ -138,7 +139,7 @@ export const COMMITMENT_WITHDRAW_TOOL: ToolSpec = {
   description: 'WITHDRAW a commitment the person made on an endeavor — their promise taken back, the step returned to the pool for someone else. Args: org, endeavorId, commitmentId (the commit_* id of their own commitment), note (why, in a sentence — kept as the reason). Only the committed participant; the record refuses anyone else.',
   inputSchema: { type: 'object', properties: { ...ORG_ARG, endeavorId: { type: 'string' }, commitmentId: { type: 'string', description: 'The commit_* id of the commitment being withdrawn.' }, note: { type: 'string', description: 'Why, in a sentence.' } }, required: ['org', 'endeavorId', 'commitmentId'] },
   capability: { id: COMMITMENT_WITHDRAW_CAPABILITY, action: 'withdraw', resourceArg: 'org', authorityArg: 'org' },
-  risk: 'medium',
+  risk: 'medium', adapter: ADAPTER.sync,
   establishes: 'authoritative',
 };
 
@@ -149,7 +150,7 @@ export const COMMITMENT_REALLOCATE_TOOL: ToolSpec = {
   description: 'REALLOCATE a committed (or withdrawn) contribution on an endeavor to another participant — a NEW allocation they must commit to themselves; nothing is granted. Args: org, endeavorId, commitmentId (the commit_* id being moved), participant (the resolved agent address it moves to). A steward\'s act as the organization.',
   inputSchema: { type: 'object', properties: { ...ORG_ARG, endeavorId: { type: 'string' }, commitmentId: { type: 'string', description: 'The commit_* id of the contribution being moved.' }, participant: { type: 'string', description: 'The agent it moves to (resolve the person first).' } }, required: ['org', 'endeavorId', 'commitmentId', 'participant'] },
   capability: { id: COMMITMENT_REALLOCATE_CAPABILITY, action: 'reallocate', resourceArg: 'org', authorityArg: 'org' },
-  risk: 'medium',
+  risk: 'medium', adapter: ADAPTER.sync,
   establishes: 'authoritative',
 };
 
@@ -160,7 +161,7 @@ export const DECISION_REQUEST_TOOL: ToolSpec = {
   description: 'Raise a DECISION on an endeavor for named approvers — who may decide is declared now, and only they can record it. Args: org, endeavorId, title (what is being decided), approvers (the resolved agent addresses who may decide — the organization\'s own address names the organization, decided by a steward as it), decisionKind (plan-change, spend, go-no-go …), summary, stepIds (the plan steps it concerns), dueAt. The organization\'s act by a steward, or an active participant\'s own.',
   inputSchema: { type: 'object', properties: { ...ORG_ARG, endeavorId: { type: 'string' }, title: { type: 'string', description: 'What is being decided, as a question or a short statement.' }, approvers: { type: 'array', items: { type: 'string' }, description: 'The agent addresses that may decide (resolve people first; the organization\'s address names the organization).' }, decisionKind: { type: 'string' }, summary: { type: 'string' }, stepIds: { type: 'array', items: { type: 'string' } }, dueAt: { type: 'string', description: 'ISO timestamp; a record after it is refused as expired.' } }, required: ['org', 'endeavorId', 'title', 'approvers'] },
   capability: { id: DECISION_REQUEST_CAPABILITY, action: 'request', resourceArg: 'org', authorityArg: 'org' },
-  risk: 'medium',
+  risk: 'medium', adapter: ADAPTER.sync,
   establishes: 'authoritative',
 };
 
@@ -171,7 +172,7 @@ export const DECISION_RECORD_TOOL: ToolSpec = {
   description: 'Record a decision on a pending decision request of an endeavor — approved, rejected or deferred, with the reason. Only a DECLARED approver may record it (a steward records as the organization only when the organization was named); approved and rejected close the request for good, deferred leaves it pending. Args: org, endeavorId, decisionId, outcome, reason.',
   inputSchema: { type: 'object', properties: { ...ORG_ARG, endeavorId: { type: 'string' }, decisionId: { type: 'string', description: 'The dec_* id from the endeavor\'s decisions.' }, outcome: { type: 'string', enum: ['approved', 'rejected', 'deferred'] }, reason: { type: 'string', description: 'Why — kept as the record\'s rationale.' } }, required: ['org', 'endeavorId', 'decisionId', 'outcome', 'reason'] },
   capability: { id: DECISION_RECORD_CAPABILITY, action: 'record', resourceArg: 'org', authorityArg: 'org' },
-  risk: 'medium',
+  risk: 'medium', adapter: ADAPTER.sync,
   establishes: 'authoritative',
 };
 

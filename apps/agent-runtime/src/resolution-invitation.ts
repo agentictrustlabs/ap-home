@@ -16,6 +16,7 @@
 // would be a second delivery path to secure. The typed body is what makes it a request rather than prose.
 import type { ToolSpec } from '@agenticprimitives/orchestration';
 import type { Address } from 'viem';
+import { ADAPTER } from './adapter-declarations.js';
 
 /** The record family a person's held grants and pending requests live in, in their own vault. */
 export const RESOLUTION_REQUESTS_RECORD = 'resolution.requests';
@@ -110,7 +111,7 @@ export const RESOLUTION_REQUEST_TOOL: ToolSpec = {
   },
   // The request is SENT AS the asker, so it is bounded like any other act of theirs.
   capability: { id: 'resolution.invitation.request', action: 'request', resourceArg: 'owner', authorityArg: 'requester' },
-  risk: 'low',
+  risk: 'low', adapter: ADAPTER.sync,
 };
 
 /** A grant of the right type that has not expired. SHAPE ONLY — see `verifiedGrants` for the rest. */

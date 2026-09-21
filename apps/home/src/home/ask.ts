@@ -688,6 +688,9 @@ export async function mintApprovedMandate(
     delegationManager: CONTRACTS.delegationManager, timestamp: CONTRACTS.timestampEnforcer,
     allowedTargets: CONTRACTS.allowedTargetsEnforcer, allowedMethods: CONTRACTS.allowedMethodsEnforcer,
     value: CONTRACTS.valueEnforcer, payment: CONTRACTS.paymentEnforcer, digestBinding: CONTRACTS.digestBindingEnforcer,
+    // Spec 410 §7 — the payload-classes caveat, on an estate that deployed its enforcer (generation 3). A requirement
+    // that names payload classes on an estate without it cannot be minted honestly, and the handler says so.
+    ...(/^0x0{40}$/i.test(CONTRACTS.payloadClassesEnforcer) ? {} : { payloadClasses: CONTRACTS.payloadClassesEnforcer }),
   };
   const handler = reply.requirement.type === PAYMENT_TYPE ? paymentHandler : capabilityHandler;
   const caveats: Caveat[] = [

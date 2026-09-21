@@ -62,7 +62,7 @@ import { CONTACT_INVITE_TOOL, CONTACT_LIST_TOOL, CONTACT_REMOVE_TOOL, contactInv
 import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
 import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
-import { ADAPTER } from './adapter-declarations.js';
+import { ADAPTER, CARRIES } from './adapter-declarations.js';
 import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance } from '@agenticprimitives/orchestration';
 import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, standingFor, declareInstruction, forgetInstruction, instructionContextOf, STANDING_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
@@ -288,7 +288,7 @@ export const ACCESS_AUDIT_TOOL: ToolSpec = {
 export const INVITE_TOOL: ToolSpec = {
   id: ORG_INVITE_CAPABILITY,
 
-  adapter: ADAPTER.sync,
+  adapter: ADAPTER.sync, carries: CARRIES.membership,
   verbs: ['invite', 'add', 'bring'],
   // Spec 367 §6 — an invitation is recorded, never a membership: the invitee's joining establishes that.
   establishes: 'submission',
@@ -363,7 +363,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   {
     id: 'treasury.payment.execute',
 
-    adapter: ADAPTER.chain,
+    adapter: ADAPTER.chain, carries: CARRIES.payment,
     verbs: ['send', 'pay', 'transfer', 'wire'],
     description: 'Pay USDC from one treasury (or organization) to another. Requires a payment mandate from the PAYER. Args: payer (the paying treasury/org SA — whose authority this needs), payee (recipient SA, NAME, or the words the person used — "bob", "my daughter", "sarah" all work: the payee is resolved from the asker\'s own household and links, so pass what they said), usdc (the amount AS THE PERSON SAID IT, in whole USDC — "20", "12.50"; never smallest units, never converted).',
     inputSchema: {
@@ -410,7 +410,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   {
     id: 'messaging.direct.send',
 
-    adapter: ADAPTER.sync,
+    adapter: ADAPTER.sync, carries: CARRIES.message,
     verbs: ['message', 'text', 'write to', 'tell', 'dm', 'send a message', 'send a note'],
     description:
       'Send a DIRECT MESSAGE to another agent — a person, an organization, anyone with an inbox. Use this '
@@ -434,7 +434,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   {
     id: 'messaging.topic.post',
 
-    adapter: ADAPTER.sync,
+    adapter: ADAPTER.sync, carries: CARRIES.message,
     verbs: ['post in', 'post to the topic', 'reply in the topic', 'answer in the thread', 'say in the topic'],
     description:
       'POST IN A TOPIC of an organization — a reply in the thread where something was said to you (spec 400 W2: a '
@@ -568,7 +568,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     // only from the person's supplied yes (the 385 trusted-event rule): a planner's reading of "from now on"
     // writes nothing.
     id: STANDING_INSTRUCTION_CAPABILITY,
-    adapter: ADAPTER.sync,
+    adapter: ADAPTER.sync, carries: CARRIES.instruction,
     verbs: ['from now on', 'always', 'by default', 'default to', 'standing instruction', 'stop defaulting', 'no longer default'],
     description:
       'Keep a STANDING INSTRUCTION — this person\'s own default for an argument of one of their acts, in this room. '
@@ -680,7 +680,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
       required: ['parent'],
     },
     capability: { id: capability, action: 'create', resourceArg: 'parent' },
-    risk: 'medium',
+    risk: 'medium', adapter: ADAPTER.chain,
   })),
 ];
 
@@ -3828,6 +3828,10 @@ async function askReplyForInner(env: HarnessEnv, input: {
       ...r.required,
       args,
       capability: { ...r.required.capability, ...(resource ? { resource } : {}) },
+      // Spec 410 §7 — what the write CARRIES reaches the requirement only where the estate can enforce it (the
+      // PayloadClassesEnforcer, generation 3). Elsewhere the requirement names no payload classes: a caveat nobody
+      // can redeem is not minted, and the Home is not asked to sign a mandate its chain would refuse.
+      ...(env.PAYLOAD_CLASSES_ENFORCER ? {} : { carries: undefined }),
     };
     // BEFORE asking anyone to authorize this: is it already impossible? Walking a person through a
     // signature for a payment their account cannot cover is the same wrong as asking them to grant

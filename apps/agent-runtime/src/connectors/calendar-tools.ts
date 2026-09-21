@@ -2,7 +2,7 @@
 // an act (add an event) needs HER mandate (`authorityArg: holder`, the person the connector belongs to). The token is
 // hers, kept by the Worker, read by nothing but these; the harness's receipt is the record of each act. Whoever asks
 // — her Home, Claude through the Home MCP, a paired runtime — gets the harness's answer AS her, never the token.
-import { ADAPTER } from '../adapter-declarations.js';
+import { ADAPTER, CARRIES } from '../adapter-declarations.js';
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import { calendarStatus, listEvents, createEvent, deleteEvent } from './google-calendar.js';
 
@@ -31,7 +31,7 @@ export const CALENDAR_TOOLS: ToolSpec[] = [
   },
   {
     id: CALENDAR_EVENT_CREATE,
-    adapter: ADAPTER.external,
+    adapter: ADAPTER.external, carries: CARRIES.event,
     verbs: ['add to my calendar', 'put on my calendar', 'schedule', 'book time', 'create an event', 'block off'],
     description: 'ADDS ONE EVENT to the person\'s Google Calendar under her mandate: summary, start and end (ISO; `allDay` with dates), optional location, description, attendee emails. Never edits or deletes.',
     inputSchema: { type: 'object', properties: { summary: { type: 'string' }, start: { type: 'string' }, end: { type: 'string' }, allDay: { type: 'boolean' }, location: { type: 'string' }, description: { type: 'string' }, attendees: { type: 'array', items: { type: 'string' } }, ...holderArg }, required: ['summary', 'start', 'end'] },

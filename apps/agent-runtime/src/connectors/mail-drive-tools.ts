@@ -3,7 +3,7 @@
 // top of the ladder — a signature, fresh each time, because mail that leaves as her is her acting. Never delete, never
 // write a file. Whoever asks — her Home, Claude through the Home MCP, a paired runtime — gets the harness's answer as
 // her, never the token.
-import { ADAPTER } from '../adapter-declarations.js';
+import { ADAPTER, CARRIES } from '../adapter-declarations.js';
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import { searchThreads, readThread, createDraft, sendMessage, deleteDraft } from './google-gmail.js';
 import { searchFiles, readFile } from './google-drive.js';
@@ -37,7 +37,7 @@ export const MAIL_DRIVE_TOOLS: ToolSpec[] = [
   },
   {
     id: GMAIL_DRAFT_CREATE,
-    adapter: ADAPTER.external,
+    adapter: ADAPTER.external, carries: CARRIES.mail,
     verbs: ['draft a reply', 'draft an email', 'write an email to', 'prepare a reply', 'draft a message to'],
     description: 'WRITES A DRAFT in the person\'s Gmail under her mandate — to, subject, body; `threadId` to draft a reply in a thread. It is a draft: nothing is sent; she sends from Gmail herself.',
     inputSchema: { type: 'object', properties: { to: { type: 'string' }, subject: { type: 'string' }, body: { type: 'string' }, threadId: { type: 'string' }, cc: { type: 'string' }, ...holderArg }, required: ['to', 'subject', 'body'] },
@@ -47,7 +47,7 @@ export const MAIL_DRIVE_TOOLS: ToolSpec[] = [
   },
   {
     id: GMAIL_MESSAGE_SEND,
-    adapter: ADAPTER.external,
+    adapter: ADAPTER.external, carries: CARRIES.mail,
     verbs: ['send an email to', 'email the', 'send the draft', 'send it', 'send that email', 'send the email', 'reply to the email saying', 'send a reply'],
     description: 'SENDS MAIL from the person\'s Gmail as her, under her SIGNATURE for this one message: either `draftId` (a draft she reviewed goes as it is — from gmail.draft.create) or `to`, `subject`, `body` whole (`threadId` to reply in a thread, `cc`). It leaves her account as her: the receipt names the sent message. Never for someone else\'s mail.',
     inputSchema: { type: 'object', properties: { draftId: { type: 'string', description: 'A draft to send as it is' }, to: { type: 'string' }, subject: { type: 'string' }, body: { type: 'string' }, threadId: { type: 'string' }, cc: { type: 'string' }, ...holderArg } },
@@ -60,7 +60,7 @@ export const MAIL_DRIVE_TOOLS: ToolSpec[] = [
     description: 'DISCARDS ONE DRAFT in the person\'s Gmail under her mandate — by `draftId` (from the draft receipt). The undo of gmail.draft.create; nothing sent is touched.',
     inputSchema: { type: 'object', properties: { draftId: { type: 'string' }, ...holderArg }, required: ['draftId'] },
     capability: { id: GMAIL_DRAFT_DELETE, action: 'delete', resourceArg: 'holder', authorityArg: 'holder' },
-    risk: 'low',
+    risk: 'low', adapter: ADAPTER.external,
   },
   {
     id: DRIVE_FILES_SEARCH,

@@ -3,7 +3,7 @@
 // Worker's per-subject secret; the harness's receipt is the record of each act. The review loop's four verbs:
 // open (a branch, a change, a PR bound to this run's intent), comment (review), read (evidence: checks, reviews),
 // merge (PROMOTION — refused unless the mandate's intent names the PR and the intent the work was opened under).
-import { ADAPTER } from '../adapter-declarations.js';
+import { ADAPTER, CARRIES } from '../adapter-declarations.js';
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import { intentDigest } from '@agenticprimitives/delegation';
 import { githubApi, githubTokenFor, parseRepo, readRepo, listRepositories, openPullRequest, commentOnPullRequest, readPullRequest, mergePullRequest, type GithubEnv } from './github.js';
@@ -35,7 +35,7 @@ export const GITHUB_TOOLS: ToolSpec[] = [
   },
   {
     id: GITHUB_PR_OPEN,
-    adapter: ADAPTER.external,
+    adapter: ADAPTER.external, carries: CARRIES.prOpen,
     verbs: ['open a pull request', 'open a pr', 'propose the change', 'push the change', 'start the work on'],
     description: 'OPENS A PULL REQUEST on GitHub for a piece of work: a branch off the default branch, the files given written on it, and a PR whose body names the INTENT this run acts under and the run — what a later promotion is bound to. Args: repo (owner/name), branch, title, body, files (optional: [{path, content}]), workItem (optional: the endeavor step), holder (whose connector — the organization).',
     inputSchema: { type: 'object', properties: { repo: { type: 'string' }, branch: { type: 'string' }, title: { type: 'string' }, body: { type: 'string' }, files: { type: 'array', items: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } }, workItem: { type: 'string' }, ...holderArg }, required: ['repo', 'branch', 'title'] },
@@ -45,7 +45,7 @@ export const GITHUB_TOOLS: ToolSpec[] = [
   },
   {
     id: GITHUB_PR_COMMENT,
-    adapter: ADAPTER.external,
+    adapter: ADAPTER.external, carries: CARRIES.prComment,
     verbs: ['comment on the pull request', 'review the pr', 'leave a review comment', 'say on the pr'],
     description: 'COMMENTS on a pull request — a review in the thread where the work is. Args: repo (owner/name), number, body, holder (whose connector).',
     inputSchema: { type: 'object', properties: { repo: { type: 'string' }, number: { type: 'integer' }, body: { type: 'string' }, ...holderArg }, required: ['repo', 'number', 'body'] },

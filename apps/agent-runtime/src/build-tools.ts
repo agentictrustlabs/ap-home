@@ -10,6 +10,7 @@
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import type { BuildArtifactRecordV1 } from '@agenticprimitives/harness';
 import { GITHUB_PR_OPEN } from './connectors/github-tools.js';
+import { ADAPTER, CARRIES } from './adapter-declarations.js';
 import { intentDigest } from '@agenticprimitives/delegation';
 import { githubApi, githubTokenFor, parseRepo, readPullRequest, mergePullRequest, type GithubEnv } from './connectors/github.js';
 
@@ -31,7 +32,7 @@ export const BUILD_TOOLS: ToolSpec[] = [
     inputSchema: { type: 'object', properties: { repository: { type: 'string', description: 'owner/name' }, task: { type: 'string' }, base: { type: 'string' }, workItem: { type: 'string' }, ...workspaceArg }, required: ['repository', 'task'] },
     // The mandate's resource is the WORKSPACE agent (the repository is attached to it; its name rides in the bound intent).
     capability: { id: BUILD_RUN, action: 'build', resourceArg: 'workspace', authorityArg: 'workspace' },
-    risk: 'medium',
+    risk: 'medium', adapter: ADAPTER.external, carries: CARRIES.build,
     establishes: 'submission',
   },
   {
@@ -47,7 +48,7 @@ export const BUILD_TOOLS: ToolSpec[] = [
     description: 'PROMOTES one build run (spec 398 §9.4, B5): merges the pull request opened from it into the repository\'s default branch — the environment — under a mandate BOUND to the exact tuple: the ask must name the build run AND the commit it lands (from build.review). Refused while the forge\'s checks fail or run, when no pull request was opened from the run, or when the tuple the ask names is not the one on the forge. Leaves a promotion record. Args: runId, commit (the PR head sha from build.review), workspace.',
     inputSchema: { type: 'object', properties: { runId: { type: 'string' }, commit: { type: 'string', description: 'The PR head commit (7+ hex) the promotion is bound to' }, ...workspaceArg }, required: ['runId', 'commit'] },
     capability: { id: BUILD_PROMOTE, action: 'promote', resourceArg: 'workspace', authorityArg: 'workspace' },
-    risk: 'high',
+    risk: 'high', adapter: ADAPTER.external,
     establishes: 'authoritative',
   },
   {

@@ -7,6 +7,7 @@
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import { rememberFact, forgetFact, factsOf, FACTS_RECORD, type RememberedFactsV1 } from '@agenticprimitives/context';
 import { requirePersonsTurn } from './persons-turn.js';
+import { ADAPTER, CARRIES } from './adapter-declarations.js';
 
 export const MEMORY_REMEMBER = 'person.memory.remember' as const;
 export const MEMORY_LIST = 'person.memory.list' as const;
@@ -22,7 +23,7 @@ export const MEMORY_REMEMBER_TOOL: ToolSpec = {
     + 'sentences, in their words), tags (optional words like family, work). It authorizes nothing and is theirs alone.',
   inputSchema: { type: 'object', properties: { fact: { type: 'string', description: 'The fact, in the person\'s words' }, tags: { type: 'array', items: { type: 'string' } }, source: { type: 'string', enum: ['you', 'connector'], description: 'connector when the fact was read off a connected account the person confirmed' }, from: { type: 'string', description: 'Which account, when source is connector (Google Calendar)' } }, required: ['fact'] },
   capability: { id: MEMORY_REMEMBER, action: 'remember', resourceArg: 'record', authorityArg: 'holder' },
-  risk: 'low',
+  risk: 'low', adapter: ADAPTER.sync, carries: CARRIES.memory,
   selfAuthorized: true,
   interaction: { navigationTarget: 'memory' },
 };
@@ -42,7 +43,7 @@ export const MEMORY_FORGET_TOOL: ToolSpec = {
   description: 'FORGETS one remembered fact about the person asking — by its id (from person.memory.list) or by the words it contains. A receipt that cited the fact keeps its citation; the fact is no longer used.',
   inputSchema: { type: 'object', properties: { id: { type: 'string' }, words: { type: 'string', description: 'Words the fact contains, when the id is not known' } } },
   capability: { id: MEMORY_FORGET, action: 'forget', resourceArg: 'record', authorityArg: 'holder' },
-  risk: 'low',
+  risk: 'low', adapter: ADAPTER.sync,
   selfAuthorized: true,
   interaction: { navigationTarget: 'memory' },
 };

@@ -4,6 +4,7 @@
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import { preferencesOf, setPreferences, PREFERENCES_RECORD } from '@agenticprimitives/context';
 import { requirePersonsTurn } from './persons-turn.js';
+import { ADAPTER, CARRIES } from './adapter-declarations.js';
 
 export const PREFERENCES_SET = 'person.preferences.set' as const;
 export const PREFERENCES_GET = 'person.preferences.get' as const;
@@ -15,7 +16,7 @@ export const PREFERENCES_TOOLS: ToolSpec[] = [
     description: 'SETS how the person\'s own agent answers and reaches her: style ("brief" | "full"), language (a language name), callMe (what to call her), emailNudges (may it email her reminders and acts waiting for her signature — default yes), routineEmails (email routine answers too — default no). Only the fields she named change; a field set to the word "clear" is cleared. Hers alone; authorizes nothing.',
     inputSchema: { type: 'object', properties: { style: { type: 'string', enum: ['brief', 'full', 'clear'] }, language: { type: 'string' }, callMe: { type: 'string' }, emailNudges: { type: 'string', description: 'yes | no' }, routineEmails: { type: 'string', description: 'yes | no' } } },
     capability: { id: PREFERENCES_SET, action: 'set', resourceArg: 'record', authorityArg: 'holder' },
-    risk: 'low',
+    risk: 'low', adapter: ADAPTER.sync, carries: CARRIES.preferences,
     selfAuthorized: true,
     interaction: { navigationTarget: 'settings' },
   },

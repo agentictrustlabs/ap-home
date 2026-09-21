@@ -3,7 +3,9 @@ import { describe, it, expect } from 'vitest';
 import { isToolInvocationResult } from '@agenticprimitives/orchestration';
 import { ROOT_AUTHORITY, intentDigest, hashDelegation } from '@agenticprimitives/delegation';
 import { keccak256, toBytes, type Address, type Hex } from 'viem';
-import { observeResult, harnessReconcilePort, receiverRunRefFor, STANDING_INSTRUCTION_CAPABILITY } from '../src/harness-run.js';
+import { observeResult, harnessReconcilePort, receiverRunRefFor, STANDING_INSTRUCTION_CAPABILITY, HARNESS_ACTION_TOOLS } from '../src/harness-run.js';
+import { ADAPTER } from '../src/adapter-declarations.js';
+import { PAYLOAD_CLASS_IDS } from '@agenticprimitives/ontology';
 
 const obs = (v: unknown) => { const r = observeResult('t', v); if (!isToolInvocationResult(r)) throw new Error('expected an observation'); return r.observation; };
 
@@ -45,6 +47,33 @@ describe('observeResult — each family says what it can vouch for', () => {
     expect(isToolInvocationResult(observeResult('t', 'a string'))).toBe(false);
     const already = { output: 1, observation: { outcome: 'committed', observedAt: 't', evidence: [] } };
     expect(observeResult('t', already)).toBe(already);
+  });
+});
+
+describe('spec 410 §2 — every consequential built-in declares its adapter', () => {
+  it('no tool with a risk above informational is offered without saying what its adapter can vouch for', () => {
+    const undeclared = HARNESS_ACTION_TOOLS.filter((t) => t.risk && t.risk !== 'informational' && !t.adapter).map((t) => t.id);
+    expect(undeclared).toEqual([]);
+    // And every declaration is one of the four families — a fifth is a decision, not a typo.
+    const families = new Set(Object.values(ADAPTER));
+    expect(HARNESS_ACTION_TOOLS.filter((t) => t.adapter && !families.has(t.adapter)).map((t) => t.id)).toEqual([]);
+  });
+});
+
+describe('spec 410 §7 — what each built-in write carries is declared in the published vocabulary, on arguments it has', () => {
+  it('every carries entry names a payload class the ontology publishes and an argument the tool\'s schema declares', () => {
+    const published = new Set(PAYLOAD_CLASS_IDS);
+    const bad: string[] = [];
+    for (const t of HARNESS_ACTION_TOOLS) {
+      const props = ((t.inputSchema as { properties?: Record<string, unknown> } | undefined)?.properties) ?? {};
+      for (const [arg, classes] of Object.entries(t.carries ?? {})) {
+        if (!(arg in props)) bad.push(`${t.id}: carries.${arg} is not an argument of the tool`);
+        for (const c of classes) if (!published.has(c)) bad.push(`${t.id}: carries.${arg} names ${c}, which tbox/payload.ttl does not publish`);
+      }
+    }
+    expect(bad).toEqual([]);
+    // The writes that carry the person's words or money say so: the honest floor, never left undeclared.
+    for (const id of ['messaging.direct.send', 'messaging.topic.post', 'treasury.payment.execute']) expect(HARNESS_ACTION_TOOLS.find((t) => t.id === id)?.carries, id).toBeTruthy();
   });
 });
 
