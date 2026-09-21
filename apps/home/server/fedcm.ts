@@ -23,6 +23,9 @@ import {
   type FedcmAccount,
 } from '@agenticprimitives/fedcm-idp';
 import { importJwks, verifyAgentSession, mintIdToken } from '@agenticprimitives/connect';
+import { nameClaimForIdToken, sharesProfileName } from '../src/lib/new-member';
+import { sharesEmailClaim } from '../src/whitelabel/provisioning';
+import { readCapabilityRecord } from './lib/capability-record';
 import type { Address, CredentialPrincipal } from '@agenticprimitives/types';
 import { whitelabel } from '../src/whitelabel/config';
 // Curated white-label entries AND member-registered ones (server/_lib/oidc-registry.ts).
@@ -263,6 +266,19 @@ export const onAssertion = async ({ request, env }: FnContext): Promise<Response
 
   const { signer } = await getServer(env);
   const iss = resolveOrigin(request, env);
+  // THE SAME CLAIMS THE POPUP LANE MINTS. A silent resume is most people's token most of the time, and it carried the
+  // handle alone — so an app the registry scopes for `profile` / `email` saw a name on its first connect and nothing on
+  // every return (Source Publishing's "Your name" and "Email" came back empty, 2026-09-21). The human name and the
+  // sign-in email are read from the person's own profile record under the session FedCM just verified, gated exactly
+  // as /oidc/authorize-grant gates them: the registry, never the request.
+  const shares = { name: sharesProfileName(client), email: sharesEmailClaim(client) };
+  let profileName = ''; let profileEmail = '';
+  if (shares.name || shares.email) {
+    const addr = addressFromSub(hs.sub);
+    const rec = addr ? await readCapabilityRecord<{ firstName?: string; lastName?: string; email?: string }>(env, addr, hs.custodyToken, 'impact-profile').catch(() => null) : null;
+    if (shares.name) profileName = [rec?.firstName, rec?.lastName].filter((x) => typeof x === 'string' && x.trim()).join(' ').trim().slice(0, 80);
+    if (shares.email) profileEmail = String(rec?.email ?? '').trim().toLowerCase().slice(0, 254);
+  }
   const idToken = await mintIdToken(
     {
       iss,
@@ -270,7 +286,9 @@ export const onAssertion = async ({ request, env }: FnContext): Promise<Response
       aud: parsed.clientId,
       ttlSeconds: ID_TOKEN_TTL,
       nonce: parsed.nonce,
-      agentName: hs.name ?? undefined,
+      agentName: nameClaimForIdToken(hs.name ?? undefined, profileName),
+      ...(profileName ? { name: profileName } : {}),
+      ...(profileEmail ? { email: profileEmail } : {}),
     },
     signer,
   );
