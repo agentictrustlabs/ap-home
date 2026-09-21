@@ -20,6 +20,13 @@ import { connectorStatus, disconnectConnector, type GoogleProvider } from './con
 import { queryOps } from './ops-index.js';
 import { anchorCallData, bundleDigest, readAnchor } from './receipt-anchor.js';
 import { relationshipCredentialDigest, verifyRelationshipCredential, relationshipCredentialRecordType, type RelationshipCredentialBodyV1, type RelationshipCredentialV1 } from '@agenticprimitives/agent-relationships';
+import { openDispute, appendDisputeExchange, disputeRecordType, runDisputeRecordType, runDisputePointer, type DisputeInteractionV1, type DisputeExchangeV1 } from './dispute.js';
+import { stewardTermCurie, decodeStewardTerm } from '@agenticprimitives/ontology';
+/** Spec 410 §10 — the term registry's two reads a dispute needs to know who the steward is. */
+const TERM_REGISTRY_READ_ABI = [
+  { type: 'function', name: 'getTerm', stateMutability: 'view', inputs: [{ name: 'id', type: 'bytes32' }], outputs: [{ type: 'tuple', components: [{ name: 'id', type: 'bytes32' }, { name: 'curie', type: 'string' }, { name: 'uri', type: 'string' }, { name: 'label', type: 'string' }, { name: 'datatype', type: 'string' }, { name: 'active', type: 'bool' }, { name: 'registeredAt', type: 'uint256' }] }] },
+  { type: 'function', name: 'isRegistered', stateMutability: 'view', inputs: [{ name: 'id', type: 'bytes32' }], outputs: [{ type: 'bool' }] },
+] as const;
 import { rebuildOpsIndex } from './run-records.js';
 import { BUDGET_RECORD, budgetOf, overBudget, budgetCounters, countAsk } from './agent-budget.js';
 import { probeMcpServer, keepMcpToken, dropMcpToken, toolsDiff, MCP_CONNECTOR_PREFIX, isMcpConnectorRecord, mcpToolId, type McpConnectorRecordV1 } from './connectors/mcp-connector.js';
@@ -43,7 +50,7 @@ import {
   csrfTokenFor,
   verifyCsrf,
 } from '@agenticprimitives/connect-auth';
-import { createPublicClient, createWalletClient, http, parseEther, encodeFunctionData, toHex, keccak256, toBytes, recoverAddress } from 'viem';
+import { createPublicClient, createWalletClient, http, parseEther, encodeFunctionData, toHex, keccak256, toBytes, stringToBytes, recoverAddress } from 'viem';
 import { buildCustodyDescriptor, type CustodyDescriptor } from '@agenticprimitives/related-agents';
 import {
   decodeGatewayAssertionToken,
@@ -651,6 +658,8 @@ export interface Env {
   PAYLOAD_CLASSES_ENFORCER?: string;
   /** Spec 410 §7 — TreasurySpendPolicy (generation 3): read for `remaining()` before a payment is offered for signature. */
   TREASURY_SPEND_POLICY?: string;
+  /** Spec 410 §10 — the OntologyTermRegistry: who stewards what, read for a dispute's determination. */
+  ONTOLOGY_TERM_REGISTRY?: string;
   /** Spec 410 §10 — the ontology manifest digest the estate adopted by governance; absent ⇒ the package's own. */
   ADOPTED_ONTOLOGY_MANIFEST_DIGEST?: string;
   /** Spec 406 W2 — the ReceiptAnchorRegistry on this chain; absent ⇒ runs are not anchored (said on the report). */
@@ -3225,6 +3234,72 @@ app.post('/relationships/credential/accept', async (c) => {
   const w = await deps.writeSharedRecord([credential.subject, credential.object], relationshipCredentialRecordType(digest), credential, `relationship:${digest}`);
   if (!w.ok) return c.json({ ok: false, error: w.error }, 502);
   return c.json({ ok: true, digest, recordType: relationshipCredentialRecordType(digest) });
+});
+
+// ─── Spec 410 §10 — THE DISPUTE PATH ──────────────────────────────────────────────────────────────────────
+// POST /harness/dispute { session, receipt: { agent, runRef, stepRef?, receiptDigest?, capability? }, counterparty,
+//   opening: <signed REQUEST exchange> } — the disputant opens an interaction under `dispute/1.0.0` citing the
+//   receipt. Held in BOTH parties' vaults as one record (`writeSharedRecord`), with a pointer from the run.
+// POST /harness/dispute/exchange { session, interactionId, holder, exchange } — the counterparty's answer or the
+//   steward's determination, appended after every gate: the author's signature against its Smart Agent, the role's
+//   right to the performative, the steward as the REGISTRY names (a public read of `ONTOLOGY_TERM_REGISTRY`).
+// Nothing here grants or reverses: a determination is evidence the provenance links.
+app.post('/harness/dispute', async (c) => {
+  const validator = c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
+  if (!validator) return c.json({ ok: false, error: 'the signature validator is not configured' }, 503);
+  const body = (await c.req.json().catch(() => null)) as { session?: string; receipt?: DisputeInteractionV1['receipt']; counterparty?: string; opening?: DisputeExchangeV1 } | null;
+  if (!body?.session || !body.receipt?.agent || !body.receipt.runRef || !body.counterparty || !body.opening) return c.json({ ok: false, error: 'session, receipt {agent, runRef}, counterparty and the signed opening exchange are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const me = String(who.sa).toLowerCase() as Address;
+  if (!/^0x[0-9a-fA-F]{40}$/.test(body.counterparty) || !/^0x[0-9a-fA-F]{40}$/.test(body.receipt.agent)) return c.json({ ok: false, error: 'counterparty and receipt.agent must be addresses' }, 400);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  const verifySig = async (signer: Address, d: Hex, sig: Hex) => (await deps.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [signer, d, sig] })) === true;
+  const opened = await openDispute({ receipt: body.receipt, disputant: me, counterparty: body.counterparty.toLowerCase() as Address, opening: body.opening, now: () => new Date() }, verifySig);
+  if (!opened.ok) return c.json({ ok: false, error: opened.reason }, 403);
+  if (!deps.writeSharedRecord || !deps.writeSubjectRecord) return c.json({ ok: false, error: 'this deployment cannot write a shared record' }, 503);
+  const ix = opened.interaction;
+  const w = await deps.writeSharedRecord([ix.parties.disputant, ix.parties.counterparty], disputeRecordType(ix.id), ix, `dispute:${ix.id}:open`);
+  if (!w.ok) return c.json({ ok: false, error: w.error }, 502);
+  const p = await deps.writeSubjectRecord(me, runDisputeRecordType(ix.receipt.runRef), runDisputePointer(ix), `dispute:${ix.id}:pointer`).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+  // The counterparty is TOLD (spec 360 — an effect never fails the act): a message from the disputant's own agent.
+  const told = deps.sendDirectMessage ? await deps.sendDirectMessage({ sender: me, recipient: ix.parties.counterparty, bodyText: `${me} disputes a receipt of run ${ix.receipt.runRef}${ix.receipt.stepRef ? ` (step ${ix.receipt.stepRef})` : ''}: “${body.opening.words.slice(0, 400)}” — dispute ${ix.id}`, session: body.session, operationId: `dispute:${ix.id}:tell` }).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) })) : { ok: false as const, error: 'this deployment cannot send a message' };
+  return c.json({ ok: true, interaction: ix, recordType: disputeRecordType(ix.id), pointer: { recordType: runDisputeRecordType(ix.receipt.runRef), written: p.ok, ...(!p.ok && 'error' in p ? { error: p.error } : {}) }, told });
+});
+app.post('/harness/dispute/exchange', async (c) => {
+  const validator = c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
+  if (!validator) return c.json({ ok: false, error: 'the signature validator is not configured' }, 503);
+  const body = (await c.req.json().catch(() => null)) as { session?: string; interactionId?: string; holder?: string; exchange?: DisputeExchangeV1 } | null;
+  if (!body?.session || !body.interactionId || !body.holder || !body.exchange) return c.json({ ok: false, error: 'session, interactionId, holder (a party whose copy to read) and the signed exchange are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const me = String(who.sa).toLowerCase() as Address;
+  if (String(body.exchange.author).toLowerCase() !== me) return c.json({ ok: false, error: 'you sign your own exchanges only' }, 403);
+  const deps = harnessDeps(c.env, buildAuditSink(c.env));
+  if (!deps.readSubjectRecord || !deps.writeSharedRecord || !deps.writeSubjectRecord) return c.json({ ok: false, error: 'this deployment cannot read or write the interaction' }, 503);
+  const holder = String(body.holder).toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(holder)) return c.json({ ok: false, error: 'holder must be an address' }, 400);
+  const current = (await deps.readSubjectRecord(holder, disputeRecordType(body.interactionId)).catch(() => null)) as DisputeInteractionV1 | null;
+  if (!current || current.type !== 'ap.dispute-interaction.v1') return c.json({ ok: false, error: 'no such dispute in that party\'s vault' }, 404);
+  if (holder !== current.parties.disputant && holder !== current.parties.counterparty) return c.json({ ok: false, error: 'the holder is not a party to this dispute' }, 403);
+  const verifySig = async (signer: Address, d: Hex, sig: Hex) => (await deps.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [signer, d, sig] })) === true;
+  const registry = (c.env.ONTOLOGY_TERM_REGISTRY ?? '').toLowerCase();
+  const stewardOf = async (subject: string): Promise<Address | null> => {
+    if (!/^0x[0-9a-f]{40}$/.test(registry)) return null; // no registry configured ⇒ no steward can be named (said by the refusal)
+    const id = keccak256(stringToBytes(stewardTermCurie(subject)));
+    const registered = (await deps.readContract({ address: registry as Address, abi: TERM_REGISTRY_READ_ABI, functionName: 'isRegistered', args: [id] })) as boolean;
+    if (!registered) return null;
+    const t = (await deps.readContract({ address: registry as Address, abi: TERM_REGISTRY_READ_ABI, functionName: 'getTerm', args: [id] })) as { curie: string; uri: string; label: string; datatype: string; active: boolean };
+    const rec = decodeStewardTerm(t);
+    return rec && t.active ? rec.stewardAgent : null;
+  };
+  const next = await appendDisputeExchange(current, body.exchange, { verifySig, stewardOf, now: () => new Date() });
+  if (!next.ok) return c.json({ ok: false, error: next.reason }, 403);
+  const ix = next.interaction;
+  const w = await deps.writeSharedRecord([ix.parties.disputant, ix.parties.counterparty], disputeRecordType(ix.id), ix, `dispute:${ix.id}:${ix.exchanges.length - 1}`);
+  if (!w.ok) return c.json({ ok: false, error: w.error }, 502);
+  if (ix.closed) await deps.writeSubjectRecord(ix.parties.disputant, runDisputeRecordType(ix.receipt.runRef), runDisputePointer(ix), `dispute:${ix.id}:pointer:${ix.exchanges.length - 1}`).catch(() => null);
+  return c.json({ ok: true, interaction: ix });
 });
 
 // POST /harness/authorize — spec 361 I4, the ONE-PROMPT ceremony. Phase A ({session, delegator,

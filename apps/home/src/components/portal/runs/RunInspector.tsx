@@ -12,6 +12,7 @@ import { retryAffordance } from '../../../home/retry';
 import { stateOf } from '../../../home/run-state';
 import { StatePill } from '../StatePill';
 import { RunTimeline } from './RunTimeline';
+import { DisputePanel } from './DisputePanel';
 import { SaveAsRecipe } from './SaveAsRecipe';
 import { canSaveAsRecipe } from '@agenticprimitives/harness/recipe';
 import { usePathname } from 'next/navigation';
@@ -122,6 +123,20 @@ export function RunInspector({ token, addressee, runRef, goal, open = true }: { 
       {/* 5 · EXECUTION DETAIL + 6 · PROVENANCE — the span timeline and its downloads */}
       <H>execution detail · provenance</H>
       <RunTimeline token={token} addressee={addressee} runRef={runRef} open />
+
+      {/* 7 · THE DISPUTE (spec 410 §10) — whether a dispute cites this receipt, and what this person may do about it.
+          The counterparty is whom the receipt names on the other side: the agent a step was routed to or acted by,
+          else the run's own agent when that is not the viewer. */}
+      <DisputePanel token={token} addressee={addressee} runRef={runRef} counterparty={counterpartyOf(rec, addressee)} stepRef={rec.steps.find((s) => s.authority && s.authority.decision === 'allow')?.stepRef} />
     </div>
   );
+}
+
+function counterpartyOf(rec: RunInspectorRecord, viewer: Address): Address | undefined {
+  const me = viewer.toLowerCase();
+  for (const s of rec.steps) {
+    const other = (s.delegatedTo ?? s.actor?.actingAgent ?? '').toLowerCase();
+    if (/^0x[0-9a-f]{40}$/.test(other) && other !== me) return other as Address;
+  }
+  return rec.agent.toLowerCase() !== me ? (rec.agent.toLowerCase() as Address) : undefined;
 }
