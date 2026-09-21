@@ -32,6 +32,10 @@ DEMO_CONNECT_ENABLED = "true"
 [env.faithnet]
 name = "home-mcp-faithnet"
 account_id = "5da2feaa56593839672948e16c6e809d"
+# The connector URL people paste into Claude: `home-mcp.faithnet.io/mcp`. A custom domain on the faithnet.io zone,
+# DECLARED here (a trigger made out of band is deleted by the next deploy — the wrangler lesson of 2026-08-30). The
+# workers.dev host keeps serving too, so a connection made under it is not ended by this.
+routes = [{ pattern = "home-mcp.faithnet.io", custom_domain = true }]
 
 [[env.faithnet.durable_objects.bindings]]
 name = "STORE"

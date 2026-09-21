@@ -84,7 +84,7 @@ export interface GateFixtureV1 {
 export const FAITHNET_FIXTURE: GateFixtureV1 = {
   home: 'https://www.faithnet.me',
   a2a: 'https://a2a.faithnet.io',
-  homeMcp: 'https://home-mcp-faithnet.richardpedersen3.workers.dev',
+  homeMcp: 'https://home-mcp.faithnet.io',
   vaultServerId: 'demo-mcp',
   people: { steward: 'alice', member: 'bob', member2: 'carol', outsider: 'dave', payeeOwner: 'nathan', invitee: 'david' },
   org: { name: 'Missio Nexus', handle: 'missio-nexus.org', agent: '0x3b99f2b452766de5df0dbcdfc676f27257151333' },

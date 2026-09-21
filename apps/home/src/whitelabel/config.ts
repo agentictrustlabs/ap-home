@@ -139,6 +139,8 @@ const faithImpact: WhiteLabelConfig = {
       name: 'Claude (Home MCP)',
       redirect_uris: [
         `${HOME_MCP_ORIGIN}/oauth/callback`,
+        // The Worker's workers.dev host — the connector URL until 2026-09-21; a connection made under it still completes there.
+        'https://home-mcp-faithnet.richardpedersen3.workers.dev/oauth/callback',
         'http://localhost:8797/oauth/callback',
       ],
       allowed_scopes: ['openid', 'agent'],

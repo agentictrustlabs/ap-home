@@ -37,7 +37,7 @@ export const VAULT_SERVER_ID = process.env.NEXT_PUBLIC_VAULT_SERVER_ID || 'demo-
  *  `${HOME_MCP_ORIGIN}/oauth/callback` as the `home-mcp` client's redirect URI, and the front door prints
  *  `${HOME_MCP_ORIGIN}/mcp` as the connector URL — a deployment that runs its own Worker sets
  *  `NEXT_PUBLIC_HOME_MCP_ORIGIN` once. Unset ⇒ faithnet's, the estate Ring 0 deploys. */
-export const HOME_MCP_ORIGIN = (process.env.NEXT_PUBLIC_HOME_MCP_ORIGIN || 'https://home-mcp-faithnet.richardpedersen3.workers.dev').replace(/\/+$/, '');
+export const HOME_MCP_ORIGIN = (process.env.NEXT_PUBLIC_HOME_MCP_ORIGIN || 'https://home-mcp.faithnet.io').replace(/\/+$/, '');
 
 /** Alias kept for existing imports. */
 export const CENTRAL_AUTH_DOMAIN = CONNECT_DOMAIN;
