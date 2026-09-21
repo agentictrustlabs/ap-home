@@ -251,6 +251,11 @@ interface LibraryScope {
   ok: true;
   owner: string;
   ownerKind: AgentKind;
+  /** Person scope only — whether the LAST catalog write reached the vault (`true`), or stopped at this Home's KV
+   *  cache (`false`). A relying app's token may read records and never write them (`read_grant_read_only`), so
+   *  a library driven by an app lands here and nowhere the person's agent reads — said on the response as
+   *  `vault: 'landed' | 'cache-only'` rather than hidden (398 §6.3). `undefined` for an org scope. */
+  landed?: () => boolean | undefined;
   /** The catalog (index) list — `content.catalog`. */
   read: () => Promise<LibraryArtifact[]>;
   write: (list: LibraryArtifact[]) => Promise<void>;
@@ -363,8 +368,10 @@ async function scopeFor(request: Request, env: FnContext['env'], person: string,
   // rebuildable cache; the `content.catalog` index + per-artifact `content.artifact.<id>` records are
   // the DATA model.
   const { readCapabilityRecord, writeCapabilityRecord } = await import('../lib/capability-record');
+  let landed: boolean | undefined;
   return {
     ok: true, owner: person, ownerKind: 'person',
+    landed: () => landed,
     read: async () => {
       const auth = await readCapabilityRecord<LibraryArtifact[]>(env, person, bearer, 'content.catalog');
       if (Array.isArray(auth)) { await env.AUTH_CODES.put(`library:${person}`, JSON.stringify(auth)); return auth; }
@@ -372,7 +379,7 @@ async function scopeFor(request: Request, env: FnContext['env'], person: string,
     },
     write: async (list) => {
       await env.AUTH_CODES.put(`library:${person}`, JSON.stringify(list));
-      await writeCapabilityRecord(env, person, bearer, 'content.catalog', list);
+      landed = await writeCapabilityRecord(env, person, bearer, 'content.catalog', list);
     },
     putRecord: async (recordType, data) => {
       await env.AUTH_CODES.put(`library:${person}:${recordType}`, JSON.stringify(data));
@@ -429,7 +436,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       if (!entry) return jsonCors({ error: 'artifact.name required' }, request, 400);
       await scope.write(list.slice(0, 200));
       await writeArtifactRecord(scope, entry);
-      return jsonCors({ ok: true, artifact: entry }, request);
+      return jsonCors({ ok: true, artifact: entry, ...vaultWord(scope) }, request);
     }
     case 'save-batch': {
       // Bulk upload (drag-and-drop of many files) — one read-modify-write, atomic.
@@ -590,7 +597,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       art.releases = [...(art.releases ?? []), release];
       await scope.write(list);
       await appendControlEvent(env, person as Address, 'credential-issued', [], (request.headers.get('authorization') ?? '').slice(7)).catch(() => undefined);
-      return jsonCors({ ok: true, artifact: art, release }, request);
+      return jsonCors({ ok: true, artifact: art, release, ...vaultWord(scope) }, request);
     }
     case 'visibility': {
       // Spec 412 — the owner declares who may read: `public` (anyone, through the owner's agent's public lane) or
@@ -604,7 +611,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       // The per-artifact record carries the declaration too, so a reader of the record alone sees it.
       await writeArtifactRecord(scope, art);
       await appendControlEvent(env, person as Address, art.accessPolicy === 'public' ? 'credential-issued' : 'grant-revoked', [], (request.headers.get('authorization') ?? '').slice(7)).catch(() => undefined);
-      return jsonCors({ ok: true, artifact: art, effectiveAccessPolicy: effectiveAccessPolicyOf(list, art) }, request);
+      return jsonCors({ ok: true, artifact: art, effectiveAccessPolicy: effectiveAccessPolicyOf(list, art), ...vaultWord(scope) }, request);
     }
     case 'discuss': {
       // Bind a native discussion board to this artifact via its artifact ContextRef (spec 335 §7.1).
@@ -789,6 +796,14 @@ function ancestorFolderPaths(folder: string): string[] {
 
 /** Attach `effectiveGrants` to each artifact: its own grants PLUS grants inherited from any ancestor
  *  folder (marked `inheritedFrom`). This is the read-side ancestor-walk that realizes folder cascade. */
+/** Where the last write landed, in one word on the response — `landed` (the person's vault, which her agent reads) or
+ *  `cache-only` (this Home's KV: a relying app's token reads records and never writes them, so its saves stop here and
+ *  the person's agent does not see them). Absent for an org scope, whose writes throw when refused. */
+function vaultWord(scope: LibraryScope): { vault?: 'landed' | 'cache-only' } {
+  const l = scope.landed?.();
+  return l === undefined ? {} : { vault: l ? 'landed' : 'cache-only' };
+}
+
 /** Spec 412 §1.1 — the effective policy of an entry: its own, else the nearest declared ancestor folder's, else private. */
 export function effectiveAccessPolicyOf(list: ReadonlyArray<Pick<LibraryArtifact, 'folder' | 'name' | 'isFolder' | 'accessPolicy'>>, a: Pick<LibraryArtifact, 'folder' | 'name' | 'isFolder' | 'accessPolicy'>): 'public' | 'private' {
   if (a.accessPolicy === 'public' || a.accessPolicy === 'private') return a.accessPolicy;
