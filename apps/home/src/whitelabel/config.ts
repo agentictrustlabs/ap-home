@@ -798,6 +798,9 @@ const faithImpact: WhiteLabelConfig = {
       // The email rides the id_token too (registry-gated, consent line added at the grant): the publisher profile's
       // "email — stays in your library" starts from the one the person signed in with instead of an empty box.
       idTokenClaims: ['email'],
+      // The app reads the person's CONTACT PROFILE (name, email) from their vault in one call under this grant —
+      // reference data it never stores (agent-rules/vault-is-the-record); revocable by the person alone.
+      read_grant: { resources: ['vault:impact-profile'] },
       // org-create: a publisher's ORGANIZATION is chosen from the Home roster, never typed; establishing
       // a new one is the Home's org-create ceremony (chooser mode), launched from the wizard's "About you".
       // Spec 412 W5 — `ask-as-me`: the person's wire to the publishing gateway's OWN key, pinned to harness.ask.

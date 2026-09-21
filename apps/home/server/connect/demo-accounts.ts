@@ -30,6 +30,9 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';
 import { demoCustodianAddress, demoPersonaFor, listDemoPersonas, signDigestAsDemoPersona } from '../_lib/demo-custody';
 import { issueAskAsMeDelegation, issueSiteDelegation, toWire } from '../../src/lib/delegation';
+import { issueReadGrant } from '../../src/lib/read-grant-build';
+import { MCP_SERVER_ID } from '../../src/lib/inbox-delivery';
+import { callInteractions } from './channels';
 import { recordCredentialFacet } from '../../src/lib/kv-indexer';
 import { clientAllowsTemplate, getClient } from '../../src/lib/oidc-clients';
 import { CHAIN_ID, CONTRACTS } from '../../src/lib/chain';
@@ -147,6 +150,19 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     signer,
   );
   await recordCredentialFacet(env.AUTH_CODES, principal, sub).catch(() => undefined);
+
+  // Spec 412 W6 — the client's declared READ GRANT, minted here as a demo persona's custodian would in the browser:
+  // person → the interactions service SA, the registry's record families, stored on the persona's own object under the
+  // client id via the home session just minted. Best-effort and said; the sign-in stands without it.
+  if (client.read_grant?.resources?.length) {
+    try {
+      const serviceSA = (process.env.NEXT_PUBLIC_INTERACTIONS_SERVICE_SA as string | undefined)?.trim() as Address | undefined;
+      if (!serviceSA) throw new Error('no interactions service agent is provisioned');
+      const grant = await issueReadGrant({ personSA: sa, serviceSA, resources: client.read_grant.resources, server: MCP_SERVER_ID, signHash });
+      const put = await callInteractions(env, sa, 'readgrant.put', { session: homeSession, clientId, delegation: toWire(grant) });
+      if (put.status >= 400 || put.body.ok === false) console.warn(`[demo-signin] read grant for ${clientId} not stored: ${String(put.body.error ?? put.status)}`);
+    } catch (e) { console.warn(`[demo-signin] read grant for ${clientId} not issued:`, e instanceof Error ? e.message : String(e)); }
+  }
 
   return json({
     ok: true,

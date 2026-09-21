@@ -20,6 +20,7 @@ import { setFedcmLoginStatus } from '../../context/session';
 import { beginEnrollmentGrant, hostOf, submitEnrollGrant, deliverEnrollCode, isCeremonyTemplate } from './useEnrollReq';
 import { signHashFor } from '../../home/onboarding';
 import { issueAskAsMeDelegation, toWire } from '../../lib/delegation';
+import { issueAppReadGrantIfDeclared } from '../../home/app-read-grant';
 import { listManagedAgents, resolveTreasuryByConvention } from '../../connect-client';
 import { BrandShield } from '../shared/BrandShield';
 import { ReceiptCard } from '../shared/ReceiptCard';
@@ -138,6 +139,7 @@ export function GoogleEnrollResume() {
       if (enroll.template === 'ask-as-me') {
         const signHash = await signHashFor('google', home.address, { token });
         const wire = await issueAskAsMeDelegation(home.address, delegate, signHash);
+        await issueAppReadGrantIfDeclared(enroll.aud, home.address, signHash); // spec 412 W6 — best-effort, said
         const askCode = await submitEnrollGrant(grant_id, toWire(wire));
         setSsoCookie(token, 'Google');
         setFedcmLoginStatus('logged-in');

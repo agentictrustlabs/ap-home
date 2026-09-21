@@ -32,6 +32,13 @@ export interface RelyingApp {
     server: string;
     resources: string[];
   };
+  /** OPTIONAL — spec 341 §4.3b / 412: a per-app READ GRANT minted at connect. A scoped, revocable delegation from the
+   *  person to the interactions service SA naming these record families (`vault:impact-profile`, say), stored on the
+   *  person's own object under this client id; the app then reads those records in ONE call (`record.get` under its
+   *  own bearer), no harness, no model — and the person revokes it alone under Connected assistants / App grants.
+   *  Read ONLY by construction (`issueReadGrant`); a write is never on this rail. Absent means none, which is what
+   *  every client gets today. Turns something ON — review it hardest. */
+  read_grant?: { resources: readonly string[] };
   /** OPTIONAL — spec 345. A `delegator = delegate = personSA` grant scoped to the person's OWN
    *  vault record family, minted in the SAME plain sign-in ceremony every relying app already
    *  runs (`givePermission` / template `site-login`) — no org, no team, no stewardship, no

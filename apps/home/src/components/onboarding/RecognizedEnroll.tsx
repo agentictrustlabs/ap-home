@@ -24,6 +24,7 @@ import { givePermission, createOrganization, personGrantForOrgCreate, collectDue
   authorizeServiceAgentWire, activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded,
   isKmsVia, resolveVia, publishSocialConnectionKindIfNeeded, signHashFor, type Via, type Auth } from '../../home/onboarding';
 import { issueAskAsMeDelegation, issueSiteDelegation, issueWorkspaceMembershipAccessDelegation, toWire } from '../../lib/delegation';
+import { issueAppReadGrantIfDeclared } from '../../home/app-read-grant';
 import { MCP_SERVER_ID } from '../../lib/inbox-delivery';
 import { clearStandingGrant } from '../../lib/grant-cache';
 import { homeLabel, type Home } from '../../home/types';
@@ -271,6 +272,8 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         const askAuth: Auth | undefined = token ? { token } : undefined;
         const signHash = await signHashFor(viaLower as Via, home.address, askAuth);
         const wire = await issueAskAsMeDelegation(home.address, askDelegate, signHash);
+        // Spec 412 W6 — the app's declared read grant rides the same ceremony (best-effort, said).
+        await issueAppReadGrantIfDeclared(enroll.aud, home.address, signHash);
         setGrantProgress({ step: 2, total: 2, label: 'Finishing…' });
         const askCode = await submitEnrollGrant(askGrantId, toWire(wire));
         setSsoCookie(token, viaLower);
