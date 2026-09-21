@@ -309,10 +309,14 @@ export async function libraryWrite(deps: LibraryToolDeps, owner: string, toolId:
     if (!entry.isFolder && !entry.contentCommitment) throw new Error('a page with no content cannot be published — a release names what it serves');
     const core = releaseCore(entry, list, owner);
     const signature = deps.signAsOwner ? await deps.signAsOwner(owner, core.releaseId as `0x${string}`).catch(() => null) : null;
-    const release: LibraryRelease = { ...core, ...(signature ? { signature } : {}), signed: !!signature, publishedAt: Date.now() };
+    // NO SIGNATURE, NO RELEASE. An unsigned release proves nothing a site can show a reader, and the one reason an owner's
+    // agent cannot sign — its session leaf expired and nothing re-issued it — is the person's to fix at their Home in a
+    // minute. Refused in those words rather than minting an artifact that verifies "invalid" (spec 412 W5).
+    if (!signature) throw new Error('your agent cannot sign as you right now — its session leaf has expired or was never issued. Open your Home once (it refreshes the leaf), then publish again');
+    const release: LibraryRelease = { ...core, signature, signed: true, publishedAt: Date.now() };
     entry.releases = [...(entry.releases ?? []), release];
     await write(list);
-    return { published: true, owner, file: catalogView(entry), release, answer: `Released ${pathOf(entry)} ${release.version}${release.signed ? ', signed as the owner' : ' (unsigned — this agent holds no session leaf here)'} — release ${release.releaseId.slice(0, 14)}…` };
+    return { published: true, owner, file: catalogView(entry), release, answer: `Released ${pathOf(entry)} ${release.version}, signed as the owner — release ${release.releaseId.slice(0, 14)}…` };
   }
   throw new Error(`${toolId} is not a Library act`);
 }

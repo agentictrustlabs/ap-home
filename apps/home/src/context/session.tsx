@@ -54,6 +54,7 @@ interface SessionCtx {
 import { DEPLOYMENT_EPOCH } from '../lib/chain';
 import { shouldRestoreFromUrl } from './session-restore';
 import { ensurePlaybook } from '../home/ensure-playbook';
+import { activateInteractionsIfNeeded, resolveVia } from '../home/onboarding';
 function epochStale(stored: string | undefined): boolean {
   if (!DEPLOYMENT_EPOCH) return false; // unknowable → don't gate
   return stored !== DEPLOYMENT_EPOCH; // stale (differs) OR unstamped (absent) → reconnect
@@ -180,6 +181,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     const addr = profile?.agent ? (profile.agent.split(':').pop() ?? '') : '';
     if (phase !== 'authed' || !session?.token || !profile?.deployed || !/^0x[0-9a-fA-F]{40}$/.test(addr)) return;
     void ensurePlaybook(addr, session.token);
+    // Spec 412 W5 — the interactions plane's SESSION LEAF (12 h by issue) is re-issued here when the DO reports it
+    // expired: without it the agent cannot sign as the person. Once per session; silent for KMS / demo custody, one
+    // prompt for a device credential; best-effort and said (the plane keeps serving reads without a live leaf).
+    const via = resolveVia((profile as { credential?: string } | null)?.credential, session.via);
+    void activateInteractionsIfNeeded(addr as Address, via, { token: session.token }).then((r) => { if (!r.ok) console.warn('[interactions] leaf/grant refresh skipped:', r.error); }).catch(() => undefined);
   }, [phase, session?.token, profile?.agent, profile?.deployed]);
 
   // On mount: handle a Google return (?code / connect_status), else restore a stored session.

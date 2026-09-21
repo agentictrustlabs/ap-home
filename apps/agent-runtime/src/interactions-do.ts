@@ -21,7 +21,7 @@ import { CONTACT_FIELD_ARGS, contactField, precisionOf } from '@agenticprimitive
 import { createPublicClient, http, decodeAbiParameters, type Address, type Hex } from 'viem';
 import { chainFor } from './chain';
 import { kinTermFor, householdRoleFor } from '@agenticprimitives/ontology';
-import { hashDelegation, decodeVaultRecordScopeTerms, vaultRecordScopeAllows, VAULT_RECORD_SCOPE_ENFORCER, type Delegation, type VaultRecordScopeGrant, currentWireOf, LINEAGE_RECORD_PREFIX, type DelegationLineageV1 } from '@agenticprimitives/delegation';
+import { hashDelegation, decodeTimestampTerms, decodeVaultRecordScopeTerms, vaultRecordScopeAllows, VAULT_RECORD_SCOPE_ENFORCER, type Delegation, type VaultRecordScopeGrant, currentWireOf, LINEAGE_RECORD_PREFIX, type DelegationLineageV1 } from '@agenticprimitives/delegation';
 import { PrincipalGatewayDO } from '@agenticprimitives/fabric/cloudflare';
 import { buildMountedGatewayDeps } from './gateway-mount.js';
 import { loadPlaybook, countedOp, countVaultCall } from '@agenticprimitives/harness';
@@ -1540,6 +1540,25 @@ export class InteractionsDO {
    * own fail-closed path, and turning that into "stale" would ask a principal to re-issue a leaf that
    * cannot be minted yet.
    */
+  /**
+   * Spec 412 W5 — IS THE LEAF STILL LIVE? A DEL-001 session leaf is time-boxed (12 h at issue) and nothing re-issued it:
+   * the DO went on signing under an expired leaf, every release its agent minted verified "invalid — not live at
+   * publishedAt", and `status` said `current: true` (a Google-custodied publisher, 2026-09-21). `null` when there is no
+   * leaf or its window cannot be read; else whether NOW is inside it. Reported on status so the Home re-issues the leaf
+   * on the person's next visit, and consulted before the DO signs as the agent.
+   */
+  sessionLeafLive(st: StoredState): boolean | null {
+    const leaf = st.sessionLeaf;
+    if (!leaf) return null;
+    const ts = (leaf.caveats ?? []).find((c) => (c.enforcer ?? '').toLowerCase() === String(this.env.TIMESTAMP_ENFORCER ?? '').toLowerCase());
+    if (!ts?.terms) return null;
+    try {
+      const w = decodeTimestampTerms(ts.terms as Hex);
+      const now = BigInt(Math.floor(Date.now() / 1000));
+      return now >= w.validAfter && now < w.validUntil;
+    } catch { return null; }
+  }
+
   private async sessionLeafMatchesSigner(st: StoredState): Promise<boolean> {
     const leaf = st.sessionLeaf;
     if (!leaf?.delegate) return true;
@@ -1855,7 +1874,9 @@ export class InteractionsDO {
         // cheerfully reported `current: true` — so the Home's activateInteractionsIfNeeded skipped and
         // nothing ever re-issued. Seen live on the 2026-09-02 AKCS cutover. Including the leaf's delegate
         // here makes a key rotation self-heal on the principal's next sign-in.
-        current: !!st.grant && this.grantIsCurrent(st.grant) && await this.sessionLeafMatchesSigner(st),
+        current: !!st.grant && this.grantIsCurrent(st.grant) && await this.sessionLeafMatchesSigner(st) && this.sessionLeafLive(st) !== false,
+        // The leaf's own window, so a Home can say "your agent's session leaf expired on …" rather than "stale".
+        leafLive: this.sessionLeafLive(st),
         // WHAT THE GRANT ACTUALLY COVERS. `granted` and `current` both say yes while a write is refused
         // with `record_scope_denied`, because a grant can be present, unstale, and still not name the
         // record someone is trying to write. Reporting the resources makes that answerable instead of
@@ -2980,7 +3001,10 @@ export class InteractionsDO {
           // against the principal. Handed ONLY in-Worker, to sign a firm offer as the provider. Nothing here
           // is authority — an offer grants nothing (336 §3.7).
           const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
-          return json({ ok: true, leaf: st.sessionLeaf ?? null });
+          // An EXPIRED leaf is handed to nobody: a signature under it verifies nowhere, and saying so here — with the
+          // window — is what lets the signer refuse in words instead of minting an "invalid" release (spec 412 W5).
+          const live = this.sessionLeafLive(st);
+          return json({ ok: true, leaf: live === false ? null : (st.sessionLeaf ?? null), leafLive: live, ...(live === false ? { reason: 'the session leaf has expired — the person refreshes it by opening their Home' } : {}) });
         }
         if (op === 'internal.consult.orgWire') {
           // The §3.1 wire, handed ONLY in-Worker to the org's own A2aTaskDO (the routing signer).

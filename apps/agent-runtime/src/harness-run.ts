@@ -2692,6 +2692,8 @@ export type AskReplyVariant =
        *  person waiting can see which "xyz" they are waiting on and say otherwise. Display; decides nothing. */
       parties?: ResolvedParty[] }
   | { kind: 'done'; runRef: string; result: unknown; receipts: RunResult['receipts']; skillProvenance?: Record<string, unknown>;
+      /** Spec 412 W5 — every step's outcome on a SUPPLIED multi-step act (an app's one run), by tool id. */
+      results?: Array<{ toolId: string; result: unknown }>;
       /** Spec 366/374 — which steps were DONE BY ANOTHER AGENT (a routed act): the subject, how it was reached, its run. */
       routed?: RoutedStepV1[];
       /** Spec 367 §6 — what the acted step ESTABLISHED, in its outcome class's words; a surface says no more than this. */
@@ -4078,7 +4080,10 @@ async function askReplyForInner(env: HarnessEnv, input: {
           ? `${CAPABILITY_WORDS[actedCap] ?? actedCap}: submitted and recorded — the outcome is not established until the other party acts`
           : `${CAPABILITY_WORDS[actedCap] ?? actedCap}: done${res.txHash ? ', on chain' : ''}`) + mail,
       } : undefined;
-      return withProv({ kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts, ...(fulfillment ? { fulfillment } : {}), ...(next ? { next } : {}), ...(routedStepsOf(r.steps).length ? { routed: routedStepsOf(r.steps) } : {}), ...(effects.length ? { effects } : {}), ...(decided.length ? { decisions: decided } : {}), ...(ix ? { interaction: { ...(ix.result ? { result: ix.result } : {}), ...(ix.navigationTarget ? { navigationTarget: ix.navigationTarget } : {}) } } : {}) });
+      // Spec 412 W5 — a SUPPLIED multi-step act (an app's one run: save · release · save · release) needs every step's
+      // outcome, not the last one's: `results[]` rides on a done reply exactly as it rides on an answer for a supplied plan.
+      const stepResults = input.suppliedPlan ? r.steps.filter((o) => o.ok && o.result && typeof o.result === 'object').map((o) => ({ toolId: o.step.toolId, result: o.result })) : [];
+      return withProv({ kind: 'done', runRef: r.runRef, result: r.result ?? null, receipts: r.receipts, ...(stepResults.length ? { results: stepResults } : {}), ...(fulfillment ? { fulfillment } : {}), ...(next ? { next } : {}), ...(routedStepsOf(r.steps).length ? { routed: routedStepsOf(r.steps) } : {}), ...(effects.length ? { effects } : {}), ...(decided.length ? { decisions: decided } : {}), ...(ix ? { interaction: { ...(ix.result ? { result: ix.result } : {}), ...(ix.navigationTarget ? { navigationTarget: ix.navigationTarget } : {}) } } : {}) });
     }
     const raw = typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? null);
     const evidence = askEvidence(r.steps);

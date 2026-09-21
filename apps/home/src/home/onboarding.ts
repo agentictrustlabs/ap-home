@@ -1378,8 +1378,11 @@ export async function activateInteractionsIfNeeded(
   if (!INTERACTIONS_SERVICE_SA) return { ok: true, skipped: true }; // not provisioned ⇒ inert (deploy-safe)
   if (!force) {
     try {
-      const st = (await fetch(`/a2a/interactions/${principal.toLowerCase()}/status`).then((r) => r.json())) as { granted?: boolean; current?: boolean };
-      if (st?.granted && st?.current !== false) return { ok: true, skipped: true }; // stale grants re-issue (scope widened — spec 322 W3)
+      const st = (await fetch(`/a2a/interactions/${principal.toLowerCase()}/status`).then((r) => r.json())) as { granted?: boolean; current?: boolean; leafLive?: boolean | null };
+      // Stale grants re-issue (scope widened — spec 322 W3); so does an EXPIRED SESSION LEAF (spec 412 W5): the leaf is
+      // 12 h by issue and nothing else re-issues it, and an agent signing under an expired leaf mints releases that
+      // verify nowhere. `leafLive === false` is the DO saying so; null (no leaf, unreadable) is not a reason to prompt.
+      if (st?.granted && st?.current !== false && st?.leafLive !== false) return { ok: true, skipped: true };
     } catch { /* status hiccup — fall through to (re)issue; the DO upsert is idempotent */ }
   }
   try {
