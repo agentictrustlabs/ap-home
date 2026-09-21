@@ -20,6 +20,8 @@ export const SITE_ORIGIN = (HOME_ORIGIN || PLATFORM_AUTH_ORIGIN).replace(/\/$/, 
 export const PUBLIC_ROUTES: ReadonlyArray<{ path: string; changeFrequency: 'weekly' | 'monthly'; priority: number }> = [
   { path: '/', changeFrequency: 'weekly', priority: 1 },
   { path: '/about', changeFrequency: 'monthly', priority: 0.8 },
+  // Spec 412 — what the person made public, served by their agent; the one page of theirs a stranger may read.
+  { path: '/published', changeFrequency: 'weekly', priority: 0.7 },
   { path: '/llms.txt', changeFrequency: 'monthly', priority: 0.5 },
 ];
 

@@ -211,6 +211,21 @@ export const MOUNTED_PEER_SKILLS: A2aSkill[] = [
     description: 'Deliver a verifiable credential into this agent’s inbox. Admission is not acceptance — holding a credential grants nothing here.',
     tags: ['interactions', 'credentials', 'a2a'],
   },
+  // Spec 412 — THE PUBLIC SHELF: served to anyone, no credential, from what the owner marked public in the Library.
+  // Mounted for every agent on the deployment (an owner with nothing public answers an empty shelf), so advertising
+  // it is honest for all of them. A record, never authority: what comes back is a disclosure the owner already made.
+  {
+    id: 'library.public.list',
+    name: 'The public shelf',
+    description: 'List what this agent’s owner made public in their Library — folders, documents, and the signed release beside each. No credential: SendMessage with a data part { "skill": "library.public.list", "folder"?: string }; the answer is a message whose data part carries `files`.',
+    tags: ['library', 'public', 'a2a'],
+  },
+  {
+    id: 'library.public.read',
+    name: 'Read a public document',
+    description: 'Read one public document from this agent’s owner’s shelf: text decoded and bounded, an image as bytes, the release beside it. No credential: SendMessage with a data part { "skill": "library.public.read", "id"?: string, "name"?: string }. A document not on the shelf is answered as not on the shelf.',
+    tags: ['library', 'public', 'a2a'],
+  },
 ];
 
 /** Merge the mounted peer skills into an agent's advertised set, dedup by id. Self-asserted labels win

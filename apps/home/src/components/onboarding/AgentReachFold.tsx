@@ -45,9 +45,28 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+/** Spec 412 — the shelf, as the Home's own `/published/shelf` reads it from her agent (the same anonymous A2A read). */
+type Shelf =
+  | { state: 'reading' }
+  | { state: 'read'; count: number; files: Array<{ id: string; name: string; kind: string; folder: string; release: { version: string; signed: boolean } | null }> }
+  | { state: 'unreachable'; why: string };
+
 export function AgentReachFold({ name, agent }: { name: string; agent: Address }) {
   const cardUri = cardUriForName(name, { nameParent: AGENT_NAME_PARENT, nameParents: AGENT_NAME_PARENTS, a2aDomain: A2A_DOMAIN });
   const [live, setLive] = useState<Live>({ state: 'reading' });
+  const [shelf, setShelf] = useState<Shelf>({ state: 'reading' });
+  useEffect(() => {
+    let cancelled = false;
+    void fetch(`/published/shelf?name=${encodeURIComponent(name)}`)
+      .then(async (r) => {
+        const b = (await r.json().catch(() => null)) as { ok?: boolean; error?: string; count?: number; files?: Shelf extends { files: infer F } ? F : never } | null;
+        if (cancelled) return;
+        if (!b?.ok) setShelf({ state: 'unreachable', why: b?.error ?? `HTTP ${r.status}` });
+        else setShelf({ state: 'read', count: b.count ?? 0, files: (b.files ?? []) as never });
+      })
+      .catch((e: unknown) => { if (!cancelled) setShelf({ state: 'unreachable', why: e instanceof Error ? e.message : 'the shelf could not be read' }); });
+    return () => { cancelled = true; };
+  }, [name]);
   useEffect(() => {
     if (!cardUri) return;
     let cancelled = false;
@@ -83,6 +102,23 @@ export function AgentReachFold({ name, agent }: { name: string; agent: Address }
         : live.endpoint ? <><code style={mono}>{live.endpoint}</code><CopyButton text={live.endpoint} /></>
         : <span>the card names no JSON-RPC endpoint</span>)}
       {row('Smart Agent', <code style={mono} title={agent}>{short(agent)}</code>)}
+      {/* Spec 412 — what {label} made public: read from her agent by the Home the way anyone would; said in its place when
+          the read fails (never rendered as "nothing published"). */}
+      <div data-testid="agent-reach-published" style={{ marginTop: '.7rem' }}>
+        <div style={{ fontWeight: 600, fontSize: '.8rem', color: 'var(--color-text, #1c1917)' }}>Published by {label}</div>
+        {shelf.state === 'reading' && <p style={{ margin: '.2rem 0 0', opacity: 0.7 }}>asking {label}&apos;s agent…</p>}
+        {shelf.state === 'unreachable' && <p style={{ margin: '.2rem 0 0' }} data-testid="agent-reach-shelf-unreachable">the shelf could not be read just now ({shelf.why})</p>}
+        {shelf.state === 'read' && shelf.count === 0 && <p style={{ margin: '.2rem 0 0', opacity: 0.7 }}>nothing public yet</p>}
+        {shelf.state === 'read' && shelf.count > 0 && (
+          <ul style={{ margin: '.25rem 0 0', paddingLeft: '1.1rem' }}>
+            {shelf.files.slice(0, 5).map((f) => (
+              <li key={f.id}><a href={`/published/${encodeURIComponent(f.id)}`}>{f.name.replace(/\.(md|json|jsonld|ttl)$/i, '')}</a>{f.release ? <span style={{ opacity: 0.6 }}> · released {f.release.version}{f.release.signed ? ', signed' : ''}</span> : null}</li>
+            ))}
+            {shelf.count > 5 && <li style={{ listStyle: 'none', marginLeft: '-1.1rem' }}><a href="/published">everything {label} has published ({shelf.count}) →</a></li>}
+          </ul>
+        )}
+        {shelf.state === 'read' && shelf.count > 0 && shelf.count <= 5 && <p style={{ margin: '.2rem 0 0' }}><a href="/published">everything {label} has published →</a></p>}
+      </div>
       <details className="demo-people-fold" style={{ marginTop: '.6rem' }}>
         <summary style={{ cursor: 'pointer', listStyle: 'none', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '.78rem', fontWeight: 600 }}>
           <span aria-hidden className="demo-people-fold__chev" style={{ display: 'inline-block', transition: 'transform .15s' }}>›</span> Talk to this agent from Claude

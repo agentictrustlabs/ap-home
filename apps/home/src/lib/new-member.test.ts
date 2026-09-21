@@ -190,9 +190,9 @@ describe('profile-name sharing is registry-gated', () => {
     expect(sharesProfileName({ allowed_scopes: ['openid', 'profile', 'agent'] })).toBe(true);
   });
 
-  it('is declared by pokernight and by no one else in the live registry', () => {
+  it('is declared by pokernight and source-publishing (87c8b4d4 — its one-time About-you step) and by no one else in the live registry', () => {
     const scoped = whitelabel.relyingApps.filter(sharesProfileName).map((a) => a.client_id);
-    expect(scoped).toEqual(['pokernight']);
+    expect(scoped).toEqual(['pokernight', 'source-publishing']);
   });
 
   it('leaves consent copy untouched for every app without the scope', () => {

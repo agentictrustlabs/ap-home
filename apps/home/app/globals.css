@@ -1855,3 +1855,12 @@ input:not([type=checkbox]):not([type=radio]), select, textarea { border-color: v
 .about-list { margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.6rem; line-height: 1.55; }
 .about-page a { color: var(--color-amber-700); }
 .about-page code { font-size: 0.9em; }
+/* Spec 412 — a published document's body (markdown rendered on /published/<id>). */
+.published-body { line-height: 1.65; }
+.published-body p { margin: 0 0 1em; }
+.published-body h1, .published-body h2, .published-body h3 { color: var(--color-text-primary); margin: 1.4em 0 0.5em; line-height: 1.25; }
+.published-body h1 { font-size: 1.5rem; } .published-body h2 { font-size: 1.25rem; } .published-body h3 { font-size: 1.05rem; }
+.published-body blockquote { margin: 0 0 1em; padding-left: 1rem; border-left: 3px solid var(--color-border); color: var(--color-text-muted); }
+.published-body ul, .published-body ol { margin: 0 0 1em; padding-left: 1.4rem; }
+.published-body pre { overflow: auto; padding: .7rem; background: var(--color-surface-sunken); border-radius: 8px; font-size: .85rem; }
+.published-body img { max-width: 100%; }

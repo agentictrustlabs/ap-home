@@ -308,6 +308,37 @@ describe('/connect/library — as a demo user (person scope)', () => {
     expect((doc2.effectiveGrants ?? []).length).toBe(0);
   });
 
+  it('spec 412 — a public FOLDER cascades to its documents; a private declaration inside it holds; a re-save keeps the policy and the releases', async () => {
+    await post({ action: 'save', artifact: { name: 'works', isFolder: true, folder: 'publishing' } });
+    await post({ action: 'save-batch', artifacts: [
+      { id: 'w-open', name: 'open.md', source: 'blob', folder: 'publishing/works', bytesB64: btoa('open') },
+      { id: 'w-draft', name: 'draft.md', source: 'blob', folder: 'publishing/works', bytesB64: btoa('draft'), accessPolicy: 'private' },
+    ] });
+    let list = (await (await get()).json()).artifacts;
+    // Absent is private, said explicitly.
+    expect(list.find((a: any) => a.id === 'w-open').effectiveAccessPolicy).toBe('private');
+    const folder = list.find((a: any) => a.isFolder && a.name === 'works' && a.folder === 'publishing');
+    const flip = await post({ action: 'visibility', id: folder.id, accessPolicy: 'public' });
+    expect((await flip.json()).artifact.accessPolicy).toBe('public');
+    list = (await (await get()).json()).artifacts;
+    expect(list.find((a: any) => a.id === 'w-open').effectiveAccessPolicy).toBe('public');
+    expect(list.find((a: any) => a.id === 'w-draft').effectiveAccessPolicy).toBe('private');
+    // The per-artifact record carries the declaration a document made itself.
+    expect(JSON.parse(env.AUTH_CODES._map.get(`library:${DEMO_SA}:content.artifact.w-draft`)).accessPolicy).toBe('private');
+    // A release, then a re-save without a policy: the version advances, the policy and the release chain stay.
+    await post({ action: 'visibility', id: 'w-open', accessPolicy: 'public' });
+    const pub = await (await post({ action: 'publish', id: 'w-open' })).json();
+    expect(pub.release.version).toBe('1.0.0');
+    const again = await (await post({ action: 'save', artifact: { id: 'w-open', name: 'open.md', source: 'blob', folder: 'publishing/works', bytesB64: btoa('open v2') } })).json();
+    expect(again.artifact.version).toBe(2);
+    expect(again.artifact.accessPolicy).toBe('public');
+    expect(again.artifact.releases).toHaveLength(1);
+    const pub2 = await (await post({ action: 'publish', id: 'w-open' })).json();
+    expect(pub2.release.version).toBe('2.0.0');
+    // A bad word is refused.
+    expect((await post({ action: 'visibility', id: 'w-open', accessPolicy: 'everyone' })).status).toBe(400);
+  });
+
   it('supports folders and cascades a folder delete', async () => {
     await post({ action: 'save', artifact: { name: 'reports', isFolder: true } });
     await post({ action: 'save-batch', artifacts: [{ name: 'q1.md', source: 'blob', folder: 'reports', bytesB64: btoa('q1') }] });

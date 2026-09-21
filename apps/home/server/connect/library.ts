@@ -168,6 +168,11 @@ interface LibraryArtifact {
   grants: ArtifactGrant[];
   /** Published skill releases (Phase 5) — a signed, append-only, version-monotonic release chain. */
   releases?: SkillReleaseRecord[];
+  /** Spec 412 — `apcnt:accessPolicy` (C-box `apcnt:Public | Private`): the owner's declaration that ANYONE may read
+   *  this entry, served by the owner's agent on the public lane. Absent = private. On a FOLDER it cascades to
+   *  everything under it (containment, like a folder grant); the nearest declared ancestor decides. Public ≠ shared
+   *  (a grant) ≠ published (a release): three acts, three records. */
+  accessPolicy?: 'public' | 'private';
 }
 
 /** A published skill release — mirrors @agenticprimitives/content-storage `SkillRelease` (spec 335 §6,
@@ -236,6 +241,7 @@ const KINDS = new Set(['skill', 'ttl', 'md', 'json-ld', 'image']);
 /** What a release can be minted for (398 §6.2): a skill, or a page. */
 const PUBLISHABLE = new Set(['skill', 'md', 'json-ld']);
 const SOURCES = new Set<ArtifactSource>(['blob', 'graphdb', 'vault', 'external']);
+const ACCESS_POLICIES = new Set(['public', 'private']);
 const ACTIONS = new Set<ArtifactAction>(['read', 'write', 'share', 'export', 'delete']);
 const AGENT_KINDS = new Set<AgentKind>(['person', 'org', 'service']);
 
@@ -392,7 +398,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     const artifacts = inbound.filter((x) => !x.revoked).map(toSharedArtifact);
     return jsonCors({ owner: scope.owner, ownerKind: scope.ownerKind, lens: 'shared', artifacts }, request);
   }
-  const artifacts = withEffectiveGrants(await scope.read());
+  const artifacts = withEffectiveAccessPolicy(withEffectiveGrants(await scope.read()));
   // Pending access requests addressed to this owner (the "someone wants access" inbox).
   const requests = (await readRequests(env, scope.owner)).filter((r) => r.status === 'pending');
   return jsonCors({ owner: scope.owner, ownerKind: scope.ownerKind, artifacts, requests }, request);
@@ -406,6 +412,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const body = (await request.json().catch(() => null)) as {
     action?: string; org?: string; artifact?: Partial<LibraryArtifact>; artifacts?: Partial<LibraryArtifact>[]; id?: string;
     grant?: { granteeAddress?: string; granteeKind?: string; granteeLabel?: string; actions?: string[]; validUntil?: number };
+    /** Spec 412 `visibility`: the policy to declare on `id`. */
+    accessPolicy?: string;
     // cross-vault read / request-access (Phase 3): the OWNER whose vault holds the artifact.
     ownerScope?: string; ownerKind?: string; actions?: string[]; artifactName?: string;
   } | null;
@@ -584,6 +592,20 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       await appendControlEvent(env, person as Address, 'credential-issued', [], (request.headers.get('authorization') ?? '').slice(7)).catch(() => undefined);
       return jsonCors({ ok: true, artifact: art, release }, request);
     }
+    case 'visibility': {
+      // Spec 412 — the owner declares who may read: `public` (anyone, through the owner's agent's public lane) or
+      // `private` (the default — grants and releases untouched). On a folder it cascades to everything under it; a
+      // document or folder declared `private` inside a public folder stays private. Owner-gated like every write here.
+      const art = list.find((x) => x.id === body.id);
+      if (!art) return jsonCors({ error: 'unknown artifact id' }, request, 404);
+      if (!ACCESS_POLICIES.has(String(body.accessPolicy))) return jsonCors({ error: 'accessPolicy must be "public" or "private"' }, request, 400);
+      art.accessPolicy = body.accessPolicy as 'public' | 'private';
+      await scope.write(list);
+      // The per-artifact record carries the declaration too, so a reader of the record alone sees it.
+      await writeArtifactRecord(scope, art);
+      await appendControlEvent(env, person as Address, art.accessPolicy === 'public' ? 'credential-issued' : 'grant-revoked', [], (request.headers.get('authorization') ?? '').slice(7)).catch(() => undefined);
+      return jsonCors({ ok: true, artifact: art, effectiveAccessPolicy: effectiveAccessPolicyOf(list, art) }, request);
+    }
     case 'discuss': {
       // Bind a native discussion board to this artifact via its artifact ContextRef (spec 335 §7.1).
       // The same ContextRef{kind:'artifact', id:'artifact:<id>'} every messaging/discussion surface accepts.
@@ -615,6 +637,7 @@ async function writeArtifactRecord(scope: LibraryScope, a: LibraryArtifact): Pro
   await scope.putRecord(`content.artifact.${a.id}`, {
     id: a.id, kind: a.kind, name: a.name, source: a.source, contentType: a.contentType,
     bytesB64: a.bytesB64, pointer: a.pointer, commitment: a.contentCommitment, version: a.version,
+    ...(a.accessPolicy ? { accessPolicy: a.accessPolicy } : {}),
   }).catch(() => undefined);
 }
 
@@ -648,8 +671,10 @@ async function upsert(list: LibraryArtifact[], a: Partial<LibraryArtifact> | und
     version: idx >= 0 ? (list[idx]!.version ?? 1) + 1 : 1,
     contentCommitment: bytesB64 ? await sha256Hex(bytesB64) : undefined,
     grants: [],
+    // Spec 412 — a declared policy on the save is kept; a re-save that says nothing keeps what the entry had.
+    ...(ACCESS_POLICIES.has(String(a.accessPolicy)) ? { accessPolicy: a.accessPolicy as 'public' | 'private' } : idx >= 0 && list[idx]!.accessPolicy ? { accessPolicy: list[idx]!.accessPolicy } : {}),
   };
-  if (idx >= 0) { entry.grants = list[idx]!.grants; list[idx] = entry; } else list.push(entry);
+  if (idx >= 0) { entry.grants = list[idx]!.grants; entry.releases = list[idx]!.releases; list[idx] = entry; } else list.push(entry);
   return entry;
 }
 
@@ -764,6 +789,19 @@ function ancestorFolderPaths(folder: string): string[] {
 
 /** Attach `effectiveGrants` to each artifact: its own grants PLUS grants inherited from any ancestor
  *  folder (marked `inheritedFrom`). This is the read-side ancestor-walk that realizes folder cascade. */
+/** Spec 412 §1.1 — the effective policy of an entry: its own, else the nearest declared ancestor folder's, else private. */
+export function effectiveAccessPolicyOf(list: ReadonlyArray<Pick<LibraryArtifact, 'folder' | 'name' | 'isFolder' | 'accessPolicy'>>, a: Pick<LibraryArtifact, 'folder' | 'name' | 'isFolder' | 'accessPolicy'>): 'public' | 'private' {
+  if (a.accessPolicy === 'public' || a.accessPolicy === 'private') return a.accessPolicy;
+  const byPath = new Map<string, 'public' | 'private'>();
+  for (const f of list) if (f.isFolder && (f.accessPolicy === 'public' || f.accessPolicy === 'private')) byPath.set(folderFullPath(f), f.accessPolicy);
+  const parts = (a.folder ?? '').split('/').filter(Boolean);
+  for (let i = parts.length; i > 0; i--) { const p = byPath.get(parts.slice(0, i).join('/')); if (p) return p; }
+  return 'private';
+}
+function withEffectiveAccessPolicy<T extends LibraryArtifact>(list: T[]): (T & { effectiveAccessPolicy: 'public' | 'private' })[] {
+  return list.map((a) => ({ ...a, effectiveAccessPolicy: effectiveAccessPolicyOf(list, a) }));
+}
+
 function withEffectiveGrants(list: LibraryArtifact[]): (LibraryArtifact & { effectiveGrants?: ArtifactGrant[] })[] {
   // Map each ancestor folder path → the folder entry's (cascading) grants.
   const folderGrants = new Map<string, { label: string; grants: ArtifactGrant[] }>();

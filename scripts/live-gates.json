@@ -580,6 +580,16 @@
       "required": true,
       "paced": false,
       "timeoutSec": 420
+    },
+    {
+      "id": "verify-public-shelf",
+      "script": "scripts/verify-public-shelf.mts",
+      "spec": "412",
+      "proves": "the public shelf: alice marks a Library folder public (a draft inside it private); a STRANGER with no credential lists and reads the public page over A2A at the interface her agent card names (library.public.list / library.public.read), bodies stripped from the list, the page's text marked untrusted; her Home's /published and /published/<id> render the same; her own Ask answers 'what have I made public' through the same read",
+      "twin": "the private draft asked for by id on the anonymous lane is 'not on the shelf' and no byte of it leaves; a message naming a private read on the anonymous door is 401 — the door opened for the shelf and nothing else",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 240
     }
   ]
 }

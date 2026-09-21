@@ -13,16 +13,20 @@
 import { describe, it, expect } from 'vitest';
 import { MOUNTED_PEER_SKILLS, withMountedSkills, buildA2aAgentCard, type A2aSkill } from '../src/host-context.js';
 import { makeMessagingSkills, makeOrgApplySkill } from '../src/messaging-skills.js';
+import { PUBLIC_LANE_SKILLS, publicLaneSkillOf } from '../src/standard-a2a.js';
 
 const RECIPIENT = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 // EVERY factory the runtime mounts peer-callable skills from, not just one. The first version listed
 // `makeMessagingSkills` alone, so it passed happily when `org.apply` was mounted from a DIFFERENT
 // factory and left off the Card — the exact drift this test exists to prevent, reproduced by the test
 // itself. A coupling check that couples to one source is an advertisement for the others.
+// Spec 412 — the PUBLIC LANE is the second mount source: the standard surface answers these two for a caller
+// with no credential, so they are mounted facts exactly as the runtime's handlers are.
 const mountedIds = [
-  ...makeMessagingSkills(RECIPIENT, async () => undefined),
-  makeOrgApplySkill(RECIPIENT, async () => undefined),
-].map((h) => h.skill).sort();
+  ...makeMessagingSkills(RECIPIENT, async () => undefined).map((h) => h.skill),
+  makeOrgApplySkill(RECIPIENT, async () => undefined).skill,
+  ...PUBLIC_LANE_SKILLS,
+].sort();
 
 describe('the Card and the runtime cannot drift', () => {
   it('advertises EXACTLY the skills the runtime mounts', () => {
@@ -89,5 +93,11 @@ describe('the card carries them through', () => {
     const card = buildA2aAgentCard(ctx, 84532, withMountedSkills([]));
     const ext = (card.capabilities as { extensions?: { uri: string }[] }).extensions ?? [];
     expect(ext.some((e) => e.uri.includes('/authority/'))).toBe(true);
+  });
+
+  it('the public lane admits exactly the two shelf skills, by data part, and nothing by text', () => {
+    expect(publicLaneSkillOf({ parts: [{ data: { skill: 'library.public.read', id: 'w1' } }] })).toEqual({ skill: 'library.public.read', args: { id: 'w1' } });
+    expect(publicLaneSkillOf({ parts: [{ text: 'library.public.list' }] })).toBeNull();
+    expect(publicLaneSkillOf({ parts: [{ data: { skill: 'library.file.read', id: 'w1' } }] })).toBeNull();
   });
 });

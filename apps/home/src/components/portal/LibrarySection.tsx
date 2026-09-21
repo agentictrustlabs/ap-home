@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useSession } from '../../context/session';
+import { nameLabel, personalAuthOrigin } from '../../lib/domain';
 import { SectionShell } from './SectionShell';
 import { cardSty, btnSty, btnPrimarySty, mono, mutedText, errorText, inputSty, badgeStyle, modalOverlaySty, infoBannerSty, shortAddr, type BadgeKind } from './theme';
 import { artifactIdentity } from '../../home/artifact-identity';
@@ -24,7 +25,10 @@ type Freshness = 'Live' | 'Signed' | 'Cached' | 'Stale' | 'Unavailable';
 type Lens = 'vault' | 'shared' | 'public';
 interface Grant { grantee: { address: string; kind: string; label?: string }; actions: string[]; grantedAt: number; revoked?: boolean; entitlementId?: string; resource?: string; signed?: boolean; inheritedFrom?: string; delegation?: { caveats?: unknown[] } }
 interface Release { canonicalId: string; version: string; bundleRoot: string; owner: string; publisher: string; riskTier: string; releaseId: string; signed: boolean; publishedAt: number }
+type AccessPolicy = 'public' | 'private';
 interface Artifact { id: string; kind: Kind; name: string; source: Source; folder: string; isFolder?: boolean; pointer?: string; discussionId?: string; contentType: string; bytesB64?: string; size: number; createdAt: number; version?: number; contentCommitment?: string; grants: Grant[]; effectiveGrants?: Grant[]; releases?: Release[];
+  /** Spec 412 — the owner's declaration (`apcnt:accessPolicy`) and what it comes to after the folder cascade. */
+  accessPolicy?: AccessPolicy; effectiveAccessPolicy?: AccessPolicy;
   // present on "Shared with me" rows (a federated inbound grant from another vault)
   accessMode?: AccessMode; sharedBy?: string; sharedByKind?: string; myActions?: string[] }
 interface TreeNode { name: string; path: string; children: TreeNode[] }
@@ -113,7 +117,7 @@ function Icon({ name, size = 16, style }: { name: IconName; size?: number; style
 }
 
 export function LibrarySection({ orgSa }: { orgSa?: string }) {
-  const { session, agentAddress } = useSession();
+  const { session, agentAddress, agentName } = useSession();
   const token = session?.token ?? '';
   const scopeQ = orgSa ? `?org=${orgSa}` : '';
   const ownerSa = (orgSa ?? agentAddress ?? '').toLowerCase();
@@ -244,6 +248,11 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
   }, [api]);
   const requestAccess = useCallback(async (a: Artifact, actions: string[]) => { await api('POST', { action: 'request-access', ownerScope: a.sharedBy, id: a.id, actions, artifactName: a.name }); }, [api]);
   const publish = async (id: string) => { try { await api('POST', { action: 'publish', org: orgSa, id }); await load(); } catch (e) { setErr((e as Error).message); } };
+  // Spec 412 — public / private is the owner's declaration on the record; the owner's agent serves what is public.
+  const setVisibility = async (id: string, accessPolicy: AccessPolicy) => { try { await api('POST', { action: 'visibility', org: orgSa, id, accessPolicy }); await load(); } catch (e) { setErr((e as Error).message); } };
+  // Where a public document of the PERSON's is read by anyone: her Home's `/published/<id>`. An organization's shelf is
+  // served by its agent's public lane today and gets its page with the org Home (412 §4).
+  const publicHref = (a: Artifact): string | null => (orgSa || a.isFolder ? null : `${personalAuthOrigin(nameLabel(agentName ?? ''))}/published/${encodeURIComponent(a.id)}`);
   const approveRequest = async (r: { requester: string; artifactId: string; actions: string[] }) => { await grant(r.artifactId, r.requester, 'person', r.actions.length ? r.actions : ['read']); };
 
   const writable = lens === 'vault';
@@ -335,6 +344,8 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
                 onOpenLive={openLive}
                 onRequestAccess={requestAccess}
                 onPublish={publish}
+                onSetVisibility={setVisibility}
+                publicHref={agentName ? publicHref : () => null}
               />
             )}
           </div>
@@ -529,6 +540,7 @@ function ArtifactList({ rows, selectedId, ownerLabel, onOpen, onDescend, onDelet
               <Icon name={a.isFolder ? 'folder' : KIND_META[a.kind].icon} size={17} style={{ color: 'var(--color-text-muted)' }} />
               <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
               <span style={{ ...badgeStyle('neutral'), fontSize: 10 }}>{a.isFolder ? (a.id.startsWith('folder:') && a.size ? `Folder · ${a.size}` : 'Folder') : KIND_META[a.kind].label}</span>
+              {a.effectiveAccessPolicy === 'public' && <span style={{ ...badgeStyle('ok'), fontSize: 10 }} title={a.accessPolicy === 'public' ? 'Anyone may read this — you made it public' : 'Anyone may read this — a folder above it is public'} data-testid="public-chip">Public</span>}
             </span>
             <span style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><b>{owner}</b></span>
             <span><span style={{ ...badgeStyle(ACCESS_TONE[mode]), fontSize: 11 }}>{mode}</span></span>
@@ -570,12 +582,14 @@ function FederatedPlaceholder({ lens }: { lens: Lens }) {
 
 // ── detail / workspace panel — progressive disclosure, one primary action + overflow ──
 type Tab = 'content' | 'access' | 'provenance' | 'versions';
-function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, ownerSa, folders, onClose, onGrant, onRevoke, onDiscuss, onMove, onRemove, onOpenMember, onOpenLive, onRequestAccess, onPublish }: {
+function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, ownerSa, folders, onClose, onGrant, onRevoke, onDiscuss, onMove, onRemove, onOpenMember, onOpenLive, onRequestAccess, onPublish, onSetVisibility, publicHref }: {
   artifact: Artifact; items: Artifact[]; ownerLabel: string; ownerVaultKind: string; ownerSa: string; folders: string[];
   onClose: () => void; onGrant: (id: string, addr: string, kind: string, actions: string[], label?: string) => void; onRevoke: (id: string, addr: string) => void;
   onDiscuss: (id: string) => void; onMove: (a: Artifact, dest: string) => void; onRemove: (a: Artifact) => void; onOpenMember: (id: string) => void;
   onOpenLive: (a: Artifact) => Promise<Artifact>; onRequestAccess: (a: Artifact, actions: string[]) => Promise<void>;
   onPublish: (id: string) => void;
+  onSetVisibility: (id: string, policy: AccessPolicy) => void;
+  publicHref: (a: Artifact) => string | null;
 }) {
   const [tab, setTab] = useState<Tab>('content');
   const [menuOpen, setMenuOpen] = useState(false);
@@ -654,6 +668,24 @@ function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, ownerSa, fol
               <Button size="sm" disabled title="Replicate = an authorized copy in another vault — not yet an act here (398 §6.2)">Replicate</Button>
               <Meta>replicate is not an act here yet</Meta>
             </div>
+            {/* Spec 412 — PUBLIC is a fourth word, kept apart from the three acts: who may read, decided on the record.
+                A folder made public makes everything under it public; a declaration on the entry itself wins. */}
+            {owned && (() => {
+              const eff = artifact.effectiveAccessPolicy ?? 'private';
+              const inherited = eff === 'public' && artifact.accessPolicy !== 'public';
+              const href = eff === 'public' ? publicHref(artifact) : null;
+              return (
+                <div data-testid="artifact-visibility" data-policy={eff} style={{ display: 'flex', gap: 6, marginTop: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <Micro>Who may read</Micro>
+                  <Chip tone={eff === 'public' ? 'ok' : undefined}>{eff === 'public' ? (inherited ? 'Public · from its folder' : 'Public') : 'Private'}</Chip>
+                  {eff === 'public'
+                    ? <Button size="sm" onClick={() => onSetVisibility(artifact.id, 'private')} title={inherited ? 'Declare this one private even though its folder is public' : 'Only you and those you shared it with'}>Make private</Button>
+                    : <Button size="sm" onClick={() => onSetVisibility(artifact.id, 'public')} title={artifact.isFolder ? 'Anyone may read everything in this folder, served by your agent' : 'Anyone may read this, served by your agent'}>Make public</Button>}
+                  {href && <a href={href} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>read it as anyone would ↗</a>}
+                  {eff === 'public' && !artifact.isFolder && !href && <Meta>served on this agent&apos;s public shelf (A2A)</Meta>}
+                </div>
+              );
+            })()}
           </div>
         );
       })()}

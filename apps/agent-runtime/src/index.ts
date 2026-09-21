@@ -143,6 +143,7 @@ import { toErrorCode } from './harness-workflow-core.js';
 export { HarnessApprovalWorkflow };
 import { claimableBy, receiptEvidence, checkpointForCommittedStep, committedStepNote } from './endeavor-authority-steps.js';
 import { parkableCommittedSteps } from './endeavor-committed-steps.js';
+import { publicLibraryRead } from './library-tools.js';
 import { internalHeaders, markInWorker, isInWorkerRequest } from './internal-marker.js';
 import { standardServerFor } from './standard-a2a.js';
 import { withStandardCardFields } from '@agenticprimitives/a2a/standard';
@@ -1396,6 +1397,9 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
       const d = harnessDeps(c.env, buildAuditSink(c.env));
       return answerProbe({ agentTypeOf: d.agentTypeOf, readSubjectRecord: d.readSubjectRecord, signAsAgent: (a, digest) => signAsAgent(c.env, a, digest) }, who, probe as never) as never;
     },
+    // Spec 412 — the public shelf, read from this agent's own records for a caller with no credential; only what the
+    // owner marked public leaves. The same invoker the owner's Ask calls (`library.public.*`).
+    ...(deps.readSubjectRecord ? { publicRead: ({ agent: who, skill, args }) => publicLibraryRead({ readSubjectRecord: deps.readSubjectRecord! }, who.toLowerCase(), skill, args) } : {}),
     // Spec 374 §4 — a delivered answer resumes the run that asked, and only that run.
     resumeFromCommitment: (input) => resumeFromCommitment(c.env, input),
     // Spec 376 — run one handed-off step here, the parent agent as the asker, the chain presented.

@@ -48,7 +48,7 @@ const securityHeaders = [
 // public three is stamped `X-Robots-Tag: noindex` — enumerated from the app directory at build time, so a
 // section added tomorrow is private by construction and never indexed as "Sign in to <brand>".
 const APP_DIR = join(dirname(fileURLToPath(import.meta.url)), 'app');
-const PUBLIC_TOP_LEVEL = new Set(['about', 'llms.txt', 'robots.ts', 'sitemap.ts', 'icon.tsx', 'opengraph-image.tsx']);
+const PUBLIC_TOP_LEVEL = new Set(['about', 'published', 'llms.txt', 'robots.ts', 'sitemap.ts', 'icon.tsx', 'opengraph-image.tsx']);
 const routeDirs = (dir) => readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith('_')).map((d) => d.name);
 const privateSections = [
   ...routeDirs(APP_DIR).filter((n) => !n.startsWith('(') && !PUBLIC_TOP_LEVEL.has(n)),

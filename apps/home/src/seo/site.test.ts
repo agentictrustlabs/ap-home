@@ -7,9 +7,9 @@ describe('what a search engine may know about a Home (src/seo/site.ts)', () => {
     for (const r of PUBLIC_ROUTES) expect(absoluteUrl(r.path)).toBe(`${SITE_ORIGIN}${r.path}`);
     expect(absoluteUrl('about')).toBe(`${SITE_ORIGIN}/about`);
   });
-  it('invites the front door, About and llms.txt — and nothing that is private', () => {
+  it('invites the front door, About, the public shelf (412) and llms.txt — and nothing that is private', () => {
     const paths = PUBLIC_ROUTES.map((r) => r.path);
-    expect(paths).toEqual(['/', '/about', '/llms.txt']);
+    expect(paths).toEqual(['/', '/about', '/published', '/llms.txt']);
     for (const p of paths) for (const priv of PRIVATE_PATH_PREFIXES) expect(p.startsWith(priv)).toBe(false);
     // the machine doors and the session paths are all disallowed
     for (const must of ['/me/', '/connect/', '/oidc/', '/token', '/jwks', '/a2a/', '/registry']) expect(PRIVATE_PATH_PREFIXES).toContain(must);

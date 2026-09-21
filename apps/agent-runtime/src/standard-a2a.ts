@@ -50,7 +50,7 @@ import {
   createStandardA2aServer, createMemoryTaskStore, createMemoryPushStore, sessionWirePrincipal,
   runtimeBackedTaskStore, delegatedDispatch, canSeeDelegatedOrOwnTask, principalBySchemes, partsText, partsData, traceHeadersOf,
   settlementForReplyKind, settleTask,
-  type AgentCardV1, type ExecutionContext, type Principal, type StandardServer, type SessionWirePrincipalDeps, type StandardTaskStore, type DelegatedRpc,
+  type AgentCardV1, type ExecutionContext, type MessageV1, type Principal, type StandardServer, type SessionWirePrincipalDeps, type StandardTaskStore, type DelegatedRpc,
 } from '@agenticprimitives/a2a/standard';
 import { internalHeaders, markInWorker, isInWorkerRequest, type InternalMarkerEnv } from './internal-marker.js';
 import { subjectAskOf, subjectAnswerOf, handoffOf, routedRunRefFor, SUBJECT_ANSWER_ARTIFACT, type HandoffV1, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
@@ -99,6 +99,20 @@ export interface StandardMountDeps {
   /** Spec 384 W2 — answer an engagement probe AS this agent (an offer, a decline, a question…). The reply is a
    *  MESSAGE, never a task (336 §5). Absent ⇒ probes are not answered here. */
   answerProbe?: (input: { agent: Address; probe: Record<string, unknown>; caller: Principal | null }) => Promise<Record<string, unknown>>;
+  /** Spec 412 — THE PUBLIC SHELF: answer a public read (`library.public.list` / `library.public.read`) AS this agent for a
+   *  caller with no credential. Reads only what the owner marked public. Absent ⇒ the lane is closed (every anonymous
+   *  request stays 401). */
+  publicRead?: (input: { agent: Address; skill: string; args: Record<string, unknown> }) => Promise<Record<string, unknown>>;
+}
+
+/** Spec 412 — the data-part shape a stranger sends: `{ skill: 'library.public.list' | 'library.public.read', ...args }`. */
+export const PUBLIC_LANE_SKILLS: ReadonlySet<string> = new Set(['library.public.list', 'library.public.read']);
+export function publicLaneSkillOf(message: { parts: MessageV1['parts'] }): { skill: string; args: Record<string, unknown> } | null {
+  const data = partsData(message.parts);
+  const skill = data && typeof data.skill === 'string' ? data.skill : null;
+  if (!skill || !PUBLIC_LANE_SKILLS.has(skill)) return null;
+  const { skill: _s, ...args } = data as Record<string, unknown>;
+  return { skill, args };
 }
 
 interface AskEnvelope {
@@ -136,6 +150,19 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
     ...delegatedDispatch({ agent, ...(deps.delegatedRpc ? { rpc: deps.delegatedRpc } : {}), ...(deps.answerProbe ? { answerProbe: deps.answerProbe } : {}) }),
     // A delegated task is visible to its parties; a conversation, to whoever had it.
     canSeeTask: canSeeDelegatedOrOwnTask,
+    // Spec 412 — THE PUBLIC LANE: a stranger's `SendMessage` whose data part names a public shelf read is answered
+    // with a message (no task) from what the owner marked public. The package admits the shape; this agent answers.
+    ...(deps.publicRead ? {
+      public: {
+        admits: (m: MessageV1) => publicLaneSkillOf(m) !== null,
+        answer: async (m: MessageV1) => {
+          const q = publicLaneSkillOf(m)!;
+          const result = await deps.publicRead!({ agent, skill: q.skill, args: q.args });
+          const said = typeof result.answer === 'string' ? result.answer : '';
+          return { messageId: crypto.randomUUID(), role: 'ROLE_AGENT' as const, parts: [...(said ? [{ text: said }] : []), { data: { skill: q.skill, ...result } }] } as never;
+        },
+      },
+    } : {}),
     // TWO SCHEMES, ONE MECHANISM EACH (ADR-0013) — the package's selector. `first` is THIS Worker's own door:
     // spec 374 §4 — AN AGENT OF THIS WORKER, calling in-process. A Worker cannot fetch its own account's
     // hostnames, so a subject agent delivering a finished act to a creditor agent served here makes the
