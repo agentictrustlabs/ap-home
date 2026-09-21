@@ -395,7 +395,11 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
       // loop asks the person for a declared argument it lacks (§3.5), while the mandate handler — which
       // only sees the step at signing time — can do nothing but throw "args.amount is required to bound
       // the authority it needs", which is true, unactionable, and arrives after the person has typed.
-      required: ['payer', 'payee', 'amount'],
+      // NAMED AS THE PROPERTY IS NAMED. `required` said `amount` after the property became `usdc`; the
+      // loop's alternatives (amount ⇄ usdc) hid it, and Gemini refused the whole vocabulary — "schema
+      // at top-level requires unspecified property 'amount'" — so every ask on that provider failed
+      // before a word was read. A required name that no property declares is an invalid schema.
+      required: ['payer', 'payee', 'usdc'],
     },
     // The step ACTS ON the token and needs the PAYER's authority. Conflating them asks a person to grant
     // authority as an ERC-20 contract, which nothing can sign.
@@ -3496,6 +3500,7 @@ export async function resolveStepArgs(
   const ALTERNATIVES: Record<string, readonly string[]> = { amount: ['amount', 'usdc'], usdc: ['usdc', 'amount'] };
   const WORD_FOR_ARG: Record<string, { label: string; hint: string }> = {
     amount: { label: 'How much', hint: 'in whole USDC, e.g. 10 or 12.50' },
+    usdc: { label: 'How much', hint: 'in whole USDC, e.g. 10 or 12.50' },
     message: { label: 'Message', hint: 'what to say' },
     label: { label: 'Name', hint: 'lowercase letters, digits and hyphens' },
   };
