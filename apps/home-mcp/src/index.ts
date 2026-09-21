@@ -180,6 +180,12 @@ app.post('/oauth/demo-connect', async (c) => {
   if (!parsed.ok) return parsed.res;
   const signin = (await fetch(`${c.env.HOME_ORIGIN}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: String(body.handle ?? ''), client_id: c.env.CLIENT_ID, delegation_template: 'ask-as-me' }) }).then((r) => r.json()).catch(() => null)) as { id_token?: string; delegation?: DelegationWireV1; agent_name?: string; error?: string } | null;
   if (!signin || signin.error) return json({ error: 'access_denied', error_description: signin?.error ?? 'the Home refused the demo sign-in' }, 400);
+  // A demo persona's connection is the gate's, and the gate's alone: every prior connection of this persona ends
+  // here, so a run that died before its revoke (or a revoke that once left the refresh token alive) cannot pile
+  // up until the per-person client cap refuses the next run with nothing actually connected (seen 2026-09-20:
+  // 100 "connected clients", every one a finished gate). Real people never come through this route.
+  const who = signin.id_token ? String((JSON.parse(atob(signin.id_token.split('.')[1] ?? '') || '{}') as { sub?: string }).sub ?? '') : '';
+  if (who) await store(c.env).deleteTokensFor(who).catch(() => undefined);
   const connected = await connectFromHome(c.env, signin, parsed.req.client_id);
   if (!connected.ok) return json({ error: 'access_denied', error_description: connected.error }, 400);
   const ours = randomToken(32);

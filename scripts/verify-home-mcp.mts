@@ -86,9 +86,13 @@ const crossOut = cross.result?.structuredContent ?? {};
 console.log(`twin · bob's client resumes alice's run → isError ${cross.result?.isError ?? false} · kind ${crossOut.kind ?? '-'} · ${String(crossOut.error ?? crossOut.text ?? '').slice(0, 120)}`);
 if (out.runRef && !cross.result?.isError && crossOut.kind !== 'refused') fail("another connection resumed alice's run");
 
-// ── revoke: the bearer dies ──
+// ── revoke: the bearer dies — and its refresh token with it (one grant), for BOTH clients this run made ──
 await post('/oauth/revoke', form({ token: tok.access_token, client_id: reg.client_id }));
 const after = await rpc('tools/list');
 console.log(`revoked → ${after.status}`);
 if (after.status !== 401) fail('a revoked bearer must be refused');
+const refreshed = await post('/oauth/token', form({ grant_type: 'refresh_token', client_id: reg.client_id, refresh_token: tok.refresh_token }));
+console.log(`refresh after revoke → ${refreshed.status}`);
+if (refreshed.status !== 400) fail('revoking the access token must end its refresh token too — a live refresh token keeps the client counted as connected');
+await post('/oauth/revoke', form({ token: tok2.access_token, client_id: reg2.client_id }));
 console.log('\n✓ spec 397 W1: Claude\'s entrance to alice\'s agent — her connection, her standing, her agent\'s answer; the bearer is a token of the Home MCP and of nothing else');
