@@ -95,24 +95,26 @@ export const COINS: Coin[] = (() => {
   ];
 })();
 
+/** The coin this Home funds and the estate's apps settle in — what "Fund with …" mints. */
+export const FUNDING_COIN: Coin = COINS.find((c) => c.primary) as Coin;
+
 /**
- * Which balance to PRINT for one account — ONE of them.
+ * Which balances to PRINT for one account.
  *
- * A treasury reads as holding a single currency, not a row of them. Two figures side by side is a
- * question rather than an answer: somebody looking at "10000.00 USDC · 10400.00 SHQ" has to work out
- * which one they can play with, and the two numbers are unrelated.
+ * Every coin the account HOLDS, and the coin this Home funds always — even at zero, because "Fund with
+ * USDC" is offered right beside the line and needs something to refer to.
  *
- * So the coin the account ACTUALLY USES wins. A treasury holding an app's currency is a treasury
- * being used for that app, and its own coin is the one its owner is thinking in; the demo USDC is
- * what this Home mints and matters only until something real is in there. The primary shows when
- * nothing else does — including at zero, so "Fund with USDC" beside it has something to refer to.
- *
- * NOTHING IS DELETED. The USDC is still in the account and still on the chain; it is not on this
- * line. If a treasury ever needs to show both, this is the one function to change.
+ * This used to print exactly one: the app coin when held, else the demo USDC, on the reasoning that
+ * "10000.00 USDC · 10400.00 SHQ" is a question rather than an answer. That reasoning assumed the USDC
+ * was only what this Home mints and nothing spent it. It is no longer true: the estate's relying apps
+ * SETTLE in it — the scripture corpus charges a licensed-edition pass in USDC from this very treasury —
+ * so hiding the USDC line hid the balance those charges move, while the button beside it named a coin
+ * the card did not show. Both numbers are answers now: SHQ is what plays at the card room, USDC is what
+ * pays across the estate. A coin whose balance could not be read is left out rather than shown as a
+ * zero that is a guess.
  */
 export function shown(balances: readonly { coin: Coin; amount: bigint | null }[]): { coin: Coin; amount: bigint | null }[] {
-  const held = balances.filter((b) => !b.coin.primary && b.amount !== null && b.amount > 0n);
-  if (held.length > 0) return [held[0] as { coin: Coin; amount: bigint | null }];
   const primary = balances.find((b) => b.coin.primary);
-  return primary ? [primary] : [];
+  const held = balances.filter((b) => !b.coin.primary && b.amount !== null && b.amount > 0n);
+  return [...(primary ? [primary] : []), ...held];
 }

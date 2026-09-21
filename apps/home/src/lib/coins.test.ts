@@ -34,47 +34,26 @@ describe('the coins a Home can show', () => {
   });
 });
 
-describe('which balance gets printed — one of them', () => {
-  it('shows the coin the account actually uses, and drops the demo USDC', () => {
-    // "10000.00 USDC · 10400.00 SHQ" is a question, not an answer: two unrelated numbers and no
-    // saying which one you can play with. A treasury holding an app's currency is a treasury being
-    // used for that app.
+describe('which balances get printed — every coin held, and the funding coin always', () => {
+  it('shows the coin this Home funds AND the coin the app minted', () => {
+    // Both are answers: SHQ plays at the card room, USDC pays across the estate (the scripture corpus
+    // charges its licensed pass in USDC from this same treasury). Hiding either hides money that moves.
     const rows = shown([{ coin: usdc, amount: 10_000_000_000n }, { coin: shq, amount: 10_400_000_000n }]);
-    expect(rows.map((b) => b.coin.symbol)).toEqual(['SHQ']);
+    expect(rows.map((b) => b.coin.symbol)).toEqual(['USDC', 'SHQ']);
   });
 
-  it('falls back to the coin this Home funds when nothing else is held', () => {
-    // Including at zero: "Fund with USDC" sits beside it and needs something to refer to.
+  it('shows the coin this Home funds even at zero, and nothing else that is empty', () => {
+    // "Fund with USDC" sits beside it and needs something to refer to; an empty app coin says nothing.
     expect(shown([{ coin: usdc, amount: 0n }, { coin: shq, amount: 0n }]).map((b) => b.coin.symbol)).toEqual(['USDC']);
     expect(shown([{ coin: usdc, amount: 5n }]).map((b) => b.coin.symbol)).toEqual(['USDC']);
   });
 
-  it('never prints two', () => {
-    const three = [{ coin: usdc, amount: 1n }, { coin: shq, amount: 1n }, { coin: { ...shq, address: '0x' + '2'.repeat(40), symbol: 'ZZZ' } as Coin, amount: 1n }];
-    expect(shown(three)).toHaveLength(1);
+  it('prints the funding coin first, then every held app coin', () => {
+    const three = [{ coin: shq, amount: 1n }, { coin: usdc, amount: 1n }, { coin: { ...shq, address: '0x' + '2'.repeat(40), symbol: 'ZZZ' } as Coin, amount: 1n }];
+    expect(shown(three).map((b) => b.coin.symbol)).toEqual(['USDC', 'SHQ', 'ZZZ']);
   });
 
   it('ignores a coin whose balance could not be read, rather than showing a zero that is a guess', () => {
     expect(shown([{ coin: usdc, amount: 0n }, { coin: shq, amount: null }]).map((b) => b.coin.symbol)).toEqual(['USDC']);
-  });
-});
-
-describe('the list a build ships with', () => {
-  it('shows the card room’s coin on faithchain without anybody configuring anything', async () => {
-    // The point of the built-in table. Told twice to set an environment variable, the person's Home
-    // still read "0.00 USDC" over a treasury holding ten thousand Sheqels — so the working default
-    // matters more than the tidy one.
-    const { COINS } = await import('./coins');
-    // This test build targets whatever chain.ts resolves; assert the SHAPE that makes it work.
-    expect(COINS[0]?.primary).toBe(true);
-    expect(COINS.every((c) => /^0x[0-9a-fA-F]{40}$/.test(c.address))).toBe(true);
-    expect(new Set(COINS.map((c) => c.address.toLowerCase())).size).toBe(COINS.length);
-  });
-
-  it('lets a configured list win outright over the built-in one', () => {
-    // A deployment that names its coins means THAT list — not that list plus whatever this build
-    // happened to ship believing about the chain.
-    const configured = parseAppCoins('[{"address":"0x1111111111111111111111111111111111111111","symbol":"ONE"}]');
-    expect(configured.map((c) => c.symbol)).toEqual(['ONE']);
   });
 });

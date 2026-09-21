@@ -22,7 +22,7 @@ import { setOrgLifecycleStatus } from '../../home/org-lifecycle';
 import { orgStatusOf, STATUS_LABEL, type OrgSurface } from '../../lib/org-lifecycle';
 import type { DelegationWire } from '../../lib/delegation';
 import { vaultWriteWithDelegation } from '../../lib/vault-client';
-import { COINS, shown, type Coin } from '../../lib/coins';
+import { COINS, FUNDING_COIN, shown, type Coin } from '../../lib/coins';
 import { CONTRACTS } from '../../lib/chain';
 import { AddressChip } from '../shared/AddressChip';
 import { BuildingIcon, LandmarkIcon, UserIcon } from '../shared/Icons';
@@ -183,7 +183,7 @@ export function FundForm({
   if (!open) {
     return (
       <button type="button" className="btn-ghost" style={{ marginTop: '.5rem', fontSize: '.78rem', padding: '.25rem .55rem' }} onClick={() => setOpen(true)}>
-        Fund with USDC
+        Fund with {FUNDING_COIN.symbol}
       </button>
     );
   }
@@ -193,7 +193,7 @@ export function FundForm({
       <div style={{ display: 'flex', gap: '.4rem', alignItems: 'center' }}>
         <input type="number" min="0" step="1" value={amt} onChange={(e) => setAmt(e.target.value)} disabled={busy}
           style={{ width: 90, padding: '.4rem .55rem', fontSize: '.85rem', border: '1px solid var(--c-g200, #e2e8f0)', borderRadius: 6 }} />
-        <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>USDC</span>
+        <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>{FUNDING_COIN.symbol}</span>
       </div>
       <div style={{ display: 'flex', gap: '.4rem' }}>
         <BusyButton busy={busy} busyLabel={step || 'Funding…'} className="btn-primary" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} onClick={() => void go()}>
@@ -207,7 +207,7 @@ export function FundForm({
           a promise by everyone: a wallet home signs the mint with its own credential, and a seeded demo
           person signs at the Home. Gas is sponsored either way; the signature is not always free. */}
       <p className="onboarding-note" style={{ margin: 0 }}>
-        Mints demo USDC to this treasury — gas is sponsored.{' '}
+        Mints demo {FUNDING_COIN.symbol} to this treasury — the coin the estate&apos;s apps settle in. Gas is sponsored.{' '}
         {promptless === null ? '' : promptless ? 'Your home signs it: no wallet prompt.' : 'Your wallet will ask you to sign it.'}
       </p>
       {err && <p className="onboarding-hint taken" style={{ margin: 0 }}>{err}</p>}
