@@ -64,7 +64,7 @@ import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
 import { ADAPTER, CARRIES } from './adapter-declarations.js';
 import { relationshipCredentialDigest, termsDigestOf, type RelationshipCredentialBodyV1 } from '@agenticprimitives/agent-relationships';
-import { replayingInvoker, inputsFor, type RunRecordV1, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent } from '@agenticprimitives/orchestration';
+import { replayingInvoker, inputsFor, type RunRecordV1, type RunMarks, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent } from '@agenticprimitives/orchestration';
 import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, standingFor, declareInstruction, forgetInstruction, instructionContextOf, STANDING_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
@@ -2399,6 +2399,9 @@ export interface HarnessRunInput {
   /** Spec 390 W2 — the W3C Trace Context the request arrived with, so a routed hop this run makes carries the
    *  SAME trace outbound (the caller's, not one derived here). Recorded on the run record; read by no gate. */
   traceContext?: TraceContextV1 | null;
+  /** Spec 390 W3 — where the runtime's own windows (playbook, catalog, standing…) are recorded, itemising the
+   *  `receive_request` span; absent ⇒ only the console line. */
+  marks?: RunMarks;
   intent: { goal: string; constraints?: Record<string, unknown>; context?: Record<string, unknown>; /** Spec 410 §5 — set here, after the playbook is known; bound by the intent digest (`delegation.VersionBindingV1`). */ versions?: { ontologyManifestDigest: string; semanticsDigest: string } };
   /** The message's DATA part naming a skill — the material `playbook.answer` reasons over. Never in the intent: it is
    *  what the person can already see, not what they asked, and it must not bind a mandate's digest. */
@@ -4544,6 +4547,9 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   const phaseT0 = Date.now();
   const phases: string[] = [];
   const mark = (name: string) => phases.push(`${name} ${Date.now() - phaseT0}ms`);
+  // Spec 390 W3 — the same windows on the RECORD (`marks`), as child spans of `receive_request`, when the
+  // caller collects them; the console line above stays for a material ask.
+  const timed = <T,>(name: string, fn: () => Promise<T>): Promise<T> => input.marks ? input.marks.time(name, fn) : fn();
   // Remembered for a minute per addressee (`run-memo.ts`): the vault read was 2–3 s of every ask.
   // The RECORD is what is remembered, not the playbook built from it: the playbook carries a Set, and
   // a Set does not survive the cache's JSON. `loadPlaybook` rebuilds from the record every time, cheaply.
@@ -4591,7 +4597,7 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
           .then(([hand, style, playerRead, note, profile, days]) => studyFrom({ access: input.study!, hand, style, read: playerRead, note, profile, material: materialInput, review, days, ...(span ? { span } : {}) }));
       })()
     : null;
-  const playbook = await loadPlaybook(rememberedRecord, String(input.addressee ?? ''), console.log).catch(() => null);
+  const playbook = await timed('prepare:playbook', () => loadPlaybook(rememberedRecord, String(input.addressee ?? ''), console.log).catch(() => null));
   mark('playbook');
   // Spec 410 §5 — stamp the intent with the versions it is acted under. The mandate a Home mints for this run
   // digests the whole intent (RFC 8785), so the versions are bound; a resume under a moved T-box or definition
@@ -4852,12 +4858,14 @@ step is then handed to that agent under authority the person grants; leave it ou
   // only then (fail closed), described by the playbook's contract when it has one, and answered by the
   // catalog itself: public metadata with a named source, never a record of ours.
   mark('planner-built');
-  const catalog = await catalogOnce;
+  const catalog = await timed('prepare:catalog', () => catalogOnce);
   mark('catalog');
   const catalogTools = catalog ? CATALOG_TOOLS.map((t) => mergeContractTool(t, playbook?.tools?.[t.id])) : [];
   // Spec 404 — the addressee's OWN external MCP connectors: compiled from its records, never narrowed by the playbook
   // (they are the holder's, not the archetype's); a read is her standing, an act her mandate at risk high.
-  const mcpConnectors = await mcpConnectorsOf(deps, input.addressee ? String(input.addressee) : undefined);
+  // Remembered a minute per holder (`run-memo.ts`): a survey and a read of the holder's vault, 1.2–2 s on every ask
+  // for a list that changes when she attaches a server at her Home. The records carry no token (`hasToken` only).
+  const mcpConnectors = await timed('prepare:mcp-connectors', () => remembered(`mcp-connectors:${String(input.addressee ?? '').toLowerCase()}`, () => mcpConnectorsOf(deps, input.addressee ? String(input.addressee) : undefined)));
   const mcpTools = mcpConnectors.length ? [...mcpConnectorTools(mcpConnectors), (playbook?.tools?.[MCP_CONNECTORS_LIST] ? mergeContractTool(MCP_CONNECTORS_LIST_TOOL, playbook.tools[MCP_CONNECTORS_LIST]!) : MCP_CONNECTORS_LIST_TOOL)] : (playbook?.tools?.[MCP_CONNECTORS_LIST] && deps.survey ? [mergeContractTool(MCP_CONNECTORS_LIST_TOOL, playbook.tools[MCP_CONNECTORS_LIST]!)] : []);
   // A QUESTION OF JUDGEMENT over material the message carried (`playbook.answer`). Listed ONLY when the
   // message names a skill and the addressee's profile publicly advertises it — an agent answers exactly
@@ -4865,7 +4873,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   const material: PlaybookMaterial | null = input.material && typeof input.material.skill === 'string'
     ? { skill: input.material.skill, input: input.material.input, ...(typeof (input.material.input as { question?: unknown } | undefined)?.question === 'string' ? { question: (input.material.input as { question: string }).question } : {}), ...(input.material.answer && typeof input.material.answer === 'object' ? { answer: input.material.answer as Record<string, string> } : {}) }
     : null;
-  const advertised = material && input.addressee && deps.advertisedCapabilities ? await remembered(`advertised:${String(input.addressee).toLowerCase()}`, () => deps.advertisedCapabilities!(input.addressee!).catch(() => [] as string[])) : [];
+  const advertised = material && input.addressee && deps.advertisedCapabilities ? await timed('prepare:advertised', () => remembered(`advertised:${String(input.addressee).toLowerCase()}`, () => deps.advertisedCapabilities!(input.addressee!).catch(() => [] as string[]))) : [];
   mark('advertised');
   const playbookAnswer = playbookAnswerAvailable({ call: structuredCallFor(env as never, input.provider), material, advertised }) ? [PLAYBOOK_ANSWER_TOOL] : [];
   const tools = [
@@ -4986,7 +4994,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   // receipt at the organization then says "for Missio Nexus, under steward wire 0x…" without anyone
   // trusting the asker's word for it. Evidence only: the mandate chain is what the verifier judged.
   let standingLink: ExecutionBindingV1['standing'] | undefined;
-  if (standingOnce) standingLink = await standingOnce;
+  if (standingOnce) standingLink = await timed('prepare:standing', () => standingOnce);
   mark('standing');
   const bindingFor = (rs: ResolvedStep): ExecutionBindingV1 => {
     const sourceOf = (v: unknown): NonNullable<ExecutionBindingV1['argSources']>[string] => {

@@ -9,7 +9,7 @@ import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 
 import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, forgetConfirmation, CONFIRMATION_RECORD, forgetInstruction, STANDING_RECORD, factsOf, forgetFact, FACTS_RECORD, routinesOf, dropRoutine, ROUTINES_RECORD, preferencesOf, setPreferences, answerPreferencesForPrompt, PREFERENCES_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1, type RememberedFactsV1 } from '@agenticprimitives/context';
 import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
-import { recordOf, replayingInvoker, planDigest, traceContextOf, type RunPlannerSummaryV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent, type RunBillV1 } from '@agenticprimitives/orchestration';
+import { recordOf, runMarks, replayingInvoker, planDigest, traceContextOf, type RunPlannerSummaryV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent, type RunBillV1 } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
 import { recordFormOf, rehydrateExecuted } from './artifact-store.js';
 import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken, advanceTrigger, withPause, withBudget, advanced, declareTrigger, removeTrigger, rebuildDeclaredTriggers } from './triggers.js';
@@ -174,7 +174,7 @@ import { subjectAsk, subjectAnswer, validateSubjectAsk, handoff, type SubjectAns
 import { realtimeKitConfigured, verifyRealtimeKitWebhook, readRealtimeKitWebhook } from './realtimekit.js';
 import { sendSubjectAskOverWire, subjectAnswerMessage, subjectEnvelopeOf, handoffMessage, routedRunRefFor } from '@agenticprimitives/a2a';
 import { EXTERNAL_AGENT_TOOL, externalAgentInvoker } from './external-agent.js';
-import { remembered } from './run-memo.js';
+import { remembered, forget } from './run-memo.js';
 import { DISCOVERY_INSPECT_CAPABILITY, discoveryInspectInvoker } from './enterprise-tools.js';
 import { INVITATIONS_RECEIVED_CAPABILITY, invitationsReceivedInvoker } from './invitations-received.js';
 import { subjectAddress, nameRecordsReader, servesUnpublishedNames, type SubjectAddressEnv } from './subject-address.js';
@@ -1863,6 +1863,7 @@ app.post('/harness/connectors/mcp', async (c) => {
       else await dropMcpToken(c.env as never, holder, record.id).catch(() => undefined);
       const wrote = await deps.writeSubjectRecord(holder, `${MCP_CONNECTOR_PREFIX}${record.id}`, record);
       if (!wrote.ok) return c.json({ ok: false, error: /record_scope_denied|scope/i.test(wrote.error ?? '') ? 'record_scope_denied' : (wrote.error ?? 'the connector could not be kept') }, 502);
+      await forget(`mcp-connectors:${holder.toLowerCase()}`); // the next ask sees the new server, not last minute's list
       return c.json({ ok: true, holder, connector: view(record) });
     }
     if (body.op === 'remove') {
@@ -1871,6 +1872,7 @@ app.post('/harness/connectors/mcp', async (c) => {
       await dropMcpToken(c.env as never, holder, rec.id).catch(() => undefined);
       const wrote = await deps.writeSubjectRecord(holder, `${MCP_CONNECTOR_PREFIX}${rec.id}`, { ...rec, tools: [], hasToken: false, removedAt: new Date().toISOString() });
       if (!wrote.ok) return c.json({ ok: false, error: wrote.error ?? 'the connector could not be removed' }, 502);
+      await forget(`mcp-connectors:${holder.toLowerCase()}`);
       return c.json({ ok: true, holder, removed: rec.id });
     }
     return c.json({ ok: false, error: 'op must be attach, list or remove' }, 400);
@@ -4056,6 +4058,7 @@ app.get('/harness/run', async (c) => {
 
 app.post('/harness/ask', async (c) => {
   const receivedAt = Date.now(); // Spec 390 W3 — the request's arrival, on the record: what came before the loop is one honest span
+  const marks = runMarks(); // — and, itemised, what the runtime awaited before and after it (record.marks → child spans)
   const rawAsk = await c.req.text();
   const body = ((): Record<string, unknown> | null => { try { return JSON.parse(rawAsk) as Record<string, unknown>; } catch { return null; } })() as {
     session?: string; addressee?: Address; message?: string; presented?: DelegationWireV1 | DelegationWireV1[] | null;
@@ -4084,7 +4087,7 @@ app.post('/harness/ask', async (c) => {
   }
   // Spec 397 — WHO IS ASKING: the person's Home session (`session` in the body), or the person THROUGH A CLIENT
   // they authorized (an `A2A-Session` assertion over their ask-as-me wire — no session travels). One or the other.
-  let viaApp = await principalFromAppDelegation(c, rawAsk);
+  let viaApp = await marks.time('admit:app-delegation', () => principalFromAppDelegation(c, rawAsk));
   if (viaApp && !viaApp.ok) return c.json({ ok: false, error: viaApp.error }, viaApp.status as 401);
   // Spec 397 + 366 — a routed hop from a run that was asked through a client: the profile forwards the asker's
   // admission evidence in place of a session; verified here as the receiver, spent once on THIS agent's object.
@@ -4099,26 +4102,34 @@ app.post('/harness/ask', async (c) => {
   if ((!body?.session && !viaApp) || !body?.addressee || !(body.message?.trim() || body.runRef)) {
     return c.json({ ok: false, error: 'session (or an A2A-Session app delegation), addressee and either a message or the runRef of a run to resume are required' }, 400);
   }
-  const who = viaApp && viaApp.ok ? viaApp : await verifyHomeSession(String(body.session), c.env);
+  const who = viaApp && viaApp.ok ? viaApp : await marks.time('admit:session', () => verifyHomeSession(String(body.session), c.env));
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   // Spec 397 — what a routed hop from this run presents in place of a session: the admission evidence, verbatim.
   const appCredential = viaApp?.ok && !forwardedCred && /^A2A-Session\s/i.test(c.req.header('authorization') ?? '') ? { authorization: c.req.header('authorization')!, body: rawAsk } : undefined;
   if (!c.env.HARNESS_AGENT_SA) return c.json({ ok: false, error: 'HARNESS_AGENT_SA not configured' }, 503);
   // P1.4 — THE AGENT'S BUDGET, at the door: a FRESH ask (not a resume) against the steward's declared limits and the
   // day's counters, before a model is called or a step runs. Over ⇒ said, 429; never a silent degrade.
-  if (body.message?.trim() && !body.runRef) {
-    const bdeps = harnessDeps(c.env, buildAuditSink(c.env));
-    const braw = bdeps.readSubjectRecord ? await bdeps.readSubjectRecord(String(body.addressee).toLowerCase(), BUDGET_RECORD).catch(() => null) : null;
-    if (braw) {
-      const budget = budgetOf(braw);
-      if (budget.asksPerDay !== null || budget.vaultCallsPerDay !== null) {
-        const [todayCounters] = await budgetCounters(c.env as never, body.addressee as Address, 1);
-        const why = todayCounters ? overBudget(budget, todayCounters) : null;
-        if (why) return c.json({ ok: false, reply: { kind: 'refused', error: why, budget: { asksPerDay: budget.asksPerDay, vaultCallsPerDay: budget.vaultCallsPerDay, today: todayCounters } } }, 429);
-      }
-    }
-    c.executionCtx.waitUntil(countAsk(c.env as never, body.addressee as Address));
-  }
+  // STARTED HERE, JUDGED BEFORE THE RUN. The declared budget is a record of the addressee's that changes once in a
+  // while (remembered a minute, like its playbook); read beside the asker's own records below rather than ahead of
+  // them — a cold read of it alone was 1.5–3.5 s at the door of every ask (measured 2026-09-21). The counters are
+  // read fresh, only when a budget is declared. Nothing between here and the judgement calls a model or runs a step.
+  const budgetGate: Promise<Response | null> = body.message?.trim() && !body.runRef
+    ? (async () => {
+        const bdeps = harnessDeps(c.env, buildAuditSink(c.env));
+        const bsubject = String(body.addressee).toLowerCase();
+        const braw = bdeps.readSubjectRecord ? await marks.time('read:budget', () => remembered(`record:${bsubject}:${BUDGET_RECORD}`, () => bdeps.readSubjectRecord!(bsubject, BUDGET_RECORD).catch(() => null))) : null;
+        if (braw) {
+          const budget = budgetOf(braw);
+          if (budget.asksPerDay !== null || budget.vaultCallsPerDay !== null) {
+            const [todayCounters] = await marks.time('read:budget-counters', () => budgetCounters(c.env as never, body.addressee as Address, 1));
+            const why = todayCounters ? overBudget(budget, todayCounters) : null;
+            if (why) return c.json({ ok: false, reply: { kind: 'refused', error: why, budget: { asksPerDay: budget.asksPerDay, vaultCallsPerDay: budget.vaultCallsPerDay, today: todayCounters } } }, 429);
+          }
+        }
+        c.executionCtx.waitUntil(countAsk(c.env as never, body.addressee as Address));
+        return null;
+      })()
+    : Promise.resolve(null);
   // Spec 377 — which model this turn runs on, decided BEFORE any run state is touched. A listed-but-keyless
   // provider throws here (a configuration error, loud), an unoffered one is refused with the offer named.
   const chosen = resolveProvider(c.env, body.model);
@@ -4168,7 +4179,7 @@ app.post('/harness/ask', async (c) => {
   const runRef = body.runRef ?? `run-${crypto.randomUUID()}`;
   let stored: HarnessRunCheckpointV1 | null = null;
   if (body.runRef) {
-    stored = await loadRun(c.env as never, addressee, body.runRef).catch(() => null);
+    stored = await marks.time('read:checkpoint', () => loadRun(c.env as never, addressee, body.runRef!).catch(() => null));
     // Only the asker may resume: the run carries their session's authority and their answers, and a run
     // someone else can pick up is a run someone else can finish.
     // A person's half-finished run is theirs; an unclaimed WORK ITEM (a plan step awaiting authority) is
@@ -4239,17 +4250,34 @@ app.post('/harness/ask', async (c) => {
   if (routedStanding) askDeps.standingContext = routedStanding;
   // Spec 375 — what KIND of agent is asked, once per ask, so a read knows whether "no subject" means
   // "which one?" (a person) or "me" (an organization asking itself). Unreadable ⇒ null ⇒ the person reading.
-  askDeps.addresseeKind = await askDeps.agentTypeOf?.(addressee).catch(() => null) ?? null;
+  // THE ASKER'S OWN RECORDS IN ONE BATCH, beside the addressee's kind and the budget. The conversation, the
+  // remembered facts and the answer preferences were three vault reads of the same principal, each ~1.3 s and each
+  // a verified call against her budget (measured 2026-09-21); `get_vault_records` decodes them in one round trip.
+  // Memory and preferences are read ONLY when the asker addresses her own agent (spec 402 W1).
+  const ownAgent = String(who.sa).toLowerCase() === String(addressee).toLowerCase();
+  const askerSubject = String(who.sa).toLowerCase();
+  const askerWanted = ownAgent ? [CONVERSATION_RECORD, FACTS_RECORD, PREFERENCES_RECORD] : [CONVERSATION_RECORD];
+  const [addresseeKind, askerRecords, budgetRefusal] = await Promise.all([
+    // The derived type is an on-chain fact that does not move between two asks: remembered a minute per agent.
+    marks.time('read:agent-type', () => remembered(`agent-type:${addressee}`, () => askDeps.agentTypeOf?.(addressee).catch(() => null) ?? Promise.resolve(null))),
+    marks.time('read:asker-records', () => askDeps.readRecords
+      ? askDeps.readRecords(askerSubject, askerWanted).catch(() => ({} as Record<string, unknown>))
+      : Promise.all(askerWanted.map((rt) => askDeps.readSubjectRecord?.(askerSubject, rt).catch(() => null) ?? Promise.resolve(null))).then((vals) => Object.fromEntries(askerWanted.map((rt, i) => [rt, vals[i]])))),
+    budgetGate,
+  ]);
+  if (budgetRefusal) return budgetRefusal; // P1.4 — over budget: said, 429, before any model or step
+  const conversationRaw = askerRecords[CONVERSATION_RECORD] ?? null;
+  const memoryRaw = ownAgent ? askerRecords[FACTS_RECORD] ?? null : null;
+  const prefsRaw = ownAgent ? askerRecords[PREFERENCES_RECORD] ?? null : null;
+  askDeps.addresseeKind = addresseeKind ?? null;
   try {
     // Spec 370 P2 — the run narrates itself; each sentence lands on the task DO as it happens, and the
     // surface long-polls them while this request is in flight. Fire-and-forget under waitUntil: a line
     // that fails to land costs a progress line, never the run.
     // Spec 370 P7 — the asker's own recent turns, from their vault. One read; absent ⇒ no memory.
-    const conversation = (await askDeps.readSubjectRecord?.(String(who.sa).toLowerCase(), CONVERSATION_RECORD).catch(() => null)) as ConversationMemoryV1 | null;
+    const conversation = conversationRaw as ConversationMemoryV1 | null;
     // Spec 402 W1 — what the asker's agent remembers about the asker, ONLY when the asker addresses their own agent: an
     // organization's agent does not read a person's memory. One read; absent ⇒ no memory, which narrows nothing.
-    const ownAgent = String(who.sa).toLowerCase() === String(addressee).toLowerCase();
-    const [memoryRaw, prefsRaw] = ownAgent ? await Promise.all([askDeps.readSubjectRecord?.(String(who.sa).toLowerCase(), FACTS_RECORD).catch(() => null), askDeps.readSubjectRecord?.(String(who.sa).toLowerCase(), PREFERENCES_RECORD).catch(() => null)]) : [null, null];
     const memory: RememberedFactsV1 | null = ownAgent ? factsOf(memoryRaw) : null;
     // Spec 403 W4 — how she wants answers (brief, a language, what to call her): one line on the composer's prompt,
     // at her own agent only. Behaviour, never authority.
@@ -4265,7 +4293,7 @@ app.post('/harness/ask', async (c) => {
       c.executionCtx.waitUntil(progressChain);
     };
     const { result, resolved, interactionFor, trace, tools: offeredTools, events: runEvents, presentedRefs, playbook: askedPlaybook, bill } = await runUnderMandateBilled(c.env as unknown as HarnessEnv, askDeps, {
-      traceContext: traceContextOf(c.req.raw.headers),
+      traceContext: traceContextOf(c.req.raw.headers), marks,
       intent, presented: turn.presented, person: who.sa as Address, session: body.session, ...(appCredential ? { appCredential } : {}), runRef, addressee, onProgress: progress,
       conversation: conversation && conversation.type === 'ap.context.conversation-memory.v1' ? conversation : null,
       ...(memory && memory.entries.length ? { memory } : {}),
@@ -4396,7 +4424,7 @@ app.post('/harness/ask', async (c) => {
       },
     });
     if (structuredRoutes.length) trace.route = { ...(trace.route ?? { policy: 'first' as const }), structured: structuredRoutes };
-    const reply = await askReplyFor(c.env as unknown as HarnessEnv, {
+    const reply = await marks.time('reply:compose', () => askReplyFor(c.env as unknown as HarnessEnv, {
       ...(memory ? { memory } : {}),
       intent, result, addressee, composerFor: (need: RouteNeed) => selectComposerRouted(c.env, { ...(provider ? { provider } : {}), ...(answerLine ? { systemPrompt: answerLine } : {}), need }), deps: askDeps, interactionFor, plannerTrace: trace, tools: offeredTools,
       ...(runPlan ? { suppliedPlan: true } : {}),
@@ -4418,10 +4446,10 @@ app.post('/harness/ask', async (c) => {
         isRevokedAbi: IS_REVOKED_ABI_FOR_STANDING, validatorAbi: universalSignatureValidatorAbi,
         ...(c.env.UNIVERSAL_SIGNATURE_VALIDATOR ? { validator: c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address } : {}),
       }),
-    });
+    }));
     // Spec 391 — THE RECORD FORM: large results leave for the agent's vault as artifacts; the checkpoint and the
     // record below keep references. The reply above was built from the full result and keeps it.
-    const recordForm = await recordFormOf(c.env, askDeps, addressee, runRef, result);
+    const recordForm = await marks.time('record:offload', () => recordFormOf(c.env, askDeps, addressee, runRef, result));
     // Checkpoint what the person has given us when the run is still owed something; forget it the moment
     // it is finished or refused. A denial is terminal (ADR-0013) — a checkpoint left behind invites a
     // caller to retry a refusal as though it were weather.
@@ -4549,19 +4577,16 @@ app.post('/harness/ask', async (c) => {
     // WHAT IS WAITING ON THEM, said once on the surface they actually opened. Someone asked them days
     // ago; the message is in an inbox they may not have read and the card is on a page they may not have
     // visited. Reported alongside the answer, never instead of it, and it decides nothing.
-    const waiting = await waitingOn(askDeps, who.sa, c.env.ALLOWED_ORIGINS).catch(() => null);
+    const waitingP = marks.time('read:waiting', () => waitingOn(askDeps, who.sa, c.env.ALLOWED_ORIGINS).catch(() => null));
     // spec 350 W3 — and the runs on THIS agent that this person could pick up, excluding the one they are
     // in. A durable run only pays for itself if someone can find it again; the ask is the surface they
     // opened, so it is where an unfinished one gets mentioned. A count and a handle — resuming still goes
     // through `/harness/ask` and still re-verifies everything.
-    const otherRuns = await listRuns(c.env as never, addressee)
+    // Started beside the wait above and the conversation write below — three independent reads and a write of
+    // the asker's own planes, once run one after another (measured 2.5–3 s after the loop, 2026-09-21).
+    const otherRunsP = marks.time('read:runs', () => listRuns(c.env as never, addressee)
       .then((rs) => rs.filter((r) => r.runRef !== runRef && claimableBy(r, String(who.sa).toLowerCase() as Address)))
-      .catch(() => []);
-    // A FEW, NEWEST FIRST — never the whole pile. This is a note beside the answer, and a note that is
-    // longer than the answer is not a note. The count travels so a surface can say how many there are
-    // without listing them; `/harness/runs` is where someone goes to see them all.
-    const UNFINISHED_SHOWN = 3;
-    const shown = otherRuns.slice(0, UNFINISHED_SHOWN);
+      .catch(() => []));
     // Spec 366 R2 — S: the profile answer naming R, with this agent's own run and receipts as evidence.
     // A READ THAT REFUSED IS A REFUSAL, not an answer (spec 366 R4). A tool answers a stranger with
     // `{ refused }` inside its result — the loop treats that as an honest read and the composer narrates
@@ -4605,7 +4630,7 @@ app.post('/harness/ask', async (c) => {
       // "send him 2 USDC" pay alice's own treasury — "him" matched "paying from". A pronoun recalls words.
       const parties = [...resolved.values()].filter((r) => /^0x[0-9a-f]{40}$/i.test(r.agent) && r.raw && !/^0x/i.test(r.raw) && !r.ruleId && !r.pointId).map((r) => ({ arg: r.arg, raw: r.raw, agent: r.agent.toLowerCase(), ...(r.label ? { label: r.label } : {}) }));
       const next = rememberTurn(conversation?.type === 'ap.context.conversation-memory.v1' ? conversation : null, { at: new Date().toISOString(), runRef, addressee, said: turn.message, kind: reply.kind, parties });
-      kept = askDeps.writeSubjectRecord(String(who.sa).toLowerCase(), CONVERSATION_RECORD, next).then((r) => { if (!r.ok) console.warn('[harness/ask] conversation not kept:', r.error); }).catch(() => undefined);
+      kept = marks.time('record:conversation', () => askDeps.writeSubjectRecord!(String(who.sa).toLowerCase(), CONVERSATION_RECORD, next).then((r) => { if (!r.ok) console.warn('[harness/ask] conversation not kept:', r.error); }).catch(() => undefined));
       // Spec 385 — REMEMBER A CONFIRMED CHOICE. The trusted event: a PRIOR turn raised an ambiguity choice
       // scoped to (word, capability, arg), and THIS turn supplied the answer (`body.supplied`). The resolved
       // agent for that arg IS the person's confirmation — recorded scoped, correctable, revalidated on the
@@ -4632,8 +4657,15 @@ app.post('/harness/ask', async (c) => {
       }
     }
     // Spec 369 — WHAT IS SAID, decided by the agent: markdown stripped, addresses named. A voice reads this.
-    const spoken = await spokenFor(reply as never, async (a) => askDeps.nameOf?.(a) ?? null, (id) => CAPABILITY_WORDS[id] ?? id).catch(() => '');
-    await kept;
+    const [spoken, waiting, otherRuns] = await Promise.all([
+      spokenFor(reply as never, async (a) => askDeps.nameOf?.(a) ?? null, (id) => CAPABILITY_WORDS[id] ?? id).catch(() => ''),
+      waitingP, otherRunsP, kept,
+    ]);
+    // A FEW, NEWEST FIRST — never the whole pile. This is a note beside the answer, and a note that is
+    // longer than the answer is not a note. The count travels so a surface can say how many there are
+    // without listing them; `/harness/runs` is where someone goes to see them all.
+    const UNFINISHED_SHOWN = 3;
+    const shown = otherRuns.slice(0, UNFINISHED_SHOWN);
     // Spec 370 P6 — THE RUN RECORD: what this turn observed, decided and received, kept a week on the
     // agent's own object for looking back and replaying (verdicts re-derived, tools never re-run). The
     // mandates ride along ONLY there; a listing strips them. Fire-and-forget: a record that failed to land
@@ -4641,7 +4673,7 @@ app.post('/harness/ask', async (c) => {
     {
       // Spec 390 W2 — the W3C Trace Context the request arrived with joins this run's spans to the caller's
       // trace. Recorded here and read by nothing else: correlation, never trust.
-      const record = recordOf({ runRef, intent, result: recordForm.result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), traceContext: traceContextOf(c.req.raw.headers), planner: plannerSummaryOf(trace), receivedAt, offloaded: recordForm.offloaded, bill });
+      const record = recordOf({ runRef, intent, result: recordForm.result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), traceContext: traceContextOf(c.req.raw.headers), planner: plannerSummaryOf(trace), receivedAt, marks: marks.list, offloaded: recordForm.offloaded, bill });
       c.executionCtx.waitUntil(putRecord(c.env as never, addressee, record).catch((e) => console.warn('[harness/ask] record not kept:', e instanceof Error ? e.message : String(e))));
       // Spec 381 — THE EXPORT: the durable half into the acting agent's vault, the spans to a collector when
       // one is named. Off the run's path; a failed export is logged, never a failed ask.
