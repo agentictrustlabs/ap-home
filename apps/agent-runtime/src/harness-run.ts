@@ -4926,7 +4926,9 @@ step is then handed to that agent under authority the person grants; leave it ou
     // Spec 402 W5a — a public page read as evidence, wherever the playbook carries the contract.
     ...WEB_TOOLS.flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     // Spec 405 — the addressee's own Library, read as evidence, wherever the playbook carries the contracts.
-    ...(deps.readSubjectRecord ? LIBRARY_TOOLS.flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])) : []),
+    // The W5 acts (save / visibility / publish) are ACTION tools above — listed here too they reached the planner twice,
+    // and Gemini refused the whole offer ("Duplicate function declaration found: library_file_save", live 2026-09-21).
+    ...(deps.readSubjectRecord ? LIBRARY_TOOLS.filter((t) => !LIBRARY_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])) : []),
     // Spec 403 W3 — a web search as evidence, wherever the playbook carries the contract.
     ...WEB_SEARCH_TOOLS.flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     // The person's own reads, under their CONTRACTS when the playbook carries them (the result app a contract names
@@ -4936,6 +4938,14 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(deps.readSubjectRecord ? PREFERENCES_TOOLS.filter((t) => t.id === PREFERENCES_GET).map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
     UNSUPPORTED_TOOL,
   ];
+  // ONE TOOL, ONE ENTRY. A family listed as both an act and a read reaches the planner twice, and a provider refuses the
+  // whole offer for it (Gemini: "Duplicate function declaration"), so every ask on the agent fails — said here, once,
+  // with the ids, instead of surfacing as a planner error on an unrelated question.
+  {
+    const seen = new Set<string>(); const twice = new Set<string>();
+    for (const t of tools) { if (seen.has(t.id)) twice.add(t.id); seen.add(t.id); }
+    if (twice.size) throw new Error(`harness offer lists a tool twice: ${[...twice].join(', ')} — an act must not also be in the read list`);
+  }
   const harnessLocal = harnessInvoker(deps, env, presentedList, input.mcpInvoke, input.person, input.session, input.surface, input.addressee, playbook);
   // THE ADDRESSEE'S OWN MEMORY of a skill family, in its own vault — read for advice (memoised a minute, like
   // its playbook), written by a review (and the memo dropped, so the next hand's advice sees this round).
