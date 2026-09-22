@@ -143,6 +143,10 @@ export function FundForm({
 }) {
   const [open, setOpen] = useState(false);
   const [amt, setAmt] = useState('10');
+  // Which coin to mint. Every coin this Home knows on its chain is a TEST coin with an open mint (the demo
+  // USDC, the card room's SHQ), so funding in any of them is the same faucet call with a different asset —
+  // a treasury has no currency of its own; it holds whatever was put in it.
+  const [coin, setCoin] = useState<Coin>(FUNDING_COIN);
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState('');
   const [err, setErr] = useState('');
@@ -165,12 +169,13 @@ export function FundForm({
     setStep('Granting the funding authority…');
     const sign = await personSignHash(person as `0x${string}`, via, token);
     if (typeof sign !== 'function') { setBusy(false); setErr(sign.error); return; }
-    // Whole USDC → the 6-decimal atomic figure the rail now takes for every coin. Same number the
-    // caller used to hand over; the conversion just moved to the one place that knows the decimals.
+    // Whole coins → the atomic figure the rail takes, at the coin's own decimals. Same number the caller
+    // used to hand over; the conversion just moved to the one place that knows the decimals.
     const res = await fundThroughHarness({
       treasury: treasury as `0x${string}`,
-      amount: BigInt(Math.round(n * 1_000_000)),
-      display: `${n} usdc`,
+      amount: BigInt(Math.round(n * 10 ** coin.decimals)),
+      ...(coin.primary ? {} : { asset: coin.address }),
+      display: `${n} ${coin.symbol.toLowerCase()}`,
       session: { token },
       signHash: sign,
     });
@@ -183,7 +188,7 @@ export function FundForm({
   if (!open) {
     return (
       <button type="button" className="btn-ghost" style={{ marginTop: '.5rem', fontSize: '.78rem', padding: '.25rem .55rem' }} onClick={() => setOpen(true)}>
-        Fund with {FUNDING_COIN.symbol}
+        {COINS.length > 1 ? 'Fund' : `Fund with ${FUNDING_COIN.symbol}`}
       </button>
     );
   }
@@ -193,7 +198,14 @@ export function FundForm({
       <div style={{ display: 'flex', gap: '.4rem', alignItems: 'center' }}>
         <input type="number" min="0" step="1" value={amt} onChange={(e) => setAmt(e.target.value)} disabled={busy}
           style={{ width: 90, padding: '.4rem .55rem', fontSize: '.85rem', border: '1px solid var(--c-g200, #e2e8f0)', borderRadius: 6 }} />
-        <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>{FUNDING_COIN.symbol}</span>
+        {COINS.length > 1 ? (
+          <select value={coin.address} disabled={busy} onChange={(e) => setCoin(COINS.find((c) => c.address === e.target.value) ?? FUNDING_COIN)}
+            style={{ padding: '.4rem .55rem', fontSize: '.85rem', border: '1px solid var(--c-g200, #e2e8f0)', borderRadius: 6 }} aria-label="Coin">
+            {COINS.map((c) => <option key={c.address} value={c.address}>{c.symbol}</option>)}
+          </select>
+        ) : (
+          <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>{FUNDING_COIN.symbol}</span>
+        )}
       </div>
       <div style={{ display: 'flex', gap: '.4rem' }}>
         <BusyButton busy={busy} busyLabel={step || 'Funding…'} className="btn-primary" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} onClick={() => void go()}>
@@ -207,7 +219,7 @@ export function FundForm({
           a promise by everyone: a wallet home signs the mint with its own credential, and a seeded demo
           person signs at the Home. Gas is sponsored either way; the signature is not always free. */}
       <p className="onboarding-note" style={{ margin: 0 }}>
-        Mints demo {FUNDING_COIN.symbol} to this treasury — the coin the estate&apos;s apps settle in. Gas is sponsored.{' '}
+        Mints test {coin.symbol} to this treasury{coin.primary ? ' — the coin the estate\u2019s apps settle in' : ''}. Gas is sponsored.{' '}
         {promptless === null ? '' : promptless ? 'Your home signs it: no wallet prompt.' : 'Your wallet will ask you to sign it.'}
       </p>
       {err && <p className="onboarding-hint taken" style={{ margin: 0 }}>{err}</p>}
