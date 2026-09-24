@@ -814,6 +814,22 @@ const faithImpact: WhiteLabelConfig = {
       ask_delegate: (process.env.NEXT_PUBLIC_PUBLISHING_ASK_DELEGATE || '0x94E58bE2CfdD0418E03059BC8596E6f20579c77b') as `0x${string}`,
       libraryFolders: ['publishing'],
     },
+    // OpenBook READER (verifiable-content-demo apps/demo-openbook-reader) — readers discover works across publishers
+    // through the OpenBook Registry, read with in-browser checks, verify quotes, and buy access. Sign-in is asked only
+    // at the moments of value (keep a verified citation, buy access, record what they read); browsing is anonymous.
+    // site-login only for now; no PII at the broker beyond the name on the token (`profile`). FIRST https URI on purpose.
+    {
+      client_id: 'openbook-reader',
+      name: 'OpenBook Reader',
+      redirect_uris: [
+        'https://reader.faithnet.io/',
+        'https://demo-openbook-reader-production.richardpedersen3.workers.dev/',
+        'http://localhost:5178/',
+      ],
+      allowed_scopes: ['openid', 'profile', 'agent'],
+      allowed_delegation_templates: ['site-login'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+    },
   ],
   // Consent disclosure per template — the human-readable can/cannot shown at the permission
   // step. The caveats themselves are contract-enforced (spec 230); this is presentational.
