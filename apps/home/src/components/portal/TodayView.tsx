@@ -8,7 +8,9 @@ import { useMemo } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
 import { assembleToday, type Today, type TodayItem } from '../../home/today';
-import { useTodayReads } from '../../home/use-today-inputs';
+import { useTodayReads, type HeldLibrarySource } from '../../home/use-today-inputs';
+import { useManagedAgents } from './ManagedAgents';
+import type { DelegationWire } from '../../lib/delegation';
 import { useMyWork } from './work/useWork';
 import { RunControls } from './runs/RunControls';
 import { workspaceHref, type WorkspaceScope, workspaceAgent } from '../../lib/workspace';
@@ -54,7 +56,15 @@ export function TodayView({ scope, children }: { scope: WorkspaceScope; children
   const { session, agentAddress } = useSession();
   const addressee = addresseeOf(scope, agentAddress);
   const { bundles } = useMyWork(session, agentAddress);
-  const { parked, triggers, vocabulary, artifacts, records, failed, pending, dropRun } = useTodayReads(session?.token, addressee, scope.kind === 'person' ? 'person' : 'other');
+  // A SERVICE's Library lives in its own vault and is read over the stewardship delegation, as its Records and
+  // Library pages read it — so "New in the library" counts what those pages show. No fetch for any other scope.
+  const heldAgents = useManagedAgents(scope.kind === 'service' ? (session?.token ?? null) : null, 'any');
+  const held: HeldLibrarySource | undefined = useMemo(() => {
+    if (scope.kind !== 'service') return undefined;
+    const svc = heldAgents.agents.find((a) => a.agent.toLowerCase() === scope.agent.toLowerCase());
+    return { loaded: heldAgents.loaded, delegation: (svc?.stewardshipDelegation as DelegationWire | undefined) ?? null };
+  }, [scope, heldAgents.agents, heldAgents.loaded]);
+  const { parked, triggers, vocabulary, artifacts, records, failed, pending, dropRun } = useTodayReads(session?.token, addressee, scope.kind === 'person' ? 'person' : 'other', held);
   const workLoading = scope.kind !== 'service' && bundles === null;
 
   const today: Today | null = useMemo(() => {

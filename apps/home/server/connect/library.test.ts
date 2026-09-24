@@ -351,3 +351,73 @@ describe('/connect/library — as a demo user (person scope)', () => {
     expect(list.some((a: any) => a.name === 'reports' || a.folder === 'reports')).toBe(false);
   });
 });
+
+// ORG scope — the catalog is read from the org's InteractionsDO (`content.get`). A refusal there used to render as an
+// EMPTY library and let a save rewrite the whole index on top of it; it is now said, and nothing is written.
+describe('/connect/library — org scope, when the org plane refuses the read', () => {
+  const ORG_SA = '0x3333333333333333333333333333333333333333';
+  const DO = 'https://a2a.test';
+  const calls: Array<{ url: string; op: string; body: any }> = [];
+  let contentGet: { status: number; body: Record<string, unknown> };
+  let orgEnv: any;
+  let realFetch: typeof fetch;
+
+  beforeAll(() => {
+    orgEnv = { ...env, AUTH_CODES: makeKV(), A2A_CUSTODY_URL: DO };
+    // The person steward-links the org (the wire itself is re-verified by the DO, stubbed below).
+    void orgEnv.AUTH_CODES.put(`related:${DEMO_SA}:${ORG_SA}`, JSON.stringify({ relationship: 'steward', stewardshipDelegation: { delegator: ORG_SA, delegate: DEMO_SA } }));
+    realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const u = String(input);
+      if (!u.startsWith(DO)) return realFetch(input as any, init);
+      const op = u.split('/').pop() ?? '';
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      calls.push({ url: u, op, body });
+      if (op === 'status') return new Response(JSON.stringify({ deliveryGranted: true }), { status: 200 });
+      if (op === 'content.get') return new Response(JSON.stringify(contentGet.body), { status: contentGet.status });
+      if (op === 'content.put') return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      return new Response(JSON.stringify({ error: 'unexpected op' }), { status: 404 });
+    }) as typeof fetch;
+    return () => { globalThis.fetch = realFetch; };
+  });
+
+  const orgGet = () => onRequestGet({ request: new Request(`${url}?org=${ORG_SA}`, { headers: { authorization: `Bearer ${token}` } }), env: orgEnv } as any);
+  const orgPost = (b: unknown) => onRequestPost({ request: new Request(url, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(b) }), env: orgEnv } as any);
+
+  it('reads the catalog the org plane holds, over the stewardship wire', async () => {
+    contentGet = { status: 200, body: { ok: true, record: [{ id: 'a1', kind: 'md', name: 'note.md', source: 'blob', folder: 'publishing', contentType: 'text/markdown', size: 1, createdAt: 1, version: 1, grants: [] }] } };
+    const res = await orgGet();
+    expect(res.status).toBe(200);
+    const b = await res.json();
+    expect(b.ownerKind).toBe('org');
+    expect(b.artifacts.map((a: any) => a.id)).toEqual(['a1']);
+    const call = calls.filter((c) => c.op === 'content.get').pop()!;
+    expect(call.body.resource).toBe('content.catalog');
+    expect(call.body.stewardship).toEqual({ delegator: ORG_SA, delegate: DEMO_SA });
+  });
+
+  it('an ABSENT catalog is an empty library', async () => {
+    contentGet = { status: 200, body: { ok: true, record: null } };
+    const res = await orgGet();
+    expect(res.status).toBe(200);
+    expect((await res.json()).artifacts).toEqual([]);
+  });
+
+  it('a REFUSED read is said, never rendered as an empty library', async () => {
+    contentGet = { status: 409, body: { error: 'no interactions grant — enable interactions for this agent first' } };
+    const res = await orgGet();
+    expect(res.status).toBe(503);
+    const b = await res.json();
+    expect(b.error).toMatch(/no interactions grant/);
+    expect(b.upstreamStatus).toBe(409);
+    expect(b.artifacts).toBeUndefined();
+  });
+
+  it('a save does not rewrite the index on top of a refused read', async () => {
+    contentGet = { status: 401, body: { error: 'unauthorized: not a steward' } };
+    const before = calls.filter((c) => c.op === 'content.put').length;
+    const res = await orgPost({ action: 'save', org: ORG_SA, artifact: { name: 'new.md', source: 'blob', bytesB64: btoa('x') } });
+    expect(res.status).toBe(503);
+    expect(calls.filter((c) => c.op === 'content.put').length).toBe(before);
+  });
+});
