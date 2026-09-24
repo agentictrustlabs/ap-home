@@ -24,7 +24,7 @@ import { useManagedAgents } from '../ManagedAgents';
 import { orgHref, serviceHref } from '../../../lib/workspace';
 import { agentClassOf } from '../../../lib/agent-class';
 import { nameLabel } from '../../../lib/domain';
-import { resolveVia, signHashFor } from '../../../home/onboarding';
+import { activateVault, resolveVia, signHashFor } from '../../../home/onboarding';
 import { useVoice, blobToBase64 } from './useVoice';
 import { yesNo, matchChoice, listenAfter, plainSpeech, navigationIntent, closestOption } from './voice-text';
 import { ask, hear, warmHearing, readProgress, type ProgressLine, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, homeModels, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField, type AskModelOption, listConfirmations, forgetConfirmation, type RememberedChoice, listInstructions, forgetInstruction, type StandingInstruction } from '../../../home/ask';
@@ -323,6 +323,17 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
           setThread((t) => [...t, saved.ok
             ? { role: 'agent', text: `${created.name} is in your agents now.` }
             : { role: 'agent', text: `${created.name} was created, but saving it to your private tree failed (${saved.error}) — it is on chain and yours; the list may not show it until that write succeeds.` }]);
+          // A SERVICE KEEPS A LIBRARY (a publisher service holds and releases its works), and a Library lives in the
+          // agent's own vault — which, like a person's, needs its KEK provisioned and bound before any write (spec 278).
+          // The person's credential custodies the new agent, so the same ceremony a Home runs for its person at
+          // creation runs here AS the service: zero prompts for a KMS home, the vault-key signatures for a device one.
+          // Best-effort and said: the service exists either way.
+          if (created.kind === 'service') {
+            const vault = await activateVault(created.agent, via, { token: session.token });
+            setThread((t) => [...t, vault.ok
+              ? { role: 'agent', text: `${created.name} has its own storage now — its Library is ready.` }
+              : { role: 'agent', text: `${created.name} was created, but its storage could not be enabled (${vault.error}) — it cannot keep a Library until that succeeds.` }]);
+          }
         }
       }
     } catch (e) {
