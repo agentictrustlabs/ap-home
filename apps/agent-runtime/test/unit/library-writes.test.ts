@@ -1,7 +1,7 @@
 // Spec 412 W5 — the owner's own Library writes, by the owner's agent: save / visibility / publish, self-acting.
 import { describe, it, expect } from 'vitest';
 import { canonicalHash } from '@agenticprimitives/verifiable-credentials';
-import { libraryInvoker, releaseCore, LIBRARY_FILE_SAVE, LIBRARY_FILE_VISIBILITY, LIBRARY_FILE_PUBLISH, LIBRARY_PUBLIC_LIST, type LibraryEntry } from '../../src/library-tools.js';
+import { libraryInvoker, releaseCore, stewardshipOver, LIBRARY_FILE_SAVE, LIBRARY_FILE_VISIBILITY, LIBRARY_FILE_PUBLISH, LIBRARY_PUBLIC_LIST, type LibraryEntry } from '../../src/library-tools.js';
 
 const ME = '0x' + 'a'.repeat(40);
 const OTHER = '0x' + 'b'.repeat(40);
@@ -52,12 +52,63 @@ describe('the Library written by its own agent (spec 412 W5)', () => {
   });
   it('is the owner\'s own act: another principal, a room, or an unattended run is refused', async () => {
     const asOther = libraryInvoker(deps, ME, OTHER);
-    expect(((await asOther(LIBRARY_FILE_SAVE, { name: 'x.md', text: 'x' }, ctx())) as { refused?: string }).refused).toMatch(/own agent only/);
+    expect(((await asOther(LIBRARY_FILE_SAVE, { name: 'x.md', text: 'x' }, ctx())) as { refused?: string }).refused).toMatch(/own agent or by a steward of it — this deployment cannot judge stewardship/);
     const nobody = libraryInvoker(deps, ME, undefined);
     await expect(nobody(LIBRARY_FILE_SAVE, { name: 'x.md', text: 'x' }, ctx())).rejects.toThrow(/signed-in person/);
     const mine = libraryInvoker(deps, ME, ME);
     const fired = { intent: { goal: 'save', context: { trigger: 'schedule' } }, step: { id: 's1' }, index: 0, operationId: 'op', supplied: [] } as never;
     await expect(mine(LIBRARY_FILE_SAVE, { name: 'x.md', text: 'x' }, fired)).rejects.toThrow(/own turn/);
     expect(catalog().some((e) => e.name === 'x.md')).toBe(false);
+  });
+});
+
+describe('a steward writes the Library of an agent it stewards (publisher-as-service)', () => {
+  const PERSON = '0x' + '1'.repeat(40);
+  const ORG = '0x' + '2'.repeat(40);
+  const SVC = '0x' + '3'.repeat(40);
+  const STRANGER = '0x' + '4'.repeat(40);
+  const wire = (from: string, to: string) => ({ delegator: from, delegate: to, signature: '0xok', caveats: [] });
+  const links: Record<string, unknown> = {
+    [ORG]: { org: ORG, orgName: 'press.org', relationship: 'steward', kind: 'org', parent: PERSON, delegations: [wire(ORG, PERSON)] },
+    [SVC]: { org: SVC, orgName: 'press.svc', relationship: 'steward', kind: 'service', parent: ORG, delegations: [wire(SVC, ORG)] },
+  };
+  const trees: Record<string, unknown> = { [PERSON]: { orgs: links }, [STRANGER]: { orgs: {} } };
+  const valid = new Set([`${ORG}>${PERSON}`, `${SVC}>${ORG}`]);
+  const standing = {
+    readSubjectRecord: async (subject: string, key: string) => (key === 'relationships.data' ? trees[subject] ?? null : null),
+    verifyStewardship: async ({ org, person, wire: w }: { org: string; person: string; wire: unknown }) => {
+      const d = w as { delegator: string; delegate: string };
+      return d.delegator === org && d.delegate === person && valid.has(`${org}>${person}`);
+    },
+  };
+  it('counts a direct steward and a steward of the parent the agent is chartered under', async () => {
+    expect((await stewardshipOver(standing as never, PERSON, ORG)).steward).toBe(true);
+    const through = await stewardshipOver(standing as never, PERSON, SVC);
+    expect(through.steward).toBe(true); expect(through.because).toMatch(/chartered under/);
+  });
+  it('refuses a stranger, a grant that does not verify, and a routed ask', async () => {
+    expect((await stewardshipOver(standing as never, STRANGER, SVC)).steward).toBe(false);
+    valid.delete(`${SVC}>${ORG}`);
+    const broken = await stewardshipOver(standing as never, PERSON, SVC);
+    expect(broken.steward).toBe(false); expect(broken.because).toMatch(/does not verify on chain/);
+    valid.add(`${SVC}>${ORG}`);
+    expect((await stewardshipOver({ ...standing, context: { routed: true } } as never, PERSON, SVC)).steward).toBe(false);
+  });
+  it('lands the write in the OWNER\'s vault and signs the release as the owner', async () => {
+    const vault = new Map<string, unknown>();
+    const signedAs: string[] = [];
+    const d = {
+      readSubjectRecord: async (subject: string, key: string) => (subject === SVC ? vault.get(key) ?? null : null),
+      writeSubjectRecord: async (subject: string, key: string, record: unknown) => { if (subject !== SVC) return { ok: false, error: 'wrong vault' }; vault.set(key, record); return { ok: true }; },
+      signAsOwner: async (owner: string, digest: `0x${string}`) => { signedAs.push(owner); return `0xsig-${digest.slice(2, 10)}` as `0x${string}`; },
+      stewardOf: (who: string, owner: string) => stewardshipOver(standing as never, who, owner),
+    };
+    const inv = libraryInvoker(d, SVC, PERSON);
+    const saved = (await inv(LIBRARY_FILE_SAVE, { id: 'w-1', kind: 'json-ld', name: 'a-work', folder: 'publishing/works', text: '{}' }, ctx())) as { saved: boolean; owner: string };
+    expect(saved.saved).toBe(true); expect(saved.owner).toBe(SVC);
+    const pub = (await inv(LIBRARY_FILE_PUBLISH, { id: 'w-1' }, ctx('publish it'))) as { release: { owner: string; publisher: string } };
+    expect(pub.release.owner).toBe(SVC); expect(pub.release.publisher).toBe(SVC); expect(signedAs).toEqual([SVC]);
+    const stranger = libraryInvoker(d, SVC, STRANGER);
+    expect(((await stranger(LIBRARY_FILE_SAVE, { name: 'x', text: 'x' }, ctx())) as { refused?: string }).refused).toMatch(/steward/);
   });
 });

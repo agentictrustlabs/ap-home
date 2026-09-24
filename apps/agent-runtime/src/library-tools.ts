@@ -5,6 +5,8 @@
 // bound to the ADDRESSEE's own records: her agent reads hers, the organization's agent reads the organization's.
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import { canonicalHash } from '@agenticprimitives/verifiable-credentials';
+import { deriveStanding, relationshipRows, type StandingDeps } from '@agenticprimitives/context';
+import type { Address } from '@agenticprimitives/types';
 import { requirePersonsTurn } from './persons-turn.js';
 import { ADAPTER } from './adapter-declarations.js';
 
@@ -102,6 +104,9 @@ export interface LibraryToolDeps {
   writeSubjectRecord?: (subject: string, recordType: string, record: unknown, operationId?: string) => Promise<{ ok: boolean; error?: string }>;
   /** Sign a digest AS the owner (ERC-1271-verifiable against the owner's Smart Agent) — the release signature. Null ⇒ unsigned. */
   signAsOwner?: (owner: string, digest: `0x${string}`) => Promise<`0x${string}` | null>;
+  /** Is `person` a STEWARD of `owner`, on evidence the chain confirms (see `stewardshipOver`)? Absent ⇒ only the
+   *  owner's own agent writes its Library. */
+  stewardOf?: (person: string, owner: string) => Promise<{ steward: boolean; because: string }>;
 }
 
 const TEXT_KINDS = new Set(['md', 'ttl', 'json-ld', 'skill']);
@@ -321,16 +326,56 @@ export async function libraryWrite(deps: LibraryToolDeps, owner: string, toolId:
   throw new Error(`${toolId} is not a Library act`);
 }
 
+/**
+ * IS `person` A STEWARD OF `owner`? — the standing a Library write for another agent needs. Two answers count, and
+ * both are read from the person's own links and CONFIRMED ON CHAIN, never from anything the caller says:
+ *
+ *   direct   the person holds a stewardship wire from `owner` (owner → person), verified (`deriveStanding`).
+ *   through  `owner` was chartered under a parent P (the person's own record of the charter names P and carries the
+ *            grant `owner → P` the owner approved at birth), that grant verifies on chain, AND the person is a verified
+ *            steward of P. This is the publisher SERVICE an organization charters: the admin stewards the org, the
+ *            org's service keeps the Library, and nobody had to mint a second wire for the service.
+ *
+ * One hop, no further: a steward of an org stewards what the org chartered, not what that chartered in turn.
+ * A routed ask never reads the asker's tree (spec 366 R3), so a routed steward-write is refused, not guessed.
+ */
+export async function stewardshipOver(deps: Pick<StandingDeps, 'readSubjectRecord' | 'verifyStewardship' | 'context'>, person: string, owner: string): Promise<{ steward: boolean; because: string }> {
+  const p = person.toLowerCase();
+  const o = owner.toLowerCase();
+  const direct = await deriveStanding(deps, { principal: p as Address, subject: o as Address });
+  if (direct.relation === 'steward') return { steward: true, because: direct.because };
+  if (!deps.readSubjectRecord || !deps.verifyStewardship || deps.context?.routed) return { steward: false, because: direct.because };
+  const row = relationshipRows(await deps.readSubjectRecord(p, 'relationships.data')).find((r) => r.agent === o);
+  const parent = row?.parent?.toLowerCase();
+  const wire = row?.stewardshipDelegation as { delegator?: string; delegate?: string } | undefined;
+  if (!row || !parent || parent === p || !wire) return { steward: false, because: direct.because };
+  if ((wire.delegator ?? '').toLowerCase() !== o || (wire.delegate ?? '').toLowerCase() !== parent) return { steward: false, because: `your record of ${row.name} carries no grant from it to the agent it names as its parent` };
+  const chartered = await deps.verifyStewardship({ org: o as Address, person: parent as Address, wire }).catch(() => false);
+  if (!chartered) return { steward: false, because: `${row.name}'s grant to ${parent} does not verify on chain` };
+  const up = await deriveStanding(deps, { principal: p as Address, subject: parent as Address });
+  return up.relation === 'steward'
+    ? { steward: true, because: `you steward ${parent}, and ${row.name} is chartered under it by a grant that verifies on chain` }
+    : { steward: false, because: `${row.name} is chartered under ${parent}, and ${up.because}` };
+}
+
 export function libraryInvoker(deps: LibraryToolDeps, addressee: string | undefined, person?: string): ToolInvoker {
   return async (toolId, args, ctx) => {
     const owner = String(addressee ?? '').toLowerCase();
     if (!/^0x[0-9a-f]{40}$/.test(owner)) throw new Error('whose Library? — the addressee names no agent');
     if (toolId === LIBRARY_PUBLIC_LIST || toolId === LIBRARY_PUBLIC_READ) return publicLibraryRead(deps, owner, toolId, args);
     if (LIBRARY_ACTS.has(toolId)) {
-      // THE OWNER'S OWN AGENT ONLY: the run's principal writes her own Library; addressed to another agent, the act
-      // is that agent's and needs that agent's standing — refused here in words, never written elsewhere.
+      // THE OWNER'S OWN AGENT, OR ITS STEWARD. The run's principal writes her own Library; addressed to another agent,
+      // the act is that agent's and needs STEWARD standing over it that the chain confirms — a publisher service's
+      // Library is kept by the person who stewards it (directly, or through the organization it is chartered under).
+      // The write still lands in the OWNER's vault and a release is still signed as the owner, under its own leaf.
+      // A member, a contact or a stranger is refused here in words, never written elsewhere.
       if (!person) throw new Error('the Library is written as its owner, and there is no signed-in person on this run');
-      if (person.toLowerCase() !== owner) return { refused: 'a Library is written by its own agent only — ask at your home, not in this room', owner };
+      if (person.toLowerCase() !== owner) {
+        const s = deps.stewardOf
+          ? await deps.stewardOf(person.toLowerCase(), owner).catch((e: unknown) => ({ steward: false, because: `your standing could not be read (${e instanceof Error ? e.message : String(e)})` }))
+          : { steward: false, because: 'this deployment cannot judge stewardship' };
+        if (!s.steward) return { refused: `a Library is written by its own agent or by a steward of it — ${s.because}`, owner };
+      }
       return libraryWrite(deps, owner, toolId, args, ctx);
     }
     const entries = await catalogOf(deps, owner);
