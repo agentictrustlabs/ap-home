@@ -79,6 +79,8 @@ export interface GateFixtureV1 {
   edge: string;
   /** Names that resolve NOWHERE — the twins that must be refused by name. */
   absent: { org: string; svc: string };
+  /** Spec 413 — the public tier's retrieval reader (discovery-mcp) and its only writer (the indexer); null = no index. */
+  publicKb: { discovery: string; indexer: string } | null;
 }
 
 export const FAITHNET_FIXTURE: GateFixtureV1 = {
@@ -103,6 +105,7 @@ export const FAITHNET_FIXTURE: GateFixtureV1 = {
   forge: { repo: 'agentictrustlabs/ap-forge-sandbox', privateRepo: 'agentictrustlabs/ap-forge-private' },
   edge: 'https://edge.faithnet.io',
   absent: { org: 'nobody-here-zz.org', svc: 'nobody-here-zz.svc' },
+  publicKb: { discovery: 'https://demo-discovery-mcp-faithnet.richardpedersen3.workers.dev', indexer: 'https://demo-discovery-indexer-faithnet.richardpedersen3.workers.dev' },
 };
 
 /** The file's blocks REPLACE the defaults — an organization named without an address must not inherit Faithnet's

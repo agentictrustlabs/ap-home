@@ -590,6 +590,16 @@
       "required": true,
       "paced": false,
       "timeoutSec": 240
+    },
+    {
+      "id": "verify-kb-retrieve",
+      "script": "scripts/verify-kb-retrieve.mts",
+      "spec": "413",
+      "proves": "retrieval over the public tier: alice's agent saves a public page and releases it (session-leaf signature); the Library act's queue hint makes the indexer read it over her anonymous lane, verify the release, and project it; /kb/retrieve returns its passage with her SA, the release id she signed and the commitment; her own Ask reaches the same passage through kb.retrieve as an untrusted, unscored observation",
+      "twin": "a public page never released is not retrievable and the indexer says 'never released'; made private, the released page is withdrawn from the tier and retrieval stops returning it",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 720
     }
   ]
 }
