@@ -15,6 +15,14 @@ import { SectionShell } from './SectionShell';
 import { cardSty, btnSty, btnPrimarySty, mono, mutedText, errorText, inputSty, badgeStyle, modalOverlaySty, infoBannerSty, shortAddr, type BadgeKind } from './theme';
 import { artifactIdentity } from '../../home/artifact-identity';
 import { SkeletonRows, EmptyState, Button, Tabs, Drawer, Chip, Meta, KeyValue, Micro, useReadyReport } from '../../ui';
+import { useManagedAgents } from './ManagedAgents';
+import { agentClassOf } from '../../lib/agent-class';
+import { vaultReadWithDelegation } from '../../lib/vault-client';
+import type { DelegationWire } from '../../lib/delegation';
+import { readHeldAgentCatalog, readHeldAgentArtifactBody } from '../../home/held-agent-library';
+
+/** Said when a steward tries to change a HELD agent's Library from Home — this view only reads it. */
+const HELD_READ_ONLY = 'This Library is read over your stewardship delegation and is read-only here — the agent (or the app that runs it) keeps its own Library.';
 
 type Kind = 'skill' | 'ttl' | 'md' | 'json-ld' | 'image';
 type Source = 'blob' | 'graphdb' | 'vault' | 'external';
@@ -112,11 +120,22 @@ function Icon({ name, size = 16, style }: { name: IconName; size?: number; style
   );
 }
 
-export function LibrarySection({ orgSa }: { orgSa?: string }) {
+export function LibrarySection({ orgSa, heldAgent }: {
+  orgSa?: string;
+  /** An agent the person HOLDS (a service, a persona — `/service/<agent>/library`). Its Library is read from its OWN
+   *  vault over the stewardship delegation, exactly as its Records page reads it (`home/held-agent-library.ts`). */
+  heldAgent?: string;
+}) {
   const { session, agentAddress } = useSession();
   const token = session?.token ?? '';
-  const scopeQ = orgSa ? `?org=${orgSa}` : '';
-  const ownerSa = (orgSa ?? agentAddress ?? '').toLowerCase();
+  const scopeSa = orgSa ?? heldAgent;
+  const scopeQ = scopeSa ? `?org=${scopeSa}` : '';
+  const ownerSa = (heldAgent ?? orgSa ?? agentAddress ?? '').toLowerCase();
+  // Resolved only for a held agent — no managed-agents read for a person's or an organization's Library.
+  const managed = useManagedAgents(heldAgent ? (token || null) : null, 'any');
+  const heldSvc = heldAgent ? managed.agents.find((a) => a.agent.toLowerCase() === heldAgent.toLowerCase()) : undefined;
+  const heldDelegation = (heldSvc?.stewardshipDelegation as DelegationWire | undefined) ?? null;
+  const heldClass = heldSvc ? agentClassOf(heldSvc.kind) : null;
   const [items, setItems] = useState<Artifact[]>([]);
   const [sharedItems, setSharedItems] = useState<Artifact[]>([]);
   const [requests, setRequests] = useState<{ requester: string; artifactId: string; artifactName?: string; actions: string[]; at: number }[]>([]);
@@ -148,23 +167,36 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
     setSelectedId(hit.id);
   }, [loading, items]);
 
-  const ownerLabel = orgSa ? 'This organization' : 'You';
-  const ownerVaultKind = orgSa ? 'Organization vault' : 'Person vault';
+  const ownerLabel = heldAgent ? (heldSvc?.name || 'This agent') : orgSa ? 'This organization' : 'You';
+  const ownerVaultKind = heldAgent ? (heldClass === 'service' ? 'Service vault' : 'Agent vault') : orgSa ? 'Organization vault' : 'Person vault';
 
   const api = useCallback(async (method: 'GET' | 'POST', payload?: unknown) => {
+    if (heldAgent && method === 'POST') throw new Error(HELD_READ_ONLY);
     const r = await fetch(`/connect/library${scopeQ}`, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: payload ? JSON.stringify(payload) : undefined });
     const b = await r.json().catch(() => ({}));
     if (r.status === 403) { const e = new Error(b.error ?? 'forbidden'); (e as { forbidden?: boolean }).forbidden = true; throw e; }
     if (!r.ok) throw new Error(b.error ?? `request failed (${r.status})`);
     return b;
-  }, [token, scopeQ]);
+  }, [token, scopeQ, heldAgent]);
 
   const load = useCallback(async () => {
     setErr(null);
+    if (heldAgent) {
+      // A HELD agent: its own vault, over the stewardship delegation — the read its Records page makes.
+      if (!managed.loaded) return; // still resolving which agents you hold — keep the skeleton
+      try {
+        if (!heldSvc) throw new Error('You don’t hold an agent at this address.');
+        if (!heldDelegation) throw new Error('No stewardship delegation on this agent — Home cannot read its Library from here.');
+        setItems((await readHeldAgentCatalog(heldDelegation, vaultReadWithDelegation)) as unknown as Artifact[]);
+        setRequests([]);
+      } catch (e) { setErr((e as Error).message); }
+      finally { setLoading(false); }
+      return;
+    }
     try { const b = await api('GET'); setItems(b.artifacts ?? []); setRequests(b.requests ?? []); setForbidden(false); }
     catch (e) { if ((e as { forbidden?: boolean }).forbidden) setForbidden(true); else setErr((e as Error).message); }
     finally { setLoading(false); }
-  }, [api]);
+  }, [api, heldAgent, managed.loaded, heldSvc, heldDelegation]);
   useEffect(() => { if (token) void load(); }, [token, load]);
 
   // "Shared with me" — the federated inbound lens, fetched separately from the owned vault list.
@@ -182,6 +214,18 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
   const tree = useMemo(() => buildTree(items), [items]);
   const allFolders = useMemo(() => ['', ...flattenPaths(tree).sort()], [tree]);
   const selected = useMemo(() => [...items, ...sharedItems].find((x) => x.id === selectedId) ?? null, [items, sharedItems, selectedId]);
+  // A held agent's catalog entry may carry no body — the body is its own `content.artifact.<id>` record (ADR-0055).
+  // Read it over the same delegation when the entry is opened, so Content shows what Records shows.
+  const bodyTried = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!heldAgent || !heldDelegation || !selected || selected.isFolder || selected.bytesB64 || selected.accessMode) return;
+    if (bodyTried.current.has(selected.id)) return;
+    bodyTried.current.add(selected.id);
+    const id = selected.id;
+    void readHeldAgentArtifactBody(heldDelegation, id, vaultReadWithDelegation)
+      .then((b) => { if (b) setItems((xs) => xs.map((x) => (x.id === id ? { ...x, bytesB64: b.bytesB64, ...(b.contentType ? { contentType: b.contentType } : {}) } : x))); })
+      .catch((e) => setErr(`Couldn’t read ${selected.name}: ${(e as Error).message}`));
+  }, [heldAgent, heldDelegation, selected]);
 
   // The current lens's rows. `vault` = your own vault at the current folder (or a search across it);
   // `shared` = the federated inbound-grant lens; `public` = the network registry (Phase 5).
@@ -246,8 +290,8 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
   const publish = async (id: string) => { try { await api('POST', { action: 'publish', org: orgSa, id }); await load(); } catch (e) { setErr((e as Error).message); } };
   const approveRequest = async (r: { requester: string; artifactId: string; actions: string[] }) => { await grant(r.artifactId, r.requester, 'person', r.actions.length ? r.actions : ['read']); };
 
-  const writable = lens === 'vault';
-  const title = orgSa ? 'Organization Library' : 'Library';
+  const writable = lens === 'vault' && !heldAgent;
+  const title = heldAgent ? (heldClass === 'service' ? 'Service Library' : 'Library') : orgSa ? 'Organization Library' : 'Library';
 
   if (forbidden) return (
     <SectionShell title="Organization Library">
@@ -265,7 +309,8 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
           (e.g. a browser/OS dark-mode default) on our light surfaces. */}
       <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', color: 'var(--color-text-body)' }}>
         <ScopeRail lens={lens} onLens={(l) => { setLens(l); setSelectedId(null); setPath([]); }} orgLabel={orgSa ? shortAddr(orgSa) : undefined} ownerLabel={ownerLabel} sharedCount={0}
-          items={items} path={path} onGo={goTo} />
+          items={items} path={path} onGo={goTo}
+          {...(heldAgent ? { heldVault: { label: heldSvc?.name || shortAddr(heldAgent), sub: `${ownerVaultKind} · Steward` } } : {})} />
 
         <div style={{ flex: 1, minWidth: 0 }}>
           {/* toolbar */}
@@ -292,6 +337,7 @@ export function LibrarySection({ orgSa }: { orgSa?: string }) {
             </div>
           )}
 
+          {heldAgent && lens === 'vault' && <p style={{ ...mutedText, fontSize: 12, margin: '0 0 .5rem' }}>Read from this agent&rsquo;s own vault with your stewardship delegation (the agent &rarr; you) &mdash; the same read as its Records. Read-only here.</p>}
           {err && <p style={errorText}>{err}</p>}
 
           {lens === 'vault' && requests.length > 0 && <RequestsBanner requests={requests} onApprove={approveRequest} />}
@@ -431,9 +477,11 @@ function FolderTree({ nodes, path, onGo, counts }: {
   );
 }
 
-function ScopeRail({ lens, onLens, orgLabel, ownerLabel, sharedCount, items, path, onGo }: {
+function ScopeRail({ lens, onLens, orgLabel, ownerLabel, sharedCount, items, path, onGo, heldVault }: {
   lens: Lens; onLens: (l: Lens) => void; orgLabel?: string; ownerLabel: string; sharedCount: number;
   items: Artifact[]; path: string[]; onGo: (segs: string[]) => void;
+  /** A held agent's vault (a service, a persona) — never labelled an organization's. */
+  heldVault?: { label: string; sub: string };
 }) {
   const item = (key: Lens, icon: IconName, label: string, sub: string) => {
     const on = lens === key;
@@ -462,7 +510,9 @@ function ScopeRail({ lens, onLens, orgLabel, ownerLabel, sharedCount, items, pat
   return (
     <div role="listbox" aria-label="Scope" style={{ ...cardSty, padding: '.4rem 0', width: 232, flexShrink: 0, color: 'var(--color-text-body)' }}>
       {heading('Scope')}
-      {orgLabel
+      {heldVault
+        ? item('vault', 'vault', heldVault.label, heldVault.sub)
+        : orgLabel
         ? item('vault', 'org', ownerLabel === 'This organization' ? 'This organization' : orgLabel, 'Organization vault · Steward')
         : item('vault', 'vault', 'My vault', 'Person vault · Owner')}
       {item('shared', 'shared', 'Shared with me', sharedCount > 0 ? `${sharedCount} grants` : 'Inbound grants')}

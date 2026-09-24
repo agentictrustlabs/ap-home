@@ -272,6 +272,34 @@ class LibraryWriteError extends Error {
   }
 }
 
+/**
+ * A READ of the org's catalog that the org's own plane refused.
+ *
+ * The org branch's `read` used to degrade any refusal to `[]`, so a scope whose plane answered 401/409 rendered as an
+ * EMPTY library ("Nothing in your vault yet") rather than as a failure — and a save on top of that empty read
+ * rewrote the org's whole index as a one-item list. Throwing carries the plane's reason to the caller (ADR-0013)
+ * and stops a write from building on a read that never happened.
+ */
+class LibraryReadError extends Error {
+  constructor(
+    message: string,
+    readonly resource: string,
+    readonly upstreamStatus: number,
+  ) {
+    super(message);
+    this.name = 'LibraryReadError';
+  }
+}
+
+/** The route's answer for a refused org read — the same status mapping writes use. */
+function readRefused(e: LibraryReadError, scope: { ownerKind: AgentKind; owner: string }, request: Request): Response {
+  return jsonCors(
+    { error: e.message, resource: e.resource, scope: scope.ownerKind, owner: scope.owner, upstreamStatus: e.upstreamStatus },
+    request,
+    e.upstreamStatus === 403 ? 403 : 503,
+  );
+}
+
 async function scopeFor(request: Request, env: FnContext['env'], person: string, org?: string): Promise<LibraryScope | { ok: false; res: Response }> {
   const bearer = (request.headers.get('authorization') ?? '').slice(7);
   if (org) {
@@ -346,7 +374,14 @@ async function scopeFor(request: Request, env: FnContext['env'], person: string,
     */
     return {
       ok: true, owner: orgSA, ownerKind: 'org',
-      read: async () => { const r = await orgOp<{ record?: unknown }>('content.get', { resource: 'content.catalog' }); return (r.ok ? (r.body.record as LibraryArtifact[] | null) : null) ?? []; },
+      read: async () => {
+        const r = await orgOp<{ record?: unknown }>('content.get', { resource: 'content.catalog' });
+        if (!r.ok) throw new LibraryReadError(r.body.error ?? `the organization's library could not be read (${r.status})`, 'content.catalog', r.status);
+        // An absent catalog is an empty library; anything present that is not a list is the plane's fault, said so.
+        const rec = r.body.record ?? null;
+        if (rec !== null && !Array.isArray(rec)) throw new LibraryReadError('content.catalog is not a list', 'content.catalog', 502);
+        return (rec as LibraryArtifact[] | null) ?? [];
+      },
       write: async (list) => { await putRecord('content.catalog', list); },
       putRecord,
       delRecord: async (recordType) => { await orgOp('content.put', { resource: recordType, data: null }); },
@@ -392,7 +427,10 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     const artifacts = inbound.filter((x) => !x.revoked).map(toSharedArtifact);
     return jsonCors({ owner: scope.owner, ownerKind: scope.ownerKind, lens: 'shared', artifacts }, request);
   }
-  const artifacts = withEffectiveGrants(await scope.read());
+  let catalog: LibraryArtifact[];
+  try { catalog = await scope.read(); }
+  catch (e) { if (e instanceof LibraryReadError) return readRefused(e, scope, request); throw e; }
+  const artifacts = withEffectiveGrants(catalog);
   // Pending access requests addressed to this owner (the "someone wants access" inbox).
   const requests = (await readRequests(env, scope.owner)).filter((r) => r.status === 'pending');
   return jsonCors({ owner: scope.owner, ownerKind: scope.ownerKind, artifacts, requests }, request);
@@ -413,7 +451,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
 
   const scope = await scopeFor(request, env, person, body.org);
   if (!scope.ok) return scope.res;
-  const list = await scope.read();
+  let list: LibraryArtifact[];
+  try { list = await scope.read(); }
+  catch (e) { if (e instanceof LibraryReadError) return readRefused(e, scope, request); throw e; }
 
   switch (body.action) {
     case 'save': {
