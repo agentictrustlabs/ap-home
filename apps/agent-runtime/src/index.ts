@@ -131,7 +131,7 @@ import {
 import { createD1AuditSink } from './audit-d1.js';
 import { runOrchestration } from './orchestration.js';
 import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker, householdMembers, ownAgentsOfType, choicesFor } from '@agenticprimitives/context';
-import { KB_QUESTION_TOOL, kbQuestionInvoker } from '@agenticprimitives/context';
+import { KB_QUESTION_TOOL, kbQuestionInvoker, KB_RETRIEVE_TOOL, kbRetrieveInvoker } from '@agenticprimitives/context';
 import { discoveryFetchFor, structuredCallFor } from './context-wiring.js';
 import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@agenticprimitives/context';
 import { selectComposer, selectComposerRouted, resolveProvider, availableModels, plannerPromptBudget, defaultProvider, widestPromptBudget, type RouteNeed, type RouteDecision } from './orchestration.js';
@@ -340,6 +340,8 @@ export interface Env {
    *  are this Worker), and the Container binding the host runs in (one instance per member). Both optional: unbound
    *  ⇒ a runtime polls (`ap runtime run`), said in the log. */
   RUNTIME_WAKE?: Queue<unknown>;
+  /** Spec 413 — shelf hints to the discovery indexer (`{owner, entryId}`), consumed by demo-discovery-indexer. */
+  SHELF_INDEX?: Queue<unknown>;
   RUNTIME?: DurableObjectNamespace;
   /**
    * spec 347 §9 — Card Studio separation of duties. `strict` refuses `release.approve` / `projection.approve`
@@ -444,6 +446,8 @@ export interface Env {
   /** Dev/base-URL fallback for the discovery MCP (no binding outside deployed environments).
    *  Unreachable/unset ⇒ find_members degrades to the un-enriched eligible set (spec 329 §4). */
   DISCOVERY_MCP_BASE?: string;
+  /** Spec 413 — `tool` | `playbook` offers passage retrieval over the public tier (see `kbRetrievalMode`); unset = off. */
+  KB_RETRIEVAL?: string;
 
   /** spec 334 §6 gather phase — a PUBLIC read-only SPARQL endpoint the coordination agent may query
    *  to gather reference facts (domain-agnostic: the query is model-authored per the org playbook,
@@ -4342,6 +4346,7 @@ app.post('/harness/ask', async (c) => {
             sendProbe: probeSenderFor(c.env, requester, c.executionCtx),
           })(toolId, args, ctx);
         }
+        if (toolId === KB_RETRIEVE_TOOL.id) return kbRetrieveInvoker({ fetchDiscovery: discoveryFetchFor(c.env) })(toolId, args, ctx);
         if (toolId === KB_QUESTION_TOOL.id) return kbQuestionInvoker({ fetchDiscovery: discoveryFetchFor(c.env), ...(structuredCall ? { call: structuredCall } : {}) })(toolId, args, ctx);
         // Their OWN records (spec 356 W2). The subject is the connected person, from the session — never
         // an argument, so a question cannot name somebody else's vault.
@@ -5409,6 +5414,9 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     teamGenesis: teamGenesisDeps(env, audit),
     // Spec 412 W5 — a Library release is signed AS its owner under the owner's session leaf (spec 384's signer).
     signAsAgent: (agent, digest) => signAsAgent(env, agent, digest),
+    // Spec 413 — after a Library act, a hint to the public tier's indexer (two public identifiers; the indexer re-reads
+    // the owner's public lane and verifies the release before anything is projected). No queue bound ⇒ no hint.
+    ...(env.SHELF_INDEX ? { announceShelf: async (owner: string, entryId: string) => { await env.SHELF_INDEX!.send({ owner, entryId }); } } : {}),
     // Spec 387 W2 — a name's published records (the catalog binding reads `atl:mcpEndpoint`); one 60s-cached reader.
     ...((): Record<string, unknown> => { const r = nameRecordsReader(env); return r ? { readNameRecords: r } : {}; })(),
     // What an agent PUBLICLY advertises (`atl:capabilities`): `playbook.answer` is listed only for a skill on it.
