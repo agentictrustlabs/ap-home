@@ -827,8 +827,13 @@ const faithImpact: WhiteLabelConfig = {
         'http://localhost:5178/',
       ],
       allowed_scopes: ['openid', 'profile', 'agent'],
-      allowed_delegation_templates: ['site-login'],
+      // Spec 412 W5 — `ask-as-me`: what a reader reads, verifies and buys is written into THEIR OWN vault by THEIR agent
+      // (a private `openbook/engagement` record per event), asked as them under this wire; the app keeps counts, not people.
+      allowed_delegation_templates: ['site-login', 'ask-as-me'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      // The reader Worker's asking key (`READER_ASK_PRIVATE_KEY` on demo-openbook-reader-production) — a revocable delegate.
+      ask_delegate: (process.env.NEXT_PUBLIC_OPENBOOK_READER_ASK_DELEGATE || '0xAB29Fb55ded14d3f917e65774988C019068Fc835') as `0x${string}`,
+      libraryFolders: ['openbook'],
     },
   ],
   // Consent disclosure per template — the human-readable can/cannot shown at the permission
