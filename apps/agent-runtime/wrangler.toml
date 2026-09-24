@@ -527,6 +527,10 @@ AGENT_RELATIONSHIP = "0x5015bD7d422e003511246f848cDd798cb00BB968"
 # Agents live on their OWN zone (2026-08-30). faithnet.io stays parseable because two cards were already
 # published under it and their URLs are inside signed bytes; nothing new publishes there.
 A2A_PUBLIC_BASE_DOMAIN = "faithnet.ai,faithnet.io"
+# Spec 413 — passage retrieval over the public tier (discovery-mcp `/kb/retrieve`, Vectorize + Workers AI THERE — never
+# here: this Worker reads vaults, so it binds no index). `tool` offers `kb.retrieve`; `playbook` also runs one pre-plan
+# retrieval step for a playbook that declares `retrievalQueries`, whose passages ground the answer, never the plan.
+KB_RETRIEVAL = "playbook"
 # Spec 366 R4 — a routed ask goes where the subject's NAME publishes (`atl:a2aEndpoint` / `atl:cardUri`). A name
 # that publishes nothing is served by the estate's default deployment — this one. A second deployment says "false".
 A2A_SERVES_UNPUBLISHED_NAMES = "true"
@@ -584,6 +588,13 @@ database_id = "dbdd6b71-f008-4a34-bb01-1cb195021993"
 [[env.faithnet.queues.producers]]
 binding = "RUNTIME_WAKE"
 queue = "runtime-wake-faithnet"
+
+# Spec 413 — shelf hints (`{owner, entryId}`, no content) after a Library act; consumed by demo-discovery-indexer-faithnet,
+# which re-reads the owner's public lane and verifies the release before projecting anything.
+# `wrangler queues create shelf-index-faithnet` once.
+[[env.faithnet.queues.producers]]
+binding = "SHELF_INDEX"
+queue = "shelf-index-faithnet"
 
 [[env.faithnet.queues.consumers]]
 queue = "runtime-wake-faithnet"

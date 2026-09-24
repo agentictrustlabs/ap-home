@@ -22,6 +22,19 @@ export function discoveryFetchFor(env: DiscoveryEnv): DiscoveryFetch {
   };
 }
 
+/**
+ * Spec 413 — whether this estate offers passage retrieval over the public tier, and how.
+ *   off       (unset) — not offered: a tool whose index is not bound would only fail, so it is not listed (ADR-0013);
+ *   tool      `kb.retrieve` is a tool the planner may choose;
+ *   playbook  also, when the acting agent's playbook declares `retrievalQueries`, ONE retrieval step runs before the
+ *             plan and its passages are an observation the answer is composed from (never the planner's prompt).
+ */
+export type KbRetrievalMode = 'off' | 'tool' | 'playbook';
+export function kbRetrievalMode(env: { KB_RETRIEVAL?: string }): KbRetrievalMode {
+  const v = (env.KB_RETRIEVAL ?? '').trim().toLowerCase();
+  return v === 'tool' || v === 'playbook' ? v : 'off';
+}
+
 /** Kept as a name for the env subset the model wiring reads; it IS the planner's env (spec 377). */
 export type ModelEnv = PlannerEnv;
 

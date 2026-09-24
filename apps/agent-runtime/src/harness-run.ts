@@ -91,12 +91,12 @@ import { enforcersFromEnv } from './org-wire.js';
 import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a';
 import { routeProvider, routePolicy, meterFor, selectPlanner, selectComposer, defaultProvider, plannerPromptBudget, type LlmProvider, type RoutePolicy, type RouteDecision, type RouteNeed } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from '@agenticprimitives/context';
-import { structuredCallFor } from './context-wiring.js';
+import { structuredCallFor, kbRetrievalMode } from './context-wiring.js';
 import type { DefinitionToolV1 } from '@agenticprimitives/capability-claims';
 import { CATALOG_TOOLS, catalogBindingFor, catalogInvoker, isCatalogTool } from './catalog-tools.js';
 import { playbookProvenanceFromReceipts } from './skill-provenance.js';
 import { checkGroundedComposition, groundedFallback } from '@agenticprimitives/context';
-import { KB_QUESTION_TOOL, kbQuestionAvailable } from '@agenticprimitives/context';
+import { KB_QUESTION_TOOL, kbQuestionAvailable, KB_RETRIEVE_TOOL } from '@agenticprimitives/context';
 import { VAULT_QUESTION_TOOL, vaultQuestionAvailable } from '@agenticprimitives/context';
 import { resolveParty, ownAgentsOfType, candidateHint, choicesFor, VALUE_ARGS, type PartyLookups } from '@agenticprimitives/context';
 import { decide, PAYMENT_SOURCE_ACCOUNT, PAYMENT_RECIPIENT, argTypesFor, readValue, isFlagTrue } from '@agenticprimitives/ontology';
@@ -916,6 +916,8 @@ export interface HarnessDeps {
   /** Spec 412 W5 — sign a digest AS an agent served here, under its DEL-001 session leaf (ERC-1271-verifiable against
    *  the agent); a Library release's signature. Null when the agent holds no leaf in this deployment. */
   signAsAgent?: (agent: string, digest: Hex) => Promise<Hex | null>;
+  /** Spec 413 — a shelf hint to the public tier's indexer after a Library act (`{owner, entryId}`, no content). */
+  announceShelf?: (owner: string, entryId: string) => Promise<void>;
   /** Append one entry to a subject's own record — how a request reaches the person who must decide it. */
   appendSubjectRecord?: (subject: string, recordType: string, entry: unknown) => Promise<{ ok: boolean; error?: string }>;
   /** Spec 410 §8 — one logical write into BOTH parties' vaults (a countersigned relationship credential or its revocation);
@@ -2206,7 +2208,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (PREFERENCES_TOOLS.some((t) => t.id === toolId)) return preferencesInvoker({ ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}) }, person, addressee)(toolId, args, ctx);
     if (MAIL_DRIVE_TOOLS.some((t) => t.id === toolId)) return mailDriveInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (CALENDAR_TOOLS.some((t) => t.id === toolId)) return calendarInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
-    if (LIBRARY_TOOLS.some((t) => t.id === toolId)) { if (!deps.readSubjectRecord) throw new Error('the private tier is not configured'); return libraryInvoker({ readSubjectRecord: deps.readSubjectRecord, ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}), ...(deps.signAsAgent ? { signAsOwner: deps.signAsAgent } : {}), stewardOf: (who, owner) => stewardshipOver({ readSubjectRecord: deps.readSubjectRecord!, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}) }, who, owner) }, addressee, person)(toolId, args, ctx); }
+    if (LIBRARY_TOOLS.some((t) => t.id === toolId)) { if (!deps.readSubjectRecord) throw new Error('the private tier is not configured'); return libraryInvoker({ readSubjectRecord: deps.readSubjectRecord, ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}), ...(deps.signAsAgent ? { signAsOwner: deps.signAsAgent } : {}), ...(deps.announceShelf ? { announce: deps.announceShelf } : {}), stewardOf: (who, owner) => stewardshipOver({ readSubjectRecord: deps.readSubjectRecord!, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}) }, who, owner) }, addressee, person)(toolId, args, ctx); }
     if (isMcpTool(toolId) || toolId === MCP_CONNECTORS_LIST) return mcpConnectorInvoker({ env: env as never, readConnectors: (h) => mcpConnectorsOf(deps, h), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, addressee)(toolId, args, ctx);
     if (BUILD_TOOLS.some((t) => t.id === toolId)) return buildInvoker({ env: env as never, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}), ...(deps.survey ? { survey: deps.survey } : {}), ...(deps.readRecords ? { readRecords: deps.readRecords } : {}), ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}) }, (presented ?? null) as never, addressee)(toolId, args, ctx);
     if (GITHUB_TOOLS.some((t) => t.id === toolId)) return githubInvoker({ env: env as unknown as Record<string, unknown>, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
@@ -4880,6 +4882,8 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...playbookAnswer,
     ...scopedActionTools(input.surface, playbook), ...catalogTools, ...mcpTools, ...ASK_DISCOVERY_TOOLS,
     ...(kbQuestionAvailable({ call: structuredCallFor(env as never, input.provider) }) ? [KB_QUESTION_TOOL] : []),
+    // Spec 413 — passages from the public tier (released shelf works + agent descriptions), where the estate binds an index.
+    ...(kbRetrievalMode(env as never) !== 'off' ? [KB_RETRIEVE_TOOL] : []),
     // Spec 379 — an outside A2A 1.0 agent may ANSWER inside a run; its words are an observation.
     EXTERNAL_AGENT_TOOL,
     // Spec 397 W2 — the enterprise behind this agent: FIND in the registry (only where one is configured — a tool that
@@ -5043,9 +5047,17 @@ step is then handed to that agent under authority the person grants; leave it ou
     ? (((await deps.nameOf(input.addressee).catch(() => null)) ?? '').split('.').pop() || undefined)
     : undefined;
   mark('runIntent-start');
+  // Spec 413 W3 — the playbook's declared retrieval guidance, spent as ONE pre-plan `kb.retrieve` step where the estate
+  // enables it (`KB_RETRIEVAL=playbook`). The query is the person's own sentence; the topics are the playbook's, sent as
+  // declared scope and echoed on the receipt. The passages ground the composed answer; no planner reads them.
+  const goalText = String((input.intent as { goal?: unknown }).goal ?? '').trim();
+  const retrieval = kbRetrievalMode(env as never) === 'playbook' && playbook?.retrievalQueries?.length && goalText && tools.some((t) => t.id === KB_RETRIEVE_TOOL.id)
+    ? { toolId: KB_RETRIEVE_TOOL.id, args: { query: goalText, topics: playbook.retrievalQueries } }
+    : null;
   const result = await runIntent(input.intent, {
     planner: boundPlanner, tools, bindingFor,
     ...(input.resume ? { resume: input.resume } : {}),
+    ...(retrieval ? { retrieval } : {}),
 
     // Spec 366 R1 — a step ABOUT ANOTHER AGENT is answered by that agent. The tool declares which argument
     // names its subject; the resolver has already turned the person's words into an address in THEIR
