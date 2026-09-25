@@ -187,6 +187,7 @@ import { answerProbe } from './engagement-answer.js';
 import type { MessageV1 } from '@agenticprimitives/a2a/standard';
 import { signAsAgent } from './consult-rail.js';
 import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, provenanceViewOf, firewalledMetrics, publicProvenanceOf, runAnchorRecordKey, type RunExportDeps } from './run-export.js';
+import { vaultProvenanceStore } from './provenance-bindings.js';
 import { runProvenanceRecordKey } from '@agenticprimitives/orchestration';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
@@ -2161,7 +2162,7 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
       const kept = await recordFormOf(env, deps, input.addressee, input.runRef, result as never);
       const record = recordOf({ runRef: input.runRef, intent, result: kept.result, events, presented: (input.resume?.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), ...(input.traceContext ? { traceContext: input.traceContext } : {}), planner: plannerSummaryOf(trace), ...(input.receivedAt ? { receivedAt: input.receivedAt } : {}), offloaded: kept.offloaded, bill });
       await putRecord(env as never, input.addressee, record);
-      await exportRun(env, { writeSubjectRecord: deps.writeSubjectRecord, ...(anchorPortFor(env, deps) ? { anchor: anchorPortFor(env, deps)! } : {}) }, input.addressee, record)
+      await exportRun(env, { store: vaultProvenanceStore({ writeSubjectRecord: deps.writeSubjectRecord }), ...(anchorPortFor(env, deps) ? { anchor: anchorPortFor(env, deps)! } : {}) }, input.addressee, record)
         .then((r) => putRecord(env as never, input.addressee, { ...record, export: r })).catch(() => undefined);
     } catch (e) { console.warn('[runAgentAsk] record not kept:', e instanceof Error ? e.message : String(e)); }
   })();
@@ -2220,7 +2221,7 @@ async function resumeFromCommitment(env: Env, input: { addressee: Address; debto
     const intent = { goal: hit.message, context: { addressee: input.addressee, asker: hit.asker } };
     const record = recordOf({ runRef: hit.runRef, intent, result: result as never, events, presented: (hit.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })) });
     await putRecord(env as never, input.addressee, record).catch(() => undefined);
-    await exportRun(env, (() => { const d = harnessDeps(env, buildAuditSink(env)); const a = anchorPortFor(env, d); return { writeSubjectRecord: d.writeSubjectRecord, ...(a ? { anchor: a } : {}) }; })(), input.addressee, record)
+    await exportRun(env, (() => { const d = harnessDeps(env, buildAuditSink(env)); const a = anchorPortFor(env, d); return { store: vaultProvenanceStore({ writeSubjectRecord: d.writeSubjectRecord }), ...(a ? { anchor: a } : {}) }; })(), input.addressee, record)
       .then((r) => putRecord(env as never, input.addressee, { ...record, export: r })).catch(() => undefined);
   }
   return { ok: true, runRef: hit.runRef, said: spoken || reply.text || '' };
@@ -2982,8 +2983,9 @@ app.post('/harness/provenance', async (c) => {
     // Spec 406 W3 — THE VAULT IS THE RECORD (ADR-0055): a run that did not run HERE may still have its provenance here —
     // a bundle its owner carried in. The task object's copy is a cache; the vault's is the document. Served as it is.
     const vdeps = harnessDeps(c.env, buildAuditSink(c.env));
-    const carried = vdeps.readSubjectRecord ? await vdeps.readSubjectRecord(addressee, runProvenanceRecordKey(body.runRef)).catch(() => null) : null;
-    if (carried && typeof carried === 'object' && (body.format === 'jsonld' || !body.format)) return c.json({ ok: true, hasProvenance: hasProvenanceRef(addressee, body.runRef), carried: true, provenance: carried });
+    const store = vaultProvenanceStore({ readSubjectRecord: vdeps.readSubjectRecord });
+    const carried = store ? await store.get({ agent: addressee, key: runProvenanceRecordKey(body.runRef) }) : null;
+    if (carried?.status === 'found' && (body.format === 'jsonld' || !body.format)) return c.json({ ok: true, hasProvenance: hasProvenanceRef(addressee, body.runRef), carried: true, provenance: carried.document });
     return c.json({ ok: false, error: 'no such record' }, 404);
   }
   // The asker, OR the agent's custodian — the same two claims `/harness/records` admits. The Inspector opens
@@ -4683,7 +4685,7 @@ app.post('/harness/ask', async (c) => {
       // Spec 381 — THE EXPORT: the durable half into the acting agent's vault, the spans to a collector when
       // one is named. Off the run's path; a failed export is logged, never a failed ask.
       // The report goes back ONTO the record: whether the provenance landed is read from it, never guessed.
-      c.executionCtx.waitUntil(exportRun(c.env, { writeSubjectRecord: askDeps.writeSubjectRecord, ...(anchorPortFor(c.env, askDeps) ? { anchor: anchorPortFor(c.env, askDeps)! } : {}) }, addressee, record)
+      c.executionCtx.waitUntil(exportRun(c.env, { store: vaultProvenanceStore({ writeSubjectRecord: askDeps.writeSubjectRecord }), ...(anchorPortFor(c.env, askDeps) ? { anchor: anchorPortFor(c.env, askDeps)! } : {}) }, addressee, record)
         .then((r) => putRecord(c.env as never, addressee, { ...record, export: r }))
         .catch((e) => console.warn('[harness/ask] export:', e instanceof Error ? e.message : String(e))));
     }

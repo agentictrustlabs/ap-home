@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { RunRecordV1 } from '@agenticprimitives/orchestration';
 import { estateIdOf } from '@agenticprimitives/estate-projection';
 import { exportRun, recordRetention, firewalledSpans, DEFAULT_RECORD_RETENTION_DAYS } from '../../src/run-export.js';
+import { vaultProvenanceStore, type VaultDoors } from '../../src/provenance-bindings.js';
 
 const ALICE = '0xb0d11ce19b756a682e78b4904cd8d832303b3d11';
 const record: RunRecordV1 = {
@@ -15,11 +16,14 @@ const record: RunRecordV1 = {
   events: [], outcome: 'completed',
 };
 
+/** Spec 414 A0 — the deployment's vault binding of the store port, over a test door. */
+const vs = (write: NonNullable<VaultDoors['writeSubjectRecord']>) => vaultProvenanceStore({ writeSubjectRecord: write });
+
 describe('exportRun', () => {
   it('writes the provenance through the agent\'s own door and sends nothing when no collector is named', async () => {
     const writes: Array<{ subject: string; recordType: string; record: unknown }> = [];
     let fetched = 0;
-    const r = await exportRun({}, { writeSubjectRecord: async (subject, recordType, rec) => { writes.push({ subject, recordType, record: rec }); return { ok: true }; }, fetch: (async () => { fetched++; return new Response('{}'); }) as never }, ALICE, record);
+    const r = await exportRun({}, { store: vs(async (subject, recordType, rec) => { writes.push({ subject, recordType, record: rec }); return { ok: true }; }), fetch: (async () => { fetched++; return new Response('{}'); }) as never }, ALICE, record);
     expect(r.provenance).toEqual({ written: true, recordType: 'run.provenance:run-x' });
     expect(writes[0]!.subject).toBe(ALICE);
     // Spec 389 — what lands is the GRAPH: a JSON-LD bundle under the published context, the run and its step
@@ -43,7 +47,7 @@ describe('exportRun', () => {
   it('posts an OTLP body to the named collector with its headers; a refused write is reported, not thrown', async () => {
     let got: { url: string; headers: Record<string, string>; body: unknown } | null = null;
     const r = await exportRun({ OTEL_EXPORTER_OTLP_ENDPOINT: 'https://collector.example/v1/traces', OTEL_EXPORTER_OTLP_HEADERS: 'x-api-key=abc, x-dataset=runs' }, {
-      writeSubjectRecord: async () => ({ ok: false, error: 'record_scope_denied' }),
+      store: vs(async () => ({ ok: false, error: 'record_scope_denied' })),
       fetch: (async (url: string, init: RequestInit) => { got = { url, headers: init.headers as Record<string, string>, body: JSON.parse(String(init.body)) }; return new Response('{}', { status: 200 }); }) as never,
     }, ALICE, record);
     expect(r.provenance).toEqual({ written: false, recordType: 'run.provenance:run-x', error: 'record_scope_denied' });
@@ -70,7 +74,7 @@ describe('exportRun', () => {
     const writes: Array<{ recordType: string; record: unknown }> = [];
     const GOV = '0x0a6000000000000000000000000000000000000a';
     const r = await exportRun({ CHAIN_ID: '84532', AGENTIC_GOVERNANCE: GOV }, {
-      writeSubjectRecord: async (_s, recordType, rec) => { writes.push({ recordType, record: rec }); return { ok: true }; },
+      store: vs(async (_s, recordType, rec) => { writes.push({ recordType, record: rec }); return { ok: true }; }),
       anchor: async () => ({ txHash: `0x${'ee'.repeat(32)}`, registry: '0x0000000000000000000000000000000000000bbb', anchoredBy: '0x0b60000000000000000000000000000000000009', chainId: 84532 }),
     }, ALICE, record);
     const expectedEstate = estateIdOf(84532, GOV);
@@ -83,7 +87,7 @@ describe('exportRun', () => {
     expect(writes[1]!.record).toMatchObject({ runRef: 'run-x', registry: 'eip155:84532:0x0000000000000000000000000000000000000bbb', anchoredBy: '0x0b60000000000000000000000000000000000009', estate: expectedEstate, txHash: `0x${'ee'.repeat(32)}` });
     expect((writes[1]!.record as { digest: string }).digest).toBe(r.anchor && 'digest' in r.anchor ? r.anchor.digest : 'no anchor');
     // Undeclared governance ⇒ not stamped (never guessed from the chain id alone) and the citation names no estate.
-    const bare = await exportRun({ CHAIN_ID: '84532' }, { writeSubjectRecord: async (_s, recordType, rec) => { writes.push({ recordType, record: rec }); return { ok: true }; } }, ALICE, record);
+    const bare = await exportRun({ CHAIN_ID: '84532' }, { store: vs(async (_s, recordType, rec) => { writes.push({ recordType, record: rec }); return { ok: true }; }) }, ALICE, record);
     expect(bare.anchorRecord).toBeUndefined();
     expect((writes[2]!.record as { graph: Array<Record<string, unknown>> }).graph.find((n) => n['id'] === 'urn:ap:prov:act:run-x')!['estate']).toBeUndefined();
   });
@@ -110,7 +114,7 @@ describe('spec 390 W4 — the metrics body goes to the metrics endpoint when one
   it('posts ExportMetricsServiceRequest with the same headers; nothing of the run in it', async () => {
     const urls: string[] = []; let metricsBody: unknown = null;
     const r = await exportRun({ OTEL_EXPORTER_OTLP_ENDPOINT: 'https://collector.example/v1/traces', OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: 'https://collector.example/v1/metrics', OTEL_EXPORTER_OTLP_HEADERS: 'x-api-key=abc' }, {
-      writeSubjectRecord: async () => ({ ok: true }),
+      store: vs(async () => ({ ok: true })),
       fetch: (async (url: string, init: RequestInit) => { urls.push(url); if (url.endsWith('/v1/metrics')) metricsBody = JSON.parse(String(init.body)); return new Response('{}', { status: 200 }); }) as never,
     }, ALICE, record);
     expect(urls).toEqual(['https://collector.example/v1/traces', 'https://collector.example/v1/metrics']);
