@@ -28,7 +28,7 @@
       "spec": "414 A1 / 415",
       "proves": "an intent sent to an agent's A2A endpoint leaves a PROV graph whose run names that door (message and task ids), its variant by sha256, its model calls and the harness capabilities that engaged; the direct ask answers with a PROV-AQ Link header",
       "twin": "the graph carries none of the ask's words; a door named in a request body is believed only on the in-Worker hop",
-      "required": false,
+      "required": true,
       "paced": true,
       "timeoutSec": 240
     },
