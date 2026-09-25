@@ -54,6 +54,7 @@ import {
 } from '@agenticprimitives/a2a/standard';
 import { internalHeaders, markInWorker, isInWorkerRequest, type InternalMarkerEnv } from './internal-marker.js';
 import { subjectAskOf, subjectAnswerOf, handoffOf, routedRunRefFor, SUBJECT_ANSWER_ARTIFACT, type HandoffV1, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
+import { a2aDoor } from './run-trace.js';
 
 export interface StandardMountDeps {
   env: InternalMarkerEnv & Record<string, unknown>;
@@ -70,7 +71,7 @@ export interface StandardMountDeps {
    *  runtime lives. Returns the JSON-RPC response verbatim. */
   delegatedRpc?: DelegatedRpc;
   /** Spec 372 S3c — an agent asking as itself: no session, no mandate, its own standing. */
-  askAsAgent?: (input: { agent: Address; addressee: Address; ask: string; runRef: string; /** Spec 390 W2 — the caller's W3C Trace Context, kept on the run's record. */ traceContext?: import('@agenticprimitives/orchestration').TraceContextV1 | null; /** Spec 390 W3 — when the request arrived. */ receivedAt?: number; /** The message's DATA part, when it carried one naming a skill — the material `playbook.answer` reasons over. */ material?: Record<string, unknown> | null; /** Spec 400 W1 — a plan the caller supplied in the message's metadata; admitted by the harness like any supplied plan (367 W1), never trusted. */ plan?: Plan | null }) => Promise<{
+  askAsAgent?: (input: { agent: Address; addressee: Address; ask: string; runRef: string; /** Spec 414 A1b — the A2A door the run arrived by. */ door?: import('@agenticprimitives/orchestration').RunDoorV1; /** Spec 390 W2 — the caller's W3C Trace Context, kept on the run's record. */ traceContext?: import('@agenticprimitives/orchestration').TraceContextV1 | null; /** Spec 390 W3 — when the request arrived. */ receivedAt?: number; /** The message's DATA part, when it carried one naming a skill — the material `playbook.answer` reasons over. */ material?: Record<string, unknown> | null; /** Spec 400 W1 — a plan the caller supplied in the message's metadata; admitted by the harness like any supplied plan (367 W1), never trusted. */ plan?: Plan | null }) => Promise<{
     reply: { kind: string; text?: string; prompt?: { kind: string; prompt: string; stepRef: string }; error?: string };
     spoken: string;
     result?: { plan: unknown };
@@ -253,7 +254,7 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
             // is a deterministic read and need not cost a planner turn. The harness admits it against the playbook's tools
             // (367 W1) exactly as it admits the Home's; a plan naming a tool the agent does not have is refused there.
             const suppliedPlan = supplierPlanOf(ctx.message.metadata);
-            asked = await deps.askAsAgent({ agent: caller, addressee: agent, ask: message, runRef, traceContext: traceContextOf(ctx.headers), receivedAt: startedAt, ...(material && typeof material.skill === 'string' ? { material } : {}), ...(suppliedPlan ? { plan: suppliedPlan } : {}) });
+            asked = await deps.askAsAgent({ agent: caller, addressee: agent, ask: message, runRef, traceContext: traceContextOf(ctx.headers), receivedAt: startedAt, door: a2aDoor(ctx.message, ctx.task), ...(material && typeof material.skill === 'string' ? { material } : {}), ...(suppliedPlan ? { plan: suppliedPlan } : {}) });
             if (material) console.log(`[phases surface] principal→ask ${askT0 - startedAt}ms · ask ${Date.now() - askT0}ms`);
           }
           // Spec 387 W2 — THE TRACE RIDES WITH THE TASK: what admitted the run, what was offered and chosen, each
@@ -314,7 +315,7 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           if (ctx.principal?.agent) ctx.task.metadata = { ...(ctx.task.metadata ?? {}), asker: ctx.principal.agent };
           const ask = routed.ask;
           const wholeAsk = ask.request.capability === 'harness.ask';
-          const body = JSON.stringify({ ...(session ? { session } : {}), addressee: agent, message: ask.request.goal, ...(wholeAsk ? {} : { plan: { steps: [{ toolId: ask.request.capability, args: ask.request.args }] } }), subjectAsk: ask, ...(ask.continue ? {} : { runRef: routedRunRefFor(ask.correlation) }) });
+          const body = JSON.stringify({ door: a2aDoor(ctx.message, ctx.task), ...(session ? { session } : {}), addressee: agent, message: ask.request.goal, ...(wholeAsk ? {} : { plan: { steps: [{ toolId: ask.request.capability, args: ask.request.args }] } }), subjectAsk: ask, ...(ask.continue ? {} : { runRef: routedRunRefFor(ask.correlation) }) });
           await ctx.working();
           const res = await deps.appFetch(markInWorker(new Request(`https://${host}/harness/ask`, { method: 'POST', headers: internalHeaders(deps.env, { 'content-type': 'application/json', accept: 'application/json', ...traceHeadersOf(ctx.headers) }), body })), deps.env);
           const envelope = (await res.json().catch(() => null)) as (AskEnvelope & { subjectAnswer?: { outcome?: string; said?: string } }) | null;
@@ -336,7 +337,9 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
         if (!message && !data) { await ctx.reject([{ text: 'Say what you would like this agent to do — the message carried no text.' }]); return; }
         // A continuation answers the parked prompt: text as the message, a data part as the supplied answer.
         const supplied: SuppliedInputV1[] | undefined = runRef && promptStep && data ? [{ stepRef: promptStep, data }] : undefined;
-        const body = JSON.stringify({ session, addressee: agent, ...(message ? { message } : {}), ...(runRef ? { runRef } : {}), ...(supplied ? { supplied } : {}) });
+        // Spec 414 A1b — the door this run arrived by: the A2A message, context and task ids (believed by `/harness/ask`
+        // only because this is an in-process hop carrying the in-Worker mark).
+        const body = JSON.stringify({ session, addressee: agent, ...(message ? { message } : {}), ...(runRef ? { runRef } : {}), ...(supplied ? { supplied } : {}), door: a2aDoor(ctx.message, ctx.task) });
         await ctx.working();
         const res = await deps.appFetch(markInWorker(new Request(`https://${host}/harness/ask`, { method: 'POST', headers: internalHeaders(deps.env, { 'content-type': 'application/json', accept: 'application/json', ...traceHeadersOf(ctx.headers) }), body })), deps.env);
         const env = (await res.json().catch(() => null)) as AskEnvelope | null;

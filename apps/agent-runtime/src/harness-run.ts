@@ -5466,6 +5466,8 @@ step is then handed to that agent under authority the person grants; leave it ou
     // Spec 354 §4.5 — the playbook that admitted this run (canonical id + version + definition digest),
     // stamped onto every receipt by the loop. Absent ⇒ the bare harness; receipts carry no skillRef.
     ...(playbook ? { skillRef: { skillId: playbook.archetypeId, version: playbook.archetypeVersion, commitment: playbook.digest } } : {}),
+    // Spec 414 A1 — and each step names the SKILL.md its own tool was compiled from, when the definition says (415 S1).
+    ...(playbook?.tools ? { skillOf: (toolId: string) => { const t = Object.values(playbook.tools ?? {}).find((d) => (d as { id?: string; capability?: { id?: string } }).id === toolId || (d as { capability?: { id?: string } }).capability?.id === toolId) as { source?: { skillId: string; version: string; contractDigest: string } } | undefined; return t?.source ? { id: t.source.skillId, version: t.source.version, contractDigest: t.source.contractDigest } : undefined; } } : {}),
     ...(input.supplied ? { supplied: input.supplied } : {}),
     ...(input.runRef ? { runRef: input.runRef } : {}),
     now,

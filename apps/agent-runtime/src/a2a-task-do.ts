@@ -1235,6 +1235,8 @@ export class A2aTaskDO {
                 try { topicGuidance = String(((await io.readTopic()) as { skillMarkdown?: string }).skillMarkdown ?? '').trim(); } catch { /* the org's playbook alone */ }
                 const run = await runAgentAsk(this.env, {
                   agent: org, addressee: org, ask: p.triggerBody, runRef,
+                  // Spec 414 A1b — this run arrived by an @-mention in a channel topic (spec 327), not another agent's run.
+                  door: { kind: 'channel-mention' },
                   context: { channelId: p.channelId, topicTitle: p.topicTitle, triggerAuthor: p.triggerAuthor, questionId },
                   plan: { steps: chosen.map((c, i) => ({ toolId: MEMBER_CONSULT_TOOL.id, args: { org, respondent: c.memberSA, question: p.triggerBody }, id: `s1#${i + 1}` })) },
                   guidance: topicReplyGuidance(p, topicGuidance),

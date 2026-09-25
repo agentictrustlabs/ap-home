@@ -9,7 +9,7 @@ import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 
 import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, forgetConfirmation, CONFIRMATION_RECORD, forgetInstruction, STANDING_RECORD, factsOf, forgetFact, FACTS_RECORD, routinesOf, dropRoutine, ROUTINES_RECORD, preferencesOf, setPreferences, answerPreferencesForPrompt, PREFERENCES_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1, type RememberedFactsV1 } from '@agenticprimitives/context';
 import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
-import { recordOf, runMarks, replayingInvoker, planDigest, traceContextOf, type RunPlannerSummaryV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent, type RunBillV1 } from '@agenticprimitives/orchestration';
+import { recordOf, runMarks, replayingInvoker, planDigest, traceContextOf, type RunDoorV1, type ModelCallV1, type VariantV1, type RunPlannerSummaryV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent, type RunBillV1 } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
 import { recordFormOf, rehydrateExecuted } from './artifact-store.js';
 import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken, advanceTrigger, withPause, withBudget, advanced, declareTrigger, removeTrigger, rebuildDeclaredTriggers } from './triggers.js';
@@ -188,6 +188,7 @@ import type { MessageV1 } from '@agenticprimitives/a2a/standard';
 import { signAsAgent } from './consult-rail.js';
 import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, provenanceViewOf, firewalledMetrics, publicProvenanceOf, runAnchorRecordKey, type RunExportDeps } from './run-export.js';
 import { vaultProvenanceStore, readCarriedProvenance } from './provenance-bindings.js';
+import { doorFromBody, modelCallsOf, variantOf, engagedFromTrace } from './run-trace.js';
 import { runProvenanceRecordKey } from '@agenticprimitives/orchestration';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
@@ -2085,6 +2086,9 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
   /** Spec 376 — the intent VERBATIM: a handed-off step's child mandate is bound to the digest of exactly
    *  this intent, so the run must be admitted against it and not a rebuilt one. */
   intent?: { goal: string; context?: Record<string, unknown> };
+  /** Spec 414 A1b — how this run arrived, when the caller knows (an A2A message's ids). Absent ⇒ decided here:
+   *  a resume is `resume`, a trigger's context is `trigger`, anything else is another agent's run asking (`routed`). */
+  door?: RunDoorV1;
 }): Promise<{
   reply: { kind: string; text?: string; prompt?: { kind: string; prompt: string; stepRef: string }; error?: string; runRef?: string; capability?: string; stepRef?: string };
   spoken: string;
@@ -2093,6 +2097,8 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
   presentedRefs: string[];
   /** Spec 396 W3 — what the run cost its agent's storage; a routine's budget is judged against it (398 §5.4). */
   bill?: { vaultCalls: number; doRequests: number };
+  /** Spec 414 A1b — the model calls and the variant, so a caller that keeps its own record of the run names them too. */
+  traceFacts?: { modelCalls: ModelCallV1[]; variant: VariantV1 };
 }> {
   const askT0 = Date.now();
   const deps = harnessDeps(env, buildAuditSink(env, input.executionCtx ? { deferVia: input.executionCtx } : {}));
@@ -2157,17 +2163,22 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
   // not part of the answer, and a second and a half of vault writes sat between a coach's sentence and the
   // table's clock. `waitUntil` keeps the isolate alive for it; without a context (an alarm, a test) it is
   // awaited as before so nothing is lost.
+  const traceFacts = { modelCalls: modelCallsOf(trace), variant: variantOf(env as never, trace) };
   const keep = (async () => {
     try {
       const kept = await recordFormOf(env, deps, input.addressee, input.runRef, result as never);
-      const record = recordOf({ runRef: input.runRef, intent, result: kept.result, events, presented: (input.resume?.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), ...(input.traceContext ? { traceContext: input.traceContext } : {}), planner: plannerSummaryOf(trace), ...(input.receivedAt ? { receivedAt: input.receivedAt } : {}), offloaded: kept.offloaded, bill });
+      const record = recordOf({ runRef: input.runRef, intent, result: kept.result, events, presented: (input.resume?.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), ...(input.traceContext ? { traceContext: input.traceContext } : {}), planner: plannerSummaryOf(trace), ...(input.receivedAt ? { receivedAt: input.receivedAt } : {}), offloaded: kept.offloaded, bill,
+        // Spec 414 A1b — how this run arrived (the caller's A2A ids when it knows them; else decided here), the model
+        // calls and the variant. A run another agent asked for is still this agent's run, traced from its door.
+        door: input.door ?? (input.resume ? { kind: 'resume' } : (input.context as { trigger?: unknown } | undefined)?.trigger ? { kind: 'trigger' } : { kind: 'routed' }),
+        modelCalls: traceFacts.modelCalls, variant: traceFacts.variant, engaged: engagedFromTrace(trace) });
       await putRecord(env as never, input.addressee, record);
       await exportRun(env, { store: vaultProvenanceStore({ writeSubjectRecord: deps.writeSubjectRecord }), ...(anchorPortFor(env, deps) ? { anchor: anchorPortFor(env, deps)! } : {}) }, input.addressee, record)
         .then((r) => putRecord(env as never, input.addressee, { ...record, export: r })).catch(() => undefined);
     } catch (e) { console.warn('[runAgentAsk] record not kept:', e instanceof Error ? e.message : String(e)); }
   })();
   if (input.executionCtx) input.executionCtx.waitUntil(keep); else await keep;
-  return { reply: reply as never, spoken, result: result as never, events, presentedRefs, bill };
+  return { reply: reply as never, spoken, result: result as never, events, presentedRefs, bill, traceFacts };
 }
 
 /**
@@ -2219,7 +2230,7 @@ async function resumeFromCommitment(env: Env, input: { addressee: Address; debto
     await dropRun(env as never, input.addressee, hit.runRef).catch(() => undefined);
     // The record of the run, the way the ask route keeps one: what was asked, what ran, what it came to.
     const intent = { goal: hit.message, context: { addressee: input.addressee, asker: hit.asker } };
-    const record = recordOf({ runRef: hit.runRef, intent, result: result as never, events, presented: (hit.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })) });
+    const record = recordOf({ runRef: hit.runRef, intent, result: result as never, events, presented: (hit.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), door: { kind: 'resume' }, ...(resumed.traceFacts ? { modelCalls: resumed.traceFacts.modelCalls, variant: resumed.traceFacts.variant } : {}) });
     await putRecord(env as never, input.addressee, record).catch(() => undefined);
     await exportRun(env, (() => { const d = harnessDeps(env, buildAuditSink(env)); const a = anchorPortFor(env, d); return { store: vaultProvenanceStore({ writeSubjectRecord: d.writeSubjectRecord }), ...(a ? { anchor: a } : {}) }; })(), input.addressee, record)
       .then((r) => putRecord(env as never, input.addressee, { ...record, export: r })).catch(() => undefined);
@@ -4681,7 +4692,12 @@ app.post('/harness/ask', async (c) => {
     {
       // Spec 390 W2 — the W3C Trace Context the request arrived with joins this run's spans to the caller's
       // trace. Recorded here and read by nothing else: correlation, never trust.
-      const record = recordOf({ runRef, intent, result: recordForm.result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), traceContext: traceContextOf(c.req.raw.headers), planner: plannerSummaryOf(trace), receivedAt, marks: marks.list, offloaded: recordForm.offloaded, bill });
+      const record = recordOf({ runRef, intent, result: recordForm.result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), traceContext: traceContextOf(c.req.raw.headers), planner: plannerSummaryOf(trace), receivedAt, marks: marks.list, offloaded: recordForm.offloaded, bill,
+        // Spec 414 A1b — THE TRACE FROM THE DOOR. The door is decided here: an in-process hop from this Worker's A2A
+        // door names its message ids; a routed ask from another agent's run is `routed`; a continuation is a
+        // `resume`; anything else is a direct ask. Plus the model calls and the variant this run ran under.
+        door: ((d) => (inResponseTo ? { ...(d ?? {}), kind: 'routed' as const } : d ?? (body.runRef && (body.supplied?.length || body.approvals) ? { kind: 'resume' as const } : { kind: 'harness-ask' as const })))(doorFromBody(body, isInWorkerRequest(c.req.raw))),
+        modelCalls: modelCallsOf(trace, marks.list), variant: variantOf(c.env as never, trace), engaged: engagedFromTrace(trace) });
       c.executionCtx.waitUntil(putRecord(c.env as never, addressee, record).catch((e) => console.warn('[harness/ask] record not kept:', e instanceof Error ? e.message : String(e))));
       // Spec 381 — THE EXPORT: the durable half into the acting agent's vault, the spans to a collector when
       // one is named. Off the run's path; a failed export is logged, never a failed ask.
