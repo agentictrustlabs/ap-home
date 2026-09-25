@@ -89,7 +89,7 @@ describe('exportRun', () => {
     // Undeclared governance ⇒ not stamped (never guessed from the chain id alone) and the citation names no estate.
     const bare = await exportRun({ CHAIN_ID: '84532' }, { store: vs(async (_s, recordType, rec) => { writes.push({ recordType, record: rec }); return { ok: true }; }) }, ALICE, record);
     expect(bare.anchorRecord).toBeUndefined();
-    expect((writes[2]!.record as { graph: Array<Record<string, unknown>> }).graph.find((n) => n['id'] === 'urn:ap:prov:act:run-x')!['estate']).toBeUndefined();
+    expect((writes.filter((w) => w.recordType === 'run.provenance:run-x')[1]!.record as { graph: Array<Record<string, unknown>> }).graph.find((n) => n['id'] === 'urn:ap:prov:act:run-x')!['estate']).toBeUndefined();
   });
   it('spec 390 — the ids on the spans are the ids in the graph, both ways', async () => {
     const { provenanceGraphOf } = await import('../../src/run-export.js');
@@ -122,5 +122,25 @@ describe('spec 390 W4 — the metrics body goes to the metrics endpoint when one
     const names = (metricsBody as { resourceMetrics: Array<{ scopeMetrics: Array<{ metrics: Array<{ name: string }> }> }> }).resourceMetrics[0]!.scopeMetrics[0]!.metrics.map((m) => m.name);
     expect(names).toEqual(['ap.harness.runs', 'ap.harness.verdicts', 'ap.harness.step.duration', 'ap.model.calls', 'ap.vault.calls']);
     expect(JSON.stringify(metricsBody)).not.toContain('nathan');
+  });
+});
+
+describe('spec 414 A2 — the run\'s measurements land beside its provenance', () => {
+  it('writes run.measures:<runRef> through the same store: a DQV record derived from the run\'s bundle, no words', async () => {
+    const writes: Array<{ recordType: string; record: unknown }> = [];
+    const r = await exportRun({ CHAIN_ID: '34348' }, { store: vs(async (_s, recordType, rec) => { writes.push({ recordType, record: rec }); return { ok: true }; }) }, ALICE, record);
+    expect(r.measures).toMatchObject({ written: true, recordType: 'run.measures:run-x' });
+    expect(r.measures!.count).toBeGreaterThan(5);
+    const m = writes.find((w) => w.recordType === 'run.measures:run-x')!.record as { id: string; wasDerivedFrom: string; graph: Array<Record<string, unknown>> };
+    expect(m.id).toBe('urn:ap:prov:measures:run-x');
+    expect(m.wasDerivedFrom).toBe('urn:ap:prov:bundle:run-x');
+    const completed = m.graph.find((n) => n['id'] === 'urn:ap:prov:measure:run-x:completed')!;
+    expect(completed).toMatchObject({ computedOn: 'urn:ap:prov:act:run-x', isMeasurementOf: 'https://agenticprimitives.dev/ns/evaluation#m-completed', value: 1, unit: '1' });
+    expect(JSON.stringify(m)).not.toContain('nathan');
+  });
+  it('a store that refuses the scope is reported, never hidden', async () => {
+    const r = await exportRun({}, { store: vs(async (_s, recordType) => (recordType.startsWith('run.measures:') ? { ok: false, error: 'record_scope_denied' } : { ok: true })) }, ALICE, record);
+    expect(r.provenance.written).toBe(true);
+    expect(r.measures).toMatchObject({ written: false, error: 'record_scope_denied' });
   });
 });

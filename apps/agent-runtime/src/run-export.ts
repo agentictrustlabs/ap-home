@@ -8,9 +8,10 @@ import { bundleDigest, ZERO32 } from './receipt-anchor.js';
 import { intentDigest } from '@agenticprimitives/delegation';
 import type { Hex, Address } from 'viem';
 import { estateIdOf } from '@agenticprimitives/estate-projection';
-import { assertFirewalled, assertMetricsFirewalled, metricsOf, provenanceOf, runProvenanceRecordKey, spansOf, type RunRecordV1, type RunExportReportV1, type RunMetricsV1, type SpanV1 } from '@agenticprimitives/orchestration';
-import { projectHarnessRunProvenance, toJsonLd, toProvN, type ProvenanceRecordV1, projectPublicProvenance, type PublicProvenanceProjection } from '@agenticprimitives/provenance';
-import { RUN_PROVENANCE_CONTEXT } from '@agenticprimitives/ontology';
+import { engagementsOf, assertFirewalled, assertMetricsFirewalled, metricsOf, provenanceOf, runProvenanceRecordKey, spansOf, type RunRecordV1, type RunExportReportV1, type RunMetricsV1, type SpanV1 } from '@agenticprimitives/orchestration';
+import { agentIri, projectHarnessRunProvenance, toJsonLd, toProvN, type ProvenanceRecordV1, projectPublicProvenance, type PublicProvenanceProjection } from '@agenticprimitives/provenance';
+import { RUN_PROVENANCE_CONTEXT, RUN_MEASURES_CONTEXT } from '@agenticprimitives/ontology';
+import { measureRun, measuresToJsonLd, runMeasuresRecordKey } from '@agenticprimitives/evaluation';
 import type { ProvenanceStorePort } from '@agenticprimitives/provenance';
 import type { TraceExporterPort } from '@agenticprimitives/orchestration';
 import { otlpHttpExporter } from './provenance-bindings.js';
@@ -69,6 +70,25 @@ export async function provenanceViewOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, agen
   const view = await provenanceOf(record, agent);
   const chainId = Number(env.CHAIN_ID);
   return { ...view, ...(Number.isFinite(chainId) && chainId > 0 ? { chainId } : {}), ...(record.bill ? { bill: record.bill } : {}), ...(record.canceled ? { canceled: record.canceled } : {}), plannedSteps: record.plan.steps.length };
+}
+/** Spec 414 A2 — THE RUN'S MEASUREMENTS: numbers from its trace alone (the same structural view the graph is made from,
+ *  plus the record's plan size, bill and replans), as one DQV record under the published context. Descriptive; no words. */
+export async function measuresOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, agent: string, record: RunRecordV1): Promise<{ count: number; doc: Record<string, unknown> }> {
+  const view = await provenanceOf(record, agent);
+  const chainId = Number(env.CHAIN_ID);
+  const agentId = agentIri(agent, Number.isFinite(chainId) && chainId > 0 ? chainId : undefined);
+  const ms = measureRun({
+    runRef: record.runRef, outcome: record.outcome, endedAt: view.endedAt,
+    ...(record.receivedAt ? { startedAt: new Date(record.receivedAt).toISOString() } : {}),
+    stepsPlanned: record.plan.steps.length,
+    steps: view.steps.map((s) => ({ stepRef: s.stepRef, status: s.status, ...(s.startedAt ? { startedAt: s.startedAt } : {}), ...(s.endedAt ? { endedAt: s.endedAt } : {}), ...(s.authority ? { authority: { decision: s.authority.decision, afterApproval: s.authority.afterApproval } } : {}), ...(s.observation ? { observation: { outcome: s.observation.outcome } } : {}), ...(record.steps.find((x) => x.stepRef === s.stepRef)?.replayed ? { replayed: true } : {}) })),
+    modelCalls: (record.modelCalls ?? []).map((m) => ({ ...(m.tokensIn !== undefined ? { tokensIn: m.tokensIn } : {}), ...(m.tokensOut !== undefined ? { tokensOut: m.tokensOut } : {}) })),
+    ...(record.bill ? { vaultCalls: record.bill.vaultCalls } : {}),
+    replans: record.events.filter((e) => e.type === 'PlanRefused' && (e as { replanning?: boolean }).replanning).length,
+    engagements: engagementsOf(record).length,
+  });
+  const doc = measuresToJsonLd(record.runRef, ms, { context: RUN_MEASURES_CONTEXT['@context'] as unknown as Record<string, unknown>, agentIri: agentId, runtimeIri: `urn:ap:prov:runtime:${agentId}`, at: new Date(record.at).toISOString() });
+  return { count: ms.length, doc };
 }
 export async function provenanceGraphOf(env: Pick<RunExportEnv, 'CHAIN_ID' | 'AGENTIC_GOVERNANCE'>, agent: string, record: RunRecordV1): Promise<Record<string, unknown>> {
   const { graph, chainId } = await provenanceRecordOf(env, agent, record);
@@ -156,6 +176,15 @@ export async function exportRun(env: RunExportEnv, deps: RunExportDeps, agent: s
         } catch (e) { report.anchorRecord = { written: false, recordType, error: e instanceof Error ? e.message : String(e) }; }
       }
     } catch (e) { report.anchor = { error: e instanceof Error ? e.message : String(e) }; }
+  }
+  // Spec 414 A2 — THE MEASUREMENTS, beside the provenance, through the same store. A refusal is said on the report.
+  if (deps.store) {
+    const recordType = runMeasuresRecordKey(record.runRef);
+    try {
+      const { count, doc } = await measuresOf(env, agent, record);
+      const w = await deps.store.put({ agent, key: recordType }, doc);
+      report.measures = { written: w.ok, recordType, count, ...(!w.ok ? { error: w.error } : {}) };
+    } catch (e) { report.measures = { written: false, recordType, count: 0, error: e instanceof Error ? e.message : String(e) }; }
   }
   // The spans — firewalled BEFORE the port, carried by whichever binding this deployment names.
   const exporter = deps.exporter ?? otlpHttpExporter(env, deps.fetch ?? fetch);
