@@ -63,3 +63,19 @@ export function otlpHttpExporter(env: OtlpEnv, fetchImpl: typeof fetch = fetch, 
     exportMetrics: (m) => send(env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, otlpMetricsOf(m, { serviceName })),
   };
 }
+
+/** Spec 406 W3's CARRIED record, read under the same claim the run-record path admits. A record carried into this
+ *  Home is its owner's own record (`/harness/records/import` writes only into the caller's own vault), so the reader
+ *  must be the agent itself or its steward — the check runs BEFORE the read, so a refused caller cannot even learn
+ *  whether a record exists. Before this, any valid Home session could read any agent's carried bundle by runRef. */
+export async function readCarriedProvenance(
+  store: ProvenanceStorePort | undefined,
+  caller: string,
+  agent: string,
+  key: string,
+  mayOversee: (caller: string, agent: string) => Promise<boolean>,
+): Promise<{ status: 'found'; document: Record<string, unknown> } | { status: 'absent' } | { status: 'forbidden' } | { status: 'refused'; reason: string }> {
+  if (!(await mayOversee(caller, agent).catch(() => false))) return { status: 'forbidden' };
+  if (!store) return { status: 'refused', reason: 'no vault read door' };
+  return store.get({ agent, key });
+}

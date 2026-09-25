@@ -187,7 +187,7 @@ import { answerProbe } from './engagement-answer.js';
 import type { MessageV1 } from '@agenticprimitives/a2a/standard';
 import { signAsAgent } from './consult-rail.js';
 import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, provenanceViewOf, firewalledMetrics, publicProvenanceOf, runAnchorRecordKey, type RunExportDeps } from './run-export.js';
-import { vaultProvenanceStore } from './provenance-bindings.js';
+import { vaultProvenanceStore, readCarriedProvenance } from './provenance-bindings.js';
 import { runProvenanceRecordKey } from '@agenticprimitives/orchestration';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
@@ -2984,8 +2984,9 @@ app.post('/harness/provenance', async (c) => {
     // a bundle its owner carried in. The task object's copy is a cache; the vault's is the document. Served as it is.
     const vdeps = harnessDeps(c.env, buildAuditSink(c.env));
     const store = vaultProvenanceStore({ readSubjectRecord: vdeps.readSubjectRecord });
-    const carried = store ? await store.get({ agent: addressee, key: runProvenanceRecordKey(body.runRef) }) : null;
-    if (carried?.status === 'found' && (body.format === 'jsonld' || !body.format)) return c.json({ ok: true, hasProvenance: hasProvenanceRef(addressee, body.runRef), carried: true, provenance: carried.document });
+    const carried = await readCarriedProvenance(store, String(who.sa).toLowerCase(), addressee, runProvenanceRecordKey(body.runRef), (me, agent) => mayOverseeAgent(c.env, me as Address, agent as Address));
+    if (carried.status === 'forbidden') return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
+    if (carried.status === 'found' && (body.format === 'jsonld' || !body.format)) return c.json({ ok: true, hasProvenance: hasProvenanceRef(addressee, body.runRef), carried: true, provenance: carried.document });
     return c.json({ ok: false, error: 'no such record' }, 404);
   }
   // The asker, OR the agent's custodian — the same two claims `/harness/records` admits. The Inspector opens

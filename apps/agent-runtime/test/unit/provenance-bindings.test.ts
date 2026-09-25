@@ -1,7 +1,7 @@
 // Spec 414 A0 — this deployment's bindings of the provenance ports: the vault store answers found / absent /
 // refused (never folds a failed read into "none"), and the OTLP exporter sends only where the deployment says.
 import { describe, expect, it } from 'vitest';
-import { vaultProvenanceStore, otlpHttpExporter } from '../../src/provenance-bindings.js';
+import { vaultProvenanceStore, otlpHttpExporter, readCarriedProvenance } from '../../src/provenance-bindings.js';
 
 const REF = { agent: '0xAbC0000000000000000000000000000000000001', key: 'run.provenance:run-1' };
 
@@ -39,5 +39,24 @@ describe('otlpHttpExporter', () => {
   it('reports a collector refusal as an error', async () => {
     const x = otlpHttpExporter({ OTEL_EXPORTER_OTLP_ENDPOINT: 'https://c.example/v1/traces' }, (async () => new Response('no', { status: 503 })) as never);
     expect(await x.exportTraces([])).toEqual({ sent: false, error: 'collector answered 503' });
+  });
+});
+
+describe('readCarriedProvenance — a carried record is read only by its agent or its steward', () => {
+  const store = vaultProvenanceStore({ readSubjectRecord: async () => ({ '@context': {}, id: 'urn:ap:prov:bundle:run-1' }) });
+  let reads = 0;
+  const counted = vaultProvenanceStore({ readSubjectRecord: async () => { reads++; return { id: 'x' }; } });
+  const oversee = async (caller: string, agent: string) => caller === agent || caller === '0xsteward';
+  it('serves the agent itself and its steward', async () => {
+    expect((await readCarriedProvenance(store, '0xalice', '0xalice', 'run.provenance:run-1', oversee)).status).toBe('found');
+    expect((await readCarriedProvenance(store, '0xsteward', '0xalice', 'run.provenance:run-1', oversee)).status).toBe('found');
+  });
+  it('the twin: any other signed-in caller is forbidden, and the store is never read for them', async () => {
+    reads = 0;
+    expect(await readCarriedProvenance(counted, '0xmallory', '0xalice', 'run.provenance:run-1', oversee)).toEqual({ status: 'forbidden' });
+    expect(reads).toBe(0);
+  });
+  it('a standing check that throws is a refusal to serve, not a pass', async () => {
+    expect(await readCarriedProvenance(store, '0xalice', '0xalice', 'k', async () => { throw new Error('rpc down'); })).toEqual({ status: 'forbidden' });
   });
 });
