@@ -60,6 +60,7 @@
   "devDependencies": {
     "@agenticprimitives/estate-projection": "workspace:*",
     "@agenticprimitives/provenance": "workspace:*",
+    "@agenticprimitives/provenance-node": "workspace:*",
     "@cloudflare/workers-types": "^4.20260604.1",
     "@types/node": "^22.7.0",
     "typescript": "^5.5.0",
