@@ -8,9 +8,12 @@ import { bundleDigest, ZERO32 } from './receipt-anchor.js';
 import { intentDigest } from '@agenticprimitives/delegation';
 import type { Hex, Address } from 'viem';
 import { estateIdOf } from '@agenticprimitives/estate-projection';
-import { assertFirewalled, assertMetricsFirewalled, otlpTracesOf, otlpMetricsOf, metricsOf, provenanceOf, runProvenanceRecordKey, spansOf, type RunRecordV1, type RunExportReportV1, type RunMetricsV1, type SpanV1 } from '@agenticprimitives/orchestration';
+import { assertFirewalled, assertMetricsFirewalled, metricsOf, provenanceOf, runProvenanceRecordKey, spansOf, type RunRecordV1, type RunExportReportV1, type RunMetricsV1, type SpanV1 } from '@agenticprimitives/orchestration';
 import { projectHarnessRunProvenance, toJsonLd, toProvN, type ProvenanceRecordV1, projectPublicProvenance, type PublicProvenanceProjection } from '@agenticprimitives/provenance';
 import { RUN_PROVENANCE_CONTEXT } from '@agenticprimitives/ontology';
+import type { ProvenanceStorePort } from '@agenticprimitives/provenance';
+import type { TraceExporterPort } from '@agenticprimitives/orchestration';
+import { otlpHttpExporter } from './provenance-bindings.js';
 
 export interface RunExportEnv {
   /** An OTLP/HTTP collector's traces endpoint (`https://…/v1/traces`). Absent ⇒ spans are not sent anywhere. */
@@ -106,8 +109,11 @@ export async function firewalledSpans(record: RunRecordV1): Promise<SpanV1[]> {
 }
 
 export interface RunExportDeps {
-  /** The acting agent's own effect-write door (`internal.coordination.vaultWrite`, ADR-0055). */
-  writeSubjectRecord?: (subject: string, recordType: string, record: unknown) => Promise<{ ok: boolean; error?: string }>;
+  /** Spec 414 §5 — where the record is KEPT: the acting agent's vault in this deployment (`vaultProvenanceStore`,
+   *  over its own effect-write door, ADR-0055); any conforming binding elsewhere. Absent ⇒ not kept, said. */
+  store?: ProvenanceStorePort;
+  /** Spec 414 §5 — where firewalled spans and metrics GO: OTLP/HTTP by default (`otlpHttpExporter`). */
+  exporter?: TraceExporterPort;
   /** Spec 406 W2 — anchor the bundle's digest on chain from the runtime's harness agent; absent ⇒ not anchored, said. */
   anchor?: (digest: Hex, intentDigest: Hex, mandateRef: Hex) => Promise<{ txHash: Hex; registry: Address; anchoredBy: Address; chainId?: number }>;
   fetch?: typeof fetch;
@@ -121,12 +127,12 @@ export async function exportRun(env: RunExportEnv, deps: RunExportDeps, agent: s
   const report: RunExportReport = { at: Date.now(), provenance: { written: false, recordType }, spans: { count: 0, sent: false } };
   // The durable half, into the vault of the agent whose authority was spent — through ITS door, under ITS grant.
   let prov: Record<string, unknown> | null = null;
-  if (deps.writeSubjectRecord) {
+  if (deps.store) {
     try {
       prov = await provenanceGraphOf(env, agent, record);
-      const out = await deps.writeSubjectRecord(agent.toLowerCase(), recordType, prov);
+      const out = await deps.store.put({ agent, key: recordType }, prov);
       report.provenance.written = out.ok;
-      if (!out.ok && out.error) report.provenance.error = out.error;
+      if (!out.ok) report.provenance.error = out.error;
     } catch (e) { report.provenance.error = e instanceof Error ? e.message : String(e); }
   } else report.provenance.error = 'no vault write door';
   // Spec 406 W2 — THE ANCHOR: the bundle's digest on chain, bound to the intent and the mandate, from the harness agent.
@@ -140,43 +146,34 @@ export async function exportRun(env: RunExportEnv, deps: RunExportDeps, agent: s
       // Spec 410 §4.4 — THE CITATION, beside the bundle: a bundle cannot carry its own digest's anchor, and a Home in
       // another estate needs to know WHICH chain to ask. Chain-qualified registry + the estate; a claim about where
       // to look, verified by recomputing the digest and reading the registry there.
-      if (deps.writeSubjectRecord) {
+      if (deps.store) {
         const recordType = runAnchorRecordKey(record.runRef);
         const estate = estateOf(env);
         const cite = { runRef: record.runRef, digest, registry: out.chainId ? `eip155:${out.chainId}:${out.registry}` : out.registry, anchoredBy: out.anchoredBy, txHash: out.txHash, ...(estate ? { estate } : {}) };
         try {
-          const w = await deps.writeSubjectRecord(agent.toLowerCase(), recordType, cite);
-          report.anchorRecord = { written: w.ok, recordType, ...(!w.ok && w.error ? { error: w.error } : {}) };
+          const w = await deps.store.put({ agent, key: recordType }, cite);
+          report.anchorRecord = { written: w.ok, recordType, ...(!w.ok ? { error: w.error } : {}) };
         } catch (e) { report.anchorRecord = { written: false, recordType, error: e instanceof Error ? e.message : String(e) }; }
       }
     } catch (e) { report.anchor = { error: e instanceof Error ? e.message : String(e) }; }
   }
-  // The spans — firewalled before they leave, sent only where this deployment says.
+  // The spans — firewalled BEFORE the port, carried by whichever binding this deployment names.
+  const exporter = deps.exporter ?? otlpHttpExporter(env, deps.fetch ?? fetch);
   try {
     const spans = await firewalledSpans(record);
     report.spans.count = spans.length;
-    const endpoint = (env.OTEL_EXPORTER_OTLP_ENDPOINT ?? '').trim();
-    if (endpoint) {
-      const headers: Record<string, string> = { 'content-type': 'application/json' };
-      for (const kv of (env.OTEL_EXPORTER_OTLP_HEADERS ?? '').split(',')) { const i = kv.indexOf('='); if (i > 0) headers[kv.slice(0, i).trim()] = kv.slice(i + 1).trim(); }
-      const res = await (deps.fetch ?? fetch)(endpoint, { method: 'POST', headers, body: JSON.stringify(otlpTracesOf(spans, { serviceName: 'demo-a2a' })) });
-      report.spans.sent = res.ok;
-      if (!res.ok) report.spans.error = `collector answered ${res.status}`;
-    }
+    const out = await exporter.exportTraces(spans);
+    report.spans.sent = out.sent;
+    if (out.error) report.spans.error = out.error;
   } catch (e) { report.spans.error = e instanceof Error ? e.message : String(e); }
   // Spec 390 W4 — the metrics, the same way: projected and firewalled, sent only where this deployment says.
   try {
     const m = firewalledMetrics(record);
     const points = m.runs.length + m.verdicts.length + m.stepDuration.length + m.modelCalls.length;
     report.metrics = { points, sent: false };
-    const endpoint = (env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT ?? '').trim();
-    if (endpoint) {
-      const headers: Record<string, string> = { 'content-type': 'application/json' };
-      for (const kv of (env.OTEL_EXPORTER_OTLP_HEADERS ?? '').split(',')) { const i = kv.indexOf('='); if (i > 0) headers[kv.slice(0, i).trim()] = kv.slice(i + 1).trim(); }
-      const res = await (deps.fetch ?? fetch)(endpoint, { method: 'POST', headers, body: JSON.stringify(otlpMetricsOf(m, { serviceName: 'demo-a2a' })) });
-      report.metrics.sent = res.ok;
-      if (!res.ok) report.metrics.error = `collector answered ${res.status}`;
-    }
+    const out = await exporter.exportMetrics(m);
+    report.metrics.sent = out.sent;
+    if (out.error) report.metrics.error = out.error;
   } catch (e) { report.metrics = { points: 0, sent: false, error: e instanceof Error ? e.message : String(e) }; }
   return report;
 }
