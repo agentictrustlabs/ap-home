@@ -57,7 +57,8 @@ export function rowOf(record: RunRecordV1, addressee: Address): OpsRowV1 {
     run_ref: record.runRef, at, day: new Date(at).toISOString().slice(0, 10), agent: addressee.toLowerCase(),
     asker: typeof ctx.asker === 'string' ? String(ctx.asker).toLowerCase() : null,
     outcome: String(record.outcome), kind: kindOf(record), capability: firstAct?.toolId ?? null, tools: JSON.stringify([...new Set(steps.map((s) => s.toolId))]),
-    provider: record.planner?.provider ?? null, model: record.planner?.model ?? null, planner_kind: record.planner?.kind ?? null,
+    // Spec 414 A1e — the plan call and the variant (the planner summary is retired).
+    provider: record.modelCalls?.find((m) => m.role === 'plan')?.provider ?? null, model: record.modelCalls?.find((m) => m.role === 'plan')?.model ?? null, planner_kind: record.variant?.plannerKind ?? null,
     duration_ms: started ? Math.max(0, at - started) : null, steps: steps.length, ok_steps: steps.filter((s) => s.ok).length, receipts: Array.isArray(record.receipts) ? record.receipts.length : Number((record as { receipts?: unknown }).receipts ?? 0),
     vault_calls: Number(record.bill?.vaultCalls ?? 0), do_requests: Number(record.bill?.doRequests ?? 0),
     failure_class: record.outcome === 'completed' ? null : failureClassOf(error ?? String(record.outcome)), error: error ? String(error).slice(0, 200) : null,

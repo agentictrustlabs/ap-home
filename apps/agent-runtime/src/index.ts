@@ -9,7 +9,7 @@ import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 
 import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, forgetConfirmation, CONFIRMATION_RECORD, forgetInstruction, STANDING_RECORD, factsOf, forgetFact, FACTS_RECORD, routinesOf, dropRoutine, ROUTINES_RECORD, preferencesOf, setPreferences, answerPreferencesForPrompt, PREFERENCES_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1, type RememberedFactsV1 } from '@agenticprimitives/context';
 import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
-import { recordOf, runMarks, replayingInvoker, planDigest, traceContextOf, type RunDoorV1, type ModelCallV1, type VariantV1, type RunPlannerSummaryV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent, type RunBillV1 } from '@agenticprimitives/orchestration';
+import { recordOf, runMarks, replayingInvoker, planDigest, traceContextOf, type RunDoorV1, type ModelCallV1, type VariantV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent, type RunBillV1 } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
 import { recordFormOf, rehydrateExecuted } from './artifact-store.js';
 import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken, advanceTrigger, withPause, withBudget, advanced, declareTrigger, removeTrigger, rebuildDeclaredTriggers } from './triggers.js';
@@ -2013,18 +2013,6 @@ app.post('/harness/instructions/forget', async (c) => {
  * open to stewards, listed among their unfinished runs, finished by one of them granting the mandate.
  * A trigger adds a clock, never authority (the user's decision, 2026-09-08: the agent, no mandate).
  */
-/** Spec 390 W3 — the run's model calls for the record: the planner kind, the model, the provider and the route's
- *  reasons (spec 388: provider names and token counts). Names and numbers only; the span projection reads it. */
-function plannerSummaryOf(trace: PlannerTraceV1 | undefined): RunPlannerSummaryV1 | null {
-  if (!trace) return null;
-  const r = trace.route;
-  return {
-    kind: trace.planner,
-    ...(trace.model ? { model: trace.model } : {}),
-    ...(r?.planner?.provider ? { provider: r.planner.provider } : {}),
-    ...(r ? { route: { policy: r.policy, ...(r.planner ? { planner: { provider: r.planner.provider, because: r.planner.because } } : {}), ...(r.composer ? { composer: { provider: r.composer.provider, because: r.composer.because } } : {}) } } : {}),
-  };
-}
 
 /**
  * AN AGENT ASKS, AS ITSELF — spec 370 P5 (a trigger firing) and spec 372 S3c (an outside runtime speaking
@@ -2182,7 +2170,7 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
   const keep = (async () => {
     try {
       const kept = await recordFormOf(env, deps, input.addressee, input.runRef, result as never);
-      const record = recordOf({ runRef: input.runRef, intent, result: kept.result, events, presented: (input.resume?.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), ...(input.traceContext ? { traceContext: input.traceContext } : {}), planner: plannerSummaryOf(trace), ...(input.receivedAt ? { receivedAt: input.receivedAt } : {}), offloaded: kept.offloaded, bill,
+      const record = recordOf({ runRef: input.runRef, intent, result: kept.result, events, presented: (input.resume?.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), ...(input.traceContext ? { traceContext: input.traceContext } : {}), ...(input.receivedAt ? { receivedAt: input.receivedAt } : {}), offloaded: kept.offloaded, bill,
         // Spec 414 A1b — how this run arrived (the caller's A2A ids when it knows them; else decided here), the model
         // calls and the variant. A run another agent asked for is still this agent's run, traced from its door.
         door: input.door ?? (input.resume ? { kind: 'resume' } : (input.context as { trigger?: unknown } | undefined)?.trigger ? { kind: 'trigger' } : { kind: 'routed' }),
@@ -4707,7 +4695,7 @@ app.post('/harness/ask', async (c) => {
     {
       // Spec 390 W2 — the W3C Trace Context the request arrived with joins this run's spans to the caller's
       // trace. Recorded here and read by nothing else: correlation, never trust.
-      const record = recordOf({ runRef, intent, result: recordForm.result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), traceContext: traceContextOf(c.req.raw.headers), planner: plannerSummaryOf(trace), receivedAt, marks: marks.list, offloaded: recordForm.offloaded, bill,
+      const record = recordOf({ runRef, intent, result: recordForm.result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), traceContext: traceContextOf(c.req.raw.headers), receivedAt, marks: marks.list, offloaded: recordForm.offloaded, bill,
         // Spec 414 A1b — THE TRACE FROM THE DOOR. The door is decided here: an in-process hop from this Worker's A2A
         // door names its message ids; a routed ask from another agent's run is `routed`; a continuation is a
         // `resume`; anything else is a direct ask. Plus the model calls and the variant this run ran under.
