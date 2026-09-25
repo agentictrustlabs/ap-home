@@ -189,6 +189,7 @@ import { signAsAgent } from './consult-rail.js';
 import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, provenanceViewOf, firewalledMetrics, publicProvenanceOf, runAnchorRecordKey, type RunExportDeps } from './run-export.js';
 import { vaultProvenanceStore, readCarriedProvenance } from './provenance-bindings.js';
 import { doorFromBody, modelCallsOf, variantOf, engagedFromTrace } from './run-trace.js';
+import { provenanceLinkHeader } from '@agenticprimitives/a2a';
 import { runProvenanceRecordKey } from '@agenticprimitives/orchestration';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
@@ -1172,6 +1173,20 @@ const gateAgenticData = async (c: Context<{ Bindings: Env }>, next: () => Promis
   if (ga) return ga;
   return next();
 };
+// Spec 414 A1c — PROV-AQ ON EVERY ASK: a reply that names its provenance (`hasProvenance`) also says so in a `Link`
+// header — the run's bundle IRI (`has_provenance`) and the service a reader with standing asks (`has_query_service`).
+// A pointer, never the record: `/harness/provenance` still checks who is asking.
+app.use('/harness/ask', async (c, next) => {
+  await next();
+  try {
+    if (!c.res.headers.get('content-type')?.includes('application/json')) return;
+    const env = (await c.res.clone().json()) as { hasProvenance?: { recordType?: unknown } } | null;
+    const recordType = env?.hasProvenance?.recordType;
+    if (typeof recordType !== 'string' || !recordType.startsWith('run.provenance:')) return;
+    const runRef = recordType.slice('run.provenance:'.length);
+    c.res.headers.append('Link', provenanceLinkHeader(`urn:ap:prov:bundle:${runRef}`, `${new URL(c.req.url).origin}/harness/provenance`));
+  } catch { /* a reply that is not the envelope carries no pointer */ }
+});
 app.use('/mcp/*', gateAgenticData);
 app.use('/tools/*', gateAgenticData);
 app.use('/intent', gateAgenticData); // ADR-0044 — the first-party INTENT surface is agentic data; edge it too.
