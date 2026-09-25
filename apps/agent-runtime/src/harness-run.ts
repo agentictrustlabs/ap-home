@@ -1073,7 +1073,7 @@ export interface RoutedStepV1 { stepRef: string; toolId: string; agent: string; 
   standing?: { relation: string; subject: string; principal: string; because: string; wireRef?: string } }
 
 /** The routed steps of a run, read from each observation's `via` — the sender's record of the hop. */
-export function routedStepsOf(steps: ReadonlyArray<{ step: { id?: string; toolId: string }; result?: unknown }>): RoutedStepV1[] {
+export function routedStepsOf(steps: ReadonlyArray<{ stepRef?: string; step: { id?: string; toolId: string }; result?: unknown }>): RoutedStepV1[] {
   const out: RoutedStepV1[] = [];
   steps.forEach((o, i) => {
     const via = (o.result as { via?: { agent?: string; name?: string | null; observedVia?: string; runRef?: string; receipts?: Array<{ binding?: { standing?: RoutedStepV1['standing'] } }>; childRef?: string } } | null | undefined)?.via;
@@ -1081,7 +1081,9 @@ export function routedStepsOf(steps: ReadonlyArray<{ step: { id?: string; toolId
     // Spec 383 W2 — the receiver's receipt names the standing the hop ran under; lifted so the asker's reply
     // (and the Home) can say "for Missio Nexus, under steward wire 0x…" without shipping the receipts whole.
     const standing = (via.receipts ?? []).map((r) => r?.binding?.standing).find((sd) => sd && sd.relation !== 'none');
-    out.push({ stepRef: o.step.id ?? `s${i}`, toolId: o.step.toolId, agent: via.agent, ...(via.name ? { name: via.name } : {}), observedVia: via.observedVia ?? 'unknown', ...(via.runRef ? { runRef: via.runRef } : {}), ...(via.receipts?.length ? { receipts: via.receipts.length } : {}), ...(via.childRef ? { childRef: via.childRef } : {}), ...(standing ? { standing } : {}) });
+    // The observation's OWN stepRef, never its index: a run that begins with the spec-413 retrieval step (`retrieve`)
+    // shifted every index by one, so the reply named `s1` for the step the record (and its provenance graph) calls `s0`.
+    out.push({ stepRef: o.stepRef ?? o.step.id ?? `s${i}`, toolId: o.step.toolId, agent: via.agent, ...(via.name ? { name: via.name } : {}), observedVia: via.observedVia ?? 'unknown', ...(via.runRef ? { runRef: via.runRef } : {}), ...(via.receipts?.length ? { receipts: via.receipts.length } : {}), ...(via.childRef ? { childRef: via.childRef } : {}), ...(standing ? { standing } : {}) });
   });
   return out;
 }
