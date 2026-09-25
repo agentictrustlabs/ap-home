@@ -271,6 +271,8 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           // THE WRITTEN REPLY, not the spoken one. `spoken` is rendered for a voice — it says "alice2 dot
           // treasury" — and an A2A peer reading that gets a mangled name it cannot resolve (seen live,
           // 2026-09-08). A voice surface asks for `spoken`; this wire wants what was written.
+          // Spec 414 A1c — every task names where its run's provenance is (the run-provenance/v1 extension's promise).
+          if (runRef) ctx.task.metadata = { ...(ctx.task.metadata ?? {}), runRef, hasProvenance: hasProvenanceRef(agent, runRef) };
           const words = asked.reply.text || asked.spoken || '';
           if (asked.reply.kind === 'answer' || asked.reply.kind === 'done') {
             // Spec 387 W2 — WHAT THE STEPS RETURNED rides beside the words, as the routed reply's does below: a
@@ -345,7 +347,8 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
         const env = (await res.json().catch(() => null)) as AskEnvelope | null;
         if (!env || env.ok === false || !env.reply) { await ctx.fail([{ text: [env?.error ?? `the ask answered ${res.status}`, env?.detail].filter(Boolean).join(': ') }]); return; }
         const r = env.reply;
-        ctx.task.metadata = { ...(ctx.task.metadata ?? {}), ...(r.runRef ? { runRef: r.runRef } : {}), ...(r.prompt?.stepRef ? { promptStepRef: r.prompt.stepRef } : {}) };
+        // Spec 414 A1c — every task names where its run's provenance is (the run-provenance/v1 extension's promise).
+        ctx.task.metadata = { ...(ctx.task.metadata ?? {}), ...(r.runRef ? { runRef: r.runRef, hasProvenance: hasProvenanceRef(agent, r.runRef) } : {}), ...(r.prompt?.stepRef ? { promptStepRef: r.prompt.stepRef } : {}) };
         // Written first, for the same reason: this is a wire, not a speaker.
         const said = r.text || r.summary || env.spoken || '';
         const how = settlementForReplyKind(r.kind);
