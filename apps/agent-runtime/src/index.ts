@@ -188,7 +188,8 @@ import type { MessageV1 } from '@agenticprimitives/a2a/standard';
 import { signAsAgent } from './consult-rail.js';
 import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, provenanceViewOf, firewalledMetrics, publicProvenanceOf, runAnchorRecordKey, type RunExportDeps } from './run-export.js';
 import { vaultProvenanceStore, readCarriedProvenance } from './provenance-bindings.js';
-import { doorFromBody, modelCallsOf, variantOf, engagedFromTrace } from './run-trace.js';
+import { runMeasuresRecordKey } from '@agenticprimitives/evaluation';
+import { doorFromBody, modelCallsOf, variantOf, engagedFromTrace, parseVariantRequest, VARIANT_TOGGLES, type VariantRequestV1 } from './run-trace.js';
 import { provenanceLinkHeader } from '@agenticprimitives/a2a';
 import { runProvenanceRecordKey } from '@agenticprimitives/orchestration';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
@@ -451,6 +452,9 @@ export interface Env {
   DISCOVERY_MCP_BASE?: string;
   /** Spec 413 — `tool` | `playbook` offers passage retrieval over the public tier (see `kbRetrievalMode`); unset = off. */
   KB_RETRIEVAL?: string;
+  /** Spec 414 §8 / 415 A4 — `on` on an estate that runs COMPARISONS: unlocks the `variant` knob on `/harness/ask` (for
+   *  the agent's own steward) and is the estate's half of the eval-store capture gate. Never on a production estate. */
+  EVAL_CAPTURE?: string;
 
   /** spec 334 §6 gather phase — a PUBLIC read-only SPARQL endpoint the coordination agent may query
    *  to gather reference facts (domain-agnostic: the query is model-authored per the org playbook,
@@ -2986,8 +2990,13 @@ app.post('/harness/spans', async (c) => {
 // asker: the same JSON-LD document the acting agent's vault holds (rebuilt from the run record, so it is served
 // even when the vault write failed — the export report says which), or PROV-N on request. The asker's own runs
 // only (P6's rule). Evidence, never authority: nothing here is read by a gate.
+// GET /harness/comparison — spec 415 A4. WHETHER THIS ESTATE RUNS COMPARISONS, and what its `variant` knob knows: a
+// comparison runner reads it before it asks (the estate's half of the eval-store capture gate). Public and secret-free:
+// that an estate is a comparison estate is a fact about the estate, not about anyone's records.
+app.get('/harness/comparison', (c) => c.json({ ok: true, evalCapture: String(c.env.EVAL_CAPTURE ?? '').trim().toLowerCase() === 'on' ? 'on' : 'off', plannerKinds: ['model', 'rule-based'], toggles: VARIANT_TOGGLES, ...(String(c.env.HARNESS_BUILD ?? '').trim() ? { build: String(c.env.HARNESS_BUILD).trim() } : {}) }));
+
 app.post('/harness/provenance', async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; runRef?: string; format?: 'jsonld' | 'prov-n' | 'record' } | null;
+  const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; runRef?: string; format?: 'jsonld' | 'prov-n' | 'record' | 'measures' } | null;
   if (!body?.session || !body.addressee || !body.runRef) return c.json({ ok: false, error: 'session, addressee and runRef are required' }, 400);
   const who = await verifyHomeSession(body.session, c.env);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
@@ -3012,6 +3021,16 @@ app.post('/harness/provenance', async (c) => {
   }
   const ref = hasProvenanceRef(addressee, body.runRef);
   if (body.format === 'prov-n') return c.json({ ok: true, hasProvenance: ref, provN: await provenanceProvNOf(c.env, addressee, rec), export: rec.export?.provenance ?? null });
+  // Spec 414 A2 / 415 A4 — THE MEASUREMENTS beside the provenance (`run.measures:<runRef>`, W3C DQV), read from the
+  // acting agent's vault through the same store binding that wrote them. Absent is absent (the export may not have
+  // landed yet — the report says); never rebuilt here from the record, so a reader gets what the vault holds.
+  if (body.format === 'measures') {
+    const vdeps = harnessDeps(c.env, buildAuditSink(c.env));
+    const store = vaultProvenanceStore({ readSubjectRecord: vdeps.readSubjectRecord });
+    const read = await store.get({ agent: addressee, key: runMeasuresRecordKey(body.runRef) });
+    if (read.status === 'found') return c.json({ ok: true, hasProvenance: ref, measures: read.document, export: rec.export?.measures ?? null });
+    return c.json({ ok: false, error: read.status === 'refused' ? `refused: ${read.reason}` : 'no measurements yet', status: read.status, export: rec.export?.measures ?? null }, read.status === 'refused' ? 403 : 404);
+  }
   // Spec 398 §5.2 — the inspector's record form: what the run left (artifacts), decided, spent authority on, cost.
   if (body.format === 'record') return c.json({ ok: true, hasProvenance: ref, record: await provenanceViewOf(c.env, addressee, rec), export: rec.export?.provenance ?? null });
   return c.json({ ok: true, hasProvenance: ref, provenance: await provenanceGraphOf(c.env, addressee, rec), export: rec.export?.provenance ?? null });
@@ -4097,6 +4116,9 @@ app.post('/harness/ask', async (c) => {
     /** Spec 377 — the provider the person chose for this conversation (`anthropic`, `groq`). Absent ⇒ the
      *  deployment default. A provider this agent does not offer is a 400, never a swap. */
     model?: string;
+    /** Spec 415 A4 — a COMPARISON's request to run one thing differently (`parseVariantRequest`); comparison estates,
+     *  the agent's own steward, known components only — otherwise refused by name. */
+    variant?: unknown;
   } | null;
   // The addressee is an ADDRESS — the vault keys on the hex form. A CAIP-10 `eip155:<chain>:0x…` (what a session's
   // `sub` is) used to pass through untouched, so the playbook read missed and the agent went quietly bare while
@@ -4153,12 +4175,24 @@ app.post('/harness/ask', async (c) => {
     : Promise.resolve(null);
   // Spec 377 — which model this turn runs on, decided BEFORE any run state is touched. A listed-but-keyless
   // provider throws here (a configuration error, loud), an unoffered one is refused with the offer named.
-  const chosen = resolveProvider(c.env, body.model);
+  // Spec 415 A4 — THE VARIANT KNOB, admitted before anything else is decided: parsed (unknown ⇒ 400 by name), then
+  // the estate (EVAL_CAPTURE=on) and the standing (the agent itself or its steward — `mayOverseeAgent`), each a 403
+  // that names itself. A requested provider is the turn's provider; a `model` that disagrees is a 400, not a guess.
+  let variantReq: VariantRequestV1 | undefined;
+  if (body.variant !== undefined) {
+    const parsed = parseVariantRequest(body.variant);
+    if (!parsed.ok) return c.json({ ok: false, error: `variant: ${parsed.error}`, refused: 'variant.unknown' }, 400);
+    if (String(c.env.EVAL_CAPTURE ?? '').trim().toLowerCase() !== 'on') return c.json({ ok: false, error: 'variant: refused — this estate does not run comparisons (EVAL_CAPTURE is not on)', refused: 'variant.estate.capture-off' }, 403);
+    if (!body.addressee || !(await mayOverseeAgent(c.env, String(who.sa).toLowerCase() as Address, String(body.addressee).toLowerCase() as Address).catch(() => false))) return c.json({ ok: false, error: 'variant: refused — only the agent itself or its steward may choose how it runs', refused: 'variant.not-steward' }, 403);
+    if (parsed.variant.provider && String(body.model ?? '').trim() && parsed.variant.provider !== String(body.model).trim()) return c.json({ ok: false, error: `variant.provider (${parsed.variant.provider}) and model (${String(body.model)}) disagree`, refused: 'variant.unknown' }, 400);
+    variantReq = parsed.variant;
+  }
+  const chosen = resolveProvider(c.env, variantReq?.provider ?? body.model);
   if (!chosen.ok) return c.json({ ok: false, error: chosen.error }, 400);
   // Spec 388 — ONLY A MODEL THE TURN NAMED is "named by the turn": resolving the default here and passing it on
   // made every call look chosen, so the route never ran and the planner prompt was trimmed to Groq's budget
   // with Anthropic offered (seen live 2026-09-10: 7,813 tokens cut to 6,500, every drop taken, over-budget).
-  const provider = String(body.model ?? '').trim() ? chosen.provider ?? undefined : undefined;
+  const provider = String(variantReq?.provider ?? body.model ?? '').trim() ? chosen.provider ?? undefined : undefined;
   // Spec 388 W2 — the structured calls route per request; each decision is collected for the trace.
   const structuredRoutes: RouteDecision[] = [];
   const structuredCall = structuredCallFor(c.env, provider, { onRoute: (d) => structuredRoutes.push(d) });
@@ -4268,6 +4302,12 @@ app.post('/harness/ask', async (c) => {
   const intent = { goal: turn.message, context: { addressee, asker: who.sa, ...(tz ? { tz } : {}) } };
   const audit = buildAuditSink(c.env);
   const askDeps = harnessDeps(c.env, audit, { executionCtx: c.executionCtx });
+  // Spec 415 A4 — a PLAYBOOK PIN: the comparison names the definition digest it means to run under; an agent whose
+  // playbook has moved is refused with both digests named, never run under the wrong one and reported as the right one.
+  if (variantReq?.playbook) {
+    const pinned = await loadPlaybook(askDeps.readSubjectRecord, addressee, console.log).catch(() => null);
+    if ((pinned?.digest ?? null) !== variantReq.playbook) return c.json({ ok: false, error: `variant.playbook: this agent's playbook is ${pinned?.digest ?? 'absent'}, not ${variantReq.playbook}`, refused: 'variant.playbook-mismatch' }, 409);
+  }
   if (routedStanding) askDeps.standingContext = routedStanding;
   // Spec 375 — what KIND of agent is asked, once per ask, so a read knows whether "no subject" means
   // "which one?" (a person) or "me" (an organization asking itself). Unreadable ⇒ null ⇒ the person reading.
@@ -4321,6 +4361,7 @@ app.post('/harness/ask', async (c) => {
       ...(inResponseTo ? { inResponseTo } : {}),
       ...(body.channel === 'voice' ? { channel: 'voice' as const } : {}),
       ...(provider ? { provider } : {}),
+      ...(variantReq && (variantReq.plannerKind || variantReq.toggles) ? { variant: { ...(variantReq.plannerKind ? { plannerKind: variantReq.plannerKind } : {}), ...(variantReq.toggles ? { toggles: variantReq.toggles } : {}) } } : {}),
       ...(runPlan ? { plan: runPlan } : {}),
       // Spec 384 W3 — a campaign selected a provider for this step: the plan is bound to it and to its offer.
       ...(stored?.origin?.engagement ? { engagement: stored.origin.engagement } : {}),
@@ -4700,7 +4741,7 @@ app.post('/harness/ask', async (c) => {
         // door names its message ids; a routed ask from another agent's run is `routed`; a continuation is a
         // `resume`; anything else is a direct ask. Plus the model calls and the variant this run ran under.
         door: ((d) => (inResponseTo ? { ...(d ?? {}), kind: 'routed' as const } : d ?? (body.runRef && (body.supplied?.length || body.approvals) ? { kind: 'resume' as const } : { kind: 'harness-ask' as const })))(doorFromBody(body, isInWorkerRequest(c.req.raw))),
-        modelCalls: modelCallsOf(trace, marks.list), variant: variantOf(c.env as never, trace), engaged: engagedFromTrace(trace) });
+        modelCalls: modelCallsOf(trace, marks.list), variant: variantOf(c.env as never, trace, variantReq), ...(variantReq?.startingState ? { startingState: { digest: variantReq.startingState.digest } } : {}), engaged: engagedFromTrace(trace) });
       c.executionCtx.waitUntil(putRecord(c.env as never, addressee, record).catch((e) => console.warn('[harness/ask] record not kept:', e instanceof Error ? e.message : String(e))));
       // Spec 381 — THE EXPORT: the durable half into the acting agent's vault, the spans to a collector when
       // one is named. Off the run's path; a failed export is logged, never a failed ask.

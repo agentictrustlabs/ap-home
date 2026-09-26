@@ -3,7 +3,7 @@
 // and a record built that way projects a graph that names its door and its variant.
 import { describe, expect, it } from 'vitest';
 import type { RunRecordV1 } from '@agenticprimitives/orchestration';
-import { a2aDoor, doorFromBody, modelCallsOf, plannerKindOf, variantOf } from '../../src/run-trace.js';
+import { a2aDoor, doorFromBody, modelCallsOf, plannerKindOf, variantOf, parseVariantRequest } from '../../src/run-trace.js';
 import { provenanceGraphOf } from '../../src/run-export.js';
 
 const trace = {
@@ -42,6 +42,30 @@ describe('model calls and the variant', () => {
   it('the variant: playbook, planner kind, route policy, build, toggles', () => {
     expect(variantOf({ KB_RETRIEVAL: 'playbook', HARNESS_BUILD: 'v-9' }, trace)).toEqual({ playbook: '0x' + '33'.repeat(32), plannerKind: 'model', routePolicy: 'budget', build: 'v-9', toggles: { 'retrieval/kb': 'playbook' } });
     expect(variantOf({}, undefined)).toEqual({});
+  });
+  it('a comparison\'s requested toggle is what ran (spec 415 A4), laid over the deployment\'s knob', () => {
+    expect(variantOf({ KB_RETRIEVAL: 'playbook' }, trace, { toggles: { 'retrieval/kb': 'off' } }).toggles).toEqual({ 'retrieval/kb': 'off' });
+    expect(variantOf({}, undefined, { toggles: { 'retrieval/kb': 'tool' } })).toEqual({ toggles: { 'retrieval/kb': 'tool' } });
+  });
+});
+
+describe('the variant knob is parsed, and anything unknown is refused by name', () => {
+  it('accepts the five components with known values', () => {
+    expect(parseVariantRequest({ plannerKind: 'rule-based', provider: 'groq', toggles: { 'retrieval/kb': 'off' }, playbook: '0x' + '33'.repeat(32), startingState: { domain: 'cil-commons', scenarioId: 'baseline', digest: 'sha256:' + 'ab'.repeat(32) } })).toEqual({ ok: true, variant: { plannerKind: 'rule-based', provider: 'groq', toggles: { 'retrieval/kb': 'off' }, playbook: '0x' + '33'.repeat(32), startingState: { domain: 'cil-commons', scenarioId: 'baseline', digest: 'sha256:' + 'ab'.repeat(32) } } });
+    expect(parseVariantRequest({})).toEqual({ ok: true, variant: {} });
+  });
+  it.each([
+    [{ temperature: 0.2 }, /not a variant component/],
+    [{ plannerKind: 'compiled' }, /plannerKind must be/],
+    [{ toggles: { 'memory/facts': 'off' } }, /no such toggle/],
+    [{ toggles: { 'retrieval/kb': 'maybe' } }, /one of off \| tool \| playbook/],
+    [{ playbook: 'latest' }, /definition digest/],
+    [{ startingState: { domain: 'x', scenarioId: 'y' } }, /startingState must be/],
+    ['groq', /must be an object/],
+  ])('refuses %j', (raw, why) => {
+    const r = parseVariantRequest(raw);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(why);
   });
 });
 

@@ -91,11 +91,59 @@ export function engagedFromTrace(trace: PlannerTraceV1 | undefined): HarnessEnga
 
 const SELECTION_APPROACH: Record<string, string> = { model: 'skill-selection/model', compiled: 'skill-selection/ontology', 'rule-based': 'skill-selection/rules' };
 
-/** The variant this run ran under: the playbook, the planner kind, the route policy, the build, the toggles. */
-export function variantOf(env: RunTraceEnv, trace: PlannerTraceV1 | undefined): VariantV1 {
+/**
+ * THE VARIANT KNOB — spec 415 A4. A comparison run asks `/harness/ask` to run ONE THING differently: the planner kind,
+ * the provider, a harness-capability toggle, a playbook pin, a starting state. Accepted only on an estate that runs
+ * comparisons (`EVAL_CAPTURE=on`) and only from the agent itself or its steward — and ONLY these components, each with
+ * its known values: a request this runtime does not know is refused by name, never ignored (an ignored knob is a
+ * variant that lies about what ran). Behaviour, never authority: no gate reads it.
+ */
+export interface VariantRequestV1 {
+  plannerKind?: 'model' | 'rule-based';
+  provider?: string;
+  toggles?: Record<string, string>;
+  playbook?: string;
+  /** The seeded records the run begins from — identified by their DIGEST (what the record and the graph keep); the domain
+   *  and scenario are the comparison's description of it. */
+  startingState?: { domain: string; scenarioId: string; digest: string };
+}
+export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/kb': ['off', 'tool', 'playbook'] };
+
+export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantRequestV1 } | { ok: false; error: string } {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'variant must be an object' };
+  const v = raw as Record<string, unknown>;
+  const out: VariantRequestV1 = {};
+  for (const k of Object.keys(v)) {
+    if (k === 'plannerKind') { if (v[k] !== 'model' && v[k] !== 'rule-based') return { ok: false, error: 'plannerKind must be model | rule-based' }; out.plannerKind = v[k] as 'model' | 'rule-based'; }
+    else if (k === 'provider') { if (typeof v[k] !== 'string' || !/^[a-z][a-z0-9-]{1,30}$/.test(v[k] as string)) return { ok: false, error: 'provider must be a provider name' }; out.provider = v[k] as string; }
+    else if (k === 'playbook') { if (typeof v[k] !== 'string' || !/^(0x[0-9a-fA-F]{64}|sha256:[0-9a-f]{64})$/.test(v[k] as string)) return { ok: false, error: 'playbook must be a definition digest' }; out.playbook = v[k] as string; }
+    else if (k === 'toggles') {
+      if (!v[k] || typeof v[k] !== 'object' || Array.isArray(v[k])) return { ok: false, error: 'toggles must map a capability notation to a value' };
+      out.toggles = {};
+      for (const [t, val] of Object.entries(v[k] as Record<string, unknown>)) {
+        const known = VARIANT_TOGGLES[t];
+        if (!known) return { ok: false, error: `toggles.${t}: this runtime has no such toggle (known: ${Object.keys(VARIANT_TOGGLES).join(', ')})` };
+        if (typeof val !== 'string' || !known.includes(val)) return { ok: false, error: `toggles.${t} must be one of ${known.join(' | ')}` };
+        out.toggles[t] = val;
+      }
+    }
+    else if (k === 'startingState') {
+      const st = v[k] as Record<string, unknown> | null;
+      if (!st || typeof st !== 'object' || typeof st['domain'] !== 'string' || typeof st['scenarioId'] !== 'string' || typeof st['digest'] !== 'string' || !/^(sha256:[0-9a-f]{64}|0x[0-9a-fA-F]{64})$/.test(st['digest'])) return { ok: false, error: 'startingState must be { domain, scenarioId, digest } — the digest of the seeded records' };
+      out.startingState = { domain: st['domain'], scenarioId: st['scenarioId'], digest: st['digest'] };
+    }
+    else return { ok: false, error: `${k}: not a variant component (plannerKind, provider, toggles, playbook, startingState)` };
+  }
+  return { ok: true, variant: out };
+}
+
+/** The variant this run ran under: the playbook, the planner kind, the route policy, the build, the toggles — the
+ *  deployment's knobs with what a comparison REQUESTED laid over them (a requested toggle is what ran). */
+export function variantOf(env: RunTraceEnv, trace: PlannerTraceV1 | undefined, requested?: Pick<VariantRequestV1, 'toggles'>): VariantV1 {
   const toggles: Record<string, string> = {};
-  const kb = (env.KB_RETRIEVAL ?? '').trim().toLowerCase();
+  const kb = requested?.toggles?.['retrieval/kb'] ?? (env.KB_RETRIEVAL ?? '').trim().toLowerCase();
   if (kb) toggles['retrieval/kb'] = kb;
+  for (const [k, val] of Object.entries(requested?.toggles ?? {})) toggles[k] = val;
   const policy = trace?.route?.policy ?? ((env.ORCHESTRATION_ROUTE ?? '').trim() || undefined);
   const kind = plannerKindOf(trace?.planner);
   const build = (env.HARNESS_BUILD ?? '').trim();

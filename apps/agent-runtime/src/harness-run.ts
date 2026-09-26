@@ -89,9 +89,15 @@ import { RELATIONSHIP_TYPE, ROLE } from '@agenticprimitives/agent-relationships'
 import type { AuditSink } from '@agenticprimitives/audit';
 import { enforcersFromEnv } from './org-wire.js';
 import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a';
-import { routeProvider, routePolicy, meterFor, selectPlanner, selectComposer, defaultProvider, plannerPromptBudget, type LlmProvider, type RoutePolicy, type RouteDecision, type RouteNeed } from './orchestration.js';
+import { routeProvider, routePolicy, meterFor, selectPlanner, selectComposer, defaultProvider, plannerPromptBudget, type LlmProvider, type RoutePolicy, type RouteDecision, type RouteNeed , RULE_BASED_PLANNER } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from '@agenticprimitives/context';
 import { structuredCallFor, kbRetrievalMode } from './context-wiring.js';
+
+/** Spec 415 A4 — the estate's retrieval mode, unless a comparison run toggled it (`retrieval/kb`). */
+const kbModeOf = (env: { KB_RETRIEVAL?: string }, variant: HarnessRunInput['variant']): ReturnType<typeof kbRetrievalMode> => {
+  const t = variant?.toggles?.['retrieval/kb'];
+  return t === 'off' || t === 'tool' || t === 'playbook' ? t : kbRetrievalMode(env);
+};
 import type { DefinitionToolV1 } from '@agenticprimitives/capability-claims';
 import { CATALOG_TOOLS, catalogBindingFor, catalogInvoker, isCatalogTool } from './catalog-tools.js';
 import { playbookProvenanceFromReceipts } from './skill-provenance.js';
@@ -2482,6 +2488,10 @@ export interface HarnessRunInput {
   /** Spec 377 — the provider this turn plans, composes and looks things up with. Absent ⇒ the deployment
    *  default. Validated by the caller against what the deployment offers; never a gate input. */
   provider?: LlmProvider;
+  /** Spec 415 A4 — what a COMPARISON asked this run to do differently (already admitted by the caller: a
+   *  comparison estate, the agent's own steward). The planner kind and the capability toggles apply here; the
+   *  provider was folded into `provider`. Behaviour, never authority. */
+  variant?: { plannerKind?: 'model' | 'rule-based'; toggles?: Record<string, string> };
   /** The agent being asked. Informational tools that read an organization's own records default to it —
    *  "who are the members" asked OF an organization means that one. */
   addressee?: Address;
@@ -4812,7 +4822,9 @@ step is then handed to that agent under authority the person grants; leave it ou
           const compiled = compiledSkillAnswer() ?? compiledConsult(rest) ?? compiledRead(rest) ?? compiledFanOut(rest) ?? compiledPayment(rest) ?? (input.person && input.addressee && input.person.toLowerCase() === input.addressee.toLowerCase() ? compiledRoutine(rest) : null);
           if (compiled) { plannerUsed = 'compiled'; return withSpecialists(named ? withExecutor(compiled, named) : compiled, playbook?.specialists, pin.tools); }
           plannerUsed = selected.kind;
-          if (selected.kind === 'rule-based') return withSpecialists(await selected.planner.plan(pin), playbook?.specialists, pin.tools);
+          // Spec 415 A4 — a comparison may ask for the rule-based planner on a deployment that offers a model: the
+          // same planner `selectPlanner` reaches when no provider is configured, chosen per run and named on the trace.
+          if (selected.kind === 'rule-based' || input.variant?.plannerKind === 'rule-based') { plannerUsed = 'rule-based'; return withSpecialists(await RULE_BASED_PLANNER.plan(pin), playbook?.specialists, pin.tools); }
           // Spec 388 — THE ROUTE, decided here where the prompt is whole and the tools are known: the full
           // prompt's estimate against each offered provider's budget and this minute's spend. A provider that
           // carries the whole prompt gets it untrimmed; only when none does is the first one served a fitted prompt.
@@ -4885,7 +4897,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...scopedActionTools(input.surface, playbook), ...catalogTools, ...mcpTools, ...ASK_DISCOVERY_TOOLS,
     ...(kbQuestionAvailable({ call: structuredCallFor(env as never, input.provider) }) ? [KB_QUESTION_TOOL] : []),
     // Spec 413 — passages from the public tier (released shelf works + agent descriptions), where the estate binds an index.
-    ...(kbRetrievalMode(env as never) !== 'off' ? [KB_RETRIEVE_TOOL] : []),
+    ...(kbModeOf(env as never, input.variant) !== 'off' ? [KB_RETRIEVE_TOOL] : []),
     // Spec 379 — an outside A2A 1.0 agent may ANSWER inside a run; its words are an observation.
     EXTERNAL_AGENT_TOOL,
     // Spec 397 W2 — the enterprise behind this agent: FIND in the registry (only where one is configured — a tool that
@@ -5053,7 +5065,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   // enables it (`KB_RETRIEVAL=playbook`). The query is the person's own sentence; the topics are the playbook's, sent as
   // declared scope and echoed on the receipt. The passages ground the composed answer; no planner reads them.
   const goalText = String((input.intent as { goal?: unknown }).goal ?? '').trim();
-  const retrieval = kbRetrievalMode(env as never) === 'playbook' && playbook?.retrievalQueries?.length && goalText && tools.some((t) => t.id === KB_RETRIEVE_TOOL.id)
+  const retrieval = kbModeOf(env as never, input.variant) === 'playbook' && playbook?.retrievalQueries?.length && goalText && tools.some((t) => t.id === KB_RETRIEVE_TOOL.id)
     ? { toolId: KB_RETRIEVE_TOOL.id, args: { query: goalText, topics: playbook.retrievalQueries } }
     : null;
   const result = await runIntent(input.intent, {
