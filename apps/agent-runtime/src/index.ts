@@ -132,7 +132,7 @@ import { createD1AuditSink } from './audit-d1.js';
 import { runOrchestration } from './orchestration.js';
 import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker, householdMembers, ownAgentsOfType, choicesFor } from '@agenticprimitives/context';
 import { KB_QUESTION_TOOL, kbQuestionInvoker, KB_RETRIEVE_TOOL, kbRetrieveInvoker } from '@agenticprimitives/context';
-import { discoveryFetchFor, structuredCallFor } from './context-wiring.js';
+import { discoveryFetchFor, structuredCallFor, type StructuredCallRecordV1 } from './context-wiring.js';
 import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@agenticprimitives/context';
 import { selectComposer, selectComposerRouted, resolveProvider, availableModels, plannerPromptBudget, defaultProvider, widestPromptBudget, type RouteNeed, type RouteDecision } from './orchestration.js';
 import { loadRun, saveRun, dropRun, listRuns, openRunOnThread, mergeTurn, type HarnessRunCheckpointV1, completedStepsOf, isExpired, AWAIT_WINDOW_MS, expiryFor, canceledRecord } from './harness-runs.js';
@@ -4201,7 +4201,8 @@ app.post('/harness/ask', async (c) => {
   const provider = String(variantReq?.provider ?? body.model ?? '').trim() ? chosen.provider ?? undefined : undefined;
   // Spec 388 W2 — the structured calls route per request; each decision is collected for the trace.
   const structuredRoutes: RouteDecision[] = [];
-  const structuredCall = structuredCallFor(c.env, provider, { onRoute: (d) => structuredRoutes.push(d) });
+  const structuredCalls: StructuredCallRecordV1[] = [];
+  const structuredCall = structuredCallFor(c.env, provider, { onRoute: (d) => structuredRoutes.push(d), onCall: (d) => structuredCalls.push(d) });
   const addressee = body.addressee.toLowerCase() as Address;
   // ── Spec 366 R2 — A ROUTED REQUEST UNDER THE SUBJECT-ASK PROFILE. Validated structurally, then checked for
   // CONSISTENCY with what this receiver verifies for itself: the credential in the profile is the session
@@ -4493,6 +4494,7 @@ app.post('/harness/ask', async (c) => {
       },
     });
     if (structuredRoutes.length) trace.route = { ...(trace.route ?? { policy: 'first' as const }), structured: structuredRoutes };
+    if (structuredCalls.length) trace.structuredCalls = [...(trace.structuredCalls ?? []), ...structuredCalls.map((x) => ({ role: 'structured' as const, ...x }))].sort((a, b) => a.startMs - b.startMs);
     const reply = await marks.time('reply:compose', () => askReplyFor(c.env as unknown as HarnessEnv, {
       ...(memory ? { memory } : {}),
       intent, result, addressee, composerFor: (need: RouteNeed) => selectComposerRouted(c.env, { ...(provider ? { provider } : {}), ...(answerLine ? { systemPrompt: answerLine } : {}), need }), deps: askDeps, interactionFor, plannerTrace: trace, tools: offeredTools,

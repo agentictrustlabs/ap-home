@@ -64,7 +64,8 @@ export function modelCallsOf(trace: PlannerTraceV1 | undefined, marks?: Readonly
     const w = marks?.find((m) => m.name === 'reply:compose');
     out.push({ role: 'compose', provider: compose.provider, ...(reason(compose.because) ? { routeReason: reason(compose.because)! } : {}), ...(w ? { startMs: w.startMs, endMs: w.endMs } : {}) });
   }
-  for (const s of trace.route?.structured ?? []) if (s.provider) out.push({ role: 'structured', provider: s.provider, ...(reason(s.because) ? { routeReason: reason(s.because)! } : {}) });
+  // Every structured call as it ran (spec 415): the selection judge (`judge`), a skill's answer, the KB and vault choosers.
+  for (const s of trace.structuredCalls ?? []) out.push({ role: s.role, provider: s.provider, model: s.model, ...(reason(s.because) ? { routeReason: reason(s.because)! } : {}), startMs: s.startMs, endMs: s.endMs });
   return out;
 }
 
