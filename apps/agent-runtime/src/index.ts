@@ -189,7 +189,7 @@ import { signAsAgent } from './consult-rail.js';
 import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, provenanceViewOf, firewalledMetrics, publicProvenanceOf, runAnchorRecordKey, type RunExportDeps } from './run-export.js';
 import { vaultProvenanceStore, readCarriedProvenance } from './provenance-bindings.js';
 import { runMeasuresRecordKey } from '@agenticprimitives/evaluation';
-import { doorFromBody, modelCallsOf, variantOf, engagedFromTrace, parseVariantRequest, VARIANT_TOGGLES, type VariantRequestV1 } from './run-trace.js';
+import { doorFromBody, modelCallsOf, variantOf, engagedFromTrace, parseVariantRequest, VARIANT_TOGGLES, type VariantRequestV1 , SELECTION_ARMS } from './run-trace.js';
 import { provenanceLinkHeader } from '@agenticprimitives/a2a';
 import { runProvenanceRecordKey } from '@agenticprimitives/orchestration';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
@@ -2998,7 +2998,7 @@ app.post('/harness/spans', async (c) => {
 // GET /harness/comparison — spec 415 A4. WHETHER THIS ESTATE RUNS COMPARISONS, and what its `variant` knob knows: a
 // comparison runner reads it before it asks (the estate's half of the eval-store capture gate). Public and secret-free:
 // that an estate is a comparison estate is a fact about the estate, not about anyone's records.
-app.get('/harness/comparison', (c) => c.json({ ok: true, evalCapture: String(c.env.EVAL_CAPTURE ?? '').trim().toLowerCase() === 'on' ? 'on' : 'off', plannerKinds: ['model', 'rule-based'], selections: ['model', 'declared', 'judgment'], toggles: VARIANT_TOGGLES, ...(String(c.env.HARNESS_BUILD ?? '').trim() ? { build: String(c.env.HARNESS_BUILD).trim() } : {}) }));
+app.get('/harness/comparison', (c) => c.json({ ok: true, evalCapture: String(c.env.EVAL_CAPTURE ?? '').trim().toLowerCase() === 'on' ? 'on' : 'off', plannerKinds: ['model', 'rule-based'], selections: [...SELECTION_ARMS], toggles: VARIANT_TOGGLES, ...(String(c.env.HARNESS_BUILD ?? '').trim() ? { build: String(c.env.HARNESS_BUILD).trim() } : {}) }));
 
 app.post('/harness/provenance', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; runRef?: string; format?: 'jsonld' | 'prov-n' | 'record' | 'measures' } | null;

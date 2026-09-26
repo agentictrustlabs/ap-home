@@ -4849,12 +4849,13 @@ step is then handed to that agent under authority the person grants; leave it ou
           const arm = input.variant?.selection;
           if (arm === 'ontology' || arm === 'judgment' || arm === 'ontology+judgment' || arm === 'framed-judgment') {
             const sources = instructionSourcesOf(playbook);
-            const skills = Object.values(playbook?.tools ?? {}).filter((t) => sources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [] }));
+            const skills = Object.values(playbook?.tools ?? {}).filter((t) => sources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}) }));
+            const lexicon = playbook?.domainLexicon;
             const call = structuredCallFor(env as never, input.provider) as never;
             let chose: string | null;
-            if (arm === 'ontology') { const r = selectByOntology(rest, skills); trace.selection = { approach: 'ontology', ...r }; chose = r.chose; }
+            if (arm === 'ontology') { const r = selectByOntology(rest, skills, lexicon); trace.selection = { approach: 'ontology', ...r }; chose = r.chose; }
             else if (arm === 'judgment') { const r = await selectByJudgment(rest, skills, call); trace.selection = { approach: 'judgment', ...r }; chose = r.chose; }
-            else if (arm === 'ontology+judgment') { const r = await selectByOntologyThenJudgment(rest, skills, call); trace.selection = { approach: 'ontology+judgment', ...r }; chose = r.chose; }
+            else if (arm === 'ontology+judgment') { const r = await selectByOntologyThenJudgment(rest, skills, call, {}, lexicon); trace.selection = { approach: 'ontology+judgment', ...r }; chose = r.chose; }
             else { const r = await selectByFramedJudgment(rest, skills.filter((x) => x.covers.length), call); trace.selection = { approach: 'framed-judgment', ...r }; chose = r.chose; }
             plannerUsed = arm;
             const why = (trace.selection as { hold?: string }).hold;
