@@ -103,7 +103,7 @@ describe('spec 415 §3a — the skill-selection engagement', () => {
     const { engagedFromTrace } = await import('../../src/run-trace.js');
     const t = { planner: 'compiled', toolsExposed: ['people.members.list', 'treasury.payment.execute', 'people.members.list'], plan: [{ toolId: 'people.members.list', args: {} }], bindings: [], admission: [] } as never;
     expect(engagedFromTrace(t)).toEqual([{ capability: 'skill-selection/ontology', effect: 'changed-plan', offered: ['urn:ap:capability:people.members.list', 'urn:ap:capability:treasury.payment.execute'], chose: ['urn:ap:capability:people.members.list'] }]);
-    expect(engagedFromTrace({ planner: 'groq', toolsExposed: [], plan: [], bindings: [], admission: [] } as never)).toEqual([{ capability: 'skill-selection/model', effect: 'no-change', offered: [] }]);
+    expect(engagedFromTrace({ planner: 'groq', toolsExposed: [], plan: [], bindings: [], admission: [] } as never)).toEqual([{ capability: 'skill-selection/model', effect: 'no-change' }]);
     expect(engagedFromTrace({ planner: 'supplied', toolsExposed: ['x'], plan: [{ toolId: 'x', args: {} }], bindings: [], admission: [] } as never)).toEqual([]);
   });
 });
@@ -113,7 +113,7 @@ describe('judgment in the ontology\'s terms reaches the PROV graph (spec 415 A4)
     const { engagedFromTrace } = await import('../../src/run-trace.js');
     const CIC = 'https://skills.demo/cil-commons#';
     const t = { planner: 'judgment', toolsExposed: ['cic.grants.draft', 'cic.board.packet'], plan: [{ toolId: 'cic.grants.draft', args: {} }],
-      selection: { approach: 'judgment', chose: 'cic.grants.draft', rejected: ['cic.board.packet'], intent: { requests: `${CIC}LetterOfInquiry`, about: [`${CIC}GrantPipeline`] }, covering: ['cic.grants.draft'], distribution: {}, grounded: [], judge: { name: 'j', kind: 'model' }, params: { floor: 0.3, margin: 0.15 } } } as never;
+      selection: { approach: 'judgment', chose: 'cic.grants.draft', rejected: ['cic.board.packet'], intent: { requests: `${CIC}LetterOfInquiry`, about: [`${CIC}GrantPipeline`] }, offered: ['cic.grants.draft', 'cic.board.packet'], distribution: {}, judge: { name: 'j', kind: 'model' }, params: { floor: 0.5, margin: 0.15 } } } as never;
     const [e] = engagedFromTrace(t);
     expect(e).toMatchObject({ capability: 'skill-selection/judgment', effect: 'changed-plan', chose: ['urn:ap:capability:cic.grants.draft'], rejected: ['urn:ap:capability:cic.board.packet'], intent: { requests: `${CIC}LetterOfInquiry`, about: [`${CIC}GrantPipeline`] } });
     const ALICE = '0xb0d11ce19b756a682e78b4904cd8d832303b3d11';
@@ -126,7 +126,27 @@ describe('judgment in the ontology\'s terms reaches the PROV graph (spec 415 A4)
   });
   it('a request the judge reads as outside the domain is typed apexec:OutsideDomain', async () => {
     const { engagedFromTrace } = await import('../../src/run-trace.js');
-    const t = { planner: 'judgment', toolsExposed: [], plan: [{ toolId: 'ask.unsupported', args: {} }], selection: { approach: 'judgment', chose: null, hold: 'outside-domain', rejected: [], intent: { requests: 'outside-domain', about: [] }, covering: [], distribution: {}, grounded: [], judge: { name: 'j', kind: 'model' }, params: { floor: 0.3, margin: 0.15 } } } as never;
+    const t = { planner: 'framed-judgment', toolsExposed: [], plan: [{ toolId: 'ask.unsupported', args: {} }], selection: { approach: 'framed-judgment', chose: null, hold: 'outside-domain', rejected: [], intent: { requests: 'outside-domain', about: [] }, covering: [], distribution: {}, grounded: [], judge: { name: 'j', kind: 'model' }, params: { floor: 0.3, margin: 0.15 } } } as never;
     expect(engagedFromTrace(t)[0]!.intent).toEqual({ requests: 'https://agenticprimitives.dev/ns/execution#OutsideDomain' });
+  });
+});
+
+describe('the ontology arm and the composed arm on the trace (spec 415 A4)', () => {
+  const CIC = 'https://skills.demo/cil-commons#';
+  it('the ontology arm records the grounded classes; a tie is recorded with the survivors as rejected', async () => {
+    const { engagedFromTrace } = await import('../../src/run-trace.js');
+    const t = { planner: 'ontology', toolsExposed: ['cic.grants.draft', 'cic.board.packet'], plan: [{ toolId: 'ask.unsupported', args: {} }],
+      selection: { approach: 'ontology', chose: null, hold: 'ambiguous', survivors: ['cic.board.packet', 'cic.grants.draft'], grounded: [{ iri: `${CIC}BoardReport`, term: 'board packet' }, { iri: `${CIC}GrantProposal`, term: 'grant proposal' }], because: {} } } as never;
+    expect(engagedFromTrace(t)).toEqual([{ capability: 'skill-selection/ontology', effect: 'no-change', offered: ['urn:ap:capability:cic.grants.draft', 'urn:ap:capability:cic.board.packet'], rejected: ['urn:ap:capability:cic.board.packet', 'urn:ap:capability:cic.grants.draft'], intent: { about: [`${CIC}BoardReport`, `${CIC}GrantProposal`] } }]);
+  });
+  it('the composed arm leaves two engagements — the rule narrowed, the judge picked from the survivors', async () => {
+    const { engagedFromTrace } = await import('../../src/run-trace.js');
+    const t = { planner: 'ontology+judgment', toolsExposed: ['cic.grants.draft', 'cic.board.packet', 'cic.entity.advise'], plan: [{ toolId: 'cic.grants.draft', args: {} }],
+      selection: { approach: 'ontology+judgment', chose: 'cic.grants.draft', decidedBy: 'judgment',
+        ontology: { chose: null, hold: 'ambiguous', survivors: ['cic.board.packet', 'cic.grants.draft'], grounded: [{ iri: `${CIC}GrantProposal`, term: 'grant proposal' }], because: {} },
+        judgment: { chose: 'cic.grants.draft', rejected: ['cic.board.packet'], offered: ['cic.board.packet', 'cic.grants.draft'], distribution: {}, judge: { name: 'j', kind: 'model' }, params: { floor: 0.5, margin: 0.15 } } } } as never;
+    const [rule, judge] = engagedFromTrace(t);
+    expect(rule).toEqual({ capability: 'skill-selection/ontology', effect: 'changed-plan', offered: ['urn:ap:capability:cic.grants.draft', 'urn:ap:capability:cic.board.packet', 'urn:ap:capability:cic.entity.advise'], intent: { about: [`${CIC}GrantProposal`] } });
+    expect(judge).toEqual({ capability: 'skill-selection/judgment', effect: 'changed-plan', offered: ['urn:ap:capability:cic.board.packet', 'urn:ap:capability:cic.grants.draft'], chose: ['urn:ap:capability:cic.grants.draft'], rejected: ['urn:ap:capability:cic.board.packet'] });
   });
 });
