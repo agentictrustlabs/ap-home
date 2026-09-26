@@ -120,6 +120,8 @@ export function providerStructuredCall(env: ModelEnv, p: LlmProvider): Structure
       tools: [tool as never], tool_choice: { type: 'tool', name: tool.name },
     });
     const block = res.content.find((b) => b.type === 'tool_use' && b.name === tool.name);
-    return (block?.input ?? {}) as Record<string, unknown>;
+    // No call is not an empty answer (ADR-0013): say so, with why the model stopped.
+    if (!block) throw new Error(`anthropic(${model}) did not call "${tool.name}" (stop_reason: ${String((res as { stop_reason?: unknown }).stop_reason ?? 'unknown')})`);
+    return (block.input ?? {}) as Record<string, unknown>;
   };
 }
