@@ -6,6 +6,7 @@
 import { useMemo, useState } from 'react';
 import report from '../../evals/skill-assessment.json';
 import { Section, List, Row, Chip, Stats, Stat, Tabs, FilterChip, Note, Card } from '../../ui';
+import { whitelabel } from '../../whitelabel/config';
 
 type Outcome = 'tp' | 'tp-alt' | 'tn' | 'mis-sib' | 'mis-far' | 'miss' | 'spur' | 'undetected';
 interface IntentRow { intentId: string; message: string; split: string; bucket?: string; expected: string | null; chosen: string | null; outcome: Outcome; label: string; ok: boolean | null; why?: string; ms?: number; contaminated?: { skill: string; overlap: number; isNot: boolean } }
@@ -16,6 +17,9 @@ interface Recommendation { rule: string; severity: 'act' | 'watch' | 'info'; tit
 interface Report { builtAt: string; experiments: Experiment[]; skillContracts: Array<{ skill: string; slates: Array<{ experiment: string; variant: string; asked: number; right: number; accuracy: number | null; wronglyChosen: number; confusedWith: Array<{ skill: string; times: number }> }>; recommendations: number }>; recommendations: Recommendation[]; headline: string[]; glossary: { outcomes: Record<Outcome, { label: string; ok: boolean | null; explain: string }>; approaches: Record<string, string> } }
 
 const R = report as unknown as Report;
+/** The skills library (skill-web), where each playbook skill's own Assessment card lives — the deployment's footer link
+ *  (white-label config), never a literal here. Absent ⇒ no outbound link is drawn. */
+const SKILLS_WEB = whitelabel.footer.links.find((l) => /skills library/i.test(l.label))?.href.replace(/\/$/, '') ?? null;
 const pct = (v: number | null | undefined): string => (v === null || v === undefined ? '—' : `${Math.round(v * 100)}%`);
 const skillName = (s: string | null | undefined): string => (s ? s.replace(/^skill:/, '').replace(/^[^/]+\//, '') : 'no skill');
 const slateName = (e: Experiment): string => `${e.slate.replace(/^cil-commons-routing-/, '').replace(/@\d+$/, '')} · ${e.split}`;
@@ -146,6 +150,7 @@ export function SkillAssessmentLab() {
               side={<>
                 {s.recommendations ? <Chip tone="warn">{s.recommendations} recommendation{s.recommendations === 1 ? '' : 's'}</Chip> : <Chip tone="ok">no open issue</Chip>}
                 <button type="button" className="btn ghost" onClick={() => setSkillFilter(s.skill)}>tests</button>
+                {SKILLS_WEB && <a className="btn ghost" href={`${SKILLS_WEB}/?skill=${encodeURIComponent(s.skill)}`} target="_blank" rel="noreferrer">in the skills library ↗</a>}
               </>} />
           ))}
         </List>
