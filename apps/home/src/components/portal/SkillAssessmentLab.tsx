@@ -100,7 +100,7 @@ export function SkillAssessmentLab() {
                   <Stat label="Right skill" value={`${variant.right}/${variant.intents.filter((i) => i.expected).length}`} tone="ok" />
                   <Stat label="Declined when it should" value={variant.holdDen ? `${variant.holdNum}/${variant.holdDen}` : '—'} tone={variant.holdRate !== null && variant.holdRate < 0.95 ? 'warn' : undefined} hint={variant.holdDen ? undefined : 'this test set has no out-of-scope asks'} />
                   <Stat label="Accuracy across skills" value={pct(variant.macroTa)} hint={variant.macroCi ? `95% interval ${pct(variant.macroCi[0])}–${pct(variant.macroCi[1])}` : undefined} />
-                  <Stat label="Gate" value={variant.gate?.status ?? '—'} tone={variant.gate?.status === 'PASS' ? 'ok' : variant.gate?.status === 'FAIL' ? 'danger' : 'warn'} hint={variant.gate?.reason} />
+                  <Stat label="Gate" value={variant.gate?.status ?? '—'} tone={variant.gate?.status === 'PASS' ? 'ok' : variant.gate?.status === 'FAIL' ? 'danger' : 'warn'} hint={variant.gate ? <span title={variant.gate.reason}>{gateLine(variant.gate.reason)}</span> : undefined} />
                 </Stats>
                 {exp.comparisons.map((c) => <Note key={`${c.a}:${c.b}`}><strong>Compared:</strong> {c.words}.</Note>)}
 
@@ -166,6 +166,12 @@ export function SkillAssessmentLab() {
       </Section>
     </div>
   );
+}
+
+/** The gate's binding reason in one short line — the reason names every skill below a floor, which is for hover, not for a card. */
+function gateLine(reason: string): string {
+  const head = reason.split(' — ')[0]!;
+  return head.length > 60 ? `${head.slice(0, 57)}…` : head;
 }
 
 /** Pooled over the latest experiment per test set (its `model` variant when it has one); null when nothing was measured. */
