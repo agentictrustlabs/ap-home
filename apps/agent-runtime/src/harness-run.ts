@@ -38,6 +38,7 @@ import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
 import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
 import { PLAYBOOK_ANSWER_TOOL, playbookAnswerAvailable, playbookAnswerInvoker, type PlaybookMaterial } from './playbook-answer.js';
+import { instructionSkillTools, instructionSourcesOf, skillApplyInvoker, skillReaderFor } from './skill-apply.js';
 import { appendNote, dayRecordsFor, reviewDaysOf, studyFrom, studyRecords, type StudyAccess } from './card-room.js';
 import { memoryRecordFor } from './playbook-memory.js';
 import { remembered, forget } from './run-memo.js';
@@ -122,6 +123,9 @@ import { vaultServerId } from './vault-server-id.js';
 export interface HarnessEnv {
   /** Spec 408 — the estate's contract generation ("1" pre-spec-408, "2" spec 408); absent ⇒ "1". */
   CONTRACTS_GENERATION?: string;
+  /** Spec 415 A4 — the skills corpus (service binding to skills-mcp): where an INSTRUCTION skill's body is read, by the
+   *  digest its playbook tool names, when the planner chooses it. Absent ⇒ instruction skills are not offered. */
+  SKILLS_MCP?: Fetcher;
   /** Spec 397 W2 — the ARD registry this agent finds other agents in (`POST /search`); absent ⇒ no find tool. */
   ARD_REGISTRY_ORIGIN?: string;
   /** The Home origins this agent serves — the first is used for links a person can follow. */
@@ -4892,8 +4896,12 @@ step is then handed to that agent under authority the person grants; leave it ou
   const advertised = material && input.addressee && deps.advertisedCapabilities ? await timed('prepare:advertised', () => remembered(`advertised:${String(input.addressee).toLowerCase()}`, () => deps.advertisedCapabilities!(input.addressee!).catch(() => [] as string[]))) : [];
   mark('advertised');
   const playbookAnswer = playbookAnswerAvailable({ call: structuredCallFor(env as never, input.provider), material, advertised }) ? [PLAYBOOK_ANSWER_TOOL] : [];
+  // Spec 415 A4 — the playbook's INSTRUCTION SKILLS (a tool per skill, answered under its own body): offered only where
+  // the corpus is bound, because a tool that cannot run is not listed.
+  const instructionTools = env.SKILLS_MCP ? instructionSkillTools(playbook) : [];
   const tools = [
     ...playbookAnswer,
+    ...instructionTools,
     ...scopedActionTools(input.surface, playbook), ...catalogTools, ...mcpTools, ...ASK_DISCOVERY_TOOLS,
     ...(kbQuestionAvailable({ call: structuredCallFor(env as never, input.provider) }) ? [KB_QUESTION_TOOL] : []),
     // Spec 413 — passages from the public tier (released shelf works + agent descriptions), where the estate binds an index.
@@ -5004,9 +5012,13 @@ step is then handed to that agent under authority the person grants; leave it ou
   const answerInvoke = playbookAnswer.length
     ? playbookAnswerInvoker({ call: structuredCallFor(env as never, input.provider), instructions: playbook?.instructions ?? null, material, advertised, agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null, ...(memory ? { memory } : {}), ...(study ? { study } : {}) })
     : null;
+  const skillInvoke = instructionTools.length
+    ? skillApplyInvoker({ call: structuredCallFor(env as never, input.provider), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null })
+    : null;
+  const instructionIds = new Set(instructionTools.map((t) => t.id));
   const localInvoke: ToolInvoker = async (toolId, args, ctx) => {
     mark(`invoke:${toolId}:start`);
-    try { return await (answerInvoke && toolId === PLAYBOOK_ANSWER_TOOL.id ? answerInvoke(toolId, args, ctx) : harnessLocal(toolId, args, ctx)); }
+    try { return await (answerInvoke && toolId === PLAYBOOK_ANSWER_TOOL.id ? answerInvoke(toolId, args, ctx) : skillInvoke && instructionIds.has(toolId) ? skillInvoke(toolId, args, ctx) : harnessLocal(toolId, args, ctx)); }
     finally { mark(`invoke:${toolId}:end`); }
   };
   mark('tools-listed');

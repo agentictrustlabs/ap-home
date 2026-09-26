@@ -444,6 +444,9 @@ export interface Env {
    *  Use env.MCP.fetch(...) instead of fetch(MCP_URL/...) — sibling
    *  Worker calls via workers.dev hit Cloudflare error 1042. */
   MCP?: Fetcher;
+  /** Spec 415 A4 — service binding to the skills corpus (skills-mcp): an instruction skill's body, read by digest when
+   *  the planner chooses it (`skill-apply.ts`). Same-account Workers cannot be fetched by hostname (CF-1042). */
+  SKILLS_MCP?: Fetcher;
   /** spec 329 W2 — service binding to demo-discovery-mcp (production; same 1042 rationale as MCP).
    *  `find_members` enriches consult candidates through it — read-only, public facets (ADR-0040). */
   DISCOVERY_MCP?: Fetcher;
