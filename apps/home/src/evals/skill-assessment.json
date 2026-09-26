@@ -1,6 +1,6 @@
 {
   "type": "ap.skill-assessment-report.v1",
-  "builtAt": "2026-09-26T09:59:42.255Z",
+  "builtAt": "2026-09-26T10:25:28.257Z",
   "experiments": [
     {
       "id": "stratum1-heldout-model-vs-rules-r1",
@@ -5339,6 +5339,1985 @@
           "p": 0.0013122558593749933
         }
       ]
+    },
+    {
+      "id": "stratum1-development-model-vs-declared-r3",
+      "slate": "cil-commons-routing-stratum-1@1",
+      "split": "development",
+      "repeats": 1,
+      "startedAt": "2026-09-26T09:34:19.597Z",
+      "finishedAt": "2026-09-26T10:25:14.252Z",
+      "variants": [
+        {
+          "name": "model",
+          "how": "the model planner chooses a skill by reading the skills' descriptions",
+          "runs": 60,
+          "macroTa": 0.9333333333333335,
+          "macroCi": [
+            0.8333333333333334,
+            1
+          ],
+          "microTa": 0.9333333333333333,
+          "holdRate": 1,
+          "holdNum": 12,
+          "holdDen": 12,
+          "routingPurity": 0.9777777777777777,
+          "collisionContainment": 0.9791666666666666,
+          "right": 44,
+          "wrong": 4,
+          "declinedCorrectly": 12,
+          "firedWrongly": 0,
+          "gate": {
+            "status": "FAIL",
+            "reason": "macro_ta_ci_lower = 0.833 (needs >= 0.85)"
+          },
+          "intents": [
+            {
+              "intentId": "nm-agov-01",
+              "message": "A funder asked whether we follow the federal AI risk framework. Before I answer I want an honest scored read across everything - oversight, documentation, data handling, how we'd cope with a failure - since we run about a dozen AI tools and no single one is the question.",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/ai-governance-assessor",
+              "chosen": "skill:cil-commons/ai-governance-assessor",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour nist-ai-rmf-crosswalk-generator is wrong because the framework reference is only the prompt for the ask, while the request itself names no single system and demands a scored read spanning every governance dimension at once.",
+              "ms": 64296
+            },
+            {
+              "intentId": "nm-agov-03",
+              "message": "We're a small family foundation and we've started leaning on AI inside our own grantmaking workflow. Someone suggested we score this the way we'd score a grantee, but I need it turned inward - how does our own house rate across the governance dimensions?",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/ai-governance-assessor",
+              "chosen": "skill:cil-commons/ai-governance-assessor",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour grantee-responsible-ai-due-diligence-scorecard is wrong because the funder is deliberately pointing the assessment at its own internal AI use rather than at any grantee's.",
+              "ms": 25421
+            },
+            {
+              "intentId": "nm-agov-04",
+              "message": "We already signed up for three AI tools last year without much thought - one of them we barely use - and now they're baked into our case notes and donor letters. I don't need help picking a vendor, I need someone to grade how badly we're running what we already have.",
+              "split": "development",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/ai-governance-assessor",
+              "chosen": "skill:cil-commons/ai-governance-assessor",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour responsible-ai-procurement-checklist is wrong because the purchase already happened and the tools are in production, so the ask is a maturity read on deployed systems rather than pre-purchase vendor vetting.",
+              "ms": 30525
+            },
+            {
+              "intentId": "nm-agov-06",
+              "message": "Last quarter our AI assistant leaked a client's address in a mass email and we handled it - the containment steps and the apology all went out fine. What I want now, and this is the part I keep putting off, is a scored read on every dimension of how we run AI, not another response plan.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/ai-governance-assessor",
+              "chosen": "skill:cil-commons/ai-governance-assessor",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour ai-incident-response-playbook-builder is wrong because the incident is already closed out and the late clause rejects a further response plan in favour of a scored read across every governance dimension.",
+              "ms": 27617
+            },
+            {
+              "intentId": "oos-agov-01",
+              "message": "We have nothing written down about staff using AI. Can you draft us an actual acceptable-use policy from scratch - which tools are allowed, what data can never go into them, who signs off on exceptions - something I can drop straight into the staff handbook?",
+              "split": "development",
+              "bucket": "negative-out",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set drafts governing policy text from scratch - the assessor explicitly disclaims policy drafting and hands it to a policy builder that is absent from these twelve, and every other skill assesses, scores, tracks, or reports rather than authoring an internal rule set.",
+              "ms": 11867
+            },
+            {
+              "intentId": "nm-airp-01",
+              "message": "We just finished a maturity review of every AI tool we run and the weakest score by far was what happens when something goes wrong. Do not re-score us. Write the actual step-by-step for who gets called, how we rank how bad it is, and what we tell the family affected.",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "chosen": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour ai-governance-assessor is wrong because the scoring pass is already done and the speaker explicitly refuses another one, asking instead for the standing response procedure that closes the identified gap.",
+              "ms": 29723
+            },
+            {
+              "intentId": "nm-airp-03",
+              "message": "When our AI scheduling assistant leaked two clients' phone numbers into the wrong thread, I improvised notes to the clients, the board and our main funder in one afternoon. I never want to improvise that again, so turn the whole sequence into a documented process with severity levels.",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "chosen": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour stakeholder-update-generator is wrong because the multi-audience notes are the past improvisation being replaced, and the deliverable named late in the request is a documented severity-tiered process.",
+              "ms": 52690
+            },
+            {
+              "intentId": "nm-airp-04",
+              "message": "Our donor CRM's AI assistant was down for eleven hours during the year-end campaign and nobody knew who was supposed to decide whether to keep sending appeals by hand. We are staying with the supplier; I just want the internal steps we follow the next time a tool like this drops out.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "chosen": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour responsible-ai-procurement-checklist is wrong because the speaker rules out re-evaluating the supplier and wants internal containment and decision steps for a future outage of a critical AI-dependent workflow.",
+              "ms": 47806
+            },
+            {
+              "intentId": "nm-airp-06",
+              "message": "Our conformance memo flagged that we have nothing written down for the moment one of our models produces something harmful. Rather than redo the mapping, I want the document that tells a staffer at nine at night who to call, how bad it counts as, and how we tell the person harmed.",
+              "split": "development",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "chosen": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour nist-ai-rmf-crosswalk-generator is wrong because the speaker declines to redo a framework mapping and asks for the operational runbook content, triage, severity and disclosure, that the memo found missing.",
+              "ms": 43577
+            },
+            {
+              "intentId": "oos-airp-01",
+              "message": "A volunteer clicked a phishing link last week and someone used our payroll portal to reroute two staff direct deposits. What do we need to do now to lock the account down and meet our reporting obligations?",
+              "split": "development",
+              "bucket": "negative-out",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set claims this because it is a conventional payroll-fraud and phishing incident with no AI system involved, and the library's incident skill is scoped exclusively to AI failures and harms.",
+              "ms": 19217
+            },
+            {
+              "intentId": "nm-bias-01",
+              "message": "Our scholarship shortlisting model has been running a year now. Applicants who declare a disability seem to drop out at the shortlist step far more often than everyone else - can you work out whether that gap is real and what we should document about it?",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/bias-fairness-reviewer",
+              "chosen": "skill:cil-commons/bias-fairness-reviewer",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour ai-governance-assessor is wrong because the ask is an outcome-rate comparison on one named shortlisting model against a protected attribute, not a read on whether fairness practices exist anywhere.",
+              "ms": 42330
+            },
+            {
+              "intentId": "nm-bias-03",
+              "message": "My data guy says we have to pick between equal selection rates and equal error rates for the housing waitlist model, and I honestly don't know how to choose. Can you work that through on the actual model and show me which groups come out worse under each option?",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/bias-fairness-reviewer",
+              "chosen": "skill:cil-commons/bias-fairness-reviewer",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour decision-brief-generator is wrong because the choice is specifically between fairness metrics and must be settled by running them on one named waitlist model to see which groups fare worse, not by a general options-and-tradeoffs brief.",
+              "ms": 28244
+            },
+            {
+              "intentId": "nm-bias-05",
+              "message": "We licensed a resume-screening product last spring - the vendor due diligence was done back then and the contract is signed. Six months of our own hiring data later, I want it checked against our applicants: are women and older candidates advancing at lower rates through it?",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/bias-fairness-reviewer",
+              "chosen": "skill:cil-commons/bias-fairness-reviewer",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour responsible-ai-procurement-checklist is wrong because the purchase and vendor check are finished, and the ask is an outcome-rate test of the live screener on the organisation's own applicants by gender and age.",
+              "ms": 29256
+            },
+            {
+              "intentId": "nm-bias-06",
+              "message": "Somebody on staff complained that the food-pantry eligibility tool turned a family away unfairly, and yes, we logged it and apologised already. The complaint is one case though - what I want is that tool run against our whole year of decisions to see if Spanish-speaking households come out worse.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/bias-fairness-reviewer",
+              "chosen": "skill:cil-commons/bias-fairness-reviewer",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour ai-incident-response-playbook-builder is wrong because the single complaint is already handled and the late clause asks for a population-level outcome comparison on one named eligibility tool by language group.",
+              "ms": 33804
+            },
+            {
+              "intentId": "oos-bias-01",
+              "message": "Our board approved one new hire to own AI oversight and ethics across the organisation. I need a job description and a short interview rubric for the role, plus a sensible salary band for a mid-size nonprofit - can you draft those by Friday?",
+              "split": "development",
+              "bucket": "negative-out",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set produces recruiting artefacts - job descriptions, interview rubrics and compensation bands are HR work, and the AI subject matter of the role does not turn the request into an assessment, a fairness test, or a board packet.",
+              "ms": 18834
+            },
+            {
+              "intentId": "nm-board-01",
+              "message": "Trustees meet a week from Thursday and I normally just circulate a written progress recap, but this time I need the real thing — timed sections with a presenter for each, year-to-date financials, and two items going to a vote where our treasurer has to step out.",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/board-agenda-reporting-builder",
+              "chosen": "skill:cil-commons/board-agenda-reporting-builder",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour stakeholder-update-generator is wrong because the user explicitly sets aside the circulated recap in favour of one formal internal sitting carrying financials, timed presenters and a recusal-affected vote.",
+              "ms": 33119
+            },
+            {
+              "intentId": "nm-board-03",
+              "message": "Most of next month's trustee meeting is about where we stand with funders. Lay the meeting out for me — running order, time per block, who owns each, pre-reads to send ahead — and note that two applications need directors' approval before we submit.",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/board-agenda-reporting-builder",
+              "chosen": "skill:cil-commons/board-agenda-reporting-builder",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour grant-pipeline-lifecycle-tracker is wrong because funding is merely the subject matter of a meeting whose structure — timings, owners, pre-reads and a sign-off item — is the actual deliverable.",
+              "ms": 38164
+            },
+            {
+              "intentId": "nm-board-04",
+              "message": "One of our directors owns the firm we're about to sign a lease with. How do I sequence Tuesday's meeting so her stepping out is on the record and the rest still have the numbers to carry the vote?",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/board-agenda-reporting-builder",
+              "chosen": "skill:cil-commons/board-agenda-reporting-builder",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour fiscal-sponsorship-entity-advisor is wrong because the user is not asking whether the dual role is defensible or for anything in writing, only how to order the meeting so the recusal is minuted and the remaining directors still make quorum.",
+              "ms": 31151
+            },
+            {
+              "intentId": "nm-board-06",
+              "message": "Our exec committee is chewing over whether to merge the two program teams and everyone has a view. Before we get there, map the ninety minutes for me — order, owners, and the exact wording of what they'll be asked to adopt at the end.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/board-agenda-reporting-builder",
+              "chosen": "skill:cil-commons/board-agenda-reporting-builder",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour decision-brief-generator is wrong because the merger question is only the topic; the late detail asks for the time map and the resolution wording, which is the meeting's structure rather than the choice itself.",
+              "ms": 79350
+            },
+            {
+              "intentId": "oos-board-01",
+              "message": "Three of our trustees roll off next June and nobody's lined up to replace them. Can you help me build a skills matrix for the seats we'll need to fill and a sensible way to approach candidates?",
+              "split": "development",
+              "bucket": "negative-out",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set covers board composition, succession or trustee recruitment — the governance skill assembles meeting agendas and packets, not the pipeline of who sits on the body.",
+              "ms": 16742
+            },
+            {
+              "intentId": "nm-dbrief-01",
+              "message": "Our social enterprise café is doing well enough that people keep pushing us to open a second site across town. I'm genuinely torn — walk me through the realistic paths, what each one risks, and where you'd land.",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/decision-brief-generator",
+              "chosen": "skill:cil-commons/decision-brief-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour fiscal-sponsorship-entity-advisor is wrong because the mission venture's housing is settled and the live question is expansion — options, risks and a recommendation with no entity, sponsorship or subclassification element.",
+              "ms": 21127
+            },
+            {
+              "intentId": "nm-dbrief-02",
+              "message": "The directors want a recommendation from me before they next sit down, on whether we take over the county meal contract. I'm not asking about how that meeting runs — give me the choices weighed honestly and a line on what would change my mind.",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/decision-brief-generator",
+              "chosen": "skill:cil-commons/decision-brief-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour board-agenda-reporting-builder is wrong because the user disclaims any interest in meeting mechanics and wants the reasoning itself, including the condition that would overturn the recommendation.",
+              "ms": 30277
+            },
+            {
+              "intentId": "nm-dbrief-04",
+              "message": "Three funders open in the same month and we have one writer. I don't want a deadline list — I want the case for each of the three, what we give up by picking one, and how sure you actually are of your pick.",
+              "split": "development",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/decision-brief-generator",
+              "chosen": "skill:cil-commons/decision-brief-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour grant-pipeline-lifecycle-tracker is wrong because the user refuses the deadline-tiered action list and asks instead for tradeoffs, an opportunity cost and a stated confidence level on a single recommended choice.",
+              "ms": 33036
+            },
+            {
+              "intentId": "nm-dbrief-06",
+              "message": "A funder we've courted for years will only come in if we drop the after-school programme. Do we take the money? I want the case both ways, what it costs us either direction, and your actual call — not the application copy.",
+              "split": "development",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/decision-brief-generator",
+              "chosen": "skill:cil-commons/decision-brief-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour grant-loi-proposal-drafter is wrong because the closing clause refuses submission-ready copy and the org has not yet decided whether to accept the funder's condition.",
+              "ms": 39438
+            },
+            {
+              "intentId": "oos-dbrief-01",
+              "message": "We closed the west site eighteen months ago and it was clearly the wrong call. There's no new decision on the table — I want an honest look back at how we got there so the leadership team doesn't repeat it.",
+              "split": "development",
+              "bucket": "negative-out",
+              "contaminated": {
+                "skill": "skill:cil-commons/decision-brief-generator",
+                "overlap": 0.68,
+                "isNot": true
+              },
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set covers a retrospective on a decision already taken — the decision skill is explicitly pre-decision and the only post-mortem capability in the set is scoped to AI incidents.",
+              "ms": 18522
+            },
+            {
+              "intentId": "nm-fisc-01",
+              "message": "We're two years into running the youth workshops under another charity's roof and it's getting awkward — they take a cut and control the bank account. Do we go it alone and set up our own thing, stay put, or is there a middle road?",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "chosen": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour decision-brief-generator is wrong because, stripped of jargon, the choice is host-charity versus standalone versus hybrid — the housing question the structure specialist owns.",
+              "ms": 28156
+            },
+            {
+              "intentId": "nm-fisc-03",
+              "message": "A foundation says they'd fund the river cleanup but we haven't got our exemption letter yet, so someone suggested running the money through an established nonprofit instead. What are our options for housing this, and what do we give up under each?",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "chosen": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour grant-loi-proposal-drafter is wrong because no application is being written — the blocker is that the venture has no charitable status and needs a housing arrangement before any money can be received.",
+              "ms": 43702
+            },
+            {
+              "intentId": "nm-fisc-05",
+              "message": "Half our grant money still lands in our sponsor's account and half in ours now that we have our own letter. Before I clean up the funding side, I need to know whether we should be leaving that sponsor at all and what unwinding it would involve.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "chosen": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour grant-pipeline-lifecycle-tracker is wrong because the grants are only the symptom and the user defers them explicitly in favour of deciding whether to exit the sponsorship arrangement.",
+              "ms": 43864
+            },
+            {
+              "intentId": "nm-fisc-06",
+              "message": "Our congregation wants to open a coffee shop that hires women coming out of trafficking. The elders want the profits feeding the ministry, but nobody wants the church's tax-exempt status anywhere near a trading business — what are the sensible ways to set this up?",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "chosen": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour decision-brief-generator is wrong because the late clause makes this a question about how a trading venture relates to an exempt church body, which is a structure choice rather than an open strategic option set.",
+              "ms": 50448
+            },
+            {
+              "intentId": "oos-fisc-01",
+              "message": "Our auditor flagged that we've never adopted a whistleblower policy. Can you draft one for us — how someone reports concerns, protection from retaliation, and who's meant to investigate?",
+              "split": "development",
+              "bucket": "negative-out",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set drafts whistleblower or retaliation-protection policies — the structure specialist's policy work is confined to entity, sponsorship and conflicting-role questions, and no general nonprofit policy drafter exists here.",
+              "ms": 16000
+            },
+            {
+              "intentId": "nm-gloi-01",
+              "message": "Three funders close inside the same week but Hollings is the one we are actually submitting. I still have nothing written for the section on who we serve or how we would know it worked - can you draft both at 400 words?",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/grant-loi-proposal-drafter",
+              "chosen": "skill:cil-commons/grant-loi-proposal-drafter",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour grant-pipeline-lifecycle-tracker is wrong because the competing deadlines are already resolved by the user's own choice, leaving two named sections of copy at a fixed word count for one funder.",
+              "ms": 31685
+            },
+            {
+              "intentId": "nm-gloi-03",
+              "message": "We're applying through our fiscal sponsor and the application has a whole box asking how the money would flow and who is legally accountable. We settled that arrangement last year, so I just need those two paragraphs written for the box.",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/grant-loi-proposal-drafter",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour fiscal-sponsorship-entity-advisor is wrong because the sponsorship structure is already decided and the ask is application prose describing it, not guidance on what the arrangement should be.",
+              "ms": 18928
+            },
+            {
+              "intentId": "nm-gloi-04",
+              "message": "The Merriweather giving office says they want to hear what we've been up to, but it arrived as four questions with a 500-word cap on each. Write our answers: who we serve, what we'd do with the funds, and how we'd know it worked.",
+              "split": "development",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/grant-loi-proposal-drafter",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour stakeholder-update-generator is wrong because the capped answer boxes and the forward-looking use-of-funds question mark this as one funder's application copy rather than a recap circulated to several audiences.",
+              "ms": 25634
+            },
+            {
+              "intentId": "nm-gloi-06",
+              "message": "This funder's application now asks how we oversee any AI we use in our programs. I don't need a rubric or an audit of ourselves, I need our answer written into their 300-word box by next week.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/grant-loi-proposal-drafter",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour grantee-responsible-ai-due-diligence-scorecard is wrong because the user is the applicant drafting a word-capped answer inside a funder's form, not a funder scoring anyone's AI maturity.",
+              "ms": 17510
+            },
+            {
+              "intentId": "oos-gloi-01",
+              "message": "I want to write a personal ask to the handful of individuals who each gave us ten thousand dollars last year, a warm letter over my signature for our year-end appeal rather than anything institutional.",
+              "split": "development",
+              "bucket": "negative-out",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set covers individual major-donor solicitation or year-end appeal letters, which are neither a funder application, a portfolio status view, nor a multi-audience digest of recent activity.",
+              "ms": 14333
+            },
+            {
+              "intentId": "nm-gpipe-02",
+              "message": "Before I talk to anybody I need the funding picture straight in my own head: which ones are still alive, which are dead, and what I personally have to move on this week.",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "chosen": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour stakeholder-update-generator is wrong because the only reader is the user, and what is wanted is a live-versus-dead status classification plus a personal action list rather than versions for other audiences.",
+              "ms": 27076
+            },
+            {
+              "intentId": "nm-gpipe-03",
+              "message": "Five funders are open to us this fall and realistically we can get two out the door. Rank them by what closes first and where we already have a warm contact, then tell me which two to chase.",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "chosen": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour decision-brief-generator is wrong because this is deadline-tier triage across live funding entries rather than a framed choice with two to four options and tradeoffs.",
+              "ms": 28482
+            },
+            {
+              "intentId": "nm-gpipe-04",
+              "message": "Half the due dates in my funding sheet came off a newsletter and I am not sure we even qualify for three of them. Before I start writing anything for anyone, sort out which dates are real, which ones we are eligible for, and what is about to slip past me.",
+              "split": "development",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "chosen": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour grant-loi-proposal-drafter is wrong because drafting is deferred until the tracked entries are cleaned up; the ask is an audit of unreliable due-date sources and eligibility across the portfolio.",
+              "ms": 62828
+            },
+            {
+              "intentId": "nm-gpipe-06",
+              "message": "My co-director wants me to brief her and the team on the money situation. Honestly I can't tell anyone anything until I have my own ranked list of what is about to close and which applications are stuck, so do that first.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "chosen": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour stakeholder-update-generator is wrong because the requested artifact, arriving at the end of the message, is a ranked internal view of stalled and closing entries that the user needs before any audience version could be written.",
+              "ms": 31763
+            },
+            {
+              "intentId": "oos-gpipe-01",
+              "message": "Our auditor says our federal drawdowns don't tie out to the general ledger for the last two quarters. How do I reconcile them, and what do I need ready before single audit fieldwork starts?",
+              "split": "development",
+              "bucket": "negative-out",
+              "contaminated": {
+                "skill": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+                "overlap": 0.63,
+                "isNot": true
+              },
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set handles grant financial reconciliation or single-audit preparation, which is accounting and compliance work rather than pipeline tracking, drafting, or reporting to audiences.",
+              "ms": 16045
+            },
+            {
+              "intentId": "nm-gscore-01",
+              "message": "Three of the nonprofits we fund just adopted a vendor's AI case-management tool, and our renewal decisions land in November. I need a light-touch way to rate how responsibly each organization handles it, without burying a two-person team in enterprise paperwork.",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "chosen": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour responsible-ai-procurement-checklist is wrong because the speaker is a funder rating the practices of organizations it already funds rather than a buyer deciding whether to purchase the tool.",
+              "ms": 36609
+            },
+            {
+              "intentId": "nm-gscore-03",
+              "message": "An applicant's proposal claims their tutoring chatbot follows the federal AI risk framework and ISO 42001. I don't need a function-by-function mapping of their system, I need a rubric to weigh that claim fairly against the other applications in this round.",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "chosen": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour nist-ai-rmf-crosswalk-generator is wrong because the speaker explicitly declines a single-system framework mapping and wants a comparative scoring rubric applied to competing applicants.",
+              "ms": 40083
+            },
+            {
+              "intentId": "nm-gscore-04",
+              "message": "One of our grantees uses an algorithm to decide which families get housing vouchers first. I am in no position to run a disparate-impact test on their model, but at the next site visit I need a consistent way to grade how they oversee and document it against the rest of the cohort.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "chosen": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour bias-fairness-reviewer is wrong because the speaker rules out testing the model for outcome disparities and instead wants comparable governance grading of a funded organization.",
+              "ms": 47305
+            },
+            {
+              "intentId": "nm-gscore-06",
+              "message": "Our trustees keep asking whether careful AI practices should become a written requirement in our grant agreements. I would rather skip the options memo, though, because what I actually need is the instrument we would use to grade each organization we support.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "chosen": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour decision-brief-generator is wrong because the speaker waves off the options-and-tradeoffs framing and asks, late in the request, for the grading instrument a funder would apply to the organizations it supports.",
+              "ms": 32249
+            },
+            {
+              "intentId": "oos-gscore-01",
+              "message": "Before we release the second tranche to any organization we support, I want a standard set of asks covering audited financials, insurance certificates and board minutes. Nothing technological about it, just the paperwork side of whether they can absorb the money.",
+              "split": "development",
+              "bucket": "negative-out",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set claims this because every governance and due-diligence skill in the library is scoped to AI or data governance, and pipeline tracking covers deadlines rather than grantee financial-capacity paperwork.",
+              "ms": 21924
+            },
+            {
+              "intentId": "nm-nist-01",
+              "message": "A university partner keeps pressing us on the donor-matching engine we call Almona before they will share data. Can you set that one engine against each of the four functions in the federal risk framework, gaps and next steps included?",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "chosen": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour ai-governance-assessor is wrong because the deliverable is scoped to a single named engine mapped function by function for an external reviewer, not a posture read spanning the organisation.",
+              "ms": 37242
+            },
+            {
+              "intentId": "nm-nist-02",
+              "message": "Our foundation funder wants evidence that our case-triage model lines up with the standard AI risk framework, and ideally the ISO standard for AI management systems too. Can you produce that memo for that one model so we can send it up to them?",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "chosen": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour grantee-responsible-ai-due-diligence-scorecard is wrong because the direction of travel is upward - the organisation authors a single-system conformance memo about itself and sends it to the funder, rather than a funder grading anyone.",
+              "ms": 33693
+            },
+            {
+              "intentId": "nm-nist-04",
+              "message": "Our biggest institutional funder's reviewers asked for a structured write-up on the benefits-eligibility screener we built - how it handles each of the four risk functions in the framework they work from, where it falls short, and what we'd fix first.",
+              "split": "development",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "chosen": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour ai-governance-assessor is wrong because the gap-and-next-steps language is scoped to one named screener mapped function by function, not to the organisation's overall posture.",
+              "ms": 41603
+            },
+            {
+              "intentId": "nm-nist-06",
+              "message": "We already have a decent plan for when the sermon-drafting assistant goes wrong - who gets paged, how we tell people. Our accreditation reviewer wants that plan slotted in as just one quadrant of the four-function framework write-up for that assistant, with the other three filled in too.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "chosen": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour ai-incident-response-playbook-builder is wrong because the response plan already exists and the late clause asks for it to be absorbed into a complete four-function crosswalk of one named assistant.",
+              "ms": 40489
+            },
+            {
+              "intentId": "oos-nist-01",
+              "message": "Our attendance forecasting model has drifted badly since last year and the numbers are off. I want to retrain it on the newer data and tune the hyperparameters properly - can you walk me through how to do that?",
+              "split": "development",
+              "bucket": "negative-out",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set covers hands-on machine-learning engineering; retraining and hyperparameter tuning sit inside the model, whereas all twelve skills are governance, fairness, funding, decision or reporting workflows that sit around one.",
+              "ms": 15488
+            },
+            {
+              "intentId": "nm-proc-01",
+              "message": "Our church office is down to two AI note-taking tools for pastoral care meetings, and the elders want a recommendation by Sunday. The feature comparison matters less to me than knowing which questions about congregants' recordings would flag a company we should walk away from.",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "chosen": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour decision-brief-generator is wrong because the speaker sets aside options-and-tradeoffs framing and asks for the responsible-AI questions and red flags to put to each vendor before adopting.",
+              "ms": 30477
+            },
+            {
+              "intentId": "nm-proc-02",
+              "message": "Our donor database vendor is switching on an AI feature next quarter and we have to opt in or out. I know our own internal policies are a mess, but that is a separate fight; right now I need to work out whether letting their model touch donor records is safe.",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "chosen": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour ai-governance-assessor is wrong because the speaker deliberately brackets their own internal posture and asks about adopting a smart feature a vendor is about to switch on.",
+              "ms": 32763
+            },
+            {
+              "intentId": "nm-proc-04",
+              "message": "A company pitching us their volunteer-screening software says the matching engine has been checked for fairness and will not discriminate. We have not paid them a cent and I have no way to test the thing myself, so what would a credible answer to that claim even look like?",
+              "split": "development",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "chosen": "skill:cil-commons/ai-governance-assessor",
+              "outcome": "mis-sib",
+              "label": "chose its sibling",
+              "ok": false,
+              "why": "Nearest neighbour bias-fairness-reviewer is wrong because the speaker has no access to the system to test and instead needs to judge a selling vendor's fairness claim before any purchase.",
+              "ms": 31745
+            },
+            {
+              "intentId": "nm-proc-05",
+              "message": "Two of our program staff want to start on a case-note summarizer a peer organization recommended, and it is a paid subscription. Before I approve the spend I want to know what to look for in how the company uses everything we type into it.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "chosen": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour grantee-responsible-ai-due-diligence-scorecard is wrong because the peer organization is only the source of the tip; the speaker is a buyer weighing a subscription purchase, not a funder scoring another organization.",
+              "ms": 28091
+            },
+            {
+              "intentId": "oos-proc-01",
+              "message": "Our per-seat pricing on the volunteer database jumped forty percent at renewal and the contract has an auto-renew clause I missed. What leverage do we actually have to push this supplier back down before the January date?",
+              "split": "development",
+              "bucket": "negative-out",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set claims this because it is commercial contract and price negotiation on a database with no AI component and no decision framing that any of the twelve descriptions cover.",
+              "ms": 16845
+            },
+            {
+              "intentId": "nm-stake-01",
+              "message": "Same quarterly numbers, three different readers: the trustees want a page, our two funders want a couple of paragraphs, and the volunteers need it in plain language. Can you write all three so they don't contradict each other?",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/stakeholder-update-generator",
+              "chosen": "skill:cil-commons/stakeholder-update-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour board-agenda-reporting-builder is wrong because the governance audience is one of three parallel versions of the same facts and nothing formal, such as motions, quorum or a packet, is requested.",
+              "ms": 26265
+            },
+            {
+              "intentId": "nm-stake-03",
+              "message": "Take what I've told you about where our grants stand and give me two write-ups off the same facts, a tight one for the board and a plainer one for staff who don't follow funder jargon.",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/stakeholder-update-generator",
+              "chosen": "skill:cil-commons/stakeholder-update-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour grant-pipeline-lifecycle-tracker is wrong because the user supplies the funding status themselves and asks only for two audience-pitched renderings of it, not for the status to be assembled or prioritized.",
+              "ms": 36198
+            },
+            {
+              "intentId": "nm-stake-05",
+              "message": "Two of our funders and our lead partner each asked how the pilot is going. None of it is a required report and nothing gets submitted anywhere, so I just want one consistent set of write-ups, longer for the partner and tighter for the funders.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/stakeholder-update-generator",
+              "chosen": "skill:cil-commons/stakeholder-update-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour grant-loi-proposal-drafter is wrong because the user rules out any submission and asks for informal, mutually consistent versions for three separate readers.",
+              "ms": 28282
+            },
+            {
+              "intentId": "nm-stake-06",
+              "message": "We've already decided to close the Tuesday meal program and that call is made, so please don't re-open it. What I need is how we say it to the board, to the donors who funded it, and to the families who show up, each one honest and consistent with the others.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/stakeholder-update-generator",
+              "chosen": "skill:cil-commons/stakeholder-update-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour decision-brief-generator is wrong because the choice is closed and the request is three honest, mutually consistent tellings of it for different audiences.",
+              "ms": 35706
+            },
+            {
+              "intentId": "oos-stake-01",
+              "message": "A reporter at the city paper covers homelessness. I'd like a press release announcing our new night shelter plus a short pitch email I could send her, both in her register rather than ours.",
+              "split": "development",
+              "bucket": "negative-out",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set covers media relations, and a press release plus a journalist pitch targets one external channel rather than producing calibrated versions for the organization's own stakeholder groups.",
+              "ms": 15549
+            }
+          ],
+          "perSkill": [
+            {
+              "skill": "skill:cil-commons/ai-governance-assessor",
+              "asked": 4,
+              "right": 4,
+              "accuracy": 1,
+              "ci": [
+                0.6096657120978346,
+                1
+              ],
+              "wronglyChosen": 1,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "asked": 4,
+              "right": 4,
+              "accuracy": 1,
+              "ci": [
+                0.5655175352168251,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/bias-fairness-reviewer",
+              "asked": 4,
+              "right": 4,
+              "accuracy": 1,
+              "ci": [
+                0.5101091635454027,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/board-agenda-reporting-builder",
+              "asked": 4,
+              "right": 4,
+              "accuracy": 1,
+              "ci": [
+                0.5655175352168251,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/decision-brief-generator",
+              "asked": 4,
+              "right": 4,
+              "accuracy": 1,
+              "ci": [
+                0.5655175352168251,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "asked": 4,
+              "right": 4,
+              "accuracy": 1,
+              "ci": [
+                0.5655175352168251,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/grant-loi-proposal-drafter",
+              "asked": 4,
+              "right": 1,
+              "accuracy": 0.25,
+              "ci": [
+                0.11762077423264783,
+                0.769275718723987
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "asked": 4,
+              "right": 4,
+              "accuracy": 1,
+              "ci": [
+                0.5655175352168251,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "asked": 4,
+              "right": 4,
+              "accuracy": 1,
+              "ci": [
+                0.5655175352168251,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "asked": 4,
+              "right": 4,
+              "accuracy": 1,
+              "ci": [
+                0.5655175352168251,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "asked": 4,
+              "right": 3,
+              "accuracy": 0.75,
+              "ci": [
+                0.37553462976252533,
+                0.9637758913675698
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": [
+                {
+                  "skill": "skill:cil-commons/ai-governance-assessor",
+                  "times": 1
+                }
+              ]
+            },
+            {
+              "skill": "skill:cil-commons/stakeholder-update-generator",
+              "asked": 4,
+              "right": 4,
+              "accuracy": 1,
+              "ci": [
+                0.5655175352168251,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            }
+          ]
+        },
+        {
+          "name": "declared",
+          "how": "a deterministic selector matches the ask against each skill's declared example sentences and declines when none fits",
+          "runs": 60,
+          "macroTa": 0.22777777777777783,
+          "macroCi": [
+            0.16666666666666666,
+            0.2833333333333334
+          ],
+          "microTa": 0.23333333333333334,
+          "holdRate": 0.9166666666666666,
+          "holdNum": 11,
+          "holdDen": 12,
+          "routingPurity": 0.375,
+          "collisionContainment": 0.9166666666666666,
+          "right": 3,
+          "wrong": 46,
+          "declinedCorrectly": 11,
+          "firedWrongly": 1,
+          "gate": {
+            "status": "FAIL",
+            "reason": "macro_ta_point = 0.228 (needs >= 0.9)"
+          },
+          "intents": [
+            {
+              "intentId": "nm-agov-01",
+              "message": "A funder asked whether we follow the federal AI risk framework. Before I answer I want an honest scored read across everything - oversight, documentation, data handling, how we'd cope with a failure - since we run about a dozen AI tools and no single one is the question.",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/ai-governance-assessor",
+              "chosen": "skill:cil-commons/ai-governance-assessor",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour nist-ai-rmf-crosswalk-generator is wrong because the framework reference is only the prompt for the ask, while the request itself names no single system and demands a scored read spanning every governance dimension at once.",
+              "ms": 32345
+            },
+            {
+              "intentId": "nm-agov-03",
+              "message": "We're a small family foundation and we've started leaning on AI inside our own grantmaking workflow. Someone suggested we score this the way we'd score a grantee, but I need it turned inward - how does our own house rate across the governance dimensions?",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/ai-governance-assessor",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour grantee-responsible-ai-due-diligence-scorecard is wrong because the funder is deliberately pointing the assessment at its own internal AI use rather than at any grantee's.",
+              "ms": 19564
+            },
+            {
+              "intentId": "nm-agov-04",
+              "message": "We already signed up for three AI tools last year without much thought - one of them we barely use - and now they're baked into our case notes and donor letters. I don't need help picking a vendor, I need someone to grade how badly we're running what we already have.",
+              "split": "development",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/ai-governance-assessor",
+              "chosen": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "outcome": "mis-sib",
+              "label": "chose its sibling",
+              "ok": false,
+              "why": "Nearest neighbour responsible-ai-procurement-checklist is wrong because the purchase already happened and the tools are in production, so the ask is a maturity read on deployed systems rather than pre-purchase vendor vetting.",
+              "ms": 28078
+            },
+            {
+              "intentId": "nm-agov-06",
+              "message": "Last quarter our AI assistant leaked a client's address in a mass email and we handled it - the containment steps and the apology all went out fine. What I want now, and this is the part I keep putting off, is a scored read on every dimension of how we run AI, not another response plan.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/ai-governance-assessor",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour ai-incident-response-playbook-builder is wrong because the incident is already closed out and the late clause rejects a further response plan in favour of a scored read across every governance dimension.",
+              "ms": 18683
+            },
+            {
+              "intentId": "oos-agov-01",
+              "message": "We have nothing written down about staff using AI. Can you draft us an actual acceptable-use policy from scratch - which tools are allowed, what data can never go into them, who signs off on exceptions - something I can drop straight into the staff handbook?",
+              "split": "development",
+              "bucket": "negative-out",
+              "expected": null,
+              "chosen": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "outcome": "spur",
+              "label": "should have declined",
+              "ok": false,
+              "why": "No skill in the set drafts governing policy text from scratch - the assessor explicitly disclaims policy drafting and hands it to a policy builder that is absent from these twelve, and every other skill assesses, scores, tracks, or reports rather than authoring an internal rule set.",
+              "ms": 26209
+            },
+            {
+              "intentId": "nm-airp-01",
+              "message": "We just finished a maturity review of every AI tool we run and the weakest score by far was what happens when something goes wrong. Do not re-score us. Write the actual step-by-step for who gets called, how we rank how bad it is, and what we tell the family affected.",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour ai-governance-assessor is wrong because the scoring pass is already done and the speaker explicitly refuses another one, asking instead for the standing response procedure that closes the identified gap.",
+              "ms": 17488
+            },
+            {
+              "intentId": "nm-airp-03",
+              "message": "When our AI scheduling assistant leaked two clients' phone numbers into the wrong thread, I improvised notes to the clients, the board and our main funder in one afternoon. I never want to improvise that again, so turn the whole sequence into a documented process with severity levels.",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour stakeholder-update-generator is wrong because the multi-audience notes are the past improvisation being replaced, and the deliverable named late in the request is a documented severity-tiered process.",
+              "ms": 17110
+            },
+            {
+              "intentId": "nm-airp-04",
+              "message": "Our donor CRM's AI assistant was down for eleven hours during the year-end campaign and nobody knew who was supposed to decide whether to keep sending appeals by hand. We are staying with the supplier; I just want the internal steps we follow the next time a tool like this drops out.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour responsible-ai-procurement-checklist is wrong because the speaker rules out re-evaluating the supplier and wants internal containment and decision steps for a future outage of a critical AI-dependent workflow.",
+              "ms": 14642
+            },
+            {
+              "intentId": "nm-airp-06",
+              "message": "Our conformance memo flagged that we have nothing written down for the moment one of our models produces something harmful. Rather than redo the mapping, I want the document that tells a staffer at nine at night who to call, how bad it counts as, and how we tell the person harmed.",
+              "split": "development",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour nist-ai-rmf-crosswalk-generator is wrong because the speaker declines to redo a framework mapping and asks for the operational runbook content, triage, severity and disclosure, that the memo found missing.",
+              "ms": 17694
+            },
+            {
+              "intentId": "oos-airp-01",
+              "message": "A volunteer clicked a phishing link last week and someone used our payroll portal to reroute two staff direct deposits. What do we need to do now to lock the account down and meet our reporting obligations?",
+              "split": "development",
+              "bucket": "negative-out",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set claims this because it is a conventional payroll-fraud and phishing incident with no AI system involved, and the library's incident skill is scoped exclusively to AI failures and harms.",
+              "ms": 18024
+            },
+            {
+              "intentId": "nm-bias-01",
+              "message": "Our scholarship shortlisting model has been running a year now. Applicants who declare a disability seem to drop out at the shortlist step far more often than everyone else - can you work out whether that gap is real and what we should document about it?",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/bias-fairness-reviewer",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour ai-governance-assessor is wrong because the ask is an outcome-rate comparison on one named shortlisting model against a protected attribute, not a read on whether fairness practices exist anywhere.",
+              "ms": 18263
+            },
+            {
+              "intentId": "nm-bias-03",
+              "message": "My data guy says we have to pick between equal selection rates and equal error rates for the housing waitlist model, and I honestly don't know how to choose. Can you work that through on the actual model and show me which groups come out worse under each option?",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/bias-fairness-reviewer",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour decision-brief-generator is wrong because the choice is specifically between fairness metrics and must be settled by running them on one named waitlist model to see which groups fare worse, not by a general options-and-tradeoffs brief.",
+              "ms": 10421
+            },
+            {
+              "intentId": "nm-bias-05",
+              "message": "We licensed a resume-screening product last spring - the vendor due diligence was done back then and the contract is signed. Six months of our own hiring data later, I want it checked against our applicants: are women and older candidates advancing at lower rates through it?",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/bias-fairness-reviewer",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour responsible-ai-procurement-checklist is wrong because the purchase and vendor check are finished, and the ask is an outcome-rate test of the live screener on the organisation's own applicants by gender and age.",
+              "ms": 15636
+            },
+            {
+              "intentId": "nm-bias-06",
+              "message": "Somebody on staff complained that the food-pantry eligibility tool turned a family away unfairly, and yes, we logged it and apologised already. The complaint is one case though - what I want is that tool run against our whole year of decisions to see if Spanish-speaking households come out worse.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/bias-fairness-reviewer",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour ai-incident-response-playbook-builder is wrong because the single complaint is already handled and the late clause asks for a population-level outcome comparison on one named eligibility tool by language group.",
+              "ms": 20327
+            },
+            {
+              "intentId": "oos-bias-01",
+              "message": "Our board approved one new hire to own AI oversight and ethics across the organisation. I need a job description and a short interview rubric for the role, plus a sensible salary band for a mid-size nonprofit - can you draft those by Friday?",
+              "split": "development",
+              "bucket": "negative-out",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set produces recruiting artefacts - job descriptions, interview rubrics and compensation bands are HR work, and the AI subject matter of the role does not turn the request into an assessment, a fairness test, or a board packet.",
+              "ms": 18224
+            },
+            {
+              "intentId": "nm-board-01",
+              "message": "Trustees meet a week from Thursday and I normally just circulate a written progress recap, but this time I need the real thing — timed sections with a presenter for each, year-to-date financials, and two items going to a vote where our treasurer has to step out.",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/board-agenda-reporting-builder",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour stakeholder-update-generator is wrong because the user explicitly sets aside the circulated recap in favour of one formal internal sitting carrying financials, timed presenters and a recusal-affected vote.",
+              "ms": 15890
+            },
+            {
+              "intentId": "nm-board-03",
+              "message": "Most of next month's trustee meeting is about where we stand with funders. Lay the meeting out for me — running order, time per block, who owns each, pre-reads to send ahead — and note that two applications need directors' approval before we submit.",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/board-agenda-reporting-builder",
+              "chosen": "skill:cil-commons/board-agenda-reporting-builder",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour grant-pipeline-lifecycle-tracker is wrong because funding is merely the subject matter of a meeting whose structure — timings, owners, pre-reads and a sign-off item — is the actual deliverable.",
+              "ms": 29515
+            },
+            {
+              "intentId": "nm-board-04",
+              "message": "One of our directors owns the firm we're about to sign a lease with. How do I sequence Tuesday's meeting so her stepping out is on the record and the rest still have the numbers to carry the vote?",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/board-agenda-reporting-builder",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour fiscal-sponsorship-entity-advisor is wrong because the user is not asking whether the dual role is defensible or for anything in writing, only how to order the meeting so the recusal is minuted and the remaining directors still make quorum.",
+              "ms": 18767
+            },
+            {
+              "intentId": "nm-board-06",
+              "message": "Our exec committee is chewing over whether to merge the two program teams and everyone has a view. Before we get there, map the ninety minutes for me — order, owners, and the exact wording of what they'll be asked to adopt at the end.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/board-agenda-reporting-builder",
+              "chosen": "skill:cil-commons/decision-brief-generator",
+              "outcome": "mis-sib",
+              "label": "chose its sibling",
+              "ok": false,
+              "why": "Nearest neighbour decision-brief-generator is wrong because the merger question is only the topic; the late detail asks for the time map and the resolution wording, which is the meeting's structure rather than the choice itself.",
+              "ms": 42271
+            },
+            {
+              "intentId": "oos-board-01",
+              "message": "Three of our trustees roll off next June and nobody's lined up to replace them. Can you help me build a skills matrix for the seats we'll need to fill and a sensible way to approach candidates?",
+              "split": "development",
+              "bucket": "negative-out",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set covers board composition, succession or trustee recruitment — the governance skill assembles meeting agendas and packets, not the pipeline of who sits on the body.",
+              "ms": 11162
+            },
+            {
+              "intentId": "nm-dbrief-01",
+              "message": "Our social enterprise café is doing well enough that people keep pushing us to open a second site across town. I'm genuinely torn — walk me through the realistic paths, what each one risks, and where you'd land.",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/decision-brief-generator",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour fiscal-sponsorship-entity-advisor is wrong because the mission venture's housing is settled and the live question is expansion — options, risks and a recommendation with no entity, sponsorship or subclassification element.",
+              "ms": 15729
+            },
+            {
+              "intentId": "nm-dbrief-02",
+              "message": "The directors want a recommendation from me before they next sit down, on whether we take over the county meal contract. I'm not asking about how that meeting runs — give me the choices weighed honestly and a line on what would change my mind.",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/decision-brief-generator",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour board-agenda-reporting-builder is wrong because the user disclaims any interest in meeting mechanics and wants the reasoning itself, including the condition that would overturn the recommendation.",
+              "ms": 18121
+            },
+            {
+              "intentId": "nm-dbrief-04",
+              "message": "Three funders open in the same month and we have one writer. I don't want a deadline list — I want the case for each of the three, what we give up by picking one, and how sure you actually are of your pick.",
+              "split": "development",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/decision-brief-generator",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour grant-pipeline-lifecycle-tracker is wrong because the user refuses the deadline-tiered action list and asks instead for tradeoffs, an opportunity cost and a stated confidence level on a single recommended choice.",
+              "ms": 15617
+            },
+            {
+              "intentId": "nm-dbrief-06",
+              "message": "A funder we've courted for years will only come in if we drop the after-school programme. Do we take the money? I want the case both ways, what it costs us either direction, and your actual call — not the application copy.",
+              "split": "development",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/decision-brief-generator",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour grant-loi-proposal-drafter is wrong because the closing clause refuses submission-ready copy and the org has not yet decided whether to accept the funder's condition.",
+              "ms": 19539
+            },
+            {
+              "intentId": "oos-dbrief-01",
+              "message": "We closed the west site eighteen months ago and it was clearly the wrong call. There's no new decision on the table — I want an honest look back at how we got there so the leadership team doesn't repeat it.",
+              "split": "development",
+              "bucket": "negative-out",
+              "contaminated": {
+                "skill": "skill:cil-commons/decision-brief-generator",
+                "overlap": 0.68,
+                "isNot": true
+              },
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set covers a retrospective on a decision already taken — the decision skill is explicitly pre-decision and the only post-mortem capability in the set is scoped to AI incidents.",
+              "ms": 14611
+            },
+            {
+              "intentId": "nm-fisc-01",
+              "message": "We're two years into running the youth workshops under another charity's roof and it's getting awkward — they take a cut and control the bank account. Do we go it alone and set up our own thing, stay put, or is there a middle road?",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour decision-brief-generator is wrong because, stripped of jargon, the choice is host-charity versus standalone versus hybrid — the housing question the structure specialist owns.",
+              "ms": 18826
+            },
+            {
+              "intentId": "nm-fisc-03",
+              "message": "A foundation says they'd fund the river cleanup but we haven't got our exemption letter yet, so someone suggested running the money through an established nonprofit instead. What are our options for housing this, and what do we give up under each?",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour grant-loi-proposal-drafter is wrong because no application is being written — the blocker is that the venture has no charitable status and needs a housing arrangement before any money can be received.",
+              "ms": 14637
+            },
+            {
+              "intentId": "nm-fisc-05",
+              "message": "Half our grant money still lands in our sponsor's account and half in ours now that we have our own letter. Before I clean up the funding side, I need to know whether we should be leaving that sponsor at all and what unwinding it would involve.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour grant-pipeline-lifecycle-tracker is wrong because the grants are only the symptom and the user defers them explicitly in favour of deciding whether to exit the sponsorship arrangement.",
+              "ms": 19703
+            },
+            {
+              "intentId": "nm-fisc-06",
+              "message": "Our congregation wants to open a coffee shop that hires women coming out of trafficking. The elders want the profits feeding the ministry, but nobody wants the church's tax-exempt status anywhere near a trading business — what are the sensible ways to set this up?",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour decision-brief-generator is wrong because the late clause makes this a question about how a trading venture relates to an exempt church body, which is a structure choice rather than an open strategic option set.",
+              "ms": 13938
+            },
+            {
+              "intentId": "oos-fisc-01",
+              "message": "Our auditor flagged that we've never adopted a whistleblower policy. Can you draft one for us — how someone reports concerns, protection from retaliation, and who's meant to investigate?",
+              "split": "development",
+              "bucket": "negative-out",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set drafts whistleblower or retaliation-protection policies — the structure specialist's policy work is confined to entity, sponsorship and conflicting-role questions, and no general nonprofit policy drafter exists here.",
+              "ms": 18505
+            },
+            {
+              "intentId": "nm-gloi-01",
+              "message": "Three funders close inside the same week but Hollings is the one we are actually submitting. I still have nothing written for the section on who we serve or how we would know it worked - can you draft both at 400 words?",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/grant-loi-proposal-drafter",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour grant-pipeline-lifecycle-tracker is wrong because the competing deadlines are already resolved by the user's own choice, leaving two named sections of copy at a fixed word count for one funder.",
+              "ms": 15529
+            },
+            {
+              "intentId": "nm-gloi-03",
+              "message": "We're applying through our fiscal sponsor and the application has a whole box asking how the money would flow and who is legally accountable. We settled that arrangement last year, so I just need those two paragraphs written for the box.",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/grant-loi-proposal-drafter",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour fiscal-sponsorship-entity-advisor is wrong because the sponsorship structure is already decided and the ask is application prose describing it, not guidance on what the arrangement should be.",
+              "ms": 21166
+            },
+            {
+              "intentId": "nm-gloi-04",
+              "message": "The Merriweather giving office says they want to hear what we've been up to, but it arrived as four questions with a 500-word cap on each. Write our answers: who we serve, what we'd do with the funds, and how we'd know it worked.",
+              "split": "development",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/grant-loi-proposal-drafter",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour stakeholder-update-generator is wrong because the capped answer boxes and the forward-looking use-of-funds question mark this as one funder's application copy rather than a recap circulated to several audiences.",
+              "ms": 32112
+            },
+            {
+              "intentId": "nm-gloi-06",
+              "message": "This funder's application now asks how we oversee any AI we use in our programs. I don't need a rubric or an audit of ourselves, I need our answer written into their 300-word box by next week.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/grant-loi-proposal-drafter",
+              "chosen": "skill:cil-commons/grant-loi-proposal-drafter",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "Nearest neighbour grantee-responsible-ai-due-diligence-scorecard is wrong because the user is the applicant drafting a word-capped answer inside a funder's form, not a funder scoring anyone's AI maturity.",
+              "ms": 28774
+            },
+            {
+              "intentId": "oos-gloi-01",
+              "message": "I want to write a personal ask to the handful of individuals who each gave us ten thousand dollars last year, a warm letter over my signature for our year-end appeal rather than anything institutional.",
+              "split": "development",
+              "bucket": "negative-out",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set covers individual major-donor solicitation or year-end appeal letters, which are neither a funder application, a portfolio status view, nor a multi-audience digest of recent activity.",
+              "ms": 13138
+            },
+            {
+              "intentId": "nm-gpipe-02",
+              "message": "Before I talk to anybody I need the funding picture straight in my own head: which ones are still alive, which are dead, and what I personally have to move on this week.",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour stakeholder-update-generator is wrong because the only reader is the user, and what is wanted is a live-versus-dead status classification plus a personal action list rather than versions for other audiences.",
+              "ms": 15152
+            },
+            {
+              "intentId": "nm-gpipe-03",
+              "message": "Five funders are open to us this fall and realistically we can get two out the door. Rank them by what closes first and where we already have a warm contact, then tell me which two to chase.",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "chosen": "skill:cil-commons/ai-governance-assessor",
+              "outcome": "mis-far",
+              "label": "chose an unrelated skill",
+              "ok": false,
+              "why": "Nearest neighbour decision-brief-generator is wrong because this is deadline-tier triage across live funding entries rather than a framed choice with two to four options and tradeoffs.",
+              "ms": 20047
+            },
+            {
+              "intentId": "nm-gpipe-04",
+              "message": "Half the due dates in my funding sheet came off a newsletter and I am not sure we even qualify for three of them. Before I start writing anything for anyone, sort out which dates are real, which ones we are eligible for, and what is about to slip past me.",
+              "split": "development",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour grant-loi-proposal-drafter is wrong because drafting is deferred until the tracked entries are cleaned up; the ask is an audit of unreliable due-date sources and eligibility across the portfolio.",
+              "ms": 14244
+            },
+            {
+              "intentId": "nm-gpipe-06",
+              "message": "My co-director wants me to brief her and the team on the money situation. Honestly I can't tell anyone anything until I have my own ranked list of what is about to close and which applications are stuck, so do that first.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour stakeholder-update-generator is wrong because the requested artifact, arriving at the end of the message, is a ranked internal view of stalled and closing entries that the user needs before any audience version could be written.",
+              "ms": 16888
+            },
+            {
+              "intentId": "oos-gpipe-01",
+              "message": "Our auditor says our federal drawdowns don't tie out to the general ledger for the last two quarters. How do I reconcile them, and what do I need ready before single audit fieldwork starts?",
+              "split": "development",
+              "bucket": "negative-out",
+              "contaminated": {
+                "skill": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+                "overlap": 0.63,
+                "isNot": true
+              },
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set handles grant financial reconciliation or single-audit preparation, which is accounting and compliance work rather than pipeline tracking, drafting, or reporting to audiences.",
+              "ms": 20470
+            },
+            {
+              "intentId": "nm-gscore-01",
+              "message": "Three of the nonprofits we fund just adopted a vendor's AI case-management tool, and our renewal decisions land in November. I need a light-touch way to rate how responsibly each organization handles it, without burying a two-person team in enterprise paperwork.",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour responsible-ai-procurement-checklist is wrong because the speaker is a funder rating the practices of organizations it already funds rather than a buyer deciding whether to purchase the tool.",
+              "ms": 15832
+            },
+            {
+              "intentId": "nm-gscore-03",
+              "message": "An applicant's proposal claims their tutoring chatbot follows the federal AI risk framework and ISO 42001. I don't need a function-by-function mapping of their system, I need a rubric to weigh that claim fairly against the other applications in this round.",
+              "split": "development",
+              "bucket": "collision-a",
+              "expected": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "chosen": "skill:cil-commons/ai-governance-assessor",
+              "outcome": "mis-sib",
+              "label": "chose its sibling",
+              "ok": false,
+              "why": "Nearest neighbour nist-ai-rmf-crosswalk-generator is wrong because the speaker explicitly declines a single-system framework mapping and wants a comparative scoring rubric applied to competing applicants.",
+              "ms": 30398
+            },
+            {
+              "intentId": "nm-gscore-04",
+              "message": "One of our grantees uses an algorithm to decide which families get housing vouchers first. I am in no position to run a disparate-impact test on their model, but at the next site visit I need a consistent way to grade how they oversee and document it against the rest of the cohort.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour bias-fairness-reviewer is wrong because the speaker rules out testing the model for outcome disparities and instead wants comparable governance grading of a funded organization.",
+              "ms": 14111
+            },
+            {
+              "intentId": "nm-gscore-06",
+              "message": "Our trustees keep asking whether careful AI practices should become a written requirement in our grant agreements. I would rather skip the options memo, though, because what I actually need is the instrument we would use to grade each organization we support.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour decision-brief-generator is wrong because the speaker waves off the options-and-tradeoffs framing and asks, late in the request, for the grading instrument a funder would apply to the organizations it supports.",
+              "ms": 20733
+            },
+            {
+              "intentId": "oos-gscore-01",
+              "message": "Before we release the second tranche to any organization we support, I want a standard set of asks covering audited financials, insurance certificates and board minutes. Nothing technological about it, just the paperwork side of whether they can absorb the money.",
+              "split": "development",
+              "bucket": "negative-out",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set claims this because every governance and due-diligence skill in the library is scoped to AI or data governance, and pipeline tracking covers deadlines rather than grantee financial-capacity paperwork.",
+              "ms": 19346
+            },
+            {
+              "intentId": "nm-nist-01",
+              "message": "A university partner keeps pressing us on the donor-matching engine we call Almona before they will share data. Can you set that one engine against each of the four functions in the federal risk framework, gaps and next steps included?",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour ai-governance-assessor is wrong because the deliverable is scoped to a single named engine mapped function by function for an external reviewer, not a posture read spanning the organisation.",
+              "ms": 11730
+            },
+            {
+              "intentId": "nm-nist-02",
+              "message": "Our foundation funder wants evidence that our case-triage model lines up with the standard AI risk framework, and ideally the ISO standard for AI management systems too. Can you produce that memo for that one model so we can send it up to them?",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour grantee-responsible-ai-due-diligence-scorecard is wrong because the direction of travel is upward - the organisation authors a single-system conformance memo about itself and sends it to the funder, rather than a funder grading anyone.",
+              "ms": 14069
+            },
+            {
+              "intentId": "nm-nist-04",
+              "message": "Our biggest institutional funder's reviewers asked for a structured write-up on the benefits-eligibility screener we built - how it handles each of the four risk functions in the framework they work from, where it falls short, and what we'd fix first.",
+              "split": "development",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour ai-governance-assessor is wrong because the gap-and-next-steps language is scoped to one named screener mapped function by function, not to the organisation's overall posture.",
+              "ms": 17810
+            },
+            {
+              "intentId": "nm-nist-06",
+              "message": "We already have a decent plan for when the sermon-drafting assistant goes wrong - who gets paged, how we tell people. Our accreditation reviewer wants that plan slotted in as just one quadrant of the four-function framework write-up for that assistant, with the other three filled in too.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour ai-incident-response-playbook-builder is wrong because the response plan already exists and the late clause asks for it to be absorbed into a complete four-function crosswalk of one named assistant.",
+              "ms": 14477
+            },
+            {
+              "intentId": "oos-nist-01",
+              "message": "Our attendance forecasting model has drifted badly since last year and the numbers are off. I want to retrain it on the newer data and tune the hyperparameters properly - can you walk me through how to do that?",
+              "split": "development",
+              "bucket": "negative-out",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set covers hands-on machine-learning engineering; retraining and hyperparameter tuning sit inside the model, whereas all twelve skills are governance, fairness, funding, decision or reporting workflows that sit around one.",
+              "ms": 15672
+            },
+            {
+              "intentId": "nm-proc-01",
+              "message": "Our church office is down to two AI note-taking tools for pastoral care meetings, and the elders want a recommendation by Sunday. The feature comparison matters less to me than knowing which questions about congregants' recordings would flag a company we should walk away from.",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour decision-brief-generator is wrong because the speaker sets aside options-and-tradeoffs framing and asks for the responsible-AI questions and red flags to put to each vendor before adopting.",
+              "ms": 14464
+            },
+            {
+              "intentId": "nm-proc-02",
+              "message": "Our donor database vendor is switching on an AI feature next quarter and we have to opt in or out. I know our own internal policies are a mess, but that is a separate fight; right now I need to work out whether letting their model touch donor records is safe.",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour ai-governance-assessor is wrong because the speaker deliberately brackets their own internal posture and asks about adopting a smart feature a vendor is about to switch on.",
+              "ms": 18055
+            },
+            {
+              "intentId": "nm-proc-04",
+              "message": "A company pitching us their volunteer-screening software says the matching engine has been checked for fairness and will not discriminate. We have not paid them a cent and I have no way to test the thing myself, so what would a credible answer to that claim even look like?",
+              "split": "development",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour bias-fairness-reviewer is wrong because the speaker has no access to the system to test and instead needs to judge a selling vendor's fairness claim before any purchase.",
+              "ms": 17399
+            },
+            {
+              "intentId": "nm-proc-05",
+              "message": "Two of our program staff want to start on a case-note summarizer a peer organization recommended, and it is a paid subscription. Before I approve the spend I want to know what to look for in how the company uses everything we type into it.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "chosen": "skill:cil-commons/decision-brief-generator",
+              "outcome": "mis-sib",
+              "label": "chose its sibling",
+              "ok": false,
+              "why": "Nearest neighbour grantee-responsible-ai-due-diligence-scorecard is wrong because the peer organization is only the source of the tip; the speaker is a buyer weighing a subscription purchase, not a funder scoring another organization.",
+              "ms": 27588
+            },
+            {
+              "intentId": "oos-proc-01",
+              "message": "Our per-seat pricing on the volunteer database jumped forty percent at renewal and the contract has an auto-renew clause I missed. What leverage do we actually have to push this supplier back down before the January date?",
+              "split": "development",
+              "bucket": "negative-out",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set claims this because it is commercial contract and price negotiation on a database with no AI component and no decision framing that any of the twelve descriptions cover.",
+              "ms": 20830
+            },
+            {
+              "intentId": "nm-stake-01",
+              "message": "Same quarterly numbers, three different readers: the trustees want a page, our two funders want a couple of paragraphs, and the volunteers need it in plain language. Can you write all three so they don't contradict each other?",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/stakeholder-update-generator",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour board-agenda-reporting-builder is wrong because the governance audience is one of three parallel versions of the same facts and nothing formal, such as motions, quorum or a packet, is requested.",
+              "ms": 11168
+            },
+            {
+              "intentId": "nm-stake-03",
+              "message": "Take what I've told you about where our grants stand and give me two write-ups off the same facts, a tight one for the board and a plainer one for staff who don't follow funder jargon.",
+              "split": "development",
+              "bucket": "collision-b",
+              "expected": "skill:cil-commons/stakeholder-update-generator",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour grant-pipeline-lifecycle-tracker is wrong because the user supplies the funding status themselves and asks only for two audience-pitched renderings of it, not for the status to be assembled or prioritized.",
+              "ms": 15641
+            },
+            {
+              "intentId": "nm-stake-05",
+              "message": "Two of our funders and our lead partner each asked how the pilot is going. None of it is a required report and nothing gets submitted anywhere, so I just want one consistent set of write-ups, longer for the partner and tighter for the funders.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/stakeholder-update-generator",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour grant-loi-proposal-drafter is wrong because the user rules out any submission and asks for informal, mutually consistent versions for three separate readers.",
+              "ms": 12733
+            },
+            {
+              "intentId": "nm-stake-06",
+              "message": "We've already decided to close the Tuesday meal program and that call is made, so please don't re-open it. What I need is how we say it to the board, to the donors who funded it, and to the families who show up, each one honest and consistent with the others.",
+              "split": "development",
+              "bucket": "contextual",
+              "expected": "skill:cil-commons/stakeholder-update-generator",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "Nearest neighbour decision-brief-generator is wrong because the choice is closed and the request is three honest, mutually consistent tellings of it for different audiences.",
+              "ms": 14782
+            },
+            {
+              "intentId": "oos-stake-01",
+              "message": "A reporter at the city paper covers homelessness. I'd like a press release announcing our new night shelter plus a short pitch email I could send her, both in her register rather than ours.",
+              "split": "development",
+              "bucket": "negative-out",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "No skill in the set covers media relations, and a press release plus a journalist pitch targets one external channel rather than producing calibrated versions for the organization's own stakeholder groups.",
+              "ms": 19362
+            }
+          ],
+          "perSkill": [
+            {
+              "skill": "skill:cil-commons/ai-governance-assessor",
+              "asked": 4,
+              "right": 1,
+              "accuracy": 0.25,
+              "ci": [
+                0.09677141110578041,
+                0.700006684861608
+              ],
+              "wronglyChosen": 2,
+              "confusedWith": [
+                {
+                  "skill": "skill:cil-commons/responsible-ai-procurement-checklist",
+                  "times": 1
+                }
+              ]
+            },
+            {
+              "skill": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "asked": 4,
+              "right": 0,
+              "accuracy": 0,
+              "ci": [
+                0.03622410863243014,
+                0.6244653702374747
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/bias-fairness-reviewer",
+              "asked": 4,
+              "right": 0,
+              "accuracy": 0,
+              "ci": [
+                0,
+                0.4898908364545973
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/board-agenda-reporting-builder",
+              "asked": 4,
+              "right": 1,
+              "accuracy": 0.25,
+              "ci": [
+                0.11762077423264783,
+                0.769275718723987
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": [
+                {
+                  "skill": "skill:cil-commons/decision-brief-generator",
+                  "times": 1
+                }
+              ]
+            },
+            {
+              "skill": "skill:cil-commons/decision-brief-generator",
+              "asked": 4,
+              "right": 0,
+              "accuracy": 0,
+              "ci": [
+                0.03622410863243014,
+                0.6244653702374747
+              ],
+              "wronglyChosen": 2,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "asked": 4,
+              "right": 0,
+              "accuracy": 0,
+              "ci": [
+                0.03622410863243014,
+                0.6244653702374747
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/grant-loi-proposal-drafter",
+              "asked": 4,
+              "right": 1,
+              "accuracy": 0.25,
+              "ci": [
+                0.11762077423264783,
+                0.769275718723987
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "asked": 4,
+              "right": 0,
+              "accuracy": 0,
+              "ci": [
+                0.03622410863243014,
+                0.6244653702374747
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": [
+                {
+                  "skill": "skill:cil-commons/ai-governance-assessor",
+                  "times": 1
+                }
+              ]
+            },
+            {
+              "skill": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "asked": 4,
+              "right": 0,
+              "accuracy": 0,
+              "ci": [
+                0.03622410863243014,
+                0.6244653702374747
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": [
+                {
+                  "skill": "skill:cil-commons/ai-governance-assessor",
+                  "times": 1
+                }
+              ]
+            },
+            {
+              "skill": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "asked": 4,
+              "right": 0,
+              "accuracy": 0,
+              "ci": [
+                0.03622410863243014,
+                0.6244653702374747
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "asked": 4,
+              "right": 0,
+              "accuracy": 0,
+              "ci": [
+                0.03622410863243014,
+                0.6244653702374747
+              ],
+              "wronglyChosen": 2,
+              "confusedWith": [
+                {
+                  "skill": "skill:cil-commons/decision-brief-generator",
+                  "times": 1
+                }
+              ]
+            },
+            {
+              "skill": "skill:cil-commons/stakeholder-update-generator",
+              "asked": 4,
+              "right": 0,
+              "accuracy": 0,
+              "ci": [
+                0.03622410863243014,
+                0.6244653702374747
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            }
+          ]
+        }
+      ],
+      "comparisons": [
+        {
+          "a": "model",
+          "b": "declared",
+          "changed": [
+            "selection"
+          ],
+          "confounded": false,
+          "words": "declared vs model: accuracy down 71% — 1 intent fixed, 43 broken (significant)",
+          "deltaMacro": -0.7055555555555556,
+          "fixed": 1,
+          "broken": 43,
+          "p": 5.11590769747273e-12
+        }
+      ]
     }
   ],
   "skillContracts": [
@@ -5364,13 +7343,27 @@
           "confusedWith": []
         },
         {
-          "experiment": "stratum1-development-model-r2-notfor",
+          "experiment": "stratum1-development-model-vs-declared-r3",
           "variant": "model",
           "asked": 4,
           "right": 4,
           "accuracy": 1,
           "wronglyChosen": 1,
           "confusedWith": []
+        },
+        {
+          "experiment": "stratum1-development-model-vs-declared-r3",
+          "variant": "declared",
+          "asked": 4,
+          "right": 1,
+          "accuracy": 0.25,
+          "wronglyChosen": 2,
+          "confusedWith": [
+            {
+              "skill": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "times": 1
+            }
+          ]
         },
         {
           "experiment": "stratum2-development-model-vs-declared-r3",
@@ -5391,7 +7384,7 @@
           "confusedWith": []
         }
       ],
-      "recommendations": 0
+      "recommendations": 2
     },
     {
       "skill": "skill:cil-commons/ai-incident-response-playbook-builder",
@@ -5415,12 +7408,21 @@
           "confusedWith": []
         },
         {
-          "experiment": "stratum1-development-model-r2-notfor",
+          "experiment": "stratum1-development-model-vs-declared-r3",
           "variant": "model",
           "asked": 4,
           "right": 4,
           "accuracy": 1,
-          "wronglyChosen": 1,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "stratum1-development-model-vs-declared-r3",
+          "variant": "declared",
+          "asked": 4,
+          "right": 0,
+          "accuracy": 0,
+          "wronglyChosen": 0,
           "confusedWith": []
         },
         {
@@ -5466,12 +7468,21 @@
           "confusedWith": []
         },
         {
-          "experiment": "stratum1-development-model-r2-notfor",
+          "experiment": "stratum1-development-model-vs-declared-r3",
           "variant": "model",
           "asked": 4,
           "right": 4,
           "accuracy": 1,
-          "wronglyChosen": 1,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "stratum1-development-model-vs-declared-r3",
+          "variant": "declared",
+          "asked": 4,
+          "right": 0,
+          "accuracy": 0,
+          "wronglyChosen": 0,
           "confusedWith": []
         },
         {
@@ -5517,13 +7528,27 @@
           "confusedWith": []
         },
         {
-          "experiment": "stratum1-development-model-r2-notfor",
+          "experiment": "stratum1-development-model-vs-declared-r3",
           "variant": "model",
           "asked": 4,
           "right": 4,
           "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
+        },
+        {
+          "experiment": "stratum1-development-model-vs-declared-r3",
+          "variant": "declared",
+          "asked": 4,
+          "right": 1,
+          "accuracy": 0.25,
+          "wronglyChosen": 0,
+          "confusedWith": [
+            {
+              "skill": "skill:cil-commons/decision-brief-generator",
+              "times": 1
+            }
+          ]
         },
         {
           "experiment": "stratum2-development-model-vs-declared-r3",
@@ -5544,7 +7569,7 @@
           "confusedWith": []
         }
       ],
-      "recommendations": 0
+      "recommendations": 1
     },
     {
       "skill": "skill:cil-commons/decision-brief-generator",
@@ -5568,12 +7593,21 @@
           "confusedWith": []
         },
         {
-          "experiment": "stratum1-development-model-r2-notfor",
+          "experiment": "stratum1-development-model-vs-declared-r3",
           "variant": "model",
           "asked": 4,
           "right": 4,
           "accuracy": 1,
           "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "stratum1-development-model-vs-declared-r3",
+          "variant": "declared",
+          "asked": 4,
+          "right": 0,
+          "accuracy": 0,
+          "wronglyChosen": 2,
           "confusedWith": []
         },
         {
@@ -5595,7 +7629,7 @@
           "confusedWith": []
         }
       ],
-      "recommendations": 0
+      "recommendations": 1
     },
     {
       "skill": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
@@ -5619,12 +7653,21 @@
           "confusedWith": []
         },
         {
-          "experiment": "stratum1-development-model-r2-notfor",
+          "experiment": "stratum1-development-model-vs-declared-r3",
           "variant": "model",
           "asked": 4,
           "right": 4,
           "accuracy": 1,
-          "wronglyChosen": 1,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "stratum1-development-model-vs-declared-r3",
+          "variant": "declared",
+          "asked": 4,
+          "right": 0,
+          "accuracy": 0,
+          "wronglyChosen": 0,
           "confusedWith": []
         },
         {
@@ -5670,15 +7713,84 @@
           "confusedWith": []
         },
         {
-          "experiment": "stratum1-development-model-r2-notfor",
+          "experiment": "stratum1-development-model-vs-declared-r3",
           "variant": "model",
           "asked": 4,
+          "right": 1,
+          "accuracy": 0.25,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "stratum1-development-model-vs-declared-r3",
+          "variant": "declared",
+          "asked": 4,
+          "right": 1,
+          "accuracy": 0.25,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "stratum2-development-model-vs-declared-r3",
+          "variant": "model",
+          "asked": 1,
+          "right": 1,
+          "accuracy": 1,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "stratum2-development-model-vs-declared-r3",
+          "variant": "declared",
+          "asked": 1,
+          "right": 0,
+          "accuracy": 0,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        }
+      ],
+      "recommendations": 0
+    },
+    {
+      "skill": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+      "slates": [
+        {
+          "experiment": "stratum1-heldout-model-vs-rules-r1",
+          "variant": "model",
+          "asked": 2,
           "right": 2,
-          "accuracy": 0.5,
+          "accuracy": 1,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "stratum1-heldout-model-vs-rules-r1",
+          "variant": "rules",
+          "asked": 2,
+          "right": 0,
+          "accuracy": 0,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "stratum1-development-model-vs-declared-r3",
+          "variant": "model",
+          "asked": 4,
+          "right": 4,
+          "accuracy": 1,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "stratum1-development-model-vs-declared-r3",
+          "variant": "declared",
+          "asked": 4,
+          "right": 0,
+          "accuracy": 0,
           "wronglyChosen": 0,
           "confusedWith": [
             {
-              "skill": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "skill": "skill:cil-commons/ai-governance-assessor",
               "times": 1
             }
           ]
@@ -5705,57 +7817,6 @@
       "recommendations": 1
     },
     {
-      "skill": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
-      "slates": [
-        {
-          "experiment": "stratum1-heldout-model-vs-rules-r1",
-          "variant": "model",
-          "asked": 2,
-          "right": 2,
-          "accuracy": 1,
-          "wronglyChosen": 0,
-          "confusedWith": []
-        },
-        {
-          "experiment": "stratum1-heldout-model-vs-rules-r1",
-          "variant": "rules",
-          "asked": 2,
-          "right": 0,
-          "accuracy": 0,
-          "wronglyChosen": 0,
-          "confusedWith": []
-        },
-        {
-          "experiment": "stratum1-development-model-r2-notfor",
-          "variant": "model",
-          "asked": 4,
-          "right": 4,
-          "accuracy": 1,
-          "wronglyChosen": 0,
-          "confusedWith": []
-        },
-        {
-          "experiment": "stratum2-development-model-vs-declared-r3",
-          "variant": "model",
-          "asked": 1,
-          "right": 1,
-          "accuracy": 1,
-          "wronglyChosen": 0,
-          "confusedWith": []
-        },
-        {
-          "experiment": "stratum2-development-model-vs-declared-r3",
-          "variant": "declared",
-          "asked": 1,
-          "right": 0,
-          "accuracy": 0,
-          "wronglyChosen": 0,
-          "confusedWith": []
-        }
-      ],
-      "recommendations": 0
-    },
-    {
       "skill": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
       "slates": [
         {
@@ -5777,13 +7838,27 @@
           "confusedWith": []
         },
         {
-          "experiment": "stratum1-development-model-r2-notfor",
+          "experiment": "stratum1-development-model-vs-declared-r3",
           "variant": "model",
           "asked": 4,
           "right": 4,
           "accuracy": 1,
-          "wronglyChosen": 1,
+          "wronglyChosen": 0,
           "confusedWith": []
+        },
+        {
+          "experiment": "stratum1-development-model-vs-declared-r3",
+          "variant": "declared",
+          "asked": 4,
+          "right": 0,
+          "accuracy": 0,
+          "wronglyChosen": 0,
+          "confusedWith": [
+            {
+              "skill": "skill:cil-commons/ai-governance-assessor",
+              "times": 1
+            }
+          ]
         },
         {
           "experiment": "stratum2-development-model-vs-declared-r3",
@@ -5804,7 +7879,7 @@
           "confusedWith": []
         }
       ],
-      "recommendations": 0
+      "recommendations": 1
     },
     {
       "skill": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
@@ -5828,11 +7903,20 @@
           "confusedWith": []
         },
         {
-          "experiment": "stratum1-development-model-r2-notfor",
+          "experiment": "stratum1-development-model-vs-declared-r3",
           "variant": "model",
           "asked": 4,
           "right": 4,
           "accuracy": 1,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "stratum1-development-model-vs-declared-r3",
+          "variant": "declared",
+          "asked": 4,
+          "right": 0,
+          "accuracy": 0,
           "wronglyChosen": 0,
           "confusedWith": []
         },
@@ -5884,7 +7968,7 @@
           "confusedWith": []
         },
         {
-          "experiment": "stratum1-development-model-r2-notfor",
+          "experiment": "stratum1-development-model-vs-declared-r3",
           "variant": "model",
           "asked": 4,
           "right": 3,
@@ -5892,7 +7976,21 @@
           "wronglyChosen": 0,
           "confusedWith": [
             {
-              "skill": "skill:cil-commons/bias-fairness-reviewer",
+              "skill": "skill:cil-commons/ai-governance-assessor",
+              "times": 1
+            }
+          ]
+        },
+        {
+          "experiment": "stratum1-development-model-vs-declared-r3",
+          "variant": "declared",
+          "asked": 4,
+          "right": 0,
+          "accuracy": 0,
+          "wronglyChosen": 2,
+          "confusedWith": [
+            {
+              "skill": "skill:cil-commons/decision-brief-generator",
               "times": 1
             }
           ]
@@ -5916,7 +8014,7 @@
           "confusedWith": []
         }
       ],
-      "recommendations": 1
+      "recommendations": 3
     },
     {
       "skill": "skill:cil-commons/stakeholder-update-generator",
@@ -5940,11 +8038,20 @@
           "confusedWith": []
         },
         {
-          "experiment": "stratum1-development-model-r2-notfor",
+          "experiment": "stratum1-development-model-vs-declared-r3",
           "variant": "model",
           "asked": 4,
           "right": 4,
           "accuracy": 1,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "stratum1-development-model-vs-declared-r3",
+          "variant": "declared",
+          "asked": 4,
+          "right": 0,
+          "accuracy": 0,
           "wronglyChosen": 0,
           "confusedWith": []
         },
@@ -6015,115 +8122,6 @@
         "numbers": {
           "minPerSkill": 2,
           "maxPerSkill": 2
-        }
-      }
-    },
-    {
-      "rule": "R1-abstention",
-      "severity": "act",
-      "experiment": "stratum1-development-model-r2-notfor",
-      "variant": "model",
-      "title": "Declines only 9/12 asks it should (target ≥ 95%)",
-      "detail": "3 out-of-scope asks got a skill anyway: “We have nothing written down about staff using AI. Can you draft us an…” → ai-governance-assessor; “A volunteer clicked a phishing link last week and someone used our pay…” → ai-incident-response-playbook-builder; “Before we release the second tranche to any organization we support, I…” → grantee-responsible-ai-due-diligence-scorecard.",
-      "change": "Give the skills that fired declared `isNot` examples of these asks (and a NOT-for line in the description), or measure a selection approach that can decline (the declared selector).",
-      "evidence": {
-        "intents": [
-          "oos-agov-01",
-          "oos-airp-01",
-          "oos-gscore-01"
-        ],
-        "numbers": {
-          "hold": 0.75,
-          "declined": 9,
-          "of": 12
-        }
-      }
-    },
-    {
-      "rule": "R3-confusion",
-      "severity": "act",
-      "experiment": "stratum1-development-model-r2-notfor",
-      "variant": "model",
-      "skill": "skill:cil-commons/grant-loi-proposal-drafter",
-      "title": "Asks for grant-loi-proposal-drafter went to fiscal-sponsorship-entity-advisor (1×)",
-      "detail": "“We're applying through our fiscal sponsor and the application has a whole box asking how t…”",
-      "change": "State the boundary in both descriptions (when it is grant-loi-proposal-drafter and not fiscal-sponsorship-entity-advisor), and add these sentences to grant-loi-proposal-drafter's `says` examples.",
-      "evidence": {
-        "intents": [
-          "nm-gloi-03"
-        ],
-        "numbers": {
-          "times": 1
-        }
-      }
-    },
-    {
-      "rule": "R3-confusion",
-      "severity": "act",
-      "experiment": "stratum1-development-model-r2-notfor",
-      "variant": "model",
-      "skill": "skill:cil-commons/responsible-ai-procurement-checklist",
-      "title": "Asks for responsible-ai-procurement-checklist went to bias-fairness-reviewer (1×)",
-      "detail": "“A company pitching us their volunteer-screening software says the matching engine has been…”",
-      "change": "State the boundary in both descriptions (when it is responsible-ai-procurement-checklist and not bias-fairness-reviewer), and add these sentences to responsible-ai-procurement-checklist's `says` examples.",
-      "evidence": {
-        "intents": [
-          "nm-proc-04"
-        ],
-        "numbers": {
-          "times": 1
-        }
-      }
-    },
-    {
-      "rule": "R4-missed",
-      "severity": "watch",
-      "experiment": "stratum1-development-model-r2-notfor",
-      "variant": "model",
-      "title": "1 ask a skill should handle got no skill",
-      "detail": "“The Merriweather giving office says they want to hear what we've been up to, but…” → should be grant-loi-proposal-drafter",
-      "change": "Check the skill's description names this situation; add it to its `says` examples.",
-      "evidence": {
-        "intents": [
-          "nm-gloi-04"
-        ],
-        "numbers": {
-          "missed": 1
-        }
-      }
-    },
-    {
-      "rule": "R0-contamination",
-      "severity": "act",
-      "experiment": "stratum1-development-model-r2-notfor",
-      "variant": "model",
-      "title": "2 of 60 test sentences are (nearly) the skills' own examples — their results do not measure selection",
-      "detail": "“We closed the west site eighteen months ago and it was clearly the wro…” ≈ an example of decision-brief-generator (68% of its words); “Our auditor says our federal drawdowns don't tie out to the general le…” ≈ an example of grant-pipeline-lifecycle-tracker (63% of its words)",
-      "change": "Keep test sentences out of the skills' examples: write examples from other phrasings, or move these sentences to a set nobody writes examples from, and re-measure on fresh sentences before reading a lift.",
-      "evidence": {
-        "intents": [
-          "oos-dbrief-01",
-          "oos-gpipe-01"
-        ],
-        "numbers": {
-          "contaminated": 2,
-          "of": 60
-        }
-      }
-    },
-    {
-      "rule": "R5-sample-size",
-      "severity": "info",
-      "experiment": "stratum1-development-model-r2-notfor",
-      "variant": "model",
-      "title": "Too few cases per skill to pass or fail a skill (4–4 each)",
-      "detail": "At this size a skill's interval spans roughly 44%–100% even when every case is right, so the per-skill gate cannot pass.",
-      "change": "Grow the slate toward ~40 cases per skill before treating a per-skill result as a verdict; use repeats (Stage 2) to measure instability.",
-      "evidence": {
-        "intents": [],
-        "numbers": {
-          "minPerSkill": 4,
-          "maxPerSkill": 4
         }
       }
     },
@@ -6295,6 +8293,335 @@
       }
     },
     {
+      "rule": "R3-confusion",
+      "severity": "act",
+      "experiment": "stratum1-development-model-vs-declared-r3",
+      "variant": "model",
+      "skill": "skill:cil-commons/responsible-ai-procurement-checklist",
+      "title": "Asks for responsible-ai-procurement-checklist went to ai-governance-assessor (1×)",
+      "detail": "“A company pitching us their volunteer-screening software says the matching engine has been…”",
+      "change": "State the boundary in both descriptions (when it is responsible-ai-procurement-checklist and not ai-governance-assessor), and add these sentences to responsible-ai-procurement-checklist's `says` examples.",
+      "evidence": {
+        "intents": [
+          "nm-proc-04"
+        ],
+        "numbers": {
+          "times": 1
+        }
+      }
+    },
+    {
+      "rule": "R4-missed",
+      "severity": "act",
+      "experiment": "stratum1-development-model-vs-declared-r3",
+      "variant": "model",
+      "title": "3 asks a skill should handle got no skill",
+      "detail": "“We're applying through our fiscal sponsor and the application has a whole box as…” → should be grant-loi-proposal-drafter; “The Merriweather giving office says they want to hear what we've been up to, but…” → should be grant-loi-proposal-drafter; “This funder's application now asks how we oversee any AI we use in our programs.…” → should be grant-loi-proposal-drafter",
+      "change": "Check the skill's description names this situation; add it to its `says` examples.",
+      "evidence": {
+        "intents": [
+          "nm-gloi-03",
+          "nm-gloi-04",
+          "nm-gloi-06"
+        ],
+        "numbers": {
+          "missed": 3
+        }
+      }
+    },
+    {
+      "rule": "R0-contamination",
+      "severity": "act",
+      "experiment": "stratum1-development-model-vs-declared-r3",
+      "variant": "model",
+      "title": "2 of 60 test sentences are (nearly) the skills' own examples — their results do not measure selection",
+      "detail": "“We closed the west site eighteen months ago and it was clearly the wro…” ≈ an example of decision-brief-generator (68% of its words); “Our auditor says our federal drawdowns don't tie out to the general le…” ≈ an example of grant-pipeline-lifecycle-tracker (63% of its words)",
+      "change": "Keep test sentences out of the skills' examples: write examples from other phrasings, or move these sentences to a set nobody writes examples from, and re-measure on fresh sentences before reading a lift.",
+      "evidence": {
+        "intents": [
+          "oos-dbrief-01",
+          "oos-gpipe-01"
+        ],
+        "numbers": {
+          "contaminated": 2,
+          "of": 60
+        }
+      }
+    },
+    {
+      "rule": "R5-sample-size",
+      "severity": "info",
+      "experiment": "stratum1-development-model-vs-declared-r3",
+      "variant": "model",
+      "title": "Too few cases per skill to pass or fail a skill (4–4 each)",
+      "detail": "At this size a skill's interval spans roughly 61%–100% even when every case is right, so the per-skill gate cannot pass.",
+      "change": "Grow the slate toward ~40 cases per skill before treating a per-skill result as a verdict; use repeats (Stage 2) to measure instability.",
+      "evidence": {
+        "intents": [],
+        "numbers": {
+          "minPerSkill": 4,
+          "maxPerSkill": 4
+        }
+      }
+    },
+    {
+      "rule": "R1-abstention",
+      "severity": "act",
+      "experiment": "stratum1-development-model-vs-declared-r3",
+      "variant": "declared",
+      "title": "Declines only 11/12 asks it should (target ≥ 95%)",
+      "detail": "1 out-of-scope ask got a skill anyway: “We have nothing written down about staff using AI. Can you draft us an…” → responsible-ai-procurement-checklist.",
+      "change": "Give the skills that fired declared `isNot` examples of these asks (and a NOT-for line in the description), or measure a selection approach that can decline (the declared selector).",
+      "evidence": {
+        "intents": [
+          "oos-agov-01"
+        ],
+        "numbers": {
+          "hold": 0.9166666666666666,
+          "declined": 11,
+          "of": 12
+        }
+      }
+    },
+    {
+      "rule": "R2-attractor",
+      "severity": "act",
+      "experiment": "stratum1-development-model-vs-declared-r3",
+      "variant": "declared",
+      "skill": "skill:cil-commons/responsible-ai-procurement-checklist",
+      "title": "responsible-ai-procurement-checklist is chosen for asks that are not its job (2×)",
+      "detail": "“We already signed up for three AI tools last year without much thought - one of …” (chose its sibling); “We have nothing written down about staff using AI. Can you draft us an actual ac…” (should have declined)",
+      "change": "Narrow responsible-ai-procurement-checklist's description and add these as its `isNot` examples; if they belong to a sibling, add a hand-off clause.",
+      "evidence": {
+        "intents": [
+          "nm-agov-04",
+          "oos-agov-01"
+        ],
+        "numbers": {
+          "times": 2
+        }
+      }
+    },
+    {
+      "rule": "R2-attractor",
+      "severity": "act",
+      "experiment": "stratum1-development-model-vs-declared-r3",
+      "variant": "declared",
+      "skill": "skill:cil-commons/decision-brief-generator",
+      "title": "decision-brief-generator is chosen for asks that are not its job (2×)",
+      "detail": "“Our exec committee is chewing over whether to merge the two program teams and ev…” (chose its sibling); “Two of our program staff want to start on a case-note summarizer a peer organiza…” (chose its sibling)",
+      "change": "Narrow decision-brief-generator's description and add these as its `isNot` examples; if they belong to a sibling, add a hand-off clause.",
+      "evidence": {
+        "intents": [
+          "nm-board-06",
+          "nm-proc-05"
+        ],
+        "numbers": {
+          "times": 2
+        }
+      }
+    },
+    {
+      "rule": "R2-attractor",
+      "severity": "act",
+      "experiment": "stratum1-development-model-vs-declared-r3",
+      "variant": "declared",
+      "skill": "skill:cil-commons/ai-governance-assessor",
+      "title": "ai-governance-assessor is chosen for asks that are not its job (2×)",
+      "detail": "“Five funders are open to us this fall and realistically we can get two out the d…” (chose an unrelated skill); “An applicant's proposal claims their tutoring chatbot follows the federal AI ris…” (chose its sibling)",
+      "change": "Narrow ai-governance-assessor's description and add these as its `isNot` examples; if they belong to a sibling, add a hand-off clause.",
+      "evidence": {
+        "intents": [
+          "nm-gpipe-03",
+          "nm-gscore-03"
+        ],
+        "numbers": {
+          "times": 2
+        }
+      }
+    },
+    {
+      "rule": "R3-confusion",
+      "severity": "act",
+      "experiment": "stratum1-development-model-vs-declared-r3",
+      "variant": "declared",
+      "skill": "skill:cil-commons/ai-governance-assessor",
+      "title": "Asks for ai-governance-assessor went to responsible-ai-procurement-checklist (1×)",
+      "detail": "“We already signed up for three AI tools last year without much thought - one of them we ba…”",
+      "change": "State the boundary in both descriptions (when it is ai-governance-assessor and not responsible-ai-procurement-checklist), and add these sentences to ai-governance-assessor's `says` examples.",
+      "evidence": {
+        "intents": [
+          "nm-agov-04"
+        ],
+        "numbers": {
+          "times": 1
+        }
+      }
+    },
+    {
+      "rule": "R3-confusion",
+      "severity": "act",
+      "experiment": "stratum1-development-model-vs-declared-r3",
+      "variant": "declared",
+      "skill": "skill:cil-commons/board-agenda-reporting-builder",
+      "title": "Asks for board-agenda-reporting-builder went to decision-brief-generator (1×)",
+      "detail": "“Our exec committee is chewing over whether to merge the two program teams and everyone has…”",
+      "change": "State the boundary in both descriptions (when it is board-agenda-reporting-builder and not decision-brief-generator), and add these sentences to board-agenda-reporting-builder's `says` examples.",
+      "evidence": {
+        "intents": [
+          "nm-board-06"
+        ],
+        "numbers": {
+          "times": 1
+        }
+      }
+    },
+    {
+      "rule": "R3-confusion",
+      "severity": "act",
+      "experiment": "stratum1-development-model-vs-declared-r3",
+      "variant": "declared",
+      "skill": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+      "title": "Asks for grant-pipeline-lifecycle-tracker went to ai-governance-assessor (1×)",
+      "detail": "“Five funders are open to us this fall and realistically we can get two out the door. Rank …”",
+      "change": "State the boundary in both descriptions (when it is grant-pipeline-lifecycle-tracker and not ai-governance-assessor), and add these sentences to grant-pipeline-lifecycle-tracker's `says` examples.",
+      "evidence": {
+        "intents": [
+          "nm-gpipe-03"
+        ],
+        "numbers": {
+          "times": 1
+        }
+      }
+    },
+    {
+      "rule": "R3-confusion",
+      "severity": "act",
+      "experiment": "stratum1-development-model-vs-declared-r3",
+      "variant": "declared",
+      "skill": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+      "title": "Asks for grantee-responsible-ai-due-diligence-scorecard went to ai-governance-assessor (1×)",
+      "detail": "“An applicant's proposal claims their tutoring chatbot follows the federal AI risk framewor…”",
+      "change": "State the boundary in both descriptions (when it is grantee-responsible-ai-due-diligence-scorecard and not ai-governance-assessor), and add these sentences to grantee-responsible-ai-due-diligence-scorecard's `says` examples.",
+      "evidence": {
+        "intents": [
+          "nm-gscore-03"
+        ],
+        "numbers": {
+          "times": 1
+        }
+      }
+    },
+    {
+      "rule": "R3-confusion",
+      "severity": "act",
+      "experiment": "stratum1-development-model-vs-declared-r3",
+      "variant": "declared",
+      "skill": "skill:cil-commons/responsible-ai-procurement-checklist",
+      "title": "Asks for responsible-ai-procurement-checklist went to decision-brief-generator (1×)",
+      "detail": "“Two of our program staff want to start on a case-note summarizer a peer organization recom…”",
+      "change": "State the boundary in both descriptions (when it is responsible-ai-procurement-checklist and not decision-brief-generator), and add these sentences to responsible-ai-procurement-checklist's `says` examples.",
+      "evidence": {
+        "intents": [
+          "nm-proc-05"
+        ],
+        "numbers": {
+          "times": 1
+        }
+      }
+    },
+    {
+      "rule": "R4-missed",
+      "severity": "act",
+      "experiment": "stratum1-development-model-vs-declared-r3",
+      "variant": "declared",
+      "title": "40 asks a skill should handle got no skill",
+      "detail": "“We're a small family foundation and we've started leaning on AI inside our own g…” → should be ai-governance-assessor; “Last quarter our AI assistant leaked a client's address in a mass email and we h…” → should be ai-governance-assessor; “We just finished a maturity review of every AI tool we run and the weakest score…” → should be ai-incident-response-playbook-builder; “When our AI scheduling assistant leaked two clients' phone numbers into the wron…” → should be ai-incident-response-playbook-builder",
+      "change": "Add `says` examples phrased like these asks to the skills they belong to — the declared selector only knows the sentences it was given.",
+      "evidence": {
+        "intents": [
+          "nm-agov-03",
+          "nm-agov-06",
+          "nm-airp-01",
+          "nm-airp-03",
+          "nm-airp-04",
+          "nm-airp-06",
+          "nm-bias-01",
+          "nm-bias-03",
+          "nm-bias-05",
+          "nm-bias-06",
+          "nm-board-01",
+          "nm-board-04",
+          "nm-dbrief-01",
+          "nm-dbrief-02",
+          "nm-dbrief-04",
+          "nm-dbrief-06",
+          "nm-fisc-01",
+          "nm-fisc-03",
+          "nm-fisc-05",
+          "nm-fisc-06",
+          "nm-gloi-01",
+          "nm-gloi-03",
+          "nm-gloi-04",
+          "nm-gpipe-02",
+          "nm-gpipe-04",
+          "nm-gpipe-06",
+          "nm-gscore-01",
+          "nm-gscore-04",
+          "nm-gscore-06",
+          "nm-nist-01",
+          "nm-nist-02",
+          "nm-nist-04",
+          "nm-nist-06",
+          "nm-proc-01",
+          "nm-proc-02",
+          "nm-proc-04",
+          "nm-stake-01",
+          "nm-stake-03",
+          "nm-stake-05",
+          "nm-stake-06"
+        ],
+        "numbers": {
+          "missed": 40
+        }
+      }
+    },
+    {
+      "rule": "R0-contamination",
+      "severity": "act",
+      "experiment": "stratum1-development-model-vs-declared-r3",
+      "variant": "declared",
+      "title": "2 of 60 test sentences are (nearly) the skills' own examples — their results do not measure selection",
+      "detail": "“We closed the west site eighteen months ago and it was clearly the wro…” ≈ an example of decision-brief-generator (68% of its words); “Our auditor says our federal drawdowns don't tie out to the general le…” ≈ an example of grant-pipeline-lifecycle-tracker (63% of its words)",
+      "change": "Keep test sentences out of the skills' examples: write examples from other phrasings, or move these sentences to a set nobody writes examples from, and re-measure on fresh sentences before reading a lift.",
+      "evidence": {
+        "intents": [
+          "oos-dbrief-01",
+          "oos-gpipe-01"
+        ],
+        "numbers": {
+          "contaminated": 2,
+          "of": 60
+        }
+      }
+    },
+    {
+      "rule": "R5-sample-size",
+      "severity": "info",
+      "experiment": "stratum1-development-model-vs-declared-r3",
+      "variant": "declared",
+      "title": "Too few cases per skill to pass or fail a skill (4–4 each)",
+      "detail": "At this size a skill's interval spans roughly 10%–100% even when every case is right, so the per-skill gate cannot pass.",
+      "change": "Grow the slate toward ~40 cases per skill before treating a per-skill result as a verdict; use repeats (Stage 2) to measure instability.",
+      "evidence": {
+        "intents": [],
+        "numbers": {
+          "minPerSkill": 4,
+          "maxPerSkill": 4
+        }
+      }
+    },
+    {
       "rule": "R7-regressions",
       "severity": "watch",
       "experiment": "stratum1-heldout-model-vs-rules-r1",
@@ -6327,24 +8654,39 @@
       }
     },
     {
+      "rule": "R7-regressions",
+      "severity": "watch",
+      "experiment": "stratum1-development-model-vs-declared-r3",
+      "variant": "declared",
+      "title": "declared broke 43 intents that model got right",
+      "detail": "declared vs model: accuracy down 71% — 1 intent fixed, 43 broken (significant)",
+      "change": "Open the broken intents; a repair that fixes some and breaks others needs its boundary tightened, not shipped.",
+      "evidence": {
+        "intents": [],
+        "numbers": {
+          "fixed": 1,
+          "broken": 43
+        }
+      }
+    },
+    {
       "rule": "R8-change-effect",
       "severity": "info",
-      "experiment": "stratum1-development-model-r2-notfor",
+      "experiment": "stratum1-development-model-vs-declared-r3",
       "variant": "model",
-      "title": "Since stratum1-development-model-r1: 3 fixed, 2 broken (model)",
-      "detail": "fixed “Three of our trustees roll off next June and nobody's lined …”; fixed “We closed the west site eighteen months ago and it was clear…”; fixed “Our per-seat pricing on the volunteer database jumped forty …”; broke “Before we release the second tranche to any organization we …” (should have declined); broke “A company pitching us their volunteer-screening software say…” (chose an unrelated skill)",
+      "title": "Since stratum1-development-model-r2-notfor: 3 fixed, 1 broken (model)",
+      "detail": "fixed “We have nothing written down about staff using AI. Can you d…”; fixed “A volunteer clicked a phishing link last week and someone us…”; fixed “Before we release the second tranche to any organization we …”; broke “This funder's application now asks how we oversee any AI we …” (chose nothing)",
       "change": "Keep the change only if the broken intents are explained; otherwise revert or narrow it.",
       "evidence": {
         "intents": [
-          "oos-board-01",
-          "oos-dbrief-01",
-          "oos-proc-01",
+          "oos-agov-01",
+          "oos-airp-01",
           "oos-gscore-01",
-          "nm-proc-04"
+          "nm-gloi-06"
         ],
         "numbers": {
           "fixed": 3,
-          "broken": 2
+          "broken": 1
         }
       }
     },
@@ -6374,7 +8716,7 @@
   ],
   "headline": [
     "cil-commons-routing-stratum-1@1 (held-out) — model: 24/24 right skill; rules: 0/24 right skill",
-    "cil-commons-routing-stratum-1@1 (development) — model: 45/48 right skill, declined 9/12 it should",
+    "cil-commons-routing-stratum-1@1 (development) — model: 44/48 right skill, declined 12/12 it should; declared: 3/48 right skill, declined 11/12 it should",
     "cil-commons-routing-stratum-2@1 (development) — model: 16/17 right skill, declined 10/12 it should; declared: 0/17 right skill, declined 12/12 it should"
   ],
   "glossary": {
