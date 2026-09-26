@@ -522,7 +522,9 @@ export async function fetchRunMeasures(session: { token: string }, addressee: Ad
     const on = String(n['computedOn'] ?? '');
     const prefix = `urn:ap:prov:act:${runRef}:`;
     const step = on.startsWith(prefix) ? on.slice(prefix.length) : undefined;
-    return { metric, value: Number(n['value']), ...(n['unit'] ? { unit: String(n['unit']).split(/[#/]/).pop() } : {}), ...(step ? { step } : {}) };
+    // UCUM: `{count}` is an annotation (a dimensionless count) — no unit to print; `ms`, `By` … are units.
+    const unit = n['unit'] ? String(n['unit']).split(/[#/]/).pop()!.replace(/^\{.*\}$/, '') : '';
+    return { metric, value: Number(n['value']), ...(unit ? { unit } : {}), ...(step ? { step } : {}) };
   });
   return { rows };
 }
