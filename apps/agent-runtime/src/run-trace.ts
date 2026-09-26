@@ -42,7 +42,7 @@ export function doorFromBody(body: unknown, inWorker: boolean): RunDoorV1 | null
   return { kind: 'a2a-message', ...(id(d.messageId) ? { messageId: id(d.messageId)! } : {}), ...(id(d.contextId) ? { contextId: id(d.contextId)! } : {}), ...(id(d.taskId) ? { taskId: id(d.taskId)! } : {}) };
 }
 
-const PLANNER_KINDS = new Set(['supplied', 'compiled', 'rule-based']);
+const PLANNER_KINDS = new Set(['supplied', 'compiled', 'rule-based', 'declared']);
 /** supplied | compiled | rule-based stay what they are; any provider name is a model planner. */
 export const plannerKindOf = (planner: string | undefined): string | undefined => (!planner ? undefined : PLANNER_KINDS.has(planner) ? planner : 'model');
 
@@ -84,12 +84,13 @@ export function engagedFromTrace(trace: PlannerTraceV1 | undefined): HarnessEnga
   if (approach) {
     const iri = (id: string) => `urn:ap:capability:${id}`;
     const chose = [...new Set((trace.plan ?? []).map((s) => s.toolId))].map(iri);
-    out.push({ capability: approach, effect: chose.length ? 'changed-plan' : 'no-change', offered: [...new Set(trace.toolsExposed ?? [])].map(iri), ...(chose.length ? { chose } : {}) });
+    const rejected = (trace.selection?.rejected ?? []).map(iri);
+    out.push({ capability: approach, effect: chose.length ? 'changed-plan' : 'no-change', offered: [...new Set(trace.toolsExposed ?? [])].map(iri), ...(chose.length ? { chose } : {}), ...(rejected.length ? { rejected } : {}) });
   }
   return out;
 }
 
-const SELECTION_APPROACH: Record<string, string> = { model: 'skill-selection/model', compiled: 'skill-selection/ontology', 'rule-based': 'skill-selection/rules' };
+const SELECTION_APPROACH: Record<string, string> = { model: 'skill-selection/model', compiled: 'skill-selection/ontology', 'rule-based': 'skill-selection/rules', declared: 'skill-selection/rules' };
 
 /**
  * THE VARIANT KNOB — spec 415 A4. A comparison run asks `/harness/ask` to run ONE THING differently: the planner kind,
@@ -100,6 +101,8 @@ const SELECTION_APPROACH: Record<string, string> = { model: 'skill-selection/mod
  */
 export interface VariantRequestV1 {
   plannerKind?: 'model' | 'rule-based';
+  /** How instruction skills are selected: the model over the descriptions, or the declared utterances (holds on a miss). */
+  selection?: 'model' | 'declared';
   provider?: string;
   toggles?: Record<string, string>;
   playbook?: string;
@@ -115,6 +118,7 @@ export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantR
   const out: VariantRequestV1 = {};
   for (const k of Object.keys(v)) {
     if (k === 'plannerKind') { if (v[k] !== 'model' && v[k] !== 'rule-based') return { ok: false, error: 'plannerKind must be model | rule-based' }; out.plannerKind = v[k] as 'model' | 'rule-based'; }
+    else if (k === 'selection') { if (v[k] !== 'model' && v[k] !== 'declared') return { ok: false, error: 'selection must be model | declared' }; out.selection = v[k] as 'model' | 'declared'; }
     else if (k === 'provider') { if (typeof v[k] !== 'string' || !/^[a-z][a-z0-9-]{1,30}$/.test(v[k] as string)) return { ok: false, error: 'provider must be a provider name' }; out.provider = v[k] as string; }
     else if (k === 'playbook') { if (typeof v[k] !== 'string' || !/^(0x[0-9a-fA-F]{64}|sha256:[0-9a-f]{64})$/.test(v[k] as string)) return { ok: false, error: 'playbook must be a definition digest' }; out.playbook = v[k] as string; }
     else if (k === 'toggles') {
@@ -132,7 +136,7 @@ export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantR
       if (!st || typeof st !== 'object' || typeof st['domain'] !== 'string' || typeof st['scenarioId'] !== 'string' || typeof st['digest'] !== 'string' || !/^(sha256:[0-9a-f]{64}|0x[0-9a-fA-F]{64})$/.test(st['digest'])) return { ok: false, error: 'startingState must be { domain, scenarioId, digest } — the digest of the seeded records' };
       out.startingState = { domain: st['domain'], scenarioId: st['scenarioId'], digest: st['digest'] };
     }
-    else return { ok: false, error: `${k}: not a variant component (plannerKind, provider, toggles, playbook, startingState)` };
+    else return { ok: false, error: `${k}: not a variant component (plannerKind, selection, provider, toggles, playbook, startingState)` };
   }
   return { ok: true, variant: out };
 }
