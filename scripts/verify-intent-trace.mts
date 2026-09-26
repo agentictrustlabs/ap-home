@@ -9,6 +9,7 @@
  *   3. `/harness/provenance` → the run `arrivedBy` a Door with doorKind `a2a-message` and THIS message's id and THIS
  *      task's id; `underVariant` a Variant named by sha256; `hasEngagement` names a planner; every model call carries
  *      a role; the graph carries none of the ask's words;
+ *   3b. the run's measurements (`run.measures:<runRef>`, W3C DQV) landed beside it — the export report says so;
  *   4. the direct ask (`/harness/ask`) answers with a PROV-AQ `Link` header (`has_provenance`, `has_query_service`).
  *
  *   npx tsx scripts/verify-intent-trace.mts          (HANDLE=… TARGET=<agent name> ASK=… A2A_ENDPOINT=… to vary)
@@ -79,6 +80,18 @@ console.log(`── model calls ── ${calls.map((c) => `${String(c?.['invocat
 if (calls.some((c) => !c?.['invocationRole'])) fail('R8: a model call names no role');
 const text = JSON.stringify(prov.provenance).toLowerCase();
 for (const w of ASK.toLowerCase().split(/\W+/).filter((x) => x.length > 6)) if (text.includes(w)) fail(`the graph carries the ask's words ("${w}")`);
+
+// ── 3b. the measurements (spec 414 A2): beside the provenance, in the same vault, said on the export report ──
+// The export runs AFTER the reply (the anchor is an on-chain write), so the report is polled for, never assumed.
+type ExportReport = { export?: { measures?: { written: boolean; count: number; error?: string } } | null };
+let measures: NonNullable<NonNullable<ExportReport['export']>['measures']> | undefined;
+for (let i = 0; i < 15 && !measures; i++) {
+  const spans = await j(await post('/harness/spans', { session: si.homeSession, addressee: (hp!.agent ?? me).toLowerCase(), runRef })) as ExportReport;
+  measures = spans.export?.measures;
+  if (!measures) await new Promise((r) => setTimeout(r, 3000));
+}
+console.log(`── measurements ── ${measures ? `${measures.count} written=${measures.written}${measures.error ? ` (${measures.error})` : ''}` : 'no report'}`);
+if (!measures?.written) fail(`the run's measurements did not land in the vault: ${JSON.stringify(measures ?? null)}`);
 
 // ── 4. the Link header on a direct ask ──
 const direct = await post('/harness/ask', { session: si.homeSession, addressee: me, message: ASK });
