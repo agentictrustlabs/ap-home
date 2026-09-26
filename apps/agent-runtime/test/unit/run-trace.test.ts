@@ -107,3 +107,26 @@ describe('spec 415 §3a — the skill-selection engagement', () => {
     expect(engagedFromTrace({ planner: 'supplied', toolsExposed: ['x'], plan: [{ toolId: 'x', args: {} }], bindings: [], admission: [] } as never)).toEqual([]);
   });
 });
+
+describe('judgment in the ontology\'s terms reaches the PROV graph (spec 415 A4)', () => {
+  it('the skill-selection/judgment engagement carries the request typed as domain classes', async () => {
+    const { engagedFromTrace } = await import('../../src/run-trace.js');
+    const CIC = 'https://skills.demo/cil-commons#';
+    const t = { planner: 'judgment', toolsExposed: ['cic.grants.draft', 'cic.board.packet'], plan: [{ toolId: 'cic.grants.draft', args: {} }],
+      selection: { approach: 'judgment', chose: 'cic.grants.draft', rejected: ['cic.board.packet'], intent: { requests: `${CIC}LetterOfInquiry`, about: [`${CIC}GrantPipeline`] }, covering: ['cic.grants.draft'], distribution: {}, grounded: [], judge: { name: 'j', kind: 'model' }, params: { floor: 0.3, margin: 0.15 } } } as never;
+    const [e] = engagedFromTrace(t);
+    expect(e).toMatchObject({ capability: 'skill-selection/judgment', effect: 'changed-plan', chose: ['urn:ap:capability:cic.grants.draft'], rejected: ['urn:ap:capability:cic.board.packet'], intent: { requests: `${CIC}LetterOfInquiry`, about: [`${CIC}GrantPipeline`] } });
+    const ALICE = '0xb0d11ce19b756a682e78b4904cd8d832303b3d11';
+    const record: RunRecordV1 = { type: 'ap.run-record.v1', runRef: 'run-j', at: 1_788_920_800_000, intent: { goal: 'draft an LOI', context: { addressee: ALICE, asker: ALICE } }, plan: { steps: [] }, steps: [], receipts: [], events: [], outcome: 'completed', engaged: engagedFromTrace(t) };
+    const doc = await provenanceGraphOf({ CHAIN_ID: '34348' }, ALICE, record) as { graph: Array<Record<string, unknown>> };
+    const run = doc.graph.find((n) => n['id'] === 'urn:ap:prov:act:run-j')!;
+    const eng = (run['hasEngagement'] as Array<Record<string, unknown>>).find((x) => String(x['ofCapability']).endsWith('hc-skillSelectionJudgment'))!;
+    expect(eng['inferredRequest']).toBe(`${CIC}LetterOfInquiry`);
+    expect(eng['inferredAbout']).toEqual([`${CIC}GrantPipeline`]);
+  });
+  it('a request the judge reads as outside the domain is typed apexec:OutsideDomain', async () => {
+    const { engagedFromTrace } = await import('../../src/run-trace.js');
+    const t = { planner: 'judgment', toolsExposed: [], plan: [{ toolId: 'ask.unsupported', args: {} }], selection: { approach: 'judgment', chose: null, hold: 'outside-domain', rejected: [], intent: { requests: 'outside-domain', about: [] }, covering: [], distribution: {}, grounded: [], judge: { name: 'j', kind: 'model' }, params: { floor: 0.3, margin: 0.15 } } } as never;
+    expect(engagedFromTrace(t)[0]!.intent).toEqual({ requests: 'https://agenticprimitives.dev/ns/execution#OutsideDomain' });
+  });
+});
