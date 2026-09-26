@@ -92,9 +92,11 @@ export function engagedFromTrace(trace: PlannerTraceV1 | undefined): HarnessEnga
     const o = sel.approach === 'ontology' ? sel : sel.ontology;
     const grounded = typed({ about: o.grounded.map((g) => g.iri) });
     // The rule: what it could choose from, what it grounded, and — alone — what it chose; composed, the judge's slate.
-    if (sel.approach === 'ontology') push('skill-selection/ontology', planned.length ? 'changed-plan' : 'no-change', offeredAll, planned, (o.hold === 'ambiguous' ? o.survivors : []).map(iri), grounded);
+    // Rejected: the tied survivors (an ambiguous hold) and every skill an adjacent class excluded.
+    const ruleRejected = [...new Set([...(o.hold === 'ambiguous' ? o.survivors : []), ...Object.keys(o.excluded ?? {})])].map(iri);
+    if (sel.approach === 'ontology') push('skill-selection/ontology', planned.length ? 'changed-plan' : 'no-change', offeredAll, planned, ruleRejected, grounded);
     else {
-      push('skill-selection/ontology', o.survivors.length ? 'changed-plan' : 'no-change', offeredAll, [], [], grounded);
+      push('skill-selection/ontology', o.survivors.length ? 'changed-plan' : 'no-change', offeredAll, [], Object.keys(o.excluded ?? {}).map(iri), grounded);
       if (sel.judgment) push('skill-selection/judgment', planned.length ? 'changed-plan' : 'no-change', sel.judgment.offered.map(iri), planned, sel.judgment.rejected.map(iri), typed(sel.judgment.intent));
     }
   } else if (sel && sel.approach === 'judgment') {
