@@ -12,6 +12,7 @@ import { StatePill } from '../StatePill';
 import { List, Row, Panel, Stats, Stat, FilterChip, SearchInput, DayHeader, Drawer, Button, timeLabel, type PanelState } from '../../../ui';
 import { stateOf, stateTone, type RunStateSource } from '../../../home/run-state';
 import { ClockIcon } from '../today-icons';
+import { facetsOf, applyFacets, threadsOf, FACET_LABELS, type FacetKey } from '../../../home/run-trace-view';
 
 /** A finished run's record carries its `outcome` (350 `RunOutcome`); the pill shows the projected state (398 §5.1). */
 const sourceOf = (r: RunRecordRow): RunStateSource => ({ kind: 'run', outcome: r.outcome as Extract<RunStateSource, { kind: 'run' }>['outcome'], ...(r.canceled ? { canceled: true } : {}) });
@@ -35,6 +36,10 @@ export function RunHistory({ token, addressee, limit = 60 }: { token: string; ad
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
   const [shownLimit, setShownLimit] = useState(limit);
+  // Spec 415 A3 — LangSmith's run filters and Threads: facet by skill · capability · model · planner · door, and group a
+  // conversation's runs by its A2A contextId.
+  const [facets, setFacets] = useState<Partial<Record<FacetKey, string>>>({});
+  const [threads, setThreads] = useState(false);
   useEffect(() => {
     let live = true;
     setRows(null); setUnknown(null);
@@ -55,8 +60,10 @@ export function RunHistory({ token, addressee, limit = 60 }: { token: string; ad
   }, [rows]);
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return (rows ?? []).filter((r) => (filter === 'all' || bucketOf(r) === filter) && (!needle || (r.intent?.goal ?? r.runRef).toLowerCase().includes(needle) || r.runRef.toLowerCase().includes(needle)));
-  }, [rows, filter, q]);
+    return applyFacets((rows ?? []).filter((r) => (filter === 'all' || bucketOf(r) === filter) && (!needle || (r.intent?.goal ?? r.runRef).toLowerCase().includes(needle) || r.runRef.toLowerCase().includes(needle))), facets);
+  }, [rows, filter, q, facets]);
+  const facetValues = useMemo(() => facetsOf(rows ?? []), [rows]);
+  const threadGroups = useMemo(() => (threads ? threadsOf(filtered) : []), [threads, filtered]);
   const shown = filtered.slice(0, shownLimit);
   const groups = useMemo(() => { const g: Array<{ day: number; rows: RunRecordRow[] }> = []; for (const r of shown) { const last = g[g.length - 1]; if (last && dayKey(last.day) === dayKey(r.at)) last.rows.push(r); else g.push({ day: r.at, rows: [r] }); } return g; }, [shown]);
   const state: PanelState = rows === null ? 'loading' : unknown ? 'unknown' : filtered.length ? 'ready' : 'empty';
@@ -74,14 +81,38 @@ export function RunHistory({ token, addressee, limit = 60 }: { token: string; ad
         <SearchInput placeholder="Search what was asked…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search runs" />
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {FILTERS.map((f) => <FilterChip key={f.id} active={filter === f.id} count={rows ? counts[f.id] : undefined} onClick={() => setFilter(f.id)}>{f.label}</FilterChip>)}
+          <FilterChip active={threads} onClick={() => setThreads((t) => !t)} data-testid="run-threads-toggle">Threads</FilterChip>
         </div>
+      </div>
+      <div className="ui-toolbar" data-testid="run-facets" style={{ flexWrap: 'wrap', gap: 8 }}>
+        {(Object.keys(FACET_LABELS) as FacetKey[]).filter((k) => facetValues[k].length).map((k) => (
+          <label key={k} style={{ display: 'inline-flex', gap: 4, alignItems: 'center', fontSize: 'var(--fs-sm)' }}>
+            <span className="ui-micro">{FACET_LABELS[k]}</span>
+            <select value={facets[k] ?? ''} onChange={(e) => setFacets((f) => ({ ...f, [k]: e.target.value || undefined }))} data-testid={`run-facet-${k}`} aria-label={`Filter by ${FACET_LABELS[k].toLowerCase()}`}>
+              <option value="">any</option>
+              {facetValues[k].map((v) => <option key={v.value} value={v.value}>{v.value} ({v.count})</option>)}
+            </select>
+          </label>
+        ))}
       </div>
       <Panel title="What this agent did" icon={<ClockIcon />} count={filtered.length} state={state} rows={5} testId="run-history"
         aside={<span>every run you asked of it — opened, each step, its authority, its provenance</span>}
         empty={{ icon: <ClockIcon />, ...emptyWords }}
         unknown={{ read: <>the runs could not be read ({unknown})</> }}>
         <div style={{ padding: '0 var(--sp-4) var(--sp-3)' }}>
-          {groups.map((g) => (
+          {threads && threadGroups.map((t) => (
+            <div key={t.id} data-testid="run-thread">
+              <p className="ui-micro" style={{ margin: 'var(--sp-3) 0 var(--sp-1)' }}>{t.contextId ? `conversation ${t.contextId.slice(0, 18)}` : 'a single run'} · {t.runs.length} run{t.runs.length === 1 ? '' : 's'} · {timeLabel(t.lastAt)}</p>
+              <List>
+                {t.runs.map((r) => (
+                  <Row key={r.runRef} title={(r.intent?.goal ?? r.runRef).slice(0, 140)}
+                    meta={<>{r.steps} step{r.steps === 1 ? '' : 's'}{r.variant?.plannerKind ? ` · planner ${r.variant.plannerKind}` : ''}{r.skills?.length ? ` · ${r.skills.length} skill${r.skills.length === 1 ? '' : 's'}` : ''}</>}
+                    side={<><StatePill state={stateOf(sourceOf(r))} native={r.outcome} compact /><Button size="sm" variant="ghost" onClick={() => setOpen(r)}>Inspect</Button></>} />
+                ))}
+              </List>
+            </div>
+          ))}
+          {!threads && groups.map((g) => (
             <div key={dayKey(g.day)}>
               <DayHeader at={g.day} />
               <List>

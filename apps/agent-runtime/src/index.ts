@@ -458,6 +458,8 @@ export interface Env {
   /** Spec 414 §8 / 415 A4 — `on` on an estate that runs COMPARISONS: unlocks the `variant` knob on `/harness/ask` (for
    *  the agent's own steward) and is the estate's half of the eval-store capture gate. Never on a production estate. */
   EVAL_CAPTURE?: string;
+  /** The runtime's build (a deployment version id or commit), named on every run's Variant when the deploy sets it. */
+  HARNESS_BUILD?: string;
 
   /** spec 334 §6 gather phase — a PUBLIC read-only SPARQL endpoint the coordination agent may query
    *  to gather reference facts (domain-agnostic: the query is model-authored per the org playbook,
@@ -3030,6 +3032,7 @@ app.post('/harness/provenance', async (c) => {
   if (body.format === 'measures') {
     const vdeps = harnessDeps(c.env, buildAuditSink(c.env));
     const store = vaultProvenanceStore({ readSubjectRecord: vdeps.readSubjectRecord });
+    if (!store) return c.json({ ok: false, error: 'this runtime has no vault binding to read measurements from', status: 'refused' }, 503);
     const read = await store.get({ agent: addressee, key: runMeasuresRecordKey(body.runRef) });
     if (read.status === 'found') return c.json({ ok: true, hasProvenance: ref, measures: read.document, export: rec.export?.measures ?? null });
     return c.json({ ok: false, error: read.status === 'refused' ? `refused: ${read.reason}` : 'no measurements yet', status: read.status, export: rec.export?.measures ?? null }, read.status === 'refused' ? 403 : 404);

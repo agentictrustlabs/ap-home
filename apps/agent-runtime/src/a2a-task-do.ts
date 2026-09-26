@@ -1036,7 +1036,10 @@ export class A2aTaskDO {
         const live = rows.filter((r) => now - Number(r.at ?? 0) <= ttl)
           .map(({ presented: _p, events: _e, ...rest }): Record<string, unknown> => full
             ? { ...rest, steps: ((rest.steps as Array<Record<string, unknown>> | undefined) ?? []).map((st) => ({ stepRef: st.stepRef, toolId: st.toolId, ok: st.ok, ...(st.error ? { error: st.error } : {}), ...(st.skipped ? { skipped: true } : {}) })), receipts: ((rest.receipts as unknown[] | undefined) ?? []).length }
-            : ({ ...rest, steps: (rest.steps as unknown[] | undefined)?.length ?? 0, receipts: (rest.receipts as unknown[] | undefined)?.length ?? 0 }))
+            // Spec 415 A3 — the list's facets: the skill contracts that governed the steps and the tools they ran (ids only).
+            : ({ ...rest, steps: (rest.steps as unknown[] | undefined)?.length ?? 0, receipts: (rest.receipts as unknown[] | undefined)?.length ?? 0,
+                skills: [...new Set(((rest.receipts as Array<{ skill?: { id?: string } }> | undefined) ?? []).map((r) => r.skill?.id).filter((x): x is string => !!x))],
+                tools: [...new Set(((rest.steps as Array<{ toolId?: string }> | undefined) ?? []).map((st) => st.toolId).filter((x): x is string => !!x))] }))
           .sort((a, b) => Number(b.at ?? 0) - Number(a.at ?? 0));
         return Response.json({ ok: true, records: live, retention: recordRetention(this.env) });
       }
