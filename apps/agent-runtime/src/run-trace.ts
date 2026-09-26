@@ -77,8 +77,19 @@ export function engagedFromTrace(trace: PlannerTraceV1 | undefined): HarnessEnga
   if (trace.bindings?.some((b) => b.source === 'standing')) out.push({ capability: 'standing-instructions', effect: 'changed-plan' });
   if (trace.bindings?.some((b) => b.source === 'memory')) out.push({ capability: 'confirmation-memory', effect: 'changed-plan' });
   if (trace.admission?.length && trace.admission.every((a) => !a.refused.length)) out.push({ capability: 'plan-admission', effect: 'no-change' });
+  // Spec 415 §3a — SKILL SELECTION: the approach that chose (by the planner kind — a compiled shape is the ontology-
+  // grounded one, spec 355; a supplied plan made no selection), what it could choose from (the tools the planner was
+  // shown) and what it chose (the tools in the plan) — as capability IRIs, never words.
+  const approach = SELECTION_APPROACH[plannerKindOf(trace.planner) ?? ''];
+  if (approach) {
+    const iri = (id: string) => `urn:ap:capability:${id}`;
+    const chose = [...new Set((trace.plan ?? []).map((s) => s.toolId))].map(iri);
+    out.push({ capability: approach, effect: chose.length ? 'changed-plan' : 'no-change', offered: [...new Set(trace.toolsExposed ?? [])].map(iri), ...(chose.length ? { chose } : {}) });
+  }
   return out;
 }
+
+const SELECTION_APPROACH: Record<string, string> = { model: 'skill-selection/model', compiled: 'skill-selection/ontology', 'rule-based': 'skill-selection/rules' };
 
 /** The variant this run ran under: the playbook, the planner kind, the route policy, the build, the toggles. */
 export function variantOf(env: RunTraceEnv, trace: PlannerTraceV1 | undefined): VariantV1 {

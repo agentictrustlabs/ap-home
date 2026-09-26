@@ -73,3 +73,13 @@ describe('engagedFromTrace — what only the planner trace can see', () => {
     expect(engagedFromTrace(undefined)).toEqual([]);
   });
 });
+
+describe('spec 415 §3a — the skill-selection engagement', () => {
+  it('names the approach by planner kind, the candidates offered and the tools chosen, as capability IRIs', async () => {
+    const { engagedFromTrace } = await import('../../src/run-trace.js');
+    const t = { planner: 'compiled', toolsExposed: ['people.members.list', 'treasury.payment.execute', 'people.members.list'], plan: [{ toolId: 'people.members.list', args: {} }], bindings: [], admission: [] } as never;
+    expect(engagedFromTrace(t)).toEqual([{ capability: 'skill-selection/ontology', effect: 'changed-plan', offered: ['urn:ap:capability:people.members.list', 'urn:ap:capability:treasury.payment.execute'], chose: ['urn:ap:capability:people.members.list'] }]);
+    expect(engagedFromTrace({ planner: 'groq', toolsExposed: [], plan: [], bindings: [], admission: [] } as never)).toEqual([{ capability: 'skill-selection/model', effect: 'no-change', offered: [] }]);
+    expect(engagedFromTrace({ planner: 'supplied', toolsExposed: ['x'], plan: [{ toolId: 'x', args: {} }], bindings: [], admission: [] } as never)).toEqual([]);
+  });
+});
