@@ -5,7 +5,7 @@ const AGENT = '0x' + 'a'.repeat(40);
 const record = (over: Record<string, unknown> = {}) => ({
   type: 'ap.run-record.v1', runRef: 'run-1', at: 1_700_000_100_000, receivedAt: 1_700_000_098_000, intent: { goal: 'pay bob', context: { asker: '0x' + 'b'.repeat(40), surface: { realm: 'org' } } }, plan: { steps: [] },
   steps: [{ stepRef: 's0', toolId: 'treasury.balance.read', args: {}, ok: true }, { stepRef: 's1', toolId: 'treasury.payment.execute', args: { usdc: '5' }, ok: true, result: { txHash: '0x1' } }],
-  receipts: [{}, {}], events: [], outcome: 'completed', planner: { kind: 'model', provider: 'xai', model: 'grok' }, bill: { vaultCalls: 7, doRequests: 3, byStep: {} }, ...over,
+  receipts: [{}, {}], events: [], outcome: 'completed', variant: { plannerKind: 'model' }, modelCalls: [{ role: 'plan', provider: 'xai', model: 'grok' }], bill: { vaultCalls: 7, doRequests: 3, byStep: {} }, ...over,
 }) as never;
 
 describe('the operator index (spec 406 W1) — numbers and ids, never words', () => {

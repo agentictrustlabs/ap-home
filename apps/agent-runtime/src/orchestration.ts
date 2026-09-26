@@ -54,7 +54,7 @@ export const ORCHESTRATION_TOOLS: ToolSpec[] = [
 ];
 
 /** The deterministic default planner (no model, no creds) — the LIVE default. Maps a goal → a plan. */
-const RULE_BASED_PLANNER: Planner = createRuleBasedPlanner([
+export const RULE_BASED_PLANNER: Planner = createRuleBasedPlanner([
   // MULTI-STEP: "show me everything / all my data" → list the vault, then read the FIRST record the list
   // returns. Step 2's recordType is threaded from step 1's result via a path $ref (the loop resolves
   // `list.record_types.0.record_type`). Exercises the loop's multi-step composition + $ref threading live.

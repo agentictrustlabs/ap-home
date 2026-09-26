@@ -377,6 +377,8 @@ export const RUN_PROVENANCE_RESOURCE_SCOPE = 'vault:run.provenance:*' as const;
 export const RUN_ARTIFACT_RESOURCE_SCOPE = 'vault:run.artifact:*' as const;
 /** Spec 410 §4.4 — the citation beside a run's bundle: which chain-qualified registry anchored it, and in which estate. */
 export const RUN_ANCHOR_RESOURCE_SCOPE = 'vault:run.anchor:*' as const;
+/** Spec 414 A2 — a run's measurements beside its provenance. Additive: a grant signed before it denies the record until re-issued. */
+export const RUN_MEASURES_RESOURCE_SCOPE = 'vault:run.measures:*' as const;
 /** Spec 385 — the person's own SCOPED CONFIRMATION MEMORY: which "David" they meant, per (word, capability,
  *  argument). Evidence the resolver cites, never a grant a verifier reads (ADR-0041). Additive like the
  *  household record: a grant signed before this scope existed denies the record until re-issued. */

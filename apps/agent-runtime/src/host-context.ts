@@ -11,7 +11,7 @@
 // access we parse the Host header ourselves.
 
 import { isCapabilityId } from '@agenticprimitives/capability-claims';
-import { apAuthorityExtension } from '@agenticprimitives/a2a';
+import { apAuthorityExtension, runProvenanceExtension } from '@agenticprimitives/a2a';
 import { AgentNamingClient, parseSubdomainLabel, typedNameForLabel, parseTypedAgentHost as parseTypedHost, hostForName as hostFor, agentNameForHandle as nameForHandle } from '@agenticprimitives/agent-naming';
 import type { Address } from '@agenticprimitives/types';
 
@@ -322,6 +322,9 @@ export function buildA2aAgentCard(
           methods: ['delegation', 'session-wire', 'mandate'],
           chain: `eip155:${chainId}`,
         }),
+        // Spec 414 A1c — every run this agent answers says where its provenance is (PROV-AQ on the wire).
+        // Unconditional: every run is recorded, and the pointer discloses nothing a reader without standing can use.
+        runProvenanceExtension(),
         ...(provenanceEnabled
           ? [
               {

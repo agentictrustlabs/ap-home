@@ -38,6 +38,7 @@ import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
 import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
 import { PLAYBOOK_ANSWER_TOOL, playbookAnswerAvailable, playbookAnswerInvoker, type PlaybookMaterial } from './playbook-answer.js';
+import { instructionSkillTools, instructionSourcesOf, skillApplyInvoker, skillReaderFor } from './skill-apply.js';
 import { appendNote, dayRecordsFor, reviewDaysOf, studyFrom, studyRecords, type StudyAccess } from './card-room.js';
 import { memoryRecordFor } from './playbook-memory.js';
 import { remembered, forget } from './run-memo.js';
@@ -64,7 +65,7 @@ import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
 import { ADAPTER, CARRIES } from './adapter-declarations.js';
 import { relationshipCredentialDigest, termsDigestOf, type RelationshipCredentialBodyV1 } from '@agenticprimitives/agent-relationships';
-import { replayingInvoker, inputsFor, type RunRecordV1, type RunMarks, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent } from '@agenticprimitives/orchestration';
+import { replayingInvoker, inputsFor, type RunRecordV1, type RunMarks, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent , selectByDeclaredUtterances } from '@agenticprimitives/orchestration';
 import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, standingFor, declareInstruction, forgetInstruction, instructionContextOf, STANDING_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
@@ -89,9 +90,15 @@ import { RELATIONSHIP_TYPE, ROLE } from '@agenticprimitives/agent-relationships'
 import type { AuditSink } from '@agenticprimitives/audit';
 import { enforcersFromEnv } from './org-wire.js';
 import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a';
-import { routeProvider, routePolicy, meterFor, selectPlanner, selectComposer, defaultProvider, plannerPromptBudget, type LlmProvider, type RoutePolicy, type RouteDecision, type RouteNeed } from './orchestration.js';
+import { routeProvider, routePolicy, meterFor, selectPlanner, selectComposer, defaultProvider, plannerPromptBudget, type LlmProvider, type RoutePolicy, type RouteDecision, type RouteNeed , RULE_BASED_PLANNER } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from '@agenticprimitives/context';
 import { structuredCallFor, kbRetrievalMode } from './context-wiring.js';
+
+/** Spec 415 A4 — the estate's retrieval mode, unless a comparison run toggled it (`retrieval/kb`). */
+const kbModeOf = (env: { KB_RETRIEVAL?: string }, variant: HarnessRunInput['variant']): ReturnType<typeof kbRetrievalMode> => {
+  const t = variant?.toggles?.['retrieval/kb'];
+  return t === 'off' || t === 'tool' || t === 'playbook' ? t : kbRetrievalMode(env);
+};
 import type { DefinitionToolV1 } from '@agenticprimitives/capability-claims';
 import { CATALOG_TOOLS, catalogBindingFor, catalogInvoker, isCatalogTool } from './catalog-tools.js';
 import { playbookProvenanceFromReceipts } from './skill-provenance.js';
@@ -116,6 +123,9 @@ import { vaultServerId } from './vault-server-id.js';
 export interface HarnessEnv {
   /** Spec 408 — the estate's contract generation ("1" pre-spec-408, "2" spec 408); absent ⇒ "1". */
   CONTRACTS_GENERATION?: string;
+  /** Spec 415 A4 — the skills corpus (service binding to skills-mcp): where an INSTRUCTION skill's body is read, by the
+   *  digest its playbook tool names, when the planner chooses it. Absent ⇒ instruction skills are not offered. */
+  SKILLS_MCP?: Fetcher;
   /** Spec 397 W2 — the ARD registry this agent finds other agents in (`POST /search`); absent ⇒ no find tool. */
   ARD_REGISTRY_ORIGIN?: string;
   /** The Home origins this agent serves — the first is used for links a person can follow. */
@@ -1073,7 +1083,7 @@ export interface RoutedStepV1 { stepRef: string; toolId: string; agent: string; 
   standing?: { relation: string; subject: string; principal: string; because: string; wireRef?: string } }
 
 /** The routed steps of a run, read from each observation's `via` — the sender's record of the hop. */
-export function routedStepsOf(steps: ReadonlyArray<{ step: { id?: string; toolId: string }; result?: unknown }>): RoutedStepV1[] {
+export function routedStepsOf(steps: ReadonlyArray<{ stepRef?: string; step: { id?: string; toolId: string }; result?: unknown }>): RoutedStepV1[] {
   const out: RoutedStepV1[] = [];
   steps.forEach((o, i) => {
     const via = (o.result as { via?: { agent?: string; name?: string | null; observedVia?: string; runRef?: string; receipts?: Array<{ binding?: { standing?: RoutedStepV1['standing'] } }>; childRef?: string } } | null | undefined)?.via;
@@ -1081,7 +1091,9 @@ export function routedStepsOf(steps: ReadonlyArray<{ step: { id?: string; toolId
     // Spec 383 W2 — the receiver's receipt names the standing the hop ran under; lifted so the asker's reply
     // (and the Home) can say "for Missio Nexus, under steward wire 0x…" without shipping the receipts whole.
     const standing = (via.receipts ?? []).map((r) => r?.binding?.standing).find((sd) => sd && sd.relation !== 'none');
-    out.push({ stepRef: o.step.id ?? `s${i}`, toolId: o.step.toolId, agent: via.agent, ...(via.name ? { name: via.name } : {}), observedVia: via.observedVia ?? 'unknown', ...(via.runRef ? { runRef: via.runRef } : {}), ...(via.receipts?.length ? { receipts: via.receipts.length } : {}), ...(via.childRef ? { childRef: via.childRef } : {}), ...(standing ? { standing } : {}) });
+    // The observation's OWN stepRef, never its index: a run that begins with the spec-413 retrieval step (`retrieve`)
+    // shifted every index by one, so the reply named `s1` for the step the record (and its provenance graph) calls `s0`.
+    out.push({ stepRef: o.stepRef ?? o.step.id ?? `s${i}`, toolId: o.step.toolId, agent: via.agent, ...(via.name ? { name: via.name } : {}), observedVia: via.observedVia ?? 'unknown', ...(via.runRef ? { runRef: via.runRef } : {}), ...(via.receipts?.length ? { receipts: via.receipts.length } : {}), ...(via.childRef ? { childRef: via.childRef } : {}), ...(standing ? { standing } : {}) });
   });
   return out;
 }
@@ -2480,6 +2492,10 @@ export interface HarnessRunInput {
   /** Spec 377 — the provider this turn plans, composes and looks things up with. Absent ⇒ the deployment
    *  default. Validated by the caller against what the deployment offers; never a gate input. */
   provider?: LlmProvider;
+  /** Spec 415 A4 — what a COMPARISON asked this run to do differently (already admitted by the caller: a
+   *  comparison estate, the agent's own steward). The planner kind and the capability toggles apply here; the
+   *  provider was folded into `provider`. Behaviour, never authority. */
+  variant?: { plannerKind?: 'model' | 'rule-based'; selection?: 'model' | 'declared'; toggles?: Record<string, string> };
   /** The agent being asked. Informational tools that read an organization's own records default to it —
    *  "who are the members" asked OF an organization means that one. */
   addressee?: Address;
@@ -2752,6 +2768,9 @@ export interface PlannerTraceV1 {
   admission: Array<{ refused: Array<{ code: string; message: string; stepIndex?: number; toolId?: string }>; replanned: boolean }>;
   /** The plan that ran (or was refused last), as the executor received it BEFORE argument resolution. */
   plan: Array<{ toolId: string; args: Record<string, unknown> }>;
+  /** Spec 415 A4 — what the DECLARED selector decided (`skill-selection/rules`): the choice or the hold, the rejected
+   *  neighbour, every candidate's score, the parameters. Absent when the model or a compiled shape planned. */
+  selection?: { approach: 'declared'; chose: string | null; hold?: string; rejected: string[]; scores: Record<string, number>; params: { threshold: number; margin: number } };
   /** Each party binding and WHERE IT CAME FROM (spec 367 §3): the person's words, a decision rule, memory, or the resolver. */
   bindings: Array<{ arg: string; raw: string; agent: string; label?: string; source: 'said' | 'context' | 'standing' | 'decision' | 'memory' | 'resolver' | 'disclosed'; because?: string }>;
   /** What the surface declared (spec 353): the realm kind and how many capabilities it offered. */
@@ -4809,8 +4828,22 @@ step is then handed to that agent under authority the person grants; leave it ou
           // Spec 402 W3 — a sentence with a clock, said at the person's own agent, is a routine to keep (read back first).
           const compiled = compiledSkillAnswer() ?? compiledConsult(rest) ?? compiledRead(rest) ?? compiledFanOut(rest) ?? compiledPayment(rest) ?? (input.person && input.addressee && input.person.toLowerCase() === input.addressee.toLowerCase() ? compiledRoutine(rest) : null);
           if (compiled) { plannerUsed = 'compiled'; return withSpecialists(named ? withExecutor(compiled, named) : compiled, playbook?.specialists, pin.tools); }
+          // Spec 415 A4 — SELECTION BY DECLARED VOCABULARY: among the playbook's instruction skills, by their contracts'
+          // utterances, choosing with a margin or HOLDING (a plan of `ask.unsupported` — no skill, said plainly). The
+          // decision is on the trace; the model is not consulted on this path.
+          if (input.variant?.selection === 'declared') {
+            const sources = instructionSourcesOf(playbook);
+            const candidates = Object.values(playbook?.tools ?? {}).filter((t) => sources[t.id] && t.utterances?.length).map((t) => ({ id: t.id, utterances: t.utterances! }));
+            const sel = selectByDeclaredUtterances(rest, candidates);
+            plannerUsed = 'declared';
+            trace.selection = { approach: 'declared', chose: sel.chose, ...(sel.hold ? { hold: sel.hold } : {}), rejected: sel.rejected, scores: sel.scores, params: sel.params };
+            const step = sel.chose ? { toolId: sel.chose, args: { question: pin.intent.goal }, id: 's0' } : { toolId: UNSUPPORTED_TOOL.id, args: { what: pin.intent.goal }, id: 's0' };
+            return withSpecialists({ steps: [step], rationale: sel.chose ? `declared: ${sel.chose} by its utterances` : `declared: held (${sel.hold})` }, playbook?.specialists, pin.tools);
+          }
           plannerUsed = selected.kind;
-          if (selected.kind === 'rule-based') return withSpecialists(await selected.planner.plan(pin), playbook?.specialists, pin.tools);
+          // Spec 415 A4 — a comparison may ask for the rule-based planner on a deployment that offers a model: the
+          // same planner `selectPlanner` reaches when no provider is configured, chosen per run and named on the trace.
+          if (selected.kind === 'rule-based' || input.variant?.plannerKind === 'rule-based') { plannerUsed = 'rule-based'; return withSpecialists(await RULE_BASED_PLANNER.plan(pin), playbook?.specialists, pin.tools); }
           // Spec 388 — THE ROUTE, decided here where the prompt is whole and the tools are known: the full
           // prompt's estimate against each offered provider's budget and this minute's spend. A provider that
           // carries the whole prompt gets it untrimmed; only when none does is the first one served a fitted prompt.
@@ -4878,12 +4911,16 @@ step is then handed to that agent under authority the person grants; leave it ou
   const advertised = material && input.addressee && deps.advertisedCapabilities ? await timed('prepare:advertised', () => remembered(`advertised:${String(input.addressee).toLowerCase()}`, () => deps.advertisedCapabilities!(input.addressee!).catch(() => [] as string[]))) : [];
   mark('advertised');
   const playbookAnswer = playbookAnswerAvailable({ call: structuredCallFor(env as never, input.provider), material, advertised }) ? [PLAYBOOK_ANSWER_TOOL] : [];
+  // Spec 415 A4 — the playbook's INSTRUCTION SKILLS (a tool per skill, answered under its own body): offered only where
+  // the corpus is bound, because a tool that cannot run is not listed.
+  const instructionTools = env.SKILLS_MCP ? instructionSkillTools(playbook) : [];
   const tools = [
     ...playbookAnswer,
+    ...instructionTools,
     ...scopedActionTools(input.surface, playbook), ...catalogTools, ...mcpTools, ...ASK_DISCOVERY_TOOLS,
     ...(kbQuestionAvailable({ call: structuredCallFor(env as never, input.provider) }) ? [KB_QUESTION_TOOL] : []),
     // Spec 413 — passages from the public tier (released shelf works + agent descriptions), where the estate binds an index.
-    ...(kbRetrievalMode(env as never) !== 'off' ? [KB_RETRIEVE_TOOL] : []),
+    ...(kbModeOf(env as never, input.variant) !== 'off' ? [KB_RETRIEVE_TOOL] : []),
     // Spec 379 — an outside A2A 1.0 agent may ANSWER inside a run; its words are an observation.
     EXTERNAL_AGENT_TOOL,
     // Spec 397 W2 — the enterprise behind this agent: FIND in the registry (only where one is configured — a tool that
@@ -4990,9 +5027,13 @@ step is then handed to that agent under authority the person grants; leave it ou
   const answerInvoke = playbookAnswer.length
     ? playbookAnswerInvoker({ call: structuredCallFor(env as never, input.provider), instructions: playbook?.instructions ?? null, material, advertised, agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null, ...(memory ? { memory } : {}), ...(study ? { study } : {}) })
     : null;
+  const skillInvoke = instructionTools.length
+    ? skillApplyInvoker({ call: structuredCallFor(env as never, input.provider), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null })
+    : null;
+  const instructionIds = new Set(instructionTools.map((t) => t.id));
   const localInvoke: ToolInvoker = async (toolId, args, ctx) => {
     mark(`invoke:${toolId}:start`);
-    try { return await (answerInvoke && toolId === PLAYBOOK_ANSWER_TOOL.id ? answerInvoke(toolId, args, ctx) : harnessLocal(toolId, args, ctx)); }
+    try { return await (answerInvoke && toolId === PLAYBOOK_ANSWER_TOOL.id ? answerInvoke(toolId, args, ctx) : skillInvoke && instructionIds.has(toolId) ? skillInvoke(toolId, args, ctx) : harnessLocal(toolId, args, ctx)); }
     finally { mark(`invoke:${toolId}:end`); }
   };
   mark('tools-listed');
@@ -5051,7 +5092,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   // enables it (`KB_RETRIEVAL=playbook`). The query is the person's own sentence; the topics are the playbook's, sent as
   // declared scope and echoed on the receipt. The passages ground the composed answer; no planner reads them.
   const goalText = String((input.intent as { goal?: unknown }).goal ?? '').trim();
-  const retrieval = kbRetrievalMode(env as never) === 'playbook' && playbook?.retrievalQueries?.length && goalText && tools.some((t) => t.id === KB_RETRIEVE_TOOL.id)
+  const retrieval = kbModeOf(env as never, input.variant) === 'playbook' && playbook?.retrievalQueries?.length && goalText && tools.some((t) => t.id === KB_RETRIEVE_TOOL.id)
     ? { toolId: KB_RETRIEVE_TOOL.id, args: { query: goalText, topics: playbook.retrievalQueries } }
     : null;
   const result = await runIntent(input.intent, {
@@ -5466,6 +5507,8 @@ step is then handed to that agent under authority the person grants; leave it ou
     // Spec 354 §4.5 — the playbook that admitted this run (canonical id + version + definition digest),
     // stamped onto every receipt by the loop. Absent ⇒ the bare harness; receipts carry no skillRef.
     ...(playbook ? { skillRef: { skillId: playbook.archetypeId, version: playbook.archetypeVersion, commitment: playbook.digest } } : {}),
+    // Spec 414 A1 — and each step names the SKILL.md its own tool was compiled from, when the definition says (415 S1).
+    ...(playbook?.tools ? { skillOf: (toolId: string) => { const t = Object.values(playbook.tools ?? {}).find((d) => (d as { id?: string; capability?: { id?: string } }).id === toolId || (d as { capability?: { id?: string } }).capability?.id === toolId) as { source?: { skillId: string; version: string; contractDigest: string } } | undefined; return t?.source ? { id: t.source.skillId, version: t.source.version, contractDigest: t.source.contractDigest } : undefined; } } : {}),
     ...(input.supplied ? { supplied: input.supplied } : {}),
     ...(input.runRef ? { runRef: input.runRef } : {}),
     now,

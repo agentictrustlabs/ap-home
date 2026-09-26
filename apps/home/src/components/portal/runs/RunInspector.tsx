@@ -12,6 +12,7 @@ import { retryAffordance } from '../../../home/retry';
 import { stateOf } from '../../../home/run-state';
 import { StatePill } from '../StatePill';
 import { RunTimeline } from './RunTimeline';
+import { RunTraceTree } from './RunTraceTree';
 import { DisputePanel } from './DisputePanel';
 import { SaveAsRecipe } from './SaveAsRecipe';
 import { canSaveAsRecipe } from '@agenticprimitives/harness/recipe';
@@ -119,6 +120,11 @@ export function RunInspector({ token, addressee, runRef, goal, open = true }: { 
           </div>
         );
       })}
+
+      {/* 4b · HOW IT RAN (spec 415 A3) — the run tree from the door: variant, model calls, skill selection, each step's
+          skill and authority, child runs; the run's measurements on request. */}
+      <H>how it ran</H>
+      <RunTraceTree token={token} addressee={addressee} runRef={runRef} rec={rec} />
 
       {/* 5 · EXECUTION DETAIL + 6 · PROVENANCE — the span timeline and its downloads */}
       <H>execution detail · provenance</H>

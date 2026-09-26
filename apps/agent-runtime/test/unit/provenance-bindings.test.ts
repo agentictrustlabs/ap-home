@@ -60,3 +60,14 @@ describe('readCarriedProvenance — a carried record is read only by its agent o
     expect(await readCarriedProvenance(store, '0xalice', '0xalice', 'k', async () => { throw new Error('rpc down'); })).toEqual({ status: 'forbidden' });
   });
 });
+
+describe('spec 414 §6 — the vault binding passes the same conformance suite as the directory store', () => {
+  it('C1–C6 over the vault doors; a reader the vault refuses is refused, never served empty', async () => {
+    const { runProvenanceConformance } = await import('@agenticprimitives/provenance-node/conform');
+    const vault = new Map<string, unknown>();
+    const door = { writeSubjectRecord: async (s: string, k: string, rec: unknown) => { vault.set(`${s}|${k}`, structuredClone(rec)); return { ok: true }; }, readSubjectRecord: async (s: string, k: string) => vault.get(`${s}|${k}`) ?? null };
+    const stranger = vaultProvenanceStore({ readSubjectRecord: async () => { throw new Error('vault_key_unauthorized'); } })!;
+    const r = await runProvenanceConformance(vaultProvenanceStore(door)!, { stranger, target: 'mcp-vault (in-memory door)' });
+    expect(r.checks.filter((c) => !c.ok).map((c) => c.id)).toEqual([]);
+  }, 60_000);
+});

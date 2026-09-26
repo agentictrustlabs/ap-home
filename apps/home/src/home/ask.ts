@@ -17,6 +17,7 @@
 // a team's workspace, an organization's person. They are usually the same agent and never assumed to be.
 // The mandate is signed by the credential that custodies the DELEGATOR, which for everything a person
 // steward does is their own credential (an SA validates its custodians' signatures, ERC-1271).
+import type { RunDoorView, VariantView, ModelCallView, EngagementView } from './run-trace-view';
 import { createPublicClient, http } from 'viem';
 import {
   buildDigestBindingCaveat, capabilityHandler, hashDelegation, paymentHandler, ROOT_AUTHORITY,
@@ -431,6 +432,10 @@ export interface RunProvenance { spans: SpanRow[]; retention?: unknown; exporter
 /** Spec 381 W3 — one finished run of an agent, as the record listing carries it (no mandates, no events). */
 export interface RunRecordRow {
   runRef: string; at: number; outcome: string; steps: number; receipts: number;
+  /** Spec 414 A1 / 415 A3 — the trace facts the listing carries, for the run list's facets and threads. */
+  door?: RunDoorView; variant?: VariantView; modelCalls?: ModelCallView[];
+  engaged?: Array<{ capability: string; effect: string }>;
+  skills?: string[]; tools?: string[];
   /** Spec 398 §5.3 — the run was stopped by the person who could resume it, after `afterSteps` completed steps. */
   canceled?: { at: number; by: string; afterSteps: number; note?: string };
   intent: { goal: string; context?: Record<string, unknown> };
@@ -480,6 +485,9 @@ export interface RunInspectorStep {
   errorClass?: string;
   /** Spec 410 §2 — what the adapter saw: which end committed this and the provider's own reference. */
   observation?: { outcome: 'attempted' | 'accepted' | 'committed' | 'confirmed'; providerRef?: string; observedAt: string };
+  /** Spec 414 A1 — the SKILL.md contract that governed this step, and harness capabilities it engaged. */
+  skill?: { id: string; version: string; contractDigest: string };
+  engagements?: Array<{ capability: string; effect: string; version?: string }>;
 }
 export interface RunInspectorRecord {
   runRef: string; endedAt: string; agent: string; asker?: string; outcome: string; chainId?: number;
@@ -489,10 +497,34 @@ export interface RunInspectorRecord {
   bill?: { vaultCalls: number; doRequests: number; byStep: Record<string, { vaultCalls: number; doRequests: number }> };
   canceled?: { at: number; by: string; afterSteps: number; note?: string };
   plannedSteps?: number;
+  /** Spec 414 A1 — the trace from the door: how the intent arrived, the variant it ran under, the model calls it made,
+   *  the starting state it ran from, and the harness capabilities engaged on the run as a whole. */
+  door?: RunDoorView;
+  variant?: VariantView;
+  startingState?: { digest: string };
+  modelCalls?: ModelCallView[];
+  engagements?: EngagementView[];
 }
 export async function fetchRunInspector(session: { token: string }, addressee: Address, runRef: string): Promise<RunInspectorRecord | { error: string }> {
   const out = (await postA2a('/a2a/harness/provenance', { session: session.token, addressee, runRef, format: 'record' })) as { ok?: boolean; error?: string; record?: RunInspectorRecord };
   return out.ok && out.record ? out.record : { error: out.error ?? 'the run could not be read back' };
+}
+
+/** Spec 414 A2 — THE RUN'S MEASUREMENTS (W3C DQV, `run.measures:<runRef>`) from the acting agent's vault, as metric →
+ *  value rows. Absent while the export has not landed — said, never guessed. */
+export interface RunMeasureRow { metric: string; value: number; unit?: string; step?: string }
+export async function fetchRunMeasures(session: { token: string }, addressee: Address, runRef: string): Promise<{ rows: RunMeasureRow[] } | { error: string }> {
+  const out = (await postA2a('/a2a/harness/provenance', { session: session.token, addressee, runRef, format: 'measures' })) as { ok?: boolean; error?: string; measures?: { graph?: Array<Record<string, unknown>> } };
+  if (!out.ok || !out.measures) return { error: out.error ?? 'no measurements yet' };
+  const rows = (out.measures.graph ?? []).filter((n) => 'value' in n && 'isMeasurementOf' in n).map((n) => {
+    const metric = String(n['isMeasurementOf']).split('#').pop()!.replace(/^m-/, '').replace(/([A-Z])/g, '-$1').toLowerCase();
+    // A measurement is computedOn the run (`urn:ap:prov:act:<runRef>`) or one of its steps (`…:<runRef>:<stepRef>`).
+    const on = String(n['computedOn'] ?? '');
+    const prefix = `urn:ap:prov:act:${runRef}:`;
+    const step = on.startsWith(prefix) ? on.slice(prefix.length) : undefined;
+    return { metric, value: Number(n['value']), ...(n['unit'] ? { unit: String(n['unit']).split(/[#/]/).pop() } : {}), ...(step ? { step } : {}) };
+  });
+  return { rows };
 }
 
 export async function fetchSpans(session: { token: string }, addressee: Address, runRef: string): Promise<RunProvenance | { error: string }> {
