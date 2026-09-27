@@ -65,7 +65,7 @@ import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
 import { ADAPTER, CARRIES } from './adapter-declarations.js';
 import { relationshipCredentialDigest, termsDigestOf, type RelationshipCredentialBodyV1 } from '@agenticprimitives/agent-relationships';
-import { replayingInvoker, inputsFor, type RunRecordV1, type RunMarks, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent , selectByDeclaredUtterances , selectByJudgment , selectByOntology, selectByOntologyThenJudgment, selectByFramedJudgment, type OntologySelectionV1, type JudgmentSelectionV1, type FramedSelectionV1 } from '@agenticprimitives/orchestration';
+import { replayingInvoker, inputsFor, type RunRecordV1, type RunMarks, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent , selectByDeclaredUtterances , selectByJudgment , selectByOntology, selectByOntologyThenJudgment, selectByProposalThenJudgment, selectByFramedJudgment, type OntologySelectionV1, type JudgmentSelectionV1, type FramedSelectionV1, type ProposedSelectionV1 } from '@agenticprimitives/orchestration';
 import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, standingFor, declareInstruction, forgetInstruction, instructionContextOf, STANDING_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
@@ -2495,7 +2495,7 @@ export interface HarnessRunInput {
   /** Spec 415 A4 — what a COMPARISON asked this run to do differently (already admitted by the caller: a
    *  comparison estate, the agent's own steward). The planner kind and the capability toggles apply here; the
    *  provider was folded into `provider`. Behaviour, never authority. */
-  variant?: { plannerKind?: 'model' | 'rule-based'; selection?: 'model' | 'declared' | 'ontology' | 'judgment' | 'ontology+judgment' | 'framed-judgment'; toggles?: Record<string, string> };
+  variant?: { plannerKind?: 'model' | 'rule-based'; selection?: 'model' | 'declared' | 'ontology' | 'judgment' | 'ontology+judgment' | 'propose+judgment' | 'framed-judgment'; toggles?: Record<string, string> };
   /** The agent being asked. Informational tools that read an organization's own records default to it —
    *  "who are the members" asked OF an organization means that one. */
   addressee?: Address;
@@ -2777,6 +2777,7 @@ export interface PlannerTraceV1 {
     | ({ approach: 'ontology' } & OntologySelectionV1)
     | ({ approach: 'judgment' } & JudgmentSelectionV1)
     | ({ approach: 'ontology+judgment'; chose: string | null; hold?: string; decidedBy: 'ontology' | 'judgment'; ontology: OntologySelectionV1; judgment?: JudgmentSelectionV1 })
+    | ({ approach: 'propose+judgment' } & ProposedSelectionV1)
     | ({ approach: 'framed-judgment' } & FramedSelectionV1);
   /** Each party binding and WHERE IT CAME FROM (spec 367 §3): the person's words, a decision rule, memory, or the resolver. */
   bindings: Array<{ arg: string; raw: string; agent: string; label?: string; source: 'said' | 'context' | 'standing' | 'decision' | 'memory' | 'resolver' | 'disclosed'; because?: string }>;
@@ -4850,7 +4851,7 @@ step is then handed to that agent under authority the person grants; leave it ou
           // Spec 415 A4 — THE THREE ARMS (+ the framed shape). A rule narrows and a judge picks; neither allows. Candidates are
           // the playbook's instruction skills; the arm's decision goes on the trace; a hold plans `ask.unsupported`.
           const arm = input.variant?.selection;
-          if (arm === 'ontology' || arm === 'judgment' || arm === 'ontology+judgment' || arm === 'framed-judgment') {
+          if (arm === 'ontology' || arm === 'judgment' || arm === 'ontology+judgment' || arm === 'propose+judgment' || arm === 'framed-judgment') {
             const sources = instructionSourcesOf(playbook);
             const skills = Object.values(playbook?.tools ?? {}).filter((t) => sources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}) }));
             const lexicon = playbook?.domainLexicon;
@@ -4861,6 +4862,8 @@ step is then handed to that agent under authority the person grants; leave it ou
             if (arm === 'ontology') { const r = selectByOntology(rest, skills, lexicon); trace.selection = { approach: 'ontology', ...r }; chose = r.chose; }
             else if (arm === 'judgment') { const r = await selectByJudgment(rest, skills, call); trace.selection = { approach: 'judgment', ...r }; chose = r.chose; }
             else if (arm === 'ontology+judgment') { const r = await selectByOntologyThenJudgment(rest, skills, call, {}, lexicon); trace.selection = { approach: 'ontology+judgment', ...r }; chose = r.chose; }
+            // Spec 416 W1 — the ontology PROPOSES (recall-first, `excludes` vetoes), the judge decides among the proposed.
+            else if (arm === 'propose+judgment') { const r = await selectByProposalThenJudgment(rest, skills, call, {}, lexicon); trace.selection = { approach: 'propose+judgment', ...r }; chose = r.chose; }
             else { const r = await selectByFramedJudgment(rest, skills.filter((x) => x.covers.length), call); trace.selection = { approach: 'framed-judgment', ...r }; chose = r.chose; }
             plannerUsed = arm;
             const why = (trace.selection as { hold?: string }).hold;

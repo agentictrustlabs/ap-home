@@ -42,7 +42,7 @@ export function doorFromBody(body: unknown, inWorker: boolean): RunDoorV1 | null
   return { kind: 'a2a-message', ...(id(d.messageId) ? { messageId: id(d.messageId)! } : {}), ...(id(d.contextId) ? { contextId: id(d.contextId)! } : {}), ...(id(d.taskId) ? { taskId: id(d.taskId)! } : {}) };
 }
 
-const PLANNER_KINDS = new Set(['supplied', 'compiled', 'rule-based', 'declared', 'ontology', 'judgment', 'ontology+judgment', 'framed-judgment']);
+const PLANNER_KINDS = new Set(['supplied', 'compiled', 'rule-based', 'declared', 'ontology', 'judgment', 'ontology+judgment', 'propose+judgment', 'framed-judgment']);
 /** supplied | compiled | rule-based stay what they are; any provider name is a model planner. */
 export const plannerKindOf = (planner: string | undefined): string | undefined => (!planner ? undefined : PLANNER_KINDS.has(planner) ? planner : 'model');
 
@@ -100,6 +100,11 @@ export function engagedFromTrace(trace: PlannerTraceV1 | undefined): HarnessEnga
       push('skill-selection/ontology', o.survivors.length ? 'changed-plan' : 'no-change', offeredAll, [], Object.keys(o.excluded ?? {}).map(iri), grounded);
       if (sel.judgment) push('skill-selection/judgment', planned.length ? 'changed-plan' : 'no-change', sel.judgment.offered.map(iri), planned, sel.judgment.rejected.map(iri), typed(sel.judgment.intent));
     }
+  } else if (sel && sel.approach === 'propose+judgment') {
+    // Spec 416 W1 — the ontology's engagement: what it could offer, what it grounded, what it VETOED (rejected), and — as
+    // its choice — the proposed set; the judge's: its slate (the proposed skills), what it chose, its runner-up.
+    push('skill-selection/ontology', sel.proposal.candidates.length ? 'changed-plan' : 'no-change', offeredAll, sel.proposal.candidates.map(iri), Object.keys(sel.proposal.removed).map(iri), typed({ about: sel.grounded.map((g) => g.iri) }));
+    if (sel.judgment) push('skill-selection/judgment', planned.length ? 'changed-plan' : 'no-change', sel.judgment.offered.map(iri), planned, sel.judgment.rejected.map(iri), typed(sel.judgment.intent));
   } else if (sel && sel.approach === 'judgment') {
     push('skill-selection/judgment', planned.length ? 'changed-plan' : 'no-change', offeredAll, planned, sel.rejected.map(iri), typed(sel.intent));
   } else if (sel && sel.approach === 'framed-judgment') {
@@ -121,9 +126,9 @@ const SELECTION_APPROACH: Record<string, string> = { model: 'skill-selection/mod
  * variant that lies about what ran). Behaviour, never authority: no gate reads it.
  */
 /** Spec 415 A4 — how instruction skills are selected: `model` (the planner over descriptions — the baseline), `declared`
- *  (overlap with declared sentences), the three arms `ontology` · `judgment` · `ontology+judgment`, and `framed-judgment`
+ *  (overlap with declared sentences), the three arms `ontology` · `judgment` · `ontology+judgment`, spec 416's `propose+judgment`, and `framed-judgment`
  *  (the 2026-09-26 shape, kept reproducible). */
-export const SELECTION_ARMS = ['model', 'declared', 'ontology', 'judgment', 'ontology+judgment', 'framed-judgment'] as const;
+export const SELECTION_ARMS = ['model', 'declared', 'ontology', 'judgment', 'ontology+judgment', 'propose+judgment', 'framed-judgment'] as const;
 export type SelectionArmV1 = (typeof SELECTION_ARMS)[number];
 
 export interface VariantRequestV1 {
