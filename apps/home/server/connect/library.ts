@@ -237,6 +237,21 @@ interface InboundGrant {
 }
 
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/i;
+/**
+ * HOW MANY ARTIFACTS A LIBRARY HOLDS. Was a bare `.slice(0, 200)` on every write — and a batch past it was
+ * ACKNOWLEDGED (`ok, count`) and then dropped, which is how twelve complete skill packages (303 files and
+ * folders) lost their last four in the skills app (2026-09-27). The number existed because the catalog carried
+ * every file's bytes inline and is stored as ONE vault record (a D1 row, ~2 MB ceiling); with the bytes moved
+ * to the per-artifact records (below) an index entry is a few hundred bytes, so the cap is a count of entries
+ * again, configurable, and a write past it is REFUSED with a 413 that says so — never silently trimmed.
+ */
+const MAX_ARTIFACTS_DEFAULT = 2000;
+const maxArtifacts = (env: FnContext['env']): number => {
+  const n = Number((env as { LIBRARY_MAX_ARTIFACTS?: string }).LIBRARY_MAX_ARTIFACTS ?? MAX_ARTIFACTS_DEFAULT);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : MAX_ARTIFACTS_DEFAULT;
+};
+/** Per-artifact hydration reads run this many at a time — the org plane is one DO. */
+const HYDRATE_CONCURRENCY = 8;
 const KINDS = new Set(['skill', 'ttl', 'md', 'json-ld', 'image']);
 /** What a release can be minted for (398 §6.2): a skill, or a page. */
 const PUBLISHABLE = new Set(['skill', 'md', 'json-ld']);
@@ -259,6 +274,16 @@ interface LibraryScope {
    *  a library driven by an app lands here and nowhere the person's agent reads — said on the response as
    *  `vault: 'landed' | 'cache-only'` rather than hidden (398 §6.3). `undefined` for an org scope. */
   landed?: () => boolean | undefined;
+  /**
+   * ORG SCOPE: THE CATALOG IS AN INDEX. Bytes live in `content.artifact.<id>` (the record ADR-0055 already
+   * writes for every save) and the catalog entry keeps name/folder/size/commitment/version/policy only. The
+   * catalog is one vault record; with bytes inline it hit the row ceiling at ~200 entries. A GET hydrates the
+   * entries a caller asks for (`?folder=`, `?name=`) from their records. Person scope keeps bytes inline: its
+   * catalog is small and its KV cache and the `vault-subject-role` page read them from the listing.
+   */
+  indexOnly?: boolean;
+  /** Read one record (`content.artifact.<id>`) — what hydration uses. Org scope only. */
+  getRecord?: (recordType: string) => Promise<unknown>;
   /** The catalog (index) list — `content.catalog`. */
   read: () => Promise<LibraryArtifact[]>;
   write: (list: LibraryArtifact[]) => Promise<void>;
@@ -387,7 +412,11 @@ async function scopeFor(request: Request, env: FnContext['env'], person: string,
       writes it was meant to make safe, because every save rewrites the catalog.
     */
     return {
-      ok: true, owner: orgSA, ownerKind: 'org',
+      ok: true, owner: orgSA, ownerKind: 'org', indexOnly: true,
+      getRecord: async (recordType) => {
+        const r = await orgOp<{ record?: unknown }>('content.get', { resource: recordType });
+        return r.ok ? (r.body.record ?? null) : null;
+      },
       read: async () => {
         const r = await orgOp<{ record?: unknown }>('content.get', { resource: 'content.catalog' });
         if (!r.ok) throw new LibraryReadError(r.body.error ?? `the organization's library could not be read (${r.status})`, 'content.catalog', r.status);
@@ -452,6 +481,23 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   try { catalog = await scope.read(); }
   catch (e) { if (e instanceof LibraryReadError) return readRefused(e, scope, request); throw e; }
   const artifacts = withEffectiveAccessPolicy(withEffectiveGrants(catalog));
+  // HYDRATE ON REQUEST (index-only scopes). `?folder=<path>` fills `bytesB64` for every file under that folder
+  // (the folder itself and its subtree); `?name=<file>` narrows to files of that name. Without either, the
+  // listing is the index — which is all a browser needs to draw it. Entries that still carry inline bytes
+  // (written before the index-only rule) are served as they are.
+  const folderQ = (url.searchParams.get('folder') ?? '').replace(/^\/+|\/+$/g, '');
+  const nameQ = url.searchParams.get('name') ?? '';
+  if (scope.indexOnly && scope.getRecord && (folderQ || nameQ)) {
+    const wanted = artifacts.filter((a) => !a.isFolder && !a.bytesB64 && a.source === 'blob'
+      && (!folderQ || a.folder === folderQ || a.folder.startsWith(`${folderQ}/`))
+      && (!nameQ || a.name === nameQ));
+    for (let i = 0; i < wanted.length; i += HYDRATE_CONCURRENCY) {
+      await Promise.all(wanted.slice(i, i + HYDRATE_CONCURRENCY).map(async (a) => {
+        const rec = (await scope.getRecord!(`content.artifact.${a.id}`).catch(() => null)) as { bytesB64?: string } | null;
+        if (rec && typeof rec.bytesB64 === 'string') a.bytesB64 = rec.bytesB64;
+      }));
+    }
+  }
   // Pending access requests addressed to this owner (the "someone wants access" inbox).
   const requests = (await readRequests(env, scope.owner)).filter((r) => r.status === 'pending');
   // Spec 412 — `source` says whether this list is her VAULT's (what her agent serves) or this Home's cache (what an app
@@ -485,17 +531,29 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     case 'save': {
       const entry = await upsert(list, body.artifact);
       if (!entry) return jsonCors({ error: 'artifact.name required' }, request, 400);
-      await scope.write(list.slice(0, 200));
-      await writeArtifactRecord(scope, entry);
+      if (list.length > maxArtifacts(env)) return tooMany(list.length, maxArtifacts(env), scope, request);
+      if (scope.indexOnly) {
+        // Bytes to the records FIRST, and strictly: an index entry whose record never landed is a name with
+        // nothing behind it, which is worse than a refused save.
+        try { await persistIndexOnly(scope, list); } catch (e) { return recordRefused(e, entry, scope, request); }
+      } else {
+        await scope.write(list);
+        await writeArtifactRecord(scope, entry);
+      }
       return jsonCors({ ok: true, artifact: entry, ...vaultWord(scope) }, request);
     }
     case 'save-batch': {
       // Bulk upload (drag-and-drop of many files) — one read-modify-write, atomic.
       if (!Array.isArray(body.artifacts) || body.artifacts.length === 0) return jsonCors({ error: 'artifacts[] required' }, request, 400);
-      const saved = (await Promise.all(body.artifacts.slice(0, 200).map((a) => upsert(list, a)))).filter((e): e is LibraryArtifact => !!e);
+      const saved = (await Promise.all(body.artifacts.map((a) => upsert(list, a)))).filter((e): e is LibraryArtifact => !!e);
+      if (list.length > maxArtifacts(env)) return tooMany(list.length, maxArtifacts(env), scope, request);
       try {
-        await scope.write(list.slice(0, 200));
-        await Promise.all(saved.map((e) => writeArtifactRecord(scope, e)));
+        if (scope.indexOnly) {
+          await persistIndexOnly(scope, list);
+        } else {
+          await scope.write(list);
+          await Promise.all(saved.map((e) => writeArtifactRecord(scope, e)));
+        }
       } catch (e) {
         // Answer with the org plane's own verdict. Previously this escaped as a bare 500 and the
         // caller could not tell an unavailable plane from an unauthorized one.
@@ -759,6 +817,36 @@ async function upsert(list: LibraryArtifact[], a: Partial<LibraryArtifact> | und
   };
   if (idx >= 0) { entry.grants = list[idx]!.grants; entry.releases = list[idx]!.releases; list[idx] = entry; } else list.push(entry);
   return entry;
+}
+
+/** The catalog as an INDEX: every entry without its inline bytes. `size` and `contentCommitment` stay, so a
+ *  listing still says how big a file is and what it commits to; the bytes are in `content.artifact.<id>`. */
+function indexOf(list: LibraryArtifact[]): LibraryArtifact[] {
+  return list.map((e) => (e.bytesB64 === undefined ? e : { ...e, bytesB64: undefined }));
+}
+
+/** Every entry that carries bytes gets its record — the ones saved now, and any older inline entry this write is
+ *  about to strip (a catalog from before the index-only rule migrates on its next save) — then the index is
+ *  written. Records first, strictly: a refused record stops the write before the index names it. */
+async function persistIndexOnly(scope: LibraryScope, list: LibraryArtifact[]): Promise<void> {
+  const carrying = list.filter((e) => !e.isFolder && typeof e.bytesB64 === 'string');
+  for (let i = 0; i < carrying.length; i += HYDRATE_CONCURRENCY) {
+    await Promise.all(carrying.slice(i, i + HYDRATE_CONCURRENCY).map((e) => writeArtifactRecordStrict(scope, e)));
+  }
+  await scope.write(indexOf(list));
+}
+
+/** A write past the cap is REFUSED, with the numbers — never trimmed to fit and reported as saved. */
+function tooMany(have: number, max: number, scope: { ownerKind: AgentKind; owner: string }, request: Request): Response {
+  return jsonCors({ error: `this library would hold ${have} artifacts (files and folders); the limit is ${max}`, limit: max, artifacts: have, scope: scope.ownerKind, owner: scope.owner }, request, 413);
+}
+
+/** The org plane refused an artifact's record: say which one and why, with the plane's own status. */
+function recordRefused(e: unknown, entry: LibraryArtifact, scope: { ownerKind: AgentKind; owner: string }, request: Request): Response {
+  if (e instanceof LibraryWriteError) {
+    return jsonCors({ error: `${entry.folder ? `${entry.folder}/` : ''}${entry.name}: ${e.message}`, resource: e.resource, scope: scope.ownerKind, owner: scope.owner, upstreamStatus: e.upstreamStatus }, request, e.upstreamStatus === 403 ? 403 : 503);
+  }
+  throw e;
 }
 
 /** Write/refresh an inbound-grant pointer in the grantee's index (the "Shared with me" federated lens). */
