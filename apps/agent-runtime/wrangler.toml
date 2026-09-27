@@ -445,7 +445,11 @@ CHAIN_ID = "34348"
 # limit"), which failed every Ask turn on the estate. Gemini (8aba978e: gemini-3.5-flash-lite plans, gemini-3.5-flash
 # composes) is now the ONLY offered model, the same one-provider stance as 09-15. GEMINI_API_KEY is a secret
 # (`wrangler secret put GEMINI_API_KEY --env faithnet`). Re-offer Grok with "gemini,xai" once its credits are back.
-ORCHESTRATION_LLM = "gemini"
+# 2026-09-26 — Anthropic offered SECOND, so a comparison may name it (spec 415: the selection judge on Gemini vs on Claude
+# Haiku, one component changed). Gemini is first and unmetered, so every call that names no provider still goes to Gemini;
+# Anthropic carries only a turn that names it. (Until today the structured call fell through to Claude whatever the route
+# said — every judgment and skill.apply call ran on Haiku while this line read "gemini"; context-wiring now refuses that.)
+ORCHESTRATION_LLM = "gemini,anthropic"
 # Spec 388 — the cheapest OFFERED provider that carries each call, decided before the request from the prompt estimate, the
 # per-request budget and this minute's spend; recorded on the trace with its reason. A route, never a fallback (ADR-0013).
 ORCHESTRATION_ROUTE = "budget"

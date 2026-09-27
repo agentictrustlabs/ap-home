@@ -6,7 +6,7 @@
 // WHICH vendor answers the one structured model call — the same provider the turn plans with (spec 377),
 // so the two adapter packages (`orchestration-anthropic`, `orchestration-openai-compat`) remain the only
 // vendor-touching ones.
-import { defaultProvider, providerConfigured, modelFor, GROQ_DEFAULTS, OPENAI_DEFAULTS, XAI_DEFAULTS, OPENAI_REASONING_HEADROOM, routePolicy, routeProvider, llmAllowlist, type PlannerEnv, type LlmProvider, type RouteDecision } from './orchestration.js';
+import { defaultProvider, providerConfigured, modelFor, geminiClient, GROQ_DEFAULTS, OPENAI_DEFAULTS, XAI_DEFAULTS, OPENAI_REASONING_HEADROOM, routePolicy, routeProvider, llmAllowlist, type PlannerEnv, type LlmProvider, type RouteDecision } from './orchestration.js';
 import { createFetchAnthropicClient } from '@agenticprimitives/orchestration-anthropic';
 import { createFetchOpenAiCompatClient, createOpenAiCompatStructuredCall } from '@agenticprimitives/orchestration-openai-compat';
 import type { DiscoveryFetch, StructuredCall } from '@agenticprimitives/context';
@@ -41,7 +41,15 @@ export type ModelEnv = PlannerEnv;
 /** The one structured model call the plane may make (grounded SPARQL, record selection). `undefined`
  *  when no model is configured — the tools are then not offered rather than offered and broken. Runs on
  *  `provider` when the turn named one, else the deployment default; a listed-but-keyless provider throws. */
-export function structuredCallFor(env: ModelEnv, provider?: LlmProvider, opts: { /** Spec 388 W2 — each routed call's decision, for the trace. */ onRoute?: (d: RouteDecision) => void; /** Test seam: build a provider's call without a client. */ make?: (p: LlmProvider) => StructuredCall } = {}): StructuredCall | undefined {
+/** One structured call as it ran — who carried it, on which model, why, and when. The trace's model invocation. */
+export interface StructuredCallRecordV1 { provider: LlmProvider; model: string; because?: string; startMs: number; endMs: number; failed?: boolean }
+
+export function structuredCallFor(env: ModelEnv, provider?: LlmProvider, opts: { /** Spec 388 W2 — each routed call's decision, for the trace. */ onRoute?: (d: RouteDecision) => void; /** Spec 415 — EVERY call, routed or named, as it ran: a model call the trace does not name is a model call nobody can audit. */ onCall?: (c: StructuredCallRecordV1) => void; /** Test seam: build a provider's call without a client. */ make?: (p: LlmProvider) => StructuredCall } = {}): StructuredCall | undefined {
+  const timed = (p: LlmProvider, c: StructuredCall, because?: string): StructuredCall => (opts.onCall ? async (input) => {
+    const startMs = Date.now();
+    const rec = (failed: boolean) => opts.onCall!({ provider: p, model: modelFor(env, p), ...(because ? { because } : {}), startMs, endMs: Date.now(), ...(failed ? { failed } : {}) });
+    try { const out = await c(input); rec(false); return out; } catch (e) { rec(true); throw e; }
+  } : c);
   // Spec 388 W2 — ROUTED PER REQUEST when the turn named no provider and the deployment routes by budget: the
   // structured call is built at request time from what it carries (the system text, the messages, the tool's
   // schema — the vault chooser's inventory alone was once 9,996 tokens), and the decision is recorded like the
@@ -54,24 +62,35 @@ export function structuredCallFor(env: ModelEnv, provider?: LlmProvider, opts: {
       const route = await routeProvider(env, undefined, { call: 'structured', estimatedTokens });
       opts.onRoute?.(route);
       if (route.provider === null) throw new Error('no model offered for the structured call');
-      return callOn(route.provider)(input);
+      return timed(route.provider, callOn(route.provider), route.because)(input);
     };
   }
   const p = provider ?? defaultProvider(env);
   if (p === null) return undefined;
-  return opts.make ? opts.make(p) : providerStructuredCall(env, p);
+  return timed(p, opts.make ? opts.make(p) : providerStructuredCall(env, p), 'named');
 }
 
 /** Roughly 4k tokens — the smallest prefix the vendor's prompt cache will hold for the models in use. */
 const CACHEABLE_SYSTEM_CHARS = 16_000;
 
-/** One provider's structured call — the vendor-touching half, unchanged from spec 358 W1. */
-function providerStructuredCall(env: ModelEnv, p: LlmProvider): StructuredCall {
-  providerConfigured(env, p);
+/**
+ * One provider's structured call — the vendor-touching half. ONE BRANCH PER PROVIDER, NO DEFAULT (ADR-0013): this
+ * once ended in an unconditional Anthropic client, so a provider without a branch (Gemini, when it was added) was
+ * carried by Claude while the route said Gemini — measured 2026-09-26: every skill-selection judgment on faithnet
+ * ran on Claude Haiku 4.5. An unlisted provider, or one this function does not know, now throws.
+ */
+export function providerStructuredCall(env: ModelEnv, p: LlmProvider): StructuredCall {
+  if (!providerConfigured(env, p)) throw new Error(`structured call on ${p}: this deployment does not offer ${p} (ORCHESTRATION_LLM) — no other provider carries it (ADR-0013)`);
+  if (p === 'gemini') {
+    // Gemini 3.5 Flash THINKS inside the completion bound: a judge's 600-token bound was spent thinking and the call came
+    // back with no tool call ("answered in prose", measured 2026-09-26). Low effort + headroom, and `required` — the
+    // form Gemini's planner already uses reliably.
+    return createOpenAiCompatStructuredCall({ client: geminiClient(env), model: modelFor(env, 'gemini'), label: 'gemini', reasoningEffort: 'low', reasoningHeadroom: OPENAI_REASONING_HEADROOM, toolChoice: 'required' });
+  }
   if (p === 'openai') {
     return createOpenAiCompatStructuredCall({
       client: createFetchOpenAiCompatClient({ apiKey: env.OPENAI_API_KEY!, baseUrl: env.ORCHESTRATION_OPENAI_BASE_URL || OPENAI_DEFAULTS.baseUrl, tokenLimitParam: 'max_completion_tokens' }),
-      model: modelFor(env, 'openai'), label: 'openai', reasoningEffort: 'low', maxTokens: 1500 + OPENAI_REASONING_HEADROOM,
+      model: modelFor(env, 'openai'), label: 'openai', reasoningEffort: 'low', reasoningHeadroom: OPENAI_REASONING_HEADROOM,
     });
   }
   if (p === 'xai') {
@@ -86,6 +105,7 @@ function providerStructuredCall(env: ModelEnv, p: LlmProvider): StructuredCall {
       model: modelFor(env, 'groq'), label: 'groq',
     });
   }
+  if (p !== 'anthropic') { const never: never = p; throw new Error(`structured call: no adapter for provider ${String(never)} (ADR-0013)`); }
   const client = createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY! });
   const model = modelFor(env, 'anthropic');
   return async ({ system, messages, tool, maxTokens }) => {
@@ -100,6 +120,8 @@ function providerStructuredCall(env: ModelEnv, p: LlmProvider): StructuredCall {
       tools: [tool as never], tool_choice: { type: 'tool', name: tool.name },
     });
     const block = res.content.find((b) => b.type === 'tool_use' && b.name === tool.name);
-    return (block?.input ?? {}) as Record<string, unknown>;
+    // No call is not an empty answer (ADR-0013): say so, with why the model stopped.
+    if (!block) throw new Error(`anthropic(${model}) did not call "${tool.name}" (stop_reason: ${String((res as { stop_reason?: unknown }).stop_reason ?? 'unknown')})`);
+    return (block.input ?? {}) as Record<string, unknown>;
   };
 }

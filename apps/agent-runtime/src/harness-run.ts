@@ -92,7 +92,7 @@ import { enforcersFromEnv } from './org-wire.js';
 import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a';
 import { routeProvider, routePolicy, meterFor, selectPlanner, selectComposer, defaultProvider, plannerPromptBudget, type LlmProvider, type RoutePolicy, type RouteDecision, type RouteNeed , RULE_BASED_PLANNER } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from '@agenticprimitives/context';
-import { structuredCallFor, kbRetrievalMode } from './context-wiring.js';
+import { structuredCallFor, kbRetrievalMode, type StructuredCallRecordV1 } from './context-wiring.js';
 
 /** Spec 415 A4 — the estate's retrieval mode, unless a comparison run toggled it (`retrieval/kb`). */
 const kbModeOf = (env: { KB_RETRIEVAL?: string }, variant: HarnessRunInput['variant']): ReturnType<typeof kbRetrievalMode> => {
@@ -2763,6 +2763,9 @@ export interface PlannerTraceV1 {
    *  result whose body was replaced by its summary. Never a silent slice. */
   composerEvidence?: { chars: number; of: number; dropped: Array<{ tool: string; stepRef?: string; bytes: number }> };
   /** Spec 388 — which provider carried the planner and the composer, and why (the numbers beside the reason). */
+  /** Spec 415 — every structured model call the run made (the selection judge, a skill's answer, the KB and vault
+   *  choosers), as it ran: provider, model, why, when. Each becomes a model invocation on the run's provenance. */
+  structuredCalls?: Array<{ role: 'judge' | 'structured'; provider: string; model: string; because?: string; startMs: number; endMs: number; failed?: boolean }>;
   route?: { policy: RoutePolicy; /** Spec 388 W3 — where the minute was counted: this isolate's own window, or the deployment's shared meter. */ meter?: 'isolate' | 'shared'; planner?: RouteDecision; composer?: RouteDecision; /** Spec 388 W2 — each structured call the run's steps made (the KB and vault choosers), in order. */ structured?: RouteDecision[] };
   /** Every admission verdict, in order — a refused plan shows what was proposed and why it was refused. */
   admission: Array<{ refused: Array<{ code: string; message: string; stepIndex?: number; toolId?: string }>; replanned: boolean }>;
@@ -4851,7 +4854,9 @@ step is then handed to that agent under authority the person grants; leave it ou
             const sources = instructionSourcesOf(playbook);
             const skills = Object.values(playbook?.tools ?? {}).filter((t) => sources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}) }));
             const lexicon = playbook?.domainLexicon;
-            const call = structuredCallFor(env as never, input.provider) as never;
+            // The judge's model call is a model invocation of the run like the planner's: on the trace, with its provider,
+            // model and why — role `judge`, so a reader can tell the call that chose the skill from the one that answered.
+            const call = structuredCallFor(env as never, input.provider, { onCall: recordStructured('judge') }) as never;
             let chose: string | null;
             if (arm === 'ontology') { const r = selectByOntology(rest, skills, lexicon); trace.selection = { approach: 'ontology', ...r }; chose = r.chose; }
             else if (arm === 'judgment') { const r = await selectByJudgment(rest, skills, call); trace.selection = { approach: 'judgment', ...r }; chose = r.chose; }
@@ -4898,6 +4903,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     admission: [], plan: [], bindings: [],
     ...(input.surface || input.channel ? { surface: { ...(input.surface?.realm?.kind ? { realm: input.surface.realm.kind } : {}), ...(input.surface?.capabilities ? { capabilities: input.surface.capabilities.length } : {}), ...(input.channel ? { channel: input.channel } : {}) } } : {}),
   };
+  const recordStructured = (role: 'judge' | 'structured') => (c: StructuredCallRecordV1) => { (trace.structuredCalls ??= []).push({ role, ...c }); };
   // What the harness may compose: the PUBLIC agent directory (read-only, through discovery — ADR-0040)
   // and the action tools, each declaring the capability and risk that decide whether it needs authority.
   // The private-vault tools are NOT here: they ride their own delegation on the orchestrate skill, and an
@@ -5047,10 +5053,10 @@ step is then handed to that agent under authority the person grants; leave it ou
       })()
     : undefined;
   const answerInvoke = playbookAnswer.length
-    ? playbookAnswerInvoker({ call: structuredCallFor(env as never, input.provider), instructions: playbook?.instructions ?? null, material, advertised, agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null, ...(memory ? { memory } : {}), ...(study ? { study } : {}) })
+    ? playbookAnswerInvoker({ call: structuredCallFor(env as never, input.provider, { onCall: recordStructured('structured') }), instructions: playbook?.instructions ?? null, material, advertised, agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null, ...(memory ? { memory } : {}), ...(study ? { study } : {}) })
     : null;
   const skillInvoke = instructionTools.length
-    ? skillApplyInvoker({ call: structuredCallFor(env as never, input.provider), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null })
+    ? skillApplyInvoker({ call: structuredCallFor(env as never, input.provider, { onCall: recordStructured('structured') }), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null })
     : null;
   const instructionIds = new Set(instructionTools.map((t) => t.id));
   const localInvoke: ToolInvoker = async (toolId, args, ctx) => {

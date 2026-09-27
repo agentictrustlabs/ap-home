@@ -41,6 +41,24 @@ describe('the offer (spec 377)', () => {
     expect(typeof structuredCallFor(both, 'groq')).toBe('function');
     expect(modelFor({ ...(both as object), ORCHESTRATION_GROQ_MODEL: 'openai/gpt-oss-20b' } as never, 'groq')).toBe('openai/gpt-oss-20b');
   });
+  it('THE STRUCTURED CALL RUNS ON THE PROVIDER IT NAMES — Gemini on Gemini, never a fall-through to Claude (2026-09-26)', async () => {
+    const gem = { ORCHESTRATION_LLM: 'gemini', GEMINI_API_KEY: 'k', ANTHROPIC_API_KEY: 'a' } as never;
+    const seen: string[] = [];
+    const orig = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL) => { seen.push(String(url)); return new Response(JSON.stringify({ choices: [{ message: { tool_calls: [{ type: 'function', function: { name: 't', arguments: '{"ok":true}' } }] } }] }), { status: 200, headers: { 'content-type': 'application/json' } }); }) as never;
+    try {
+      const calls: Array<{ provider: string; model: string }> = [];
+      const call = structuredCallFor(gem, 'gemini', { onCall: (c) => calls.push(c) })!;
+      expect(await call({ system: 's', messages: [{ role: 'user', content: 'q' }], tool: { name: 't', description: 'd', input_schema: { type: 'object' } } })).toEqual({ ok: true });
+      expect(seen[0]).toContain('generativelanguage.googleapis.com');
+      expect(seen.some((u) => u.includes('anthropic'))).toBe(false);
+      expect(calls).toMatchObject([{ provider: 'gemini', model: 'gemini-3.5-flash', because: 'named' }]);
+    } finally { globalThis.fetch = orig; }
+  });
+  it('a structured call on a provider the deployment does not offer throws — no other provider carries it', async () => {
+    const { providerStructuredCall } = await import('../../src/context-wiring.js');
+    expect(() => providerStructuredCall({ ORCHESTRATION_LLM: 'gemini', GEMINI_API_KEY: 'k', ANTHROPIC_API_KEY: 'a' } as never, 'anthropic')).toThrow(/does not offer anthropic/);
+  });
   it('a request for a provider that is not offered is refused with the offer named — never the default', () => {
     expect(resolveProvider(both, 'workers-ai')).toEqual({ ok: false, error: expect.stringMatching(/"workers-ai" is not offered.*offered: anthropic, groq/) });
     expect(resolveProvider({ ORCHESTRATION_LLM: 'groq', GROQ_API_KEY: 'g' } as never, 'anthropic')).toMatchObject({ ok: false });

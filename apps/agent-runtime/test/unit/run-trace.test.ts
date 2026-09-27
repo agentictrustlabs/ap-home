@@ -10,6 +10,10 @@ const trace = {
   planner: 'groq', model: 'openai/gpt-oss-120b', toolsExposed: [], playbook: { archetypeId: 'skill:x/y', archetypeVersion: '1.0.0', digest: '0x' + '33'.repeat(32) },
   promptDigest: '0x' + 'ee'.repeat(32), examplesRendered: 2, promptBudget: { tokens: 6000, estimated: 5400, trimmed: [] },
   route: { policy: 'budget', planner: { provider: 'groq', because: 'fits the minute', considered: [] }, composer: { provider: 'anthropic', because: 'groq minute spent', considered: [] }, structured: [{ provider: 'groq', because: 'kb chooser', considered: [] }] },
+  structuredCalls: [
+    { role: 'judge', provider: 'gemini', model: 'gemini-3.5-flash', because: 'named', startMs: 1, endMs: 2 },
+    { role: 'structured', provider: 'groq', model: 'openai/gpt-oss-120b', because: 'kb chooser', startMs: 3, endMs: 4 },
+  ],
 } as never;
 
 describe('doors', () => {
@@ -31,12 +35,13 @@ describe('model calls and the variant', () => {
     expect(calls).toEqual([
       { role: 'plan', model: 'openai/gpt-oss-120b', provider: 'groq', promptDigest: '0x' + 'ee'.repeat(32), routeReason: 'fits the minute' },
       { role: 'compose', provider: 'anthropic', routeReason: 'groq minute spent', startMs: 10, endMs: 20 },
-      { role: 'structured', provider: 'groq', routeReason: 'kb chooser' },
+      { role: 'judge', provider: 'gemini', model: 'gemini-3.5-flash', routeReason: 'named', startMs: 1, endMs: 2 },
+      { role: 'structured', provider: 'groq', model: 'openai/gpt-oss-120b', routeReason: 'kb chooser', startMs: 3, endMs: 4 },
     ]);
     expect(JSON.stringify(calls)).not.toContain('5400');
   });
   it('a supplied or compiled plan made no plan call', () => {
-    expect(modelCallsOf({ ...(trace as object), planner: 'compiled', route: undefined } as never)).toEqual([]);
+    expect(modelCallsOf({ ...(trace as object), planner: 'compiled', route: undefined, structuredCalls: undefined } as never)).toEqual([]);
     expect([plannerKindOf('supplied'), plannerKindOf('compiled'), plannerKindOf('anthropic')]).toEqual(['supplied', 'compiled', 'model']);
   });
   it('the variant: playbook, planner kind, route policy, build, toggles', () => {
@@ -82,7 +87,7 @@ describe('a record built at an entrance projects its door and its variant', () =
     const run = doc.graph.find((n) => n['id'] === 'urn:ap:prov:act:run-e')!;
     expect(run['arrivedBy']).toBe('urn:ap:prov:door:run-e');
     expect(String(run['underVariant'])).toMatch(/^urn:ap:prov:variant:sha256:[0-9a-f]{64}$/);
-    expect(run['hasModelInvocation']).toHaveLength(3);
+    expect(run['hasModelInvocation']).toHaveLength(4);
     expect(doc.graph.find((n) => n['id'] === 'urn:ap:prov:door:run-e')).toMatchObject({ doorKind: 'a2a-message', a2aMessageId: 'm-1', a2aTaskId: 't-1', a2aContextId: 'c-1' });
     expect(JSON.stringify(doc)).not.toContain('missio nexus');
   });
