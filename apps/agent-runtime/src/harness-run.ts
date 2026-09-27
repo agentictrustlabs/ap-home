@@ -2495,7 +2495,9 @@ export interface HarnessRunInput {
   /** Spec 415 A4 — what a COMPARISON asked this run to do differently (already admitted by the caller: a
    *  comparison estate, the agent's own steward). The planner kind and the capability toggles apply here; the
    *  provider was folded into `provider`. Behaviour, never authority. */
-  variant?: { plannerKind?: 'model' | 'rule-based'; selection?: 'model' | 'declared' | 'ontology' | 'judgment' | 'ontology+judgment' | 'propose+judgment' | 'framed-judgment'; toggles?: Record<string, string> };
+  variant?: { plannerKind?: 'model' | 'rule-based'; selection?: 'model' | 'declared' | 'ontology' | 'judgment' | 'ontology+judgment' | 'propose+judgment' | 'framed-judgment'; toggles?: Record<string, string>;
+    /** Spec 416 W3 — conformal acceptance under a fitted map. */
+    acceptance?: { method: 'conformal'; alpha: number; temperature: number; qhat: number; mapDigest: string } };
   /** The agent being asked. Informational tools that read an organization's own records default to it —
    *  "who are the members" asked OF an organization means that one. */
   addressee?: Address;
@@ -4859,11 +4861,12 @@ step is then handed to that agent under authority the person grants; leave it ou
             // model and why — role `judge`, so a reader can tell the call that chose the skill from the one that answered.
             const call = structuredCallFor(env as never, input.provider, { onCall: recordStructured('judge') }) as never;
             let chose: string | null;
+            const judgeParams = input.variant?.acceptance ? { acceptance: input.variant.acceptance } : {};
             if (arm === 'ontology') { const r = selectByOntology(rest, skills, lexicon); trace.selection = { approach: 'ontology', ...r }; chose = r.chose; }
-            else if (arm === 'judgment') { const r = await selectByJudgment(rest, skills, call); trace.selection = { approach: 'judgment', ...r }; chose = r.chose; }
-            else if (arm === 'ontology+judgment') { const r = await selectByOntologyThenJudgment(rest, skills, call, {}, lexicon); trace.selection = { approach: 'ontology+judgment', ...r }; chose = r.chose; }
+            else if (arm === 'judgment') { const r = await selectByJudgment(rest, skills, call, judgeParams); trace.selection = { approach: 'judgment', ...r }; chose = r.chose; }
+            else if (arm === 'ontology+judgment') { const r = await selectByOntologyThenJudgment(rest, skills, call, judgeParams, lexicon); trace.selection = { approach: 'ontology+judgment', ...r }; chose = r.chose; }
             // Spec 416 W1 — the ontology PROPOSES (recall-first, `excludes` vetoes), the judge decides among the proposed.
-            else if (arm === 'propose+judgment') { const r = await selectByProposalThenJudgment(rest, skills, call, {}, lexicon); trace.selection = { approach: 'propose+judgment', ...r }; chose = r.chose; }
+            else if (arm === 'propose+judgment') { const r = await selectByProposalThenJudgment(rest, skills, call, judgeParams, lexicon); trace.selection = { approach: 'propose+judgment', ...r }; chose = r.chose; }
             else { const r = await selectByFramedJudgment(rest, skills.filter((x) => x.covers.length), call); trace.selection = { approach: 'framed-judgment', ...r }; chose = r.chose; }
             plannerUsed = arm;
             const why = (trace.selection as { hold?: string }).hold;

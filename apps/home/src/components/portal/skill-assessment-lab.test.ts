@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { SkillAssessmentLab } from './SkillAssessmentLab';
+import { SkillAssessmentLab, RiskCoverageChart } from './SkillAssessmentLab';
 import report from '../../evals/skill-assessment.json';
 
 describe('the Lab', () => {
@@ -27,5 +27,15 @@ describe('the Lab', () => {
     expect(count('lab-skill')).toBe((report as { skillContracts: unknown[] }).skillContracts.length);
     expect(html).toContain('should have declined');
     expect(html).toContain('counts as wrong');
+  });
+});
+
+describe('the risk–coverage chart (spec 416 W3)', () => {
+  it('draws the curve and says, in words, how often the judge is wrong when it answers', () => {
+    const html = renderToStaticMarkup(createElement(RiskCoverageChart, { rc: { n: 3, aurc: 0.278, points: [{ coverage: 0.333, risk: 0, threshold: 0.95 }, { coverage: 0.667, risk: 0.5, threshold: 0.7 }, { coverage: 1, risk: 0.333, threshold: 0.55 }] } }));
+    expect(html).toContain('data-testid="lab-risk-coverage"');
+    expect(html).toMatch(/<path d="M[^"]+L[^"]+L[^"]+"/);
+    expect(html).toContain('all 3: 33% wrong');
+    expect(html).toContain('0.278');
   });
 });

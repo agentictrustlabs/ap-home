@@ -141,6 +141,8 @@ export interface VariantRequestV1 {
   /** The seeded records the run begins from — identified by their DIGEST (what the record and the graph keep); the domain
    *  and scenario are the comparison's description of it. */
   startingState?: { domain: string; scenarioId: string; digest: string };
+  /** Spec 416 W3 — acceptance by a fitted conformal map (the map inline, cited by its digest) instead of floor/margin. */
+  acceptance?: { method: 'conformal'; alpha: number; temperature: number; qhat: number; mapDigest: string };
 }
 export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/kb': ['off', 'tool', 'playbook'] };
 
@@ -168,18 +170,26 @@ export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantR
       if (!st || typeof st !== 'object' || typeof st['domain'] !== 'string' || typeof st['scenarioId'] !== 'string' || typeof st['digest'] !== 'string' || !/^(sha256:[0-9a-f]{64}|0x[0-9a-fA-F]{64})$/.test(st['digest'])) return { ok: false, error: 'startingState must be { domain, scenarioId, digest } — the digest of the seeded records' };
       out.startingState = { domain: st['domain'], scenarioId: st['scenarioId'], digest: st['digest'] };
     }
-    else return { ok: false, error: `${k}: not a variant component (plannerKind, selection, provider, toggles, playbook, startingState)` };
+    else if (k === 'acceptance') {
+      const a = v[k] as Record<string, unknown> | null;
+      const num = (x: unknown, lo: number, hi: number) => typeof x === 'number' && Number.isFinite(x) && x >= lo && x <= hi;
+      if (!a || typeof a !== 'object' || a['method'] !== 'conformal' || !num(a['alpha'], 0.001, 0.5) || !num(a['temperature'], 0.05, 20) || !num(a['qhat'], 0, 1) || typeof a['mapDigest'] !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(a['mapDigest'])) return { ok: false, error: 'acceptance must be { method: conformal, alpha, temperature, qhat, mapDigest } — a fitted calibration map' };
+      out.acceptance = { method: 'conformal', alpha: a['alpha'] as number, temperature: a['temperature'] as number, qhat: a['qhat'] as number, mapDigest: a['mapDigest'] };
+    }
+    else return { ok: false, error: `${k}: not a variant component (plannerKind, selection, provider, toggles, playbook, startingState, acceptance)` };
   }
   return { ok: true, variant: out };
 }
 
 /** The variant this run ran under: the playbook, the planner kind, the route policy, the build, the toggles — the
  *  deployment's knobs with what a comparison REQUESTED laid over them (a requested toggle is what ran). */
-export function variantOf(env: RunTraceEnv, trace: PlannerTraceV1 | undefined, requested?: Pick<VariantRequestV1, 'toggles'>): VariantV1 {
+export function variantOf(env: RunTraceEnv, trace: PlannerTraceV1 | undefined, requested?: Pick<VariantRequestV1, 'toggles' | 'acceptance'>): VariantV1 {
   const toggles: Record<string, string> = {};
   const kb = requested?.toggles?.['retrieval/kb'] ?? (env.KB_RETRIEVAL ?? '').trim().toLowerCase();
   if (kb) toggles['retrieval/kb'] = kb;
   for (const [k, val] of Object.entries(requested?.toggles ?? {})) toggles[k] = val;
+  // The acceptance rule is a harness-capability setting: which map shaped the decision is part of what ran.
+  if (requested?.acceptance) toggles['skill-selection/acceptance'] = `conformal:${requested.acceptance.mapDigest}`;
   const policy = trace?.route?.policy ?? ((env.ORCHESTRATION_ROUTE ?? '').trim() || undefined);
   const kind = plannerKindOf(trace?.planner);
   const build = (env.HARNESS_BUILD ?? '').trim();
