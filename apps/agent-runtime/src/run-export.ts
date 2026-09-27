@@ -66,10 +66,13 @@ export async function provenanceRecordOf(env: Pick<RunExportEnv, 'CHAIN_ID' | 'A
 /** Spec 398 §5.2 — THE INSPECTOR'S VIEW: the same structural record (`RunProvenanceV1`), as records rather than as a
  *  graph — outcome, artifacts, decisions, per-step authority, effects, bill — for a surface that orders it
  *  artifact-first. Never the arguments, results or words: the firewall is the same one the graph passes. */
-export async function provenanceViewOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, agent: string, record: RunRecordV1): Promise<Awaited<ReturnType<typeof provenanceOf>> & { chainId?: number; bill?: RunRecordV1['bill']; canceled?: RunRecordV1['canceled']; plannedSteps?: number }> {
+export async function provenanceViewOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, agent: string, record: RunRecordV1): Promise<Omit<Awaited<ReturnType<typeof provenanceOf>>, 'modelCalls'> & { modelCalls?: Array<NonNullable<Awaited<ReturnType<typeof provenanceOf>>['modelCalls']>[number] & { stepRef?: string; failed?: boolean }>; chainId?: number; bill?: RunRecordV1['bill']; canceled?: RunRecordV1['canceled']; plannedSteps?: number; operational?: RunRecordV1['operational'] }> {
   const view = await provenanceOf(record, agent);
   const chainId = Number(env.CHAIN_ID);
-  return { ...view, ...(Number.isFinite(chainId) && chainId > 0 ? { chainId } : {}), ...(record.bill ? { bill: record.bill } : {}), ...(record.canceled ? { canceled: record.canceled } : {}), plannedSteps: record.plan.steps.length };
+  // Spec 418 §3 — the inspector nests a skill's model call under its STEP: the view's calls are the record's, in order,
+  // so each keeps the step it names and whether it failed (ids and a flag; the graph projection is unchanged).
+  const calls = view.modelCalls?.map((m, i) => { const r = record.modelCalls?.[i]; return { ...m, ...(r?.stepRef ? { stepRef: r.stepRef } : {}), ...(r?.failed ? { failed: true } : {}) }; });
+  return { ...view, ...(calls ? { modelCalls: calls } : {}), ...(Number.isFinite(chainId) && chainId > 0 ? { chainId } : {}), ...(record.bill ? { bill: record.bill } : {}), ...(record.canceled ? { canceled: record.canceled } : {}), plannedSteps: record.plan.steps.length, ...(record.operational ? { operational: record.operational } : {}) };
 }
 /** Spec 414 A2 — THE RUN'S MEASUREMENTS: numbers from its trace alone (the same structural view the graph is made from,
  *  plus the record's plan size, bill and replans), as one DQV record under the published context. Descriptive; no words. */

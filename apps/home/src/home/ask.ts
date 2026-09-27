@@ -17,7 +17,7 @@
 // a team's workspace, an organization's person. They are usually the same agent and never assumed to be.
 // The mandate is signed by the credential that custodies the DELEGATOR, which for everything a person
 // steward does is their own credential (an SA validates its custodians' signatures, ERC-1271).
-import type { RunDoorView, VariantView, ModelCallView, EngagementView } from './run-trace-view';
+import type { RunDoorView, VariantView, ModelCallView, EngagementView, RunOperationalView, TurnCallsSource } from './run-trace-view';
 import { createPublicClient, http } from 'viem';
 import {
   buildDigestBindingCaveat, capabilityHandler, hashDelegation, paymentHandler, ROOT_AUTHORITY,
@@ -141,6 +141,17 @@ export interface PlannerTrace {
   instructionsRendered?: { chars: number; of: number };
   /** A provider's prompt budget and every named part dropped to meet it, in order (spec 377). */
   promptBudget?: { tokens: number; estimated: number; trimmed: string[] };
+  /** Spec 418 §3 — the turn's operations, as the runtime measured them: every structured model call (the selection judge,
+   *  a skill's answer under its step), ms per runtime stage, the time spent choosing and what the selection arm decided
+   *  (kept loose: every arm has its own shape — `turnSelectionOf` reads it), the skill stage, and reported usage. */
+  structuredCalls?: TurnCallsSource['structuredCalls'];
+  stages?: Record<string, number>;
+  selectionMs?: number;
+  selection?: { approach: string } & Record<string, unknown>;
+  skillStage?: string;
+  plannerUsage?: { tokensIn: number; tokensOut: number };
+  composeUsage?: { tokensIn: number; tokensOut: number };
+  quality?: TurnCallsSource['quality'] & { scores?: Record<string, number>; score?: number };
 }
 
 /** Spec 377 — one model the agent OFFERS for an Ask: the provider id a turn names, the words the picker
@@ -432,6 +443,8 @@ export interface RunProvenance { spans: SpanRow[]; retention?: unknown; exporter
 /** Spec 381 W3 — one finished run of an agent, as the record listing carries it (no mandates, no events). */
 export interface RunRecordRow {
   runRef: string; at: number; outcome: string; steps: number; receipts: number;
+  /** When the ask arrived (ms), and the turn's operations (spec 418 §3) — for the threads' totals. */
+  receivedAt?: number; operational?: RunOperationalView;
   /** Spec 414 A1 / 415 A3 — the trace facts the listing carries, for the run list's facets and threads. */
   door?: RunDoorView; variant?: VariantView; modelCalls?: ModelCallView[];
   engaged?: Array<{ capability: string; effect: string }>;
@@ -504,6 +517,8 @@ export interface RunInspectorRecord {
   startingState?: { digest: string };
   modelCalls?: ModelCallView[];
   engagements?: EngagementView[];
+  /** Spec 418 §3 — the turn's operations: ms per stage, the selection, the skill stage, the conversation. */
+  operational?: RunOperationalView;
 }
 export async function fetchRunInspector(session: { token: string }, addressee: Address, runRef: string): Promise<RunInspectorRecord | { error: string }> {
   const out = (await postA2a('/a2a/harness/provenance', { session: session.token, addressee, runRef, format: 'record' })) as { ok?: boolean; error?: string; record?: RunInspectorRecord };
@@ -888,6 +903,11 @@ export interface OpsSummaryView {
   byAgent: Array<{ agent: string; runs: number; answered: number; parked: number; errored: number; vaultCalls: number }>;
   byFailure: Array<{ failureClass: string; runs: number; sample: string | null }>;
   recent: Array<{ run_ref: string; at: number; agent: string; kind: string; capability: string | null; provider: string | null; duration_ms: number | null; vault_calls: number; failure_class: string | null }>;
+  /** Spec 418 §3 — absent from a runtime that predates them (said, never zero-filled). */
+  byStage?: Array<{ stage: string; runs: number; p50Ms: number | null; p95Ms: number | null }>;
+  selection?: { recorded: number; held: number; holdRate: number | null; p50Ms: number | null; byApproach: Array<{ approach: string; runs: number; share: number; held: number; chose: number }>; byHold: Array<{ hold: string; runs: number }> };
+  conversations?: { conversations: number; turns: number; turnsPerConversationP50: number | null; msPerTurnP50: number | null; tokensPerTurnP50: number | null;
+    rows: Array<{ conversation: string; turns: number; firstAt: number; lastAt: number; totalMs: number | null; msPerTurnP50: number | null; tokens: number | null; tokensPerTurn: number | null }> };
 }
 export async function operatorView(session: { token: string }, input: { scope: 'agent' | 'estate'; addressee?: Address; window?: '24h' | '7d' | '30d' }): Promise<{ ok: true; summary: OpsSummaryView | null } | { ok: false; error: string }> {
   const out = (await postA2a('/a2a/harness/ops', { session: session.token, ...input })) as { ok?: boolean; error?: string; summary?: OpsSummaryView | null };

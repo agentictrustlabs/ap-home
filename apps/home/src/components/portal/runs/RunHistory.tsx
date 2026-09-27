@@ -12,7 +12,7 @@ import { StatePill } from '../StatePill';
 import { List, Row, Panel, Stats, Stat, FilterChip, SearchInput, DayHeader, Drawer, Button, timeLabel, type PanelState } from '../../../ui';
 import { stateOf, stateTone, type RunStateSource } from '../../../home/run-state';
 import { ClockIcon } from '../today-icons';
-import { facetsOf, applyFacets, threadsOf, FACET_LABELS, type FacetKey } from '../../../home/run-trace-view';
+import { facetsOf, applyFacets, threadsOf, FACET_LABELS, fmtMs, turnMsOf, turnTokensOf, type FacetKey } from '../../../home/run-trace-view';
 
 /** A finished run's record carries its `outcome` (350 `RunOutcome`); the pill shows the projected state (398 §5.1). */
 const sourceOf = (r: RunRecordRow): RunStateSource => ({ kind: 'run', outcome: r.outcome as Extract<RunStateSource, { kind: 'run' }>['outcome'], ...(r.canceled ? { canceled: true } : {}) });
@@ -102,11 +102,15 @@ export function RunHistory({ token, addressee, limit = 60 }: { token: string; ad
         <div style={{ padding: '0 var(--sp-4) var(--sp-3)' }}>
           {threads && threadGroups.map((t) => (
             <div key={t.id} data-testid="run-thread">
-              <p className="ui-micro" style={{ margin: 'var(--sp-3) 0 var(--sp-1)' }}>{t.contextId ? `conversation ${t.contextId.slice(0, 18)}` : 'a single run'} · {t.runs.length} run{t.runs.length === 1 ? '' : 's'} · {timeLabel(t.lastAt)}</p>
+              <p className="ui-micro" style={{ margin: 'var(--sp-3) 0 var(--sp-1)' }}>{t.contextId ? `conversation ${t.contextId.slice(0, 18)}` : 'a single run'} · {t.runs.length} turn{t.runs.length === 1 ? '' : 's'}
+                {/* Spec 418 §3 — the thread's totals over the turns that recorded them (never a zero for "not recorded"). */}
+                <span data-testid="run-thread-totals">{t.totals.ms !== undefined ? ` · ${fmtMs(t.totals.ms)}${t.totals.timed < t.totals.turns ? ` over ${t.totals.timed}` : ''}` : ' · time not recorded'}
+                {t.totals.tokens !== undefined ? ` · ${t.totals.tokens.toLocaleString()} tokens${t.totals.counted < t.totals.turns ? ` over ${t.totals.counted}` : ''}` : ' · tokens not reported'}</span>
+                {' '}· {timeLabel(t.lastAt)}</p>
               <List>
                 {t.runs.map((r) => (
                   <Row key={r.runRef} title={(r.intent?.goal ?? r.runRef).slice(0, 140)}
-                    meta={<>{r.steps} step{r.steps === 1 ? '' : 's'}{r.variant?.plannerKind ? ` · planner ${r.variant.plannerKind}` : ''}{r.skills?.length ? ` · ${r.skills.length} skill${r.skills.length === 1 ? '' : 's'}` : ''}</>}
+                    meta={<>{r.steps} step{r.steps === 1 ? '' : 's'}{r.variant?.plannerKind ? ` · planner ${r.variant.plannerKind}` : ''}{r.skills?.length ? ` · ${r.skills.length} skill${r.skills.length === 1 ? '' : 's'}` : ''}{turnMsOf(r) !== undefined ? ` · ${fmtMs(turnMsOf(r))}` : ''}{turnTokensOf(r) !== undefined ? ` · ${turnTokensOf(r)!.toLocaleString()} tokens` : ''}</>}
                     side={<><StatePill state={stateOf(sourceOf(r))} native={r.outcome} compact /><Button size="sm" variant="ghost" onClick={() => setOpen(r)}>Inspect</Button></>} />
                 ))}
               </List>

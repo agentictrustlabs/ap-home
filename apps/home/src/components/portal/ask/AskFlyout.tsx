@@ -19,6 +19,8 @@ import type { Address } from '@agenticprimitives/types';
 import { useRouter } from 'next/navigation';
 import { useSession } from '../../../context/session';
 import { RunInspector } from '../runs/RunInspector';
+import { TurnOperations } from '../runs/TurnOperations';
+import { turnModelCallsOf, turnSelectionOf } from '../../../home/run-trace-view';
 import { BasisLine } from '../BasisLine';
 import { useManagedAgents } from '../ManagedAgents';
 import { orgHref, serviceHref } from '../../../lib/workspace';
@@ -1009,7 +1011,7 @@ function DiagnosticsPane({ entries, token, onClose }: { entries: DiagEntry[]; to
           {e.error && <div style={{ color: 'var(--c-danger, #dc2626)' }}>{e.error}</div>}
           {/* A turn with no tool step is not a defect — a refusal or an authority request reads nothing. */}
           {e.evidence.length === 0 && !e.error && <div className="muted">No tool read anything on this turn.</div>}
-          {e.trace && <PlannerTraceView trace={e.trace} />}
+          {e.trace && <PlannerTraceView trace={e.trace} totalMs={e.ms} />}
           {e.runRef && e.addressee && <RunInspector token={token} addressee={e.addressee} runRef={e.runRef} open={false} />}
           {e.evidence.map((ev, k) => (
             <div key={k} style={{ marginTop: 4 }}>
@@ -1045,7 +1047,7 @@ function DiagnosticsPane({ entries, token, onClose }: { entries: DiagEntry[]; to
  * whether the capability was even offered, which playbook was in force, what admission said, what plan the
  * executor got, and where each party came from. Compact by default; the plan and tool list expand.
  */
-function PlannerTraceView({ trace }: { trace: PlannerTrace }) {
+function PlannerTraceView({ trace, totalMs }: { trace: PlannerTrace; /** the whole turn as this screen observed it */ totalMs?: number }) {
   const [open, setOpen] = useState(false);
   const short = (h: string) => (h.length > 14 ? `${h.slice(0, 10)}…${h.slice(-4)}` : h);
   const refusals = trace.admission.filter((a) => a.refused.length);
@@ -1069,6 +1071,13 @@ function PlannerTraceView({ trace }: { trace: PlannerTrace }) {
       )}
       {trace.bindings.length > 0 && (
         <div>bindings: {trace.bindings.map((b) => `${b.arg}: “${b.raw}” → ${b.label ?? short(b.agent)} (${b.source}${b.because ? `: ${b.because}` : ''})`).join('; ')}</div>
+      )}
+      {/* Spec 418 §3 — the turn's operations: where its time went, its model calls (a skill's under its step), how it chose. */}
+      <TurnOperations testId="ask-turn-operations" stages={trace.stages} {...(totalMs !== undefined ? { totalMs } : {})} calls={turnModelCallsOf(trace)}
+        selection={turnSelectionOf(trace.selection)} {...(trace.selectionMs !== undefined ? { selectionMs: trace.selectionMs } : {})}
+        {...(trace.skillStage ? { skillStage: trace.skillStage } : {})} {...(trace.recalledTurns !== undefined ? { recalledTurns: trace.recalledTurns } : {})} />
+      {trace.quality && (
+        <div data-testid="ask-turn-quality">quality {trace.quality.error ? `not measured (${trace.quality.error})` : typeof trace.quality.score === 'number' ? trace.quality.score.toFixed(2) : 'not recorded'} · judge {trace.quality.judge}</div>
       )}
       {open && (
         <>

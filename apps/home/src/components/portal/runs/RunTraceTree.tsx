@@ -7,14 +7,16 @@
 import { useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { fetchRunMeasures, type RunInspectorRecord, type RunMeasureRow } from '../../../home/ask';
-import { traceTreeOf, flattenTree, type TraceNode } from '../../../home/run-trace-view';
+import { traceTreeOf, flattenTree, stepMeasuresOf, type TraceNode } from '../../../home/run-trace-view';
 
 const TONE: Record<NonNullable<TraceNode['tone']>, string> = { ok: 'var(--color-green-700, #15803d)', warn: 'var(--color-amber-700, #b45309)', bad: 'var(--c-danger, #dc2626)', muted: 'inherit' };
 const KIND_MARK: Record<TraceNode['kind'], string> = { door: '⇢', run: '▣', model: '◇', step: '▸', child: '↳', engagement: '·' };
 
 export function RunTraceTree({ token, addressee, runRef, rec }: { token: string; addressee: Address; runRef: string; rec: RunInspectorRecord }) {
   const [measures, setMeasures] = useState<RunMeasureRow[] | { error: string } | 'loading' | null>(null);
-  const rows = flattenTree(traceTreeOf({ ...rec, steps: rec.steps.map((s) => ({ ...s, ...(s.capability ? { capability: { id: s.capability.id } } : {}) })) }));
+  // Spec 418 §3 — once the measurements are read, each step carries its model calls and tokens beside its time.
+  const perStep = Array.isArray(measures) ? stepMeasuresOf(measures) : undefined;
+  const rows = flattenTree(traceTreeOf({ ...rec, steps: rec.steps.map((s) => ({ ...s, ...(s.capability ? { capability: { id: s.capability.id } } : {}) })) }, perStep));
   const maxMs = Math.max(1, ...rows.map((r) => r.node.ms ?? 0));
   const load = async () => { setMeasures('loading'); setMeasures(await fetchRunMeasures({ token }, addressee, runRef).then((r) => ('rows' in r ? r.rows : r))); };
   const runLevel = Array.isArray(measures) ? measures.filter((m) => !m.step) : [];
@@ -39,8 +41,11 @@ export function RunTraceTree({ token, addressee, runRef, rec }: { token: string;
         ))}
       </div>
       <div style={{ marginTop: 4 }}>
-        {measures === null && <button type="button" className="btn ghost" style={{ fontSize: 10.5, padding: '0 6px', minHeight: 0 }} onClick={() => void load()} data-testid="run-measures-load">measurements</button>}
-        {measures === 'loading' && <span>reading the measurements…</span>}
+        {(measures === null || measures === 'loading') && (
+          <button type="button" className="btn ghost" style={{ fontSize: 10.5, padding: '0 6px', minHeight: 0 }} onClick={() => void load()} disabled={measures === 'loading'} aria-busy={measures === 'loading'} data-testid="run-measures-load">
+            {measures === 'loading' ? 'reading the measurements…' : 'measurements (per-step time, model calls, tokens)'}
+          </button>
+        )}
         {measures && typeof measures === 'object' && 'error' in measures && <span style={{ opacity: 0.7 }}>measurements: {measures.error}</span>}
         {Array.isArray(measures) && (
           <div data-testid="run-measures" style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px' }}>
