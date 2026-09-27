@@ -9,7 +9,7 @@
 import { defaultProvider, providerConfigured, modelFor, geminiClient, GROQ_DEFAULTS, OPENAI_DEFAULTS, XAI_DEFAULTS, OPENAI_REASONING_HEADROOM, routePolicy, routeProvider, llmAllowlist, type PlannerEnv, type LlmProvider, type RouteDecision } from './orchestration.js';
 import { createFetchAnthropicClient, usageOfAnthropic } from '@agenticprimitives/orchestration-anthropic';
 import { addUsage, type ModelUsageV1 } from '@agenticprimitives/orchestration';
-import { createFetchOpenAiCompatClient, createOpenAiCompatStructuredCall } from '@agenticprimitives/orchestration-openai-compat';
+import { createFetchOpenAiCompatClient, createOpenAiCompatStructuredCall, createOpenAiCompatLogprobChoice } from '@agenticprimitives/orchestration-openai-compat';
 import type { DiscoveryFetch, StructuredCall } from '@agenticprimitives/context';
 import type { DiscoveryEnv } from './discovery-facets.js';
 
@@ -135,5 +135,25 @@ export function providerStructuredCall(env: ModelEnv, p: LlmProvider, onUsage?: 
     { const u = usageOfAnthropic(res.usage); if (u) onUsage?.(u); }
     if (!block) throw new Error(`anthropic(${model}) did not call "${tool.name}" (stop_reason: ${String((res as { stop_reason?: unknown }).stop_reason ?? 'unknown')})`);
     return (block.input ?? {}) as Record<string, unknown>;
+  };
+}
+
+/**
+ * Spec 416 §4f — the ONE-LETTER call for the log-probability judge, on the provider's light model, recorded like any judge
+ * call (provider, model, time, reported tokens). OpenAI-compatible hosts only; Anthropic returns no log-probabilities, so
+ * there it is `undefined` and the judgment holds `no-judge` — said, never substituted.
+ */
+export function logprobChoiceFor(env: ModelEnv, provider: LlmProvider | undefined, opts: { onCall?: (c: StructuredCallRecordV1) => void } = {}): ((input: { system: string; user: string; letters: readonly string[] }) => Promise<Record<string, number>>) | undefined {
+  const p = provider ?? defaultProvider(env);
+  if (!p || p === 'anthropic' || !providerConfigured(env, p)) return undefined;
+  const model = modelFor(env, p, 'planner');
+  const client = p === 'gemini' ? geminiClient(env)
+    : createFetchOpenAiCompatClient({ apiKey: (p === 'openai' ? env.OPENAI_API_KEY : p === 'xai' ? env.XAI_API_KEY : env.GROQ_API_KEY)!, baseUrl: p === 'openai' ? env.ORCHESTRATION_OPENAI_BASE_URL || OPENAI_DEFAULTS.baseUrl : p === 'xai' ? env.ORCHESTRATION_XAI_BASE_URL || XAI_DEFAULTS.baseUrl : env.ORCHESTRATION_GROQ_BASE_URL || GROQ_DEFAULTS.baseUrl });
+  return async (input) => {
+    const startMs = Date.now();
+    let usage: ModelUsageV1 | undefined;
+    const choose = createOpenAiCompatLogprobChoice({ client, model, label: p, onUsage: (u) => { usage = addUsage(usage, u); } });
+    const rec = (failed: boolean) => opts.onCall?.({ provider: p, model, because: 'named', startMs, endMs: Date.now(), ...(failed ? { failed } : {}), ...(usage ?? {}) });
+    try { const out = await choose(input); rec(false); return out; } catch (e) { rec(true); throw e; }
   };
 }

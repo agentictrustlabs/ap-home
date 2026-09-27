@@ -193,6 +193,18 @@ describe('the ask reply (what the surface is told)', () => {
     expect(acted.kind).toBe('done');
   });
 
+  it('an instruction skill\'s answer IS the reply — the pre-plan retrieval\'s passages are not composed over it', async () => {
+    let composed = 0;
+    const steps = [
+      { step: { toolId: 'kb.retrieve', args: {} }, ok: true, result: { passages: [{ text: 'p' }] } },
+      { step: { toolId: 'cic.governance.crosswalk', args: {} }, ok: true, result: { answer: 'The mapping, under the crosswalk skill.' } },
+    ];
+    const reply = await askReplyFor(env2, { intent, addressee: WORKSPACE as `0x${string}`, result: { ...base, outcome: 'completed', result: 'x', steps, receipts: [{ status: 'executed', risk: 'informational' }] } as never,
+      tools: [{ id: 'cic.governance.crosswalk', description: 'd', inputSchema: {}, answer: '{{answer}}' }] as never, composer: { compose: async () => { composed++; return 'recomposed'; } } as never });
+    expect(reply).toMatchObject({ kind: 'answer', text: 'The mapping, under the crosswalk skill.' });
+    expect(composed).toBe(0);
+  });
+
   it('a denial is refused, and says so — never dressed up as a request for authority', async () => {
     const reply = await askReplyFor(env2, { intent, addressee: WORKSPACE as `0x${string}`, result: { ...base, outcome: 'denied', error: 'intent-mismatch: …' } as never });
     expect(reply).toMatchObject({ kind: 'refused', outcome: 'denied' });

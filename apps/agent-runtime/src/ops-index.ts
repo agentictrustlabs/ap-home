@@ -140,3 +140,14 @@ export async function queryOps(env: OpsEnv, q: OpsQuery): Promise<OpsSummary | n
     recent: rows.slice(0, 50).map((r) => ({ run_ref: r.run_ref, at: r.at, agent: r.agent, kind: r.kind, capability: r.capability, provider: r.provider, duration_ms: r.duration_ms, vault_calls: r.vault_calls, failure_class: r.failure_class })),
   };
 }
+
+/** Spec 416 §4f — the tools an asker's runs at this agent used since `sinceMs`, counted (one indexed range read). The
+ *  asker's recent skills, for the judge's typed reading — ids and counts only. `null` when no index is bound. */
+export async function recentToolsOf(env: OpsEnv, agent: Address, asker: Address, sinceMs: number, limit = 40): Promise<Array<{ id: string; times: number }> | null> {
+  if (!env.OPS) return null;
+  const rows = await env.OPS.prepare('SELECT tools FROM runs WHERE agent = ? AND asker = ? AND at >= ? ORDER BY at DESC LIMIT ?')
+    .bind(agent.toLowerCase(), asker.toLowerCase(), sinceMs, limit).all<{ tools: string }>();
+  const counts = new Map<string, number>();
+  for (const r of rows.results ?? []) { let ts: unknown = []; try { ts = JSON.parse(r.tools); } catch { /* a row we cannot read is skipped */ } for (const t of Array.isArray(ts) ? ts : []) if (typeof t === 'string') counts.set(t, (counts.get(t) ?? 0) + 1); }
+  return [...counts.entries()].map(([id, times]) => ({ id, times })).sort((a, b) => b.times - a.times || a.id.localeCompare(b.id));
+}

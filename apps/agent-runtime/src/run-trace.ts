@@ -151,11 +151,15 @@ export interface VariantRequestV1 {
   /** Spec 416 W3 — acceptance by a fitted conformal map (the map inline, cited by its digest) instead of floor/margin. */
   acceptance?: { method: 'conformal'; alpha: number; temperature: number; qhat: number; mapDigest: string };
   /** Spec 416 — the judge's profile: `thorough` (v5) or `fast` (one call, one question, the provider's light model). */
-  judgeProfile?: 'thorough' | 'fast';
+  judgeProfile?: 'thorough' | 'fast' | 'logprob';
 }
 export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/kb': ['off', 'tool', 'playbook'],
   /** Spec 416 — `off`: the chosen skill is stamped but not RUN (no model call) — a comparison that measures the pick alone. */
-  'skill-selection/answer': ['on', 'off'] };
+  'skill-selection/answer': ['on', 'off'],
+  /** Spec 416 §4f — what the judge is told about the asker: nothing, their standing (default), or standing + their recent
+   *  skills here + (at their own agent) memory. `full` reads the asker's history, so a comparison uses it only from a
+   *  seeded starting state — never over its own test runs. */
+  'skill-selection/asker-context': ['off', 'relation', 'full'] };
 
 export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantRequestV1 } | { ok: false; error: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'variant must be an object' };
@@ -187,7 +191,7 @@ export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantR
       if (!a || typeof a !== 'object' || a['method'] !== 'conformal' || !num(a['alpha'], 0.001, 0.5) || !num(a['temperature'], 0.05, 20) || !num(a['qhat'], 0, 1) || typeof a['mapDigest'] !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(a['mapDigest'])) return { ok: false, error: 'acceptance must be { method: conformal, alpha, temperature, qhat, mapDigest } — a fitted calibration map' };
       out.acceptance = { method: 'conformal', alpha: a['alpha'] as number, temperature: a['temperature'] as number, qhat: a['qhat'] as number, mapDigest: a['mapDigest'] };
     }
-    else if (k === 'judgeProfile') { if (v[k] !== 'thorough' && v[k] !== 'fast') return { ok: false, error: 'judgeProfile must be thorough | fast' }; out.judgeProfile = v[k] as 'thorough' | 'fast'; }
+    else if (k === 'judgeProfile') { if (v[k] !== 'thorough' && v[k] !== 'fast' && v[k] !== 'logprob') return { ok: false, error: 'judgeProfile must be thorough | fast | logprob' }; out.judgeProfile = v[k] as 'thorough' | 'fast' | 'logprob'; }
     else return { ok: false, error: `${k}: not a variant component (plannerKind, selection, provider, toggles, playbook, startingState, acceptance, judgeProfile)` };
   }
   return { ok: true, variant: out };
