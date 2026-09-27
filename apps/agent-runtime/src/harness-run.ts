@@ -65,7 +65,7 @@ import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
 import { ADAPTER, CARRIES } from './adapter-declarations.js';
 import { relationshipCredentialDigest, termsDigestOf, type RelationshipCredentialBodyV1 } from '@agenticprimitives/agent-relationships';
-import { replayingInvoker, inputsFor, type RunRecordV1, type RunMarks, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent , selectByDeclaredUtterances , selectByJudgment , selectByOntology, selectByOntologyThenJudgment, selectByProposalThenJudgment, selectByFramedJudgment, type OntologySelectionV1, type JudgmentSelectionV1, type FramedSelectionV1, type ProposedSelectionV1 } from '@agenticprimitives/orchestration';
+import { replayingInvoker, inputsFor, type RunRecordV1, type RunMarks, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent , selectByDeclaredUtterances , selectByJudgment , selectByOntology, selectByOntologyThenJudgment, selectByProposalThenJudgment, selectByOntologyFirst, type OntologyFirstSelectionV1, selectByFramedJudgment, addUsage, type ModelUsageV1, type OntologySelectionV1, type JudgmentSelectionV1, type FramedSelectionV1, type ProposedSelectionV1 } from '@agenticprimitives/orchestration';
 import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, standingFor, declareInstruction, forgetInstruction, instructionContextOf, STANDING_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
@@ -2495,7 +2495,8 @@ export interface HarnessRunInput {
   /** Spec 415 A4 — what a COMPARISON asked this run to do differently (already admitted by the caller: a
    *  comparison estate, the agent's own steward). The planner kind and the capability toggles apply here; the
    *  provider was folded into `provider`. Behaviour, never authority. */
-  variant?: { plannerKind?: 'model' | 'rule-based'; selection?: 'model' | 'declared' | 'ontology' | 'judgment' | 'ontology+judgment' | 'propose+judgment' | 'framed-judgment'; toggles?: Record<string, string>;
+  variant?: { plannerKind?: 'model' | 'rule-based'; selection?: 'model' | 'declared' | 'ontology' | 'judgment' | 'ontology+judgment' | 'propose+judgment' | 'ontology-first' | 'framed-judgment'; toggles?: Record<string, string>;
+    judgeProfile?: 'thorough' | 'fast';
     /** Spec 416 W3 — conformal acceptance under a fitted map. */
     acceptance?: { method: 'conformal'; alpha: number; temperature: number; qhat: number; mapDigest: string } };
   /** The agent being asked. Informational tools that read an organization's own records default to it —
@@ -2767,7 +2768,13 @@ export interface PlannerTraceV1 {
   /** Spec 388 — which provider carried the planner and the composer, and why (the numbers beside the reason). */
   /** Spec 415 — every structured model call the run made (the selection judge, a skill's answer, the KB and vault
    *  choosers), as it ran: provider, model, why, when. Each becomes a model invocation on the run's provenance. */
-  structuredCalls?: Array<{ role: 'judge' | 'structured'; provider: string; model: string; because?: string; startMs: number; endMs: number; failed?: boolean }>;
+  structuredCalls?: Array<{ role: 'judge' | 'structured'; provider: string; model: string; because?: string; startMs: number; endMs: number; failed?: boolean; tokensIn?: number; tokensOut?: number; cachedIn?: number; reasoningOut?: number }>;
+  /** Spec 416 — milliseconds spent choosing (planner or selection arm), summed over re-plans. */
+  selectionMs?: number;
+  /** What the model planner's calls used, as the provider reported them (summed over re-plans). */
+  plannerUsage?: ModelUsageV1;
+  /** What the composer's calls used, as the provider reported them. */
+  composeUsage?: ModelUsageV1;
   route?: { policy: RoutePolicy; /** Spec 388 W3 — where the minute was counted: this isolate's own window, or the deployment's shared meter. */ meter?: 'isolate' | 'shared'; planner?: RouteDecision; composer?: RouteDecision; /** Spec 388 W2 — each structured call the run's steps made (the KB and vault choosers), in order. */ structured?: RouteDecision[] };
   /** Every admission verdict, in order — a refused plan shows what was proposed and why it was refused. */
   admission: Array<{ refused: Array<{ code: string; message: string; stepIndex?: number; toolId?: string }>; replanned: boolean }>;
@@ -2780,6 +2787,7 @@ export interface PlannerTraceV1 {
     | ({ approach: 'judgment' } & JudgmentSelectionV1)
     | ({ approach: 'ontology+judgment'; chose: string | null; hold?: string; decidedBy: 'ontology' | 'judgment'; ontology: OntologySelectionV1; judgment?: JudgmentSelectionV1 })
     | ({ approach: 'propose+judgment' } & ProposedSelectionV1)
+    | ({ approach: 'ontology-first' } & OntologyFirstSelectionV1)
     | ({ approach: 'framed-judgment' } & FramedSelectionV1);
   /** Each party binding and WHERE IT CAME FROM (spec 367 §3): the person's words, a decision rule, memory, or the resolver. */
   bindings: Array<{ arg: string; raw: string; agent: string; label?: string; source: 'said' | 'context' | 'standing' | 'decision' | 'memory' | 'resolver' | 'disclosed'; because?: string }>;
@@ -4811,7 +4819,9 @@ step is then handed to that agent under authority the person grants; leave it ou
   // known. The digest on the trace is of what was actually sent.
   // Spec 388 — under ORCHESTRATION_ROUTE=budget the provider is chosen per call, at plan time, from the prompt's
   // estimate (see `plan` below); `selected` is the deployment's default, kept for the rule-based case.
-  const selected = selectPlanner(env as never, { systemPrompt: withPlaybook, maxTokens: ASK_PLANNER_MAX_TOKENS, ...(input.provider ? { provider: input.provider } : {}) });
+  // The planner's reported usage lands on the trace (declared below; the planner runs after it exists).
+  const notePlannerUsage = (u: ModelUsageV1) => { trace.plannerUsage = addUsage(trace.plannerUsage, u); };
+  const selected = selectPlanner(env as never, { systemPrompt: withPlaybook, maxTokens: ASK_PLANNER_MAX_TOKENS, ...(input.provider ? { provider: input.provider } : {}), onUsage: notePlannerUsage });
   let plannerModel = selected.model;
   // The compiler answers for the shapes it claims; the model answers for the rest. Not a fallback pair
   // (ADR-0013): the match is deterministic and decided BEFORE any planner runs, the way a rule-based
@@ -4853,19 +4863,21 @@ step is then handed to that agent under authority the person grants; leave it ou
           // Spec 415 A4 — THE THREE ARMS (+ the framed shape). A rule narrows and a judge picks; neither allows. Candidates are
           // the playbook's instruction skills; the arm's decision goes on the trace; a hold plans `ask.unsupported`.
           const arm = input.variant?.selection;
-          if (arm === 'ontology' || arm === 'judgment' || arm === 'ontology+judgment' || arm === 'propose+judgment' || arm === 'framed-judgment') {
+          if (arm === 'ontology' || arm === 'judgment' || arm === 'ontology+judgment' || arm === 'propose+judgment' || arm === 'ontology-first' || arm === 'framed-judgment') {
             const sources = instructionSourcesOf(playbook);
             const skills = Object.values(playbook?.tools ?? {}).filter((t) => sources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}) }));
             const lexicon = playbook?.domainLexicon;
             // The judge's model call is a model invocation of the run like the planner's: on the trace, with its provider,
             // model and why — role `judge`, so a reader can tell the call that chose the skill from the one that answered.
-            const call = structuredCallFor(env as never, input.provider, { onCall: recordStructured('judge') }) as never;
+            const fast = input.variant?.judgeProfile === 'fast';
+            const call = structuredCallFor(env as never, input.provider, { onCall: recordStructured('judge'), ...(fast ? { tier: 'light' as const } : {}) }) as never;
             let chose: string | null;
-            const judgeParams = input.variant?.acceptance ? { acceptance: input.variant.acceptance } : {};
+            const judgeParams = { ...(input.variant?.acceptance ? { acceptance: input.variant.acceptance } : {}), ...(fast ? { profile: 'fast' as const } : {}) };
             if (arm === 'ontology') { const r = selectByOntology(rest, skills, lexicon); trace.selection = { approach: 'ontology', ...r }; chose = r.chose; }
             else if (arm === 'judgment') { const r = await selectByJudgment(rest, skills, call, judgeParams); trace.selection = { approach: 'judgment', ...r }; chose = r.chose; }
             else if (arm === 'ontology+judgment') { const r = await selectByOntologyThenJudgment(rest, skills, call, judgeParams, lexicon); trace.selection = { approach: 'ontology+judgment', ...r }; chose = r.chose; }
             // Spec 416 W1 — the ontology PROPOSES (recall-first, `excludes` vetoes), the judge decides among the proposed.
+            else if (arm === 'ontology-first') { const r = await selectByOntologyFirst(rest, skills, call, judgeParams, lexicon); trace.selection = { approach: 'ontology-first', ...r }; chose = r.chose; }
             else if (arm === 'propose+judgment') { const r = await selectByProposalThenJudgment(rest, skills, call, judgeParams, lexicon); trace.selection = { approach: 'propose+judgment', ...r }; chose = r.chose; }
             else { const r = await selectByFramedJudgment(rest, skills.filter((x) => x.covers.length), call); trace.selection = { approach: 'framed-judgment', ...r }; chose = r.chose; }
             plannerUsed = arm;
@@ -4884,7 +4896,7 @@ step is then handed to that agent under authority the person grants; leave it ou
           const route = await routeProvider(env as never, input.provider, { call: 'planner', estimatedTokens: estimatePromptTokens(withPlaybook, pin.tools, user) });
           trace.route = { ...(trace.route ?? { policy: routePolicy(env as never) }), meter: meterFor(env as never).kind, planner: route };
           const provider = route.provider ?? undefined;
-          const chosen = provider && provider !== selected.kind ? selectPlanner(env as never, { systemPrompt: withPlaybook, maxTokens: ASK_PLANNER_MAX_TOKENS, provider }) : selected;
+          const chosen = provider && provider !== selected.kind ? selectPlanner(env as never, { systemPrompt: withPlaybook, maxTokens: ASK_PLANNER_MAX_TOKENS, provider, onUsage: notePlannerUsage }) : selected;
           plannerUsed = chosen.kind; plannerModel = chosen.model;
           const budget = plannerPromptBudget(env as never, provider ?? null);
           if (budget !== null) {
@@ -4892,15 +4904,18 @@ step is then handed to that agent under authority the person grants; leave it ou
             trace.promptBudget = { tokens: budget, estimated: fitted.estimated, trimmed: fitted.trimmed };
             trace.promptDigest = keccak256(toBytes(fitted.text));
             trace.examplesRendered = (fitted.text.match(/^- /gm) ?? []).length;
-            return withSpecialists(await selectPlanner(env as never, { systemPrompt: fitted.text, maxTokens: ASK_PLANNER_MAX_TOKENS, ...(provider ? { provider } : {}) }).planner.plan(pin), playbook?.specialists, pin.tools);
+            return withSpecialists(await selectPlanner(env as never, { systemPrompt: fitted.text, maxTokens: ASK_PLANNER_MAX_TOKENS, ...(provider ? { provider } : {}), onUsage: notePlannerUsage }).planner.plan(pin), playbook?.specialists, pin.tools);
           }
           return withSpecialists(await chosen.planner.plan(pin), playbook?.specialists, pin.tools);
         },
       };
   // Spec 384 W3 — the campaign's selection binds the planned step to its provider and offer, whoever planned it.
+  // Spec 416 — how long the PICK took (the model planner's call, or a selection arm's work), apart from the rest of the
+  // turn: a comparison of selection approaches measures this, not the whole ask.
+  const timedPlanner: Planner = { plan: async (pin) => { const t0 = Date.now(); try { return await planner.plan(pin); } finally { trace.selectionMs = (trace.selectionMs ?? 0) + (Date.now() - t0); } } };
   const boundPlanner: Planner = input.engagement
-    ? { plan: async (pin) => { const p = await planner.plan(pin); return { ...p, ...bindSelectedOffer(p, input.engagement) }; } }
-    : planner;
+    ? { plan: async (pin) => { const p = await timedPlanner.plan(pin); return { ...p, ...bindSelectedOffer(p, input.engagement) }; } }
+    : timedPlanner;
   const kind = input.plan ? 'supplied' : selected.kind;
   const trace: PlannerTraceV1 = {
     planner: plannerUsed, ...(selected.model ? { model: selected.model } : {}), toolsExposed: [], recalledTurns: input.conversation?.turns.length ?? 0, playbook: playbook ? { archetypeId: playbook.archetypeId, archetypeVersion: playbook.archetypeVersion, digest: playbook.digest } : null,
@@ -5062,7 +5077,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     ? playbookAnswerInvoker({ call: structuredCallFor(env as never, input.provider, { onCall: recordStructured('structured') }), instructions: playbook?.instructions ?? null, material, advertised, agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null, ...(memory ? { memory } : {}), ...(study ? { study } : {}) })
     : null;
   const skillInvoke = instructionTools.length
-    ? skillApplyInvoker({ call: structuredCallFor(env as never, input.provider, { onCall: recordStructured('structured') }), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null })
+    ? skillApplyInvoker({ call: structuredCallFor(env as never, input.provider, { onCall: recordStructured('structured') }), ...(input.variant?.toggles?.['skill-selection/answer'] === 'off' ? { pickOnly: true } : {}), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null })
     : null;
   const instructionIds = new Set(instructionTools.map((t) => t.id));
   const localInvoke: ToolInvoker = async (toolId, args, ctx) => {

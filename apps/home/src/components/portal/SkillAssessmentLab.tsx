@@ -11,7 +11,8 @@ import { whitelabel } from '../../whitelabel/config';
 type Outcome = 'tp' | 'tp-alt' | 'tn' | 'mis-sib' | 'mis-far' | 'miss' | 'spur' | 'undetected';
 interface IntentRow { intentId: string; message: string; split: string; bucket?: string; expected: string | null; chosen: string | null; outcome: Outcome; label: string; ok: boolean | null; why?: string; ms?: number; contaminated?: { skill: string; overlap: number; isNot: boolean } }
 interface PerSkill { skill: string; asked: number; right: number; accuracy: number | null; ci: [number, number] | null; wronglyChosen: number; confusedWith: Array<{ skill: string; times: number }> }
-interface Variant { name: string; how: string; runs: number; macroTa: number | null; macroCi: [number, number] | null; microTa: number | null; holdRate: number | null; holdNum?: number; holdDen?: number; routingPurity: number | null; right: number; wrong: number; declinedCorrectly: number; firedWrongly: number; gate: { status: string; reason: string } | null; intents: IntentRow[]; perSkill: PerSkill[]; riskCoverage?: RiskCoverage }
+interface Variant { name: string; how: string; runs: number; macroTa: number | null; macroCi: [number, number] | null; microTa: number | null; holdRate: number | null; holdNum?: number; holdDen?: number; routingPurity: number | null; right: number; wrong: number; declinedCorrectly: number; firedWrongly: number; gate: { status: string; reason: string } | null; intents: IntentRow[]; perSkill: PerSkill[]; riskCoverage?: RiskCoverage; cost?: Cost }
+interface Cost { medianMs: number | null; medianSelectionMs?: number | null; tokenRuns: number; meanSelectionIn: number | null; meanSelectionOut: number | null; meanTotalIn: number | null; meanTotalOut: number | null; unreportedCalls: number }
 interface RiskCoverage { n: number; aurc: number | null; points: Array<{ coverage: number; risk: number; threshold: number }> }
 interface Experiment { id: string; slate: string; split: string; repeats: number; startedAt: string; finishedAt: string; variants: Variant[]; comparisons: Array<{ a: string; b: string; changed: string[]; confounded: boolean; words: string }> }
 interface Recommendation { rule: string; severity: 'act' | 'watch' | 'info'; title: string; detail: string; change: string; skill?: string; experiment: string; variant?: string; evidence: { intents: string[]; numbers: Record<string, number | string> } }
@@ -21,6 +22,7 @@ const R = report as unknown as Report;
 /** The skills library (skill-web), where each playbook skill's own Assessment card lives — the deployment's footer link
  *  (white-label config), never a literal here. Absent ⇒ no outbound link is drawn. */
 const SKILLS_WEB = whitelabel.footer.links.find((l) => /skills library/i.test(l.label))?.href.replace(/\/$/, '') ?? null;
+const fmtK = (v: number | null | undefined): string => (v === null || v === undefined ? '—' : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v));
 const pct = (v: number | null | undefined): string => (v === null || v === undefined ? '—' : `${Math.round(v * 100)}%`);
 const skillName = (s: string | null | undefined): string => (s ? s.replace(/^skill:/, '').replace(/^[^/]+\//, '') : 'no skill');
 const slateName = (e: Experiment): string => `${e.slate.replace(/^cil-commons-routing-/, '').replace(/@\d+$/, '')} · ${e.split}`;
@@ -101,6 +103,8 @@ export function SkillAssessmentLab() {
                   <Stat label="Right skill" value={`${variant.right}/${variant.intents.filter((i) => i.expected).length}`} tone="ok" />
                   <Stat label="Declined when it should" value={variant.holdDen ? `${variant.holdNum}/${variant.holdDen}` : '—'} tone={variant.holdRate !== null && variant.holdRate < 0.95 ? 'warn' : undefined} hint={variant.holdDen ? undefined : 'this test set has no out-of-scope asks'} />
                   <Stat label="Accuracy across skills" value={pct(variant.macroTa)} hint={variant.macroCi ? `95% interval ${pct(variant.macroCi[0])}–${pct(variant.macroCi[1])}` : undefined} />
+                  <Stat label="Time to pick (median)" value={typeof variant.cost?.medianSelectionMs === 'number' ? `${(variant.cost.medianSelectionMs / 1000).toFixed(2)} s` : '—'} hint={variant.cost?.medianMs ? `whole ask ${(variant.cost.medianMs / 1000).toFixed(1)} s` : undefined} />
+                  <Stat label="Tokens to pick the skill" value={variant.cost?.tokenRuns ? `${fmtK(variant.cost.meanSelectionIn)} in · ${fmtK(variant.cost.meanSelectionOut)} out` : '—'} hint={variant.cost?.tokenRuns ? `whole run ${fmtK(variant.cost.meanTotalIn)} in · ${fmtK(variant.cost.meanTotalOut)} out${variant.cost.unreportedCalls ? ` · ${variant.cost.unreportedCalls} call(s) reported nothing` : ''}` : 'not recorded for this experiment'} />
                   <Stat label="Gate" value={variant.gate?.status ?? '—'} tone={variant.gate?.status === 'PASS' ? 'ok' : variant.gate?.status === 'FAIL' ? 'danger' : 'warn'} hint={variant.gate ? <span title={variant.gate.reason}>{gateLine(variant.gate.reason)}</span> : undefined} />
                 </Stats>
                 {exp.comparisons.map((c) => <Note key={`${c.a}:${c.b}`}><strong>Compared:</strong> {c.words}.</Note>)}

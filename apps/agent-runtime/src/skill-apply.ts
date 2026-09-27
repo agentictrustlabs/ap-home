@@ -70,6 +70,9 @@ export interface SkillApplyDeps {
   readSkill: SkillReader;
   agentName?: string | null;
   maxTokens?: number;
+  /** Spec 416 — a comparison measuring the PICK alone: the step is stamped under the skill (so the selection is read
+   *  exactly as in a full run) but the skill is not applied — no body read, no model call. Never set outside a variant. */
+  pickOnly?: boolean;
 }
 
 /** The invoker: the skill's body by its pinned digest, the model once, the answer as written. */
@@ -77,6 +80,7 @@ export function skillApplyInvoker(deps: SkillApplyDeps): ToolInvoker {
   return async (toolId, args) => {
     const source = deps.sources[toolId];
     if (!source) return { refused: `${toolId} is not an instruction skill of this playbook` };
+    if (deps.pickOnly) return { answer: `(pick-only comparison) ${source.skillId} was selected; it was not applied.`, skill: { id: source.skillId, version: source.version, digest: source.contractDigest }, source: `${deps.agentName ?? 'this agent'}, selection only` };
     if (!deps.call) return { refused: 'no model is available to answer with' };
     const question = String(args.question ?? '').trim();
     if (!question) return { refused: 'an instruction skill answers a question; none was asked' };

@@ -21,6 +21,8 @@ export interface RunTraceEnv {
 
 /** A route reason is the router's own words about numbers — bounded, so it can never carry a body (shape R6). */
 const reason = (s: string | undefined): string | undefined => (s ? s.slice(0, 200) : undefined);
+/** A provider-REPORTED usage onto a model call (numbers only; absent stays absent — never an estimate). */
+const tokensOf = (u: { tokensIn?: number; tokensOut?: number } | undefined): { tokensIn?: number; tokensOut?: number } => (u && typeof u.tokensIn === 'number' ? { tokensIn: u.tokensIn, tokensOut: u.tokensOut ?? 0 } : {});
 
 /** The A2A message the run answered: its message, context and task ids. */
 export function a2aDoor(message: { messageId?: string; contextId?: string } | undefined, task: { id?: string; contextId?: string } | undefined): RunDoorV1 {
@@ -42,7 +44,7 @@ export function doorFromBody(body: unknown, inWorker: boolean): RunDoorV1 | null
   return { kind: 'a2a-message', ...(id(d.messageId) ? { messageId: id(d.messageId)! } : {}), ...(id(d.contextId) ? { contextId: id(d.contextId)! } : {}), ...(id(d.taskId) ? { taskId: id(d.taskId)! } : {}) };
 }
 
-const PLANNER_KINDS = new Set(['supplied', 'compiled', 'rule-based', 'declared', 'ontology', 'judgment', 'ontology+judgment', 'propose+judgment', 'framed-judgment']);
+const PLANNER_KINDS = new Set(['supplied', 'compiled', 'rule-based', 'declared', 'ontology', 'judgment', 'ontology+judgment', 'propose+judgment', 'ontology-first', 'framed-judgment']);
 /** supplied | compiled | rule-based stay what they are; any provider name is a model planner. */
 export const plannerKindOf = (planner: string | undefined): string | undefined => (!planner ? undefined : PLANNER_KINDS.has(planner) ? planner : 'model');
 
@@ -57,15 +59,16 @@ export function modelCallsOf(trace: PlannerTraceV1 | undefined, marks?: Readonly
       provider: trace.route?.planner?.provider ?? trace.planner,
       ...(trace.promptDigest ? { promptDigest: trace.promptDigest } : {}),
       ...(reason(trace.route?.planner?.because) ? { routeReason: reason(trace.route?.planner?.because)! } : {}),
+      ...tokensOf(trace.plannerUsage),
     });
   }
   const compose = trace.route?.composer;
   if (compose?.provider) {
     const w = marks?.find((m) => m.name === 'reply:compose');
-    out.push({ role: 'compose', provider: compose.provider, ...(reason(compose.because) ? { routeReason: reason(compose.because)! } : {}), ...(w ? { startMs: w.startMs, endMs: w.endMs } : {}) });
+    out.push({ role: 'compose', provider: compose.provider, ...(reason(compose.because) ? { routeReason: reason(compose.because)! } : {}), ...(w ? { startMs: w.startMs, endMs: w.endMs } : {}), ...tokensOf(trace.composeUsage) });
   }
   // Every structured call as it ran (spec 415): the selection judge (`judge`), a skill's answer, the KB and vault choosers.
-  for (const s of trace.structuredCalls ?? []) out.push({ role: s.role, provider: s.provider, model: s.model, ...(reason(s.because) ? { routeReason: reason(s.because)! } : {}), startMs: s.startMs, endMs: s.endMs });
+  for (const s of trace.structuredCalls ?? []) out.push({ role: s.role, provider: s.provider, model: s.model, ...(reason(s.because) ? { routeReason: reason(s.because)! } : {}), startMs: s.startMs, endMs: s.endMs, ...tokensOf(s) });
   return out;
 }
 
@@ -105,6 +108,10 @@ export function engagedFromTrace(trace: PlannerTraceV1 | undefined): HarnessEnga
     // its choice — the proposed set; the judge's: its slate (the proposed skills), what it chose, its runner-up.
     push('skill-selection/ontology', sel.proposal.candidates.length ? 'changed-plan' : 'no-change', offeredAll, sel.proposal.candidates.map(iri), Object.keys(sel.proposal.removed).map(iri), typed({ about: sel.grounded.map((g) => g.iri) }));
     if (sel.judgment) push('skill-selection/judgment', planned.length ? 'changed-plan' : 'no-change', sel.judgment.offered.map(iri), planned, sel.judgment.rejected.map(iri), typed(sel.judgment.intent));
+  } else if (sel && sel.approach === 'ontology-first') {
+    // The ontology's engagement always (it read the request first); the judge's only when the ontology was not decisive.
+    push('skill-selection/ontology', sel.decidedBy === 'ontology' ? 'changed-plan' : 'no-change', offeredAll, sel.decidedBy === 'ontology' ? planned : [], Object.keys(sel.ontology.excluded ?? {}).map(iri), typed({ about: sel.ontology.grounded.map((g) => g.iri) }));
+    if (sel.judgment) push('skill-selection/judgment', planned.length ? 'changed-plan' : 'no-change', sel.judgment.offered.map(iri), planned, sel.judgment.rejected.map(iri), typed(sel.judgment.intent));
   } else if (sel && sel.approach === 'judgment') {
     push('skill-selection/judgment', planned.length ? 'changed-plan' : 'no-change', offeredAll, planned, sel.rejected.map(iri), typed(sel.intent));
   } else if (sel && sel.approach === 'framed-judgment') {
@@ -128,7 +135,7 @@ const SELECTION_APPROACH: Record<string, string> = { model: 'skill-selection/mod
 /** Spec 415 A4 — how instruction skills are selected: `model` (the planner over descriptions — the baseline), `declared`
  *  (overlap with declared sentences), the three arms `ontology` · `judgment` · `ontology+judgment`, spec 416's `propose+judgment`, and `framed-judgment`
  *  (the 2026-09-26 shape, kept reproducible). */
-export const SELECTION_ARMS = ['model', 'declared', 'ontology', 'judgment', 'ontology+judgment', 'propose+judgment', 'framed-judgment'] as const;
+export const SELECTION_ARMS = ['model', 'declared', 'ontology', 'judgment', 'ontology+judgment', 'propose+judgment', 'ontology-first', 'framed-judgment'] as const;
 export type SelectionArmV1 = (typeof SELECTION_ARMS)[number];
 
 export interface VariantRequestV1 {
@@ -143,8 +150,12 @@ export interface VariantRequestV1 {
   startingState?: { domain: string; scenarioId: string; digest: string };
   /** Spec 416 W3 — acceptance by a fitted conformal map (the map inline, cited by its digest) instead of floor/margin. */
   acceptance?: { method: 'conformal'; alpha: number; temperature: number; qhat: number; mapDigest: string };
+  /** Spec 416 — the judge's profile: `thorough` (v5) or `fast` (one call, one question, the provider's light model). */
+  judgeProfile?: 'thorough' | 'fast';
 }
-export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/kb': ['off', 'tool', 'playbook'] };
+export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/kb': ['off', 'tool', 'playbook'],
+  /** Spec 416 — `off`: the chosen skill is stamped but not RUN (no model call) — a comparison that measures the pick alone. */
+  'skill-selection/answer': ['on', 'off'] };
 
 export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantRequestV1 } | { ok: false; error: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'variant must be an object' };
@@ -176,20 +187,22 @@ export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantR
       if (!a || typeof a !== 'object' || a['method'] !== 'conformal' || !num(a['alpha'], 0.001, 0.5) || !num(a['temperature'], 0.05, 20) || !num(a['qhat'], 0, 1) || typeof a['mapDigest'] !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(a['mapDigest'])) return { ok: false, error: 'acceptance must be { method: conformal, alpha, temperature, qhat, mapDigest } — a fitted calibration map' };
       out.acceptance = { method: 'conformal', alpha: a['alpha'] as number, temperature: a['temperature'] as number, qhat: a['qhat'] as number, mapDigest: a['mapDigest'] };
     }
-    else return { ok: false, error: `${k}: not a variant component (plannerKind, selection, provider, toggles, playbook, startingState, acceptance)` };
+    else if (k === 'judgeProfile') { if (v[k] !== 'thorough' && v[k] !== 'fast') return { ok: false, error: 'judgeProfile must be thorough | fast' }; out.judgeProfile = v[k] as 'thorough' | 'fast'; }
+    else return { ok: false, error: `${k}: not a variant component (plannerKind, selection, provider, toggles, playbook, startingState, acceptance, judgeProfile)` };
   }
   return { ok: true, variant: out };
 }
 
 /** The variant this run ran under: the playbook, the planner kind, the route policy, the build, the toggles — the
  *  deployment's knobs with what a comparison REQUESTED laid over them (a requested toggle is what ran). */
-export function variantOf(env: RunTraceEnv, trace: PlannerTraceV1 | undefined, requested?: Pick<VariantRequestV1, 'toggles' | 'acceptance'>): VariantV1 {
+export function variantOf(env: RunTraceEnv, trace: PlannerTraceV1 | undefined, requested?: Pick<VariantRequestV1, 'toggles' | 'acceptance' | 'judgeProfile'>): VariantV1 {
   const toggles: Record<string, string> = {};
   const kb = requested?.toggles?.['retrieval/kb'] ?? (env.KB_RETRIEVAL ?? '').trim().toLowerCase();
   if (kb) toggles['retrieval/kb'] = kb;
   for (const [k, val] of Object.entries(requested?.toggles ?? {})) toggles[k] = val;
   // The acceptance rule is a harness-capability setting: which map shaped the decision is part of what ran.
   if (requested?.acceptance) toggles['skill-selection/acceptance'] = `conformal:${requested.acceptance.mapDigest}`;
+  if (requested?.judgeProfile) toggles['skill-selection/judge-profile'] = requested.judgeProfile;
   const policy = trace?.route?.policy ?? ((env.ORCHESTRATION_ROUTE ?? '').trim() || undefined);
   const kind = plannerKindOf(trace?.planner);
   const build = (env.HARNESS_BUILD ?? '').trim();
