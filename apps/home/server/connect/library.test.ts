@@ -421,3 +421,82 @@ describe('/connect/library — org scope, when the org plane refuses the read', 
     expect(calls.filter((c) => c.op === 'content.put').length).toBe(before);
   });
 });
+
+// ORG scope — THE CATALOG IS AN INDEX. Bytes go to `content.artifact.<id>` records (strictly), the catalog entry
+// keeps no `bytesB64`, and a GET hydrates on request (`?folder=`, `?name=`). A write past the cap is refused with
+// a 413, never trimmed: the old `.slice(0, 200)` acknowledged a batch and dropped its tail (2026-09-27).
+describe('/connect/library — org scope, index-only catalog', () => {
+  const ORG_SA = '0x4444444444444444444444444444444444444444';
+  const DO = 'https://a2a-index.test';
+  const records = new Map<string, unknown>();
+  let orgEnv: any;
+  let realFetch: typeof fetch;
+
+  beforeAll(() => {
+    orgEnv = { ...env, AUTH_CODES: makeKV(), A2A_CUSTODY_URL: DO, LIBRARY_MAX_ARTIFACTS: '6' };
+    void orgEnv.AUTH_CODES.put(`related:${DEMO_SA}:${ORG_SA}`, JSON.stringify({ relationship: 'steward', stewardshipDelegation: { delegator: ORG_SA, delegate: DEMO_SA } }));
+    realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const u = String(input);
+      if (!u.startsWith(DO)) return realFetch(input as any, init);
+      const op = u.split('/').pop() ?? '';
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      if (op === 'status') return new Response(JSON.stringify({ deliveryGranted: true }), { status: 200 });
+      if (op === 'content.get') return new Response(JSON.stringify({ ok: true, record: records.get(body.resource) ?? null }), { status: 200 });
+      if (op === 'content.put') { if (body.data === null) records.delete(body.resource); else records.set(body.resource, body.data); return new Response(JSON.stringify({ ok: true }), { status: 200 }); }
+      return new Response(JSON.stringify({ error: 'unexpected op' }), { status: 404 });
+    }) as typeof fetch;
+    return () => { globalThis.fetch = realFetch; };
+  });
+
+  const get = (q = '') => onRequestGet({ request: new Request(`${url}?org=${ORG_SA}${q}`, { headers: { authorization: `Bearer ${token}` } }), env: orgEnv } as any);
+  const post = (b: unknown) => onRequestPost({ request: new Request(url, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(b) }), env: orgEnv } as any);
+
+  it('a batch writes every file to its own record and keeps the catalog free of bytes', async () => {
+    const res = await post({ action: 'save-batch', org: ORG_SA, artifacts: [
+      { id: 'pkg', name: 'pkg', folder: 'skills', isFolder: true, source: 'blob', kind: 'md' },
+      { id: 'f-skill', name: 'SKILL.md', folder: 'skills/pkg', source: 'blob', bytesB64: btoa('# pkg') },
+      { id: 'f-lic', name: 'LICENSE', folder: 'skills/pkg', source: 'blob', bytesB64: btoa('Apache-2.0') },
+    ] });
+    expect(res.status).toBe(200);
+    const catalog = records.get('content.catalog') as any[];
+    expect(catalog.map((a) => a.id)).toEqual(['pkg', 'f-skill', 'f-lic']);
+    expect(catalog.every((a) => a.bytesB64 === undefined)).toBe(true);
+    expect(catalog.find((a) => a.id === 'f-lic').size).toBe(btoa('Apache-2.0').length);
+    expect((records.get('content.artifact.f-lic') as any).bytesB64).toBe(btoa('Apache-2.0'));
+    expect(records.has('content.artifact.pkg')).toBe(false);   // a folder has no content record
+  });
+
+  it('a plain GET is the index; ?folder= hydrates that subtree from the records', async () => {
+    const plain = await (await get()).json();
+    expect(plain.artifacts.find((a: any) => a.id === 'f-lic').bytesB64).toBeUndefined();
+    const hydrated = await (await get('&folder=skills/pkg')).json();
+    expect(hydrated.artifacts.find((a: any) => a.id === 'f-lic').bytesB64).toBe(btoa('Apache-2.0'));
+    expect(hydrated.artifacts.find((a: any) => a.id === 'f-skill').bytesB64).toBe(btoa('# pkg'));
+    const named = await (await get('&folder=skills&name=SKILL.md')).json();
+    expect(named.artifacts.find((a: any) => a.id === 'f-skill').bytesB64).toBe(btoa('# pkg'));
+    expect(named.artifacts.find((a: any) => a.id === 'f-lic').bytesB64).toBeUndefined();
+  });
+
+  it('a write past the cap is refused with the numbers, and nothing is trimmed', async () => {
+    const before = (records.get('content.catalog') as any[]).length;
+    const res = await post({ action: 'save-batch', org: ORG_SA, artifacts: [1, 2, 3, 4].map((i) => ({ id: `x${i}`, name: `x${i}.md`, folder: 'skills/pkg', source: 'blob', bytesB64: btoa(String(i)) })) });
+    expect(res.status).toBe(413);
+    const b = await res.json();
+    expect(b.limit).toBe(6);
+    expect(b.artifacts).toBe(before + 4);
+    expect((records.get('content.catalog') as any[]).length).toBe(before);
+  });
+
+  it('an older inline entry migrates to its record on the next save', async () => {
+    const catalog = records.get('content.catalog') as any[];
+    catalog.push({ id: 'old', kind: 'md', name: 'old.md', source: 'blob', folder: 'skills/pkg', contentType: 'text/markdown', bytesB64: btoa('old'), size: 4, version: 1, grants: [] });
+    records.set('content.catalog', catalog);
+    const res = await post({ action: 'save', org: ORG_SA, artifact: { id: 'f-skill', name: 'SKILL.md', folder: 'skills/pkg', source: 'blob', bytesB64: btoa('# pkg v2') } });
+    expect(res.status).toBe(200);
+    const after = records.get('content.catalog') as any[];
+    expect(after.find((a) => a.id === 'old').bytesB64).toBeUndefined();
+    expect((records.get('content.artifact.old') as any).bytesB64).toBe(btoa('old'));
+    expect((records.get('content.artifact.f-skill') as any).bytesB64).toBe(btoa('# pkg v2'));
+  });
+});

@@ -438,7 +438,7 @@ export function OrgDetail({ org, token, onBack }: { org: MyOrg; token: string | 
     if (!token || !org.orgAgent) return;
     void (async () => {
       try {
-        const r = await fetch(`/connect/library?org=${org.orgAgent}`, { headers: { authorization: `Bearer ${token}` } });
+        const r = await fetch(`/connect/library?org=${org.orgAgent}&folder=skills&name=SKILL.md`, { headers: { authorization: `Bearer ${token}` } });
         const b = (await r.json().catch(() => ({}))) as { artifacts?: Array<{ folder?: string; name?: string; bytesB64?: string }> };
         const roles: { slug: string; description?: string }[] = [];
         for (const a of b.artifacts ?? []) {
