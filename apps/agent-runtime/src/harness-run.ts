@@ -2775,7 +2775,7 @@ export interface PlannerTraceV1 {
   /** Spec 388 — which provider carried the planner and the composer, and why (the numbers beside the reason). */
   /** Spec 415 — every structured model call the run made (the selection judge, a skill's answer, the KB and vault
    *  choosers), as it ran: provider, model, why, when. Each becomes a model invocation on the run's provenance. */
-  structuredCalls?: Array<{ role: 'judge' | 'structured'; provider: string; model: string; because?: string; startMs: number; endMs: number; failed?: boolean; tokensIn?: number; tokensOut?: number; cachedIn?: number; reasoningOut?: number }>;
+  structuredCalls?: Array<{ role: 'judge' | 'structured'; stepRef?: string; provider: string; model: string; because?: string; startMs: number; endMs: number; failed?: boolean; tokensIn?: number; tokensOut?: number; cachedIn?: number; reasoningOut?: number }>;
   /** Spec 416 §4h — the answer's quality by the rubric (a comparison's instrument): P(true) per question, the mean,
    *  the judge's own time and reported tokens — kept apart from the ask's. */
   quality?: { judge: string; scores: Record<string, number>; score: number; ms: number; tokensIn?: number; tokensOut?: number; error?: string };
@@ -5012,7 +5012,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     admission: [], plan: [], bindings: [],
     ...(input.surface || input.channel ? { surface: { ...(input.surface?.realm?.kind ? { realm: input.surface.realm.kind } : {}), ...(input.surface?.capabilities ? { capabilities: input.surface.capabilities.length } : {}), ...(input.channel ? { channel: input.channel } : {}) } } : {}),
   };
-  const recordStructured = (role: 'judge' | 'structured') => (c: StructuredCallRecordV1) => { (trace.structuredCalls ??= []).push({ role, ...c }); };
+  const recordStructured = (role: 'judge' | 'structured', stepRef?: string) => (c: StructuredCallRecordV1) => { (trace.structuredCalls ??= []).push({ role, ...(stepRef ? { stepRef } : {}), ...c }); };
   // What the harness may compose: the PUBLIC agent directory (read-only, through discovery — ADR-0040)
   // and the action tools, each declaring the capability and risk that decide whether it needs authority.
   // The private-vault tools are NOT here: they ride their own delegation on the orchestrate skill, and an
@@ -5169,7 +5169,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   // its own model's answer; the other answer and the judgment are a comparison's instrument (numbers on the trace only).
   const answerLight = input.variant?.toggles?.['skill-selection/answer-model'] === 'light';
   const agentNameForSkill = instructionTools.length && deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null;
-  const applyWith = (light: boolean, recorded: boolean) => skillApplyInvoker({ call: structuredCallFor(env as never, input.provider, { ...(recorded ? { onCall: recordStructured('structured') } : {}), ...(light ? { tier: 'light' as const } : {}) }), ...(input.variant?.toggles?.['skill-selection/answer'] === 'off' ? { pickOnly: true } : {}), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: agentNameForSkill });
+  const applyWith = (light: boolean, recorded: boolean) => skillApplyInvoker({ call: undefined, callFor: (stepRef) => structuredCallFor(env as never, input.provider, { ...(recorded ? { onCall: recordStructured('structured', stepRef) } : {}), ...(light ? { tier: 'light' as const } : {}) }), ...(input.variant?.toggles?.['skill-selection/answer'] === 'off' ? { pickOnly: true } : {}), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: agentNameForSkill });
   const pairwise = input.variant?.toggles?.['quality/judge'] === 'pairwise';
   const skillInvoke: ToolInvoker | null = !instructionTools.length ? null : !pairwise ? applyWith(answerLight, true) : async (toolId, args, ctx) => {
     const [own, other] = await Promise.all([applyWith(answerLight, true)(toolId, args, ctx), applyWith(!answerLight, false)(toolId, args, ctx).catch(() => null)]);

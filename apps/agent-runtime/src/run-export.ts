@@ -82,7 +82,7 @@ export async function measuresOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, agent: str
     ...(record.receivedAt ? { startedAt: new Date(record.receivedAt).toISOString() } : {}),
     stepsPlanned: record.plan.steps.length,
     steps: view.steps.map((s) => ({ stepRef: s.stepRef, status: s.status, ...(s.startedAt ? { startedAt: s.startedAt } : {}), ...(s.endedAt ? { endedAt: s.endedAt } : {}), ...(s.authority ? { authority: { decision: s.authority.decision, afterApproval: s.authority.afterApproval } } : {}), ...(s.observation ? { observation: { outcome: s.observation.outcome } } : {}), ...(record.steps.find((x) => x.stepRef === s.stepRef)?.replayed ? { replayed: true } : {}) })),
-    modelCalls: (record.modelCalls ?? []).map((m) => ({ ...(m.tokensIn !== undefined ? { tokensIn: m.tokensIn } : {}), ...(m.tokensOut !== undefined ? { tokensOut: m.tokensOut } : {}) })),
+    modelCalls: (record.modelCalls ?? []).map((m) => ({ ...(m.stepRef ? { stepRef: m.stepRef } : {}), ...(m.tokensIn !== undefined ? { tokensIn: m.tokensIn } : {}), ...(m.tokensOut !== undefined ? { tokensOut: m.tokensOut } : {}) })),
     ...(record.bill ? { vaultCalls: record.bill.vaultCalls } : {}),
     replans: record.events.filter((e) => e.type === 'PlanRefused' && (e as { replanning?: boolean }).replanning).length,
     engagements: engagementsOf(record).length,

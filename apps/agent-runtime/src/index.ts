@@ -189,7 +189,7 @@ import { signAsAgent } from './consult-rail.js';
 import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenanceGraphOf, provenanceProvNOf, provenanceViewOf, firewalledMetrics, publicProvenanceOf, runAnchorRecordKey, type RunExportDeps } from './run-export.js';
 import { vaultProvenanceStore, readCarriedProvenance } from './provenance-bindings.js';
 import { runMeasuresRecordKey } from '@agenticprimitives/evaluation';
-import { doorFromBody, modelCallsOf, variantOf, engagedFromTrace, parseVariantRequest, VARIANT_TOGGLES, type VariantRequestV1 , SELECTION_ARMS } from './run-trace.js';
+import { doorFromBody, modelCallsOf, variantOf, engagedFromTrace, operationalOf, parseVariantRequest, VARIANT_TOGGLES, type VariantRequestV1 , SELECTION_ARMS } from './run-trace.js';
 import { provenanceLinkHeader } from '@agenticprimitives/a2a';
 import { runProvenanceRecordKey } from '@agenticprimitives/orchestration';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
@@ -4758,7 +4758,9 @@ app.post('/harness/ask', async (c) => {
         // door names its message ids; a routed ask from another agent's run is `routed`; a continuation is a
         // `resume`; anything else is a direct ask. Plus the model calls and the variant this run ran under.
         door: ((d) => (inResponseTo ? { ...(d ?? {}), kind: 'routed' as const } : d ?? (body.runRef && (body.supplied?.length || body.approvals) ? { kind: 'resume' as const } : { kind: 'harness-ask' as const })))(doorFromBody(body, isInWorkerRequest(c.req.raw))),
-        modelCalls: modelCallsOf(trace, marks.list), variant: variantOf(c.env as never, trace, variantReq), ...(variantReq?.startingState ? { startingState: { digest: variantReq.startingState.digest } } : {}), engaged: engagedFromTrace(trace) }));
+        modelCalls: modelCallsOf(trace, marks.list), variant: variantOf(c.env as never, trace, variantReq), ...(variantReq?.startingState ? { startingState: { digest: variantReq.startingState.digest } } : {}), engaged: engagedFromTrace(trace),
+        // Spec 417 §5 — how the turn went (stages, the selection, the turn), kept past the reply.
+        operational: operationalOf(trace, marks.list, { receivedAt, runStartMs, runEndMs, ...(typeof doorFromBody(body, isInWorkerRequest(c.req.raw))?.contextId === 'string' ? { contextId: doorFromBody(body, isInWorkerRequest(c.req.raw))!.contextId! } : {}) }) }));
       c.executionCtx.waitUntil(recordP.then((record) => putRecord(c.env as never, addressee, record)).catch((e) => console.warn('[harness/ask] record not kept:', e instanceof Error ? e.message : String(e))));
       // Spec 381 — THE EXPORT: the durable half into the acting agent's vault, the spans to a collector when
       // one is named. Off the run's path; a failed export is logged, never a failed ask.

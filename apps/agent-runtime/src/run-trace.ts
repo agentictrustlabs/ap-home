@@ -8,7 +8,7 @@
 //
 // Door kinds are decided HERE, server-side, never taken from a body a caller wrote: an in-process hop from the A2A
 // door (the in-Worker mark) may name its message ids; anything else is what the route itself can see.
-import type { HarnessEngagementV1, ModelCallV1, RunDoorV1, VariantV1 } from '@agenticprimitives/orchestration';
+import type { HarnessEngagementV1, ModelCallV1, RunDoorV1, VariantV1, RunOperationalV1 } from '@agenticprimitives/orchestration';
 import type { PlannerTraceV1 } from './harness-run.js';
 
 /** The deployment knobs that are harness-capability toggles, by notation. */
@@ -68,7 +68,7 @@ export function modelCallsOf(trace: PlannerTraceV1 | undefined, marks?: Readonly
     out.push({ role: 'compose', provider: compose.provider, ...(reason(compose.because) ? { routeReason: reason(compose.because)! } : {}), ...(w ? { startMs: w.startMs, endMs: w.endMs } : {}), ...tokensOf(trace.composeUsage) });
   }
   // Every structured call as it ran (spec 415): the selection judge (`judge`), a skill's answer, the KB and vault choosers.
-  for (const s of trace.structuredCalls ?? []) out.push({ role: s.role, provider: s.provider, model: s.model, ...(reason(s.because) ? { routeReason: reason(s.because)! } : {}), startMs: s.startMs, endMs: s.endMs, ...tokensOf(s) });
+  for (const s of trace.structuredCalls ?? []) out.push({ role: s.role, ...(s.stepRef ? { stepRef: s.stepRef } : {}), ...(s.failed ? { failed: true } : {}), provider: s.provider, model: s.model, ...(reason(s.because) ? { routeReason: reason(s.because)! } : {}), startMs: s.startMs, endMs: s.endMs, ...tokensOf(s) });
   return out;
 }
 
@@ -243,4 +243,27 @@ export function variantOf(env: RunTraceEnv, trace: PlannerTraceV1 | undefined, r
     ...(build ? { build } : {}),
     ...(Object.keys(toggles).length ? { toggles } : {}),
   };
+}
+
+/** Spec 417 §5 — the turn's operational facts, kept on the record (numbers and ids only): the stage windows summed per
+ *  name with the pre-run and run wall phases, and how the skill was chosen (arm, choice or hold, chain, judge, top
+ *  probability). The post-run phase is not yet over when the record is written, and is not claimed. */
+export function operationalOf(trace: PlannerTraceV1 | undefined, marks: ReadonlyArray<{ name: string; startMs: number; endMs: number }>, w: { receivedAt: number; runStartMs: number; runEndMs: number; contextId?: string }): RunOperationalV1 | null {
+  if (!trace) return null;
+  const stages: Record<string, number> = {};
+  for (const m of marks) stages[m.name] = (stages[m.name] ?? 0) + Math.max(0, m.endMs - m.startMs);
+  if (w.runStartMs > 0 && w.receivedAt > 0) stages['phase:pre-run'] = Math.max(0, w.runStartMs - w.receivedAt);
+  if (w.runEndMs > 0 && w.runStartMs > 0) stages['phase:run'] = Math.max(0, w.runEndMs - w.runStartMs);
+  const s = trace.selection as { approach?: string; chose?: string | null; hold?: string; plan?: { steps?: Array<{ tool: string }>; missing?: string[] }; judge?: { name?: string }; judgment?: { judge?: { name?: string }; distribution?: Record<string, number> }; distribution?: Record<string, number> } | undefined;
+  const dist = s?.distribution ?? s?.judgment?.distribution;
+  const top = dist ? Math.max(0, ...Object.values(dist).filter((v) => typeof v === 'number')) : undefined;
+  const selection = s?.approach ? {
+    approach: s.approach, chose: s.chose ?? null, ...(s.hold ? { hold: s.hold } : {}),
+    ...(s.plan?.steps?.length ? { chain: s.plan.steps.map((x) => x.tool) } : s.chose ? { chain: [s.chose] } : {}),
+    ...(s.plan?.missing?.length ? { missing: [...s.plan.missing] } : {}),
+    ...((s.judge?.name ?? s.judgment?.judge?.name) ? { judge: (s.judge?.name ?? s.judgment?.judge?.name)! } : {}),
+    ...(top !== undefined && Number.isFinite(top) && top > 0 ? { confidence: Number(top.toFixed(4)) } : {}),
+  } : undefined;
+  const turn = w.contextId || trace.recalledTurns !== undefined ? { ...(w.contextId ? { contextId: w.contextId } : {}), ...(trace.recalledTurns !== undefined ? { recalledTurns: trace.recalledTurns } : {}) } : undefined;
+  return { stages, ...(trace.selectionMs !== undefined ? { selectionMs: trace.selectionMs } : {}), ...(selection ? { selection } : {}), ...(trace.skillStage ? { skillStage: trace.skillStage } : {}), ...(turn ? { turn } : {}) };
 }
