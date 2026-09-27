@@ -4189,7 +4189,9 @@ app.post('/harness/ask', async (c) => {
     const parsed = parseVariantRequest(body.variant);
     if (!parsed.ok) return c.json({ ok: false, error: `variant: ${parsed.error}`, refused: 'variant.unknown' }, 400);
     if (String(c.env.EVAL_CAPTURE ?? '').trim().toLowerCase() !== 'on') return c.json({ ok: false, error: 'variant: refused — this estate does not run comparisons (EVAL_CAPTURE is not on)', refused: 'variant.estate.capture-off' }, 403);
-    if (!body.addressee || !(await mayOverseeAgent(c.env, String(who.sa).toLowerCase() as Address, String(body.addressee).toLowerCase() as Address).catch(() => false))) return c.json({ ok: false, error: 'variant: refused — only the agent itself or its steward may choose how it runs', refused: 'variant.not-steward' }, 403);
+    // Remembered a minute per (caller, agent) — the same derivation the harness memoises for its receipts; a comparison
+    // paid it on every run (1.5–2 s of chain reads, measured 2026-09-27 as the largest part of the pre-run phase).
+    if (!body.addressee || !(await marks.time('admit:variant-steward', () => remembered(`oversee:${String(who.sa).toLowerCase()}:${String(body.addressee).toLowerCase()}`, () => mayOverseeAgent(c.env, String(who.sa).toLowerCase() as Address, String(body.addressee).toLowerCase() as Address))).catch(() => false))) return c.json({ ok: false, error: 'variant: refused — only the agent itself or its steward may choose how it runs', refused: 'variant.not-steward' }, 403);
     if (parsed.variant.provider && String(body.model ?? '').trim() && parsed.variant.provider !== String(body.model).trim()) return c.json({ ok: false, error: `variant.provider (${parsed.variant.provider}) and model (${String(body.model)}) disagree`, refused: 'variant.unknown' }, 400);
     variantReq = parsed.variant;
   }
@@ -4360,6 +4362,7 @@ app.post('/harness/ask', async (c) => {
       progressChain = progressChain.then(() => appendProgress(c.env as never, addressee, runRef, askerSa, full)).catch(() => undefined);
       c.executionCtx.waitUntil(progressChain);
     };
+    const runStartMs = Date.now();
     const { result, resolved, interactionFor, trace, tools: offeredTools, events: runEvents, presentedRefs, playbook: askedPlaybook, bill } = await runUnderMandateBilled(c.env as unknown as HarnessEnv, askDeps, {
       traceContext: traceContextOf(c.req.raw.headers), marks,
       intent, presented: turn.presented, person: who.sa as Address, session: body.session, ...(appCredential ? { appCredential } : {}), runRef, addressee, onProgress: progress,
@@ -4493,6 +4496,7 @@ app.post('/harness/ask', async (c) => {
         })(toolId, args, ctx);
       },
     });
+    const runEndMs = Date.now();
     if (structuredRoutes.length) trace.route = { ...(trace.route ?? { policy: 'first' as const }), structured: structuredRoutes };
     if (structuredCalls.length) trace.structuredCalls = [...(trace.structuredCalls ?? []), ...structuredCalls.map((x) => ({ role: 'structured' as const, ...x }))].sort((a, b) => a.startMs - b.startMs);
     const reply = await marks.time('reply:compose', () => askReplyFor(c.env as unknown as HarnessEnv, {
@@ -4520,7 +4524,11 @@ app.post('/harness/ask', async (c) => {
     }));
     // Spec 391 — THE RECORD FORM: large results leave for the agent's vault as artifacts; the checkpoint and the
     // record below keep references. The reply above was built from the full result and keeps it.
-    const recordForm = await marks.time('record:offload', () => recordFormOf(c.env, askDeps, addressee, runRef, result));
+    // Only a run that CHECKPOINTS (a prompt, a wait for authority, a routed wait) needs the record form before the reply —
+    // the checkpoint keeps its references. Otherwise the offload joins the run record's write after the response
+    // (416 §4g: ~2 s on the reply path for every answer, measured 2026-09-27).
+    const checkpoints = reply.kind === 'prompt' || reply.kind === 'authority_required' || reply.kind === 'waiting';
+    const recordForm = checkpoints ? await marks.time('record:offload', () => recordFormOf(c.env, askDeps, addressee, runRef, result)) : null;
     // Checkpoint what the person has given us when the run is still owed something; forget it the moment
     // it is finished or refused. A denial is terminal (ADR-0013) — a checkpoint left behind invites a
     // caller to retry a refusal as though it were weather.
@@ -4561,7 +4569,7 @@ app.post('/harness/ask', async (c) => {
           ...(reply.kind === 'authority_required' ? { awaiting: { kind: 'authority' as const, prompt: `${CAPABILITY_WORDS[reply.capability] ?? reply.capability} — needs your mandate`, stepRef: reply.stepRef, expiresAt: now + AWAIT_WINDOW_MS.authority } } : {}),
           // WHAT RAN (spec 370 P1): the admitted plan and the completed steps with their receipts, so the
           // next turn replays them instead of planning and executing the whole ask again.
-          executed: { plan: recordForm.result.plan, completed: completedStepsOf(recordForm.result) },
+          executed: { plan: recordForm!.result.plan, completed: completedStepsOf(recordForm!.result) },
           expiresAt: expiryFor(reply.kind === 'prompt' ? { kind: reply.prompt.kind, prompt: reply.prompt.prompt, stepRef: reply.prompt.stepRef } : reply.kind === 'waiting' ? { kind: 'commitment', prompt: reply.text, stepRef: reply.stepRef } : reply.kind === 'authority_required' ? { kind: 'authority', prompt: '', stepRef: reply.stepRef } : undefined, now),
           createdAt: stored?.createdAt ?? now, updatedAt: now,
         });
@@ -4744,18 +4752,19 @@ app.post('/harness/ask', async (c) => {
     {
       // Spec 390 W2 — the W3C Trace Context the request arrived with joins this run's spans to the caller's
       // trace. Recorded here and read by nothing else: correlation, never trust.
-      const record = recordOf({ runRef, intent, result: recordForm.result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), traceContext: traceContextOf(c.req.raw.headers), receivedAt, marks: marks.list, offloaded: recordForm.offloaded, bill,
+      const formP = recordForm ? Promise.resolve(recordForm) : recordFormOf(c.env, askDeps, addressee, runRef, result);
+      const recordP = formP.then((recordForm) => recordOf({ runRef, intent, result: recordForm.result, events: runEvents, presented: (turn.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), traceContext: traceContextOf(c.req.raw.headers), receivedAt, marks: marks.list, offloaded: recordForm.offloaded, bill,
         // Spec 414 A1b — THE TRACE FROM THE DOOR. The door is decided here: an in-process hop from this Worker's A2A
         // door names its message ids; a routed ask from another agent's run is `routed`; a continuation is a
         // `resume`; anything else is a direct ask. Plus the model calls and the variant this run ran under.
         door: ((d) => (inResponseTo ? { ...(d ?? {}), kind: 'routed' as const } : d ?? (body.runRef && (body.supplied?.length || body.approvals) ? { kind: 'resume' as const } : { kind: 'harness-ask' as const })))(doorFromBody(body, isInWorkerRequest(c.req.raw))),
-        modelCalls: modelCallsOf(trace, marks.list), variant: variantOf(c.env as never, trace, variantReq), ...(variantReq?.startingState ? { startingState: { digest: variantReq.startingState.digest } } : {}), engaged: engagedFromTrace(trace) });
-      c.executionCtx.waitUntil(putRecord(c.env as never, addressee, record).catch((e) => console.warn('[harness/ask] record not kept:', e instanceof Error ? e.message : String(e))));
+        modelCalls: modelCallsOf(trace, marks.list), variant: variantOf(c.env as never, trace, variantReq), ...(variantReq?.startingState ? { startingState: { digest: variantReq.startingState.digest } } : {}), engaged: engagedFromTrace(trace) }));
+      c.executionCtx.waitUntil(recordP.then((record) => putRecord(c.env as never, addressee, record)).catch((e) => console.warn('[harness/ask] record not kept:', e instanceof Error ? e.message : String(e))));
       // Spec 381 — THE EXPORT: the durable half into the acting agent's vault, the spans to a collector when
       // one is named. Off the run's path; a failed export is logged, never a failed ask.
       // The report goes back ONTO the record: whether the provenance landed is read from it, never guessed.
-      c.executionCtx.waitUntil(exportRun(c.env, { store: vaultProvenanceStore({ writeSubjectRecord: askDeps.writeSubjectRecord }), ...(anchorPortFor(c.env, askDeps) ? { anchor: anchorPortFor(c.env, askDeps)! } : {}) }, addressee, record)
-        .then((r) => putRecord(c.env as never, addressee, { ...record, export: r }))
+      c.executionCtx.waitUntil(recordP.then((record) => exportRun(c.env, { store: vaultProvenanceStore({ writeSubjectRecord: askDeps.writeSubjectRecord }), ...(anchorPortFor(c.env, askDeps) ? { anchor: anchorPortFor(c.env, askDeps)! } : {}) }, addressee, record)
+        .then((r) => putRecord(c.env as never, addressee, { ...record, export: r })))
         .catch((e) => console.warn('[harness/ask] export:', e instanceof Error ? e.message : String(e))));
     }
     // The reply is ready: the last line, so a poller stops without waiting out its window.
@@ -4765,6 +4774,9 @@ app.post('/harness/ask', async (c) => {
     if (reply && typeof reply === 'object' && (reply as { plannerTrace?: unknown }).plannerTrace) {
       const stages: Record<string, number> = {};
       for (const m of marks.list) stages[m.name] = (stages[m.name] ?? 0) + Math.max(0, m.endMs - m.startMs);
+      // The three WALL phases, non-overlapping: before the harness ran, the run (prepare · pick · steps), after it.
+      const nowMs = Date.now();
+      stages['phase:pre-run'] = runStartMs - receivedAt; stages['phase:run'] = runEndMs - runStartMs; stages['phase:post-run'] = nowMs - runEndMs;
       (reply as { plannerTrace: { stages?: Record<string, number> } }).plannerTrace.stages = stages;
     }
     return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, hasProvenance: hasProvenanceRef(addressee, runRef), resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(routedDelivery ? { routedDelivery } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt, ...(isExpired(r) ? { expired: true } : {}) })), unfinishedTotal: otherRuns.length } : {}) });
