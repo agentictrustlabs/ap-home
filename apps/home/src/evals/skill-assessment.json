@@ -1,6 +1,6 @@
 {
   "type": "ap.skill-assessment-report.v1",
-  "builtAt": "2026-09-27T03:19:52.163Z",
+  "builtAt": "2026-09-27T05:55:46.523Z",
   "experiments": [
     {
       "id": "stratum1-heldout-model-vs-rules-r1",
@@ -27929,6 +27929,2207 @@
           "p": 1
         }
       ]
+    },
+    {
+      "id": "fresh2-propose-judgment-w1-r2",
+      "slate": "cil-commons-fresh-heldout-2@1",
+      "split": "held-out",
+      "repeats": 2,
+      "startedAt": "2026-09-27T04:45:15.769Z",
+      "finishedAt": "2026-09-27T05:17:15.242Z",
+      "variants": [
+        {
+          "name": "propose-gemini",
+          "how": "propose-gemini",
+          "runs": 34,
+          "macroTa": 0.9166666666666666,
+          "macroCi": [
+            0.75,
+            1
+          ],
+          "microTa": 0.9705882352941176,
+          "holdRate": 1,
+          "holdNum": 16,
+          "holdDen": 16,
+          "routingPurity": 1,
+          "collisionContainment": null,
+          "right": 17,
+          "wrong": 1,
+          "declinedCorrectly": 16,
+          "firedWrongly": 0,
+          "gate": {
+            "status": "FAIL",
+            "reason": "macro_ta_ci_lower = 0.750 (needs >= 0.85)"
+          },
+          "intents": [
+            {
+              "intentId": "f2n-stake-01",
+              "message": "Write minutes-style notes from this morning's all-staff huddle so the people on leave can catch up.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope; the nearest skill is stakeholder-update-generator",
+              "ms": 26169
+            },
+            {
+              "intentId": "f2n-stake-02",
+              "message": "Draft an out-of-office auto-reply for the whole team over the Christmas closure, with the emergency number.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope; the nearest skill is stakeholder-update-generator",
+              "ms": 16506
+            },
+            {
+              "intentId": "f2n-stake-03",
+              "message": "Our executive director is retiring. Write her farewell speech for the gala — funny but heartfelt.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope; the nearest skill is stakeholder-update-generator",
+              "ms": 18392
+            },
+            {
+              "intentId": "f2n-stake-04",
+              "message": "Rewrite our About page so it explains what we do in plain language for someone who has never heard of us.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope; the nearest skill is stakeholder-update-generator",
+              "ms": 15077
+            },
+            {
+              "intentId": "f2n-stake-05",
+              "message": "Compose a condolence card from the staff to a volunteer whose husband passed away last week.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope; the nearest skill is stakeholder-update-generator",
+              "ms": 13994
+            },
+            {
+              "intentId": "f2n-stake-06",
+              "message": "Summarise this forty-page evaluation report into one page for me to read on the train.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope; the nearest skill is stakeholder-update-generator",
+              "ms": 16880
+            },
+            {
+              "intentId": "f2n-stake-07",
+              "message": "I need a performance review write-up for our program manager — strengths, growth areas, next year's goals.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope; the nearest skill is stakeholder-update-generator",
+              "ms": 53138
+            },
+            {
+              "intentId": "f2n-stake-08",
+              "message": "Turn our client intake questions into a friendly online form with short helper text under each field.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope; the nearest skill is stakeholder-update-generator",
+              "ms": 15796
+            },
+            {
+              "intentId": "f2n-dbrief-01",
+              "message": "Which of these three logo drafts do you like best? Just give me your gut reaction.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope; the nearest skill is decision-brief-generator",
+              "ms": 23490
+            },
+            {
+              "intentId": "f2n-dbrief-02",
+              "message": "Should I take Friday off or push through to finish the report? I'm exhausted.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope; the nearest skill is decision-brief-generator",
+              "ms": 22848
+            },
+            {
+              "intentId": "f2n-dbrief-03",
+              "message": "What font should we use on the new brochure — something clean and readable?",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope; the nearest skill is decision-brief-generator",
+              "ms": 19227
+            },
+            {
+              "intentId": "f2n-dbrief-04",
+              "message": "Is it better to send the appeal letter on Tuesday or Thursday for open rates?",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope; the nearest skill is decision-brief-generator",
+              "ms": 53710
+            },
+            {
+              "intentId": "f2n-dbrief-05",
+              "message": "Help me choose a restaurant for the team lunch — about twelve people, one vegan, one gluten-free.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope; the nearest skill is decision-brief-generator",
+              "ms": 19253
+            },
+            {
+              "intentId": "f2n-dbrief-06",
+              "message": "Which spreadsheet formula should I use to count volunteers who came more than twice?",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope; the nearest skill is decision-brief-generator",
+              "ms": 18429
+            },
+            {
+              "intentId": "f2n-dbrief-07",
+              "message": "Explain the difference between a restricted and an unrestricted gift so I can answer a donor's question.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope; the nearest skill is decision-brief-generator",
+              "ms": 17181
+            },
+            {
+              "intentId": "f2n-dbrief-08",
+              "message": "Rank these five blog post ideas by how interesting they'd be to our readers.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope; the nearest skill is decision-brief-generator",
+              "ms": 16902
+            },
+            {
+              "intentId": "f2p-stake-01",
+              "message": "We finished the housing pilot. I need that outcome told three ways — a crisp summary for trustees, a results note for the funding partners, and something warm for the tenants' newsletter — all saying the same thing.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/stakeholder-update-generator",
+              "chosen": "skill:cil-commons/stakeholder-update-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for stakeholder-update-generator",
+              "ms": 35154
+            },
+            {
+              "intentId": "f2p-stake-02",
+              "message": "Last month's work on the mobile clinic should reach our medical partners, the county health office and our own volunteers, each with the detail that group cares about and nothing contradicting.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/stakeholder-update-generator",
+              "chosen": "skill:cil-commons/stakeholder-update-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for stakeholder-update-generator",
+              "ms": 25594
+            },
+            {
+              "intentId": "f2p-stake-03",
+              "message": "Here are my notes on the quarter. Make a trustee version, a donor version and a staff version, and check none of them overstates the numbers.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/stakeholder-update-generator",
+              "chosen": "skill:cil-commons/stakeholder-update-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for stakeholder-update-generator",
+              "ms": 21510
+            },
+            {
+              "intentId": "f2p-stake-04",
+              "message": "The school partnership hit a snag and then recovered. Brief the principal, the parents' association and our funder, each differently, from the same set of facts.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/stakeholder-update-generator",
+              "chosen": "skill:cil-commons/stakeholder-update-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for stakeholder-update-generator",
+              "ms": 40591
+            },
+            {
+              "intentId": "f2p-dbrief-01",
+              "message": "Our board has to decide whether to merge with the other food bank across town. Frame the options, the risks of each, and what you'd recommend.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/decision-brief-generator",
+              "chosen": "skill:cil-commons/decision-brief-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for decision-brief-generator",
+              "ms": 35643
+            },
+            {
+              "intentId": "f2p-dbrief-02",
+              "message": "We could open a second site, deepen services at the first, or partner with the library instead. Lay out those paths honestly and pick one.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/decision-brief-generator",
+              "chosen": "skill:cil-commons/decision-brief-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for decision-brief-generator",
+              "ms": 32020
+            },
+            {
+              "intentId": "f2p-dbrief-03",
+              "message": "Staff are split on moving to a four-day week. Before leadership decides, I want the options, trade-offs and a recommendation with what would change it.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/decision-brief-generator",
+              "chosen": "skill:cil-commons/decision-brief-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for decision-brief-generator",
+              "ms": 35313
+            },
+            {
+              "intentId": "f2p-dbrief-04",
+              "message": "Keep renting our office, buy the building next door, or go fully remote? Give the organisation's leaders a proper decision brief.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/decision-brief-generator",
+              "chosen": "skill:cil-commons/decision-brief-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for decision-brief-generator",
+              "ms": 34833
+            },
+            {
+              "intentId": "f2p-agov-01",
+              "message": "Now that three departments use AI tools on their own, where does our organisation stand on oversight, records and risk overall? Score it and tell us what to do first.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/ai-governance-assessor",
+              "chosen": "skill:cil-commons/ai-governance-assessor",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for ai-governance-assessor",
+              "ms": 34445
+            },
+            {
+              "intentId": "f2p-nist-01",
+              "message": "For our grant-screening assistant specifically, show a funder how it maps onto the NIST AI framework's functions and where it's weak.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "chosen": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for nist-ai-rmf-crosswalk-generator",
+              "ms": 41599
+            },
+            {
+              "intentId": "f2p-bias-01",
+              "message": "Seniors keep telling us the eligibility scorer ranks them lower. Can we test whether age or disability shifts its results unfairly?",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/bias-fairness-reviewer",
+              "chosen": "skill:cil-commons/bias-fairness-reviewer",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for bias-fairness-reviewer",
+              "ms": 30138
+            },
+            {
+              "intentId": "f2p-airp-01",
+              "message": "Before we switch on the AI that answers helpline texts at night, write down how we'd catch, contain and own up to a harmful reply.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "in scope for ai-incident-response-playbook-builder",
+              "ms": 19672
+            },
+            {
+              "intentId": "f2p-board-01",
+              "message": "June's trustee meeting has the budget vote and two declared conflicts on it. Assemble the running order, motions and reading pack.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/board-agenda-reporting-builder",
+              "chosen": "skill:cil-commons/board-agenda-reporting-builder",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for board-agenda-reporting-builder",
+              "ms": 33725
+            },
+            {
+              "intentId": "f2p-gloi-01",
+              "message": "The Hartwell Trust asked for a three-page proposal for our literacy tutoring. Write it to their priorities and mark every figure I still need to confirm.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/grant-loi-proposal-drafter",
+              "chosen": "skill:cil-commons/grant-loi-proposal-drafter",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for grant-loi-proposal-drafter",
+              "ms": 42885
+            },
+            {
+              "intentId": "f2p-gpipe-01",
+              "message": "Across all our funders — submitted, awaiting a decision, reports owed, stalled — show me the state of play and this week's to-do.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "chosen": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for grant-pipeline-lifecycle-tracker",
+              "ms": 30769
+            },
+            {
+              "intentId": "f2p-gscore-01",
+              "message": "Our foundation wants a light-touch way to gauge how carefully each grantee uses AI with client data, scaled to their size.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "chosen": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for grantee-responsible-ai-due-diligence-scorecard",
+              "ms": 32824
+            },
+            {
+              "intentId": "f2p-proc-01",
+              "message": "An AI scheduling assistant vendor wants access to our clients' calendars. What should a non-technical buyer like me ask before we agree?",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "chosen": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for responsible-ai-procurement-checklist",
+              "ms": 34747
+            },
+            {
+              "intentId": "f2p-fisc-01",
+              "message": "The youth choir started under the church's umbrella and now has its own donors. Keep the umbrella arrangement, or incorporate separately?",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "chosen": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for fiscal-sponsorship-entity-advisor",
+              "ms": 36559
+            }
+          ],
+          "perSkill": [
+            {
+              "skill": "skill:cil-commons/ai-governance-assessor",
+              "asked": 1,
+              "right": 1,
+              "accuracy": 1,
+              "ci": [
+                0.20654931437723745,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "asked": 1,
+              "right": 0,
+              "accuracy": 0,
+              "ci": [
+                0,
+                0.7934506856227626
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/bias-fairness-reviewer",
+              "asked": 1,
+              "right": 1,
+              "accuracy": 1,
+              "ci": [
+                0.20654931437723745,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/board-agenda-reporting-builder",
+              "asked": 1,
+              "right": 1,
+              "accuracy": 1,
+              "ci": [
+                0.20654931437723745,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/decision-brief-generator",
+              "asked": 4,
+              "right": 4,
+              "accuracy": 1,
+              "ci": [
+                0.7575059933447592,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "asked": 1,
+              "right": 1,
+              "accuracy": 1,
+              "ci": [
+                0.20654931437723745,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/grant-loi-proposal-drafter",
+              "asked": 1,
+              "right": 1,
+              "accuracy": 1,
+              "ci": [
+                0.20654931437723745,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "asked": 1,
+              "right": 1,
+              "accuracy": 1,
+              "ci": [
+                0.20654931437723745,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "asked": 1,
+              "right": 1,
+              "accuracy": 1,
+              "ci": [
+                0.20654931437723745,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "asked": 1,
+              "right": 1,
+              "accuracy": 1,
+              "ci": [
+                0.20654931437723745,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "asked": 1,
+              "right": 1,
+              "accuracy": 1,
+              "ci": [
+                0.20654931437723745,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/stakeholder-update-generator",
+              "asked": 4,
+              "right": 4,
+              "accuracy": 1,
+              "ci": [
+                0.7575059933447592,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            }
+          ]
+        }
+      ],
+      "comparisons": []
+    },
+    {
+      "id": "fresh3-propose-judgment-w1-r2",
+      "slate": "cil-commons-fresh-heldout-3@1",
+      "split": "held-out",
+      "repeats": 2,
+      "startedAt": "2026-09-27T04:45:15.921Z",
+      "finishedAt": "2026-09-27T05:05:52.440Z",
+      "variants": [
+        {
+          "name": "propose-gemini",
+          "how": "propose-gemini",
+          "runs": 24,
+          "macroTa": 0.9583333333333333,
+          "macroCi": [
+            0.9166666666666666,
+            1
+          ],
+          "microTa": 0.9583333333333334,
+          "holdRate": 0.9375,
+          "holdNum": 15,
+          "holdDen": 16,
+          "routingPurity": 1,
+          "collisionContainment": null,
+          "right": 8,
+          "wrong": 1,
+          "declinedCorrectly": 15,
+          "firedWrongly": 1,
+          "gate": {
+            "status": "FAIL",
+            "reason": "per_skill_ci_lower_floor = 0.646 (needs >= 0.7) — below floor: skill:cil-commons/stakeholder-update-generator; none BH-confirmed"
+          },
+          "intents": [
+            {
+              "intentId": "f3n-stake-01",
+              "message": "Invite our members and our corporate sponsors to the spring open house — one invitation for each group, with the RSVP link.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope, deliberately close to stakeholder-update-generator",
+              "ms": 26060
+            },
+            {
+              "intentId": "f3n-stake-02",
+              "message": "Explain the new expense-reimbursement policy to staff and to volunteers so both know what to submit and by when.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": "skill:cil-commons/stakeholder-update-generator",
+              "outcome": "spur",
+              "label": "should have declined",
+              "ok": false,
+              "why": "out of scope, deliberately close to stakeholder-update-generator",
+              "ms": 30777
+            },
+            {
+              "intentId": "f3n-stake-03",
+              "message": "Post the youth coordinator vacancy on our website and on the regional jobs board — adapt the wording for each.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope, deliberately close to stakeholder-update-generator",
+              "ms": 16331
+            },
+            {
+              "intentId": "f3n-stake-04",
+              "message": "Write this month's report to the Hartley Fund on the reading program — they're our only funder for it and they use their own template.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope, deliberately close to stakeholder-update-generator",
+              "ms": 22850
+            },
+            {
+              "intentId": "f3n-stake-05",
+              "message": "Our client satisfaction survey results are in. Write them up for the leadership team with the three things we should change.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope, deliberately close to stakeholder-update-generator",
+              "ms": 11280
+            },
+            {
+              "intentId": "f3n-stake-06",
+              "message": "We're changing our opening hours from next month. Put a notice on the door and a line in the email footer.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope, deliberately close to stakeholder-update-generator",
+              "ms": 17716
+            },
+            {
+              "intentId": "f3n-stake-07",
+              "message": "Draft a letter of support from our director for a partner charity's grant application.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope, deliberately close to stakeholder-update-generator",
+              "ms": 16724
+            },
+            {
+              "intentId": "f3n-stake-08",
+              "message": "Thank the three churches that hosted our winter shelter this year — one short thank-you to each pastor.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope, deliberately close to stakeholder-update-generator",
+              "ms": 20434
+            },
+            {
+              "intentId": "f3n-dbrief-01",
+              "message": "Three catering bids came in for the spring luncheon, all within budget. Tell us which firm to go with.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope, deliberately close to decision-brief-generator",
+              "ms": 10996
+            },
+            {
+              "intentId": "f3n-dbrief-02",
+              "message": "Should the staff meeting move from Monday mornings to Tuesday afternoons? Most people seem fine either way.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope, deliberately close to decision-brief-generator",
+              "ms": 18191
+            },
+            {
+              "intentId": "f3n-dbrief-03",
+              "message": "Choose a theme for this year's gala — we're between 'Roots and Wings' and 'Stronger Together'.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope, deliberately close to decision-brief-generator",
+              "ms": 15481
+            },
+            {
+              "intentId": "f3n-dbrief-04",
+              "message": "The printer or the copy shop for five hundred flyers — which is cheaper and faster?",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope, deliberately close to decision-brief-generator",
+              "ms": 17891
+            },
+            {
+              "intentId": "f3n-dbrief-05",
+              "message": "Do we use the big meeting room or the small one for Thursday's volunteer training of fifteen people?",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope, deliberately close to decision-brief-generator",
+              "ms": 17244
+            },
+            {
+              "intentId": "f3n-dbrief-06",
+              "message": "Zoom or Teams for the monthly partner call? We have licences for both.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope, deliberately close to decision-brief-generator",
+              "ms": 17941
+            },
+            {
+              "intentId": "f3n-dbrief-07",
+              "message": "Should the newsletter subject line lead with the event or with the appeal?",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope, deliberately close to decision-brief-generator",
+              "ms": 16795
+            },
+            {
+              "intentId": "f3n-dbrief-08",
+              "message": "Our two interns want the same week off. Who gets it — first to ask or whoever has more hours?",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope, deliberately close to decision-brief-generator",
+              "ms": 20250
+            },
+            {
+              "intentId": "f3p-stake-01",
+              "message": "The shelter's first winter is done. Board, city officials and the congregations who hosted all need to hear how it went — each told what matters to them, and nobody told a different story.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/stakeholder-update-generator",
+              "chosen": "skill:cil-commons/stakeholder-update-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for stakeholder-update-generator",
+              "ms": 33579
+            },
+            {
+              "intentId": "f3p-stake-02",
+              "message": "Turn the notes from this term's mentoring work into something for our foundation partner, something for the mentors themselves, and something for the parents.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/stakeholder-update-generator",
+              "chosen": "skill:cil-commons/stakeholder-update-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for stakeholder-update-generator",
+              "ms": 22161
+            },
+            {
+              "intentId": "f3p-stake-03",
+              "message": "We had a rough month at the pantry — supply shortfall, then a big donation. Our trustees, our food-bank partner and the neighbourhood group each need an honest version.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/stakeholder-update-generator",
+              "chosen": "skill:cil-commons/stakeholder-update-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for stakeholder-update-generator",
+              "ms": 30727
+            },
+            {
+              "intentId": "f3p-stake-04",
+              "message": "Same progress, several readers: funders get outcomes, staff get the operational picture, the community gets the story. Draft all three from this quarter's log.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/stakeholder-update-generator",
+              "chosen": "skill:cil-commons/stakeholder-update-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for stakeholder-update-generator",
+              "ms": 31233
+            },
+            {
+              "intentId": "f3p-dbrief-01",
+              "message": "Our largest program is losing its anchor funder next year. Cut it back, find a replacement funder, or fold it into the partner's program? We need a proper brief for the board.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/decision-brief-generator",
+              "chosen": "skill:cil-commons/decision-brief-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for decision-brief-generator",
+              "ms": 74322
+            },
+            {
+              "intentId": "f3p-dbrief-02",
+              "message": "We could hire an operations manager, outsource bookkeeping and HR, or ask the director to carry it another year. Which should leadership choose, and why?",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/decision-brief-generator",
+              "chosen": "skill:cil-commons/decision-brief-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for decision-brief-generator",
+              "ms": 32976
+            },
+            {
+              "intentId": "f3p-dbrief-03",
+              "message": "The city offered us a free building on a ten-year term with strings attached. Take it, counter-offer, or stay where we are — set that out for the trustees.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/decision-brief-generator",
+              "chosen": "skill:cil-commons/decision-brief-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for decision-brief-generator",
+              "ms": 38319
+            },
+            {
+              "intentId": "f3p-dbrief-04",
+              "message": "Expanding the after-school program to two more schools would double our staff. Grow now, pilot one school first, or hold? Lay out the options and your recommendation.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/decision-brief-generator",
+              "chosen": "skill:cil-commons/decision-brief-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope for decision-brief-generator",
+              "ms": 28484
+            }
+          ],
+          "perSkill": [
+            {
+              "skill": "skill:cil-commons/decision-brief-generator",
+              "asked": 4,
+              "right": 4,
+              "accuracy": 1,
+              "ci": [
+                0.7575059933447592,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/stakeholder-update-generator",
+              "asked": 4,
+              "right": 4,
+              "accuracy": 1,
+              "ci": [
+                0.646120088858883,
+                0.9851349055950829
+              ],
+              "wronglyChosen": 1,
+              "confusedWith": []
+            }
+          ]
+        }
+      ],
+      "comparisons": []
+    },
+    {
+      "id": "fresh4-propose-vs-judgment-w1",
+      "slate": "cil-commons-fresh-heldout-4@1",
+      "split": "held-out",
+      "repeats": 1,
+      "startedAt": "2026-09-27T05:22:00.553Z",
+      "finishedAt": "2026-09-27T05:54:26.458Z",
+      "variants": [
+        {
+          "name": "propose-gemini",
+          "how": "propose-gemini",
+          "runs": 32,
+          "macroTa": 0.9444444444444443,
+          "macroCi": [
+            0.8611111111111112,
+            1
+          ],
+          "microTa": 0.9375,
+          "holdRate": 1,
+          "holdNum": 12,
+          "holdDen": 12,
+          "routingPurity": 1,
+          "collisionContainment": null,
+          "right": 18,
+          "wrong": 2,
+          "declinedCorrectly": 12,
+          "firedWrongly": 0,
+          "gate": {
+            "status": "FAIL",
+            "reason": "per_skill_ci_lower_floor = 0.208 (needs >= 0.7) — below floor: skill:cil-commons/ai-governance-assessor, skill:cil-commons/ai-incident-response-playbook-builder, skill:cil-commons/bias-fairness-reviewer, skill:cil-commons/board-agenda-reporting-builder, skill:cil-commons/decision-brief-generator, skill:cil-commons/fiscal-sponsorship-entity-advisor, skill:cil-commons/grant-loi-proposal-drafter, skill:cil-commons/grant-pipeline-lifecycle-tracker, skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard, skill:cil-commons/nist-ai-rmf-crosswalk-generator, skill:cil-commons/responsible-ai-procurement-checklist, skill:cil-commons/stakeholder-update-generator; none BH-confirmed"
+          },
+          "intents": [
+            {
+              "intentId": "f4c-agov-01",
+              "message": "Our programs team, intake staff and finance office each picked up different AI tools this year, and we are hiring a data lead soon. Where do we stand overall on AI oversight, and what should we fix first?",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/ai-governance-assessor",
+              "chosen": "skill:cil-commons/ai-governance-assessor",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 43822
+            },
+            {
+              "intentId": "f4c-airp-01",
+              "message": "Before the chatbot goes live on our donation page, plan how we would respond if it ever gave someone wrong tax advice: who to notify, how we would pull it, and how we would explain it afterwards.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 16675
+            },
+            {
+              "intentId": "f4c-bias-01",
+              "message": "The volunteer-matching tool seems to send fewer placements to applicants over sixty. Before anyone suggests retraining it, can we check whether that gap is real and unfair?",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/bias-fairness-reviewer",
+              "chosen": null,
+              "outcome": "miss",
+              "label": "chose nothing",
+              "ok": false,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 18912
+            },
+            {
+              "intentId": "f4c-board-01",
+              "message": "Put together the running order and reading pack for the October trustees' meeting. It includes approving the last meeting's minutes and a vote on the reserves policy.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/board-agenda-reporting-builder",
+              "chosen": "skill:cil-commons/board-agenda-reporting-builder",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 45560
+            },
+            {
+              "intentId": "f4c-dbrief-01",
+              "message": "Our board must decide whether to move the annual conference to a venue with twice the capacity, keep the current one, or go hybrid. Set out the options, the risks and a recommendation.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/decision-brief-generator",
+              "chosen": "skill:cil-commons/decision-brief-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 27855
+            },
+            {
+              "intentId": "f4c-fisc-01",
+              "message": "Our refugee-support project has run under a church's fiscal sponsorship for three years and now receives cross-border funding from a partner in Canada. Should we stay sponsored or set up our own nonprofit?",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "chosen": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 35014
+            },
+            {
+              "intentId": "f4c-gloi-01",
+              "message": "Draft the letter of inquiry to the Marlow Foundation for our tenant-rights clinic, two pages at most. It should read nothing like our year-end appeal letter.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/grant-loi-proposal-drafter",
+              "chosen": "skill:cil-commons/grant-loi-proposal-drafter",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 39362
+            },
+            {
+              "intentId": "f4c-gpipe-01",
+              "message": "Give me one view of every grant we are chasing or reporting on: deadlines, the stage each one is at, and which ones have drawdowns we still need to request.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "chosen": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 33885
+            },
+            {
+              "intentId": "f4c-gscore-01",
+              "message": "As a small family foundation we want a proportionate way to check how each grantee handles AI with client records, lighter for the tiny ones. We already collect audited financials separately.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "chosen": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 37152
+            },
+            {
+              "intentId": "f4c-nist-01",
+              "message": "Map our donor-scoring model against the NIST AI RMF functions for a funder report and show where we fall short. We already fixed the drift problem from last spring.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "chosen": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 41775
+            },
+            {
+              "intentId": "f4c-proc-01",
+              "message": "A vendor wants to sell us an AI tool that reads case notes. What should a non-technical manager ask them about data, security and bias before we sign? Pricing is already settled.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "chosen": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 46436
+            },
+            {
+              "intentId": "f4c-stake-01",
+              "message": "From this quarter's program log, write versions for our funders, our volunteers and the neighbourhood council, each with what they care about and all consistent. The volunteers' one will also go on our web page.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/stakeholder-update-generator",
+              "chosen": "skill:cil-commons/stakeholder-update-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 24922
+            },
+            {
+              "intentId": "f4p-airp-01",
+              "message": "Nothing has gone wrong yet, but if our AI caseworker assistant ever gives harmful advice, what is our plan? Write it down step by step.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "chosen": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, plainly phrased",
+              "ms": 45896
+            },
+            {
+              "intentId": "f4p-nist-01",
+              "message": "Our board asked which parts of the NIST AI Risk Management Framework our intake triage model actually meets. Produce that mapping.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "chosen": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, plainly phrased",
+              "ms": 41167
+            },
+            {
+              "intentId": "f4p-gpipe-01",
+              "message": "Between reports we owe and proposals nobody has answered, I cannot see the whole picture. Build a tracker of every funder relationship and what comes due next.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "chosen": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, plainly phrased",
+              "ms": 38811
+            },
+            {
+              "intentId": "f4p-gloi-01",
+              "message": "Hollis Trust liked our inquiry and wants the complete application for the adult numeracy classes by the 30th. Draft it in their format and highlight numbers you had to estimate.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/grant-loi-proposal-drafter",
+              "chosen": "skill:cil-commons/grant-loi-proposal-drafter",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, plainly phrased",
+              "ms": 54162
+            },
+            {
+              "intentId": "f4p-bias-01",
+              "message": "Families tell us the housing waitlist tool ranks larger households lower. Is that discrimination, and how would we find out?",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/bias-fairness-reviewer",
+              "chosen": "skill:cil-commons/bias-fairness-reviewer",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, plainly phrased",
+              "ms": 38616
+            },
+            {
+              "intentId": "f4p-board-01",
+              "message": "Next month's board meeting needs an agenda with the budget approval, two conflict-of-interest disclosures and the treasurer's figures explained.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/board-agenda-reporting-builder",
+              "chosen": "skill:cil-commons/board-agenda-reporting-builder",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, plainly phrased",
+              "ms": 32244
+            },
+            {
+              "intentId": "f4p-fisc-01",
+              "message": "The community garden network has grown past what our sponsor can handle. Do we find a different sponsor or become an independent charity?",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "chosen": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, plainly phrased",
+              "ms": 37946
+            },
+            {
+              "intentId": "f4p-gscore-01",
+              "message": "Our foundation's program officers want a short rubric for rating grantees' AI use with sensitive data, one that does not punish the smallest organisations.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "chosen": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, plainly phrased",
+              "ms": 36998
+            },
+            {
+              "intentId": "f4x-airp-01",
+              "message": "Someone is sending phishing emails pretending to be our director right now. What do we do in the next hour?",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class ai-incident-response-playbook-builder excludes (a contradiction)",
+              "ms": 15594
+            },
+            {
+              "intentId": "f4x-board-01",
+              "message": "Write up the minutes from last night's trustees' meeting from my notes.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class board-agenda-reporting-builder excludes (a contradiction)",
+              "ms": 21179
+            },
+            {
+              "intentId": "f4x-stake-01",
+              "message": "The local paper wants something from us about the new executive director by Friday. Could you write it as a press release?",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class stakeholder-update-generator excludes (a contradiction)",
+              "ms": 16254
+            },
+            {
+              "intentId": "f4x-dbrief-01",
+              "message": "Which venue should we book for the volunteer picnic, the park pavilion or the church hall?",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class decision-brief-generator excludes (a contradiction)",
+              "ms": 18429
+            },
+            {
+              "intentId": "f4x-proc-01",
+              "message": "Help me negotiate a lower renewal price with our CRM vendor.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class responsible-ai-procurement-checklist excludes (a contradiction)",
+              "ms": 18372
+            },
+            {
+              "intentId": "f4x-gloi-01",
+              "message": "The study section scored our R01 poorly. Help me write the introduction page answering each critique for the resubmission.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class grant-loi-proposal-drafter excludes (a contradiction)",
+              "ms": 20225
+            },
+            {
+              "intentId": "f4x-gpipe-01",
+              "message": "Reconcile our grant ledgers before the auditors arrive.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class grant-pipeline-lifecycle-tracker excludes (a contradiction)",
+              "ms": 12310
+            },
+            {
+              "intentId": "f4x-fisc-01",
+              "message": "We need written rules for staff who want to report misconduct confidentially, to go in the handbook as our whistleblower policy.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class fiscal-sponsorship-entity-advisor excludes (a contradiction)",
+              "ms": 19476
+            },
+            {
+              "intentId": "f4x-agov-01",
+              "message": "We bought a chatbot from a US company and use it with clients in Ireland. Which EU AI Act obligations fall on us as the ones using it rather than building it?",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class ai-governance-assessor excludes (a contradiction)",
+              "ms": 18784
+            },
+            {
+              "intentId": "f4x-bias-01",
+              "message": "Accuracy on this year's applications dropped. Retrain the eligibility model on the new data so it catches up.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class bias-fairness-reviewer excludes (a contradiction)",
+              "ms": 21222
+            },
+            {
+              "intentId": "f4x-gscore-01",
+              "message": "Check that this grantee has insurance and three references before we release the first payment.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class grantee-responsible-ai-due-diligence-scorecard excludes (a contradiction)",
+              "ms": 21908
+            },
+            {
+              "intentId": "f4x-stake-02",
+              "message": "Write a thank-you card to our longest-serving volunteer.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class stakeholder-update-generator excludes (a contradiction)",
+              "ms": 15564
+            }
+          ],
+          "perSkill": [
+            {
+              "skill": "skill:cil-commons/ai-governance-assessor",
+              "asked": 1,
+              "right": 1,
+              "accuracy": 1,
+              "ci": [
+                0.34238022750665303,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "asked": 2,
+              "right": 1,
+              "accuracy": 0.5,
+              "ci": [
+                0.2076596008020477,
+                0.9385080552796037
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/bias-fairness-reviewer",
+              "asked": 2,
+              "right": 1,
+              "accuracy": 0.5,
+              "ci": [
+                0.2076596008020477,
+                0.9385080552796037
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/board-agenda-reporting-builder",
+              "asked": 2,
+              "right": 2,
+              "accuracy": 1,
+              "ci": [
+                0.4385029682449546,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/decision-brief-generator",
+              "asked": 1,
+              "right": 1,
+              "accuracy": 1,
+              "ci": [
+                0.34238022750665303,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "asked": 2,
+              "right": 2,
+              "accuracy": 1,
+              "ci": [
+                0.4385029682449546,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/grant-loi-proposal-drafter",
+              "asked": 2,
+              "right": 2,
+              "accuracy": 1,
+              "ci": [
+                0.4385029682449546,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "asked": 2,
+              "right": 2,
+              "accuracy": 1,
+              "ci": [
+                0.4385029682449546,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "asked": 2,
+              "right": 2,
+              "accuracy": 1,
+              "ci": [
+                0.4385029682449546,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "asked": 2,
+              "right": 2,
+              "accuracy": 1,
+              "ci": [
+                0.34238022750665303,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "asked": 1,
+              "right": 1,
+              "accuracy": 1,
+              "ci": [
+                0.34238022750665303,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/stakeholder-update-generator",
+              "asked": 1,
+              "right": 1,
+              "accuracy": 1,
+              "ci": [
+                0.4385029682449546,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            }
+          ]
+        },
+        {
+          "name": "judge-gemini",
+          "how": "judge-gemini",
+          "runs": 32,
+          "macroTa": 1,
+          "macroCi": [
+            1,
+            1
+          ],
+          "microTa": 1,
+          "holdRate": 1,
+          "holdNum": 12,
+          "holdDen": 12,
+          "routingPurity": 1,
+          "collisionContainment": null,
+          "right": 20,
+          "wrong": 0,
+          "declinedCorrectly": 12,
+          "firedWrongly": 0,
+          "gate": {
+            "status": "FAIL",
+            "reason": "per_skill_ci_lower_floor = 0.342 (needs >= 0.7) — below floor: skill:cil-commons/ai-governance-assessor, skill:cil-commons/ai-incident-response-playbook-builder, skill:cil-commons/bias-fairness-reviewer, skill:cil-commons/board-agenda-reporting-builder, skill:cil-commons/decision-brief-generator, skill:cil-commons/fiscal-sponsorship-entity-advisor, skill:cil-commons/grant-loi-proposal-drafter, skill:cil-commons/grant-pipeline-lifecycle-tracker, skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard, skill:cil-commons/nist-ai-rmf-crosswalk-generator, skill:cil-commons/responsible-ai-procurement-checklist, skill:cil-commons/stakeholder-update-generator; none BH-confirmed"
+          },
+          "intents": [
+            {
+              "intentId": "f4c-agov-01",
+              "message": "Our programs team, intake staff and finance office each picked up different AI tools this year, and we are hiring a data lead soon. Where do we stand overall on AI oversight, and what should we fix first?",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/ai-governance-assessor",
+              "chosen": "skill:cil-commons/ai-governance-assessor",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 40021
+            },
+            {
+              "intentId": "f4c-airp-01",
+              "message": "Before the chatbot goes live on our donation page, plan how we would respond if it ever gave someone wrong tax advice: who to notify, how we would pull it, and how we would explain it afterwards.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "chosen": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 39009
+            },
+            {
+              "intentId": "f4c-bias-01",
+              "message": "The volunteer-matching tool seems to send fewer placements to applicants over sixty. Before anyone suggests retraining it, can we check whether that gap is real and unfair?",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/bias-fairness-reviewer",
+              "chosen": "skill:cil-commons/bias-fairness-reviewer",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 44613
+            },
+            {
+              "intentId": "f4c-board-01",
+              "message": "Put together the running order and reading pack for the October trustees' meeting. It includes approving the last meeting's minutes and a vote on the reserves policy.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/board-agenda-reporting-builder",
+              "chosen": "skill:cil-commons/board-agenda-reporting-builder",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 36540
+            },
+            {
+              "intentId": "f4c-dbrief-01",
+              "message": "Our board must decide whether to move the annual conference to a venue with twice the capacity, keep the current one, or go hybrid. Set out the options, the risks and a recommendation.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/decision-brief-generator",
+              "chosen": "skill:cil-commons/decision-brief-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 39139
+            },
+            {
+              "intentId": "f4c-fisc-01",
+              "message": "Our refugee-support project has run under a church's fiscal sponsorship for three years and now receives cross-border funding from a partner in Canada. Should we stay sponsored or set up our own nonprofit?",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "chosen": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 39172
+            },
+            {
+              "intentId": "f4c-gloi-01",
+              "message": "Draft the letter of inquiry to the Marlow Foundation for our tenant-rights clinic, two pages at most. It should read nothing like our year-end appeal letter.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/grant-loi-proposal-drafter",
+              "chosen": "skill:cil-commons/grant-loi-proposal-drafter",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 35385
+            },
+            {
+              "intentId": "f4c-gpipe-01",
+              "message": "Give me one view of every grant we are chasing or reporting on: deadlines, the stage each one is at, and which ones have drawdowns we still need to request.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "chosen": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 23090
+            },
+            {
+              "intentId": "f4c-gscore-01",
+              "message": "As a small family foundation we want a proportionate way to check how each grantee handles AI with client records, lighter for the tiny ones. We already collect audited financials separately.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "chosen": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 40144
+            },
+            {
+              "intentId": "f4c-nist-01",
+              "message": "Map our donor-scoring model against the NIST AI RMF functions for a funder report and show where we fall short. We already fixed the drift problem from last spring.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "chosen": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 48209
+            },
+            {
+              "intentId": "f4c-proc-01",
+              "message": "A vendor wants to sell us an AI tool that reads case notes. What should a non-technical manager ask them about data, security and bias before we sign? Pricing is already settled.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "chosen": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 31498
+            },
+            {
+              "intentId": "f4c-stake-01",
+              "message": "From this quarter's program log, write versions for our funders, our volunteers and the neighbourhood council, each with what they care about and all consistent. The volunteers' one will also go on our web page.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/stakeholder-update-generator",
+              "chosen": "skill:cil-commons/stakeholder-update-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, using an incidental word from the skill's excluded vocabulary (a collision)",
+              "ms": 37698
+            },
+            {
+              "intentId": "f4p-airp-01",
+              "message": "Nothing has gone wrong yet, but if our AI caseworker assistant ever gives harmful advice, what is our plan? Write it down step by step.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "chosen": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, plainly phrased",
+              "ms": 43267
+            },
+            {
+              "intentId": "f4p-nist-01",
+              "message": "Our board asked which parts of the NIST AI Risk Management Framework our intake triage model actually meets. Produce that mapping.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "chosen": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, plainly phrased",
+              "ms": 37043
+            },
+            {
+              "intentId": "f4p-gpipe-01",
+              "message": "Between reports we owe and proposals nobody has answered, I cannot see the whole picture. Build a tracker of every funder relationship and what comes due next.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "chosen": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, plainly phrased",
+              "ms": 37247
+            },
+            {
+              "intentId": "f4p-gloi-01",
+              "message": "Hollis Trust liked our inquiry and wants the complete application for the adult numeracy classes by the 30th. Draft it in their format and highlight numbers you had to estimate.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/grant-loi-proposal-drafter",
+              "chosen": "skill:cil-commons/grant-loi-proposal-drafter",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, plainly phrased",
+              "ms": 50362
+            },
+            {
+              "intentId": "f4p-bias-01",
+              "message": "Families tell us the housing waitlist tool ranks larger households lower. Is that discrimination, and how would we find out?",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/bias-fairness-reviewer",
+              "chosen": "skill:cil-commons/bias-fairness-reviewer",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, plainly phrased",
+              "ms": 41175
+            },
+            {
+              "intentId": "f4p-board-01",
+              "message": "Next month's board meeting needs an agenda with the budget approval, two conflict-of-interest disclosures and the treasurer's figures explained.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/board-agenda-reporting-builder",
+              "chosen": "skill:cil-commons/board-agenda-reporting-builder",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, plainly phrased",
+              "ms": 34585
+            },
+            {
+              "intentId": "f4p-fisc-01",
+              "message": "The community garden network has grown past what our sponsor can handle. Do we find a different sponsor or become an independent charity?",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "chosen": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, plainly phrased",
+              "ms": 37213
+            },
+            {
+              "intentId": "f4p-gscore-01",
+              "message": "Our foundation's program officers want a short rubric for rating grantees' AI use with sensitive data, one that does not punish the smallest organisations.",
+              "split": "held-out",
+              "bucket": "implicit",
+              "expected": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "chosen": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "outcome": "tp",
+              "label": "right skill",
+              "ok": true,
+              "why": "in scope, plainly phrased",
+              "ms": 36730
+            },
+            {
+              "intentId": "f4x-airp-01",
+              "message": "Someone is sending phishing emails pretending to be our director right now. What do we do in the next hour?",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class ai-incident-response-playbook-builder excludes (a contradiction)",
+              "ms": 18856
+            },
+            {
+              "intentId": "f4x-board-01",
+              "message": "Write up the minutes from last night's trustees' meeting from my notes.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class board-agenda-reporting-builder excludes (a contradiction)",
+              "ms": 16424
+            },
+            {
+              "intentId": "f4x-stake-01",
+              "message": "The local paper wants something from us about the new executive director by Friday. Could you write it as a press release?",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class stakeholder-update-generator excludes (a contradiction)",
+              "ms": 11689
+            },
+            {
+              "intentId": "f4x-dbrief-01",
+              "message": "Which venue should we book for the volunteer picnic, the park pavilion or the church hall?",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class decision-brief-generator excludes (a contradiction)",
+              "ms": 21566
+            },
+            {
+              "intentId": "f4x-proc-01",
+              "message": "Help me negotiate a lower renewal price with our CRM vendor.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class responsible-ai-procurement-checklist excludes (a contradiction)",
+              "ms": 12280
+            },
+            {
+              "intentId": "f4x-gloi-01",
+              "message": "The study section scored our R01 poorly. Help me write the introduction page answering each critique for the resubmission.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class grant-loi-proposal-drafter excludes (a contradiction)",
+              "ms": 19571
+            },
+            {
+              "intentId": "f4x-gpipe-01",
+              "message": "Reconcile our grant ledgers before the auditors arrive.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class grant-pipeline-lifecycle-tracker excludes (a contradiction)",
+              "ms": 18536
+            },
+            {
+              "intentId": "f4x-fisc-01",
+              "message": "We need written rules for staff who want to report misconduct confidentially, to go in the handbook as our whistleblower policy.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class fiscal-sponsorship-entity-advisor excludes (a contradiction)",
+              "ms": 18688
+            },
+            {
+              "intentId": "f4x-agov-01",
+              "message": "We bought a chatbot from a US company and use it with clients in Ireland. Which EU AI Act obligations fall on us as the ones using it rather than building it?",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class ai-governance-assessor excludes (a contradiction)",
+              "ms": 20787
+            },
+            {
+              "intentId": "f4x-bias-01",
+              "message": "Accuracy on this year's applications dropped. Retrain the eligibility model on the new data so it catches up.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class bias-fairness-reviewer excludes (a contradiction)",
+              "ms": 18042
+            },
+            {
+              "intentId": "f4x-gscore-01",
+              "message": "Check that this grantee has insurance and three references before we release the first payment.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class grantee-responsible-ai-due-diligence-scorecard excludes (a contradiction)",
+              "ms": 23596
+            },
+            {
+              "intentId": "f4x-stake-02",
+              "message": "Write a thank-you card to our longest-serving volunteer.",
+              "split": "held-out",
+              "bucket": "negative-near",
+              "expected": null,
+              "chosen": null,
+              "outcome": "tn",
+              "label": "correctly declined",
+              "ok": true,
+              "why": "out of scope: squarely a class stakeholder-update-generator excludes (a contradiction)",
+              "ms": 17087
+            }
+          ],
+          "perSkill": [
+            {
+              "skill": "skill:cil-commons/ai-governance-assessor",
+              "asked": 1,
+              "right": 1,
+              "accuracy": 1,
+              "ci": [
+                0.34238022750665303,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/ai-incident-response-playbook-builder",
+              "asked": 2,
+              "right": 2,
+              "accuracy": 1,
+              "ci": [
+                0.4385029682449546,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/bias-fairness-reviewer",
+              "asked": 2,
+              "right": 2,
+              "accuracy": 1,
+              "ci": [
+                0.4385029682449546,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/board-agenda-reporting-builder",
+              "asked": 2,
+              "right": 2,
+              "accuracy": 1,
+              "ci": [
+                0.4385029682449546,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/decision-brief-generator",
+              "asked": 1,
+              "right": 1,
+              "accuracy": 1,
+              "ci": [
+                0.34238022750665303,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/fiscal-sponsorship-entity-advisor",
+              "asked": 2,
+              "right": 2,
+              "accuracy": 1,
+              "ci": [
+                0.4385029682449546,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/grant-loi-proposal-drafter",
+              "asked": 2,
+              "right": 2,
+              "accuracy": 1,
+              "ci": [
+                0.4385029682449546,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/grant-pipeline-lifecycle-tracker",
+              "asked": 2,
+              "right": 2,
+              "accuracy": 1,
+              "ci": [
+                0.4385029682449546,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/grantee-responsible-ai-due-diligence-scorecard",
+              "asked": 2,
+              "right": 2,
+              "accuracy": 1,
+              "ci": [
+                0.4385029682449546,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/nist-ai-rmf-crosswalk-generator",
+              "asked": 2,
+              "right": 2,
+              "accuracy": 1,
+              "ci": [
+                0.34238022750665303,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/responsible-ai-procurement-checklist",
+              "asked": 1,
+              "right": 1,
+              "accuracy": 1,
+              "ci": [
+                0.34238022750665303,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            },
+            {
+              "skill": "skill:cil-commons/stakeholder-update-generator",
+              "asked": 1,
+              "right": 1,
+              "accuracy": 1,
+              "ci": [
+                0.4385029682449546,
+                1
+              ],
+              "wronglyChosen": 0,
+              "confusedWith": []
+            }
+          ]
+        }
+      ],
+      "comparisons": [
+        {
+          "a": "propose-gemini",
+          "b": "judge-gemini",
+          "changed": [
+            "selection"
+          ],
+          "confounded": false,
+          "words": "judge-gemini vs propose-gemini: accuracy up 6% — 2 intents fixed, 0 broken (not significant yet)",
+          "deltaMacro": 0.05555555555555569,
+          "fixed": 2,
+          "broken": 0,
+          "p": 0.5
+        }
+      ]
     }
   ],
   "skillContracts": [
@@ -28013,17 +30214,26 @@
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology",
+          "experiment": "fresh2-propose-judgment-w1-r2",
+          "variant": "propose-gemini",
           "asked": 1,
-          "right": 0,
-          "accuracy": 0,
+          "right": 1,
+          "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology+judgment",
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "propose-gemini",
+          "asked": 1,
+          "right": 1,
+          "accuracy": 1,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "judge-gemini",
           "asked": 1,
           "right": 1,
           "accuracy": 1,
@@ -28109,8 +30319,8 @@
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology",
+          "experiment": "fresh2-propose-judgment-w1-r2",
+          "variant": "propose-gemini",
           "asked": 1,
           "right": 0,
           "accuracy": 0,
@@ -28118,11 +30328,20 @@
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology+judgment",
-          "asked": 1,
-          "right": 0,
-          "accuracy": 0,
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "propose-gemini",
+          "asked": 2,
+          "right": 1,
+          "accuracy": 0.5,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "judge-gemini",
+          "asked": 2,
+          "right": 2,
+          "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
         }
@@ -28205,19 +30424,28 @@
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology",
+          "experiment": "fresh2-propose-judgment-w1-r2",
+          "variant": "propose-gemini",
           "asked": 1,
-          "right": 0,
-          "accuracy": 0,
+          "right": 1,
+          "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology+judgment",
-          "asked": 1,
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "propose-gemini",
+          "asked": 2,
           "right": 1,
+          "accuracy": 0.5,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "judge-gemini",
+          "asked": 2,
+          "right": 2,
           "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
@@ -28311,8 +30539,8 @@
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology",
+          "experiment": "fresh2-propose-judgment-w1-r2",
+          "variant": "propose-gemini",
           "asked": 1,
           "right": 1,
           "accuracy": 1,
@@ -28320,10 +30548,19 @@
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology+judgment",
-          "asked": 1,
-          "right": 1,
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "propose-gemini",
+          "asked": 2,
+          "right": 2,
+          "accuracy": 1,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "judge-gemini",
+          "asked": 2,
+          "right": 2,
           "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
@@ -28407,38 +30644,38 @@
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology",
+          "experiment": "fresh2-propose-judgment-w1-r2",
+          "variant": "propose-gemini",
           "asked": 4,
-          "right": 2,
-          "accuracy": 0.5,
+          "right": 4,
+          "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology+judgment",
+          "experiment": "fresh3-propose-judgment-w1-r2",
+          "variant": "propose-gemini",
           "asked": 4,
-          "right": 2,
-          "accuracy": 0.5,
+          "right": 4,
+          "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
         },
         {
-          "experiment": "fresh3-ontology-arms-v4-r2b",
-          "variant": "ontology",
-          "asked": 4,
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "propose-gemini",
+          "asked": 1,
           "right": 1,
-          "accuracy": 0.25,
+          "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
         },
         {
-          "experiment": "fresh3-ontology-arms-v4-r2b",
-          "variant": "ontology+judgment",
-          "asked": 4,
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "judge-gemini",
+          "asked": 1,
           "right": 1,
-          "accuracy": 0.25,
+          "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
         }
@@ -28521,20 +30758,29 @@
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology",
+          "experiment": "fresh2-propose-judgment-w1-r2",
+          "variant": "propose-gemini",
           "asked": 1,
-          "right": 0,
-          "accuracy": 0,
+          "right": 1,
+          "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology+judgment",
-          "asked": 1,
-          "right": 0,
-          "accuracy": 0,
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "propose-gemini",
+          "asked": 2,
+          "right": 2,
+          "accuracy": 1,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "judge-gemini",
+          "asked": 2,
+          "right": 2,
+          "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
         }
@@ -28617,20 +30863,29 @@
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology",
+          "experiment": "fresh2-propose-judgment-w1-r2",
+          "variant": "propose-gemini",
           "asked": 1,
-          "right": 0,
-          "accuracy": 0,
+          "right": 1,
+          "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology+judgment",
-          "asked": 1,
-          "right": 0,
-          "accuracy": 0,
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "propose-gemini",
+          "asked": 2,
+          "right": 2,
+          "accuracy": 1,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "judge-gemini",
+          "asked": 2,
+          "right": 2,
+          "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
         }
@@ -28723,8 +30978,8 @@
           ]
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology",
+          "experiment": "fresh2-propose-judgment-w1-r2",
+          "variant": "propose-gemini",
           "asked": 1,
           "right": 1,
           "accuracy": 1,
@@ -28732,10 +30987,19 @@
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology+judgment",
-          "asked": 1,
-          "right": 1,
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "propose-gemini",
+          "asked": 2,
+          "right": 2,
+          "accuracy": 1,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "judge-gemini",
+          "asked": 2,
+          "right": 2,
           "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
@@ -28829,8 +31093,8 @@
           ]
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology",
+          "experiment": "fresh2-propose-judgment-w1-r2",
+          "variant": "propose-gemini",
           "asked": 1,
           "right": 1,
           "accuracy": 1,
@@ -28838,10 +31102,19 @@
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology+judgment",
-          "asked": 1,
-          "right": 1,
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "propose-gemini",
+          "asked": 2,
+          "right": 2,
+          "accuracy": 1,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "judge-gemini",
+          "asked": 2,
+          "right": 2,
           "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
@@ -28930,19 +31203,28 @@
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology",
+          "experiment": "fresh2-propose-judgment-w1-r2",
+          "variant": "propose-gemini",
           "asked": 1,
-          "right": 0,
-          "accuracy": 0,
+          "right": 1,
+          "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology+judgment",
-          "asked": 1,
-          "right": 1,
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "propose-gemini",
+          "asked": 2,
+          "right": 2,
+          "accuracy": 1,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "judge-gemini",
+          "asked": 2,
+          "right": 2,
           "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
@@ -29036,17 +31318,26 @@
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology",
+          "experiment": "fresh2-propose-judgment-w1-r2",
+          "variant": "propose-gemini",
           "asked": 1,
-          "right": 0,
-          "accuracy": 0,
+          "right": 1,
+          "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology+judgment",
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "propose-gemini",
+          "asked": 1,
+          "right": 1,
+          "accuracy": 1,
+          "wronglyChosen": 0,
+          "confusedWith": []
+        },
+        {
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "judge-gemini",
           "asked": 1,
           "right": 1,
           "accuracy": 1,
@@ -29132,38 +31423,38 @@
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology",
+          "experiment": "fresh2-propose-judgment-w1-r2",
+          "variant": "propose-gemini",
           "asked": 4,
-          "right": 1,
-          "accuracy": 0.25,
+          "right": 4,
+          "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
         },
         {
-          "experiment": "fresh2-ontology-arms-v4-r2b",
-          "variant": "ontology+judgment",
+          "experiment": "fresh3-propose-judgment-w1-r2",
+          "variant": "propose-gemini",
           "asked": 4,
+          "right": 4,
+          "accuracy": 1,
+          "wronglyChosen": 1,
+          "confusedWith": []
+        },
+        {
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "propose-gemini",
+          "asked": 1,
           "right": 1,
-          "accuracy": 0.25,
+          "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
         },
         {
-          "experiment": "fresh3-ontology-arms-v4-r2b",
-          "variant": "ontology",
-          "asked": 4,
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "variant": "judge-gemini",
+          "asked": 1,
           "right": 1,
-          "accuracy": 0.25,
-          "wronglyChosen": 0,
-          "confusedWith": []
-        },
-        {
-          "experiment": "fresh3-ontology-arms-v4-r2b",
-          "variant": "ontology+judgment",
-          "asked": 4,
-          "right": 1,
-          "accuracy": 0.25,
+          "accuracy": 1,
           "wronglyChosen": 0,
           "confusedWith": []
         }
@@ -29914,77 +32205,26 @@
     },
     {
       "rule": "R4-missed",
-      "severity": "act",
-      "experiment": "fresh2-ontology-arms-v4-r2b",
-      "variant": "ontology",
-      "title": "12 asks a skill should handle got no skill",
-      "detail": "“We finished the housing pilot. I need that outcome told three ways — a crisp sum…” → should be stakeholder-update-generator; “Last month's work on the mobile clinic should reach our medical partners, the co…” → should be stakeholder-update-generator; “The school partnership hit a snag and then recovered. Brief the principal, the p…” → should be stakeholder-update-generator; “We could open a second site, deepen services at the first, or partner with the l…” → should be decision-brief-generator",
+      "severity": "watch",
+      "experiment": "fresh2-propose-judgment-w1-r2",
+      "variant": "propose-gemini",
+      "title": "1 ask a skill should handle got no skill",
+      "detail": "“Before we switch on the AI that answers helpline texts at night, write down how …” → should be ai-incident-response-playbook-builder",
       "change": "Check the skill's description names this situation; add it to its `says` examples.",
       "evidence": {
         "intents": [
-          "f2p-stake-01",
-          "f2p-stake-02",
-          "f2p-stake-04",
-          "f2p-dbrief-02",
-          "f2p-dbrief-04",
-          "f2p-agov-01",
-          "f2p-nist-01",
-          "f2p-bias-01",
-          "f2p-airp-01",
-          "f2p-gloi-01",
-          "f2p-proc-01",
-          "f2p-fisc-01"
+          "f2p-airp-01"
         ],
         "numbers": {
-          "missed": 12
+          "missed": 1
         }
       }
     },
     {
       "rule": "R5-sample-size",
       "severity": "info",
-      "experiment": "fresh2-ontology-arms-v4-r2b",
-      "variant": "ontology",
-      "title": "Too few cases per skill to pass or fail a skill (1–4 each)",
-      "detail": "At this size a skill's interval spans roughly 0%–100% even when every case is right, so the per-skill gate cannot pass.",
-      "change": "Grow the slate toward ~40 cases per skill before treating a per-skill result as a verdict; use repeats (Stage 2) to measure instability.",
-      "evidence": {
-        "intents": [],
-        "numbers": {
-          "minPerSkill": 1,
-          "maxPerSkill": 4
-        }
-      }
-    },
-    {
-      "rule": "R4-missed",
-      "severity": "act",
-      "experiment": "fresh2-ontology-arms-v4-r2b",
-      "variant": "ontology+judgment",
-      "title": "8 asks a skill should handle got no skill",
-      "detail": "“We finished the housing pilot. I need that outcome told three ways — a crisp sum…” → should be stakeholder-update-generator; “Last month's work on the mobile clinic should reach our medical partners, the co…” → should be stakeholder-update-generator; “The school partnership hit a snag and then recovered. Brief the principal, the p…” → should be stakeholder-update-generator; “We could open a second site, deepen services at the first, or partner with the l…” → should be decision-brief-generator",
-      "change": "Check the skill's description names this situation; add it to its `says` examples.",
-      "evidence": {
-        "intents": [
-          "f2p-stake-01",
-          "f2p-stake-02",
-          "f2p-stake-04",
-          "f2p-dbrief-02",
-          "f2p-dbrief-04",
-          "f2p-airp-01",
-          "f2p-gloi-01",
-          "f2p-fisc-01"
-        ],
-        "numbers": {
-          "missed": 8
-        }
-      }
-    },
-    {
-      "rule": "R5-sample-size",
-      "severity": "info",
-      "experiment": "fresh2-ontology-arms-v4-r2b",
-      "variant": "ontology+judgment",
+      "experiment": "fresh2-propose-judgment-w1-r2",
+      "variant": "propose-gemini",
       "title": "Too few cases per skill to pass or fail a skill (1–4 each)",
       "detail": "At this size a skill's interval spans roughly 21%–100% even when every case is right, so the per-skill gate cannot pass.",
       "change": "Grow the slate toward ~40 cases per skill before treating a per-skill result as a verdict; use repeats (Stage 2) to measure instability.",
@@ -29999,14 +32239,14 @@
     {
       "rule": "R1-abstention",
       "severity": "act",
-      "experiment": "fresh3-ontology-arms-v4-r2b",
-      "variant": "ontology",
+      "experiment": "fresh3-propose-judgment-w1-r2",
+      "variant": "propose-gemini",
       "title": "Declines only 15/16 asks it should (target ≥ 95%)",
-      "detail": "1 out-of-scope ask got a skill anyway: “Draft a letter of support from our director for a partner charity's gr…” → grant-loi-proposal-drafter.",
+      "detail": "1 out-of-scope ask got a skill anyway: “Explain the new expense-reimbursement policy to staff and to volunteer…” → stakeholder-update-generator.",
       "change": "Give the skills that fired declared `isNot` examples of these asks (and a NOT-for line in the description), or measure a selection approach that can decline (the declared selector).",
       "evidence": {
         "intents": [
-          "f3n-stake-07"
+          "f3n-stake-02"
         ],
         "numbers": {
           "hold": 0.9375,
@@ -30016,34 +32256,12 @@
       }
     },
     {
-      "rule": "R4-missed",
-      "severity": "act",
-      "experiment": "fresh3-ontology-arms-v4-r2b",
-      "variant": "ontology",
-      "title": "6 asks a skill should handle got no skill",
-      "detail": "“The shelter's first winter is done. Board, city officials and the congregations …” → should be stakeholder-update-generator; “Turn the notes from this term's mentoring work into something for our foundation…” → should be stakeholder-update-generator; “Same progress, several readers: funders get outcomes, staff get the operational …” → should be stakeholder-update-generator; “Our largest program is losing its anchor funder next year. Cut it back, find a r…” → should be decision-brief-generator",
-      "change": "Check the skill's description names this situation; add it to its `says` examples.",
-      "evidence": {
-        "intents": [
-          "f3p-stake-01",
-          "f3p-stake-02",
-          "f3p-stake-04",
-          "f3p-dbrief-01",
-          "f3p-dbrief-02",
-          "f3p-dbrief-03"
-        ],
-        "numbers": {
-          "missed": 6
-        }
-      }
-    },
-    {
       "rule": "R5-sample-size",
       "severity": "info",
-      "experiment": "fresh3-ontology-arms-v4-r2b",
-      "variant": "ontology",
+      "experiment": "fresh3-propose-judgment-w1-r2",
+      "variant": "propose-gemini",
       "title": "Too few cases per skill to pass or fail a skill (4–4 each)",
-      "detail": "At this size a skill's interval spans roughly 47%–100% even when every case is right, so the per-skill gate cannot pass.",
+      "detail": "At this size a skill's interval spans roughly 76%–100% even when every case is right, so the per-skill gate cannot pass.",
       "change": "Grow the slate toward ~40 cases per skill before treating a per-skill result as a verdict; use repeats (Stage 2) to measure instability.",
       "evidence": {
         "intents": [],
@@ -30055,39 +32273,51 @@
     },
     {
       "rule": "R4-missed",
-      "severity": "act",
-      "experiment": "fresh3-ontology-arms-v4-r2b",
-      "variant": "ontology+judgment",
-      "title": "6 asks a skill should handle got no skill",
-      "detail": "“The shelter's first winter is done. Board, city officials and the congregations …” → should be stakeholder-update-generator; “Turn the notes from this term's mentoring work into something for our foundation…” → should be stakeholder-update-generator; “Same progress, several readers: funders get outcomes, staff get the operational …” → should be stakeholder-update-generator; “Our largest program is losing its anchor funder next year. Cut it back, find a r…” → should be decision-brief-generator",
+      "severity": "watch",
+      "experiment": "fresh4-propose-vs-judgment-w1",
+      "variant": "propose-gemini",
+      "title": "2 asks a skill should handle got no skill",
+      "detail": "“Before the chatbot goes live on our donation page, plan how we would respond if …” → should be ai-incident-response-playbook-builder; “The volunteer-matching tool seems to send fewer placements to applicants over si…” → should be bias-fairness-reviewer",
       "change": "Check the skill's description names this situation; add it to its `says` examples.",
       "evidence": {
         "intents": [
-          "f3p-stake-01",
-          "f3p-stake-02",
-          "f3p-stake-04",
-          "f3p-dbrief-01",
-          "f3p-dbrief-02",
-          "f3p-dbrief-03"
+          "f4c-airp-01",
+          "f4c-bias-01"
         ],
         "numbers": {
-          "missed": 6
+          "missed": 2
         }
       }
     },
     {
       "rule": "R5-sample-size",
       "severity": "info",
-      "experiment": "fresh3-ontology-arms-v4-r2b",
-      "variant": "ontology+judgment",
-      "title": "Too few cases per skill to pass or fail a skill (4–4 each)",
-      "detail": "At this size a skill's interval spans roughly 47%–100% even when every case is right, so the per-skill gate cannot pass.",
+      "experiment": "fresh4-propose-vs-judgment-w1",
+      "variant": "propose-gemini",
+      "title": "Too few cases per skill to pass or fail a skill (1–2 each)",
+      "detail": "At this size a skill's interval spans roughly 34%–100% even when every case is right, so the per-skill gate cannot pass.",
       "change": "Grow the slate toward ~40 cases per skill before treating a per-skill result as a verdict; use repeats (Stage 2) to measure instability.",
       "evidence": {
         "intents": [],
         "numbers": {
-          "minPerSkill": 4,
-          "maxPerSkill": 4
+          "minPerSkill": 1,
+          "maxPerSkill": 2
+        }
+      }
+    },
+    {
+      "rule": "R5-sample-size",
+      "severity": "info",
+      "experiment": "fresh4-propose-vs-judgment-w1",
+      "variant": "judge-gemini",
+      "title": "Too few cases per skill to pass or fail a skill (1–2 each)",
+      "detail": "At this size a skill's interval spans roughly 34%–100% even when every case is right, so the per-skill gate cannot pass.",
+      "change": "Grow the slate toward ~40 cases per skill before treating a per-skill result as a verdict; use repeats (Stage 2) to measure instability.",
+      "evidence": {
+        "intents": [],
+        "numbers": {
+          "minPerSkill": 1,
+          "maxPerSkill": 2
         }
       }
     },
@@ -30205,8 +32435,9 @@
     "cil-commons-routing-stratum-1@1 (development) — model: 44/48 right skill, declined 12/12 it should; declared: 3/48 right skill, declined 11/12 it should",
     "cil-commons-routing-stratum-2@1 (development) — model: 16/17 right skill, declined 10/12 it should; declared: 0/17 right skill, declined 12/12 it should",
     "cil-commons-fresh-heldout@1 (held-out) — model: 23/24 right skill, declined 20/24 it should; declared: 6/24 right skill, declined 23/24 it should",
-    "cil-commons-fresh-heldout-2@1 (held-out) — ontology: 6/18 right skill, declined 16/16 it should; ontology+judgment: 10/18 right skill, declined 16/16 it should",
-    "cil-commons-fresh-heldout-3@1 (held-out) — ontology: 2/8 right skill, declined 15/16 it should; ontology+judgment: 2/8 right skill, declined 16/16 it should"
+    "cil-commons-fresh-heldout-2@1 (held-out) — propose-gemini: 17/18 right skill, declined 16/16 it should",
+    "cil-commons-fresh-heldout-3@1 (held-out) — propose-gemini: 8/8 right skill, declined 15/16 it should",
+    "cil-commons-fresh-heldout-4@1 (held-out) — propose-gemini: 18/20 right skill, declined 12/12 it should; judge-gemini: 20/20 right skill, declined 12/12 it should"
   ],
   "glossary": {
     "outcomes": {
@@ -30258,6 +32489,7 @@
       "ontology": "exact: the words of the request ground it to domain classes, and the one skill covering them is chosen — several is a tie it holds, none is a decline; no model, no confidence",
       "judgment": "probabilistic: a judge gives every skill (and \"none\") a probability; the top skill is chosen only when likely enough and clearly ahead, otherwise it declines",
       "ontology+judgment": "composed: the ontology narrows to the skills covering the classes the request names (none ⇒ decline), and the judge picks among those survivors or declines",
+      "propose+judgment": "recall-first (spec 416): the ontology proposes skills — those covering the classes the request names, their cluster neighbours, and (for a small catalog) every other skill — and vetoes any whose exclusions the request names; the judge picks among the proposed or declines",
       "framed-judgment": "the judge first frames the request as one domain class, the skills covering that class are ranked by the judge (the 2026-09-26 shape — the judge narrows, so it is not the composed arm)"
     }
   }
