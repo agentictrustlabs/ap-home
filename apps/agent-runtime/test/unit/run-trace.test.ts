@@ -154,4 +154,14 @@ describe('the ontology arm and the composed arm on the trace (spec 415 A4)', () 
     expect(rule).toEqual({ capability: 'skill-selection/ontology', effect: 'changed-plan', offered: ['urn:ap:capability:cic.grants.draft', 'urn:ap:capability:cic.board.packet', 'urn:ap:capability:cic.entity.advise'], intent: { about: [`${CIC}GrantProposal`] } });
     expect(judge).toEqual({ capability: 'skill-selection/judgment', effect: 'changed-plan', offered: ['urn:ap:capability:cic.board.packet', 'urn:ap:capability:cic.grants.draft'], chose: ['urn:ap:capability:cic.grants.draft'], rejected: ['urn:ap:capability:cic.board.packet'] });
   });
+  it('spec 416 W1 — the ontology PROPOSES (its choice is the proposed set, its rejections the vetoed), the judge picks', async () => {
+    const { engagedFromTrace } = await import('../../src/run-trace.js');
+    const t = { planner: 'propose+judgment', toolsExposed: ['cic.grants.draft', 'cic.board.packet', 'cic.entity.advise'], plan: [{ toolId: 'cic.grants.draft', args: {} }],
+      selection: { approach: 'propose+judgment', chose: 'cic.grants.draft', grounded: [{ iri: `${CIC}GrantProposal`, term: 'grant proposal' }],
+        proposal: { candidates: ['cic.grants.draft', 'cic.entity.advise'], via: { 'cic.grants.draft': 'direct', 'cic.entity.advise': 'catalog' }, removed: { 'cic.board.packet': [`${CIC}Minutes`] }, params: { smallCatalog: 50 } },
+        judgment: { chose: 'cic.grants.draft', rejected: ['cic.entity.advise'], offered: ['cic.grants.draft', 'cic.entity.advise'], distribution: {}, judge: { name: 'j', kind: 'model' }, params: { floor: 0.5, margin: 0.15 } } } } as never;
+    const [rule, judge] = engagedFromTrace(t);
+    expect(rule).toEqual({ capability: 'skill-selection/ontology', effect: 'changed-plan', offered: ['urn:ap:capability:cic.grants.draft', 'urn:ap:capability:cic.board.packet', 'urn:ap:capability:cic.entity.advise'], chose: ['urn:ap:capability:cic.grants.draft', 'urn:ap:capability:cic.entity.advise'], rejected: ['urn:ap:capability:cic.board.packet'], intent: { about: [`${CIC}GrantProposal`] } });
+    expect(judge).toMatchObject({ capability: 'skill-selection/judgment', chose: ['urn:ap:capability:cic.grants.draft'], rejected: ['urn:ap:capability:cic.entity.advise'] });
+  });
 });
