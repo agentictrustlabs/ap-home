@@ -9,6 +9,7 @@
 import { runIntent, createRuleBasedPlanner, OrchestrationError, type Planner, type ToolSpec, type ToolInvoker, type RunResult, type AnswerComposer } from '@agenticprimitives/orchestration';
 import { createAnthropicPlanner, createAnthropicComposer, createFetchAnthropicClient, DEFAULT_PLANNER_MODEL as ANTHROPIC_DEFAULT_MODEL } from '@agenticprimitives/orchestration-anthropic';
 import { createOpenAiCompatPlanner, createOpenAiCompatComposer, createFetchOpenAiCompatClient, type OpenAiCompatLike } from '@agenticprimitives/orchestration-openai-compat';
+import type { ModelUsageV1 } from '@agenticprimitives/orchestration';
 import type { Address } from 'viem';
 // Type-only import (erased at build — no runtime cycle with index.ts).
 import type { Env } from './index.js';
@@ -497,7 +498,7 @@ function providerFor(env: PlannerEnv, requested?: LlmProvider): LlmProvider | nu
   return p;
 }
 
-export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string; provider?: LlmProvider }): AnswerComposer | null {
+export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string; provider?: LlmProvider; /** Told what each composing call used, as the provider reported it. */ onUsage?: (u: ModelUsageV1) => void }): AnswerComposer | null {
   const p = providerFor(env, opts?.provider);
   if (p === null) return null;
   // THE REPLY'S LENGTH IS A DEPLOYMENT SETTING, not a per-ask guess. The composers' own default (700 tokens)
@@ -509,6 +510,7 @@ export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string; 
   const maxTokens = cap ? { maxTokens: Number(cap) } : {};
   if (p === 'openai') {
     return createOpenAiCompatComposer({
+      ...(opts?.onUsage ? { onUsage: opts.onUsage } : {}),
       client: openAiClient(env), model: modelFor(env, 'openai'), label: 'openai',
       // A reasoning model spends completion tokens thinking BEFORE it writes, and the bound covers both —
       // so the deployment's reply cap gets the same headroom the planner gets, or a long composition ends
@@ -519,6 +521,7 @@ export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string; 
   }
   if (p === 'gemini') {
     return createOpenAiCompatComposer({
+      ...(opts?.onUsage ? { onUsage: opts.onUsage } : {}),
       client: geminiClient(env), model: modelFor(env, 'gemini', 'composer'), label: 'gemini',
       maxEvidenceChars: 24_000, ...maxTokens,
       ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
@@ -526,6 +529,7 @@ export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string; 
   }
   if (p === 'xai') {
     return createOpenAiCompatComposer({
+      ...(opts?.onUsage ? { onUsage: opts.onUsage } : {}),
       client: xaiClient(env), model: modelFor(env, 'xai'), label: 'xai',
       maxEvidenceChars: 24_000, ...maxTokens,
       ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
@@ -533,6 +537,7 @@ export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string; 
   }
   if (p === 'groq') {
     return createOpenAiCompatComposer({
+      ...(opts?.onUsage ? { onUsage: opts.onUsage } : {}),
       client: groqClient(env), model: modelFor(env, 'groq'), label: 'groq',
       // A smaller evidence cap than the Anthropic composer's 24k: the free tier is bounded by tokens-per-minute,
       // and the composer is the turn's largest request.
@@ -541,6 +546,7 @@ export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string; 
     });
   }
   return createAnthropicComposer({
+      ...(opts?.onUsage ? { onUsage: opts.onUsage } : {}),
     client: createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY! }),
     ...(env.ORCHESTRATION_MODEL ? { model: env.ORCHESTRATION_MODEL } : {}),
     ...maxTokens,
@@ -549,10 +555,10 @@ export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string; 
 }
 
 /** Spec 388 — the composer for THIS reply, chosen by what it must carry (the evidence), with the reason recorded. */
-export async function selectComposerRouted(env: PlannerEnv, opts: { systemPrompt?: string; provider?: LlmProvider; need: RouteNeed }): Promise<{ composer: AnswerComposer | null; route: RouteDecision }> {
+export async function selectComposerRouted(env: PlannerEnv, opts: { systemPrompt?: string; provider?: LlmProvider; need: RouteNeed; onUsage?: (u: ModelUsageV1) => void }): Promise<{ composer: AnswerComposer | null; route: RouteDecision }> {
   const route = await routeProvider(env, opts.provider, opts.need);
   if (route.provider === null) return { composer: null, route };
-  return { composer: selectComposer(env, { ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}), provider: route.provider }), route };
+  return { composer: selectComposer(env, { ...(opts.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}), provider: route.provider, ...(opts.onUsage ? { onUsage: opts.onUsage } : {}) }), route };
 }
 
 /** What a reasoning model may spend THINKING before it calls a tool. The completion bound covers reasoning
@@ -561,10 +567,11 @@ export async function selectComposerRouted(env: PlannerEnv, opts: { systemPrompt
  *  leaving no tool call and a `no_plan` that looks like the planner refusing. */
 export const OPENAI_REASONING_HEADROOM = 2048;
 
-export function selectPlanner(env: PlannerEnv, opts?: { systemPrompt?: string; maxTokens?: number; provider?: LlmProvider }): { planner: Planner; kind: PlannerKind; model?: string } {
+export function selectPlanner(env: PlannerEnv, opts?: { systemPrompt?: string; maxTokens?: number; provider?: LlmProvider; /** Told what each planning call used, as the provider reported it. */ onUsage?: (u: ModelUsageV1) => void }): { planner: Planner; kind: PlannerKind; model?: string } {
   const p = providerFor(env, opts?.provider);
   if (p === 'openai') {
     const planner = createOpenAiCompatPlanner({
+      ...(opts?.onUsage ? { onUsage: opts.onUsage } : {}),
       client: openAiClient(env), model: modelFor(env, 'openai'), label: 'openai',
       ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
       maxTokens: (opts?.maxTokens ?? 1024) + OPENAI_REASONING_HEADROOM,
@@ -577,6 +584,7 @@ export function selectPlanner(env: PlannerEnv, opts?: { systemPrompt?: string; m
     // reasoning tokens outside the completion bound, so the ceiling needs no headroom.
     const model = modelFor(env, 'gemini', 'planner');
     const planner = createOpenAiCompatPlanner({
+      ...(opts?.onUsage ? { onUsage: opts.onUsage } : {}),
       client: geminiClient(env), model, label: 'gemini',
       ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
       maxTokens: opts?.maxTokens ?? 1024,
@@ -585,6 +593,7 @@ export function selectPlanner(env: PlannerEnv, opts?: { systemPrompt?: string; m
   }
   if (p === 'xai') {
     const planner = createOpenAiCompatPlanner({
+      ...(opts?.onUsage ? { onUsage: opts.onUsage } : {}),
       client: xaiClient(env), model: modelFor(env, 'xai'), label: 'xai',
       ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
       ...(opts?.maxTokens ? { maxTokens: opts.maxTokens } : {}),
@@ -594,6 +603,7 @@ export function selectPlanner(env: PlannerEnv, opts?: { systemPrompt?: string; m
   }
   if (p === 'groq') {
     const planner = createOpenAiCompatPlanner({
+      ...(opts?.onUsage ? { onUsage: opts.onUsage } : {}),
       client: groqClient(env), model: modelFor(env, 'groq'), label: 'groq',
       ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),
       ...(opts?.maxTokens ? { maxTokens: opts.maxTokens } : {}),
@@ -605,6 +615,7 @@ export function selectPlanner(env: PlannerEnv, opts?: { systemPrompt?: string; m
   if (p === 'anthropic') {
     const client = createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY! });
     const planner = createAnthropicPlanner({
+      ...(opts?.onUsage ? { onUsage: opts.onUsage } : {}),
       client,
       ...(env.ORCHESTRATION_MODEL ? { model: env.ORCHESTRATION_MODEL } : {}),
       ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}),

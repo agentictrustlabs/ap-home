@@ -33,6 +33,13 @@ describe('skill.apply', () => {
     expect(calls[0]!.system).toContain('Inventory before rubric.');
     expect(calls[0]!.user).toBe('score our AI governance maturity\n\nThe situation, in the person\'s words:\nwe run a dozen tools');
   });
+  it('pick-only (a comparison of the PICK): stamped under the skill, no body read, no model call', async () => {
+    let modelCalls = 0, reads = 0;
+    const invoke = skillApplyInvoker({ call: async () => { modelCalls++; return { answer: 'x' }; }, pickOnly: true, sources: instructionSourcesOf({ tools }), readSkill: async () => { reads++; return null; } });
+    const out = await invoke('cic.governance.assess', { question: 'q' }, {} as never) as Record<string, unknown>;
+    expect(out).toMatchObject({ skill: { id: SRC.skillId, digest: SRC.contractDigest } });
+    expect([modelCalls, reads]).toEqual([0, 0]);
+  });
   it('refuses a body that moved, an unknown tool, an unpinned source, and a missing model', async () => {
     const moved = skillApplyInvoker({ call, sources: instructionSourcesOf({ tools }), readSkill: async () => ({ body: 'x', commitment: 'sha256:' + 'cc'.repeat(32) }) });
     expect(String(((await moved('cic.governance.assess', { question: 'q' }, {} as never)) as { refused: string }).refused)).toMatch(/has moved/);

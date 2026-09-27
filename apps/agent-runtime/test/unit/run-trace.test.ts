@@ -40,6 +40,12 @@ describe('model calls and the variant', () => {
     ]);
     expect(JSON.stringify(calls)).not.toContain('5400');
   });
+  it('tokens a provider REPORTED ride on each model call — planner, composer, judge; none is estimated', () => {
+    const t = { ...(trace as object), plannerUsage: { tokensIn: 5000, tokensOut: 40 }, composeUsage: { tokensIn: 1200, tokensOut: 300 },
+      structuredCalls: [{ role: 'judge', provider: 'gemini', model: 'g', startMs: 1, endMs: 2, tokensIn: 2100, tokensOut: 90 }, { role: 'structured', provider: 'gemini', model: 'g', startMs: 3, endMs: 4 }] } as never;
+    const calls = modelCallsOf(t, [{ name: 'reply:compose', startMs: 10, endMs: 20 }]);
+    expect(calls.map((c) => [c.role, c.tokensIn, c.tokensOut])).toEqual([['plan', 5000, 40], ['compose', 1200, 300], ['judge', 2100, 90], ['structured', undefined, undefined]]);
+  });
   it('a supplied or compiled plan made no plan call', () => {
     expect(modelCallsOf({ ...(trace as object), planner: 'compiled', route: undefined, structuredCalls: undefined } as never)).toEqual([]);
     expect([plannerKindOf('supplied'), plannerKindOf('compiled'), plannerKindOf('anthropic')]).toEqual(['supplied', 'compiled', 'model']);
@@ -58,6 +64,11 @@ describe('the variant knob is parsed, and anything unknown is refused by name', 
   it('accepts the five components with known values', () => {
     expect(parseVariantRequest({ plannerKind: 'rule-based', provider: 'groq', toggles: { 'retrieval/kb': 'off' }, playbook: '0x' + '33'.repeat(32), startingState: { domain: 'cil-commons', scenarioId: 'baseline', digest: 'sha256:' + 'ab'.repeat(32) } })).toEqual({ ok: true, variant: { plannerKind: 'rule-based', provider: 'groq', toggles: { 'retrieval/kb': 'off' }, playbook: '0x' + '33'.repeat(32), startingState: { domain: 'cil-commons', scenarioId: 'baseline', digest: 'sha256:' + 'ab'.repeat(32) } } });
     expect(parseVariantRequest({})).toEqual({ ok: true, variant: {} });
+  });
+  it('spec 416 — speed: a judge profile, a pick-only toggle, the ontology-first arm; each on the recorded variant', () => {
+    expect(parseVariantRequest({ selection: 'ontology-first', judgeProfile: 'fast', toggles: { 'skill-selection/answer': 'off' } })).toEqual({ ok: true, variant: { selection: 'ontology-first', judgeProfile: 'fast', toggles: { 'skill-selection/answer': 'off' } } });
+    expect(parseVariantRequest({ judgeProfile: 'turbo' })).toMatchObject({ ok: false });
+    expect(variantOf({} as never, undefined, { judgeProfile: 'fast', toggles: { 'skill-selection/answer': 'off' } }).toggles).toEqual({ 'skill-selection/answer': 'off', 'skill-selection/judge-profile': 'fast' });
   });
   it('spec 416 W3 — a conformal map is a component, and which map ran is on the recorded variant', () => {
     const acceptance = { method: 'conformal' as const, alpha: 0.05, temperature: 1.2, qhat: 0.4, mapDigest: 'sha256:' + 'cd'.repeat(32) };

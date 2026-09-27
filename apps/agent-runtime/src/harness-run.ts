@@ -65,7 +65,7 @@ import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
 import { ADAPTER, CARRIES } from './adapter-declarations.js';
 import { relationshipCredentialDigest, termsDigestOf, type RelationshipCredentialBodyV1 } from '@agenticprimitives/agent-relationships';
-import { replayingInvoker, inputsFor, type RunRecordV1, type RunMarks, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent , selectByDeclaredUtterances , selectByJudgment , selectByOntology, selectByOntologyThenJudgment, selectByProposalThenJudgment, selectByFramedJudgment, type OntologySelectionV1, type JudgmentSelectionV1, type FramedSelectionV1, type ProposedSelectionV1 } from '@agenticprimitives/orchestration';
+import { replayingInvoker, inputsFor, type RunRecordV1, type RunMarks, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent , selectByDeclaredUtterances , selectByJudgment , selectByOntology, selectByOntologyThenJudgment, selectByProposalThenJudgment, selectByOntologyFirst, type OntologyFirstSelectionV1, type AskerContextV1, selectByFramedJudgment, addUsage, type ModelUsageV1, type OntologySelectionV1, type JudgmentSelectionV1, type FramedSelectionV1, type ProposedSelectionV1 } from '@agenticprimitives/orchestration';
 import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, standingFor, declareInstruction, forgetInstruction, instructionContextOf, STANDING_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
@@ -92,7 +92,8 @@ import { enforcersFromEnv } from './org-wire.js';
 import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a';
 import { routeProvider, routePolicy, meterFor, selectPlanner, selectComposer, defaultProvider, plannerPromptBudget, type LlmProvider, type RoutePolicy, type RouteDecision, type RouteNeed , RULE_BASED_PLANNER } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from '@agenticprimitives/context';
-import { structuredCallFor, kbRetrievalMode, type StructuredCallRecordV1 } from './context-wiring.js';
+import { recentToolsOf } from './ops-index.js';
+import { structuredCallFor, logprobChoiceFor, kbRetrievalMode, type StructuredCallRecordV1 } from './context-wiring.js';
 
 /** Spec 415 A4 — the estate's retrieval mode, unless a comparison run toggled it (`retrieval/kb`). */
 const kbModeOf = (env: { KB_RETRIEVAL?: string }, variant: HarnessRunInput['variant']): ReturnType<typeof kbRetrievalMode> => {
@@ -126,6 +127,8 @@ export interface HarnessEnv {
   /** Spec 415 A4 — the skills corpus (service binding to skills-mcp): where an INSTRUCTION skill's body is read, by the
    *  digest its playbook tool names, when the planner chooses it. Absent ⇒ instruction skills are not offered. */
   SKILLS_MCP?: Fetcher;
+  /** Spec 416 §4f — `fast`: the fast judge picks among the playbook's instruction skills before the planner runs. */
+  SKILL_SELECTION_DEFAULT?: string;
   /** Spec 397 W2 — the ARD registry this agent finds other agents in (`POST /search`); absent ⇒ no find tool. */
   ARD_REGISTRY_ORIGIN?: string;
   /** The Home origins this agent serves — the first is used for links a person can follow. */
@@ -2495,7 +2498,8 @@ export interface HarnessRunInput {
   /** Spec 415 A4 — what a COMPARISON asked this run to do differently (already admitted by the caller: a
    *  comparison estate, the agent's own steward). The planner kind and the capability toggles apply here; the
    *  provider was folded into `provider`. Behaviour, never authority. */
-  variant?: { plannerKind?: 'model' | 'rule-based'; selection?: 'model' | 'declared' | 'ontology' | 'judgment' | 'ontology+judgment' | 'propose+judgment' | 'framed-judgment'; toggles?: Record<string, string>;
+  variant?: { plannerKind?: 'model' | 'rule-based'; selection?: 'model' | 'declared' | 'ontology' | 'judgment' | 'ontology+judgment' | 'propose+judgment' | 'ontology-first' | 'framed-judgment'; toggles?: Record<string, string>;
+    judgeProfile?: 'thorough' | 'fast' | 'logprob';
     /** Spec 416 W3 — conformal acceptance under a fitted map. */
     acceptance?: { method: 'conformal'; alpha: number; temperature: number; qhat: number; mapDigest: string } };
   /** The agent being asked. Informational tools that read an organization's own records default to it —
@@ -2767,7 +2771,17 @@ export interface PlannerTraceV1 {
   /** Spec 388 — which provider carried the planner and the composer, and why (the numbers beside the reason). */
   /** Spec 415 — every structured model call the run made (the selection judge, a skill's answer, the KB and vault
    *  choosers), as it ran: provider, model, why, when. Each becomes a model invocation on the run's provenance. */
-  structuredCalls?: Array<{ role: 'judge' | 'structured'; provider: string; model: string; because?: string; startMs: number; endMs: number; failed?: boolean }>;
+  structuredCalls?: Array<{ role: 'judge' | 'structured'; provider: string; model: string; because?: string; startMs: number; endMs: number; failed?: boolean; tokensIn?: number; tokensOut?: number; cachedIn?: number; reasoningOut?: number }>;
+  /** Spec 416 §4g — milliseconds per runtime stage of this ask (the marks, summed per name). */
+  stages?: Record<string, number>;
+  /** Spec 416 §4f — the default skill stage's outcome: the fast judge chose a skill, or handed the ask to the planner. */
+  skillStage?: 'chose' | 'handed-to-planner';
+  /** Spec 416 — milliseconds spent choosing (planner or selection arm), summed over re-plans. */
+  selectionMs?: number;
+  /** What the model planner's calls used, as the provider reported them (summed over re-plans). */
+  plannerUsage?: ModelUsageV1;
+  /** What the composer's calls used, as the provider reported them. */
+  composeUsage?: ModelUsageV1;
   route?: { policy: RoutePolicy; /** Spec 388 W3 — where the minute was counted: this isolate's own window, or the deployment's shared meter. */ meter?: 'isolate' | 'shared'; planner?: RouteDecision; composer?: RouteDecision; /** Spec 388 W2 — each structured call the run's steps made (the KB and vault choosers), in order. */ structured?: RouteDecision[] };
   /** Every admission verdict, in order — a refused plan shows what was proposed and why it was refused. */
   admission: Array<{ refused: Array<{ code: string; message: string; stepIndex?: number; toolId?: string }>; replanned: boolean }>;
@@ -2780,6 +2794,7 @@ export interface PlannerTraceV1 {
     | ({ approach: 'judgment' } & JudgmentSelectionV1)
     | ({ approach: 'ontology+judgment'; chose: string | null; hold?: string; decidedBy: 'ontology' | 'judgment'; ontology: OntologySelectionV1; judgment?: JudgmentSelectionV1 })
     | ({ approach: 'propose+judgment' } & ProposedSelectionV1)
+    | ({ approach: 'ontology-first' } & OntologyFirstSelectionV1)
     | ({ approach: 'framed-judgment' } & FramedSelectionV1);
   /** Each party binding and WHERE IT CAME FROM (spec 367 §3): the person's words, a decision rule, memory, or the resolver. */
   bindings: Array<{ arg: string; raw: string; agent: string; label?: string; source: 'said' | 'context' | 'standing' | 'decision' | 'memory' | 'resolver' | 'disclosed'; because?: string }>;
@@ -4154,7 +4169,11 @@ async function askReplyForInner(env: HarnessEnv, input: {
     // template and its result has the fields, the reply is the template over the result — the person's
     // unit, no interpretation, no model. The composer is for reads that declare no sentence.
     const offered = input.tools ?? [];
-    const readSteps = r.steps.filter((o) => o.ok && !o.skipped);
+    // The PRE-PLAN retrieval (spec 413 `retrievalQueries`) grounds a composed answer; it is not a deliverable of its own.
+    // When every step the PLAN ran declares its sentence (an instruction skill's answer is its reply), the reply is
+    // rendered and the passages are not re-composed over it — measured 2026-09-27: the composer re-rendered a skill's
+    // answer over five passages (15.6 s of an 18.6 s run) and once contradicted it.
+    const readSteps = r.steps.filter((o) => o.ok && !o.skipped && o.step.toolId !== KB_RETRIEVE_TOOL.id);
     if (readSteps.length && readSteps.every((o) => offered.find((t) => t.id === o.step.toolId)?.answer)) {
       const rendered = readSteps.map((o) => renderAnswer(offered.find((t) => t.id === o.step.toolId)!.answer!, o.result));
       if (rendered.every((x): x is string => typeof x === 'string' && x.length > 0)) return withEvidence(rendered.join(' '));
@@ -4811,7 +4830,9 @@ step is then handed to that agent under authority the person grants; leave it ou
   // known. The digest on the trace is of what was actually sent.
   // Spec 388 — under ORCHESTRATION_ROUTE=budget the provider is chosen per call, at plan time, from the prompt's
   // estimate (see `plan` below); `selected` is the deployment's default, kept for the rule-based case.
-  const selected = selectPlanner(env as never, { systemPrompt: withPlaybook, maxTokens: ASK_PLANNER_MAX_TOKENS, ...(input.provider ? { provider: input.provider } : {}) });
+  // The planner's reported usage lands on the trace (declared below; the planner runs after it exists).
+  const notePlannerUsage = (u: ModelUsageV1) => { trace.plannerUsage = addUsage(trace.plannerUsage, u); };
+  const selected = selectPlanner(env as never, { systemPrompt: withPlaybook, maxTokens: ASK_PLANNER_MAX_TOKENS, ...(input.provider ? { provider: input.provider } : {}), onUsage: notePlannerUsage });
   let plannerModel = selected.model;
   // The compiler answers for the shapes it claims; the model answers for the rest. Not a fallback pair
   // (ADR-0013): the match is deterministic and decided BEFORE any planner runs, the way a rule-based
@@ -4853,25 +4874,69 @@ step is then handed to that agent under authority the person grants; leave it ou
           // Spec 415 A4 — THE THREE ARMS (+ the framed shape). A rule narrows and a judge picks; neither allows. Candidates are
           // the playbook's instruction skills; the arm's decision goes on the trace; a hold plans `ask.unsupported`.
           const arm = input.variant?.selection;
-          if (arm === 'ontology' || arm === 'judgment' || arm === 'ontology+judgment' || arm === 'propose+judgment' || arm === 'framed-judgment') {
+          if (arm === 'ontology' || arm === 'judgment' || arm === 'ontology+judgment' || arm === 'propose+judgment' || arm === 'ontology-first' || arm === 'framed-judgment') {
             const sources = instructionSourcesOf(playbook);
             const skills = Object.values(playbook?.tools ?? {}).filter((t) => sources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}) }));
             const lexicon = playbook?.domainLexicon;
             // The judge's model call is a model invocation of the run like the planner's: on the trace, with its provider,
             // model and why — role `judge`, so a reader can tell the call that chose the skill from the one that answered.
-            const call = structuredCallFor(env as never, input.provider, { onCall: recordStructured('judge') }) as never;
+            const fast = input.variant?.judgeProfile === 'fast' || input.variant?.judgeProfile === 'logprob';
+            const choose = input.variant?.judgeProfile === 'logprob' ? logprobChoiceFor(env as never, input.provider, { onCall: recordStructured('judge') }) : undefined;
+            // Spec 416 §4f — WHAT IS KNOWN OF THE ASKER, for the judge's typed reading: their standing (already derived for
+            // the receipts, memoised), and under `full` their recent skills here (the operator index, one range read) and
+            // — at their own agent — short memory entries. Labels and counts go on the trace, never the memory's words.
+            const askerMode = input.variant?.toggles?.['skill-selection/asker-context'] ?? 'relation';
+            const asker: AskerContextV1 | undefined = askerMode === 'off' ? undefined : await (async () => {
+              const st = standingOnce ? await standingOnce : undefined;
+              const rel = !input.person ? undefined : String(input.person).toLowerCase() === String(input.addressee ?? '').toLowerCase() ? 'self' as const
+                : st?.relation === 'steward' || st?.relation === 'self' ? 'steward' as const : st?.relation === 'member' ? 'member' as const : 'stranger' as const;
+              if (askerMode !== 'full') return rel ? { relation: rel } : undefined;
+              const recent = input.person && input.addressee ? await recentToolsOf(env as never, input.addressee as Address, input.person as Address, Date.now() - 30 * 86_400_000).catch(() => null) : null;
+              const skillIds = new Set(Object.keys(sources));
+              const recentSkills = (recent ?? []).filter((x) => skillIds.has(x.id)).slice(0, 4);
+              const memoryTags = input.memory ? factsOf(input.memory).entries.slice(0, 6).map((e) => (e.tags?.length ? e.tags.join(', ') : e.fact).slice(0, 80)) : [];
+              return { ...(rel ? { relation: rel } : {}), ...(recentSkills.length ? { recentSkills } : {}), ...(memoryTags.length ? { memoryTags } : {}) };
+            })();
+            const call = structuredCallFor(env as never, input.provider, { onCall: recordStructured('judge'), ...(fast ? { tier: 'light' as const } : {}) }) as never;
             let chose: string | null;
-            const judgeParams = input.variant?.acceptance ? { acceptance: input.variant.acceptance } : {};
+            const judgeParams = { ...(input.variant?.acceptance ? { acceptance: input.variant.acceptance } : {}), ...(fast ? { profile: input.variant?.judgeProfile === 'logprob' ? 'logprob' as const : 'fast' as const } : {}) };
             if (arm === 'ontology') { const r = selectByOntology(rest, skills, lexicon); trace.selection = { approach: 'ontology', ...r }; chose = r.chose; }
-            else if (arm === 'judgment') { const r = await selectByJudgment(rest, skills, call, judgeParams); trace.selection = { approach: 'judgment', ...r }; chose = r.chose; }
+            else if (arm === 'judgment') { const r = await selectByJudgment(rest, skills, call, judgeParams, { ...(lexicon ? { lexicon } : {}), ...(asker ? { asker } : {}), ...(choose ? { choose } : {}) }); trace.selection = { approach: 'judgment', ...r }; chose = r.chose; }
             else if (arm === 'ontology+judgment') { const r = await selectByOntologyThenJudgment(rest, skills, call, judgeParams, lexicon); trace.selection = { approach: 'ontology+judgment', ...r }; chose = r.chose; }
             // Spec 416 W1 — the ontology PROPOSES (recall-first, `excludes` vetoes), the judge decides among the proposed.
+            else if (arm === 'ontology-first') { const r = await selectByOntologyFirst(rest, skills, call, judgeParams, lexicon, asker); trace.selection = { approach: 'ontology-first', ...r }; chose = r.chose; }
             else if (arm === 'propose+judgment') { const r = await selectByProposalThenJudgment(rest, skills, call, judgeParams, lexicon); trace.selection = { approach: 'propose+judgment', ...r }; chose = r.chose; }
             else { const r = await selectByFramedJudgment(rest, skills.filter((x) => x.covers.length), call); trace.selection = { approach: 'framed-judgment', ...r }; chose = r.chose; }
             plannerUsed = arm;
             const why = (trace.selection as { hold?: string }).hold;
             const step = chose ? { toolId: chose, args: { question: pin.intent.goal }, id: 's0' } : { toolId: UNSUPPORTED_TOOL.id, args: { what: pin.intent.goal }, id: 's0' };
             return withSpecialists({ steps: [step], rationale: chose ? `${arm}: ${chose}` : `${arm}: declined (${why})` }, playbook?.specialists, pin.tools);
+          }
+          // Spec 416 §4f — THE DEFAULT SKILL STAGE (deployment setting `SKILL_SELECTION_DEFAULT=fast`). When the playbook has
+          // instruction skills and no comparison chose an approach, the fast judge — one call over the skills' ontology
+          // cards and the request's typed reading, the provider's light model — picks among them FIRST. A pick is planned
+          // directly (no planner call). "None of these skills" hands the ask to the planner over the agent's other tools:
+          // two declared stages, both on the trace (`selection` records the judge's verdict), never a silent retry.
+          // Explicit per run (`skill-selection/stage` on | off — so a comparison NAMES it), else the deployment's default.
+          const stageToggle = input.variant?.toggles?.['skill-selection/stage'];
+          const stageOn = stageToggle ? stageToggle === 'on' : !input.variant?.selection && !input.variant?.plannerKind && (env.SKILL_SELECTION_DEFAULT ?? '').trim() === 'fast';
+          const skillSources = stageOn && !input.variant?.selection ? instructionSourcesOf(playbook) : {};
+          if (Object.keys(skillSources).length) {
+            const skills = Object.values(playbook?.tools ?? {}).filter((t) => skillSources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}) }));
+            const st = standingOnce ? await standingOnce : undefined;
+            const relation = !input.person ? undefined : String(input.person).toLowerCase() === String(input.addressee ?? '').toLowerCase() ? 'self' as const : st?.relation === 'steward' || st?.relation === 'self' ? 'steward' as const : st?.relation === 'member' ? 'member' as const : 'stranger' as const;
+            const call = structuredCallFor(env as never, input.provider, { onCall: recordStructured('judge'), tier: 'light' }) as never;
+            const r = await selectByJudgment(rest, skills, call, { profile: 'fast' }, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(relation ? { asker: { relation } } : {}) });
+            trace.selection = { approach: 'judgment', ...r };
+            trace.skillStage = r.chose ? 'chose' : 'handed-to-planner';
+            if (r.chose) {
+              plannerUsed = 'judgment';
+              return withSpecialists({ steps: [{ toolId: r.chose, args: { question: pin.intent.goal }, id: 's0' }], rationale: `skill stage: ${r.chose}` }, playbook?.specialists, pin.tools);
+            }
+            // "None of these skills": the planner gets the agent's OTHER tools only. Offering it the skills the judge just
+            // rejected let it pick one anyway (measured 2026-09-27: a declined out-of-scope ask answered by a skill) and
+            // cost ~12k prompt tokens of skill descriptions for nothing.
+            pin = { ...pin, tools: pin.tools.filter((t) => !skillSources[t.id]) };
           }
           plannerUsed = selected.kind;
           // Spec 415 A4 — a comparison may ask for the rule-based planner on a deployment that offers a model: the
@@ -4884,7 +4949,7 @@ step is then handed to that agent under authority the person grants; leave it ou
           const route = await routeProvider(env as never, input.provider, { call: 'planner', estimatedTokens: estimatePromptTokens(withPlaybook, pin.tools, user) });
           trace.route = { ...(trace.route ?? { policy: routePolicy(env as never) }), meter: meterFor(env as never).kind, planner: route };
           const provider = route.provider ?? undefined;
-          const chosen = provider && provider !== selected.kind ? selectPlanner(env as never, { systemPrompt: withPlaybook, maxTokens: ASK_PLANNER_MAX_TOKENS, provider }) : selected;
+          const chosen = provider && provider !== selected.kind ? selectPlanner(env as never, { systemPrompt: withPlaybook, maxTokens: ASK_PLANNER_MAX_TOKENS, provider, onUsage: notePlannerUsage }) : selected;
           plannerUsed = chosen.kind; plannerModel = chosen.model;
           const budget = plannerPromptBudget(env as never, provider ?? null);
           if (budget !== null) {
@@ -4892,15 +4957,18 @@ step is then handed to that agent under authority the person grants; leave it ou
             trace.promptBudget = { tokens: budget, estimated: fitted.estimated, trimmed: fitted.trimmed };
             trace.promptDigest = keccak256(toBytes(fitted.text));
             trace.examplesRendered = (fitted.text.match(/^- /gm) ?? []).length;
-            return withSpecialists(await selectPlanner(env as never, { systemPrompt: fitted.text, maxTokens: ASK_PLANNER_MAX_TOKENS, ...(provider ? { provider } : {}) }).planner.plan(pin), playbook?.specialists, pin.tools);
+            return withSpecialists(await selectPlanner(env as never, { systemPrompt: fitted.text, maxTokens: ASK_PLANNER_MAX_TOKENS, ...(provider ? { provider } : {}), onUsage: notePlannerUsage }).planner.plan(pin), playbook?.specialists, pin.tools);
           }
           return withSpecialists(await chosen.planner.plan(pin), playbook?.specialists, pin.tools);
         },
       };
   // Spec 384 W3 — the campaign's selection binds the planned step to its provider and offer, whoever planned it.
+  // Spec 416 — how long the PICK took (the model planner's call, or a selection arm's work), apart from the rest of the
+  // turn: a comparison of selection approaches measures this, not the whole ask.
+  const timedPlanner: Planner = { plan: async (pin) => { const t0 = Date.now(); try { return await planner.plan(pin); } finally { trace.selectionMs = (trace.selectionMs ?? 0) + (Date.now() - t0); } } };
   const boundPlanner: Planner = input.engagement
-    ? { plan: async (pin) => { const p = await planner.plan(pin); return { ...p, ...bindSelectedOffer(p, input.engagement) }; } }
-    : planner;
+    ? { plan: async (pin) => { const p = await timedPlanner.plan(pin); return { ...p, ...bindSelectedOffer(p, input.engagement) }; } }
+    : timedPlanner;
   const kind = input.plan ? 'supplied' : selected.kind;
   const trace: PlannerTraceV1 = {
     planner: plannerUsed, ...(selected.model ? { model: selected.model } : {}), toolsExposed: [], recalledTurns: input.conversation?.turns.length ?? 0, playbook: playbook ? { archetypeId: playbook.archetypeId, archetypeVersion: playbook.archetypeVersion, digest: playbook.digest } : null,
@@ -5062,7 +5130,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     ? playbookAnswerInvoker({ call: structuredCallFor(env as never, input.provider, { onCall: recordStructured('structured') }), instructions: playbook?.instructions ?? null, material, advertised, agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null, ...(memory ? { memory } : {}), ...(study ? { study } : {}) })
     : null;
   const skillInvoke = instructionTools.length
-    ? skillApplyInvoker({ call: structuredCallFor(env as never, input.provider, { onCall: recordStructured('structured') }), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null })
+    ? skillApplyInvoker({ call: structuredCallFor(env as never, input.provider, { onCall: recordStructured('structured') }), ...(input.variant?.toggles?.['skill-selection/answer'] === 'off' ? { pickOnly: true } : {}), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null })
     : null;
   const instructionIds = new Set(instructionTools.map((t) => t.id));
   const localInvoke: ToolInvoker = async (toolId, args, ctx) => {
@@ -5127,7 +5195,10 @@ step is then handed to that agent under authority the person grants; leave it ou
   // declared scope and echoed on the receipt. The passages ground the composed answer; no planner reads them.
   const goalText = String((input.intent as { goal?: unknown }).goal ?? '').trim();
   const retrieval = kbModeOf(env as never, input.variant) === 'playbook' && playbook?.retrievalQueries?.length && goalText && tools.some((t) => t.id === KB_RETRIEVE_TOOL.id)
-    ? { toolId: KB_RETRIEVE_TOOL.id, args: { query: goalText, topics: playbook.retrievalQueries } }
+    ? { toolId: KB_RETRIEVE_TOOL.id, args: { query: goalText, topics: playbook.retrievalQueries },
+        // 416 §4g — the passages ground a COMPOSED answer; a plan whose every step renders its own sentence (an
+        // instruction skill's answer) needs none, so the retrieval is decided on the plan and skipped then.
+        onlyIf: (plan: { steps: ReadonlyArray<{ toolId: string }> }) => !plan.steps.every((st) => !!tools.find((t) => t.id === st.toolId)?.answer) }
     : null;
   const result = await runIntent(input.intent, {
     planner: boundPlanner, tools, bindingFor,

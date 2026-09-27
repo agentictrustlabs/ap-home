@@ -7,8 +7,9 @@
 // so the two adapter packages (`orchestration-anthropic`, `orchestration-openai-compat`) remain the only
 // vendor-touching ones.
 import { defaultProvider, providerConfigured, modelFor, geminiClient, GROQ_DEFAULTS, OPENAI_DEFAULTS, XAI_DEFAULTS, OPENAI_REASONING_HEADROOM, routePolicy, routeProvider, llmAllowlist, type PlannerEnv, type LlmProvider, type RouteDecision } from './orchestration.js';
-import { createFetchAnthropicClient } from '@agenticprimitives/orchestration-anthropic';
-import { createFetchOpenAiCompatClient, createOpenAiCompatStructuredCall } from '@agenticprimitives/orchestration-openai-compat';
+import { createFetchAnthropicClient, usageOfAnthropic } from '@agenticprimitives/orchestration-anthropic';
+import { addUsage, type ModelUsageV1 } from '@agenticprimitives/orchestration';
+import { createFetchOpenAiCompatClient, createOpenAiCompatStructuredCall, createOpenAiCompatLogprobChoice } from '@agenticprimitives/orchestration-openai-compat';
 import type { DiscoveryFetch, StructuredCall } from '@agenticprimitives/context';
 import type { DiscoveryEnv } from './discovery-facets.js';
 
@@ -42,32 +43,39 @@ export type ModelEnv = PlannerEnv;
  *  when no model is configured — the tools are then not offered rather than offered and broken. Runs on
  *  `provider` when the turn named one, else the deployment default; a listed-but-keyless provider throws. */
 /** One structured call as it ran — who carried it, on which model, why, and when. The trace's model invocation. */
-export interface StructuredCallRecordV1 { provider: LlmProvider; model: string; because?: string; startMs: number; endMs: number; failed?: boolean }
+export interface StructuredCallRecordV1 { provider: LlmProvider; model: string; because?: string; startMs: number; endMs: number; failed?: boolean;
+  /** What the provider reported the call used (absent when it reported nothing — never estimated). */
+  tokensIn?: number; tokensOut?: number; cachedIn?: number; reasoningOut?: number }
 
-export function structuredCallFor(env: ModelEnv, provider?: LlmProvider, opts: { /** Spec 388 W2 — each routed call's decision, for the trace. */ onRoute?: (d: RouteDecision) => void; /** Spec 415 — EVERY call, routed or named, as it ran: a model call the trace does not name is a model call nobody can audit. */ onCall?: (c: StructuredCallRecordV1) => void; /** Test seam: build a provider's call without a client. */ make?: (p: LlmProvider) => StructuredCall } = {}): StructuredCall | undefined {
-  const timed = (p: LlmProvider, c: StructuredCall, because?: string): StructuredCall => (opts.onCall ? async (input) => {
+export function structuredCallFor(env: ModelEnv, provider?: LlmProvider, opts: { /** Spec 388 W2 — each routed call's decision, for the trace. */ onRoute?: (d: RouteDecision) => void; /** Spec 415 — EVERY call, routed or named, as it ran: a model call the trace does not name is a model call nobody can audit. */ onCall?: (c: StructuredCallRecordV1) => void; /** `light`: the provider's lighter model where it names one (Gemini's planner model) — for a call that only has to choose. */ tier?: 'light'; /** Test seam: build a provider's call without a client. */ make?: (p: LlmProvider) => StructuredCall } = {}): StructuredCall | undefined {
+  const build = (p: LlmProvider, onUsage?: (u: ModelUsageV1) => void): StructuredCall => (opts.make ? opts.make(p) : providerStructuredCall(env, p, onUsage, opts.tier));
+  const modelOf = (p: LlmProvider) => modelFor(env, p, opts.tier === 'light' ? 'planner' : undefined);
+  // Each invocation is built with its own usage callback: two calls in flight at once (a judge's permutations) must not
+  // mix their counts.
+  const timed = (p: LlmProvider, because?: string): StructuredCall => async (input) => {
+    if (!opts.onCall) return build(p)(input);
     const startMs = Date.now();
-    const rec = (failed: boolean) => opts.onCall!({ provider: p, model: modelFor(env, p), ...(because ? { because } : {}), startMs, endMs: Date.now(), ...(failed ? { failed } : {}) });
+    let usage: ModelUsageV1 | undefined;
+    const c = build(p, (u) => { usage = addUsage(usage, u); });
+    const rec = (failed: boolean) => opts.onCall!({ provider: p, model: modelOf(p), ...(because ? { because } : {}), startMs, endMs: Date.now(), ...(failed ? { failed } : {}), ...(usage ?? {}) });
     try { const out = await c(input); rec(false); return out; } catch (e) { rec(true); throw e; }
-  } : c);
+  };
   // Spec 388 W2 — ROUTED PER REQUEST when the turn named no provider and the deployment routes by budget: the
   // structured call is built at request time from what it carries (the system text, the messages, the tool's
   // schema — the vault chooser's inventory alone was once 9,996 tokens), and the decision is recorded like the
   // planner's. A named provider is the turn's choice; `first` keeps spec 377.
   if (!provider && routePolicy(env) === 'budget' && llmAllowlist(env).length) {
-    const built = new Map<LlmProvider, StructuredCall>();
-    const callOn = (p: LlmProvider): StructuredCall => { let c = built.get(p); if (!c) { c = (opts.make ?? ((q: LlmProvider) => providerStructuredCall(env, q)))(p); built.set(p, c); } return c; };
     return async (input) => {
       const estimatedTokens = Math.ceil((input.system.length + input.messages.reduce((n, m) => n + m.content.length, 0)) / 4 + JSON.stringify(input.tool).length / 3.5);
       const route = await routeProvider(env, undefined, { call: 'structured', estimatedTokens });
       opts.onRoute?.(route);
       if (route.provider === null) throw new Error('no model offered for the structured call');
-      return timed(route.provider, callOn(route.provider), route.because)(input);
+      return timed(route.provider, route.because)(input);
     };
   }
   const p = provider ?? defaultProvider(env);
   if (p === null) return undefined;
-  return timed(p, opts.make ? opts.make(p) : providerStructuredCall(env, p), 'named');
+  return timed(p, 'named');
 }
 
 /** Roughly 4k tokens — the smallest prefix the vendor's prompt cache will hold for the models in use. */
@@ -79,28 +87,31 @@ const CACHEABLE_SYSTEM_CHARS = 16_000;
  * carried by Claude while the route said Gemini — measured 2026-09-26: every skill-selection judgment on faithnet
  * ran on Claude Haiku 4.5. An unlisted provider, or one this function does not know, now throws.
  */
-export function providerStructuredCall(env: ModelEnv, p: LlmProvider): StructuredCall {
+export function providerStructuredCall(env: ModelEnv, p: LlmProvider, onUsage?: (u: ModelUsageV1) => void, tier?: 'light'): StructuredCall {
   if (!providerConfigured(env, p)) throw new Error(`structured call on ${p}: this deployment does not offer ${p} (ORCHESTRATION_LLM) — no other provider carries it (ADR-0013)`);
   if (p === 'gemini') {
     // Gemini 3.5 Flash THINKS inside the completion bound: a judge's 600-token bound was spent thinking and the call came
     // back with no tool call ("answered in prose", measured 2026-09-26). Low effort + headroom, and `required` — the
     // form Gemini's planner already uses reliably.
-    return createOpenAiCompatStructuredCall({ client: geminiClient(env), model: modelFor(env, 'gemini'), label: 'gemini', reasoningEffort: 'low', reasoningHeadroom: OPENAI_REASONING_HEADROOM, toolChoice: 'required' });
+    return createOpenAiCompatStructuredCall({ ...(onUsage ? { onUsage } : {}), client: geminiClient(env), model: modelFor(env, 'gemini', tier === 'light' ? 'planner' : undefined), label: 'gemini', reasoningEffort: 'low', reasoningHeadroom: OPENAI_REASONING_HEADROOM, toolChoice: 'required' });
   }
   if (p === 'openai') {
     return createOpenAiCompatStructuredCall({
+      ...(onUsage ? { onUsage } : {}),
       client: createFetchOpenAiCompatClient({ apiKey: env.OPENAI_API_KEY!, baseUrl: env.ORCHESTRATION_OPENAI_BASE_URL || OPENAI_DEFAULTS.baseUrl, tokenLimitParam: 'max_completion_tokens' }),
       model: modelFor(env, 'openai'), label: 'openai', reasoningEffort: 'low', reasoningHeadroom: OPENAI_REASONING_HEADROOM,
     });
   }
   if (p === 'xai') {
     return createOpenAiCompatStructuredCall({
+      ...(onUsage ? { onUsage } : {}),
       client: createFetchOpenAiCompatClient({ apiKey: env.XAI_API_KEY!, baseUrl: env.ORCHESTRATION_XAI_BASE_URL || XAI_DEFAULTS.baseUrl }),
       model: modelFor(env, 'xai'), label: 'xai',
     });
   }
   if (p === 'groq') {
     return createOpenAiCompatStructuredCall({
+      ...(onUsage ? { onUsage } : {}),
       client: createFetchOpenAiCompatClient({ apiKey: env.GROQ_API_KEY!, baseUrl: env.ORCHESTRATION_GROQ_BASE_URL || GROQ_DEFAULTS.baseUrl }),
       model: modelFor(env, 'groq'), label: 'groq',
     });
@@ -121,7 +132,28 @@ export function providerStructuredCall(env: ModelEnv, p: LlmProvider): Structure
     });
     const block = res.content.find((b) => b.type === 'tool_use' && b.name === tool.name);
     // No call is not an empty answer (ADR-0013): say so, with why the model stopped.
+    { const u = usageOfAnthropic(res.usage); if (u) onUsage?.(u); }
     if (!block) throw new Error(`anthropic(${model}) did not call "${tool.name}" (stop_reason: ${String((res as { stop_reason?: unknown }).stop_reason ?? 'unknown')})`);
     return (block.input ?? {}) as Record<string, unknown>;
+  };
+}
+
+/**
+ * Spec 416 §4f — the ONE-LETTER call for the log-probability judge, on the provider's light model, recorded like any judge
+ * call (provider, model, time, reported tokens). OpenAI-compatible hosts only; Anthropic returns no log-probabilities, so
+ * there it is `undefined` and the judgment holds `no-judge` — said, never substituted.
+ */
+export function logprobChoiceFor(env: ModelEnv, provider: LlmProvider | undefined, opts: { onCall?: (c: StructuredCallRecordV1) => void } = {}): ((input: { system: string; user: string; letters: readonly string[] }) => Promise<Record<string, number>>) | undefined {
+  const p = provider ?? defaultProvider(env);
+  if (!p || p === 'anthropic' || !providerConfigured(env, p)) return undefined;
+  const model = modelFor(env, p, 'planner');
+  const client = p === 'gemini' ? geminiClient(env)
+    : createFetchOpenAiCompatClient({ apiKey: (p === 'openai' ? env.OPENAI_API_KEY : p === 'xai' ? env.XAI_API_KEY : env.GROQ_API_KEY)!, baseUrl: p === 'openai' ? env.ORCHESTRATION_OPENAI_BASE_URL || OPENAI_DEFAULTS.baseUrl : p === 'xai' ? env.ORCHESTRATION_XAI_BASE_URL || XAI_DEFAULTS.baseUrl : env.ORCHESTRATION_GROQ_BASE_URL || GROQ_DEFAULTS.baseUrl });
+  return async (input) => {
+    const startMs = Date.now();
+    let usage: ModelUsageV1 | undefined;
+    const choose = createOpenAiCompatLogprobChoice({ client, model, label: p, onUsage: (u) => { usage = addUsage(usage, u); } });
+    const rec = (failed: boolean) => opts.onCall?.({ provider: p, model, because: 'named', startMs, endMs: Date.now(), ...(failed ? { failed } : {}), ...(usage ?? {}) });
+    try { const out = await choose(input); rec(false); return out; } catch (e) { rec(true); throw e; }
   };
 }
