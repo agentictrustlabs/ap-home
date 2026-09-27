@@ -129,6 +129,9 @@ export interface HarnessEnv {
   SKILLS_MCP?: Fetcher;
   /** Spec 416 §4f — `fast`: the fast judge picks among the playbook's instruction skills before the planner runs. */
   SKILL_SELECTION_DEFAULT?: string;
+  /** Spec 416 §4h — `full`: the default skill stage tells the judge the asker's recent skills here and their memory
+   *  (real asks only). Measured on seeded states: 18/19 vs 7/19 with standing alone. Off unless set. */
+  SKILL_SELECTION_ASKER_CONTEXT?: string;
   /** Spec 397 W2 — the ARD registry this agent finds other agents in (`POST /search`); absent ⇒ no find tool. */
   ARD_REGISTRY_ORIGIN?: string;
   /** The Home origins this agent serves — the first is used for links a person can follow. */
@@ -4937,7 +4940,13 @@ step is then handed to that agent under authority the person grants; leave it ou
             const relation = !input.person ? undefined : String(input.person).toLowerCase() === String(input.addressee ?? '').toLowerCase() ? 'self' as const : st?.relation === 'steward' || st?.relation === 'self' ? 'steward' as const : st?.relation === 'member' ? 'member' as const : 'stranger' as const;
             const call = structuredCallFor(env as never, input.provider, { onCall: recordStructured('judge'), tier: 'light' }) as never;
             const seeded = input.variant?.toggles?.['skill-selection/asker-context'] ? undefined : input.variant?.askerContext;
-            const asker = relation || seeded ? { ...(relation ? { relation } : {}), ...(seeded?.recentSkills?.length ? { recentSkills: seeded.recentSkills.slice(0, 4) } : {}), ...(seeded?.memoryTags?.length ? { memoryTags: seeded.memoryTags.slice(0, 6) } : {}) } : undefined;
+            // LIVE history (the asker's recent skills here + their memory) only on a REAL ask with the deployment's
+            // `SKILL_SELECTION_ASKER_CONTEXT=full` — never under a comparison, whose asker's history is its own test runs.
+            const live = !input.variant && (env.SKILL_SELECTION_ASKER_CONTEXT ?? '').trim() === 'full' && input.person && input.addressee
+              ? { recentSkills: ((await recentToolsOf(env as never, input.addressee as Address, input.person as Address, Date.now() - 30 * 86_400_000).catch(() => null)) ?? []).filter((x) => skillSources[x.id]).slice(0, 4), memoryTags: input.memory ? factsOf(input.memory).entries.slice(0, 6).map((e) => (e.tags?.length ? e.tags.join(', ') : e.fact).slice(0, 80)) : [] }
+              : undefined;
+            const ctx = seeded ?? live;
+            const asker = relation || ctx ? { ...(relation ? { relation } : {}), ...(ctx?.recentSkills?.length ? { recentSkills: ctx.recentSkills.slice(0, 4) } : {}), ...(ctx?.memoryTags?.length ? { memoryTags: ctx.memoryTags.slice(0, 6) } : {}) } : undefined;
             const r = await selectByJudgment(rest, skills, call, { profile: 'fast' }, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(asker ? { asker } : {}) });
             trace.selection = { approach: 'judgment', ...r };
             trace.skillStage = r.chose ? 'chose' : 'handed-to-planner';
