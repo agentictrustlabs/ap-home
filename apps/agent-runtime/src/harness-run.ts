@@ -2772,6 +2772,8 @@ export interface PlannerTraceV1 {
   /** Spec 415 — every structured model call the run made (the selection judge, a skill's answer, the KB and vault
    *  choosers), as it ran: provider, model, why, when. Each becomes a model invocation on the run's provenance. */
   structuredCalls?: Array<{ role: 'judge' | 'structured'; provider: string; model: string; because?: string; startMs: number; endMs: number; failed?: boolean; tokensIn?: number; tokensOut?: number; cachedIn?: number; reasoningOut?: number }>;
+  /** Spec 416 §4g — milliseconds per runtime stage of this ask (the marks, summed per name). */
+  stages?: Record<string, number>;
   /** Spec 416 §4f — the default skill stage's outcome: the fast judge chose a skill, or handed the ask to the planner. */
   skillStage?: 'chose' | 'handed-to-planner';
   /** Spec 416 — milliseconds spent choosing (planner or selection arm), summed over re-plans. */
@@ -4915,7 +4917,10 @@ step is then handed to that agent under authority the person grants; leave it ou
           // cards and the request's typed reading, the provider's light model — picks among them FIRST. A pick is planned
           // directly (no planner call). "None of these skills" hands the ask to the planner over the agent's other tools:
           // two declared stages, both on the trace (`selection` records the judge's verdict), never a silent retry.
-          const skillSources = !input.variant?.selection && !input.variant?.plannerKind && (env.SKILL_SELECTION_DEFAULT ?? '').trim() === 'fast' ? instructionSourcesOf(playbook) : {};
+          // Explicit per run (`skill-selection/stage` on | off — so a comparison NAMES it), else the deployment's default.
+          const stageToggle = input.variant?.toggles?.['skill-selection/stage'];
+          const stageOn = stageToggle ? stageToggle === 'on' : !input.variant?.selection && !input.variant?.plannerKind && (env.SKILL_SELECTION_DEFAULT ?? '').trim() === 'fast';
+          const skillSources = stageOn && !input.variant?.selection ? instructionSourcesOf(playbook) : {};
           if (Object.keys(skillSources).length) {
             const skills = Object.values(playbook?.tools ?? {}).filter((t) => skillSources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}) }));
             const st = standingOnce ? await standingOnce : undefined;
@@ -4928,6 +4933,10 @@ step is then handed to that agent under authority the person grants; leave it ou
               plannerUsed = 'judgment';
               return withSpecialists({ steps: [{ toolId: r.chose, args: { question: pin.intent.goal }, id: 's0' }], rationale: `skill stage: ${r.chose}` }, playbook?.specialists, pin.tools);
             }
+            // "None of these skills": the planner gets the agent's OTHER tools only. Offering it the skills the judge just
+            // rejected let it pick one anyway (measured 2026-09-27: a declined out-of-scope ask answered by a skill) and
+            // cost ~12k prompt tokens of skill descriptions for nothing.
+            pin = { ...pin, tools: pin.tools.filter((t) => !skillSources[t.id]) };
           }
           plannerUsed = selected.kind;
           // Spec 415 A4 — a comparison may ask for the rule-based planner on a deployment that offers a model: the
@@ -5186,7 +5195,10 @@ step is then handed to that agent under authority the person grants; leave it ou
   // declared scope and echoed on the receipt. The passages ground the composed answer; no planner reads them.
   const goalText = String((input.intent as { goal?: unknown }).goal ?? '').trim();
   const retrieval = kbModeOf(env as never, input.variant) === 'playbook' && playbook?.retrievalQueries?.length && goalText && tools.some((t) => t.id === KB_RETRIEVE_TOOL.id)
-    ? { toolId: KB_RETRIEVE_TOOL.id, args: { query: goalText, topics: playbook.retrievalQueries } }
+    ? { toolId: KB_RETRIEVE_TOOL.id, args: { query: goalText, topics: playbook.retrievalQueries },
+        // 416 §4g — the passages ground a COMPOSED answer; a plan whose every step renders its own sentence (an
+        // instruction skill's answer) needs none, so the retrieval is decided on the plan and skipped then.
+        onlyIf: (plan: { steps: ReadonlyArray<{ toolId: string }> }) => !plan.steps.every((st) => !!tools.find((t) => t.id === st.toolId)?.answer) }
     : null;
   const result = await runIntent(input.intent, {
     planner: boundPlanner, tools, bindingFor,

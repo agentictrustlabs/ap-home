@@ -159,7 +159,9 @@ export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/k
   /** Spec 416 §4f — what the judge is told about the asker: nothing, their standing (default), or standing + their recent
    *  skills here + (at their own agent) memory. `full` reads the asker's history, so a comparison uses it only from a
    *  seeded starting state — never over its own test runs. */
-  'skill-selection/asker-context': ['off', 'relation', 'full'] };
+  'skill-selection/asker-context': ['off', 'relation', 'full'],
+  /** Spec 416 §4f — the fast skill stage before the planner, named per run (default: the deployment's setting). */
+  'skill-selection/stage': ['on', 'off'] };
 
 export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantRequestV1 } | { ok: false; error: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'variant must be an object' };

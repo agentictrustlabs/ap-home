@@ -4760,6 +4760,13 @@ app.post('/harness/ask', async (c) => {
     }
     // The reply is ready: the last line, so a poller stops without waiting out its window.
     progress({ type: 'ReplyReady', said: spoken || 'Done.', terminal: true });
+    // Spec 416 §4g — WHERE THE ASK'S TIME WENT: the runtime's own stage marks, summed per stage (names and ms only), on
+    // the reply's trace so a comparison can track each stage across iterations — not only the total.
+    if (reply && typeof reply === 'object' && (reply as { plannerTrace?: unknown }).plannerTrace) {
+      const stages: Record<string, number> = {};
+      for (const m of marks.list) stages[m.name] = (stages[m.name] ?? 0) + Math.max(0, m.endMs - m.startMs);
+      (reply as { plannerTrace: { stages?: Record<string, number> } }).plannerTrace.stages = stages;
+    }
     return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, hasProvenance: hasProvenanceRef(addressee, runRef), resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(routedDelivery ? { routedDelivery } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt, ...(isExpired(r) ? { expired: true } : {}) })), unfinishedTotal: otherRuns.length } : {}) });
   } catch (e) {
     return c.json({ ok: false, error: 'ask_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
