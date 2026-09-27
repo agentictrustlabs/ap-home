@@ -44,7 +44,7 @@ export function doorFromBody(body: unknown, inWorker: boolean): RunDoorV1 | null
   return { kind: 'a2a-message', ...(id(d.messageId) ? { messageId: id(d.messageId)! } : {}), ...(id(d.contextId) ? { contextId: id(d.contextId)! } : {}), ...(id(d.taskId) ? { taskId: id(d.taskId)! } : {}) };
 }
 
-const PLANNER_KINDS = new Set(['supplied', 'compiled', 'rule-based', 'declared', 'ontology', 'judgment', 'ontology+judgment', 'propose+judgment', 'ontology-first', 'framed-judgment']);
+const PLANNER_KINDS = new Set(['supplied', 'compiled', 'rule-based', 'declared', 'ontology', 'judgment', 'ontology+judgment', 'propose+judgment', 'ontology-first', 'framed-judgment', 'outcome']);
 /** supplied | compiled | rule-based stay what they are; any provider name is a model planner. */
 export const plannerKindOf = (planner: string | undefined): string | undefined => (!planner ? undefined : PLANNER_KINDS.has(planner) ? planner : 'model');
 
@@ -114,6 +114,12 @@ export function engagedFromTrace(trace: PlannerTraceV1 | undefined): HarnessEnga
     if (sel.judgment) push('skill-selection/judgment', planned.length ? 'changed-plan' : 'no-change', sel.judgment.offered.map(iri), planned, sel.judgment.rejected.map(iri), typed(sel.judgment.intent));
   } else if (sel && sel.approach === 'judgment') {
     push('skill-selection/judgment', planned.length ? 'changed-plan' : 'no-change', offeredAll, planned, sel.rejected.map(iri), typed(sel.intent));
+  } else if (sel && sel.approach === 'outcome') {
+    // Spec 417 — TWO engagements: the judge chose the OUTCOME (the terminal skill; its runner-up rejected), and the
+    // ontology's dataflow rule added the steps that produce what the outcome consumes (none when context held them).
+    const runnerUp = Object.entries(sel.distribution).filter(([k]) => k !== 'none' && k !== sel.chose).sort((a, b) => b[1] - a[1])[0];
+    push('skill-selection/judgment', planned.length ? 'changed-plan' : 'no-change', offeredAll, sel.chose ? [iri(sel.chose)] : [], runnerUp && runnerUp[1] > 0 ? [iri(runnerUp[0])] : []);
+    if (sel.plan) push('skill-selection/ontology', sel.plan.steps.length > 1 ? 'changed-plan' : 'no-change', offeredAll, sel.plan.steps.slice(0, -1).map((x) => iri(x.tool)), [], typed({ about: Object.keys(sel.plan.satisfied) }));
   } else if (sel && sel.approach === 'framed-judgment') {
     push('skill-selection/judgment', planned.length ? 'changed-plan' : 'no-change', offeredAll, planned, sel.rejected.map(iri), typed(sel.intent));
   } else {
@@ -135,7 +141,7 @@ const SELECTION_APPROACH: Record<string, string> = { model: 'skill-selection/mod
 /** Spec 415 A4 — how instruction skills are selected: `model` (the planner over descriptions — the baseline), `declared`
  *  (overlap with declared sentences), the three arms `ontology` · `judgment` · `ontology+judgment`, spec 416's `propose+judgment`, and `framed-judgment`
  *  (the 2026-09-26 shape, kept reproducible). */
-export const SELECTION_ARMS = ['model', 'declared', 'ontology', 'judgment', 'ontology+judgment', 'propose+judgment', 'ontology-first', 'framed-judgment'] as const;
+export const SELECTION_ARMS = ['model', 'declared', 'ontology', 'judgment', 'ontology+judgment', 'propose+judgment', 'ontology-first', 'framed-judgment', 'outcome'] as const;
 export type SelectionArmV1 = (typeof SELECTION_ARMS)[number];
 
 export interface VariantRequestV1 {
@@ -154,7 +160,7 @@ export interface VariantRequestV1 {
   judgeProfile?: 'thorough' | 'fast' | 'logprob';
   /** Spec 416 §4h — a SEEDED asker context (a comparison's starting state, by digest): what the judge is told the asker
    *  used recently and what is remembered of them, in place of reading the asker's live history. */
-  askerContext?: { digest: string; recentSkills?: Array<{ id: string; times: number }>; memoryTags?: string[] };
+  askerContext?: { digest: string; recentSkills?: Array<{ id: string; times: number }>; memoryTags?: string[]; heldClasses?: string[] };
 }
 export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/kb': ['off', 'tool', 'playbook'],
   /** Spec 416 — `off`: the chosen skill is stamped but not RUN (no model call) — a comparison that measures the pick alone. */
@@ -202,11 +208,13 @@ export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantR
     }
     else if (k === 'askerContext') {
       const a = v[k] as Record<string, unknown> | null;
-      const rs = a?.['recentSkills'], mt = a?.['memoryTags'];
+      const rs = a?.['recentSkills'], mt = a?.['memoryTags'], hc = a?.['heldClasses'];
       const okRs = rs === undefined || (Array.isArray(rs) && rs.length <= 8 && rs.every((x) => x && typeof (x as { id?: unknown }).id === 'string' && /^[a-z0-9._-]{1,80}$/i.test((x as { id: string }).id) && Number.isInteger((x as { times?: unknown }).times) && (x as { times: number }).times > 0 && (x as { times: number }).times < 1000));
       const okMt = mt === undefined || (Array.isArray(mt) && mt.length <= 8 && mt.every((x) => typeof x === 'string' && x.length <= 120));
-      if (!a || typeof a !== 'object' || typeof a['digest'] !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(a['digest']) || !okRs || !okMt) return { ok: false, error: 'askerContext must be { digest: sha256:…, recentSkills?: [{ id, times }], memoryTags?: [string] } — a seeded starting state' };
-      out.askerContext = { digest: a['digest'], ...(rs ? { recentSkills: (rs as Array<{ id: string; times: number }>).map((x) => ({ id: x.id, times: x.times })) } : {}), ...(mt ? { memoryTags: [...(mt as string[])] } : {}) };
+      // Spec 417 — classes the asker holds: IRIs only (never a record).
+      const okHc = hc === undefined || (Array.isArray(hc) && hc.length <= 16 && hc.every((x) => typeof x === 'string' && /^(https?|urn):\S{1,200}$/.test(x)));
+      if (!a || typeof a !== 'object' || typeof a['digest'] !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(a['digest']) || !okRs || !okMt || !okHc) return { ok: false, error: 'askerContext must be { digest: sha256:…, recentSkills?: [{ id, times }], memoryTags?: [string], heldClasses?: [class IRI] } — a seeded starting state' };
+      out.askerContext = { digest: a['digest'], ...(rs ? { recentSkills: (rs as Array<{ id: string; times: number }>).map((x) => ({ id: x.id, times: x.times })) } : {}), ...(mt ? { memoryTags: [...(mt as string[])] } : {}), ...(hc ? { heldClasses: [...(hc as string[])] } : {}) };
     }
     else if (k === 'judgeProfile') { if (v[k] !== 'thorough' && v[k] !== 'fast' && v[k] !== 'logprob') return { ok: false, error: 'judgeProfile must be thorough | fast | logprob' }; out.judgeProfile = v[k] as 'thorough' | 'fast' | 'logprob'; }
     else return { ok: false, error: `${k}: not a variant component (plannerKind, selection, provider, toggles, playbook, startingState, acceptance, judgeProfile, askerContext)` };

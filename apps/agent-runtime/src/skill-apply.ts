@@ -88,7 +88,9 @@ export function skillApplyInvoker(deps: SkillApplyDeps): ToolInvoker {
     const doc = await deps.readSkill(source.skillId);
     if (!doc) return { refused: `${source.skillId} could not be read from the corpus` };
     if (doc.commitment !== source.contractDigest) return { refused: `${source.skillId} has moved: the playbook pins ${source.contractDigest}, the corpus serves ${doc.commitment} — re-assign the playbook to apply the current skill` };
-    const material = typeof args.material === 'string' && args.material.trim() ? `\n\nThe situation, in the person's words:\n${args.material.trim()}` : '';
+    // Spec 417 — a chain hands earlier steps' answers on as material (one, or a list when a skill works from several).
+    const pieces = (Array.isArray(args.material) ? args.material : [args.material]).filter((m): m is string => typeof m === 'string' && !!m.trim()).map((m) => m.trim());
+    const material = !pieces.length ? '' : Array.isArray(args.material) ? `\n\nThe material, from earlier steps:\n${pieces.map((m, i) => `--- ${i + 1} ---\n${m}`).join('\n\n')}` : `\n\nThe situation, in the person's words:\n${pieces[0]}`;
     const out = await deps.call({
       system: `${APPLY_SYSTEM}\n\n---\n\n${doc.body}`,
       messages: [{ role: 'user', content: `${question}${material}` }],

@@ -65,7 +65,7 @@ import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
 import { ADAPTER, CARRIES } from './adapter-declarations.js';
 import { relationshipCredentialDigest, termsDigestOf, type RelationshipCredentialBodyV1 } from '@agenticprimitives/agent-relationships';
-import { replayingInvoker, inputsFor, type RunRecordV1, type RunMarks, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent , selectByDeclaredUtterances , selectByJudgment , selectByOntology, selectByOntologyThenJudgment, selectByProposalThenJudgment, selectByOntologyFirst, type OntologyFirstSelectionV1, type AskerContextV1, selectByFramedJudgment, addUsage, judgeAnswerPreference, type ModelUsageV1, type OntologySelectionV1, type JudgmentSelectionV1, type FramedSelectionV1, type ProposedSelectionV1 } from '@agenticprimitives/orchestration';
+import { replayingInvoker, inputsFor, type RunRecordV1, type RunMarks, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent , selectByDeclaredUtterances , selectByJudgment , selectByOntology, selectByOntologyThenJudgment, selectByProposalThenJudgment, selectByOntologyFirst, type OntologyFirstSelectionV1, type AskerContextV1, selectByFramedJudgment, addUsage, judgeAnswerPreference, type ModelUsageV1, type OntologySelectionV1, type JudgmentSelectionV1, type FramedSelectionV1, type ProposedSelectionV1, selectByOutcome, outcomeSteps, type OutcomeSelectionV1 } from '@agenticprimitives/orchestration';
 import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, standingFor, declareInstruction, forgetInstruction, instructionContextOf, STANDING_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
@@ -2501,9 +2501,9 @@ export interface HarnessRunInput {
   /** Spec 415 A4 — what a COMPARISON asked this run to do differently (already admitted by the caller: a
    *  comparison estate, the agent's own steward). The planner kind and the capability toggles apply here; the
    *  provider was folded into `provider`. Behaviour, never authority. */
-  variant?: { plannerKind?: 'model' | 'rule-based'; selection?: 'model' | 'declared' | 'ontology' | 'judgment' | 'ontology+judgment' | 'propose+judgment' | 'ontology-first' | 'framed-judgment'; toggles?: Record<string, string>;
+  variant?: { plannerKind?: 'model' | 'rule-based'; selection?: 'model' | 'declared' | 'ontology' | 'judgment' | 'ontology+judgment' | 'propose+judgment' | 'ontology-first' | 'framed-judgment' | 'outcome'; toggles?: Record<string, string>;
     judgeProfile?: 'thorough' | 'fast' | 'logprob';
-    askerContext?: { digest: string; recentSkills?: Array<{ id: string; times: number }>; memoryTags?: string[] };
+    askerContext?: { digest: string; recentSkills?: Array<{ id: string; times: number }>; memoryTags?: string[]; heldClasses?: string[] };
     /** Spec 416 W3 — conformal acceptance under a fitted map. */
     acceptance?: { method: 'conformal'; alpha: number; temperature: number; qhat: number; mapDigest: string } };
   /** The agent being asked. Informational tools that read an organization's own records default to it —
@@ -2804,7 +2804,8 @@ export interface PlannerTraceV1 {
     | ({ approach: 'ontology+judgment'; chose: string | null; hold?: string; decidedBy: 'ontology' | 'judgment'; ontology: OntologySelectionV1; judgment?: JudgmentSelectionV1 })
     | ({ approach: 'propose+judgment' } & ProposedSelectionV1)
     | ({ approach: 'ontology-first' } & OntologyFirstSelectionV1)
-    | ({ approach: 'framed-judgment' } & FramedSelectionV1);
+    | ({ approach: 'framed-judgment' } & FramedSelectionV1)
+    | ({ approach: 'outcome' } & OutcomeSelectionV1);
   /** Each party binding and WHERE IT CAME FROM (spec 367 §3): the person's words, a decision rule, memory, or the resolver. */
   bindings: Array<{ arg: string; raw: string; agent: string; label?: string; source: 'said' | 'context' | 'standing' | 'decision' | 'memory' | 'resolver' | 'disclosed'; because?: string }>;
   /** What the surface declared (spec 353): the realm kind and how many capabilities it offered. */
@@ -4883,9 +4884,9 @@ step is then handed to that agent under authority the person grants; leave it ou
           // Spec 415 A4 — THE THREE ARMS (+ the framed shape). A rule narrows and a judge picks; neither allows. Candidates are
           // the playbook's instruction skills; the arm's decision goes on the trace; a hold plans `ask.unsupported`.
           const arm = input.variant?.selection;
-          if (arm === 'ontology' || arm === 'judgment' || arm === 'ontology+judgment' || arm === 'propose+judgment' || arm === 'ontology-first' || arm === 'framed-judgment') {
+          if (arm === 'ontology' || arm === 'judgment' || arm === 'ontology+judgment' || arm === 'propose+judgment' || arm === 'ontology-first' || arm === 'framed-judgment' || arm === 'outcome') {
             const sources = instructionSourcesOf(playbook);
-            const skills = Object.values(playbook?.tools ?? {}).filter((t) => sources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}) }));
+            const skills = Object.values(playbook?.tools ?? {}).filter((t) => sources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}), ...(t.produces?.length ? { produces: t.produces } : {}), ...(t.consumes?.length ? { consumes: t.consumes } : {}) }));
             const lexicon = playbook?.domainLexicon;
             // The judge's model call is a model invocation of the run like the planner's: on the trace, with its provider,
             // model and why — role `judge`, so a reader can tell the call that chose the skill from the one that answered.
@@ -4902,7 +4903,7 @@ step is then handed to that agent under authority the person grants; leave it ou
               // A SEEDED asker context (a comparison's starting state) stands in for the asker's live history.
               // …unless the comparison says the asker context is only their standing (`relation`) or nothing (`off`).
               const seeded = input.variant?.toggles?.['skill-selection/asker-context'] ? undefined : input.variant?.askerContext;
-              if (seeded) return { ...(rel ? { relation: rel } : {}), ...(seeded.recentSkills?.length ? { recentSkills: seeded.recentSkills.slice(0, 4) } : {}), ...(seeded.memoryTags?.length ? { memoryTags: seeded.memoryTags.slice(0, 6) } : {}) };
+              if (seeded) return { ...(rel ? { relation: rel } : {}), ...(seeded.recentSkills?.length ? { recentSkills: seeded.recentSkills.slice(0, 4) } : {}), ...(seeded.memoryTags?.length ? { memoryTags: seeded.memoryTags.slice(0, 6) } : {}), ...(seeded.heldClasses?.length ? { heldClasses: seeded.heldClasses.slice(0, 16) } : {}) };
               if (askerMode !== 'full') return rel ? { relation: rel } : undefined;
               const recent = input.person && input.addressee ? await recentToolsOf(env as never, input.addressee as Address, input.person as Address, Date.now() - 30 * 86_400_000).catch(() => null) : null;
               const skillIds = new Set(Object.keys(sources));
@@ -4919,6 +4920,19 @@ step is then handed to that agent under authority the person grants; leave it ou
             // Spec 416 W1 — the ontology PROPOSES (recall-first, `excludes` vetoes), the judge decides among the proposed.
             else if (arm === 'ontology-first') { const r = await selectByOntologyFirst(rest, skills, call, judgeParams, lexicon, asker); trace.selection = { approach: 'ontology-first', ...r }; chose = r.chose; }
             else if (arm === 'propose+judgment') { const r = await selectByProposalThenJudgment(rest, skills, call, judgeParams, lexicon); trace.selection = { approach: 'propose+judgment', ...r }; chose = r.chose; }
+            else if (arm === 'outcome') {
+              // Spec 417 — the OUTCOME the person wants (one judged call: the result, and what the request supplies), then
+              // the path to it by the data graph's arrows from what the asker holds. A chain runs as `$ref`-linked steps.
+              const r = await selectByOutcome(rest, skills, call, {}, { ...(lexicon ? { lexicon } : {}), ...(asker ? { asker } : {}) });
+              trace.selection = { approach: 'outcome', ...r };
+              plannerUsed = arm;
+              if (r.chose && r.plan) {
+                const labels = new Map([...(lexicon ?? []).map((e) => [e.iri, e.label] as const), ...skills.flatMap((x) => [...(x.produces ?? []), ...(x.consumes ?? [])].map((k) => [k.iri, k.label] as const))]);
+                const steps = outcomeSteps(r.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri);
+                return withSpecialists({ steps, rationale: `outcome: ${r.plan.steps.map((x) => x.tool).join(' → ')}` }, playbook?.specialists, pin.tools);
+              }
+              chose = null;
+            }
             else { const r = await selectByFramedJudgment(rest, skills.filter((x) => x.covers.length), call); trace.selection = { approach: 'framed-judgment', ...r }; chose = r.chose; }
             plannerUsed = arm;
             const why = (trace.selection as { hold?: string }).hold;
