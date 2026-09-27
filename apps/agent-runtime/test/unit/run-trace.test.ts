@@ -59,6 +59,11 @@ describe('the variant knob is parsed, and anything unknown is refused by name', 
     expect(parseVariantRequest({ plannerKind: 'rule-based', provider: 'groq', toggles: { 'retrieval/kb': 'off' }, playbook: '0x' + '33'.repeat(32), startingState: { domain: 'cil-commons', scenarioId: 'baseline', digest: 'sha256:' + 'ab'.repeat(32) } })).toEqual({ ok: true, variant: { plannerKind: 'rule-based', provider: 'groq', toggles: { 'retrieval/kb': 'off' }, playbook: '0x' + '33'.repeat(32), startingState: { domain: 'cil-commons', scenarioId: 'baseline', digest: 'sha256:' + 'ab'.repeat(32) } } });
     expect(parseVariantRequest({})).toEqual({ ok: true, variant: {} });
   });
+  it('spec 416 W3 — a conformal map is a component, and which map ran is on the recorded variant', () => {
+    const acceptance = { method: 'conformal' as const, alpha: 0.05, temperature: 1.2, qhat: 0.4, mapDigest: 'sha256:' + 'cd'.repeat(32) };
+    expect(parseVariantRequest({ selection: 'judgment', acceptance })).toEqual({ ok: true, variant: { selection: 'judgment', acceptance } });
+    expect(variantOf({} as never, undefined, { acceptance }).toggles).toEqual({ 'skill-selection/acceptance': `conformal:${acceptance.mapDigest}` });
+  });
   it.each([
     [{ temperature: 0.2 }, /not a variant component/],
     [{ plannerKind: 'compiled' }, /plannerKind must be/],
@@ -66,6 +71,8 @@ describe('the variant knob is parsed, and anything unknown is refused by name', 
     [{ toggles: { 'retrieval/kb': 'maybe' } }, /one of off \| tool \| playbook/],
     [{ playbook: 'latest' }, /definition digest/],
     [{ startingState: { domain: 'x', scenarioId: 'y' } }, /startingState must be/],
+    [{ acceptance: { method: 'conformal', alpha: 0.05, temperature: 1, qhat: 1.5, mapDigest: 'sha256:' + 'ab'.repeat(32) } }, /fitted calibration map/],
+    [{ acceptance: { method: 'margin' } }, /fitted calibration map/],
     ['groq', /must be an object/],
   ])('refuses %j', (raw, why) => {
     const r = parseVariantRequest(raw);

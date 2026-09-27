@@ -11,7 +11,8 @@ import { whitelabel } from '../../whitelabel/config';
 type Outcome = 'tp' | 'tp-alt' | 'tn' | 'mis-sib' | 'mis-far' | 'miss' | 'spur' | 'undetected';
 interface IntentRow { intentId: string; message: string; split: string; bucket?: string; expected: string | null; chosen: string | null; outcome: Outcome; label: string; ok: boolean | null; why?: string; ms?: number; contaminated?: { skill: string; overlap: number; isNot: boolean } }
 interface PerSkill { skill: string; asked: number; right: number; accuracy: number | null; ci: [number, number] | null; wronglyChosen: number; confusedWith: Array<{ skill: string; times: number }> }
-interface Variant { name: string; how: string; runs: number; macroTa: number | null; macroCi: [number, number] | null; microTa: number | null; holdRate: number | null; holdNum?: number; holdDen?: number; routingPurity: number | null; right: number; wrong: number; declinedCorrectly: number; firedWrongly: number; gate: { status: string; reason: string } | null; intents: IntentRow[]; perSkill: PerSkill[] }
+interface Variant { name: string; how: string; runs: number; macroTa: number | null; macroCi: [number, number] | null; microTa: number | null; holdRate: number | null; holdNum?: number; holdDen?: number; routingPurity: number | null; right: number; wrong: number; declinedCorrectly: number; firedWrongly: number; gate: { status: string; reason: string } | null; intents: IntentRow[]; perSkill: PerSkill[]; riskCoverage?: RiskCoverage }
+interface RiskCoverage { n: number; aurc: number | null; points: Array<{ coverage: number; risk: number; threshold: number }> }
 interface Experiment { id: string; slate: string; split: string; repeats: number; startedAt: string; finishedAt: string; variants: Variant[]; comparisons: Array<{ a: string; b: string; changed: string[]; confounded: boolean; words: string }> }
 interface Recommendation { rule: string; severity: 'act' | 'watch' | 'info'; title: string; detail: string; change: string; skill?: string; experiment: string; variant?: string; evidence: { intents: string[]; numbers: Record<string, number | string> } }
 interface Report { builtAt: string; experiments: Experiment[]; skillContracts: Array<{ skill: string; slates: Array<{ experiment: string; variant: string; asked: number; right: number; accuracy: number | null; wronglyChosen: number; confusedWith: Array<{ skill: string; times: number }> }>; recommendations: number }>; recommendations: Recommendation[]; headline: string[]; glossary: { outcomes: Record<Outcome, { label: string; ok: boolean | null; explain: string }>; approaches: Record<string, string> } }
@@ -103,6 +104,7 @@ export function SkillAssessmentLab() {
                   <Stat label="Gate" value={variant.gate?.status ?? '—'} tone={variant.gate?.status === 'PASS' ? 'ok' : variant.gate?.status === 'FAIL' ? 'danger' : 'warn'} hint={variant.gate ? <span title={variant.gate.reason}>{gateLine(variant.gate.reason)}</span> : undefined} />
                 </Stats>
                 {exp.comparisons.map((c) => <Note key={`${c.a}:${c.b}`}><strong>Compared:</strong> {c.words}.</Note>)}
+                {variant.riskCoverage && <RiskCoverageChart rc={variant.riskCoverage} />}
 
                 <div className="ui-toolbar" style={{ gap: 6, flexWrap: 'wrap' }}>
                   <FilterChip active={!onlyWrong} onClick={() => setOnlyWrong(false)} count={variant.intents.length}>Every test</FilterChip>
@@ -179,4 +181,36 @@ function ratio(list: readonly Experiment[], num: (v: Variant) => number, den: (v
   let n = 0, d = 0;
   for (const e of list) { const v = e.variants.find((x) => x.name === 'model') ?? e.variants[0]; if (!v) continue; n += num(v); d += den(v); }
   return d ? n / d : null;
+}
+
+/** Spec 416 W3 — risk against coverage: answering only the judge's most confident runs, how often is the answer wrong?
+ *  A curve that stays on the floor until the right edge means the judge knows when it is unsure. Drawn from the report. */
+export function RiskCoverageChart({ rc }: { rc: RiskCoverage }) {
+  const W = 320, H = 110, P = 28;
+  const maxRisk = Math.max(0.1, ...rc.points.map((p) => p.risk));
+  const x = (c: number) => P + c * (W - P - 8);
+  const y = (r: number) => H - 18 - (r / maxRisk) * (H - 30);
+  const path = rc.points.map((p, i) => `${i ? 'L' : 'M'}${x(p.coverage).toFixed(1)},${y(p.risk).toFixed(1)}`).join(' ');
+  const at = (c: number) => rc.points.find((p) => p.coverage >= c) ?? rc.points[rc.points.length - 1];
+  const full = rc.points[rc.points.length - 1];
+  return (
+    <Card>
+      <div data-testid="lab-risk-coverage" style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ maxWidth: W, color: 'inherit' }} role="img" aria-label={`Risk against coverage over ${rc.n} judged runs`}>
+          <line x1={P} y1={H - 18} x2={W - 8} y2={H - 18} stroke="currentColor" strokeOpacity={0.3} />
+          <line x1={P} y1={8} x2={P} y2={H - 18} stroke="currentColor" strokeOpacity={0.3} />
+          <text x={P} y={H - 4} fontSize={9} fill="currentColor" opacity={0.7}>0%</text>
+          <text x={W - 8} y={H - 4} fontSize={9} fill="currentColor" opacity={0.7} textAnchor="end">answered 100%</text>
+          <text x={P - 4} y={12} fontSize={9} fill="currentColor" opacity={0.7} textAnchor="end">{Math.round(maxRisk * 100)}%</text>
+          <text x={P - 4} y={H - 18} fontSize={9} fill="currentColor" opacity={0.7} textAnchor="end">0</text>
+          <path d={path} fill="none" stroke="currentColor" strokeWidth={1.8} />
+        </svg>
+        <div className="ui-micro" style={{ flex: '1 1 180px' }}>
+          <div><strong>Wrong when it answers</strong>, keeping only its most confident runs.</div>
+          <div>Answering the top 80%: {pct(at(0.8)?.risk ?? null)} wrong · all {rc.n}: {pct(full?.risk ?? null)} wrong.</div>
+          <div style={{ opacity: 0.75 }}>Area under the curve {rc.aurc === null ? '—' : rc.aurc.toFixed(3)} (lower is better).</div>
+        </div>
+      </div>
+    </Card>
+  );
 }
