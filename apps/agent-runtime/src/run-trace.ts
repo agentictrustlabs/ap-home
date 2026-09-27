@@ -152,6 +152,9 @@ export interface VariantRequestV1 {
   acceptance?: { method: 'conformal'; alpha: number; temperature: number; qhat: number; mapDigest: string };
   /** Spec 416 — the judge's profile: `thorough` (v5) or `fast` (one call, one question, the provider's light model). */
   judgeProfile?: 'thorough' | 'fast' | 'logprob';
+  /** Spec 416 §4h — a SEEDED asker context (a comparison's starting state, by digest): what the judge is told the asker
+   *  used recently and what is remembered of them, in place of reading the asker's live history. */
+  askerContext?: { digest: string; recentSkills?: Array<{ id: string; times: number }>; memoryTags?: string[] };
 }
 export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/kb': ['off', 'tool', 'playbook'],
   /** Spec 416 — `off`: the chosen skill is stamped but not RUN (no model call) — a comparison that measures the pick alone. */
@@ -161,7 +164,11 @@ export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/k
    *  seeded starting state — never over its own test runs. */
   'skill-selection/asker-context': ['off', 'relation', 'full'],
   /** Spec 416 §4f — the fast skill stage before the planner, named per run (default: the deployment's setting). */
-  'skill-selection/stage': ['on', 'off'] };
+  'skill-selection/stage': ['on', 'off'],
+  /** Spec 416 §4h — the model an instruction skill ANSWERS with: the deployment's (default) or the provider's light one. */
+  'skill-selection/answer-model': ['default', 'light'],
+  /** Spec 416 §4h — score the answer with the quality rubric (a comparison's instrument; its time is reported apart). */
+  'quality/judge': ['off', 'on', 'pairwise'] };
 
 export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantRequestV1 } | { ok: false; error: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'variant must be an object' };
@@ -193,15 +200,23 @@ export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantR
       if (!a || typeof a !== 'object' || a['method'] !== 'conformal' || !num(a['alpha'], 0.001, 0.5) || !num(a['temperature'], 0.05, 20) || !num(a['qhat'], 0, 1) || typeof a['mapDigest'] !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(a['mapDigest'])) return { ok: false, error: 'acceptance must be { method: conformal, alpha, temperature, qhat, mapDigest } — a fitted calibration map' };
       out.acceptance = { method: 'conformal', alpha: a['alpha'] as number, temperature: a['temperature'] as number, qhat: a['qhat'] as number, mapDigest: a['mapDigest'] };
     }
+    else if (k === 'askerContext') {
+      const a = v[k] as Record<string, unknown> | null;
+      const rs = a?.['recentSkills'], mt = a?.['memoryTags'];
+      const okRs = rs === undefined || (Array.isArray(rs) && rs.length <= 8 && rs.every((x) => x && typeof (x as { id?: unknown }).id === 'string' && /^[a-z0-9._-]{1,80}$/i.test((x as { id: string }).id) && Number.isInteger((x as { times?: unknown }).times) && (x as { times: number }).times > 0 && (x as { times: number }).times < 1000));
+      const okMt = mt === undefined || (Array.isArray(mt) && mt.length <= 8 && mt.every((x) => typeof x === 'string' && x.length <= 120));
+      if (!a || typeof a !== 'object' || typeof a['digest'] !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(a['digest']) || !okRs || !okMt) return { ok: false, error: 'askerContext must be { digest: sha256:…, recentSkills?: [{ id, times }], memoryTags?: [string] } — a seeded starting state' };
+      out.askerContext = { digest: a['digest'], ...(rs ? { recentSkills: (rs as Array<{ id: string; times: number }>).map((x) => ({ id: x.id, times: x.times })) } : {}), ...(mt ? { memoryTags: [...(mt as string[])] } : {}) };
+    }
     else if (k === 'judgeProfile') { if (v[k] !== 'thorough' && v[k] !== 'fast' && v[k] !== 'logprob') return { ok: false, error: 'judgeProfile must be thorough | fast | logprob' }; out.judgeProfile = v[k] as 'thorough' | 'fast' | 'logprob'; }
-    else return { ok: false, error: `${k}: not a variant component (plannerKind, selection, provider, toggles, playbook, startingState, acceptance, judgeProfile)` };
+    else return { ok: false, error: `${k}: not a variant component (plannerKind, selection, provider, toggles, playbook, startingState, acceptance, judgeProfile, askerContext)` };
   }
   return { ok: true, variant: out };
 }
 
 /** The variant this run ran under: the playbook, the planner kind, the route policy, the build, the toggles — the
  *  deployment's knobs with what a comparison REQUESTED laid over them (a requested toggle is what ran). */
-export function variantOf(env: RunTraceEnv, trace: PlannerTraceV1 | undefined, requested?: Pick<VariantRequestV1, 'toggles' | 'acceptance' | 'judgeProfile'>): VariantV1 {
+export function variantOf(env: RunTraceEnv, trace: PlannerTraceV1 | undefined, requested?: Pick<VariantRequestV1, 'toggles' | 'acceptance' | 'judgeProfile' | 'askerContext'>): VariantV1 {
   const toggles: Record<string, string> = {};
   const kb = requested?.toggles?.['retrieval/kb'] ?? (env.KB_RETRIEVAL ?? '').trim().toLowerCase();
   if (kb) toggles['retrieval/kb'] = kb;
@@ -209,6 +224,7 @@ export function variantOf(env: RunTraceEnv, trace: PlannerTraceV1 | undefined, r
   // The acceptance rule is a harness-capability setting: which map shaped the decision is part of what ran.
   if (requested?.acceptance) toggles['skill-selection/acceptance'] = `conformal:${requested.acceptance.mapDigest}`;
   if (requested?.judgeProfile) toggles['skill-selection/judge-profile'] = requested.judgeProfile;
+  if (requested?.askerContext) toggles['skill-selection/asker-context'] = `seeded:${requested.askerContext.digest}`;
   const policy = trace?.route?.policy ?? ((env.ORCHESTRATION_ROUTE ?? '').trim() || undefined);
   const kind = plannerKindOf(trace?.planner);
   const build = (env.HARNESS_BUILD ?? '').trim();
