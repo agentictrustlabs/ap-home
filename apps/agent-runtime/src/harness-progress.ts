@@ -17,7 +17,9 @@ export interface ProgressLineV1 {
   /** Monotonic within the run, assigned by the route as events arrive. */
   seq: number;
   at: number;
-  type: RunEvent['type'] | 'ReplyReady' | 'Relayed';
+  type: RunEvent['type'] | 'ReplyReady' | 'Relayed' | 'AnswerDraft';
+  /** Spec 418 A1 — the growing answer of a streamed step (`AnswerDraft`): a surface REPLACES the previous draft with it. */
+  draft?: string;
   /** Spec 374 / appendix M8 — a line RELAYED from the subject agent's own run (a routed step): the words
    *  are the receiver's, prefixed with its name; `from` says whose. */
   from?: { agent: string; name?: string };

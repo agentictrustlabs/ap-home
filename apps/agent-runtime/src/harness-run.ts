@@ -93,7 +93,7 @@ import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a'
 import { routeProvider, routePolicy, meterFor, selectPlanner, selectComposer, defaultProvider, plannerPromptBudget, type LlmProvider, type RoutePolicy, type RouteDecision, type RouteNeed , RULE_BASED_PLANNER } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from '@agenticprimitives/context';
 import { recentToolsOf } from './ops-index.js';
-import { structuredCallFor, logprobChoiceFor, kbRetrievalMode, type StructuredCallRecordV1 } from './context-wiring.js';
+import { structuredCallFor, textStreamFor, logprobChoiceFor, kbRetrievalMode, type StructuredCallRecordV1 } from './context-wiring.js';
 
 /** Spec 415 A4 — the estate's retrieval mode, unless a comparison run toggled it (`retrieval/kb`). */
 const kbModeOf = (env: { KB_RETRIEVAL?: string }, variant: HarnessRunInput['variant']): ReturnType<typeof kbRetrievalMode> => {
@@ -2815,6 +2815,8 @@ export interface PlannerTraceV1 {
   /** Spec 418 A2 — what the planned skills should DELIVER (each intermediate step's artifact + the final skill's
    *  products), glossed from the lexicon — the outcome check's expected classes. */
   expectedDelivers?: Array<{ iri: string; label: string }>;
+  /** Spec 418 A1 — ms from a streamed step's start to its first words (the earliest step's). */
+  answerFirstWordsMs?: number;
   /** Spec 416 — milliseconds spent choosing (planner or selection arm), summed over re-plans. */
   selectionMs?: number;
   /** What the model planner's calls used, as the provider reported them (summed over re-plans). */
@@ -5273,7 +5275,15 @@ step is then handed to that agent under authority the person grants; leave it ou
   const otherTier: AnswerTier = ((input.variant?.toggles?.['quality/against'] as AnswerTier | undefined) ?? (ownTier === 'light' ? 'default' : 'light'));
   const answerLight = ownTier === 'light';
   const agentNameForSkill = instructionTools.length && deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null;
-  const applyWith = (tier: AnswerTier, recorded: boolean) => skillApplyInvoker({ call: undefined, callFor: (stepRef) => structuredCallFor(env as never, input.provider, { ...(recorded ? { onCall: recordStructured('structured', stepRef) } : {}), ...(tier !== 'default' ? { tier } : {}) }), ...(input.variant?.toggles?.['skill-selection/answer'] === 'off' ? { pickOnly: true } : {}), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: agentNameForSkill });
+  // Spec 418 A1 — stream the answer (`answer/stream` on, or the deployment's ANSWER_STREAM_DEFAULT); never for the
+  // side-by-side's second answer. Drafts go to the progress stream; the first words' time goes on the trace.
+  const streamOn = ((input.variant?.toggles?.['answer/stream'] ?? ((env as { ANSWER_STREAM_DEFAULT?: string }).ANSWER_STREAM_DEFAULT?.trim() || 'off')) === 'on');
+  const applyWith = (tier: AnswerTier, recorded: boolean) => skillApplyInvoker({ call: undefined, callFor: (stepRef) => structuredCallFor(env as never, input.provider, { ...(recorded ? { onCall: recordStructured('structured', stepRef) } : {}), ...(tier !== 'default' ? { tier } : {}) }),
+    ...(streamOn && recorded ? {
+      streamFor: (stepRef: string) => textStreamFor(env as never, input.provider, { onCall: recordStructured('structured', stepRef), ...(tier !== 'default' ? { tier } : {}) }),
+      onDraft: (stepRef: string, draft: string) => input.onProgress?.({ type: 'AnswerDraft', stepRef, said: 'Writing the answer…', draft: draft.slice(-6000) }),
+      onFirstWords: (_stepRef: string, ms: number) => { if (trace.answerFirstWordsMs === undefined) trace.answerFirstWordsMs = ms; },
+    } : {}), ...(input.variant?.toggles?.['skill-selection/answer'] === 'off' ? { pickOnly: true } : {}), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: agentNameForSkill });
   const pairwise = input.variant?.toggles?.['quality/judge'] === 'pairwise';
   const skillInvoke: ToolInvoker | null = !instructionTools.length ? null : !pairwise ? applyWith(ownTier, true) : async (toolId, args, ctx) => {
     const [own, other] = await Promise.all([applyWith(ownTier, true)(toolId, args, ctx), applyWith(otherTier, false)(toolId, args, ctx).catch(() => null)]);

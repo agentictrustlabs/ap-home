@@ -255,7 +255,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
         try {
           const got = await readProgress(session, state.addressee, state.runRef, progressCursor.current.after);
           if (!polling) break;
-          if (got.lines.length) { progressCursor.current.after = got.lines[got.lines.length - 1]!.seq; setProgress((p) => [...p, ...got.lines]); }
+          if (got.lines.length) { progressCursor.current.after = got.lines[got.lines.length - 1]!.seq; setProgress((p) => { const drafts = new Set(got.lines.filter((l) => l.type === 'AnswerDraft').map((l) => l.stepRef)); return [...p.filter((l) => !(l.type === 'AnswerDraft' && drafts.has(l.stepRef))), ...got.lines]; }); }
           if (got.terminal) break;
           if (!got.lines.length) await new Promise((r) => setTimeout(r, 400));
         } catch { await new Promise((r) => setTimeout(r, 1_000)); }
@@ -479,6 +479,9 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   const [voiceNote, setVoiceNote] = useState<string | null>(null);
   // Spec 370 P2 — what the agent has said about this turn so far; the last line is the busy text.
   const [progress, setProgress] = useState<ProgressLine[]>([]);
+  // Spec 418 A1 — a streamed answer's draft shows under the step lines; the step lines exclude it.
+  const steps = progress.filter((l) => l.type !== 'AnswerDraft');
+  const draft = [...progress].reverse().find((l) => l.type === 'AnswerDraft');
   const progressSpoken = useRef(0);
   const progressCursor = useRef<{ runRef: string; after: number }>({ runRef: '', after: 0 });
 
@@ -798,11 +801,14 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
         )}
         {busy && !pending && (
           <div className="muted" data-testid="ask-busy" style={{ fontSize: 12 }}>
-            <span className="spinner" /> {progress.length && !progress[progress.length - 1]!.terminal ? progress[progress.length - 1]!.said : busy}
-            {progress.length > 1 && (
+            <span className="spinner" /> {steps.length && !steps[steps.length - 1]!.terminal ? steps[steps.length - 1]!.said : busy}
+            {steps.length > 1 && (
               <div data-testid="ask-progress" style={{ marginTop: 4, opacity: 0.7, fontSize: 11 }}>
-                {progress.filter((l) => !l.terminal).slice(0, -1).map((l) => <div key={l.seq}>· {l.said}</div>)}
+                {steps.filter((l) => !l.terminal).slice(0, -1).map((l) => <div key={l.seq}>· {l.said}</div>)}
               </div>
+            )}
+            {draft?.draft && (
+              <div data-testid="ask-draft" style={{ marginTop: 8, fontSize: 13, whiteSpace: 'pre-wrap', color: 'var(--text, inherit)', opacity: 0.9 }}>{draft.draft}</div>
             )}
           </div>
         )}

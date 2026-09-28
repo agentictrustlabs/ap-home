@@ -50,4 +50,16 @@ describe('skill.apply', () => {
     const noModel = skillApplyInvoker({ call: undefined, sources: instructionSourcesOf({ tools }), readSkill });
     expect(await noModel('cic.governance.assess', { question: 'q' }, {} as never)).toEqual({ refused: 'no model is available to answer with' });
   });
+  it('streams (spec 418 A1): the answer under the same body, drafts handed on, first words timed once, no structured call', async () => {
+    let structured = 0; const drafts: string[] = []; const firsts: number[] = [];
+    const stream = async (input: { system: string; maxTokens?: number; onDelta: (d: string, soFar: string) => void }) => {
+      expect(input.system).toContain('Inventory before rubric.'); expect(input.maxTokens).toBe(600);
+      input.onDelta('Inventory ', 'Inventory '); input.onDelta('first.', 'Inventory first.');
+      return 'Inventory first. ';
+    };
+    const invoke = skillApplyInvoker({ call: async () => { structured++; return { answer: 'x' }; }, streamFor: () => stream, onDraft: (_s, d) => drafts.push(d), onFirstWords: (_s, ms) => firsts.push(ms), sources: instructionSourcesOf({ tools }), readSkill });
+    const out = await invoke('cic.governance.assess', { question: 'q', brief: true }, { step: { id: 's1' } } as never) as Record<string, unknown>;
+    expect(out).toMatchObject({ answer: 'Inventory first.', skill: { id: SRC.skillId } });
+    expect(structured).toBe(0); expect(firsts).toHaveLength(1); expect(drafts[drafts.length - 1]).toBe('Inventory first. ');
+  });
 });

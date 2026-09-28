@@ -16,6 +16,7 @@
 // WHAT IT IS NOT. Not an act: nothing is performed, certified, submitted or ruled, and no mandate is asked for. Not
 // the playbook's doctrine: the body is NOT in the archetype's instructions (twelve bodies in every planner prompt
 // would be the cost), it is read when chosen. Not a fallback: a skill whose corpus is unbound is not listed.
+import type { TextStreamCall } from '@agenticprimitives/orchestration-openai-compat';
 import type { ToolSpec, ToolInvoker } from '@agenticprimitives/orchestration';
 import type { StructuredCall } from '@agenticprimitives/context';
 import type { DefinitionToolV1 } from '@agenticprimitives/capability-claims';
@@ -68,6 +69,12 @@ export interface SkillApplyDeps {
   /** Spec 417 §5 — the call FOR ONE STEP (so the trace ties the model call, its tokens and its time to the step that
    *  made it). Preferred over `call` when given. */
   callFor?: (stepRef: string) => StructuredCall | undefined;
+  /** Spec 418 A1 — a STREAMED answer for one step (plain text over SSE); when given, the answer streams and each growing
+   *  draft goes to `onDraft` (throttled). The structured call is not used for that step. */
+  streamFor?: (stepRef: string) => TextStreamCall | undefined;
+  onDraft?: (stepRef: string, draft: string) => void;
+  /** Called once, with ms from the step's start to the first streamed words. */
+  onFirstWords?: (stepRef: string, ms: number) => void;
   /** The offered instruction tools' sources by tool id (`instructionSourcesOf`) — what each answer is applied under. */
   sources: Record<string, InstructionToolLike['source']>;
   readSkill: SkillReader;
@@ -95,6 +102,23 @@ export function skillApplyInvoker(deps: SkillApplyDeps): ToolInvoker {
     // Spec 417 — a chain hands earlier steps' answers on as material (one, or a list when a skill works from several).
     const pieces = (Array.isArray(args.material) ? args.material : [args.material]).filter((m): m is string => typeof m === 'string' && !!m.trim()).map((m) => m.trim());
     const material = !pieces.length ? '' : Array.isArray(args.material) ? `\n\nThe material, from earlier steps:\n${pieces.map((m, i) => `--- ${i + 1} ---\n${m}`).join('\n\n')}` : `\n\nThe situation, in the person's words:\n${pieces[0]}`;
+    const stepRef = ctx?.step?.id ?? `s${ctx?.index ?? 0}`;
+    const stream = deps.streamFor?.(stepRef);
+    if (stream) {
+      const t0 = Date.now(); let first = false; let lastEmit = 0;
+      const text = await stream({
+        system: `${APPLY_SYSTEM}\n\n---\n\n${doc.body}\n\n---\n\nWrite the answer itself, as the person will read it — plain text or markdown, nothing around it.`,
+        messages: [{ role: 'user', content: `${question}${material}` }],
+        maxTokens: args.brief === true ? Math.min(deps.maxTokens ?? 1400, 600) : deps.maxTokens ?? 1400,
+        onDelta: (_d, soFar) => {
+          const now = Date.now();
+          if (!first) { first = true; deps.onFirstWords?.(stepRef, now - t0); }
+          if (now - lastEmit > 400) { lastEmit = now; deps.onDraft?.(stepRef, soFar); }
+        },
+      }).catch((e: unknown) => { throw new Error(`the streamed answer under ${source.skillId} failed: ${e instanceof Error ? e.message : String(e)}`); });
+      deps.onDraft?.(stepRef, text);
+      return { answer: text.trim(), skill: { id: source.skillId, version: source.version, digest: source.contractDigest }, source: `${deps.agentName ?? 'this agent'}, under ${source.skillId}` };
+    }
     const out = await call({
       system: `${APPLY_SYSTEM}\n\n---\n\n${doc.body}`,
       messages: [{ role: 'user', content: `${question}${material}` }],
