@@ -1,6 +1,6 @@
 {
   "type": "ap.technique-ledger.v1",
-  "builtAt": "2026-09-28T05:24:10.138Z",
+  "builtAt": "2026-09-28T05:39:53.726Z",
   "rows": [
     {
       "technique": {
@@ -4674,10 +4674,224 @@
         "source": "fresh 9 plan-choice run: the first-stage pick declined 4× at top p ≈ 0.43 where a rerun gave 0.68–1.0 — and a declined real ask reaches the planner WITHOUT the skills (\"can't help\")",
         "what": "When the fast pick's top probability lands in a borderline band (e.g. 0.35–0.6), one more sample; the mean decides. Two-sample agreement always cost 2× tokens; this pays only on the borderline.",
         "plannedAb": "instability (same case, repeated) and hold rate on positives; pick tokens should rise only on the borderline share.",
-        "comparisons": []
+        "comparisons": [
+          {
+            "experiment": "fresh8-borderline",
+            "baseline": "sel-bl-off",
+            "treatment": "sel-bl-on"
+          },
+          {
+            "experiment": "fresh6-borderline",
+            "baseline": "sel-bl-off",
+            "treatment": "sel-bl-on"
+          }
+        ],
+        "decision": {
+          "status": "kept-off",
+          "date": "2026-09-28",
+          "note": "Pooled +5/−5 (fresh 8 + 6, ×2); declined positives 8/132 → 6/132; instability unchanged; pick tokens −0.1% — the band [0.35, 0.6] almost never fired, so first-pick variance mostly lies outside it. Next look: which declines are genuine abstentions vs variance (repeat-level analysis on the full ledger)."
+        }
       },
-      "comparisons": [],
-      "verdict": "planned",
+      "comparisons": [
+        {
+          "experiment": "fresh6-borderline",
+          "baseline": "sel-bl-off",
+          "treatment": "sel-bl-on",
+          "set": "sha256:a7c35bcc7db5d8f9585b52576944ac94bc78d60b4b4e4fdeaa4b48db9c23457a",
+          "finishedAt": "2026-09-28T05:28:28.473Z",
+          "n": 38,
+          "quality": {
+            "metric": "selection",
+            "base": 0.6842,
+            "treat": 0.6579,
+            "delta": -0.0263,
+            "fixed": 2,
+            "broken": 3,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1756,
+              "treat": 1756.5,
+              "delta": 0.5,
+              "deltaPct": 0,
+              "ci": [
+                0,
+                2
+              ]
+            },
+            "totalTokens": {
+              "base": 1756,
+              "treat": 1756.5,
+              "delta": 0.5,
+              "deltaPct": 0,
+              "ci": [
+                0,
+                2
+              ]
+            },
+            "pickMs": {
+              "base": 1335.5,
+              "treat": 1277.5,
+              "delta": -58,
+              "deltaPct": -4.3,
+              "ci": [
+                -42,
+                237
+              ]
+            },
+            "askMs": {
+              "base": 1667.5,
+              "treat": 1653.5,
+              "delta": -14,
+              "deltaPct": -0.8,
+              "ci": [
+                -107,
+                173
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 174.5,
+                "treat": 172,
+                "delta": -2.5,
+                "deltaPct": -1.4,
+                "ci": [
+                  -16,
+                  8
+                ]
+              },
+              "phase:pre-run": {
+                "base": 74.5,
+                "treat": 77,
+                "delta": 2.5,
+                "deltaPct": 3.4,
+                "ci": [
+                  -3,
+                  5.5
+                ]
+              },
+              "phase:run": {
+                "base": 1425,
+                "treat": 1347.5,
+                "delta": -77.5,
+                "deltaPct": -5.4,
+                "ci": [
+                  -106.5,
+                  241
+                ]
+              }
+            }
+          },
+          "verdict": "same"
+        },
+        {
+          "experiment": "fresh8-borderline",
+          "baseline": "sel-bl-off",
+          "treatment": "sel-bl-on",
+          "set": "sha256:2e0ca91d31b7328c5d40519767a644d9c46f7f6a514c4e07837812924b43df55",
+          "finishedAt": "2026-09-28T05:39:30.708Z",
+          "n": 154,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.8831,
+            "treat": 0.8896,
+            "delta": 0.0065,
+            "fixed": 3,
+            "broken": 2,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 2148,
+              "treat": 2143,
+              "delta": -5,
+              "deltaPct": -0.2,
+              "ci": [
+                0,
+                0
+              ]
+            },
+            "totalTokens": {
+              "base": 2148,
+              "treat": 2143,
+              "delta": -5,
+              "deltaPct": -0.2,
+              "ci": [
+                0,
+                0
+              ]
+            },
+            "pickMs": {
+              "base": 1680.5,
+              "treat": 1705,
+              "delta": 24.5,
+              "deltaPct": 1.5,
+              "ci": [
+                -12.5,
+                103
+              ]
+            },
+            "askMs": {
+              "base": 2000.5,
+              "treat": 2113,
+              "delta": 112.5,
+              "deltaPct": 5.6,
+              "ci": [
+                -59,
+                97
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 175,
+                "treat": 176,
+                "delta": 1,
+                "deltaPct": 0.6,
+                "ci": [
+                  -4.5,
+                  7.5
+                ]
+              },
+              "phase:pre-run": {
+                "base": 73,
+                "treat": 71,
+                "delta": -2,
+                "deltaPct": -2.7,
+                "ci": [
+                  -3,
+                  0
+                ]
+              },
+              "phase:run": {
+                "base": 1812.5,
+                "treat": 1868.5,
+                "delta": 56,
+                "deltaPct": 3.1,
+                "ci": [
+                  -56,
+                  88
+                ]
+              }
+            }
+          },
+          "verdict": "same"
+        }
+      ],
+      "pooled": [
+        {
+          "baseline": "sel-bl-off",
+          "experiments": 2,
+          "n": 192,
+          "fixed": 5,
+          "broken": 5,
+          "p": 1,
+          "pickTokensPct": -0.1,
+          "askMsPct": 2.4,
+          "verdict": "same"
+        }
+      ],
+      "verdict": "same",
       "missing": []
     }
   ],
