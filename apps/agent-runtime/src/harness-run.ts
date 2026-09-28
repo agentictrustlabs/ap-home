@@ -5297,7 +5297,9 @@ step is then handed to that agent under authority the person grants; leave it ou
   // its own model's answer; the other answer and the judgment are a comparison's instrument (numbers on the trace only).
   // Spec 418 — the answer tier: default · light · strong (a stronger model, measured side by side before any use).
   type AnswerTier = 'default' | 'light' | 'strong' | 'minimal';
-  const ownTier: AnswerTier = ((input.variant?.toggles?.['skill-selection/answer-model'] as AnswerTier | undefined) ?? 'default');
+  // Spec 418 A1 — the deployment's answer tier (`SKILL_ANSWER_MODEL_DEFAULT`, adopted `minimal` on effort-a1); a comparison names its own.
+  const envTier = ((env as { SKILL_ANSWER_MODEL_DEFAULT?: string }).SKILL_ANSWER_MODEL_DEFAULT ?? '').trim();
+  const ownTier: AnswerTier = ((input.variant?.toggles?.['skill-selection/answer-model'] as AnswerTier | undefined) ?? (['light', 'strong', 'minimal'].includes(envTier) ? envTier as AnswerTier : 'default'));
   const otherTier: AnswerTier = ((input.variant?.toggles?.['quality/against'] as AnswerTier | undefined) ?? (ownTier === 'light' ? 'default' : 'light'));
   const answerLight = ownTier === 'light';
   const agentNameForSkill = instructionTools.length && deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null;

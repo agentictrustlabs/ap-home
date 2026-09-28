@@ -463,6 +463,9 @@ ORCHESTRATION_GEMINI_STRONG_MODEL = "gemini-3.1-pro-preview"
 OPS_RECORDS_DEFAULT = "cached"
 # Spec 418 A1 — the skill answer streams (adopted 2026-09-28 on stream-a1c: first words 11.8 s vs the whole answer at 23.3 s; tokens and outcome unchanged).
 ANSWER_STREAM_DEFAULT = "on"
+# Spec 418 A1 — the skill answer thinks at MINIMAL effort (adopted 2026-09-28 on effort-a1: first words in-step 3.8 → 0.8 s,
+# 8/8, p = 0.008; from the ask 12.9 → 4.9 s; side by side minimal preferred 5–2–1).
+SKILL_ANSWER_MODEL_DEFAULT = "minimal"
 # Spec 388 — the cheapest OFFERED provider that carries each call, decided before the request from the prompt estimate, the
 # per-request budget and this minute's spend; recorded on the trace with its reason. A route, never a fallback (ADR-0013).
 ORCHESTRATION_ROUTE = "budget"
