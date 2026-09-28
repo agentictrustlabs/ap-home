@@ -174,7 +174,14 @@ export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/k
   /** Spec 416 §4h — the model an instruction skill ANSWERS with: the deployment's (default) or the provider's light one. */
   'skill-selection/answer-model': ['default', 'light'],
   /** Spec 416 §4h — score the answer with the quality rubric (a comparison's instrument; its time is reported apart). */
-  'quality/judge': ['off', 'on', 'pairwise'] };
+  'quality/judge': ['off', 'on', 'pairwise'],
+  /** Spec 418 §1 — the outcome arm's party-stance rule: `on` (default) decides an arrow whose ends are both qualified by
+   *  rule; `off` asks the judge about every arrow (the spec 417 shape) — so the rule's effect is measured in one experiment. */
+  'skill-selection/party-rule': ['on', 'off'],
+  /** Spec 418 D4 — required vs enriching inputs (`off`: every input treated as required — the pre-D4 rule). */
+  'skill-selection/necessity': ['on', 'off'],
+  /** Spec 418 D4 — the asker's office (memory grounded in role classes) and its typical capabilities in the reading. */
+  'skill-selection/office-prior': ['on', 'off'] };
 
 export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantRequestV1 } | { ok: false; error: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'variant must be an object' };

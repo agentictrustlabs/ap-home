@@ -4886,8 +4886,9 @@ step is then handed to that agent under authority the person grants; leave it ou
           const arm = input.variant?.selection;
           if (arm === 'ontology' || arm === 'judgment' || arm === 'ontology+judgment' || arm === 'propose+judgment' || arm === 'ontology-first' || arm === 'framed-judgment' || arm === 'outcome') {
             const sources = instructionSourcesOf(playbook);
-            const skills = Object.values(playbook?.tools ?? {}).filter((t) => sources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}), ...(t.produces?.length ? { produces: t.produces } : {}), ...(t.consumes?.length ? { consumes: t.consumes } : {}) }));
-            const lexicon = playbook?.domainLexicon;
+            const skills = Object.values(playbook?.tools ?? {}).filter((t) => sources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}), ...(t.produces?.length ? { produces: t.produces } : {}), ...(t.consumes?.length ? { consumes: input.variant?.toggles?.['skill-selection/necessity'] === 'off' ? t.consumes.map(({ necessity: _n, ...k }) => k) : t.consumes } : {}) }));
+            // Spec 418 D4 — `office-prior off` hides the role classes' typical capabilities from the reading.
+            const lexicon = input.variant?.toggles?.['skill-selection/office-prior'] === 'off' ? playbook?.domainLexicon?.map(({ uses: _u, ...e }) => e) : playbook?.domainLexicon;
             // The judge's model call is a model invocation of the run like the planner's: on the trace, with its provider,
             // model and why — role `judge`, so a reader can tell the call that chose the skill from the one that answered.
             const fast = input.variant?.judgeProfile === 'fast' || input.variant?.judgeProfile === 'logprob';
@@ -4923,7 +4924,7 @@ step is then handed to that agent under authority the person grants; leave it ou
             else if (arm === 'outcome') {
               // Spec 417 — the OUTCOME the person wants (one judged call: the result, and what the request supplies), then
               // the path to it by the data graph's arrows from what the asker holds. A chain runs as `$ref`-linked steps.
-              const r = await selectByOutcome(rest, skills, call, {}, { ...(lexicon ? { lexicon } : {}), ...(asker ? { asker } : {}) });
+              const r = await selectByOutcome(rest, skills, call, input.variant?.toggles?.['skill-selection/party-rule'] === 'off' ? { partyRule: false } : {}, { ...(lexicon ? { lexicon } : {}), ...(asker ? { asker } : {}) });
               trace.selection = { approach: 'outcome', ...r };
               plannerUsed = arm;
               if (r.chose && r.plan) {
@@ -4961,7 +4962,9 @@ step is then handed to that agent under authority the person grants; leave it ou
               : undefined;
             const ctx = seeded ?? live;
             const asker = relation || ctx ? { ...(relation ? { relation } : {}), ...(ctx?.recentSkills?.length ? { recentSkills: ctx.recentSkills.slice(0, 4) } : {}), ...(ctx?.memoryTags?.length ? { memoryTags: ctx.memoryTags.slice(0, 6) } : {}) } : undefined;
-            const r = await selectByJudgment(rest, skills, call, { profile: 'fast' }, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(asker ? { asker } : {}) });
+            // Spec 418 D4 — `office-prior off` hides the role classes' typical capabilities here too (one knob, both paths).
+            const stageLexicon = input.variant?.toggles?.['skill-selection/office-prior'] === 'off' ? playbook?.domainLexicon?.map(({ uses: _u, ...e }) => e) : playbook?.domainLexicon;
+            const r = await selectByJudgment(rest, skills, call, { profile: 'fast' }, { ...(stageLexicon ? { lexicon: stageLexicon } : {}), ...(asker ? { asker } : {}) });
             trace.selection = { approach: 'judgment', ...r };
             trace.skillStage = r.chose ? 'chose' : 'handed-to-planner';
             if (r.chose) {
