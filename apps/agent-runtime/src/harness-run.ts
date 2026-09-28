@@ -2533,6 +2533,9 @@ export interface HarnessRunInput {
   /** Spec 415 A4 — what a COMPARISON asked this run to do differently (already admitted by the caller: a
    *  comparison estate, the agent's own steward). The planner kind and the capability toggles apply here; the
    *  provider was folded into `provider`. Behaviour, never authority. */
+  /** Spec 418 §12 — this run is a COMPARISON (the request carried a variant, whatever its fields): self-acting writes are
+   *  held (dry run). Set by the ask surface from the request itself, never inferred from which variant fields arrived. */
+  comparison?: boolean;
   variant?: { plannerKind?: 'model' | 'rule-based'; selection?: 'model' | 'declared' | 'ontology' | 'judgment' | 'ontology+judgment' | 'propose+judgment' | 'ontology-first' | 'framed-judgment' | 'outcome' | 'outcome-selective'; toggles?: Record<string, string>;
     judgeProfile?: 'thorough' | 'fast' | 'logprob';
     askerContext?: { digest: string; recentSkills?: Array<{ id: string; times: number }>; memoryTags?: string[]; heldClasses?: string[] };
@@ -2824,6 +2827,8 @@ export interface PlannerTraceV1 {
   answerFirstWordsMs?: number;
   /** Wall-clock time of those first words — the surface computes time from the ASK to them (what a person feels). */
   answerFirstWordsAt?: number;
+  /** Spec 418 §12 — this run was a comparison: its self-acting writes were held (dry run). */
+  comparison?: boolean;
   /** Spec 416 — milliseconds spent choosing (planner or selection arm), summed over re-plans. */
   selectionMs?: number;
   /** What the model planner's calls used, as the provider reported them (summed over re-plans). */
@@ -5282,7 +5287,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   // `quality/judge: pairwise`, BOTH answers in parallel judged side by side (both orders, neutral labels): the run returns
   // its own model's answer; the other answer and the judgment are a comparison's instrument (numbers on the trace only).
   // Spec 418 — the answer tier: default · light · strong (a stronger model, measured side by side before any use).
-  type AnswerTier = 'default' | 'light' | 'strong';
+  type AnswerTier = 'default' | 'light' | 'strong' | 'minimal';
   const ownTier: AnswerTier = ((input.variant?.toggles?.['skill-selection/answer-model'] as AnswerTier | undefined) ?? 'default');
   const otherTier: AnswerTier = ((input.variant?.toggles?.['quality/against'] as AnswerTier | undefined) ?? (ownTier === 'light' ? 'default' : 'light'));
   const answerLight = ownTier === 'light';
@@ -5377,6 +5382,7 @@ step is then handed to that agent under authority the person grants; leave it ou
         // instruction skill's answer) needs none, so the retrieval is decided on the plan and skipped then.
         onlyIf: (plan: { steps: ReadonlyArray<{ toolId: string }> }) => !plan.steps.every((st) => !!tools.find((t) => t.id === st.toolId)?.answer) }
     : null;
+  if (input.comparison || input.variant) trace.comparison = true;
   const result = await runIntent(input.intent, {
     planner: boundPlanner, tools, bindingFor,
     ...(input.resume ? { resume: input.resume } : {}),
@@ -5789,6 +5795,8 @@ step is then handed to that agent under authority the person grants; leave it ou
     // reached its second payee, whose mandate had not been minted yet. Reporting names the step and its
     // args; the surface mints exactly that and resumes.
     onMissingMandate: 'report' as const,
+    // Spec 418 §12 — a comparison run (a variant) never commits a self-acting write: the estate stays the stated one.
+    ...(input.comparison || input.variant ? { dryRunSelfActs: true } : {}),
     // Spec 354 §4.5 — the playbook that admitted this run (canonical id + version + definition digest),
     // stamped onto every receipt by the loop. Absent ⇒ the bare harness; receipts carry no skillRef.
     ...(playbook ? { skillRef: { skillId: playbook.archetypeId, version: playbook.archetypeVersion, commitment: playbook.digest } } : {}),

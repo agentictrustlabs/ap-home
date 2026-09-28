@@ -47,7 +47,7 @@ export interface StructuredCallRecordV1 { provider: LlmProvider; model: string; 
   /** What the provider reported the call used (absent when it reported nothing — never estimated). */
   tokensIn?: number; tokensOut?: number; cachedIn?: number; reasoningOut?: number }
 
-export function structuredCallFor(env: ModelEnv, provider?: LlmProvider, opts: { /** Spec 388 W2 — each routed call's decision, for the trace. */ onRoute?: (d: RouteDecision) => void; /** Spec 415 — EVERY call, routed or named, as it ran: a model call the trace does not name is a model call nobody can audit. */ onCall?: (c: StructuredCallRecordV1) => void; /** `light`: the provider's lighter model where it names one (Gemini's planner model) — for a call that only has to choose. */ tier?: 'light' | 'strong'; /** Test seam: build a provider's call without a client. */ make?: (p: LlmProvider) => StructuredCall } = {}): StructuredCall | undefined {
+export function structuredCallFor(env: ModelEnv, provider?: LlmProvider, opts: { /** Spec 388 W2 — each routed call's decision, for the trace. */ onRoute?: (d: RouteDecision) => void; /** Spec 415 — EVERY call, routed or named, as it ran: a model call the trace does not name is a model call nobody can audit. */ onCall?: (c: StructuredCallRecordV1) => void; /** `light`: the provider's lighter model where it names one (Gemini's planner model) — for a call that only has to choose. `minimal` (spec 418 A1): the default model, thinking at `minimal` effort — for an answer whose first words wait on its thinking. */ tier?: 'light' | 'strong' | 'minimal'; /** Test seam: build a provider's call without a client. */ make?: (p: LlmProvider) => StructuredCall } = {}): StructuredCall | undefined {
   const build = (p: LlmProvider, onUsage?: (u: ModelUsageV1) => void): StructuredCall => (opts.make ? opts.make(p) : providerStructuredCall(env, p, onUsage, opts.tier));
   const modelOf = (p: LlmProvider) => (opts.tier === 'strong' ? strongModelFor(env, p) : modelFor(env, p, opts.tier === 'light' ? 'planner' : undefined));
   // Each invocation is built with its own usage callback: two calls in flight at once (a judge's permutations) must not
@@ -93,13 +93,13 @@ export function strongModelFor(env: ModelEnv, p: LlmProvider): string {
   return p === 'gemini' ? ((env as { ORCHESTRATION_GEMINI_STRONG_MODEL?: string }).ORCHESTRATION_GEMINI_STRONG_MODEL?.trim() || 'gemini-3.5-pro') : modelFor(env, p);
 }
 
-export function providerStructuredCall(env: ModelEnv, p: LlmProvider, onUsage?: (u: ModelUsageV1) => void, tier?: 'light' | 'strong'): StructuredCall {
+export function providerStructuredCall(env: ModelEnv, p: LlmProvider, onUsage?: (u: ModelUsageV1) => void, tier?: 'light' | 'strong' | 'minimal'): StructuredCall {
   if (!providerConfigured(env, p)) throw new Error(`structured call on ${p}: this deployment does not offer ${p} (ORCHESTRATION_LLM) — no other provider carries it (ADR-0013)`);
   if (p === 'gemini') {
     // Gemini 3.5 Flash THINKS inside the completion bound: a judge's 600-token bound was spent thinking and the call came
     // back with no tool call ("answered in prose", measured 2026-09-26). Low effort + headroom, and `required` — the
     // form Gemini's planner already uses reliably.
-    return createOpenAiCompatStructuredCall({ ...(onUsage ? { onUsage } : {}), client: geminiClient(env), model: tier === 'strong' ? strongModelFor(env, 'gemini') : modelFor(env, 'gemini', tier === 'light' ? 'planner' : undefined), label: 'gemini', reasoningEffort: 'low', reasoningHeadroom: OPENAI_REASONING_HEADROOM, toolChoice: 'required' });
+    return createOpenAiCompatStructuredCall({ ...(onUsage ? { onUsage } : {}), client: geminiClient(env), model: tier === 'strong' ? strongModelFor(env, 'gemini') : modelFor(env, 'gemini', tier === 'light' ? 'planner' : undefined), label: 'gemini', reasoningEffort: tier === 'minimal' ? 'minimal' : 'low', reasoningHeadroom: OPENAI_REASONING_HEADROOM, toolChoice: 'required' });
   }
   if (p === 'openai') {
     return createOpenAiCompatStructuredCall({
@@ -166,14 +166,14 @@ export function logprobChoiceFor(env: ModelEnv, provider: LlmProvider | undefine
 
 /** Spec 418 A1 — a STREAMED text answer (Gemini only; any other provider ⇒ undefined, and the caller keeps the structured
  *  call — one mechanism per provider, never a silent switch mid-answer). Recorded on the trace like any structured call. */
-export function textStreamFor(env: ModelEnv, provider: LlmProvider | undefined, opts: { onCall?: (c: StructuredCallRecordV1) => void; tier?: 'light' | 'strong' } = {}): TextStreamCall | undefined {
+export function textStreamFor(env: ModelEnv, provider: LlmProvider | undefined, opts: { onCall?: (c: StructuredCallRecordV1) => void; tier?: 'light' | 'strong' | 'minimal' } = {}): TextStreamCall | undefined {
   const p = provider ?? (env.ORCHESTRATION_LLM ?? '').split(',').map((x) => x.trim()).filter(Boolean)[0] as LlmProvider | undefined;
   if (p !== 'gemini' || !(env as { GEMINI_API_KEY?: string }).GEMINI_API_KEY) return undefined;
   const model = opts.tier === 'strong' ? strongModelFor(env, 'gemini') : modelFor(env, 'gemini', opts.tier === 'light' ? 'planner' : undefined);
   return async (input) => {
     const startMs = Date.now();
     let usage: ModelUsageV1 | undefined;
-    const call = createOpenAiCompatTextStream({ apiKey: (env as { GEMINI_API_KEY: string }).GEMINI_API_KEY, baseUrl: (env as { ORCHESTRATION_GEMINI_BASE_URL?: string }).ORCHESTRATION_GEMINI_BASE_URL || GEMINI_DEFAULTS.baseUrl, model, label: 'gemini', reasoningEffort: 'low', reasoningHeadroom: OPENAI_REASONING_HEADROOM, onUsage: (u) => { usage = addUsage(usage, u); } });
+    const call = createOpenAiCompatTextStream({ apiKey: (env as { GEMINI_API_KEY: string }).GEMINI_API_KEY, baseUrl: (env as { ORCHESTRATION_GEMINI_BASE_URL?: string }).ORCHESTRATION_GEMINI_BASE_URL || GEMINI_DEFAULTS.baseUrl, model, label: 'gemini', reasoningEffort: opts.tier === 'minimal' ? 'minimal' : 'low', reasoningHeadroom: OPENAI_REASONING_HEADROOM, onUsage: (u) => { usage = addUsage(usage, u); } });
     try {
       const text = await call(input);
       opts.onCall?.({ provider: 'gemini', model, because: 'stream', startMs, endMs: Date.now(), ...(usage ?? {}) });

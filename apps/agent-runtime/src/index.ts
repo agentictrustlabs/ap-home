@@ -4385,6 +4385,8 @@ app.post('/harness/ask', async (c) => {
       ...(inResponseTo ? { inResponseTo } : {}),
       ...(body.channel === 'voice' ? { channel: 'voice' as const } : {}),
       ...(provider ? { provider } : {}),
+      // Spec 418 §12 — any variant makes this a comparison run: its self-acting writes are held, even a provider-only variant.
+      ...(variantReq ? { comparison: true } : {}),
       ...(variantReq && (variantReq.plannerKind || variantReq.selection || variantReq.toggles || variantReq.acceptance || variantReq.judgeProfile || variantReq.askerContext) ? { variant: { ...(variantReq.plannerKind ? { plannerKind: variantReq.plannerKind } : {}), ...(variantReq.selection ? { selection: variantReq.selection } : {}), ...(variantReq.toggles ? { toggles: variantReq.toggles } : {}), ...(variantReq.acceptance ? { acceptance: variantReq.acceptance } : {}), ...(variantReq.judgeProfile ? { judgeProfile: variantReq.judgeProfile } : {}), ...(variantReq.askerContext ? { askerContext: variantReq.askerContext } : {}) } } : {}),
       ...(runPlan ? { plan: runPlan } : {}),
       // Spec 384 W3 — a campaign selected a provider for this step: the plan is bound to it and to its offer.
