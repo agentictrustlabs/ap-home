@@ -718,6 +718,23 @@ const faithImpact: WhiteLabelConfig = {
       allowed_delegation_templates: ['site-login', 'org-create'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
+    // Global.Church Engage (engage.global.church) — GC's engagement dashboard, NOT the `engage-app`
+    // above (that is agentictrustlabs/engage, a different product). Server-side sign-in in the
+    // openbook-tyndale shape: /api/auth/start 307s here with PKCE + site-login, the code lands at
+    // /api/auth/callback and is exchanged server-side; the id_token is the session. `profile` so the
+    // member's human name can label the account. No email claim — engage keys identity on `sub`.
+    // Re-registers verbatim on gcid.me when GC ID launches.
+    {
+      client_id: 'gc-engage',
+      name: 'Global.Church Engage',
+      redirect_uris: [
+        'https://engage.global.church/api/auth/callback',
+        'http://localhost:3000/api/auth/callback',
+      ],
+      allowed_scopes: ['openid', 'profile', 'agent'],
+      allowed_delegation_templates: ['site-login'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+    },
     // Engagement Campaign Studio (uupg apps/campaign) — org-scoped ask over demo-a2a needs a
     // session whose `aud` is THIS client_id. Borrowing `uupg-tracker` mints a valid token that
     // demo-a2a then refuses as aud mismatch. Same demo delegate as the other uupg apps.
