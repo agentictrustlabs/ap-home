@@ -283,6 +283,14 @@ const faithImpact: WhiteLabelConfig = {
         'https://field-web.richardpedersen3.workers.dev/',
         'http://localhost:5174/',
         'http://127.0.0.1:5174/',
+        // HeartCoach (agentictrustlabs/engage apps/coach-*) signs in AS field-app until `coach-app` is
+        // registered here — a RECORDED WIDENING (owner decision 2026-09-28, option B): a Field token also
+        // serves HeartCoach. Fixed, known URLs, present on every deploy (same reasoning as
+        // churchglobalgather27 under gather-app). Comes off this list, and coach-a2a's SESSION_AUDS
+        // drops field-app, the day coach-app is a client of its own.
+        'https://heartcoach.faithnet.io/',
+        'http://localhost:5176/',
+        'http://127.0.0.1:5176/',
       ],
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: [
