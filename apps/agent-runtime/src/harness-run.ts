@@ -2171,6 +2171,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
           ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}),
           ...(deps.standingContext ? { context: deps.standingContext } : {}),
           ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}),
+          ...(deps.agentTypeOf ? { agentKindOf: deps.agentTypeOf } : {}),
           ...(deps.readSubjectRecordStatus ? { readSubjectRecordStatus: deps.readSubjectRecordStatus } : {}),
           ...(deps.resolveName ? { resolveName: deps.resolveName } : {}),
           ...(deps.nameOf ? { nameOf: deps.nameOf } : {}),
@@ -2192,6 +2193,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
           ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}),
           ...(deps.standingContext ? { context: deps.standingContext } : {}),
           ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}),
+          ...(deps.agentTypeOf ? { agentKindOf: deps.agentTypeOf } : {}),
           ...(deps.survey ? { survey: deps.survey } : {}),
           ...(deps.readRecords ? { readRecords: deps.readRecords } : {}),
           ...(deps.nameOf ? { nameOf: deps.nameOf } : {}),
@@ -2243,7 +2245,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     // Spec 419 — what an agent HOLDS, from the public chartered-under record; unnamed ⇒ the agent being asked.
     if (toolId === HOLDINGS_READ_CAPABILITY) return holdingsReadInvoker({ ...(deps.charteredAgents ? { charteredAgents: deps.charteredAgents } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, (addressee ?? person) as Address)(toolId, args, ctx);
     // The coordination reads judge standing themselves; the routed context rides in as `StandingDeps.context`.
-    const coordinationDeps = { ...deps, ...(deps.standingContext ? { context: deps.standingContext } : {}) };
+    const coordinationDeps = { ...deps, ...(deps.standingContext ? { context: deps.standingContext } : {}), ...(deps.agentTypeOf ? { agentKindOf: deps.agentTypeOf } : {}) };
     if (toolId === ENDEAVOR_LIST_CAPABILITY || toolId === ENDEAVOR_GET_CAPABILITY) return endeavorReadInvoker(coordinationDeps, (addressee ?? person) as Address, person)(toolId, args, ctx);
     if (COORDINATION_CAPABILITY_IDS.has(toolId)) return endeavorActInvoker(coordinationDeps, (addressee ?? person) as Address, person, session)(toolId, args, ctx);
     if (toolId === 'messaging.direct.send') return messageInvoker(deps, presented!, person, session, { presentedAll, chainId: Number(env.CHAIN_ID), delegationManager: env.DELEGATION_MANAGER as Address })(toolId, args, ctx);
@@ -4730,7 +4732,7 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   const standingOnce: Promise<ExecutionBindingV1['standing'] | undefined> | null = input.study && standingPrincipal && standingSubject
     ? Promise.resolve({ relation: 'none' as const, subject: standingSubject.toLowerCase(), principal: standingPrincipal.toLowerCase(), because: 'no standing between them — the person\'s agent presented a study grant to this service, verified at admission (wireRef is its digest)', ...(input.study.hash ? { wireRef: input.study.hash } : {}) })
     : standingPrincipal && standingSubject && deps.readSubjectRecord
-    ? remembered(`standing:${standingPrincipal.toLowerCase()}:${standingSubject.toLowerCase()}`, () => deriveStanding({ readSubjectRecord: deps.readSubjectRecord, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}), wireRefOf },
+    ? remembered(`standing:${standingPrincipal.toLowerCase()}:${standingSubject.toLowerCase()}`, () => deriveStanding({ readSubjectRecord: deps.readSubjectRecord, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}), ...(deps.agentTypeOf ? { agentKindOf: deps.agentTypeOf } : {}), wireRefOf },
         { principal: standingPrincipal, subject: standingSubject })
       .then((st) => ({ relation: st.relation, subject: st.subject, principal: standingPrincipal.toLowerCase(), because: st.because, ...(st.wireRef ? { wireRef: st.wireRef } : {}) }))
       .catch(() => undefined))
@@ -5187,7 +5189,7 @@ step is then handed to that agent under authority the person grants; leave it ou
       // `directory.data` read saw three listings and missed every member who joined by invitation (2026-09-28). An INVITATION
       // row is not a membership (appr:invitationIsNotMembership); a member answers to their name, its first word, or a label.
       const roster = await membershipListInvoker(
-        { ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}), ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.readSubjectRecordStatus ? { readSubjectRecordStatus: deps.readSubjectRecordStatus } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.survey ? { survey: deps.survey } : {}), ...(deps.readRecords ? { readRecords: deps.readRecords } : {}), ...(deps.addresseeKind !== undefined ? { addresseeKind: deps.addresseeKind } : {}) },
+        { ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}), ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.agentTypeOf ? { agentKindOf: deps.agentTypeOf } : {}), ...(deps.readSubjectRecordStatus ? { readSubjectRecordStatus: deps.readSubjectRecordStatus } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.survey ? { survey: deps.survey } : {}), ...(deps.readRecords ? { readRecords: deps.readRecords } : {}), ...(deps.addresseeKind !== undefined ? { addresseeKind: deps.addresseeKind } : {}) },
         room as Address, input.person,
       )(MEMBERSHIP_LIST_TOOL.id, { org: room }, { intent: input.intent, step: { toolId: MEMBERSHIP_LIST_TOOL.id, args: { org: room } }, index: 0, operationId: `${input.runRef ?? 'facts'}:regression-roster` } as never).catch(() => null) as { members?: Array<{ agent: string; name?: string | null; via?: string }> } | null;
       if (roster?.members) { known.add(SITUATION_MEMBERSHIP); known.add(SITUATION.MembershipInvitation); for (const r of roster.members) situations.push({ situation: r.via === 'invitation' ? SITUATION.MembershipInvitation : SITUATION_MEMBERSHIP, of: r.agent.toLowerCase(), in: room, ...(r.name ? { aliases: [r.name] } : {}) }); }
