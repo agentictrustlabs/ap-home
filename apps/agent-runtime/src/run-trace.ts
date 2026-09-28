@@ -184,7 +184,9 @@ export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/k
   'skill-selection/office-prior': ['on', 'off'],
   /** Spec 418 D5 — the asker's own records: read from the vault and written before the reply (`vault`, default), or
    *  served from the colo cache with the conversation write landing after the reply (`cached`). */
-  'ops/records': ['vault', 'cached'] };
+  'ops/records': ['vault', 'cached'],
+  /** Spec 418 — the fast judge's independent samples: `2` ⇒ agreement is the confidence; disagreement asks which. */
+  'skill-selection/samples': ['1', '2'] };
 
 export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantRequestV1 } | { ok: false; error: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'variant must be an object' };
