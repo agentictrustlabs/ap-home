@@ -5236,18 +5236,22 @@ step is then handed to that agent under authority the person grants; leave it ou
   // Spec 416 §4h — the model an instruction skill answers with (`skill-selection/answer-model`), and, under
   // `quality/judge: pairwise`, BOTH answers in parallel judged side by side (both orders, neutral labels): the run returns
   // its own model's answer; the other answer and the judgment are a comparison's instrument (numbers on the trace only).
-  const answerLight = input.variant?.toggles?.['skill-selection/answer-model'] === 'light';
+  // Spec 418 — the answer tier: default · light · strong (a stronger model, measured side by side before any use).
+  type AnswerTier = 'default' | 'light' | 'strong';
+  const ownTier: AnswerTier = ((input.variant?.toggles?.['skill-selection/answer-model'] as AnswerTier | undefined) ?? 'default');
+  const otherTier: AnswerTier = ((input.variant?.toggles?.['quality/against'] as AnswerTier | undefined) ?? (ownTier === 'light' ? 'default' : 'light'));
+  const answerLight = ownTier === 'light';
   const agentNameForSkill = instructionTools.length && deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null;
-  const applyWith = (light: boolean, recorded: boolean) => skillApplyInvoker({ call: undefined, callFor: (stepRef) => structuredCallFor(env as never, input.provider, { ...(recorded ? { onCall: recordStructured('structured', stepRef) } : {}), ...(light ? { tier: 'light' as const } : {}) }), ...(input.variant?.toggles?.['skill-selection/answer'] === 'off' ? { pickOnly: true } : {}), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: agentNameForSkill });
+  const applyWith = (tier: AnswerTier, recorded: boolean) => skillApplyInvoker({ call: undefined, callFor: (stepRef) => structuredCallFor(env as never, input.provider, { ...(recorded ? { onCall: recordStructured('structured', stepRef) } : {}), ...(tier !== 'default' ? { tier } : {}) }), ...(input.variant?.toggles?.['skill-selection/answer'] === 'off' ? { pickOnly: true } : {}), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: agentNameForSkill });
   const pairwise = input.variant?.toggles?.['quality/judge'] === 'pairwise';
-  const skillInvoke: ToolInvoker | null = !instructionTools.length ? null : !pairwise ? applyWith(answerLight, true) : async (toolId, args, ctx) => {
-    const [own, other] = await Promise.all([applyWith(answerLight, true)(toolId, args, ctx), applyWith(!answerLight, false)(toolId, args, ctx).catch(() => null)]);
+  const skillInvoke: ToolInvoker | null = !instructionTools.length ? null : !pairwise ? applyWith(ownTier, true) : async (toolId, args, ctx) => {
+    const [own, other] = await Promise.all([applyWith(ownTier, true)(toolId, args, ctx), applyWith(otherTier, false)(toolId, args, ctx).catch(() => null)]);
     const a = (x: unknown) => (x && typeof x === 'object' && typeof (x as { answer?: unknown }).answer === 'string' ? (x as { answer: string }).answer : null);
     const ownA = a(own), otherA = a(other);
     const card = instructionTools.find((t) => t.id === toolId)?.description ?? toolId;
     const qcall = structuredCallFor(env as never, input.provider);
     if (ownA && otherA && qcall) {
-      const pref = await judgeAnswerPreference({ request: String(args.question ?? input.intent.goal), skillCard: card, answers: answerLight ? { light: ownA, default: otherA } : { default: ownA, light: otherA } }, qcall as never).catch(() => null);
+      const pref = await judgeAnswerPreference({ request: String(args.question ?? input.intent.goal), skillCard: card, answers: { [ownTier]: ownA, [otherTier]: otherA } }, qcall as never).catch(() => null);
       if (pref) trace.pairwise = { judge: pref.judge.name, preference: pref.preference, ms: pref.ms, ...(pref.error ? { error: pref.error.slice(0, 200) } : {}) };
     }
     return own;

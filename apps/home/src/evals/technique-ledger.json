@@ -1,6 +1,6 @@
 {
   "type": "ap.technique-ledger.v1",
-  "builtAt": "2026-09-28T05:39:53.726Z",
+  "builtAt": "2026-09-28T11:48:57.086Z",
   "rows": [
     {
       "technique": {
@@ -4892,6 +4892,279 @@
         }
       ],
       "verdict": "same",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "fast-v3",
+        "name": "Fast judge v3: missing information does not make a request 'none'",
+        "ontologyDriven": false,
+        "spec": "418",
+        "source": "Decline analysis (2,305 positive runs): 'put together this year's update' with no facts declined 7/14",
+        "what": "The judge's question says a request lacking information a skill needs is still that skill's (the skill asks).",
+        "comparisons": [
+          {
+            "experiment": "fresh10-declines",
+            "baseline": "sel-base",
+            "treatment": "sel-v3"
+          }
+        ],
+        "decision": {
+          "status": "kept-off",
+          "date": "2026-09-28",
+          "note": "fresh 10: +1/−3 at +24% pick tokens; missing-input cases unchanged (8/10 both)."
+        }
+      },
+      "comparisons": [
+        {
+          "experiment": "fresh10-declines",
+          "baseline": "sel-base",
+          "treatment": "sel-v3",
+          "set": "sha256:0d5c98972f0f723a4aa74f08ae31a3835de3a161bcac44eae39d3b31639bc30a",
+          "finishedAt": "2026-09-28T11:40:56.647Z",
+          "n": 42,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.7381,
+            "treat": 0.6905,
+            "delta": -0.0476,
+            "fixed": 1,
+            "broken": 3,
+            "p": 0.625
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1768,
+              "treat": 2184,
+              "delta": 416,
+              "deltaPct": 23.5,
+              "ci": [
+                40,
+                44
+              ]
+            },
+            "totalTokens": {
+              "base": 1768,
+              "treat": 2184,
+              "delta": 416,
+              "deltaPct": 23.5,
+              "ci": [
+                40.5,
+                45
+              ]
+            },
+            "pickMs": {
+              "base": 1507,
+              "treat": 1713.5,
+              "delta": 206.5,
+              "deltaPct": 13.7,
+              "ci": [
+                -166,
+                50
+              ]
+            },
+            "askMs": {
+              "base": 1916.5,
+              "treat": 2002,
+              "delta": 85.5,
+              "deltaPct": 4.5,
+              "ci": [
+                -326,
+                68
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 170.5,
+                "treat": 160,
+                "delta": -10.5,
+                "deltaPct": -6.2,
+                "ci": [
+                  -24.5,
+                  2
+                ]
+              },
+              "phase:pre-run": {
+                "base": 76,
+                "treat": 76,
+                "delta": 0,
+                "deltaPct": 0,
+                "ci": [
+                  -3.5,
+                  3
+                ]
+              },
+              "phase:run": {
+                "base": 1577.5,
+                "treat": 1836.5,
+                "delta": 259,
+                "deltaPct": 16.4,
+                "ci": [
+                  -153.5,
+                  79.5
+                ]
+              }
+            }
+          },
+          "verdict": "same-quality-costs-more"
+        }
+      ],
+      "verdict": "same-quality-costs-more",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "split-to-clarify",
+        "name": "A split between two skills asks which, instead of declining",
+        "ontologyDriven": false,
+        "spec": "418",
+        "source": "Decline analysis: 'look at another org's AI' flips grantee-diligence vs procurement (10/14, 8/14 declines) — a declined real ask reaches the planner without the skills",
+        "what": "When the pick is held but the top two outcomes are both skills with ≥ 0.7 mass together, the answer asks which of the two (ask.clarify), naming each by its purpose.",
+        "comparisons": [
+          {
+            "experiment": "fresh10-declines",
+            "baseline": "sel-base",
+            "treatment": "sel-split"
+          }
+        ],
+        "decision": {
+          "status": "kept-off",
+          "date": "2026-09-28",
+          "note": "fresh 10: never fired on the six ambiguous cases (0/6) — the judge does not split between the two skills; it commits to one (0.7–1.0) or leaks mass to \"none\" (top 0.43–0.48). Declines come from \"none\", not indecision. Ambiguity recognition is the open problem (cf. spec 416: judges never chose \"ask\")."
+        }
+      },
+      "comparisons": [
+        {
+          "experiment": "fresh10-declines",
+          "baseline": "sel-base",
+          "treatment": "sel-split",
+          "set": "sha256:0d5c98972f0f723a4aa74f08ae31a3835de3a161bcac44eae39d3b31639bc30a",
+          "finishedAt": "2026-09-28T11:40:56.647Z",
+          "n": 42,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.7381,
+            "treat": 0.7619,
+            "delta": 0.0238,
+            "fixed": 1,
+            "broken": 0,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1768,
+              "treat": 1754,
+              "delta": -14,
+              "deltaPct": -0.8,
+              "ci": [
+                -7,
+                0
+              ]
+            },
+            "totalTokens": {
+              "base": 1768,
+              "treat": 1754,
+              "delta": -14,
+              "deltaPct": -0.8,
+              "ci": [
+                -10,
+                0
+              ]
+            },
+            "pickMs": {
+              "base": 1507,
+              "treat": 1444,
+              "delta": -63,
+              "deltaPct": -4.2,
+              "ci": [
+                -151,
+                95
+              ]
+            },
+            "askMs": {
+              "base": 1916.5,
+              "treat": 1765.5,
+              "delta": -151,
+              "deltaPct": -7.9,
+              "ci": [
+                -283.5,
+                128.5
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 170.5,
+                "treat": 160,
+                "delta": -10.5,
+                "deltaPct": -6.2,
+                "ci": [
+                  -10.5,
+                  0.5
+                ]
+              },
+              "phase:pre-run": {
+                "base": 76,
+                "treat": 76.5,
+                "delta": 0.5,
+                "deltaPct": 0.7,
+                "ci": [
+                  -5,
+                  3
+                ]
+              },
+              "phase:run": {
+                "base": 1577.5,
+                "treat": 1525,
+                "delta": -52.5,
+                "deltaPct": -3.3,
+                "ci": [
+                  -147,
+                  93
+                ]
+              }
+            }
+          },
+          "verdict": "same"
+        }
+      ],
+      "verdict": "same",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "strong-answer-model",
+        "name": "A stronger model for long answers (side by side)",
+        "ontologyDriven": false,
+        "spec": "418",
+        "source": "A review's suggestion: route long answers (playbook, board pack) to a stronger model only if a side-by-side can tell them apart; the rubric cannot",
+        "what": "gemini-3.1-pro-preview vs the default (gemini-3.5-flash) on long-answer skills, judged side by side in both orders — before any per-skill routing.",
+        "preferences": [
+          {
+            "experiment": "long1-strong",
+            "variant": "ans-vs-strong",
+            "baselineKey": "default",
+            "treatmentKey": "strong"
+          }
+        ],
+        "comparisons": [],
+        "decision": {
+          "status": "kept-off",
+          "date": "2026-09-28",
+          "note": "Long-answer panel 1 (8 runs, ~7k tokens each): stronger preferred 3 (assessment 0.95, proposal 0.90, entity advice 0.85), default preferred 4 (procurement, diligence, board pack, decision brief), 1 tie (incident). No general gain. Per-skill hint for assess/proposal/entity rests on one sample each — confirm with 2 repeats on those three before any per-skill routing."
+        }
+      },
+      "comparisons": [],
+      "preferences": [
+        {
+          "experiment": "long1-strong",
+          "n": 8,
+          "treatmentWins": 3,
+          "baselineWins": 4,
+          "ties": 1,
+          "p": 1
+        }
+      ],
+      "verdict": "planned",
       "missing": []
     }
   ],

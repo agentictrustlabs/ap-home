@@ -172,7 +172,7 @@ export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/k
   /** Spec 416 §4f — the fast skill stage before the planner, named per run (default: the deployment's setting). */
   'skill-selection/stage': ['on', 'off'],
   /** Spec 416 §4h — the model an instruction skill ANSWERS with: the deployment's (default) or the provider's light one. */
-  'skill-selection/answer-model': ['default', 'light'],
+  'skill-selection/answer-model': ['default', 'light', 'strong'],
   /** Spec 416 §4h — score the answer with the quality rubric (a comparison's instrument; its time is reported apart). */
   'quality/judge': ['off', 'on', 'pairwise'],
   /** Spec 418 §1 — the outcome arm's party-stance rule: `on` (default) decides an arrow whose ends are both qualified by
@@ -201,7 +201,9 @@ export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/k
   /** Spec 418 — the fast judge's question: v2, or v3 (a request missing information a skill needs is still that skill's). */
   'skill-selection/fast-version': ['v2', 'v3'],
   /** Spec 418 — a pick split between two skills: decline (today) or clarify (ask which). */
-  'skill-selection/split': ['decline', 'clarify'] };
+  'skill-selection/split': ['decline', 'clarify'],
+  /** Spec 418 — under quality/judge=pairwise, the tier the run's own answer is compared AGAINST (default: light vs default). */
+  'quality/against': ['default', 'light', 'strong'] };
 
 export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantRequestV1 } | { ok: false; error: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'variant must be an object' };
