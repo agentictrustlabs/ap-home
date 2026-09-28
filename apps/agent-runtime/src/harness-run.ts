@@ -5753,6 +5753,8 @@ step is then handed to that agent under authority the person grants; leave it ou
       return agent.toLowerCase() === String(input.addressee ?? '').toLowerCase() ? undefined : agent;
     },
     normalizeArgs: ({ toolId, tool, args }) => resolveStepArgs(args, env, { ...deps, ...(input.session ? { session: input.session } : {}),
+      // Spec 420 §10 — the on-chain kind of a display-named candidate (a roster row), read from the record, never from the row.
+      ...(deps.agentTypeOf ? { agentKindOf: deps.agentTypeOf } : {}),
       // Spec 370 P7 — what recent asks resolved, for a pronoun or a repeated name. The same addressee's turns first.
       ...(input.conversation ? { recentParties: async () => recentParties(input.conversation, { addressee: String(input.addressee ?? '') }) } : {}),
       // Spec 385 — the person's DURABLE scoped confirmation memory (their own vault), consulted before the
