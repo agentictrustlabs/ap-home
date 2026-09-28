@@ -10,7 +10,7 @@ interface Cost { base: number | null; treat: number | null; delta: number | null
 interface Comparison { experiment: string; baseline: string; treatment: string; n: number; finishedAt?: string;
   quality: { metric: string; base: number; treat: number; delta: number; fixed: number; broken: number; p: number };
   cost: { pickTokens: Cost; totalTokens: Cost; pickMs: Cost; askMs: Cost; stages: Record<string, Cost> }; verdict: string }
-interface Row { technique: { id: string; name: string; what: string; ontologyDriven: boolean; spec?: string; source?: string; plannedAb?: string };
+interface Row { technique: { id: string; name: string; what: string; ontologyDriven: boolean; spec?: string; source?: string; plannedAb?: string; decision?: { status: string; date: string; note: string } };
   comparisons: Comparison[]; preferences?: Array<{ experiment: string; n: number; treatmentWins: number; baselineWins: number; ties: number; p: number }>; verdict: string; missing: string[] }
 const L = ledger as unknown as { builtAt: string; rows: Row[]; rule: string };
 
@@ -44,6 +44,7 @@ export function TechniqueLedger() {
             <span style={{ color: TONE[r.verdict] ?? '#64748b', fontWeight: 600 }}>{WORDS[r.verdict] ?? r.verdict}</span>
           </div>
           <div style={{ opacity: 0.8, fontSize: 13, marginTop: 2 }}>{r.technique.what}{r.technique.spec ? ` · spec ${r.technique.spec}` : ''}</div>
+          {r.technique.decision && <div style={{ fontSize: 13, marginTop: 4 }} data-testid="technique-decision"><strong>Decision ({r.technique.decision.date}): {r.technique.decision.status}</strong> — {r.technique.decision.note}</div>}
           {r.verdict === 'planned' && (
             <div style={{ fontSize: 13, marginTop: 4 }}>
               {r.technique.source && <div style={{ opacity: 0.75 }}>From: {r.technique.source}</div>}

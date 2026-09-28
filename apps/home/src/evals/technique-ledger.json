@@ -1,6 +1,6 @@
 {
   "type": "ap.technique-ledger.v1",
-  "builtAt": "2026-09-28T00:13:44.858Z",
+  "builtAt": "2026-09-28T01:17:23.323Z",
   "rows": [
     {
       "technique": {
@@ -20,7 +20,12 @@
             "baseline": "model",
             "treatment": "declared"
           }
-        ]
+        ],
+        "decision": {
+          "status": "kept-off",
+          "date": "2026-09-26",
+          "note": "Significantly worse than the model planner on fresh held-out (+4/−18, p=0.004)."
+        }
       },
       "comparisons": [
         {
@@ -207,7 +212,12 @@
             "baseline": "judgment",
             "treatment": "ontology+judgment"
           }
-        ]
+        ],
+        "decision": {
+          "status": "kept-off",
+          "date": "2026-09-26",
+          "note": "Significantly worse than the judge alone on fresh 2 and 3 (0 fixed, 8 and 7 broken)."
+        }
       },
       "comparisons": [
         {
@@ -322,7 +332,12 @@
             "baseline": "judgment",
             "treatment": "ontology"
           }
-        ]
+        ],
+        "decision": {
+          "status": "kept-off",
+          "date": "2026-09-26",
+          "note": "Significantly worse than the judge alone (−12, −7)."
+        }
       },
       "comparisons": [
         {
@@ -432,7 +447,12 @@
             "baseline": "judge-gemini",
             "treatment": "propose-gemini"
           }
-        ]
+        ],
+        "decision": {
+          "status": "kept-off",
+          "date": "2026-09-27",
+          "note": "No gain over the judge (+0/−2); the veto by word match retired (spec 416 W1)."
+        }
       },
       "comparisons": [
         {
@@ -497,7 +517,12 @@
             "baseline": "judge-gemini",
             "treatment": "judge-gemini-conformal"
           }
-        ]
+        ],
+        "decision": {
+          "status": "pending",
+          "date": "2026-09-27",
+          "note": "Coverage holds on both judges; no selection change at this set size — kept available as an acceptance mode, not the default."
+        }
       },
       "comparisons": [
         {
@@ -577,7 +602,12 @@
             "baseline": "stage-off",
             "treatment": "stage-on"
           }
-        ]
+        ],
+        "decision": {
+          "status": "adopted",
+          "date": "2026-09-27",
+          "note": "Tokens to pick −86–90% on every comparison, better on fresh 5 (+7/−0); SKILL_SELECTION_DEFAULT=fast on faithnet. Watch: time to pick is higher than the planner-only pick."
+        }
       },
       "comparisons": [
         {
@@ -860,7 +890,12 @@
             "baselineKey": "default",
             "treatmentKey": "light"
           }
-        ]
+        ],
+        "decision": {
+          "status": "kept-off",
+          "date": "2026-09-27",
+          "note": "Faster (ask −20–34%) but the default answer was preferred side by side on fresh 4 (14 vs 6)."
+        }
       },
       "comparisons": [
         {
@@ -1106,7 +1141,12 @@
             "baseline": "ctx-relation",
             "treatment": "ctx-seeded"
           }
-        ]
+        ],
+        "decision": {
+          "status": "adopted",
+          "date": "2026-09-27",
+          "note": "Context-dependent routing +11/−0 (p=0.001) at no token cost; live history behind SKILL_SELECTION_ASKER_CONTEXT=full (real asks only)."
+        }
       },
       "comparisons": [
         {
@@ -1222,8 +1262,19 @@
             "experiment": "fresh8-coverage",
             "baseline": "one-skill",
             "treatment": "outcome"
+          },
+          {
+            "experiment": "fresh9-d4",
+            "baseline": "one-skill",
+            "treatment": "outcome-d4",
+            "note": "with D4 (necessity + office prior) on both"
           }
-        ]
+        ],
+        "decision": {
+          "status": "pending",
+          "date": "2026-09-27",
+          "note": "Three sets, same plan quality as one-skill (+2/−2, +4/−6, +3/−2) at +124–174% pick tokens: not a default. Next: pay for the dataflow questions only when the picked skill has a producible upstream input."
+        }
       },
       "comparisons": [
         {
@@ -1317,12 +1368,195 @@
             }
           },
           "verdict": "same-quality-costs-more"
+        },
+        {
+          "experiment": "fresh8-coverage",
+          "baseline": "one-skill",
+          "treatment": "outcome",
+          "set": "sha256:2e0ca91d31b7328c5d40519767a644d9c46f7f6a514c4e07837812924b43df55",
+          "finishedAt": "2026-09-28T00:13:44.939Z",
+          "n": 77,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.8961,
+            "treat": 0.8701,
+            "delta": -0.026,
+            "fixed": 4,
+            "broken": 6,
+            "p": 0.7539
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1747,
+              "treat": 3907,
+              "delta": 2160,
+              "deltaPct": 123.6,
+              "ci": [
+                1895,
+                2204
+              ]
+            },
+            "totalTokens": {
+              "base": 1747,
+              "treat": 3907,
+              "delta": 2160,
+              "deltaPct": 123.6,
+              "ci": [
+                1895,
+                2204
+              ]
+            },
+            "pickMs": {
+              "base": 1191,
+              "treat": 1737,
+              "delta": 546,
+              "deltaPct": 45.8,
+              "ci": [
+                223,
+                673
+              ]
+            },
+            "askMs": {
+              "base": 5354,
+              "treat": 5893,
+              "delta": 539,
+              "deltaPct": 10.1,
+              "ci": [
+                41,
+                778
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1493,
+                "treat": 1514,
+                "delta": 21,
+                "deltaPct": 1.4,
+                "ci": [
+                  -24,
+                  63
+                ]
+              },
+              "phase:pre-run": {
+                "base": 2055,
+                "treat": 2111,
+                "delta": 56,
+                "deltaPct": 2.7,
+                "ci": [
+                  -40,
+                  99
+                ]
+              },
+              "phase:run": {
+                "base": 1758,
+                "treat": 2011,
+                "delta": 253,
+                "deltaPct": 14.4,
+                "ci": [
+                  -88,
+                  679
+                ]
+              }
+            }
+          },
+          "verdict": "same-quality-costs-more"
+        },
+        {
+          "experiment": "fresh9-d4",
+          "baseline": "one-skill",
+          "treatment": "outcome-d4",
+          "note": "with D4 (necessity + office prior) on both",
+          "set": "sha256:8763d5dd945cff5612f90841994e69584d563a24fb952cd85388e4156e11e9fc",
+          "finishedAt": "2026-09-28T01:16:51.517Z",
+          "n": 38,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.8684,
+            "treat": 0.8684,
+            "delta": 0,
+            "fixed": 2,
+            "broken": 2,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1731.5,
+              "treat": 4651,
+              "delta": 2919.5,
+              "deltaPct": 168.6,
+              "ci": [
+                2746,
+                2944.5
+              ]
+            },
+            "totalTokens": {
+              "base": 1731.5,
+              "treat": 4651,
+              "delta": 2919.5,
+              "deltaPct": 168.6,
+              "ci": [
+                2746,
+                2944.5
+              ]
+            },
+            "pickMs": {
+              "base": 1182,
+              "treat": 2220.5,
+              "delta": 1038.5,
+              "deltaPct": 87.9,
+              "ci": [
+                781,
+                1121
+              ]
+            },
+            "askMs": {
+              "base": 4721.5,
+              "treat": 6466.5,
+              "delta": 1745,
+              "deltaPct": 37,
+              "ci": [
+                863,
+                2586
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1508.5,
+                "treat": 1507.5,
+                "delta": -1,
+                "deltaPct": -0.1,
+                "ci": [
+                  -108,
+                  34
+                ]
+              },
+              "phase:pre-run": {
+                "base": 1992.5,
+                "treat": 2420.5,
+                "delta": 428,
+                "deltaPct": 21.5,
+                "ci": [
+                  421,
+                  1042
+                ]
+              },
+              "phase:run": {
+                "base": 1322,
+                "treat": 2398,
+                "delta": 1076,
+                "deltaPct": 81.4,
+                "ci": [
+                  956,
+                  1468.5
+                ]
+              }
+            }
+          },
+          "verdict": "same-quality-costs-more"
         }
       ],
       "verdict": "same-quality-costs-more",
-      "missing": [
-        "fresh8-coverage"
-      ]
+      "missing": []
     },
     {
       "technique": {
@@ -1337,13 +1571,442 @@
             "baseline": "outcome-ask-arrows",
             "treatment": "outcome-party-rule"
           }
-        ]
+        ],
+        "decision": {
+          "status": "adopted",
+          "date": "2026-09-27",
+          "note": "Same plan quality (33/36 both) at −12% tokens to pick; stays on in the outcome arm."
+        }
       },
-      "comparisons": [],
-      "verdict": "inconclusive",
-      "missing": [
-        "fresh7-party-rule"
-      ]
+      "comparisons": [
+        {
+          "experiment": "fresh7-party-rule",
+          "baseline": "outcome-ask-arrows",
+          "treatment": "outcome-party-rule",
+          "set": "sha256:f487af4a8a8563da110651bdb37ed863a340dad5f80acbfbaf6cc8a4f7b3848d",
+          "finishedAt": "2026-09-28T00:44:35.417Z",
+          "n": 36,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.9167,
+            "treat": 0.9167,
+            "delta": 0,
+            "fixed": 1,
+            "broken": 1,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 5318,
+              "treat": 4667.5,
+              "delta": -650.5,
+              "deltaPct": -12.2,
+              "ci": [
+                -801,
+                -614
+              ]
+            },
+            "totalTokens": {
+              "base": 5318,
+              "treat": 4667.5,
+              "delta": -650.5,
+              "deltaPct": -12.2,
+              "ci": [
+                -801,
+                -614
+              ]
+            },
+            "pickMs": {
+              "base": 2090.5,
+              "treat": 2139,
+              "delta": 48.5,
+              "deltaPct": 2.3,
+              "ci": [
+                -139,
+                289
+              ]
+            },
+            "askMs": {
+              "base": 5738.5,
+              "treat": 5810,
+              "delta": 71.5,
+              "deltaPct": 1.2,
+              "ci": [
+                -140,
+                476.5
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1515.5,
+                "treat": 1530,
+                "delta": 14.5,
+                "deltaPct": 1,
+                "ci": [
+                  -85,
+                  98
+                ]
+              },
+              "phase:pre-run": {
+                "base": 1484,
+                "treat": 1643.5,
+                "delta": 159.5,
+                "deltaPct": 10.7,
+                "ci": [
+                  -48,
+                  558
+                ]
+              },
+              "phase:run": {
+                "base": 2411,
+                "treat": 2429,
+                "delta": 18,
+                "deltaPct": 0.7,
+                "ci": [
+                  -329,
+                  583
+                ]
+              }
+            }
+          },
+          "verdict": "same-quality-cheaper"
+        }
+      ],
+      "verdict": "same-quality-cheaper",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "input-necessity",
+        "name": "Required vs enriching inputs; chain only on declared absence",
+        "ontologyDriven": true,
+        "spec": "418 D4",
+        "source": "held-out 8 (development): 4 needless chain steps where an enriching input was merely unmentioned",
+        "what": "Every consumed slot is required or enriching; an enriching input is produced by a chain only when the request says it is absent — one yes-no per producible enriching class.",
+        "comparisons": [
+          {
+            "experiment": "fresh9-d4",
+            "baseline": "outcome-no-necessity",
+            "treatment": "outcome-d4"
+          }
+        ],
+        "decision": {
+          "status": "pending",
+          "date": "2026-09-27",
+          "note": "Fixed the over-chaining it targeted (3 cases) but lost 3 grant cases to holds; +19% pick tokens. n=38 × 1 repeat is within noise — rerun with repeats before deciding."
+        }
+      },
+      "comparisons": [
+        {
+          "experiment": "fresh9-d4",
+          "baseline": "outcome-no-necessity",
+          "treatment": "outcome-d4",
+          "set": "sha256:8763d5dd945cff5612f90841994e69584d563a24fb952cd85388e4156e11e9fc",
+          "finishedAt": "2026-09-28T01:16:51.517Z",
+          "n": 38,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.8684,
+            "treat": 0.8684,
+            "delta": 0,
+            "fixed": 3,
+            "broken": 3,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 3917.5,
+              "treat": 4651,
+              "delta": 733.5,
+              "deltaPct": 18.7,
+              "ci": [
+                646,
+                774
+              ]
+            },
+            "totalTokens": {
+              "base": 3917.5,
+              "treat": 4651,
+              "delta": 733.5,
+              "deltaPct": 18.7,
+              "ci": [
+                646,
+                774
+              ]
+            },
+            "pickMs": {
+              "base": 1833.5,
+              "treat": 2220.5,
+              "delta": 387,
+              "deltaPct": 21.1,
+              "ci": [
+                269,
+                650
+              ]
+            },
+            "askMs": {
+              "base": 5590.5,
+              "treat": 6466.5,
+              "delta": 876,
+              "deltaPct": 15.7,
+              "ci": [
+                -79.5,
+                1725
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1466.5,
+                "treat": 1507.5,
+                "delta": 41,
+                "deltaPct": 2.8,
+                "ci": [
+                  -47.5,
+                  49
+                ]
+              },
+              "phase:pre-run": {
+                "base": 2086,
+                "treat": 2420.5,
+                "delta": 334.5,
+                "deltaPct": 16,
+                "ci": [
+                  13,
+                  588
+                ]
+              },
+              "phase:run": {
+                "base": 2046,
+                "treat": 2398,
+                "delta": 352,
+                "deltaPct": 17.2,
+                "ci": [
+                  91.5,
+                  849
+                ]
+              }
+            }
+          },
+          "verdict": "same-quality-costs-more"
+        }
+      ],
+      "verdict": "same-quality-costs-more",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "office-prior",
+        "name": "The asker's office as a prior (memory → role → typical capabilities)",
+        "ontologyDriven": true,
+        "spec": "418 D4",
+        "source": "Offices typicallyUses in the domain ontology; held-out 8 office cases missed by both arms",
+        "what": "The asker's memory tags grounded in role classes; the reading names the office and the capabilities it typically uses.",
+        "comparisons": [
+          {
+            "experiment": "fresh9-d4",
+            "baseline": "outcome-no-office",
+            "treatment": "outcome-d4"
+          },
+          {
+            "experiment": "fresh9-d4",
+            "baseline": "one-skill-no-office",
+            "treatment": "one-skill"
+          }
+        ],
+        "decision": {
+          "status": "kept-off",
+          "date": "2026-09-27",
+          "note": "No gain on either arm (outcome −1, one-skill −1 net); declines rose on the office cases. Not adopted; the prompt wording is the suspect."
+        }
+      },
+      "comparisons": [
+        {
+          "experiment": "fresh9-d4",
+          "baseline": "outcome-no-office",
+          "treatment": "outcome-d4",
+          "set": "sha256:8763d5dd945cff5612f90841994e69584d563a24fb952cd85388e4156e11e9fc",
+          "finishedAt": "2026-09-28T01:16:51.517Z",
+          "n": 38,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.8947,
+            "treat": 0.8684,
+            "delta": -0.0263,
+            "fixed": 0,
+            "broken": 1,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 4644,
+              "treat": 4651,
+              "delta": 7,
+              "deltaPct": 0.2,
+              "ci": [
+                -2,
+                21
+              ]
+            },
+            "totalTokens": {
+              "base": 4644,
+              "treat": 4651,
+              "delta": 7,
+              "deltaPct": 0.2,
+              "ci": [
+                -2,
+                21
+              ]
+            },
+            "pickMs": {
+              "base": 2207.5,
+              "treat": 2220.5,
+              "delta": 13,
+              "deltaPct": 0.6,
+              "ci": [
+                -130,
+                147
+              ]
+            },
+            "askMs": {
+              "base": 6170.5,
+              "treat": 6466.5,
+              "delta": 296,
+              "deltaPct": 4.8,
+              "ci": [
+                -527,
+                1318
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1508.5,
+                "treat": 1507.5,
+                "delta": -1,
+                "deltaPct": -0.1,
+                "ci": [
+                  -50,
+                  66
+                ]
+              },
+              "phase:pre-run": {
+                "base": 2158,
+                "treat": 2420.5,
+                "delta": 262.5,
+                "deltaPct": 12.2,
+                "ci": [
+                  -176.5,
+                  475
+                ]
+              },
+              "phase:run": {
+                "base": 2370.5,
+                "treat": 2398,
+                "delta": 27.5,
+                "deltaPct": 1.2,
+                "ci": [
+                  -216,
+                  335
+                ]
+              }
+            }
+          },
+          "verdict": "same"
+        },
+        {
+          "experiment": "fresh9-d4",
+          "baseline": "one-skill-no-office",
+          "treatment": "one-skill",
+          "set": "sha256:8763d5dd945cff5612f90841994e69584d563a24fb952cd85388e4156e11e9fc",
+          "finishedAt": "2026-09-28T01:16:51.517Z",
+          "n": 38,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.8947,
+            "treat": 0.8684,
+            "delta": -0.0263,
+            "fixed": 1,
+            "broken": 2,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1722,
+              "treat": 1731.5,
+              "delta": 9.5,
+              "deltaPct": 0.6,
+              "ci": [
+                0,
+                3
+              ]
+            },
+            "totalTokens": {
+              "base": 1722,
+              "treat": 1731.5,
+              "delta": 9.5,
+              "deltaPct": 0.6,
+              "ci": [
+                0,
+                3
+              ]
+            },
+            "pickMs": {
+              "base": 1110,
+              "treat": 1182,
+              "delta": 72,
+              "deltaPct": 6.5,
+              "ci": [
+                -69,
+                80.5
+              ]
+            },
+            "askMs": {
+              "base": 4674,
+              "treat": 4721.5,
+              "delta": 47.5,
+              "deltaPct": 1,
+              "ci": [
+                -177,
+                601
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1514.5,
+                "treat": 1508.5,
+                "delta": -6,
+                "deltaPct": -0.4,
+                "ci": [
+                  -27.5,
+                  106
+                ]
+              },
+              "phase:pre-run": {
+                "base": 1964,
+                "treat": 1992.5,
+                "delta": 28.5,
+                "deltaPct": 1.5,
+                "ci": [
+                  -112,
+                  273.5
+                ]
+              },
+              "phase:run": {
+                "base": 1221,
+                "treat": 1322,
+                "delta": 101,
+                "deltaPct": 8.3,
+                "ci": [
+                  -55,
+                  264
+                ]
+              }
+            }
+          },
+          "verdict": "same"
+        }
+      ],
+      "verdict": "same",
+      "missing": []
     },
     {
       "technique": {
