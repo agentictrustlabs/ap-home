@@ -4886,8 +4886,9 @@ step is then handed to that agent under authority the person grants; leave it ou
           const arm = input.variant?.selection;
           if (arm === 'ontology' || arm === 'judgment' || arm === 'ontology+judgment' || arm === 'propose+judgment' || arm === 'ontology-first' || arm === 'framed-judgment' || arm === 'outcome') {
             const sources = instructionSourcesOf(playbook);
-            const skills = Object.values(playbook?.tools ?? {}).filter((t) => sources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}), ...(t.produces?.length ? { produces: t.produces } : {}), ...(t.consumes?.length ? { consumes: t.consumes } : {}) }));
-            const lexicon = playbook?.domainLexicon;
+            const skills = Object.values(playbook?.tools ?? {}).filter((t) => sources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}), ...(t.produces?.length ? { produces: t.produces } : {}), ...(t.consumes?.length ? { consumes: input.variant?.toggles?.['skill-selection/necessity'] === 'off' ? t.consumes.map(({ necessity: _n, ...k }) => k) : t.consumes } : {}) }));
+            // Spec 418 D4 — `office-prior off` hides the role classes' typical capabilities from the reading.
+            const lexicon = input.variant?.toggles?.['skill-selection/office-prior'] === 'off' ? playbook?.domainLexicon?.map(({ uses: _u, ...e }) => e) : playbook?.domainLexicon;
             // The judge's model call is a model invocation of the run like the planner's: on the trace, with its provider,
             // model and why — role `judge`, so a reader can tell the call that chose the skill from the one that answered.
             const fast = input.variant?.judgeProfile === 'fast' || input.variant?.judgeProfile === 'logprob';
