@@ -4345,7 +4345,12 @@ app.post('/harness/ask', async (c) => {
     budgetGate,
   ]);
   if (budgetRefusal) return budgetRefusal; // P1.4 — over budget: said, 429, before any model or step
-  const conversationRaw = askerRecords[CONVERSATION_RECORD] ?? null;
+  // Spec 418 §12 — A COMPARISON RUN STARTS FROM ITS STATED STATE. The conversation window is the asker's rolling record:
+  // read in a comparison, each case began from whatever the previous cases left (a payer named two cases earlier filled
+  // an unnamed one); written, test asks landed in the person's own history. A run under a variant neither reads nor
+  // keeps it — the Home never sends a variant (it sends `model`), so no person's conversation changes.
+  const isolatedTurn = !!variantReq;
+  const conversationRaw = isolatedTurn ? null : askerRecords[CONVERSATION_RECORD] ?? null;
   const memoryRaw = ownAgent ? askerRecords[FACTS_RECORD] ?? null : null;
   const prefsRaw = ownAgent ? askerRecords[PREFERENCES_RECORD] ?? null : null;
   askDeps.addresseeKind = addresseeKind ?? null;
@@ -4713,7 +4718,7 @@ app.post('/harness/ask', async (c) => {
     // The write LANDS BEFORE THE REPLY LEAVES: a next ask one second later once read the record without
     // this turn and recalled an older, wrong one. It runs beside the spoken-line rendering, not after it.
     let kept: Promise<void> = Promise.resolve();
-    if (askDeps.writeSubjectRecord) {
+    if (askDeps.writeSubjectRecord && !isolatedTurn) {
       // ONLY what the PERSON'S WORDS resolved. A decision point's answer (the payer they marked, cited
       // by a rule) carries the ROLE'S word as `raw` ("paying from"), and remembered as a party it once made
       // "send him 2 USDC" pay alice's own treasury — "him" matched "paying from". A pronoun recalls words.
@@ -4819,6 +4824,10 @@ app.post('/harness/ask', async (c) => {
       // The three WALL phases, non-overlapping: before the harness ran, the run (prepare · pick · steps), after it.
       const nowMs = Date.now();
       stages['phase:pre-run'] = runStartMs - receivedAt; stages['phase:run'] = runEndMs - runStartMs; stages['phase:post-run'] = nowMs - runEndMs - (trace.quality?.ms ?? 0) - ((trace as { outcomeCheck?: { ms?: number } }).outcomeCheck?.ms ?? 0);
+      // Spec 418 A1 — first words: from the ASK (what a person feels) and from the start of the streamed step.
+      { const fw = trace as { answerFirstWordsMs?: number; answerFirstWordsAt?: number };
+        if (typeof fw.answerFirstWordsAt === 'number') stages['answer:first-words'] = fw.answerFirstWordsAt - receivedAt;
+        if (typeof fw.answerFirstWordsMs === 'number') stages['answer:first-words-in-step'] = fw.answerFirstWordsMs; }
       (reply as { plannerTrace: { stages?: Record<string, number> } }).plannerTrace.stages = stages;
     }
     return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, hasProvenance: hasProvenanceRef(addressee, runRef), resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(routedDelivery ? { routedDelivery } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt, ...(isExpired(r) ? { expired: true } : {}) })), unfinishedTotal: otherRuns.length } : {}) });

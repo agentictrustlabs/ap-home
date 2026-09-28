@@ -1,6 +1,6 @@
 {
   "type": "ap.technique-ledger.v1",
-  "builtAt": "2026-09-28T11:48:57.086Z",
+  "builtAt": "2026-09-28T13:27:16.109Z",
   "rows": [
     {
       "technique": {
@@ -3732,10 +3732,264 @@
         "source": "Live, 2026-09-27: a two-step chain ran 29 s of a 33 s ask — each skill.apply ~14 s; the lighter answer model was faster but lost side by side (14 vs 6)",
         "what": "Candidates: stream the answer to the surface as it is produced (time to first words, not to the whole answer); cap the answer to what the skill's method needs; for a chain, stream the first step's result while the second runs; answer-model routing by skill (a light model only where side-by-side shows no loss).",
         "plannedAb": "answers on: time to first token and whole-ask p50/p90, side-by-side preference vs the current answers — per skill.",
-        "comparisons": []
+        "comparisons": [
+          {
+            "experiment": "stream-a1b",
+            "baseline": "st-off",
+            "treatment": "st-on",
+            "note": "long-answer panel 1, answers on, outcome check on; stages answer:first-words (from the ask) vs the whole ask"
+          },
+          {
+            "experiment": "stream-a1c",
+            "baseline": "st-off",
+            "treatment": "st-on",
+            "note": "after the stream fixes (reasoning headroom; usage once); repeats 1"
+          }
+        ],
+        "decision": {
+          "status": "pending",
+          "date": "2026-09-28",
+          "note": "Streaming wired (answer/stream, ANSWER_STREAM_DEFAULT): drafts on the progress list, first words timed from the ask. Live probe on a two-step chain: first words at 5.0 s into the step, whole ask 31.7 s. Decide on stream-a1b: first-words p50 vs the structured answer's whole time, outcome check unchanged."
+        }
       },
-      "comparisons": [],
-      "verdict": "planned",
+      "comparisons": [
+        {
+          "experiment": "stream-a1b",
+          "baseline": "st-off",
+          "treatment": "st-on",
+          "note": "long-answer panel 1, answers on, outcome check on; stages answer:first-words (from the ask) vs the whole ask",
+          "set": "sha256:fa8691eea1fe5f4498e091f7ce8ba3644578dc169e46bbf11199201c66da3c23",
+          "finishedAt": "2026-09-28T12:39:24.870Z",
+          "n": 16,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.875,
+            "treat": 0.875,
+            "delta": 0,
+            "fixed": 0,
+            "broken": 0,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1747.5,
+              "treat": 1755,
+              "delta": 7.5,
+              "deltaPct": 0.4,
+              "ci": [
+                0,
+                0
+              ]
+            },
+            "totalTokens": {
+              "base": 6776.5,
+              "treat": 125271.5,
+              "delta": 118495,
+              "deltaPct": 1748.6,
+              "ci": [
+                86046,
+                134894.5
+              ]
+            },
+            "pickMs": {
+              "base": 2370,
+              "treat": 2839.5,
+              "delta": 469.5,
+              "deltaPct": 19.8,
+              "ci": [
+                -1296,
+                1689
+              ]
+            },
+            "askMs": {
+              "base": 18993,
+              "treat": 17943.5,
+              "delta": -1049.5,
+              "deltaPct": -5.5,
+              "ci": [
+                -8298,
+                6225.5
+              ]
+            },
+            "stages": {
+              "answer:first-words": {
+                "base": null,
+                "treat": 13393.5,
+                "delta": null,
+                "deltaPct": null
+              },
+              "phase:post-run": {
+                "base": 425.5,
+                "treat": 206.5,
+                "delta": -219,
+                "deltaPct": -51.5,
+                "ci": [
+                  -2265,
+                  1717
+                ]
+              },
+              "phase:pre-run": {
+                "base": 83,
+                "treat": 892.5,
+                "delta": 809.5,
+                "deltaPct": 975.3,
+                "ci": [
+                  -11,
+                  1616
+                ]
+              },
+              "phase:run": {
+                "base": 18495.5,
+                "treat": 16593.5,
+                "delta": -1902,
+                "deltaPct": -10.3,
+                "ci": [
+                  -7799,
+                  2457.5
+                ]
+              }
+            }
+          },
+          "answer": {
+            "outcome": {
+              "base": 1,
+              "treat": 0.5,
+              "delta": -0.5,
+              "deltaPct": -50,
+              "ci": [
+                -0.5125,
+                0
+              ]
+            }
+          },
+          "verdict": "same"
+        },
+        {
+          "experiment": "stream-a1c",
+          "baseline": "st-off",
+          "treatment": "st-on",
+          "note": "after the stream fixes (reasoning headroom; usage once); repeats 1",
+          "set": "sha256:fa8691eea1fe5f4498e091f7ce8ba3644578dc169e46bbf11199201c66da3c23",
+          "finishedAt": "2026-09-28T12:53:58.631Z",
+          "n": 8,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.875,
+            "treat": 0.875,
+            "delta": 0,
+            "fixed": 0,
+            "broken": 0,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1747.5,
+              "treat": 1747.5,
+              "delta": 0,
+              "deltaPct": 0,
+              "ci": [
+                -8,
+                0
+              ]
+            },
+            "totalTokens": {
+              "base": 6868.5,
+              "treat": 6713,
+              "delta": -155.5,
+              "deltaPct": -2.3,
+              "ci": [
+                -258,
+                6
+              ]
+            },
+            "pickMs": {
+              "base": 2859,
+              "treat": 1826.5,
+              "delta": -1032.5,
+              "deltaPct": -36.1,
+              "ci": [
+                -1802,
+                375
+              ]
+            },
+            "askMs": {
+              "base": 23310,
+              "treat": 21221.5,
+              "delta": -2088.5,
+              "deltaPct": -9,
+              "ci": [
+                -8016,
+                7300
+              ]
+            },
+            "stages": {
+              "answer:first-words": {
+                "base": null,
+                "treat": 11810.5,
+                "delta": null,
+                "deltaPct": null
+              },
+              "phase:post-run": {
+                "base": 1128.5,
+                "treat": 161.5,
+                "delta": -967,
+                "deltaPct": -85.7,
+                "ci": [
+                  -2407,
+                  1797
+                ]
+              },
+              "phase:pre-run": {
+                "base": 856,
+                "treat": 88.5,
+                "delta": -767.5,
+                "deltaPct": -89.7,
+                "ci": [
+                  -1842,
+                  1580
+                ]
+              },
+              "phase:run": {
+                "base": 19105,
+                "treat": 19725.5,
+                "delta": 620.5,
+                "deltaPct": 3.2,
+                "ci": [
+                  -3152.5,
+                  7781
+                ]
+              }
+            }
+          },
+          "answer": {
+            "outcome": {
+              "base": 0.83335,
+              "treat": 1,
+              "delta": 0.16664999999999996,
+              "deltaPct": 20,
+              "ci": [
+                0,
+                0.30000000000000004
+              ]
+            }
+          },
+          "verdict": "same"
+        }
+      ],
+      "pooled": [
+        {
+          "baseline": "st-off",
+          "experiments": 2,
+          "n": 24,
+          "fixed": 0,
+          "broken": 0,
+          "p": 1,
+          "pickTokensPct": 0.2,
+          "askMsPct": -7.25,
+          "verdict": "same"
+        }
+      ],
+      "verdict": "same",
       "missing": []
     },
     {
@@ -3752,12 +4006,24 @@
             "baseline": "chain-full",
             "treatment": "chain-brief",
             "note": "answers on, rubric on the terminal skill"
+          },
+          {
+            "experiment": "chain4-outcome",
+            "baseline": "oc-full",
+            "treatment": "oc-brief",
+            "note": "answers on; the outcome check (did it deliver the inventory AND the playbook)"
+          },
+          {
+            "experiment": "chain4-outcome2",
+            "baseline": "oc-full",
+            "treatment": "oc-brief",
+            "note": "outcome check fixed (wholes, not parts); streaming on in both arms"
           }
         ],
         "decision": {
           "status": "pending",
-          "date": "2026-09-27",
-          "note": "Chain panel 1: on the chained runs ask p50 28.6 → 23.1 s (−19%), output tokens −44%, rubric 0.94 → 1.00 (the rubric saturates). Needs a side-by-side of the final answers before any default."
+          "date": "2026-09-28",
+          "note": "Decided on plan-exact and cost only (the outcome check is not yet valid). chain1-brief: plan-exact 0.50/0.50, ask −15.7%, tokens −12.4% (CIs cross 0). chain4-outcome: plan-exact same, ask −33% (CI crosses 0). chain4-outcome2 (streaming on in both arms): plan-exact 0.93 → 1.00 (1 fixed, 0 broken), ask −2.6%, tokens −11.1% (CI [−676, +99]). Direction consistent, no single interval excludes 0; not adopted by the §8 rule. Kept off; no further spend unless the outcome check becomes valid."
         }
       },
       "comparisons": [
@@ -3865,6 +4131,239 @@
             }
           },
           "verdict": "same"
+        },
+        {
+          "experiment": "chain4-outcome",
+          "baseline": "oc-full",
+          "treatment": "oc-brief",
+          "note": "answers on; the outcome check (did it deliver the inventory AND the playbook)",
+          "set": "sha256:63fb229d0daa6a5fc375c2cf38001d12bbbd2a13dac488c01d87b94b9bc14884",
+          "finishedAt": "2026-09-28T12:18:08.845Z",
+          "n": 14,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.6429,
+            "treat": 0.6429,
+            "delta": 0,
+            "fixed": 0,
+            "broken": 0,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 2134,
+              "treat": 2129.5,
+              "delta": -4.5,
+              "deltaPct": -0.2,
+              "ci": [
+                -2,
+                2
+              ]
+            },
+            "totalTokens": {
+              "base": 6839,
+              "treat": 7306,
+              "delta": 467,
+              "deltaPct": 6.8,
+              "ci": [
+                -1220,
+                272
+              ]
+            },
+            "pickMs": {
+              "base": 2498,
+              "treat": 2215,
+              "delta": -283,
+              "deltaPct": -11.3,
+              "ci": [
+                -1611,
+                322
+              ]
+            },
+            "askMs": {
+              "base": 22420,
+              "treat": 15117,
+              "delta": -7303,
+              "deltaPct": -32.6,
+              "ci": [
+                -10224,
+                4984
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 189,
+                "treat": 172.5,
+                "delta": -16.5,
+                "deltaPct": -8.7,
+                "ci": [
+                  -2270,
+                  1767
+                ]
+              },
+              "phase:pre-run": {
+                "base": 99,
+                "treat": 90.5,
+                "delta": -8.5,
+                "deltaPct": -8.6,
+                "ci": [
+                  -1655,
+                  1846
+                ]
+              },
+              "phase:run": {
+                "base": 16525,
+                "treat": 14241.5,
+                "delta": -2283.5,
+                "deltaPct": -13.8,
+                "ci": [
+                  -8194,
+                  1938
+                ]
+              }
+            }
+          },
+          "answer": {
+            "outcome": {
+              "base": 0.0267,
+              "treat": 0.02,
+              "delta": -0.006700000000000001,
+              "deltaPct": -25.1,
+              "ci": [
+                -0.033299999999999996,
+                0.01
+              ]
+            }
+          },
+          "verdict": "same"
+        },
+        {
+          "experiment": "chain4-outcome2",
+          "baseline": "oc-full",
+          "treatment": "oc-brief",
+          "note": "outcome check fixed (wholes, not parts); streaming on in both arms",
+          "set": "sha256:63fb229d0daa6a5fc375c2cf38001d12bbbd2a13dac488c01d87b94b9bc14884",
+          "finishedAt": "2026-09-28T13:26:32.372Z",
+          "n": 14,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.9286,
+            "treat": 1,
+            "delta": 0.0714,
+            "fixed": 1,
+            "broken": 0,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 2138,
+              "treat": 2134.5,
+              "delta": -3.5,
+              "deltaPct": -0.2,
+              "ci": [
+                -7.5,
+                0
+              ]
+            },
+            "totalTokens": {
+              "base": 8769,
+              "treat": 7794,
+              "delta": -975,
+              "deltaPct": -11.1,
+              "ci": [
+                -676,
+                99
+              ]
+            },
+            "pickMs": {
+              "base": 6192.5,
+              "treat": 5782.5,
+              "delta": -410,
+              "deltaPct": -6.6,
+              "ci": [
+                -2660,
+                1309
+              ]
+            },
+            "askMs": {
+              "base": 28120.5,
+              "treat": 27392,
+              "delta": -728.5,
+              "deltaPct": -2.6,
+              "ci": [
+                -11343,
+                3901
+              ]
+            },
+            "stages": {
+              "answer:first-words": {
+                "base": 15869,
+                "treat": 13834.5,
+                "delta": -2034.5,
+                "deltaPct": -12.8,
+                "ci": [
+                  -10604,
+                  5287
+                ]
+              },
+              "phase:post-run": {
+                "base": 685.5,
+                "treat": 199.5,
+                "delta": -486,
+                "deltaPct": -70.9,
+                "ci": [
+                  -1995,
+                  810
+                ]
+              },
+              "phase:pre-run": {
+                "base": 153,
+                "treat": 1708.5,
+                "delta": 1555.5,
+                "deltaPct": 1016.7,
+                "ci": [
+                  -2099.5,
+                  2350.5
+                ]
+              },
+              "phase:run": {
+                "base": 25273,
+                "treat": 25895,
+                "delta": 622,
+                "deltaPct": 2.5,
+                "ci": [
+                  -8214,
+                  2520
+                ]
+              }
+            }
+          },
+          "answer": {
+            "outcome": {
+              "base": 0.24,
+              "treat": 0.19165,
+              "delta": -0.048350000000000004,
+              "deltaPct": -20.1,
+              "ci": [
+                -0.0733,
+                0.01
+              ]
+            }
+          },
+          "verdict": "same"
+        }
+      ],
+      "pooled": [
+        {
+          "baseline": "oc-full",
+          "experiments": 2,
+          "n": 28,
+          "fixed": 1,
+          "broken": 0,
+          "p": 1,
+          "pickTokensPct": -0.2,
+          "askMsPct": -17.6,
+          "verdict": "same-quality-cheaper"
         }
       ],
       "verdict": "same",
@@ -5164,6 +5663,288 @@
           "p": 1
         }
       ],
+      "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "outcome-check",
+        "name": "Check the outcome, not only the choice",
+        "ontologyDriven": true,
+        "spec": "418 · gap register A2",
+        "source": "LangSmith/Braintrust/OpenAI Evals grade results; SAP/Salesforce grade tool-call correctness; our receipts already carry attempted · accepted · committed · confirmed",
+        "what": "Per case: a deterministic check where the record can be read back (the receipt at the payee, the amount, the declared effect landed) and a judged check where it cannot (the reply states the result truly); outcome rate on the ledger beside selection and plan quality.",
+        "plannedAb": "outcome rate per variant on cases with acts; effects that failed surfaced",
+        "comparisons": [
+          {
+            "experiment": "chain4-outcome",
+            "baseline": "oc-full",
+            "treatment": "oc-brief",
+            "note": "first use of the instrument"
+          },
+          {
+            "experiment": "chain4-outcome2",
+            "baseline": "oc-full",
+            "treatment": "oc-brief",
+            "note": "outcome check fixed (wholes, not parts); streaming on in both arms"
+          }
+        ],
+        "decision": {
+          "status": "pending",
+          "date": "2026-09-28",
+          "note": "chain4-outcome2 (fixed for parts): still NOT a valid instrument — (1) it asks for every class the terminal skill produces, not the one requested (the grants drafter produces GrantProposal + LetterOfInquiry + ClaimPlaceholder; a correct LOI scores 0.24); (2) 'usable as it stands' scores the right behaviour on a request missing its facts (a pipeline structure with the gaps named) near 0. Next: expected = the class the outcome reading picked for the request; judged 'delivers it, or its structure with the missing facts named'. No decision may rest on its numbers until then."
+        }
+      },
+      "comparisons": [
+        {
+          "experiment": "chain4-outcome",
+          "baseline": "oc-full",
+          "treatment": "oc-brief",
+          "note": "first use of the instrument",
+          "set": "sha256:63fb229d0daa6a5fc375c2cf38001d12bbbd2a13dac488c01d87b94b9bc14884",
+          "finishedAt": "2026-09-28T12:18:08.845Z",
+          "n": 14,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.6429,
+            "treat": 0.6429,
+            "delta": 0,
+            "fixed": 0,
+            "broken": 0,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 2134,
+              "treat": 2129.5,
+              "delta": -4.5,
+              "deltaPct": -0.2,
+              "ci": [
+                -2,
+                2
+              ]
+            },
+            "totalTokens": {
+              "base": 6839,
+              "treat": 7306,
+              "delta": 467,
+              "deltaPct": 6.8,
+              "ci": [
+                -1220,
+                272
+              ]
+            },
+            "pickMs": {
+              "base": 2498,
+              "treat": 2215,
+              "delta": -283,
+              "deltaPct": -11.3,
+              "ci": [
+                -1611,
+                322
+              ]
+            },
+            "askMs": {
+              "base": 22420,
+              "treat": 15117,
+              "delta": -7303,
+              "deltaPct": -32.6,
+              "ci": [
+                -10224,
+                4984
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 189,
+                "treat": 172.5,
+                "delta": -16.5,
+                "deltaPct": -8.7,
+                "ci": [
+                  -2270,
+                  1767
+                ]
+              },
+              "phase:pre-run": {
+                "base": 99,
+                "treat": 90.5,
+                "delta": -8.5,
+                "deltaPct": -8.6,
+                "ci": [
+                  -1655,
+                  1846
+                ]
+              },
+              "phase:run": {
+                "base": 16525,
+                "treat": 14241.5,
+                "delta": -2283.5,
+                "deltaPct": -13.8,
+                "ci": [
+                  -8194,
+                  1938
+                ]
+              }
+            }
+          },
+          "answer": {
+            "outcome": {
+              "base": 0.0267,
+              "treat": 0.02,
+              "delta": -0.006700000000000001,
+              "deltaPct": -25.1,
+              "ci": [
+                -0.033299999999999996,
+                0.01
+              ]
+            }
+          },
+          "verdict": "same"
+        },
+        {
+          "experiment": "chain4-outcome2",
+          "baseline": "oc-full",
+          "treatment": "oc-brief",
+          "note": "outcome check fixed (wholes, not parts); streaming on in both arms",
+          "set": "sha256:63fb229d0daa6a5fc375c2cf38001d12bbbd2a13dac488c01d87b94b9bc14884",
+          "finishedAt": "2026-09-28T13:26:32.372Z",
+          "n": 14,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.9286,
+            "treat": 1,
+            "delta": 0.0714,
+            "fixed": 1,
+            "broken": 0,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 2138,
+              "treat": 2134.5,
+              "delta": -3.5,
+              "deltaPct": -0.2,
+              "ci": [
+                -7.5,
+                0
+              ]
+            },
+            "totalTokens": {
+              "base": 8769,
+              "treat": 7794,
+              "delta": -975,
+              "deltaPct": -11.1,
+              "ci": [
+                -676,
+                99
+              ]
+            },
+            "pickMs": {
+              "base": 6192.5,
+              "treat": 5782.5,
+              "delta": -410,
+              "deltaPct": -6.6,
+              "ci": [
+                -2660,
+                1309
+              ]
+            },
+            "askMs": {
+              "base": 28120.5,
+              "treat": 27392,
+              "delta": -728.5,
+              "deltaPct": -2.6,
+              "ci": [
+                -11343,
+                3901
+              ]
+            },
+            "stages": {
+              "answer:first-words": {
+                "base": 15869,
+                "treat": 13834.5,
+                "delta": -2034.5,
+                "deltaPct": -12.8,
+                "ci": [
+                  -10604,
+                  5287
+                ]
+              },
+              "phase:post-run": {
+                "base": 685.5,
+                "treat": 199.5,
+                "delta": -486,
+                "deltaPct": -70.9,
+                "ci": [
+                  -1995,
+                  810
+                ]
+              },
+              "phase:pre-run": {
+                "base": 153,
+                "treat": 1708.5,
+                "delta": 1555.5,
+                "deltaPct": 1016.7,
+                "ci": [
+                  -2099.5,
+                  2350.5
+                ]
+              },
+              "phase:run": {
+                "base": 25273,
+                "treat": 25895,
+                "delta": 622,
+                "deltaPct": 2.5,
+                "ci": [
+                  -8214,
+                  2520
+                ]
+              }
+            }
+          },
+          "answer": {
+            "outcome": {
+              "base": 0.24,
+              "treat": 0.19165,
+              "delta": -0.048350000000000004,
+              "deltaPct": -20.1,
+              "ci": [
+                -0.0733,
+                0.01
+              ]
+            }
+          },
+          "verdict": "same"
+        }
+      ],
+      "pooled": [
+        {
+          "baseline": "oc-full",
+          "experiments": 2,
+          "n": 28,
+          "fixed": 1,
+          "broken": 0,
+          "p": 1,
+          "pickTokensPct": -0.2,
+          "askMsPct": -17.6,
+          "verdict": "same-quality-cheaper"
+        }
+      ],
+      "verdict": "same",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "ambiguity-recognition",
+        "name": "Recognise ambiguity before choosing",
+        "ontologyDriven": true,
+        "spec": "418 · gap register A3",
+        "source": "Spec 416 clarify 0/8; fresh 10: the judge commits to one of two readings (0.7–1.0) or leaks to 'none' — never splits",
+        "what": "Candidates: a typed ambiguity question over the ontology (does the request name the party the artifact is about? the audience?) asked before the choice; or the asker's context consulted to break the tie, else ask.",
+        "plannedAb": "clarify cases asked; positives declined; single-reading controls unaffected",
+        "comparisons": []
+      },
+      "comparisons": [],
       "verdict": "planned",
       "missing": []
     }

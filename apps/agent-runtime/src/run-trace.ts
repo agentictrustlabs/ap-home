@@ -204,6 +204,8 @@ export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/k
   'skill-selection/split': ['decline', 'clarify'],
   /** Spec 418 — under quality/judge=pairwise, the tier the run's own answer is compared AGAINST (default: light vs default). */
   'quality/against': ['default', 'light', 'strong'],
+  /** Spec 418 A1 — stream the skill answer (drafts to the progress list; first words timed). */
+  'answer/stream': ['off', 'on'],
   /** Spec 418 A5 — held inputs from the agent's own record types on a real ask (`records`, default) or never (`off`). */
   'skill-selection/held': ['records', 'off'] };
 

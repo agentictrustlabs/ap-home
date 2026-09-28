@@ -1050,10 +1050,16 @@ export class A2aTaskDO {
         // ONE SEQUENCE PER RUN, assigned here. A run is several turns and every turn narrates from its
         // start; a reader keeps its cursor across turns, so a seq that restarted per turn re-read the
         // earlier turns' lines ("checking your authority…" three times over).
-        if (cur.lines.length < 400) cur.lines.push({ ...body.line, seq: cur.lines.length + 1 });
+        // Spec 418 A1 — a streamed answer's drafts REPLACE each other (same step): the list keeps the latest, under a new seq.
+        const lines = cur.lines as Array<{ seq: number; type?: string; stepRef?: string }>;
+        const last = lines[lines.length - 1];
+        const seq = (last?.seq ?? 0) + 1;
+        const line = body.line as { type?: string; stepRef?: string };
+        if (line.type === 'AnswerDraft' && last?.type === 'AnswerDraft' && last.stepRef === line.stepRef) lines[lines.length - 1] = { ...body.line, seq };
+        else if (lines.length < 400) lines.push({ ...body.line, seq });
         cur.at = Date.now();
         await this.state.storage.put(pkey(body.runRef), cur);
-        return Response.json({ ok: true, seq: cur.lines.length });
+        return Response.json({ ok: true, seq });
       }
       if (op === 'progress-read') {
         if (!body?.runRef || !body.asker) return Response.json({ ok: false, error: 'runRef and asker required' }, { status: 400 });

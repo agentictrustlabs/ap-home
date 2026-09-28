@@ -645,7 +645,7 @@ export async function rotateTrigger(session: { token: string }, addressee: Addre
 }
 
 /** Spec 370 P2 — one sentence the agent said about its own progress, as the run went. */
-export interface ProgressLine { seq: number; at: number; type: string; stepRef?: string; toolId?: string; said: string; terminal?: boolean }
+export interface ProgressLine { seq: number; at: number; type: string; stepRef?: string; toolId?: string; said: string; terminal?: boolean; /** Spec 418 A1 — a streamed answer so far (`AnswerDraft`); the latest replaces the earlier. */ draft?: string }
 
 /** The run's progress lines after `after`, held by the agent for up to ~3 s until there is something new
  *  (a long poll). `known:false` = nothing recorded yet for this runRef. */

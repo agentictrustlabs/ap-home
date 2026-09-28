@@ -6,10 +6,10 @@
 // WHICH vendor answers the one structured model call — the same provider the turn plans with (spec 377),
 // so the two adapter packages (`orchestration-anthropic`, `orchestration-openai-compat`) remain the only
 // vendor-touching ones.
-import { defaultProvider, providerConfigured, modelFor, geminiClient, GROQ_DEFAULTS, OPENAI_DEFAULTS, XAI_DEFAULTS, OPENAI_REASONING_HEADROOM, routePolicy, routeProvider, llmAllowlist, type PlannerEnv, type LlmProvider, type RouteDecision } from './orchestration.js';
+import { defaultProvider, providerConfigured, modelFor, geminiClient, GEMINI_DEFAULTS, GROQ_DEFAULTS, OPENAI_DEFAULTS, XAI_DEFAULTS, OPENAI_REASONING_HEADROOM, routePolicy, routeProvider, llmAllowlist, type PlannerEnv, type LlmProvider, type RouteDecision } from './orchestration.js';
 import { createFetchAnthropicClient, usageOfAnthropic } from '@agenticprimitives/orchestration-anthropic';
 import { addUsage, type ModelUsageV1 } from '@agenticprimitives/orchestration';
-import { createFetchOpenAiCompatClient, createOpenAiCompatStructuredCall, createOpenAiCompatLogprobChoice } from '@agenticprimitives/orchestration-openai-compat';
+import { createFetchOpenAiCompatClient, createOpenAiCompatStructuredCall, createOpenAiCompatLogprobChoice, createOpenAiCompatTextStream, type TextStreamCall } from '@agenticprimitives/orchestration-openai-compat';
 import type { DiscoveryFetch, StructuredCall } from '@agenticprimitives/context';
 import type { DiscoveryEnv } from './discovery-facets.js';
 
@@ -161,5 +161,26 @@ export function logprobChoiceFor(env: ModelEnv, provider: LlmProvider | undefine
     const choose = createOpenAiCompatLogprobChoice({ client, model, label: p, onUsage: (u) => { usage = addUsage(usage, u); } });
     const rec = (failed: boolean) => opts.onCall?.({ provider: p, model, because: 'named', startMs, endMs: Date.now(), ...(failed ? { failed } : {}), ...(usage ?? {}) });
     try { const out = await choose(input); rec(false); return out; } catch (e) { rec(true); throw e; }
+  };
+}
+
+/** Spec 418 A1 — a STREAMED text answer (Gemini only; any other provider ⇒ undefined, and the caller keeps the structured
+ *  call — one mechanism per provider, never a silent switch mid-answer). Recorded on the trace like any structured call. */
+export function textStreamFor(env: ModelEnv, provider: LlmProvider | undefined, opts: { onCall?: (c: StructuredCallRecordV1) => void; tier?: 'light' | 'strong' } = {}): TextStreamCall | undefined {
+  const p = provider ?? (env.ORCHESTRATION_LLM ?? '').split(',').map((x) => x.trim()).filter(Boolean)[0] as LlmProvider | undefined;
+  if (p !== 'gemini' || !(env as { GEMINI_API_KEY?: string }).GEMINI_API_KEY) return undefined;
+  const model = opts.tier === 'strong' ? strongModelFor(env, 'gemini') : modelFor(env, 'gemini', opts.tier === 'light' ? 'planner' : undefined);
+  return async (input) => {
+    const startMs = Date.now();
+    let usage: ModelUsageV1 | undefined;
+    const call = createOpenAiCompatTextStream({ apiKey: (env as { GEMINI_API_KEY: string }).GEMINI_API_KEY, baseUrl: (env as { ORCHESTRATION_GEMINI_BASE_URL?: string }).ORCHESTRATION_GEMINI_BASE_URL || GEMINI_DEFAULTS.baseUrl, model, label: 'gemini', reasoningEffort: 'low', reasoningHeadroom: OPENAI_REASONING_HEADROOM, onUsage: (u) => { usage = addUsage(usage, u); } });
+    try {
+      const text = await call(input);
+      opts.onCall?.({ provider: 'gemini', model, because: 'stream', startMs, endMs: Date.now(), ...(usage ?? {}) });
+      return text;
+    } catch (e) {
+      opts.onCall?.({ provider: 'gemini', model, because: 'stream', startMs, endMs: Date.now(), failed: true, ...(usage ?? {}) });
+      throw e;
+    }
   };
 }
