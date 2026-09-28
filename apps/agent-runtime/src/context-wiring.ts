@@ -173,7 +173,7 @@ export function textStreamFor(env: ModelEnv, provider: LlmProvider | undefined, 
   return async (input) => {
     const startMs = Date.now();
     let usage: ModelUsageV1 | undefined;
-    const call = createOpenAiCompatTextStream({ apiKey: (env as { GEMINI_API_KEY: string }).GEMINI_API_KEY, baseUrl: (env as { ORCHESTRATION_GEMINI_BASE_URL?: string }).ORCHESTRATION_GEMINI_BASE_URL || GEMINI_DEFAULTS.baseUrl, model, label: 'gemini', reasoningEffort: 'low', onUsage: (u) => { usage = addUsage(usage, u); } });
+    const call = createOpenAiCompatTextStream({ apiKey: (env as { GEMINI_API_KEY: string }).GEMINI_API_KEY, baseUrl: (env as { ORCHESTRATION_GEMINI_BASE_URL?: string }).ORCHESTRATION_GEMINI_BASE_URL || GEMINI_DEFAULTS.baseUrl, model, label: 'gemini', reasoningEffort: 'low', reasoningHeadroom: OPENAI_REASONING_HEADROOM, onUsage: (u) => { usage = addUsage(usage, u); } });
     try {
       const text = await call(input);
       opts.onCall?.({ provider: 'gemini', model, because: 'stream', startMs, endMs: Date.now(), ...(usage ?? {}) });
