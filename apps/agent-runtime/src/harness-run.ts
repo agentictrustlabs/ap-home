@@ -4982,7 +4982,7 @@ step is then handed to that agent under authority the person grants; leave it ou
             const asker = relation || ctx ? { ...(relation ? { relation } : {}), ...(ctx?.recentSkills?.length ? { recentSkills: ctx.recentSkills.slice(0, 4) } : {}), ...(ctx?.memoryTags?.length ? { memoryTags: ctx.memoryTags.slice(0, 6) } : {}) } : undefined;
             // Spec 418 D4 — `office-prior off` hides the role classes' typical capabilities here too (one knob, both paths).
             const stageLexicon = input.variant?.toggles?.['skill-selection/office-prior'] === 'off' ? playbook?.domainLexicon?.map(({ uses: _u, ...e }) => e) : playbook?.domainLexicon;
-            const r = await selectByJudgment(rest, skills, call, { profile: 'fast', ...(input.variant?.toggles?.['skill-selection/samples'] === '2' ? { samples: 2 } : {}) }, { ...(stageLexicon ? { lexicon: stageLexicon } : {}), ...(asker ? { asker } : {}) });
+            const r = await selectByJudgment(rest, skills, call, { profile: 'fast', ...(input.variant?.toggles?.['skill-selection/samples'] === '2' ? { samples: 2 } : {}), ...((input.variant?.toggles?.['skill-selection/borderline'] ?? ((env as { SKILL_SELECTION_BORDERLINE?: string }).SKILL_SELECTION_BORDERLINE?.trim() || 'off')) === 'on' ? { borderline: [0.35, 0.6] as [number, number] } : {}) }, { ...(stageLexicon ? { lexicon: stageLexicon } : {}), ...(asker ? { asker } : {}) });
             trace.selection = { approach: 'judgment', ...r };
             trace.skillStage = r.chose ? 'chose' : 'handed-to-planner';
             if (r.chose) {

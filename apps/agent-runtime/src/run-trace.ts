@@ -195,7 +195,9 @@ export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/k
   'skill-selection/absence': ['v1', 'v2'],
   /** Spec 418 §11 — how selective reading decides the plan around the pick: yes-no dataflow questions, or one choice
    *  among the plans the ontology allows (alone · upstream → pick · pick → downstream). */
-  'skill-selection/plan': ['questions', 'choice'] };
+  'skill-selection/plan': ['questions', 'choice'],
+  /** Spec 418 — a second sample only when the first pick is borderline (top p in [0.35, 0.6]). */
+  'skill-selection/borderline': ['off', 'on'] };
 
 export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantRequestV1 } | { ok: false; error: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'variant must be an object' };
