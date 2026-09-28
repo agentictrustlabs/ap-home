@@ -36,6 +36,7 @@ import { CONTACT_FIELDS, CONTACT_FIELD_ARGS, ONTOLOGY_MANIFEST_DIGEST, OUTCOME_C
 import { bindSelectedOffer, type SelectedOfferBindingV1 } from './engagement-campaign.js';
 import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
+import { HOLDINGS_READ_TOOL, HOLDINGS_READ_CAPABILITY, holdingsReadInvoker } from './holdings-read.js';
 import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
 import { PLAYBOOK_ANSWER_TOOL, playbookAnswerAvailable, playbookAnswerInvoker, type PlaybookMaterial } from './playbook-answer.js';
 import { instructionSkillTools, instructionSourcesOf, skillApplyInvoker, skillReaderFor } from './skill-apply.js';
@@ -2237,6 +2238,8 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
       )(toolId, args, ctx);
     }
     if (toolId === BALANCE_READ_CAPABILITY) return balanceReadInvoker({ ...(deps.valueHeld ? { valueHeld: deps.valueHeld } : {}), ...(deps.charteredAgents ? { charteredAgents: deps.charteredAgents } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, (addressee ?? person) as Address, person)(toolId, args, ctx);
+    // Spec 419 — what an agent HOLDS, from the public chartered-under record; unnamed ⇒ the agent being asked.
+    if (toolId === HOLDINGS_READ_CAPABILITY) return holdingsReadInvoker({ ...(deps.charteredAgents ? { charteredAgents: deps.charteredAgents } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, (addressee ?? person) as Address)(toolId, args, ctx);
     // The coordination reads judge standing themselves; the routed context rides in as `StandingDeps.context`.
     const coordinationDeps = { ...deps, ...(deps.standingContext ? { context: deps.standingContext } : {}) };
     if (toolId === ENDEAVOR_LIST_CAPABILITY || toolId === ENDEAVOR_GET_CAPABILITY) return endeavorReadInvoker(coordinationDeps, (addressee ?? person) as Address, person)(toolId, args, ctx);
@@ -5239,6 +5242,8 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(deps.readSubjectRecord ? [AFFILIATIONS_LIST_TOOL] : []),
     // Spec 371 — the balance read: what an account holds now, on chain, in the person's unit.
     ...(deps.valueHeld ? [BALANCE_READ_TOOL] : []),
+    // Spec 419 — what an agent holds (public chartered-under edges).
+    ...(deps.charteredAgents ? [HOLDINGS_READ_TOOL] : []),
     // Spec 370 P4 — the organization's work, read through the same record the Home's Work surface reads.
     ...(deps.readSubjectRecord ? COORDINATION_READ_TOOLS : []),
     // The person's own access audit — informational, always available on their own surface.

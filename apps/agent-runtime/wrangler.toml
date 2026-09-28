@@ -465,10 +465,9 @@ OPS_RECORDS_DEFAULT = "cached"
 ANSWER_STREAM_DEFAULT = "on"
 # Spec 418 A1 — the skill answer thinks at MINIMAL effort (adopted 2026-09-28 on effort-a1: first words in-step 3.8 → 0.8 s,
 # 8/8, p = 0.008; from the ask 12.9 → 4.9 s; side by side minimal preferred 5–2–1).
-# REVERTED 2026-09-28 pending evidence: the re-check on chain panel 4 (effort-c4) gave the outcome check 0.87 → 0.62
-# (minimal worse in 7, better in 1, one repeat) while effort-a1's side by side preferred minimal 5–2. Low effort until a
-# paired test with repeats resolves it; first words stay streamed.
-SKILL_ANSWER_MODEL_DEFAULT = "default"
+# Re-adopted 2026-09-28 on effort-c4r2 (chain panel 4, two repeats, 26 pairs): outcome check 0.753 vs 0.748 (6 better,
+# 8 worse, 12 same; p = 0.79) — the one-repeat drop on effort-c4 was per-case noise; first words 7.1 → 4.7 s, in-step 3.3 → 0.8 s.
+SKILL_ANSWER_MODEL_DEFAULT = "minimal"
 # Spec 388 — the cheapest OFFERED provider that carries each call, decided before the request from the prompt estimate, the
 # per-request budget and this minute's spend; recorded on the trace with its reason. A route, never a fallback (ADR-0013).
 ORCHESTRATION_ROUTE = "budget"
