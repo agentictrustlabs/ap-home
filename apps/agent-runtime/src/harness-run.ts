@@ -5759,9 +5759,11 @@ step is then handed to that agent under authority the person grants; leave it ou
         dependenciesProvided,
         branchesDecidable,
         questionAnsweredByRead,
-        numbersFromTheWords,
+        // Spec 418 §12 / 420 — the "from the words" rules hold a PLANNER to what the person said. A SUPPLIED plan (a Home button,
+        // a screen's form) carries the person's own input — often in base units ("amount": "4000000" for "4 usdc") — and is not a
+        // paraphrase: applying them there stripped the Fund button's amount (found by the act laboratory's UX-action cases).
+        ...(input.plan ? [] : [numbersFromTheWords, actingPartyFromTheWords((capability: string, arg: string) => partyRole(capability, arg)?.side)]),
         partiesDistinct((capability, arg) => partyRole(capability, arg)?.side),
-        actingPartyFromTheWords((capability, arg) => partyRole(capability, arg)?.side),
         kindNamedIsChartered(CHILD_AGENT_KINDS.map((k) => ({ capability: k.capability, noun: k.noun, words: [...new Set([k.noun, k.tld, ...(k.tld === 'org' ? ['organization'] : [])])] }))),
         subjectNamedInAsk(async () => {
           if (!input.person || !deps.readSubjectRecord) return [];
