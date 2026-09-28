@@ -4791,7 +4791,8 @@ app.post('/harness/ask', async (c) => {
     // its time and tokens are the instrument's, reported apart from the ask's.
     if (variantReq?.toggles?.['quality/judge'] === 'on' && reply?.kind === 'answer' && typeof (reply as { text?: unknown }).text === 'string') {
       const planned = (trace.plan ?? []).map((p) => p.toolId);
-      const tool = planned.length === 1 ? offeredTools.find((t) => t.id === planned[0] && t.answer) : undefined;
+      // Spec 418 — a chain's reply is judged against its TERMINAL skill (the outcome it was built for).
+      const tool = planned.length ? offeredTools.find((t) => t.id === planned[planned.length - 1] && t.answer) : undefined;
       if (tool) {
         let usage: { tokensIn?: number; tokensOut?: number } | undefined;
         const qcall = structuredCallFor(c.env, provider, { onCall: (rec) => { usage = { tokensIn: rec.tokensIn, tokensOut: rec.tokensOut }; } });

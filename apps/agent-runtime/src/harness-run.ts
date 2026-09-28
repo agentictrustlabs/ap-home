@@ -4932,7 +4932,7 @@ step is then handed to that agent under authority the person grants; leave it ou
                 const { judge: planJudge, ...plan2 } = r2;
                 trace.selection = { approach: 'outcome-selective', chose: r1.chose, distribution: r1.distribution, judge: r1.judge, ...(r1.reading ? { reading: r1.reading } : {}), ...plan2, planJudge };
                 const labels = new Map([...(lexicon ?? []).map((e) => [e.iri, e.label] as const), ...skills.flatMap((x) => [...(x.produces ?? []), ...(x.consumes ?? [])].map((k) => [k.iri, k.label] as const))]);
-                const steps = outcomeSteps(r2.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri);
+                const steps = outcomeSteps(r2.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri, { briefIntermediate: input.variant?.toggles?.['skill-selection/intermediate'] === 'brief' });
                 return withSpecialists({ steps, rationale: `outcome-selective: ${r2.plan.steps.map((x) => x.tool).join(' → ')}${r2.asked ? '' : ' (no dataflow call)'}` }, playbook?.specialists, pin.tools);
               }
               trace.selection = { approach: 'outcome-selective', chose: null, ...(r1.hold ? { hold: r1.hold } : {}), distribution: r1.distribution, judge: r1.judge };
@@ -4995,7 +4995,7 @@ step is then handed to that agent under authority the person grants; leave it ou
                 const { judge: planJudge, ...plan2 } = r2;
                 trace.selection = { approach: 'outcome-selective', chose: r.chose, distribution: r.distribution, judge: r.judge, ...plan2, planJudge };
                 const labels = new Map([...(playbook?.domainLexicon ?? []).map((e) => [e.iri, e.label] as const)]);
-                const steps = outcomeSteps(r2.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri);
+                const steps = outcomeSteps(r2.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri, { briefIntermediate: input.variant?.toggles?.['skill-selection/intermediate'] === 'brief' });
                 return withSpecialists({ steps, rationale: `skill stage (selective): ${r2.plan.steps.map((x) => x.tool).join(' → ')}${r2.asked ? '' : ' (no dataflow call)'}` }, playbook?.specialists, pin.tools);
               }
               return withSpecialists({ steps: [{ toolId: r.chose, args: { question: pin.intent.goal }, id: 's0' }], rationale: `skill stage: ${r.chose}` }, playbook?.specialists, pin.tools);
