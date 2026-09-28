@@ -4928,7 +4928,7 @@ step is then handed to that agent under authority the person grants; leave it ou
               const r1 = await selectByJudgment(rest, skills, call, { profile: 'fast', ...(input.variant?.toggles?.['skill-selection/samples'] === '2' ? { samples: 2 } : {}) }, { ...(lexicon ? { lexicon } : {}), ...(asker ? { asker } : {}) });
               plannerUsed = arm;
               if (r1.chose) {
-                const r2 = await planForPicked(rest, r1.chose, skills, call, input.variant?.toggles?.['skill-selection/party-rule'] === 'off' ? { partyRule: false } : {}, { ...(lexicon ? { lexicon } : {}), ...(asker ? { asker } : {}) });
+                const r2 = await planForPicked(rest, r1.chose, skills, call, { ...(input.variant?.toggles?.['skill-selection/party-rule'] === 'off' ? { partyRule: false } : {}), ...(input.variant?.toggles?.['skill-selection/downstream'] === 'on' ? { downstream: true } : {}) }, { ...(lexicon ? { lexicon } : {}), ...(asker ? { asker } : {}) });
                 const { judge: planJudge, ...plan2 } = r2;
                 trace.selection = { approach: 'outcome-selective', chose: r1.chose, distribution: r1.distribution, judge: r1.judge, ...(r1.reading ? { reading: r1.reading } : {}), ...plan2, planJudge };
                 const labels = new Map([...(lexicon ?? []).map((e) => [e.iri, e.label] as const), ...skills.flatMap((x) => [...(x.produces ?? []), ...(x.consumes ?? [])].map((k) => [k.iri, k.label] as const))]);
@@ -4991,7 +4991,7 @@ step is then handed to that agent under authority the person grants; leave it ou
               // cost): `SKILL_SELECTION_DEFAULT=selective` — after the pick, one small dataflow call only when the picked
               // skill has a producible upstream input the asker does not hold; the plan may then be a chain.
               if (stageDefault === 'selective' && skills.some((x) => x.consumes?.length)) {
-                const r2 = await planForPicked(rest, r.chose, skills, call, {}, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(asker ? { asker } : {}) });
+                const r2 = await planForPicked(rest, r.chose, skills, call, { ...(input.variant?.toggles?.['skill-selection/downstream'] === 'on' ? { downstream: true } : {}) }, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(asker ? { asker } : {}) });
                 const { judge: planJudge, ...plan2 } = r2;
                 trace.selection = { approach: 'outcome-selective', chose: r.chose, distribution: r.distribution, judge: r.judge, ...plan2, planJudge };
                 const labels = new Map([...(playbook?.domainLexicon ?? []).map((e) => [e.iri, e.label] as const)]);
