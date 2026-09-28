@@ -78,7 +78,7 @@ registerDefaultSubsetHandlers();
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
 import { type Plan, type Planner,
   runIntent, InputRequired, dataFor, signatureFor,
-  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, partiesDistinct, actingPartyFromTheWords, kindNamedIsChartered, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
+  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, partiesDistinct, actingPartyFromTheWords, kindNamedIsChartered, completePlan, transitionsHold, type FactsV1, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
 import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep, composeOfferedTools, mergeContractTool as composeMergeContractTool, loadPlaybook, declaredEffectSink, setBillStep, declaredCapabilities, type AskScopeV1 } from '@agenticprimitives/harness';
 // Spec 353 — the scope schema is Ring 0 now (spec 399 §4); this app keeps exporting it for its callers.
 export type { AskScopeV1 } from '@agenticprimitives/harness';
@@ -111,6 +111,9 @@ import { resolveParty, ownAgentsOfType, candidateHint, choicesFor, VALUE_ARGS, t
 import { decide, PAYMENT_SOURCE_ACCOUNT, PAYMENT_RECIPIENT, argTypesFor, readValue, isFlagTrue } from '@agenticprimitives/ontology';
 import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
 import type { ResolvedParty } from '@agenticprimitives/context';
+import { rosterRows } from '@agenticprimitives/context';
+import { CAPABILITY_TRANSITIONS, SITUATION } from '@agenticprimitives/ontology';
+const SITUATION_MEMBERSHIP = SITUATION.OrganizationMembership;
 import { MEMBERSHIP_LIST_TOOL, membershipListInvoker, AFFILIATIONS_LIST_TOOL, affiliationsListInvoker, INVITATIONS_LIST_TOOL, invitationsListInvoker, relationshipRows } from '@agenticprimitives/context';
 import { RESOLUTION_REQUEST_TOOL } from './resolution-invitation.js';
 import { actionLink, resolutionRequestInvoker } from './resolution-request.js';
@@ -2826,6 +2829,9 @@ export interface PlannerTraceV1 {
   /** Spec 418 A2 — what the planned skills should DELIVER (each intermediate step's artifact + the final skill's
    *  products), glossed from the lexicon — the outcome check's expected classes. */
   expectedDelivers?: Array<{ iri: string; label: string; required?: boolean }>;
+  /** Spec 420 §2 — what goal regression did to the plan: the reads it inserted, the gaps (a standing the asker lacks) and
+   *  violations (facts that contradict a step) it named, the submissions it marked. Present only under `plan/regression`. */
+  regression?: { inserted: Array<{ before: number; toolId: string; because: string }>; gaps: Array<{ index: number; toolId: string; because: string }>; violations: Array<{ index: number; toolId: string; because: string }>; submissions: Array<{ index: number; toolId: string; establishes: string }>; facts: { standingAtRoom: string; situations: number; known: string[] } };
   /** Spec 418 A1 — ms from a streamed step's start to its first words (the earliest step's). */
   answerFirstWordsMs?: number;
   /** Wall-clock time of those first words — the surface computes time from the ASK to them (what a person feels). */
@@ -5152,9 +5158,40 @@ step is then handed to that agent under authority the person grants; leave it ou
   // Spec 416 — how long the PICK took (the model planner's call, or a selection arm's work), apart from the rest of the
   // turn: a comparison of selection approaches measures this, not the whole ask.
   const timedPlanner: Planner = { plan: async (pin) => { const t0 = Date.now(); try { return await planner.plan(pin); } finally { trace.selectionMs = (trace.selectionMs ?? 0) + (Date.now() - t0); } } };
-  const boundPlanner: Planner = input.engagement
+  const offerBound: Planner = input.engagement
     ? { plan: async (pin) => { const p = await timedPlanner.plan(pin); return { ...p, ...bindSelectedOffer(p, input.engagement) }; } }
     : timedPlanner;
+  // Spec 420 §2 — GOAL REGRESSION OVER SITUATIONS (`plan/regression`): the facts the harness knows this turn — the asker's
+  // standing at the room, the room's roster when the room is an organization — and the ontology's capability transitions
+  // check every act's preconditions before any signature is asked for, insert the reads that settle unknown ones, and name
+  // the standing the asker lacks. The model still chose the outcome and the words; nothing here invents a party or an amount.
+  const regressionOn = input.variant?.toggles?.['plan/regression'] === 'on' || (!input.variant?.toggles?.['plan/regression'] && ((env as { PLAN_REGRESSION_DEFAULT?: string }).PLAN_REGRESSION_DEFAULT ?? '').trim() === 'on');
+  let regressionFacts: FactsV1 | null = null;
+  const room = String(input.addressee ?? '').toLowerCase();
+  const factsOnce: Promise<FactsV1> | null = regressionOn && room ? (async () => {
+    const st = standingOnce ? await standingOnce.catch(() => undefined) : undefined;
+    const atRoom = input.person && room === String(input.person).toLowerCase() ? 'self' as const : (st?.relation ?? undefined);
+    const roomName = deps.nameOf ? await deps.nameOf(room).catch(() => null) : null;
+    const aliases = new Set(['us', 'we', 'our', 'ours', 'ourselves', 'self', 'this organization', 'this org', 'the organization', 'the org', room, ...(roomName ? [roomName.toLowerCase(), roomName.toLowerCase().split('.')[0]!, roomName.toLowerCase().split('.')[0]!.replace(/-/g, ' ')] : [])]);
+    const orgLike = ['org', 'team', 'church', 'circle', 'household', 'workspace'].includes(String(deps.addresseeKind ?? '').toLowerCase()) || /\.(org|team|church|circle|household|workspace)$/.test(roomName ?? '');
+    const situations: Array<{ situation: string; of: string; in?: string; aliases?: readonly string[] }> = []; const known = new Set<string>();
+    if (orgLike && deps.readSubjectRecord) {
+      const doc = await deps.readSubjectRecord(room, 'directory.data').catch(() => null);
+      if (doc) { known.add(SITUATION_MEMBERSHIP); for (const r of rosterRows(doc)) situations.push({ situation: SITUATION_MEMBERSHIP, of: r.agent.toLowerCase(), in: room, ...(r.name ? { aliases: [r.name] } : {}) }); }
+    }
+    const facts: FactsV1 = { situations, known, room, isRoom: (w) => aliases.has(w), emptyMeansRoom: !!input.person && room !== String(input.person).toLowerCase(), standing: (agent) => (agent === room ? atRoom : input.person && agent === String(input.person).toLowerCase() ? 'self' : undefined) };
+    regressionFacts = facts;
+    return facts;
+  })() : null;
+  const boundPlanner: Planner = factsOnce
+    ? { plan: async (pin) => {
+        const p = await offerBound.plan(pin);
+        const facts = await factsOnce;
+        const done = completePlan(p, CAPABILITY_TRANSITIONS, facts);
+        trace.regression = { inserted: done.inserted, gaps: done.gaps.map(({ index, toolId, because }) => ({ index, toolId, because })), violations: done.violations, submissions: done.submissions, facts: { standingAtRoom: facts.standing(room) ?? 'unknown', situations: facts.situations.length, known: [...facts.known] } };
+        return done.plan;
+      } }
+    : offerBound;
   const kind = input.plan ? 'supplied' : selected.kind;
   const trace: PlannerTraceV1 = {
     planner: plannerUsed, ...(selected.model ? { model: selected.model } : {}), toolsExposed: [], recalledTurns: input.conversation?.turns.length ?? 0, playbook: playbook ? { archetypeId: playbook.archetypeId, archetypeVersion: playbook.archetypeVersion, digest: playbook.digest } : null,
@@ -5764,6 +5801,9 @@ step is then handed to that agent under authority the person grants; leave it ou
         // paraphrase: applying them there stripped the Fund button's amount (found by the act laboratory's UX-action cases).
         ...(input.plan ? [] : [numbersFromTheWords, actingPartyFromTheWords((capability: string, arg: string) => partyRole(capability, arg)?.side)]),
         partiesDistinct((capability, arg) => partyRole(capability, arg)?.side),
+        // Spec 420 §2 — a step the facts contradict, or whose standing the asker lacks, is refused by name (the facts were
+        // gathered while planning; a run without them passes here and the verifier judges as always).
+        ...(factsOnce ? [transitionsHold(CAPABILITY_TRANSITIONS, () => regressionFacts ?? { situations: [], known: new Set<string>(), room, standing: () => undefined })] : []),
         kindNamedIsChartered(CHILD_AGENT_KINDS.map((k) => ({ capability: k.capability, noun: k.noun, words: [...new Set([k.noun, k.tld, ...(k.tld === 'org' ? ['organization'] : [])])] }))),
         subjectNamedInAsk(async () => {
           if (!input.person || !deps.readSubjectRecord) return [];

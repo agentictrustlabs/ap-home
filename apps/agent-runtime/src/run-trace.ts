@@ -207,7 +207,9 @@ export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/k
   /** Spec 418 A1 — stream the skill answer (drafts to the progress list; first words timed). */
   'answer/stream': ['off', 'on'],
   /** Spec 418 A5 — held inputs from the agent's own record types on a real ask (`records`, default) or never (`off`). */
-  'skill-selection/held': ['records', 'off'] };
+  'skill-selection/held': ['records', 'off'],
+  /** Spec 420 §2 — goal regression over situations: preconditions checked, reads inserted, gaps named before any signature. */
+  'plan/regression': ['off', 'on'] };
 
 export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantRequestV1 } | { ok: false; error: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'variant must be an object' };
