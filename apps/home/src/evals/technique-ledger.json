@@ -1,6 +1,6 @@
 {
   "type": "ap.technique-ledger.v1",
-  "builtAt": "2026-09-28T04:23:13.079Z",
+  "builtAt": "2026-09-28T04:24:25.311Z",
   "rows": [
     {
       "technique": {
@@ -2256,6 +2256,18 @@
             "baseline": "one-skill",
             "treatment": "outcome-selective",
             "note": "regression panel"
+          },
+          {
+            "experiment": "fresh8-selective",
+            "baseline": "outcome-d4",
+            "treatment": "outcome-selective",
+            "note": "vs the full outcome reading (glossed) — fresh 8 is development data for D4"
+          },
+          {
+            "experiment": "fresh7-selective",
+            "baseline": "outcome-d4",
+            "treatment": "outcome-selective",
+            "note": "vs the full outcome reading (glossed)"
           }
         ],
         "decision": {
@@ -2356,6 +2368,99 @@
             }
           },
           "verdict": "same"
+        },
+        {
+          "experiment": "fresh7-selective",
+          "baseline": "outcome-d4",
+          "treatment": "outcome-selective",
+          "note": "vs the full outcome reading (glossed)",
+          "set": "sha256:f487af4a8a8563da110651bdb37ed863a340dad5f80acbfbaf6cc8a4f7b3848d",
+          "finishedAt": "2026-09-28T04:04:53.986Z",
+          "n": 36,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.9167,
+            "treat": 0.9444,
+            "delta": 0.0278,
+            "fixed": 1,
+            "broken": 0,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 4855,
+              "treat": 1734.5,
+              "delta": -3120.5,
+              "deltaPct": -64.3,
+              "ci": [
+                -3144,
+                -2937
+              ]
+            },
+            "totalTokens": {
+              "base": 4855,
+              "treat": 1734.5,
+              "delta": -3120.5,
+              "deltaPct": -64.3,
+              "ci": [
+                -3144,
+                -2937
+              ]
+            },
+            "pickMs": {
+              "base": 2138,
+              "treat": 1046,
+              "delta": -1092,
+              "deltaPct": -51.1,
+              "ci": [
+                -1174.5,
+                -737.5
+              ]
+            },
+            "askMs": {
+              "base": 5743.5,
+              "treat": 4580,
+              "delta": -1163.5,
+              "deltaPct": -20.3,
+              "ci": [
+                -1472,
+                -330.5
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1663.5,
+                "treat": 1687,
+                "delta": 23.5,
+                "deltaPct": 1.4,
+                "ci": [
+                  -168,
+                  139
+                ]
+              },
+              "phase:pre-run": {
+                "base": 1657,
+                "treat": 1570,
+                "delta": -87,
+                "deltaPct": -5.3,
+                "ci": [
+                  -184,
+                  -0.5
+                ]
+              },
+              "phase:run": {
+                "base": 2265.5,
+                "treat": 1141.5,
+                "delta": -1124,
+                "deltaPct": -49.6,
+                "ci": [
+                  -1221,
+                  -791
+                ]
+              }
+            }
+          },
+          "verdict": "same-quality-cheaper"
         },
         {
           "experiment": "fresh9-selective",
@@ -2633,6 +2738,99 @@
             }
           },
           "verdict": "same"
+        },
+        {
+          "experiment": "fresh8-selective",
+          "baseline": "outcome-d4",
+          "treatment": "outcome-selective",
+          "note": "vs the full outcome reading (glossed) — fresh 8 is development data for D4",
+          "set": "sha256:2e0ca91d31b7328c5d40519767a644d9c46f7f6a514c4e07837812924b43df55",
+          "finishedAt": "2026-09-28T04:17:16.169Z",
+          "n": 77,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.961,
+            "treat": 0.9221,
+            "delta": -0.039,
+            "fixed": 0,
+            "broken": 3,
+            "p": 0.25
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 4833,
+              "treat": 1713,
+              "delta": -3120,
+              "deltaPct": -64.6,
+              "ci": [
+                -3139,
+                -3102
+              ]
+            },
+            "totalTokens": {
+              "base": 4833,
+              "treat": 1713,
+              "delta": -3120,
+              "deltaPct": -64.6,
+              "ci": [
+                -3139,
+                -3102
+              ]
+            },
+            "pickMs": {
+              "base": 2156,
+              "treat": 1090,
+              "delta": -1066,
+              "deltaPct": -49.4,
+              "ci": [
+                -1134,
+                -791
+              ]
+            },
+            "askMs": {
+              "base": 5332,
+              "treat": 4712,
+              "delta": -620,
+              "deltaPct": -11.6,
+              "ci": [
+                -956,
+                44
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1632,
+                "treat": 1627,
+                "delta": -5,
+                "deltaPct": -0.3,
+                "ci": [
+                  -114,
+                  18
+                ]
+              },
+              "phase:pre-run": {
+                "base": 1514,
+                "treat": 1581,
+                "delta": 67,
+                "deltaPct": 4.4,
+                "ci": [
+                  -18,
+                  116
+                ]
+              },
+              "phase:run": {
+                "base": 2285,
+                "treat": 1325,
+                "delta": -960,
+                "deltaPct": -42,
+                "ci": [
+                  -1093,
+                  -723
+                ]
+              }
+            }
+          },
+          "verdict": "same-quality-cheaper"
         }
       ],
       "pooled": [
@@ -2646,9 +2844,20 @@
           "pickTokensPct": -1.8,
           "askMsPct": -4,
           "verdict": "better"
+        },
+        {
+          "baseline": "outcome-d4",
+          "experiments": 3,
+          "n": 151,
+          "fixed": 7,
+          "broken": 3,
+          "p": 0.3438,
+          "pickTokensPct": -64.5,
+          "askMsPct": -18,
+          "verdict": "same-quality-cheaper"
         }
       ],
-      "verdict": "same",
+      "verdict": "same-quality-cheaper",
       "missing": [
         "fresh4-panel-selective",
         "fresh5-panel-selective",
