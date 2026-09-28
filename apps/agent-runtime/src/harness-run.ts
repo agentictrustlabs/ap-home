@@ -359,12 +359,14 @@ export const ASK_CLARIFY_TOOL: ToolSpec = {
 };
 
 /** Spec 418 A2 — the classes a plan should deliver: each intermediate step's artifact, then the final skill's products. */
-export function expectedDeliversOf(steps: ReadonlyArray<{ tool: string; for?: string }>, skills: ReadonlyArray<{ id: string; produces?: ReadonlyArray<{ iri: string; label: string }> }>, lexicon?: ReadonlyArray<{ iri: string; label: string; terms: readonly string[] }>): Array<{ iri: string; label: string }> {
+export function expectedDeliversOf(steps: ReadonlyArray<{ tool: string; for?: string }>, skills: ReadonlyArray<{ id: string; produces?: ReadonlyArray<{ iri: string; label: string; within?: string }> }>, lexicon?: ReadonlyArray<{ iri: string; label: string; terms: readonly string[] }>): Array<{ iri: string; label: string }> {
   const out = new Map<string, string>();
   const gloss = (iri: string, label: string) => { const e = lexicon?.find((x) => x.iri === iri); const also = (e?.terms ?? []).filter((t) => t.toLowerCase() !== label.toLowerCase()).slice(0, 3); return also.length ? `${label} (also: ${also.join(', ')})` : label; };
   for (const st of steps.slice(0, -1)) if (st.for) { const lab = skills.flatMap((x) => x.produces ?? []).find((k) => k.iri === st.for)?.label ?? st.for.split('#').pop()!; out.set(st.for, gloss(st.for, lab)); }
   const last = steps[steps.length - 1];
-  for (const k of skills.find((x) => x.id === last?.tool)?.produces ?? []) out.set(k.iri, gloss(k.iri, k.label));
+  // A part of a whole the same skill produces (`within`) is not asked for on its own: the person asked for the whole.
+  const made = skills.find((x) => x.id === last?.tool)?.produces ?? [];
+  for (const k of made) if (!(k.within && made.some((w) => w.iri === k.within))) out.set(k.iri, gloss(k.iri, k.label));
   return [...out].map(([iri, label]) => ({ iri, label }));
 }
 
@@ -2817,6 +2819,8 @@ export interface PlannerTraceV1 {
   expectedDelivers?: Array<{ iri: string; label: string }>;
   /** Spec 418 A1 — ms from a streamed step's start to its first words (the earliest step's). */
   answerFirstWordsMs?: number;
+  /** Wall-clock time of those first words — the surface computes time from the ASK to them (what a person feels). */
+  answerFirstWordsAt?: number;
   /** Spec 416 — milliseconds spent choosing (planner or selection arm), summed over re-plans. */
   selectionMs?: number;
   /** What the model planner's calls used, as the provider reported them (summed over re-plans). */
@@ -2990,7 +2994,7 @@ export function splitPurpose(sentence: string): { body: string; memo?: string } 
   return { body: sentence.slice(0, m.index).trim(), memo };
 }
 
-export function paymentAskOf(goal: string): { payee?: string; usdc?: string; memo?: string } | null {
+export function paymentAskOf(goal: string): { payee?: string; payer?: string; usdc?: string; memo?: string } | null {
   const { body: g, memo } = splitPurpose(goal.trim());
   if (!/\b(send|pay|transfer)\b/i.test(g)) return null;
   if (/\b(each|every|all)\b[\s\S]{0,40}\bmembers?\b/i.test(g)) return null; // the fan-out shape
@@ -3000,10 +3004,15 @@ export function paymentAskOf(goal: string): { payee?: string; usdc?: string; mem
   // ("Do this by exercising treasury.payment.execute as 0x…", spec 350 W3) and the payee capture ran to the
   // end of the message — "nathan.treasury\n\nDo this by exercising…" was looked up as a name (spec 382, live).
   const firstLine = g.split(/\n\s*\n/)[0] ?? g;
-  let rest = firstLine.replace(/(\d+(?:\.\d+)?)\s*usdc/i, ' ').replace(/\b(send|pay|transfer)\b/i, ' ').replace(/\bfrom\b[\s\S]*$/i, ' ');
+  // THE PAYER THE PERSON NAMED ("… from alice3.treasury") travels as `payer` — resolved in her tier like any party. It
+  // was once stripped and dropped, and the account she had marked as her default paid instead (act laboratory, live).
+  const from = firstLine.match(/\bfrom\s+(?:my\s+|our\s+|the\s+)?(.+?)(?:\s+to\s+.*)?\s*[.!?]*$/i)?.[1]?.replace(/(\d+(?:\.\d+)?)\s*usdc/i, ' ').trim();
+  const payer = from && !/^(my|our)?\s*(account|treasury|wallet|balance|funds?)$/i.test(from) ? from : undefined;
+  // Only the from-clause goes — "from alice3.treasury to bob" keeps "to bob".
+  let rest = firstLine.replace(/(\d+(?:\.\d+)?)\s*usdc/i, ' ').replace(/\b(send|pay|transfer)\b/i, ' ').replace(/\bfrom\s+.+?(?=\s+to\s+|\s*[.!?]*$)/i, ' ');
   const to = rest.match(/\bto\s+(.+?)\s*$/i)?.[1];
   const payee = (to ?? rest).replace(/^(to|please|now)\s+/i, '').replace(/[.!?]+$/, '').trim();
-  return { ...(payee ? { payee } : {}), ...(amount ? { usdc: amount } : {}), ...(memo ? { memo } : {}) };
+  return { ...(payee ? { payee } : {}), ...(payer ? { payer } : {}), ...(amount ? { usdc: amount } : {}), ...(memo ? { memo } : {}) };
 }
 
 /**
@@ -4828,7 +4837,7 @@ The person has ALREADY granted authority to ${holding} for this exact ask. That 
   // form ("every member") is matched first and excluded here.
   const compiledPayment = (goal: string): Plan | null => {
     const p = paymentAskOf(goal);
-    return p ? { steps: [{ toolId: 'treasury.payment.execute', args: { ...(p.payee ? { payee: p.payee } : {}), ...(p.usdc ? { usdc: p.usdc } : {}), ...(p.memo ? { memo: p.memo } : {}) } }], rationale: 'compiled: single payment (spec 355)' } : null;
+    return p ? { steps: [{ toolId: 'treasury.payment.execute', args: { ...(p.payee ? { payee: p.payee } : {}), ...(p.payer ? { payer: p.payer } : {}), ...(p.usdc ? { usdc: p.usdc } : {}), ...(p.memo ? { memo: p.memo } : {}) } }], rationale: 'compiled: single payment (spec 355)' } : null;
   };
 
   // Fan-out guidance (spec 358 W4) — appended to whichever prompt applies. The form is taught, the
@@ -5282,7 +5291,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(streamOn && recorded ? {
       streamFor: (stepRef: string) => textStreamFor(env as never, input.provider, { onCall: recordStructured('structured', stepRef), ...(tier !== 'default' ? { tier } : {}) }),
       onDraft: (stepRef: string, draft: string) => input.onProgress?.({ type: 'AnswerDraft', stepRef, said: 'Writing the answer…', draft: draft.slice(-6000) }),
-      onFirstWords: (_stepRef: string, ms: number) => { if (trace.answerFirstWordsMs === undefined) trace.answerFirstWordsMs = ms; },
+      onFirstWords: (_stepRef: string, ms: number) => { if (trace.answerFirstWordsMs === undefined) { trace.answerFirstWordsMs = ms; trace.answerFirstWordsAt = Date.now(); } },
     } : {}), ...(input.variant?.toggles?.['skill-selection/answer'] === 'off' ? { pickOnly: true } : {}), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: agentNameForSkill });
   const pairwise = input.variant?.toggles?.['quality/judge'] === 'pairwise';
   const skillInvoke: ToolInvoker | null = !instructionTools.length ? null : !pairwise ? applyWith(ownTier, true) : async (toolId, args, ctx) => {

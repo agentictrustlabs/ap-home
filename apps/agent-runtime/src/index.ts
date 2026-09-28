@@ -4819,7 +4819,10 @@ app.post('/harness/ask', async (c) => {
       // The three WALL phases, non-overlapping: before the harness ran, the run (prepare · pick · steps), after it.
       const nowMs = Date.now();
       stages['phase:pre-run'] = runStartMs - receivedAt; stages['phase:run'] = runEndMs - runStartMs; stages['phase:post-run'] = nowMs - runEndMs - (trace.quality?.ms ?? 0) - ((trace as { outcomeCheck?: { ms?: number } }).outcomeCheck?.ms ?? 0);
-      if (typeof (trace as { answerFirstWordsMs?: number }).answerFirstWordsMs === 'number') stages['answer:first-words'] = (trace as { answerFirstWordsMs: number }).answerFirstWordsMs;
+      // Spec 418 A1 — first words: from the ASK (what a person feels) and from the start of the streamed step.
+      { const fw = trace as { answerFirstWordsMs?: number; answerFirstWordsAt?: number };
+        if (typeof fw.answerFirstWordsAt === 'number') stages['answer:first-words'] = fw.answerFirstWordsAt - receivedAt;
+        if (typeof fw.answerFirstWordsMs === 'number') stages['answer:first-words-in-step'] = fw.answerFirstWordsMs; }
       (reply as { plannerTrace: { stages?: Record<string, number> } }).plannerTrace.stages = stages;
     }
     return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, hasProvenance: hasProvenanceRef(addressee, runRef), resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(routedDelivery ? { routedDelivery } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt, ...(isExpired(r) ? { expired: true } : {}) })), unfinishedTotal: otherRuns.length } : {}) });
