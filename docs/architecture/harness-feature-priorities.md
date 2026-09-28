@@ -1,6 +1,6 @@
 # The A2A harness against the field — the defensible position, the provenance audit, and what goes next
 
-**Status:** maintained (**2026-09-10: the final gap list before the transition to UX and developer tools — §3**;
+**Status:** maintained (**2026-09-27: §11 — selection and the ontology measured, the technique ledger, the next wave by evidence**; 2026-09-10: the final gap list before the transition to UX and developer tools — §3;
 prior snapshots 2026-09-05, 2026-09-09 noon, 2026-09-09 evening). Refreshed at the end of every harness wave — a
 changed verdict lands here, in the competitive scorecard and in spec 351's layer table in the same change.
 **Reads:** LangGraph 1.x OSS, LangSmith (Observability · Evaluation · Deployment/Agent Server · Engine ·
@@ -441,3 +441,37 @@ diff AND the recorded evidence on the work item (B4), `build.promote` as the ste
 ## 10. The master gap analysis against the studios (2026-09-15)
 
 The whole offering — Ring 0, ap-home, ap-build, the Developer Kit and the coding-agent tooling — scored against the platform, work and build studios in one table, then ordered: [master-gap-analysis-2026-09.md](master-gap-analysis-2026-09.md). P0 = the reach wave (external MCP servers as connectors under her grant → Slack/Notion; files + org documents under grant; the kit's clean-machine G2 exit with the typed-client and parity projections; Build B2/B4/B5). P1 = the surface wave (embeddable Ask + AG-UI, Slack/Teams entrances, evals as a product, estate admin + budgets, federation G4–G6). P2 = authoring in the Home, supply, conformance, multimodal.
+
+
+## 11. Selection, the ontology and the agent's context — measured (2026-09-27)
+
+**What changed the method.** Every harness technique is now a row on the **technique ledger** (spec 418 §5; `ap eval ledger`;
+Home → Evals → Techniques): paired comparisons inside one experiment — plan-exact or right-skill (McNemar), tokens and time
+to pick, the whole ask, each wall phase (paired bootstrap medians), answer preference — a declared verdict rule and a
+recorded adoption decision (spec 418 §8: hypothesis first, one component, pre-registered set, regression panel). Every
+turn's operations are kept on the run record (`RunRecordV1.operational`, model calls tied to steps) and shown in the Home
+(Ask "How", run inspector, Operations: stages / selection / conversations).
+
+**Verdicts (was → is).**
+
+| Family | Was | Is |
+| --- | --- | --- |
+| Skill selection | model planner over descriptions (12.9k tokens) | fast judge over a typed reading + ontology cards: **−86–90% tokens**, same or better quality — the default |
+| Agent context in selection | standing only | + the asker's recent skills and memory: **+11/−0 (p = 0.001)** — adopted; the asker's OFFICE as a prior: no gain — kept off |
+| Ontology in selection | a veto (alone −12/−7, narrowing −8/−7: significantly worse) | types and prices the choice; decides dataflow arrows by party stance (**−12% tokens, same quality**, adopted) |
+| Multi-skill outcomes | none | outcome-directed intent (spec 417): chains, held inputs, missing inputs — **same plan quality at +124–174% tokens**; selective reading under test |
+| Latency | ~5–6 s ask; pick ~1 s; ~1.3 s pre-run reads, ~2 s post-run writes | cached asker records + write-after-reply under test (`ops/records`); prompt caching measured and not worth building (judge prompts never hit) |
+| Tests | JSON sets | 393+ cases as A-box in the domain graph (`urn:skills:context:cil-commons:tests`), coverage by skill and by ontology class (97/119 classes exercised) |
+
+**Tiers for the next wave (each a ledger row before it is built):**
+
+- **Now** — selective outcome reading (running); input necessity ×3 repeats (running); `ops/records` latency (queued, run alone).
+- **Next, ranked by expected effect per cost** — declared preconditions with named reasons (Palantir-style, ≈0 tokens per
+  refusal); per-request T-box subsetting / PageRank pre-filter (tokens; Recall@k ≥ 0.99 offline first); two-sample agreement +
+  conformal threshold (confidence without logprobs); parallel independent chain steps; SHACL-validated skill output with one
+  repair; rejected candidates on the provenance graph; steps score against reference chains.
+- **Kept off by evidence** — ontology-alone and ontology-narrowing arms, declared utterances, the lighter answer model, the
+  office prior, prompt caching for the judge. A measured loss stays on the ledger.
+
+Landscape behind the tiers: [ontology-agent-harness-landscape-2026-09.md](product-comparison/ontology-agent-harness-landscape-2026-09.md);
+review and its update: [harness-differentiators-2026-09.md](harness-differentiators-2026-09.md) §6.

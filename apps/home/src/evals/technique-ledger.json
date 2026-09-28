@@ -1,6 +1,6 @@
 {
   "type": "ap.technique-ledger.v1",
-  "builtAt": "2026-09-28T01:17:23.323Z",
+  "builtAt": "2026-09-28T04:24:25.311Z",
   "rows": [
     {
       "technique": {
@@ -191,6 +191,19 @@
           "verdict": "same"
         }
       ],
+      "pooled": [
+        {
+          "baseline": "model",
+          "experiments": 2,
+          "n": 58,
+          "fixed": 3,
+          "broken": 4,
+          "p": 1,
+          "pickTokensPct": null,
+          "askMsPct": null,
+          "verdict": "same"
+        }
+      ],
       "verdict": "same",
       "missing": []
     },
@@ -311,6 +324,19 @@
           "verdict": "worse"
         }
       ],
+      "pooled": [
+        {
+          "baseline": "judgment",
+          "experiments": 2,
+          "n": 58,
+          "fixed": 0,
+          "broken": 15,
+          "p": 0.0001,
+          "pickTokensPct": null,
+          "askMsPct": null,
+          "verdict": "worse"
+        }
+      ],
       "verdict": "worse",
       "missing": []
     },
@@ -428,6 +454,19 @@
             },
             "stages": {}
           },
+          "verdict": "worse"
+        }
+      ],
+      "pooled": [
+        {
+          "baseline": "judgment",
+          "experiments": 2,
+          "n": 58,
+          "fixed": 0,
+          "broken": 19,
+          "p": 0,
+          "pickTokensPct": null,
+          "askMsPct": null,
           "verdict": "worse"
         }
       ],
@@ -855,6 +894,30 @@
           "verdict": "same-quality-cheaper"
         }
       ],
+      "pooled": [
+        {
+          "baseline": "planner-only",
+          "experiments": 2,
+          "n": 60,
+          "fixed": 0,
+          "broken": 2,
+          "p": 0.5,
+          "pickTokensPct": -86.55,
+          "askMsPct": 6.4,
+          "verdict": "same-quality-cheaper"
+        },
+        {
+          "baseline": "stage-off",
+          "experiments": 2,
+          "n": 60,
+          "fixed": 9,
+          "broken": 1,
+          "p": 0.0215,
+          "pickTokensPct": -90.05,
+          "askMsPct": -9.1,
+          "verdict": "better-and-cheaper"
+        }
+      ],
       "verdict": "same-quality-cheaper",
       "missing": []
     },
@@ -1107,6 +1170,19 @@
           "verdict": "same-quality-cheaper"
         }
       ],
+      "pooled": [
+        {
+          "baseline": "ans-default",
+          "experiments": 2,
+          "n": 66,
+          "fixed": 0,
+          "broken": 0,
+          "p": 1,
+          "pickTokensPct": 0.05,
+          "askMsPct": -26.7,
+          "verdict": "same-quality-cheaper"
+        }
+      ],
       "preferences": [
         {
           "experiment": "fresh2-pairwise-default-vs-light",
@@ -1271,9 +1347,9 @@
           }
         ],
         "decision": {
-          "status": "pending",
+          "status": "kept-off",
           "date": "2026-09-27",
-          "note": "Three sets, same plan quality as one-skill (+2/−2, +4/−6, +3/−2) at +124–174% pick tokens: not a default. Next: pay for the dataflow questions only when the picked skill has a producible upstream input."
+          "note": "Full outcome reading pooled over 3 sets: +9/−10 at +169% pick tokens — superseded by selective outcome reading."
         }
       },
       "comparisons": [
@@ -1555,6 +1631,19 @@
           "verdict": "same-quality-costs-more"
         }
       ],
+      "pooled": [
+        {
+          "baseline": "one-skill",
+          "experiments": 3,
+          "n": 151,
+          "fixed": 9,
+          "broken": 10,
+          "p": 1,
+          "pickTokensPct": 168.6,
+          "askMsPct": 19.8,
+          "verdict": "same-quality-costs-more"
+        }
+      ],
       "verdict": "same-quality-costs-more",
       "missing": []
     },
@@ -1688,12 +1777,18 @@
             "experiment": "fresh9-d4",
             "baseline": "outcome-no-necessity",
             "treatment": "outcome-d4"
+          },
+          {
+            "experiment": "fresh9-necessity-r3",
+            "baseline": "outcome-no-necessity",
+            "treatment": "outcome-d4",
+            "note": "3 repeats — the noise check"
           }
         ],
         "decision": {
-          "status": "pending",
+          "status": "kept-off",
           "date": "2026-09-27",
-          "note": "Fixed the over-chaining it targeted (3 cases) but lost 3 grant cases to holds; +19% pick tokens. n=38 × 1 repeat is within noise — rerun with repeats before deciding."
+          "note": "In the FULL outcome reading, pooled +11/−16 (3 repeats on fresh 9 + 1) at +19% pick tokens: kept off there. Its absence question survives inside selective outcome reading, which is measured on its own."
         }
       },
       "comparisons": [
@@ -1787,6 +1882,112 @@
               }
             }
           },
+          "verdict": "same-quality-costs-more"
+        },
+        {
+          "experiment": "fresh9-necessity-r3",
+          "baseline": "outcome-no-necessity",
+          "treatment": "outcome-d4",
+          "note": "3 repeats — the noise check",
+          "set": "sha256:8763d5dd945cff5612f90841994e69584d563a24fb952cd85388e4156e11e9fc",
+          "finishedAt": "2026-09-28T04:17:40.514Z",
+          "n": 114,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.8421,
+            "treat": 0.7982,
+            "delta": -0.0439,
+            "fixed": 8,
+            "broken": 13,
+            "p": 0.3833
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 4060,
+              "treat": 4843,
+              "delta": 783,
+              "deltaPct": 19.3,
+              "ci": [
+                699,
+                780
+              ]
+            },
+            "totalTokens": {
+              "base": 4060,
+              "treat": 4843,
+              "delta": 783,
+              "deltaPct": 19.3,
+              "ci": [
+                699,
+                780
+              ]
+            },
+            "pickMs": {
+              "base": 1850.5,
+              "treat": 2185,
+              "delta": 334.5,
+              "deltaPct": 18.1,
+              "ci": [
+                243,
+                425
+              ]
+            },
+            "askMs": {
+              "base": 5240,
+              "treat": 5498.5,
+              "delta": 258.5,
+              "deltaPct": 4.9,
+              "ci": [
+                -128,
+                426
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1626,
+                "treat": 1660,
+                "delta": 34,
+                "deltaPct": 2.1,
+                "ci": [
+                  -41.5,
+                  78.5
+                ]
+              },
+              "phase:pre-run": {
+                "base": 1501.5,
+                "treat": 1549,
+                "delta": 47.5,
+                "deltaPct": 3.2,
+                "ci": [
+                  -35,
+                  129.5
+                ]
+              },
+              "phase:run": {
+                "base": 1943.5,
+                "treat": 2307.5,
+                "delta": 364,
+                "deltaPct": 18.7,
+                "ci": [
+                  271,
+                  538
+                ]
+              }
+            }
+          },
+          "verdict": "same-quality-costs-more"
+        }
+      ],
+      "pooled": [
+        {
+          "baseline": "outcome-no-necessity",
+          "experiments": 2,
+          "n": 152,
+          "fixed": 11,
+          "broken": 16,
+          "p": 0.4421,
+          "pickTokensPct": 19,
+          "askMsPct": 10.3,
           "verdict": "same-quality-costs-more"
         }
       ],
@@ -2010,18 +2211,682 @@
     },
     {
       "technique": {
+        "id": "outcome-selective",
+        "name": "Selective outcome reading (dataflow questions only when the pick has a producible input)",
+        "ontologyDriven": true,
+        "spec": "418 D6",
+        "source": "The ledger: full outcome reading paid +124–174% pick tokens on every ask for chains that mattered in a handful of cases",
+        "what": "The cheap one-skill pick first; one small dataflow call only when the picked skill has an input another skill can produce (after the party rule) that the asker does not hold — about that skill's inputs only. Classes named with their lexicon glosses.",
+        "comparisons": [
+          {
+            "experiment": "fresh9-selective",
+            "baseline": "one-skill",
+            "treatment": "outcome-selective"
+          },
+          {
+            "experiment": "fresh8-selective",
+            "baseline": "one-skill",
+            "treatment": "outcome-selective"
+          },
+          {
+            "experiment": "fresh7-selective",
+            "baseline": "one-skill",
+            "treatment": "outcome-selective"
+          },
+          {
+            "experiment": "fresh9-selective",
+            "baseline": "outcome-d4",
+            "treatment": "outcome-selective",
+            "note": "vs the full outcome reading"
+          },
+          {
+            "experiment": "fresh4-panel-selective",
+            "baseline": "one-skill",
+            "treatment": "outcome-selective",
+            "note": "regression panel"
+          },
+          {
+            "experiment": "fresh5-panel-selective",
+            "baseline": "one-skill",
+            "treatment": "outcome-selective",
+            "note": "regression panel"
+          },
+          {
+            "experiment": "fresh6-panel-selective",
+            "baseline": "one-skill",
+            "treatment": "outcome-selective",
+            "note": "regression panel"
+          },
+          {
+            "experiment": "fresh8-selective",
+            "baseline": "outcome-d4",
+            "treatment": "outcome-selective",
+            "note": "vs the full outcome reading (glossed) — fresh 8 is development data for D4"
+          },
+          {
+            "experiment": "fresh7-selective",
+            "baseline": "outcome-d4",
+            "treatment": "outcome-selective",
+            "note": "vs the full outcome reading (glossed)"
+          }
+        ],
+        "decision": {
+          "status": "pending",
+          "date": "2026-09-27",
+          "note": "Pooled over held-out 7/8/9 vs one-skill: +7/−0 (p=0.016) at −2% pick tokens, −4% ask time; vs the full outcome reading +6/−0 (p=0.03), −65% tokens. Adopt as the default skill stage once the regression panel (fresh 4/5/6) shows no set worse."
+        }
+      },
+      "comparisons": [
+        {
+          "experiment": "fresh7-selective",
+          "baseline": "one-skill",
+          "treatment": "outcome-selective",
+          "set": "sha256:f487af4a8a8563da110651bdb37ed863a340dad5f80acbfbaf6cc8a4f7b3848d",
+          "finishedAt": "2026-09-28T04:04:53.986Z",
+          "n": 36,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.8889,
+            "treat": 0.9444,
+            "delta": 0.0556,
+            "fixed": 2,
+            "broken": 0,
+            "p": 0.5
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1732,
+              "treat": 1734.5,
+              "delta": 2.5,
+              "deltaPct": 0.1,
+              "ci": [
+                0,
+                9
+              ]
+            },
+            "totalTokens": {
+              "base": 1732,
+              "treat": 1734.5,
+              "delta": 2.5,
+              "deltaPct": 0.1,
+              "ci": [
+                0,
+                9
+              ]
+            },
+            "pickMs": {
+              "base": 1040,
+              "treat": 1046,
+              "delta": 6,
+              "deltaPct": 0.6,
+              "ci": [
+                -78,
+                147
+              ]
+            },
+            "askMs": {
+              "base": 4735,
+              "treat": 4580,
+              "delta": -155,
+              "deltaPct": -3.3,
+              "ci": [
+                -651,
+                57
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1713,
+                "treat": 1687,
+                "delta": -26,
+                "deltaPct": -1.5,
+                "ci": [
+                  -185.5,
+                  52
+                ]
+              },
+              "phase:pre-run": {
+                "base": 1716,
+                "treat": 1570,
+                "delta": -146,
+                "deltaPct": -8.5,
+                "ci": [
+                  -394,
+                  32
+                ]
+              },
+              "phase:run": {
+                "base": 1127.5,
+                "treat": 1141.5,
+                "delta": 14,
+                "deltaPct": 1.2,
+                "ci": [
+                  -93,
+                  85
+                ]
+              }
+            }
+          },
+          "verdict": "same"
+        },
+        {
+          "experiment": "fresh7-selective",
+          "baseline": "outcome-d4",
+          "treatment": "outcome-selective",
+          "note": "vs the full outcome reading (glossed)",
+          "set": "sha256:f487af4a8a8563da110651bdb37ed863a340dad5f80acbfbaf6cc8a4f7b3848d",
+          "finishedAt": "2026-09-28T04:04:53.986Z",
+          "n": 36,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.9167,
+            "treat": 0.9444,
+            "delta": 0.0278,
+            "fixed": 1,
+            "broken": 0,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 4855,
+              "treat": 1734.5,
+              "delta": -3120.5,
+              "deltaPct": -64.3,
+              "ci": [
+                -3144,
+                -2937
+              ]
+            },
+            "totalTokens": {
+              "base": 4855,
+              "treat": 1734.5,
+              "delta": -3120.5,
+              "deltaPct": -64.3,
+              "ci": [
+                -3144,
+                -2937
+              ]
+            },
+            "pickMs": {
+              "base": 2138,
+              "treat": 1046,
+              "delta": -1092,
+              "deltaPct": -51.1,
+              "ci": [
+                -1174.5,
+                -737.5
+              ]
+            },
+            "askMs": {
+              "base": 5743.5,
+              "treat": 4580,
+              "delta": -1163.5,
+              "deltaPct": -20.3,
+              "ci": [
+                -1472,
+                -330.5
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1663.5,
+                "treat": 1687,
+                "delta": 23.5,
+                "deltaPct": 1.4,
+                "ci": [
+                  -168,
+                  139
+                ]
+              },
+              "phase:pre-run": {
+                "base": 1657,
+                "treat": 1570,
+                "delta": -87,
+                "deltaPct": -5.3,
+                "ci": [
+                  -184,
+                  -0.5
+                ]
+              },
+              "phase:run": {
+                "base": 2265.5,
+                "treat": 1141.5,
+                "delta": -1124,
+                "deltaPct": -49.6,
+                "ci": [
+                  -1221,
+                  -791
+                ]
+              }
+            }
+          },
+          "verdict": "same-quality-cheaper"
+        },
+        {
+          "experiment": "fresh9-selective",
+          "baseline": "one-skill",
+          "treatment": "outcome-selective",
+          "set": "sha256:8763d5dd945cff5612f90841994e69584d563a24fb952cd85388e4156e11e9fc",
+          "finishedAt": "2026-09-28T04:05:47.672Z",
+          "n": 38,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.8158,
+            "treat": 0.8947,
+            "delta": 0.0789,
+            "fixed": 3,
+            "broken": 0,
+            "p": 0.25
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1749,
+              "treat": 1716,
+              "delta": -33,
+              "deltaPct": -1.9,
+              "ci": [
+                -17.5,
+                0
+              ]
+            },
+            "totalTokens": {
+              "base": 1749,
+              "treat": 1716,
+              "delta": -33,
+              "deltaPct": -1.9,
+              "ci": [
+                -17.5,
+                0
+              ]
+            },
+            "pickMs": {
+              "base": 1121.5,
+              "treat": 1025.5,
+              "delta": -96,
+              "deltaPct": -8.6,
+              "ci": [
+                -439,
+                30
+              ]
+            },
+            "askMs": {
+              "base": 4850.5,
+              "treat": 4655,
+              "delta": -195.5,
+              "deltaPct": -4,
+              "ci": [
+                -893,
+                327
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1722,
+                "treat": 1750,
+                "delta": 28,
+                "deltaPct": 1.6,
+                "ci": [
+                  -46,
+                  127
+                ]
+              },
+              "phase:pre-run": {
+                "base": 1657,
+                "treat": 1656.5,
+                "delta": -0.5,
+                "deltaPct": 0,
+                "ci": [
+                  -89.5,
+                  134
+                ]
+              },
+              "phase:run": {
+                "base": 1257,
+                "treat": 1181,
+                "delta": -76,
+                "deltaPct": -6,
+                "ci": [
+                  -464.5,
+                  31.5
+                ]
+              }
+            }
+          },
+          "verdict": "same"
+        },
+        {
+          "experiment": "fresh9-selective",
+          "baseline": "outcome-d4",
+          "treatment": "outcome-selective",
+          "note": "vs the full outcome reading",
+          "set": "sha256:8763d5dd945cff5612f90841994e69584d563a24fb952cd85388e4156e11e9fc",
+          "finishedAt": "2026-09-28T04:05:47.672Z",
+          "n": 38,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.7368,
+            "treat": 0.8947,
+            "delta": 0.1579,
+            "fixed": 6,
+            "broken": 0,
+            "p": 0.0313
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 4832,
+              "treat": 1716,
+              "delta": -3116,
+              "deltaPct": -64.5,
+              "ci": [
+                -3125.5,
+                -2947
+              ]
+            },
+            "totalTokens": {
+              "base": 4832,
+              "treat": 1716,
+              "delta": -3116,
+              "deltaPct": -64.5,
+              "ci": [
+                -3125.5,
+                -2947
+              ]
+            },
+            "pickMs": {
+              "base": 2174.5,
+              "treat": 1025.5,
+              "delta": -1149,
+              "deltaPct": -52.8,
+              "ci": [
+                -1158,
+                -773
+              ]
+            },
+            "askMs": {
+              "base": 5676,
+              "treat": 4655,
+              "delta": -1021,
+              "deltaPct": -18,
+              "ci": [
+                -1255.5,
+                -587.5
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1707,
+                "treat": 1750,
+                "delta": 43,
+                "deltaPct": 2.5,
+                "ci": [
+                  -127,
+                  118
+                ]
+              },
+              "phase:pre-run": {
+                "base": 1662.5,
+                "treat": 1656.5,
+                "delta": -6,
+                "deltaPct": -0.4,
+                "ci": [
+                  -85.5,
+                  68
+                ]
+              },
+              "phase:run": {
+                "base": 2313,
+                "treat": 1181,
+                "delta": -1132,
+                "deltaPct": -48.9,
+                "ci": [
+                  -1161,
+                  -746
+                ]
+              }
+            }
+          },
+          "verdict": "better-and-cheaper"
+        },
+        {
+          "experiment": "fresh8-selective",
+          "baseline": "one-skill",
+          "treatment": "outcome-selective",
+          "set": "sha256:2e0ca91d31b7328c5d40519767a644d9c46f7f6a514c4e07837812924b43df55",
+          "finishedAt": "2026-09-28T04:17:16.169Z",
+          "n": 77,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.8961,
+            "treat": 0.9221,
+            "delta": 0.026,
+            "fixed": 2,
+            "broken": 0,
+            "p": 0.5
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1745,
+              "treat": 1713,
+              "delta": -32,
+              "deltaPct": -1.8,
+              "ci": [
+                -9,
+                0
+              ]
+            },
+            "totalTokens": {
+              "base": 1745,
+              "treat": 1713,
+              "delta": -32,
+              "deltaPct": -1.8,
+              "ci": [
+                -9,
+                0
+              ]
+            },
+            "pickMs": {
+              "base": 1388,
+              "treat": 1090,
+              "delta": -298,
+              "deltaPct": -21.5,
+              "ci": [
+                -433,
+                -6
+              ]
+            },
+            "askMs": {
+              "base": 5210,
+              "treat": 4712,
+              "delta": -498,
+              "deltaPct": -9.6,
+              "ci": [
+                -531,
+                -98
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1619,
+                "treat": 1627,
+                "delta": 8,
+                "deltaPct": 0.5,
+                "ci": [
+                  -43,
+                  57
+                ]
+              },
+              "phase:pre-run": {
+                "base": 1664,
+                "treat": 1581,
+                "delta": -83,
+                "deltaPct": -5,
+                "ci": [
+                  -133,
+                  39
+                ]
+              },
+              "phase:run": {
+                "base": 1538,
+                "treat": 1325,
+                "delta": -213,
+                "deltaPct": -13.8,
+                "ci": [
+                  -399,
+                  51
+                ]
+              }
+            }
+          },
+          "verdict": "same"
+        },
+        {
+          "experiment": "fresh8-selective",
+          "baseline": "outcome-d4",
+          "treatment": "outcome-selective",
+          "note": "vs the full outcome reading (glossed) — fresh 8 is development data for D4",
+          "set": "sha256:2e0ca91d31b7328c5d40519767a644d9c46f7f6a514c4e07837812924b43df55",
+          "finishedAt": "2026-09-28T04:17:16.169Z",
+          "n": 77,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.961,
+            "treat": 0.9221,
+            "delta": -0.039,
+            "fixed": 0,
+            "broken": 3,
+            "p": 0.25
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 4833,
+              "treat": 1713,
+              "delta": -3120,
+              "deltaPct": -64.6,
+              "ci": [
+                -3139,
+                -3102
+              ]
+            },
+            "totalTokens": {
+              "base": 4833,
+              "treat": 1713,
+              "delta": -3120,
+              "deltaPct": -64.6,
+              "ci": [
+                -3139,
+                -3102
+              ]
+            },
+            "pickMs": {
+              "base": 2156,
+              "treat": 1090,
+              "delta": -1066,
+              "deltaPct": -49.4,
+              "ci": [
+                -1134,
+                -791
+              ]
+            },
+            "askMs": {
+              "base": 5332,
+              "treat": 4712,
+              "delta": -620,
+              "deltaPct": -11.6,
+              "ci": [
+                -956,
+                44
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1632,
+                "treat": 1627,
+                "delta": -5,
+                "deltaPct": -0.3,
+                "ci": [
+                  -114,
+                  18
+                ]
+              },
+              "phase:pre-run": {
+                "base": 1514,
+                "treat": 1581,
+                "delta": 67,
+                "deltaPct": 4.4,
+                "ci": [
+                  -18,
+                  116
+                ]
+              },
+              "phase:run": {
+                "base": 2285,
+                "treat": 1325,
+                "delta": -960,
+                "deltaPct": -42,
+                "ci": [
+                  -1093,
+                  -723
+                ]
+              }
+            }
+          },
+          "verdict": "same-quality-cheaper"
+        }
+      ],
+      "pooled": [
+        {
+          "baseline": "one-skill",
+          "experiments": 3,
+          "n": 151,
+          "fixed": 7,
+          "broken": 0,
+          "p": 0.0156,
+          "pickTokensPct": -1.8,
+          "askMsPct": -4,
+          "verdict": "better"
+        },
+        {
+          "baseline": "outcome-d4",
+          "experiments": 3,
+          "n": 151,
+          "fixed": 7,
+          "broken": 3,
+          "p": 0.3438,
+          "pickTokensPct": -64.5,
+          "askMsPct": -18,
+          "verdict": "same-quality-cheaper"
+        }
+      ],
+      "verdict": "same-quality-cheaper",
+      "missing": [
+        "fresh4-panel-selective",
+        "fresh5-panel-selective",
+        "fresh6-panel-selective"
+      ]
+    },
+    {
+      "technique": {
         "id": "async-recording",
-        "name": "Recording off the reply's critical path; reads overlapped",
+        "name": "The asker's records from the colo cache; the conversation write after the reply",
         "ontologyDriven": false,
         "spec": "418 §4",
         "source": "LLMCompiler (arXiv 2312.04511) scheduling; our stage marks (pre-run ~1.3 s, post-run ~2 s)",
-        "what": "Reply as soon as the run ends; the record/provenance commit durably after (waitUntil + run ref); the asker-context and held-class reads start alongside the lexicon reading.",
+        "what": "ops/records=cached: the asker's conversation/facts/preferences read from the colo cache (the canonical answer this Worker last wrote; the vault on a miss), 'what is waiting on you' memoised a minute, and the conversation write lands after the reply (read-your-writes through the cache).",
         "plannedAb": "same set, sync vs async recording: p50/p95 ask ms and phase:post-run; plan-exact unchanged; zero replies citing an uncommitted run.",
-        "comparisons": []
+        "comparisons": [
+          {
+            "experiment": "fresh9-records",
+            "baseline": "one-skill",
+            "treatment": "one-skill-cached",
+            "note": "run alone (no concurrent runners), interleaved"
+          }
+        ]
       },
       "comparisons": [],
-      "verdict": "planned",
-      "missing": []
+      "verdict": "inconclusive",
+      "missing": [
+        "fresh9-records"
+      ]
     },
     {
       "technique": {
@@ -2032,7 +2897,12 @@
         "source": "Gemini implicit caching (90% discount on cached prefix)",
         "what": "The judge's instructions and the skills' ontology result cards first, byte-stable; the typed reading last — so the prefix is served from the provider's cache.",
         "plannedAb": "cachedIn tokens, pick ms, plan-exact unchanged — current vs reordered.",
-        "comparisons": []
+        "comparisons": [],
+        "decision": {
+          "status": "kept-off",
+          "date": "2026-09-27",
+          "note": "Measured before building: implicit prefix caching hit 29 of 1,338 stored runs, only on the planner's 12–17k-token prompts; the judge's 1.5–5k-token prompts never hit. The judge's prefix is already byte-stable, so implicit caching cannot help it; explicit caching would save ≤ ~100 ms per ask — deprioritised."
+        }
       },
       "comparisons": [],
       "verdict": "planned",

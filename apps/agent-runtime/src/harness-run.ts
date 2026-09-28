@@ -65,7 +65,7 @@ import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
 import { ADAPTER, CARRIES } from './adapter-declarations.js';
 import { relationshipCredentialDigest, termsDigestOf, type RelationshipCredentialBodyV1 } from '@agenticprimitives/agent-relationships';
-import { replayingInvoker, inputsFor, type RunRecordV1, type RunMarks, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent , selectByDeclaredUtterances , selectByJudgment , selectByOntology, selectByOntologyThenJudgment, selectByProposalThenJudgment, selectByOntologyFirst, type OntologyFirstSelectionV1, type AskerContextV1, selectByFramedJudgment, addUsage, judgeAnswerPreference, type ModelUsageV1, type OntologySelectionV1, type JudgmentSelectionV1, type FramedSelectionV1, type ProposedSelectionV1, selectByOutcome, outcomeSteps, type OutcomeSelectionV1 } from '@agenticprimitives/orchestration';
+import { replayingInvoker, inputsFor, type RunRecordV1, type RunMarks, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent , selectByDeclaredUtterances , selectByJudgment , selectByOntology, selectByOntologyThenJudgment, selectByProposalThenJudgment, selectByOntologyFirst, type OntologyFirstSelectionV1, type AskerContextV1, selectByFramedJudgment, addUsage, judgeAnswerPreference, type ModelUsageV1, type OntologySelectionV1, type JudgmentSelectionV1, type FramedSelectionV1, type ProposedSelectionV1, selectByOutcome, outcomeSteps, type OutcomeSelectionV1, planForPicked, type SelectivePlanV1 } from '@agenticprimitives/orchestration';
 import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, standingFor, declareInstruction, forgetInstruction, instructionContextOf, STANDING_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
@@ -2501,7 +2501,7 @@ export interface HarnessRunInput {
   /** Spec 415 A4 — what a COMPARISON asked this run to do differently (already admitted by the caller: a
    *  comparison estate, the agent's own steward). The planner kind and the capability toggles apply here; the
    *  provider was folded into `provider`. Behaviour, never authority. */
-  variant?: { plannerKind?: 'model' | 'rule-based'; selection?: 'model' | 'declared' | 'ontology' | 'judgment' | 'ontology+judgment' | 'propose+judgment' | 'ontology-first' | 'framed-judgment' | 'outcome'; toggles?: Record<string, string>;
+  variant?: { plannerKind?: 'model' | 'rule-based'; selection?: 'model' | 'declared' | 'ontology' | 'judgment' | 'ontology+judgment' | 'propose+judgment' | 'ontology-first' | 'framed-judgment' | 'outcome' | 'outcome-selective'; toggles?: Record<string, string>;
     judgeProfile?: 'thorough' | 'fast' | 'logprob';
     askerContext?: { digest: string; recentSkills?: Array<{ id: string; times: number }>; memoryTags?: string[]; heldClasses?: string[] };
     /** Spec 416 W3 — conformal acceptance under a fitted map. */
@@ -2805,7 +2805,9 @@ export interface PlannerTraceV1 {
     | ({ approach: 'propose+judgment' } & ProposedSelectionV1)
     | ({ approach: 'ontology-first' } & OntologyFirstSelectionV1)
     | ({ approach: 'framed-judgment' } & FramedSelectionV1)
-    | ({ approach: 'outcome' } & OutcomeSelectionV1);
+    | ({ approach: 'outcome' } & OutcomeSelectionV1)
+    /** Spec 418 D6 — the one-skill pick, then (only when the pick has a producible upstream input) one small dataflow call. */
+    | ({ approach: 'outcome-selective'; chose: string | null; hold?: string; distribution: Record<string, number>; judge: { name: string; kind: string }; reading?: unknown } & Partial<Omit<SelectivePlanV1, 'judge'>> & { planJudge?: { name: string; kind: string } });
   /** Each party binding and WHERE IT CAME FROM (spec 367 §3): the person's words, a decision rule, memory, or the resolver. */
   bindings: Array<{ arg: string; raw: string; agent: string; label?: string; source: 'said' | 'context' | 'standing' | 'decision' | 'memory' | 'resolver' | 'disclosed'; because?: string }>;
   /** What the surface declared (spec 353): the realm kind and how many capabilities it offered. */
@@ -4884,7 +4886,7 @@ step is then handed to that agent under authority the person grants; leave it ou
           // Spec 415 A4 — THE THREE ARMS (+ the framed shape). A rule narrows and a judge picks; neither allows. Candidates are
           // the playbook's instruction skills; the arm's decision goes on the trace; a hold plans `ask.unsupported`.
           const arm = input.variant?.selection;
-          if (arm === 'ontology' || arm === 'judgment' || arm === 'ontology+judgment' || arm === 'propose+judgment' || arm === 'ontology-first' || arm === 'framed-judgment' || arm === 'outcome') {
+          if (arm === 'ontology' || arm === 'judgment' || arm === 'ontology+judgment' || arm === 'propose+judgment' || arm === 'ontology-first' || arm === 'framed-judgment' || arm === 'outcome' || arm === 'outcome-selective') {
             const sources = instructionSourcesOf(playbook);
             const skills = Object.values(playbook?.tools ?? {}).filter((t) => sources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}), ...(t.produces?.length ? { produces: t.produces } : {}), ...(t.consumes?.length ? { consumes: input.variant?.toggles?.['skill-selection/necessity'] === 'off' ? t.consumes.map(({ necessity: _n, ...k }) => k) : t.consumes } : {}) }));
             // Spec 418 D4 — `office-prior off` hides the role classes' typical capabilities from the reading.
@@ -4921,6 +4923,21 @@ step is then handed to that agent under authority the person grants; leave it ou
             // Spec 416 W1 — the ontology PROPOSES (recall-first, `excludes` vetoes), the judge decides among the proposed.
             else if (arm === 'ontology-first') { const r = await selectByOntologyFirst(rest, skills, call, judgeParams, lexicon, asker); trace.selection = { approach: 'ontology-first', ...r }; chose = r.chose; }
             else if (arm === 'propose+judgment') { const r = await selectByProposalThenJudgment(rest, skills, call, judgeParams, lexicon); trace.selection = { approach: 'propose+judgment', ...r }; chose = r.chose; }
+            else if (arm === 'outcome-selective') {
+              // Spec 418 D6 — the cheap pick first; the dataflow questions only when the pick has a producible upstream input.
+              const r1 = await selectByJudgment(rest, skills, call, { profile: 'fast', ...(input.variant?.toggles?.['skill-selection/samples'] === '2' ? { samples: 2 } : {}) }, { ...(lexicon ? { lexicon } : {}), ...(asker ? { asker } : {}) });
+              plannerUsed = arm;
+              if (r1.chose) {
+                const r2 = await planForPicked(rest, r1.chose, skills, call, input.variant?.toggles?.['skill-selection/party-rule'] === 'off' ? { partyRule: false } : {}, { ...(lexicon ? { lexicon } : {}), ...(asker ? { asker } : {}) });
+                const { judge: planJudge, ...plan2 } = r2;
+                trace.selection = { approach: 'outcome-selective', chose: r1.chose, distribution: r1.distribution, judge: r1.judge, ...(r1.reading ? { reading: r1.reading } : {}), ...plan2, planJudge };
+                const labels = new Map([...(lexicon ?? []).map((e) => [e.iri, e.label] as const), ...skills.flatMap((x) => [...(x.produces ?? []), ...(x.consumes ?? [])].map((k) => [k.iri, k.label] as const))]);
+                const steps = outcomeSteps(r2.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri);
+                return withSpecialists({ steps, rationale: `outcome-selective: ${r2.plan.steps.map((x) => x.tool).join(' → ')}${r2.asked ? '' : ' (no dataflow call)'}` }, playbook?.specialists, pin.tools);
+              }
+              trace.selection = { approach: 'outcome-selective', chose: null, ...(r1.hold ? { hold: r1.hold } : {}), distribution: r1.distribution, judge: r1.judge };
+              chose = null;
+            }
             else if (arm === 'outcome') {
               // Spec 417 — the OUTCOME the person wants (one judged call: the result, and what the request supplies), then
               // the path to it by the data graph's arrows from what the asker holds. A chain runs as `$ref`-linked steps.
@@ -4964,7 +4981,7 @@ step is then handed to that agent under authority the person grants; leave it ou
             const asker = relation || ctx ? { ...(relation ? { relation } : {}), ...(ctx?.recentSkills?.length ? { recentSkills: ctx.recentSkills.slice(0, 4) } : {}), ...(ctx?.memoryTags?.length ? { memoryTags: ctx.memoryTags.slice(0, 6) } : {}) } : undefined;
             // Spec 418 D4 — `office-prior off` hides the role classes' typical capabilities here too (one knob, both paths).
             const stageLexicon = input.variant?.toggles?.['skill-selection/office-prior'] === 'off' ? playbook?.domainLexicon?.map(({ uses: _u, ...e }) => e) : playbook?.domainLexicon;
-            const r = await selectByJudgment(rest, skills, call, { profile: 'fast' }, { ...(stageLexicon ? { lexicon: stageLexicon } : {}), ...(asker ? { asker } : {}) });
+            const r = await selectByJudgment(rest, skills, call, { profile: 'fast', ...(input.variant?.toggles?.['skill-selection/samples'] === '2' ? { samples: 2 } : {}) }, { ...(stageLexicon ? { lexicon: stageLexicon } : {}), ...(asker ? { asker } : {}) });
             trace.selection = { approach: 'judgment', ...r };
             trace.skillStage = r.chose ? 'chose' : 'handed-to-planner';
             if (r.chose) {
