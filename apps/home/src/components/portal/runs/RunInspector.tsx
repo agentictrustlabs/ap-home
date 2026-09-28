@@ -13,6 +13,7 @@ import { stateOf } from '../../../home/run-state';
 import { StatePill } from '../StatePill';
 import { RunTimeline } from './RunTimeline';
 import { RunTraceTree } from './RunTraceTree';
+import { TurnOperations } from './TurnOperations';
 import { DisputePanel } from './DisputePanel';
 import { SaveAsRecipe } from './SaveAsRecipe';
 import { canSaveAsRecipe } from '@agenticprimitives/harness/recipe';
@@ -124,6 +125,15 @@ export function RunInspector({ token, addressee, runRef, goal, open = true }: { 
       {/* 4b · HOW IT RAN (spec 415 A3) — the run tree from the door: variant, model calls, skill selection, each step's
           skill and authority, child runs; the run's measurements on request. */}
       <H>how it ran</H>
+      {/* Spec 418 §3 — the turn's operations as the record kept them (stages, selection, conversation); the model calls
+          are in the tree below, each skill's under its step. A run recorded before 418 has none — said so. */}
+      {rec.operational
+        ? <TurnOperations testId="run-operations" stages={rec.operational.stages} selection={rec.operational.selection ?? null}
+            {...(rec.operational.selectionMs !== undefined ? { selectionMs: rec.operational.selectionMs } : {})}
+            {...(rec.operational.skillStage ? { skillStage: rec.operational.skillStage } : {})}
+            {...(rec.operational.turn?.contextId ? { contextId: rec.operational.turn.contextId } : {})}
+            {...(rec.operational.turn?.recalledTurns !== undefined ? { recalledTurns: rec.operational.turn.recalledTurns } : {})} />
+        : <div style={{ opacity: 0.6 }} data-testid="run-operations-absent">operations (stages, selection): not recorded for this run</div>}
       <RunTraceTree token={token} addressee={addressee} runRef={runRef} rec={rec} />
 
       {/* 5 · EXECUTION DETAIL + 6 · PROVENANCE — the span timeline and its downloads */}

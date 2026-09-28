@@ -9,7 +9,9 @@ import { Section, List, Row, Chip, Stats, Stat, Tabs, FilterChip, Note, Card } f
 import { whitelabel } from '../../whitelabel/config';
 
 type Outcome = 'tp' | 'tp-alt' | 'tn' | 'mis-sib' | 'mis-far' | 'miss' | 'spur' | 'undetected';
-interface IntentRow { intentId: string; message: string; split: string; bucket?: string; expected: string | null; chosen: string | null; outcome: Outcome; label: string; ok: boolean | null; why?: string; ms?: number; contaminated?: { skill: string; overlap: number; isNot: boolean } }
+interface IntentRow { intentId: string; message: string; split: string; bucket?: string; expected: string | null; chosen: string | null; outcome: Outcome; label: string; ok: boolean | null; why?: string; ms?: number; contaminated?: { skill: string; overlap: number; isNot: boolean };
+  /** Spec 418 §3 — how the case's turn went. */
+  askMs?: number; selectionMs?: number; tokens?: { pickIn?: number; pickOut?: number; totalIn?: number; totalOut?: number; calls?: number }; stages?: Record<string, number>; chain?: string[]; missing?: string[]; quality?: number }
 interface PerSkill { skill: string; asked: number; right: number; accuracy: number | null; ci: [number, number] | null; wronglyChosen: number; confusedWith: Array<{ skill: string; times: number }> }
 interface Variant { name: string; how: string; runs: number; macroTa: number | null; macroCi: [number, number] | null; microTa: number | null; holdRate: number | null; holdNum?: number; holdDen?: number; routingPurity: number | null; right: number; wrong: number; declinedCorrectly: number; firedWrongly: number; gate: { status: string; reason: string } | null; intents: IntentRow[]; perSkill: PerSkill[]; riskCoverage?: RiskCoverage; cost?: Cost }
 interface Cost { medianMs: number | null; medianSelectionMs?: number | null; tokenRuns: number; meanSelectionIn: number | null; meanSelectionOut: number | null; meanTotalIn: number | null; meanTotalOut: number | null; unreportedCalls: number }
@@ -121,11 +123,15 @@ export function SkillAssessmentLab() {
                       title={`“${i.message}”`}
                       meta={<>
                         <span>should be <strong>{skillName(i.expected)}</strong> · chose <strong>{skillName(i.chosen)}</strong></span>
-                        <span style={{ opacity: 0.65 }}> · {i.intentId}{i.bucket ? ` · ${i.bucket}` : ''}{i.ms ? ` · ${(i.ms / 1000).toFixed(0)}s` : ''}</span>
+                        <span style={{ opacity: 0.65 }}> · {i.intentId}{i.bucket ? ` · ${i.bucket}` : ''}{i.askMs !== undefined ? ` · ${(i.askMs / 1000).toFixed(1)}s` : i.ms ? ` · ${(i.ms / 1000).toFixed(0)}s` : ''}{i.selectionMs !== undefined ? ` · pick ${(i.selectionMs / 1000).toFixed(1)}s` : ''}{i.tokens?.pickIn !== undefined ? ` · pick ${fmtTok((i.tokens.pickIn ?? 0) + (i.tokens.pickOut ?? 0))} tok` : ''}</span>
+                        {i.chain && i.chain.length > 0 && <span style={{ opacity: 0.8 }}> · plan {i.chain.map((c) => c.replace(/^cic\./, '')).join(' → ')}</span>}
                         {openIntent === i.intentId && (
                           <div style={{ marginTop: 4 }}>
                             <div>{R.glossary.outcomes[i.outcome]?.explain}.</div>
                             {i.why && <div style={{ opacity: 0.8 }}>Why the test set says so: {i.why}</div>}
+                            {i.missing?.length ? <div style={{ opacity: 0.8 }}>Named missing (to ask for): {i.missing.map((m) => m.split('#').pop()).join(', ')}</div> : null}
+                            {i.tokens && <div style={{ opacity: 0.8 }}>Tokens — to pick: {fmtTok(i.tokens.pickIn)} in / {fmtTok(i.tokens.pickOut)} out · whole run: {fmtTok(i.tokens.totalIn)} in / {fmtTok(i.tokens.totalOut)} out{i.tokens.calls !== undefined ? ` · ${i.tokens.calls} model call${i.tokens.calls === 1 ? '' : 's'}` : ''}{i.quality !== undefined ? ` · answer quality ${Math.round(i.quality * 100)}%` : ''}</div>}
+                            {i.stages && <StageBars stages={i.stages} />}
                             {i.contaminated && <div style={{ color: 'var(--color-amber-700, #b45309)' }}>This sentence is {Math.round(i.contaminated.overlap * 100)}% the same words as an example {skillName(i.contaminated.skill)} declares{i.contaminated.isNot ? ' as not its job' : ''} — the skill was shown the answer, so this result does not measure selection.</div>}
                           </div>
                         )}
@@ -217,4 +223,21 @@ export function RiskCoverageChart({ rc }: { rc: RiskCoverage }) {
       </div>
     </Card>
   );
+}
+
+const fmtTok = (n?: number) => (n === undefined ? '—' : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+
+/** Spec 418 §3 — where one case's time went: the wall phases, then the largest named stages (summed per name). */
+function StageBars({ stages }: { stages: Record<string, number> }) {
+  const phases = ['phase:pre-run', 'phase:run', 'phase:post-run'].filter((k) => stages[k] !== undefined);
+  const named = Object.entries(stages).filter(([k]) => !k.startsWith('phase:')).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const max = Math.max(1, ...phases.map((k) => stages[k]!), ...named.map(([, v]) => v));
+  const bar = (k: string, v: number) => (
+    <div key={k} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 }}>
+      <span style={{ width: 150, opacity: 0.75 }}>{k.replace(/^phase:/, '')}</span>
+      <span style={{ display: 'inline-block', height: 6, width: `${Math.max(2, Math.round((v / max) * 160))}px`, background: k.startsWith('phase:') ? 'var(--color-slate-500, #64748b)' : 'var(--color-slate-300, #cbd5e1)', borderRadius: 3 }} />
+      <span style={{ opacity: 0.75 }}>{v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${v}ms`}</span>
+    </div>
+  );
+  return <div data-testid="lab-stages" style={{ marginTop: 4 }}>{phases.map((k) => bar(k, stages[k]!))}{named.length ? <div style={{ opacity: 0.6, fontSize: 11, marginTop: 2 }}>largest stages (summed per name)</div> : null}{named.map(([k, v]) => bar(k, v))}</div>;
 }

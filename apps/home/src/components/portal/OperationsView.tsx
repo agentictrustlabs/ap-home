@@ -57,6 +57,11 @@ export function OperationsView() {
               <List>{summary.byFailure.map((f) => <Row key={f.failureClass} title={<span><Chip tone="danger">{f.failureClass}</Chip> {f.runs} run{f.runs === 1 ? '' : 's'}</span>} meta={f.sample ?? ''} />)}</List>
             </Section>
           )}
+          {/* Spec 418 §3 — WHERE THE TIME GOES, HOW IT CHOSE, AND THE CONVERSATIONS. Absent from a runtime that predates
+              them; a run indexed before them reads "not recorded" until the index is rebuilt from the records. */}
+          <StagesSection rows={summary.byStage} />
+          <SelectionSection s={summary.selection} />
+          <ConversationsSection c={summary.conversations} />
           <Section title="By capability" count={summary.byCapability.length}>
             {summary.byCapability.length === 0 ? <Empty title="Nothing ran in this window" /> : <List>{summary.byCapability.map((c) => <Row key={c.capability} title={<Mono>{c.capability}</Mono>} meta={`${c.runs} run${c.runs === 1 ? '' : 's'} · ${c.answered} answered · ${c.parked} parked · ${c.errored} errored · p50 ${ms(c.p50Ms)}`} />)}</List>}
           </Section>
@@ -76,5 +81,59 @@ export function OperationsView() {
       )}
       <Note>Numbers and ids only — no words, no arguments, no results live in this index. It is serving-plane: wiped, it is rebuilt from the run records (the button). What a counterparty can prove is on the run&rsquo;s inspector and its public projection, never here.</Note>
     </>
+  );
+}
+
+const pctWord = (x: number | null) => (x === null ? '—' : `${Math.round(100 * x)}%`);
+const notRecorded = (what: string) => <Empty title={`${what}: not recorded`}>No run in this window recorded it — a run indexed before spec 418 needs the index rebuilt from the records.</Empty>;
+
+/** p50 · p95 per runtime stage, the wall phases first, each with a bar on one scale (the largest p95). */
+function StagesSection({ rows }: { rows?: OpsSummaryView['byStage'] }) {
+  if (rows === undefined) return null;
+  const max = Math.max(1, ...rows.map((r) => r.p95Ms ?? 0));
+  const bar = (v: number | null, strong?: boolean) => (
+    <span aria-hidden style={{ display: 'inline-block', width: 120, height: 6, borderRadius: 3, background: 'var(--color-border, #e5e7eb)', position: 'relative', verticalAlign: 'middle' }}>
+      <span style={{ position: 'absolute', inset: 0, width: `${Math.max(2, ((v ?? 0) / max) * 100)}%`, borderRadius: 3, background: strong ? 'var(--color-accent-strong, #4338ca)' : 'var(--color-accent, #6366f1)' }} />
+    </span>
+  );
+  return (
+    <Section title="Where the time goes — stages" count={rows.length} aside={<Meta>p50 · p95 per stage, over the runs that recorded it</Meta>}>
+      {rows.length === 0 ? notRecorded('Stages') : (
+        <List>{rows.map((r) => (
+          <Row key={r.stage} testId="ops-stage" title={<Mono>{r.stage === 'phase:pre-run' ? 'before the run' : r.stage === 'phase:run' ? 'the run' : r.stage}</Mono>}
+            meta={`${r.runs} run${r.runs === 1 ? '' : 's'} · p50 ${ms(r.p50Ms)} · p95 ${ms(r.p95Ms)}`} side={bar(r.p95Ms, r.stage.startsWith('phase:'))} />
+        ))}</List>
+      )}
+    </Section>
+  );
+}
+
+/** How the window's turns chose: share per arm, holds and why, the median time spent choosing. */
+function SelectionSection({ s }: { s?: OpsSummaryView['selection'] }) {
+  if (s === undefined) return null;
+  return (
+    <Section title="Selection" count={s.recorded} aside={<Meta>{s.recorded ? `hold rate ${pctWord(s.holdRate)} · choosing p50 ${ms(s.p50Ms)}` : `choosing p50 ${ms(s.p50Ms)}`}</Meta>}>
+      {s.recorded === 0 ? notRecorded('Selection') : (
+        <List>
+          {s.byApproach.map((a) => <Row key={a.approach} testId="ops-selection-arm" title={<Mono>{a.approach}</Mono>} meta={`${a.runs} turn${a.runs === 1 ? '' : 's'} (${pctWord(a.share)}) · chose ${a.chose} · held ${a.held}`} />)}
+          {s.byHold.map((h) => <Row key={`hold:${h.hold}`} title={<span><Chip tone="warn">held</Chip> <Mono>{h.hold}</Mono></span>} meta={`${h.runs} turn${h.runs === 1 ? '' : 's'}`} />)}
+        </List>
+      )}
+    </Section>
+  );
+}
+
+/** The conversation axis: turns per conversation, time and tokens per turn. */
+function ConversationsSection({ c }: { c?: OpsSummaryView['conversations'] }) {
+  if (c === undefined) return null;
+  return (
+    <Section title="Conversations" count={c.conversations} aside={<Meta>{c.conversations ? `${c.turns} turns · p50 ${c.turnsPerConversationP50 ?? '—'} turns per conversation · ${ms(c.msPerTurnP50)} and ${c.tokensPerTurnP50 === null ? '— (not reported)' : c.tokensPerTurnP50.toLocaleString()} tokens per turn` : 'turns grouped by their conversation id'}</Meta>}>
+      {c.conversations === 0 ? notRecorded('Conversation ids') : (
+        <List>{c.rows.map((r) => (
+          <Row key={r.conversation} testId="ops-conversation" title={<Mono>{r.conversation.length > 22 ? `${r.conversation.slice(0, 14)}…${r.conversation.slice(-5)}` : r.conversation}</Mono>}
+            meta={`${r.turns} turn${r.turns === 1 ? '' : 's'} · ${when(r.firstAt)} → ${when(r.lastAt)} · ${r.totalMs === null ? 'time not recorded' : `${ms(r.totalMs)} total, p50 ${ms(r.msPerTurnP50)} per turn`} · ${r.tokens === null ? 'tokens not reported' : `${r.tokens.toLocaleString()} tokens, ${r.tokensPerTurn?.toLocaleString() ?? '—'} per turn`}`} />
+        ))}</List>
+      )}
+    </Section>
   );
 }

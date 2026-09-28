@@ -65,6 +65,9 @@ const APPLY_SYSTEM =
 export interface SkillApplyDeps {
   /** The structured-completion call for this turn, routed the same way the planner's is. */
   call: StructuredCall | undefined;
+  /** Spec 417 §5 — the call FOR ONE STEP (so the trace ties the model call, its tokens and its time to the step that
+   *  made it). Preferred over `call` when given. */
+  callFor?: (stepRef: string) => StructuredCall | undefined;
   /** The offered instruction tools' sources by tool id (`instructionSourcesOf`) — what each answer is applied under. */
   sources: Record<string, InstructionToolLike['source']>;
   readSkill: SkillReader;
@@ -77,19 +80,22 @@ export interface SkillApplyDeps {
 
 /** The invoker: the skill's body by its pinned digest, the model once, the answer as written. */
 export function skillApplyInvoker(deps: SkillApplyDeps): ToolInvoker {
-  return async (toolId, args) => {
+  return async (toolId, args, ctx) => {
+    const call = deps.callFor ? deps.callFor(ctx?.step?.id ?? `s${ctx?.index ?? 0}`) : deps.call;
     const source = deps.sources[toolId];
     if (!source) return { refused: `${toolId} is not an instruction skill of this playbook` };
     if (deps.pickOnly) return { answer: `(pick-only comparison) ${source.skillId} was selected; it was not applied.`, skill: { id: source.skillId, version: source.version, digest: source.contractDigest }, source: `${deps.agentName ?? 'this agent'}, selection only` };
-    if (!deps.call) return { refused: 'no model is available to answer with' };
+    if (!call) return { refused: 'no model is available to answer with' };
     const question = String(args.question ?? '').trim();
     if (!question) return { refused: 'an instruction skill answers a question; none was asked' };
     if (source.contractDigest.startsWith('id:')) return { refused: `${source.skillId} was compiled without a content commitment; a body cannot be applied under a pin that names none` };
     const doc = await deps.readSkill(source.skillId);
     if (!doc) return { refused: `${source.skillId} could not be read from the corpus` };
     if (doc.commitment !== source.contractDigest) return { refused: `${source.skillId} has moved: the playbook pins ${source.contractDigest}, the corpus serves ${doc.commitment} — re-assign the playbook to apply the current skill` };
-    const material = typeof args.material === 'string' && args.material.trim() ? `\n\nThe situation, in the person's words:\n${args.material.trim()}` : '';
-    const out = await deps.call({
+    // Spec 417 — a chain hands earlier steps' answers on as material (one, or a list when a skill works from several).
+    const pieces = (Array.isArray(args.material) ? args.material : [args.material]).filter((m): m is string => typeof m === 'string' && !!m.trim()).map((m) => m.trim());
+    const material = !pieces.length ? '' : Array.isArray(args.material) ? `\n\nThe material, from earlier steps:\n${pieces.map((m, i) => `--- ${i + 1} ---\n${m}`).join('\n\n')}` : `\n\nThe situation, in the person's words:\n${pieces[0]}`;
+    const out = await call({
       system: `${APPLY_SYSTEM}\n\n---\n\n${doc.body}`,
       messages: [{ role: 'user', content: `${question}${material}` }],
       tool: { name: 'skill_answer', description: `The answer under ${source.skillId}, as the person will read it.`, input_schema: { type: 'object', properties: { answer: { type: 'string', description: 'The answer, in the person\'s terms, under the skill\'s method' } }, required: ['answer'] } },

@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import type { RunRecordV1 } from '@agenticprimitives/orchestration';
 import { estateIdOf } from '@agenticprimitives/estate-projection';
-import { exportRun, recordRetention, firewalledSpans, DEFAULT_RECORD_RETENTION_DAYS } from '../../src/run-export.js';
+import { exportRun, recordRetention, firewalledSpans, DEFAULT_RECORD_RETENTION_DAYS, provenanceViewOf } from '../../src/run-export.js';
 import { vaultProvenanceStore, type VaultDoors } from '../../src/provenance-bindings.js';
 
 const ALICE = '0xb0d11ce19b756a682e78b4904cd8d832303b3d11';
@@ -142,5 +142,17 @@ describe('spec 414 A2 — the run\'s measurements land beside its provenance', (
     const r = await exportRun({}, { store: vs(async (_s, recordType) => (recordType.startsWith('run.measures:') ? { ok: false, error: 'record_scope_denied' } : { ok: true })) }, ALICE, record);
     expect(r.provenance.written).toBe(true);
     expect(r.measures).toMatchObject({ written: false, error: 'record_scope_denied' });
+  });
+});
+
+describe('provenanceViewOf — spec 418 §3', () => {
+  it('the inspector\'s view keeps each model call\'s step and failure, and the record\'s operations; no words', async () => {
+    const v = await provenanceViewOf({}, ALICE, { ...record,
+      modelCalls: [{ role: 'plan', provider: 'groq', model: 'm', tokensIn: 10, tokensOut: 2 }, { role: 'structured', stepRef: 's0', provider: 'gemini', model: 'f', failed: true, startMs: 1, endMs: 5 }],
+      operational: { stages: { 'phase:run': 900, 'read:runs': 20 }, selectionMs: 40, selection: { approach: 'outcome', chose: 'treasury.payment.execute' }, turn: { contextId: 'ctx-1' } } });
+    expect(v.modelCalls?.map((m) => [m.role, m.stepRef ?? null, m.failed ?? false])).toEqual([['plan', null, false], ['structured', 's0', true]]);
+    expect(v.operational).toMatchObject({ stages: { 'phase:run': 900 }, selection: { approach: 'outcome' }, turn: { contextId: 'ctx-1' } });
+    expect(JSON.stringify(v.operational)).not.toContain('nathan');
+    expect((await provenanceViewOf({}, ALICE, record)).operational).toBeUndefined();
   });
 });

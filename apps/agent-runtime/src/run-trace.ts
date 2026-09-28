@@ -8,7 +8,7 @@
 //
 // Door kinds are decided HERE, server-side, never taken from a body a caller wrote: an in-process hop from the A2A
 // door (the in-Worker mark) may name its message ids; anything else is what the route itself can see.
-import type { HarnessEngagementV1, ModelCallV1, RunDoorV1, VariantV1 } from '@agenticprimitives/orchestration';
+import type { HarnessEngagementV1, ModelCallV1, RunDoorV1, VariantV1, RunOperationalV1 } from '@agenticprimitives/orchestration';
 import type { PlannerTraceV1 } from './harness-run.js';
 
 /** The deployment knobs that are harness-capability toggles, by notation. */
@@ -44,7 +44,7 @@ export function doorFromBody(body: unknown, inWorker: boolean): RunDoorV1 | null
   return { kind: 'a2a-message', ...(id(d.messageId) ? { messageId: id(d.messageId)! } : {}), ...(id(d.contextId) ? { contextId: id(d.contextId)! } : {}), ...(id(d.taskId) ? { taskId: id(d.taskId)! } : {}) };
 }
 
-const PLANNER_KINDS = new Set(['supplied', 'compiled', 'rule-based', 'declared', 'ontology', 'judgment', 'ontology+judgment', 'propose+judgment', 'ontology-first', 'framed-judgment']);
+const PLANNER_KINDS = new Set(['supplied', 'compiled', 'rule-based', 'declared', 'ontology', 'judgment', 'ontology+judgment', 'propose+judgment', 'ontology-first', 'framed-judgment', 'outcome']);
 /** supplied | compiled | rule-based stay what they are; any provider name is a model planner. */
 export const plannerKindOf = (planner: string | undefined): string | undefined => (!planner ? undefined : PLANNER_KINDS.has(planner) ? planner : 'model');
 
@@ -68,7 +68,7 @@ export function modelCallsOf(trace: PlannerTraceV1 | undefined, marks?: Readonly
     out.push({ role: 'compose', provider: compose.provider, ...(reason(compose.because) ? { routeReason: reason(compose.because)! } : {}), ...(w ? { startMs: w.startMs, endMs: w.endMs } : {}), ...tokensOf(trace.composeUsage) });
   }
   // Every structured call as it ran (spec 415): the selection judge (`judge`), a skill's answer, the KB and vault choosers.
-  for (const s of trace.structuredCalls ?? []) out.push({ role: s.role, provider: s.provider, model: s.model, ...(reason(s.because) ? { routeReason: reason(s.because)! } : {}), startMs: s.startMs, endMs: s.endMs, ...tokensOf(s) });
+  for (const s of trace.structuredCalls ?? []) out.push({ role: s.role, ...(s.stepRef ? { stepRef: s.stepRef } : {}), ...(s.failed ? { failed: true } : {}), provider: s.provider, model: s.model, ...(reason(s.because) ? { routeReason: reason(s.because)! } : {}), startMs: s.startMs, endMs: s.endMs, ...tokensOf(s) });
   return out;
 }
 
@@ -114,6 +114,12 @@ export function engagedFromTrace(trace: PlannerTraceV1 | undefined): HarnessEnga
     if (sel.judgment) push('skill-selection/judgment', planned.length ? 'changed-plan' : 'no-change', sel.judgment.offered.map(iri), planned, sel.judgment.rejected.map(iri), typed(sel.judgment.intent));
   } else if (sel && sel.approach === 'judgment') {
     push('skill-selection/judgment', planned.length ? 'changed-plan' : 'no-change', offeredAll, planned, sel.rejected.map(iri), typed(sel.intent));
+  } else if (sel && sel.approach === 'outcome') {
+    // Spec 417 — TWO engagements: the judge chose the OUTCOME (the terminal skill; its runner-up rejected), and the
+    // ontology's dataflow rule added the steps that produce what the outcome consumes (none when context held them).
+    const runnerUp = Object.entries(sel.distribution).filter(([k]) => k !== 'none' && k !== sel.chose).sort((a, b) => b[1] - a[1])[0];
+    push('skill-selection/judgment', planned.length ? 'changed-plan' : 'no-change', offeredAll, sel.chose ? [iri(sel.chose)] : [], runnerUp && runnerUp[1] > 0 ? [iri(runnerUp[0])] : []);
+    if (sel.plan) push('skill-selection/ontology', sel.plan.steps.length > 1 ? 'changed-plan' : 'no-change', offeredAll, sel.plan.steps.slice(0, -1).map((x) => iri(x.tool)), [], typed({ about: Object.keys(sel.plan.satisfied) }));
   } else if (sel && sel.approach === 'framed-judgment') {
     push('skill-selection/judgment', planned.length ? 'changed-plan' : 'no-change', offeredAll, planned, sel.rejected.map(iri), typed(sel.intent));
   } else {
@@ -135,7 +141,7 @@ const SELECTION_APPROACH: Record<string, string> = { model: 'skill-selection/mod
 /** Spec 415 A4 — how instruction skills are selected: `model` (the planner over descriptions — the baseline), `declared`
  *  (overlap with declared sentences), the three arms `ontology` · `judgment` · `ontology+judgment`, spec 416's `propose+judgment`, and `framed-judgment`
  *  (the 2026-09-26 shape, kept reproducible). */
-export const SELECTION_ARMS = ['model', 'declared', 'ontology', 'judgment', 'ontology+judgment', 'propose+judgment', 'ontology-first', 'framed-judgment'] as const;
+export const SELECTION_ARMS = ['model', 'declared', 'ontology', 'judgment', 'ontology+judgment', 'propose+judgment', 'ontology-first', 'framed-judgment', 'outcome'] as const;
 export type SelectionArmV1 = (typeof SELECTION_ARMS)[number];
 
 export interface VariantRequestV1 {
@@ -154,7 +160,7 @@ export interface VariantRequestV1 {
   judgeProfile?: 'thorough' | 'fast' | 'logprob';
   /** Spec 416 §4h — a SEEDED asker context (a comparison's starting state, by digest): what the judge is told the asker
    *  used recently and what is remembered of them, in place of reading the asker's live history. */
-  askerContext?: { digest: string; recentSkills?: Array<{ id: string; times: number }>; memoryTags?: string[] };
+  askerContext?: { digest: string; recentSkills?: Array<{ id: string; times: number }>; memoryTags?: string[]; heldClasses?: string[] };
 }
 export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/kb': ['off', 'tool', 'playbook'],
   /** Spec 416 — `off`: the chosen skill is stamped but not RUN (no model call) — a comparison that measures the pick alone. */
@@ -202,11 +208,13 @@ export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantR
     }
     else if (k === 'askerContext') {
       const a = v[k] as Record<string, unknown> | null;
-      const rs = a?.['recentSkills'], mt = a?.['memoryTags'];
+      const rs = a?.['recentSkills'], mt = a?.['memoryTags'], hc = a?.['heldClasses'];
       const okRs = rs === undefined || (Array.isArray(rs) && rs.length <= 8 && rs.every((x) => x && typeof (x as { id?: unknown }).id === 'string' && /^[a-z0-9._-]{1,80}$/i.test((x as { id: string }).id) && Number.isInteger((x as { times?: unknown }).times) && (x as { times: number }).times > 0 && (x as { times: number }).times < 1000));
       const okMt = mt === undefined || (Array.isArray(mt) && mt.length <= 8 && mt.every((x) => typeof x === 'string' && x.length <= 120));
-      if (!a || typeof a !== 'object' || typeof a['digest'] !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(a['digest']) || !okRs || !okMt) return { ok: false, error: 'askerContext must be { digest: sha256:…, recentSkills?: [{ id, times }], memoryTags?: [string] } — a seeded starting state' };
-      out.askerContext = { digest: a['digest'], ...(rs ? { recentSkills: (rs as Array<{ id: string; times: number }>).map((x) => ({ id: x.id, times: x.times })) } : {}), ...(mt ? { memoryTags: [...(mt as string[])] } : {}) };
+      // Spec 417 — classes the asker holds: IRIs only (never a record).
+      const okHc = hc === undefined || (Array.isArray(hc) && hc.length <= 16 && hc.every((x) => typeof x === 'string' && /^(https?|urn):\S{1,200}$/.test(x)));
+      if (!a || typeof a !== 'object' || typeof a['digest'] !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(a['digest']) || !okRs || !okMt || !okHc) return { ok: false, error: 'askerContext must be { digest: sha256:…, recentSkills?: [{ id, times }], memoryTags?: [string], heldClasses?: [class IRI] } — a seeded starting state' };
+      out.askerContext = { digest: a['digest'], ...(rs ? { recentSkills: (rs as Array<{ id: string; times: number }>).map((x) => ({ id: x.id, times: x.times })) } : {}), ...(mt ? { memoryTags: [...(mt as string[])] } : {}), ...(hc ? { heldClasses: [...(hc as string[])] } : {}) };
     }
     else if (k === 'judgeProfile') { if (v[k] !== 'thorough' && v[k] !== 'fast' && v[k] !== 'logprob') return { ok: false, error: 'judgeProfile must be thorough | fast | logprob' }; out.judgeProfile = v[k] as 'thorough' | 'fast' | 'logprob'; }
     else return { ok: false, error: `${k}: not a variant component (plannerKind, selection, provider, toggles, playbook, startingState, acceptance, judgeProfile, askerContext)` };
@@ -235,4 +243,27 @@ export function variantOf(env: RunTraceEnv, trace: PlannerTraceV1 | undefined, r
     ...(build ? { build } : {}),
     ...(Object.keys(toggles).length ? { toggles } : {}),
   };
+}
+
+/** Spec 417 §5 — the turn's operational facts, kept on the record (numbers and ids only): the stage windows summed per
+ *  name with the pre-run and run wall phases, and how the skill was chosen (arm, choice or hold, chain, judge, top
+ *  probability). The post-run phase is not yet over when the record is written, and is not claimed. */
+export function operationalOf(trace: PlannerTraceV1 | undefined, marks: ReadonlyArray<{ name: string; startMs: number; endMs: number }>, w: { receivedAt: number; runStartMs: number; runEndMs: number; contextId?: string }): RunOperationalV1 | null {
+  if (!trace) return null;
+  const stages: Record<string, number> = {};
+  for (const m of marks) stages[m.name] = (stages[m.name] ?? 0) + Math.max(0, m.endMs - m.startMs);
+  if (w.runStartMs > 0 && w.receivedAt > 0) stages['phase:pre-run'] = Math.max(0, w.runStartMs - w.receivedAt);
+  if (w.runEndMs > 0 && w.runStartMs > 0) stages['phase:run'] = Math.max(0, w.runEndMs - w.runStartMs);
+  const s = trace.selection as { approach?: string; chose?: string | null; hold?: string; plan?: { steps?: Array<{ tool: string }>; missing?: string[] }; judge?: { name?: string }; judgment?: { judge?: { name?: string }; distribution?: Record<string, number> }; distribution?: Record<string, number> } | undefined;
+  const dist = s?.distribution ?? s?.judgment?.distribution;
+  const top = dist ? Math.max(0, ...Object.values(dist).filter((v) => typeof v === 'number')) : undefined;
+  const selection = s?.approach ? {
+    approach: s.approach, chose: s.chose ?? null, ...(s.hold ? { hold: s.hold } : {}),
+    ...(s.plan?.steps?.length ? { chain: s.plan.steps.map((x) => x.tool) } : s.chose ? { chain: [s.chose] } : {}),
+    ...(s.plan?.missing?.length ? { missing: [...s.plan.missing] } : {}),
+    ...((s.judge?.name ?? s.judgment?.judge?.name) ? { judge: (s.judge?.name ?? s.judgment?.judge?.name)! } : {}),
+    ...(top !== undefined && Number.isFinite(top) && top > 0 ? { confidence: Number(top.toFixed(4)) } : {}),
+  } : undefined;
+  const turn = w.contextId || trace.recalledTurns !== undefined ? { ...(w.contextId ? { contextId: w.contextId } : {}), ...(trace.recalledTurns !== undefined ? { recalledTurns: trace.recalledTurns } : {}) } : undefined;
+  return { stages, ...(trace.selectionMs !== undefined ? { selectionMs: trace.selectionMs } : {}), ...(selection ? { selection } : {}), ...(trace.skillStage ? { skillStage: trace.skillStage } : {}), ...(turn ? { turn } : {}) };
 }
