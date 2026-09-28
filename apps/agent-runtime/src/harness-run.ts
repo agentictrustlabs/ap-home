@@ -2237,7 +2237,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
         person, session,
       )(toolId, args, ctx);
     }
-    if (toolId === BALANCE_READ_CAPABILITY) return balanceReadInvoker({ ...(deps.valueHeld ? { valueHeld: deps.valueHeld } : {}), ...(deps.charteredAgents ? { charteredAgents: deps.charteredAgents } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, (addressee ?? person) as Address, person)(toolId, args, ctx);
+    if (toolId === BALANCE_READ_CAPABILITY) return balanceReadInvoker({ ...(deps.valueHeld ? { valueHeld: deps.valueHeld } : {}), ...(deps.agentTypeOf ? { agentTypeOf: deps.agentTypeOf } : {}), ...(deps.charteredAgents ? { charteredAgents: deps.charteredAgents } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, (addressee ?? person) as Address, person)(toolId, args, ctx);
     // Spec 419 — what an agent HOLDS, from the public chartered-under record; unnamed ⇒ the agent being asked.
     if (toolId === HOLDINGS_READ_CAPABILITY) return holdingsReadInvoker({ ...(deps.charteredAgents ? { charteredAgents: deps.charteredAgents } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, (addressee ?? person) as Address)(toolId, args, ctx);
     // The coordination reads judge standing themselves; the routed context rides in as `StandingDeps.context`.
