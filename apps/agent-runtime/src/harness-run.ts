@@ -359,15 +359,18 @@ export const ASK_CLARIFY_TOOL: ToolSpec = {
 };
 
 /** Spec 418 A2 — the classes a plan should deliver: each intermediate step's artifact, then the final skill's products. */
-export function expectedDeliversOf(steps: ReadonlyArray<{ tool: string; for?: string }>, skills: ReadonlyArray<{ id: string; produces?: ReadonlyArray<{ iri: string; label: string; within?: string }> }>, lexicon?: ReadonlyArray<{ iri: string; label: string; terms: readonly string[] }>): Array<{ iri: string; label: string }> {
+export function expectedDeliversOf(steps: ReadonlyArray<{ tool: string; for?: string }>, skills: ReadonlyArray<{ id: string; produces?: ReadonlyArray<{ iri: string; label: string; within?: string }> }>, lexicon?: ReadonlyArray<{ iri: string; label: string; terms: readonly string[] }>): Array<{ iri: string; label: string; required?: boolean }> {
   const out = new Map<string, string>();
+  const required = new Set<string>();
   const gloss = (iri: string, label: string) => { const e = lexicon?.find((x) => x.iri === iri); const also = (e?.terms ?? []).filter((t) => t.toLowerCase() !== label.toLowerCase()).slice(0, 3); return also.length ? `${label} (also: ${also.join(', ')})` : label; };
-  for (const st of steps.slice(0, -1)) if (st.for) { const lab = skills.flatMap((x) => x.produces ?? []).find((k) => k.iri === st.for)?.label ?? st.for.split('#').pop()!; out.set(st.for, gloss(st.for, lab)); }
+  for (const st of steps.slice(0, -1)) if (st.for) { const lab = skills.flatMap((x) => x.produces ?? []).find((k) => k.iri === st.for)?.label ?? st.for.split('#').pop()!; out.set(st.for, gloss(st.for, lab)); required.add(st.for); }
   const last = steps[steps.length - 1];
   // A part of a whole the same skill produces (`within`) is not asked for on its own: the person asked for the whole.
   const made = skills.find((x) => x.id === last?.tool)?.produces ?? [];
   for (const k of made) if (!(k.within && made.some((w) => w.iri === k.within))) out.set(k.iri, gloss(k.iri, k.label));
-  return [...out].map(([iri, label]) => ({ iri, label }));
+  // The intermediate artifacts are REQUIRED (the plan was built on them); the terminal skill's products are candidates —
+  // the outcome check asks which of them the request wants (spec 418 A2 v2).
+  return [...out].map(([iri, label]) => ({ iri, label, ...(required.has(iri) ? { required: true } : {}) }));
 }
 
 export const UNSUPPORTED_TOOL: ToolSpec = {
@@ -2816,7 +2819,7 @@ export interface PlannerTraceV1 {
   skillStage?: 'chose' | 'handed-to-planner' | 'clarify';
   /** Spec 418 A2 — what the planned skills should DELIVER (each intermediate step's artifact + the final skill's
    *  products), glossed from the lexicon — the outcome check's expected classes. */
-  expectedDelivers?: Array<{ iri: string; label: string }>;
+  expectedDelivers?: Array<{ iri: string; label: string; required?: boolean }>;
   /** Spec 418 A1 — ms from a streamed step's start to its first words (the earliest step's). */
   answerFirstWordsMs?: number;
   /** Wall-clock time of those first words — the surface computes time from the ASK to them (what a person feels). */

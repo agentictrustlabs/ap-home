@@ -4800,7 +4800,7 @@ app.post('/harness/ask', async (c) => {
       const ocall = structuredCallFor(c.env, provider, { onCall: (rec) => { usage = { tokensIn: rec.tokensIn, tokensOut: rec.tokensOut }; } });
       if (ocall) {
         const oc = await judgeOutcomeDelivered({ request: String(body.message ?? ''), answer: (reply as { text: string }).text, expected: trace.expectedDelivers }, ocall).catch((e: unknown) => ({ judge: OUTCOME_CHECK_JUDGE, classes: {}, score: 0, ms: 0, error: e instanceof Error ? e.message : String(e) }));
-        (trace as { outcomeCheck?: unknown }).outcomeCheck = { judge: oc.judge.name, classes: oc.classes, score: oc.score, ms: oc.ms, ...(usage?.tokensIn !== undefined ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut ?? 0 } : {}), ...(oc.error ? { error: oc.error.slice(0, 200) } : {}) };
+        (trace as { outcomeCheck?: unknown }).outcomeCheck = { judge: oc.judge.name, classes: oc.classes, ...('requested' in oc ? { requested: oc.requested } : {}), score: oc.score, ms: oc.ms, ...(usage?.tokensIn !== undefined ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut ?? 0 } : {}), ...(oc.error ? { error: oc.error.slice(0, 200) } : {}) };
       }
     }
     if (variantReq?.toggles?.['quality/judge'] === 'on' && reply?.kind === 'answer' && typeof (reply as { text?: unknown }).text === 'string') {
