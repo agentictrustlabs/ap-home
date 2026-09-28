@@ -60,3 +60,12 @@ export async function forget(key: string): Promise<void> {
   if (cache) { try { await cache.delete(urlOf(key)); } catch { /* nothing to forget */ } }
 }
 
+
+/** Spec 418 D5 — REMEMBER A VALUE THIS WORKER JUST WROTE (read-your-writes for the next ask), same TTL rules. */
+export async function rememberValue(key: string, value: unknown, ttlMs = TTL_MS): Promise<void> {
+  local.set(key, { at: Date.now(), value });
+  const cache = shared();
+  if (cache) {
+    try { await cache.put(urlOf(key), new Response(JSON.stringify(value ?? null), { headers: { 'content-type': 'application/json', 'cache-control': `max-age=${Math.floor(ttlMs / 1000)}` } })); } catch { /* best-effort */ }
+  }
+}

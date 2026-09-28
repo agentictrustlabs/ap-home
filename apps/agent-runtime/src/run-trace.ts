@@ -44,7 +44,7 @@ export function doorFromBody(body: unknown, inWorker: boolean): RunDoorV1 | null
   return { kind: 'a2a-message', ...(id(d.messageId) ? { messageId: id(d.messageId)! } : {}), ...(id(d.contextId) ? { contextId: id(d.contextId)! } : {}), ...(id(d.taskId) ? { taskId: id(d.taskId)! } : {}) };
 }
 
-const PLANNER_KINDS = new Set(['supplied', 'compiled', 'rule-based', 'declared', 'ontology', 'judgment', 'ontology+judgment', 'propose+judgment', 'ontology-first', 'framed-judgment', 'outcome']);
+const PLANNER_KINDS = new Set(['supplied', 'compiled', 'rule-based', 'declared', 'ontology', 'judgment', 'ontology+judgment', 'propose+judgment', 'ontology-first', 'framed-judgment', 'outcome', 'outcome-selective']);
 /** supplied | compiled | rule-based stay what they are; any provider name is a model planner. */
 export const plannerKindOf = (planner: string | undefined): string | undefined => (!planner ? undefined : PLANNER_KINDS.has(planner) ? planner : 'model');
 
@@ -114,7 +114,7 @@ export function engagedFromTrace(trace: PlannerTraceV1 | undefined): HarnessEnga
     if (sel.judgment) push('skill-selection/judgment', planned.length ? 'changed-plan' : 'no-change', sel.judgment.offered.map(iri), planned, sel.judgment.rejected.map(iri), typed(sel.judgment.intent));
   } else if (sel && sel.approach === 'judgment') {
     push('skill-selection/judgment', planned.length ? 'changed-plan' : 'no-change', offeredAll, planned, sel.rejected.map(iri), typed(sel.intent));
-  } else if (sel && sel.approach === 'outcome') {
+  } else if (sel && (sel.approach === 'outcome' || sel.approach === 'outcome-selective')) {
     // Spec 417 — TWO engagements: the judge chose the OUTCOME (the terminal skill; its runner-up rejected), and the
     // ontology's dataflow rule added the steps that produce what the outcome consumes (none when context held them).
     const runnerUp = Object.entries(sel.distribution).filter(([k]) => k !== 'none' && k !== sel.chose).sort((a, b) => b[1] - a[1])[0];
@@ -141,7 +141,7 @@ const SELECTION_APPROACH: Record<string, string> = { model: 'skill-selection/mod
 /** Spec 415 A4 — how instruction skills are selected: `model` (the planner over descriptions — the baseline), `declared`
  *  (overlap with declared sentences), the three arms `ontology` · `judgment` · `ontology+judgment`, spec 416's `propose+judgment`, and `framed-judgment`
  *  (the 2026-09-26 shape, kept reproducible). */
-export const SELECTION_ARMS = ['model', 'declared', 'ontology', 'judgment', 'ontology+judgment', 'propose+judgment', 'ontology-first', 'framed-judgment', 'outcome'] as const;
+export const SELECTION_ARMS = ['model', 'declared', 'ontology', 'judgment', 'ontology+judgment', 'propose+judgment', 'ontology-first', 'framed-judgment', 'outcome', 'outcome-selective'] as const;
 export type SelectionArmV1 = (typeof SELECTION_ARMS)[number];
 
 export interface VariantRequestV1 {
@@ -181,7 +181,10 @@ export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/k
   /** Spec 418 D4 — required vs enriching inputs (`off`: every input treated as required — the pre-D4 rule). */
   'skill-selection/necessity': ['on', 'off'],
   /** Spec 418 D4 — the asker's office (memory grounded in role classes) and its typical capabilities in the reading. */
-  'skill-selection/office-prior': ['on', 'off'] };
+  'skill-selection/office-prior': ['on', 'off'],
+  /** Spec 418 D5 — the asker's own records: read from the vault and written before the reply (`vault`, default), or
+   *  served from the colo cache with the conversation write landing after the reply (`cached`). */
+  'ops/records': ['vault', 'cached'] };
 
 export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantRequestV1 } | { ok: false; error: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'variant must be an object' };

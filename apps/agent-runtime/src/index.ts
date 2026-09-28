@@ -174,7 +174,7 @@ import { subjectAsk, subjectAnswer, validateSubjectAsk, handoff, type SubjectAns
 import { realtimeKitConfigured, verifyRealtimeKitWebhook, readRealtimeKitWebhook } from './realtimekit.js';
 import { sendSubjectAskOverWire, subjectAnswerMessage, subjectEnvelopeOf, handoffMessage, routedRunRefFor } from '@agenticprimitives/a2a';
 import { EXTERNAL_AGENT_TOOL, externalAgentInvoker } from './external-agent.js';
-import { remembered, forget } from './run-memo.js';
+import { remembered, forget, rememberValue } from './run-memo.js';
 import { DISCOVERY_INSPECT_CAPABILITY, discoveryInspectInvoker } from './enterprise-tools.js';
 import { INVITATIONS_RECEIVED_CAPABILITY, invitationsReceivedInvoker } from './invitations-received.js';
 import { subjectAddress, nameRecordsReader, servesUnpublishedNames, type SubjectAddressEnv } from './subject-address.js';
@@ -4326,13 +4326,19 @@ app.post('/harness/ask', async (c) => {
   // Memory and preferences are read ONLY when the asker addresses her own agent (spec 402 W1).
   const ownAgent = String(who.sa).toLowerCase() === String(addressee).toLowerCase();
   const askerSubject = String(who.sa).toLowerCase();
+  const recordsCached = variantReq?.toggles?.['ops/records'] === 'cached';
   const askerWanted = ownAgent ? [CONVERSATION_RECORD, FACTS_RECORD, PREFERENCES_RECORD] : [CONVERSATION_RECORD];
   const [addresseeKind, askerRecords, budgetRefusal] = await Promise.all([
     // The derived type is an on-chain fact that does not move between two asks: remembered a minute per agent.
     marks.time('read:agent-type', () => remembered(`agent-type:${addressee}`, () => askDeps.agentTypeOf?.(addressee).catch(() => null) ?? Promise.resolve(null))),
-    marks.time('read:asker-records', () => askDeps.readRecords
-      ? askDeps.readRecords(askerSubject, askerWanted).catch(() => ({} as Record<string, unknown>))
-      : Promise.all(askerWanted.map((rt) => askDeps.readSubjectRecord?.(askerSubject, rt).catch(() => null) ?? Promise.resolve(null))).then((vals) => Object.fromEntries(askerWanted.map((rt, i) => [rt, vals[i]])))),
+    marks.time('read:asker-records', () => {
+      const read = () => askDeps.readRecords
+        ? askDeps.readRecords(askerSubject, askerWanted).catch(() => ({} as Record<string, unknown>))
+        : Promise.all(askerWanted.map((rt) => askDeps.readSubjectRecord?.(askerSubject, rt).catch(() => null) ?? Promise.resolve(null))).then((vals) => Object.fromEntries(askerWanted.map((rt, i) => [rt, vals[i]])));
+      // Spec 418 D5 — `ops/records=cached`: the asker's records from the colo cache (the canonical answer, kept by
+      // this Worker's own writes), the vault on a miss. One mechanism with a cache in front — never a second source.
+      return recordsCached ? remembered(`asker-records:${askerSubject}:${askerWanted.join(',')}`, read, 300_000) : read();
+    }),
     budgetGate,
   ]);
   if (budgetRefusal) return budgetRefusal; // P1.4 — over budget: said, 429, before any model or step
@@ -4656,7 +4662,8 @@ app.post('/harness/ask', async (c) => {
     // WHAT IS WAITING ON THEM, said once on the surface they actually opened. Someone asked them days
     // ago; the message is in an inbox they may not have read and the card is on a page they may not have
     // visited. Reported alongside the answer, never instead of it, and it decides nothing.
-    const waitingP = marks.time('read:waiting', () => waitingOn(askDeps, who.sa, c.env.ALLOWED_ORIGINS).catch(() => null));
+    // Spec 418 D5 — `ops/records=cached`: "what is waiting on you" is a note beside the answer; a minute's memory of it.
+    const waitingP = marks.time('read:waiting', () => (recordsCached ? remembered(`waiting:${String(who.sa).toLowerCase()}`, () => waitingOn(askDeps, who.sa, c.env.ALLOWED_ORIGINS).catch(() => null)) : waitingOn(askDeps, who.sa, c.env.ALLOWED_ORIGINS).catch(() => null)));
     // spec 350 W3 — and the runs on THIS agent that this person could pick up, excluding the one they are
     // in. A durable run only pays for itself if someone can find it again; the ask is the surface they
     // opened, so it is where an unfinished one gets mentioned. A count and a handle — resuming still goes
@@ -4709,7 +4716,12 @@ app.post('/harness/ask', async (c) => {
       // "send him 2 USDC" pay alice's own treasury — "him" matched "paying from". A pronoun recalls words.
       const parties = [...resolved.values()].filter((r) => /^0x[0-9a-f]{40}$/i.test(r.agent) && r.raw && !/^0x/i.test(r.raw) && !r.ruleId && !r.pointId).map((r) => ({ arg: r.arg, raw: r.raw, agent: r.agent.toLowerCase(), ...(r.label ? { label: r.label } : {}) }));
       const next = rememberTurn(conversation?.type === 'ap.context.conversation-memory.v1' ? conversation : null, { at: new Date().toISOString(), runRef, addressee, said: turn.message, kind: reply.kind, parties });
-      kept = marks.time('record:conversation', () => askDeps.writeSubjectRecord!(String(who.sa).toLowerCase(), CONVERSATION_RECORD, next).then((r) => { if (!r.ok) console.warn('[harness/ask] conversation not kept:', r.error); }).catch(() => undefined));
+      const write = () => askDeps.writeSubjectRecord!(String(who.sa).toLowerCase(), CONVERSATION_RECORD, next).then((r) => { if (!r.ok) console.warn('[harness/ask] conversation not kept:', r.error); }).catch(() => undefined);
+      if (recordsCached) {
+        // Spec 418 D5 — the next ask reads this turn from the cache (read-your-writes); the vault write lands after the reply.
+        kept = rememberValue(`asker-records:${askerSubject}:${askerWanted.join(',')}`, { ...askerRecords, [CONVERSATION_RECORD]: next }, 300_000);
+        c.executionCtx.waitUntil(write());
+      } else kept = marks.time('record:conversation', write);
       // Spec 385 — REMEMBER A CONFIRMED CHOICE. The trusted event: a PRIOR turn raised an ambiguity choice
       // scoped to (word, capability, arg), and THIS turn supplied the answer (`body.supplied`). The resolved
       // agent for that arg IS the person's confirmation — recorded scoped, correctable, revalidated on the
