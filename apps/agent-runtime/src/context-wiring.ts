@@ -47,9 +47,9 @@ export interface StructuredCallRecordV1 { provider: LlmProvider; model: string; 
   /** What the provider reported the call used (absent when it reported nothing — never estimated). */
   tokensIn?: number; tokensOut?: number; cachedIn?: number; reasoningOut?: number }
 
-export function structuredCallFor(env: ModelEnv, provider?: LlmProvider, opts: { /** Spec 388 W2 — each routed call's decision, for the trace. */ onRoute?: (d: RouteDecision) => void; /** Spec 415 — EVERY call, routed or named, as it ran: a model call the trace does not name is a model call nobody can audit. */ onCall?: (c: StructuredCallRecordV1) => void; /** `light`: the provider's lighter model where it names one (Gemini's planner model) — for a call that only has to choose. */ tier?: 'light'; /** Test seam: build a provider's call without a client. */ make?: (p: LlmProvider) => StructuredCall } = {}): StructuredCall | undefined {
+export function structuredCallFor(env: ModelEnv, provider?: LlmProvider, opts: { /** Spec 388 W2 — each routed call's decision, for the trace. */ onRoute?: (d: RouteDecision) => void; /** Spec 415 — EVERY call, routed or named, as it ran: a model call the trace does not name is a model call nobody can audit. */ onCall?: (c: StructuredCallRecordV1) => void; /** `light`: the provider's lighter model where it names one (Gemini's planner model) — for a call that only has to choose. */ tier?: 'light' | 'strong'; /** Test seam: build a provider's call without a client. */ make?: (p: LlmProvider) => StructuredCall } = {}): StructuredCall | undefined {
   const build = (p: LlmProvider, onUsage?: (u: ModelUsageV1) => void): StructuredCall => (opts.make ? opts.make(p) : providerStructuredCall(env, p, onUsage, opts.tier));
-  const modelOf = (p: LlmProvider) => modelFor(env, p, opts.tier === 'light' ? 'planner' : undefined);
+  const modelOf = (p: LlmProvider) => (opts.tier === 'strong' ? strongModelFor(env, p) : modelFor(env, p, opts.tier === 'light' ? 'planner' : undefined));
   // Each invocation is built with its own usage callback: two calls in flight at once (a judge's permutations) must not
   // mix their counts.
   const timed = (p: LlmProvider, because?: string): StructuredCall => async (input) => {
@@ -87,13 +87,19 @@ const CACHEABLE_SYSTEM_CHARS = 16_000;
  * carried by Claude while the route said Gemini — measured 2026-09-26: every skill-selection judgment on faithnet
  * ran on Claude Haiku 4.5. An unlisted provider, or one this function does not know, now throws.
  */
-export function providerStructuredCall(env: ModelEnv, p: LlmProvider, onUsage?: (u: ModelUsageV1) => void, tier?: 'light'): StructuredCall {
+/** Spec 418 — the provider's STRONGER model, for a comparison of long answers (Gemini: ORCHESTRATION_GEMINI_STRONG_MODEL,
+ *  default gemini-3.5-pro); a provider that names none uses its default model. */
+export function strongModelFor(env: ModelEnv, p: LlmProvider): string {
+  return p === 'gemini' ? ((env as { ORCHESTRATION_GEMINI_STRONG_MODEL?: string }).ORCHESTRATION_GEMINI_STRONG_MODEL?.trim() || 'gemini-3.5-pro') : modelFor(env, p);
+}
+
+export function providerStructuredCall(env: ModelEnv, p: LlmProvider, onUsage?: (u: ModelUsageV1) => void, tier?: 'light' | 'strong'): StructuredCall {
   if (!providerConfigured(env, p)) throw new Error(`structured call on ${p}: this deployment does not offer ${p} (ORCHESTRATION_LLM) — no other provider carries it (ADR-0013)`);
   if (p === 'gemini') {
     // Gemini 3.5 Flash THINKS inside the completion bound: a judge's 600-token bound was spent thinking and the call came
     // back with no tool call ("answered in prose", measured 2026-09-26). Low effort + headroom, and `required` — the
     // form Gemini's planner already uses reliably.
-    return createOpenAiCompatStructuredCall({ ...(onUsage ? { onUsage } : {}), client: geminiClient(env), model: modelFor(env, 'gemini', tier === 'light' ? 'planner' : undefined), label: 'gemini', reasoningEffort: 'low', reasoningHeadroom: OPENAI_REASONING_HEADROOM, toolChoice: 'required' });
+    return createOpenAiCompatStructuredCall({ ...(onUsage ? { onUsage } : {}), client: geminiClient(env), model: tier === 'strong' ? strongModelFor(env, 'gemini') : modelFor(env, 'gemini', tier === 'light' ? 'planner' : undefined), label: 'gemini', reasoningEffort: 'low', reasoningHeadroom: OPENAI_REASONING_HEADROOM, toolChoice: 'required' });
   }
   if (p === 'openai') {
     return createOpenAiCompatStructuredCall({

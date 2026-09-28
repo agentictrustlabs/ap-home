@@ -453,8 +453,12 @@ ORCHESTRATION_LLM = "gemini,anthropic"
 # Spec 416 §4f — the fast judge picks among a playbook's instruction skills before the planner (one light-model call over
 # ontology cards + the typed reading; "none" hands the ask to the planner). Only agents with instruction skills are affected.
 SKILL_SELECTION_DEFAULT = "selective"
+# Spec 416 §4h — the asker's own recent skills here (+ memory at their own agent) in the reading on REAL asks (ledger: +11/−0, p = 0.001).
+SKILL_SELECTION_ASKER_CONTEXT = "full"
 # Spec 418 §11 — the plan around the pick: one choice among the plans the ontology allows (ledger: chain panel 4 +12/−0).
 SKILL_SELECTION_PLAN = "choice"
+# Spec 418 — the stronger Gemini model a side-by-side compares long answers against (never a default without a ledger verdict).
+ORCHESTRATION_GEMINI_STRONG_MODEL = "gemini-3.1-pro-preview"
 # Spec 418 D5 — the asker's records from the colo cache; the conversation write after the reply (ledger: −63% ask time, same quality).
 OPS_RECORDS_DEFAULT = "cached"
 # Spec 388 — the cheapest OFFERED provider that carries each call, decided before the request from the prompt estimate, the

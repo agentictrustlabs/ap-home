@@ -9,7 +9,7 @@ import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 
 import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, forgetConfirmation, CONFIRMATION_RECORD, forgetInstruction, STANDING_RECORD, factsOf, forgetFact, FACTS_RECORD, routinesOf, dropRoutine, ROUTINES_RECORD, preferencesOf, setPreferences, answerPreferencesForPrompt, PREFERENCES_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1, type RememberedFactsV1 } from '@agenticprimitives/context';
 import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
-import { addUsage, judgeAnswerQuality, ANSWER_QUALITY_JUDGE, recordOf, runMarks, replayingInvoker, planDigest, traceContextOf, type RunDoorV1, type ModelCallV1, type VariantV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent, type RunBillV1 } from '@agenticprimitives/orchestration';
+import { addUsage, judgeAnswerQuality, judgeOutcomeDelivered, OUTCOME_CHECK_JUDGE, ANSWER_QUALITY_JUDGE, recordOf, runMarks, replayingInvoker, planDigest, traceContextOf, type RunDoorV1, type ModelCallV1, type VariantV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent, type RunBillV1 } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
 import { recordFormOf, rehydrateExecuted } from './artifact-store.js';
 import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken, advanceTrigger, withPause, withBudget, advanced, declareTrigger, removeTrigger, rebuildDeclaredTriggers } from './triggers.js';
@@ -4789,6 +4789,15 @@ app.post('/harness/ask', async (c) => {
     // Spec 416 §4h — ANSWER QUALITY, when a comparison asks for it: an instruction skill's answer scored by the rubric
     // (typed yes-no questions, the deployment's model), here where the answer's words are. Only numbers go on the trace;
     // its time and tokens are the instrument's, reported apart from the ask's.
+    // Spec 418 A2 — THE OUTCOME CHECK: did the answer DELIVER each class the plan was for (the ontology's `produces`)?
+    if (variantReq?.toggles?.['quality/judge'] === 'outcome' && reply?.kind === 'answer' && typeof (reply as { text?: unknown }).text === 'string' && trace.expectedDelivers?.length) {
+      let usage: { tokensIn?: number; tokensOut?: number } | undefined;
+      const ocall = structuredCallFor(c.env, provider, { onCall: (rec) => { usage = { tokensIn: rec.tokensIn, tokensOut: rec.tokensOut }; } });
+      if (ocall) {
+        const oc = await judgeOutcomeDelivered({ request: String(body.message ?? ''), answer: (reply as { text: string }).text, expected: trace.expectedDelivers }, ocall).catch((e: unknown) => ({ judge: OUTCOME_CHECK_JUDGE, classes: {}, score: 0, ms: 0, error: e instanceof Error ? e.message : String(e) }));
+        (trace as { outcomeCheck?: unknown }).outcomeCheck = { judge: oc.judge.name, classes: oc.classes, score: oc.score, ms: oc.ms, ...(usage?.tokensIn !== undefined ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut ?? 0 } : {}), ...(oc.error ? { error: oc.error.slice(0, 200) } : {}) };
+      }
+    }
     if (variantReq?.toggles?.['quality/judge'] === 'on' && reply?.kind === 'answer' && typeof (reply as { text?: unknown }).text === 'string') {
       const planned = (trace.plan ?? []).map((p) => p.toolId);
       // Spec 418 — a chain's reply is judged against its TERMINAL skill (the outcome it was built for).
@@ -4809,7 +4818,7 @@ app.post('/harness/ask', async (c) => {
       for (const m of marks.list) stages[m.name] = (stages[m.name] ?? 0) + Math.max(0, m.endMs - m.startMs);
       // The three WALL phases, non-overlapping: before the harness ran, the run (prepare · pick · steps), after it.
       const nowMs = Date.now();
-      stages['phase:pre-run'] = runStartMs - receivedAt; stages['phase:run'] = runEndMs - runStartMs; stages['phase:post-run'] = nowMs - runEndMs - (trace.quality?.ms ?? 0);
+      stages['phase:pre-run'] = runStartMs - receivedAt; stages['phase:run'] = runEndMs - runStartMs; stages['phase:post-run'] = nowMs - runEndMs - (trace.quality?.ms ?? 0) - ((trace as { outcomeCheck?: { ms?: number } }).outcomeCheck?.ms ?? 0);
       (reply as { plannerTrace: { stages?: Record<string, number> } }).plannerTrace.stages = stages;
     }
     return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, hasProvenance: hasProvenanceRef(addressee, runRef), resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(routedDelivery ? { routedDelivery } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt, ...(isExpired(r) ? { expired: true } : {}) })), unfinishedTotal: otherRuns.length } : {}) });

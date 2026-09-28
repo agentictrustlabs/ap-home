@@ -348,6 +348,26 @@ export const INVITE_TOOL: ToolSpec = {
  * This is that way. Selecting it is a real answer — "this agent cannot do that here" — and the reply lists
  * what it CAN do, drawn from the capabilities actually on offer rather than from the model's imagination.
  */
+/** Spec 418 — the selection stage's CLARIFY: when the pick splits between two skills, the answer asks which one the person
+ *  means (naming each by its purpose) instead of declining. Planned only by the selection stage — never offered to a
+ *  model planner (filtered out of what the planner sees). Informational; nothing is performed. */
+export const ASK_CLARIFY_TOOL: ToolSpec = {
+  id: 'ask.clarify',
+  description: '(Selection stage only.) Ask the person which of two skills they mean. Never plan this tool.',
+  inputSchema: { type: 'object', properties: { options: { type: 'array', items: { type: 'string' }, description: 'The two skill ids' }, purposes: { type: 'array', items: { type: 'string' }, description: 'Each skill\'s purpose, in words' }, what: { type: 'string', description: 'What was asked' } }, required: ['options'] },
+  answer: '{{answer}}',
+};
+
+/** Spec 418 A2 — the classes a plan should deliver: each intermediate step's artifact, then the final skill's products. */
+export function expectedDeliversOf(steps: ReadonlyArray<{ tool: string; for?: string }>, skills: ReadonlyArray<{ id: string; produces?: ReadonlyArray<{ iri: string; label: string }> }>, lexicon?: ReadonlyArray<{ iri: string; label: string; terms: readonly string[] }>): Array<{ iri: string; label: string }> {
+  const out = new Map<string, string>();
+  const gloss = (iri: string, label: string) => { const e = lexicon?.find((x) => x.iri === iri); const also = (e?.terms ?? []).filter((t) => t.toLowerCase() !== label.toLowerCase()).slice(0, 3); return also.length ? `${label} (also: ${also.join(', ')})` : label; };
+  for (const st of steps.slice(0, -1)) if (st.for) { const lab = skills.flatMap((x) => x.produces ?? []).find((k) => k.iri === st.for)?.label ?? st.for.split('#').pop()!; out.set(st.for, gloss(st.for, lab)); }
+  const last = steps[steps.length - 1];
+  for (const k of skills.find((x) => x.id === last?.tool)?.produces ?? []) out.set(k.iri, gloss(k.iri, k.label));
+  return [...out].map(([iri, label]) => ({ iri, label }));
+}
+
 export const UNSUPPORTED_TOOL: ToolSpec = {
   id: 'ask.unsupported',
   description:
@@ -2126,6 +2146,13 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
     // mandate); explicit so a future caller cannot make it reachable quietly.
     if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === 'messaging.topic.post' || GITHUB_ACTS.has(toolId) || BUILD_ACTS.has(toolId) || CALENDAR_ACTS.has(toolId) || MAIL_DRIVE_ACTS.has(toolId) || toolId === ORG_INVITE_CAPABILITY || toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (toolId === ASK_CLARIFY_TOOL.id) {
+      const ids = Array.isArray(args.options) ? (args.options as unknown[]).map(String).slice(0, 2) : [];
+      const purposes = Array.isArray(args.purposes) ? (args.purposes as unknown[]).map(String) : [];
+      const [pa, pb] = purposes;
+      const answer = pa && pb ? `I can take this two ways — ${pa.replace(/^./, (x) => x.toLowerCase())}, or ${pb.replace(/^./, (x) => x.toLowerCase())}. Which do you mean?` : 'Which do you mean?';
+      return { answer, clarify: ids };
+    }
     if (toolId === UNSUPPORTED_TOOL.id) {
       const offered = scopedActionTools(surface, playbook).map((t) => t.capability?.id ?? t.id);
       return { unsupported: true, what: String(args.what ?? ''), available: offered };
@@ -2784,7 +2811,10 @@ export interface PlannerTraceV1 {
   /** Spec 416 §4g — milliseconds per runtime stage of this ask (the marks, summed per name). */
   stages?: Record<string, number>;
   /** Spec 416 §4f — the default skill stage's outcome: the fast judge chose a skill, or handed the ask to the planner. */
-  skillStage?: 'chose' | 'handed-to-planner';
+  skillStage?: 'chose' | 'handed-to-planner' | 'clarify';
+  /** Spec 418 A2 — what the planned skills should DELIVER (each intermediate step's artifact + the final skill's
+   *  products), glossed from the lexicon — the outcome check's expected classes. */
+  expectedDelivers?: Array<{ iri: string; label: string }>;
   /** Spec 416 — milliseconds spent choosing (planner or selection arm), summed over re-plans. */
   selectionMs?: number;
   /** What the model planner's calls used, as the provider reported them (summed over re-plans). */
@@ -4933,6 +4963,7 @@ step is then handed to that agent under authority the person grants; leave it ou
                 trace.selection = { approach: 'outcome-selective', chose: r1.chose, distribution: r1.distribution, judge: r1.judge, ...(r1.reading ? { reading: r1.reading } : {}), ...plan2, planJudge };
                 const labels = new Map([...(lexicon ?? []).map((e) => [e.iri, e.label] as const), ...skills.flatMap((x) => [...(x.produces ?? []), ...(x.consumes ?? [])].map((k) => [k.iri, k.label] as const))]);
                 const steps = outcomeSteps(r2.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri, { briefIntermediate: input.variant?.toggles?.['skill-selection/intermediate'] === 'brief' });
+                trace.expectedDelivers = expectedDeliversOf(r2.plan.steps, skills, playbook?.domainLexicon);
                 return withSpecialists({ steps, rationale: `outcome-selective: ${r2.plan.steps.map((x) => x.tool).join(' → ')}${r2.asked ? '' : ' (no dataflow call)'}` }, playbook?.specialists, pin.tools);
               }
               trace.selection = { approach: 'outcome-selective', chose: null, ...(r1.hold ? { hold: r1.hold } : {}), distribution: r1.distribution, judge: r1.judge };
@@ -4979,14 +5010,34 @@ step is then handed to that agent under authority the person grants; leave it ou
               ? { recentSkills: ((await recentToolsOf(env as never, input.addressee as Address, input.person as Address, Date.now() - 30 * 86_400_000).catch(() => null)) ?? []).filter((x) => skillSources[x.id]).slice(0, 4), memoryTags: input.memory ? factsOf(input.memory).entries.slice(0, 6).map((e) => (e.tags?.length ? e.tags.join(', ') : e.fact).slice(0, 80)) : [] }
               : undefined;
             const ctx = seeded ?? live;
-            const asker = relation || ctx ? { ...(relation ? { relation } : {}), ...(ctx?.recentSkills?.length ? { recentSkills: ctx.recentSkills.slice(0, 4) } : {}), ...(ctx?.memoryTags?.length ? { memoryTags: ctx.memoryTags.slice(0, 6) } : {}) } : undefined;
+            const seededHeld = (seeded as { heldClasses?: string[] } | undefined)?.heldClasses;
+            const asker: AskerContextV1 | undefined = relation || ctx ? { ...(relation ? { relation } : {}), ...(ctx?.recentSkills?.length ? { recentSkills: ctx.recentSkills.slice(0, 4) } : {}), ...(ctx?.memoryTags?.length ? { memoryTags: ctx.memoryTags.slice(0, 6) } : {}), ...(seededHeld?.length ? { heldClasses: seededHeld.slice(0, 16) } : {}) } : undefined;
             // Spec 418 D4 — `office-prior off` hides the role classes' typical capabilities here too (one knob, both paths).
             const stageLexicon = input.variant?.toggles?.['skill-selection/office-prior'] === 'off' ? playbook?.domainLexicon?.map(({ uses: _u, ...e }) => e) : playbook?.domainLexicon;
-            const r = await selectByJudgment(rest, skills, call, { profile: 'fast', ...(input.variant?.toggles?.['skill-selection/samples'] === '2' ? { samples: 2 } : {}), ...((input.variant?.toggles?.['skill-selection/borderline'] ?? ((env as { SKILL_SELECTION_BORDERLINE?: string }).SKILL_SELECTION_BORDERLINE?.trim() || 'off')) === 'on' ? { borderline: [0.35, 0.6] as [number, number] } : {}) }, { ...(stageLexicon ? { lexicon: stageLexicon } : {}), ...(asker ? { asker } : {}) });
+            const r = await selectByJudgment(rest, skills, call, { profile: 'fast', ...(input.variant?.toggles?.['skill-selection/samples'] === '2' ? { samples: 2 } : {}), ...((input.variant?.toggles?.['skill-selection/fast-version'] ?? ((env as { SKILL_SELECTION_FAST_VERSION?: string }).SKILL_SELECTION_FAST_VERSION?.trim() || 'v2')) === 'v3' ? { fastVersion: 'v3' as const } : {}), ...((input.variant?.toggles?.['skill-selection/split'] ?? ((env as { SKILL_SELECTION_SPLIT?: string }).SKILL_SELECTION_SPLIT?.trim() || 'decline')) === 'clarify' ? { splitToClarify: 0.7 } : {}), ...((input.variant?.toggles?.['skill-selection/borderline'] ?? ((env as { SKILL_SELECTION_BORDERLINE?: string }).SKILL_SELECTION_BORDERLINE?.trim() || 'off')) === 'on' ? { borderline: [0.35, 0.6] as [number, number] } : {}) }, { ...(stageLexicon ? { lexicon: stageLexicon } : {}), ...(asker ? { asker } : {}) });
             trace.selection = { approach: 'judgment', ...r };
             trace.skillStage = r.chose ? 'chose' : 'handed-to-planner';
+            // Spec 418 — the pick split between two skills: ask which (a clarify reply), never decline to the planner.
+            if (!r.chose && r.hold === 'needs-clarification' && r.rejected.length === 2) {
+              plannerUsed = 'judgment'; trace.skillStage = 'clarify';
+              const purposeOf = (id: string) => (skills.find((x) => x.id === id)?.description ?? id).split(/\bNOT for\b/i)[0]!.split(/[.—]/)[0]!.trim() || id;
+              return withSpecialists({ steps: [{ toolId: ASK_CLARIFY_TOOL.id, args: { options: r.rejected, purposes: r.rejected.map(purposeOf), what: pin.intent.goal }, id: 's0' }], rationale: `skill stage: which of ${r.rejected.join(' / ')}?` }, playbook?.specialists, pin.tools);
+            }
             if (r.chose) {
               plannerUsed = 'judgment';
+              // Spec 418 A5 — WHAT THE AGENT ALREADY HOLDS: a comparison's seeded state wins; on a real ask, the addressee's
+              // own record TYPES (never content) through the domain's record ↔ class bindings, read only when the picked
+              // skill consumes a class some binding names — one survey, remembered a minute. Classes only reach the reading.
+              const heldNow = await (async (): Promise<{ classes: string[]; from: 'seeded' | 'records' | 'none' }> => {
+                if (asker?.heldClasses?.length) return { classes: [...asker.heldClasses], from: 'seeded' };
+                if (input.variant?.toggles?.['skill-selection/held'] === 'off' || input.variant?.askerContext) return { classes: [], from: 'none' };
+                const consumed = skills.find((x) => x.id === r.chose)?.consumes?.map((k) => k.iri) ?? [];
+                const relevant = (playbook?.domainRecords ?? []).filter((m) => consumed.includes(m.class));
+                if (!relevant.length || !deps.survey || !input.addressee) return { classes: [], from: 'none' };
+                const types = await remembered(`record-types:${String(input.addressee).toLowerCase()}`, () => deps.survey!(String(input.addressee)).then((rs) => rs.map((x) => x.recordType)).catch(() => [] as string[]));
+                return { classes: relevant.filter((m) => types.some((t) => t === m.recordType || t.startsWith(`${m.recordType}:`))).map((m) => m.class), from: 'records' };
+              })();
+              const askerHeld = heldNow.classes.length ? { ...(asker ?? {}), heldClasses: heldNow.classes } : asker;
               // Spec 418 D6 — adopted 2026-09-27 (ledger: pooled +12/−2 over six sets, p = 0.013, no set worse, no extra
               // cost): `SKILL_SELECTION_DEFAULT=selective` — after the pick, one small dataflow call only when the picked
               // skill has a producible upstream input the asker does not hold; the plan may then be a chain.
@@ -4994,27 +5045,32 @@ step is then handed to that agent under authority the person grants; leave it ou
               // deployment's `SKILL_SELECTION_PLAN` (choice | questions); an explicit `skill-selection/plan` toggle wins.
               const planMode = input.variant?.toggles?.['skill-selection/plan'] ?? ((env as { SKILL_SELECTION_PLAN?: string }).SKILL_SELECTION_PLAN?.trim() || 'questions');
               if (stageDefault === 'selective' && skills.some((x) => x.consumes?.length) && planMode === 'choice') {
-                const pc = await choosePlanAround(rest, r.chose, skills, call, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(asker ? { asker } : {}) });
-                trace.selection = { approach: 'outcome-selective', chose: r.chose, distribution: r.distribution, judge: r.judge, asked: pc.asked, plan: pc.plan, supplied: {}, planJudge: pc.judge };
+                const pc = await choosePlanAround(rest, r.chose, skills, call, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(askerHeld ? { asker: askerHeld } : {}) });
+                trace.selection = { approach: 'outcome-selective', chose: r.chose, distribution: r.distribution, judge: r.judge, ...(r.reading ? { reading: r.reading } : {}), ...(heldNow.from !== 'none' ? { held: heldNow } : {}), asked: pc.asked, plan: pc.plan, supplied: {}, planJudge: pc.judge };
                 const labels = new Map([...(playbook?.domainLexicon ?? []).map((e) => [e.iri, e.label] as const)]);
-                const steps = outcomeSteps(pc.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri);
+                const steps = outcomeSteps(pc.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri, { briefIntermediate: input.variant?.toggles?.['skill-selection/intermediate'] === 'brief' });
+                trace.expectedDelivers = expectedDeliversOf(pc.plan.steps, skills, playbook?.domainLexicon);
                 return withSpecialists({ steps, rationale: `skill stage (plan choice): ${pc.chosen.steps.join(' → ')}${pc.asked ? '' : ' (no plan call)'}` }, playbook?.specialists, pin.tools);
               }
               if (stageDefault === 'selective' && skills.some((x) => x.consumes?.length)) {
-                const r2 = await planForPicked(rest, r.chose, skills, call, { ...(input.variant?.toggles?.['skill-selection/downstream'] === 'on' ? { downstream: true } : {}), ...(input.variant?.toggles?.['skill-selection/absence'] === 'v2' ? { absenceWording: 'v2' as const } : {}) }, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(asker ? { asker } : {}) });
+                const r2 = await planForPicked(rest, r.chose, skills, call, { ...(input.variant?.toggles?.['skill-selection/downstream'] === 'on' ? { downstream: true } : {}), ...(input.variant?.toggles?.['skill-selection/absence'] === 'v2' ? { absenceWording: 'v2' as const } : {}) }, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(askerHeld ? { asker: askerHeld } : {}) });
                 const { judge: planJudge, ...plan2 } = r2;
-                trace.selection = { approach: 'outcome-selective', chose: r.chose, distribution: r.distribution, judge: r.judge, ...plan2, planJudge };
+                trace.selection = { approach: 'outcome-selective', chose: r.chose, distribution: r.distribution, judge: r.judge, ...(r.reading ? { reading: r.reading } : {}), ...plan2, planJudge };
                 const labels = new Map([...(playbook?.domainLexicon ?? []).map((e) => [e.iri, e.label] as const)]);
                 const steps = outcomeSteps(r2.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri, { briefIntermediate: input.variant?.toggles?.['skill-selection/intermediate'] === 'brief' });
+                trace.expectedDelivers = expectedDeliversOf(r2.plan.steps, skills, playbook?.domainLexicon);
                 return withSpecialists({ steps, rationale: `skill stage (selective): ${r2.plan.steps.map((x) => x.tool).join(' → ')}${r2.asked ? '' : ' (no dataflow call)'}` }, playbook?.specialists, pin.tools);
               }
+              trace.expectedDelivers = expectedDeliversOf([{ tool: r.chose }], skills, playbook?.domainLexicon);
               return withSpecialists({ steps: [{ toolId: r.chose, args: { question: pin.intent.goal }, id: 's0' }], rationale: `skill stage: ${r.chose}` }, playbook?.specialists, pin.tools);
             }
             // "None of these skills": the planner gets the agent's OTHER tools only. Offering it the skills the judge just
             // rejected let it pick one anyway (measured 2026-09-27: a declined out-of-scope ask answered by a skill) and
             // cost ~12k prompt tokens of skill descriptions for nothing.
-            pin = { ...pin, tools: pin.tools.filter((t) => !skillSources[t.id]) };
+            pin = { ...pin, tools: pin.tools.filter((t) => !skillSources[t.id] && t.id !== ASK_CLARIFY_TOOL.id) };
           }
+          // The model planner never sees the selection stage's clarify tool.
+          pin = { ...pin, tools: pin.tools.filter((t) => t.id !== ASK_CLARIFY_TOOL.id) };
           plannerUsed = selected.kind;
           // Spec 415 A4 — a comparison may ask for the rule-based planner on a deployment that offers a model: the
           // same planner `selectPlanner` reaches when no provider is configured, chosen per run and named on the trace.
@@ -5157,6 +5213,8 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(deps.listTriggers ? ROUTINE_TOOLS.filter((t) => t.id === ROUTINE_LIST).map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
     ...(deps.readSubjectRecord ? PREFERENCES_TOOLS.filter((t) => t.id === PREFERENCES_GET).map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
     UNSUPPORTED_TOOL,
+    // Spec 418 — planned only by the skill stage (see ASK_CLARIFY_TOOL); filtered from the planner's view below.
+    ...(Object.keys(instructionSourcesOf(playbook)).length ? [ASK_CLARIFY_TOOL] : []),
   ];
   // ONE TOOL, ONE ENTRY. A family listed as both an act and a read reaches the planner twice, and a provider refuses the
   // whole offer for it (Gemini: "Duplicate function declaration"), so every ask on the agent fails — said here, once,
@@ -5209,18 +5267,22 @@ step is then handed to that agent under authority the person grants; leave it ou
   // Spec 416 §4h — the model an instruction skill answers with (`skill-selection/answer-model`), and, under
   // `quality/judge: pairwise`, BOTH answers in parallel judged side by side (both orders, neutral labels): the run returns
   // its own model's answer; the other answer and the judgment are a comparison's instrument (numbers on the trace only).
-  const answerLight = input.variant?.toggles?.['skill-selection/answer-model'] === 'light';
+  // Spec 418 — the answer tier: default · light · strong (a stronger model, measured side by side before any use).
+  type AnswerTier = 'default' | 'light' | 'strong';
+  const ownTier: AnswerTier = ((input.variant?.toggles?.['skill-selection/answer-model'] as AnswerTier | undefined) ?? 'default');
+  const otherTier: AnswerTier = ((input.variant?.toggles?.['quality/against'] as AnswerTier | undefined) ?? (ownTier === 'light' ? 'default' : 'light'));
+  const answerLight = ownTier === 'light';
   const agentNameForSkill = instructionTools.length && deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null;
-  const applyWith = (light: boolean, recorded: boolean) => skillApplyInvoker({ call: undefined, callFor: (stepRef) => structuredCallFor(env as never, input.provider, { ...(recorded ? { onCall: recordStructured('structured', stepRef) } : {}), ...(light ? { tier: 'light' as const } : {}) }), ...(input.variant?.toggles?.['skill-selection/answer'] === 'off' ? { pickOnly: true } : {}), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: agentNameForSkill });
+  const applyWith = (tier: AnswerTier, recorded: boolean) => skillApplyInvoker({ call: undefined, callFor: (stepRef) => structuredCallFor(env as never, input.provider, { ...(recorded ? { onCall: recordStructured('structured', stepRef) } : {}), ...(tier !== 'default' ? { tier } : {}) }), ...(input.variant?.toggles?.['skill-selection/answer'] === 'off' ? { pickOnly: true } : {}), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: agentNameForSkill });
   const pairwise = input.variant?.toggles?.['quality/judge'] === 'pairwise';
-  const skillInvoke: ToolInvoker | null = !instructionTools.length ? null : !pairwise ? applyWith(answerLight, true) : async (toolId, args, ctx) => {
-    const [own, other] = await Promise.all([applyWith(answerLight, true)(toolId, args, ctx), applyWith(!answerLight, false)(toolId, args, ctx).catch(() => null)]);
+  const skillInvoke: ToolInvoker | null = !instructionTools.length ? null : !pairwise ? applyWith(ownTier, true) : async (toolId, args, ctx) => {
+    const [own, other] = await Promise.all([applyWith(ownTier, true)(toolId, args, ctx), applyWith(otherTier, false)(toolId, args, ctx).catch(() => null)]);
     const a = (x: unknown) => (x && typeof x === 'object' && typeof (x as { answer?: unknown }).answer === 'string' ? (x as { answer: string }).answer : null);
     const ownA = a(own), otherA = a(other);
     const card = instructionTools.find((t) => t.id === toolId)?.description ?? toolId;
     const qcall = structuredCallFor(env as never, input.provider);
     if (ownA && otherA && qcall) {
-      const pref = await judgeAnswerPreference({ request: String(args.question ?? input.intent.goal), skillCard: card, answers: answerLight ? { light: ownA, default: otherA } : { default: ownA, light: otherA } }, qcall as never).catch(() => null);
+      const pref = await judgeAnswerPreference({ request: String(args.question ?? input.intent.goal), skillCard: card, answers: { [ownTier]: ownA, [otherTier]: otherA } }, qcall as never).catch(() => null);
       if (pref) trace.pairwise = { judge: pref.judge.name, preference: pref.preference, ms: pref.ms, ...(pref.error ? { error: pref.error.slice(0, 200) } : {}) };
     }
     return own;
