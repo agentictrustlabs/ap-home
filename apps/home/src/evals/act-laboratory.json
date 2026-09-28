@@ -1,6 +1,6 @@
 {
   "type": "ap.act-laboratory.v1",
-  "bakedAt": "2026-09-28T18:29:49.515Z",
+  "bakedAt": "2026-09-28T18:49:48.462Z",
   "sets": [
     {
       "id": "home-acts-1",
@@ -1188,7 +1188,10 @@
       "note": "Pre-registered 2026-09-28 before any run of plan/regression. bob asks AT missio-nexus.org as a MEMBER. A tool-planner parks a steward's act for the organization's authority a member cannot sign (the Home then fails at the ceremony); goal regression names the gap before anything is asked for. Sentences checked against the contracts' utterances and ask-scenarios.heldout.json.",
       "estate": "faithnet: bob is a MEMBER (not a steward) of missio-nexus.org; carol and david are people in his tier; the organization's roster and endeavors are its records.",
       "digest": "sha256:2a51daa03ee0de17898861cb45afec9b1361ed9db7d041e0998c93e94bafcf8a",
-      "latest": null,
+      "latest": {
+        "experiment": "acts5-member-live-reg",
+        "finishedAt": "2026-09-28T18:39:35.546Z"
+      },
       "cases": [
         {
           "id": "m5-invite",
@@ -1204,7 +1207,13 @@
             "organizationInvitesUnderItsAuthority"
           ],
           "checks": [],
-          "verdicts": {}
+          "verdicts": {
+            "live": {
+              "right": 2,
+              "total": 2,
+              "failing": []
+            }
+          }
         },
         {
           "id": "m5-team",
@@ -1220,7 +1229,13 @@
             "kindNamedIsKindChartered"
           ],
           "checks": [],
-          "verdicts": {}
+          "verdicts": {
+            "live": {
+              "right": 2,
+              "total": 2,
+              "failing": []
+            }
+          }
         },
         {
           "id": "m5-treasury",
@@ -1234,7 +1249,16 @@
           "ux": false,
           "principles": [],
           "checks": [],
-          "verdicts": {}
+          "verdicts": {
+            "live": {
+              "right": 0,
+              "total": 2,
+              "failing": [
+                "reply",
+                "capability"
+              ]
+            }
+          }
         },
         {
           "id": "m5-roster",
@@ -1251,7 +1275,13 @@
             "weIsTheRoom"
           ],
           "checks": [],
-          "verdicts": {}
+          "verdicts": {
+            "live": {
+              "right": 2,
+              "total": 2,
+              "failing": []
+            }
+          }
         },
         {
           "id": "m5-endeavors",
@@ -1267,7 +1297,13 @@
             "readsRunAtTheirSubject"
           ],
           "checks": [],
-          "verdicts": {}
+          "verdicts": {
+            "live": {
+              "right": 2,
+              "total": 2,
+              "failing": []
+            }
+          }
         },
         {
           "id": "m5-holdings",
@@ -1283,10 +1319,39 @@
             "holdingsAreTheRecord"
           ],
           "checks": [],
-          "verdicts": {}
+          "verdicts": {
+            "live": {
+              "right": 2,
+              "total": 2,
+              "failing": []
+            }
+          }
         }
       ],
-      "history": []
+      "history": [
+        {
+          "experiment": "acts5-member-live",
+          "finishedAt": "2026-09-28T18:33:45.254Z",
+          "variants": {
+            "live": {
+              "right": 7,
+              "total": 12,
+              "askMsP50": 6958
+            }
+          }
+        },
+        {
+          "experiment": "acts5-member-live-reg",
+          "finishedAt": "2026-09-28T18:39:35.546Z",
+          "variants": {
+            "live": {
+              "right": 10,
+              "total": 12,
+              "askMsP50": 8307
+            }
+          }
+        }
+      ]
     },
     {
       "id": "home-acts-5-steward",
@@ -1294,7 +1359,10 @@
       "note": "Pre-registered 2026-09-28 before any run of plan/regression. alice asks AT missio-nexus.org as its steward. Goal regression reads the roster before an invitation (the read is inserted), refuses an invitation to a member by name, and says an invitation is a submission. Sentences checked against the contracts' utterances and ask-scenarios.heldout.json.",
       "estate": "faithnet: alice stewards missio-nexus.org; bob and carol ARE members of it; david is NOT; the organization holds no treasury (spec 419).",
       "digest": "sha256:2381bfa98c519a1a3d4eddc94428450d9eaf4ef58be5acc5995d09be99fcbabc",
-      "latest": null,
+      "latest": {
+        "experiment": "acts5-steward-reg2",
+        "finishedAt": "2026-09-28T18:37:15.425Z"
+      },
       "cases": [
         {
           "id": "s5-invite-member",
@@ -1310,7 +1378,20 @@
             "invitationIsNotMembership"
           ],
           "checks": [],
-          "verdicts": {}
+          "verdicts": {
+            "reg-off": {
+              "right": 0,
+              "total": 2,
+              "failing": [
+                "reply"
+              ]
+            },
+            "reg-on": {
+              "right": 2,
+              "total": 2,
+              "failing": []
+            }
+          }
         },
         {
           "id": "s5-invite-new",
@@ -1331,7 +1412,18 @@
             "delegator",
             "receipt"
           ],
-          "verdicts": {}
+          "verdicts": {
+            "reg-off": {
+              "right": 2,
+              "total": 2,
+              "failing": []
+            },
+            "reg-on": {
+              "right": 2,
+              "total": 2,
+              "failing": []
+            }
+          }
         },
         {
           "id": "s5-roster-then-invite",
@@ -1347,7 +1439,24 @@
             "invitationIsNotMembership"
           ],
           "checks": [],
-          "verdicts": {}
+          "verdicts": {
+            "reg-off": {
+              "right": 0,
+              "total": 2,
+              "failing": [
+                "reply",
+                "capability"
+              ]
+            },
+            "reg-on": {
+              "right": 0,
+              "total": 2,
+              "failing": [
+                "reply",
+                "capability"
+              ]
+            }
+          }
         },
         {
           "id": "s5-team-here",
@@ -1367,10 +1476,212 @@
             "delegator",
             "receipt"
           ],
-          "verdicts": {}
+          "verdicts": {
+            "reg-off": {
+              "right": 2,
+              "total": 2,
+              "failing": []
+            },
+            "reg-on": {
+              "right": 2,
+              "total": 2,
+              "failing": []
+            }
+          }
         }
       ],
-      "history": []
+      "history": [
+        {
+          "experiment": "acts5-steward-reg",
+          "finishedAt": "2026-09-28T18:31:49.547Z",
+          "variants": {
+            "reg-off": {
+              "right": 4,
+              "total": 8,
+              "askMsP50": 9242
+            },
+            "reg-on": {
+              "right": 4,
+              "total": 8,
+              "askMsP50": 8657
+            }
+          }
+        },
+        {
+          "experiment": "acts5-steward-reg2",
+          "finishedAt": "2026-09-28T18:37:15.425Z",
+          "variants": {
+            "reg-off": {
+              "right": 4,
+              "total": 8,
+              "askMsP50": 8020
+            },
+            "reg-on": {
+              "right": 6,
+              "total": 8,
+              "askMsP50": 9251
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "home-acts-6-context",
+      "title": "Agentic Trust — Home acts 6 (spec 420 §10): names resolve in CONTEXT — a bare name means the person nearest the asker in the room she stands in; several at the same distance is a question; an outsider gets signals, never the record",
+      "note": "Pre-registered 2026-09-28 before any run of the context resolver (W8). The roster of missio-nexus.org holds one Bob (Bob Tanaka, bob.me) and two people answering to 'rich' (Richard Pedersen, Rich Canvas). alice is its steward; dave is an outsider. Sentences checked against the contracts' utterances and ask-scenarios.heldout.json.",
+      "estate": "faithnet: missio-nexus.org members include Bob Tanaka (bob.me), Richard Pedersen, Rich Canvas, Ryan Pedersen, Carol Mbeki, Elena Voss; alice stewards it and is linked to bob.me; dave.me holds no standing at it.",
+      "digest": "sha256:3d37b5dd4840de44d77aca80ea0c5890d779863e3dfb88ed190ed97a7de2adb7",
+      "latest": {
+        "experiment": "acts6-context-res",
+        "finishedAt": "2026-09-28T18:49:25.738Z"
+      },
+      "cases": [
+        {
+          "id": "c6-bob-at-org",
+          "bucket": "room-first",
+          "ask": "Let bob know the van is back from the shop.",
+          "plan": [
+            "messaging.direct.send"
+          ],
+          "reply": "authority_required",
+          "capability": "messaging.direct.send",
+          "ux": false,
+          "principles": [
+            "namesResolveInContext"
+          ],
+          "checks": [
+            "parties"
+          ],
+          "verdicts": {
+            "res-off": {
+              "right": 2,
+              "total": 2,
+              "failing": []
+            },
+            "res-on": {
+              "right": 2,
+              "total": 2,
+              "failing": []
+            }
+          }
+        },
+        {
+          "id": "c6-rich-at-org",
+          "bucket": "same-level-ambiguous",
+          "ask": "Tell rich the van is back from the shop.",
+          "plan": [
+            "messaging.direct.send"
+          ],
+          "reply": "prompt",
+          "capability": "messaging.direct.send",
+          "ux": false,
+          "principles": [
+            "namesResolveInContext"
+          ],
+          "checks": [
+            "promptFields"
+          ],
+          "verdicts": {
+            "res-off": {
+              "right": 2,
+              "total": 2,
+              "failing": []
+            },
+            "res-on": {
+              "right": 2,
+              "total": 2,
+              "failing": []
+            }
+          }
+        },
+        {
+          "id": "c6-pedersen-at-org",
+          "bucket": "same-level-ambiguous",
+          "ask": "Send pedersen a note that the van is back.",
+          "plan": [
+            "messaging.direct.send"
+          ],
+          "reply": "prompt",
+          "capability": "messaging.direct.send",
+          "ux": false,
+          "principles": [
+            "namesResolveInContext"
+          ],
+          "checks": [
+            "promptFields"
+          ],
+          "verdicts": {
+            "res-off": {
+              "right": 2,
+              "total": 2,
+              "failing": []
+            },
+            "res-on": {
+              "right": 2,
+              "total": 2,
+              "failing": []
+            }
+          }
+        },
+        {
+          "id": "c6-carol-at-org",
+          "bucket": "room-first",
+          "ask": "Message carol that the van is back from the shop.",
+          "plan": [
+            "messaging.direct.send"
+          ],
+          "reply": "authority_required",
+          "capability": "messaging.direct.send",
+          "ux": false,
+          "principles": [
+            "namesResolveInContext"
+          ],
+          "checks": [
+            "parties"
+          ],
+          "verdicts": {
+            "res-off": {
+              "right": 2,
+              "total": 2,
+              "failing": []
+            },
+            "res-on": {
+              "right": 2,
+              "total": 2,
+              "failing": []
+            }
+          }
+        }
+      ],
+      "history": [
+        {
+          "experiment": "acts6-context-base",
+          "finishedAt": "2026-09-28T18:42:47.054Z",
+          "variants": {
+            "act-base": {
+              "right": 0,
+              "total": 8,
+              "askMsP50": 5849
+            }
+          }
+        },
+        {
+          "experiment": "acts6-context-res",
+          "finishedAt": "2026-09-28T18:49:25.738Z",
+          "variants": {
+            "res-off": {
+              "right": 8,
+              "total": 8,
+              "askMsP50": 12666
+            },
+            "res-on": {
+              "right": 8,
+              "total": 8,
+              "askMsP50": 10502
+            }
+          }
+        }
+      ]
     }
   ],
   "principles": [
@@ -1514,9 +1825,11 @@
         "submitted and recorded — the outcome is not established until the other party acts"
       ],
       "coverage": {
-        "right": 0,
-        "total": 0,
-        "sets": []
+        "right": 6,
+        "total": 12,
+        "sets": [
+          "home-acts-5-steward"
+        ]
       }
     },
     {
@@ -1528,9 +1841,12 @@
         "ORG_INVITE_CAPABILITY"
       ],
       "coverage": {
-        "right": 0,
-        "total": 0,
-        "sets": []
+        "right": 6,
+        "total": 6,
+        "sets": [
+          "home-acts-5-member",
+          "home-acts-5-steward"
+        ]
       }
     },
     {
@@ -1543,9 +1859,11 @@
         "deriveStanding"
       ],
       "coverage": {
-        "right": 0,
-        "total": 0,
-        "sets": []
+        "right": 2,
+        "total": 2,
+        "sets": [
+          "home-acts-5-member"
+        ]
       }
     },
     {
@@ -1557,10 +1875,12 @@
         "kindNamedIsChartered"
       ],
       "coverage": {
-        "right": 2,
-        "total": 2,
+        "right": 8,
+        "total": 8,
         "sets": [
-          "home-acts-4-ux"
+          "home-acts-4-ux",
+          "home-acts-5-member",
+          "home-acts-5-steward"
         ]
       }
     },
@@ -1573,9 +1893,11 @@
         "holdingsReadInvoker"
       ],
       "coverage": {
-        "right": 0,
-        "total": 0,
-        "sets": []
+        "right": 2,
+        "total": 2,
+        "sets": [
+          "home-acts-5-member"
+        ]
       }
     },
     {
@@ -1587,9 +1909,12 @@
         "the agent you are asking"
       ],
       "coverage": {
-        "right": 0,
-        "total": 0,
-        "sets": []
+        "right": 6,
+        "total": 6,
+        "sets": [
+          "home-acts-5-member",
+          "home-acts-5-steward"
+        ]
       }
     },
     {
@@ -1601,10 +1926,11 @@
         "subjectOfRead"
       ],
       "coverage": {
-        "right": 2,
-        "total": 2,
+        "right": 4,
+        "total": 4,
         "sets": [
-          "home-acts-4-ux"
+          "home-acts-4-ux",
+          "home-acts-5-member"
         ]
       }
     },
@@ -1631,6 +1957,42 @@
       "violation": "a fact remembered from words the person did not say",
       "enforcedBy": [
         "requirePersonsTurn"
+      ],
+      "coverage": {
+        "right": 0,
+        "total": 0,
+        "sets": []
+      }
+    },
+    {
+      "id": "namesResolveInContext",
+      "area": "context",
+      "statement": "A bare name means the person nearest to the asker in the context they are standing in: the room's own people first, then their household, then a context they share (a team or organization both belong to), then the people they deal with most, then their other links — one at the nearest level is the answer, cited by that context; several at the same level is a question; a public directory hit is never evidence the asker means that person.",
+      "violation": "a name resolved to a stranger from the public directory, or to a distant link while the room's own person answers to it",
+      "enforcedBy": [
+        "rosterProvider",
+        "householdMembers",
+        "relationshipsProvider",
+        "recentParties",
+        "preferredChoice"
+      ],
+      "coverage": {
+        "right": 16,
+        "total": 16,
+        "sets": [
+          "home-acts-6-context"
+        ]
+      }
+    },
+    {
+      "id": "disclosureFollowsProximity",
+      "area": "context",
+      "statement": "What an agent says about a person follows the asker's distance from them: within a shared context, under a delegation, entitlement or grant, the fine-grained record; beyond it only attestations and signals the person chose to publish or countersign (a listing, a card, a public chartered-under edge) — never the record itself.",
+      "violation": "a person's private record described to someone outside every context they share with them",
+      "enforcedBy": [
+        "deriveStanding",
+        "subjectOfRead",
+        "tier: 'private'"
       ],
       "coverage": {
         "right": 0,
