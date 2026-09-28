@@ -1,6 +1,6 @@
 {
   "type": "ap.technique-ledger.v1",
-  "builtAt": "2026-09-28T04:42:48.279Z",
+  "builtAt": "2026-09-28T05:24:10.138Z",
   "rows": [
     {
       "technique": {
@@ -3732,6 +3732,948 @@
         "source": "Live, 2026-09-27: a two-step chain ran 29 s of a 33 s ask — each skill.apply ~14 s; the lighter answer model was faster but lost side by side (14 vs 6)",
         "what": "Candidates: stream the answer to the surface as it is produced (time to first words, not to the whole answer); cap the answer to what the skill's method needs; for a chain, stream the first step's result while the second runs; answer-model routing by skill (a light model only where side-by-side shows no loss).",
         "plannedAb": "answers on: time to first token and whole-ask p50/p90, side-by-side preference vs the current answers — per skill.",
+        "comparisons": []
+      },
+      "comparisons": [],
+      "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "brief-intermediate",
+        "name": "A chain's intermediate step produces only the typed artifact",
+        "ontologyDriven": true,
+        "spec": "418 §11",
+        "source": "Live chain ran 29 s: two ~14 s skill answers in sequence; the intermediate step's reader is the next skill, not the person",
+        "what": "The producer step in a chain is asked for ONLY the class the next step consumes, as a compact working artifact, under a smaller token budget (600).",
+        "comparisons": [
+          {
+            "experiment": "chain1-brief",
+            "baseline": "chain-full",
+            "treatment": "chain-brief",
+            "note": "answers on, rubric on the terminal skill"
+          }
+        ],
+        "decision": {
+          "status": "pending",
+          "date": "2026-09-27",
+          "note": "Chain panel 1: on the chained runs ask p50 28.6 → 23.1 s (−19%), output tokens −44%, rubric 0.94 → 1.00 (the rubric saturates). Needs a side-by-side of the final answers before any default."
+        }
+      },
+      "comparisons": [
+        {
+          "experiment": "chain1-brief",
+          "baseline": "chain-full",
+          "treatment": "chain-brief",
+          "note": "answers on, rubric on the terminal skill",
+          "set": "sha256:fc46ad886d231c5dada462e53b5b0763de0cf21041eb6c72c4ddfdf476ee70ca",
+          "finishedAt": "2026-09-28T05:01:23.969Z",
+          "n": 24,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.5,
+            "treat": 0.5,
+            "delta": 0,
+            "fixed": 1,
+            "broken": 1,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 2277.5,
+              "treat": 2002,
+              "delta": -275.5,
+              "deltaPct": -12.1,
+              "ci": [
+                0,
+                2
+              ]
+            },
+            "totalTokens": {
+              "base": 8158.5,
+              "treat": 7149.5,
+              "delta": -1009,
+              "deltaPct": -12.4,
+              "ci": [
+                -554,
+                96.5
+              ]
+            },
+            "pickMs": {
+              "base": 1736,
+              "treat": 1703.5,
+              "delta": -32.5,
+              "deltaPct": -1.9,
+              "ci": [
+                -182,
+                65
+              ]
+            },
+            "askMs": {
+              "base": 16254,
+              "treat": 13701,
+              "delta": -2553,
+              "deltaPct": -15.7,
+              "ci": [
+                -4245,
+                2450
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 195.5,
+                "treat": 189.5,
+                "delta": -6,
+                "deltaPct": -3.1,
+                "ci": [
+                  -13,
+                  509.5
+                ]
+              },
+              "phase:pre-run": {
+                "base": 90.5,
+                "treat": 86.5,
+                "delta": -4,
+                "deltaPct": -4.4,
+                "ci": [
+                  -1454,
+                  90.5
+                ]
+              },
+              "phase:run": {
+                "base": 14765,
+                "treat": 11971,
+                "delta": -2794,
+                "deltaPct": -18.9,
+                "ci": [
+                  -3481,
+                  1322
+                ]
+              }
+            }
+          },
+          "answer": {
+            "rubric": {
+              "base": 1,
+              "treat": 1,
+              "delta": 0,
+              "deltaPct": 0,
+              "ci": [
+                0,
+                0
+              ]
+            }
+          },
+          "verdict": "same"
+        }
+      ],
+      "verdict": "same",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "downstream-extension",
+        "name": "Selective reading looks downstream of the pick",
+        "ontologyDriven": true,
+        "spec": "418 §11",
+        "source": "Chain panel 1 (development): grant chains chained 2/24 — the pick lands on the FIRST skill named ('work out the deadline… and draft'), and selective reading looked only upstream",
+        "what": "When the picked skill produces a class another skill consumes (the party rule not refusing), one yes-no in the same small call: does the request also want that next result? If so the plan ends there.",
+        "comparisons": [
+          {
+            "experiment": "chain2-downstream",
+            "baseline": "sel-nodown",
+            "treatment": "sel-down",
+            "note": "chain panel 2 (judging)"
+          },
+          {
+            "experiment": "fresh9-downstream",
+            "baseline": "sel-nodown",
+            "treatment": "sel-down",
+            "note": "regression — must not over-extend"
+          }
+        ],
+        "decision": {
+          "status": "kept-off",
+          "date": "2026-09-27",
+          "note": "Pooled +5/−4 at +24% pick tokens, +32% ask time (chain panel 2: producer-first 4/14 → 6/14, controls unharmed; fresh 9 −2). The misses are mostly the TERMINAL skill picked without its upstream step — the absence question does not cover \"make it as a step\" phrasing. Next: widen that question (judged on chain panel 3)."
+        }
+      },
+      "comparisons": [
+        {
+          "experiment": "chain2-downstream",
+          "baseline": "sel-nodown",
+          "treatment": "sel-down",
+          "note": "chain panel 2 (judging)",
+          "set": "sha256:3a1cf3ddada905f699764a2eacfda7259e2dbe450801e3da085aa4b841f54a9e",
+          "finishedAt": "2026-09-28T05:06:37.144Z",
+          "n": 30,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.6,
+            "treat": 0.7,
+            "delta": 0.1,
+            "fixed": 5,
+            "broken": 2,
+            "p": 0.4531
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1740,
+              "treat": 2193.5,
+              "delta": 453.5,
+              "deltaPct": 26.1,
+              "ci": [
+                2.5,
+                395
+              ]
+            },
+            "totalTokens": {
+              "base": 1740,
+              "treat": 2193.5,
+              "delta": 453.5,
+              "deltaPct": 26.1,
+              "ci": [
+                2.5,
+                395
+              ]
+            },
+            "pickMs": {
+              "base": 1600,
+              "treat": 2211.5,
+              "delta": 611.5,
+              "deltaPct": 38.2,
+              "ci": [
+                259,
+                820
+              ]
+            },
+            "askMs": {
+              "base": 2064.5,
+              "treat": 2465.5,
+              "delta": 401,
+              "deltaPct": 19.4,
+              "ci": [
+                284,
+                1044.5
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 182.5,
+                "treat": 183,
+                "delta": 0.5,
+                "deltaPct": 0.3,
+                "ci": [
+                  -4,
+                  12
+                ]
+              },
+              "phase:pre-run": {
+                "base": 77.5,
+                "treat": 76.5,
+                "delta": -1,
+                "deltaPct": -1.3,
+                "ci": [
+                  -7,
+                  5
+                ]
+              },
+              "phase:run": {
+                "base": 1984,
+                "treat": 2296.5,
+                "delta": 312.5,
+                "deltaPct": 15.8,
+                "ci": [
+                  195.5,
+                  934
+                ]
+              }
+            }
+          },
+          "verdict": "same-quality-costs-more"
+        },
+        {
+          "experiment": "fresh9-downstream",
+          "baseline": "sel-nodown",
+          "treatment": "sel-down",
+          "note": "regression — must not over-extend",
+          "set": "sha256:8763d5dd945cff5612f90841994e69584d563a24fb952cd85388e4156e11e9fc",
+          "finishedAt": "2026-09-28T05:07:53.042Z",
+          "n": 38,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.8947,
+            "treat": 0.8421,
+            "delta": -0.0526,
+            "fixed": 0,
+            "broken": 2,
+            "p": 0.5
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1748.5,
+              "treat": 2136.5,
+              "delta": 388,
+              "deltaPct": 22.2,
+              "ci": [
+                0,
+                29.5
+              ]
+            },
+            "totalTokens": {
+              "base": 1748.5,
+              "treat": 2136.5,
+              "delta": 388,
+              "deltaPct": 22.2,
+              "ci": [
+                0,
+                28
+              ]
+            },
+            "pickMs": {
+              "base": 1315.5,
+              "treat": 1911.5,
+              "delta": 596,
+              "deltaPct": 45.3,
+              "ci": [
+                139,
+                451.5
+              ]
+            },
+            "askMs": {
+              "base": 1637,
+              "treat": 2367,
+              "delta": 730,
+              "deltaPct": 44.6,
+              "ci": [
+                131,
+                712
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 183,
+                "treat": 184,
+                "delta": 1,
+                "deltaPct": 0.5,
+                "ci": [
+                  -9,
+                  9
+                ]
+              },
+              "phase:pre-run": {
+                "base": 75,
+                "treat": 76,
+                "delta": 1,
+                "deltaPct": 1.3,
+                "ci": [
+                  -2,
+                  2.5
+                ]
+              },
+              "phase:run": {
+                "base": 1403,
+                "treat": 2153.5,
+                "delta": 750.5,
+                "deltaPct": 53.5,
+                "ci": [
+                  75,
+                  506
+                ]
+              }
+            }
+          },
+          "verdict": "same-quality-costs-more"
+        }
+      ],
+      "pooled": [
+        {
+          "baseline": "sel-nodown",
+          "experiments": 2,
+          "n": 68,
+          "fixed": 5,
+          "broken": 4,
+          "p": 1,
+          "pickTokensPct": 24.15,
+          "askMsPct": 32,
+          "verdict": "same-quality-costs-more"
+        }
+      ],
+      "verdict": "same-quality-costs-more",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "absence-as-step",
+        "name": "Absence question covers 'make it as a step'",
+        "ontologyDriven": true,
+        "spec": "418 §11",
+        "source": "Chain panel 2 misses: 'take stock of every AI tool we use and then build the response plan' — the terminal skill picked, the inventory step not added",
+        "what": "The enriching-input question also counts a request that ASKS for the input to be made first ('take stock… then', 'list the deadlines and…') — not only one saying it is missing.",
+        "comparisons": [
+          {
+            "experiment": "chain3-absence",
+            "baseline": "sel-absent-v1",
+            "treatment": "sel-absent-v2",
+            "note": "chain panel 3 (judging)"
+          },
+          {
+            "experiment": "fresh9-absence",
+            "baseline": "sel-absent-v1",
+            "treatment": "sel-absent-v2",
+            "note": "regression"
+          }
+        ],
+        "decision": {
+          "status": "kept-off",
+          "date": "2026-09-27",
+          "note": "Pooled +0/−3: chains asked as a step stayed 1/12 either way; the misses were the pick landing on the first OR the last step — not wording."
+        }
+      },
+      "comparisons": [
+        {
+          "experiment": "chain3-absence",
+          "baseline": "sel-absent-v1",
+          "treatment": "sel-absent-v2",
+          "note": "chain panel 3 (judging)",
+          "set": "sha256:7055d4804e64c26be76cd45a09a77efdd1cfcf1bd4f709716137cb3fecd0e19f",
+          "finishedAt": "2026-09-28T05:12:08.564Z",
+          "n": 28,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.5357,
+            "treat": 0.4643,
+            "delta": -0.0714,
+            "fixed": 0,
+            "broken": 2,
+            "p": 0.5
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 2150,
+              "treat": 1926.5,
+              "delta": -223.5,
+              "deltaPct": -10.4,
+              "ci": [
+                0,
+                26
+              ]
+            },
+            "totalTokens": {
+              "base": 2150,
+              "treat": 1926.5,
+              "delta": -223.5,
+              "deltaPct": -10.4,
+              "ci": [
+                0,
+                26
+              ]
+            },
+            "pickMs": {
+              "base": 1670.5,
+              "treat": 1728,
+              "delta": 57.5,
+              "deltaPct": 3.4,
+              "ci": [
+                -298,
+                217.5
+              ]
+            },
+            "askMs": {
+              "base": 2133.5,
+              "treat": 2007,
+              "delta": -126.5,
+              "deltaPct": -5.9,
+              "ci": [
+                -469,
+                307
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 177.5,
+                "treat": 184.5,
+                "delta": 7,
+                "deltaPct": 3.9,
+                "ci": [
+                  -11,
+                  20
+                ]
+              },
+              "phase:pre-run": {
+                "base": 76,
+                "treat": 75,
+                "delta": -1,
+                "deltaPct": -1.3,
+                "ci": [
+                  -7.5,
+                  3
+                ]
+              },
+              "phase:run": {
+                "base": 1834,
+                "treat": 1859,
+                "delta": 25,
+                "deltaPct": 1.4,
+                "ci": [
+                  -310,
+                  214
+                ]
+              }
+            }
+          },
+          "verdict": "same"
+        },
+        {
+          "experiment": "fresh9-absence",
+          "baseline": "sel-absent-v1",
+          "treatment": "sel-absent-v2",
+          "note": "regression",
+          "set": "sha256:8763d5dd945cff5612f90841994e69584d563a24fb952cd85388e4156e11e9fc",
+          "finishedAt": "2026-09-28T05:13:26.688Z",
+          "n": 38,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.9211,
+            "treat": 0.8947,
+            "delta": -0.0263,
+            "fixed": 0,
+            "broken": 1,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1748.5,
+              "treat": 1749.5,
+              "delta": 1,
+              "deltaPct": 0.1,
+              "ci": [
+                0,
+                0.5
+              ]
+            },
+            "totalTokens": {
+              "base": 1748.5,
+              "treat": 1749.5,
+              "delta": 1,
+              "deltaPct": 0.1,
+              "ci": [
+                0,
+                1
+              ]
+            },
+            "pickMs": {
+              "base": 1427.5,
+              "treat": 1370,
+              "delta": -57.5,
+              "deltaPct": -4,
+              "ci": [
+                -227,
+                22.5
+              ]
+            },
+            "askMs": {
+              "base": 2289.5,
+              "treat": 1646,
+              "delta": -643.5,
+              "deltaPct": -28.1,
+              "ci": [
+                -344,
+                26.5
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 180.5,
+                "treat": 185.5,
+                "delta": 5,
+                "deltaPct": 2.8,
+                "ci": [
+                  -15,
+                  11
+                ]
+              },
+              "phase:pre-run": {
+                "base": 76,
+                "treat": 75,
+                "delta": -1,
+                "deltaPct": -1.3,
+                "ci": [
+                  -4,
+                  1
+                ]
+              },
+              "phase:run": {
+                "base": 1648.5,
+                "treat": 1452,
+                "delta": -196.5,
+                "deltaPct": -11.9,
+                "ci": [
+                  -369.5,
+                  -24
+                ]
+              }
+            }
+          },
+          "verdict": "same"
+        }
+      ],
+      "pooled": [
+        {
+          "baseline": "sel-absent-v1",
+          "experiments": 2,
+          "n": 66,
+          "fixed": 0,
+          "broken": 3,
+          "p": 0.25,
+          "pickTokensPct": -5.15,
+          "askMsPct": -17,
+          "verdict": "same-quality-cheaper"
+        }
+      ],
+      "verdict": "same",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "plan-choice",
+        "name": "Plan choice: the rule enumerates the plans around the pick, the judge picks one",
+        "ontologyDriven": true,
+        "spec": "418 §11",
+        "source": "Chain panels 1–3 (development): yes-no questions around a single pick failed both ways — the pick lands on the first step as often as the last",
+        "what": "For a pick with dataflow arrows, the ontology enumerates the few allowed plans (alone · producer → pick · pick → consumer; party rule applied, held inputs pruned) and one choice question picks the plan. No call for a pick with no arrows.",
+        "comparisons": [
+          {
+            "experiment": "chain4-plan",
+            "baseline": "sel-questions",
+            "treatment": "sel-choice",
+            "note": "chain panel 4 (judging)"
+          },
+          {
+            "experiment": "fresh9-plan",
+            "baseline": "sel-questions",
+            "treatment": "sel-choice",
+            "note": "regression"
+          },
+          {
+            "experiment": "fresh8-plan",
+            "baseline": "sel-questions",
+            "treatment": "sel-choice",
+            "note": "regression"
+          }
+        ],
+        "decision": {
+          "status": "adopted",
+          "date": "2026-09-27",
+          "note": "Chain panel 4 (judging): chains 4/16 → 16/16, all 12 controls intact (+12/−0, p=0.0005). Regression fresh 8/9 not significantly worse (+3/−7 raw; 4 of the 7 were the FIRST-stage pick declining below the floor at p≈0.43, identical code before plan choice — noise; 2 real over-extensions: assess → incident on \"gap roadmap\" / \"ready for new AI rules\"). Cost: +22% ask, +21% pick tokens. SKILL_SELECTION_PLAN=choice on faithnet."
+        }
+      },
+      "comparisons": [
+        {
+          "experiment": "chain4-plan",
+          "baseline": "sel-questions",
+          "treatment": "sel-choice",
+          "note": "chain panel 4 (judging)",
+          "set": "sha256:63fb229d0daa6a5fc375c2cf38001d12bbbd2a13dac488c01d87b94b9bc14884",
+          "finishedAt": "2026-09-28T05:18:06.350Z",
+          "n": 28,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.5714,
+            "treat": 1,
+            "delta": 0.4286,
+            "fixed": 12,
+            "broken": 0,
+            "p": 0.0005
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 2211,
+              "treat": 2138,
+              "delta": -73,
+              "deltaPct": -3.3,
+              "ci": [
+                -132,
+                416
+              ]
+            },
+            "totalTokens": {
+              "base": 2211,
+              "treat": 2138,
+              "delta": -73,
+              "deltaPct": -3.3,
+              "ci": [
+                -132,
+                416
+              ]
+            },
+            "pickMs": {
+              "base": 1548.5,
+              "treat": 2068.5,
+              "delta": 520,
+              "deltaPct": 33.6,
+              "ci": [
+                124.5,
+                662.5
+              ]
+            },
+            "askMs": {
+              "base": 1960.5,
+              "treat": 2396,
+              "delta": 435.5,
+              "deltaPct": 22.2,
+              "ci": [
+                65,
+                651
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 171,
+                "treat": 178,
+                "delta": 7,
+                "deltaPct": 4.1,
+                "ci": [
+                  -5,
+                  30
+                ]
+              },
+              "phase:pre-run": {
+                "base": 81,
+                "treat": 72,
+                "delta": -9,
+                "deltaPct": -11.1,
+                "ci": [
+                  -9.5,
+                  0
+                ]
+              },
+              "phase:run": {
+                "base": 1753,
+                "treat": 2151.5,
+                "delta": 398.5,
+                "deltaPct": 22.7,
+                "ci": [
+                  99.5,
+                  658.5
+                ]
+              }
+            }
+          },
+          "verdict": "better-costs-more"
+        },
+        {
+          "experiment": "fresh9-plan",
+          "baseline": "sel-questions",
+          "treatment": "sel-choice",
+          "note": "regression",
+          "set": "sha256:8763d5dd945cff5612f90841994e69584d563a24fb952cd85388e4156e11e9fc",
+          "finishedAt": "2026-09-28T05:19:40.896Z",
+          "n": 38,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.8947,
+            "treat": 0.8158,
+            "delta": -0.0789,
+            "fixed": 1,
+            "broken": 4,
+            "p": 0.375
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1749,
+              "treat": 2156,
+              "delta": 407,
+              "deltaPct": 23.3,
+              "ci": [
+                0,
+                33.5
+              ]
+            },
+            "totalTokens": {
+              "base": 1749,
+              "treat": 2156,
+              "delta": 407,
+              "deltaPct": 23.3,
+              "ci": [
+                0,
+                274.5
+              ]
+            },
+            "pickMs": {
+              "base": 1221.5,
+              "treat": 1711.5,
+              "delta": 490,
+              "deltaPct": 40.1,
+              "ci": [
+                26,
+                357
+              ]
+            },
+            "askMs": {
+              "base": 1595,
+              "treat": 1965,
+              "delta": 370,
+              "deltaPct": 23.2,
+              "ci": [
+                53,
+                507
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 168.5,
+                "treat": 168,
+                "delta": -0.5,
+                "deltaPct": -0.3,
+                "ci": [
+                  -13,
+                  10
+                ]
+              },
+              "phase:pre-run": {
+                "base": 73,
+                "treat": 72.5,
+                "delta": -0.5,
+                "deltaPct": -0.7,
+                "ci": [
+                  -3.5,
+                  1
+                ]
+              },
+              "phase:run": {
+                "base": 1369.5,
+                "treat": 1792.5,
+                "delta": 423,
+                "deltaPct": 30.9,
+                "ci": [
+                  57,
+                  444
+                ]
+              }
+            }
+          },
+          "verdict": "same-quality-costs-more"
+        },
+        {
+          "experiment": "fresh8-plan",
+          "baseline": "sel-questions",
+          "treatment": "sel-choice",
+          "note": "regression",
+          "set": "sha256:2e0ca91d31b7328c5d40519767a644d9c46f7f6a514c4e07837812924b43df55",
+          "finishedAt": "2026-09-28T05:22:22.975Z",
+          "n": 77,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.9091,
+            "treat": 0.8961,
+            "delta": -0.013,
+            "fixed": 2,
+            "broken": 3,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1765,
+              "treat": 2144,
+              "delta": 379,
+              "deltaPct": 21.5,
+              "ci": [
+                0,
+                3
+              ]
+            },
+            "totalTokens": {
+              "base": 1765,
+              "treat": 2144,
+              "delta": 379,
+              "deltaPct": 21.5,
+              "ci": [
+                0,
+                5
+              ]
+            },
+            "pickMs": {
+              "base": 1214,
+              "treat": 1724,
+              "delta": 510,
+              "deltaPct": 42,
+              "ci": [
+                -16,
+                282
+              ]
+            },
+            "askMs": {
+              "base": 1831,
+              "treat": 2045,
+              "delta": 214,
+              "deltaPct": 11.7,
+              "ci": [
+                -27,
+                314
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 169,
+                "treat": 168,
+                "delta": -1,
+                "deltaPct": -0.6,
+                "ci": [
+                  -5,
+                  4
+                ]
+              },
+              "phase:pre-run": {
+                "base": 71,
+                "treat": 72,
+                "delta": 1,
+                "deltaPct": 1.4,
+                "ci": [
+                  -2,
+                  3
+                ]
+              },
+              "phase:run": {
+                "base": 1328,
+                "treat": 1868,
+                "delta": 540,
+                "deltaPct": 40.7,
+                "ci": [
+                  -27,
+                  313
+                ]
+              }
+            }
+          },
+          "verdict": "same"
+        }
+      ],
+      "pooled": [
+        {
+          "baseline": "sel-questions",
+          "experiments": 3,
+          "n": 143,
+          "fixed": 15,
+          "broken": 7,
+          "p": 0.1338,
+          "pickTokensPct": 21.5,
+          "askMsPct": 22.2,
+          "verdict": "same-quality-costs-more"
+        }
+      ],
+      "verdict": "same",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "borderline-second-sample",
+        "name": "A second sample only for a borderline first pick",
+        "ontologyDriven": false,
+        "spec": "418 §11",
+        "source": "fresh 9 plan-choice run: the first-stage pick declined 4× at top p ≈ 0.43 where a rerun gave 0.68–1.0 — and a declined real ask reaches the planner WITHOUT the skills (\"can't help\")",
+        "what": "When the fast pick's top probability lands in a borderline band (e.g. 0.35–0.6), one more sample; the mean decides. Two-sample agreement always cost 2× tokens; this pays only on the borderline.",
+        "plannedAb": "instability (same case, repeated) and hold rate on positives; pick tokens should rise only on the borderline share.",
         "comparisons": []
       },
       "comparisons": [],

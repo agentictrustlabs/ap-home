@@ -4990,7 +4990,10 @@ step is then handed to that agent under authority the person grants; leave it ou
               // Spec 418 D6 — adopted 2026-09-27 (ledger: pooled +12/−2 over six sets, p = 0.013, no set worse, no extra
               // cost): `SKILL_SELECTION_DEFAULT=selective` — after the pick, one small dataflow call only when the picked
               // skill has a producible upstream input the asker does not hold; the plan may then be a chain.
-              if (stageDefault === 'selective' && skills.some((x) => x.consumes?.length) && input.variant?.toggles?.['skill-selection/plan'] === 'choice') {
+              // Spec 418 §11 — adopted 2026-09-27 (chain panel 4: +12/−0, p = 0.0005; regressions not significant): the
+              // deployment's `SKILL_SELECTION_PLAN` (choice | questions); an explicit `skill-selection/plan` toggle wins.
+              const planMode = input.variant?.toggles?.['skill-selection/plan'] ?? ((env as { SKILL_SELECTION_PLAN?: string }).SKILL_SELECTION_PLAN?.trim() || 'questions');
+              if (stageDefault === 'selective' && skills.some((x) => x.consumes?.length) && planMode === 'choice') {
                 const pc = await choosePlanAround(rest, r.chose, skills, call, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(asker ? { asker } : {}) });
                 trace.selection = { approach: 'outcome-selective', chose: r.chose, distribution: r.distribution, judge: r.judge, asked: pc.asked, plan: pc.plan, supplied: {}, planJudge: pc.judge };
                 const labels = new Map([...(playbook?.domainLexicon ?? []).map((e) => [e.iri, e.label] as const)]);
