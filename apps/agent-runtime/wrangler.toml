@@ -453,6 +453,8 @@ ORCHESTRATION_LLM = "gemini,anthropic"
 # Spec 416 §4f — the fast judge picks among a playbook's instruction skills before the planner (one light-model call over
 # ontology cards + the typed reading; "none" hands the ask to the planner). Only agents with instruction skills are affected.
 SKILL_SELECTION_DEFAULT = "fast"
+# Spec 418 D5 — the asker's records from the colo cache; the conversation write after the reply (ledger: −63% ask time, same quality).
+OPS_RECORDS_DEFAULT = "cached"
 # Spec 388 — the cheapest OFFERED provider that carries each call, decided before the request from the prompt estimate, the
 # per-request budget and this minute's spend; recorded on the trace with its reason. A route, never a fallback (ADR-0013).
 ORCHESTRATION_ROUTE = "budget"

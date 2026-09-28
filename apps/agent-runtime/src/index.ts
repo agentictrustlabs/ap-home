@@ -4326,7 +4326,10 @@ app.post('/harness/ask', async (c) => {
   // Memory and preferences are read ONLY when the asker addresses her own agent (spec 402 W1).
   const ownAgent = String(who.sa).toLowerCase() === String(addressee).toLowerCase();
   const askerSubject = String(who.sa).toLowerCase();
-  const recordsCached = variantReq?.toggles?.['ops/records'] === 'cached';
+  // Spec 418 D5 — adopted 2026-09-27 on the ledger (−63% ask time, same quality): the deployment's default is
+  // `OPS_RECORDS_DEFAULT` (cached | vault); an explicit `ops/records` toggle on a comparison wins.
+  const recordsToggle = variantReq?.toggles?.['ops/records'];
+  const recordsCached = recordsToggle ? recordsToggle === 'cached' : (c.env as { OPS_RECORDS_DEFAULT?: string }).OPS_RECORDS_DEFAULT?.trim() === 'cached';
   const askerWanted = ownAgent ? [CONVERSATION_RECORD, FACTS_RECORD, PREFERENCES_RECORD] : [CONVERSATION_RECORD];
   const [addresseeKind, askerRecords, budgetRefusal] = await Promise.all([
     // The derived type is an on-chain fact that does not move between two asks: remembered a minute per agent.

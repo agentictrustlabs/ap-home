@@ -1,6 +1,6 @@
 {
   "type": "ap.technique-ledger.v1",
-  "builtAt": "2026-09-28T04:24:25.311Z",
+  "builtAt": "2026-09-28T04:36:53.218Z",
   "rows": [
     {
       "technique": {
@@ -2880,13 +2880,110 @@
             "treatment": "one-skill-cached",
             "note": "run alone (no concurrent runners), interleaved"
           }
-        ]
+        ],
+        "decision": {
+          "status": "adopted",
+          "date": "2026-09-27",
+          "note": "fresh 9, run alone and interleaved, 76 pairs: ask p50 4.62 s → 1.71 s (−63%), p90 10.96 → 7.19 s; pre-run 1.50 → 0.08 s, post-run 1.52 → 0.17 s; plan quality unchanged (+1/−2). OPS_RECORDS_DEFAULT=cached on faithnet. Caveat: an ask landing in another colo within the seconds before the vault write lands reads the older conversation."
+        }
       },
-      "comparisons": [],
-      "verdict": "inconclusive",
-      "missing": [
-        "fresh9-records"
-      ]
+      "comparisons": [
+        {
+          "experiment": "fresh9-records",
+          "baseline": "one-skill",
+          "treatment": "one-skill-cached",
+          "note": "run alone (no concurrent runners), interleaved",
+          "set": "sha256:8763d5dd945cff5612f90841994e69584d563a24fb952cd85388e4156e11e9fc",
+          "finishedAt": "2026-09-28T04:34:47.117Z",
+          "n": 76,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.8684,
+            "treat": 0.8553,
+            "delta": -0.0132,
+            "fixed": 1,
+            "broken": 2,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1741.5,
+              "treat": 1748,
+              "delta": 6.5,
+              "deltaPct": 0.4,
+              "ci": [
+                0,
+                0
+              ]
+            },
+            "totalTokens": {
+              "base": 1741.5,
+              "treat": 1748,
+              "delta": 6.5,
+              "deltaPct": 0.4,
+              "ci": [
+                0,
+                0
+              ]
+            },
+            "pickMs": {
+              "base": 1115.5,
+              "treat": 1272.5,
+              "delta": 157,
+              "deltaPct": 14.1,
+              "ci": [
+                -37,
+                93
+              ]
+            },
+            "askMs": {
+              "base": 4623.5,
+              "treat": 1714,
+              "delta": -2909.5,
+              "deltaPct": -62.9,
+              "ci": [
+                -2945.5,
+                -2493
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1524,
+                "treat": 173.5,
+                "delta": -1350.5,
+                "deltaPct": -88.6,
+                "ci": [
+                  -1380,
+                  -1268
+                ]
+              },
+              "phase:pre-run": {
+                "base": 1499,
+                "treat": 77,
+                "delta": -1422,
+                "deltaPct": -94.9,
+                "ci": [
+                  -1519.5,
+                  -1361
+                ]
+              },
+              "phase:run": {
+                "base": 1327.5,
+                "treat": 1416.5,
+                "delta": 89,
+                "deltaPct": 6.7,
+                "ci": [
+                  -68,
+                  78
+                ]
+              }
+            }
+          },
+          "verdict": "same-quality-cheaper"
+        }
+      ],
+      "verdict": "same-quality-cheaper",
+      "missing": []
     },
     {
       "technique": {
@@ -2911,17 +3008,33 @@
     {
       "technique": {
         "id": "two-sample-agreement",
-        "name": "Two-sample agreement + conformal threshold",
+        "name": "Two-sample agreement (confidence without logprobs)",
         "ontologyDriven": false,
         "spec": "416 W3",
         "source": "'Two samples are enough' (OpenReview), CISC (ACL 2025), CP-Router",
-        "what": "Without logprobs, two parallel samples of the pick; their agreement is the confidence, thresholded by split-conformal calibration; disagreement holds or asks.",
+        "what": "The fast judge runs twice in parallel; the same skill stands, two different skills ask which (clarify), a skill vs none holds. No conformal threshold yet — agreement alone first.",
         "plannedAb": "macro TA, hold rate and precision-at-coverage on collisions / near-negatives / clarify; pick tokens ×2, pick ms ~same.",
-        "comparisons": []
+        "comparisons": [
+          {
+            "experiment": "fresh5-agree",
+            "baseline": "selective",
+            "treatment": "selective-2",
+            "note": "clarify/several heavy"
+          },
+          {
+            "experiment": "fresh3-agree",
+            "baseline": "selective",
+            "treatment": "selective-2",
+            "note": "hard negatives"
+          }
+        ]
       },
       "comparisons": [],
-      "verdict": "planned",
-      "missing": []
+      "verdict": "inconclusive",
+      "missing": [
+        "fresh5-agree",
+        "fresh3-agree"
+      ]
     },
     {
       "technique": {
@@ -3112,6 +3225,21 @@
         "source": "TrustGraph (flashrank cross-encoder replaced LLM edge scoring)",
         "what": "A cross-encoder/embedding reranker over skill cards shortlists the judge's options; the judge sees top-k + none + collision partners.",
         "plannedAb": "Recall@k of gold (≥ 0.99), then pick tokens and plan-exact live.",
+        "comparisons": []
+      },
+      "comparisons": [],
+      "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "vault-op-latency",
+        "name": "Faster vault operations (the ~1.5 s per verified call)",
+        "ontologyDriven": false,
+        "spec": "418 §9",
+        "source": "Stage breakdown, fresh 9 (2026-09-27): pick ~1.2 s; read:asker-records 1.58 s, record:conversation 1.63 s, read:waiting 1.50 s — three vault operations are ~70% of a pick-only ask · Inside one vault call (demo-mcp tail, 2026-09-27, 4 calls): ~260 ms to the service-MAC accept, ~270 ms delegation verification (on-chain signature + revocation reads), ~170 ms delegation binding, ~350 ms the vault op — ~1.05 s, about half of it re-verifying a token the caller already reuses.",
+        "what": "Candidates, each with its security reasoning first (a spec, not a patch): (a) a verified-token cache keyed by the token digest with a revocation bound stated in seconds (weighs against per-step on-chain revocation — needs the authority doctrine's sign-off); (b) batch the post-run vault reads into one call; (c) move 'what is waiting' to the Home's own poll; (d) find the ~260 ms before the service-MAC accept.",
+        "plannedAb": "phase:pre-run and phase:post-run p50/p95 — vault as is vs the change; correctness: the next ask recalls this turn (a two-ask pronoun probe).",
         "comparisons": []
       },
       "comparisons": [],
