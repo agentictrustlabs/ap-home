@@ -98,3 +98,23 @@ describe('a required usdc is satisfied by the amount it became (caught live 2026
     expect(out.amount).toBe('1200000');
   });
 });
+
+describe('"us" at an organization is that organization (act laboratory, 2026-09-28)', () => {
+  const env = {} as never;
+  const ORG = '0x3b99f2b452766de5df0dbcdfc676f27257151333';
+  it('an acting/context party named "us" asked AT the org resolves to the org, cited', async () => {
+    const seen: Array<{ arg: string; via?: string; hint?: string }> = [];
+    const out = await resolveStepArgs({ org: 'us', invitee: '0x' + '12'.repeat(20) }, env, { onResolved: (r) => seen.push({ arg: r.arg, via: r.via, hint: r.hint }) }, {
+      stepRef: 's0', toolId: 'organization.membership.invite', capabilityId: 'organization.membership.invite', subject: ALICE, addressee: ORG, required: ['org', 'invitee'],
+    } as never);
+    expect(out.org).toBe(ORG);
+    expect(seen).toContainEqual({ arg: 'org', via: 'context', hint: 'the agent you are asking' });
+  });
+  it('"self" (the planner\'s word for the agent asked) is the room too', async () => {
+    const out = await resolveStepArgs({ parent: 'self', label: 'youth-outreach' }, env, {}, { stepRef: 's0', toolId: 'organization.team.create', capabilityId: 'organization.team.create', subject: ALICE, addressee: ORG, required: ['parent'] } as never);
+    expect(out.parent).toBe(ORG);
+  });
+  it('never at the asker\'s own agent', async () => {
+    await expect(resolveStepArgs({ org: 'us' }, env, {}, { stepRef: 's0', toolId: 'organization.membership.invite', capabilityId: 'organization.membership.invite', subject: ALICE, addressee: ALICE, required: ['org'] } as never)).rejects.toBeTruthy();
+  });
+});

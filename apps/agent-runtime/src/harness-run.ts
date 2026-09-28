@@ -3571,6 +3571,17 @@ export async function resolveStepArgs(
           fields: [{ name: key, label: partyWord(key), type: 'text', required: true, hint: 'an agent name (alice.me) or address' }],
         });
       }
+      // "US" AT AN ORGANIZATION IS THAT ORGANIZATION (act laboratory, 2026-09-28): asked at missio-nexus.org, "invite david
+      // to join us" planned `org: "us"`, which no tier resolves, and the steward was asked which organization. The room
+      // the person stands in is who "we" are — for an ACTING or CONTEXT party only (the ontology's side); a counterparty
+      // ("pay us") is left to be resolved or asked. Never when the room is the asker's own agent.
+      const room = (where as { addressee?: string }).addressee?.toLowerCase();
+      if (room && where.subject && room !== where.subject.toLowerCase() && /^(us|we|our|ours|ourselves|self|itself|this agent|the agent|this (organi[sz]ation|org|team|group|circle|church|household|workspace)|the (organi[sz]ation|org|team))$/i.test(raw.trim())
+        && partyRole(where.capabilityId ?? where.toolId, key)?.side !== 'counterparty') {
+        out[key] = room;
+        lookups.onResolved?.({ arg: key, raw, agent: room, hint: 'the agent you are asking', via: 'context' });
+        continue;
+      }
       out[key] = await resolveParty(raw, lookups, {
         stepRef: where.stepRef, toolId: where.toolId, argName: key, what: partyWord(key),
         // Spec 385 — the capability the resolution is FOR, so a scoped confirmation memory keys on it.
@@ -3791,6 +3802,17 @@ export async function resolveStepArgs(
           prompt: `That would be you. Who is ${partyWord(key)}?`,
           fields: [{ name: key, label: partyWord(key), type: 'text', required: true, hint: 'an agent name (alice.me) or address' }],
         });
+      }
+      // "US" AT AN ORGANIZATION IS THAT ORGANIZATION (act laboratory, 2026-09-28): asked at missio-nexus.org, "invite david
+      // to join us" planned `org: "us"`, which no tier resolves, and the steward was asked which organization. The room
+      // the person stands in is who "we" are — for an ACTING or CONTEXT party only (the ontology's side); a counterparty
+      // ("pay us") is left to be resolved or asked. Never when the room is the asker's own agent.
+      const room = (where as { addressee?: string }).addressee?.toLowerCase();
+      if (room && where.subject && room !== where.subject.toLowerCase() && /^(us|we|our|ours|ourselves|self|itself|this agent|the agent|this (organi[sz]ation|org|team|group|circle|church|household|workspace)|the (organi[sz]ation|org|team))$/i.test(raw.trim())
+        && partyRole(where.capabilityId ?? where.toolId, key)?.side !== 'counterparty') {
+        out[key] = room;
+        lookups.onResolved?.({ arg: key, raw, agent: room, hint: 'the agent you are asking', via: 'context' });
+        continue;
       }
       out[key] = await resolveParty(raw, lookups, {
         stepRef: where.stepRef, toolId: where.toolId, argName: key, what: partyWord(key),
