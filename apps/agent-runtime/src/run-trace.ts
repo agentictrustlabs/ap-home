@@ -197,7 +197,11 @@ export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/k
    *  among the plans the ontology allows (alone · upstream → pick · pick → downstream). */
   'skill-selection/plan': ['questions', 'choice'],
   /** Spec 418 — a second sample only when the first pick is borderline (top p in [0.35, 0.6]). */
-  'skill-selection/borderline': ['off', 'on'] };
+  'skill-selection/borderline': ['off', 'on'],
+  /** Spec 418 — the fast judge's question: v2, or v3 (a request missing information a skill needs is still that skill's). */
+  'skill-selection/fast-version': ['v2', 'v3'],
+  /** Spec 418 — a pick split between two skills: decline (today) or clarify (ask which). */
+  'skill-selection/split': ['decline', 'clarify'] };
 
 export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantRequestV1 } | { ok: false; error: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'variant must be an object' };

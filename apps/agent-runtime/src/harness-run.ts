@@ -348,6 +348,16 @@ export const INVITE_TOOL: ToolSpec = {
  * This is that way. Selecting it is a real answer — "this agent cannot do that here" — and the reply lists
  * what it CAN do, drawn from the capabilities actually on offer rather than from the model's imagination.
  */
+/** Spec 418 — the selection stage's CLARIFY: when the pick splits between two skills, the answer asks which one the person
+ *  means (naming each by its purpose) instead of declining. Planned only by the selection stage — never offered to a
+ *  model planner (filtered out of what the planner sees). Informational; nothing is performed. */
+export const ASK_CLARIFY_TOOL: ToolSpec = {
+  id: 'ask.clarify',
+  description: '(Selection stage only.) Ask the person which of two skills they mean. Never plan this tool.',
+  inputSchema: { type: 'object', properties: { options: { type: 'array', items: { type: 'string' }, description: 'The two skill ids' }, purposes: { type: 'array', items: { type: 'string' }, description: 'Each skill\'s purpose, in words' }, what: { type: 'string', description: 'What was asked' } }, required: ['options'] },
+  answer: '{{answer}}',
+};
+
 export const UNSUPPORTED_TOOL: ToolSpec = {
   id: 'ask.unsupported',
   description:
@@ -2126,6 +2136,13 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
     // mandate); explicit so a future caller cannot make it reachable quietly.
     if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === 'messaging.topic.post' || GITHUB_ACTS.has(toolId) || BUILD_ACTS.has(toolId) || CALENDAR_ACTS.has(toolId) || MAIL_DRIVE_ACTS.has(toolId) || toolId === ORG_INVITE_CAPABILITY || toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (toolId === ASK_CLARIFY_TOOL.id) {
+      const ids = Array.isArray(args.options) ? (args.options as unknown[]).map(String).slice(0, 2) : [];
+      const purposes = Array.isArray(args.purposes) ? (args.purposes as unknown[]).map(String) : [];
+      const [pa, pb] = purposes;
+      const answer = pa && pb ? `I can take this two ways — ${pa.replace(/^./, (x) => x.toLowerCase())}, or ${pb.replace(/^./, (x) => x.toLowerCase())}. Which do you mean?` : 'Which do you mean?';
+      return { answer, clarify: ids };
+    }
     if (toolId === UNSUPPORTED_TOOL.id) {
       const offered = scopedActionTools(surface, playbook).map((t) => t.capability?.id ?? t.id);
       return { unsupported: true, what: String(args.what ?? ''), available: offered };
@@ -2784,7 +2801,7 @@ export interface PlannerTraceV1 {
   /** Spec 416 §4g — milliseconds per runtime stage of this ask (the marks, summed per name). */
   stages?: Record<string, number>;
   /** Spec 416 §4f — the default skill stage's outcome: the fast judge chose a skill, or handed the ask to the planner. */
-  skillStage?: 'chose' | 'handed-to-planner';
+  skillStage?: 'chose' | 'handed-to-planner' | 'clarify';
   /** Spec 416 — milliseconds spent choosing (planner or selection arm), summed over re-plans. */
   selectionMs?: number;
   /** What the model planner's calls used, as the provider reported them (summed over re-plans). */
@@ -4982,9 +4999,15 @@ step is then handed to that agent under authority the person grants; leave it ou
             const asker = relation || ctx ? { ...(relation ? { relation } : {}), ...(ctx?.recentSkills?.length ? { recentSkills: ctx.recentSkills.slice(0, 4) } : {}), ...(ctx?.memoryTags?.length ? { memoryTags: ctx.memoryTags.slice(0, 6) } : {}) } : undefined;
             // Spec 418 D4 — `office-prior off` hides the role classes' typical capabilities here too (one knob, both paths).
             const stageLexicon = input.variant?.toggles?.['skill-selection/office-prior'] === 'off' ? playbook?.domainLexicon?.map(({ uses: _u, ...e }) => e) : playbook?.domainLexicon;
-            const r = await selectByJudgment(rest, skills, call, { profile: 'fast', ...(input.variant?.toggles?.['skill-selection/samples'] === '2' ? { samples: 2 } : {}), ...((input.variant?.toggles?.['skill-selection/borderline'] ?? ((env as { SKILL_SELECTION_BORDERLINE?: string }).SKILL_SELECTION_BORDERLINE?.trim() || 'off')) === 'on' ? { borderline: [0.35, 0.6] as [number, number] } : {}) }, { ...(stageLexicon ? { lexicon: stageLexicon } : {}), ...(asker ? { asker } : {}) });
+            const r = await selectByJudgment(rest, skills, call, { profile: 'fast', ...(input.variant?.toggles?.['skill-selection/samples'] === '2' ? { samples: 2 } : {}), ...((input.variant?.toggles?.['skill-selection/fast-version'] ?? ((env as { SKILL_SELECTION_FAST_VERSION?: string }).SKILL_SELECTION_FAST_VERSION?.trim() || 'v2')) === 'v3' ? { fastVersion: 'v3' as const } : {}), ...((input.variant?.toggles?.['skill-selection/split'] ?? ((env as { SKILL_SELECTION_SPLIT?: string }).SKILL_SELECTION_SPLIT?.trim() || 'decline')) === 'clarify' ? { splitToClarify: 0.7 } : {}), ...((input.variant?.toggles?.['skill-selection/borderline'] ?? ((env as { SKILL_SELECTION_BORDERLINE?: string }).SKILL_SELECTION_BORDERLINE?.trim() || 'off')) === 'on' ? { borderline: [0.35, 0.6] as [number, number] } : {}) }, { ...(stageLexicon ? { lexicon: stageLexicon } : {}), ...(asker ? { asker } : {}) });
             trace.selection = { approach: 'judgment', ...r };
             trace.skillStage = r.chose ? 'chose' : 'handed-to-planner';
+            // Spec 418 — the pick split between two skills: ask which (a clarify reply), never decline to the planner.
+            if (!r.chose && r.hold === 'needs-clarification' && r.rejected.length === 2) {
+              plannerUsed = 'judgment'; trace.skillStage = 'clarify';
+              const purposeOf = (id: string) => (skills.find((x) => x.id === id)?.description ?? id).split(/\bNOT for\b/i)[0]!.split(/[.—]/)[0]!.trim() || id;
+              return withSpecialists({ steps: [{ toolId: ASK_CLARIFY_TOOL.id, args: { options: r.rejected, purposes: r.rejected.map(purposeOf), what: pin.intent.goal }, id: 's0' }], rationale: `skill stage: which of ${r.rejected.join(' / ')}?` }, playbook?.specialists, pin.tools);
+            }
             if (r.chose) {
               plannerUsed = 'judgment';
               // Spec 418 D6 — adopted 2026-09-27 (ledger: pooled +12/−2 over six sets, p = 0.013, no set worse, no extra
@@ -5013,8 +5036,10 @@ step is then handed to that agent under authority the person grants; leave it ou
             // "None of these skills": the planner gets the agent's OTHER tools only. Offering it the skills the judge just
             // rejected let it pick one anyway (measured 2026-09-27: a declined out-of-scope ask answered by a skill) and
             // cost ~12k prompt tokens of skill descriptions for nothing.
-            pin = { ...pin, tools: pin.tools.filter((t) => !skillSources[t.id]) };
+            pin = { ...pin, tools: pin.tools.filter((t) => !skillSources[t.id] && t.id !== ASK_CLARIFY_TOOL.id) };
           }
+          // The model planner never sees the selection stage's clarify tool.
+          pin = { ...pin, tools: pin.tools.filter((t) => t.id !== ASK_CLARIFY_TOOL.id) };
           plannerUsed = selected.kind;
           // Spec 415 A4 — a comparison may ask for the rule-based planner on a deployment that offers a model: the
           // same planner `selectPlanner` reaches when no provider is configured, chosen per run and named on the trace.
@@ -5157,6 +5182,8 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(deps.listTriggers ? ROUTINE_TOOLS.filter((t) => t.id === ROUTINE_LIST).map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
     ...(deps.readSubjectRecord ? PREFERENCES_TOOLS.filter((t) => t.id === PREFERENCES_GET).map((t) => (playbook?.tools?.[t.id] ? mergeContractTool(t, playbook.tools[t.id]!) : t)) : []),
     UNSUPPORTED_TOOL,
+    // Spec 418 — planned only by the skill stage (see ASK_CLARIFY_TOOL); filtered from the planner's view below.
+    ...(Object.keys(instructionSourcesOf(playbook)).length ? [ASK_CLARIFY_TOOL] : []),
   ];
   // ONE TOOL, ONE ENTRY. A family listed as both an act and a read reaches the planner twice, and a provider refuses the
   // whole offer for it (Gemini: "Duplicate function declaration"), so every ask on the agent fails — said here, once,
