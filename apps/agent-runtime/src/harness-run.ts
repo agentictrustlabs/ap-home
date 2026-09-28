@@ -4996,7 +4996,8 @@ step is then handed to that agent under authority the person grants; leave it ou
               ? { recentSkills: ((await recentToolsOf(env as never, input.addressee as Address, input.person as Address, Date.now() - 30 * 86_400_000).catch(() => null)) ?? []).filter((x) => skillSources[x.id]).slice(0, 4), memoryTags: input.memory ? factsOf(input.memory).entries.slice(0, 6).map((e) => (e.tags?.length ? e.tags.join(', ') : e.fact).slice(0, 80)) : [] }
               : undefined;
             const ctx = seeded ?? live;
-            const asker = relation || ctx ? { ...(relation ? { relation } : {}), ...(ctx?.recentSkills?.length ? { recentSkills: ctx.recentSkills.slice(0, 4) } : {}), ...(ctx?.memoryTags?.length ? { memoryTags: ctx.memoryTags.slice(0, 6) } : {}) } : undefined;
+            const seededHeld = (seeded as { heldClasses?: string[] } | undefined)?.heldClasses;
+            const asker: AskerContextV1 | undefined = relation || ctx ? { ...(relation ? { relation } : {}), ...(ctx?.recentSkills?.length ? { recentSkills: ctx.recentSkills.slice(0, 4) } : {}), ...(ctx?.memoryTags?.length ? { memoryTags: ctx.memoryTags.slice(0, 6) } : {}), ...(seededHeld?.length ? { heldClasses: seededHeld.slice(0, 16) } : {}) } : undefined;
             // Spec 418 D4 — `office-prior off` hides the role classes' typical capabilities here too (one knob, both paths).
             const stageLexicon = input.variant?.toggles?.['skill-selection/office-prior'] === 'off' ? playbook?.domainLexicon?.map(({ uses: _u, ...e }) => e) : playbook?.domainLexicon;
             const r = await selectByJudgment(rest, skills, call, { profile: 'fast', ...(input.variant?.toggles?.['skill-selection/samples'] === '2' ? { samples: 2 } : {}), ...((input.variant?.toggles?.['skill-selection/fast-version'] ?? ((env as { SKILL_SELECTION_FAST_VERSION?: string }).SKILL_SELECTION_FAST_VERSION?.trim() || 'v2')) === 'v3' ? { fastVersion: 'v3' as const } : {}), ...((input.variant?.toggles?.['skill-selection/split'] ?? ((env as { SKILL_SELECTION_SPLIT?: string }).SKILL_SELECTION_SPLIT?.trim() || 'decline')) === 'clarify' ? { splitToClarify: 0.7 } : {}), ...((input.variant?.toggles?.['skill-selection/borderline'] ?? ((env as { SKILL_SELECTION_BORDERLINE?: string }).SKILL_SELECTION_BORDERLINE?.trim() || 'off')) === 'on' ? { borderline: [0.35, 0.6] as [number, number] } : {}) }, { ...(stageLexicon ? { lexicon: stageLexicon } : {}), ...(asker ? { asker } : {}) });
@@ -5010,6 +5011,19 @@ step is then handed to that agent under authority the person grants; leave it ou
             }
             if (r.chose) {
               plannerUsed = 'judgment';
+              // Spec 418 A5 — WHAT THE AGENT ALREADY HOLDS: a comparison's seeded state wins; on a real ask, the addressee's
+              // own record TYPES (never content) through the domain's record ↔ class bindings, read only when the picked
+              // skill consumes a class some binding names — one survey, remembered a minute. Classes only reach the reading.
+              const heldNow = await (async (): Promise<{ classes: string[]; from: 'seeded' | 'records' | 'none' }> => {
+                if (asker?.heldClasses?.length) return { classes: [...asker.heldClasses], from: 'seeded' };
+                if (input.variant?.toggles?.['skill-selection/held'] === 'off' || input.variant?.askerContext) return { classes: [], from: 'none' };
+                const consumed = skills.find((x) => x.id === r.chose)?.consumes?.map((k) => k.iri) ?? [];
+                const relevant = (playbook?.domainRecords ?? []).filter((m) => consumed.includes(m.class));
+                if (!relevant.length || !deps.survey || !input.addressee) return { classes: [], from: 'none' };
+                const types = await remembered(`record-types:${String(input.addressee).toLowerCase()}`, () => deps.survey!(String(input.addressee)).then((rs) => rs.map((x) => x.recordType)).catch(() => [] as string[]));
+                return { classes: relevant.filter((m) => types.some((t) => t === m.recordType || t.startsWith(`${m.recordType}:`))).map((m) => m.class), from: 'records' };
+              })();
+              const askerHeld = heldNow.classes.length ? { ...(asker ?? {}), heldClasses: heldNow.classes } : asker;
               // Spec 418 D6 — adopted 2026-09-27 (ledger: pooled +12/−2 over six sets, p = 0.013, no set worse, no extra
               // cost): `SKILL_SELECTION_DEFAULT=selective` — after the pick, one small dataflow call only when the picked
               // skill has a producible upstream input the asker does not hold; the plan may then be a chain.
@@ -5017,14 +5031,14 @@ step is then handed to that agent under authority the person grants; leave it ou
               // deployment's `SKILL_SELECTION_PLAN` (choice | questions); an explicit `skill-selection/plan` toggle wins.
               const planMode = input.variant?.toggles?.['skill-selection/plan'] ?? ((env as { SKILL_SELECTION_PLAN?: string }).SKILL_SELECTION_PLAN?.trim() || 'questions');
               if (stageDefault === 'selective' && skills.some((x) => x.consumes?.length) && planMode === 'choice') {
-                const pc = await choosePlanAround(rest, r.chose, skills, call, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(asker ? { asker } : {}) });
-                trace.selection = { approach: 'outcome-selective', chose: r.chose, distribution: r.distribution, judge: r.judge, ...(r.reading ? { reading: r.reading } : {}), asked: pc.asked, plan: pc.plan, supplied: {}, planJudge: pc.judge };
+                const pc = await choosePlanAround(rest, r.chose, skills, call, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(askerHeld ? { asker: askerHeld } : {}) });
+                trace.selection = { approach: 'outcome-selective', chose: r.chose, distribution: r.distribution, judge: r.judge, ...(r.reading ? { reading: r.reading } : {}), ...(heldNow.from !== 'none' ? { held: heldNow } : {}), asked: pc.asked, plan: pc.plan, supplied: {}, planJudge: pc.judge };
                 const labels = new Map([...(playbook?.domainLexicon ?? []).map((e) => [e.iri, e.label] as const)]);
                 const steps = outcomeSteps(pc.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri);
                 return withSpecialists({ steps, rationale: `skill stage (plan choice): ${pc.chosen.steps.join(' → ')}${pc.asked ? '' : ' (no plan call)'}` }, playbook?.specialists, pin.tools);
               }
               if (stageDefault === 'selective' && skills.some((x) => x.consumes?.length)) {
-                const r2 = await planForPicked(rest, r.chose, skills, call, { ...(input.variant?.toggles?.['skill-selection/downstream'] === 'on' ? { downstream: true } : {}), ...(input.variant?.toggles?.['skill-selection/absence'] === 'v2' ? { absenceWording: 'v2' as const } : {}) }, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(asker ? { asker } : {}) });
+                const r2 = await planForPicked(rest, r.chose, skills, call, { ...(input.variant?.toggles?.['skill-selection/downstream'] === 'on' ? { downstream: true } : {}), ...(input.variant?.toggles?.['skill-selection/absence'] === 'v2' ? { absenceWording: 'v2' as const } : {}) }, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(askerHeld ? { asker: askerHeld } : {}) });
                 const { judge: planJudge, ...plan2 } = r2;
                 trace.selection = { approach: 'outcome-selective', chose: r.chose, distribution: r.distribution, judge: r.judge, ...(r.reading ? { reading: r.reading } : {}), ...plan2, planJudge };
                 const labels = new Map([...(playbook?.domainLexicon ?? []).map((e) => [e.iri, e.label] as const)]);

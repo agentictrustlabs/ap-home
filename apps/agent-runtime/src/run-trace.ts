@@ -203,7 +203,9 @@ export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/k
   /** Spec 418 — a pick split between two skills: decline (today) or clarify (ask which). */
   'skill-selection/split': ['decline', 'clarify'],
   /** Spec 418 — under quality/judge=pairwise, the tier the run's own answer is compared AGAINST (default: light vs default). */
-  'quality/against': ['default', 'light', 'strong'] };
+  'quality/against': ['default', 'light', 'strong'],
+  /** Spec 418 A5 — held inputs from the agent's own record types on a real ask (`records`, default) or never (`off`). */
+  'skill-selection/held': ['records', 'off'] };
 
 export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantRequestV1 } | { ok: false; error: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'variant must be an object' };
