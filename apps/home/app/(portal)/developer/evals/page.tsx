@@ -8,16 +8,17 @@ import { SectionShell } from '../../../../src/components/portal/SectionShell';
 import { EvalsDashboard } from '../../../../src/components/portal/EvalsDashboard';
 import { SkillAssessmentLab } from '../../../../src/components/portal/SkillAssessmentLab';
 import { TechniqueLedger } from '../../../../src/components/portal/TechniqueLedger';
+import { ActLaboratory } from '../../../../src/components/portal/ActLaboratory';
 import { Tabs } from '../../../../src/ui';
 
 export default function EvalsPage() {
-  const [tab, setTab] = useState<'skills' | 'techniques' | 'gates'>('skills');
+  const [tab, setTab] = useState<'skills' | 'acts' | 'techniques' | 'gates'>('skills');
   // `?tab=gates` (the nightly links here) — read after mount so the server and the first client render agree.
-  useEffect(() => { try { const t = new URL(window.location.href).searchParams.get('tab'); if (t === 'gates' || t === 'techniques') setTab(t); } catch { /* no URL */ } }, []);
+  useEffect(() => { try { const t = new URL(window.location.href).searchParams.get('tab'); if (t === 'gates' || t === 'techniques' || t === 'acts') setTab(t); } catch { /* no URL */ } }, []);
   return (
-    <SectionShell title="Evals" description="Skill assessment — are the right skills chosen for what people ask, and what to change — and the live gates, night by night. Evidence, never a claim.">
-      <Tabs label="evals" value={tab} onChange={setTab} items={[{ id: 'skills', label: 'Skill selection (playbooks)' }, { id: 'techniques', label: 'Techniques' }, { id: 'gates', label: 'Live gates' }]} />
-      {tab === 'skills' ? <SkillAssessmentLab /> : tab === 'techniques' ? <TechniqueLedger /> : <EvalsDashboard />}
+    <SectionShell title="Evals" description="Skill assessment — are the right skills chosen for what people ask — the act laboratory (did the Home reach the act asked for, under the domain's principles), the technique ledger, and the live gates, night by night. Evidence, never a claim.">
+      <Tabs label="evals" value={tab} onChange={setTab} items={[{ id: 'skills', label: 'Skill selection (playbooks)' }, { id: 'acts', label: 'Acts (Home)' }, { id: 'techniques', label: 'Techniques' }, { id: 'gates', label: 'Live gates' }]} />
+      {tab === 'skills' ? <SkillAssessmentLab /> : tab === 'acts' ? <ActLaboratory /> : tab === 'techniques' ? <TechniqueLedger /> : <EvalsDashboard />}
     </SectionShell>
   );
 }

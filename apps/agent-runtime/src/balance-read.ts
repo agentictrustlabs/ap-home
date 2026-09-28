@@ -32,6 +32,8 @@ export const BALANCE_READ_TOOL: ToolSpec = {
 
 export interface BalanceDeps {
   valueHeld?: (agent: string) => Promise<{ amount: bigint; display: string } | null>;
+  /** The on-chain `atl:agentType` (ADR-0061) — the value rail reads a balance only where it is `treasury`. */
+  agentTypeOf?: (agent: string) => Promise<string | null>;
   charteredAgents?: (owner: string, type: string) => Promise<Array<{ agent: string; name?: string; primary?: boolean }>>;
   nameOf?: (agent: string) => Promise<string | null>;
 }
@@ -51,11 +53,25 @@ export function balanceReadInvoker(deps: BalanceDeps, addressee: Address, person
     // Named ⇒ that account. Unnamed ⇒ THE REALM YOU STAND IN is the subject (spec 371 §2.1): asked inside
     // alice3.treasury, "what is the balance" is alice3's — never hers and her other treasury's beside it.
     // Only in the person's OWN realm does "my balance" mean every treasury they hold.
-    let accounts: Array<{ agent: string; name?: string; primary?: boolean }> = [];
-    if (raw) accounts = [{ agent: raw.toLowerCase() }];
-    else if (person && addressee.toLowerCase() !== person.toLowerCase()) accounts = [{ agent: addressee.toLowerCase() }];
-    else if (person && deps.charteredAgents) accounts = await deps.charteredAgents(person.toLowerCase(), 'treasury').catch(() => []);
-    if (!accounts.length) accounts = [{ agent: addressee.toLowerCase() }];
+    // THE VALUE RAIL (user mandate, 2026-09-28; spec 373): ASSETS LIVE ONLY IN TREASURIES. An organization or a person never
+    // holds them — any balance found on such an agent is IGNORED, never reported ("missio-nexus.org holds 51 USDC" was the
+    // incident). A person or organization, named or asked, means the treasuries it charters; a treasury means itself. What
+    // kind an agent is comes from its on-chain type (the record is the authority, a name is a claim); unreadable reads nothing.
+    if (!deps.agentTypeOf) return { items: [], count: 0, reason: 'this agent cannot read what kind of account this is — balances are read only from treasuries', interpretation: 'on-chain balance of the USDC asset' };
+    const treasuriesOf = async (agent: string): Promise<Array<{ agent: string; name?: string; primary?: boolean }>> => {
+      const type = (await deps.agentTypeOf!(agent).catch(() => null))?.toLowerCase() ?? null;
+      if (type === 'treasury') return [{ agent }];
+      if (!type || !deps.charteredAgents) return [];
+      return deps.charteredAgents(agent, 'treasury').catch(() => []);
+    };
+    // Named ⇒ that account's treasuries. Unnamed ⇒ THE REALM YOU STAND IN (spec 371 §2.1): inside a treasury, that treasury;
+    // at an organization, the treasuries it charters; at the person's own agent, every treasury they hold.
+    const subject = (raw || (person && addressee.toLowerCase() !== person.toLowerCase() ? addressee : person ?? addressee)).toLowerCase();
+    const accounts = await treasuriesOf(subject);
+    if (!accounts.length) {
+      const label = (deps.nameOf ? await deps.nameOf(subject).catch(() => null) : null) ?? `${subject.slice(0, 8)}…${subject.slice(-4)}`;
+      return { items: [], count: 0, interpretation: 'on-chain USDC balance, read only from treasuries', reason: `${label} holds no treasury, and balances are kept only in treasuries — there is nothing to report.` };
+    }
     const items: BalanceItem[] = [];
     const unreadable: string[] = [];
     for (const a of accounts) {

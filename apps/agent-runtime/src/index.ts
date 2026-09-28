@@ -2423,6 +2423,7 @@ async function mayOverseeAgent(env: Env, caller: Address, agent: Address): Promi
   if (!deps.readSubjectRecord) return false;
   const standing = await deriveStanding({
     readSubjectRecord: deps.readSubjectRecord,
+    ...(deps.agentTypeOf ? { agentKindOf: deps.agentTypeOf } : {}),
     verifyStewardship: chainStewardshipCheck({
       readContract: ((args: never) => deps.readContract(args)) as never,
       chainId: Number(env.CHAIN_ID), delegationManager: env.DELEGATION_MANAGER as Address,
@@ -2559,6 +2560,7 @@ async function huddleStandingFor(env: Env, caller: Address, scope: NonNullable<R
   const askDeps = harnessDeps(env, buildAuditSink(env));
   const standing = await deriveStanding({
     ...(askDeps.readSubjectRecord ? { readSubjectRecord: askDeps.readSubjectRecord } : {}),
+    ...(askDeps.agentTypeOf ? { agentKindOf: askDeps.agentTypeOf } : {}),
     verifyStewardship: chainStewardshipCheck({
       readContract: ((args: never) => askDeps.readContract(args)) as never,
       chainId: Number(env.CHAIN_ID), delegationManager: env.DELEGATION_MANAGER as Address,
@@ -10327,6 +10329,7 @@ app.post('/email/send', async (c) => {
     const askDeps = harnessDeps(c.env, buildAuditSink(c.env));
     const standing = await deriveStanding({
       ...(askDeps.readSubjectRecord ? { readSubjectRecord: askDeps.readSubjectRecord } : {}),
+      ...(askDeps.agentTypeOf ? { agentKindOf: askDeps.agentTypeOf } : {}),
       verifyStewardship: chainStewardshipCheck({
         readContract: ((args: never) => askDeps.readContract(args)) as never,
         chainId: Number(c.env.CHAIN_ID), delegationManager: c.env.DELEGATION_MANAGER as Address,

@@ -1,6 +1,6 @@
 {
   "type": "ap.technique-ledger.v1",
-  "builtAt": "2026-09-28T15:50:25.552Z",
+  "builtAt": "2026-09-28T17:37:38.982Z",
   "rows": [
     {
       "technique": {
@@ -5963,6 +5963,18 @@
             "baseline": "eff-low",
             "treatment": "eff-min",
             "note": "eff-low also generated the side-by-side's second answer, so its whole-ask time is inflated — decide on first words, not ask time; two deploys landed mid-run (interleaved pairs)"
+          },
+          {
+            "experiment": "effort-c4",
+            "baseline": "c4-low",
+            "treatment": "c4-min",
+            "note": "chain panel 4, the fixed outcome check in both arms, one repeat"
+          },
+          {
+            "experiment": "effort-c4r2",
+            "baseline": "c4-low",
+            "treatment": "c4-min",
+            "note": "chain panel 4, two repeats — the decision"
           }
         ],
         "preferences": [
@@ -5976,9 +5988,11 @@
         "decision": {
           "status": "adopted",
           "date": "2026-09-28",
-          "note": "First words within the step 3.8 → 0.8 s median, faster in 8/8 (sign test p = 0.008); from the ask 12.9 → 4.9 s (7/8). Side by side the minimal-effort answer was preferred 5, the low-effort 2, 1 tie — no loss. SKILL_ANSWER_MODEL_DEFAULT=minimal on faithnet. n = 8, one repeat: re-check on the next long-answer panel.",
+          "note": "Three experiments. effort-a1 (long answers, 8): first words in-step 3.8 → 0.8 s, side by side minimal preferred 5–2–1. effort-c4 (chain panel 4, ONE repeat): outcome check 0.87 → 0.62 — reverted on it. effort-c4r2 (the same panel, TWO repeats, 26 pairs): outcome 0.753 vs 0.748 (6 better, 8 worse, 12 same; sign p = 0.79), first words 7.1 → 4.7 s, in-step 3.3 → 0.8 s — the drop was per-case noise (cases flip sign between repeats: grant-plain +0.95 then −0.95). Same quality, faster: re-adopted. LESSON: the outcome check's per-case variance is large — no decision on it from one repeat; two or more.",
           "experiments": [
-            "effort-a1"
+            "effort-a1",
+            "effort-c4",
+            "effort-c4r2"
           ]
         }
       },
@@ -6085,6 +6099,249 @@
             }
           },
           "verdict": "same-quality-cheaper"
+        },
+        {
+          "experiment": "effort-c4",
+          "baseline": "c4-low",
+          "treatment": "c4-min",
+          "note": "chain panel 4, the fixed outcome check in both arms, one repeat",
+          "set": "sha256:63fb229d0daa6a5fc375c2cf38001d12bbbd2a13dac488c01d87b94b9bc14884",
+          "finishedAt": "2026-09-28T16:33:22.884Z",
+          "n": 14,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 1,
+            "treat": 1,
+            "delta": 0,
+            "fixed": 0,
+            "broken": 0,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 2140,
+              "treat": 2136,
+              "delta": -4,
+              "deltaPct": -0.2,
+              "ci": [
+                -2,
+                0
+              ]
+            },
+            "totalTokens": {
+              "base": 8898,
+              "treat": 8945,
+              "delta": 47,
+              "deltaPct": 0.5,
+              "ci": [
+                -254.5,
+                1314.5
+              ]
+            },
+            "pickMs": {
+              "base": 3891,
+              "treat": 3273,
+              "delta": -618,
+              "deltaPct": -15.9,
+              "ci": [
+                -1885.5,
+                -148
+              ]
+            },
+            "askMs": {
+              "base": 21238,
+              "treat": 15729.5,
+              "delta": -5508.5,
+              "deltaPct": -25.9,
+              "ci": [
+                -9927,
+                1036
+              ]
+            },
+            "stages": {
+              "answer:first-words": {
+                "base": 12357.5,
+                "treat": 5362.5,
+                "delta": -6995,
+                "deltaPct": -56.6,
+                "ci": [
+                  -10156.5,
+                  -933
+                ]
+              },
+              "phase:post-run": {
+                "base": 1156,
+                "treat": 196,
+                "delta": -960,
+                "deltaPct": -83,
+                "ci": [
+                  -2140,
+                  29
+                ]
+              },
+              "phase:pre-run": {
+                "base": 983,
+                "treat": 107,
+                "delta": -876,
+                "deltaPct": -89.1,
+                "ci": [
+                  -2697,
+                  30
+                ]
+              },
+              "phase:run": {
+                "base": 18699.5,
+                "treat": 13255,
+                "delta": -5444.5,
+                "deltaPct": -29.1,
+                "ci": [
+                  -5292,
+                  -1385
+                ]
+              }
+            }
+          },
+          "answer": {
+            "outcome": {
+              "base": 0.95,
+              "treat": 0.525,
+              "delta": -0.42499999999999993,
+              "deltaPct": -44.7,
+              "ci": [
+                -0.44999999999999996,
+                0
+              ]
+            }
+          },
+          "verdict": "same"
+        },
+        {
+          "experiment": "effort-c4r2",
+          "baseline": "c4-low",
+          "treatment": "c4-min",
+          "note": "chain panel 4, two repeats — the decision",
+          "set": "sha256:63fb229d0daa6a5fc375c2cf38001d12bbbd2a13dac488c01d87b94b9bc14884",
+          "finishedAt": "2026-09-28T17:36:48.494Z",
+          "n": 28,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 1,
+            "treat": 0.9286,
+            "delta": -0.0714,
+            "fixed": 0,
+            "broken": 2,
+            "p": 0.5
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 2136.5,
+              "treat": 2138,
+              "delta": 1.5,
+              "deltaPct": 0.1,
+              "ci": [
+                0,
+                0
+              ]
+            },
+            "totalTokens": {
+              "base": 8758,
+              "treat": 8805,
+              "delta": 47,
+              "deltaPct": 0.5,
+              "ci": [
+                -36,
+                416
+              ]
+            },
+            "pickMs": {
+              "base": 3328.5,
+              "treat": 3288,
+              "delta": -40.5,
+              "deltaPct": -1.2,
+              "ci": [
+                -1150,
+                336
+              ]
+            },
+            "askMs": {
+              "base": 19616,
+              "treat": 14216,
+              "delta": -5400,
+              "deltaPct": -27.5,
+              "ci": [
+                -9209,
+                446
+              ]
+            },
+            "stages": {
+              "answer:first-words": {
+                "base": 7291.5,
+                "treat": 4738.5,
+                "delta": -2553,
+                "deltaPct": -35,
+                "ci": [
+                  -5231,
+                  151.5
+                ]
+              },
+              "phase:post-run": {
+                "base": 194,
+                "treat": 194,
+                "delta": 0,
+                "deltaPct": 0,
+                "ci": [
+                  -63,
+                  227
+                ]
+              },
+              "phase:pre-run": {
+                "base": 96,
+                "treat": 98,
+                "delta": 2,
+                "deltaPct": 2.1,
+                "ci": [
+                  -1920,
+                  39
+                ]
+              },
+              "phase:run": {
+                "base": 16625,
+                "treat": 13875,
+                "delta": -2750,
+                "deltaPct": -16.5,
+                "ci": [
+                  -5170,
+                  -1811
+                ]
+              }
+            }
+          },
+          "answer": {
+            "outcome": {
+              "base": 0.995,
+              "treat": 0.95,
+              "delta": -0.04500000000000004,
+              "deltaPct": -4.5,
+              "ci": [
+                -0.07500000000000001,
+                0
+              ]
+            }
+          },
+          "verdict": "same"
+        }
+      ],
+      "pooled": [
+        {
+          "baseline": "c4-low",
+          "experiments": 2,
+          "n": 42,
+          "fixed": 0,
+          "broken": 2,
+          "p": 0.5,
+          "pickTokensPct": -0.05,
+          "askMsPct": -26.7,
+          "verdict": "same-quality-cheaper"
         }
       ],
       "preferences": [
@@ -6097,7 +6354,7 @@
           "p": 0.4531
         }
       ],
-      "verdict": "same-quality-cheaper",
+      "verdict": "same",
       "missing": []
     }
   ],

@@ -62,7 +62,12 @@ export function charteredAgentsReader(deps: CharteredDeps) {
     // forever. So: a tighter cap, and the role is asked ONLY when there is a choice to disambiguate,
     // which is the only time the answer changes anything.
     const matched: Array<{ id: Hex; agent: string; name: string }> = [];
-    for (const id of (ids ?? []).slice(0, deps.maxEdges ?? 12)) {
+    // Spec 419 — how much of the record was read: a holdings answer must never say "none" about edges it did not look at.
+    const cap = deps.maxEdges ?? 12;
+    const scanned = { read: Math.min((ids ?? []).length, cap), of: (ids ?? []).length };
+    // Non-enumerable: the rows are what every caller reads; `scanned` is beside them for the one that says "none".
+    const withScan = <T extends object[]>(rows: T): T => Object.defineProperty(rows, 'scanned', { value: scanned, enumerable: false });
+    for (const id of (ids ?? []).slice(0, cap)) {
       if (!id || id === ZERO32) continue;
       const e = (await deps.readContract({ address: deps.relationships, abi: GET_EDGE_ABI, functionName: 'getEdge', args: [id] } as never).catch(() => null)) as
         { subject?: string; relationshipType?: string; status?: number } | null;
@@ -70,11 +75,12 @@ export function charteredAgentsReader(deps: CharteredDeps) {
       if ((e.relationshipType ?? '').toLowerCase() !== deps.relationshipType.toLowerCase()) continue;
       if (Number(e.status) !== ACTIVE) continue;
       const name = deps.reverseName ? await deps.reverseName(e.subject).catch(() => null) : null;
-      if (!name || name.toLowerCase().split('.').pop() !== type) continue;
+      // `*` (spec 419) — every typed agent held, one scan; the caller reads each one's type from its name suffix.
+      if (!name || (type !== '*' && name.toLowerCase().split('.').pop() !== type)) continue;
       matched.push({ id, agent: e.subject.toLowerCase(), name });
     }
     const roleEntries = Object.entries(deps.roles ?? {});
-    if (matched.length < 2 || !roleEntries.length) return matched.map(({ agent, name }) => ({ agent, name }));
+    if (matched.length < 2 || !roleEntries.length) return withScan(matched.map(({ agent, name }) => ({ agent, name })));
 
     // WHICH ONES THEY MARKED — asked only now, when there is more than one and the answer decides
     // whether a person is questioned about their own (or somebody else's) accounts.
@@ -92,7 +98,7 @@ export function charteredAgentsReader(deps: CharteredDeps) {
         ...(carried.some((i) => i.endsWith('#primaryPayee')) ? { primary: true } : {}),
       });
     }
-    return out;
+    return withScan(out);
   };
 }
 

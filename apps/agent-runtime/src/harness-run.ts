@@ -36,6 +36,7 @@ import { CONTACT_FIELDS, CONTACT_FIELD_ARGS, ONTOLOGY_MANIFEST_DIGEST, OUTCOME_C
 import { bindSelectedOffer, type SelectedOfferBindingV1 } from './engagement-campaign.js';
 import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
+import { HOLDINGS_READ_TOOL, HOLDINGS_READ_CAPABILITY, holdingsReadInvoker } from './holdings-read.js';
 import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
 import { PLAYBOOK_ANSWER_TOOL, playbookAnswerAvailable, playbookAnswerInvoker, type PlaybookMaterial } from './playbook-answer.js';
 import { instructionSkillTools, instructionSourcesOf, skillApplyInvoker, skillReaderFor } from './skill-apply.js';
@@ -77,7 +78,7 @@ registerDefaultSubsetHandlers();
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
 import { type Plan, type Planner,
   runIntent, InputRequired, dataFor, signatureFor,
-  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, partiesDistinct, actingPartyFromTheWords, kindNamedIsChartered, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
+  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, partiesDistinct, actingPartyFromTheWords, kindNamedIsChartered, completePlan, transitionsHold, type FactsV1, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
 import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep, composeOfferedTools, mergeContractTool as composeMergeContractTool, loadPlaybook, declaredEffectSink, setBillStep, declaredCapabilities, type AskScopeV1 } from '@agenticprimitives/harness';
 // Spec 353 — the scope schema is Ring 0 now (spec 399 §4); this app keeps exporting it for its callers.
 export type { AskScopeV1 } from '@agenticprimitives/harness';
@@ -110,6 +111,8 @@ import { resolveParty, ownAgentsOfType, candidateHint, choicesFor, VALUE_ARGS, t
 import { decide, PAYMENT_SOURCE_ACCOUNT, PAYMENT_RECIPIENT, argTypesFor, readValue, isFlagTrue } from '@agenticprimitives/ontology';
 import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
 import type { ResolvedParty } from '@agenticprimitives/context';
+import { CAPABILITY_TRANSITIONS, SITUATION } from '@agenticprimitives/ontology';
+const SITUATION_MEMBERSHIP = SITUATION.OrganizationMembership;
 import { MEMBERSHIP_LIST_TOOL, membershipListInvoker, AFFILIATIONS_LIST_TOOL, affiliationsListInvoker, INVITATIONS_LIST_TOOL, invitationsListInvoker, relationshipRows } from '@agenticprimitives/context';
 import { RESOLUTION_REQUEST_TOOL } from './resolution-invitation.js';
 import { actionLink, resolutionRequestInvoker } from './resolution-request.js';
@@ -709,7 +712,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     interaction: { navigationTarget: 'settings' },
   },
   ...CHILD_AGENT_KINDS.map(({ capability, tld, noun, parentNoun }): ToolSpec => ({
-    verbs: [`create a ${noun}`, `create ${noun}`, `charter a ${noun}`, `charter ${noun}`, `start a ${noun}`, `make a ${noun}`, `new ${noun}`],
+    verbs: [`create a ${noun}`, `create ${noun}`, `charter a ${noun}`, `charter ${noun}`, `start a ${noun}`, `make a ${noun}`, `new ${noun}`, `open a ${noun}`, `set up a ${noun}`],
     id: capability,
     description:
       `Create (charter) a new ${noun.toUpperCase()} under ${parentNoun}. It becomes a typed agent named <label>.${tld}, `
@@ -2168,6 +2171,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
           ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}),
           ...(deps.standingContext ? { context: deps.standingContext } : {}),
           ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}),
+          ...(deps.agentTypeOf ? { agentKindOf: deps.agentTypeOf } : {}),
           ...(deps.readSubjectRecordStatus ? { readSubjectRecordStatus: deps.readSubjectRecordStatus } : {}),
           ...(deps.resolveName ? { resolveName: deps.resolveName } : {}),
           ...(deps.nameOf ? { nameOf: deps.nameOf } : {}),
@@ -2189,6 +2193,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
           ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}),
           ...(deps.standingContext ? { context: deps.standingContext } : {}),
           ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}),
+          ...(deps.agentTypeOf ? { agentKindOf: deps.agentTypeOf } : {}),
           ...(deps.survey ? { survey: deps.survey } : {}),
           ...(deps.readRecords ? { readRecords: deps.readRecords } : {}),
           ...(deps.nameOf ? { nameOf: deps.nameOf } : {}),
@@ -2236,9 +2241,11 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
         person, session,
       )(toolId, args, ctx);
     }
-    if (toolId === BALANCE_READ_CAPABILITY) return balanceReadInvoker({ ...(deps.valueHeld ? { valueHeld: deps.valueHeld } : {}), ...(deps.charteredAgents ? { charteredAgents: deps.charteredAgents } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, (addressee ?? person) as Address, person)(toolId, args, ctx);
+    if (toolId === BALANCE_READ_CAPABILITY) return balanceReadInvoker({ ...(deps.valueHeld ? { valueHeld: deps.valueHeld } : {}), ...(deps.agentTypeOf ? { agentTypeOf: deps.agentTypeOf } : {}), ...(deps.charteredAgents ? { charteredAgents: deps.charteredAgents } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, (addressee ?? person) as Address, person)(toolId, args, ctx);
+    // Spec 419 — what an agent HOLDS, from the public chartered-under record; unnamed ⇒ the agent being asked.
+    if (toolId === HOLDINGS_READ_CAPABILITY) return holdingsReadInvoker({ ...(deps.charteredAgents ? { charteredAgents: deps.charteredAgents } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, (addressee ?? person) as Address)(toolId, args, ctx);
     // The coordination reads judge standing themselves; the routed context rides in as `StandingDeps.context`.
-    const coordinationDeps = { ...deps, ...(deps.standingContext ? { context: deps.standingContext } : {}) };
+    const coordinationDeps = { ...deps, ...(deps.standingContext ? { context: deps.standingContext } : {}), ...(deps.agentTypeOf ? { agentKindOf: deps.agentTypeOf } : {}) };
     if (toolId === ENDEAVOR_LIST_CAPABILITY || toolId === ENDEAVOR_GET_CAPABILITY) return endeavorReadInvoker(coordinationDeps, (addressee ?? person) as Address, person)(toolId, args, ctx);
     if (COORDINATION_CAPABILITY_IDS.has(toolId)) return endeavorActInvoker(coordinationDeps, (addressee ?? person) as Address, person, session)(toolId, args, ctx);
     if (toolId === 'messaging.direct.send') return messageInvoker(deps, presented!, person, session, { presentedAll, chainId: Number(env.CHAIN_ID), delegationManager: env.DELEGATION_MANAGER as Address })(toolId, args, ctx);
@@ -2823,6 +2830,9 @@ export interface PlannerTraceV1 {
   /** Spec 418 A2 — what the planned skills should DELIVER (each intermediate step's artifact + the final skill's
    *  products), glossed from the lexicon — the outcome check's expected classes. */
   expectedDelivers?: Array<{ iri: string; label: string; required?: boolean }>;
+  /** Spec 420 §2 — what goal regression did to the plan: the reads it inserted, the gaps (a standing the asker lacks) and
+   *  violations (facts that contradict a step) it named, the submissions it marked. Present only under `plan/regression`. */
+  regression?: { inserted: Array<{ before: number; toolId: string; because: string }>; gaps: Array<{ index: number; toolId: string; because: string }>; violations: Array<{ index: number; toolId: string; because: string }>; submissions: Array<{ index: number; toolId: string; establishes: string }>; facts: { standingAtRoom: string; situations: number; known: string[] }; /** Spec 420 §3 — acts the offer marked or left out for the asker's standing. */ offer?: Array<{ toolId: string; needs: string; has: string; mode: string }> };
   /** Spec 418 A1 — ms from a streamed step's start to its first words (the earliest step's). */
   answerFirstWordsMs?: number;
   /** Wall-clock time of those first words — the surface computes time from the ASK to them (what a person feels). */
@@ -3195,6 +3205,8 @@ export async function resolveStepArgs(
   lookups: PartyLookups,
   where?: {
     stepRef: string; toolId: string; capabilityId?: string; authorityArg?: string; subject?: string; required?: string[];
+    /** Spec 420 §10 — the nearest-in-context rule may resolve a bare name among several before asking. */
+    nearest?: boolean;
     /** The arguments the TOOL ITSELF describes (its input schema). An argument the tool describes and the ontology
      *  declares no party role for is NOT a party of this step — `catalog.topic.list { parent }` is a topic slug, and
      *  resolving it as an agent asked "which agent is justification?" (seen live). Counterparties stay resolved. */
@@ -3584,6 +3596,9 @@ export async function resolveStepArgs(
       }
       out[key] = await resolveParty(raw, lookups, {
         stepRef: where.stepRef, toolId: where.toolId, argName: key, what: partyWord(key),
+        // Spec 420 §10 — the room, and whether the nearest-in-context rule may decide before asking (`resolve/context`).
+        ...((where as { addressee?: string }).addressee ? { room: (where as { addressee?: string }).addressee! } : {}),
+        ...((where as { nearest?: boolean }).nearest ? { nearest: true } : {}),
         // Spec 385 — the capability the resolution is FOR, so a scoped confirmation memory keys on it.
         ...(where.capabilityId ? { capabilityId: where.capabilityId } : {}),
         // Which questions this capability lets the substrate answer for the person (spec 363 W5).
@@ -3816,6 +3831,9 @@ export async function resolveStepArgs(
       }
       out[key] = await resolveParty(raw, lookups, {
         stepRef: where.stepRef, toolId: where.toolId, argName: key, what: partyWord(key),
+        // Spec 420 §10 — the room, and whether the nearest-in-context rule may decide before asking (`resolve/context`).
+        ...((where as { addressee?: string }).addressee ? { room: (where as { addressee?: string }).addressee! } : {}),
+        ...((where as { nearest?: boolean }).nearest ? { nearest: true } : {}),
         // Spec 385 — the capability the resolution is FOR, so a scoped confirmation memory keys on it.
         ...(where.capabilityId ? { capabilityId: where.capabilityId } : {}),
         // WHOSE tier: the person asking. Without a subject the private providers are skipped and the
@@ -4714,7 +4732,7 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   const standingOnce: Promise<ExecutionBindingV1['standing'] | undefined> | null = input.study && standingPrincipal && standingSubject
     ? Promise.resolve({ relation: 'none' as const, subject: standingSubject.toLowerCase(), principal: standingPrincipal.toLowerCase(), because: 'no standing between them — the person\'s agent presented a study grant to this service, verified at admission (wireRef is its digest)', ...(input.study.hash ? { wireRef: input.study.hash } : {}) })
     : standingPrincipal && standingSubject && deps.readSubjectRecord
-    ? remembered(`standing:${standingPrincipal.toLowerCase()}:${standingSubject.toLowerCase()}`, () => deriveStanding({ readSubjectRecord: deps.readSubjectRecord, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}), wireRefOf },
+    ? remembered(`standing:${standingPrincipal.toLowerCase()}:${standingSubject.toLowerCase()}`, () => deriveStanding({ readSubjectRecord: deps.readSubjectRecord, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}), ...(deps.agentTypeOf ? { agentKindOf: deps.agentTypeOf } : {}), wireRefOf },
         { principal: standingPrincipal, subject: standingSubject })
       .then((st) => ({ relation: st.relation, subject: st.subject, principal: standingPrincipal.toLowerCase(), because: st.because, ...(st.wireRef ? { wireRef: st.wireRef } : {}) }))
       .catch(() => undefined))
@@ -5149,9 +5167,70 @@ step is then handed to that agent under authority the person grants; leave it ou
   // Spec 416 — how long the PICK took (the model planner's call, or a selection arm's work), apart from the rest of the
   // turn: a comparison of selection approaches measures this, not the whole ask.
   const timedPlanner: Planner = { plan: async (pin) => { const t0 = Date.now(); try { return await planner.plan(pin); } finally { trace.selectionMs = (trace.selectionMs ?? 0) + (Date.now() - t0); } } };
-  const boundPlanner: Planner = input.engagement
+  const offerBound: Planner = input.engagement
     ? { plan: async (pin) => { const p = await timedPlanner.plan(pin); return { ...p, ...bindSelectedOffer(p, input.engagement) }; } }
     : timedPlanner;
+  // Spec 420 §2 — GOAL REGRESSION OVER SITUATIONS (`plan/regression`): the facts the harness knows this turn — the asker's
+  // standing at the room, the room's roster when the room is an organization — and the ontology's capability transitions
+  // check every act's preconditions before any signature is asked for, insert the reads that settle unknown ones, and name
+  // the standing the asker lacks. The model still chose the outcome and the words; nothing here invents a party or an amount.
+  const regressionOn = input.variant?.toggles?.['plan/regression'] === 'on' || (!input.variant?.toggles?.['plan/regression'] && ((env as { PLAN_REGRESSION_DEFAULT?: string }).PLAN_REGRESSION_DEFAULT ?? '').trim() === 'on');
+  let regressionFacts: FactsV1 | null = null;
+  const room = String(input.addressee ?? '').toLowerCase();
+  const factsOnce: Promise<FactsV1> | null = regressionOn && room ? (async () => {
+    const st = standingOnce ? await standingOnce.catch(() => undefined) : undefined;
+    const atRoom = input.person && room === String(input.person).toLowerCase() ? 'self' as const : (st?.relation ?? undefined);
+    const roomName = deps.nameOf ? await deps.nameOf(room).catch(() => null) : null;
+    const aliases = new Set(['us', 'we', 'our', 'ours', 'ourselves', 'self', 'this organization', 'this org', 'the organization', 'the org', room, ...(roomName ? [roomName.toLowerCase(), roomName.toLowerCase().split('.')[0]!, roomName.toLowerCase().split('.')[0]!.replace(/-/g, ' ')] : [])]);
+    const orgLike = ['org', 'team', 'church', 'circle', 'household', 'workspace'].includes(String(deps.addresseeKind ?? '').toLowerCase()) || /\.(org|team|church|circle|household|workspace)$/.test(roomName ?? '');
+    const situations: Array<{ situation: string; of: string; in?: string; aliases?: readonly string[] }> = []; const known = new Set<string>();
+    if (orgLike && deps.readSubjectRecord) {
+      // THE SAME READ THE ROSTER TOOL MAKES (listings ∪ invitation records ∪ membership situations, standing-gated) — a raw
+      // `directory.data` read saw three listings and missed every member who joined by invitation (2026-09-28). An INVITATION
+      // row is not a membership (appr:invitationIsNotMembership); a member answers to their name, its first word, or a label.
+      const roster = await membershipListInvoker(
+        { ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}), ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.agentTypeOf ? { agentKindOf: deps.agentTypeOf } : {}), ...(deps.readSubjectRecordStatus ? { readSubjectRecordStatus: deps.readSubjectRecordStatus } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.survey ? { survey: deps.survey } : {}), ...(deps.readRecords ? { readRecords: deps.readRecords } : {}), ...(deps.addresseeKind !== undefined ? { addresseeKind: deps.addresseeKind } : {}) },
+        room as Address, input.person,
+      )(MEMBERSHIP_LIST_TOOL.id, { org: room }, { intent: input.intent, step: { toolId: MEMBERSHIP_LIST_TOOL.id, args: { org: room } }, index: 0, operationId: `${input.runRef ?? 'facts'}:regression-roster` } as never).catch(() => null) as { members?: Array<{ agent: string; name?: string | null; via?: string }> } | null;
+      if (roster?.members) { known.add(SITUATION_MEMBERSHIP); known.add(SITUATION.MembershipInvitation); for (const r of roster.members) situations.push({ situation: r.via === 'invitation' ? SITUATION.MembershipInvitation : SITUATION_MEMBERSHIP, of: r.agent.toLowerCase(), in: room, ...(r.name ? { aliases: [r.name] } : {}) }); }
+    }
+    const facts: FactsV1 = { situations, known, room, isRoom: (w) => aliases.has(w), emptyMeansRoom: !!input.person && room !== String(input.person).toLowerCase(), standing: (agent) => (agent === room ? atRoom : input.person && agent === String(input.person).toLowerCase() ? 'self' : undefined) };
+    regressionFacts = facts;
+    return facts;
+  })() : null;
+  // Spec 420 §3 — THE OFFER BY STANDING (`offer/standing`: off · annotate · prune): before the planner sees the tools, each act
+  // whose transition needs a standing at the room the asker lacks is either marked "not available to the person asking" (the
+  // planner is told to say who could, not to plan it) or left out of the offer. No leading harness knows whether a principal
+  // CAN authorize a step before proposing it; here the ontology says what standing an act needs and the record says what the
+  // asker holds. Behaviour, never authority: the loop's own tool list is untouched and the verifier still judges every step.
+  const offerMode = (input.variant?.toggles?.['offer/standing'] ?? ((env as { OFFER_STANDING_DEFAULT?: string }).OFFER_STANDING_DEFAULT ?? 'off').trim()) as 'off' | 'annotate' | 'prune';
+  const offerByStanding = (tools: readonly ToolSpec[], facts: FactsV1): ToolSpec[] => {
+    if (offerMode === 'off') return [...tools];
+    const has = facts.standing(room);
+    if (!has || has === 'self') return [...tools];
+    const rank: Record<string, number> = { none: 0, member: 1, steward: 2, self: 3 };
+    const out: ToolSpec[] = [];
+    for (const t of tools) {
+      const tr = t.capability?.id ? CAPABILITY_TRANSITIONS.find((x) => x.capability === t.capability!.id) : undefined;
+      const need = tr?.requires.find((pre): pre is { standing: 'self' | 'steward' | 'member'; at: string } => 'standing' in pre && (pre.at === 'room' || pre.at === 'org' || pre.at === 'parent'));
+      const lacks = need && rank[has]! < rank[need.standing]!;
+      if (!lacks) { out.push(t); continue; }
+      trace.regression = { ...(trace.regression ?? { inserted: [], gaps: [], violations: [], submissions: [], facts: { standingAtRoom: has, situations: facts.situations.length, known: [...facts.known] } }), offer: [...(trace.regression?.offer ?? []), { toolId: t.id, needs: need.standing, has, mode: offerMode }] };
+      if (offerMode === 'prune') continue;
+      out.push({ ...t, description: `${t.description} NOT AVAILABLE TO THE PERSON ASKING: it needs a ${need.standing} of this agent and they are a ${has} here — do not plan it; say that a ${need.standing} would have to do it.` });
+    }
+    return out;
+  };
+  const boundPlanner: Planner = factsOnce
+    ? { plan: async (pin) => {
+        const facts0 = await factsOnce;
+        const p = await offerBound.plan({ ...pin, tools: offerByStanding(pin.tools, facts0) });
+        const facts = await factsOnce;
+        const done = completePlan(p, CAPABILITY_TRANSITIONS, facts);
+        trace.regression = { ...(trace.regression ?? {}), inserted: done.inserted, gaps: done.gaps.map(({ index, toolId, because }) => ({ index, toolId, because })), violations: done.violations, submissions: done.submissions, facts: { standingAtRoom: facts.standing(room) ?? 'unknown', situations: facts.situations.length, known: [...facts.known] } };
+        return done.plan;
+      } }
+    : offerBound;
   const kind = input.plan ? 'supplied' : selected.kind;
   const trace: PlannerTraceV1 = {
     planner: plannerUsed, ...(selected.model ? { model: selected.model } : {}), toolsExposed: [], recalledTurns: input.conversation?.turns.length ?? 0, playbook: playbook ? { archetypeId: playbook.archetypeId, archetypeVersion: playbook.archetypeVersion, digest: playbook.digest } : null,
@@ -5239,6 +5318,8 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(deps.readSubjectRecord ? [AFFILIATIONS_LIST_TOOL] : []),
     // Spec 371 — the balance read: what an account holds now, on chain, in the person's unit.
     ...(deps.valueHeld ? [BALANCE_READ_TOOL] : []),
+    // Spec 419 — what an agent holds (public chartered-under edges).
+    ...(deps.charteredAgents ? [HOLDINGS_READ_TOOL] : []),
     // Spec 370 P4 — the organization's work, read through the same record the Home's Work surface reads.
     ...(deps.readSubjectRecord ? COORDINATION_READ_TOOLS : []),
     // The person's own access audit — informational, always available on their own surface.
@@ -5707,6 +5788,7 @@ step is then handed to that agent under authority the person grants; leave it ou
       // WHOSE authority this step spends — declared by the tool, never inferred from the sentence.
       ...(tool.capability?.authorityArg ? { authorityArg: tool.capability.authorityArg } : {}),
       ...(input.person ? { subject: input.person } : {}),
+      ...((input.variant?.toggles?.['resolve/context'] ?? ((env as { RESOLVE_CONTEXT_DEFAULT?: string }).RESOLVE_CONTEXT_DEFAULT ?? 'off').trim()) === 'on' ? { nearest: true } : {}),
       // Spec 367 §7 / 361 I6 — the validated application context a party may be filled from.
       ...(input.addressee ? { addressee: input.addressee } : {}),
       // The surface's realm kind; absent a surface, the addressee's ON-CHAIN kind (ADR-0046 — the record, of which
@@ -5754,9 +5836,14 @@ step is then handed to that agent under authority the person grants; leave it ou
         dependenciesProvided,
         branchesDecidable,
         questionAnsweredByRead,
-        numbersFromTheWords,
+        // Spec 418 §12 / 420 — the "from the words" rules hold a PLANNER to what the person said. A SUPPLIED plan (a Home button,
+        // a screen's form) carries the person's own input — often in base units ("amount": "4000000" for "4 usdc") — and is not a
+        // paraphrase: applying them there stripped the Fund button's amount (found by the act laboratory's UX-action cases).
+        ...(input.plan ? [] : [numbersFromTheWords, actingPartyFromTheWords((capability: string, arg: string) => partyRole(capability, arg)?.side)]),
         partiesDistinct((capability, arg) => partyRole(capability, arg)?.side),
-        actingPartyFromTheWords((capability, arg) => partyRole(capability, arg)?.side),
+        // Spec 420 §2 — a step the facts contradict, or whose standing the asker lacks, is refused by name (the facts were
+        // gathered while planning; a run without them passes here and the verifier judges as always).
+        ...(factsOnce ? [transitionsHold(CAPABILITY_TRANSITIONS, () => regressionFacts ?? { situations: [], known: new Set<string>(), room, standing: () => undefined })] : []),
         kindNamedIsChartered(CHILD_AGENT_KINDS.map((k) => ({ capability: k.capability, noun: k.noun, words: [...new Set([k.noun, k.tld, ...(k.tld === 'org' ? ['organization'] : [])])] }))),
         subjectNamedInAsk(async () => {
           if (!input.person || !deps.readSubjectRecord) return [];

@@ -25,6 +25,8 @@ export const MEMORY_REMEMBER_TOOL: ToolSpec = {
   capability: { id: MEMORY_REMEMBER, action: 'remember', resourceArg: 'record', authorityArg: 'holder' },
   risk: 'low', adapter: ADAPTER.sync, carries: CARRIES.memory,
   selfAuthorized: true,
+  // Spec 420 — honours a comparison's dry run: preconditions run, nothing is written.
+  dryRun: 'invoke',
   interaction: { navigationTarget: 'memory' },
 };
 
@@ -45,6 +47,8 @@ export const MEMORY_FORGET_TOOL: ToolSpec = {
   capability: { id: MEMORY_FORGET, action: 'forget', resourceArg: 'record', authorityArg: 'holder' },
   risk: 'low', adapter: ADAPTER.sync,
   selfAuthorized: true,
+  // Spec 420 — honours a comparison's dry run: preconditions run, nothing is written.
+  dryRun: 'invoke',
   interaction: { navigationTarget: 'memory' },
 };
 
@@ -77,6 +81,7 @@ export function memoryFactsInvoker(deps: MemoryFactsDeps, person: string | undef
         // the card says "from Google Calendar", never "you told me". Only she can say so (this tool is hers alone).
         const from = typeof args.from === 'string' && args.from.trim() ? args.from.trim().slice(0, 60) : undefined;
         const source = args.source === 'connector' && from ? 'connector' as const : 'you' as const;
+        if (ctx.dryRun) return { dryRun: true, wouldRemember: String(args.fact ?? '') };
         const r = rememberFact(prev, { fact: String(args.fact ?? ''), source, ...(source === 'connector' ? { from } : {}), saidAs: said, ...(runRef ? { runRef } : {}), ...(Array.isArray(args.tags) ? { tags: (args.tags as unknown[]).map(String) } : {}) });
         if ('error' in r) throw new Error(r.error);
         const wrote = await deps.writeSubjectRecord(me, FACTS_RECORD, r.next, ctx.operationId);
@@ -89,6 +94,7 @@ export function memoryFactsInvoker(deps: MemoryFactsDeps, person: string | undef
         const words = String(args.words ?? '').trim().toLowerCase();
         const target = id ? prev.entries.find((e) => e.id === id) : words ? prev.entries.find((e) => e.fact.toLowerCase().includes(words)) : undefined;
         if (!target) return { forgotten: false, refused: id ? `no remembered fact has the id ${id}` : words ? `nothing I remember contains "${words}"` : 'say which fact — its id, or words it contains', count: prev.entries.length };
+        if (ctx.dryRun) return { dryRun: true, wouldForget: target.fact, id: target.id };
         const r = forgetFact(prev, target.id);
         const wrote = await deps.writeSubjectRecord(me, FACTS_RECORD, r.next, ctx.operationId);
         if (!wrote.ok) throw new Error(wrote.error ?? 'the fact could not be forgotten');
