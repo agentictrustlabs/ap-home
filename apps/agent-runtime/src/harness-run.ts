@@ -77,7 +77,7 @@ registerDefaultSubsetHandlers();
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
 import { type Plan, type Planner,
   runIntent, InputRequired, dataFor, signatureFor,
-  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
+  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
 import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep, composeOfferedTools, mergeContractTool as composeMergeContractTool, loadPlaybook, declaredEffectSink, setBillStep, declaredCapabilities, type AskScopeV1 } from '@agenticprimitives/harness';
 // Spec 353 — the scope schema is Ring 0 now (spec 399 §4); this app keeps exporting it for its callers.
 export type { AskScopeV1 } from '@agenticprimitives/harness';
@@ -5712,6 +5712,7 @@ step is then handed to that agent under authority the person grants; leave it ou
         dependenciesProvided,
         branchesDecidable,
         questionAnsweredByRead,
+        numbersFromTheWords,
         subjectNamedInAsk(async () => {
           if (!input.person || !deps.readSubjectRecord) return [];
           const doc = await deps.readSubjectRecord(input.person, 'relationships.data').catch(() => null);
