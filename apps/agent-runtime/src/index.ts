@@ -9,7 +9,7 @@ import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 
 import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, forgetConfirmation, CONFIRMATION_RECORD, forgetInstruction, STANDING_RECORD, factsOf, forgetFact, FACTS_RECORD, routinesOf, dropRoutine, ROUTINES_RECORD, preferencesOf, setPreferences, answerPreferencesForPrompt, PREFERENCES_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1, type RememberedFactsV1 } from '@agenticprimitives/context';
 import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
-import { addUsage, recordOf, runMarks, replayingInvoker, planDigest, traceContextOf, type RunDoorV1, type ModelCallV1, type VariantV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent, type RunBillV1 } from '@agenticprimitives/orchestration';
+import { addUsage, judgeAnswerQuality, ANSWER_QUALITY_JUDGE, recordOf, runMarks, replayingInvoker, planDigest, traceContextOf, type RunDoorV1, type ModelCallV1, type VariantV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent, type RunBillV1 } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
 import { recordFormOf, rehydrateExecuted } from './artifact-store.js';
 import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken, advanceTrigger, withPause, withBudget, advanced, declareTrigger, removeTrigger, rebuildDeclaredTriggers } from './triggers.js';
@@ -4371,7 +4371,7 @@ app.post('/harness/ask', async (c) => {
       ...(inResponseTo ? { inResponseTo } : {}),
       ...(body.channel === 'voice' ? { channel: 'voice' as const } : {}),
       ...(provider ? { provider } : {}),
-      ...(variantReq && (variantReq.plannerKind || variantReq.selection || variantReq.toggles || variantReq.acceptance || variantReq.judgeProfile) ? { variant: { ...(variantReq.plannerKind ? { plannerKind: variantReq.plannerKind } : {}), ...(variantReq.selection ? { selection: variantReq.selection } : {}), ...(variantReq.toggles ? { toggles: variantReq.toggles } : {}), ...(variantReq.acceptance ? { acceptance: variantReq.acceptance } : {}), ...(variantReq.judgeProfile ? { judgeProfile: variantReq.judgeProfile } : {}) } } : {}),
+      ...(variantReq && (variantReq.plannerKind || variantReq.selection || variantReq.toggles || variantReq.acceptance || variantReq.judgeProfile || variantReq.askerContext) ? { variant: { ...(variantReq.plannerKind ? { plannerKind: variantReq.plannerKind } : {}), ...(variantReq.selection ? { selection: variantReq.selection } : {}), ...(variantReq.toggles ? { toggles: variantReq.toggles } : {}), ...(variantReq.acceptance ? { acceptance: variantReq.acceptance } : {}), ...(variantReq.judgeProfile ? { judgeProfile: variantReq.judgeProfile } : {}), ...(variantReq.askerContext ? { askerContext: variantReq.askerContext } : {}) } } : {}),
       ...(runPlan ? { plan: runPlan } : {}),
       // Spec 384 W3 — a campaign selected a provider for this step: the plan is bound to it and to its offer.
       ...(stored?.origin?.engagement ? { engagement: stored.origin.engagement } : {}),
@@ -4769,6 +4769,21 @@ app.post('/harness/ask', async (c) => {
     }
     // The reply is ready: the last line, so a poller stops without waiting out its window.
     progress({ type: 'ReplyReady', said: spoken || 'Done.', terminal: true });
+    // Spec 416 §4h — ANSWER QUALITY, when a comparison asks for it: an instruction skill's answer scored by the rubric
+    // (typed yes-no questions, the deployment's model), here where the answer's words are. Only numbers go on the trace;
+    // its time and tokens are the instrument's, reported apart from the ask's.
+    if (variantReq?.toggles?.['quality/judge'] === 'on' && reply?.kind === 'answer' && typeof (reply as { text?: unknown }).text === 'string') {
+      const planned = (trace.plan ?? []).map((p) => p.toolId);
+      const tool = planned.length === 1 ? offeredTools.find((t) => t.id === planned[0] && t.answer) : undefined;
+      if (tool) {
+        let usage: { tokensIn?: number; tokensOut?: number } | undefined;
+        const qcall = structuredCallFor(c.env, provider, { onCall: (rec) => { usage = { tokensIn: rec.tokensIn, tokensOut: rec.tokensOut }; } });
+        if (qcall) {
+          const q = await judgeAnswerQuality({ request: String(body.message ?? ''), skillCard: tool.description, answer: (reply as { text: string }).text }, qcall).catch((e: unknown) => ({ judge: ANSWER_QUALITY_JUDGE, scores: {}, score: 0, ms: 0, error: e instanceof Error ? e.message : String(e) }));
+          trace.quality = { judge: q.judge.name, scores: q.scores, score: q.score, ms: q.ms, ...(usage?.tokensIn !== undefined ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut ?? 0 } : {}), ...(q.error ? { error: q.error.slice(0, 200) } : {}) };
+        }
+      }
+    }
     // Spec 416 §4g — WHERE THE ASK'S TIME WENT: the runtime's own stage marks, summed per stage (names and ms only), on
     // the reply's trace so a comparison can track each stage across iterations — not only the total.
     if (reply && typeof reply === 'object' && (reply as { plannerTrace?: unknown }).plannerTrace) {
@@ -4776,7 +4791,7 @@ app.post('/harness/ask', async (c) => {
       for (const m of marks.list) stages[m.name] = (stages[m.name] ?? 0) + Math.max(0, m.endMs - m.startMs);
       // The three WALL phases, non-overlapping: before the harness ran, the run (prepare · pick · steps), after it.
       const nowMs = Date.now();
-      stages['phase:pre-run'] = runStartMs - receivedAt; stages['phase:run'] = runEndMs - runStartMs; stages['phase:post-run'] = nowMs - runEndMs;
+      stages['phase:pre-run'] = runStartMs - receivedAt; stages['phase:run'] = runEndMs - runStartMs; stages['phase:post-run'] = nowMs - runEndMs - (trace.quality?.ms ?? 0);
       (reply as { plannerTrace: { stages?: Record<string, number> } }).plannerTrace.stages = stages;
     }
     return c.json({ ok: true, addressee, reply: { ...reply, ...(spoken ? { spoken } : {}) }, runRef, hasProvenance: hasProvenanceRef(addressee, runRef), resumable: reply.kind === 'prompt' || reply.kind === 'authority_required', ...(answer ? { subjectAnswer: answer } : {}), ...(satisfied ? { satisfiedStep: satisfied } : {}), ...(routedDelivery ? { routedDelivery } : {}), ...(waiting ? { waiting } : {}), ...(otherRuns.length ? { unfinishedRuns: shown.map((r) => ({ runRef: r.runRef, message: r.message, awaiting: r.awaiting ?? null, updatedAt: r.updatedAt, ...(isExpired(r) ? { expired: true } : {}) })), unfinishedTotal: otherRuns.length } : {}) });

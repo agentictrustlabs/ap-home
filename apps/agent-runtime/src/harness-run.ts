@@ -65,7 +65,7 @@ import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
 import { ADAPTER, CARRIES } from './adapter-declarations.js';
 import { relationshipCredentialDigest, termsDigestOf, type RelationshipCredentialBodyV1 } from '@agenticprimitives/agent-relationships';
-import { replayingInvoker, inputsFor, type RunRecordV1, type RunMarks, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent , selectByDeclaredUtterances , selectByJudgment , selectByOntology, selectByOntologyThenJudgment, selectByProposalThenJudgment, selectByOntologyFirst, type OntologyFirstSelectionV1, type AskerContextV1, selectByFramedJudgment, addUsage, type ModelUsageV1, type OntologySelectionV1, type JudgmentSelectionV1, type FramedSelectionV1, type ProposedSelectionV1 } from '@agenticprimitives/orchestration';
+import { replayingInvoker, inputsFor, type RunRecordV1, type RunMarks, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent , selectByDeclaredUtterances , selectByJudgment , selectByOntology, selectByOntologyThenJudgment, selectByProposalThenJudgment, selectByOntologyFirst, type OntologyFirstSelectionV1, type AskerContextV1, selectByFramedJudgment, addUsage, judgeAnswerPreference, type ModelUsageV1, type OntologySelectionV1, type JudgmentSelectionV1, type FramedSelectionV1, type ProposedSelectionV1 } from '@agenticprimitives/orchestration';
 import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, standingFor, declareInstruction, forgetInstruction, instructionContextOf, STANDING_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
@@ -129,6 +129,9 @@ export interface HarnessEnv {
   SKILLS_MCP?: Fetcher;
   /** Spec 416 §4f — `fast`: the fast judge picks among the playbook's instruction skills before the planner runs. */
   SKILL_SELECTION_DEFAULT?: string;
+  /** Spec 416 §4h — `full`: the default skill stage tells the judge the asker's recent skills here and their memory
+   *  (real asks only). Measured on seeded states: 18/19 vs 7/19 with standing alone. Off unless set. */
+  SKILL_SELECTION_ASKER_CONTEXT?: string;
   /** Spec 397 W2 — the ARD registry this agent finds other agents in (`POST /search`); absent ⇒ no find tool. */
   ARD_REGISTRY_ORIGIN?: string;
   /** The Home origins this agent serves — the first is used for links a person can follow. */
@@ -2500,6 +2503,7 @@ export interface HarnessRunInput {
    *  provider was folded into `provider`. Behaviour, never authority. */
   variant?: { plannerKind?: 'model' | 'rule-based'; selection?: 'model' | 'declared' | 'ontology' | 'judgment' | 'ontology+judgment' | 'propose+judgment' | 'ontology-first' | 'framed-judgment'; toggles?: Record<string, string>;
     judgeProfile?: 'thorough' | 'fast' | 'logprob';
+    askerContext?: { digest: string; recentSkills?: Array<{ id: string; times: number }>; memoryTags?: string[] };
     /** Spec 416 W3 — conformal acceptance under a fitted map. */
     acceptance?: { method: 'conformal'; alpha: number; temperature: number; qhat: number; mapDigest: string } };
   /** The agent being asked. Informational tools that read an organization's own records default to it —
@@ -2772,6 +2776,11 @@ export interface PlannerTraceV1 {
   /** Spec 415 — every structured model call the run made (the selection judge, a skill's answer, the KB and vault
    *  choosers), as it ran: provider, model, why, when. Each becomes a model invocation on the run's provenance. */
   structuredCalls?: Array<{ role: 'judge' | 'structured'; provider: string; model: string; because?: string; startMs: number; endMs: number; failed?: boolean; tokensIn?: number; tokensOut?: number; cachedIn?: number; reasoningOut?: number }>;
+  /** Spec 416 §4h — the answer's quality by the rubric (a comparison's instrument): P(true) per question, the mean,
+   *  the judge's own time and reported tokens — kept apart from the ask's. */
+  quality?: { judge: string; scores: Record<string, number>; score: number; ms: number; tokensIn?: number; tokensOut?: number; error?: string };
+  /** Spec 416 §4h — the default and light answers judged side by side: P(default better), P(light better), P(tie). */
+  pairwise?: { judge: string; preference: Record<string, number>; ms: number; error?: string };
   /** Spec 416 §4g — milliseconds per runtime stage of this ask (the marks, summed per name). */
   stages?: Record<string, number>;
   /** Spec 416 §4f — the default skill stage's outcome: the fast judge chose a skill, or handed the ask to the planner. */
@@ -4890,6 +4899,10 @@ step is then handed to that agent under authority the person grants; leave it ou
               const st = standingOnce ? await standingOnce : undefined;
               const rel = !input.person ? undefined : String(input.person).toLowerCase() === String(input.addressee ?? '').toLowerCase() ? 'self' as const
                 : st?.relation === 'steward' || st?.relation === 'self' ? 'steward' as const : st?.relation === 'member' ? 'member' as const : 'stranger' as const;
+              // A SEEDED asker context (a comparison's starting state) stands in for the asker's live history.
+              // …unless the comparison says the asker context is only their standing (`relation`) or nothing (`off`).
+              const seeded = input.variant?.toggles?.['skill-selection/asker-context'] ? undefined : input.variant?.askerContext;
+              if (seeded) return { ...(rel ? { relation: rel } : {}), ...(seeded.recentSkills?.length ? { recentSkills: seeded.recentSkills.slice(0, 4) } : {}), ...(seeded.memoryTags?.length ? { memoryTags: seeded.memoryTags.slice(0, 6) } : {}) };
               if (askerMode !== 'full') return rel ? { relation: rel } : undefined;
               const recent = input.person && input.addressee ? await recentToolsOf(env as never, input.addressee as Address, input.person as Address, Date.now() - 30 * 86_400_000).catch(() => null) : null;
               const skillIds = new Set(Object.keys(sources));
@@ -4926,7 +4939,15 @@ step is then handed to that agent under authority the person grants; leave it ou
             const st = standingOnce ? await standingOnce : undefined;
             const relation = !input.person ? undefined : String(input.person).toLowerCase() === String(input.addressee ?? '').toLowerCase() ? 'self' as const : st?.relation === 'steward' || st?.relation === 'self' ? 'steward' as const : st?.relation === 'member' ? 'member' as const : 'stranger' as const;
             const call = structuredCallFor(env as never, input.provider, { onCall: recordStructured('judge'), tier: 'light' }) as never;
-            const r = await selectByJudgment(rest, skills, call, { profile: 'fast' }, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(relation ? { asker: { relation } } : {}) });
+            const seeded = input.variant?.toggles?.['skill-selection/asker-context'] ? undefined : input.variant?.askerContext;
+            // LIVE history (the asker's recent skills here + their memory) only on a REAL ask with the deployment's
+            // `SKILL_SELECTION_ASKER_CONTEXT=full` — never under a comparison, whose asker's history is its own test runs.
+            const live = !input.variant && (env.SKILL_SELECTION_ASKER_CONTEXT ?? '').trim() === 'full' && input.person && input.addressee
+              ? { recentSkills: ((await recentToolsOf(env as never, input.addressee as Address, input.person as Address, Date.now() - 30 * 86_400_000).catch(() => null)) ?? []).filter((x) => skillSources[x.id]).slice(0, 4), memoryTags: input.memory ? factsOf(input.memory).entries.slice(0, 6).map((e) => (e.tags?.length ? e.tags.join(', ') : e.fact).slice(0, 80)) : [] }
+              : undefined;
+            const ctx = seeded ?? live;
+            const asker = relation || ctx ? { ...(relation ? { relation } : {}), ...(ctx?.recentSkills?.length ? { recentSkills: ctx.recentSkills.slice(0, 4) } : {}), ...(ctx?.memoryTags?.length ? { memoryTags: ctx.memoryTags.slice(0, 6) } : {}) } : undefined;
+            const r = await selectByJudgment(rest, skills, call, { profile: 'fast' }, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(asker ? { asker } : {}) });
             trace.selection = { approach: 'judgment', ...r };
             trace.skillStage = r.chose ? 'chose' : 'handed-to-planner';
             if (r.chose) {
@@ -5129,9 +5150,25 @@ step is then handed to that agent under authority the person grants; leave it ou
   const answerInvoke = playbookAnswer.length
     ? playbookAnswerInvoker({ call: structuredCallFor(env as never, input.provider, { onCall: recordStructured('structured') }), instructions: playbook?.instructions ?? null, material, advertised, agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null, ...(memory ? { memory } : {}), ...(study ? { study } : {}) })
     : null;
-  const skillInvoke = instructionTools.length
-    ? skillApplyInvoker({ call: structuredCallFor(env as never, input.provider, { onCall: recordStructured('structured') }), ...(input.variant?.toggles?.['skill-selection/answer'] === 'off' ? { pickOnly: true } : {}), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null })
-    : null;
+  // Spec 416 §4h — the model an instruction skill answers with (`skill-selection/answer-model`), and, under
+  // `quality/judge: pairwise`, BOTH answers in parallel judged side by side (both orders, neutral labels): the run returns
+  // its own model's answer; the other answer and the judgment are a comparison's instrument (numbers on the trace only).
+  const answerLight = input.variant?.toggles?.['skill-selection/answer-model'] === 'light';
+  const agentNameForSkill = instructionTools.length && deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null;
+  const applyWith = (light: boolean, recorded: boolean) => skillApplyInvoker({ call: structuredCallFor(env as never, input.provider, { ...(recorded ? { onCall: recordStructured('structured') } : {}), ...(light ? { tier: 'light' as const } : {}) }), ...(input.variant?.toggles?.['skill-selection/answer'] === 'off' ? { pickOnly: true } : {}), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: agentNameForSkill });
+  const pairwise = input.variant?.toggles?.['quality/judge'] === 'pairwise';
+  const skillInvoke: ToolInvoker | null = !instructionTools.length ? null : !pairwise ? applyWith(answerLight, true) : async (toolId, args, ctx) => {
+    const [own, other] = await Promise.all([applyWith(answerLight, true)(toolId, args, ctx), applyWith(!answerLight, false)(toolId, args, ctx).catch(() => null)]);
+    const a = (x: unknown) => (x && typeof x === 'object' && typeof (x as { answer?: unknown }).answer === 'string' ? (x as { answer: string }).answer : null);
+    const ownA = a(own), otherA = a(other);
+    const card = instructionTools.find((t) => t.id === toolId)?.description ?? toolId;
+    const qcall = structuredCallFor(env as never, input.provider);
+    if (ownA && otherA && qcall) {
+      const pref = await judgeAnswerPreference({ request: String(args.question ?? input.intent.goal), skillCard: card, answers: answerLight ? { light: ownA, default: otherA } : { default: ownA, light: otherA } }, qcall as never).catch(() => null);
+      if (pref) trace.pairwise = { judge: pref.judge.name, preference: pref.preference, ms: pref.ms, ...(pref.error ? { error: pref.error.slice(0, 200) } : {}) };
+    }
+    return own;
+  };
   const instructionIds = new Set(instructionTools.map((t) => t.id));
   const localInvoke: ToolInvoker = async (toolId, args, ctx) => {
     mark(`invoke:${toolId}:start`);

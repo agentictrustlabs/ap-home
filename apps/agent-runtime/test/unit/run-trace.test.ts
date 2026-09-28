@@ -70,6 +70,13 @@ describe('the variant knob is parsed, and anything unknown is refused by name', 
     expect(parseVariantRequest({ judgeProfile: 'turbo' })).toMatchObject({ ok: false });
     expect(variantOf({} as never, undefined, { judgeProfile: 'fast', toggles: { 'skill-selection/answer': 'off' } }).toggles).toEqual({ 'skill-selection/answer': 'off', 'skill-selection/judge-profile': 'fast' });
   });
+  it('spec 416 §4h — a SEEDED asker context is a component (by digest), and which one ran is on the recorded variant', () => {
+    const askerContext = { digest: 'sha256:' + 'ef'.repeat(32), recentSkills: [{ id: 'cic.grants.draft', times: 3 }], memoryTags: ['writes to funders monthly'] };
+    expect(parseVariantRequest({ askerContext })).toEqual({ ok: true, variant: { askerContext } });
+    expect(parseVariantRequest({ askerContext: { recentSkills: [] } })).toMatchObject({ ok: false });
+    expect(parseVariantRequest({ askerContext: { digest: askerContext.digest, recentSkills: [{ id: 'x', times: 0 }] } })).toMatchObject({ ok: false });
+    expect(variantOf({} as never, undefined, { askerContext }).toggles).toEqual({ 'skill-selection/asker-context': `seeded:${askerContext.digest}` });
+  });
   it('spec 416 W3 — a conformal map is a component, and which map ran is on the recorded variant', () => {
     const acceptance = { method: 'conformal' as const, alpha: 0.05, temperature: 1.2, qhat: 0.4, mapDigest: 'sha256:' + 'cd'.repeat(32) };
     expect(parseVariantRequest({ selection: 'judgment', acceptance })).toEqual({ ok: true, variant: { selection: 'judgment', acceptance } });
