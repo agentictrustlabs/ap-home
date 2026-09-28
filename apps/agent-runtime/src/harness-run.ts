@@ -111,7 +111,6 @@ import { resolveParty, ownAgentsOfType, candidateHint, choicesFor, VALUE_ARGS, t
 import { decide, PAYMENT_SOURCE_ACCOUNT, PAYMENT_RECIPIENT, argTypesFor, readValue, isFlagTrue } from '@agenticprimitives/ontology';
 import { buildAskVocabulary, type AskCapabilityLike, type SurfaceCeremony, type SurfaceDescriptor, type SurfaceRiskTier } from '@agenticprimitives/surface-catalog';
 import type { ResolvedParty } from '@agenticprimitives/context';
-import { rosterRows } from '@agenticprimitives/context';
 import { CAPABILITY_TRANSITIONS, SITUATION } from '@agenticprimitives/ontology';
 const SITUATION_MEMBERSHIP = SITUATION.OrganizationMembership;
 import { MEMBERSHIP_LIST_TOOL, membershipListInvoker, AFFILIATIONS_LIST_TOOL, affiliationsListInvoker, INVITATIONS_LIST_TOOL, invitationsListInvoker, relationshipRows } from '@agenticprimitives/context';
@@ -713,7 +712,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
     interaction: { navigationTarget: 'settings' },
   },
   ...CHILD_AGENT_KINDS.map(({ capability, tld, noun, parentNoun }): ToolSpec => ({
-    verbs: [`create a ${noun}`, `create ${noun}`, `charter a ${noun}`, `charter ${noun}`, `start a ${noun}`, `make a ${noun}`, `new ${noun}`],
+    verbs: [`create a ${noun}`, `create ${noun}`, `charter a ${noun}`, `charter ${noun}`, `start a ${noun}`, `make a ${noun}`, `new ${noun}`, `open a ${noun}`, `set up a ${noun}`],
     id: capability,
     description:
       `Create (charter) a new ${noun.toUpperCase()} under ${parentNoun}. It becomes a typed agent named <label>.${tld}, `
@@ -5176,8 +5175,14 @@ step is then handed to that agent under authority the person grants; leave it ou
     const orgLike = ['org', 'team', 'church', 'circle', 'household', 'workspace'].includes(String(deps.addresseeKind ?? '').toLowerCase()) || /\.(org|team|church|circle|household|workspace)$/.test(roomName ?? '');
     const situations: Array<{ situation: string; of: string; in?: string; aliases?: readonly string[] }> = []; const known = new Set<string>();
     if (orgLike && deps.readSubjectRecord) {
-      const doc = await deps.readSubjectRecord(room, 'directory.data').catch(() => null);
-      if (doc) { known.add(SITUATION_MEMBERSHIP); for (const r of rosterRows(doc)) situations.push({ situation: SITUATION_MEMBERSHIP, of: r.agent.toLowerCase(), in: room, ...(r.name ? { aliases: [r.name] } : {}) }); }
+      // THE SAME READ THE ROSTER TOOL MAKES (listings ∪ invitation records ∪ membership situations, standing-gated) — a raw
+      // `directory.data` read saw three listings and missed every member who joined by invitation (2026-09-28). An INVITATION
+      // row is not a membership (appr:invitationIsNotMembership); a member answers to their name, its first word, or a label.
+      const roster = await membershipListInvoker(
+        { ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}), ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.readSubjectRecordStatus ? { readSubjectRecordStatus: deps.readSubjectRecordStatus } : {}), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}), ...(deps.survey ? { survey: deps.survey } : {}), ...(deps.readRecords ? { readRecords: deps.readRecords } : {}), ...(deps.addresseeKind !== undefined ? { addresseeKind: deps.addresseeKind } : {}) },
+        room as Address, input.person,
+      )(MEMBERSHIP_LIST_TOOL.id, { org: room }, { intent: input.intent, step: { toolId: MEMBERSHIP_LIST_TOOL.id, args: { org: room } }, index: 0, operationId: `${input.runRef ?? 'facts'}:regression-roster` } as never).catch(() => null) as { members?: Array<{ agent: string; name?: string | null; via?: string }> } | null;
+      if (roster?.members) { known.add(SITUATION_MEMBERSHIP); known.add(SITUATION.MembershipInvitation); for (const r of roster.members) situations.push({ situation: r.via === 'invitation' ? SITUATION.MembershipInvitation : SITUATION_MEMBERSHIP, of: r.agent.toLowerCase(), in: room, ...(r.name ? { aliases: [r.name] } : {}) }); }
     }
     const facts: FactsV1 = { situations, known, room, isRoom: (w) => aliases.has(w), emptyMeansRoom: !!input.person && room !== String(input.person).toLowerCase(), standing: (agent) => (agent === room ? atRoom : input.person && agent === String(input.person).toLowerCase() ? 'self' : undefined) };
     regressionFacts = facts;

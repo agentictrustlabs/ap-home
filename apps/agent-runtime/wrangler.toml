@@ -468,6 +468,9 @@ ANSWER_STREAM_DEFAULT = "on"
 # Re-adopted 2026-09-28 on effort-c4r2 (chain panel 4, two repeats, 26 pairs): outcome check 0.753 vs 0.748 (6 better,
 # 8 worse, 12 same; p = 0.79) — the one-repeat drop on effort-c4 was per-case noise; first words 7.1 → 4.7 s, in-step 3.3 → 0.8 s.
 SKILL_ANSWER_MODEL_DEFAULT = "minimal"
+# Spec 420 §2 — goal regression over situations on every ask (a comparison names its own arm): the room's roster and the
+# asker's standing check each act's preconditions before any signature is asked for.
+PLAN_REGRESSION_DEFAULT = "on"
 # Spec 388 — the cheapest OFFERED provider that carries each call, decided before the request from the prompt estimate, the
 # per-request budget and this minute's spend; recorded on the trace with its reason. A route, never a fallback (ADR-0013).
 ORCHESTRATION_ROUTE = "budget"
