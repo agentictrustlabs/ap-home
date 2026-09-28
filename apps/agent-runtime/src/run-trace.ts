@@ -190,7 +190,9 @@ export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/k
   /** Spec 418 — a chain's intermediate step: a full answer (default) or only the typed artifact the next step consumes. */
   'skill-selection/intermediate': ['full', 'brief'],
   /** Spec 418 — selective reading also asks whether the request wants the result of a skill DOWNSTREAM of the pick. */
-  'skill-selection/downstream': ['off', 'on'] };
+  'skill-selection/downstream': ['off', 'on'],
+  /** Spec 418 — the enriching-input question's wording (v2 also counts "make it as a step first"). */
+  'skill-selection/absence': ['v1', 'v2'] };
 
 export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantRequestV1 } | { ok: false; error: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'variant must be an object' };
