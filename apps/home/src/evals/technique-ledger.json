@@ -1,6 +1,6 @@
 {
   "type": "ap.technique-ledger.v1",
-  "builtAt": "2026-09-28T04:24:25.311Z",
+  "builtAt": "2026-09-28T04:42:48.279Z",
   "rows": [
     {
       "technique": {
@@ -2271,9 +2271,9 @@
           }
         ],
         "decision": {
-          "status": "pending",
+          "status": "adopted",
           "date": "2026-09-27",
-          "note": "Pooled over held-out 7/8/9 vs one-skill: +7/−0 (p=0.016) at −2% pick tokens, −4% ask time; vs the full outcome reading +6/−0 (p=0.03), −65% tokens. Adopt as the default skill stage once the regression panel (fresh 4/5/6) shows no set worse."
+          "note": "Pooled over six sets vs one-skill: +12/−2 (p=0.013), pick tokens −1%, ask −5%; regression panel fresh 4/5/6 no set worse (+0/−0, +3/−2, +2/−0). SKILL_SELECTION_DEFAULT=selective on faithnet. Live: a declared-absent inventory chains assessor → incident playbook. Watch: a chain with answers on runs ~29 s (two ~14 s skill answers in sequence)."
         }
       },
       "comparisons": [
@@ -2831,18 +2831,297 @@
             }
           },
           "verdict": "same-quality-cheaper"
+        },
+        {
+          "experiment": "fresh6-panel-selective",
+          "baseline": "one-skill",
+          "treatment": "outcome-selective",
+          "note": "regression panel",
+          "set": "sha256:a7c35bcc7db5d8f9585b52576944ac94bc78d60b4b4e4fdeaa4b48db9c23457a",
+          "finishedAt": "2026-09-28T04:38:28.337Z",
+          "n": 19,
+          "quality": {
+            "metric": "selection",
+            "base": 0.7368,
+            "treat": 0.8421,
+            "delta": 0.1053,
+            "fixed": 2,
+            "broken": 0,
+            "p": 0.5
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1742,
+              "treat": 1737,
+              "delta": -5,
+              "deltaPct": -0.3,
+              "ci": [
+                -37,
+                0
+              ]
+            },
+            "totalTokens": {
+              "base": 1742,
+              "treat": 1737,
+              "delta": -5,
+              "deltaPct": -0.3,
+              "ci": [
+                -37,
+                0
+              ]
+            },
+            "pickMs": {
+              "base": 1201,
+              "treat": 1084,
+              "delta": -117,
+              "deltaPct": -9.7,
+              "ci": [
+                -288,
+                310
+              ]
+            },
+            "askMs": {
+              "base": 1439,
+              "treat": 1412,
+              "delta": -27,
+              "deltaPct": -1.9,
+              "ci": [
+                -463,
+                132
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 178,
+                "treat": 167,
+                "delta": -11,
+                "deltaPct": -6.2,
+                "ci": [
+                  -13,
+                  -3
+                ]
+              },
+              "phase:pre-run": {
+                "base": 79,
+                "treat": 73,
+                "delta": -6,
+                "deltaPct": -7.6,
+                "ci": [
+                  -8,
+                  2
+                ]
+              },
+              "phase:run": {
+                "base": 1265,
+                "treat": 1189,
+                "delta": -76,
+                "deltaPct": -6,
+                "ci": [
+                  -463,
+                  128
+                ]
+              }
+            }
+          },
+          "verdict": "same"
+        },
+        {
+          "experiment": "fresh5-panel-selective",
+          "baseline": "one-skill",
+          "treatment": "outcome-selective",
+          "note": "regression panel",
+          "set": "sha256:e54861d24c18426773ee4f444710075e20e14e997fb63df72d5583c4d6da3225",
+          "finishedAt": "2026-09-28T04:38:57.146Z",
+          "n": 28,
+          "quality": {
+            "metric": "selection",
+            "base": 0.6786,
+            "treat": 0.7143,
+            "delta": 0.0357,
+            "fixed": 3,
+            "broken": 2,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1731.5,
+              "treat": 1713.5,
+              "delta": -18,
+              "deltaPct": -1,
+              "ci": [
+                -13800,
+                0
+              ]
+            },
+            "totalTokens": {
+              "base": 1731.5,
+              "treat": 1713.5,
+              "delta": -18,
+              "deltaPct": -1,
+              "ci": [
+                -13800,
+                0
+              ]
+            },
+            "pickMs": {
+              "base": 1299.5,
+              "treat": 1043,
+              "delta": -256.5,
+              "deltaPct": -19.7,
+              "ci": [
+                -750,
+                101
+              ]
+            },
+            "askMs": {
+              "base": 1661.5,
+              "treat": 1436,
+              "delta": -225.5,
+              "deltaPct": -13.6,
+              "ci": [
+                -883,
+                69.5
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 169.5,
+                "treat": 171.5,
+                "delta": 2,
+                "deltaPct": 1.2,
+                "ci": [
+                  -8.5,
+                  5
+                ]
+              },
+              "phase:pre-run": {
+                "base": 74.5,
+                "treat": 76.5,
+                "delta": 2,
+                "deltaPct": 2.7,
+                "ci": [
+                  -6,
+                  6
+                ]
+              },
+              "phase:run": {
+                "base": 1383,
+                "treat": 1172,
+                "delta": -211,
+                "deltaPct": -15.3,
+                "ci": [
+                  -792.5,
+                  103.5
+                ]
+              }
+            }
+          },
+          "verdict": "same"
+        },
+        {
+          "experiment": "fresh4-panel-selective",
+          "baseline": "one-skill",
+          "treatment": "outcome-selective",
+          "note": "regression panel",
+          "set": "sha256:25621e6fabb5efcb0b02b00622023516ec73d2a86cbff0c3c02927e88a4aa9ea",
+          "finishedAt": "2026-09-28T04:39:47.396Z",
+          "n": 32,
+          "quality": {
+            "metric": "selection",
+            "base": 0.9688,
+            "treat": 0.9688,
+            "delta": 0,
+            "fixed": 0,
+            "broken": 0,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1754.5,
+              "treat": 1730.5,
+              "delta": -24,
+              "deltaPct": -1.4,
+              "ci": [
+                -6929.5,
+                0
+              ]
+            },
+            "totalTokens": {
+              "base": 1754.5,
+              "treat": 1730.5,
+              "delta": -24,
+              "deltaPct": -1.4,
+              "ci": [
+                -6929.5,
+                0
+              ]
+            },
+            "pickMs": {
+              "base": 1154.5,
+              "treat": 1101.5,
+              "delta": -53,
+              "deltaPct": -4.6,
+              "ci": [
+                -567,
+                70.5
+              ]
+            },
+            "askMs": {
+              "base": 1596.5,
+              "treat": 1491,
+              "delta": -105.5,
+              "deltaPct": -6.6,
+              "ci": [
+                -471,
+                264
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 171,
+                "treat": 169,
+                "delta": -2,
+                "deltaPct": -1.2,
+                "ci": [
+                  -12.5,
+                  8
+                ]
+              },
+              "phase:pre-run": {
+                "base": 78,
+                "treat": 74,
+                "delta": -4,
+                "deltaPct": -5.1,
+                "ci": [
+                  -6.5,
+                  1
+                ]
+              },
+              "phase:run": {
+                "base": 1303.5,
+                "treat": 1222,
+                "delta": -81.5,
+                "deltaPct": -6.3,
+                "ci": [
+                  -629,
+                  67.5
+                ]
+              }
+            }
+          },
+          "verdict": "same"
         }
       ],
       "pooled": [
         {
           "baseline": "one-skill",
-          "experiments": 3,
-          "n": 151,
-          "fixed": 7,
-          "broken": 0,
-          "p": 0.0156,
-          "pickTokensPct": -1.8,
-          "askMsPct": -4,
+          "experiments": 6,
+          "n": 230,
+          "fixed": 12,
+          "broken": 2,
+          "p": 0.0129,
+          "pickTokensPct": -1.2,
+          "askMsPct": -5.3,
           "verdict": "better"
         },
         {
@@ -2857,12 +3136,8 @@
           "verdict": "same-quality-cheaper"
         }
       ],
-      "verdict": "same-quality-cheaper",
-      "missing": [
-        "fresh4-panel-selective",
-        "fresh5-panel-selective",
-        "fresh6-panel-selective"
-      ]
+      "verdict": "same",
+      "missing": []
     },
     {
       "technique": {
@@ -2880,13 +3155,110 @@
             "treatment": "one-skill-cached",
             "note": "run alone (no concurrent runners), interleaved"
           }
-        ]
+        ],
+        "decision": {
+          "status": "adopted",
+          "date": "2026-09-27",
+          "note": "fresh 9, run alone and interleaved, 76 pairs: ask p50 4.62 s → 1.71 s (−63%), p90 10.96 → 7.19 s; pre-run 1.50 → 0.08 s, post-run 1.52 → 0.17 s; plan quality unchanged (+1/−2). OPS_RECORDS_DEFAULT=cached on faithnet. Caveat: an ask landing in another colo within the seconds before the vault write lands reads the older conversation."
+        }
       },
-      "comparisons": [],
-      "verdict": "inconclusive",
-      "missing": [
-        "fresh9-records"
-      ]
+      "comparisons": [
+        {
+          "experiment": "fresh9-records",
+          "baseline": "one-skill",
+          "treatment": "one-skill-cached",
+          "note": "run alone (no concurrent runners), interleaved",
+          "set": "sha256:8763d5dd945cff5612f90841994e69584d563a24fb952cd85388e4156e11e9fc",
+          "finishedAt": "2026-09-28T04:34:47.117Z",
+          "n": 76,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.8684,
+            "treat": 0.8553,
+            "delta": -0.0132,
+            "fixed": 1,
+            "broken": 2,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1741.5,
+              "treat": 1748,
+              "delta": 6.5,
+              "deltaPct": 0.4,
+              "ci": [
+                0,
+                0
+              ]
+            },
+            "totalTokens": {
+              "base": 1741.5,
+              "treat": 1748,
+              "delta": 6.5,
+              "deltaPct": 0.4,
+              "ci": [
+                0,
+                0
+              ]
+            },
+            "pickMs": {
+              "base": 1115.5,
+              "treat": 1272.5,
+              "delta": 157,
+              "deltaPct": 14.1,
+              "ci": [
+                -37,
+                93
+              ]
+            },
+            "askMs": {
+              "base": 4623.5,
+              "treat": 1714,
+              "delta": -2909.5,
+              "deltaPct": -62.9,
+              "ci": [
+                -2945.5,
+                -2493
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1524,
+                "treat": 173.5,
+                "delta": -1350.5,
+                "deltaPct": -88.6,
+                "ci": [
+                  -1380,
+                  -1268
+                ]
+              },
+              "phase:pre-run": {
+                "base": 1499,
+                "treat": 77,
+                "delta": -1422,
+                "deltaPct": -94.9,
+                "ci": [
+                  -1519.5,
+                  -1361
+                ]
+              },
+              "phase:run": {
+                "base": 1327.5,
+                "treat": 1416.5,
+                "delta": 89,
+                "deltaPct": 6.7,
+                "ci": [
+                  -68,
+                  78
+                ]
+              }
+            }
+          },
+          "verdict": "same-quality-cheaper"
+        }
+      ],
+      "verdict": "same-quality-cheaper",
+      "missing": []
     },
     {
       "technique": {
@@ -2911,16 +3283,234 @@
     {
       "technique": {
         "id": "two-sample-agreement",
-        "name": "Two-sample agreement + conformal threshold",
+        "name": "Two-sample agreement (confidence without logprobs)",
         "ontologyDriven": false,
         "spec": "416 W3",
         "source": "'Two samples are enough' (OpenReview), CISC (ACL 2025), CP-Router",
-        "what": "Without logprobs, two parallel samples of the pick; their agreement is the confidence, thresholded by split-conformal calibration; disagreement holds or asks.",
+        "what": "The fast judge runs twice in parallel; the same skill stands, two different skills ask which (clarify), a skill vs none holds. No conformal threshold yet — agreement alone first.",
         "plannedAb": "macro TA, hold rate and precision-at-coverage on collisions / near-negatives / clarify; pick tokens ×2, pick ms ~same.",
-        "comparisons": []
+        "comparisons": [
+          {
+            "experiment": "fresh5-agree",
+            "baseline": "selective",
+            "treatment": "selective-2",
+            "note": "clarify/several heavy"
+          },
+          {
+            "experiment": "fresh3-agree",
+            "baseline": "selective",
+            "treatment": "selective-2",
+            "note": "hard negatives"
+          }
+        ],
+        "decision": {
+          "status": "kept-off",
+          "date": "2026-09-27",
+          "note": "Pooled +6/−2 (p=0.29) at +100% pick tokens, +8% ask. Promising on the clarify-heavy set (fresh 5: +5/−2) — revisit with a clarify-focused held-out set before any default."
+        }
       },
-      "comparisons": [],
-      "verdict": "planned",
+      "comparisons": [
+        {
+          "experiment": "fresh3-agree",
+          "baseline": "selective",
+          "treatment": "selective-2",
+          "note": "hard negatives",
+          "set": "sha256:980cfcd7ed176304ee4fbbf354c9af4366b84f7a47c504443c4483096c6dd02b",
+          "finishedAt": "2026-09-28T04:40:47.685Z",
+          "n": 48,
+          "quality": {
+            "metric": "selection",
+            "base": 0.9583,
+            "treat": 0.9792,
+            "delta": 0.0208,
+            "fixed": 1,
+            "broken": 0,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1677,
+              "treat": 3355,
+              "delta": 1678,
+              "deltaPct": 100.1,
+              "ci": [
+                1672.5,
+                1688
+              ]
+            },
+            "totalTokens": {
+              "base": 1677,
+              "treat": 3355,
+              "delta": 1678,
+              "deltaPct": 100.1,
+              "ci": [
+                1672.5,
+                1688
+              ]
+            },
+            "pickMs": {
+              "base": 989.5,
+              "treat": 1103,
+              "delta": 113.5,
+              "deltaPct": 11.5,
+              "ci": [
+                -4,
+                183
+              ]
+            },
+            "askMs": {
+              "base": 1378,
+              "treat": 1479.5,
+              "delta": 101.5,
+              "deltaPct": 7.4,
+              "ci": [
+                8.5,
+                197
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 168.5,
+                "treat": 164.5,
+                "delta": -4,
+                "deltaPct": -2.4,
+                "ci": [
+                  -10,
+                  1
+                ]
+              },
+              "phase:pre-run": {
+                "base": 75,
+                "treat": 76.5,
+                "delta": 1.5,
+                "deltaPct": 2,
+                "ci": [
+                  -2,
+                  6
+                ]
+              },
+              "phase:run": {
+                "base": 1142.5,
+                "treat": 1290.5,
+                "delta": 148,
+                "deltaPct": 13,
+                "ci": [
+                  7,
+                  203
+                ]
+              }
+            }
+          },
+          "verdict": "same-quality-costs-more"
+        },
+        {
+          "experiment": "fresh5-agree",
+          "baseline": "selective",
+          "treatment": "selective-2",
+          "note": "clarify/several heavy",
+          "set": "sha256:e54861d24c18426773ee4f444710075e20e14e997fb63df72d5583c4d6da3225",
+          "finishedAt": "2026-09-28T04:40:59.810Z",
+          "n": 56,
+          "quality": {
+            "metric": "selection",
+            "base": 0.7143,
+            "treat": 0.7679,
+            "delta": 0.0536,
+            "fixed": 5,
+            "broken": 2,
+            "p": 0.4531
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1717.5,
+              "treat": 3432,
+              "delta": 1714.5,
+              "deltaPct": 99.8,
+              "ci": [
+                1677,
+                1719
+              ]
+            },
+            "totalTokens": {
+              "base": 1717.5,
+              "treat": 3432,
+              "delta": 1714.5,
+              "deltaPct": 99.8,
+              "ci": [
+                1677,
+                1719
+              ]
+            },
+            "pickMs": {
+              "base": 1068,
+              "treat": 1174,
+              "delta": 106,
+              "deltaPct": 9.9,
+              "ci": [
+                9.5,
+                228
+              ]
+            },
+            "askMs": {
+              "base": 1453,
+              "treat": 1572.5,
+              "delta": 119.5,
+              "deltaPct": 8.2,
+              "ci": [
+                -12,
+                233.5
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 170,
+                "treat": 168,
+                "delta": -2,
+                "deltaPct": -1.2,
+                "ci": [
+                  -8.5,
+                  6.5
+                ]
+              },
+              "phase:pre-run": {
+                "base": 77,
+                "treat": 75,
+                "delta": -2,
+                "deltaPct": -2.6,
+                "ci": [
+                  -3,
+                  4
+                ]
+              },
+              "phase:run": {
+                "base": 1221,
+                "treat": 1373.5,
+                "delta": 152.5,
+                "deltaPct": 12.5,
+                "ci": [
+                  1,
+                  234.5
+                ]
+              }
+            }
+          },
+          "verdict": "same-quality-costs-more"
+        }
+      ],
+      "pooled": [
+        {
+          "baseline": "selective",
+          "experiments": 2,
+          "n": 104,
+          "fixed": 6,
+          "broken": 2,
+          "p": 0.2891,
+          "pickTokensPct": 99.94999999999999,
+          "askMsPct": 7.8,
+          "verdict": "same-quality-costs-more"
+        }
+      ],
+      "verdict": "same-quality-costs-more",
       "missing": []
     },
     {
@@ -3112,6 +3702,36 @@
         "source": "TrustGraph (flashrank cross-encoder replaced LLM edge scoring)",
         "what": "A cross-encoder/embedding reranker over skill cards shortlists the judge's options; the judge sees top-k + none + collision partners.",
         "plannedAb": "Recall@k of gold (≥ 0.99), then pick tokens and plan-exact live.",
+        "comparisons": []
+      },
+      "comparisons": [],
+      "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "vault-op-latency",
+        "name": "Faster vault operations (the ~1.5 s per verified call)",
+        "ontologyDriven": false,
+        "spec": "418 §9",
+        "source": "Stage breakdown, fresh 9 (2026-09-27): pick ~1.2 s; read:asker-records 1.58 s, record:conversation 1.63 s, read:waiting 1.50 s — three vault operations are ~70% of a pick-only ask · Inside one vault call (demo-mcp tail, 2026-09-27, 4 calls): ~260 ms to the service-MAC accept, ~270 ms delegation verification (on-chain signature + revocation reads), ~170 ms delegation binding, ~350 ms the vault op — ~1.05 s, about half of it re-verifying a token the caller already reuses.",
+        "what": "Candidates, each with its security reasoning first (a spec, not a patch): (a) a verified-token cache keyed by the token digest with a revocation bound stated in seconds (weighs against per-step on-chain revocation — needs the authority doctrine's sign-off); (b) batch the post-run vault reads into one call; (c) move 'what is waiting' to the Home's own poll; (d) find the ~260 ms before the service-MAC accept.",
+        "plannedAb": "phase:pre-run and phase:post-run p50/p95 — vault as is vs the change; correctness: the next ask recalls this turn (a two-ask pronoun probe).",
+        "comparisons": []
+      },
+      "comparisons": [],
+      "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "answer-latency",
+        "name": "Skill-answer latency (the ~14 s per applied skill)",
+        "ontologyDriven": false,
+        "spec": "418 §9",
+        "source": "Live, 2026-09-27: a two-step chain ran 29 s of a 33 s ask — each skill.apply ~14 s; the lighter answer model was faster but lost side by side (14 vs 6)",
+        "what": "Candidates: stream the answer to the surface as it is produced (time to first words, not to the whole answer); cap the answer to what the skill's method needs; for a chain, stream the first step's result while the second runs; answer-model routing by skill (a light model only where side-by-side shows no loss).",
+        "plannedAb": "answers on: time to first token and whole-ask p50/p90, side-by-side preference vs the current answers — per skill.",
         "comparisons": []
       },
       "comparisons": [],

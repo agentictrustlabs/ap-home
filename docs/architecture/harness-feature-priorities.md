@@ -465,7 +465,8 @@ turn's operations are kept on the run record (`RunRecordV1.operational`, model c
 
 **Tiers for the next wave (each a ledger row before it is built):**
 
-- **Now** — selective outcome reading (running); input necessity ×3 repeats (running); `ops/records` latency (queued, run alone).
+- **Adopted 2026-09-27** — selective outcome reading (pooled +12/−2, p = 0.013; the default skill stage); cached asker records (ask p50 4.62 → 1.71 s); party-stance arrows. Kept off: two-sample agreement, necessity in the full reading, the office prior.
+- **Now** — the skill ANSWER's latency (~14 s per applied skill; streaming, caps, per-skill model routing — each judged side by side); the vault call's ~1.05 s (verification caching needs a revocation-latency spec first).
 - **Next, ranked by expected effect per cost** — declared preconditions with named reasons (Palantir-style, ≈0 tokens per
   refusal); per-request T-box subsetting / PageRank pre-filter (tokens; Recall@k ≥ 0.99 offline first); two-sample agreement +
   conformal threshold (confidence without logprobs); parallel independent chain steps; SHACL-validated skill output with one

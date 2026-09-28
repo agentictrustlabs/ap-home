@@ -99,7 +99,8 @@ export function skillApplyInvoker(deps: SkillApplyDeps): ToolInvoker {
       system: `${APPLY_SYSTEM}\n\n---\n\n${doc.body}`,
       messages: [{ role: 'user', content: `${question}${material}` }],
       tool: { name: 'skill_answer', description: `The answer under ${source.skillId}, as the person will read it.`, input_schema: { type: 'object', properties: { answer: { type: 'string', description: 'The answer, in the person\'s terms, under the skill\'s method' } }, required: ['answer'] } },
-      maxTokens: deps.maxTokens ?? 1400,
+      // Spec 418 — an intermediate chain step (`brief`) produces only the artifact the next step consumes: a smaller budget.
+      maxTokens: args.brief === true ? Math.min(deps.maxTokens ?? 1400, 600) : deps.maxTokens ?? 1400,
     });
     const answer = typeof out['answer'] === 'string' ? out['answer'].trim() : '';
     if (!answer) return { refused: `the model returned no answer under ${source.skillId}` };

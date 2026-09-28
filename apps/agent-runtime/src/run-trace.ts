@@ -186,7 +186,9 @@ export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/k
    *  served from the colo cache with the conversation write landing after the reply (`cached`). */
   'ops/records': ['vault', 'cached'],
   /** Spec 418 — the fast judge's independent samples: `2` ⇒ agreement is the confidence; disagreement asks which. */
-  'skill-selection/samples': ['1', '2'] };
+  'skill-selection/samples': ['1', '2'],
+  /** Spec 418 — a chain's intermediate step: a full answer (default) or only the typed artifact the next step consumes. */
+  'skill-selection/intermediate': ['full', 'brief'] };
 
 export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantRequestV1 } | { ok: false; error: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'variant must be an object' };

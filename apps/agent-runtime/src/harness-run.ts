@@ -4932,7 +4932,7 @@ step is then handed to that agent under authority the person grants; leave it ou
                 const { judge: planJudge, ...plan2 } = r2;
                 trace.selection = { approach: 'outcome-selective', chose: r1.chose, distribution: r1.distribution, judge: r1.judge, ...(r1.reading ? { reading: r1.reading } : {}), ...plan2, planJudge };
                 const labels = new Map([...(lexicon ?? []).map((e) => [e.iri, e.label] as const), ...skills.flatMap((x) => [...(x.produces ?? []), ...(x.consumes ?? [])].map((k) => [k.iri, k.label] as const))]);
-                const steps = outcomeSteps(r2.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri);
+                const steps = outcomeSteps(r2.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri, { briefIntermediate: input.variant?.toggles?.['skill-selection/intermediate'] === 'brief' });
                 return withSpecialists({ steps, rationale: `outcome-selective: ${r2.plan.steps.map((x) => x.tool).join(' → ')}${r2.asked ? '' : ' (no dataflow call)'}` }, playbook?.specialists, pin.tools);
               }
               trace.selection = { approach: 'outcome-selective', chose: null, ...(r1.hold ? { hold: r1.hold } : {}), distribution: r1.distribution, judge: r1.judge };
@@ -4964,10 +4964,11 @@ step is then handed to that agent under authority the person grants; leave it ou
           // two declared stages, both on the trace (`selection` records the judge's verdict), never a silent retry.
           // Explicit per run (`skill-selection/stage` on | off — so a comparison NAMES it), else the deployment's default.
           const stageToggle = input.variant?.toggles?.['skill-selection/stage'];
-          const stageOn = stageToggle ? stageToggle === 'on' : !input.variant?.selection && !input.variant?.plannerKind && (env.SKILL_SELECTION_DEFAULT ?? '').trim() === 'fast';
+          const stageDefault = (env.SKILL_SELECTION_DEFAULT ?? '').trim();
+  const stageOn = stageToggle ? stageToggle === 'on' : !input.variant?.selection && !input.variant?.plannerKind && (stageDefault === 'fast' || stageDefault === 'selective');
           const skillSources = stageOn && !input.variant?.selection ? instructionSourcesOf(playbook) : {};
           if (Object.keys(skillSources).length) {
-            const skills = Object.values(playbook?.tools ?? {}).filter((t) => skillSources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}) }));
+            const skills = Object.values(playbook?.tools ?? {}).filter((t) => skillSources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}), ...(t.produces?.length ? { produces: t.produces } : {}), ...(t.consumes?.length ? { consumes: t.consumes } : {}) }));
             const st = standingOnce ? await standingOnce : undefined;
             const relation = !input.person ? undefined : String(input.person).toLowerCase() === String(input.addressee ?? '').toLowerCase() ? 'self' as const : st?.relation === 'steward' || st?.relation === 'self' ? 'steward' as const : st?.relation === 'member' ? 'member' as const : 'stranger' as const;
             const call = structuredCallFor(env as never, input.provider, { onCall: recordStructured('judge'), tier: 'light' }) as never;
@@ -4986,6 +4987,17 @@ step is then handed to that agent under authority the person grants; leave it ou
             trace.skillStage = r.chose ? 'chose' : 'handed-to-planner';
             if (r.chose) {
               plannerUsed = 'judgment';
+              // Spec 418 D6 — adopted 2026-09-27 (ledger: pooled +12/−2 over six sets, p = 0.013, no set worse, no extra
+              // cost): `SKILL_SELECTION_DEFAULT=selective` — after the pick, one small dataflow call only when the picked
+              // skill has a producible upstream input the asker does not hold; the plan may then be a chain.
+              if (stageDefault === 'selective' && skills.some((x) => x.consumes?.length)) {
+                const r2 = await planForPicked(rest, r.chose, skills, call, {}, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(asker ? { asker } : {}) });
+                const { judge: planJudge, ...plan2 } = r2;
+                trace.selection = { approach: 'outcome-selective', chose: r.chose, distribution: r.distribution, judge: r.judge, ...plan2, planJudge };
+                const labels = new Map([...(playbook?.domainLexicon ?? []).map((e) => [e.iri, e.label] as const)]);
+                const steps = outcomeSteps(r2.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri, { briefIntermediate: input.variant?.toggles?.['skill-selection/intermediate'] === 'brief' });
+                return withSpecialists({ steps, rationale: `skill stage (selective): ${r2.plan.steps.map((x) => x.tool).join(' → ')}${r2.asked ? '' : ' (no dataflow call)'}` }, playbook?.specialists, pin.tools);
+              }
               return withSpecialists({ steps: [{ toolId: r.chose, args: { question: pin.intent.goal }, id: 's0' }], rationale: `skill stage: ${r.chose}` }, playbook?.specialists, pin.tools);
             }
             // "None of these skills": the planner gets the agent's OTHER tools only. Offering it the skills the judge just
