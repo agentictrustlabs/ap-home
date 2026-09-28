@@ -2830,7 +2830,7 @@ export interface PlannerTraceV1 {
   expectedDelivers?: Array<{ iri: string; label: string; required?: boolean }>;
   /** Spec 420 §2 — what goal regression did to the plan: the reads it inserted, the gaps (a standing the asker lacks) and
    *  violations (facts that contradict a step) it named, the submissions it marked. Present only under `plan/regression`. */
-  regression?: { inserted: Array<{ before: number; toolId: string; because: string }>; gaps: Array<{ index: number; toolId: string; because: string }>; violations: Array<{ index: number; toolId: string; because: string }>; submissions: Array<{ index: number; toolId: string; establishes: string }>; facts: { standingAtRoom: string; situations: number; known: string[] } };
+  regression?: { inserted: Array<{ before: number; toolId: string; because: string }>; gaps: Array<{ index: number; toolId: string; because: string }>; violations: Array<{ index: number; toolId: string; because: string }>; submissions: Array<{ index: number; toolId: string; establishes: string }>; facts: { standingAtRoom: string; situations: number; known: string[] }; /** Spec 420 §3 — acts the offer marked or left out for the asker's standing. */ offer?: Array<{ toolId: string; needs: string; has: string; mode: string }> };
   /** Spec 418 A1 — ms from a streamed step's start to its first words (the earliest step's). */
   answerFirstWordsMs?: number;
   /** Wall-clock time of those first words — the surface computes time from the ASK to them (what a person feels). */
@@ -5188,12 +5188,36 @@ step is then handed to that agent under authority the person grants; leave it ou
     regressionFacts = facts;
     return facts;
   })() : null;
+  // Spec 420 §3 — THE OFFER BY STANDING (`offer/standing`: off · annotate · prune): before the planner sees the tools, each act
+  // whose transition needs a standing at the room the asker lacks is either marked "not available to the person asking" (the
+  // planner is told to say who could, not to plan it) or left out of the offer. No leading harness knows whether a principal
+  // CAN authorize a step before proposing it; here the ontology says what standing an act needs and the record says what the
+  // asker holds. Behaviour, never authority: the loop's own tool list is untouched and the verifier still judges every step.
+  const offerMode = (input.variant?.toggles?.['offer/standing'] ?? ((env as { OFFER_STANDING_DEFAULT?: string }).OFFER_STANDING_DEFAULT ?? 'off').trim()) as 'off' | 'annotate' | 'prune';
+  const offerByStanding = (tools: readonly ToolSpec[], facts: FactsV1): ToolSpec[] => {
+    if (offerMode === 'off') return [...tools];
+    const has = facts.standing(room);
+    if (!has || has === 'self') return [...tools];
+    const rank: Record<string, number> = { none: 0, member: 1, steward: 2, self: 3 };
+    const out: ToolSpec[] = [];
+    for (const t of tools) {
+      const tr = t.capability?.id ? CAPABILITY_TRANSITIONS.find((x) => x.capability === t.capability!.id) : undefined;
+      const need = tr?.requires.find((pre): pre is { standing: 'self' | 'steward' | 'member'; at: string } => 'standing' in pre && (pre.at === 'room' || pre.at === 'org' || pre.at === 'parent'));
+      const lacks = need && rank[has]! < rank[need.standing]!;
+      if (!lacks) { out.push(t); continue; }
+      trace.regression = { ...(trace.regression ?? { inserted: [], gaps: [], violations: [], submissions: [], facts: { standingAtRoom: has, situations: facts.situations.length, known: [...facts.known] } }), offer: [...(trace.regression?.offer ?? []), { toolId: t.id, needs: need.standing, has, mode: offerMode }] };
+      if (offerMode === 'prune') continue;
+      out.push({ ...t, description: `${t.description} NOT AVAILABLE TO THE PERSON ASKING: it needs a ${need.standing} of this agent and they are a ${has} here — do not plan it; say that a ${need.standing} would have to do it.` });
+    }
+    return out;
+  };
   const boundPlanner: Planner = factsOnce
     ? { plan: async (pin) => {
-        const p = await offerBound.plan(pin);
+        const facts0 = await factsOnce;
+        const p = await offerBound.plan({ ...pin, tools: offerByStanding(pin.tools, facts0) });
         const facts = await factsOnce;
         const done = completePlan(p, CAPABILITY_TRANSITIONS, facts);
-        trace.regression = { inserted: done.inserted, gaps: done.gaps.map(({ index, toolId, because }) => ({ index, toolId, because })), violations: done.violations, submissions: done.submissions, facts: { standingAtRoom: facts.standing(room) ?? 'unknown', situations: facts.situations.length, known: [...facts.known] } };
+        trace.regression = { ...(trace.regression ?? {}), inserted: done.inserted, gaps: done.gaps.map(({ index, toolId, because }) => ({ index, toolId, because })), violations: done.violations, submissions: done.submissions, facts: { standingAtRoom: facts.standing(room) ?? 'unknown', situations: facts.situations.length, known: [...facts.known] } };
         return done.plan;
       } }
     : offerBound;
