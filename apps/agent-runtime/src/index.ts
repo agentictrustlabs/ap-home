@@ -4727,10 +4727,17 @@ app.post('/harness/ask', async (c) => {
       const parties = [...resolved.values()].filter((r) => /^0x[0-9a-f]{40}$/i.test(r.agent) && r.raw && !/^0x/i.test(r.raw) && !r.ruleId && !r.pointId).map((r) => ({ arg: r.arg, raw: r.raw, agent: r.agent.toLowerCase(), ...(r.label ? { label: r.label } : {}) }));
       const next = rememberTurn(conversation?.type === 'ap.context.conversation-memory.v1' ? conversation : null, { at: new Date().toISOString(), runRef, addressee, said: turn.message, kind: reply.kind, parties });
       const write = () => askDeps.writeSubjectRecord!(String(who.sa).toLowerCase(), CONVERSATION_RECORD, next).then((r) => { if (!r.ok) console.warn('[harness/ask] conversation not kept:', r.error); }).catch(() => undefined);
-      if (recordsCached) {
+      // A turn whose OWN act wrote the asker's records (remember · forget · a preference — a self-acting write, receipt
+      // `self`) leaves the cached copy stale: re-caching it carried a forgotten fact into every later prompt for as long
+      // as the person kept asking (act laboratory, 2026-09-28). Then the cache is dropped and the next read is the vault's.
+      const wroteOwnRecords = (result.receipts ?? []).some((r) => r.status === 'executed' && r.authority?.presentedRef === 'self');
+      const cacheKey = `asker-records:${askerSubject}:${askerWanted.join(',')}`;
+      if (recordsCached && !wroteOwnRecords) {
         // Spec 418 D5 — the next ask reads this turn from the cache (read-your-writes); the vault write lands after the reply.
-        kept = rememberValue(`asker-records:${askerSubject}:${askerWanted.join(',')}`, { ...askerRecords, [CONVERSATION_RECORD]: next }, 300_000);
+        kept = rememberValue(cacheKey, { ...askerRecords, [CONVERSATION_RECORD]: next }, 300_000);
         c.executionCtx.waitUntil(write());
+      } else if (recordsCached) {
+        kept = forget(cacheKey).then(() => marks.time('record:conversation', write));
       } else kept = marks.time('record:conversation', write);
       // Spec 385 — REMEMBER A CONFIRMED CHOICE. The trusted event: a PRIOR turn raised an ambiguity choice
       // scoped to (word, capability, arg), and THIS turn supplied the answer (`body.supplied`). The resolved

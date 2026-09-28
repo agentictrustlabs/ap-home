@@ -77,7 +77,7 @@ registerDefaultSubsetHandlers();
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
 import { type Plan, type Planner,
   runIntent, InputRequired, dataFor, signatureFor,
-  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, partiesDistinct, actingPartyFromTheWords, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
+  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, partiesDistinct, actingPartyFromTheWords, kindNamedIsChartered, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
 import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep, composeOfferedTools, mergeContractTool as composeMergeContractTool, loadPlaybook, declaredEffectSink, setBillStep, declaredCapabilities, type AskScopeV1 } from '@agenticprimitives/harness';
 // Spec 353 — the scope schema is Ring 0 now (spec 399 §4); this app keeps exporting it for its callers.
 export type { AskScopeV1 } from '@agenticprimitives/harness';
@@ -4157,6 +4157,15 @@ async function askReplyForInner(env: HarnessEnv, input: {
       });
     }
     const acted = r.receipts.some((rc) => rc.status === 'executed' && rc.risk !== 'informational');
+    // AN ACT THAT REFUSED DID NOTHING, AND IS SAID SO. A tool may run and decline ("nothing I remember contains …") — its
+    // result carries `refused`. Reporting that as "Done — person.memory.forget: done." told a person a fact was forgotten
+    // that was not (act laboratory, 2026-09-28). The refusal is the answer, in the tool's words.
+    const lastActed = [...r.receipts].reverse().find((rc) => rc.status === 'executed' && rc.risk !== 'informational');
+    const lastResult = lastActed ? r.steps.find((o) => o.stepRef === lastActed.stepRef)?.result : undefined;
+    const declined = lastResult && typeof lastResult === 'object' && typeof (lastResult as { refused?: unknown }).refused === 'string' ? String((lastResult as { refused: string }).refused) : null;
+    if (acted && declined) {
+      return withProv({ kind: 'answer', runRef: r.runRef, text: `Nothing was changed: ${declined.charAt(0).toLowerCase()}${declined.slice(1).replace(/[.]?$/, '.')}` });
+    }
     if (acted) {
       await settleFinishedRequests(input, r).catch(() => undefined);
       // The binding of the LAST authority-bearing step that executed — that is the act the person asked
@@ -5724,6 +5733,7 @@ step is then handed to that agent under authority the person grants; leave it ou
         numbersFromTheWords,
         partiesDistinct((capability, arg) => partyRole(capability, arg)?.side),
         actingPartyFromTheWords((capability, arg) => partyRole(capability, arg)?.side),
+        kindNamedIsChartered(CHILD_AGENT_KINDS.map((k) => ({ capability: k.capability, noun: k.noun, words: [...new Set([k.noun, k.tld, ...(k.tld === 'org' ? ['organization'] : [])])] }))),
         subjectNamedInAsk(async () => {
           if (!input.person || !deps.readSubjectRecord) return [];
           const doc = await deps.readSubjectRecord(input.person, 'relationships.data').catch(() => null);
