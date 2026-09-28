@@ -3203,6 +3203,8 @@ export async function resolveStepArgs(
   lookups: PartyLookups,
   where?: {
     stepRef: string; toolId: string; capabilityId?: string; authorityArg?: string; subject?: string; required?: string[];
+    /** Spec 420 §10 — the nearest-in-context rule may resolve a bare name among several before asking. */
+    nearest?: boolean;
     /** The arguments the TOOL ITSELF describes (its input schema). An argument the tool describes and the ontology
      *  declares no party role for is NOT a party of this step — `catalog.topic.list { parent }` is a topic slug, and
      *  resolving it as an agent asked "which agent is justification?" (seen live). Counterparties stay resolved. */
@@ -3592,6 +3594,9 @@ export async function resolveStepArgs(
       }
       out[key] = await resolveParty(raw, lookups, {
         stepRef: where.stepRef, toolId: where.toolId, argName: key, what: partyWord(key),
+        // Spec 420 §10 — the room, and whether the nearest-in-context rule may decide before asking (`resolve/context`).
+        ...((where as { addressee?: string }).addressee ? { room: (where as { addressee?: string }).addressee! } : {}),
+        ...((where as { nearest?: boolean }).nearest ? { nearest: true } : {}),
         // Spec 385 — the capability the resolution is FOR, so a scoped confirmation memory keys on it.
         ...(where.capabilityId ? { capabilityId: where.capabilityId } : {}),
         // Which questions this capability lets the substrate answer for the person (spec 363 W5).
@@ -3824,6 +3829,9 @@ export async function resolveStepArgs(
       }
       out[key] = await resolveParty(raw, lookups, {
         stepRef: where.stepRef, toolId: where.toolId, argName: key, what: partyWord(key),
+        // Spec 420 §10 — the room, and whether the nearest-in-context rule may decide before asking (`resolve/context`).
+        ...((where as { addressee?: string }).addressee ? { room: (where as { addressee?: string }).addressee! } : {}),
+        ...((where as { nearest?: boolean }).nearest ? { nearest: true } : {}),
         // Spec 385 — the capability the resolution is FOR, so a scoped confirmation memory keys on it.
         ...(where.capabilityId ? { capabilityId: where.capabilityId } : {}),
         // WHOSE tier: the person asking. Without a subject the private providers are skipped and the
@@ -5778,6 +5786,7 @@ step is then handed to that agent under authority the person grants; leave it ou
       // WHOSE authority this step spends — declared by the tool, never inferred from the sentence.
       ...(tool.capability?.authorityArg ? { authorityArg: tool.capability.authorityArg } : {}),
       ...(input.person ? { subject: input.person } : {}),
+      ...((input.variant?.toggles?.['resolve/context'] ?? ((env as { RESOLVE_CONTEXT_DEFAULT?: string }).RESOLVE_CONTEXT_DEFAULT ?? 'off').trim()) === 'on' ? { nearest: true } : {}),
       // Spec 367 §7 / 361 I6 — the validated application context a party may be filled from.
       ...(input.addressee ? { addressee: input.addressee } : {}),
       // The surface's realm kind; absent a surface, the addressee's ON-CHAIN kind (ADR-0046 — the record, of which

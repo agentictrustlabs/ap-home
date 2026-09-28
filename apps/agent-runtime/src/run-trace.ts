@@ -211,7 +211,9 @@ export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/k
   /** Spec 420 §2 — goal regression over situations: preconditions checked, reads inserted, gaps named before any signature. */
   'plan/regression': ['off', 'on'],
   /** Spec 420 §3 — the offer by standing: acts the asker cannot authorize at the room are marked for the planner, or left out. */
-  'offer/standing': ['off', 'annotate', 'prune'] };
+  'offer/standing': ['off', 'annotate', 'prune'],
+  /** Spec 420 §10 — a bare name among several resolves to the nearest in context (the room's roster · household · a shared context · dealings) before asking. */
+  'resolve/context': ['off', 'on'] };
 
 export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantRequestV1 } | { ok: false; error: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'variant must be an object' };
