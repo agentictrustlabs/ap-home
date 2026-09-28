@@ -77,7 +77,7 @@ registerDefaultSubsetHandlers();
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
 import { type Plan, type Planner,
   runIntent, InputRequired, dataFor, signatureFor,
-  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, partiesDistinct, actingPartyFromTheWords, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
+  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, partiesDistinct, actingPartyFromTheWords, kindNamedIsChartered, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
 import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep, composeOfferedTools, mergeContractTool as composeMergeContractTool, loadPlaybook, declaredEffectSink, setBillStep, declaredCapabilities, type AskScopeV1 } from '@agenticprimitives/harness';
 // Spec 353 — the scope schema is Ring 0 now (spec 399 §4); this app keeps exporting it for its callers.
 export type { AskScopeV1 } from '@agenticprimitives/harness';
@@ -359,15 +359,18 @@ export const ASK_CLARIFY_TOOL: ToolSpec = {
 };
 
 /** Spec 418 A2 — the classes a plan should deliver: each intermediate step's artifact, then the final skill's products. */
-export function expectedDeliversOf(steps: ReadonlyArray<{ tool: string; for?: string }>, skills: ReadonlyArray<{ id: string; produces?: ReadonlyArray<{ iri: string; label: string; within?: string }> }>, lexicon?: ReadonlyArray<{ iri: string; label: string; terms: readonly string[] }>): Array<{ iri: string; label: string }> {
+export function expectedDeliversOf(steps: ReadonlyArray<{ tool: string; for?: string }>, skills: ReadonlyArray<{ id: string; produces?: ReadonlyArray<{ iri: string; label: string; within?: string }> }>, lexicon?: ReadonlyArray<{ iri: string; label: string; terms: readonly string[] }>): Array<{ iri: string; label: string; required?: boolean }> {
   const out = new Map<string, string>();
+  const required = new Set<string>();
   const gloss = (iri: string, label: string) => { const e = lexicon?.find((x) => x.iri === iri); const also = (e?.terms ?? []).filter((t) => t.toLowerCase() !== label.toLowerCase()).slice(0, 3); return also.length ? `${label} (also: ${also.join(', ')})` : label; };
-  for (const st of steps.slice(0, -1)) if (st.for) { const lab = skills.flatMap((x) => x.produces ?? []).find((k) => k.iri === st.for)?.label ?? st.for.split('#').pop()!; out.set(st.for, gloss(st.for, lab)); }
+  for (const st of steps.slice(0, -1)) if (st.for) { const lab = skills.flatMap((x) => x.produces ?? []).find((k) => k.iri === st.for)?.label ?? st.for.split('#').pop()!; out.set(st.for, gloss(st.for, lab)); required.add(st.for); }
   const last = steps[steps.length - 1];
   // A part of a whole the same skill produces (`within`) is not asked for on its own: the person asked for the whole.
   const made = skills.find((x) => x.id === last?.tool)?.produces ?? [];
   for (const k of made) if (!(k.within && made.some((w) => w.iri === k.within))) out.set(k.iri, gloss(k.iri, k.label));
-  return [...out].map(([iri, label]) => ({ iri, label }));
+  // The intermediate artifacts are REQUIRED (the plan was built on them); the terminal skill's products are candidates —
+  // the outcome check asks which of them the request wants (spec 418 A2 v2).
+  return [...out].map(([iri, label]) => ({ iri, label, ...(required.has(iri) ? { required: true } : {}) }));
 }
 
 export const UNSUPPORTED_TOOL: ToolSpec = {
@@ -2530,6 +2533,9 @@ export interface HarnessRunInput {
   /** Spec 415 A4 — what a COMPARISON asked this run to do differently (already admitted by the caller: a
    *  comparison estate, the agent's own steward). The planner kind and the capability toggles apply here; the
    *  provider was folded into `provider`. Behaviour, never authority. */
+  /** Spec 418 §12 — this run is a COMPARISON (the request carried a variant, whatever its fields): self-acting writes are
+   *  held (dry run). Set by the ask surface from the request itself, never inferred from which variant fields arrived. */
+  comparison?: boolean;
   variant?: { plannerKind?: 'model' | 'rule-based'; selection?: 'model' | 'declared' | 'ontology' | 'judgment' | 'ontology+judgment' | 'propose+judgment' | 'ontology-first' | 'framed-judgment' | 'outcome' | 'outcome-selective'; toggles?: Record<string, string>;
     judgeProfile?: 'thorough' | 'fast' | 'logprob';
     askerContext?: { digest: string; recentSkills?: Array<{ id: string; times: number }>; memoryTags?: string[]; heldClasses?: string[] };
@@ -2816,11 +2822,13 @@ export interface PlannerTraceV1 {
   skillStage?: 'chose' | 'handed-to-planner' | 'clarify';
   /** Spec 418 A2 — what the planned skills should DELIVER (each intermediate step's artifact + the final skill's
    *  products), glossed from the lexicon — the outcome check's expected classes. */
-  expectedDelivers?: Array<{ iri: string; label: string }>;
+  expectedDelivers?: Array<{ iri: string; label: string; required?: boolean }>;
   /** Spec 418 A1 — ms from a streamed step's start to its first words (the earliest step's). */
   answerFirstWordsMs?: number;
   /** Wall-clock time of those first words — the surface computes time from the ASK to them (what a person feels). */
   answerFirstWordsAt?: number;
+  /** Spec 418 §12 — this run was a comparison: its self-acting writes were held (dry run). */
+  comparison?: boolean;
   /** Spec 416 — milliseconds spent choosing (planner or selection arm), summed over re-plans. */
   selectionMs?: number;
   /** What the model planner's calls used, as the provider reported them (summed over re-plans). */
@@ -3563,6 +3571,17 @@ export async function resolveStepArgs(
           fields: [{ name: key, label: partyWord(key), type: 'text', required: true, hint: 'an agent name (alice.me) or address' }],
         });
       }
+      // "US" AT AN ORGANIZATION IS THAT ORGANIZATION (act laboratory, 2026-09-28): asked at missio-nexus.org, "invite david
+      // to join us" planned `org: "us"`, which no tier resolves, and the steward was asked which organization. The room
+      // the person stands in is who "we" are — for an ACTING or CONTEXT party only (the ontology's side); a counterparty
+      // ("pay us") is left to be resolved or asked. Never when the room is the asker's own agent.
+      const room = (where as { addressee?: string }).addressee?.toLowerCase();
+      if (room && where.subject && room !== where.subject.toLowerCase() && /^(us|we|our|ours|ourselves|self|itself|this agent|the agent|this (organi[sz]ation|org|team|group|circle|church|household|workspace)|the (organi[sz]ation|org|team))$/i.test(raw.trim())
+        && partyRole(where.capabilityId ?? where.toolId, key)?.side !== 'counterparty') {
+        out[key] = room;
+        lookups.onResolved?.({ arg: key, raw, agent: room, hint: 'the agent you are asking', via: 'context' });
+        continue;
+      }
       out[key] = await resolveParty(raw, lookups, {
         stepRef: where.stepRef, toolId: where.toolId, argName: key, what: partyWord(key),
         // Spec 385 — the capability the resolution is FOR, so a scoped confirmation memory keys on it.
@@ -3783,6 +3802,17 @@ export async function resolveStepArgs(
           prompt: `That would be you. Who is ${partyWord(key)}?`,
           fields: [{ name: key, label: partyWord(key), type: 'text', required: true, hint: 'an agent name (alice.me) or address' }],
         });
+      }
+      // "US" AT AN ORGANIZATION IS THAT ORGANIZATION (act laboratory, 2026-09-28): asked at missio-nexus.org, "invite david
+      // to join us" planned `org: "us"`, which no tier resolves, and the steward was asked which organization. The room
+      // the person stands in is who "we" are — for an ACTING or CONTEXT party only (the ontology's side); a counterparty
+      // ("pay us") is left to be resolved or asked. Never when the room is the asker's own agent.
+      const room = (where as { addressee?: string }).addressee?.toLowerCase();
+      if (room && where.subject && room !== where.subject.toLowerCase() && /^(us|we|our|ours|ourselves|self|itself|this agent|the agent|this (organi[sz]ation|org|team|group|circle|church|household|workspace)|the (organi[sz]ation|org|team))$/i.test(raw.trim())
+        && partyRole(where.capabilityId ?? where.toolId, key)?.side !== 'counterparty') {
+        out[key] = room;
+        lookups.onResolved?.({ arg: key, raw, agent: room, hint: 'the agent you are asking', via: 'context' });
+        continue;
       }
       out[key] = await resolveParty(raw, lookups, {
         stepRef: where.stepRef, toolId: where.toolId, argName: key, what: partyWord(key),
@@ -4149,6 +4179,15 @@ async function askReplyForInner(env: HarnessEnv, input: {
       });
     }
     const acted = r.receipts.some((rc) => rc.status === 'executed' && rc.risk !== 'informational');
+    // AN ACT THAT REFUSED DID NOTHING, AND IS SAID SO. A tool may run and decline ("nothing I remember contains …") — its
+    // result carries `refused`. Reporting that as "Done — person.memory.forget: done." told a person a fact was forgotten
+    // that was not (act laboratory, 2026-09-28). The refusal is the answer, in the tool's words.
+    const lastActed = [...r.receipts].reverse().find((rc) => rc.status === 'executed' && rc.risk !== 'informational');
+    const lastResult = lastActed ? r.steps.find((o) => o.stepRef === lastActed.stepRef)?.result : undefined;
+    const declined = lastResult && typeof lastResult === 'object' && typeof (lastResult as { refused?: unknown }).refused === 'string' ? String((lastResult as { refused: string }).refused) : null;
+    if (acted && declined) {
+      return withProv({ kind: 'answer', runRef: r.runRef, text: `Nothing was changed: ${declined.charAt(0).toLowerCase()}${declined.slice(1).replace(/[.]?$/, '.')}` });
+    }
     if (acted) {
       await settleFinishedRequests(input, r).catch(() => undefined);
       // The binding of the LAST authority-bearing step that executed — that is the act the person asked
@@ -5279,8 +5318,10 @@ step is then handed to that agent under authority the person grants; leave it ou
   // `quality/judge: pairwise`, BOTH answers in parallel judged side by side (both orders, neutral labels): the run returns
   // its own model's answer; the other answer and the judgment are a comparison's instrument (numbers on the trace only).
   // Spec 418 — the answer tier: default · light · strong (a stronger model, measured side by side before any use).
-  type AnswerTier = 'default' | 'light' | 'strong';
-  const ownTier: AnswerTier = ((input.variant?.toggles?.['skill-selection/answer-model'] as AnswerTier | undefined) ?? 'default');
+  type AnswerTier = 'default' | 'light' | 'strong' | 'minimal';
+  // Spec 418 A1 — the deployment's answer tier (`SKILL_ANSWER_MODEL_DEFAULT`, adopted `minimal` on effort-a1); a comparison names its own.
+  const envTier = ((env as { SKILL_ANSWER_MODEL_DEFAULT?: string }).SKILL_ANSWER_MODEL_DEFAULT ?? '').trim();
+  const ownTier: AnswerTier = ((input.variant?.toggles?.['skill-selection/answer-model'] as AnswerTier | undefined) ?? (['light', 'strong', 'minimal'].includes(envTier) ? envTier as AnswerTier : 'default'));
   const otherTier: AnswerTier = ((input.variant?.toggles?.['quality/against'] as AnswerTier | undefined) ?? (ownTier === 'light' ? 'default' : 'light'));
   const answerLight = ownTier === 'light';
   const agentNameForSkill = instructionTools.length && deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null;
@@ -5374,6 +5415,7 @@ step is then handed to that agent under authority the person grants; leave it ou
         // instruction skill's answer) needs none, so the retrieval is decided on the plan and skipped then.
         onlyIf: (plan: { steps: ReadonlyArray<{ toolId: string }> }) => !plan.steps.every((st) => !!tools.find((t) => t.id === st.toolId)?.answer) }
     : null;
+  if (input.comparison || input.variant) trace.comparison = true;
   const result = await runIntent(input.intent, {
     planner: boundPlanner, tools, bindingFor,
     ...(input.resume ? { resume: input.resume } : {}),
@@ -5715,6 +5757,7 @@ step is then handed to that agent under authority the person grants; leave it ou
         numbersFromTheWords,
         partiesDistinct((capability, arg) => partyRole(capability, arg)?.side),
         actingPartyFromTheWords((capability, arg) => partyRole(capability, arg)?.side),
+        kindNamedIsChartered(CHILD_AGENT_KINDS.map((k) => ({ capability: k.capability, noun: k.noun, words: [...new Set([k.noun, k.tld, ...(k.tld === 'org' ? ['organization'] : [])])] }))),
         subjectNamedInAsk(async () => {
           if (!input.person || !deps.readSubjectRecord) return [];
           const doc = await deps.readSubjectRecord(input.person, 'relationships.data').catch(() => null);
@@ -5786,6 +5829,8 @@ step is then handed to that agent under authority the person grants; leave it ou
     // reached its second payee, whose mandate had not been minted yet. Reporting names the step and its
     // args; the surface mints exactly that and resumes.
     onMissingMandate: 'report' as const,
+    // Spec 418 §12 — a comparison run (a variant) never commits a self-acting write: the estate stays the stated one.
+    ...(input.comparison || input.variant ? { dryRunSelfActs: true } : {}),
     // Spec 354 §4.5 — the playbook that admitted this run (canonical id + version + definition digest),
     // stamped onto every receipt by the loop. Absent ⇒ the bare harness; receipts carry no skillRef.
     ...(playbook ? { skillRef: { skillId: playbook.archetypeId, version: playbook.archetypeVersion, commitment: playbook.digest } } : {}),

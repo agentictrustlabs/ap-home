@@ -1,6 +1,6 @@
 {
   "type": "ap.technique-ledger.v1",
-  "builtAt": "2026-09-28T13:27:16.109Z",
+  "builtAt": "2026-09-28T15:50:25.552Z",
   "rows": [
     {
       "technique": {
@@ -5692,7 +5692,7 @@
         "decision": {
           "status": "pending",
           "date": "2026-09-28",
-          "note": "chain4-outcome2 (fixed for parts): still NOT a valid instrument — (1) it asks for every class the terminal skill produces, not the one requested (the grants drafter produces GrantProposal + LetterOfInquiry + ClaimPlaceholder; a correct LOI scores 0.24); (2) 'usable as it stands' scores the right behaviour on a request missing its facts (a pipeline structure with the gaps named) near 0. Next: expected = the class the outcome reading picked for the request; judged 'delivers it, or its structure with the missing facts named'. No decision may rest on its numbers until then."
+          "note": "v2 (ap.outcome-check-judge.v2): delivery over the classes the REQUEST asks for (the judge says which) plus the plan's intermediates; two plain questions per class (complete · its structure with the missing facts named). Validated by hand on the four cases v1 got wrong: pipeline-only ~0 → 0.99, assess-only 0.02 → 1.0, incident chain 1.0, grants→LOI 0.24 → 0.5 (the LOI truly was not delivered — the drafter declined without a funder). Earlier outcome-check numbers are void. Instrument ready; no technique decided on it yet."
         }
       },
       "comparisons": [
@@ -5946,6 +5946,158 @@
       },
       "comparisons": [],
       "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "answer-effort-minimal",
+        "name": "The skill answer thinks at minimal effort",
+        "ontologyDriven": false,
+        "spec": "418 A1",
+        "source": "stream-a1c: first words at 11.8 s of a 21 s ask, most of it the model thinking before its first word",
+        "what": "The streamed skill answer uses the default model at reasoning effort 'minimal' (tier 'minimal') instead of 'low'.",
+        "plannedAb": "long-answer panel 1: time to first words (from the ask and within the step) paired; side-by-side preference of the two answers for the same case",
+        "comparisons": [
+          {
+            "experiment": "effort-a1",
+            "baseline": "eff-low",
+            "treatment": "eff-min",
+            "note": "eff-low also generated the side-by-side's second answer, so its whole-ask time is inflated — decide on first words, not ask time; two deploys landed mid-run (interleaved pairs)"
+          }
+        ],
+        "preferences": [
+          {
+            "experiment": "effort-a1",
+            "variant": "eff-low",
+            "baselineKey": "default",
+            "treatmentKey": "minimal"
+          }
+        ],
+        "decision": {
+          "status": "adopted",
+          "date": "2026-09-28",
+          "note": "First words within the step 3.8 → 0.8 s median, faster in 8/8 (sign test p = 0.008); from the ask 12.9 → 4.9 s (7/8). Side by side the minimal-effort answer was preferred 5, the low-effort 2, 1 tie — no loss. SKILL_ANSWER_MODEL_DEFAULT=minimal on faithnet. n = 8, one repeat: re-check on the next long-answer panel.",
+          "experiments": [
+            "effort-a1"
+          ]
+        }
+      },
+      "comparisons": [
+        {
+          "experiment": "effort-a1",
+          "baseline": "eff-low",
+          "treatment": "eff-min",
+          "note": "eff-low also generated the side-by-side's second answer, so its whole-ask time is inflated — decide on first words, not ask time; two deploys landed mid-run (interleaved pairs)",
+          "set": "sha256:fa8691eea1fe5f4498e091f7ce8ba3644578dc169e46bbf11199201c66da3c23",
+          "finishedAt": "2026-09-28T15:29:34.597Z",
+          "n": 8,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.875,
+            "treat": 0.875,
+            "delta": 0,
+            "fixed": 0,
+            "broken": 0,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1747.5,
+              "treat": 1747.5,
+              "delta": 0,
+              "deltaPct": 0,
+              "ci": [
+                0,
+                0
+              ]
+            },
+            "totalTokens": {
+              "base": 6889,
+              "treat": 6924.5,
+              "delta": 35.5,
+              "deltaPct": 0.5,
+              "ci": [
+                -112,
+                451
+              ]
+            },
+            "pickMs": {
+              "base": 5315,
+              "treat": 3135.5,
+              "delta": -2179.5,
+              "deltaPct": -41,
+              "ci": [
+                -4361,
+                -318
+              ]
+            },
+            "askMs": {
+              "base": 28406,
+              "treat": 14894,
+              "delta": -13512,
+              "deltaPct": -47.6,
+              "ci": [
+                -18821,
+                -1128
+              ]
+            },
+            "stages": {
+              "answer:first-words": {
+                "base": 12906.5,
+                "treat": 4924.5,
+                "delta": -7982,
+                "deltaPct": -61.8,
+                "ci": [
+                  -15699,
+                  -2797
+                ]
+              },
+              "phase:post-run": {
+                "base": 186,
+                "treat": 239,
+                "delta": 53,
+                "deltaPct": 28.5,
+                "ci": [
+                  -2138,
+                  1827
+                ]
+              },
+              "phase:pre-run": {
+                "base": 1112.5,
+                "treat": 78.5,
+                "delta": -1034,
+                "deltaPct": -92.9,
+                "ci": [
+                  -2501,
+                  456
+                ]
+              },
+              "phase:run": {
+                "base": 28491,
+                "treat": 13610,
+                "delta": -14881,
+                "deltaPct": -52.2,
+                "ci": [
+                  -17332.5,
+                  -5447
+                ]
+              }
+            }
+          },
+          "verdict": "same-quality-cheaper"
+        }
+      ],
+      "preferences": [
+        {
+          "experiment": "effort-a1",
+          "n": 8,
+          "treatmentWins": 5,
+          "baselineWins": 2,
+          "ties": 1,
+          "p": 0.4531
+        }
+      ],
+      "verdict": "same-quality-cheaper",
       "missing": []
     }
   ],

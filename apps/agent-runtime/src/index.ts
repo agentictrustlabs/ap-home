@@ -4385,6 +4385,8 @@ app.post('/harness/ask', async (c) => {
       ...(inResponseTo ? { inResponseTo } : {}),
       ...(body.channel === 'voice' ? { channel: 'voice' as const } : {}),
       ...(provider ? { provider } : {}),
+      // Spec 418 §12 — any variant makes this a comparison run: its self-acting writes are held, even a provider-only variant.
+      ...(variantReq ? { comparison: true } : {}),
       ...(variantReq && (variantReq.plannerKind || variantReq.selection || variantReq.toggles || variantReq.acceptance || variantReq.judgeProfile || variantReq.askerContext) ? { variant: { ...(variantReq.plannerKind ? { plannerKind: variantReq.plannerKind } : {}), ...(variantReq.selection ? { selection: variantReq.selection } : {}), ...(variantReq.toggles ? { toggles: variantReq.toggles } : {}), ...(variantReq.acceptance ? { acceptance: variantReq.acceptance } : {}), ...(variantReq.judgeProfile ? { judgeProfile: variantReq.judgeProfile } : {}), ...(variantReq.askerContext ? { askerContext: variantReq.askerContext } : {}) } } : {}),
       ...(runPlan ? { plan: runPlan } : {}),
       // Spec 384 W3 — a campaign selected a provider for this step: the plan is bound to it and to its offer.
@@ -4725,10 +4727,17 @@ app.post('/harness/ask', async (c) => {
       const parties = [...resolved.values()].filter((r) => /^0x[0-9a-f]{40}$/i.test(r.agent) && r.raw && !/^0x/i.test(r.raw) && !r.ruleId && !r.pointId).map((r) => ({ arg: r.arg, raw: r.raw, agent: r.agent.toLowerCase(), ...(r.label ? { label: r.label } : {}) }));
       const next = rememberTurn(conversation?.type === 'ap.context.conversation-memory.v1' ? conversation : null, { at: new Date().toISOString(), runRef, addressee, said: turn.message, kind: reply.kind, parties });
       const write = () => askDeps.writeSubjectRecord!(String(who.sa).toLowerCase(), CONVERSATION_RECORD, next).then((r) => { if (!r.ok) console.warn('[harness/ask] conversation not kept:', r.error); }).catch(() => undefined);
-      if (recordsCached) {
+      // A turn whose OWN act wrote the asker's records (remember · forget · a preference — a self-acting write, receipt
+      // `self`) leaves the cached copy stale: re-caching it carried a forgotten fact into every later prompt for as long
+      // as the person kept asking (act laboratory, 2026-09-28). Then the cache is dropped and the next read is the vault's.
+      const wroteOwnRecords = (result.receipts ?? []).some((r) => r.status === 'executed' && r.authority?.presentedRef === 'self');
+      const cacheKey = `asker-records:${askerSubject}:${askerWanted.join(',')}`;
+      if (recordsCached && !wroteOwnRecords) {
         // Spec 418 D5 — the next ask reads this turn from the cache (read-your-writes); the vault write lands after the reply.
-        kept = rememberValue(`asker-records:${askerSubject}:${askerWanted.join(',')}`, { ...askerRecords, [CONVERSATION_RECORD]: next }, 300_000);
+        kept = rememberValue(cacheKey, { ...askerRecords, [CONVERSATION_RECORD]: next }, 300_000);
         c.executionCtx.waitUntil(write());
+      } else if (recordsCached) {
+        kept = forget(cacheKey).then(() => marks.time('record:conversation', write));
       } else kept = marks.time('record:conversation', write);
       // Spec 385 — REMEMBER A CONFIRMED CHOICE. The trusted event: a PRIOR turn raised an ambiguity choice
       // scoped to (word, capability, arg), and THIS turn supplied the answer (`body.supplied`). The resolved
@@ -4800,7 +4809,7 @@ app.post('/harness/ask', async (c) => {
       const ocall = structuredCallFor(c.env, provider, { onCall: (rec) => { usage = { tokensIn: rec.tokensIn, tokensOut: rec.tokensOut }; } });
       if (ocall) {
         const oc = await judgeOutcomeDelivered({ request: String(body.message ?? ''), answer: (reply as { text: string }).text, expected: trace.expectedDelivers }, ocall).catch((e: unknown) => ({ judge: OUTCOME_CHECK_JUDGE, classes: {}, score: 0, ms: 0, error: e instanceof Error ? e.message : String(e) }));
-        (trace as { outcomeCheck?: unknown }).outcomeCheck = { judge: oc.judge.name, classes: oc.classes, score: oc.score, ms: oc.ms, ...(usage?.tokensIn !== undefined ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut ?? 0 } : {}), ...(oc.error ? { error: oc.error.slice(0, 200) } : {}) };
+        (trace as { outcomeCheck?: unknown }).outcomeCheck = { judge: oc.judge.name, classes: oc.classes, ...('requested' in oc ? { requested: oc.requested } : {}), score: oc.score, ms: oc.ms, ...(usage?.tokensIn !== undefined ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut ?? 0 } : {}), ...(oc.error ? { error: oc.error.slice(0, 200) } : {}) };
       }
     }
     if (variantReq?.toggles?.['quality/judge'] === 'on' && reply?.kind === 'answer' && typeof (reply as { text?: unknown }).text === 'string') {

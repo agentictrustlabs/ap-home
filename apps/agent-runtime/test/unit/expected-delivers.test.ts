@@ -12,6 +12,7 @@ const skills = [
 describe('expectedDeliversOf', () => {
   it('asks for the intermediate artifact and the whole, not its parts', () => {
     expect(expectedDeliversOf([{ tool: 'assess', for: `${C}DeploymentInventory` }, { tool: 'incident' }], skills).map((x) => x.iri)).toEqual([`${C}DeploymentInventory`, `${C}IncidentPlaybook`]);
+    expect(expectedDeliversOf([{ tool: 'assess', for: `${C}DeploymentInventory` }, { tool: 'incident' }], skills).map((x) => !!x.required)).toEqual([true, false]);
   });
   it('keeps a part whose whole the skill does not produce', () => {
     const lone = [{ id: 'x', produces: [{ iri: `${C}PlaybookStep`, label: 'Playbook Step', within: `${C}IncidentPlaybook` }] }];
