@@ -4923,7 +4923,7 @@ step is then handed to that agent under authority the person grants; leave it ou
             else if (arm === 'outcome') {
               // Spec 417 — the OUTCOME the person wants (one judged call: the result, and what the request supplies), then
               // the path to it by the data graph's arrows from what the asker holds. A chain runs as `$ref`-linked steps.
-              const r = await selectByOutcome(rest, skills, call, {}, { ...(lexicon ? { lexicon } : {}), ...(asker ? { asker } : {}) });
+              const r = await selectByOutcome(rest, skills, call, input.variant?.toggles?.['skill-selection/party-rule'] === 'off' ? { partyRule: false } : {}, { ...(lexicon ? { lexicon } : {}), ...(asker ? { asker } : {}) });
               trace.selection = { approach: 'outcome', ...r };
               plannerUsed = arm;
               if (r.chose && r.plan) {

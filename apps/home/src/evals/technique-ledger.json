@@ -1,0 +1,1590 @@
+{
+  "type": "ap.technique-ledger.v1",
+  "builtAt": "2026-09-28T00:13:44.858Z",
+  "rows": [
+    {
+      "technique": {
+        "id": "declared-utterances",
+        "name": "Declared utterances (rules)",
+        "ontologyDriven": false,
+        "spec": "415 A4",
+        "what": "Route by token overlap with the sentences each SKILL.md declares — no model.",
+        "comparisons": [
+          {
+            "experiment": "fresh-heldout-model-vs-declared-r1",
+            "baseline": "model",
+            "treatment": "declared"
+          },
+          {
+            "experiment": "stratum1-development-model-vs-declared-r2",
+            "baseline": "model",
+            "treatment": "declared"
+          }
+        ]
+      },
+      "comparisons": [
+        {
+          "experiment": "fresh-heldout-model-vs-declared-r1",
+          "baseline": "model",
+          "treatment": "declared",
+          "set": "sha256:d8291d250b4baa4c23408d1a62876e656988cedf2323bd452697ddf9568fa3d9",
+          "finishedAt": "2026-09-26T12:57:56.624Z",
+          "n": 48,
+          "quality": {
+            "metric": "selection",
+            "base": 0.8958,
+            "treat": 0.6042,
+            "delta": -0.2917,
+            "fixed": 4,
+            "broken": 18,
+            "p": 0.0043
+          },
+          "cost": {
+            "pickTokens": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "totalTokens": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "pickMs": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "askMs": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "stages": {}
+          },
+          "verdict": "worse"
+        }
+      ],
+      "verdict": "worse",
+      "missing": [
+        "stratum1-development-model-vs-declared-r2"
+      ]
+    },
+    {
+      "technique": {
+        "id": "selection-judge",
+        "name": "Selection by judgment (typed questions)",
+        "ontologyDriven": true,
+        "spec": "416",
+        "what": "A calibrated judge answers typed questions (choice over skills + none/clarify/several, fit yes-no per skill) instead of the planner choosing a tool.",
+        "comparisons": [
+          {
+            "experiment": "fresh2-after-repair-model-vs-judgment",
+            "baseline": "model",
+            "treatment": "judgment"
+          },
+          {
+            "experiment": "fresh3-after-repair-model-vs-judgment",
+            "baseline": "model",
+            "treatment": "judgment"
+          }
+        ]
+      },
+      "comparisons": [
+        {
+          "experiment": "fresh2-after-repair-model-vs-judgment",
+          "baseline": "model",
+          "treatment": "judgment",
+          "set": "sha256:1ef22799a146fc09067cecdada6ebdb4be2608b83205faaa8c2064ce2d7cf0ff",
+          "finishedAt": "2026-09-26T15:55:40.040Z",
+          "n": 34,
+          "quality": {
+            "metric": "selection",
+            "base": 1,
+            "treat": 0.9412,
+            "delta": -0.0588,
+            "fixed": 0,
+            "broken": 2,
+            "p": 0.5
+          },
+          "cost": {
+            "pickTokens": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "totalTokens": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "pickMs": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "askMs": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "stages": {}
+          },
+          "verdict": "same"
+        },
+        {
+          "experiment": "fresh3-after-repair-model-vs-judgment",
+          "baseline": "model",
+          "treatment": "judgment",
+          "set": "sha256:980cfcd7ed176304ee4fbbf354c9af4366b84f7a47c504443c4483096c6dd02b",
+          "finishedAt": "2026-09-26T16:14:48.241Z",
+          "n": 24,
+          "quality": {
+            "metric": "selection",
+            "base": 0.875,
+            "treat": 0.9167,
+            "delta": 0.0417,
+            "fixed": 3,
+            "broken": 2,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "totalTokens": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "pickMs": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "askMs": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "stages": {}
+          },
+          "verdict": "same"
+        }
+      ],
+      "verdict": "same",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "ontology-then-judgment",
+        "name": "Ontology narrows, judge picks",
+        "ontologyDriven": true,
+        "spec": "415 A4",
+        "what": "The request is grounded in the domain lexicon; skills covering the grounded classes (minus exclusions) are the judge's slate.",
+        "comparisons": [
+          {
+            "experiment": "fresh2-three-arms-item1",
+            "baseline": "judgment",
+            "treatment": "ontology+judgment"
+          },
+          {
+            "experiment": "fresh3-three-arms-item1",
+            "baseline": "judgment",
+            "treatment": "ontology+judgment"
+          }
+        ]
+      },
+      "comparisons": [
+        {
+          "experiment": "fresh2-three-arms-item1",
+          "baseline": "judgment",
+          "treatment": "ontology+judgment",
+          "set": "sha256:1ef22799a146fc09067cecdada6ebdb4be2608b83205faaa8c2064ce2d7cf0ff",
+          "finishedAt": "2026-09-26T19:00:38.723Z",
+          "n": 34,
+          "quality": {
+            "metric": "selection",
+            "base": 1,
+            "treat": 0.7647,
+            "delta": -0.2353,
+            "fixed": 0,
+            "broken": 8,
+            "p": 0.0078
+          },
+          "cost": {
+            "pickTokens": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "totalTokens": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "pickMs": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "askMs": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "stages": {}
+          },
+          "verdict": "worse"
+        },
+        {
+          "experiment": "fresh3-three-arms-item1",
+          "baseline": "judgment",
+          "treatment": "ontology+judgment",
+          "set": "sha256:980cfcd7ed176304ee4fbbf354c9af4366b84f7a47c504443c4483096c6dd02b",
+          "finishedAt": "2026-09-26T20:38:34.232Z",
+          "n": 24,
+          "quality": {
+            "metric": "selection",
+            "base": 1,
+            "treat": 0.7083,
+            "delta": -0.2917,
+            "fixed": 0,
+            "broken": 7,
+            "p": 0.0156
+          },
+          "cost": {
+            "pickTokens": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "totalTokens": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "pickMs": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "askMs": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "stages": {}
+          },
+          "verdict": "worse"
+        }
+      ],
+      "verdict": "worse",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "ontology-only",
+        "name": "Ontology alone (no model)",
+        "ontologyDriven": true,
+        "spec": "415 A4",
+        "what": "Grounding + coverage/exclusion rule decides alone; no model call.",
+        "comparisons": [
+          {
+            "experiment": "fresh2-three-arms-item1",
+            "baseline": "judgment",
+            "treatment": "ontology"
+          },
+          {
+            "experiment": "fresh3-three-arms-item1",
+            "baseline": "judgment",
+            "treatment": "ontology"
+          }
+        ]
+      },
+      "comparisons": [
+        {
+          "experiment": "fresh2-three-arms-item1",
+          "baseline": "judgment",
+          "treatment": "ontology",
+          "set": "sha256:1ef22799a146fc09067cecdada6ebdb4be2608b83205faaa8c2064ce2d7cf0ff",
+          "finishedAt": "2026-09-26T19:00:38.723Z",
+          "n": 34,
+          "quality": {
+            "metric": "selection",
+            "base": 1,
+            "treat": 0.6471,
+            "delta": -0.3529,
+            "fixed": 0,
+            "broken": 12,
+            "p": 0.0005
+          },
+          "cost": {
+            "pickTokens": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "totalTokens": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "pickMs": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "askMs": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "stages": {}
+          },
+          "verdict": "worse"
+        },
+        {
+          "experiment": "fresh3-three-arms-item1",
+          "baseline": "judgment",
+          "treatment": "ontology",
+          "set": "sha256:980cfcd7ed176304ee4fbbf354c9af4366b84f7a47c504443c4483096c6dd02b",
+          "finishedAt": "2026-09-26T20:38:34.232Z",
+          "n": 24,
+          "quality": {
+            "metric": "selection",
+            "base": 1,
+            "treat": 0.7083,
+            "delta": -0.2917,
+            "fixed": 0,
+            "broken": 7,
+            "p": 0.0156
+          },
+          "cost": {
+            "pickTokens": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "totalTokens": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "pickMs": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "askMs": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "stages": {}
+          },
+          "verdict": "worse"
+        }
+      ],
+      "verdict": "worse",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "propose-then-judgment",
+        "name": "Ontology proposes, excludes veto, judge decides",
+        "ontologyDriven": true,
+        "spec": "416 W1",
+        "what": "Recall-first proposal from grounding (direct → neighbourhood → catalog), excluded classes veto, the judge decides among the proposed.",
+        "comparisons": [
+          {
+            "experiment": "fresh4-propose-vs-judgment-w1",
+            "baseline": "judge-gemini",
+            "treatment": "propose-gemini"
+          }
+        ]
+      },
+      "comparisons": [
+        {
+          "experiment": "fresh4-propose-vs-judgment-w1",
+          "baseline": "judge-gemini",
+          "treatment": "propose-gemini",
+          "set": "sha256:25621e6fabb5efcb0b02b00622023516ec73d2a86cbff0c3c02927e88a4aa9ea",
+          "finishedAt": "2026-09-27T05:54:26.458Z",
+          "n": 32,
+          "quality": {
+            "metric": "selection",
+            "base": 1,
+            "treat": 0.9375,
+            "delta": -0.0625,
+            "fixed": 0,
+            "broken": 2,
+            "p": 0.5
+          },
+          "cost": {
+            "pickTokens": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "totalTokens": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "pickMs": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "askMs": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "stages": {}
+          },
+          "verdict": "same"
+        }
+      ],
+      "verdict": "same",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "conformal-acceptance",
+        "name": "Conformal acceptance",
+        "ontologyDriven": false,
+        "spec": "416 W3",
+        "what": "Temperature-scaled judge distribution + a conformal prediction set: one skill routes, several asks, none declines.",
+        "comparisons": [
+          {
+            "experiment": "fresh2-gemini-margin-vs-conformal-w3",
+            "baseline": "judge-gemini",
+            "treatment": "judge-gemini-conformal"
+          }
+        ]
+      },
+      "comparisons": [
+        {
+          "experiment": "fresh2-gemini-margin-vs-conformal-w3",
+          "baseline": "judge-gemini",
+          "treatment": "judge-gemini-conformal",
+          "set": "sha256:1ef22799a146fc09067cecdada6ebdb4be2608b83205faaa8c2064ce2d7cf0ff",
+          "finishedAt": "2026-09-27T13:09:21.593Z",
+          "n": 34,
+          "quality": {
+            "metric": "selection",
+            "base": 1,
+            "treat": 1,
+            "delta": 0,
+            "fixed": 0,
+            "broken": 0,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "totalTokens": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "pickMs": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "askMs": {
+              "base": null,
+              "treat": null,
+              "delta": null,
+              "deltaPct": null
+            },
+            "stages": {}
+          },
+          "verdict": "same"
+        }
+      ],
+      "verdict": "same",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "default-skill-stage",
+        "name": "Fast skill stage before the planner",
+        "ontologyDriven": true,
+        "spec": "416 §4f",
+        "what": "One light-model call over the typed reading and ontology skill cards picks first; 'none' hands the ask to the planner over the other tools.",
+        "comparisons": [
+          {
+            "experiment": "fresh4-default-stage-vs-planner",
+            "baseline": "planner-only",
+            "treatment": "default-stage"
+          },
+          {
+            "experiment": "fresh5-default-stage-vs-planner",
+            "baseline": "planner-only",
+            "treatment": "default-stage"
+          },
+          {
+            "experiment": "fresh4-iter2b-stage",
+            "baseline": "stage-off",
+            "treatment": "stage-on"
+          },
+          {
+            "experiment": "fresh5-iter2b-stage",
+            "baseline": "stage-off",
+            "treatment": "stage-on"
+          }
+        ]
+      },
+      "comparisons": [
+        {
+          "experiment": "fresh5-default-stage-vs-planner",
+          "baseline": "planner-only",
+          "treatment": "default-stage",
+          "set": "sha256:e54861d24c18426773ee4f444710075e20e14e997fb63df72d5583c4d6da3225",
+          "finishedAt": "2026-09-27T18:07:35.301Z",
+          "n": 28,
+          "quality": {
+            "metric": "selection",
+            "base": 0.4643,
+            "treat": 0.4286,
+            "delta": -0.0357,
+            "fixed": 0,
+            "broken": 1,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 12898,
+              "treat": 1728,
+              "delta": -11170,
+              "deltaPct": -86.6,
+              "ci": [
+                -11204.5,
+                1651.5
+              ]
+            },
+            "totalTokens": {
+              "base": 15994,
+              "treat": 8318.5,
+              "delta": -7675.5,
+              "deltaPct": -48,
+              "ci": [
+                -11189.5,
+                1656
+              ]
+            },
+            "pickMs": {
+              "base": 863,
+              "treat": 1331,
+              "delta": 468,
+              "deltaPct": 54.2,
+              "ci": [
+                175,
+                982.5
+              ]
+            },
+            "askMs": {
+              "base": 12627,
+              "treat": 14897.5,
+              "delta": 2270.5,
+              "deltaPct": 18,
+              "ci": [
+                139.5,
+                2037
+              ]
+            },
+            "stages": {}
+          },
+          "verdict": "same-quality-costs-more"
+        },
+        {
+          "experiment": "fresh4-default-stage-vs-planner",
+          "baseline": "planner-only",
+          "treatment": "default-stage",
+          "set": "sha256:25621e6fabb5efcb0b02b00622023516ec73d2a86cbff0c3c02927e88a4aa9ea",
+          "finishedAt": "2026-09-27T18:11:47.564Z",
+          "n": 32,
+          "quality": {
+            "metric": "selection",
+            "base": 1,
+            "treat": 0.9688,
+            "delta": -0.0313,
+            "fixed": 0,
+            "broken": 1,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 12907.5,
+              "treat": 1746.5,
+              "delta": -11161,
+              "deltaPct": -86.5,
+              "ci": [
+                -11201.5,
+                1664.5
+              ]
+            },
+            "totalTokens": {
+              "base": 15909.5,
+              "treat": 8369,
+              "delta": -7540.5,
+              "deltaPct": -47.4,
+              "ci": [
+                -11187,
+                1664.5
+              ]
+            },
+            "pickMs": {
+              "base": 865.5,
+              "treat": 1107.5,
+              "delta": 242,
+              "deltaPct": 28,
+              "ci": [
+                111,
+                795.5
+              ]
+            },
+            "askMs": {
+              "base": 13022.5,
+              "treat": 12342.5,
+              "delta": -680,
+              "deltaPct": -5.2,
+              "ci": [
+                -660,
+                1075.5
+              ]
+            },
+            "stages": {}
+          },
+          "verdict": "same"
+        },
+        {
+          "experiment": "fresh5-iter2b-stage",
+          "baseline": "stage-off",
+          "treatment": "stage-on",
+          "set": "sha256:e54861d24c18426773ee4f444710075e20e14e997fb63df72d5583c4d6da3225",
+          "finishedAt": "2026-09-27T19:14:29.757Z",
+          "n": 28,
+          "quality": {
+            "metric": "selection",
+            "base": 0.4643,
+            "treat": 0.7143,
+            "delta": 0.25,
+            "fixed": 7,
+            "broken": 0,
+            "p": 0.0156
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 17507.5,
+              "treat": 1735,
+              "delta": -15772.5,
+              "deltaPct": -90.1,
+              "ci": [
+                -15832,
+                -1980
+              ]
+            },
+            "totalTokens": {
+              "base": 21585.5,
+              "treat": 7088,
+              "delta": -14497.5,
+              "deltaPct": -67.2,
+              "ci": [
+                -15973,
+                -6404.5
+              ]
+            },
+            "pickMs": {
+              "base": 897.5,
+              "treat": 1376,
+              "delta": 478.5,
+              "deltaPct": 53.3,
+              "ci": [
+                249,
+                789
+              ]
+            },
+            "askMs": {
+              "base": 16161,
+              "treat": 13114,
+              "delta": -3047,
+              "deltaPct": -18.9,
+              "ci": [
+                -2260.5,
+                1346.5
+              ]
+            },
+            "stages": {}
+          },
+          "verdict": "better-and-cheaper"
+        },
+        {
+          "experiment": "fresh4-iter2b-stage",
+          "baseline": "stage-off",
+          "treatment": "stage-on",
+          "set": "sha256:25621e6fabb5efcb0b02b00622023516ec73d2a86cbff0c3c02927e88a4aa9ea",
+          "finishedAt": "2026-09-27T19:17:51.178Z",
+          "n": 32,
+          "quality": {
+            "metric": "selection",
+            "base": 0.9375,
+            "treat": 0.9688,
+            "delta": 0.0313,
+            "fixed": 2,
+            "broken": 1,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 17523,
+              "treat": 1753,
+              "delta": -15770,
+              "deltaPct": -90,
+              "ci": [
+                -15824.5,
+                -8848.5
+              ]
+            },
+            "totalTokens": {
+              "base": 21381,
+              "treat": 6813.5,
+              "delta": -14567.5,
+              "deltaPct": -68.1,
+              "ci": [
+                -15818.5,
+                -8031
+              ]
+            },
+            "pickMs": {
+              "base": 943,
+              "treat": 1195,
+              "delta": 252,
+              "deltaPct": 26.7,
+              "ci": [
+                45,
+                632.5
+              ]
+            },
+            "askMs": {
+              "base": 15892,
+              "treat": 15999.5,
+              "delta": 107.5,
+              "deltaPct": 0.7,
+              "ci": [
+                -2388.5,
+                1269
+              ]
+            },
+            "stages": {}
+          },
+          "verdict": "same-quality-cheaper"
+        }
+      ],
+      "verdict": "same-quality-cheaper",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "light-answer-model",
+        "name": "Lighter answer model",
+        "ontologyDriven": false,
+        "spec": "416 §4h",
+        "what": "The instruction skill answers with the provider's light model instead of the default.",
+        "comparisons": [
+          {
+            "experiment": "fresh2-answer-model-quality",
+            "baseline": "ans-default",
+            "treatment": "ans-light"
+          },
+          {
+            "experiment": "fresh4-answer-model-quality",
+            "baseline": "ans-default",
+            "treatment": "ans-light"
+          }
+        ],
+        "preferences": [
+          {
+            "experiment": "fresh2-pairwise-default-vs-light",
+            "variant": "pairwise",
+            "baselineKey": "default",
+            "treatmentKey": "light"
+          },
+          {
+            "experiment": "fresh4-pairwise-default-vs-light",
+            "variant": "pairwise",
+            "baselineKey": "default",
+            "treatmentKey": "light"
+          }
+        ]
+      },
+      "comparisons": [
+        {
+          "experiment": "fresh4-answer-model-quality",
+          "baseline": "ans-default",
+          "treatment": "ans-light",
+          "set": "sha256:25621e6fabb5efcb0b02b00622023516ec73d2a86cbff0c3c02927e88a4aa9ea",
+          "finishedAt": "2026-09-27T22:14:17.953Z",
+          "n": 32,
+          "quality": {
+            "metric": "selection",
+            "base": 0.9688,
+            "treat": 0.9688,
+            "delta": 0,
+            "fixed": 0,
+            "broken": 0,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1753,
+              "treat": 1754,
+              "delta": 1,
+              "deltaPct": 0.1,
+              "ci": [
+                0,
+                2
+              ]
+            },
+            "totalTokens": {
+              "base": 6985.5,
+              "treat": 6613.5,
+              "delta": -372,
+              "deltaPct": -5.3,
+              "ci": [
+                -446,
+                0
+              ]
+            },
+            "pickMs": {
+              "base": 1199,
+              "treat": 1226.5,
+              "delta": 27.5,
+              "deltaPct": 2.3,
+              "ci": [
+                -68,
+                53
+              ]
+            },
+            "askMs": {
+              "base": 13906,
+              "treat": 11145.5,
+              "delta": -2760.5,
+              "deltaPct": -19.9,
+              "ci": [
+                -4541.5,
+                -1523
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1807,
+                "treat": 1633,
+                "delta": -174,
+                "deltaPct": -9.6,
+                "ci": [
+                  -296.5,
+                  -45
+                ]
+              },
+              "phase:pre-run": {
+                "base": 1965.5,
+                "treat": 1685.5,
+                "delta": -280,
+                "deltaPct": -14.2,
+                "ci": [
+                  -621.5,
+                  87
+                ]
+              },
+              "phase:run": {
+                "base": 10712.5,
+                "treat": 7150.5,
+                "delta": -3562,
+                "deltaPct": -33.3,
+                "ci": [
+                  -4195,
+                  -1568
+                ]
+              }
+            }
+          },
+          "answer": {
+            "rubric": {
+              "base": 1,
+              "treat": 1,
+              "delta": 0,
+              "deltaPct": 0,
+              "ci": [
+                0,
+                0
+              ]
+            }
+          },
+          "verdict": "same-quality-cheaper"
+        },
+        {
+          "experiment": "fresh2-answer-model-quality",
+          "baseline": "ans-default",
+          "treatment": "ans-light",
+          "set": "sha256:1ef22799a146fc09067cecdada6ebdb4be2608b83205faaa8c2064ce2d7cf0ff",
+          "finishedAt": "2026-09-27T22:15:42.820Z",
+          "n": 34,
+          "quality": {
+            "metric": "selection",
+            "base": 1,
+            "treat": 1,
+            "delta": 0,
+            "fixed": 0,
+            "broken": 0,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1761,
+              "treat": 1761,
+              "delta": 0,
+              "deltaPct": 0,
+              "ci": [
+                0,
+                0
+              ]
+            },
+            "totalTokens": {
+              "base": 7456,
+              "treat": 6552.5,
+              "delta": -903.5,
+              "deltaPct": -12.1,
+              "ci": [
+                -265,
+                -17
+              ]
+            },
+            "pickMs": {
+              "base": 1449,
+              "treat": 1585.5,
+              "delta": 136.5,
+              "deltaPct": 9.4,
+              "ci": [
+                -144,
+                227
+              ]
+            },
+            "askMs": {
+              "base": 11554.5,
+              "treat": 7684,
+              "delta": -3870.5,
+              "deltaPct": -33.5,
+              "ci": [
+                -4215,
+                -279.5
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1647,
+                "treat": 1606.5,
+                "delta": -40.5,
+                "deltaPct": -2.5,
+                "ci": [
+                  -126,
+                  70
+                ]
+              },
+              "phase:pre-run": {
+                "base": 2174,
+                "treat": 2148,
+                "delta": -26,
+                "deltaPct": -1.2,
+                "ci": [
+                  -594,
+                  259
+                ]
+              },
+              "phase:run": {
+                "base": 6601,
+                "treat": 3995,
+                "delta": -2606,
+                "deltaPct": -39.5,
+                "ci": [
+                  -3826,
+                  -145
+                ]
+              }
+            }
+          },
+          "answer": {
+            "rubric": {
+              "base": 1,
+              "treat": 1,
+              "delta": 0,
+              "deltaPct": 0,
+              "ci": [
+                0,
+                0
+              ]
+            }
+          },
+          "verdict": "same-quality-cheaper"
+        }
+      ],
+      "preferences": [
+        {
+          "experiment": "fresh2-pairwise-default-vs-light",
+          "n": 18,
+          "treatmentWins": 8,
+          "baselineWins": 7,
+          "ties": 3,
+          "p": 1
+        },
+        {
+          "experiment": "fresh4-pairwise-default-vs-light",
+          "n": 21,
+          "treatmentWins": 6,
+          "baselineWins": 14,
+          "ties": 1,
+          "p": 0.1153
+        }
+      ],
+      "verdict": "same-quality-cheaper",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "seeded-asker-context",
+        "name": "The asker's context in the reading",
+        "ontologyDriven": true,
+        "spec": "416 §4h",
+        "what": "The judge is told the asker's recent skills and memory tags (seeded starting states), not only their standing.",
+        "comparisons": [
+          {
+            "experiment": "fresh6-asker-context",
+            "baseline": "ctx-relation",
+            "treatment": "ctx-seeded"
+          }
+        ]
+      },
+      "comparisons": [
+        {
+          "experiment": "fresh6-asker-context",
+          "baseline": "ctx-relation",
+          "treatment": "ctx-seeded",
+          "set": "sha256:a7c35bcc7db5d8f9585b52576944ac94bc78d60b4b4e4fdeaa4b48db9c23457a",
+          "finishedAt": "2026-09-27T22:33:39.786Z",
+          "n": 19,
+          "quality": {
+            "metric": "selection",
+            "base": 0.3684,
+            "treat": 0.9474,
+            "delta": 0.5789,
+            "fixed": 11,
+            "broken": 0,
+            "p": 0.001
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1709,
+              "treat": 1741,
+              "delta": 32,
+              "deltaPct": 1.9,
+              "ci": [
+                -155,
+                38
+              ]
+            },
+            "totalTokens": {
+              "base": 6609,
+              "treat": 5690,
+              "delta": -919,
+              "deltaPct": -13.9,
+              "ci": [
+                -1466,
+                150
+              ]
+            },
+            "pickMs": {
+              "base": 1081,
+              "treat": 1085,
+              "delta": 4,
+              "deltaPct": 0.4,
+              "ci": [
+                -427,
+                102
+              ]
+            },
+            "askMs": {
+              "base": 14008,
+              "treat": 12187,
+              "delta": -1821,
+              "deltaPct": -13,
+              "ci": [
+                -3849,
+                886
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1700,
+                "treat": 1614,
+                "delta": -86,
+                "deltaPct": -5.1,
+                "ci": [
+                  -483,
+                  127
+                ]
+              },
+              "phase:pre-run": {
+                "base": 2050,
+                "treat": 1797,
+                "delta": -253,
+                "deltaPct": -12.3,
+                "ci": [
+                  -968,
+                  474
+                ]
+              },
+              "phase:run": {
+                "base": 9219,
+                "treat": 7949,
+                "delta": -1270,
+                "deltaPct": -13.8,
+                "ci": [
+                  -2821,
+                  2992
+                ]
+              }
+            }
+          },
+          "verdict": "better"
+        }
+      ],
+      "verdict": "better",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "outcome-chains",
+        "name": "Outcome-directed intent (chains by dataflow)",
+        "ontologyDriven": true,
+        "spec": "417",
+        "what": "The judge picks the outcome; a rule over produces/consumes builds the chain, prunes held inputs, names missing ones.",
+        "comparisons": [
+          {
+            "experiment": "fresh7-outcome-b",
+            "baseline": "one-skill",
+            "treatment": "outcome"
+          },
+          {
+            "experiment": "fresh8-coverage",
+            "baseline": "one-skill",
+            "treatment": "outcome"
+          }
+        ]
+      },
+      "comparisons": [
+        {
+          "experiment": "fresh7-outcome-b",
+          "baseline": "one-skill",
+          "treatment": "outcome",
+          "set": "sha256:f487af4a8a8563da110651bdb37ed863a340dad5f80acbfbaf6cc8a4f7b3848d",
+          "finishedAt": "2026-09-27T23:25:54.167Z",
+          "n": 36,
+          "quality": {
+            "metric": "plan-exact",
+            "base": 0.8889,
+            "treat": 0.9167,
+            "delta": 0.0278,
+            "fixed": 3,
+            "broken": 2,
+            "p": 1
+          },
+          "cost": {
+            "pickTokens": {
+              "base": 1724,
+              "treat": 4718.5,
+              "delta": 2994.5,
+              "deltaPct": 173.7,
+              "ci": [
+                2931,
+                3053
+              ]
+            },
+            "totalTokens": {
+              "base": 1724,
+              "treat": 4718.5,
+              "delta": 2994.5,
+              "deltaPct": 173.7,
+              "ci": [
+                2931,
+                3053
+              ]
+            },
+            "pickMs": {
+              "base": 1042.5,
+              "treat": 2093,
+              "delta": 1050.5,
+              "deltaPct": 100.8,
+              "ci": [
+                761,
+                1113
+              ]
+            },
+            "askMs": {
+              "base": 4845.5,
+              "treat": 5805,
+              "delta": 959.5,
+              "deltaPct": 19.8,
+              "ci": [
+                -524,
+                1365
+              ]
+            },
+            "stages": {
+              "phase:post-run": {
+                "base": 1538.5,
+                "treat": 1499,
+                "delta": -39.5,
+                "deltaPct": -2.6,
+                "ci": [
+                  -84,
+                  90.5
+                ]
+              },
+              "phase:pre-run": {
+                "base": 2084.5,
+                "treat": 2050.5,
+                "delta": -34,
+                "deltaPct": -1.6,
+                "ci": [
+                  -160,
+                  68.5
+                ]
+              },
+              "phase:run": {
+                "base": 1251.5,
+                "treat": 2265.5,
+                "delta": 1014,
+                "deltaPct": 81,
+                "ci": [
+                  663.5,
+                  1252.5
+                ]
+              }
+            }
+          },
+          "verdict": "same-quality-costs-more"
+        }
+      ],
+      "verdict": "same-quality-costs-more",
+      "missing": [
+        "fresh8-coverage"
+      ]
+    },
+    {
+      "technique": {
+        "id": "party-stance-rule",
+        "name": "Whose it is decides the arrow",
+        "ontologyDriven": true,
+        "spec": "418 §1",
+        "what": "An arrow whose ends are both party-qualified is decided by rule (our own scorecard never feeds a grantee's diligence) — no question asked.",
+        "comparisons": [
+          {
+            "experiment": "fresh7-party-rule",
+            "baseline": "outcome-ask-arrows",
+            "treatment": "outcome-party-rule"
+          }
+        ]
+      },
+      "comparisons": [],
+      "verdict": "inconclusive",
+      "missing": [
+        "fresh7-party-rule"
+      ]
+    },
+    {
+      "technique": {
+        "id": "async-recording",
+        "name": "Recording off the reply's critical path; reads overlapped",
+        "ontologyDriven": false,
+        "spec": "418 §4",
+        "source": "LLMCompiler (arXiv 2312.04511) scheduling; our stage marks (pre-run ~1.3 s, post-run ~2 s)",
+        "what": "Reply as soon as the run ends; the record/provenance commit durably after (waitUntil + run ref); the asker-context and held-class reads start alongside the lexicon reading.",
+        "plannedAb": "same set, sync vs async recording: p50/p95 ask ms and phase:post-run; plan-exact unchanged; zero replies citing an uncommitted run.",
+        "comparisons": []
+      },
+      "comparisons": [],
+      "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "stable-prefix-cache",
+        "name": "Stable prompt prefix for provider caching",
+        "ontologyDriven": true,
+        "spec": "418 §4",
+        "source": "Gemini implicit caching (90% discount on cached prefix)",
+        "what": "The judge's instructions and the skills' ontology result cards first, byte-stable; the typed reading last — so the prefix is served from the provider's cache.",
+        "plannedAb": "cachedIn tokens, pick ms, plan-exact unchanged — current vs reordered.",
+        "comparisons": []
+      },
+      "comparisons": [],
+      "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "two-sample-agreement",
+        "name": "Two-sample agreement + conformal threshold",
+        "ontologyDriven": false,
+        "spec": "416 W3",
+        "source": "'Two samples are enough' (OpenReview), CISC (ACL 2025), CP-Router",
+        "what": "Without logprobs, two parallel samples of the pick; their agreement is the confidence, thresholded by split-conformal calibration; disagreement holds or asks.",
+        "plannedAb": "macro TA, hold rate and precision-at-coverage on collisions / near-negatives / clarify; pick tokens ×2, pick ms ~same.",
+        "comparisons": []
+      },
+      "comparisons": [],
+      "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "ontology-pagerank-prefilter",
+        "name": "Personalized PageRank over the ontology to narrow the cards",
+        "ontologyDriven": true,
+        "spec": "418 §4",
+        "source": "HippoRAG 2 (ICML 2025); RAG-MCP (2505.03275)",
+        "what": "Seed at the grounded classes and the asker's context, spread over cluster/class/dataflow edges to the skills; the judge sees the top-k cards + none + collision partners.",
+        "plannedAb": "offline Recall@k of the gold skill (≥ 0.99 required), then live pick tokens and plan-exact, all vs top-4 vs top-6.",
+        "comparisons": []
+      },
+      "comparisons": [],
+      "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "reading-keyed-decision-cache",
+        "name": "Decision cache keyed by the typed reading",
+        "ontologyDriven": true,
+        "spec": "418 §4",
+        "source": "Agentic Plan Caching (NeurIPS 2025): −50% cost, −27% latency",
+        "what": "The pick's answers cached by a canonical signature of the reading (grounded classes, party, held classes, recent-skill class); the chain rule re-runs on a hit; authority is always fresh.",
+        "plannedAb": "replay recorded runs: hit rate, plan-exact on hits vs misses, p50 pick ms.",
+        "comparisons": []
+      },
+      "comparisons": [],
+      "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "parallel-chain-steps",
+        "name": "Independent chain steps in parallel",
+        "ontologyDriven": true,
+        "spec": "418 §4",
+        "source": "LLMCompiler",
+        "what": "The dataflow graph is the dependency graph: producers with no edge between them run concurrently (e.g. two inputs of one outcome).",
+        "plannedAb": "p50 ask ms on chain cases with answers on; plan-exact unchanged.",
+        "comparisons": []
+      },
+      "comparisons": [],
+      "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "shacl-validated-output",
+        "name": "SHACL-validated skill output with one repair",
+        "ontologyDriven": true,
+        "spec": "418 §4",
+        "source": "OntoLogX (2510.01409), VirtualSet (2607.18821)",
+        "what": "A skill's answer is checked against the shape of the class it produces; a failure gets one repair call. Structure, never permission.",
+        "plannedAb": "shape conformance rate, repair rate, pairwise answer preference.",
+        "comparisons": []
+      },
+      "comparisons": [],
+      "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "declared-preconditions",
+        "name": "Declared preconditions with named failure reasons",
+        "ontologyDriven": true,
+        "spec": "418 §4",
+        "source": "Palantir Action Types — submission criteria",
+        "what": "A SKILL.md declares preconditions over the asker's typed state (held classes, party, role); checked by rule before any model call, refusing with the named reason.",
+        "plannedAb": "a failing-precondition negative twin per skill: right refusal with the right reason (target 100%), tokens per refusal ≈ 0.",
+        "comparisons": []
+      },
+      "comparisons": [],
+      "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "verified-exemplars",
+        "name": "Verified exemplars on skill cards",
+        "ontologyDriven": false,
+        "spec": "418 §4",
+        "source": "Snowflake semantic views — verified queries; Agent Workflow Memory / ReasoningBank",
+        "what": "Adjudicated request→skill pairs (development split only) retrieved into the judge's prompt, including recorded failures as 'not X because …'.",
+        "plannedAb": "held-out top-1 and plan-exact on collisions/near-negatives, extra pick tokens — on vs off.",
+        "comparisons": []
+      },
+      "comparisons": [],
+      "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "lazy-verbalization",
+        "name": "Lazy ontology verbalization",
+        "ontologyDriven": true,
+        "spec": "418 §4",
+        "source": "RelationalAI RAI_VERBALIZE_MODEL / RAI_EXPLAIN_CONCEPT; Palantir property scoping",
+        "what": "The judge gets short skill cards; a concept's full explanation (its rules, excludes, neighbours) is fetched only for the top candidates on a second, rare call.",
+        "plannedAb": "pick tokens, p50/p95 pick ms, plan-exact non-inferiority.",
+        "comparisons": []
+      },
+      "comparisons": [],
+      "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "dry-run-chains",
+        "name": "Dry-run chains against a snapshot",
+        "ontologyDriven": false,
+        "spec": "418 §4",
+        "source": "Palantir branching action types",
+        "what": "A chain runs end to end against a vault snapshot with external effects disabled, so each step's input/output is judged without side effects.",
+        "plannedAb": "step-level input/output correctness on the chain cases of held-out 7 and 8.",
+        "comparisons": []
+      },
+      "comparisons": [],
+      "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "argument-correctness",
+        "name": "Per-step argument correctness as its own metric",
+        "ontologyDriven": true,
+        "spec": "418 §4",
+        "source": "SAP AI Agent Hub tool-call correctness; Salesforce Testing Center",
+        "what": "Each step's bound arguments (the material passed along a chain, held records named, missing classes asked) scored apart from the skill choice.",
+        "plannedAb": "binding-error rate vs selection-error rate on chain and held-input cases.",
+        "comparisons": []
+      },
+      "comparisons": [],
+      "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "tbox-subsetting",
+        "name": "Per-request T-box subsetting",
+        "ontologyDriven": true,
+        "spec": "418 §4",
+        "source": "TrustGraph ontology_selector (top-k + superclass/domain-range closure); Stardog schema agent; metaphactory reduction/import semantics",
+        "what": "Embed classes/properties; per request take the top-k plus the closure over superclasses and the produces/consumes neighbours the dataflow rule needs; only that subset enters the judge's reading.",
+        "plannedAb": "held-out 7/8: plan-exact, chains, missing named; pick tokens; p50/p95 pick ms.",
+        "comparisons": []
+      },
+      "comparisons": [],
+      "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "record-rejected-candidates",
+        "name": "Rejected candidates and distributions on the run's provenance",
+        "ontologyDriven": false,
+        "spec": "418 §3",
+        "source": "TrustGraph tg:toolCandidate / tg:llmDurationMs",
+        "what": "Each selection records the candidates offered, the runner-up and the judge's distribution on the PROV record (not only on the reply) — retrieval failure vs judge failure becomes separable.",
+        "plannedAb": "share of wrong picks where gold was offered; no runtime cost (ms delta ≈ 0).",
+        "comparisons": []
+      },
+      "comparisons": [],
+      "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "steps-score",
+        "name": "Steps score against reference chains",
+        "ontologyDriven": true,
+        "spec": "418 §2",
+        "source": "Ontotext graphrag-eval Steps Score",
+        "what": "Chain quality as exact match AND edit distance to the gold plan (from the A-box tests), reported beside plan-exact — partial credit for a chain one step off.",
+        "plannedAb": "measurement only: steps-score distribution per variant on held-out 7/8.",
+        "comparisons": []
+      },
+      "comparisons": [],
+      "verdict": "planned",
+      "missing": []
+    },
+    {
+      "technique": {
+        "id": "reranker-shortlist",
+        "name": "Small reranker shortlist ahead of the judge",
+        "ontologyDriven": false,
+        "spec": "418 §4",
+        "source": "TrustGraph (flashrank cross-encoder replaced LLM edge scoring)",
+        "what": "A cross-encoder/embedding reranker over skill cards shortlists the judge's options; the judge sees top-k + none + collision partners.",
+        "plannedAb": "Recall@k of gold (≥ 0.99), then pick tokens and plan-exact live.",
+        "comparisons": []
+      },
+      "comparisons": [],
+      "verdict": "planned",
+      "missing": []
+    }
+  ],
+  "rule": "Quality moves when the paired McNemar test gives p < 0.05 (else \"same\"). Cost moves when the paired bootstrap 95% interval of the median change in tokens-to-pick or the ask's time excludes 0 AND the change is at least 10%. The row's verdict is the latest comparison's; \"inconclusive\" when fewer than 8 paired cases."
+}
