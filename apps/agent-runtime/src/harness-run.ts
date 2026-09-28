@@ -5018,7 +5018,7 @@ step is then handed to that agent under authority the person grants; leave it ou
               const planMode = input.variant?.toggles?.['skill-selection/plan'] ?? ((env as { SKILL_SELECTION_PLAN?: string }).SKILL_SELECTION_PLAN?.trim() || 'questions');
               if (stageDefault === 'selective' && skills.some((x) => x.consumes?.length) && planMode === 'choice') {
                 const pc = await choosePlanAround(rest, r.chose, skills, call, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(asker ? { asker } : {}) });
-                trace.selection = { approach: 'outcome-selective', chose: r.chose, distribution: r.distribution, judge: r.judge, asked: pc.asked, plan: pc.plan, supplied: {}, planJudge: pc.judge };
+                trace.selection = { approach: 'outcome-selective', chose: r.chose, distribution: r.distribution, judge: r.judge, ...(r.reading ? { reading: r.reading } : {}), asked: pc.asked, plan: pc.plan, supplied: {}, planJudge: pc.judge };
                 const labels = new Map([...(playbook?.domainLexicon ?? []).map((e) => [e.iri, e.label] as const)]);
                 const steps = outcomeSteps(pc.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri);
                 return withSpecialists({ steps, rationale: `skill stage (plan choice): ${pc.chosen.steps.join(' → ')}${pc.asked ? '' : ' (no plan call)'}` }, playbook?.specialists, pin.tools);
@@ -5026,7 +5026,7 @@ step is then handed to that agent under authority the person grants; leave it ou
               if (stageDefault === 'selective' && skills.some((x) => x.consumes?.length)) {
                 const r2 = await planForPicked(rest, r.chose, skills, call, { ...(input.variant?.toggles?.['skill-selection/downstream'] === 'on' ? { downstream: true } : {}), ...(input.variant?.toggles?.['skill-selection/absence'] === 'v2' ? { absenceWording: 'v2' as const } : {}) }, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(asker ? { asker } : {}) });
                 const { judge: planJudge, ...plan2 } = r2;
-                trace.selection = { approach: 'outcome-selective', chose: r.chose, distribution: r.distribution, judge: r.judge, ...plan2, planJudge };
+                trace.selection = { approach: 'outcome-selective', chose: r.chose, distribution: r.distribution, judge: r.judge, ...(r.reading ? { reading: r.reading } : {}), ...plan2, planJudge };
                 const labels = new Map([...(playbook?.domainLexicon ?? []).map((e) => [e.iri, e.label] as const)]);
                 const steps = outcomeSteps(r2.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri, { briefIntermediate: input.variant?.toggles?.['skill-selection/intermediate'] === 'brief' });
                 return withSpecialists({ steps, rationale: `skill stage (selective): ${r2.plan.steps.map((x) => x.tool).join(' → ')}${r2.asked ? '' : ' (no dataflow call)'}` }, playbook?.specialists, pin.tools);
