@@ -11,7 +11,7 @@ interface Comparison { experiment: string; baseline: string; treatment: string; 
   quality: { metric: string; base: number; treat: number; delta: number; fixed: number; broken: number; p: number };
   cost: { pickTokens: Cost; totalTokens: Cost; pickMs: Cost; askMs: Cost; stages: Record<string, Cost> }; verdict: string }
 interface Row { technique: { id: string; name: string; what: string; ontologyDriven: boolean; spec?: string; source?: string; plannedAb?: string; decision?: { status: string; date: string; note: string } };
-  comparisons: Comparison[]; preferences?: Array<{ experiment: string; n: number; treatmentWins: number; baselineWins: number; ties: number; p: number }>; verdict: string; missing: string[] }
+  comparisons: Comparison[]; pooled?: Array<{ baseline: string; experiments: number; n: number; fixed: number; broken: number; p: number; pickTokensPct: number | null; askMsPct: number | null; verdict: string }>; preferences?: Array<{ experiment: string; n: number; treatmentWins: number; baselineWins: number; ties: number; p: number }>; verdict: string; missing: string[] }
 const L = ledger as unknown as { builtAt: string; rows: Row[]; rule: string };
 
 const TONE: Record<string, string> = {
@@ -70,6 +70,11 @@ export function TechniqueLedger() {
               </tbody>
             </table>
           )}
+          {r.pooled?.map((q) => (
+            <div key={`pool-${q.baseline}`} data-testid="technique-pooled" style={{ fontSize: 13, marginTop: 6, fontWeight: 600, color: TONE[q.verdict] }}>
+              Pooled vs {q.baseline} — {q.experiments} experiments, {q.n} paired cases: +{q.fixed} / −{q.broken} (p={q.p}) · tokens to pick {q.pickTokensPct === null ? '—' : `${q.pickTokensPct > 0 ? '+' : ''}${Math.round(q.pickTokensPct)}%`} · whole ask {q.askMsPct === null ? '—' : `${q.askMsPct > 0 ? '+' : ''}${Math.round(q.askMsPct)}%`} · {WORDS[q.verdict] ?? q.verdict}
+            </div>
+          ))}
           {r.preferences?.map((p) => (
             <div key={p.experiment} style={{ fontSize: 12, marginTop: 4 }}>Side by side ({p.experiment}): treatment preferred {p.treatmentWins}, baseline {p.baselineWins}, no difference {p.ties}{p.p < 0.05 ? ` (p=${p.p})` : ` (p=${p.p}, not significant)`}</div>
           ))}
