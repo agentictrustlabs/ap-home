@@ -358,6 +358,16 @@ export const ASK_CLARIFY_TOOL: ToolSpec = {
   answer: '{{answer}}',
 };
 
+/** Spec 418 A2 — the classes a plan should deliver: each intermediate step's artifact, then the final skill's products. */
+export function expectedDeliversOf(steps: ReadonlyArray<{ tool: string; for?: string }>, skills: ReadonlyArray<{ id: string; produces?: ReadonlyArray<{ iri: string; label: string }> }>, lexicon?: ReadonlyArray<{ iri: string; label: string; terms: readonly string[] }>): Array<{ iri: string; label: string }> {
+  const out = new Map<string, string>();
+  const gloss = (iri: string, label: string) => { const e = lexicon?.find((x) => x.iri === iri); const also = (e?.terms ?? []).filter((t) => t.toLowerCase() !== label.toLowerCase()).slice(0, 3); return also.length ? `${label} (also: ${also.join(', ')})` : label; };
+  for (const st of steps.slice(0, -1)) if (st.for) { const lab = skills.flatMap((x) => x.produces ?? []).find((k) => k.iri === st.for)?.label ?? st.for.split('#').pop()!; out.set(st.for, gloss(st.for, lab)); }
+  const last = steps[steps.length - 1];
+  for (const k of skills.find((x) => x.id === last?.tool)?.produces ?? []) out.set(k.iri, gloss(k.iri, k.label));
+  return [...out].map(([iri, label]) => ({ iri, label }));
+}
+
 export const UNSUPPORTED_TOOL: ToolSpec = {
   id: 'ask.unsupported',
   description:
@@ -2802,6 +2812,9 @@ export interface PlannerTraceV1 {
   stages?: Record<string, number>;
   /** Spec 416 §4f — the default skill stage's outcome: the fast judge chose a skill, or handed the ask to the planner. */
   skillStage?: 'chose' | 'handed-to-planner' | 'clarify';
+  /** Spec 418 A2 — what the planned skills should DELIVER (each intermediate step's artifact + the final skill's
+   *  products), glossed from the lexicon — the outcome check's expected classes. */
+  expectedDelivers?: Array<{ iri: string; label: string }>;
   /** Spec 416 — milliseconds spent choosing (planner or selection arm), summed over re-plans. */
   selectionMs?: number;
   /** What the model planner's calls used, as the provider reported them (summed over re-plans). */
@@ -4950,6 +4963,7 @@ step is then handed to that agent under authority the person grants; leave it ou
                 trace.selection = { approach: 'outcome-selective', chose: r1.chose, distribution: r1.distribution, judge: r1.judge, ...(r1.reading ? { reading: r1.reading } : {}), ...plan2, planJudge };
                 const labels = new Map([...(lexicon ?? []).map((e) => [e.iri, e.label] as const), ...skills.flatMap((x) => [...(x.produces ?? []), ...(x.consumes ?? [])].map((k) => [k.iri, k.label] as const))]);
                 const steps = outcomeSteps(r2.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri, { briefIntermediate: input.variant?.toggles?.['skill-selection/intermediate'] === 'brief' });
+                trace.expectedDelivers = expectedDeliversOf(r2.plan.steps, skills, playbook?.domainLexicon);
                 return withSpecialists({ steps, rationale: `outcome-selective: ${r2.plan.steps.map((x) => x.tool).join(' → ')}${r2.asked ? '' : ' (no dataflow call)'}` }, playbook?.specialists, pin.tools);
               }
               trace.selection = { approach: 'outcome-selective', chose: null, ...(r1.hold ? { hold: r1.hold } : {}), distribution: r1.distribution, judge: r1.judge };
@@ -5034,7 +5048,8 @@ step is then handed to that agent under authority the person grants; leave it ou
                 const pc = await choosePlanAround(rest, r.chose, skills, call, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(askerHeld ? { asker: askerHeld } : {}) });
                 trace.selection = { approach: 'outcome-selective', chose: r.chose, distribution: r.distribution, judge: r.judge, ...(r.reading ? { reading: r.reading } : {}), ...(heldNow.from !== 'none' ? { held: heldNow } : {}), asked: pc.asked, plan: pc.plan, supplied: {}, planJudge: pc.judge };
                 const labels = new Map([...(playbook?.domainLexicon ?? []).map((e) => [e.iri, e.label] as const)]);
-                const steps = outcomeSteps(pc.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri);
+                const steps = outcomeSteps(pc.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri, { briefIntermediate: input.variant?.toggles?.['skill-selection/intermediate'] === 'brief' });
+                trace.expectedDelivers = expectedDeliversOf(pc.plan.steps, skills, playbook?.domainLexicon);
                 return withSpecialists({ steps, rationale: `skill stage (plan choice): ${pc.chosen.steps.join(' → ')}${pc.asked ? '' : ' (no plan call)'}` }, playbook?.specialists, pin.tools);
               }
               if (stageDefault === 'selective' && skills.some((x) => x.consumes?.length)) {
@@ -5043,8 +5058,10 @@ step is then handed to that agent under authority the person grants; leave it ou
                 trace.selection = { approach: 'outcome-selective', chose: r.chose, distribution: r.distribution, judge: r.judge, ...(r.reading ? { reading: r.reading } : {}), ...plan2, planJudge };
                 const labels = new Map([...(playbook?.domainLexicon ?? []).map((e) => [e.iri, e.label] as const)]);
                 const steps = outcomeSteps(r2.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri, { briefIntermediate: input.variant?.toggles?.['skill-selection/intermediate'] === 'brief' });
+                trace.expectedDelivers = expectedDeliversOf(r2.plan.steps, skills, playbook?.domainLexicon);
                 return withSpecialists({ steps, rationale: `skill stage (selective): ${r2.plan.steps.map((x) => x.tool).join(' → ')}${r2.asked ? '' : ' (no dataflow call)'}` }, playbook?.specialists, pin.tools);
               }
+              trace.expectedDelivers = expectedDeliversOf([{ tool: r.chose }], skills, playbook?.domainLexicon);
               return withSpecialists({ steps: [{ toolId: r.chose, args: { question: pin.intent.goal }, id: 's0' }], rationale: `skill stage: ${r.chose}` }, playbook?.specialists, pin.tools);
             }
             // "None of these skills": the planner gets the agent's OTHER tools only. Offering it the skills the judge just

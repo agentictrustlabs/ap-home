@@ -174,7 +174,7 @@ export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/k
   /** Spec 416 §4h — the model an instruction skill ANSWERS with: the deployment's (default) or the provider's light one. */
   'skill-selection/answer-model': ['default', 'light', 'strong'],
   /** Spec 416 §4h — score the answer with the quality rubric (a comparison's instrument; its time is reported apart). */
-  'quality/judge': ['off', 'on', 'pairwise'],
+  'quality/judge': ['off', 'on', 'pairwise', 'outcome'],
   /** Spec 418 §1 — the outcome arm's party-stance rule: `on` (default) decides an arrow whose ends are both qualified by
    *  rule; `off` asks the judge about every arrow (the spec 417 shape) — so the rule's effect is measured in one experiment. */
   'skill-selection/party-rule': ['on', 'off'],
