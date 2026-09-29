@@ -78,7 +78,7 @@ import { progressLine, type ProgressLineV1 } from './harness-progress.js';
 registerDefaultSubsetHandlers();
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
 import { type Plan, type Planner,
-  runIntent, CONTINUE_STEP_ID, InputRequired, dataFor, signatureFor,
+  runIntent, CONTINUE_STEP_ID, deriveArgs, InputRequired, dataFor, signatureFor,
   type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, partiesDistinct, actingPartyFromTheWords, kindNamedIsChartered, completePlan, transitionsHold, type FactsV1, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
 import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep, composeOfferedTools, mergeContractTool as composeMergeContractTool, loadPlaybook, declaredEffectSink, setBillStep, declaredCapabilities, type AskScopeV1 } from '@agenticprimitives/harness';
 // Spec 353 — the scope schema is Ring 0 now (spec 399 §4); this app keeps exporting it for its callers.
@@ -4112,6 +4112,12 @@ async function askReplyForInner(env: HarnessEnv, input: {
       ).catch((e: unknown) => { standingUnavailable = e instanceof Error ? e.message : String(e); return undefined; });
     }
     const note = standing ? standingNote(standing, CAPABILITY_WORDS[r.required.capability.id] ?? 'authority') : '';
+    // Spec 421 W2 — WHOSE WORDS, judged against HER sentence at THIS door. The loop's own derivation was computed wherever the
+    // step ran — for a step routed to an organization's harness (spec 366), against a routed restatement, not her words — and
+    // the card said "the organization was taken from published words" of "invite nathan to missio nexus" (live 2026-09-29).
+    // The card is hers, so it is derived here: the plan's raw words for this step, her goal, the run's observations.
+    const plannedStep = (() => { const m = /^s(\d+)$/.exec(r.required.stepRef); return r.plan.steps.find((st) => st.id === r.required!.stepRef) ?? (m ? r.plan.steps[Number(m[1])] : undefined); })();
+    const cardDerivation = deriveArgs(plannedStep?.args ?? r.required.args, input.intent.goal, r.steps);
     return {
       kind: 'authority_required', runRef: r.runRef, requirement, delegator,
       ...(alsoApprove.length ? { alsoApprove } : {}),
@@ -4121,12 +4127,11 @@ async function askReplyForInner(env: HarnessEnv, input: {
       // Spec 421 W2 — WHOSE WORDS: an argument found only in something the run read from another person is named here,
       // and the note says so plainly, so the card she signs shows it ("the recipient came from a message, not from you").
       ...(() => {
-        const d = r.required.derivation ?? {};
-        const fromOthers = Object.entries(d).filter(([, v]) => v.untrustedOnly).map(([arg, v]) => ({ arg, from: [...new Set(v.from.map((f) => f.toolId))] }));
+        const fromOthers = Object.entries(cardDerivation).filter(([, v]) => v.untrustedOnly).map(([arg, v]) => ({ arg, from: [...new Set(v.from.map((f) => f.toolId))] }));
         return fromOthers.length ? { fromOthers } : {};
       })(),
       ...((): Record<string, unknown> => { const ix = input.interactionFor?.[r.required.capability.id]; return ix?.review || ix?.navigationTarget ? { interaction: { ...(ix.review ? { review: ix.review } : {}), ...(ix.navigationTarget ? { navigationTarget: ix.navigationTarget } : {}) } } : {}; })(),
-      ...(standing ? { standing } : {}), ...((): Record<string, unknown> => { const SOURCE: Record<string, string> = { 'messaging.inbox.list': 'a message in your inbox', 'web.read': 'a web page', 'web.search': 'web search results', 'library.public.read': 'a published work', 'kb.retrieve': 'published words' }; const others = Object.entries(r.required.derivation ?? {}).filter(([, v]) => v.untrustedOnly).map(([a, v]) => { const val = String(r.required?.args[a] ?? ''); const shown = /^0x[0-9a-f]{40}$/i.test(val) ? (input.resolved ? [...input.resolved.values()].find((p) => p.agent === val.toLowerCase())?.label : undefined) : val; const src = v.from.map((f) => SOURCE[f.toolId]).filter(Boolean)[0] ?? 'something someone else wrote'; return `${partyWord(a)}${shown ? ` (${shown.length > 40 ? `${shown.slice(0, 40)}…` : shown})` : ''} was taken from ${src}`; }); const warn = others.length ? `Check before you sign: ${others.join('; ')} — not from what you said.` : ''; const n = [warn, note].filter(Boolean).join(' '); return n ? { note: n } : {}; })(),
+      ...(standing ? { standing } : {}), ...((): Record<string, unknown> => { const SOURCE: Record<string, string> = { 'messaging.inbox.list': 'a message in your inbox', 'web.read': 'a web page', 'web.search': 'web search results', 'library.public.read': 'a published work', 'kb.retrieve': 'published words' }; const others = Object.entries(cardDerivation).filter(([, v]) => v.untrustedOnly).map(([a, v]) => { const val = String(r.required?.args[a] ?? ''); const shown = /^0x[0-9a-f]{40}$/i.test(val) ? (input.resolved ? [...input.resolved.values()].find((p) => p.agent === val.toLowerCase())?.label : undefined) : val; const src = v.from.map((f) => SOURCE[f.toolId]).filter(Boolean)[0] ?? 'something someone else wrote'; return `${partyWord(a)}${shown ? ` (${shown.length > 40 ? `${shown.slice(0, 40)}…` : shown})` : ''} was taken from ${src}`; }); const warn = others.length ? `Check before you sign: ${others.join('; ')} — not from what you said.` : ''; const n = [warn, note].filter(Boolean).join(' '); return n ? { note: n } : {}; })(),
       ...(standingUnavailable ? { standingUnavailable } : {}),
       // Only the parties this STEP actually names — a run that resolved three things does not get to
       // show all three under a mandate that covers one.
