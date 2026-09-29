@@ -329,3 +329,27 @@ describe('the Welcome topic narrates arrivals', () => {
     expect(bodies.some((b) => /joined\./.test(b))).toBe(true);
   });
 });
+
+// A MEMBERSHIP ENDS IN THE ORGANIZATION'S OWN RECORD (spec 324 §11) — leaving or removal stamps `endedAt` on the record
+// and keeps it; nobody else may end it. Before this, a removed member stayed on the org agent's roster and an invitation
+// back was refused as "already holds organization membership".
+describe('org.endMembership', () => {
+  const record = { memberAgent: MEMBER, organizationAgent: ORG, roleAssignment: { materializedByDelegation: { delegate: ORG, delegator: MEMBER } } };
+  it('the member ends their own; the record is kept and stamped', async () => {
+    seedListing('Alice', MEMBER);
+    expect((await call('org.recordMembership', MEMBER, { record })).status).toBe(200);
+    const r = await call('org.endMembership', MEMBER, { member: MEMBER });
+    expect(r.status).toBe(200);
+    const kept = w.records.get(`org.membership:member:${MEMBER}`) as { endedAt?: string; endReason?: string; memberAgent: string };
+    expect(kept.memberAgent).toBe(MEMBER);
+    expect(kept.endedAt).toBeTruthy();
+    expect(kept.endReason).toBe('left');
+  });
+  it('a stranger cannot end somebody else\'s membership', async () => {
+    seedListing('Alice', MEMBER);
+    await call('org.recordMembership', MEMBER, { record });
+    const r = await call('org.endMembership', OUTSIDER, { member: MEMBER });
+    expect(r.status).toBe(403);
+    expect((w.records.get(`org.membership:member:${MEMBER}`) as { endedAt?: string }).endedAt).toBeUndefined();
+  });
+});

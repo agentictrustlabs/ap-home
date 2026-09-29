@@ -48,6 +48,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     if (r.status !== 200 && r.status !== 409) {
       return json({ error: `listing removal failed: ${String(r.body.error ?? r.status)}` }, 502);
     }
+    // The ORGANIZATION's own record of the membership ends (spec 324 §11) — stamped `endedAt`, kept as history. Without
+    // it the org's agent kept the removed member on its roster and refused to invite them back ("already holds
+    // organization membership"). Steward-gated in the DO by the same stewardship wire.
+    const ended = await callInteractions(env, org, 'org.endMembership', { session: callerToken, member, ...(stewardship ? { stewardship } : {}) });
+    if (ended.status !== 200) return json({ error: `ending the membership record failed: ${String(ended.body.error ?? ended.status)}` }, 502);
   }
 
   // 2. The authority-only member link (projection) — never a steward link (removeOrgMemberLink guards).
