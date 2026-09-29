@@ -112,6 +112,12 @@ export async function stewardWireFor(
   // `/connect/related-orgs` already makes on the person's own view, and `memberAccessWireFor` below
   // makes from the org vault.
   if (!bearer) return null;
+  // A PERSON WITH NO LINK TO THIS ORGANIZATION is the common case on every non-member read (an invitee, a visitor), and the
+  // self-heal below is a vault read of their whole relationships doc — ~1–2 s on EVERY request, every poll (an invitee's
+  // Discussions page took 3.3 s per read — live 2026-09-29). "No entry" is remembered for five minutes. It is consulted only
+  // AFTER the KV link above, so a stewardship written in the meantime still wins at once.
+  const missKey = `related-miss:${person.toLowerCase()}:${org.toLowerCase()}`;
+  if (await env.AUTH_CODES.get(missKey).catch(() => null)) return null;
   try {
     const { readRelationshipsDoc } = await import('../lib/relationships-doc');
     const doc = await readRelationshipsDoc(env, person, bearer);
@@ -122,7 +128,7 @@ export async function stewardWireFor(
       .find(([k]) => k.toLowerCase() === org.toLowerCase())?.[1];
     // Same rule as above: the wire decides. A relationship word in the authoritative doc is no more
     // a verification than the one in the KV projection.
-    if (!entry) return null;
+    if (!entry) { await (env.AUTH_CODES as { put(k: string, v: string, o?: { expirationTtl?: number }): Promise<void> }).put(missKey, '1', { expirationTtl: 300 }).catch(() => undefined); return null; }
     // A MEMBER'S ENTRY IS NOT A STEWARDSHIP TO HEAL. The doc carries a member's scoped data wire under the same
     // `delegations` slot (related-orgs merges `stewardshipDelegation ?? membershipDelegation` there), so healing
     // "the first delegation" of a member entry wrote that wire back to KV AS stewardship and flipped the link to

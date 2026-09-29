@@ -84,7 +84,6 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   const communityAvatar = useAvatar(communityAvatarKey(org));
 
   const [channels, setChannels] = useState<Channel[] | null>(null);
-  useReadyReport('discussions-channels', channels === null);
   const [bodies, setBodies] = useState<Record<string, string>>({});
   const [orgVault, setOrgVault] = useState<boolean | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
@@ -97,6 +96,10 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   const [linked, setLinked] = useState(false);
   const [you, setYou] = useState<string | null>(null);
   const [member, setMember] = useState<boolean | null>(null);
+  // LOADING until we know whether this person is a member — then done. A NON-member's page has no channels to wait for:
+  // reporting `channels === null` as loading kept "Reading…" on forever for everyone the organization had not admitted
+  // (ezra.me, invited, live 2026-09-29 — "it just spins").
+  useReadyReport('discussions-channels', member === null || (member === true && channels === null));
   const [steward, setSteward] = useState(false);
   // spec 321 W2b — the org info a MEMBER may read over their member-access grant (org→member,
   // vault:org:profile). Steward-independent: read from the ORG's vault via the delegation itself.
@@ -189,9 +192,11 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
     // 12s (was 5s): each poll drives 2 delegated vault reads (channels + directory); at 5s an open tab
     // alone kept the free RPC near its rate limit, which is what made valid reads flake intermittently.
     // The a2a DO reads no longer re-verify the grant on-chain per op, but a slower poll keeps headroom.
-    const t = setInterval(() => void load(), 12000);
+    // A NON-member has no topic to follow — the page only watches for their join/approval, so it polls far less (three
+    // 1–3 s reads every 12 s kept an invitee's page churning for nothing — live 2026-09-29).
+    const t = setInterval(() => void load(), member === false ? 45000 : 12000);
     return () => clearInterval(t);
-  }, [load]);
+  }, [load, member]);
 
   // spec 321 W2b — if this viewer holds a member-access grant for the org, read its shareable
   // profile over it (one mechanism: the delegation; no steward session involved).
