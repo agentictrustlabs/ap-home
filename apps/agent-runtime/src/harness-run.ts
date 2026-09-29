@@ -44,7 +44,7 @@ import { appendNote, dayRecordsFor, reviewDaysOf, studyFrom, studyRecords, type 
 import { memoryRecordFor } from './playbook-memory.js';
 import { remembered, forget } from './run-memo.js';
 import { DISCOVERY_FIND_TOOL, ENGAGEMENT_INVOKE_TOOL, DISCOVERY_INSPECT_TOOL, DISCOVERY_FIND_CAPABILITY, ENGAGEMENT_INVOKE_CAPABILITY, discoveryFindInvoker } from './enterprise-tools.js';
-import { INVITATIONS_RECEIVED_TOOL } from './invitations-received.js';
+import { INVITATIONS_RECEIVED_TOOL, MEMBERSHIP_ACCEPT_TOOL, MEMBERSHIP_ACCEPT_CAPABILITY, membershipAcceptInvoker } from './invitations-received.js';
 import { INBOX_LIST_TOOL, inboxListInvoker } from './inbox-list.js';
 import { WORK_SEARCH_TOOL, workSearchInvoker } from './work-search-tool.js';
 import { GITHUB_TOOLS, GITHUB_ACTS, githubInvoker } from './connectors/github-tools.js';
@@ -404,6 +404,8 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   ...BUILD_TOOLS.filter((t) => BUILD_ACTS.has(t.id)),
   // Spec 402 W1 — memory that follows the person: remember / forget, self-acting (a note about herself, in her vault).
   ...MEMORY_TOOLS.filter((t) => MEMORY_ACTS.has(t.id)),
+  // Spec 421 — accepting an invitation: the invitee's own act; her Home runs the Join ceremony, her records say it happened.
+  MEMBERSHIP_ACCEPT_TOOL,
   // Spec 412 W5 — her Library, written by her agent: save / visibility / publish, self-acting (her own records).
   ...LIBRARY_TOOLS.filter((t) => LIBRARY_ACTS.has(t.id)),
   // Spec 402 W3 — a routine of the person's own, from a sentence: declare / remove, self-acting (her own clock).
@@ -2274,6 +2276,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (toolId === HOUSEHOLD_RECORD_CAPABILITY) return householdRecordInvoker(deps, person)(toolId, args, ctx);
     if (toolId === STANDING_INSTRUCTION_CAPABILITY) return standingInstructionInvoker(deps, person, addressee)(toolId, args, ctx);
     if (ROUTINE_TOOLS.some((t) => t.id === toolId)) return routineInvoker({ ...(deps.listTriggers ? { listTriggers: deps.listTriggers } : {}), ...(deps.declareTrigger ? { declareTrigger: deps.declareTrigger } : {}), ...(deps.removeTrigger ? { removeTrigger: deps.removeTrigger } : {}), ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}) }, person, addressee, (i) => { throw new InputRequired(i); }, (c, ref) => dataFor((c as { supplied?: unknown }).supplied as never, ref))(toolId, args, ctx);
+    if (toolId === MEMBERSHIP_ACCEPT_CAPABILITY) return membershipAcceptInvoker({ ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, person)(toolId, args, ctx);
     if (MEMORY_TOOLS.some((t) => t.id === toolId)) return memoryFactsInvoker(deps, person, (ctx as { runRef?: string }).runRef ?? (ctx.idempotencyKey ? ctx.idempotencyKey.split(':').slice(0, -1).join(':') : undefined), addressee)(toolId, args, ctx);
     // Spec 387 W2 — the addressee's own catalog: bound by ITS name's records at call time (cached by the reader),
     // so an unattended run at a service (a gateway's task, a routed ask) reads it exactly as a person's does.
@@ -4448,6 +4451,7 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'resolution.invitation.request': ['signature'],   // the mandate — asking is an act of yours too
   'treasury.primary.declare': ['signature'],        // the mandate — a public statement of yours
   'access.grant.revoke': ['signature'],             // the mandate — taking authority back is an act too
+  'organization.membership.accept': ['signature'], // spec 421 — joining SIGNS her membership (at her Home, the Join ceremony); a surface that cannot sign cannot join
 };
 
 /**

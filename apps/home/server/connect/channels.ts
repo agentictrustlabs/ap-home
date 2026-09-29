@@ -123,6 +123,14 @@ export async function stewardWireFor(
     // Same rule as above: the wire decides. A relationship word in the authoritative doc is no more
     // a verification than the one in the KV projection.
     if (!entry) return null;
+    // A MEMBER'S ENTRY IS NOT A STEWARDSHIP TO HEAL. The doc carries a member's scoped data wire under the same
+    // `delegations` slot (related-orgs merges `stewardshipDelegation ?? membershipDelegation` there), so healing
+    // "the first delegation" of a member entry wrote that wire back to KV AS stewardship and flipped the link to
+    // steward — after which every library read presented a data grant as custody and was refused ("only this
+    // agent, a steward presenting its stewardship delegation, or a scoped grant …"), on every read, forever
+    // (seen on a HeartCoach patient, 2026-09-29). The word is not the check, but it does say which SLOT the doc's
+    // delegation belongs in; a member's stays a member's.
+    if (entry.relationship === 'member') return null;
     const wire = Array.isArray(entry.delegations) ? entry.delegations[0] ?? null : null;
     if (!wire) return null;
     await env.AUTH_CODES.put(`related:${person}:${org}`, JSON.stringify({
