@@ -77,7 +77,7 @@ import { progressLine, type ProgressLineV1 } from './harness-progress.js';
 registerDefaultSubsetHandlers();
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
 import { type Plan, type Planner,
-  runIntent, InputRequired, dataFor, signatureFor,
+  runIntent, CONTINUE_STEP_ID, InputRequired, dataFor, signatureFor,
   type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, partiesDistinct, actingPartyFromTheWords, kindNamedIsChartered, completePlan, transitionsHold, type FactsV1, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
 import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep, composeOfferedTools, mergeContractTool as composeMergeContractTool, loadPlaybook, declaredEffectSink, setBillStep, declaredCapabilities, type AskScopeV1 } from '@agenticprimitives/harness';
 // Spec 353 — the scope schema is Ring 0 now (spec 399 §4); this app keeps exporting it for its callers.
@@ -2816,6 +2816,8 @@ export interface PlannerTraceV1 {
   composerEvidence?: { chars: number; of: number; dropped: Array<{ tool: string; stepRef?: string; bytes: number }> };
   /** Spec 420 §10 — per party word, what the private tier returned before narrowing (evidence; bounded to 12 entries). */
   resolution?: Array<{ arg: string; raw: string; outcome: string; looked?: string[]; candidates: Array<{ agent: string; source: string; match?: string; context?: string; kind?: string }> }>;
+  /** Spec 421 W1 — the planner calls that CONTINUED a plan from what was read: the steps each one added. */
+  continuations?: Array<{ steps: Array<{ toolId: string }> }>;
   /** Spec 388 — which provider carried the planner and the composer, and why (the numbers beside the reason). */
   /** Spec 415 — every structured model call the run made (the selection judge, a skill's answer, the KB and vault
    *  choosers), as it ran: provider, model, why, when. Each becomes a model invocation on the run's provenance. */
@@ -4969,12 +4971,25 @@ step is then handed to that agent under authority the person grants; leave it ou
           // compiled shapes match. A model-planned ask keeps the whole sentence: the planner is taught `$executor`.
           const { executor: named, rest } = executorPrefixOf(pin.intent.goal);
           // Spec 402 W3 — a sentence with a clock, said at the person's own agent, is a routine to keep (read back first).
-          const compiled = compiledSkillAnswer() ?? compiledConsult(rest) ?? compiledRead(rest) ?? compiledFanOut(rest) ?? compiledPayment(rest) ?? (input.person && input.addressee && input.person.toLowerCase() === input.addressee.toLowerCase() ? compiledRoutine(rest) : null);
-          if (compiled) { plannerUsed = 'compiled'; return withSpecialists(named ? withExecutor(compiled, named) : compiled, playbook?.specialists, pin.tools); }
+          // Spec 421 W1 — a CONTINUATION is always the model's: it plans from what was read, which no compiled shape knows.
+          const compiled = pin.continuation ? null : compiledSkillAnswer() ?? compiledConsult(rest) ?? compiledRead(rest) ?? compiledFanOut(rest) ?? compiledPayment(rest) ?? (input.person && input.addressee && input.person.toLowerCase() === input.addressee.toLowerCase() ? compiledRoutine(rest) : null);
+          if (compiled) {
+            plannerUsed = 'compiled';
+            // Spec 421 W1 — A COMPILED READ THAT THE SENTENCE WANTS ACTED ON continues: "save the details from my latest
+            // message" compiles to the inbox read, and the act it asks for is planned from what the read returns. The
+            // test is whether the sentence says one of the offered acts' declared verbs (the contracts', never a list here),
+            // and continuation must be on (the loop offers `plan.continue` only then).
+            const offersContinue = pin.tools.some((t) => t.id === CONTINUE_STEP_ID);
+            const readOnly = compiled.steps.every((st) => !pin.tools.find((t) => t.id === st.toolId)?.capability);
+            const said = ` ${rest.toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ')} `;
+            const saysAnAct = pin.tools.some((t) => t.capability && (t as { verbs?: string[] }).verbs?.some((v) => said.includes(` ${v.toLowerCase()} `)));
+            const out = offersContinue && readOnly && saysAnAct ? { ...compiled, steps: [...compiled.steps, { toolId: CONTINUE_STEP_ID, args: {} }] } : compiled;
+            return withSpecialists(named ? withExecutor(out, named) : out, playbook?.specialists, pin.tools);
+          }
           // Spec 415 A4 — SELECTION BY DECLARED VOCABULARY: among the playbook's instruction skills, by their contracts'
           // utterances, choosing with a margin or HOLDING (a plan of `ask.unsupported` — no skill, said plainly). The
           // decision is on the trace; the model is not consulted on this path.
-          if (input.variant?.selection === 'declared') {
+          if (!pin.continuation && input.variant?.selection === 'declared') {
             const sources = instructionSourcesOf(playbook);
             const candidates = Object.values(playbook?.tools ?? {}).filter((t) => sources[t.id] && t.utterances?.length).map((t) => ({ id: t.id, utterances: t.utterances! }));
             const sel = selectByDeclaredUtterances(rest, candidates);
@@ -4986,7 +5001,7 @@ step is then handed to that agent under authority the person grants; leave it ou
           // Spec 415 A4 — THE THREE ARMS (+ the framed shape). A rule narrows and a judge picks; neither allows. Candidates are
           // the playbook's instruction skills; the arm's decision goes on the trace; a hold plans `ask.unsupported`.
           const arm = input.variant?.selection;
-          if (arm === 'ontology' || arm === 'judgment' || arm === 'ontology+judgment' || arm === 'propose+judgment' || arm === 'ontology-first' || arm === 'framed-judgment' || arm === 'outcome' || arm === 'outcome-selective') {
+          if (!pin.continuation && (arm === 'ontology' || arm === 'judgment' || arm === 'ontology+judgment' || arm === 'propose+judgment' || arm === 'ontology-first' || arm === 'framed-judgment' || arm === 'outcome' || arm === 'outcome-selective')) {
             const sources = instructionSourcesOf(playbook);
             const skills = Object.values(playbook?.tools ?? {}).filter((t) => sources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}), ...(t.produces?.length ? { produces: t.produces } : {}), ...(t.consumes?.length ? { consumes: input.variant?.toggles?.['skill-selection/necessity'] === 'off' ? t.consumes.map(({ necessity: _n, ...k }) => k) : t.consumes } : {}) }));
             // Spec 418 D4 — `office-prior off` hides the role classes' typical capabilities from the reading.
@@ -5067,7 +5082,7 @@ step is then handed to that agent under authority the person grants; leave it ou
           const stageToggle = input.variant?.toggles?.['skill-selection/stage'];
           const stageDefault = (env.SKILL_SELECTION_DEFAULT ?? '').trim();
   const stageOn = stageToggle ? stageToggle === 'on' : !input.variant?.selection && !input.variant?.plannerKind && (stageDefault === 'fast' || stageDefault === 'selective');
-          const skillSources = stageOn && !input.variant?.selection ? instructionSourcesOf(playbook) : {};
+          const skillSources = stageOn && !pin.continuation && !input.variant?.selection ? instructionSourcesOf(playbook) : {};
           if (Object.keys(skillSources).length) {
             const skills = Object.values(playbook?.tools ?? {}).filter((t) => skillSources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}), ...(t.produces?.length ? { produces: t.produces } : {}), ...(t.consumes?.length ? { consumes: t.consumes } : {}) }));
             const st = standingOnce ? await standingOnce : undefined;
@@ -5223,7 +5238,9 @@ step is then handed to that agent under authority the person grants; leave it ou
     }
     return out;
   };
-  const boundPlanner: Planner = factsOnce
+  // Spec 421 W1 — continuation (`plan/continuation`, env PLAN_CONTINUATION_DEFAULT; off until the ledger adopts it).
+  const continuationOn = input.variant?.toggles?.['plan/continuation'] === 'on' || (!input.variant?.toggles?.['plan/continuation'] && ((env as { PLAN_CONTINUATION_DEFAULT?: string }).PLAN_CONTINUATION_DEFAULT ?? 'off').trim() === 'on');
+  const boundPlanner0: Planner = factsOnce
     ? { plan: async (pin) => {
         const facts0 = await factsOnce;
         const p = await offerBound.plan({ ...pin, tools: offerByStanding(pin.tools, facts0) });
@@ -5233,6 +5250,11 @@ step is then handed to that agent under authority the person grants; leave it ou
         return done.plan;
       } }
     : offerBound;
+  const boundPlanner: Planner = { plan: async (pin) => {
+    const p = await boundPlanner0.plan(pin);
+    if (pin.continuation) trace.continuations = [...(trace.continuations ?? []), { steps: p.steps.map((st) => ({ toolId: st.toolId })) }];
+    return p;
+  } };
   const kind = input.plan ? 'supplied' : selected.kind;
   const trace: PlannerTraceV1 = {
     planner: plannerUsed, ...(selected.model ? { model: selected.model } : {}), toolsExposed: [], recalledTurns: input.conversation?.turns.length ?? 0, playbook: playbook ? { archetypeId: playbook.archetypeId, archetypeVersion: playbook.archetypeVersion, digest: playbook.digest } : null,
@@ -5501,6 +5523,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   if (input.comparison || input.variant) trace.comparison = true;
   const result = await runIntent(input.intent, {
     planner: boundPlanner, tools, bindingFor,
+    ...(continuationOn && !input.plan ? { continuation: { max: 2 } } : {}),
     ...(input.resume ? { resume: input.resume } : {}),
     ...(retrieval ? { retrieval } : {}),
 

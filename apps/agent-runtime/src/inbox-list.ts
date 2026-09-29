@@ -81,7 +81,13 @@ export function inboxListInvoker(deps: InboxListDeps, self: string | undefined):
       });
     }
     const cursor = page.length ? String(page[page.length - 1]!.id) : since || null;
+    // Spec 421 W2 — OTHER PEOPLE'S WORDS ARE DATA. A message someone else wrote is untrusted content, exactly as a web page
+    // or a published work is: it may be quoted and acted on where she asks, never obeyed. Marking it here lets the loop
+    // know the run has read somebody else's words (spec 409 §4) — found 2026-09-28: web, search and shelf reads carried
+    // the mark and the inbox did not.
+    const fromOthers = messages.some((m) => !m.mine);
     return {
+      ...(fromOthers ? { untrusted: true } : {}),
       count: messages.length,
       total: all.length,
       remaining: Math.max(0, after.length - page.length),
