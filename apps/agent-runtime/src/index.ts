@@ -4696,9 +4696,13 @@ app.post('/harness/ask', async (c) => {
     const answer = inResponseTo ? subjectAnswer({
       agent: addressee,
       inResponseTo: { operationId: inResponseTo.operationId, runRef: inResponseTo.runRef, stepRef: inResponseTo.stepRef },
-      outcome: reply.kind === 'answer' ? (toolRefusal ? 'refused' : 'answer') : reply.kind === 'refused' ? 'refused' : reply.kind === 'prompt' || reply.kind === 'authority_required' ? 'needs' : 'error',
+      // A routed ACT that completed (`done`) is an answer — its result and its words — exactly as the handoff and resume
+      // paths already say. Falling through to 'error' with no words made a completed invitation read at the asker's door
+      // as "Nothing was changed: missio-nexus.org could not answer:." (live 2026-09-29, the invite e2e).
+      outcome: reply.kind === 'answer' ? (toolRefusal ? 'refused' : 'answer') : reply.kind === 'done' ? 'answer' : reply.kind === 'refused' ? 'refused' : reply.kind === 'prompt' || reply.kind === 'authority_required' ? 'needs' : 'error',
       ...(reply.kind === 'answer' && !toolRefusal ? { result: routedResult } : {}),
-      ...(toolRefusal ? { said: toolRefusal } : reply.kind === 'refused' ? { said: reply.error } : reply.kind === 'prompt' ? { said: reply.prompt.prompt } : reply.kind === 'authority_required' ? { said: reply.summary } : {}),
+      ...(reply.kind === 'done' ? { result: { result: (reply as { result?: unknown }).result ?? null, done: true } } : {}),
+      ...(toolRefusal ? { said: toolRefusal } : reply.kind === 'done' ? { said: (reply as { fulfillment?: { words?: string } }).fulfillment?.words ?? 'Done.' } : reply.kind === 'refused' ? { said: reply.error } : reply.kind === 'prompt' ? { said: reply.prompt.prompt } : reply.kind === 'authority_required' ? { said: reply.summary } : {}),
       // Spec 374 W2 — WHAT this agent needs, whole, so a steward asker can be asked for it at home and
       // carry it back: the authority request (requirement, delegator, delegate, alsoApprove, standing) or
       // the prompt. The asker's agent relays; this agent's verifier judges what comes back.
