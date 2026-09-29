@@ -51,8 +51,9 @@ const scopedRead = (wire: unknown, resource = RESOURCE): Promise<boolean> =>
 const scopedContentOp = (op: string, resource: string, data: unknown) => {
   if (op === 'content.get') return { resource, op: 'read' as const };
   if (op !== 'content.put') return undefined;
-  if (!resource.startsWith('content.artifact.')) return undefined;
-  return { resource, op: data === null ? ('delete' as const) : ('write' as const) };
+  if (resource.startsWith('content.artifact.')) return { resource, op: data === null ? ('delete' as const) : ('write' as const) };
+  if (resource === 'content.catalog' && Array.isArray(data)) return { resource, op: 'write' as const };
+  return undefined;
 };
 
 const wireWith = (resources: string[], ops: string[] = ['read'], over: Record<string, unknown> = {}) => ({
@@ -133,12 +134,14 @@ describe('scoped admission maps the op honestly', () => {
     expect(scopedContentOp('content.put', ART, null)?.op).toBe('delete');
   });
 
-  /* The catalog lists every artifact in the org. A scoped writer who could rewrite it could drop
-     another community's records while holding a grant naming only their own. No scope string buys
-     this, so it is refused before the wire is even consulted. */
-  it('WRITING the catalog is never scoped — it is the org-wide index', () => {
-    expect(scopedContentOp('content.put', 'content.catalog', [])).toBeUndefined();
+  /* The catalog lists every artifact in the org. A scoped writer's save has to touch it (the library
+     rewrites the whole list on every save), so the write IS admitted for a wire that names the catalog —
+     and the handler MERGES it, taking only the entries the grant covers. Deleting it, or replacing it with
+     something that is not a list, is refused before the wire is consulted. */
+  it('WRITING the catalog is scoped as a merge — a list is a write, anything else is refused', () => {
+    expect(scopedContentOp('content.put', 'content.catalog', [])?.op).toBe('write');
     expect(scopedContentOp('content.put', 'content.catalog', null)).toBeUndefined();
+    expect(scopedContentOp('content.put', 'content.catalog', { not: 'a list' })).toBeUndefined();
   });
 
   it('ops other than content.* are not scoped at all', () => {

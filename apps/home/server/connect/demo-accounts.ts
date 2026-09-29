@@ -89,7 +89,7 @@ export const onRequestPut = async ({ request, env }: FnContext): Promise<Respons
 };
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
-  const body = (await request.json().catch(() => null)) as { handle?: string; sa?: string; client_id?: string; delegation_template?: string } | null;
+  const body = (await request.json().catch(() => null)) as { handle?: string; sa?: string; as?: string; client_id?: string; delegation_template?: string } | null;
   const clientId = (body?.client_id ?? '').trim();
   const client = clientId ? getClient(clientId) : null;
   if (!client) return json({ error: 'a registered client_id is required' }, 400);
@@ -99,7 +99,27 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const persona = demoPersonaFor(env, key);
   if (!persona) return json({ error: 'unknown demo account' }, 404);
 
-  const sa = persona.sa as Address;
+  // SIGN IN AS ANOTHER NAME OF THE SAME DEMO PERSON (persona.ttl pn:PersonaAgent — a trail name, a professional
+  // name, a character in a play). `as` names a person-class agent this demo person chartered under themselves,
+  // recorded in THEIR Home as `kind: person, relationship: self` by the charter ceremony, and custodied by the same
+  // seeded key — so the same signer signs for it. The id_token's subject becomes the persona; the roster entry is
+  // only the custodian. An address the person's own tree does not list as a name of theirs is somebody else, and is
+  // refused: this never lets a demo account act as a second human.
+  const asRaw = (body?.as ?? '').trim().toLowerCase();
+  let actingSa = persona.sa as Address;
+  let actingName: string | undefined = persona.name;
+  if (asRaw) {
+    if (!/^0x[0-9a-f]{40}$/.test(asRaw)) return json({ error: 'as must be an agent address' }, 400);
+    const raw = await env.AUTH_CODES.get(`related:${persona.sa.toLowerCase()}:${asRaw}`);
+    const link = raw ? (JSON.parse(raw) as { kind?: string; relationship?: string; orgName?: string; status?: string }) : null;
+    if (!link || (link.kind ?? '').toLowerCase() !== 'person' || (link.relationship ?? '').toLowerCase() !== 'self') {
+      return json({ error: 'not another name of this demo person — their Home lists no person-class agent of theirs at that address' }, 403);
+    }
+    if (link.status === 'deleted' || link.status === 'inactive') return json({ error: 'that name is retired' }, 403);
+    actingSa = asRaw as Address;
+    actingName = link.orgName || actingName;
+  }
+  const sa = actingSa;
   const sub = toCanonicalAgentId(CHAIN_ID, sa);
   const iss = resolveOrigin(request, env);
   const { signer } = await getServer(env);
@@ -129,10 +149,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // The identity half. Binding the digest to this client keeps silent re-auth (/token
   // grant_type=delegation) working for the demo session exactly as it does for a real one — and
   // keeps it FAILING for any other client, so a demo delegation can't be replayed sideways.
-  const idToken = await mintIdToken({ iss, sub, aud: clientId, agentName: persona.name, ttlSeconds: ID_TOKEN_TTL }, signer);
+  const idToken = await mintIdToken({ iss, sub, aud: clientId, agentName: actingName, ttlSeconds: ID_TOKEN_TTL }, signer);
   await env.AUTH_CODES.put(
     `oidc-deleg:${digest.toLowerCase()}`,
-    JSON.stringify({ client_id: clientId, agent_name: persona.name }),
+    JSON.stringify({ client_id: clientId, agent_name: actingName }),
     { expirationTtl: DELEG_BIND_TTL_SEC },
   );
 
@@ -169,7 +189,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     sub,
     agent: sa,
     handle: persona.handle,
-    agent_name: persona.name ?? null,
+    ...(asRaw ? { as: sa, custodian: persona.sa } : {}),
+    agent_name: actingName ?? null,
     blurb: persona.blurb ?? '',
     id_token: idToken,
     expires_in: ID_TOKEN_TTL,

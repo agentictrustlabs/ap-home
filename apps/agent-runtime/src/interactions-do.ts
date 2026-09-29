@@ -279,8 +279,17 @@ function scopedContentOp(
 ): { resource: string; op: 'read' | 'write' | 'delete' } | undefined {
   if (op === 'content.get') return { resource, op: 'read' };
   if (op !== 'content.put') return undefined;
-  if (!resource.startsWith('content.artifact.')) return undefined;
-  return { resource, op: data === null ? 'delete' : 'write' };
+  if (resource.startsWith('content.artifact.')) return { resource, op: data === null ? 'delete' : 'write' };
+  // THE CATALOG, FOR A SCOPED WRITER, IS A MERGE — NEVER A REPLACEMENT. `content.catalog` is the org-wide
+  // index and every save rewrites it (demo-sso-next `library.ts` puts the list before the artifact), so a
+  // grant that can write a record but not the catalog can write nothing at all — which is what every
+  // scoped role wire hit (2026-09-28: `unauthorized … resource content.catalog`). Admitting the write here
+  // asks the wire the honest question (does it name `vault:content.catalog` with `write`?), and the
+  // content handler then MERGES: entries the grant covers are taken from the submission, every other
+  // entry is kept as stored. A scoped caller still cannot drop another family's records, and a null
+  // (delete) or non-list catalog is refused before the wire is consulted.
+  if (resource === 'content.catalog' && Array.isArray(data)) return { resource, op: 'write' };
+  return undefined;
 }
 
 const READ_GRANT_KEY = (clientId: string): string => `read.grant:${clientId.toLowerCase()}`;
@@ -1942,10 +1951,10 @@ export class InteractionsDO {
                 principal,
                 String(body.session ?? ''),
                 body.stewardship as IncomingDelegation | undefined,
-                // ARTIFACTS ONLY, and only for content ops. `content.catalog` is deliberately excluded:
-                // it is the org-wide index, and no scope string should buy the right to rewrite it.
-                // `applications.*` and `invite.put` are steward-facing acts of a different sensitivity
-                // and stay exactly as they were.
+                // CONTENT OPS ONLY. Artifacts by their own scope; the catalog only as a MERGE for a wire
+                // that names it (see scopedContentOp and the content handler) — a scoped caller never
+                // replaces the org-wide index. `applications.*` and `invite.put` are steward-facing acts
+                // of a different sensitivity and stay exactly as they were.
                 ((q) => (q ? { ...q, wire: body.scopedAccess as IncomingDelegation | undefined } : undefined))(
                   scopedContentOp(op, String(body.resource ?? ''), body.data),
                 ),
@@ -3317,33 +3326,6 @@ export class InteractionsDO {
             return json({ ok: true, record: r?.data ?? null });
           }
           if (body.data === undefined) return json({ error: 'data required' }, 400);
-          /*
-            THE INDEX IS MAINTAINED HERE, NOT REPLACED BY THE CALLER.
-
-            `content.catalog` lists every artifact in the organization, and demo-sso-next rewrites the
-            WHOLE list on every save (`library.ts` — `scope.write(list)` runs before the artifact is
-            written). For a steward that is harmless: they may write all of it anyway. For a SCOPED
-            writer it is the entire problem — replacing the index wholesale would let a grant naming
-            one community drop another community's records out of it, which is a deletion wearing a
-            save, and it would also let a stale list roll back somebody else's concurrent write.
-
-            So a scoped caller's catalog write is MERGED. Entries their grant actually covers are
-            taken from the submission; every other entry is preserved from what is stored. They cannot
-            remove what they could not have written. A steward still replaces the list outright —
-            merging for them would only stop their deletes working.
-          */
-          if (resource === 'content.catalog' && scopedGrants && Array.isArray(body.data)) {
-            const stored = ((await this.vaultFor(dg).read<unknown>({ owner: '', resource }))?.data ?? []) as Array<{ id?: string }>;
-            const mine = (e: { id?: string }): boolean =>
-              vaultRecordScopeAllows(scopedGrants!, {
-                server: vaultServerId(this.env),
-                resource: `vault:content.artifact.${String(e.id ?? '')}`,
-                op: 'write',
-              });
-            const merged = [...stored.filter((e) => !mine(e)), ...(body.data as Array<{ id?: string }>).filter(mine)];
-            await this.vaultFor(dg).write({ owner: '', resource, data: merged, classification: 'internal' } as never);
-            return json({ ok: true, merged: merged.length });
-          }
           await this.vaultFor(dg).write({ owner: '', resource, data: body.data, classification: 'internal' } as never);
           // The room says so (Welcome topic): an invitation went out — to a named agent, or by email (the
           // address itself is never on the board; the record never held it either).
@@ -3373,6 +3355,33 @@ export class InteractionsDO {
             return json({ ok: true, record: r?.data ?? null });
           }
           if (body.data === undefined) return json({ error: 'data required' }, 400);
+          /*
+            THE INDEX IS MAINTAINED HERE, NOT REPLACED BY THE CALLER.
+
+            `content.catalog` lists every artifact in the organization, and demo-sso-next rewrites the
+            WHOLE list on every save (`library.ts` — `scope.write(list)` runs before the artifact is
+            written). For a steward that is harmless: they may write all of it anyway. For a SCOPED
+            writer it is the entire problem — replacing the index wholesale would let a grant naming
+            one community drop another community's records out of it, which is a deletion wearing a
+            save, and it would also let a stale list roll back somebody else's concurrent write.
+
+            So a scoped caller's catalog write is MERGED. Entries their grant actually covers are
+            taken from the submission; every other entry is preserved from what is stored. They cannot
+            remove what they could not have written. A steward still replaces the list outright —
+            merging for them would only stop their deletes working.
+          */
+          if (resource === 'content.catalog' && scopedGrants && Array.isArray(body.data)) {
+            const stored = ((await this.vaultFor(dg).read<unknown>({ owner: '', resource }))?.data ?? []) as Array<{ id?: string }>;
+            const mine = (e: { id?: string }): boolean =>
+              vaultRecordScopeAllows(scopedGrants!, {
+                server: vaultServerId(this.env),
+                resource: `vault:content.artifact.${String(e.id ?? '')}`,
+                op: 'write',
+              });
+            const merged = [...stored.filter((e) => !mine(e)), ...(body.data as Array<{ id?: string }>).filter(mine)];
+            await this.vaultFor(dg).write({ owner: '', resource, data: merged, classification: 'internal' } as never);
+            return json({ ok: true, merged: merged.length });
+          }
           await this.vaultFor(dg).write({ owner: '', resource, data: body.data, classification: 'internal' } as never);
           return json({ ok: true });
         }

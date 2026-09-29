@@ -288,6 +288,7 @@ const faithImpact: WhiteLabelConfig = {
         // serves HeartCoach. Fixed, known URLs, present on every deploy (same reasoning as
         // churchglobalgather27 under gather-app). Comes off this list, and coach-a2a's SESSION_AUDS
         // drops field-app, the day coach-app is a client of its own.
+        'https://coach.faithnet.io/',
         'https://heartcoach.faithnet.io/',
         'http://localhost:5176/',
         'http://127.0.0.1:5176/',

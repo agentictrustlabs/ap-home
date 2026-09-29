@@ -50,6 +50,7 @@ import { WORK_SEARCH_TOOL, workSearchInvoker } from './work-search-tool.js';
 import { GITHUB_TOOLS, GITHUB_ACTS, githubInvoker } from './connectors/github-tools.js';
 import { CALENDAR_TOOLS, CALENDAR_ACTS, calendarInvoker } from './connectors/calendar-tools.js';
 import { MAIL_DRIVE_TOOLS, MAIL_DRIVE_ACTS, mailDriveInvoker } from './connectors/mail-drive-tools.js';
+import { connectorStatus } from './connectors/google-token.js';
 import { MEMORY_TOOLS, MEMORY_ACTS, MEMORY_LIST_TOOL, MEMORY_REMEMBER, memoryFactsInvoker, memoryProposalFor, connectorMemoryProposal } from './memory-facts-tools.js';
 import { ROUTINE_TOOLS, ROUTINE_ACTS, ROUTINE_LIST, routineInvoker, compiledRoutine } from './routine-tools.js';
 import { WEB_TOOLS, webReadInvoker } from './web-read.js';
@@ -77,7 +78,7 @@ import { progressLine, type ProgressLineV1 } from './harness-progress.js';
 registerDefaultSubsetHandlers();
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
 import { type Plan, type Planner,
-  runIntent, InputRequired, dataFor, signatureFor,
+  runIntent, CONTINUE_STEP_ID, deriveArgs, type ArgDerivationV1, InputRequired, dataFor, signatureFor,
   type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, partiesDistinct, actingPartyFromTheWords, kindNamedIsChartered, completePlan, transitionsHold, type FactsV1, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
 import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep, composeOfferedTools, mergeContractTool as composeMergeContractTool, loadPlaybook, declaredEffectSink, setBillStep, declaredCapabilities, type AskScopeV1 } from '@agenticprimitives/harness';
 // Spec 353 — the scope schema is Ring 0 now (spec 399 §4); this app keeps exporting it for its callers.
@@ -2739,6 +2740,9 @@ export type AskReplyVariant =
   | { kind: 'authority_required'; runRef: string; requirement: MandateRequirementV1; delegate: Address; delegator: Address; capability: string; stepRef: string; summary: string;
       /** Spec 361 / 402 W4 — the required capability's REVIEW component (from its contract), rendered before she signs. */
       interaction?: { review?: string; navigationTarget?: string };
+      /** Spec 421 W2 — the arguments of this act that came ONLY from someone else's words (not hers), with where from — said
+       *  on the card before she signs. Evidence, never a gate: the signature is still hers to give or withhold. */
+      fromOthers?: Array<{ arg: string; from: string[] }>;
       /** Spec 374 W2 — this authority is the SUBJECT'S request, relayed: the step waits at that agent, and
        *  the mandate the asker grants travels there on resume. Absent ⇒ a local step. */
       routedAt?: { agent: Address; name?: string; runRef: string };
@@ -2816,6 +2820,8 @@ export interface PlannerTraceV1 {
   composerEvidence?: { chars: number; of: number; dropped: Array<{ tool: string; stepRef?: string; bytes: number }> };
   /** Spec 420 §10 — per party word, what the private tier returned before narrowing (evidence; bounded to 12 entries). */
   resolution?: Array<{ arg: string; raw: string; outcome: string; looked?: string[]; candidates: Array<{ agent: string; source: string; match?: string; context?: string; kind?: string }> }>;
+  /** Spec 421 W1 — the planner calls that CONTINUED a plan from what was read: the steps each one added. */
+  continuations?: Array<{ steps: Array<{ toolId: string }> }>;
   /** Spec 388 — which provider carried the planner and the composer, and why (the numbers beside the reason). */
   /** Spec 415 — every structured model call the run made (the selection judge, a skill's answer, the KB and vault
    *  choosers), as it ran: provider, model, why, when. Each becomes a model invocation on the run's provenance. */
@@ -3201,6 +3207,19 @@ export function partyTypesFor(capabilityId: string, arg: string): readonly strin
  * authority whose limits name a string, and minting it throws. So the words become addresses HERE, once,
  * before anything is shown or signed.
  */
+/**
+ * The account a balance question names — or none, meaning the asker's own treasuries (spec 371). Named after the LAST
+ * "of/in/does/do/for", the anchor nearest the thing named: "how much money DO i have IN my treasury" names "my treasury",
+ * not "i have in my treasury" (the first anchor — which the person was then asked about: 'I could not find "i have in my"',
+ * live 2026-09-29). The asker's own words about herself ARE her: a phrase with I / my / me / we / our / us is her own.
+ */
+export function balanceAccountOf(goal: string): string | undefined {
+  const m = goal.match(/.*\b(?:of|in|does|do|for)\s+(?:the\s+)?([a-z0-9][a-z0-9 .'-]*?)\s*(?:hold|have|has|holds|currently)?\s*[?.!]*$/i);
+  const phrase = (m?.[1] ?? '').replace(/\s+(treasury|treasuries|account|accounts|wallet|organization|org)$/i, '').replace(/^(treasury|treasuries|account|accounts|wallet)$/i, '').trim();
+  if (!phrase || /\b(i|my|me|mine|we|our|ours|us)\b/i.test(phrase)) return undefined;
+  return /^(it|there|this|that|you|money|usdc|funds|balance)$/i.test(phrase) ? undefined : phrase;
+}
+
 export async function resolveStepArgs(
   args: Record<string, unknown>,
   env: HarnessEnv,
@@ -3959,6 +3978,24 @@ export async function askReplyFor(env: HarnessEnv, input: Parameters<typeof askR
   return input.plannerTrace && !reply.plannerTrace ? { ...reply, plannerTrace: input.plannerTrace } : reply;
 }
 
+/** Spec 421 W2 — the card's "check before you sign" sentence: each argument that came ONLY from someone else's words, with
+ *  its value and where from. Empty when every argument is hers. Derived at the ASKER'S door (her sentence), never relayed. */
+function whoseWordsWarning(d: Record<string, ArgDerivationV1>, args: Record<string, unknown>, resolved?: ResolvedParties): string {
+  const SOURCE: Record<string, string> = { 'messaging.inbox.list': 'a message in your inbox', 'web.read': 'a web page', 'web.search': 'web search results', 'library.public.read': 'a published work', 'kb.retrieve': 'published words' };
+  const others = Object.entries(d).filter(([, v]) => v.untrustedOnly).map(([a, v]) => {
+    const val = String(args[a] ?? '');
+    const shown = /^0x[0-9a-f]{40}$/i.test(val) ? (resolved ? [...resolved.values()].find((p) => p.agent === val.toLowerCase())?.label : undefined) : val;
+    // The most SPECIFIC source names it: a message she received beats a page, and both beat the public passages retrieved for
+    // every ask (a name like "bob" is in those too) — "taken from published words" for a reply to whoever asked was untrue.
+    const order = ['messaging.inbox.list', 'library.public.read', 'web.read', 'web.search', 'kb.retrieve'];
+    const src = [...v.from].sort((x, y) => (order.indexOf(x.toolId) + 99) % 99 - (order.indexOf(y.toolId) + 99) % 99).map((f) => SOURCE[f.toolId]).filter(Boolean)[0] ?? 'something someone else wrote';
+    return `${partyWord(a)}${shown ? ` (${shown.length > 40 ? `${shown.slice(0, 40)}…` : shown})` : ''} was taken from ${src}`;
+  });
+  return others.length ? `Check before you sign: ${others.join('; ')} — not from what you said.` : '';
+}
+/** A relayed note loses any whose-words sentence the RECEIVER wrote: it compared against a routed restatement, not her words. */
+const withoutRelayedWarning = (note: string): string => note.replace(/Check before you sign:.*?— not from what you said\.\s*/g, '').trim();
+
 async function askReplyForInner(env: HarnessEnv, input: {
   /** Spec 371 — the tools the run was offered, for rendering a read's `answer` template. */
   tools?: ToolSpec[];
@@ -4093,14 +4130,26 @@ async function askReplyForInner(env: HarnessEnv, input: {
       ).catch((e: unknown) => { standingUnavailable = e instanceof Error ? e.message : String(e); return undefined; });
     }
     const note = standing ? standingNote(standing, CAPABILITY_WORDS[r.required.capability.id] ?? 'authority') : '';
+    // Spec 421 W2 — WHOSE WORDS, judged against HER sentence at THIS door. The loop's own derivation was computed wherever the
+    // step ran — for a step routed to an organization's harness (spec 366), against a routed restatement, not her words — and
+    // the card said "the organization was taken from published words" of "invite nathan to missio nexus" (live 2026-09-29).
+    // The card is hers, so it is derived here: the plan's raw words for this step, her goal, the run's observations.
+    const plannedStep = (() => { const m = /^s(\d+)$/.exec(r.required.stepRef); return r.plan.steps.find((st) => st.id === r.required!.stepRef) ?? (m ? r.plan.steps[Number(m[1])] : undefined); })();
+    const cardDerivation = deriveArgs(plannedStep?.args ?? r.required.args, input.intent.goal, r.steps);
     return {
       kind: 'authority_required', runRef: r.runRef, requirement, delegator,
       ...(alsoApprove.length ? { alsoApprove } : {}),
       delegate: (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address,
       capability: r.required.capability.id, stepRef: r.required.stepRef,
       summary: `${r.required.capability.id} on ${delegator}`,
+      // Spec 421 W2 — WHOSE WORDS: an argument found only in something the run read from another person is named here,
+      // and the note says so plainly, so the card she signs shows it ("the recipient came from a message, not from you").
+      ...(() => {
+        const fromOthers = Object.entries(cardDerivation).filter(([, v]) => v.untrustedOnly).map(([arg, v]) => ({ arg, from: [...new Set(v.from.map((f) => f.toolId))] }));
+        return fromOthers.length ? { fromOthers } : {};
+      })(),
       ...((): Record<string, unknown> => { const ix = input.interactionFor?.[r.required.capability.id]; return ix?.review || ix?.navigationTarget ? { interaction: { ...(ix.review ? { review: ix.review } : {}), ...(ix.navigationTarget ? { navigationTarget: ix.navigationTarget } : {}) } } : {}; })(),
-      ...(standing ? { standing } : {}), ...(note ? { note } : {}),
+      ...(standing ? { standing } : {}), ...((): Record<string, unknown> => { const n = [whoseWordsWarning(cardDerivation, r.required!.args, input.resolved), note].filter(Boolean).join(' '); return n ? { note: n } : {}; })(),
       ...(standingUnavailable ? { standingUnavailable } : {}),
       // Only the parties this STEP actually names — a run that resolved three things does not get to
       // show all three under a mandate that covers one.
@@ -4154,7 +4203,13 @@ async function askReplyForInner(env: HarnessEnv, input: {
       return {
         kind: 'authority_required', runRef: r.runRef, requirement: a.requirement, delegator: a.delegator, delegate: a.delegate,
         capability: a.capability ?? r.prompt.toolId, stepRef: r.prompt.stepRef, summary: a.summary ?? `${a.capability ?? r.prompt.toolId} on ${a.delegator}`,
-        ...(a.alsoApprove ? { alsoApprove: a.alsoApprove as never } : {}), ...(a.standing ? { standing: a.standing } : {}), ...(a.note ? { note: a.note } : {}),
+        ...(a.alsoApprove ? { alsoApprove: a.alsoApprove as never } : {}), ...(a.standing ? { standing: a.standing } : {}),
+        ...((): Record<string, unknown> => {
+          const m = /^s(\d+)$/.exec(r.prompt!.stepRef ?? ''); const st = r.plan.steps.find((x) => x.id === r.prompt!.stepRef) ?? (m ? r.plan.steps[Number(m[1])] : undefined);
+          const warn = st ? whoseWordsWarning(deriveArgs(st.args, input.intent.goal, r.steps), st.args, input.resolved) : '';
+          const n = [warn, a.note ? withoutRelayedWarning(a.note) : ''].filter(Boolean).join(' ');
+          return n ? { note: n } : {};
+        })(),
         // THE ASKER'S OWN RESOLUTION SURVIVES THE RELAY. The receiver was handed addresses, so its parties
         // say "0x1659… — said"; but it was THIS run that turned "somali corridor team" into that address —
         // from the person's links, from a remembered choice (spec 385), from the last ask (370 P7) — and
@@ -4804,9 +4859,11 @@ The person has ALREADY granted authority to ${holding} for this exact ask. That 
     // much does alice2.treasury hold", "how much money does missio nexus have" → the balance read, with the
     // account phrase for the party resolver (or none: the asker's own treasuries).
     if (/\b(balance|how much (money|usdc|funds)?|what do (i|we) (hold|have)|funds)\b/.test(g) && !/\b(pay|send|transfer|receipts?|payments?|history)\b/.test(g)) {
-      const m = goal.match(/\b(?:of|in|does|do|for)\s+(?:the\s+|my\s+)?([a-z0-9][a-z0-9 .'-]*?)\s*(?:hold|have|has|holds|currently)?\s*[?.!]*$/i);
-      const phrase = (m?.[1] ?? '').replace(/\s+(treasury|account|wallet|organization|org)$/i, '').trim();
-      const account = phrase && !/^(i|we|my|our|it|there|this|that|you|money|usdc|funds|balance)$/i.test(phrase) ? phrase : undefined;
+      // The account is named after the LAST "of/in/does/do/for" — the one nearest the thing named: "how much money DO i have
+      // IN my treasury" names "my treasury", not "i have in my treasury" (the first anchor, which the person then got asked
+      // about: 'I could not find "i have in my"' — live 2026-09-29). And the asker's own words about herself ARE her: a
+      // phrase with I / my / me / we / our / us is her own treasuries, which the read answers with no account at all.
+      const account = balanceAccountOf(goal);
       return { steps: [{ toolId: BALANCE_READ_TOOL.id, args: account ? { account } : {} }], rationale: 'compiled: balance read (spec 371)' };
     }
     if (/\bmembers?\b.*\b(of|on|in)\b|\bwho (are|is|belongs)\b.*\bmembers?\b|\bwho belongs\b/.test(g)) {
@@ -4969,12 +5026,25 @@ step is then handed to that agent under authority the person grants; leave it ou
           // compiled shapes match. A model-planned ask keeps the whole sentence: the planner is taught `$executor`.
           const { executor: named, rest } = executorPrefixOf(pin.intent.goal);
           // Spec 402 W3 — a sentence with a clock, said at the person's own agent, is a routine to keep (read back first).
-          const compiled = compiledSkillAnswer() ?? compiledConsult(rest) ?? compiledRead(rest) ?? compiledFanOut(rest) ?? compiledPayment(rest) ?? (input.person && input.addressee && input.person.toLowerCase() === input.addressee.toLowerCase() ? compiledRoutine(rest) : null);
-          if (compiled) { plannerUsed = 'compiled'; return withSpecialists(named ? withExecutor(compiled, named) : compiled, playbook?.specialists, pin.tools); }
+          // Spec 421 W1 — a CONTINUATION is always the model's: it plans from what was read, which no compiled shape knows.
+          const compiled = pin.continuation ? null : compiledSkillAnswer() ?? compiledConsult(rest) ?? compiledRead(rest) ?? compiledFanOut(rest) ?? compiledPayment(rest) ?? (input.person && input.addressee && input.person.toLowerCase() === input.addressee.toLowerCase() ? compiledRoutine(rest) : null);
+          if (compiled) {
+            plannerUsed = 'compiled';
+            // Spec 421 W1 — A COMPILED READ THAT THE SENTENCE WANTS ACTED ON continues: "save the details from my latest
+            // message" compiles to the inbox read, and the act it asks for is planned from what the read returns. The
+            // test is whether the sentence says one of the offered acts' declared verbs (the contracts', never a list here),
+            // and continuation must be on (the loop offers `plan.continue` only then).
+            const offersContinue = pin.tools.some((t) => t.id === CONTINUE_STEP_ID);
+            const readOnly = compiled.steps.every((st) => !pin.tools.find((t) => t.id === st.toolId)?.capability);
+            const said = ` ${rest.toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ')} `;
+            const saysAnAct = pin.tools.some((t) => t.capability && (t as { verbs?: string[] }).verbs?.some((v) => said.includes(` ${v.toLowerCase()} `)));
+            const out = offersContinue && readOnly && saysAnAct ? { ...compiled, steps: [...compiled.steps, { toolId: CONTINUE_STEP_ID, args: {} }] } : compiled;
+            return withSpecialists(named ? withExecutor(out, named) : out, playbook?.specialists, pin.tools);
+          }
           // Spec 415 A4 — SELECTION BY DECLARED VOCABULARY: among the playbook's instruction skills, by their contracts'
           // utterances, choosing with a margin or HOLDING (a plan of `ask.unsupported` — no skill, said plainly). The
           // decision is on the trace; the model is not consulted on this path.
-          if (input.variant?.selection === 'declared') {
+          if (!pin.continuation && input.variant?.selection === 'declared') {
             const sources = instructionSourcesOf(playbook);
             const candidates = Object.values(playbook?.tools ?? {}).filter((t) => sources[t.id] && t.utterances?.length).map((t) => ({ id: t.id, utterances: t.utterances! }));
             const sel = selectByDeclaredUtterances(rest, candidates);
@@ -4986,7 +5056,7 @@ step is then handed to that agent under authority the person grants; leave it ou
           // Spec 415 A4 — THE THREE ARMS (+ the framed shape). A rule narrows and a judge picks; neither allows. Candidates are
           // the playbook's instruction skills; the arm's decision goes on the trace; a hold plans `ask.unsupported`.
           const arm = input.variant?.selection;
-          if (arm === 'ontology' || arm === 'judgment' || arm === 'ontology+judgment' || arm === 'propose+judgment' || arm === 'ontology-first' || arm === 'framed-judgment' || arm === 'outcome' || arm === 'outcome-selective') {
+          if (!pin.continuation && (arm === 'ontology' || arm === 'judgment' || arm === 'ontology+judgment' || arm === 'propose+judgment' || arm === 'ontology-first' || arm === 'framed-judgment' || arm === 'outcome' || arm === 'outcome-selective')) {
             const sources = instructionSourcesOf(playbook);
             const skills = Object.values(playbook?.tools ?? {}).filter((t) => sources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}), ...(t.produces?.length ? { produces: t.produces } : {}), ...(t.consumes?.length ? { consumes: input.variant?.toggles?.['skill-selection/necessity'] === 'off' ? t.consumes.map(({ necessity: _n, ...k }) => k) : t.consumes } : {}) }));
             // Spec 418 D4 — `office-prior off` hides the role classes' typical capabilities from the reading.
@@ -5067,7 +5137,7 @@ step is then handed to that agent under authority the person grants; leave it ou
           const stageToggle = input.variant?.toggles?.['skill-selection/stage'];
           const stageDefault = (env.SKILL_SELECTION_DEFAULT ?? '').trim();
   const stageOn = stageToggle ? stageToggle === 'on' : !input.variant?.selection && !input.variant?.plannerKind && (stageDefault === 'fast' || stageDefault === 'selective');
-          const skillSources = stageOn && !input.variant?.selection ? instructionSourcesOf(playbook) : {};
+          const skillSources = stageOn && !pin.continuation && !input.variant?.selection ? instructionSourcesOf(playbook) : {};
           if (Object.keys(skillSources).length) {
             const skills = Object.values(playbook?.tools ?? {}).filter((t) => skillSources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}), ...(t.produces?.length ? { produces: t.produces } : {}), ...(t.consumes?.length ? { consumes: t.consumes } : {}) }));
             const st = standingOnce ? await standingOnce : undefined;
@@ -5223,7 +5293,9 @@ step is then handed to that agent under authority the person grants; leave it ou
     }
     return out;
   };
-  const boundPlanner: Planner = factsOnce
+  // Spec 421 W1 — continuation (`plan/continuation`, env PLAN_CONTINUATION_DEFAULT; off until the ledger adopts it).
+  const continuationOn = input.variant?.toggles?.['plan/continuation'] === 'on' || (!input.variant?.toggles?.['plan/continuation'] && ((env as { PLAN_CONTINUATION_DEFAULT?: string }).PLAN_CONTINUATION_DEFAULT ?? 'off').trim() === 'on');
+  const boundPlanner0: Planner = factsOnce
     ? { plan: async (pin) => {
         const facts0 = await factsOnce;
         const p = await offerBound.plan({ ...pin, tools: offerByStanding(pin.tools, facts0) });
@@ -5233,6 +5305,11 @@ step is then handed to that agent under authority the person grants; leave it ou
         return done.plan;
       } }
     : offerBound;
+  const boundPlanner: Planner = { plan: async (pin) => {
+    const p = await boundPlanner0.plan(pin);
+    if (pin.continuation) trace.continuations = [...(trace.continuations ?? []), { steps: p.steps.map((st) => ({ toolId: st.toolId })) }];
+    return p;
+  } };
   const kind = input.plan ? 'supplied' : selected.kind;
   const trace: PlannerTraceV1 = {
     planner: plannerUsed, ...(selected.model ? { model: selected.model } : {}), toolsExposed: [], recalledTurns: input.conversation?.turns.length ?? 0, playbook: playbook ? { archetypeId: playbook.archetypeId, archetypeVersion: playbook.archetypeVersion, digest: playbook.digest } : null,
@@ -5280,6 +5357,24 @@ step is then handed to that agent under authority the person grants; leave it ou
   // Spec 415 A4 — the playbook's INSTRUCTION SKILLS (a tool per skill, answered under its own body): offered only where
   // the corpus is bound, because a tool that cannot run is not listed.
   const instructionTools = env.SKILLS_MCP ? instructionSkillTools(playbook) : [];
+  // Spec 421 — A CONNECTOR SHE HAS NOT CONNECTED IS NOT A PLACE TO LOOK. The planner answered "who wrote to me about the
+  // rehearsal" by searching Gmail, which alice never connected — "Gmail is not connected", and the message she meant sat in
+  // her Home inbox. The read tools stay offered (asked about Gmail by name, the honest answer is "connect it"), with their
+  // description saying they are not connected. Read at the person's own agent only, once per turn; a status that cannot be
+  // read leaves the tools as they are (the invoker still says "not connected" if it is not).
+  const person = input.person ? String(input.person).toLowerCase() : '';
+  const atOwnAgent = !!person && person === String(input.addressee ?? '').toLowerCase();
+  const googleConnected = atOwnAgent ? await remembered(`google-connected:${person}`, async () => {
+    const [mail, drive, cal] = await Promise.all((['google-gmail', 'google-drive', 'google-calendar'] as const).map((p) => connectorStatus(env as never, person as Address, p).then((x) => x.connected).catch(() => null)));
+    return { 'google-gmail': mail, 'google-drive': drive, 'google-calendar': cal } as Record<string, boolean | null>;
+  }).catch(() => null) : null;
+  const providerOf = (id: string): string | null => id.startsWith('gmail.') ? 'google-gmail' : id.startsWith('drive.') ? 'google-drive' : id.startsWith('calendar.') ? 'google-calendar' : null;
+  const unlessConnected = (t: ToolSpec): ToolSpec => {
+    const pv = providerOf(t.id);
+    if (!pv || !googleConnected || googleConnected[pv] !== false) return t;
+    const name = pv === 'google-gmail' ? 'Gmail' : pv === 'google-drive' ? 'Google Drive' : 'Google Calendar';
+    return { ...t, description: `NOT CONNECTED — ${name} is not connected for this person, so it holds nothing to find: never search it for what she refers to (her messages are in her Home inbox). Use it only if she names ${name}, to tell her to connect it. ${t.description}` };
+  };
   const tools = [
     ...playbookAnswer,
     ...instructionTools,
@@ -5328,8 +5423,8 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(deps.readGrants ? [ACCESS_LIST_TOOL] : []),
     ...(deps.auditGrants && playbook?.tools?.[ACCESS_AUDIT_TOOL.id] ? [mergeContractTool(ACCESS_AUDIT_TOOL, playbook.tools[ACCESS_AUDIT_TOOL.id])] : []),
     ...GITHUB_TOOLS.filter((t) => !GITHUB_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
-    ...CALENDAR_TOOLS.filter((t) => !CALENDAR_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
-    ...MAIL_DRIVE_TOOLS.filter((t) => !MAIL_DRIVE_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
+    ...CALENDAR_TOOLS.filter((t) => !CALENDAR_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [unlessConnected(mergeContractTool(t, playbook.tools[t.id]!))] : [])),
+    ...MAIL_DRIVE_TOOLS.filter((t) => !MAIL_DRIVE_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [unlessConnected(mergeContractTool(t, playbook.tools[t.id]!))] : [])),
     // Spec 398 §9 — the workspace's build runs, read wherever the playbook carries the contract.
     ...BUILD_TOOLS.filter((t) => !BUILD_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     // Spec 402 W5a — a public page read as evidence, wherever the playbook carries the contract.
@@ -5501,6 +5596,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   if (input.comparison || input.variant) trace.comparison = true;
   const result = await runIntent(input.intent, {
     planner: boundPlanner, tools, bindingFor,
+    ...(continuationOn && !input.plan ? { continuation: { max: 2 } } : {}),
     ...(input.resume ? { resume: input.resume } : {}),
     ...(retrieval ? { retrieval } : {}),
 

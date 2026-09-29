@@ -56,7 +56,7 @@ export function requirePersonsTurn(input: PersonsTurnInput): void {
   const inHerWords = said === null ? true : said.length > 0 && goal.includes(said);
   if (!ctx.untrustedSeen && inHerWords) return;
   const because = ctx.untrustedSeen
-    ? 'this run read something from outside (a page, a file, a connected server) before this'
+    ? 'this came from something someone else wrote (a message, a page, a file, a connected server), not from what you said'
     : 'these are not the words you used';
   throw new InputRequired({
     kind: 'data', stepRef, toolId,

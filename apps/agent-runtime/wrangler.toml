@@ -471,6 +471,12 @@ SKILL_ANSWER_MODEL_DEFAULT = "minimal"
 # Spec 420 §2 — goal regression over situations on every ask (a comparison names its own arm): the room's roster and the
 # asker's standing check each act's preconditions before any signature is asked for.
 PLAN_REGRESSION_DEFAULT = "on"
+# Spec 420 §10 — names resolve in context (the room's roster · household · a shared context · dealings) before asking.
+# ADOPTED 2026-09-28 on the ledger (resolve-context: fixed 6, broken 0, exact McNemar p = 0.031).
+RESOLVE_CONTEXT_DEFAULT = "on"
+# Spec 421 W1 — continue from what was read (read → act chains; whose words each argument came from is on the card).
+# ADOPTED 2026-09-29 on the ledger (plan-continuation: set 9 fixed 7, broken 0, p = 0.016; adversarial 16/16; panel unchanged).
+PLAN_CONTINUATION_DEFAULT = "on"
 # Spec 388 — the cheapest OFFERED provider that carries each call, decided before the request from the prompt estimate, the
 # per-request budget and this minute's spend; recorded on the trace with its reason. A route, never a fallback (ADR-0013).
 ORCHESTRATION_ROUTE = "budget"

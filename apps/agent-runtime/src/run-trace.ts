@@ -213,7 +213,9 @@ export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/k
   /** Spec 420 §3 — the offer by standing: acts the asker cannot authorize at the room are marked for the planner, or left out. */
   'offer/standing': ['off', 'annotate', 'prune'],
   /** Spec 420 §10 — a bare name among several resolves to the nearest in context (the room's roster · household · a shared context · dealings) before asking. */
-  'resolve/context': ['off', 'on'] };
+  'resolve/context': ['off', 'on'],
+  /** Spec 421 W1 — continue from what was read: the planner may end a plan with `plan.continue` and plan the rest from the reads. */
+  'plan/continuation': ['off', 'on'] };
 
 export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantRequestV1 } | { ok: false; error: string } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: 'variant must be an object' };
