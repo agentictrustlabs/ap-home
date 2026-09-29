@@ -2739,6 +2739,9 @@ export type AskReplyVariant =
   | { kind: 'authority_required'; runRef: string; requirement: MandateRequirementV1; delegate: Address; delegator: Address; capability: string; stepRef: string; summary: string;
       /** Spec 361 / 402 W4 — the required capability's REVIEW component (from its contract), rendered before she signs. */
       interaction?: { review?: string; navigationTarget?: string };
+      /** Spec 421 W2 — the arguments of this act that came ONLY from someone else's words (not hers), with where from — said
+       *  on the card before she signs. Evidence, never a gate: the signature is still hers to give or withhold. */
+      fromOthers?: Array<{ arg: string; from: string[] }>;
       /** Spec 374 W2 — this authority is the SUBJECT'S request, relayed: the step waits at that agent, and
        *  the mandate the asker grants travels there on resume. Absent ⇒ a local step. */
       routedAt?: { agent: Address; name?: string; runRef: string };
@@ -4101,8 +4104,15 @@ async function askReplyForInner(env: HarnessEnv, input: {
       delegate: (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address,
       capability: r.required.capability.id, stepRef: r.required.stepRef,
       summary: `${r.required.capability.id} on ${delegator}`,
+      // Spec 421 W2 — WHOSE WORDS: an argument found only in something the run read from another person is named here,
+      // and the note says so plainly, so the card she signs shows it ("the recipient came from a message, not from you").
+      ...(() => {
+        const d = r.required.derivation ?? {};
+        const fromOthers = Object.entries(d).filter(([, v]) => v.untrustedOnly).map(([arg, v]) => ({ arg, from: [...new Set(v.from.map((f) => f.toolId))] }));
+        return fromOthers.length ? { fromOthers } : {};
+      })(),
       ...((): Record<string, unknown> => { const ix = input.interactionFor?.[r.required.capability.id]; return ix?.review || ix?.navigationTarget ? { interaction: { ...(ix.review ? { review: ix.review } : {}), ...(ix.navigationTarget ? { navigationTarget: ix.navigationTarget } : {}) } } : {}; })(),
-      ...(standing ? { standing } : {}), ...(note ? { note } : {}),
+      ...(standing ? { standing } : {}), ...((): Record<string, unknown> => { const others = Object.entries(r.required.derivation ?? {}).filter(([, v]) => v.untrustedOnly).map(([a]) => partyWord(a)); const warn = others.length ? `Check before you sign: ${others.join(' and ')} came from something someone else wrote, not from what you said.` : ''; const n = [warn, note].filter(Boolean).join(' '); return n ? { note: n } : {}; })(),
       ...(standingUnavailable ? { standingUnavailable } : {}),
       // Only the parties this STEP actually names — a run that resolved three things does not get to
       // show all three under a mandate that covers one.
