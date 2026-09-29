@@ -19,7 +19,7 @@ import { HashIcon as HashGlyph, LockIcon as LockGlyph } from '../shared/Icons';
 import { SectionShell } from './SectionShell';
 import { issueDirectoryListing } from '../../home/directory';
 import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, isKmsVia, resolveVia, signHashFor, type Via } from '../../home/onboarding';
-import { recordOrgMembership } from '../../lib/org-membership';
+import { joinOrganization } from '../../home/join-organization';
 import { provisionCommunityMessaging } from '../../lib/messaging-ceremony';
 import { notifyAgentsChanged } from './ManagedAgents';
 import { vaultReadWithDelegation } from '../../lib/vault-client';
@@ -214,34 +214,8 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       // Use the agent's naming-service name by default — don't make the member type a display name (they can
       // still override via the optional field). Falls back to a short address label only if unnamed.
       const displayName = joinName.trim() || agentName || `member-${agentAddress.slice(2, 8)}`;
-      // Route the signer by the home's ACTUAL credential (a KMS home must not pop a passkey/wallet).
-      const sign = await signHashFor(resolveVia(homeProfile?.credential, session.via), agentAddress as Address, { token: session.token });
-      const listing = await issueDirectoryListing(agentAddress as Address, sign, {
-        communityId,
-        displayName,
-      });
-      const res = await fetch('/connect/directory', {
-        method: 'POST', headers: authed,
-        body: JSON.stringify({ action: 'publish', listing }),
-      });
-      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (!res.ok || !body.ok) throw new Error(body.error ?? `join failed (${res.status})`);
-      // spec 322 W3d — enable the MEMBER's own interactions plane when it costs no extra device
-      // prompt (KMS homes sign server-side), so the write-through below lands in their vault.
-      // Prompt-requiring credentials skip here (value steps ≠ signatures) — their doc catches up
-      // at their own enable ceremony.
-      const joinVia = resolveVia(homeProfile?.credential, session.via);
-      if (isKmsVia(joinVia)) await activateInteractionsIfNeeded(agentAddress as Address, joinVia, { token: session.token }).catch(() => null);
-      // spec 321 W1/W2b — every join path mints the membership delegation (member→org); the server
-      // also attaches any steward-pre-signed member-access grant stored for this SA (in-app invites).
-      await recordOrgMembership(agentAddress as Address, communityId, sign, session.token, null, displayName);
-      await provisionCommunityMessaging({
-        person: agentAddress as Address,
-        org: communityId,
-        named: !!agentName?.trim(),
-        via: joinVia,
-        token: session.token,
-      }).catch((e) => { console.warn('[join] community messaging provision failed (non-fatal):', e); });
+      // THE ceremony — shared with the Ask's accept (spec 421): listing, interactions plane, membership, messaging.
+      await joinOrganization({ member: agentAddress as Address, org: communityId, displayName, session, credential: homeProfile?.credential, named: !!agentName?.trim() });
       await load();
       // The join added this org to the member's tree — reload every dropdown/list instance NOW (the
       // triggered related-orgs read also runs the org-name self-heal, so it arrives named, not 0x…).

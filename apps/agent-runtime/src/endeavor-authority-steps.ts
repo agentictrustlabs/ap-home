@@ -107,6 +107,9 @@ export const NOT_PLAN_STEPS: readonly string[] = [
   // Spec 394 — a STANDING INSTRUCTION is the person's own note of a default: self-acting, no mandate, and
   // never work anyone is allocated.
   'context.instruction.declare',
+  // Spec 421 — ACCEPTING an invitation is the invitee's own consent: self-acting, signed at her Home, and never work an
+  // endeavor may allocate — a plan that could accept a membership for someone would be a plan that joins people up.
+  'organization.membership.accept',
   // Spec 402 W1 — MEMORY is the person's own note about herself: self-acting, no mandate, never work.
   'person.memory.remember',
   'person.memory.forget',

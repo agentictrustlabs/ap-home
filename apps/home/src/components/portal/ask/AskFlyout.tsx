@@ -43,6 +43,7 @@ import { attachToLibrary } from '../../../home/library-attach';
 import { AgentName } from '../../shared/AgentName';
 import { connectedCredential } from './credential';
 import { createdAgentOf, recordCreatedAgent, invitationOf, recordInvitation } from '../../../home/ask-record';
+import { joinOrganization } from '../../../home/join-organization';
 
 type Entry =
   | { role: 'you'; text: string }
@@ -641,6 +642,14 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
         const signer = p.signer || (agentAddress as string);
         supplied = { stepRef: reply.resumeToken, signature: { digest: p.digest, signer, signature, payload: p.payload } };
       } else {
+        // Spec 421 — A CONFIRMATION THAT NAMES A CEREMONY is answered by running it: "accept the invitation to Missio Nexus"
+        // asks her Home to JOIN — the same ceremony the Join button runs (joinOrganization), signed by her credential. The
+        // agent then reads her records to say whether it happened; this surface never claims it did.
+        const ceremony = (p as { summary?: { ceremony?: string; org?: string } }).summary;
+        if (ceremony?.ceremony === 'org-join' && ceremony.org && session && agentAddress) {
+          setBusy('Joining…');
+          await joinOrganization({ member: agentAddress as Address, org: ceremony.org, displayName: personName ?? agentName ?? `member-${agentAddress.slice(2, 8)}`, session, credential: profile?.credential, named: !!agentName?.trim() });
+        }
         supplied = { stepRef: reply.resumeToken, confirmed: true };
       }
       setPending(null);
@@ -1434,7 +1443,7 @@ function PromptCard({ prompt, answers, setAnswers, busy, onAnswer, onCancel, onC
       )}
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
         <BusyButton busy={!!busy} busyLabel={busy ?? 'Working…'} disabled={!ready} onClick={onAnswer} className="btn primary" data-testid="ask-answer">
-          {prompt.kind === 'signature' ? 'Sign & continue' : prompt.kind === 'confirmation' ? 'Yes, continue' : 'Continue'}
+          {prompt.kind === 'signature' ? 'Sign & continue' : prompt.kind === 'confirmation' ? ((prompt as { summary?: { ceremony?: string; orgName?: string } }).summary?.ceremony === 'org-join' ? `Join ${(prompt as { summary?: { orgName?: string } }).summary?.orgName ?? 'the organization'}` : 'Yes, continue') : 'Continue'}
         </BusyButton>
         <button type="button" className="btn ghost" onClick={onCancel} disabled={!!busy}>Cancel</button>
       </div>
