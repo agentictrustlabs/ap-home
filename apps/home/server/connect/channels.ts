@@ -172,9 +172,12 @@ export async function scopedWireFor(env: FnContext['env'], person: string, org: 
  *  The DO re-verifies it on-chain (ERC-1271 by the org + unrevoked + data-grant scope), so the
  *  SOURCE is untrusted — this only has to FIND the artifact. Falls back to the member's own KV link
  *  (populated after the first join) when the org vault isn't reachable. */
-export async function memberAccessWireFor(env: FnContext['env'], org: string, person: string): Promise<unknown | null> {
+export async function memberAccessWireFor(env: FnContext['env'], org: string, person: string, session?: string): Promise<unknown | null> {
   try {
-    const vault = await orgVault(env, org);
+    // spec 341 §5.5b — reading MY invitation is a CLAIM that rides my session (the agent derives the key from it). Without
+    // the session the claim fails closed and the join was refused "this organization has not authorized you to join" for
+    // every in-app invitation — the Join chip and the Ask's accept alike (invite e2e, live 2026-09-29).
+    const vault = await orgVault(env, org, session);
     const rec = vault ? ((await vault.get(`org.invite:agent:${person.toLowerCase()}`)) as { delegation?: unknown; status?: string } | null) : null;
     if (rec?.delegation && rec.status !== 'removed') return rec.delegation;
   } catch { /* vault unreachable — fall to the cached link */ }
