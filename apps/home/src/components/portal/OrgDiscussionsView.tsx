@@ -84,7 +84,6 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   const communityAvatar = useAvatar(communityAvatarKey(org));
 
   const [channels, setChannels] = useState<Channel[] | null>(null);
-  useReadyReport('discussions-channels', channels === null);
   const [bodies, setBodies] = useState<Record<string, string>>({});
   const [orgVault, setOrgVault] = useState<boolean | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
@@ -97,6 +96,10 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   const [linked, setLinked] = useState(false);
   const [you, setYou] = useState<string | null>(null);
   const [member, setMember] = useState<boolean | null>(null);
+  // LOADING until we know whether this person is a member — then done. A NON-member's page has no channels to wait for:
+  // reporting `channels === null` as loading kept "Reading…" on forever for everyone the organization had not admitted
+  // (ezra.me, invited, live 2026-09-29 — "it just spins").
+  useReadyReport('discussions-channels', member === null || (member === true && channels === null));
   const [steward, setSteward] = useState(false);
   // spec 321 W2b — the org info a MEMBER may read over their member-access grant (org→member,
   // vault:org:profile). Steward-independent: read from the ORG's vault via the delegation itself.
@@ -114,6 +117,8 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   // pending invitations. Open topics never load these — participation is derived from membership.
   const [participants, setParticipants] = useState<ParticipantRow[] | null>(null);
   const [pendingInvites, setPendingInvites] = useState<PendingInviteRow[]>([]);
+  /** This person holds the organization's invitation (its member-access grant) — the page leads with Join, not Request. */
+  const [invitedToJoin, setInvitedToJoin] = useState(false);
   const [participantBusy, setParticipantBusy] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   // Restricted-topic participant invite popover (filterable roster of existing org members).
@@ -157,6 +162,8 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       // this exact card, so an unconditional clear erased the only feedback they had. The approval
       // affordance survives because it lives in `wireNeeded`, not in `error`; the guard keeps a genuine
       // apply error visible too.
+      const nb = (await chRes.json().catch(() => ({}))) as { invited?: boolean };
+      setInvitedToJoin(nb.invited === true);
       setMember(false); setChannels(null);
       if (!wireNeededRef.current) setError(null);
       return;
@@ -185,9 +192,11 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
     // 12s (was 5s): each poll drives 2 delegated vault reads (channels + directory); at 5s an open tab
     // alone kept the free RPC near its rate limit, which is what made valid reads flake intermittently.
     // The a2a DO reads no longer re-verify the grant on-chain per op, but a slower poll keeps headroom.
-    const t = setInterval(() => void load(), 12000);
+    // A NON-member has no topic to follow — the page only watches for their join/approval, so it polls far less (three
+    // 1–3 s reads every 12 s kept an invitee's page churning for nothing — live 2026-09-29).
+    const t = setInterval(() => void load(), member === false ? 45000 : 12000);
     return () => clearInterval(t);
-  }, [load]);
+  }, [load, member]);
 
   // spec 321 W2b — if this viewer holds a member-access grant for the org, read its shareable
   // profile over it (one mechanism: the delegation; no steward session involved).
@@ -561,6 +570,20 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       <SectionShell title="Discussions" description="Topic discussion inside this organization">
         {/* spec 324 §12 — a non-member REQUESTS to join; membership is granted by a steward (enrollment), and
             the presence listing is published as a CONSEQUENCE of that (Complete membership, below). */}
+        {/* INVITED: the organization asked them — lead with Join (the same ceremony as the Ask's accept and the Join chip). */}
+        {invitedToJoin && (
+          <div className="manage-card" style={{ maxWidth: 460, padding: '1.25rem', marginBottom: '0.85rem' }} data-testid="invited-join">
+            <h3 className="subhead">You&rsquo;ve been invited to join</h3>
+            <p className="manage-card-blurb" style={{ margin: '0 0 0.8rem' }}>
+              A steward invited you. Joining signs your membership — your consent, for you alone, revocable anytime.
+            </p>
+            <button type="button" className="btn-primary" style={{ width: 'auto' }} disabled={busy} onClick={() => void join()}>
+              {busy ? 'Joining…' : 'Join'}
+            </button>
+            {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{error}</p>}
+          </div>
+        )}
+        {!invitedToJoin && (
         <div className="manage-card" style={{ maxWidth: 460, padding: '1.25rem' }}>
           <h3 className="subhead">Request to join this organization</h3>
           {applied ? (
@@ -593,9 +616,11 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       />
       {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{error}</p>}
         </div>
+        )}
 
         {/* After a steward approves, the applicant completes membership here — publishing the listing they sign
             (revocable). recordOrgMembership picks up the org→member grant the approval stored. */}
+        {!invitedToJoin && (
         <div className="manage-card" style={{ maxWidth: 460, padding: '1.25rem', marginTop: '0.85rem' }}>
           <h3 className="subhead">Approved? Complete your membership</h3>
           <p className="manage-card-blurb" style={{ margin: '0 0 0.8rem' }}>
@@ -612,6 +637,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
             {busy ? 'Signing…' : 'Sign & complete membership'}
           </button>
         </div>
+        )}
       </SectionShell>
     );
   }

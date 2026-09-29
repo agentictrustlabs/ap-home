@@ -86,6 +86,14 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     if (r.status === 200) {
       // Leaving revokes the AUTHORITY-ONLY member link too (never a steward link — spec 318).
       await removeOrgMemberLink(env, who.person, communityId);
+      // …and the member's OWN record of it — the relationships entry in their vault (spec 322 W3d wrote it at join). Only a
+      // MEMBER entry: a steward's or a persona's link is never removed by leaving. Without this their agent went on saying
+      // "you already joined" an organization they had left (invite e2e, live 2026-09-29).
+      try {
+        const got = await callInteractions(env, who.person, 'relationships.get', { session: who.token });
+        const entry = (got.body as { relationships?: { orgs?: Record<string, { relationship?: string }> } }).relationships?.orgs?.[communityId];
+        if (entry && entry.relationship === 'member') await callInteractions(env, who.person, 'relationships.merge', { session: who.token, entry: { org: communityId }, remove: true });
+      } catch { /* the org side is left already; the person's record catches up on their next join/leave */ }
       await appendControlEvent(env, who.person as Address, 'grant-revoked', [], who.token).catch(() => undefined); // listing = the membership consent (closed event union)
     }
     return jsonCors(r.body, request, r.status);

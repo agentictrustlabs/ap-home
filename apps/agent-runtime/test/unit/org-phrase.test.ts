@@ -21,3 +21,17 @@ describe('orgPhraseOf', () => {
     expect(orgPhraseOf('how many members are in this organization')).toBeUndefined();
   });
 });
+
+describe('the phrasings the compiled roster read catches (live 2026-09-29)', () => {
+  it.each([
+    ['who belongs to missio nexus?', 'missio nexus'],
+    ['Who belongs to Missio Nexus', 'Missio Nexus'],
+    ['who is in the youth team?', 'youth'],
+    ["who's part of calvary.org?", 'calvary.org'],
+    ['who is a member of missio nexus', 'missio nexus'],
+  ])('%s → %s', (q, want) => expect(orgPhraseOf(q)).toBe(want));
+  it('still names nothing for "who belongs to us" / "who belongs here"', () => {
+    expect(orgPhraseOf('who belongs to our org')).toBeUndefined();
+    expect(orgPhraseOf('who belongs here?')).toBeUndefined();
+  });
+});

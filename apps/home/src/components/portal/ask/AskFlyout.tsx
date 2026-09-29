@@ -1154,14 +1154,16 @@ function ReplyView({ reply, realm, addressee, onNext }: { reply: AskReply; realm
   // stays in the unfinished list until the other agent's answer arrives; there is nothing to click.
   if (reply.kind === 'waiting') return <span>{reply.text}</span>;
   if (reply.kind === 'done') {
-    const r = reply.result as { name?: string; agent?: string; txHash?: string; alreadyCreated?: boolean } | null;
+    const r = reply.result as { name?: string; agent?: string; txHash?: string; alreadyCreated?: boolean; answer?: string } | null;
     const doneApp = resultApp(reply.interaction?.result, { result: reply.result });
     return (
       <div>
         {doneApp}
         {/* Spec 367 §6 — the reply claims what the evidence ESTABLISHED and no more: an invitation is "submitted",
             not "done"; a payment is "done, on chain". The words come from the agent's fulfillment record. */}
-        <div>{r?.alreadyCreated ? `${r?.name ?? 'It'} already exists.` : reply.fulfillment ? (reply.fulfillment.established === 'submission' ? `Submitted — ${reply.fulfillment.words}.` : `Done — ${r?.name ? `${r.name} is live` : reply.fulfillment.words}.`) : `Done — ${r?.name ?? 'it'} is live.`}</div>
+        {/* The act's OWN words when its result says them ("You joined missio-nexus.org.") — "‹name› is live" is a CREATED
+            agent's line, and an accepted invitation carries a name too (invite e2e: "Done — missio-nexus.org is live."). */}
+        <div>{r?.answer ? r.answer : r?.alreadyCreated ? `${r?.name ?? 'It'} already exists.` : reply.fulfillment ? (reply.fulfillment.established === 'submission' ? `Submitted — ${reply.fulfillment.words}.` : `Done — ${r?.name ? `${r.name} is live` : reply.fulfillment.words}.`) : `Done — ${r?.name ?? 'it'} is live.`}</div>
         {/* THE REFERENCE, whether or not an agent was created. This used to hang off `r.agent`, so a
             PAYMENT — whose result is a transfer, not an agent — reported "Done" and showed the person who
             had just moved money no transaction at all. The hash is carried in full for anything that

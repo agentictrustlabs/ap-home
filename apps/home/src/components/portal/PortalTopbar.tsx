@@ -6,6 +6,7 @@ import { IdentityChip } from './IdentityChip';
 import { AgentSwitcher } from './AgentSwitcher';
 import { WorkspaceAction } from './WorkspaceAction';
 import { ChatIcon } from '../shared/Icons';
+import { AlertBell } from './AlertBell';
 
 // On a phone the bar carries FOUR things and no more: the shield (home), the workspace you stand in, Ask,
 // and the identity chip whose menu holds Sign out (on every width — top right, beside Ask). The brand name and
@@ -24,6 +25,8 @@ export function PortalTopbar({ brandName, askOpen, onToggleAsk, menuOpen, onMenu
         <span className="portal-topbar-action"><WorkspaceAction /></span>
       </div>
       <div className="portal-topbar-r">
+        {/* B6a — what is waiting on me, on every page (signatures, decisions, answers, invitations). */}
+        <AlertBell />
         {/* Ask the realm you are standing in — the addressee follows the switcher, never a second picker. */}
         {onToggleAsk && (
           <button

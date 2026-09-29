@@ -3187,7 +3187,11 @@ export function orgPhraseOf(goal: string): string | undefined {
   // The phrase may carry a DOT: "members of calvary.org", "members of alice-home-church.impact" are typed
   // names, and excluding the dot here meant no typed name ever reached the step — the roster read then
   // fell to the addressee (spec 366 R3's incident). Only sentence punctuation ends the phrase.
-  const m = goal.match(/\bmembers?\b[^?]*?\b(?:of|in|on)\b\s+(?:the\s+)?([^?,;!]+?)\s*[?.!]*$/i);
+  // "members of / in / on X" — and the phrasings the compiled roster read ALSO catches: "who belongs to X", "who is in X",
+  // "who's part of X". Without them the name was dropped and the plan refused "the ask names Missio Nexus and the step
+  // names no org" for the plainest roster question there is (live 2026-09-29).
+  const m = goal.match(/\bmembers?\b[^?]*?\b(?:of|in|on)\b\s+(?:the\s+)?([^?,;!]+?)\s*[?.!]*$/i)
+    ?? goal.match(/\bwho(?:'s|\s+is|\s+are)?\s+(?:belongs?\s+to|belongs?\s+in|in|on|part\s+of|a\s+member\s+of)\s+(?:the\s+)?([^?,;!]+?)\s*[?.!]*$/i);
   if (!m) return undefined;
   const phrase = (m[1] ?? '')
     // "… of missio nexus 1 usdc" (the fan-out sentence) — the amount is the payment's, not the name's.

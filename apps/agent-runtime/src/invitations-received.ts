@@ -5,6 +5,7 @@
 // A read of the asker's own records (self-acting, no mandate); never another person's inbox.
 import { InputRequired, type ToolSpec, type ToolInvoker } from '@agenticprimitives/orchestration';
 import { ADAPTER } from './adapter-declarations.js';
+import { relationshipRows } from '@agenticprimitives/context';
 
 export const INVITATIONS_RECEIVED_CAPABILITY = 'person.invitations.list' as const;
 
@@ -22,7 +23,6 @@ export const INVITATIONS_RECEIVED_TOOL: ToolSpec = {
 interface ContextRef { kind: string; id: string; label?: string }
 /** `inbox.data` (fabric `InboxDataV1`): the message envelopes carry the reference (the Join chip's), the conversation descriptors mirror it. */
 interface InboxDoc { envelopes?: Array<{ id?: string; from?: string; createdAt?: string; contextRefs?: ContextRef[] }>; conversations?: Array<{ id?: string; participants?: string[]; contextRefs?: ContextRef[]; createdAt?: string; archived?: boolean }> }
-interface Relationships { data?: Record<string, { agent?: string; relationship?: string }> }
 
 export interface InvitationsDeps {
   readSubjectRecord?: (subject: string, recordType: string) => Promise<unknown>;
@@ -57,8 +57,11 @@ export async function invitationsOf(deps: InvitationsDeps, person: string): Prom
       ...(inbox?.envelopes ?? []).map((e) => ({ participants: e.from ? [e.from] : [], contextRefs: e.contextRefs, createdAt: e.createdAt })),
       ...(inbox?.conversations ?? []).filter((c) => !c.archived).map((c) => ({ participants: c.participants ?? [], contextRefs: c.contextRefs, createdAt: c.createdAt })),
     ];
-    const rels = (await read(person.toLowerCase(), 'relationships.data').catch(() => null)) as Relationships | null;
-    const belongs = new Set(Object.values(rels?.data ?? {}).map((r) => String(r.agent ?? '').toLowerCase()).filter(Boolean));
+    const rels = await read(person.toLowerCase(), 'relationships.data').catch(() => null);
+    // ONE PARSER for relationships.data (`{ orgs: { <address>: entry } }` — a map, in several entry shapes). This read
+    // `rels.data`, which the record does not have, so `joined` was false for everyone: an invitation listed as pending
+    // after its invitee joined, and accept could never confirm a join (invite e2e, live 2026-09-29).
+    const belongs = new Set(relationshipRows(rels).map((r) => r.agent));
     const seen = new Map<string, { org: string; name: string | null; label?: string; from: string[]; invitedAt?: string; joined: boolean }>();
     for (const d of descriptors) {
       for (const ref of d.contextRefs ?? []) {
