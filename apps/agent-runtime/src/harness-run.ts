@@ -2814,6 +2814,8 @@ export interface PlannerTraceV1 {
   /** Spec 391 — the composer's evidence, FITTED to its budget: how much it saw of how much there was, and every
    *  result whose body was replaced by its summary. Never a silent slice. */
   composerEvidence?: { chars: number; of: number; dropped: Array<{ tool: string; stepRef?: string; bytes: number }> };
+  /** Spec 420 §10 — per party word, what the private tier returned before narrowing (evidence; bounded to 12 entries). */
+  resolution?: Array<{ arg: string; raw: string; outcome: string; looked?: string[]; candidates: Array<{ agent: string; source: string; match?: string; context?: string; kind?: string }> }>;
   /** Spec 388 — which provider carried the planner and the composer, and why (the numbers beside the reason). */
   /** Spec 415 — every structured model call the run made (the selection judge, a skill's answer, the KB and vault
    *  choosers), as it ran: provider, model, why, when. Each becomes a model invocation on the run's provenance. */
@@ -5755,6 +5757,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     normalizeArgs: ({ toolId, tool, args }) => resolveStepArgs(args, env, { ...deps, ...(input.session ? { session: input.session } : {}),
       // Spec 420 §10 — the on-chain kind of a display-named candidate (a roster row), read from the record, never from the row.
       ...(deps.agentTypeOf ? { agentKindOf: deps.agentTypeOf } : {}),
+      onCandidates: (e: NonNullable<PlannerTraceV1['resolution']>[number]) => { trace.resolution = [...(trace.resolution ?? []), e].slice(-12); },
       // Spec 370 P7 — what recent asks resolved, for a pronoun or a repeated name. The same addressee's turns first.
       ...(input.conversation ? { recentParties: async () => recentParties(input.conversation, { addressee: String(input.addressee ?? '') }) } : {}),
       // Spec 385 — the person's DURABLE scoped confirmation memory (their own vault), consulted before the
