@@ -3985,7 +3985,10 @@ function whoseWordsWarning(d: Record<string, ArgDerivationV1>, args: Record<stri
   const others = Object.entries(d).filter(([, v]) => v.untrustedOnly).map(([a, v]) => {
     const val = String(args[a] ?? '');
     const shown = /^0x[0-9a-f]{40}$/i.test(val) ? (resolved ? [...resolved.values()].find((p) => p.agent === val.toLowerCase())?.label : undefined) : val;
-    const src = v.from.map((f) => SOURCE[f.toolId]).filter(Boolean)[0] ?? 'something someone else wrote';
+    // The most SPECIFIC source names it: a message she received beats a page, and both beat the public passages retrieved for
+    // every ask (a name like "bob" is in those too) — "taken from published words" for a reply to whoever asked was untrue.
+    const order = ['messaging.inbox.list', 'library.public.read', 'web.read', 'web.search', 'kb.retrieve'];
+    const src = [...v.from].sort((x, y) => (order.indexOf(x.toolId) + 99) % 99 - (order.indexOf(y.toolId) + 99) % 99).map((f) => SOURCE[f.toolId]).filter(Boolean)[0] ?? 'something someone else wrote';
     return `${partyWord(a)}${shown ? ` (${shown.length > 40 ? `${shown.slice(0, 40)}…` : shown})` : ''} was taken from ${src}`;
   });
   return others.length ? `Check before you sign: ${others.join('; ')} — not from what you said.` : '';
