@@ -50,6 +50,7 @@ import { WORK_SEARCH_TOOL, workSearchInvoker } from './work-search-tool.js';
 import { GITHUB_TOOLS, GITHUB_ACTS, githubInvoker } from './connectors/github-tools.js';
 import { CALENDAR_TOOLS, CALENDAR_ACTS, calendarInvoker } from './connectors/calendar-tools.js';
 import { MAIL_DRIVE_TOOLS, MAIL_DRIVE_ACTS, mailDriveInvoker } from './connectors/mail-drive-tools.js';
+import { connectorStatus } from './connectors/google-token.js';
 import { MEMORY_TOOLS, MEMORY_ACTS, MEMORY_LIST_TOOL, MEMORY_REMEMBER, memoryFactsInvoker, memoryProposalFor, connectorMemoryProposal } from './memory-facts-tools.js';
 import { ROUTINE_TOOLS, ROUTINE_ACTS, ROUTINE_LIST, routineInvoker, compiledRoutine } from './routine-tools.js';
 import { WEB_TOOLS, webReadInvoker } from './web-read.js';
@@ -5312,6 +5313,24 @@ step is then handed to that agent under authority the person grants; leave it ou
   // Spec 415 A4 — the playbook's INSTRUCTION SKILLS (a tool per skill, answered under its own body): offered only where
   // the corpus is bound, because a tool that cannot run is not listed.
   const instructionTools = env.SKILLS_MCP ? instructionSkillTools(playbook) : [];
+  // Spec 421 — A CONNECTOR SHE HAS NOT CONNECTED IS NOT A PLACE TO LOOK. The planner answered "who wrote to me about the
+  // rehearsal" by searching Gmail, which alice never connected — "Gmail is not connected", and the message she meant sat in
+  // her Home inbox. The read tools stay offered (asked about Gmail by name, the honest answer is "connect it"), with their
+  // description saying they are not connected. Read at the person's own agent only, once per turn; a status that cannot be
+  // read leaves the tools as they are (the invoker still says "not connected" if it is not).
+  const person = input.person ? String(input.person).toLowerCase() : '';
+  const atOwnAgent = !!person && person === String(input.addressee ?? '').toLowerCase();
+  const googleConnected = atOwnAgent ? await remembered(`google-connected:${person}`, async () => {
+    const [mail, drive, cal] = await Promise.all((['google-gmail', 'google-drive', 'google-calendar'] as const).map((p) => connectorStatus(env as never, person as Address, p).then((x) => x.connected).catch(() => null)));
+    return { 'google-gmail': mail, 'google-drive': drive, 'google-calendar': cal } as Record<string, boolean | null>;
+  }).catch(() => null) : null;
+  const providerOf = (id: string): string | null => id.startsWith('gmail.') ? 'google-gmail' : id.startsWith('drive.') ? 'google-drive' : id.startsWith('calendar.') ? 'google-calendar' : null;
+  const unlessConnected = (t: ToolSpec): ToolSpec => {
+    const pv = providerOf(t.id);
+    if (!pv || !googleConnected || googleConnected[pv] !== false) return t;
+    const name = pv === 'google-gmail' ? 'Gmail' : pv === 'google-drive' ? 'Google Drive' : 'Google Calendar';
+    return { ...t, description: `NOT CONNECTED — ${name} is not connected for this person, so it holds nothing to find: never search it for what she refers to (her messages are in her Home inbox). Use it only if she names ${name}, to tell her to connect it. ${t.description}` };
+  };
   const tools = [
     ...playbookAnswer,
     ...instructionTools,
@@ -5360,8 +5379,8 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(deps.readGrants ? [ACCESS_LIST_TOOL] : []),
     ...(deps.auditGrants && playbook?.tools?.[ACCESS_AUDIT_TOOL.id] ? [mergeContractTool(ACCESS_AUDIT_TOOL, playbook.tools[ACCESS_AUDIT_TOOL.id])] : []),
     ...GITHUB_TOOLS.filter((t) => !GITHUB_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
-    ...CALENDAR_TOOLS.filter((t) => !CALENDAR_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
-    ...MAIL_DRIVE_TOOLS.filter((t) => !MAIL_DRIVE_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
+    ...CALENDAR_TOOLS.filter((t) => !CALENDAR_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [unlessConnected(mergeContractTool(t, playbook.tools[t.id]!))] : [])),
+    ...MAIL_DRIVE_TOOLS.filter((t) => !MAIL_DRIVE_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [unlessConnected(mergeContractTool(t, playbook.tools[t.id]!))] : [])),
     // Spec 398 §9 — the workspace's build runs, read wherever the playbook carries the contract.
     ...BUILD_TOOLS.filter((t) => !BUILD_ACTS.has(t.id)).flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id]!)] : [])),
     // Spec 402 W5a — a public page read as evidence, wherever the playbook carries the contract.
