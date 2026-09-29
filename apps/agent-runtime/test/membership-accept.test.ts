@@ -7,7 +7,7 @@ import { membershipAcceptInvoker } from '../src/invitations-received.js';
 const ME = '0x1dba4a27c53d7babda99513080223fb3bfc4bad1', ORG = '0x3b99f2b452766de5df0dbcdfc676f27257151333', OTHER = '0x' + 'ab'.repeat(20);
 const inboxWith = (org: string) => ({ envelopes: [{ id: 'm1', from: `eip155:34348:0x${'a1'.repeat(20)}`, createdAt: '2026-09-29T10:00:00Z', contextRefs: [{ kind: 'org-channels', id: org, label: 'Missio Nexus' }] }] });
 const deps = (joined: () => boolean) => ({
-  readSubjectRecord: async (_s: string, r: string) => (r === 'inbox.data' ? inboxWith(ORG) : r === 'relationships.data' ? { data: joined() ? { x: { agent: ORG, relationship: 'member' } } : {} } : null),
+  readSubjectRecord: async (_s: string, r: string) => (r === 'inbox.data' ? inboxWith(ORG) : r === 'relationships.data' ? { orgs: joined() ? { [ORG]: { orgName: 'Missio Nexus', relationship: 'member', kind: 'org' } } : {} } : null), // the record's real shape: a map keyed by address
   nameOf: async (a: string) => (a === ORG ? 'missio-nexus.org' : null),
 });
 const ctx = (supplied: unknown[] = []) => ({ intent: { goal: 'accept the invitation' }, step: { toolId: 'organization.membership.accept', args: {}, id: 's0' }, index: 0, supplied } as never);
