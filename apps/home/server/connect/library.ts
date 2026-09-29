@@ -486,11 +486,13 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // listing is the index — which is all a browser needs to draw it. Entries that still carry inline bytes
   // (written before the index-only rule) are served as they are.
   const folderQ = (url.searchParams.get('folder') ?? '').replace(/^\/+|\/+$/g, '');
-  const nameQ = url.searchParams.get('name') ?? '';
-  if (scope.indexOnly && scope.getRecord && (folderQ || nameQ)) {
+  // `name` may be given more than once (`?name=a.json&name=b.json`): a reader whose copy of a library is a few
+  // artifacts behind hydrates exactly those in ONE round trip, instead of one per artifact or a whole folder.
+  const namesQ = new Set(url.searchParams.getAll('name').filter((n) => n));
+  if (scope.indexOnly && scope.getRecord && (folderQ || namesQ.size)) {
     const wanted = artifacts.filter((a) => !a.isFolder && !a.bytesB64 && a.source === 'blob'
       && (!folderQ || a.folder === folderQ || a.folder.startsWith(`${folderQ}/`))
-      && (!nameQ || a.name === nameQ));
+      && (!namesQ.size || namesQ.has(a.name)));
     for (let i = 0; i < wanted.length; i += HYDRATE_CONCURRENCY) {
       await Promise.all(wanted.slice(i, i + HYDRATE_CONCURRENCY).map(async (a) => {
         const rec = (await scope.getRecord!(`content.artifact.${a.id}`).catch(() => null)) as { bytesB64?: string } | null;
