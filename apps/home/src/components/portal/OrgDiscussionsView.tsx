@@ -114,6 +114,8 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   // pending invitations. Open topics never load these — participation is derived from membership.
   const [participants, setParticipants] = useState<ParticipantRow[] | null>(null);
   const [pendingInvites, setPendingInvites] = useState<PendingInviteRow[]>([]);
+  /** This person holds the organization's invitation (its member-access grant) — the page leads with Join, not Request. */
+  const [invitedToJoin, setInvitedToJoin] = useState(false);
   const [participantBusy, setParticipantBusy] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   // Restricted-topic participant invite popover (filterable roster of existing org members).
@@ -157,6 +159,8 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       // this exact card, so an unconditional clear erased the only feedback they had. The approval
       // affordance survives because it lives in `wireNeeded`, not in `error`; the guard keeps a genuine
       // apply error visible too.
+      const nb = (await chRes.json().catch(() => ({}))) as { invited?: boolean };
+      setInvitedToJoin(nb.invited === true);
       setMember(false); setChannels(null);
       if (!wireNeededRef.current) setError(null);
       return;
@@ -561,6 +565,20 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       <SectionShell title="Discussions" description="Topic discussion inside this organization">
         {/* spec 324 §12 — a non-member REQUESTS to join; membership is granted by a steward (enrollment), and
             the presence listing is published as a CONSEQUENCE of that (Complete membership, below). */}
+        {/* INVITED: the organization asked them — lead with Join (the same ceremony as the Ask's accept and the Join chip). */}
+        {invitedToJoin && (
+          <div className="manage-card" style={{ maxWidth: 460, padding: '1.25rem', marginBottom: '0.85rem' }} data-testid="invited-join">
+            <h3 className="subhead">You&rsquo;ve been invited to join</h3>
+            <p className="manage-card-blurb" style={{ margin: '0 0 0.8rem' }}>
+              A steward invited you. Joining signs your membership — your consent, for you alone, revocable anytime.
+            </p>
+            <button type="button" className="btn-primary" style={{ width: 'auto' }} disabled={busy} onClick={() => void join()}>
+              {busy ? 'Joining…' : 'Join'}
+            </button>
+            {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{error}</p>}
+          </div>
+        )}
+        {!invitedToJoin && (
         <div className="manage-card" style={{ maxWidth: 460, padding: '1.25rem' }}>
           <h3 className="subhead">Request to join this organization</h3>
           {applied ? (
@@ -593,9 +611,11 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       />
       {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{error}</p>}
         </div>
+        )}
 
         {/* After a steward approves, the applicant completes membership here — publishing the listing they sign
             (revocable). recordOrgMembership picks up the org→member grant the approval stored. */}
+        {!invitedToJoin && (
         <div className="manage-card" style={{ maxWidth: 460, padding: '1.25rem', marginTop: '0.85rem' }}>
           <h3 className="subhead">Approved? Complete your membership</h3>
           <p className="manage-card-blurb" style={{ margin: '0 0 0.8rem' }}>
@@ -612,6 +632,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
             {busy ? 'Signing…' : 'Sign & complete membership'}
           </button>
         </div>
+        )}
       </SectionShell>
     );
   }

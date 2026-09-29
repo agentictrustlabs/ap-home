@@ -228,6 +228,13 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     const stale = /stale/i.test(reason);
     return jsonCors({ channels: [], bodies: {}, you: '', orgVaultEnabled: false, needsReEnable: stale, reason, membership: 'linked', steward: !!stewardship }, request);
   }
+  // NOT A MEMBER — BUT INVITED? The organization's invitation to THIS person (its signed member-access grant) is read with
+  // their own session (the invite claim, spec 341 §5.5b), so the page can say "you've been invited — join" instead of
+  // "request to join" to someone who was asked (ezra.me, live 2026-09-29). A read of their own invitation; grants nothing.
+  if (r.status === 403) {
+    const invited = !!(await memberAccessWireFor(env, communityId, who.person, who.token).catch(() => null));
+    return jsonCors({ ...r.body, ...(invited ? { invited: true } : {}) }, request, 403);
+  }
   if (r.status !== 200) return jsonCors(r.body, request, r.status);
 
   // Membership projection reconcile (Home-local cache; the DO just proved the listing).
