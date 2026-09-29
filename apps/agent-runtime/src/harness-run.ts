@@ -3207,6 +3207,19 @@ export function partyTypesFor(capabilityId: string, arg: string): readonly strin
  * authority whose limits name a string, and minting it throws. So the words become addresses HERE, once,
  * before anything is shown or signed.
  */
+/**
+ * The account a balance question names — or none, meaning the asker's own treasuries (spec 371). Named after the LAST
+ * "of/in/does/do/for", the anchor nearest the thing named: "how much money DO i have IN my treasury" names "my treasury",
+ * not "i have in my treasury" (the first anchor — which the person was then asked about: 'I could not find "i have in my"',
+ * live 2026-09-29). The asker's own words about herself ARE her: a phrase with I / my / me / we / our / us is her own.
+ */
+export function balanceAccountOf(goal: string): string | undefined {
+  const m = goal.match(/.*\b(?:of|in|does|do|for)\s+(?:the\s+)?([a-z0-9][a-z0-9 .'-]*?)\s*(?:hold|have|has|holds|currently)?\s*[?.!]*$/i);
+  const phrase = (m?.[1] ?? '').replace(/\s+(treasury|treasuries|account|accounts|wallet|organization|org)$/i, '').replace(/^(treasury|treasuries|account|accounts|wallet)$/i, '').trim();
+  if (!phrase || /\b(i|my|me|mine|we|our|ours|us)\b/i.test(phrase)) return undefined;
+  return /^(it|there|this|that|you|money|usdc|funds|balance)$/i.test(phrase) ? undefined : phrase;
+}
+
 export async function resolveStepArgs(
   args: Record<string, unknown>,
   env: HarnessEnv,
@@ -4817,9 +4830,11 @@ The person has ALREADY granted authority to ${holding} for this exact ask. That 
     // much does alice2.treasury hold", "how much money does missio nexus have" → the balance read, with the
     // account phrase for the party resolver (or none: the asker's own treasuries).
     if (/\b(balance|how much (money|usdc|funds)?|what do (i|we) (hold|have)|funds)\b/.test(g) && !/\b(pay|send|transfer|receipts?|payments?|history)\b/.test(g)) {
-      const m = goal.match(/\b(?:of|in|does|do|for)\s+(?:the\s+|my\s+)?([a-z0-9][a-z0-9 .'-]*?)\s*(?:hold|have|has|holds|currently)?\s*[?.!]*$/i);
-      const phrase = (m?.[1] ?? '').replace(/\s+(treasury|account|wallet|organization|org)$/i, '').trim();
-      const account = phrase && !/^(i|we|my|our|it|there|this|that|you|money|usdc|funds|balance)$/i.test(phrase) ? phrase : undefined;
+      // The account is named after the LAST "of/in/does/do/for" — the one nearest the thing named: "how much money DO i have
+      // IN my treasury" names "my treasury", not "i have in my treasury" (the first anchor, which the person then got asked
+      // about: 'I could not find "i have in my"' — live 2026-09-29). And the asker's own words about herself ARE her: a
+      // phrase with I / my / me / we / our / us is her own treasuries, which the read answers with no account at all.
+      const account = balanceAccountOf(goal);
       return { steps: [{ toolId: BALANCE_READ_TOOL.id, args: account ? { account } : {} }], rationale: 'compiled: balance read (spec 371)' };
     }
     if (/\bmembers?\b.*\b(of|on|in)\b|\bwho (are|is|belongs)\b.*\bmembers?\b|\bwho belongs\b/.test(g)) {
