@@ -139,7 +139,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // being presented, never a claim being trusted.
     const suppliedMemberAccess = subjectAddr === who.person ? (body.memberAccess ?? null) : null;
     const selfMemberAccess =
-      suppliedMemberAccess ?? (subjectAddr === who.person ? await memberAccessWireFor(env, communityId, who.person) : null);
+      suppliedMemberAccess ?? (subjectAddr === who.person ? await memberAccessWireFor(env, communityId, who.person, who.token) : null);
     const selfStewardship = subjectAddr === who.person ? await stewardWireFor(env, who.person, communityId, who.token) : null;
     const r = await callInteractions(env, communityId, 'directory.publish', {
       session: who.token,

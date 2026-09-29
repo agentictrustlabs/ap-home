@@ -1158,7 +1158,9 @@ export function readSubjectReply(envelope: (AskReplyEnvelopeV1 & { subjectAnswer
     // Spec 374 — `needs` from the receiver means it PARKED the act for its own steward (or asked the
     // asker something); the run reference is where it waits, and the caller decides whether that is a
     // commitment (an act) or a relayed question (a read).
-    return { ok: false, refused: `${who} ${sa.outcome === 'refused' ? 'refused' : sa.outcome === 'needs' ? 'needs more before it can answer —' : 'could not answer:'} ${sa.said ?? ''}`.trim(), ...(sa.outcome === 'needs' ? { needs: true, said: sa.said ?? '', ...(sa.result !== undefined ? { needsWhat: sa.result } : {}) } : {}), runRef: sa.run?.runRef, receipts };
+    // A refusal is never empty (spec 420 refusalIsSaid): the receiver's own words, else its reply's error.
+    const why = (sa.said ?? '').trim() || String((envelope.reply as { error?: string } | undefined)?.error ?? '').trim() || 'it gave no reason';
+    return { ok: false, refused: `${who} ${sa.outcome === 'refused' ? 'refused' : sa.outcome === 'needs' ? 'needs more before it can answer —' : 'could not answer:'} ${why}`.trim(), ...(sa.outcome === 'needs' ? { needs: true, said: sa.said ?? '', ...(sa.result !== undefined ? { needsWhat: sa.result } : {}) } : {}), runRef: sa.run?.runRef, receipts };
   }
   if (envelope.ok === false || envelope.error) return { ok: false, refused: `${who} refused: ${envelope.error ?? status}` };
   const reply = envelope.reply;
@@ -5936,11 +5938,15 @@ step is then handed to that agent under authority the person grants; leave it ou
         // outcome does not entail disclosing — refused here, before any signature is asked for. The ontology says
         // what an outcome entails (`outcomeClassOf`); a planner prompt never does.
         outcomeConformance(ontologyOutcomeClassOf),
-        instructionNeedsAct,
+        // Whether a plan ANSWERS THE SENTENCE (an instruction needs an act; a question needs a read) is a judgement of a PLANNED
+        // plan. A SUPPLIED plan was decided already — a Home button, or ONE step of another agent's plan routed here (spec
+        // 366): the routed roster check of "invite nathan to missio nexus" arrived with the whole sentence as its goal and was
+        // refused as "an instruction answered by a lookup" (live 2026-09-29, the invite e2e).
+        ...(input.plan ? [] : [instructionNeedsAct]),
         noPlaceholders,
         dependenciesProvided,
         branchesDecidable,
-        questionAnsweredByRead,
+        ...(input.plan ? [] : [questionAnsweredByRead]),
         // Spec 418 §12 / 420 — the "from the words" rules hold a PLANNER to what the person said. A SUPPLIED plan (a Home button,
         // a screen's form) carries the person's own input — often in base units ("amount": "4000000" for "4 usdc") — and is not a
         // paraphrase: applying them there stripped the Fund button's amount (found by the act laboratory's UX-action cases).
