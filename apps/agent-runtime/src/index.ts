@@ -4701,7 +4701,10 @@ app.post('/harness/ask', async (c) => {
       // as "Nothing was changed: missio-nexus.org could not answer:." (live 2026-09-29, the invite e2e).
       outcome: reply.kind === 'answer' ? (toolRefusal ? 'refused' : 'answer') : reply.kind === 'done' ? 'answer' : reply.kind === 'refused' ? 'refused' : reply.kind === 'prompt' || reply.kind === 'authority_required' ? 'needs' : 'error',
       ...(reply.kind === 'answer' && !toolRefusal ? { result: routedResult } : {}),
-      ...(reply.kind === 'done' ? { result: { result: (reply as { result?: unknown }).result ?? null, done: true } } : {}),
+      // The act's OWN result, unwrapped (the handoff path's shape): the asker's Home reads it — an invitation's signed
+      // member-access grant is stored in the organization's vault by the asker's surface (`invitationOf`), and a result
+      // nested one level deeper was never seen, so the invitee could not join ("has not authorized you to join").
+      ...(reply.kind === 'done' ? { result: (reply as { result?: unknown }).result ?? { done: true } } : {}),
       ...(toolRefusal ? { said: toolRefusal } : reply.kind === 'done' ? { said: (reply as { fulfillment?: { words?: string } }).fulfillment?.words ?? 'Done.' } : reply.kind === 'refused' ? { said: reply.error } : reply.kind === 'prompt' ? { said: reply.prompt.prompt } : reply.kind === 'authority_required' ? { said: reply.summary } : {}),
       // Spec 374 W2 — WHAT this agent needs, whole, so a steward asker can be asked for it at home and
       // carry it back: the authority request (requirement, delegator, delegate, alsoApprove, standing) or
