@@ -94,6 +94,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         const entry = (got.body as { relationships?: { orgs?: Record<string, { relationship?: string }> } }).relationships?.orgs?.[communityId];
         if (entry && entry.relationship === 'member') await callInteractions(env, who.person, 'relationships.merge', { session: who.token, entry: { org: communityId }, remove: true });
       } catch { /* the org side is left already; the person's record catches up on their next join/leave */ }
+      // …and the ORGANIZATION's record of it ends too (`endedAt`, kept as history) — otherwise its own agent goes on counting
+      // her as a member. The member ends her own; the DO checks the session is that member.
+      await callInteractions(env, communityId, 'org.endMembership', { session: who.token, member: who.person.toLowerCase() }).catch(() => undefined);
       await appendControlEvent(env, who.person as Address, 'grant-revoked', [], who.token).catch(() => undefined); // listing = the membership consent (closed event union)
     }
     return jsonCors(r.body, request, r.status);

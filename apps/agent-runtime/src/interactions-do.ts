@@ -3670,6 +3670,32 @@ export class InteractionsDO {
           return json({ ok: true, member });
         });
       }
+      if (op === 'org.endMembership') {
+        // THE ORGANIZATION'S RECORD SAYS WHEN A MEMBERSHIP ENDED (spec 324 §11). Removal and leaving cleared every
+        // projection — the listing, the member link, the grant index — and left this record untouched, so the org's
+        // own agent kept counting a removed member: the roster listed them, and an invitation back was refused as
+        // "already holds organization membership". The record is KEPT and stamped (who was here then is history);
+        // every reader skips a record with `endedAt`.
+        //
+        // WHO MAY END IT: the member, for themselves (leaving), or a steward of this organization (removal) — the
+        // same two parties whose acts end a membership. Nobody else writes an organization's roster.
+        const member = String(body.member ?? '').toLowerCase();
+        if (!/^0x[0-9a-f]{40}$/.test(member)) return json({ error: 'member required' }, 400);
+        const self = member === sessionSa.toLowerCase();
+        if (!self && !(await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined))) {
+          return json({ error: 'a membership is ended by the member or by a steward of the organization' }, 403);
+        }
+        const endReason = self ? 'left' : 'removed';
+        return this.serialize(async () => {
+          const key = `org.membership:member:${member}`;
+          const rec = await this.readDoc<Record<string, unknown> | null>(grant, key, null);
+          if (!rec) return json({ ok: true, member, ended: false, reason: 'no membership record' });
+          if (typeof rec.endedAt === 'string' && rec.endedAt) return json({ ok: true, member, ended: true, already: true });
+          await this.writeDoc(grant, key, { ...rec, endedAt: new Date().toISOString(), endReason });
+          await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.org.membership.end', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'membership', id: member } });
+          return json({ ok: true, member, ended: true });
+        });
+      }
       if (op === 'directory.publish') {
         const listing = body.listing as DirectoryListingV1 | undefined;
         if (!listing) return json({ error: 'listing required' }, 400);
