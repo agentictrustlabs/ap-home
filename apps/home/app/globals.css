@@ -988,6 +988,29 @@
       .portal-ask-btn svg { flex: none; }
       .portal-ask-btn:hover { background: var(--color-surface-sunken); }
       .portal-ask-btn.on { background: var(--color-text-primary); border-color: var(--color-text-primary); color: #fff; }
+      /* ── The bell (gap register B6a) — what is waiting on me, on every page ── */
+      .alert-bell { position: relative; }
+      .alert-bell__btn {
+        position: relative; display: inline-flex; align-items: center; justify-content: center; min-height: 36px; width: 38px;
+        border-radius: 8px; border: 1px solid var(--color-border-strong); background: var(--color-surface); color: var(--color-text-body); cursor: pointer;
+      }
+      .alert-bell__btn:hover { background: var(--color-surface-sunken); }
+      .alert-bell__btn.on { background: var(--color-surface-sunken); }
+      .alert-bell__count {
+        position: absolute; top: -5px; right: -5px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+        background: var(--color-danger, #c2410c); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
+      }
+      .alert-bell__panel {
+        position: absolute; right: 0; top: calc(100% + 6px); width: min(360px, calc(100vw - 32px)); max-height: 70vh; overflow-y: auto; z-index: 45;
+        background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 10px; box-shadow: 0 8px 24px rgb(0 0 0 / 10%);
+      }
+      .alert-bell__head { padding: .6rem .8rem; font-size: .78rem; font-weight: 700; border-bottom: 1px solid var(--color-border); }
+      .alert-bell__empty { padding: .9rem .8rem; font-size: .82rem; color: var(--color-text-muted); }
+      .alert-bell__row { display: flex; flex-direction: column; gap: .15rem; padding: .6rem .8rem; border-bottom: 1px solid var(--color-border); text-decoration: none; color: inherit; }
+      .alert-bell__row:hover { background: var(--color-surface-sunken); }
+      .alert-bell__kind { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--color-text-muted); }
+      .alert-bell__title { font-size: .85rem; font-weight: 600; }
+      .alert-bell__detail { font-size: .78rem; color: var(--color-text-muted); }
       .ask-flyout {
         position: fixed; right: 0; top: var(--topbar-h); bottom: 0; width: min(420px, 100vw); z-index: 40;
         display: flex; flex-direction: column; background: var(--color-surface);
