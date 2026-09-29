@@ -78,7 +78,7 @@ import { progressLine, type ProgressLineV1 } from './harness-progress.js';
 registerDefaultSubsetHandlers();
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
 import { type Plan, type Planner,
-  runIntent, CONTINUE_STEP_ID, deriveArgs, InputRequired, dataFor, signatureFor,
+  runIntent, CONTINUE_STEP_ID, deriveArgs, type ArgDerivationV1, InputRequired, dataFor, signatureFor,
   type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, partiesDistinct, actingPartyFromTheWords, kindNamedIsChartered, completePlan, transitionsHold, type FactsV1, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
 import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep, composeOfferedTools, mergeContractTool as composeMergeContractTool, loadPlaybook, declaredEffectSink, setBillStep, declaredCapabilities, type AskScopeV1 } from '@agenticprimitives/harness';
 // Spec 353 — the scope schema is Ring 0 now (spec 399 §4); this app keeps exporting it for its callers.
@@ -3978,6 +3978,21 @@ export async function askReplyFor(env: HarnessEnv, input: Parameters<typeof askR
   return input.plannerTrace && !reply.plannerTrace ? { ...reply, plannerTrace: input.plannerTrace } : reply;
 }
 
+/** Spec 421 W2 — the card's "check before you sign" sentence: each argument that came ONLY from someone else's words, with
+ *  its value and where from. Empty when every argument is hers. Derived at the ASKER'S door (her sentence), never relayed. */
+function whoseWordsWarning(d: Record<string, ArgDerivationV1>, args: Record<string, unknown>, resolved?: ResolvedParties): string {
+  const SOURCE: Record<string, string> = { 'messaging.inbox.list': 'a message in your inbox', 'web.read': 'a web page', 'web.search': 'web search results', 'library.public.read': 'a published work', 'kb.retrieve': 'published words' };
+  const others = Object.entries(d).filter(([, v]) => v.untrustedOnly).map(([a, v]) => {
+    const val = String(args[a] ?? '');
+    const shown = /^0x[0-9a-f]{40}$/i.test(val) ? (resolved ? [...resolved.values()].find((p) => p.agent === val.toLowerCase())?.label : undefined) : val;
+    const src = v.from.map((f) => SOURCE[f.toolId]).filter(Boolean)[0] ?? 'something someone else wrote';
+    return `${partyWord(a)}${shown ? ` (${shown.length > 40 ? `${shown.slice(0, 40)}…` : shown})` : ''} was taken from ${src}`;
+  });
+  return others.length ? `Check before you sign: ${others.join('; ')} — not from what you said.` : '';
+}
+/** A relayed note loses any whose-words sentence the RECEIVER wrote: it compared against a routed restatement, not her words. */
+const withoutRelayedWarning = (note: string): string => note.replace(/Check before you sign:.*?— not from what you said\.\s*/g, '').trim();
+
 async function askReplyForInner(env: HarnessEnv, input: {
   /** Spec 371 — the tools the run was offered, for rendering a read's `answer` template. */
   tools?: ToolSpec[];
@@ -4131,7 +4146,7 @@ async function askReplyForInner(env: HarnessEnv, input: {
         return fromOthers.length ? { fromOthers } : {};
       })(),
       ...((): Record<string, unknown> => { const ix = input.interactionFor?.[r.required.capability.id]; return ix?.review || ix?.navigationTarget ? { interaction: { ...(ix.review ? { review: ix.review } : {}), ...(ix.navigationTarget ? { navigationTarget: ix.navigationTarget } : {}) } } : {}; })(),
-      ...(standing ? { standing } : {}), ...((): Record<string, unknown> => { const SOURCE: Record<string, string> = { 'messaging.inbox.list': 'a message in your inbox', 'web.read': 'a web page', 'web.search': 'web search results', 'library.public.read': 'a published work', 'kb.retrieve': 'published words' }; const others = Object.entries(cardDerivation).filter(([, v]) => v.untrustedOnly).map(([a, v]) => { const val = String(r.required?.args[a] ?? ''); const shown = /^0x[0-9a-f]{40}$/i.test(val) ? (input.resolved ? [...input.resolved.values()].find((p) => p.agent === val.toLowerCase())?.label : undefined) : val; const src = v.from.map((f) => SOURCE[f.toolId]).filter(Boolean)[0] ?? 'something someone else wrote'; return `${partyWord(a)}${shown ? ` (${shown.length > 40 ? `${shown.slice(0, 40)}…` : shown})` : ''} was taken from ${src}`; }); const warn = others.length ? `Check before you sign: ${others.join('; ')} — not from what you said.` : ''; const n = [warn, note].filter(Boolean).join(' '); return n ? { note: n } : {}; })(),
+      ...(standing ? { standing } : {}), ...((): Record<string, unknown> => { const n = [whoseWordsWarning(cardDerivation, r.required!.args, input.resolved), note].filter(Boolean).join(' '); return n ? { note: n } : {}; })(),
       ...(standingUnavailable ? { standingUnavailable } : {}),
       // Only the parties this STEP actually names — a run that resolved three things does not get to
       // show all three under a mandate that covers one.
@@ -4185,7 +4200,13 @@ async function askReplyForInner(env: HarnessEnv, input: {
       return {
         kind: 'authority_required', runRef: r.runRef, requirement: a.requirement, delegator: a.delegator, delegate: a.delegate,
         capability: a.capability ?? r.prompt.toolId, stepRef: r.prompt.stepRef, summary: a.summary ?? `${a.capability ?? r.prompt.toolId} on ${a.delegator}`,
-        ...(a.alsoApprove ? { alsoApprove: a.alsoApprove as never } : {}), ...(a.standing ? { standing: a.standing } : {}), ...(a.note ? { note: a.note } : {}),
+        ...(a.alsoApprove ? { alsoApprove: a.alsoApprove as never } : {}), ...(a.standing ? { standing: a.standing } : {}),
+        ...((): Record<string, unknown> => {
+          const m = /^s(\d+)$/.exec(r.prompt!.stepRef ?? ''); const st = r.plan.steps.find((x) => x.id === r.prompt!.stepRef) ?? (m ? r.plan.steps[Number(m[1])] : undefined);
+          const warn = st ? whoseWordsWarning(deriveArgs(st.args, input.intent.goal, r.steps), st.args, input.resolved) : '';
+          const n = [warn, a.note ? withoutRelayedWarning(a.note) : ''].filter(Boolean).join(' ');
+          return n ? { note: n } : {};
+        })(),
         // THE ASKER'S OWN RESOLUTION SURVIVES THE RELAY. The receiver was handed addresses, so its parties
         // say "0x1659… — said"; but it was THIS run that turned "somali corridor team" into that address —
         // from the person's links, from a remembered choice (spec 385), from the last ask (370 P7) — and
