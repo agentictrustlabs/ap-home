@@ -25,6 +25,8 @@ bindings = [
   { name = "INTERACTIONS", class_name = "InteractionsDO" },
   { name = "HUDDLES", class_name = "HuddleRoomDO" },
   { name = "PROVIDER_METER", class_name = "ProviderMeterDO" },
+  # Spec 415 A5 — the Lab's experiments, one object per plan id (experiment-do.ts).
+  { name = "EXPERIMENTS", class_name = "ExperimentDO" },
 ]
 
 [[migrations]]
@@ -311,6 +313,8 @@ bindings = [
   { name = "INTERACTIONS", class_name = "InteractionsDO" },
   { name = "HUDDLES", class_name = "HuddleRoomDO" },
   { name = "PROVIDER_METER", class_name = "ProviderMeterDO" },
+  # Spec 415 A5 — the Lab's experiments, one object per plan id (experiment-do.ts).
+  { name = "EXPERIMENTS", class_name = "ExperimentDO" },
   # spec 290 §8/§9 — CROSS-SCRIPT binding to demo-mcp's SmartAgentBudgetDO so the A2A + MCP paths share
   # ONE hard-budget authority per Smart Agent. demo-mcp owns the class + migration; demo-a2a only binds.
   { name = "SA_BUDGET", class_name = "SmartAgentBudgetDO", script_name = "demo-mcp-production" },
@@ -376,6 +380,11 @@ new_sqlite_classes = ["ProviderMeterDO"]
 [[migrations]]
 tag = "v6"
 new_sqlite_classes = ["RuntimeContainer"]
+
+# Spec 415 A5 — the Lab's experiment object.
+[[migrations]]
+tag = "v7"
+new_sqlite_classes = ["ExperimentDO"]
 
 # ── FAITHNET (Azure faithchain 34348) — gcp-kms custody, Home on faithnet.me, backend on faithnet.io ──
 [env.faithnet]
@@ -595,6 +604,8 @@ bindings = [
   { name = "INTERACTIONS", class_name = "InteractionsDO" },
   { name = "HUDDLES", class_name = "HuddleRoomDO" },
   { name = "PROVIDER_METER", class_name = "ProviderMeterDO" },
+  # Spec 415 A5 — the Lab's experiments, one object per plan id (experiment-do.ts).
+  { name = "EXPERIMENTS", class_name = "ExperimentDO" },
   { name = "SA_BUDGET", class_name = "SmartAgentBudgetDO", script_name = "demo-mcp-faithnet" },
   # Spec 400 W1c — one runtime Container per member, named by the member's agent address.
   { name = "RUNTIME", class_name = "RuntimeContainer" },
@@ -929,6 +940,8 @@ bindings = [
   { name = "INTERACTIONS", class_name = "InteractionsDO" },
   { name = "HUDDLES", class_name = "HuddleRoomDO" },
   { name = "PROVIDER_METER", class_name = "ProviderMeterDO" },
+  # Spec 415 A5 — the Lab's experiments, one object per plan id (experiment-do.ts).
+  { name = "EXPERIMENTS", class_name = "ExperimentDO" },
   { name = "SA_BUDGET", class_name = "SmartAgentBudgetDO", script_name = "demo-mcp-faithnet" },
 ]
 
