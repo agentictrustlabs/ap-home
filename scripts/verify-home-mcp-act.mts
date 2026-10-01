@@ -87,8 +87,7 @@ console.log(`  run → outcome ${rec.out.outcome} · receipts ${JSON.stringify(r
 if (rec.out.outcome !== 'completed' || !steps.some((s) => s.toolId === 'treasury.payment.execute' && s.txHash)) fail(`the record does not show the payment: ${JSON.stringify(rec.out).slice(0, 400)}`);
 const recText = JSON.stringify(rec.out);
 if (recText.includes('"signature"') || recText.toLowerCase().includes(au.wire.toLowerCase())) fail('the record view leaked the act wire or a signature');
-const door = JSON.stringify(rec.out.door ?? rec.out.actor ?? rec.out.via ?? '');
-console.log(`  record door/actor → ${door.slice(0, 160)}`);
+console.log(`  record names act-as-me → ${recText.includes('act-as-me')} · names the client → ${recText.includes(actC.clientId)}`);
 
 // ── 2. over the cap: parks for her signature ──
 const two = await actC.call('ask', pay('5', `act-as-me over cap ${nonce}`));

@@ -12,7 +12,7 @@
 //   - one wire per capability, one selector each, never A2A_ANY_SKILL; a wire that does not cover the step derives
 //     nothing, and `grant_link` still works — an act with no matching wire still needs her signature;
 //   - only a client REGISTERED to request scope `act` gets this; Claude's dynamic registration cannot.
-import { privateKeyToAccount, sign as signRaw } from 'viem/accounts';
+import { privateKeyToAccount } from 'viem/accounts';
 import type { Hex } from 'viem';
 import { deriveFromStanding, parkedNeedOf, standingFor, type StandingWireV1 } from '@agenticprimitives/delegation';
 
@@ -76,6 +76,10 @@ export async function deriveForParked(env: { HOME_MCP_ACT_KEY?: string }, grant:
   if (!env.HOME_MCP_ACT_KEY) return { ok: false, reason: 'no act key' };
   const s = standingFor(grant.standing, parked.need, parked.capability);
   if (!s) return { ok: false, reason: `no standing wire covers ${parked.capability} for ${parked.need.delegator}` };
-  const r = await deriveFromStanding(s, parked.need, async (digest) => signRaw({ hash: digest, privateKey: env.HOME_MCP_ACT_KEY as Hex, to: 'hex' }));
+  // The act key is an EOA delegator: the DelegationManager recovers an EOA's signature from the EIP-191 eth-signed
+  // hash of the digest (`_validateSignature`), never the raw digest — so the child is signed as `signMessage({ raw })`,
+  // the same form every key-held delegator in this estate uses (`custody-oidc.ts`).
+  const account = privateKeyToAccount(env.HOME_MCP_ACT_KEY as Hex);
+  const r = await deriveFromStanding(s, parked.need, async (digest) => account.signMessage({ message: { raw: digest } }));
   return r.ok ? { ...r, capability: parked.capability } : r;
 }
