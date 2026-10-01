@@ -13,7 +13,7 @@
  * the fix is to delete the exception, not to loosen the test.
  */
 import { describe, it, expect } from 'vitest';
-import { buildNav, buildSettingsPane, buildUserMenu, paneGroups, stewardshipPane, type NavGroup } from './nav';
+import { buildNav, buildSettingsPane, buildUserMenu, paneGroups, stewardshipPane, securityPane, type NavGroup } from './nav';
 import { whitelabel } from '../../whitelabel/config';
 
 const ORG = '0xe26157068af46629691e2ab19726bf61476e6b6c';
@@ -306,5 +306,39 @@ describe('the "You steward" pane', () => {
 
   it('an org workspace gets its own treasury surface and its alliances', () => {
     expect(stewardshipPane({ kind: 'org', org: '0x1' })[0]!.items.map((i) => i.id)).toEqual(['org-treasury', 'alliances']);
+  });
+});
+
+
+describe('spec 422 — the Security pane', () => {
+  it('Security in the user menu opens the third pane, and the pane takes no workspace scope', () => {
+    const sec = buildUserMenu(whitelabel).find((i) => i.id === 'security');
+    expect(sec?.opensPane).toBe('security');
+    expect(sec?.href).toBe('/security');
+    // paneGroups ignores scope for the security pane: it is about the signed-in person, whatever is open.
+    expect(paneGroups('security', ORG_SCOPE, 'member')).toEqual(paneGroups('security', PERSON));
+    expect(paneGroups('security')).toEqual(securityPane());
+  });
+
+  it('the pane answers its questions in order: overview · who can sign · what you let others do', () => {
+    const headings = securityPane().map((g) => g.heading);
+    expect(headings).toEqual(['Security', 'Who can sign', 'What you let others do']);
+    const ids = securityPane().flatMap((g) => g.items.map((i) => i.id));
+    expect(ids).toEqual(['sec-overview', 'sec-sign-in', 'sec-grants', 'sec-connected']);
+  });
+
+  it('Grants and Connected are CROSS-LINKS — one page, two doors — and every other row lives under /security', () => {
+    for (const g of securityPane()) for (const i of g.items) {
+      if (i.crossLink) expect(i.href.startsWith('/security')).toBe(false);
+      else expect(i.href.startsWith('/security')).toBe(true);
+    }
+    expect(securityPane().flatMap((g) => g.items).filter((i) => i.crossLink).map((i) => i.href)).toEqual(['/grants', '/apps']);
+  });
+
+  it('no pane row is a placeholder: a page that has not shipped is absent, never a "soon" row', () => {
+    for (const i of securityPane().flatMap((g) => g.items)) {
+      expect(i.status).toBe('live');
+      expect(i.disabledReason).toBeUndefined();
+    }
   });
 });

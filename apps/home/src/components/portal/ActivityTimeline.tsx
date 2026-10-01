@@ -29,6 +29,11 @@ const EVENT_COPY: Record<HomeControlEventV1['eventType'], string> = {
   'card-published': 'Agent card published',
   'projection-published': 'Registry projection published',
   'binding-revoked': 'External binding revoked',
+  // spec 422 §7 — the Security section
+  'credential-added': 'A credential that signs for you was added',
+  'credential-retired': 'A credential was retired',
+  'channel-linked': 'An email or phone now opens your home',
+  'channel-unlinked': 'An email or phone was unlinked',
 };
 
 /** spec 348 §2.1 — `agent` scopes the timeline to events ABOUT one managed agent, for an org's or a

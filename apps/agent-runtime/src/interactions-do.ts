@@ -413,7 +413,9 @@ const RESOLUTION_GRANTS_RESOURCE = 'resolution.grants';
 // invitation key stays a delivery-plane write (the fabric firewall), untouched by this door.
 const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run.provenance:', 'run.artifact:', 'run.anchor:', 'run.measures:', 'build.run:', 'build.promotion:', 'connector.mcp:', 'agent.budget', 'confirmation.preferences', 'standing.instructions', 'memory.facts', 'routines.data', 'person.preferences', 'playbook.memory:', 'cardroom.', 'contact:', 'delegation.lineage:', 'relationships.credential:', 'relationships.revocation:', 'interaction.dispute:', 'run.dispute:', 'content.catalog', 'content.artifact.'] as const; // spec 412 W5 — the owner's Library, written by the owner's own agent (library.file.save / visibility / publish) // spec 410 §8 — each party's copy, in its own vault // spec 410 §1.2 — a wire re-issued for a rotation, in the delegator's own vault
 
-const CAPABILITY_RECORDS = new Set(['impact-profile', 'capabilities.data', 'skills.data', 'home.manifest', 'control-events.data', 'archetype.assignment']);
+const CAPABILITY_RECORDS = new Set(['impact-profile', 'capabilities.data', 'skills.data', 'home.manifest', 'control-events.data', 'archetype.assignment',
+  // spec 422 §9.3 — the person's Security section: credential labels + the channels that open the home. Hers to write.
+  'security.credentials', 'security.channels']);
 const CONTROL_EVENTS_RESOURCE = 'control-events.data';
 const CONTROL_EVENTS_CAP = 200; // ring buffer — the person's portable timeline is a recent-window projection.
 

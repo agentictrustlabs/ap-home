@@ -14,7 +14,7 @@
 //
 // The addressee comes from the workspace switcher's active scope, not from a second picker — one source
 // of truth for "where am I", exactly as the sidebar uses.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useRouter } from 'next/navigation';
 import { useSession } from '../../../context/session';
@@ -44,6 +44,9 @@ import { AgentName } from '../../shared/AgentName';
 import { connectedCredential } from './credential';
 import { createdAgentOf, recordCreatedAgent, invitationOf, recordInvitation } from '../../../home/ask-record';
 import { joinOrganization } from '../../../home/join-organization';
+import { isSecurityCeremony, runSecurityCeremony, ceremonyButtonLabel, recordLinkedChannel, type SecurityCeremonySummary } from '../../../home/security-ceremonies';
+import { EmailAuthCard } from '../EmailAuthCard';
+import { PhoneAuthCard } from '../PhoneAuthCard';
 
 type Entry =
   | { role: 'you'; text: string }
@@ -650,6 +653,13 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
           setBusy('Joining…');
           await joinOrganization({ member: agentAddress as Address, org: ceremony.org, displayName: personName ?? agentName ?? `member-${agentAddress.slice(2, 8)}`, session, credential: profile?.credential, named: !!agentName?.trim() });
         }
+        // Spec 422 §9.1 — the Security section's ceremonies: the SAME code the Sign-in page's buttons run, under her
+        // session (and, for a credential add, a credential that signs). `channel-link` ran inside the card the prompt
+        // rendered; the agent reads her records back and says what happened.
+        if (isSecurityCeremony(ceremony) && session && agentAddress) {
+          setBusy(ceremonyButtonLabel(ceremony) + '…');
+          await runSecurityCeremony({ person: agentAddress as Address, session, profile, onStep: (st) => setBusy(st) }, ceremony);
+        }
         supplied = { stepRef: reply.resumeToken, confirmed: true };
       }
       setPending(null);
@@ -806,6 +816,14 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
             onChoose={(value, label) => setChosen((m) => ({ ...m, [value.toLowerCase()]: label }))}
             onSuggest={(message) => { setPending(null); setQ(message); }}
             onAnswer={() => answer(pending.reply as never, pending.state)} onCancel={() => setPending(null)}
+            ceremonyUi={(() => {
+              // Spec 422 — linking a channel IS the code she verifies: the card runs the ceremony; once linked, her vault
+              // records it and the run resumes confirmed, so the agent reads it back from her records.
+              const sm = (pending.reply.prompt as { summary?: unknown }).summary;
+              if (!isSecurityCeremony(sm) || sm.ceremony !== 'channel-link' || !session || !agentAddress) return undefined;
+              const linked = async (value: string) => { await recordLinkedChannel({ person: agentAddress as Address, session, profile }, { kind: sm.kind, value }); void answer(pending.reply as never, pending.state); };
+              return sm.kind === 'phone' ? <PhoneAuthCard onLinked={linked} /> : <EmailAuthCard onLinked={linked} />;
+            })()}
           />
         )}
         {busy && !pending && (
@@ -1357,9 +1375,11 @@ function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest
 }
 
 /** A question for the person. Never a credential field — this surface answered those already. */
-function PromptCard({ prompt, answers, setAnswers, busy, onAnswer, onCancel, onChoose, onSuggest }: {
+function PromptCard({ prompt, answers, setAnswers, busy, onAnswer, onCancel, onChoose, onSuggest, ceremonyUi }: {
   prompt: AskPrompt; answers: Record<string, string>; setAnswers: (v: Record<string, string>) => void;
   busy: string | null; onAnswer: () => void; onCancel: () => void;
+  /** Spec 422 — a ceremony that IS a form (an email / phone code): rendered in place of the confirm button. */
+  ceremonyUi?: ReactNode;
   /** Remember the label this surface showed for a chosen value, so the next card can say it back. */
   onChoose: (value: string, label: string) => void;
   /** Prefill the composer with the agent's suggested follow-up. Never sends it. */
@@ -1445,10 +1465,11 @@ function PromptCard({ prompt, answers, setAnswers, busy, onAnswer, onCancel, onC
           onClick={() => onSuggest(prompt.suggest!.message)}
         >{prompt.suggest.label}</button>
       )}
+      {ceremonyUi && <div style={{ marginTop: 10 }}>{ceremonyUi}</div>}
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-        <BusyButton busy={!!busy} busyLabel={busy ?? 'Working…'} disabled={!ready} onClick={onAnswer} className="btn primary" data-testid="ask-answer">
-          {prompt.kind === 'signature' ? 'Sign & continue' : prompt.kind === 'confirmation' ? ((prompt as { summary?: { ceremony?: string; orgName?: string } }).summary?.ceremony === 'org-join' ? `Join ${(prompt as { summary?: { orgName?: string } }).summary?.orgName ?? 'the organization'}` : 'Yes, continue') : 'Continue'}
-        </BusyButton>
+        {!ceremonyUi && <BusyButton busy={!!busy} busyLabel={busy ?? 'Working…'} disabled={!ready} onClick={onAnswer} className="btn primary" data-testid="ask-answer">
+          {prompt.kind === 'signature' ? 'Sign & continue' : prompt.kind === 'confirmation' ? (((s: unknown) => isSecurityCeremony(s) ? ceremonyButtonLabel(s) : (s as { ceremony?: string })?.ceremony === 'org-join' ? `Join ${(s as { orgName?: string })?.orgName ?? 'the organization'}` : 'Yes, continue')((prompt as { summary?: unknown }).summary)) : 'Continue'}
+        </BusyButton>}
         <button type="button" className="btn ghost" onClick={onCancel} disabled={!!busy}>Cancel</button>
       </div>
     </div>

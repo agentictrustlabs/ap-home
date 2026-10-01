@@ -5,7 +5,7 @@ import type { WhiteLabelConfig } from '../../whitelabel/schema';
 import { isPersonClassScope, isSelfScope, personaHref, type WorkspaceScope } from '../../lib/workspace';
 import { orgHref, serviceHref, workspaceHref } from '../../lib/workspace';
 import {
-  UserIcon, BuildingIcon, LandmarkIcon, DatabaseIcon, TagIcon, AwardIcon, LinkIcon, ShieldIcon, HistoryIcon, HomeIcon,
+  UserIcon, BuildingIcon, LandmarkIcon, DatabaseIcon, TagIcon, AwardIcon, LinkIcon, ShieldIcon, HistoryIcon, HomeIcon, FingerprintIcon,
   ChatIcon, HashIcon, GlobeIcon, BotIcon, CheckCircleIcon, SettingsIcon, CodeIcon, IdCardIcon,
   type IconComponent,
 } from '../shared/Icons';
@@ -23,11 +23,15 @@ export interface NavItem {
   /** Present ⇒ the row is shown but not navigable, and this says why. Reserved for a surface that
    *  genuinely cannot do its job yet — never for permission (a server decides that, not a nav). */
   disabledReason?: string;
+  /** spec 422 §2.1 — a pane row that LINKS OUT to a page which already has a door elsewhere (Grants sits in the
+   *  person nav's Yours band; Connected is a user-menu row). The row is a real URL in the pane, but being on
+   *  that page does not hold the pane open: one page, two doors, one lit row. */
+  crossLink?: boolean;
 }
 
 /** The sections that open a pane. Both are lists too long to hang under a heading in a 240px column,
  *  and both are somewhere you go to work on a set of things rather than a single page. */
-export type PaneId = 'stewardship' | 'settings';
+export type PaneId = 'stewardship' | 'settings' | 'security';
 export interface NavGroup {
   id?: string;
   heading?: string;
@@ -271,7 +275,31 @@ export function paneGroups(
   active: WorkspaceScope = { kind: 'person' },
   orgRelationship: 'steward' | 'member' | 'self' = 'steward',
 ): SettingsGroup[] {
+  if (pane === 'security') return securityPane();
   return pane === 'stewardship' ? stewardshipPane(active) : buildSettingsPane(active, orgRelationship);
+}
+
+/**
+ * spec 422 §2.1 — the Security pane: about the SIGNED-IN PERSON, never the agent in the workspace, so it takes
+ * no scope and reads the same from every workspace. Four questions, one group each:
+ * who can sign for you · who can rescue you · what the key protects · what you have let others do.
+ * Rows arrive with their waves (W2 Recovery, W3 Vault + Sessions): a pane row that goes to a page which does not
+ * exist is a broken link, and §5's empty rule says an area with no items renders nothing — so a group whose
+ * page has not shipped is simply absent here, not a "soon" row.
+ */
+export function securityPane(): SettingsGroup[] {
+  return [
+    { heading: 'Security', items: [
+      { id: 'sec-overview', label: 'Overview', href: '/security', Icon: ShieldIcon, status: 'live' },
+    ] },
+    { heading: 'Who can sign', items: [
+      { id: 'sec-sign-in', label: 'Sign-in', href: '/security/sign-in', Icon: FingerprintIcon, status: 'live' },
+    ] },
+    { heading: 'What you let others do', items: [
+      { id: 'sec-grants', label: 'Grants', href: '/grants', Icon: ShieldIcon, status: 'live', crossLink: true },
+      { id: 'sec-connected', label: 'Connected', href: '/apps', Icon: LinkIcon, status: 'live', crossLink: true },
+    ] },
+  ];
 }
 
 /**
@@ -381,7 +409,9 @@ export function buildUserMenu(wl: WhiteLabelConfig): NavItem[] {
   // Household is NOT here: it moved to the Stewardship pane, beside Treasuries and Alliances, because
   // that is where a person looks for the things that are theirs to keep — and a nav item in two places
   // is two answers to "where does this live".
-  if (wl.services.devices) items.push({ id: 'security', label: 'Security', href: '/security', Icon: ShieldIcon, status: 'live' });
+  // spec 422 — Security OPENS A PANE (the third, beside Stewardship and Settings): one row in the menu, the
+  // section's pages in the second column. The row's href is the pane's first page.
+  if (wl.services.devices) items.push({ id: 'security', label: 'Security', href: '/security', Icon: ShieldIcon, status: 'live', opensPane: 'security' });
   if (wl.services.connectedApps) {
     items.push({ id: 'apps', label: 'Connected', href: '/apps', Icon: LinkIcon, status: 'live' });
     // The membership organizations an app supports for invite / register. NOT `.workspace` agents, and
