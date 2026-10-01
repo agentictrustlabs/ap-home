@@ -8,6 +8,8 @@ export type AccessMethod = 'owned locally' | 'live remote' | 'authorized replica
 export interface ArtifactLike {
   id: string; name: string; version?: number; source: 'blob' | 'graphdb' | 'vault' | 'external'; pointer?: string; discussionId?: string;
   contentCommitment?: string; createdAt: number; grants?: Array<{ grantee: { address: string; label?: string }; revoked?: boolean }>; effectiveGrants?: unknown[];
+  /** The registry edition this copy was written from (the server's `registry`), beside the vault's own save count. */
+  registry?: { id: string; version: string | number };
   releases?: Array<{ version: string; publisher: string; publishedAt: number }>; accessMode?: 'Owned' | 'Read-through' | 'Replica' | 'Public' | 'Projection'; sharedBy?: string;
 }
 
@@ -15,7 +17,9 @@ export interface ArtifactIdentity {
   version: string;
   /** The SA that authored it — the vault's owner for an owned artifact; the sharer for a shared one. */
   author: string;
-  sources: Array<{ kind: 'pointer' | 'topic' | 'commitment'; value: string }>;
+  sources: Array<{ kind: 'pointer' | 'topic' | 'commitment' | 'registry'; value: string }>;
+  /** The registry edition this copy was written from, beside the vault's own save count. */
+  registryEdition?: { id: string; version: string };
   scope: { vault: string; grants: number; live: number };
   /** No artifact carries its work item yet (398 §4.3) — said absent. */
   linkedWorkItem: null;
@@ -44,7 +48,9 @@ export function artifactIdentity(a: ArtifactLike, owner: { sa: string; vaultLabe
       ...(a.pointer ? [{ kind: 'pointer' as const, value: a.pointer }] : []),
       ...(a.discussionId ? [{ kind: 'topic' as const, value: a.discussionId }] : []),
       ...(a.contentCommitment ? [{ kind: 'commitment' as const, value: a.contentCommitment }] : []),
+      ...(a.registry ? [{ kind: 'registry' as const, value: `${a.registry.id} v${a.registry.version}` }] : []),
     ],
+    ...(a.registry ? { registryEdition: { id: a.registry.id, version: String(a.registry.version) } } : {}),
     scope: { vault: owner.vaultLabel, grants: grants.length, live: grants.filter((g) => !g.revoked).length },
     linkedWorkItem: null,
     accessMethod: accessMethodOf(a),

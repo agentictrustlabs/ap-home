@@ -3,7 +3,7 @@
 // harness did, and what to change. Renders the skill assessment report (`ap eval report`, baked at build time by
 // `scripts/build-evals-dashboard.mts`) — it judges nothing and derives no number. The sentences shown are the replay
 // sets' AUTHORED test intents; a person's words never reach the eval store (spec 414 §8).
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import report from '../../evals/skill-assessment.json';
 import { Section, List, Row, Chip, Stats, Stat, Tabs, FilterChip, Note, Card } from '../../ui';
 import { whitelabel } from '../../whitelabel/config';
@@ -45,6 +45,20 @@ export function SkillAssessmentLab() {
   const [skillFilter, setSkillFilter] = useState<string | null>(null);
   const [openIntent, setOpenIntent] = useState<string | null>(null);
   const [recFilter, setRecFilter] = useState<'act' | 'all'>('act');
+  // WHAT "SHOW" DID (owner, 2026-10-01: "I am not sure what happens when I select show"): a focus names the recommendation
+  // or skill whose test sentences the list below is now narrowed to, the list scrolls into view, and a banner above it
+  // says so with a Clear. Without this the click only re-filtered a list two screens down.
+  const [focus, setFocus] = useState<{ title: string; skill?: string } | null>(null);
+  const intentsRef = useRef<HTMLDivElement | null>(null);
+  const focusOn = (f: { title: string; skill?: string; experiment?: string; variant?: string }) => {
+    if (f.skill) setSkillFilter(f.skill);
+    if (f.experiment) setExpId(f.experiment);
+    if (f.variant) setVariantName(f.variant);
+    setOnlyWrong(false);
+    setFocus({ title: f.title, ...(f.skill ? { skill: f.skill } : {}) });
+    setTimeout(() => intentsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
+  const clearFocus = () => { setFocus(null); setSkillFilter(null); };
 
   if (!R.experiments.length) return <Note>No skill assessment has been run yet. Run <code>ap eval compare</code>, then <code>ap eval report</code>.</Note>;
   const allRuns = R.experiments.reduce((n, e) => n + e.variants.reduce((m, v) => m + v.runs, 0), 0);
@@ -85,13 +99,13 @@ export function SkillAssessmentLab() {
               </>}
               side={<>
                 <Chip tone={SEVERITY[r.severity].tone}>{SEVERITY[r.severity].label}</Chip>
-                {r.skill && <button type="button" className="btn ghost" onClick={() => { setSkillFilter(r.skill!); setExpId(r.experiment); if (r.variant) setVariantName(r.variant); }}>show</button>}
+                {r.skill && <button type="button" className="btn ghost" data-testid="lab-recommendation-show" onClick={() => focusOn({ title: r.title, skill: r.skill!, experiment: r.experiment, ...(r.variant ? { variant: r.variant } : {}) })}>Show its test sentences ↓</button>}
               </>} />
           ))}
         </List>
       </Section>
 
-      <Section title="Experiments" count={R.experiments.length} testId="lab-experiments">
+      <Section title="The test sentences, by experiment" count={R.experiments.length} testId="lab-experiments" aside={<span>pick an experiment, then an approach; the sentences it ran are listed</span>}>
         <Tabs label="experiment" value={expId} onChange={(id) => { setExpId(id); setVariantName(R.experiments.find((e) => e.id === id)?.variants[0]?.name ?? ''); setSkillFilter(null); }}
           items={R.experiments.map((e) => ({ id: e.id, label: `${slateName(e)} · ${new Date(e.startedAt).toLocaleDateString()}${latest.includes(e) ? '' : ' (earlier)'}` }))} />
         {exp && (
@@ -112,10 +126,17 @@ export function SkillAssessmentLab() {
                 {exp.comparisons.map((c) => <Note key={`${c.a}:${c.b}`}><strong>Compared:</strong> {c.words}.</Note>)}
                 {variant.riskCoverage && <RiskCoverageChart rc={variant.riskCoverage} />}
 
+                <div ref={intentsRef} style={{ scrollMarginTop: 72 }} />
+                {focus && (
+                  <div className="settings-banner" data-testid="lab-focus" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', margin: '8px 0' }}>
+                    <span><strong>Showing the test sentences behind:</strong> {focus.title}{focus.skill ? <> — skill <strong>{skillName(focus.skill)}</strong></> : null}{exp ? <> · {slateName(exp)}{variant ? ` · ${variant.name}` : ''}</> : null} · {intents.length} sentence{intents.length === 1 ? '' : 's'}</span>
+                    <button type="button" className="btn ghost" onClick={clearFocus} data-testid="lab-focus-clear">Show every test</button>
+                  </div>
+                )}
                 <div className="ui-toolbar" style={{ gap: 6, flexWrap: 'wrap' }}>
                   <FilterChip active={!onlyWrong} onClick={() => setOnlyWrong(false)} count={variant.intents.length}>Every test</FilterChip>
                   <FilterChip active={onlyWrong} onClick={() => setOnlyWrong(true)} count={variant.wrong} data-testid="lab-only-wrong">Only wrong</FilterChip>
-                  {skillFilter && <FilterChip active onClick={() => setSkillFilter(null)}>{skillName(skillFilter)} ✕</FilterChip>}
+                  {skillFilter && <FilterChip active onClick={clearFocus}>{skillName(skillFilter)} ✕</FilterChip>}
                 </div>
                 <List testId="lab-intents">
                   {intents.map((i) => (
@@ -161,7 +182,7 @@ export function SkillAssessmentLab() {
               </>}
               side={<>
                 {s.recommendations ? <Chip tone="warn">{s.recommendations} recommendation{s.recommendations === 1 ? '' : 's'}</Chip> : <Chip tone="ok">no open issue</Chip>}
-                <button type="button" className="btn ghost" onClick={() => setSkillFilter(s.skill)}>tests</button>
+                <button type="button" className="btn ghost" onClick={() => focusOn({ title: `the tests for ${skillName(s.skill)}`, skill: s.skill })}>Show its tests ↑</button>
                 {SKILLS_WEB && <a className="btn ghost" href={`${SKILLS_WEB}/?skill=${encodeURIComponent(s.skill)}`} target="_blank" rel="noreferrer">in the skills library ↗</a>}
               </>} />
           ))}

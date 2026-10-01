@@ -499,4 +499,15 @@ describe('/connect/library — org scope, index-only catalog', () => {
     expect((records.get('content.artifact.old') as any).bytesB64).toBe(btoa('old'));
     expect((records.get('content.artifact.f-skill') as any).bytesB64).toBe(btoa('# pkg v2'));
   });
+
+  it('keeps the REGISTRY EDITION a writer names beside its own save count, and keeps it across a re-save that says nothing', async () => {
+    const first = await (await post({ action: 'save', artifact: { id: 'reg-doc', kind: 'skill', name: 'SKILL.md', source: 'blob', bytesB64: btoa('# one'), registry: { id: 'skill:ns/thing', version: 9, at: 1 } } })).json();
+    expect(first.artifact.version).toBe(1);
+    expect(first.artifact.registry).toEqual({ id: 'skill:ns/thing', version: '9', at: 1 });
+    const again = await (await post({ action: 'save', artifact: { id: 'reg-doc', kind: 'skill', name: 'SKILL.md', source: 'blob', bytesB64: btoa('# two') } })).json();
+    expect(again.artifact.version).toBe(2);
+    expect(again.artifact.registry).toEqual({ id: 'skill:ns/thing', version: '9', at: 1 });
+    const bad = await (await post({ action: 'save', artifact: { id: 'reg-doc2', kind: 'md', name: 'x.md', source: 'blob', bytesB64: btoa('x'), registry: { id: '', version: 3 } } })).json();
+    expect(bad.artifact.registry).toBeUndefined();
+  });
 });

@@ -1226,6 +1226,8 @@
         /* `--portal-max` was declared and never used: explanatory paragraphs ran the full 920px, about
            150 characters a line. Cards keep the full width; prose gets a measure. */
         .portal-main > * { max-width: 1040px; }
+        /* A wide section (the Library: a tree beside a table) takes the whole column; the cap above is for prose pages. */
+        .portal-main > .section-shell--wide { max-width: none; }
         .portal-main p { max-width: 70ch; }
       }
       /* Two nav columns at 1024 would leave ~510px of content. Both narrow; the longest labels still

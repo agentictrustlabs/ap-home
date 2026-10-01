@@ -45,7 +45,9 @@ interface Artifact { id: string; kind: Kind; name: string; source: Source; folde
   /** Spec 412 — the owner's declaration (`apcnt:accessPolicy`) and what it comes to after the folder cascade. */
   accessPolicy?: AccessPolicy; effectiveAccessPolicy?: AccessPolicy;
   // present on "Shared with me" rows (a federated inbound grant from another vault)
-  accessMode?: AccessMode; sharedBy?: string; sharedByKind?: string; myActions?: string[] }
+  accessMode?: AccessMode; sharedBy?: string; sharedByKind?: string; myActions?: string[];
+  /** The registry edition this copy was written from, when a registry wrote it (shown beside the vault's own v-count). */
+  registry?: { id: string; version: string; at?: number } }
 interface TreeNode { name: string; path: string; children: TreeNode[] }
 
 /** The shape of the list while the vault is being read — never the empty state. */
@@ -305,6 +307,27 @@ export function LibrarySection({ orgSa, heldAgent }: {
     const r = await api('POST', { action: 'open', ownerScope: a.sharedBy, ownerKind: a.sharedByKind ?? 'person', id: a.id });
     return r.artifact as Artifact;
   }, [api]);
+  // THE DOCUMENT ITSELF (owner, 2026-10-01: "I want to be able to view the actual document"). An organization's catalog is
+  // an index — bytes live on `content.artifact.<id>` and a GET with `name=` hydrates exactly that one; a held agent's
+  // body is read over the stewardship delegation. Called when the panel opens a file the listing gave no bytes for.
+  const hydrate = useCallback(async (a: Artifact): Promise<Artifact> => {
+    if (heldAgent) {
+      if (!heldDelegation) throw new Error('No stewardship delegation on this agent — its document cannot be read from here.');
+      const body = await readHeldAgentArtifactBody(heldDelegation, a.id, vaultReadWithDelegation);
+      if (!body) throw new Error('This document carries no body in the vault.');
+      return { ...a, ...body };
+    }
+    const q = new URLSearchParams();
+    if (scopeSa) q.set('org', scopeSa);
+    q.set('name', a.name);
+    if (a.folder) q.set('folder', a.folder);
+    const r = await fetch(`/connect/library?${q.toString()}`, { headers: { authorization: `Bearer ${token}` } });
+    const b = (await r.json().catch(() => ({}))) as { artifacts?: Artifact[]; error?: string };
+    if (!r.ok) throw new Error(b.error ?? `read failed (${r.status})`);
+    const hit = (b.artifacts ?? []).find((x) => x.id === a.id) ?? (b.artifacts ?? []).find((x) => x.name === a.name && x.folder === a.folder);
+    if (!hit?.bytesB64) throw new Error('The document could not be read from the vault.');
+    return hit;
+  }, [heldAgent, heldDelegation, scopeSa, token]);
   const requestAccess = useCallback(async (a: Artifact, actions: string[]) => { await api('POST', { action: 'request-access', ownerScope: a.sharedBy, id: a.id, actions, artifactName: a.name }); }, [api]);
   const publish = async (id: string) => { try { await api('POST', { action: 'publish', org: orgSa, id }); await load(); } catch (e) { setErr((e as Error).message); } };
   // Spec 412 — move this Home's cache into her vault, under her own session (the catalog + every document's record).
@@ -329,7 +352,7 @@ export function LibrarySection({ orgSa, heldAgent }: {
   const shelfHref = orgSa || heldAgent ? null : '/published';
 
   if (forbidden) return (
-    <SectionShell title="Organization Library">
+    <SectionShell wide title="Organization Library">
       <div style={{ ...cardSty, textAlign: 'center', padding: '2rem' }}>
         <div style={{ display: 'inline-flex', color: 'var(--color-text-muted)' }}><Icon name="lock" size={28} /></div>
         <h3 style={{ margin: '.4rem 0' }}>You&apos;re not a steward of this organization</h3>
@@ -339,7 +362,7 @@ export function LibrarySection({ orgSa, heldAgent }: {
   );
 
   return (
-    <SectionShell title={title} description="What this vault holds, who may see each item, and how fresh it is — shared, published or replicated as three separate acts.">
+    <SectionShell wide title={title} description="What this vault holds, who may see each item, and how fresh it is — shared, published or replicated as three separate acts.">
       {/* Explicit text color so every descendant inherits a defined token — never a white ambient
           (e.g. a browser/OS dark-mode default) on our light surfaces. */}
       <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', color: 'var(--color-text-body)' }}>
@@ -436,6 +459,7 @@ export function LibrarySection({ orgSa, heldAgent }: {
                 onRemove={removeItem}
                 onOpenMember={select}
                 onOpenLive={openLive}
+                onHydrate={hydrate}
                 onRequestAccess={requestAccess}
                 onPublish={publish}
                 onSetVisibility={setVisibility}
@@ -479,6 +503,7 @@ function FolderTree({ nodes, path, onGo, counts }: {
     });
   }, [here]);
 
+  const [hover, setHover] = useState<string | null>(null);
   const row = (n: TreeNode, depth: number): ReactNode => {
     const on = n.path === here;
     const expanded = open.has(n.path);
@@ -487,6 +512,7 @@ function FolderTree({ nodes, path, onGo, counts }: {
       <div key={n.path}>
         <div role="treeitem" aria-selected={on} aria-expanded={hasKids ? expanded : undefined} tabIndex={0}
           onClick={() => onGo(n.path.split('/'))}
+          onMouseEnter={() => setHover(n.path)} onMouseLeave={() => setHover((h) => (h === n.path ? null : h))}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onGo(n.path.split('/')); } }}
           style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 13,
             // Top-level folders sit flush with "All items" (they are its rows, not a level under it); a child steps in.
@@ -497,7 +523,7 @@ function FolderTree({ nodes, path, onGo, counts }: {
             style={{ width: 12, flexShrink: 0, color: 'var(--color-text-muted)', fontSize: 10, textAlign: 'center' }}
             aria-hidden={!hasKids}>{hasKids ? (expanded ? '▾' : '▸') : ''}</span>
           <Icon name="folder" size={14} style={{ flexShrink: 0, color: 'var(--color-text-muted)' }} />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }} title={depth === 1 && appOfFolder(n.name) ? `${n.name} — written by ${appOfFolder(n.name)}, an app you connected` : n.name}>
+          <span style={hover === n.path ? { flex: 1, minWidth: 0, whiteSpace: 'normal', overflowWrap: 'anywhere' } : { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }} title={depth === 1 && appOfFolder(n.name) ? `${n.name} — written by ${appOfFolder(n.name)}, an app you connected` : n.name}>
             {n.name}
             {depth === 1 && appOfFolder(n.name) && <span style={{ ...mutedText, fontSize: 10, marginLeft: 6 }}>{appOfFolder(n.name)}</span>}
           </span>
@@ -558,7 +584,7 @@ function FolderRail({ lens, onLens, items, path, onGo }: {
   );
   const sharedOn = lens === 'shared';
   return (
-    <div aria-label="Folders" style={{ ...cardSty, padding: '.4rem 0', width: 232, flexShrink: 0, color: 'var(--color-text-body)' }}>
+    <div aria-label="Folders" style={{ ...cardSty, padding: '.4rem 0', width: 'clamp(260px, 24%, 420px)', flexShrink: 0, color: 'var(--color-text-body)' }}>
       {heading('Folders')}
       {/* THE FOLDERS ARE THE NAVIGATION. The vault is a tree; "public" is a property a file or folder carries (a
           filter above the list, a chip on the row), and the workspace switcher in the header already says whose
@@ -627,15 +653,16 @@ function ArtifactList({ rows, selectedId, ownerLabel, onOpen, onDescend, onDelet
             onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = 'transparent'; }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: '.5rem', minWidth: 0 }}>
               <Icon name={a.isFolder ? 'folder' : KIND_META[a.kind].icon} size={17} style={{ color: 'var(--color-text-muted)' }} />
-              <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+              <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.name}>{a.name}</span>
               <span style={{ ...badgeStyle('neutral'), fontSize: 10 }}>{a.isFolder ? (a.id.startsWith('folder:') && a.size ? `Folder · ${a.size}` : 'Folder') : KIND_META[a.kind].label}</span>
+              {!a.isFolder && <button type="button" onClick={(e) => { e.stopPropagation(); onOpen(a.id); }} title={`Open ${a.name}`} data-testid={`library-view-${a.id}`} style={{ ...btnSty, padding: '.1rem .5rem', fontSize: 11, flexShrink: 0 }}>View</button>}
               {a.effectiveAccessPolicy === 'public' && <span style={{ ...badgeStyle('ok'), fontSize: 10 }} title={a.accessPolicy === 'public' ? 'Anyone may read this — you made it public' : 'Anyone may read this — a folder above it is public'} data-testid="public-chip">Public</span>}
             </span>
             <span style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><b>{owner}</b></span>
             <span><span style={{ ...badgeStyle(ACCESS_TONE[mode]), fontSize: 11 }}>{mode}</span></span>
             <span>{a.isFolder ? <span style={{ ...mutedText, fontSize: 12 }}>—</span> : <span style={{ ...badgeStyle(FRESH_TONE[fresh]), fontSize: 11 }}>{fresh}</span>}</span>
             <span style={{ ...mutedText, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{authority}</span>
-            <span style={{ ...mono, ...mutedText, fontSize: 12 }}>{a.isFolder ? '—' : `v${a.version ?? 1}`}</span>
+            <span style={{ ...mono, ...mutedText, fontSize: 12 }} title={a.registry ? `v${a.version ?? 1} in this vault · registry v${a.registry.version}` : undefined}>{a.isFolder ? '—' : a.registry ? `v${a.version ?? 1} · reg v${a.registry.version}` : `v${a.version ?? 1}`}</span>
             {onDelete && (
               <button type="button" title={a.isFolder ? 'Delete this folder and everything in it' : 'Delete this file'}
                 aria-label={`Delete ${a.name}`}
@@ -686,11 +713,11 @@ function FederatedPlaceholder({ lens }: { lens: Lens }) {
 
 // ── detail / workspace panel — progressive disclosure, one primary action + overflow ──
 type Tab = 'content' | 'access' | 'provenance' | 'versions';
-function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, ownerSa, folders, onClose, onGrant, onRevoke, onDiscuss, onMove, onRemove, onOpenMember, onOpenLive, onRequestAccess, onPublish, onSetVisibility, publicHref }: {
+function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, ownerSa, folders, onClose, onGrant, onRevoke, onDiscuss, onMove, onRemove, onOpenMember, onOpenLive, onHydrate, onRequestAccess, onPublish, onSetVisibility, publicHref }: {
   artifact: Artifact; items: Artifact[]; ownerLabel: string; ownerVaultKind: string; ownerSa: string; folders: string[];
   onClose: () => void; onGrant: (id: string, addr: string, kind: string, actions: string[], label?: string) => void; onRevoke: (id: string, addr: string) => void;
   onDiscuss: (id: string) => void; onMove: (a: Artifact, dest: string) => void; onRemove: (a: Artifact) => void; onOpenMember: (id: string) => void;
-  onOpenLive: (a: Artifact) => Promise<Artifact>; onRequestAccess: (a: Artifact, actions: string[]) => Promise<void>;
+  onOpenLive: (a: Artifact) => Promise<Artifact>; onHydrate: (a: Artifact) => Promise<Artifact>; onRequestAccess: (a: Artifact, actions: string[]) => Promise<void>;
   onPublish: (id: string) => void;
   onSetVisibility: (id: string, policy: AccessPolicy) => void;
   publicHref: (a: Artifact) => string | null;
@@ -723,7 +750,8 @@ function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, ownerSa, fol
       actions={<Button variant="primary" size="sm" disabled={opening} onClick={() => (owned ? setTab('access') : void openLive())}>{owned ? 'Manage access' : opening ? 'Opening…' : 'Open live'}</Button>}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 'var(--sp-3)' }}>
         <Chip>{artifact.isFolder ? 'Folder' : KIND_META[artifact.kind].label}</Chip>
-        <Chip>v{artifact.version ?? 1}{id.latestRelease ? ` · released ${id.latestRelease.version}` : ''}</Chip>
+        <Chip title="This vault's own save count: it advances every time this entry is written here">v{artifact.version ?? 1} in this vault{id.latestRelease ? ` · released ${id.latestRelease.version}` : ''}</Chip>
+        {id.registryEdition && <Chip tone="ok" title={`The skills registry's edition this copy was written from (${id.registryEdition.id}); the registry counts publishes, this vault counts saves`}>registry v{id.registryEdition.version}</Chip>}
         <Chip tone={ACCESS_TONE[mode] === 'ok' ? 'ok' : ACCESS_TONE[mode] === 'warn' ? 'warn' : undefined}>{mode}</Chip>
         {!artifact.isFolder && <Chip tone={FRESH_TONE[mode !== 'Owned' ? 'Cached' : freshnessOf(artifact)] === 'ok' ? 'ok' : undefined}>{mode !== 'Owned' ? 'Cached' : freshnessOf(artifact)}</Chip>}
         {!owned && artifact.sharedBy && <Meta>shared by {shortAddr(artifact.sharedBy)}</Meta>}
@@ -801,7 +829,7 @@ function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, ownerSa, fol
       <div>
         {tab === 'content' && (isBundle
           ? <Members artifact={artifact} members={members} onOpenMember={onOpenMember} />
-          : owned ? <ContentPreview artifact={artifact} items={items} />
+          : owned ? <ContentPreview artifact={artifact} items={items} onHydrate={onHydrate} />
           : <SharedContent artifact={live ?? artifact} hasLive={!!live} opening={opening} liveErr={liveErr} onOpenLive={openLive} />)}
         {tab === 'access' && (owned
           ? <AccessTab artifact={artifact} onGrant={onGrant} onRevoke={onRevoke} />
@@ -834,7 +862,23 @@ function MoveMenu({ artifact, folders, onMove }: { artifact: Artifact; folders: 
   );
 }
 
-function ContentPreview({ artifact, items }: { artifact: Artifact; items: Artifact[] }) {
+function ContentPreview({ artifact: listed, items, onHydrate }: { artifact: Artifact; items: Artifact[]; onHydrate?: (a: Artifact) => Promise<Artifact> }) {
+  // The listing may carry no bytes (an organization's catalog is an index): read the document when the panel opens.
+  const [hydrated, setHydrated] = useState<Artifact | null>(null);
+  const [reading, setReading] = useState(false);
+  const [readErr, setReadErr] = useState<string | null>(null);
+  const needsBody = !listed.bytesB64 && !listed.pointer && (listed.source === 'blob' || listed.source === 'vault');
+  useEffect(() => {
+    setHydrated(null); setReadErr(null);
+    if (!needsBody || !onHydrate) return;
+    let live = true;
+    setReading(true);
+    onHydrate(listed).then((a) => { if (live) setHydrated(a); }).catch((e: unknown) => { if (live) setReadErr(e instanceof Error ? e.message : String(e)); }).finally(() => { if (live) setReading(false); });
+    return () => { live = false; };
+  }, [listed, needsBody, onHydrate]);
+  const artifact = hydrated ?? listed;
+  if (needsBody && reading) return <p style={{ ...mutedText, fontSize: 13 }} data-testid="library-reading">Reading {listed.name} from the vault…</p>;
+  if (needsBody && readErr) return <p style={{ ...errorText, fontSize: 13 }} data-testid="library-read-failed">{readErr}</p>;
   if (artifact.source !== 'blob' || !artifact.bytesB64) {
     return (
       <div>
