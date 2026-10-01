@@ -139,4 +139,4 @@ const after = await j(await fetch(`${HOME}/connect/app-grants`, { headers: auth 
 const rowAfter = ((after.grants ?? []) as Array<{ clientId: string; wires?: unknown[] }>).find((g) => g.clientId === 'home-mcp-act');
 if (rowAfter?.wires?.length) fail('the revoked wire is still listed under Connected assistants');
 
-console.log(`1 · pay 1 USDC → ${one.out.kind}${one.out.error ? ` ${one.out.error}` : ''} · run ${run1} · acted_under ${JSON.stringify(one.out.acted_under ?? null)}${one.out.act_note ? ` · ${String(one.out.act_note).slice(0, 160)}` : ''}`);console.log('\n✓ spec 397 §11: within the cap paid without a second signature; over the cap parked; after her revoke refused; ask-as-me still parks; a plain registration cannot request act');
+console.log('\n✓ spec 397 §11: within the cap paid without a second signature; over the cap parked; after her revoke refused; ask-as-me still parks; a plain registration cannot request act');
