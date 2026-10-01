@@ -72,19 +72,43 @@ export function ActAsMeConsent({ token, agent, onChange }: { token: string; agen
   if (err) return <p className="error" data-testid="act-consent-error">{err}</p>;
   if (caps.length === 0) return <p className="muted" data-testid="act-consent-none">Your playbook carries no acts an assistant could be pre-authorized for. Everything it asks still waits for your signature.</p>;
   const toggle = (id: string) => setChecked((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const setMany = (ids: string[], on: boolean) => setChecked((prev) => { const n = new Set(prev); for (const id of ids) { if (on) n.add(id); else n.delete(id); } return n; });
+  // Grouped by family (the id's first segment: treasury · messaging · person …) so a long playbook reads as a few
+  // headings, each with its own "all", and one "Check all" over the lot.
+  const families = [...caps.reduce((m, c) => { const f = c.id.split('.')[0] ?? c.id; m.set(f, [...(m.get(f) ?? []), c]); return m; }, new Map<string, typeof caps>())].sort(([a], [b]) => a.localeCompare(b));
+  const allIds = caps.map((c) => c.id);
+  const allOn = allIds.every((id) => checked.has(id));
   return (
     <div className="act-consent" data-testid="act-consent">
       <p className="muted" style={{ margin: '0 0 .5rem' }}>Check the acts this assistant may run <b>without asking you again</b> for 30 days. Each one is its own wire; you can revoke any of them, or all, under Connected → Assistants.</p>
-      <ul className="consent-list can" style={{ listStyle: 'none', padding: 0 }}>
-        {caps.map((c) => (
-          <li key={c.id} style={{ marginBottom: '.35rem' }}>
-            <label style={{ display: 'flex', gap: '.5rem', alignItems: 'flex-start', cursor: 'pointer' }}>
-              <input type="checkbox" checked={checked.has(c.id)} onChange={() => toggle(c.id)} data-testid={`act-${c.id}`} />
-              <span><b>{c.id}</b> <span className="muted">· {c.risk}</span><br /><span className="muted" style={{ fontSize: '.85em' }}>{c.description}</span></span>
-            </label>
-          </li>
-        ))}
-      </ul>
+      <div style={{ display: 'flex', gap: '.6rem', alignItems: 'center', margin: '0 0 .5rem', fontSize: '.9rem' }}>
+        <button type="button" className="btn-ghost" onClick={() => setMany(allIds, !allOn)} data-testid="act-check-all">{allOn ? 'Clear all' : `Check all ${caps.length}`}</button>
+        <span className="muted">{checked.size} of {caps.length} checked</span>
+      </div>
+      <div style={{ maxHeight: '22rem', overflowY: 'auto', border: '1px solid var(--line, #e5e7eb)', borderRadius: 8, padding: '.5rem .7rem' }}>
+        {families.map(([family, items]) => {
+          const ids = items.map((c) => c.id);
+          const on = ids.every((id) => checked.has(id));
+          return (
+            <section key={family} style={{ marginBottom: '.6rem' }}>
+              <label style={{ display: 'flex', gap: '.5rem', alignItems: 'center', fontWeight: 600, cursor: 'pointer' }}>
+                <input type="checkbox" checked={on} onChange={() => setMany(ids, !on)} data-testid={`act-family-${family}`} />
+                <span>{family} <span className="muted" style={{ fontWeight: 400 }}>· {items.length}</span></span>
+              </label>
+              <ul className="consent-list can" style={{ listStyle: 'none', padding: '0 0 0 1.4rem', margin: '.25rem 0 0' }}>
+                {items.map((c) => (
+                  <li key={c.id} style={{ marginBottom: '.3rem' }}>
+                    <label style={{ display: 'flex', gap: '.5rem', alignItems: 'flex-start', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={checked.has(c.id)} onChange={() => toggle(c.id)} data-testid={`act-${c.id}`} />
+                      <span><b>{c.id}</b> <span className="muted">· {c.risk}</span><br /><span className="muted" style={{ fontSize: '.85em' }}>{c.description}</span></span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          );
+        })}
+      </div>
       {wantsPayment && (
         <div className="act-payment" data-testid="act-payment" style={{ borderTop: '1px solid var(--line, #e5e7eb)', paddingTop: '.6rem', marginTop: '.4rem' }}>
           <p style={{ margin: '0 0 .4rem', fontWeight: 600 }}>Payments — from which treasury, to whom, up to how much</p>

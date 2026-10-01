@@ -45,6 +45,9 @@ export interface EnrollReq {
   /** org-create + a registry: the org's registration (presence, affirmed clauses, contact) as the app sent it,
    *  base64url JSON, parsed and checked by `mission-registry.ts` — see `RelyingApp.missionRegistryConfig`. */
   registryEntry?: string;
+  /** Spec 397 — the HOST connecting through a Home MCP (Claude, Muse, …), as the Worker's registration names it. A
+   *  display hint for the consent and the Connected card only; the template and delegate come from the registry. */
+  viaHost?: string;
 }
 
 // SEC-005: ALLOWED_RELYING_ORIGINS is now derived from whitelabel.relyingApps[].redirect_uris
@@ -98,6 +101,7 @@ export function parseEnrollReq(): EnrollReq | null {
       prompt: p.get('prompt') ?? undefined,
       requireNamedAgent: p.get('require_named_agent') === 'true' || p.get('require_named_agent') === '1',
       registryEntry: p.get('registry_entry') ?? undefined,
+      viaHost: (p.get('via_host') ?? '').replace(/[^\p{L}\p{N} .,'()&_-]/gu, '').trim().slice(0, 60) || undefined,
     };
   } catch {
     return null;
