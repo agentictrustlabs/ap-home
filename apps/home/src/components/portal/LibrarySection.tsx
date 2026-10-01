@@ -582,7 +582,7 @@ function FolderRail({ lens, onLens, items, path, onGo }: {
   );
   const sharedOn = lens === 'shared';
   return (
-    <div aria-label="Folders" style={{ ...cardSty, padding: '.4rem 0', width: 232, flexShrink: 0, color: 'var(--color-text-body)' }}>
+    <div aria-label="Folders" style={{ ...cardSty, padding: '.4rem 0', width: 'clamp(260px, 24%, 420px)', flexShrink: 0, color: 'var(--color-text-body)' }}>
       {heading('Folders')}
       {/* THE FOLDERS ARE THE NAVIGATION. The vault is a tree; "public" is a property a file or folder carries (a
           filter above the list, a chip on the row), and the workspace switcher in the header already says whose
