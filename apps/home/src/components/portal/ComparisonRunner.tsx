@@ -148,7 +148,12 @@ export function ComparisonRunner() {
         {/* 3. The controls, each starting at its default. */}
         <Card quiet>
           <KeyValue rows={[
-            ['Organization asked', orgs.length ? sel(addressee, setAddressee, orgs.map((o) => o.agent), '(choose an organization you steward)') : <span>No organization you steward is listed.</span>],
+            ['Organization asked', orgs.length ? (
+              <select key="org" value={addressee} onChange={(e) => setAddressee(e.target.value)} style={{ minWidth: 220 }} data-testid="comparison-runner-org">
+                <option value="">(choose an organization you steward)</option>
+                {orgs.map((o) => <option key={o.agent} value={o.agent}>{o.name || `${o.agent.slice(0, 8)}…${o.agent.slice(-4)}`}</option>)}
+              </select>
+            ) : <span>No organization you steward is listed.</span>],
             ['Test set', <span key="set" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               <select value={source === 'named' ? draft.setId : '__upload'} onChange={(e) => { if (e.target.value === '__upload') setSource('upload'); else { setSource('named'); patch({ setId: e.target.value }); } }} data-testid="comparison-runner-set">
                 {sets.map((x) => <option key={x.id} value={x.id}>{x.title} · {x.cases} cases{x.recommended ? ' · recommended' : ''}</option>)}
@@ -166,7 +171,7 @@ export function ComparisonRunner() {
             ['Plan id (optional)', <input key="pid" type="text" value={planId} onChange={(e) => setPlanId(e.target.value)} placeholder="named after the set and the arms when blank" style={{ minWidth: 260 }} />],
           ]} />
         </Card>
-        {orgs.length ? orgs.filter((o) => o.agent === addressee).map((o) => <Note key={o.agent}>Asking <Mono>{o.name}</Mono> ({o.agent.slice(0, 10)}…).</Note>) : null}
+        {orgs.length ? orgs.filter((o) => o.agent === addressee).map((o) => <Note key={o.agent}>Asking <strong>{o.name}</strong> — its agent is <Mono>{o.agent.slice(0, 10)}…</Mono>.</Note>) : null}
         <Card title="Arms" testId="comparison-runner-arms">
           <p className="ui-micro" style={{ margin: '0 0 6px' }}>Each arm is one way of running the same cases. <strong>control</strong> is the live default; <strong>treatment</strong> starts one change away ({armWords(rows[1] ?? rows[0]!, rows[0]!) || 'no change yet'}). A blank choice means the deployment's default.</p>
           <table className="ui-table" style={{ width: '100%' }}>
