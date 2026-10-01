@@ -16,6 +16,12 @@ describe('scope act', () => {
     expect(clientMayAct({}, 'claude-dcr', undefined)).toBe(false);
     expect(clientMayAct({}, 'claude-dcr', true)).toBe(true);
     expect(clientMayAct({ ACT_CLIENT_IDS: 'a, b' }, 'b', undefined)).toBe(true);
+    // A host that re-registers every attempt is named by its redirect URI; a registration with any other URI is not.
+    const env = { ACT_REDIRECT_URIS: 'https://agent.meta.ai/api/hatch/oauth/callback' };
+    expect(clientMayAct(env, 'mcp_fresh', undefined, ['https://agent.meta.ai/api/hatch/oauth/callback'])).toBe(true);
+    expect(clientMayAct(env, 'mcp_fresh', undefined, ['https://agent.meta.ai/api/hatch/oauth/callback', 'https://evil.example/cb'])).toBe(false);
+    expect(clientMayAct(env, 'mcp_fresh', undefined, [])).toBe(false);
+    expect(clientMayAct({}, 'mcp_fresh', undefined, ['https://agent.meta.ai/api/hatch/oauth/callback'])).toBe(false);
     expect(requestsAct(['ask'])).toBe(false);
     expect(requestsAct(['ask', 'act'])).toBe(true);
   });
