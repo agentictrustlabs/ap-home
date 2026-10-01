@@ -144,6 +144,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       settlementHash?: string;
       treasury?: string | null;
       selfVaultGrant?: unknown;
+      /** Spec 397 §11 — the act-as-me standing wires, when the template was act-as-me. */
+      delegations?: unknown;
       org: unknown;
       /** The member's human profile name, when the client is registry-scoped for `profile`. */
       profile_name?: string;
@@ -167,6 +169,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         pullDelegation: grant.pullDelegation ?? undefined, // spec 272 recurring — standing subscription pull mandate
         settlementHash: grant.settlementHash ?? undefined, // spec 272 — first-charge settlement (ceremony)
         selfVaultGrant: grant.selfVaultGrant ?? undefined, // spec 345 — the person's own scoped vault grant
+        ...(Array.isArray(grant.delegations) && grant.delegations.length ? { delegations: grant.delegations } : {}), // spec 397 §11 — the act set
         // The member's HUMAN name (what they are called), for a client the registry scopes for
         // `profile`. Present as its own field so an app can tell it apart from the `agent_name`
         // CLAIM, which carries the `<label>.me` handle when there is one and falls back to this

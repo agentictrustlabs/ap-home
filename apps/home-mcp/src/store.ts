@@ -4,7 +4,7 @@
 // object is a re-connect, never a bereavement (ADR-0055 — the delegation of record is on chain, revocable there).
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 
-export interface ClientRow { client_id: string; client_secret_hash?: string; redirect_uris: string[]; client_name?: string; token_endpoint_auth_method: 'none' | 'client_secret_post' | 'client_secret_basic'; created_at: number }
+export interface ClientRow { client_id: string; client_secret_hash?: string; redirect_uris: string[]; client_name?: string; token_endpoint_auth_method: 'none' | 'client_secret_post' | 'client_secret_basic'; created_at: number; /** Spec 397 §11 — the OPERATOR allowed this registration to request scope `act`. Never set by the registration body alone. */ act?: boolean }
 export interface PendingRow { id: string; client_id: string; redirect_uri: string; state?: string; code_challenge: string; scope: string[]; resource: string; home_verifier: string; home_state: string; created_at: number }
 export interface CodeRow { code: string; client_id: string; redirect_uri: string; code_challenge: string; scope: string[]; resource: string; sub: string; created_at: number }
 export interface TokenRow { token_hash: string; kind: 'access' | 'refresh'; client_id: string; sub: string; scope: string[]; resource: string; exp: number; refresh_of?: string; created_at: number }
@@ -20,7 +20,7 @@ export interface SessionRow {
 }
 export interface ElicitAnswer { action: 'accept' | 'decline' | 'cancel'; content?: Record<string, unknown> }
 export interface ElicitRow { sub: string; runRef: string; stepRef: string; answer?: ElicitAnswer }
-export interface PersonRow { sub: string; agent: string; agent_name?: string; wire_enc: string; wire_iv: string; wire_ref: string; connected_at: number; client_ids: string[] }
+export interface PersonRow { sub: string; agent: string; agent_name?: string; wire_enc: string; wire_iv: string; wire_ref: string; connected_at: number; client_ids: string[]; /** Spec 397 §11 — her ACT grant (standing wires, one per capability), sealed like the ask wire; absent until an act client connected. */ act_enc?: string; act_iv?: string }
 
 export class HomeMcpStoreDO {
   private readonly sql: SqlStorage;

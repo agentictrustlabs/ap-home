@@ -44,7 +44,7 @@ export async function refreshWire(id: PersonIdentity, a2aOrigin: string, chain: 
   return { status: 'current' };
 }
 
-export interface AskBody { addressee: string; message?: string; runRef?: string; supplied?: unknown[]; plan?: unknown; model?: string }
+export interface AskBody { addressee: string; message?: string; runRef?: string; supplied?: unknown[]; plan?: unknown; model?: string; /** Spec 397 §11 — the chain derived from her act wire for a parked step, on the resume call only. */ presented?: unknown[]; /** Which client and template, for the door and the receipt. */ via?: { client: string; template: string } }
 
 /** The wire itself was refused by her agent — revoked at her Home, or expired: the person must authorize again. */
 export const isDelegationRefusal = (status: number, error: string): boolean => status === 401 && /app delegation|revoked|wire/i.test(error);

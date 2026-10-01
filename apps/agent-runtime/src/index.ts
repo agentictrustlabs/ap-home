@@ -4181,6 +4181,8 @@ app.post('/harness/ask', async (c) => {
     plan?: HarnessRunInput['plan'];
     /** Spec 366 R2 — another agent's routed request under the subject-ask profile. */
     subjectAsk?: unknown;
+    /** Spec 397 — through a host: the registered client + template. Honoured only beside a verified A2A-Session admission. */
+    via?: { client?: unknown; template?: unknown };
     /** Spec 369 — how the words arrived (recorded on the trace; the words themselves are the person's). */
     channel?: 'text' | 'voice';
     /** Spec 377 — the provider the person chose for this conversation (`anthropic`, `groq`). Absent ⇒ the
@@ -4219,6 +4221,10 @@ app.post('/harness/ask', async (c) => {
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   // Spec 397 — what a routed hop from this run presents in place of a session: the admission evidence, verbatim.
   const appCredential = viaApp?.ok && !forwardedCred && /^A2A-Session\s/i.test(c.req.header('authorization') ?? '') ? { authorization: c.req.header('authorization')!, body: rawAsk } : undefined;
+  // Spec 397 — WHICH CLIENT, WHICH TEMPLATE. Said by the host in the body the assertion signed over; believed only when
+  // the admission was an app delegation (a session names no client). Ids for the door and the receipt — never a wire.
+  const viaHost = viaApp?.ok && body?.via && typeof body.via.client === 'string' && typeof body.via.template === 'string' && /^[a-z0-9._-]{1,64}$/i.test(body.via.client) && /^[a-z-]{1,32}$/.test(body.via.template)
+    ? { client: body.via.client, template: body.via.template } : undefined;
   if (!c.env.HARNESS_AGENT_SA) return c.json({ ok: false, error: 'HARNESS_AGENT_SA not configured' }, 503);
   // P1.4 — THE AGENT'S BUDGET, at the door: a FRESH ask (not a resume) against the steward's declared limits and the
   // day's counters, before a model is called or a step runs. Over ⇒ said, 429; never a silent degrade.
@@ -4454,7 +4460,7 @@ app.post('/harness/ask', async (c) => {
     const runStartMs = Date.now();
     const { result, resolved, interactionFor, trace, tools: offeredTools, events: runEvents, presentedRefs, playbook: askedPlaybook, bill } = await runUnderMandateBilled(c.env as unknown as HarnessEnv, askDeps, {
       traceContext: traceContextOf(c.req.raw.headers), marks,
-      intent, presented: turn.presented, person: who.sa as Address, session: body.session, ...(appCredential ? { appCredential } : {}), runRef, addressee, onProgress: progress,
+      intent, presented: turn.presented, person: who.sa as Address, session: body.session, ...(appCredential ? { appCredential } : {}), ...(viaHost ? { via: viaHost } : {}), runRef, addressee, onProgress: progress,
       conversation: conversation && conversation.type === 'ap.context.conversation-memory.v1' ? conversation : null,
       ...(memory && memory.entries.length ? { memory } : {}),
       ...(inResponseTo ? { inResponseTo } : {}),
@@ -4870,7 +4876,7 @@ app.post('/harness/ask', async (c) => {
         // Spec 414 A1b — THE TRACE FROM THE DOOR. The door is decided here: an in-process hop from this Worker's A2A
         // door names its message ids; a routed ask from another agent's run is `routed`; a continuation is a
         // `resume`; anything else is a direct ask. Plus the model calls and the variant this run ran under.
-        door: ((d) => (inResponseTo ? { ...(d ?? {}), kind: 'routed' as const } : d ?? (body.runRef && (body.supplied?.length || body.approvals) ? { kind: 'resume' as const } : { kind: 'harness-ask' as const })))(doorFromBody(body, isInWorkerRequest(c.req.raw))),
+        door: ((d) => (inResponseTo ? { ...(d ?? {}), kind: 'routed' as const } : d ?? (viaHost ? { kind: 'home-mcp' as const, ...viaHost } : body.runRef && (body.supplied?.length || body.approvals) ? { kind: 'resume' as const } : { kind: 'harness-ask' as const })))(doorFromBody(body, isInWorkerRequest(c.req.raw))),
         modelCalls: modelCallsOf(trace, marks.list), variant: variantOf(c.env as never, trace, variantReq), ...(variantReq?.startingState ? { startingState: { digest: variantReq.startingState.digest } } : {}), engaged: engagedFromTrace(trace),
         // Spec 417 §5 — how the turn went (stages, the selection, the turn), kept past the reply.
         operational: operationalOf(trace, marks.list, { receivedAt, runStartMs, runEndMs, ...(typeof doorFromBody(body, isInWorkerRequest(c.req.raw))?.contextId === 'string' ? { contextId: doorFromBody(body, isInWorkerRequest(c.req.raw))!.contextId! } : {}) }) }));

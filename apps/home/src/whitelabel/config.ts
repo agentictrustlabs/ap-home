@@ -147,6 +147,24 @@ const faithImpact: WhiteLabelConfig = {
       allowed_delegation_templates: ['ask-as-me'],
       delegate: (process.env.NEXT_PUBLIC_HOME_MCP_DELEGATE || '0x2D16473370b654D75FCf9cC37649BBd86B9Aff70') as `0x${string}`,
     },
+    // Spec 397 §11 — THE SAME WORKER AS AN ACT CLIENT. A second registration, not a second scope on the first: the
+    // `home-mcp` client's allowed templates stay ask-as-me only, so nothing a dynamic registration (Claude's) can
+    // request reaches this one. `delegate` is the Worker's ACT key (a second secret, never the ask key): every
+    // standing wire of the set names it. `ask_delegate` is still the ask key — the ask-as-me wire that admits the
+    // ask rides the same ceremony. A stolen ask key still cannot pay.
+    {
+      client_id: 'home-mcp-act',
+      name: 'Claude (Home MCP, acts you pre-authorized)',
+      redirect_uris: [
+        `${HOME_MCP_ORIGIN}/oauth/callback`,
+        'https://home-mcp-faithnet.richardpedersen3.workers.dev/oauth/callback',
+        'http://localhost:8797/oauth/callback',
+      ],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['act-as-me'],
+      delegate: (process.env.NEXT_PUBLIC_HOME_MCP_ACT_DELEGATE || '0x0eE38D01753149EE75f68f42FcBCA5eDb94B3434') as `0x${string}`,
+      ask_delegate: (process.env.NEXT_PUBLIC_HOME_MCP_DELEGATE || '0x2D16473370b654D75FCf9cC37649BBd86B9Aff70') as `0x${string}`,
+    },
     {
       client_id: 'skills-app',
       name: 'Skills',
@@ -988,6 +1006,32 @@ const faithImpact: WhiteLabelConfig = {
     // agent-rule `service-agent-signing.md` — you authorize a service's HSM-backed KMS key to act AS
     // an agent you custody (e.g. skills-agent.impact), for ONE kind of message, revocably. The
     // service never holds anything that controls the agent.
+    // Spec 397 — the Home MCP's ask wire: what Claude (or any assistant) holds when it connects as a client of you.
+    'ask-as-me': {
+      canDo: [
+        'Put a question to your agent as you — your records, your organizations, your playbook',
+      ],
+      cannotDo: [
+        'Sign anything: every act still waits for your signature at this Home',
+        'Move funds, or touch your sign-in methods or recovery',
+        'Read anything your agent would not show you',
+      ],
+      expiryDays: 30,
+    },
+    // Spec 397 §11 — the act set: one standing wire per act YOU checked, each revocable on its own; a payment wire
+    // is from your treasury to one payee with a cap. The ceremony lists the acts; this is the frame around them.
+    'act-as-me': {
+      canDo: [
+        'Run the acts you check below without a second signature, for 30 days',
+        'Pay the one payee you name, up to the cap you set, from the treasury you choose',
+      ],
+      cannotDo: [
+        'Run any act you did not check — those still wait for your signature at this Home',
+        'Pay anyone else, more than the cap, or from any other treasury',
+        'Touch your sign-in methods, your recovery, or your other grants',
+      ],
+      expiryDays: 30,
+    },
     'service-agent-wire': {
       canDo: [
         'Let this service act as an agent you custody, for one specific kind of request',
