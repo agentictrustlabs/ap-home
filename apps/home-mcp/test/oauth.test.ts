@@ -1,6 +1,6 @@
 // Spec 397 W1 — the authorization server, exactly: DCR, PKCE S256 required, the resource bound, rotation, revocation.
 import { describe, it, expect } from 'vitest';
-import { registerClient, parseAuthorize, tokenEndpoint, bearerOf, revokeEndpoint, authorizationServerMetadata } from '../src/oauth.js';
+import { registerClient, parseAuthorize, tokenEndpoint, bearerOf, revokeEndpoint, authorizationServerMetadata, withDefaultResource } from '../src/oauth.js';
 import { Store, sha256b64, type ClientRow, type CodeRow, type PendingRow, type TokenRow, type PersonRow } from '../src/store.js';
 
 /** An in-memory stand-in for the object, same ops. */
@@ -74,5 +74,17 @@ describe('the authorization server toward MCP clients', () => {
     expect((await tokenEndpoint(env, s, new URLSearchParams({ grant_type: 'refresh_token', client_id: reg.client_id, refresh_token: tok.refresh_token }), null, RESOURCE)).status).toBe(400);
     await revokeEndpoint(env, s, new URLSearchParams({ client_id: reg.client_id, token: rotated.access_token }), null);
     expect(await bearerOf(env, s, `Bearer ${rotated.access_token}`, RESOURCE)).toBeNull();
+  });
+  it('a request that names no resource is read as this server\'s one resource; one that names another is still refused', async () => {
+    const s = memStore();
+    const reg = await (await registerClient(s, { client_name: 'Muse', redirect_uris: ['https://agent.meta.ai/api/hatch/oauth/callback'] })).json() as { client_id: string };
+    const base = new URLSearchParams({ response_type: 'code', client_id: reg.client_id, redirect_uri: 'https://agent.meta.ai/api/hatch/oauth/callback', scope: 'ask act', state: 's', code_challenge_method: 'S256', code_challenge: 'c'.repeat(43) });
+    const bare = await parseAuthorize(s, base, RESOURCE, ['ask', 'act']);
+    expect(bare.ok).toBe(false);
+    const defaulted = await parseAuthorize(s, withDefaultResource(base, RESOURCE), RESOURCE, ['ask', 'act']);
+    expect(defaulted.ok).toBe(true);
+    if (defaulted.ok) expect(defaulted.req).toMatchObject({ resource: RESOURCE, scope: ['ask', 'act'] });
+    const other = new URLSearchParams(base); other.set('resource', 'https://elsewhere.example/mcp');
+    expect((await parseAuthorize(s, withDefaultResource(other, RESOURCE), RESOURCE, ['ask', 'act'])).ok).toBe(false);
   });
 });

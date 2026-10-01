@@ -17,7 +17,7 @@ import { HomeMcpStoreDO, Store, kekFrom, openWire, sealWire, randomToken, sha256
 import { sseFrame, progressNotification, elicitationFor, isJsonRpcResponse } from './stream.js';
 import { progressAsPerson, refreshWire } from './a2a.js';
 import { ACT_TEMPLATE, ACT_SCOPE, requestsAct, clientMayAct, actKeyAddress, acceptStandingWires, type ActGrantV1 } from './act.js';
-import { authorizationServerMetadata, parseAuthorize, registerClient, tokenEndpoint, revokeEndpoint, bearerOf, PENDING_TTL_MS } from './oauth.js';
+import { authorizationServerMetadata, parseAuthorize, registerClient, tokenEndpoint, revokeEndpoint, bearerOf, withDefaultResource, PENDING_TTL_MS } from './oauth.js';
 import { KEY_CLIENT_ID, KEY_ACCESS_TTL_SECONDS, operatorAllowed, listClients, setClientAct, ensureKeyClient, keyStartPage, keyDonePage, keyErrorPage, keyCookie, readKeyCookie } from './operator.js';
 import { TOOLS, askTool, grantLinkTool, discoverTool, engageTool, inspectTool, publicShelfTool, runTool, myRunsTool, needsReauthorization, type Person } from './tools.js';
 import { SERVER, SCOPES } from './whitelabel.js';
@@ -119,7 +119,8 @@ app.post('/oauth/register', async (c) => {
 
 // ── /oauth/authorize — validated here, COMPLETED at the Home (a relying app never runs a credential ceremony). ──
 app.get('/oauth/authorize', async (c) => {
-  const parsed = await parseAuthorize(store(c.env), new URL(c.req.url).searchParams, resourceOf(c), SCOPES);
+  // A host that names no resource (Meta Muse's connector) gets this Worker's one resource; a host that names another is refused.
+  const parsed = await parseAuthorize(store(c.env), withDefaultResource(new URL(c.req.url).searchParams, resourceOf(c)), resourceOf(c), SCOPES);
   if (!parsed.ok) return parsed.res;
   // Spec 397 §11 — scope `act` is served only to a client the operator allowed, and only where this Worker holds an
   // act key. Refused by name, never quietly narrowed to `ask`.

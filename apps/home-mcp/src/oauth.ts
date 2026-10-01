@@ -18,3 +18,11 @@ export const parseAuthorize = (store: Store, q: URLSearchParams, resourceUrl: st
 export const tokenEndpoint = (env: OAuthEnv, store: Store, body: URLSearchParams, authHeader: string | null, resourceUrl: string): Promise<Response> => asToken(opts(env), asStore(store), body, authHeader, resourceUrl);
 export const revokeEndpoint = (env: OAuthEnv, store: Store, body: URLSearchParams, authHeader: string | null): Promise<Response> => asRevoke(opts(env), asStore(store), body, authHeader);
 export const bearerOf = (env: OAuthEnv, store: Store, authHeader: string | null, resourceUrl: string): Promise<TokenRow | null> => asBearer(opts(env), asStore(store), authHeader, resourceUrl) as Promise<TokenRow | null>;
+
+/** RFC 8707 says a client MAY name the resource; MCP says it SHOULD. This Worker issues tokens for ONE resource, so a
+ *  request that names none (Meta Muse's connector, 2026-10-01) is read as that one — never as a different one. */
+export function withDefaultResource(q: URLSearchParams, resourceUrl: string): URLSearchParams {
+  const out = new URLSearchParams(q);
+  if (!(out.get('resource') ?? '').trim()) out.set('resource', resourceUrl);
+  return out;
+}
