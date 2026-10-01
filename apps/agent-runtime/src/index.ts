@@ -4426,6 +4426,20 @@ app.post('/harness/ask', async (c) => {
     budgetGate,
   ]);
   if (budgetRefusal) return budgetRefusal; // P1.4 — over budget: said, 429, before any model or step
+  // Spec 366 §6 — A PERSON'S AGENT ANSWERS ONLY ITS OWN PERSON. A routed ask whose addressee is a person-class agent and
+  // whose asker is anyone else is refused HERE, before a plan exists: there is no standing a stranger can hold at a
+  // person (a person has no members), so nothing of hers may be read for him. The incident (2026-10-01): bob's agent,
+  // for Muse, `engage`d carol.me with "this is a direct message from muse"; carol's agent planned an inbox listing,
+  // read 22 of her message bodies and narrated them to bob. The refusal names the right door — a message to her is
+  // sent by HIS agent and lands in her inbox — and is signed as the subject's own answer like any routed refusal.
+  if (inResponseTo && !ownAgent && String(addresseeKind ?? '').toLowerCase() === 'person') {
+    const askerName = await (askDeps.nameOf?.(String(who.sa).toLowerCase() as Address).catch(() => null) ?? Promise.resolve(null));
+    const mine = await (askDeps.nameOf?.(addressee).catch(() => null) ?? Promise.resolve(null));
+    const said = `${mine ?? 'This agent'} answers only ${mine ? `${mine}'s own person` : 'its own person'}. Nothing of theirs is read for ${askerName ?? 'another person'}. To reach ${mine ?? 'them'}, send a message from your own agent ("send ${mine ?? 'them'} a message: …") — it lands in their inbox, where they read it themselves.`;
+    const reply = { kind: 'refused' as const, error: said, runRef };
+    const answer = subjectAnswer({ agent: addressee, inResponseTo: { operationId: inResponseTo.operationId, runRef: inResponseTo.runRef, stepRef: inResponseTo.stepRef }, outcome: 'refused', said, run: { runRef, receipts: [] } });
+    return c.json({ ok: true, addressee, reply, runRef, hasProvenance: false, resumable: false, subjectAnswer: answer });
+  }
   // Spec 418 §12 — A COMPARISON RUN STARTS FROM ITS STATED STATE. The conversation window is the asker's rolling record:
   // read in a comparison, each case began from whatever the previous cases left (a payer named two cases earlier filled
   // an unnamed one); written, test asks landed in the person's own history. A run under a variant neither reads nor
