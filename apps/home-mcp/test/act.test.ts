@@ -1,7 +1,10 @@
 // Spec 397 §11 — the act gate: who may request scope act, which wires this Worker accepts, what a parked reply yields.
 import { describe, it, expect } from 'vitest';
 import { privateKeyToAccount } from 'viem/accounts';
-import { acceptStandingWires, actKeyAddress, clientMayAct, parkedOf, requestsAct } from '../src/act.js';
+import { recoverMessageAddress, type Address, type Hex } from 'viem';
+import { buildStandingWire, hashDelegation, registerDefaultSubsetHandlers, type Delegation } from '@agenticprimitives/delegation';
+import { acceptStandingWires, actKeyAddress, clientMayAct, deriveForParked, parkedOf, requestsAct } from '../src/act.js';
+registerDefaultSubsetHandlers();
 
 const KEY = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d';
 const ADDR = privateKeyToAccount(KEY).address.toLowerCase();
@@ -35,5 +38,30 @@ describe('scope act', () => {
     const need = { requirement: { type: 'urn:ap:rar:capability', actions: ['messaging.send'], validUntil: 9, intentDigest: '0x11' }, delegator: ALICE, delegate: '0x9999999999999999999999999999999999999999', capability: 'messaging.send' };
     expect(parkedOf(need, 'run:1')).toMatchObject({ runRef: 'run:1', capability: 'messaging.send' });
     expect(parkedOf(need, '')).toBeNull();
+  });
+
+  it('derives the child for a covered need and signs it the way the chain recovers an EOA delegator: EIP-191 over the child digest', async () => {
+    const env = { HOME_MCP_ACT_KEY: KEY };
+    const DM = '0x710cb1bF08C234Df397e0910331e0A29710EF4F7' as Address;
+    const E = { delegationManager: DM, timestamp: '0x0000000000000000000000000000000000000011', value: '0x0000000000000000000000000000000000000012', allowedTargets: '0x0000000000000000000000000000000000000022', allowedMethods: '0x0000000000000000000000000000000000000033', payment: '0x0000000000000000000000000000000000000044', digestBinding: '0x00000000000000000000000000000000000000d1' } as const;
+    const TREASURY = '0x5ef5360a41f31e55541117a854455c0da0fb67b3' as Address;
+    const PAYEE = '0x2c471607fec409516ab6de6b7517bcf95f1f2edc' as Address;
+    const USDC = '0xdae09066a2cc32f6203605619137dcf01a9b49ae' as Address;
+    const { standing } = buildStandingWire({ template: 'act-as-me', delegator: TREASURY, delegate: ADDR as Address, capability: 'treasury.payment.execute', payment: { payee: PAYEE, asset: USDC, maxAmount: 2_000_000n }, validForSeconds: 3600, enforcers: E as never, chainId: 34348, delegationManager: DM, salt: 3n });
+    const now = Math.floor(Date.now() / 1000);
+    const need = { requirement: { type: 'urn:ap:rar:treasury.payment.execute', actions: ['treasury.payment.execute'], locations: [USDC], limits: { payee: PAYEE, asset: USDC, maxAmount: '1000000', maxAggregate: '1000000', maxRedemptionsPerWindow: 1, windowSeconds: 3600 }, intentDigest: '0x' + '11'.repeat(32), validAfter: now - 10, validUntil: now + 600 }, delegator: TREASURY, delegate: '0x9999999999999999999999999999999999999999', capability: 'treasury.payment.execute', kind: 'authority_required' };
+    const parked = parkedOf(need, 'run:1')!;
+    const r = await deriveForParked(env, { v: 1, client_id: 'c', standing: [standing], granted_at: 0 }, parked);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.parentRef).toBe(standing.ref);
+    const child = r.presented[0] as Record<string, unknown>;
+    expect(String(child.delegator).toLowerCase()).toBe(ADDR);
+    const digest = hashDelegation({ ...child, salt: BigInt(String(child.salt)) } as unknown as Delegation, 34348, DM);
+    expect(digest).toBe(r.childRef);
+    expect((await recoverMessageAddress({ message: { raw: digest }, signature: child.signature as Hex })).toLowerCase()).toBe(ADDR);
+    // Over the cap: nothing is derived; the run stays parked for her.
+    const over = await deriveForParked(env, { v: 1, client_id: 'c', standing: [standing], granted_at: 0 }, parkedOf({ ...need, requirement: { ...need.requirement, limits: { ...need.requirement.limits, maxAmount: '5000000', maxAggregate: '5000000' } } }, 'run:2')!);
+    expect(over.ok).toBe(false);
   });
 });
