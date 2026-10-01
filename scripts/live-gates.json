@@ -293,6 +293,16 @@
       "needs": "HOME_MCP_ACT_REGISTRATION_SECRET (skips without it)"
     },
     {
+      "id": "verify-person-agent-door",
+      "script": "scripts/verify-person-agent-door.mts",
+      "spec": "366 §6",
+      "proves": "a routed ask at a PERSON-class agent from anyone but that person is refused at the door in the agent's own words, names the right door (a message from the asker's own agent), and runs no plan — nothing of hers is read for him",
+      "twin": "the refusal carries nothing from her records (no inbox, invitations or treasury words); her records gain no routed run with a plan",
+      "required": true,
+      "paced": false,
+      "timeoutSec": 180
+    },
+    {
       "id": "verify-home-mcp-revoke",
       "script": "scripts/verify-home-mcp-revoke.mts",
       "spec": "397 W4",

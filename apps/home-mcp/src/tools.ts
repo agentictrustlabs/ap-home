@@ -8,7 +8,7 @@ export const TOOLS = [
   {
     name: 'ask',
     description: 'Put the person\'s words to THEIR OWN agent, as them — their records, their organizations, their playbook. Args: message (their ask, in their words); addressee (optional: an organization they stand in, by name, to ask there instead of at home); run (optional: the runRef of a run to continue — a prompt answered with `supplied`, or a run they granted authority for at their Home). Replies carry `kind`: answer | done | prompt | authority_required | refused, the run reference, and where its provenance is.',
-    inputSchema: { type: 'object', properties: { message: { type: 'string' }, addressee: { type: 'string', description: 'an organization name (missio-nexus.org) to ask there; omit for their own agent' }, run: { type: 'string', description: 'a runRef to continue' }, supplied: { type: 'array', items: { type: 'object' }, description: 'answers to a prompt: [{ stepRef, data: { field: value } }]' } }, required: [] },
+    inputSchema: { type: 'object', properties: { message: { type: 'string' }, addressee: { type: 'string', description: 'an ORGANIZATION name (missio-nexus.org) to ask there; omit for their own agent. Never a person: a person\'s agent answers only its own person. To reach a person, ask THEIR OWN agent to send a message — message: "send carol.me a message: …"' }, run: { type: 'string', description: 'a runRef to continue' }, supplied: { type: 'array', items: { type: 'object' }, description: 'answers to a prompt: [{ stepRef, data: { field: value } }]' } }, required: [] },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   },
   {
@@ -31,7 +31,7 @@ export const TOOLS = [
   },
   {
     name: 'engage',
-    description: 'Send the person\'s words, as them, to another agent — one `discover_agents` returned or one they named (ligonier.svc, missio-nexus.org) — and get that agent\'s own answer, made under ITS playbook from its own catalog or records (a study plan with links, what it offers). Their agent sends it and records the hop; the other agent sees only the message. Args: agent (name or 0x address as discovery returned it), message (the ask, complete, in the person\'s words). Present the reply as that agent\'s answer, naming it as the source and keeping every link it gave.',
+    description: 'Send the person\'s words, as them, to a SERVICE or ORGANIZATION agent — one `discover_agents` returned or one they named (ligonier.svc, missio-nexus.org) — and get that agent\'s own answer, made under ITS playbook from its own catalog or records (a study plan with links, what it offers). Their agent sends it and records the hop; the other agent sees only the message. NOT for a person (carol.me): a person\'s agent answers only its own person and refuses this; to message a person, use `ask` with "send carol.me a message: …" — their agent delivers it to her inbox. Args: agent (name or 0x address as discovery returned it), message (the ask, complete, in the person\'s words). Present the reply as that agent\'s answer, naming it as the source and keeping every link it gave.',
     inputSchema: { type: 'object', properties: { agent: { type: 'string' }, message: { type: 'string' } }, required: ['agent', 'message'] },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   },
