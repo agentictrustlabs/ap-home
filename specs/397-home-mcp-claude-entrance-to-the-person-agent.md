@@ -334,6 +334,22 @@ and act-as-me; over the cap parks; after she revokes the payment wire the next p
 client still parks. Twin: a plain registration asking for scope `act` is refused; the record Claude reads carries
 neither the act wire nor a signature.
 
+### 11.4 Hosts that register themselves, and hosts that cannot finish OAuth
+
+A host that registers itself (RFC 7591) from inside its own flow — Meta Muse builds its connector on its own VM —
+cannot present the operator's secret. So the operator **lists** this Worker's registrations (`GET /oauth/clients`)
+and **allows one** for scope `act` (`POST /oauth/clients/:id/act`), both under `x-act-registration`
+(`scripts/home-mcp-act-client.mts list | allow | deny`). The flag lives on the client row; the registration body can
+never set it; the person still signs the act consent at her Home when the host re-authorizes with `ask act`.
+
+A host that cannot complete the code exchange and asks for "an API key or a header" gets a **connection key** the
+PERSON mints at `/connect/key` in her own browser: the same authorization at her Home with the Worker as its own
+curated client (`home-mcp-key`, act-allowed), then one 30-day bearer for this resource shown once. It is a client
+credential and nothing more — every call still runs under her wire, which she revokes at her Home (ending the key),
+and `/oauth/revoke` ends it too. Nothing Meta-specific is built; the guide for Muse (what to paste, the operator's
+two verbs, the directory-listing packet, what only the owner can file) is
+[`docs/architecture/muse-integration.md`](../docs/architecture/muse-integration.md).
+
 ## 12. What this buys that option 1 cannot (the differentiation, stated so it can be checked)
 
 | | AP Gateway (387) | Home MCP (this) |

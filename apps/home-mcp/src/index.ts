@@ -18,6 +18,7 @@ import { sseFrame, progressNotification, elicitationFor, isJsonRpcResponse } fro
 import { progressAsPerson, refreshWire } from './a2a.js';
 import { ACT_TEMPLATE, ACT_SCOPE, requestsAct, clientMayAct, actKeyAddress, acceptStandingWires, type ActGrantV1 } from './act.js';
 import { authorizationServerMetadata, parseAuthorize, registerClient, tokenEndpoint, revokeEndpoint, bearerOf, PENDING_TTL_MS } from './oauth.js';
+import { KEY_CLIENT_ID, KEY_ACCESS_TTL_SECONDS, operatorAllowed, listClients, setClientAct, ensureKeyClient, keyStartPage, keyDonePage, keyErrorPage, keyCookie, readKeyCookie } from './operator.js';
 import { TOOLS, askTool, grantLinkTool, discoverTool, engageTool, inspectTool, publicShelfTool, runTool, myRunsTool, needsReauthorization, type Person } from './tools.js';
 import { SERVER, SCOPES } from './whitelabel.js';
 
@@ -83,7 +84,7 @@ app.use('*', async (c, next) => {
 // registration. Rotating the key = a new secret + that registration updated + deploy; every connection then ends itself
 // (the assertion no longer recovers to the wire's delegate → 401 → the host re-authorizes; the Home mints a new wire).
 app.get('/health', (c) => c.json({ ok: true, service: 'home-mcp', spec: 397, tools: TOOLS.map((t) => t.name), home: c.env.HOME_ORIGIN, actKeyAddress: actKeyAddress(c.env), keyAddress: c.env.HOME_MCP_PRIVATE_KEY ? privateKeyToAccount(c.env.HOME_MCP_PRIVATE_KEY as Hex).address : null }));
-app.get('/', (c) => c.json({ service: SERVER.name, mcp: `POST ${resourceOf(c)} (Streamable HTTP; OAuth 2.1 — see /.well-known/oauth-protected-resource)`, tools: TOOLS.map((t) => t.name), doctrine: SERVER.instructions }));
+app.get('/', (c) => c.json({ service: SERVER.name, mcp: `POST ${resourceOf(c)} (Streamable HTTP; OAuth 2.1 — see /.well-known/oauth-protected-resource)`, tools: TOOLS.map((t) => t.name), connectionKey: `${originOf(c)}/connect/key`, doctrine: SERVER.instructions }));
 
 // ── RFC 9728 / RFC 8414 ──
 app.get('/.well-known/oauth-protected-resource', (c) => serveProtectedResourceMetadata(createProtectedResourceMetadata({ resource: resourceOf(c), authorizationServers: [originOf(c)], scopesSupported: [...SCOPES], resourceDocumentation: `${originOf(c)}/` })));
@@ -239,7 +240,53 @@ app.post('/oauth/demo-connect', async (c) => {
   return json({ ok: true, code: ours, agent: connected.agent });
 });
 
-app.post('/oauth/token', async (c) => tokenEndpoint(c.env, store(c.env), new URLSearchParams(await c.req.text()), c.req.header('authorization') ?? null, resourceOf(c)));
+app.post('/oauth/token', async (c) => {
+  const body = new URLSearchParams(await c.req.text());
+  // Spec 397 §11.4 — the connection-key client's access token lives as long as the wire it rides on; every other client
+  // keeps the hour and refreshes.
+  const opts = body.get('client_id') === KEY_CLIENT_ID ? { ...c.env, accessTtlSeconds: KEY_ACCESS_TTL_SECONDS } : c.env;
+  return tokenEndpoint(opts, store(c.env), body, c.req.header('authorization') ?? null, resourceOf(c));
+});
+
+// ── Operator (spec 397 §11.1): list registrations; allow ONE for scope act. The secret is the operator's; a host's own
+//    registration body can never set the flag. ──
+app.get('/oauth/clients', async (c) => {
+  if (!operatorAllowed(c.env, c.req.header('x-act-registration'))) return json({ error: 'forbidden', error_description: 'the operator secret is required' }, 403);
+  return json({ ok: true, clients: await listClients(store(c.env)) });
+});
+app.post('/oauth/clients/:id/act', async (c) => {
+  if (!operatorAllowed(c.env, c.req.header('x-act-registration'))) return json({ error: 'forbidden', error_description: 'the operator secret is required' }, 403);
+  const body = (await c.req.json().catch(() => ({}))) as { allow?: unknown };
+  const r = await setClientAct(store(c.env), c.req.param('id'), body.allow !== false);
+  return r.ok ? json(r) : json({ error: 'not_found', error_description: r.error }, 404);
+});
+
+// ── Connection key (spec 397 §11.4): the person mints a bearer for THIS resource in her own browser, by the same
+//    authorization flow, the Worker as its own curated client. Shown once; the wire's revocation ends it. ──
+app.get('/connect/key', (c) => c.html(keyStartPage(originOf(c), c.env.HOME_ORIGIN)));
+app.get('/connect/key/start', async (c) => {
+  const scope = (new URL(c.req.url).searchParams.get('scope') ?? 'ask').trim() === 'ask act' ? 'ask act' : 'ask';
+  if (scope === 'ask act' && (!c.env.CLIENT_ID_ACT || !actKeyAddress(c.env))) return c.html(keyErrorPage(originOf(c), 'scope act is not served by this Home MCP'), 400);
+  await ensureKeyClient(store(c.env), originOf(c));
+  const verifier = randomToken(48);
+  const state = randomToken(16);
+  const challenge = await sha256b64(verifier);
+  const q = new URLSearchParams({ response_type: 'code', client_id: KEY_CLIENT_ID, redirect_uri: `${originOf(c)}/connect/key/done`, code_challenge: challenge, code_challenge_method: 'S256', resource: resourceOf(c), scope, state });
+  c.header('set-cookie', keyCookie(`${state}.${verifier}`, PENDING_TTL_MS / 1000));
+  return c.redirect(`${originOf(c)}/oauth/authorize?${q.toString()}`, 302);
+});
+app.get('/connect/key/done', async (c) => {
+  const q = new URL(c.req.url).searchParams;
+  const ck = readKeyCookie(c.req.header('cookie'));
+  c.header('set-cookie', keyCookie('', 0));
+  if (!ck || q.get('state') !== ck.state) return c.html(keyErrorPage(originOf(c), 'this browser holds no pending key request (start again, in the same browser).'), 400);
+  const code = q.get('code');
+  if (!code) return c.html(keyErrorPage(originOf(c), q.get('error_description') ?? 'the authorization returned no code'), 400);
+  const body = new URLSearchParams({ grant_type: 'authorization_code', code, client_id: KEY_CLIENT_ID, redirect_uri: `${originOf(c)}/connect/key/done`, code_verifier: ck.verifier, resource: resourceOf(c) });
+  const tok = (await (await tokenEndpoint({ ...c.env, accessTtlSeconds: KEY_ACCESS_TTL_SECONDS }, store(c.env), body, null, resourceOf(c))).json().catch(() => null)) as { access_token?: string; scope?: string; expires_in?: number; error_description?: string } | null;
+  if (!tok?.access_token) return c.html(keyErrorPage(originOf(c), tok?.error_description ?? 'the code could not be exchanged'), 400);
+  return c.html(keyDonePage(originOf(c), tok.access_token, tok.scope ?? 'ask', tok.expires_in ?? KEY_ACCESS_TTL_SECONDS));
+});
 app.post('/oauth/revoke', async (c) => revokeEndpoint(c.env, store(c.env), new URLSearchParams(await c.req.text()), c.req.header('authorization') ?? null));
 
 /** The person behind a bearer: the token row → the sealed wire → the identity this Worker asks as. */

@@ -45,6 +45,7 @@ export class HomeMcpStoreDO {
     switch (op) {
       case 'client.put': this.sql.exec(`INSERT OR REPLACE INTO clients (client_id, row) VALUES (?, ?)`, key, JSON.stringify(row)); return json({ ok: true });
       case 'client.get': { const r = [...this.sql.exec(`SELECT row FROM clients WHERE client_id = ?`, key)][0]; return json({ ok: true, row: r ? JSON.parse(String(r.row)) : null }); }
+      case 'client.list': return json({ ok: true, rows: [...this.sql.exec(`SELECT row FROM clients`)].map((r) => JSON.parse(String(r.row))) });
       case 'pending.put': this.sql.exec(`INSERT OR REPLACE INTO pending (id, row, created_at) VALUES (?, ?, ?)`, key, JSON.stringify(row), now); return json({ ok: true });
       case 'pending.take': { const r = [...this.sql.exec(`SELECT row, created_at FROM pending WHERE id = ?`, key)][0]; this.sql.exec(`DELETE FROM pending WHERE id = ?`, key); if (!r || now - Number(r.created_at) > (ttlMs ?? 600_000)) return json({ ok: true, row: null }); return json({ ok: true, row: JSON.parse(String(r.row)) }); }
       case 'code.put': this.sql.exec(`INSERT OR REPLACE INTO codes (code, row, created_at) VALUES (?, ?, ?)`, key, JSON.stringify(row), now); return json({ ok: true });
@@ -79,6 +80,8 @@ export class Store {
   }
   putClient(r: ClientRow) { return this.call('client.put', r.client_id, r); }
   async getClient(id: string): Promise<ClientRow | null> { return (await this.call<{ row: ClientRow | null }>('client.get', id)).row; }
+  /** Every registration (the operator's listing, spec 397 §11.1). */
+  async listClients(): Promise<ClientRow[]> { return (await this.call<{ rows?: ClientRow[] }>('client.list')).rows ?? []; }
   /** One more hit on a window; the count within it. */
   async rateHit(key: string, windowMs: number): Promise<number> { return (await this.call<{ n: number }>('rate.hit', key, { windowMs })).n; }
   putSession(id: string, r: SessionRow) { return this.call('session.put', id, r); }

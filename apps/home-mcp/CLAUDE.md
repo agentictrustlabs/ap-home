@@ -29,7 +29,9 @@ a wiped store means "authorize again") · `src/a2a.ts` (`askAsPerson`) · `src/t
 `src/whitelabel.ts` (name, instructions, scopes — the only branded module) · `src/act.ts` (spec 397 §11 — ACT-AS-ME: scope `act` for a
 registration the operator allowed (`x-act-registration` secret or `ACT_CLIENT_IDS`), the Home's `home-mcp-act` client, her standing wires
 sealed beside the ask wire (`act_enc`), and on a parked `authority_required` the derivation of the mandate from the covering wire with
-`HOME_MCP_ACT_KEY`, resumed on the same run with `presented: [child, standing]` + `via`; no covering wire ⇒ parked as before).
+`HOME_MCP_ACT_KEY`, resumed on the same run with `presented: [child, standing]` + `via`; no covering wire ⇒ parked as before). · `src/operator.ts` (§11.4 — `GET /oauth/clients` + `POST /oauth/clients/:id/act` under `x-act-registration`
+(`scripts/home-mcp-act-client.mts`), and the connection key `/connect/key` → Home → `/connect/key/done`: the Worker as its own curated
+client `home-mcp-key`, a 30-day bearer shown once, for a host that cannot finish OAuth — Muse guide `docs/architecture/muse-integration.md`).
 
 ## Validate / deploy
 

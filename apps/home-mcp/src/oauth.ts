@@ -8,8 +8,8 @@ import type { Store, TokenRow } from './store.js';
 
 export type { AuthorizeRequest };
 export const PENDING_TTL_MS = 600_000;
-export interface OAuthEnv { TOKEN_SECRET?: string }
-const opts = (env: OAuthEnv) => ({ tokenSecret: env.TOKEN_SECRET ?? 'unset' });
+export interface OAuthEnv { TOKEN_SECRET?: string; /** Spec 397 §11.4 — the connection-key client's access-token lifetime; unset ⇒ the AS default (an hour). */ accessTtlSeconds?: number }
+const opts = (env: OAuthEnv) => ({ tokenSecret: env.TOKEN_SECRET ?? 'unset', ...(env.accessTtlSeconds ? { accessTtlSeconds: env.accessTtlSeconds } : {}) });
 const asStore = (store: Store): AuthorizationServerStore => store;
 
 export const authorizationServerMetadata = (origin: string, scopes: readonly string[]): Record<string, unknown> => asMetadata(origin, scopes);
