@@ -214,6 +214,10 @@ export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/k
   'answer/stream': ['off', 'on'],
   /** Spec 418 A5 — held inputs from the agent's own record types on a real ask (`records`, default) or never (`off`). */
   'skill-selection/held': ['records', 'off'],
+  /** 2026-10-01 — a plan with a REQUIRED input missing: `ask` (default — the skill is told to ask, not invent) or
+   *  `skeleton` (the skill runs anyway: full structure, `[MISSING: …]` placeholders, the questions first). Measured
+   *  because the outcome check credits a filled-in template and scores a bare question 0 (`skeleton-hold.ts`). */
+  'skill-selection/hold': ['ask', 'skeleton'],
   /** Spec 420 §2 — goal regression over situations: preconditions checked, reads inserted, gaps named before any signature. */
   'plan/regression': ['off', 'on'],
   /** Spec 420 §3 — the offer by standing: acts the asker cannot authorize at the room are marked for the planner, or left out. */
