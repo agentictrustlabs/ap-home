@@ -484,6 +484,10 @@ SKILL_ANSWER_MODEL_DEFAULT = "minimal"
 # harness is +0.07 over a bare model on delivered classes and trails it on exactly these holds, because the outcome check
 # credits a filled-in template and a bare question scores 0. NOT SET: `ask` until the Lab measures the skeleton arm.
 # SKILL_HOLD_DEFAULT = "skeleton"
+# 2026-10-01 — THE OUTCOME CHECK'S REPEATS (`quality/judge-repeats`): the same answer judged N times, score and classes
+# averaged, `outcomeCheck.spread` (max − min) and `.repeats` on the trace. The judge moved 0.025 (Haiku; Gemini far more)
+# between two runs of the same check on a fixed answer. NOT SET: one call until the Lab measures whether two steady it.
+# QUALITY_JUDGE_REPEATS_DEFAULT = "2"
 # Spec 420 §2 — goal regression over situations on every ask (a comparison names its own arm): the room's roster and the
 # asker's standing check each act's preconditions before any signature is asked for.
 PLAN_REGRESSION_DEFAULT = "on"

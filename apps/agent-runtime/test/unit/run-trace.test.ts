@@ -95,6 +95,13 @@ describe('the variant knob is parsed, and anything unknown is refused by name', 
     expect(parseVariantRequest({ toggles: { 'skill-selection/hold': 'template' } })).toMatchObject({ ok: false, error: expect.stringMatching(/one of ask \| skeleton/) });
     expect(variantOf({} as never, undefined, { toggles }).toggles).toEqual(toggles);
   });
+  it('2026-10-01 — the judge repeats are an advertised toggle, parsed by value (a string, like every toggle), and on the recorded variant', () => {
+    expect(VARIANT_TOGGLES['quality/judge-repeats']).toEqual(['1', '2']);
+    const toggles = { 'quality/judge': 'outcome', 'quality/judge-repeats': '2' };
+    expect(parseVariantRequest({ toggles })).toEqual({ ok: true, variant: { toggles } });
+    expect(parseVariantRequest({ toggles: { 'quality/judge-repeats': 2 } })).toMatchObject({ ok: false, error: expect.stringMatching(/one of 1 \| 2/) });
+    expect(variantOf({} as never, undefined, { toggles }).toggles).toEqual(toggles);
+  });
   it('2026-10-01 — a skeleton that ran is on the operational record as the skill stage', () => {
     const t = { ...(trace as object), skillStage: 'skeleton', selection: { approach: 'outcome-selective', chose: 'cic.grants.draft', plan: { steps: [{ tool: 'cic.grants.draft' }], missing: ['https://x/#FunderDeadline'] } } } as never;
     const op = operationalOf(t, [], { receivedAt: 0, runStartMs: 0, runEndMs: 0 });
