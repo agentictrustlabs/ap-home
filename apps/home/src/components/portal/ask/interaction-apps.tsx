@@ -218,7 +218,7 @@ function McpConnectorsCard({ result }: ResultAppProps) {
   const r = result as { connectors?: Array<{ id: string; name: string; server: string | null; tools: Array<{ name: string; kind: string }> }> } | null;
   if (!r?.connectors) return null;
   return rows(<>
-    <div className="ask-app__head">MCP servers · {r.connectors.length}</div>
+    <div className="ask-app__head">Tool servers · {r.connectors.length}</div>
     {r.connectors.length === 0 && <Meta>None attached.</Meta>}
     {r.connectors.map((c) => line(<span>{c.name}{c.server ? <Meta> · {c.server}</Meta> : null}</span>, c.tools.map((t) => `${t.name} [${t.kind}]`).join(', ')))}
   </>);

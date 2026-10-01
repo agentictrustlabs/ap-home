@@ -1002,7 +1002,10 @@
         "(portal)/org/[org]/access",
         "(portal)/service/[agent]/access",
         "(portal)/grants",
-        "(portal)/org/[org]/grants"
+        "(portal)/org/[org]/grants",
+        "(portal)/apps/signed-in",
+        "(portal)/apps/assistants",
+        "(portal)/apps/readers"
       ],
       "capabilities": [
         "access.grant.revoke"
@@ -1031,7 +1034,9 @@
       ],
       "section": "404 §1–§2",
       "routes": [
-        "(portal)/apps"
+        "(portal)/apps",
+        "(portal)/apps/accounts",
+        "(portal)/apps/tools"
       ],
       "capabilities": [
         "mcp.connectors.list"

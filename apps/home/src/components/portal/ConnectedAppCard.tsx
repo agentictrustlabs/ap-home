@@ -67,9 +67,11 @@ export function ConnectedAppCard({
       ) : revokeEnabled ? (
         <button type="button" className="btn-danger-outline" onClick={() => setConfirming(true)}>Revoke access</button>
       ) : (
-        <button type="button" className="btn-ghost" disabled title="Revocation is custody-grade — coming soon">
-          Revoke access — coming soon
-        </button>
+        <p className="muted" style={{ margin: '.4rem 0 0', fontSize: '.82rem' }}>
+          {/* spec 422 §6.3 — honest, not "coming soon": a sign-in gives no standing access, so there is nothing here to
+              revoke; what the app may READ is a separate grant, removed on the readers page. */}
+          Signing in gave {app.appName} no standing access to your records. What it may read is under <a href="/apps/readers">Who can read your records</a>, where you can remove it.
+        </p>
       )}
     </div>
   );

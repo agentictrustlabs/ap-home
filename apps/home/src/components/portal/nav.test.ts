@@ -13,7 +13,7 @@
  * the fix is to delete the exception, not to loosen the test.
  */
 import { describe, it, expect } from 'vitest';
-import { buildNav, buildSettingsPane, buildUserMenu, paneGroups, stewardshipPane, securityPane, type NavGroup } from './nav';
+import { buildNav, buildSettingsPane, buildUserMenu, paneGroups, stewardshipPane, securityPane, connectedPane, type NavGroup } from './nav';
 import { whitelabel } from '../../whitelabel/config';
 
 const ORG = '0xe26157068af46629691e2ab19726bf61476e6b6c';
@@ -340,5 +340,21 @@ describe('spec 422 — the Security pane', () => {
       expect(i.status).toBe('live');
       expect(i.disabledReason).toBeUndefined();
     }
+  });
+});
+
+
+describe('spec 422 §8 — the Connected pane', () => {
+  it('Connected in the user menu opens its pane; the pane takes no workspace scope', () => {
+    const row = buildUserMenu(whitelabel).find((i) => i.id === 'apps');
+    expect(row?.opensPane).toBe('connected');
+    expect(row?.href).toBe('/apps');
+    expect(paneGroups('connected', ORG_SCOPE, 'member')).toEqual(connectedPane());
+  });
+  it('one page per plain question, every row under /apps, none a placeholder', () => {
+    const items = connectedPane().flatMap((g) => g.items);
+    expect(items.map((i) => i.id)).toEqual(['con-overview', 'con-accounts', 'con-tools', 'con-signed-in', 'con-assistants', 'con-readers']);
+    for (const i of items) { expect(i.href.startsWith('/apps')).toBe(true); expect(i.status).toBe('live'); expect(i.disabledReason).toBeUndefined(); }
+    expect(connectedPane().map((g) => g.heading)).toEqual(['Connected', 'Your agent can use', 'Who may act as you']);
   });
 });

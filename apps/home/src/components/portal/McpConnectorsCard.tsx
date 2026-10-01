@@ -48,7 +48,7 @@ export function McpConnectorsCard() {
 
   const state: PanelState = list === null ? 'loading' : 'ready';
   return (
-    <Panel title="MCP servers" state={state} rows={2} testId="connector-mcp" aside={list?.length ? <Chip tone="ok">{list.length} connected</Chip> : <Chip>none</Chip>}>
+    <Panel title="Tool servers" state={state} rows={2} testId="connector-mcp" aside={list?.length ? <Chip tone="ok">{list.length} connected</Chip> : <Chip>none</Chip>}>
       <div className="ui-panel-body">
         {err && <ErrorNote>{err}</ErrorNote>}
         {just && <Note>✓ {just.name} attached — {just.tools.length} tool{just.tools.length === 1 ? '' : 's'}: {just.tools.filter((t) => t.kind === 'read').length} read{just.tools.filter((t) => t.kind === 'read').length === 1 ? '' : 's'} under your standing, {just.tools.filter((t) => t.kind === 'act').length} act{just.tools.filter((t) => t.kind === 'act').length === 1 ? '' : 's'} under your signature. Ask “{just.tools[0]?.name.replace(/[_.-]+/g, ' ')} on {just.name}”.</Note>}
@@ -92,7 +92,7 @@ export function McpConnectorsCard() {
             </div>
           </div>
         ) : (
-          <div style={{ marginTop: 'var(--sp-3)' }}><Button variant="primary" size="sm" disabled={!session} onClick={() => setOpen(true)}>Attach an MCP server</Button></div>
+          <div style={{ marginTop: 'var(--sp-3)' }}><Button variant="primary" size="sm" disabled={!session} onClick={() => setOpen(true)}>Attach a tool server</Button></div>
         )}
       </div>
     </Panel>
