@@ -21,6 +21,7 @@ import { authorizationServerMetadata, parseAuthorize, registerClient, tokenEndpo
 import { KEY_CLIENT_ID, KEY_ACCESS_TTL_SECONDS, operatorAllowed, listClients, setClientAct, ensureKeyClient, keyStartPage, keyDonePage, keyErrorPage, keyCookie, readKeyCookie } from './operator.js';
 import { TOOLS, askTool, grantLinkTool, discoverTool, engageTool, inspectTool, publicShelfTool, runTool, myRunsTool, needsReauthorization, type Person } from './tools.js';
 import { SERVER, SCOPES } from './whitelabel.js';
+import { homeSkillMarkdown } from './skill.js';
 
 export { HomeMcpStoreDO };
 
@@ -87,7 +88,9 @@ app.use('*', async (c, next) => {
 // registration. Rotating the key = a new secret + that registration updated + deploy; every connection then ends itself
 // (the assertion no longer recovers to the wire's delegate → 401 → the host re-authorizes; the Home mints a new wire).
 app.get('/health', (c) => c.json({ ok: true, service: 'home-mcp', spec: 397, tools: TOOLS.map((t) => t.name), home: c.env.HOME_ORIGIN, actKeyAddress: actKeyAddress(c.env), keyAddress: c.env.HOME_MCP_PRIVATE_KEY ? privateKeyToAccount(c.env.HOME_MCP_PRIVATE_KEY as Hex).address : null }));
-app.get('/', (c) => c.json({ service: SERVER.name, mcp: `POST ${resourceOf(c)} (Streamable HTTP; OAuth 2.1 — see /.well-known/oauth-protected-resource)`, tools: TOOLS.map((t) => t.name), connectionKey: `${originOf(c)}/connect/key`, doctrine: SERVER.instructions }));
+app.get('/', (c) => c.json({ service: SERVER.name, mcp: `POST ${resourceOf(c)} (Streamable HTTP; OAuth 2.1 — see /.well-known/oauth-protected-resource)`, tools: TOOLS.map((t) => t.name), skill: `${originOf(c)}/skill.md`, connectionKey: `${originOf(c)}/connect/key`, doctrine: SERVER.instructions }));
+// Spec 397 §11.4 — the skill a host keeps: how to ask questions of the person's Home (Muse saves it as the connector's skill).
+app.get('/skill.md', (c) => new Response(homeSkillMarkdown(originOf(c)), { headers: { 'content-type': 'text/markdown; charset=utf-8', 'cache-control': 'public, max-age=300' } }));
 
 // ── RFC 9728 / RFC 8414 ──
 app.get('/.well-known/oauth-protected-resource', (c) => serveProtectedResourceMetadata(createProtectedResourceMetadata({ resource: resourceOf(c), authorizationServers: [originOf(c)], scopesSupported: [...SCOPES], resourceDocumentation: `${originOf(c)}/` })));
