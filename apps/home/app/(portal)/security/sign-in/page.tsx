@@ -229,15 +229,17 @@ export default function SignInPage() {
             <Row title={<span>Unlabelled</span>} meta={<span>{set.unlabelled.passkeys > 0 ? `${set.unlabelled.passkeys} passkey${set.unlabelled.passkeys === 1 ? '' : 's'}` : ''}{set.unlabelled.passkeys > 0 && set.unlabelled.custodians > 0 ? ' and ' : ''}{set.unlabelled.custodians > 0 ? `${set.unlabelled.custodians} custodian key${set.unlabelled.custodians === 1 ? '' : 's'}` : ''} the chain holds that this Home has no label for — added from another device or before labels existed. They sign for you all the same.</span>} testId="sec-unlabelled" />
           )}
         </List>
-        {set && set.unknown.length > 0 && <Unknown read={set.unknown.join(', ')} partial />}
-        {total === 1 && <Note>One credential opens this home. Lose it and nothing can bring it back — add a second of another kind.</Note>}
-        {thisDevicePasskey && !custodyGoverned && (
-          <FlexRow gap={0.5} style={{ marginTop: '.5rem' }}>
-            <Button size="sm" onClick={() => setApprove(true)}>Add another device</Button>
-            <Button size="sm" onClick={() => void openRotation(true)} disabled={!rotationOk.ok} title={rotationOk.ok ? undefined : rotationOk.reason}>Move to another Home</Button>
-          </FlexRow>
-        )}
-        {!rotationOk.ok && !custodyGoverned && <Note>Replace, Retire, Graduate and Move need the rotation ceremony (spec 410 §1.2), which keeps every grant you issued. {rotationOk.reason}. Adding a credential works today; nothing here will quietly remove one.</Note>}
+        <div className="ui-panel-body">
+          {set && set.unknown.length > 0 && <Unknown read={set.unknown.join(', ')} partial />}
+          {total === 1 && <Note>One credential opens this home. Lose it and nothing can bring it back — add a second of another kind.</Note>}
+          {thisDevicePasskey && !custodyGoverned && (
+            <FlexRow gap={0.5} style={{ marginBottom: '.5rem' }}>
+              <Button size="sm" onClick={() => setApprove(true)}>Add another device</Button>
+              <Button size="sm" onClick={() => void openRotation(true)} disabled={!rotationOk.ok} title={rotationOk.ok ? undefined : rotationOk.reason}>Move to another Home</Button>
+            </FlexRow>
+          )}
+          {!rotationOk.ok && !custodyGoverned && <Note>Replace, Retire, Graduate and Move need the rotation ceremony (spec 410 §1.2), which keeps every grant you issued. {rotationOk.reason}. Adding a credential works today; nothing here will quietly remove one.</Note>}
+        </div>
       </Panel>
 
       {/* ── Opens this home ─────────────────────────────────────────────────────────────────────────── */}
@@ -264,7 +266,7 @@ export default function SignInPage() {
             />
           ))}
         </List>
-        <Note>An email or phone is a <b>channel</b>: it opens this home and is told about changes so you can stop one that was not you. It never signs for you, never approves anything, and is never a way to recover this home.</Note>
+        <div className="ui-panel-body"><Note>An email or phone is a <b>channel</b>: it opens this home and is told about changes so you can stop one that was not you. It never signs for you, never approves anything, and is never a way to recover this home.</Note></div>
       </Panel>
 
       {/* ── Retired ─────────────────────────────────────────────────────────────────────────────────── */}

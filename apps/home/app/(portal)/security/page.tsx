@@ -78,7 +78,7 @@ export default function SecurityOverviewPage() {
         testId="sec-posture"
       >
         {set && (
-          <>
+          <div className="ui-panel-body">
             <KeyValue rows={[
               ['Signs for you', <span key="c">{custody.length > 0 ? custody.map((r) => r.label).join(' · ') : (total ? `${total} on chain, unlabelled` : 'nothing')}{set.unlabelled.passkeys + set.unlabelled.custodians > 0 && custody.length > 0 ? ` · ${set.unlabelled.passkeys + set.unlabelled.custodians} unlabelled` : ''}</span>],
               ['Opens this home', channels.length > 0 ? channels.map((r) => `${r.label} ${r.sub}`).join(' · ') : 'no email or phone linked', { absent: channels.length === 0 }],
@@ -86,10 +86,11 @@ export default function SecurityOverviewPage() {
               ['Custody', set.custodyMode === 0 ? 'self-governed — your own credentials sign every change' : `custody-governed (mode ${set.custodyMode}) — changes go through your trustees' quorum`],
               ['Recovery', rung === 'trustees' ? 'trustees named' : rung === 'backups' ? 'a second credential: lose one, sign in with the other and replace it' : 'none — one credential opens this home; lose it and nothing can bring it back', { absent: rung !== 'trustees' }],
             ]} />
+            <div style={{ height: 'var(--sp-3)' }} />
             {rung === 'just-you' && <Note>Next step: add a passkey on a second device or a wallet, so a lost device is survivable. Naming recovery trustees arrives with this section&rsquo;s recovery wave (spec 422 W2).</Note>}
             {rung === 'backups' && <Note>Next step: recovery trustees — people you choose who can restore your access after a delay. Arrives with this section&rsquo;s recovery wave (spec 422 W2).</Note>}
             {!rotationOk.ok && <Note>{rotationOk.reason} — until then, adding a credential works and nothing here removes one quietly.</Note>}
-          </>
+          </div>
         )}
       </Panel>
 
