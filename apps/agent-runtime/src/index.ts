@@ -982,7 +982,10 @@ app.use('*', async (c, next) => {
   // session-carried like the ask) and delivers a finished routed act to the creditor over the standard
   // mount (`/api/a2a`, whose caller is named by the marker). Same posture: body/header-carried authority,
   // no ambient cookie to forge; a browser POST without the marker keeps CSRF.
-  if ((c.req.path === '/harness/ask' || c.req.path === '/harness/progress' || c.req.path === '/api/a2a') && isInWorkerRequest(c.req.raw)) return next();
+  // An in-isolate request never crossed a site: the ask, its progress, the A2A door — and the provenance reads the
+  // Lab's experiment object makes for each case (2026-10-01: without this every Lab case read back `unreadable`, the
+  // provenance poll answering `csrf required` twenty times).
+  if ((c.req.path === '/harness/ask' || c.req.path === '/harness/progress' || c.req.path === '/harness/provenance' || c.req.path === '/api/a2a') && isInWorkerRequest(c.req.raw)) return next();
   // Spec 375 — the WEBHOOK door is called by external systems; its admission is the row's bearer token
   // (header-carried, per agent, per trigger), so there is no ambient cookie authority for CSRF to protect.
   if (c.req.path.startsWith('/harness/hooks/')) return next();
