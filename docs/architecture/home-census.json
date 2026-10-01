@@ -1255,7 +1255,8 @@
     "(portal)/developer/evals/acts",
     "(portal)/developer/evals/techniques",
     "(portal)/developer/evals/gates",
-    "(portal)/developer/evals/run"
+    "(portal)/developer/evals/run",
+    "(portal)/developer/evals/skills"
    ],
    "gaps": [
     "P1.3 evals as a product (2026-09-16): `ap eval <cases.eval.json>` (cases as data, deterministic judge, a persona or a session, `--report`), `ap eval --from-runs` (a dataset from an agent's live runs), `evals/faithnet.eval.json` (5 cases: the authority twins + truthfulness, 5/5 live), the Evals screen (/developer/evals: recurring failures first, gates by night, the latest ap eval) folded by `scripts/build-evals-dashboard.mts`. Open: experiments compared side by side (two reports diffed); the nightly writing its report into the repo needs GitHub Actions billing",
@@ -1276,7 +1277,8 @@
     "registry/registry.json",
     "components/portal/DeveloperApps.tsx",
     "components/portal/ActLaboratory.tsx",
-    "components/portal/TechniqueLedger.tsx"
+    "components/portal/TechniqueLedger.tsx",
+    "components/portal/HowToRead.tsx"
    ],
    "gates": [
     "verify-devkit-starter"

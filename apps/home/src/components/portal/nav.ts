@@ -294,7 +294,8 @@ export function developerPane(): SettingsGroup[] {
       { id: 'dev-apps', label: 'Your apps', href: '/developer/apps', Icon: GlobeIcon, status: 'live' },
     ] },
     { heading: 'Evals', items: [
-      { id: 'dev-evals-skills', label: 'Skill selection', href: '/developer/evals', Icon: DatabaseIcon, status: 'live' },
+      { id: 'dev-evals-overview', label: 'What evals are', href: '/developer/evals', Icon: DatabaseIcon, status: 'live' },
+      { id: 'dev-evals-skills', label: 'Skill selection', href: '/developer/evals/skills', Icon: DatabaseIcon, status: 'live' },
       { id: 'dev-evals-acts', label: 'Acts', href: '/developer/evals/acts', Icon: BotIcon, status: 'live' },
       { id: 'dev-evals-techniques', label: 'Techniques', href: '/developer/evals/techniques', Icon: DatabaseIcon, status: 'live' },
       { id: 'dev-evals-gates', label: 'Live gates', href: '/developer/evals/gates', Icon: ShieldIcon, status: 'live' },
