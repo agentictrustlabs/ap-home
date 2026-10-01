@@ -26,6 +26,8 @@ CHAIN_ID = "31337"
 DELEGATION_MANAGER = ""
 AGENT_HOST_PATTERN = "http://localhost:8787"
 CLIENT_ID = "home-mcp"
+CLIENT_ID_ACT = "home-mcp-act"
+ACT_CLIENT_IDS = ""
 DEMO_CONNECT_ENABLED = "true"
 
 # ── FAITHNET (chain 34348) ──
@@ -53,7 +55,14 @@ CHAIN_ID = "34348"
 DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
 # The Home MCP's OWN registration at the Home (`whitelabel.relyingApps`); its key's address is the delegate there.
 CLIENT_ID = "home-mcp"
+# Spec 397 §11 — the Home's client for the ACT template (`home-mcp-act`); its delegate is HOME_MCP_ACT_KEY's address.
+CLIENT_ID_ACT = "home-mcp-act"
+# Operator allowlist of client ids that may request scope `act` (a registration that presented ACT_REGISTRATION_SECRET
+# is allowed too). Claude's dynamic registration is neither.
+ACT_CLIENT_IDS = ""
 # The demo personas may connect with no browser (the live gates; spec 392's rule: they sign in openly).
 DEMO_CONNECT_ENABLED = "true"
 # Secrets: HOME_MCP_PRIVATE_KEY (the key the ask-as-me wires are made to; its address is `delegate` at the Home),
+#          HOME_MCP_ACT_KEY (spec 397 §11 — the act-as-me key; a second secret; its address is the `home-mcp-act` delegate),
+#          ACT_REGISTRATION_SECRET (a registration presenting it may request scope act — the live gate's path),
 #          TOKEN_SECRET (HMAC for opaque tokens' lookup keys).

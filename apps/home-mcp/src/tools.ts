@@ -2,6 +2,7 @@
 // a vault read, never a mandate. What comes back is their agent's reply with its evidence; an act that needs their
 // authority is said as such, with the page on their Home where they sign.
 import { askAsPerson, callAsPerson, isDelegationRefusal, type PersonIdentity } from './a2a.js';
+import { ACT_TEMPLATE, deriveForParked, parkedOf } from './act.js';
 
 export const TOOLS = [
   {
@@ -55,7 +56,13 @@ export const TOOLS = [
 ] as const;
 
 export interface ToolEnv { A2A_ORIGIN: string; HOME_ORIGIN: string; /** `https://{label}.faithnet.ai` — where an agent's public card lives (spec 412: the shelf is read from the card's interface). */ AGENT_HOST_PATTERN?: string }
-export interface Person { sub: string; identity: PersonIdentity; agentName?: string }
+export interface Person {
+  sub: string; identity: PersonIdentity; agentName?: string;
+  /** The MCP client this bearer belongs to — what a receipt names (spec 397 §11). */
+  client?: string;
+  /** Spec 397 §11 — her act grant, opened only for a bearer with scope `act`. */
+  act?: import('./act.js').ActGrantV1;
+}
 
 /** The wire itself was refused by her agent: revoked or expired at her Home. The server turns this into a 401 with the
  *  resource metadata, so a conformant host re-runs authorization by itself; the words are for a host that shows them. */
@@ -103,12 +110,33 @@ export async function askTool(env: ToolEnv, person: Person, args: Record<string,
     }
     return { error: out.error, status: out.status };
   }
-  const reply = summarize(out.reply);
+  let reply = summarize(out.reply);
+  let outRunRef = out.runRef;
+  // Spec 397 §11 — ACT-AS-ME: the run parked for her authority and this client holds her act grant. If one of her
+  // standing wires covers the parked step (its capability; for a payment its payee, asset and cap), derive the mandate
+  // the run asked for, signed with the ACT key, and resume THE SAME run presenting [child, standing] — bound by this
+  // call's assertion, never in the bearer, never logged. Her agent verifies the chain; the step runs or parks again.
+  // No covering wire ⇒ the reply stands as it is and `grant_link` still works.
+  if (reply.kind === 'authority_required' && person.act && person.client) {
+    const parked = parkedOf(out.reply, String(out.runRef ?? reply.runRef ?? ''));
+    const derived = parked ? await deriveForParked(env as { HOME_MCP_ACT_KEY?: string }, person.act, parked) : null;
+    if (parked && derived?.ok) {
+      const resumed = await askAsPerson(person.identity, env.A2A_ORIGIN, { addressee, runRef: parked.runRef, presented: derived.presented, via: { client: person.client, template: ACT_TEMPLATE } }, fetchImpl);
+      if (!resumed.ok) {
+        if (isDelegationRefusal(resumed.status, resumed.error)) return wireRefused(resumed.error);
+        return { error: resumed.error, status: resumed.status, acted_under: { template: ACT_TEMPLATE, wire: derived.parentRef, capability: derived.capability } };
+      }
+      reply = { ...summarize(resumed.reply), acted_under: { template: ACT_TEMPLATE, wire: derived.parentRef, capability: derived.capability } };
+      outRunRef = resumed.runRef ?? outRunRef;
+    } else if (parked && derived && !derived.ok) {
+      reply = { ...reply, act_note: `none of the person's standing wires covers this step (${derived.reason}) — it needs their signature at their Home` };
+    }
+  }
   const hint = reply.kind === 'authority_required'
     ? `The person's agent needs THEIR authority for this: call grant_link with run=${String(out.runRef ?? reply.runRef ?? '')} and tell them to sign there; then ask again with that run.`
     : reply.kind === 'prompt' ? 'Their agent asked a question: answer it with ask { run, supplied: [{ stepRef, data }] } using the prompt\'s stepRef and field names — or ask the person.'
     : undefined;
-  return { ...reply, runRef: out.runRef ?? reply.runRef, ...(out.hasProvenance ? { hasProvenance: out.hasProvenance } : {}), ...(hint ? { next: hint } : {}), asked_as: person.agentName ?? person.identity.agent };
+  return { ...reply, runRef: outRunRef ?? reply.runRef, ...(out.hasProvenance ? { hasProvenance: out.hasProvenance } : {}), ...(hint ? { next: hint } : {}), asked_as: person.agentName ?? person.identity.agent };
 }
 
 export function grantLinkTool(env: ToolEnv, person: Person, args: Record<string, unknown>): Record<string, unknown> {

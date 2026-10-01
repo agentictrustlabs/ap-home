@@ -16,6 +16,7 @@ import type { Hex } from 'viem';
 import { HomeMcpStoreDO, Store, kekFrom, openWire, sealWire, randomToken, sha256b64, type PersonRow, type ElicitAnswer } from './store.js';
 import { sseFrame, progressNotification, elicitationFor, isJsonRpcResponse } from './stream.js';
 import { progressAsPerson, refreshWire } from './a2a.js';
+import { ACT_TEMPLATE, ACT_SCOPE, requestsAct, clientMayAct, actKeyAddress, acceptStandingWires, type ActGrantV1 } from './act.js';
 import { authorizationServerMetadata, parseAuthorize, registerClient, tokenEndpoint, revokeEndpoint, bearerOf, PENDING_TTL_MS } from './oauth.js';
 import { TOOLS, askTool, grantLinkTool, discoverTool, engageTool, inspectTool, publicShelfTool, runTool, myRunsTool, needsReauthorization, type Person } from './tools.js';
 import { SERVER, SCOPES } from './whitelabel.js';
@@ -39,6 +40,15 @@ export interface Env {
   CHAIN_ID?: string;
   DELEGATION_MANAGER?: string;
   TOKEN_SECRET?: string;
+  /** Spec 397 §11 — the ACT-AS-ME delegate key: a SECOND secret; its address is the `delegate` on the Home's
+   *  `home-mcp-act` client. A stolen ask key cannot derive a mandate — the act wires name this one. */
+  HOME_MCP_ACT_KEY?: string;
+  /** The Home's client id for the act template (`home-mcp-act`). */
+  CLIENT_ID_ACT?: string;
+  /** Operator allowlist: client ids that may request scope `act` (beside registrations that presented the act secret). */
+  ACT_CLIENT_IDS?: string;
+  /** A registration presenting this secret (`x-act-registration`) may request scope `act`. Unset ⇒ only the allowlist. */
+  ACT_REGISTRATION_SECRET?: string;
 }
 
 /** R917-E-5 (spec 409 §7) — the secret that seals every connected person's wire. FAIL CLOSED: unset or empty is an
@@ -72,7 +82,7 @@ app.use('*', async (c, next) => {
 // `keyAddress` is the delegate every ask-as-me wire names: it MUST equal the `delegate` on the Home's `home-mcp` client
 // registration. Rotating the key = a new secret + that registration updated + deploy; every connection then ends itself
 // (the assertion no longer recovers to the wire's delegate → 401 → the host re-authorizes; the Home mints a new wire).
-app.get('/health', (c) => c.json({ ok: true, service: 'home-mcp', spec: 397, tools: TOOLS.map((t) => t.name), home: c.env.HOME_ORIGIN, keyAddress: c.env.HOME_MCP_PRIVATE_KEY ? privateKeyToAccount(c.env.HOME_MCP_PRIVATE_KEY as Hex).address : null }));
+app.get('/health', (c) => c.json({ ok: true, service: 'home-mcp', spec: 397, tools: TOOLS.map((t) => t.name), home: c.env.HOME_ORIGIN, actKeyAddress: actKeyAddress(c.env), keyAddress: c.env.HOME_MCP_PRIVATE_KEY ? privateKeyToAccount(c.env.HOME_MCP_PRIVATE_KEY as Hex).address : null }));
 app.get('/', (c) => c.json({ service: SERVER.name, mcp: `POST ${resourceOf(c)} (Streamable HTTP; OAuth 2.1 — see /.well-known/oauth-protected-resource)`, tools: TOOLS.map((t) => t.name), doctrine: SERVER.instructions }));
 
 // ── RFC 9728 / RFC 8414 ──
@@ -92,19 +102,36 @@ const tooManyResponse = () => new Response(JSON.stringify({ error: 'too_many_req
 
 app.post('/oauth/register', async (c) => {
   if (await tooMany(c.env, 'register', callerOf(c), 30, 600)) return tooManyResponse();
-  return registerClient(store(c.env), (await c.req.json().catch(() => ({}))) as Record<string, unknown>);
+  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  const res = await registerClient(store(c.env), body);
+  // Spec 397 §11 — a registration that presented the OPERATOR's act secret may request scope `act` later; the flag
+  // lives on the client row, set here and nowhere else. A registration without it (Claude's) never gets the scope.
+  const secret = (c.env.ACT_REGISTRATION_SECRET ?? '').trim();
+  const presented = (c.req.header('x-act-registration') ?? '').trim();
+  if (res.ok && secret && presented && presented === secret) {
+    const reg = (await res.clone().json().catch(() => null)) as { client_id?: string } | null;
+    const row = reg?.client_id ? await store(c.env).getClient(reg.client_id) : null;
+    if (row) await store(c.env).putClient({ ...row, act: true });
+  }
+  return res;
 });
 
 // ── /oauth/authorize — validated here, COMPLETED at the Home (a relying app never runs a credential ceremony). ──
 app.get('/oauth/authorize', async (c) => {
   const parsed = await parseAuthorize(store(c.env), new URL(c.req.url).searchParams, resourceOf(c), SCOPES);
   if (!parsed.ok) return parsed.res;
+  // Spec 397 §11 — scope `act` is served only to a client the operator allowed, and only where this Worker holds an
+  // act key. Refused by name, never quietly narrowed to `ask`.
+  const act = requestsAct(parsed.req.scope);
+  if (act && !clientMayAct(c.env, parsed.req.client_id, (parsed.client as { act?: boolean }).act)) return json({ error: 'invalid_scope', error_description: 'this registration may not request scope act' }, 400);
+  if (act && (!c.env.CLIENT_ID_ACT || !actKeyAddress(c.env))) return json({ error: 'invalid_scope', error_description: 'scope act is not served by this Home MCP' }, 400);
   const id = randomToken(24);
   const homeVerifier = randomToken(48);
   const homeState = randomToken(16);
   await store(c.env).putPending({ id, ...parsed.req, home_verifier: homeVerifier, home_state: homeState, created_at: Date.now() });
   const home = new URL(c.env.HOME_ORIGIN);
-  home.searchParams.set('client_id', c.env.CLIENT_ID);
+  // Scope act redirects to the Home AS THE ACT CLIENT with the act template; any other connect stays ask-as-me.
+  home.searchParams.set('client_id', act ? c.env.CLIENT_ID_ACT! : c.env.CLIENT_ID);
   home.searchParams.set('redirect_uri', `${originOf(c)}/oauth/callback`);
   home.searchParams.set('response_type', 'code');
   home.searchParams.set('scope', 'openid agent');
@@ -112,17 +139,17 @@ app.get('/oauth/authorize', async (c) => {
   home.searchParams.set('nonce', randomToken(12));
   home.searchParams.set('code_challenge', await sha256b64(homeVerifier));
   home.searchParams.set('code_challenge_method', 'S256');
-  home.searchParams.set('delegation_template', 'ask-as-me');
+  home.searchParams.set('delegation_template', act ? ACT_TEMPLATE : 'ask-as-me');
   return c.redirect(home.toString(), 302);
 });
 
 /** The Home's token exchange → the id_token (who) and the ask-as-me delegation (how). Verified here against the Home's JWKS. */
-async function connectFromHome(env: Env, exchange: { id_token?: string; delegation?: DelegationWireV1; agent_name?: string }, clientId: string): Promise<{ ok: true; sub: string; agent: string } | { ok: false; error: string }> {
+async function connectFromHome(env: Env, exchange: { id_token?: string; delegation?: DelegationWireV1; delegations?: unknown; agent_name?: string }, clientId: string, template: 'ask-as-me' | typeof ACT_TEMPLATE = 'ask-as-me'): Promise<{ ok: true; sub: string; agent: string } | { ok: false; error: string }> {
   if (!exchange.id_token || !exchange.delegation) return { ok: false, error: 'the Home returned no id_token or no delegation' };
   const jwksUrl = env.BROKER_JWKS_URL ?? `${env.HOME_ORIGIN}/jwks`;
   const jwks = (await fetch(jwksUrl).then((r) => r.json()).catch(() => null)) as { keys: Array<JsonWebKey & { kid?: string; alg?: string }> } | null;
   if (!jwks) return { ok: false, error: 'the Home\'s JWKS could not be read' };
-  const v = await verifyIdToken(exchange.id_token, { keys: await importJwks(jwks), expectedIss: env.HOME_ORIGIN, expectedAud: env.CLIENT_ID });
+  const v = await verifyIdToken(exchange.id_token, { keys: await importJwks(jwks), expectedIss: env.HOME_ORIGIN, expectedAud: template === ACT_TEMPLATE ? (env.CLIENT_ID_ACT ?? env.CLIENT_ID) : env.CLIENT_ID });
   if (!v.ok) return { ok: false, error: `the Home's id_token did not verify: ${v.reason}` };
   const agent = String(v.claims.sub).match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase();
   if (!agent) return { ok: false, error: 'the id_token names no agent' };
@@ -143,7 +170,20 @@ async function connectFromHome(env: Env, exchange: { id_token?: string; delegati
   // The person's REGISTRY NAME (alice.me) from the Home's reverse lookup — the id_token's agent_name is their display name.
   const rn = (await fetch(`${env.HOME_ORIGIN}/connect/reverse-name?address=${agent}`).then((r) => r.json()).catch(() => null)) as { name?: string | null } | null;
   const agentName = typeof rn?.name === 'string' && rn.name ? rn.name : (v.claims.agent_name ?? exchange.agent_name);
-  const row: PersonRow = { sub: v.claims.sub, agent, ...(agentName ? { agent_name: agentName } : {}), wire_enc: sealed.enc, wire_iv: sealed.iv, wire_ref: '', connected_at: Date.now(), client_ids: [...new Set([...live, clientId])] };
+  // Spec 397 §11 — the ACT grant beside the ask wire: her standing wires, each naming this Worker's ACT key, sealed
+  // the same way. Kept per person; an act connect replaces her prior act grant (she authorized anew), an ask connect
+  // leaves it alone. A wiped store means she authorizes again.
+  let actSeal: { enc: string; iv: string } | undefined;
+  if (template === ACT_TEMPLATE) {
+    const acc = acceptStandingWires(env, agent, exchange.delegations);
+    if (!acc.ok) return { ok: false, error: acc.error };
+    const grant: ActGrantV1 = { v: 1, client_id: clientId, standing: acc.standing, granted_at: Date.now() };
+    actSeal = await sealWire(kek, grant as unknown as DelegationWireV1);
+  }
+  const row: PersonRow = {
+    sub: v.claims.sub, agent, ...(agentName ? { agent_name: agentName } : {}), wire_enc: sealed.enc, wire_iv: sealed.iv, wire_ref: '', connected_at: Date.now(), client_ids: [...new Set([...live, clientId])],
+    ...(actSeal ? { act_enc: actSeal.enc, act_iv: actSeal.iv } : prior?.act_enc ? { act_enc: prior.act_enc, act_iv: prior.act_iv! } : {}),
+  };
   await store(env).putPerson(row);
   return { ok: true, sub: v.claims.sub, agent };
 }
@@ -157,9 +197,10 @@ app.get('/oauth/callback', async (c) => {
   const code = q.get('code');
   if (!code) return json({ error: 'access_denied', error_description: q.get('error_description') ?? 'the Home returned no code' }, 400);
   // The Home's /token: PKCE with the verifier only this Worker held. The exchange happens server-to-server.
-  const exchange = (await fetch(`${c.env.HOME_ORIGIN}/token`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ grant_type: 'authorization_code', code, code_verifier: pending.home_verifier, client_id: c.env.CLIENT_ID, redirect_uri: `${originOf(c)}/oauth/callback` }) }).then((r) => r.json()).catch(() => null)) as { id_token?: string; delegation?: DelegationWireV1; error?: string } | null;
+  const act = requestsAct(pending.scope);
+  const exchange = (await fetch(`${c.env.HOME_ORIGIN}/token`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ grant_type: 'authorization_code', code, code_verifier: pending.home_verifier, client_id: act ? c.env.CLIENT_ID_ACT : c.env.CLIENT_ID, redirect_uri: `${originOf(c)}/oauth/callback` }) }).then((r) => r.json()).catch(() => null)) as { id_token?: string; delegation?: DelegationWireV1; delegations?: unknown; error?: string } | null;
   if (!exchange || exchange.error) return json({ error: 'access_denied', error_description: exchange?.error ?? 'the Home\'s token exchange failed' }, 400);
-  const connected = await connectFromHome(c.env, exchange, pending.client_id);
+  const connected = await connectFromHome(c.env, exchange, pending.client_id, act ? ACT_TEMPLATE : 'ask-as-me');
   if (!connected.ok) return json({ error: 'access_denied', error_description: connected.error }, 400);
   const ours = randomToken(32);
   await store(c.env).putCode({ code: ours, client_id: pending.client_id, redirect_uri: pending.redirect_uri, code_challenge: pending.code_challenge, scope: pending.scope, resource: pending.resource, sub: connected.sub, created_at: Date.now() });
@@ -178,7 +219,12 @@ app.post('/oauth/demo-connect', async (c) => {
   const q = new URLSearchParams({ client_id: String(body.client_id ?? ''), redirect_uri: String(body.redirect_uri ?? ''), response_type: 'code', code_challenge: String(body.code_challenge ?? ''), code_challenge_method: 'S256', resource: String(body.resource ?? resourceOf(c)), ...(typeof body.scope === 'string' ? { scope: body.scope } : {}) });
   const parsed = await parseAuthorize(store(c.env), q, resourceOf(c), SCOPES);
   if (!parsed.ok) return parsed.res;
-  const signin = (await fetch(`${c.env.HOME_ORIGIN}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: String(body.handle ?? ''), client_id: c.env.CLIENT_ID, delegation_template: 'ask-as-me' }) }).then((r) => r.json()).catch(() => null)) as { id_token?: string; delegation?: DelegationWireV1; agent_name?: string; error?: string } | null;
+  // Spec 397 §11 — a demo persona connecting with scope act: the same gate as a browser (the registration must be
+  // allowed), the Home's demo path mints the act set the gate names (`act` in the body: the capabilities and the cap).
+  const act = requestsAct(parsed.req.scope);
+  if (act && !clientMayAct(c.env, parsed.req.client_id, (parsed.client as { act?: boolean }).act)) return json({ error: 'invalid_scope', error_description: 'this registration may not request scope act' }, 400);
+  if (act && (!c.env.CLIENT_ID_ACT || !actKeyAddress(c.env))) return json({ error: 'invalid_scope', error_description: 'scope act is not served by this Home MCP' }, 400);
+  const signin = (await fetch(`${c.env.HOME_ORIGIN}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: String(body.handle ?? ''), client_id: act ? c.env.CLIENT_ID_ACT : c.env.CLIENT_ID, delegation_template: act ? ACT_TEMPLATE : 'ask-as-me', ...(act && body.act && typeof body.act === 'object' ? { act: body.act } : {}) }) }).then((r) => r.json()).catch(() => null)) as { id_token?: string; delegation?: DelegationWireV1; delegations?: unknown; agent_name?: string; error?: string } | null;
   if (!signin || signin.error) return json({ error: 'access_denied', error_description: signin?.error ?? 'the Home refused the demo sign-in' }, 400);
   // A demo persona's connection is the gate's, and the gate's alone: every prior connection of this persona ends
   // here, so a run that died before its revoke (or a revoke that once left the refresh token alive) cannot pile
@@ -186,7 +232,7 @@ app.post('/oauth/demo-connect', async (c) => {
   // 100 "connected clients", every one a finished gate). Real people never come through this route.
   const who = signin.id_token ? String((JSON.parse(atob(signin.id_token.split('.')[1] ?? '') || '{}') as { sub?: string }).sub ?? '') : '';
   if (who) await store(c.env).deleteTokensFor(who).catch(() => undefined);
-  const connected = await connectFromHome(c.env, signin, parsed.req.client_id);
+  const connected = await connectFromHome(c.env, signin, parsed.req.client_id, act ? ACT_TEMPLATE : 'ask-as-me');
   if (!connected.ok) return json({ error: 'access_denied', error_description: connected.error }, 400);
   const ours = randomToken(32);
   await store(c.env).putCode({ code: ours, ...parsed.req, sub: connected.sub, created_at: Date.now() });
@@ -197,11 +243,15 @@ app.post('/oauth/token', async (c) => tokenEndpoint(c.env, store(c.env), new URL
 app.post('/oauth/revoke', async (c) => revokeEndpoint(c.env, store(c.env), new URLSearchParams(await c.req.text()), c.req.header('authorization') ?? null));
 
 /** The person behind a bearer: the token row → the sealed wire → the identity this Worker asks as. */
-async function personOf(env: Env, sub: string): Promise<Person | null> {
+async function personOf(env: Env, sub: string, token?: { client_id: string; scope: string[] }): Promise<Person | null> {
   const row = await store(env).getPerson(sub);
   if (!row || !env.HOME_MCP_PRIVATE_KEY) return null;
-  const wire = await openWire(await kekFrom(tokenSecret(env)), row.wire_enc, row.wire_iv);
-  return { sub, identity: { agent: row.agent, privateKey: env.HOME_MCP_PRIVATE_KEY as Hex, wire }, ...(row.agent_name ? { agentName: row.agent_name } : {}) };
+  const kek = await kekFrom(tokenSecret(env));
+  const wire = await openWire(kek, row.wire_enc, row.wire_iv);
+  // Spec 397 §11 — the act grant is opened only for a bearer whose scope includes `act`; an ask-only client of the same
+  // person never sees it, and it is never on the bearer. The client id is what the receipt names.
+  const act = token && requestsAct(token.scope) && row.act_enc && row.act_iv ? (await openWire(kek, row.act_enc, row.act_iv)) as unknown as ActGrantV1 : undefined;
+  return { sub, identity: { agent: row.agent, privateKey: env.HOME_MCP_PRIVATE_KEY as Hex, wire }, ...(row.agent_name ? { agentName: row.agent_name } : {}), ...(token ? { client: token.client_id } : {}), ...(act && act.v === 1 ? { act } : {}) };
 }
 
 /** Her agent refused the wire this connection holds: the connection is over. Thrown from a tool call; the transport
@@ -247,6 +297,11 @@ async function callTool(env: Env, person: Person, name: string, args: Record<str
 /** The connection is over: every token of this person for this client dies, the person row goes; the next request meets the challenge. */
 async function endConnection(env: Env, sub: string, clientId: string): Promise<void> {
   await store(env).deleteTokensFor(sub, clientId).catch(() => undefined);
+  // Spec 397 §11 — the act grant was that client's: it goes with the client. The ask wire (and the person row) goes
+  // when no client of hers is live any more, as before.
+  const row = await store(env).getPerson(sub).catch(() => null);
+  const live = row ? await store(env).liveClientsFor(sub).catch(() => []) : [];
+  if (row && live.length > 0) { if (row.act_enc) { const { act_enc: _a, act_iv: _b, ...rest } = row; await store(env).putPerson(rest as PersonRow).catch(() => undefined); } return; }
   await store(env).deletePerson(sub).catch(() => undefined);
 }
 
@@ -382,7 +437,7 @@ app.post('/mcp', async (c) => {
   }
   if (req.method === 'notifications/initialized') return c.body(null, 202);
   if (req.method === 'ping') return c.json({ jsonrpc: '2.0', id, result: {} });
-  const person = await personOf(c.env, token.sub);
+  const person = await personOf(c.env, token.sub, { client_id: token.client_id, scope: token.scope });
   if (!person) return buildUnauthorizedResponse({ resourceMetadataUrl, errorDescription: 'this person is no longer connected — authorize again' });
   // STREAMING (spec 397 W3): a tools/call whose client accepts an event stream gets progress, an elicitation when the
   // agent asks a data question and the client can put it to the person, then the result — on one SSE stream.

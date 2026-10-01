@@ -88,7 +88,7 @@ export type { AskScopeV1 } from '@agenticprimitives/harness';
 import {
   hashDelegation, intentDigest, encodeDigestBindingArgs, digestBindingStepNonce, decodeDigestBindingTerms, decodeTimestampTerms, buildCaveat, buildVaultRecordScopeCaveat,
   encodeTimestampTerms, encodeValueTerms, ROOT_AUTHORITY, CAPABILITY_RAR_TYPE, PAYMENT_RAR_TYPE,
-  type Caveat, type Delegation, type EnforcerAddresses, type MandateRequirementV1, methodSelector, deriveMandate, readMandate, readDigestBindings, registerDefaultSubsetHandlers, NO_SEMANTICS_DIGEST, type VersionBindingV1 } from '@agenticprimitives/delegation';
+  type Caveat, type Delegation, type EnforcerAddresses, type MandateRequirementV1, methodSelector, deriveMandate, readMandate, readDigestBindings, registerDefaultSubsetHandlers, NO_SEMANTICS_DIGEST, type VersionBindingV1, isStandingWire, decodeAllowedMethodsTerms } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 import { RELATIONSHIP_TYPE, ROLE } from '@agenticprimitives/agent-relationships';
 import type { AuditSink } from '@agenticprimitives/audit';
@@ -1309,7 +1309,18 @@ export function suppliedApprovalsPort(
         .map((s) => ({ approver: s.signature!.signer as Address, digest: s.signature!.digest as Hex, signature: s.signature!.signature as Hex }));
       const pool = [...approvals, ...answered];
       const records: string[] = [];
+      // Spec 397 `act-as-me` — SHE DECIDED ONCE. When the step's mandate is a CHILD derived from a STANDING wire (no
+      // intent binding) that the run's principal — or the treasury the step spends from — signed, the person's own
+      // standing decision IS the second party for this step: the cap, the payee, the asset and the capability were
+      // hers to set, and the chain already verified the child ⊆ that wire. Recorded on the receipt by the wire's
+      // digest, so a reviewer can see which standing decision stood in. A wire whose delegator is someone else's
+      // discharges nothing — it is not her decision.
+      const parentWire = parentRef ? (presentedAll ?? []).find((p) => p.ref.toLowerCase() === parentRef.toLowerCase())?.wire as { delegator?: string; caveats?: Array<{ enforcer: string; terms: string; args?: string }> } | undefined : undefined;
+      const standingOwners = new Set([person, req.step.capability.authority, req.step.capability.resource].filter((x): x is string => typeof x === 'string').map((x) => x.toLowerCase()));
+      const standingByHer = !!parentWire && typeof parentWire.delegator === 'string' && standingOwners.has(parentWire.delegator.toLowerCase())
+        && (() => { try { return isStandingWire(parentWire, harnessEnforcers(env).digestBinding); } catch { return false; } })();
       for (const ob of req.obligations) {
+        if (ob.kind === 'second-party-approval' && standingByHer && parentRef) { records.push(`approval:standing:${parentRef.toLowerCase()}`); continue; }
         const allowed = (ob.dischargeableBy.agents ?? []).map((a) => a.toLowerCase());
         const candidates = pool.filter((a) => wants.includes(a.digest.toLowerCase()) && (allowed.length === 0 || allowed.includes(a.approver.toLowerCase())));
         let discharged = false;
@@ -2531,6 +2542,10 @@ export interface HarnessRunInput {
   /** Spec 397 — no session: the person asked THROUGH A CLIENT they authorized. The `A2A-Session` authorization and
    *  the exact body it bound, kept so a routed hop can present the same evidence to the subject's agent. */
   appCredential?: { authorization: string; body: string };
+  /** Spec 397 — THROUGH A HOST: the registered client of the person and the template whose wire admitted the ask
+   *  (`ask-as-me`) or whose standing wire a step's mandate derives from (`act-as-me`). Ids the receipt names; never
+   *  the wire. Accepted only beside a verified `A2A-Session` admission. */
+  via?: { client: string; template: string };
   /**
    * WHAT THE SURFACE SUPPORTS, and where the person is standing (spec 352 §2).
    *
@@ -4708,7 +4723,19 @@ export function scopedActionTools(surface?: AskScopeV1, playbook?: { capabilityI
  * item's own args, which is what the surface mints the next mandate from. Reading a caveat's terms is
  * not verifying them — the verifier judges the selected mandate alone, afterwards, as always.
  */
-function selectByPayee(rs: { capability: { id: string }; args: Record<string, unknown> }, all: MandatePresentation[], paymentEnforcer?: string): MandatePresentation | null {
+function selectByPayee(rs: { capability: { id: string }; args: Record<string, unknown> }, all: MandatePresentation[], paymentEnforcer?: string, allowedMethodsEnforcer?: string): MandatePresentation | null {
+  // Spec 397 `act-as-me` / spec 422: a key that names a DIFFERENT capability does not fit this step — it is left
+  // alone and the step PARKS (authority-required for its own args), which is what the surface mints or derives the
+  // next key from. Judged by the wire's own `allowedMethods` selector list when it has one; a wire with none, or an
+  // undecodable one, is not pre-judged here (the verifier judges the selected mandate alone, afterwards, as always).
+  const covers = (p: MandatePresentation): boolean => {
+    if (!allowedMethodsEnforcer) return true;
+    const wire = p.wire as { caveats?: Array<{ enforcer?: string; terms?: unknown }> };
+    const caveat = (wire.caveats ?? []).find((c) => (c.enforcer ?? '').toLowerCase() === allowedMethodsEnforcer.toLowerCase());
+    if (!caveat) return true;
+    try { return decodeAllowedMethodsTerms(caveat.terms as never).map((x) => String(x).toLowerCase()).includes(methodSelector(rs.capability.id).toLowerCase()); } catch { return true; }
+  };
+  all = all.filter(covers);
   if (rs.capability.id !== 'treasury.payment.execute' || !paymentEnforcer) return all[0] ?? null;
   const payee = String(rs.args.payee ?? '').toLowerCase();
   if (!payee) return all[0] ?? null;
@@ -4773,7 +4800,7 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
         action: `harness.step.${r.status}`, outcome: r.status === 'executed' || r.status === 'compensated' ? 'success' : r.status === 'denied' || r.status === 'failed' ? 'failure' : 'success',
         actor: { type: 'agent', id: (env.HARNESS_AGENT_SA ?? '').toLowerCase() },
         subject: { type: 'harness-step', id: `${r.runRef}:${r.stepRef}` },
-        metadata: { toolId: r.toolId, risk: r.risk, capability: r.capability ?? null, mandateRef: r.authority?.presentedRef ?? null, decision: r.authority?.decision.decision ?? null, approvalRecords: r.approvalRecords ?? null, idempotencyKey: r.idempotencyKey ?? null, pendingInput: r.pendingInput ?? null, error: r.error ?? null },
+        metadata: { toolId: r.toolId, risk: r.risk, capability: r.capability ?? null, mandateRef: r.authority?.presentedRef ?? null, via: input.via ?? null, decision: r.authority?.decision.decision ?? null, approvalRecords: r.approvalRecords ?? null, idempotencyKey: r.idempotencyKey ?? null, pendingInput: r.pendingInput ?? null, error: r.error ?? null },
       } as never);
     },
   };
@@ -5599,7 +5626,7 @@ step is then handed to that agent under authority the person grants; leave it ou
         : {}),
       ...(standingLink ? { standing: standingLink } : {}),
       // Spec 383 — the actor context of this hop (ADR-0052): for whom, who started it, whose harness ran it.
-      ...(input.addressee ? { actor: { ...(input.person ? { rootPrincipal: input.person.toLowerCase() } : {}), ...(input.inResponseTo?.agent ? { originatingAgent: input.inResponseTo.agent.toLowerCase() } : input.person ? { originatingAgent: input.person.toLowerCase() } : {}), actingAgent: input.addressee.toLowerCase() } } : {}),
+      ...(input.addressee ? { actor: { ...(input.via ? { via: input.via } : {}), ...(input.person ? { rootPrincipal: input.person.toLowerCase() } : {}), ...(input.inResponseTo?.agent ? { originatingAgent: input.inResponseTo.agent.toLowerCase() } : input.person ? { originatingAgent: input.person.toLowerCase() } : {}), actingAgent: input.addressee.toLowerCase() } } : {}),
     };
   };
   // THE REALM'S TYPED SUFFIX, whether or not a surface declared it (spec 367 §7 / 371 §2.1). A person's
@@ -6039,7 +6066,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     // The keyring's selector: a payment step is judged under the mandate whose PaymentEnforcer caveat
     // names its payee. Selection reads a caveat; it verifies nothing — the verifier still judges the one
     // selected mandate alone (ADR-0013: one mechanism, deterministically chosen).
-    selectPresentation: (rs, all) => selectByPayee(rs, all, enforcers.payment),
+    selectPresentation: (rs, all) => selectByPayee(rs, all, enforcers.payment, enforcers.allowedMethods),
     // Which relations a plan may FAN OUT over — the ontology's plan-shapes binding, injected so the loop
     // stays domain-free. Absence fails closed in the loop.
     fanOut: (relation) => {
