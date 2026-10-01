@@ -48,6 +48,9 @@ export interface Env {
   CLIENT_ID_ACT?: string;
   /** Operator allowlist: client ids that may request scope `act` (beside registrations that presented the act secret). */
   ACT_CLIENT_IDS?: string;
+  /** Operator allowlist of REDIRECT URIs: a registration whose every redirect URI is listed may request scope `act` —
+   *  for a host that registers itself afresh each attempt (Meta Muse: `https://agent.meta.ai/api/hatch/oauth/callback`). */
+  ACT_REDIRECT_URIS?: string;
   /** A registration presenting this secret (`x-act-registration`) may request scope `act`. Unset ⇒ only the allowlist. */
   ACT_REGISTRATION_SECRET?: string;
 }
@@ -125,7 +128,7 @@ app.get('/oauth/authorize', async (c) => {
   // Spec 397 §11 — scope `act` is served only to a client the operator allowed, and only where this Worker holds an
   // act key. Refused by name, never quietly narrowed to `ask`.
   const act = requestsAct(parsed.req.scope);
-  if (act && !clientMayAct(c.env, parsed.req.client_id, (parsed.client as { act?: boolean }).act)) return json({ error: 'invalid_scope', error_description: 'this registration may not request scope act' }, 400);
+  if (act && !clientMayAct(c.env, parsed.req.client_id, (parsed.client as { act?: boolean }).act, parsed.client.redirect_uris)) return json({ error: 'invalid_scope', error_description: 'this registration may not request scope act' }, 400);
   if (act && (!c.env.CLIENT_ID_ACT || !actKeyAddress(c.env))) return json({ error: 'invalid_scope', error_description: 'scope act is not served by this Home MCP' }, 400);
   const id = randomToken(24);
   const homeVerifier = randomToken(48);
@@ -224,7 +227,7 @@ app.post('/oauth/demo-connect', async (c) => {
   // Spec 397 §11 — a demo persona connecting with scope act: the same gate as a browser (the registration must be
   // allowed), the Home's demo path mints the act set the gate names (`act` in the body: the capabilities and the cap).
   const act = requestsAct(parsed.req.scope);
-  if (act && !clientMayAct(c.env, parsed.req.client_id, (parsed.client as { act?: boolean }).act)) return json({ error: 'invalid_scope', error_description: 'this registration may not request scope act' }, 400);
+  if (act && !clientMayAct(c.env, parsed.req.client_id, (parsed.client as { act?: boolean }).act, parsed.client.redirect_uris)) return json({ error: 'invalid_scope', error_description: 'this registration may not request scope act' }, 400);
   if (act && (!c.env.CLIENT_ID_ACT || !actKeyAddress(c.env))) return json({ error: 'invalid_scope', error_description: 'scope act is not served by this Home MCP' }, 400);
   const signin = (await fetch(`${c.env.HOME_ORIGIN}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: String(body.handle ?? ''), client_id: act ? c.env.CLIENT_ID_ACT : c.env.CLIENT_ID, delegation_template: act ? ACT_TEMPLATE : 'ask-as-me', ...(act && body.act && typeof body.act === 'object' ? { act: body.act } : {}) }) }).then((r) => r.json()).catch(() => null)) as { id_token?: string; delegation?: DelegationWireV1; delegations?: unknown; agent_name?: string; error?: string } | null;
   if (!signin || signin.error) return json({ error: 'access_denied', error_description: signin?.error ?? 'the Home refused the demo sign-in' }, 400);

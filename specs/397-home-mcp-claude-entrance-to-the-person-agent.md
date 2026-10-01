@@ -315,7 +315,10 @@ she signs as before.
 ### 11.1 Who may request `act`
 
 Only a registration the OPERATOR allowed: one that presented `ACT_REGISTRATION_SECRET` (`x-act-registration`) at
-`/oauth/register`, or a client id in `ACT_CLIENT_IDS`. The flag lives on the client row and nowhere else. Claude's
+`/oauth/register`, a client id in `ACT_CLIENT_IDS`, or — for a host that registers itself afresh on every attempt
+(Meta Muse did, 2026-10-01) — a registration whose EVERY redirect URI is in `ACT_REDIRECT_URIS`: the redirect URI is
+where the authorization code goes, so naming it names the party, and PKCE binds the code to the requester. The
+flag otherwise lives on the client row and nowhere else. Claude's
 dynamic registration cannot request it (`invalid_scope`); the `home-mcp` client's allowed templates stay
 `ask-as-me` only. A stolen ASK key still cannot pay: the act wires name the ACT key.
 

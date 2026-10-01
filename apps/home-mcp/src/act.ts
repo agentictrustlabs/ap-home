@@ -22,13 +22,19 @@ export const ACT_SCOPE = 'act' as const;
 /** The act grant this Worker holds for a person: her standing wires, each one capability. Sealed at rest beside the ask wire. */
 export interface ActGrantV1 { v: 1; client_id: string; standing: StandingWireV1[]; granted_at: number }
 
+const listOf = (v: string | undefined): string[] => (v ?? '').split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+
 /** A registration may hold scope `act` only when the OPERATOR allowed it: a registration that presented the act
- *  registration secret (`x-act-registration`), or a client id named in `ACT_CLIENT_IDS`. A dynamic registration
- *  with neither — Claude's — cannot request it (`invalid_scope`). */
-export function clientMayAct(env: { ACT_CLIENT_IDS?: string }, clientId: string, actFlag: boolean | undefined): boolean {
+ *  registration secret (`x-act-registration`), a client id named in `ACT_CLIENT_IDS`, or — for a host that registers
+ *  itself afresh on every attempt (Meta Muse, 2026-10-01) — a registration whose EVERY redirect URI is in
+ *  `ACT_REDIRECT_URIS`. The redirect URI is what an authorization code is sent to, so naming it names the party
+ *  (plus PKCE binds the code to the requester). A dynamic registration with none of these — Claude's — cannot
+ *  request it (`invalid_scope`). */
+export function clientMayAct(env: { ACT_CLIENT_IDS?: string; ACT_REDIRECT_URIS?: string }, clientId: string, actFlag: boolean | undefined, redirectUris: readonly string[] = []): boolean {
   if (actFlag === true) return true;
-  const ids = (env.ACT_CLIENT_IDS ?? '').split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
-  return ids.includes(clientId);
+  if (listOf(env.ACT_CLIENT_IDS).includes(clientId)) return true;
+  const allowed = new Set(listOf(env.ACT_REDIRECT_URIS).map((u) => u.replace(/\/$/, '')));
+  return allowed.size > 0 && redirectUris.length > 0 && redirectUris.every((u) => allowed.has(u.replace(/\/$/, '')));
 }
 
 export const requestsAct = (scope: readonly string[]): boolean => scope.includes(ACT_SCOPE);
