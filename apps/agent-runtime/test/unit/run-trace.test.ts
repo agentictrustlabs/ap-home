@@ -16,6 +16,17 @@ const trace = {
   ],
 } as never;
 
+describe('variant per-area providers', () => {
+  it('accepts selectionProvider / answerProvider / judgeProvider as provider names and refuses anything else', () => {
+    const ok = parseVariantRequest({ provider: 'gemini', judgeProvider: 'anthropic', answerProvider: 'groq' });
+    expect(ok.ok).toBe(true);
+    if (ok.ok) expect(ok.variant).toEqual({ provider: 'gemini', judgeProvider: 'anthropic', answerProvider: 'groq' });
+    const bad = parseVariantRequest({ judgeProvider: 'Claude Opus' });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.error).toContain('judgeProvider must be a provider name');
+  });
+});
+
 describe('doors', () => {
   it('an A2A message door carries message, context and task ids', () => {
     expect(a2aDoor({ messageId: 'm', contextId: 'c' }, { id: 't', contextId: 'c2' })).toEqual({ kind: 'a2a-message', messageId: 'm', contextId: 'c', taskId: 't' });

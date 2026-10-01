@@ -129,7 +129,7 @@ import {
   type AuditSink,
 } from '@agenticprimitives/audit';
 import { createD1AuditSink } from './audit-d1.js';
-import { runOrchestration } from './orchestration.js';
+import { runOrchestration, llmAllowlist, type LlmProvider } from './orchestration.js';
 import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker, householdMembers, ownAgentsOfType, choicesFor } from '@agenticprimitives/context';
 import { KB_QUESTION_TOOL, kbQuestionInvoker, KB_RETRIEVE_TOOL, kbRetrieveInvoker } from '@agenticprimitives/context';
 import { discoveryFetchFor, structuredCallFor, type StructuredCallRecordV1 } from './context-wiring.js';
@@ -3001,7 +3001,9 @@ app.post('/harness/spans', async (c) => {
 // GET /harness/comparison — spec 415 A4. WHETHER THIS ESTATE RUNS COMPARISONS, and what its `variant` knob knows: a
 // comparison runner reads it before it asks (the estate's half of the eval-store capture gate). Public and secret-free:
 // that an estate is a comparison estate is a fact about the estate, not about anyone's records.
-app.get('/harness/comparison', (c) => c.json({ ok: true, evalCapture: String(c.env.EVAL_CAPTURE ?? '').trim().toLowerCase() === 'on' ? 'on' : 'off', plannerKinds: ['model', 'rule-based'], selections: [...SELECTION_ARMS], toggles: VARIANT_TOGGLES, ...(String(c.env.HARNESS_BUILD ?? '').trim() ? { build: String(c.env.HARNESS_BUILD).trim() } : {}) }));
+app.get('/harness/comparison', (c) => c.json({ ok: true, evalCapture: String(c.env.EVAL_CAPTURE ?? '').trim().toLowerCase() === 'on' ? 'on' : 'off', plannerKinds: ['model', 'rule-based'], selections: [...SELECTION_ARMS], toggles: VARIANT_TOGGLES,
+  // Per-area providers (2026-10-01): the roles a variant may put on their own provider, and what this deployment offers.
+  providerRoles: ['provider', 'selectionProvider', 'answerProvider', 'judgeProvider'], providers: llmAllowlist(c.env), ...(String(c.env.HARNESS_BUILD ?? '').trim() ? { build: String(c.env.HARNESS_BUILD).trim() } : {}) }));
 
 app.post('/harness/provenance', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; runRef?: string; format?: 'jsonld' | 'prov-n' | 'record' | 'measures' } | null;
@@ -4204,6 +4206,17 @@ app.post('/harness/ask', async (c) => {
   // made every call look chosen, so the route never ran and the planner prompt was trimmed to Groq's budget
   // with Anthropic offered (seen live 2026-09-10: 7,813 tokens cut to 6,500, every drop taken, over-budget).
   const provider = String(variantReq?.provider ?? body.model ?? '').trim() ? chosen.provider ?? undefined : undefined;
+  // Per-area providers (2026-10-01): each role's provider resolved like `provider` — offered by this deployment and keyed —
+  // or the turn is refused by name. Unset roles fall back to `provider` inside the run.
+  const roleProviders: { selectionProvider?: LlmProvider; answerProvider?: LlmProvider; judgeProvider?: LlmProvider } = {};
+  for (const role of ['selectionProvider', 'answerProvider', 'judgeProvider'] as const) {
+    const want = variantReq?.[role];
+    if (!want) continue;
+    const r = resolveProvider(c.env, want);
+    if (!r.ok) return c.json({ ok: false, error: `variant.${role}: ${r.error}`, refused: 'variant.provider.not-offered' }, 400);
+    if (r.provider) roleProviders[role] = r.provider;
+  }
+  const judgeProvider = roleProviders.judgeProvider ?? provider;
   // Spec 388 W2 — the structured calls route per request; each decision is collected for the trace.
   const structuredRoutes: RouteDecision[] = [];
   const structuredCalls: StructuredCallRecordV1[] = [];
@@ -4387,7 +4400,7 @@ app.post('/harness/ask', async (c) => {
       ...(memory && memory.entries.length ? { memory } : {}),
       ...(inResponseTo ? { inResponseTo } : {}),
       ...(body.channel === 'voice' ? { channel: 'voice' as const } : {}),
-      ...(provider ? { provider } : {}),
+      ...(provider ? { provider } : {}), ...roleProviders,
       // Spec 418 §12 — any variant makes this a comparison run: its self-acting writes are held, even a provider-only variant.
       ...(variantReq ? { comparison: true } : {}),
       ...(variantReq && (variantReq.plannerKind || variantReq.selection || variantReq.toggles || variantReq.acceptance || variantReq.judgeProfile || variantReq.askerContext) ? { variant: { ...(variantReq.plannerKind ? { plannerKind: variantReq.plannerKind } : {}), ...(variantReq.selection ? { selection: variantReq.selection } : {}), ...(variantReq.toggles ? { toggles: variantReq.toggles } : {}), ...(variantReq.acceptance ? { acceptance: variantReq.acceptance } : {}), ...(variantReq.judgeProfile ? { judgeProfile: variantReq.judgeProfile } : {}), ...(variantReq.askerContext ? { askerContext: variantReq.askerContext } : {}) } } : {}),
@@ -4818,7 +4831,7 @@ app.post('/harness/ask', async (c) => {
     // Spec 418 A2 — THE OUTCOME CHECK: did the answer DELIVER each class the plan was for (the ontology's `produces`)?
     if (variantReq?.toggles?.['quality/judge'] === 'outcome' && reply?.kind === 'answer' && typeof (reply as { text?: unknown }).text === 'string' && trace.expectedDelivers?.length) {
       let usage: { tokensIn?: number; tokensOut?: number } | undefined;
-      const ocall = structuredCallFor(c.env, provider, { onCall: (rec) => { usage = { tokensIn: rec.tokensIn, tokensOut: rec.tokensOut }; } });
+      const ocall = structuredCallFor(c.env, judgeProvider, { onCall: (rec) => { usage = { tokensIn: rec.tokensIn, tokensOut: rec.tokensOut }; } });
       if (ocall) {
         const oc = await judgeOutcomeDelivered({ request: String(body.message ?? ''), answer: (reply as { text: string }).text, expected: trace.expectedDelivers }, ocall).catch((e: unknown) => ({ judge: OUTCOME_CHECK_JUDGE, classes: {}, score: 0, ms: 0, error: e instanceof Error ? e.message : String(e) }));
         (trace as { outcomeCheck?: unknown }).outcomeCheck = { judge: oc.judge.name, classes: oc.classes, ...('requested' in oc ? { requested: oc.requested } : {}), score: oc.score, ms: oc.ms, ...(usage?.tokensIn !== undefined ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut ?? 0 } : {}), ...(oc.error ? { error: oc.error.slice(0, 200) } : {}) };
@@ -4830,7 +4843,7 @@ app.post('/harness/ask', async (c) => {
       const tool = planned.length ? offeredTools.find((t) => t.id === planned[planned.length - 1] && t.answer) : undefined;
       if (tool) {
         let usage: { tokensIn?: number; tokensOut?: number } | undefined;
-        const qcall = structuredCallFor(c.env, provider, { onCall: (rec) => { usage = { tokensIn: rec.tokensIn, tokensOut: rec.tokensOut }; } });
+        const qcall = structuredCallFor(c.env, judgeProvider, { onCall: (rec) => { usage = { tokensIn: rec.tokensIn, tokensOut: rec.tokensOut }; } });
         if (qcall) {
           const q = await judgeAnswerQuality({ request: String(body.message ?? ''), skillCard: tool.description, answer: (reply as { text: string }).text }, qcall).catch((e: unknown) => ({ judge: ANSWER_QUALITY_JUDGE, scores: {}, score: 0, ms: 0, error: e instanceof Error ? e.message : String(e) }));
           trace.quality = { judge: q.judge.name, scores: q.scores, score: q.score, ms: q.ms, ...(usage?.tokensIn !== undefined ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut ?? 0 } : {}), ...(q.error ? { error: q.error.slice(0, 200) } : {}) };
