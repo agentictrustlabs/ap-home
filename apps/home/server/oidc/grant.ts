@@ -24,6 +24,7 @@ import { toCanonicalAgentId } from '@agenticprimitives/identity-directory-adapte
 import { getServer, json, resolveOrigin, type FnContext } from '../_lib/server-broker';
 import { verifyDelegation, type IncomingDelegation } from '../_lib/verify-delegation';
 import { CHAIN_ID } from '../../src/lib/chain';
+import { getClient } from '../../src/lib/oidc-clients';
 import type { StoredEnrollmentGrant } from './authorize-grant';
 import { idTokenTtl } from '../_lib/session-ttl';
 import { nameClaimForIdToken } from '../../src/lib/new-member';
@@ -58,6 +59,10 @@ interface GrantBody {
    *  whitelabel entry declared `self_vault_grant`. Independently ERC-1271-verified below, reusing
    *  the SAME delegator already proven for the main site delegation. */
   selfVaultGrant?: IncomingDelegation;
+  /** Spec 397 §11 — `act-as-me`: the STANDING WIRES of the set, one per capability, each to the client's ACT key
+   *  (`grant.delegate`); the main `delegation` is then the ask wire to the client's `ask_delegate`. Each wire is
+   *  verified on its own (ERC-1271 + window against ITS delegator — the person, or her treasury for a payment). */
+  delegations?: Array<{ v: 1; template: string; capability: string; wire: IncomingDelegation; ref: string; requirement: Record<string, unknown> }>;
 }
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
@@ -86,8 +91,28 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // Delegate binding: the supplied delegation's `delegate` MUST equal the delegate
   // recorded at /authorize-grant time (which came from the OIDC client registry, NOT
   // from the request). This closes the "attacker chooses delegate" attack.
-  if (body.delegation.delegate.toLowerCase() !== grant.delegate.toLowerCase()) {
+  // Spec 397 §11 — under `act-as-me` the main delegation is the ASK wire, bound to the client's ask key; the act
+  // wires (`delegations[]`) are each bound to the registered ACT key (`grant.delegate`). Any other template: as before.
+  const actTemplate = grant.delegation_template === 'act-as-me';
+  const actClient = actTemplate ? getClient(grant.client_id) : null;
+  const expectedMain = actTemplate ? (actClient?.ask_delegate ?? '') : grant.delegate;
+  if (!expectedMain || body.delegation.delegate.toLowerCase() !== expectedMain.toLowerCase()) {
     return json({ error: 'delegation delegate does not match the registered client delegate' }, 401);
+  }
+  if (actTemplate) {
+    if (!Array.isArray(body.delegations) || body.delegations.length === 0) return json({ error: 'act-as-me needs at least one act wire' }, 400);
+    const caps = new Set<string>();
+    for (const w of body.delegations) {
+      if (!w || w.v !== 1 || w.template !== 'act-as-me' || typeof w.capability !== 'string' || !w.wire || typeof w.ref !== 'string' || !w.requirement) return json({ error: 'an act wire is malformed' }, 400);
+      if (caps.has(w.capability)) return json({ error: `two act wires for ${w.capability} — one wire per capability` }, 400);
+      caps.add(w.capability);
+      if (String(w.wire.delegate).toLowerCase() !== grant.delegate.toLowerCase()) return json({ error: `the act wire for ${w.capability} does not name the registered act key` }, 401);
+      const isPayment = w.capability === 'treasury.payment.execute';
+      if (!isPayment && String(w.wire.delegator).toLowerCase() !== body.delegation.delegator.toLowerCase()) return json({ error: `the act wire for ${w.capability} is not the connecting person's` }, 401);
+      const wv = await verifyDelegation(env, w.wire);
+      if (!wv.ok) return json({ error: `act wire for ${w.capability} failed: ${wv.reason}` }, 401);
+      if (wv.digest.toLowerCase() !== w.ref.toLowerCase()) return json({ error: `the act wire for ${w.capability} does not hash to its ref` }, 401);
+    }
   }
 
   // ERC-1271 + timestamp-window verification. On success returns the canonical EIP-712
@@ -240,7 +265,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     const key = `app-grants:${person}`;
     const rows = JSON.parse((await env.AUTH_CODES.get(key)) ?? '[]') as Array<{ clientId: string }>;
     const next = rows.filter((r) => r.clientId !== grant.client_id);
-    next.unshift({ clientId: grant.client_id, template: grant.delegation_template, delegate: grant.delegate, delegation: body.delegation, issuedAt: Date.now() } as never);
+    next.unshift({ clientId: grant.client_id, template: grant.delegation_template, delegate: grant.delegate, delegation: body.delegation, issuedAt: Date.now(), ...(actTemplate ? { wires: body.delegations } : {}) } as never);
     await env.AUTH_CODES.put(key, JSON.stringify(next.slice(0, 50)));
   }
 
@@ -257,6 +282,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       settlementHash: body.settlementHash ?? null,
       treasury: body.treasury ?? null,
       selfVaultGrant: body.selfVaultGrant ?? null,
+      delegations: actTemplate ? body.delegations : null,
       org: body.org ?? null,
       // Returned verbatim by /token so an app can read the HUMAN name explicitly rather than
       // inferring it from `agent_name`. '' (never absent) when the client isn't `profile`-scoped.

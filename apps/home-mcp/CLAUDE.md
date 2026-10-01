@@ -26,14 +26,19 @@ passed through (ADR-0041).
 `DEMO_CONNECT_ENABLED`), `POST /mcp`, `/health`) · `src/oauth.ts` (the AS) · `src/store.ts` (`HomeMcpStoreDO` — clients,
 pending, codes, tokens, persons; wires sealed AES-GCM under a KEK from `TOKEN_SECRET`; a rebuild, never a bereavement:
 a wiped store means "authorize again") · `src/a2a.ts` (`askAsPerson`) · `src/tools.ts` (`ask`, `discover_agents`, `engage`, `my_runs`, `run`, `grant_link` — discover/engage are ONE supplied step each at her agent, `discovery.agents.find` / `engagement.agent.invoke` in `apps/demo-a2a/src/enterprise-tools.ts`; my_runs/run read her records under the same credential) · `src/stream.ts` (SSE frames, progress, elicitation shape — W3: a `tools/call` with `Accept: text/event-stream` streams progress, elicits a data prompt when the client declared it at initialize, never a signature) ·
-`src/whitelabel.ts` (name, instructions, scopes — the only branded module).
+`src/whitelabel.ts` (name, instructions, scopes — the only branded module) · `src/act.ts` (spec 397 §11 — ACT-AS-ME: scope `act` for a
+registration the operator allowed (`x-act-registration` secret or `ACT_CLIENT_IDS`), the Home's `home-mcp-act` client, her standing wires
+sealed beside the ask wire (`act_enc`), and on a parked `authority_required` the derivation of the mandate from the covering wire with
+`HOME_MCP_ACT_KEY`, resumed on the same run with `presented: [child, standing]` + `via`; no covering wire ⇒ parked as before).
 
 ## Validate / deploy
 
 `npx tsc --noEmit -p .` + `npx vitest run` (the AS: DCR, PKCE, resource binding, rotation, revocation). Live gates
 `verify-home-mcp` (W1) · `-browser-path` · `-discovery` (W2) · `-authority` (W3: signed at her Home via /you?run=) · `-stream` (W3) · `-revoke` (W4: Connected assistants → on chain) · `-instructions`. Deploy `npx wrangler deploy --env faithnet`; secrets
 `HOME_MCP_PRIVATE_KEY` (its address is the `delegate` on the Home's `home-mcp` client registration) and `TOKEN_SECRET`.
-Live: `https://home-mcp.faithnet.io` (the faithnet.io zone is at its domain limit).
+Live: `https://home-mcp.faithnet.io` (the faithnet.io zone is at its domain limit). Act secrets: `HOME_MCP_ACT_KEY` (its address is the
+`home-mcp-act` client's `delegate`; `/health` prints `actKeyAddress`) + `ACT_REGISTRATION_SECRET` (the live gate `verify-home-mcp-act`
+reads it as `HOME_MCP_ACT_REGISTRATION_SECRET`; the operator keeps both in `~/.agenticprimitives/home-mcp-act.env`).
 
 ## Key rotation (runbook)
 

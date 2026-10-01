@@ -225,8 +225,9 @@ conformant to this ADR.* The gateway (387) remains the entrance for a host that 
 
 - **The bearer never leaves the Home MCP.** Not to her agent, not to a ministry, not in a log. The wire is what
   travels, and it is hers.
-- **`ask-as-me` never widens.** A second template ("act-as-me") is the failure this spec exists to prevent; any
-  act needs her signature at her Home.
+- **`ask-as-me` never widens and never authorizes an act.** `act-as-me` (§11) is a DIFFERENT template, one wire
+  per capability, only for a client registered to request it. An act with no matching wire still needs her
+  signature at her Home.
 - **No per-ministry tools, no vault tools, no dynamic surface.** The door is stable; the rooms are her agent's.
 - **The registry is an agent she asks, never a service the Home MCP calls.** Discovery is a run of hers with
   provenance; the Home MCP has no registry client.
@@ -273,7 +274,67 @@ conformant to this ADR.* The gateway (387) remains the entrance for a host that 
 
 (W1's revoked-wire twin now lives in `verify-home-mcp-revoke.mts`.)
 
-## 11. What this buys that option 1 cannot (the differentiation, stated so it can be checked)
+## 11. `act-as-me` — the second template: acts she decided once, run without a second signature
+
+The ask-as-me wire proves WHO is asking and nothing more; every act parks. That is the right default and it stays
+the default. What a person may ALSO want from an assistant she trusts is to decide some acts ONCE — "pay the church
+up to 20 a month", "send messages as me" — and have them run without a signature each time. This section adds
+exactly that, with the same substrate and no new authority model.
+
+**The grant.** A client whose registration may request OAuth scope `act` (§11.3) connects as the Home's
+`home-mcp-act` client with template `act-as-me`. The ceremony mints the ask-as-me wire (to the Worker's ASK key, as
+before) PLUS a SET of STANDING WIRES (`StandingWireV1`, `packages/delegation/src/standing.ts`): one per act
+capability she checked from her compiled playbook (reads and instructions are never offered), each from her — or
+from her treasury for a payment, since assets live only in treasuries — to the Worker's ACT key
+(`HOME_MCP_ACT_KEY`, a second secret), caveated to that ONE capability selector (never `A2A_ANY_SKILL`) and a
+30-day window. A payment wire carries its payee, asset and cap (`PaymentEnforcer` terms). A standing wire has NO
+intent binding: it is a capability, not a mandate — `verifyMandateForStep` refuses it alone (`not-a-mandate`), and
+nothing acts on it directly. One ceremony signs the set: a demo persona or KMS custodian signs each digest; a
+passkey approves every digest of one delegator in one batch (`approveGrantHashes`, the approved-hash sentinel) —
+her treasury is a second delegator and a second prompt, never a hidden one.
+
+**Where it lives.** The Home's `/oidc/grant` verifies every wire on its own (ERC-1271 + window against ITS
+delegator, delegate = the registered act key, digest = `ref`) and `/token` returns `delegations[]` beside the ask
+wire; the Worker seals the set in the person's row (`act_enc`) like the ask wire, opens it only for a bearer whose
+scope includes `act`, and never puts it on a bearer or in a log. Her Home lists the act rows APART from the ask
+line under Connected → Assistants (`AppGrantsPanel`), one wire each, with "Revoke this act" per wire and "Revoke
+everything" for the set; rotation reviews each act wire as its own line (spec 410 §1).
+
+**The act.** On `ask`, the Worker still enters under ask-as-me. When the run parks `authority_required` and the
+client holds her act grant, the Worker finds the standing wire whose capability and principal match the parked
+need (`standingFor`), DERIVES the mandate the run asked for from it — a child bound to this run's intent, window
+clamped into the wire's, subset-checked by the capability's own handler (for a payment: amount ≤ cap, payee and
+asset equal), signed with the ACT key (`deriveFromStanding`) — and resumes THE SAME run presenting `[child,
+standing]` with `via: { client, template: 'act-as-me' }`. Her agent verifies the chain as it verifies a mandate she
+signed at her Home — every link's signature, revocation on chain, child ⊆ parent, intent binding — and the
+harness's second-party obligation is discharged by the standing parent SHE signed (`approval:standing:<ref>`). The
+receipt and the run's door name the client and the template. No covering wire (the cap exceeded, another payee,
+an act she did not check, a revoked wire): the reply stays `authority_required`, `grant_link` names her Home, and
+she signs as before.
+
+### 11.1 Who may request `act`
+
+Only a registration the OPERATOR allowed: one that presented `ACT_REGISTRATION_SECRET` (`x-act-registration`) at
+`/oauth/register`, or a client id in `ACT_CLIENT_IDS`. The flag lives on the client row and nowhere else. Claude's
+dynamic registration cannot request it (`invalid_scope`); the `home-mcp` client's allowed templates stay
+`ask-as-me` only. A stolen ASK key still cannot pay: the act wires name the ACT key.
+
+### 11.2 Boundaries
+
+- The Worker's act key is a DELEGATE, never the person's identity. The chain is hers → the key → her agent.
+- One capability selector per wire. Never `A2A_ANY_SKILL`. A payment wire is per payee.
+- She revokes: each wire on its own on chain (its delegator's `revokeDelegationByOwner`), or the set.
+- Not Meta's connector API, not a session, not a bearer with scopes: field-level authority is never encoded in a
+  scope (ADR-0041); `act` only says which template the Home is asked for.
+
+### 11.3 Done when (`verify-home-mcp-act`)
+
+The same payment four ways: within the cap completes with no second signature and the receipt names the client
+and act-as-me; over the cap parks; after she revokes the payment wire the next payment is refused; an ask-as-me
+client still parks. Twin: a plain registration asking for scope `act` is refused; the record Claude reads carries
+neither the act wire nor a signature.
+
+## 12. What this buys that option 1 cannot (the differentiation, stated so it can be checked)
 
 | | AP Gateway (387) | Home MCP (this) |
 | --- | --- | --- |

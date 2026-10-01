@@ -282,6 +282,17 @@
       "timeoutSec": 300
     },
     {
+      "id": "verify-home-mcp-act",
+      "script": "scripts/verify-home-mcp-act.mts",
+      "spec": "397 §11",
+      "proves": "the same payment four ways: an act client holding her standing payment wire (payee + cap) pays within the cap with no second signature and the reply names the client and act-as-me; over the cap parks and grant_link names her Home; after she revokes the wire on chain from her treasury the next payment is refused and the wire leaves Connected assistants; an ask-as-me client still parks",
+      "twin": "a plain (Claude-style) registration asking for scope act is refused invalid_scope; the record Claude reads carries neither the act wire nor a signature",
+      "required": false,
+      "paced": false,
+      "timeoutSec": 300,
+      "needs": "HOME_MCP_ACT_REGISTRATION_SECRET (skips without it)"
+    },
+    {
       "id": "verify-home-mcp-revoke",
       "script": "scripts/verify-home-mcp-revoke.mts",
       "spec": "397 W4",

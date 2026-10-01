@@ -24,7 +24,8 @@
 // what "sign in as Nathan" means; keep real accounts out of the registry.
 import { mintAgentSession, mintIdToken } from '@agenticprimitives/connect';
 import { toCanonicalAgentId } from '@agenticprimitives/identity-directory-adapters';
-import { hashDelegation } from '@agenticprimitives/delegation';
+import { hashDelegation, type StandingWireV1 } from '@agenticprimitives/delegation';
+import { buildActAsMeSet, signActAsMeSet, PAYMENT_CAPABILITY, type ActChoice } from '../../src/lib/act-as-me';
 import type { Address, CredentialPrincipal, Hex } from '@agenticprimitives/types';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getServer, resolveOrigin, type FnContext } from '../_lib/server-broker';
@@ -89,7 +90,7 @@ export const onRequestPut = async ({ request, env }: FnContext): Promise<Respons
 };
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
-  const body = (await request.json().catch(() => null)) as { handle?: string; sa?: string; as?: string; client_id?: string; delegation_template?: string } | null;
+  const body = (await request.json().catch(() => null)) as { handle?: string; sa?: string; as?: string; client_id?: string; delegation_template?: string; /** Spec 397 §11 — the act set a persona pre-authorizes (the live gate). */ act?: unknown } | null;
   const clientId = (body?.client_id ?? '').trim();
   const client = clientId ? getClient(clientId) : null;
   if (!client) return json({ error: 'a registered client_id is required' }, 400);
@@ -132,17 +133,36 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const template = (body?.delegation_template ?? '').trim();
   if (template && !clientAllowsTemplate(client, template)) return json({ error: `delegation_template "${template}" not allowed for ${clientId}` }, 400);
   const askDelegate = (client.ask_delegate ?? client.delegate) as Address; // spec 397: the app's asking key, when it has one
-  const delegation = template === 'ask-as-me'
+  const isAsk = template === 'ask-as-me' || template === 'act-as-me';
+  const delegation = isAsk
     ? await issueAskAsMeDelegation(sa, askDelegate, signHash)
     : await issueSiteDelegation(sa, client.delegate as Address, signHash, SITE_DELEGATION_TTL);
   const digest = hashDelegation(delegation, CHAIN_ID, CONTRACTS.delegationManager);
+  // Spec 397 §11 — the ACT SET for a demo persona: `act` names the capabilities (and a payment's treasury, payee and
+  // cap); the persona's custodian key signs each standing wire — the same key custodies the persona's treasury, so a
+  // payment wire's ERC-1271 check at her agent passes for the same reason a treasury mandate's does. The live gate
+  // is the only caller; a browser goes through ActAsMeConsent.
+  let actSet: StandingWireV1[] | undefined;
+  if (template === 'act-as-me') {
+    const act = body?.act as { capabilities?: unknown; payment?: { treasury?: string; payee?: string; asset?: string; maxAmount?: string } } | undefined;
+    const caps = Array.isArray(act?.capabilities) ? act!.capabilities.filter((c): c is string => typeof c === 'string' && !!c.trim()) : [];
+    if (caps.length === 0) return json({ error: 'act-as-me needs act.capabilities (one wire per capability)' }, 400);
+    const pay = act?.payment;
+    const choices: ActChoice[] = caps.map((c) => (c === PAYMENT_CAPABILITY
+      ? { capability: c, payment: { treasury: String(pay?.treasury ?? '') as Address, payee: String(pay?.payee ?? '') as Address, asset: String(pay?.asset ?? CONTRACTS.mockUsdc) as Address, maxAmount: BigInt(String(pay?.maxAmount ?? '0')) } }
+      : { capability: c }));
+    try {
+      const set = buildActAsMeSet(sa, client.delegate as Address, choices);
+      actSet = await signActAsMeSet(set, { mode: 'each', sign: (_delegator, d) => signHash(d) });
+    } catch (e) { return json({ error: e instanceof Error ? e.message : 'the act set could not be built' }, 400); }
+  }
   // Spec 397 W4 — a person-level app wire (ask-as-me) is listed under Connected assistants like a browser-made one,
   // so the demo persona can see and REVOKE what their assistant holds. A rebuildable pointer; the chain is the record.
-  if (template === 'ask-as-me') {
+  if (isAsk) {
     const key = `app-grants:${sa.toLowerCase()}`;
     const rows = JSON.parse((await env.AUTH_CODES.get(key)) ?? '[]') as Array<{ clientId: string }>;
     const next = rows.filter((r) => r.clientId !== clientId);
-    next.unshift({ clientId, template, delegate: askDelegate, delegation: toWire(delegation), issuedAt: Date.now() } as never);
+    next.unshift({ clientId, template, delegate: template === 'act-as-me' ? client.delegate : askDelegate, delegation: toWire(delegation), issuedAt: Date.now(), ...(actSet ? { wires: actSet } : {}) } as never);
     await env.AUTH_CODES.put(key, JSON.stringify(next.slice(0, 50)));
   }
 
@@ -195,6 +215,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     id_token: idToken,
     expires_in: ID_TOKEN_TTL,
     delegation: toWire(delegation),
+    ...(actSet ? { delegations: actSet } : {}),
     homeSession,
     homeSessionExpiresIn: HOME_SESSION_TTL,
   });

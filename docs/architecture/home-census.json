@@ -1100,7 +1100,7 @@
         "H29",
         "H30"
       ],
-      "title": "Home MCP — Claude.ai as a client of the person: ask-as-me delegation, discovery and engagement through her agent, acts park for her signature",
+      "title": "Home MCP — Claude.ai as a client of the person: ask-as-me delegation, discovery and engagement through her agent, acts park for her signature; act-as-me (397 §11): standing wires she decided once, one per capability, derived into the parked run's mandate by the Worker's act key, revocable one by one",
       "priority": "P1",
       "status": "shipped",
       "specs": [
@@ -1112,13 +1112,17 @@
       ],
       "tests": [
         "apps/home-mcp/test/oauth.test.ts",
-        "apps/home-mcp/test/stream.test.ts"
+        "apps/home-mcp/test/stream.test.ts",
+        "apps/home-mcp/test/act.test.ts",
+        "apps/demo-sso-next/src/lib/act-as-me.test.ts",
+        "packages/delegation/test/unit/standing.test.ts"
       ],
       "gates": [
         "verify-home-mcp",
         "verify-home-mcp-browser-path",
         "verify-home-mcp-stream",
-        "verify-home-mcp-routed"
+        "verify-home-mcp-routed",
+        "verify-home-mcp-act"
       ]
     },
     {

@@ -24,6 +24,7 @@ import { CHAIN_ID, CONTRACTS } from '../lib/chain';
 import { loadPasskey, storePasskey, clearPasskey, type DemoPasskey } from '../lib/passkey';
 import { registerPasskeyCredentialRef, rotateCredential, rotationAvailability, readCustodyMode, type SignHash } from '../connect-client';
 import type { DelegationWire } from '../lib/delegation';
+import { actWireWords } from '../lib/act-as-me';
 import { auditGrantsThroughHarness, type GrantRow } from './grants-harness';
 import { ensureCsrfToken, csrfHeaders } from '../csrf';
 import { readPersonRecord } from '../profile-store';
@@ -41,6 +42,8 @@ export interface ReviewedWire {
   wire?: DelegationWire;
   /** The `app-grants` client the wire belongs to, when it is one. */
   clientId?: string;
+  /** Spec 397 §11 — an ACT wire of an app-grants row: its ref, so the row's wire (not the ask line) is re-pointed or struck. */
+  wireRef?: Hex;
   /** Spec 410 §1.2 — a key-signed wire the AGENT holds in one of HER vault records (`contact:<sa>`): read from that
    *  record so it can be re-issued here, and written back to it once the batch lands. */
   recordType?: string;
@@ -72,7 +75,7 @@ export async function reviewedList(input: { person: Address; session: { token: s
   }
   await ensureCsrfToken();
   const res = await fetch('/connect/app-grants', { headers: { authorization: `Bearer ${input.session.token}`, ...csrfHeaders() }, credentials: 'include' });
-  const out = (await res.json().catch(() => ({}))) as { ok?: boolean; grants?: Array<{ clientId: string; appName?: string; template: string; delegate: string; delegation: DelegationWire; validUntil?: number | null }> };
+  const out = (await res.json().catch(() => ({}))) as { ok?: boolean; grants?: Array<{ clientId: string; appName?: string; template: string; delegate: string; delegation: DelegationWire; validUntil?: number | null; wires?: Array<{ capability: string; ref: Hex; wire: DelegationWire; requirement: { limits?: Record<string, unknown> }; validUntil?: number | null }> }> };
   if (!res.ok || !out.ok) warnings.push('the apps you authorized with your own wire could not be listed — those wires will need re-authorizing at the app');
   for (const row of out.grants ?? []) {
     if (row.validUntil && row.validUntil < Date.now()) continue;
@@ -80,6 +83,12 @@ export async function reviewedList(input: { person: Address; session: { token: s
     const k = digest.toLowerCase();
     const prior = byDigest.get(k);
     byDigest.set(k, { ...(prior ?? {}), digest, kind: 'app', holder: row.delegate.toLowerCase(), holderName: row.appName ?? row.clientId, what: `${row.template} — asks your agent as you`, signed: wireSigning(row.delegation), wire: row.delegation, clientId: row.clientId, source: 'app-grants' });
+    // Spec 397 §11 — each ACT wire of the set is its own line: a person's wire or her treasury's, reviewed like any other.
+    for (const w of row.wires ?? []) {
+      if (w.validUntil && w.validUntil < Date.now()) continue;
+      const wk = w.ref.toLowerCase();
+      byDigest.set(wk, { ...(byDigest.get(wk) ?? {}), digest: w.ref, kind: 'app', holder: row.delegate.toLowerCase(), holderName: row.appName ?? row.clientId, what: `act-as-me — ${actWireWords(w)}`, signed: wireSigning(w.wire), wire: w.wire, clientId: row.clientId, wireRef: w.ref, source: 'app-grants' });
+    }
   }
   return { ok: true, wires: [...byDigest.values()], warnings };
 }
@@ -130,7 +139,7 @@ export async function rotateThisDevicePasskey(input: {
   const warnings: string[] = [];
   const reapprove: Hex[] = [];
   const lineages: DelegationLineageV1[] = [];
-  const replacements: Array<{ clientId: string; wire: LineageWire }> = [];
+  const replacements: Array<{ clientId: string; wire: LineageWire; ref?: Hex; nextRef?: Hex }> = [];
   const recordReplacements: Array<{ recordType: string; wire: LineageWire; digest: Hex }> = [];
   for (const w of kept) {
     if (w.signed === 'key') {
@@ -138,7 +147,7 @@ export async function rotateThisDevicePasskey(input: {
         const r = reissueForRotation(toLineageWire(w.wire), CHAIN_ID, CONTRACTS.delegationManager);
         reapprove.push(r.digest);
         lineages.push(r.lineage);
-        replacements.push({ clientId: w.clientId, wire: r.wire });
+        replacements.push({ clientId: w.clientId, wire: r.wire, ...(w.wireRef ? { ref: w.wireRef, nextRef: r.digest } : {}) });
       } else if (w.wire && w.recordType) {
         // A contact's wire from her own record: re-issued the same way, written back to the record after the batch.
         const r = reissueForRotation(toLineageWire(w.wire), CHAIN_ID, CONTRACTS.delegationManager);
@@ -188,7 +197,7 @@ export async function rotateThisDevicePasskey(input: {
     } catch (e) { warnings.push(`the re-issued wire for ${rep.recordType} could not be written back: ${e instanceof Error ? e.message : String(e)}`); }
   }
   for (const rep of replacements) {
-    const r = await fetch('/connect/app-grants', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', authorization: `Bearer ${input.session.token}`, ...csrfHeaders() }, body: JSON.stringify({ clientId: rep.clientId, delegation: rep.wire }) });
+    const r = await fetch('/connect/app-grants', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', authorization: `Bearer ${input.session.token}`, ...csrfHeaders() }, body: JSON.stringify({ clientId: rep.clientId, delegation: rep.wire, ...(rep.ref ? { ref: rep.ref, nextRef: rep.nextRef } : {}) }) });
     if (!r.ok) warnings.push(`the app-grant row for ${rep.clientId} could not be re-pointed at the re-issued wire`);
   }
   // Struck wires: the ones the Home held were revoked in the batch above; the ones only the agent holds are dead
@@ -198,7 +207,7 @@ export async function rotateThisDevicePasskey(input: {
     if (!w.wire) warnings.push(`${w.holderName ?? w.holder} (${w.kind}): struck — void under the new epoch; revoke it from your agent's grants screen so the chain says so too`);
   }
   for (const w of struck.filter((x) => x.clientId)) {
-    const r = await fetch('/connect/app-grants', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', authorization: `Bearer ${input.session.token}`, ...csrfHeaders() }, body: JSON.stringify({ clientId: w.clientId, revoked: true }) }).catch(() => null);
+    const r = await fetch('/connect/app-grants', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', authorization: `Bearer ${input.session.token}`, ...csrfHeaders() }, body: JSON.stringify({ clientId: w.clientId, revoked: true, ...(w.wireRef ? { ref: w.wireRef } : {}) }) }).catch(() => null);
     if (!r?.ok) warnings.push(`the app-grant row for ${w.clientId} was struck on chain but could not be forgotten here`);
   }
   if (input.add) {

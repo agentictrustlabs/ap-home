@@ -18,12 +18,15 @@ import { WorkingBar } from './WorkingBar';
 // Recognition is best-effort: a missing/stale cookie (no session, undeployed SA, fetch fail) calls
 // `onUnrecognized()` and the caller falls back to the credential-first entry (ADR-0013 — one explicit
 // fallback, never a silent second mechanism).
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { givePermission, createOrganization, personGrantForOrgCreate, collectDueSubscriptions, authorizeContentSigningForOwner,
   authorizeServiceAgentWire, activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded,
   isKmsVia, resolveVia, publishSocialConnectionKindIfNeeded, signHashFor, type Via, type Auth } from '../../home/onboarding';
 import { issueAskAsMeDelegation, issueSiteDelegation, issueWorkspaceMembershipAccessDelegation, toWire } from '../../lib/delegation';
+import { buildActAsMeSet, signActAsMeSet, type ActChoice } from '../../lib/act-as-me';
+import { ActAsMeConsent } from './ActAsMeConsent';
+import { approveGrantHashes, signsWithoutPrompt } from '../../connect-client';
 import { issueAppReadGrantIfDeclared } from '../../home/app-read-grant';
 import { MCP_SERVER_ID } from '../../lib/inbox-delivery';
 import { clearStandingGrant } from '../../lib/grant-cache';
@@ -90,6 +93,9 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
   const [home, setHome] = useState<Home | null>(null);
   const [viaLower, setViaLower] = useState<Via>('passkey');
   const [token, setToken] = useState('');
+  // Spec 397 §11 — the act set the person checked (ActAsMeConsent); read at authorize time, never re-rendered into.
+  const actChoices = useRef<{ choices: ActChoice[]; problem: string | null }>({ choices: [], problem: null });
+  const onActChoices = useCallback((choices: ActChoice[], problem: string | null) => { actChoices.current = { choices, problem }; }, []);
   const [error, setError] = useState('');
   // Chooser-mode org-create (spec 246 select-existing): the enroll carries NO org_base/existing_org —
   // the member picks a stewarded org (grant-only) or names a new one HERE before consenting.
@@ -266,6 +272,35 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       // a question to their agent as them, and nothing more (every act still parks for their signature). Minted
       // and signed here by the person's own credential, bound to the server-minted grant like a site login; the
       // relying app receives it on the token exchange and holds it, revocable on chain, in the person's name.
+      // Spec 397 §11 — `act-as-me`: the ask wire as above PLUS the act set she checked — one standing wire per act,
+      // from her (her treasury for a payment) to the client's ACT key, 30 days, revocable one by one. One ceremony:
+      // a prompt-free custodian signs each digest; a passkey approves each delegator's digests in one batch (a
+      // payment wire is her treasury's — a second prompt, never a hidden one). Nothing here is a mandate.
+      if (enroll.template === 'act-as-me') {
+        const { choices, problem } = actChoices.current;
+        if (problem) return fail(`Before you authorize: ${problem}.`);
+        if (choices.length === 0) return fail('Check at least one act to pre-authorize, or decline.');
+        const askDelegate = relyingApp?.ask_delegate;
+        if (!askDelegate) return fail('This client has no ask key registered — it cannot hold an act set.');
+        const n = choices.length;
+        setGrantProgress({ step: 1, total: 3, label: 'Authorizing this assistant to ask your agent as you…' });
+        const { grant_id: actGrantId, delegate: actDelegate } = await beginEnrollmentGrant(enroll, home.name);
+        const auth: Auth | undefined = token ? { token } : undefined;
+        const signPerson = await signHashFor(viaLower as Via, home.address, auth);
+        const askWire = await issueAskAsMeDelegation(home.address, askDelegate, signPerson);
+        setGrantProgress({ step: 2, total: 3, label: `Signing ${n} standing wire${n === 1 ? '' : 's'} for the acts you checked…` });
+        const set = buildActAsMeSet(home.address, actDelegate, choices);
+        const promptFree = await signsWithoutPrompt(viaLower, token);
+        const signed = await signActAsMeSet(set, promptFree
+          ? { mode: 'each', sign: async (delegator, digest) => (await signHashFor(viaLower as Via, delegator, auth))(digest) }
+          : { mode: 'batch', approve: async (delegator, digests) => { const r = await approveGrantHashes(delegator, await signHashFor(viaLower as Via, delegator, auth), digests); if (!r.ok) throw new Error(r.error); } });
+        setGrantProgress({ step: 3, total: 3, label: 'Finishing…' });
+        const actCode = await submitEnrollGrant(actGrantId, toWire(askWire), undefined, undefined, undefined, undefined, undefined, undefined, undefined, signed);
+        setSsoCookie(token, viaLower);
+        setPhase('connected');
+        setTimeout(() => deliverEnrollCode(enroll, api.popupMode, actCode), 600);
+        return;
+      }
       if (enroll.template === 'ask-as-me') {
         setGrantProgress({ step: 1, total: 2, label: 'Authorizing this assistant to ask your agent as you…' });
         const { grant_id: askGrantId, delegate: askDelegate } = await beginEnrollmentGrant(enroll, home.name);
@@ -864,6 +899,9 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           <p className="onboarding-sub">
             Then it is listed in {appName}’s mission registry: you sign the covenant as yourself, and the organization signs its own entry — one year, renewable, revocable.
           </p>
+        )}
+        {enroll.template === 'act-as-me' && home?.address && token && (
+          <ActAsMeConsent token={token} agent={home.address} onChange={onActChoices} />
         )}
         <ConsentSheet
           title={fmt(c.authorizeStepTitle, { app: appName })}

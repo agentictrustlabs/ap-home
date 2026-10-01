@@ -24,7 +24,8 @@ async function personFrom(request: Request, env: FnContext['env']): Promise<stri
   return (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() || null;
 }
 
-interface Row { clientId: string; template: string; delegate: string; delegation: { caveats?: Array<{ enforcer: string; terms: string }> }; issuedAt: number }
+interface ActWire { v: 1; template: string; capability: string; wire: { delegator?: string; delegate?: string; caveats?: Array<{ enforcer: string; terms: string }> }; ref: string; requirement: Record<string, unknown> }
+interface Row { clientId: string; template: string; delegate: string; delegation: { caveats?: Array<{ enforcer: string; terms: string }> }; issuedAt: number; /** Spec 397 §11 — the act set, one wire per capability. */ wires?: ActWire[] }
 
 /** The timestamp caveat's validUntil, read from the wire's own terms (uint128 validAfter ‖ uint128 validUntil). */
 function validUntilOf(row: Row, timestampEnforcer: string | undefined): number | null {
@@ -39,16 +40,35 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   const person = await personFrom(request, env);
   if (!person) return json({ error: 'session required' }, 401);
   const rows = JSON.parse((await env.AUTH_CODES.get(`app-grants:${person}`)) ?? '[]') as Row[];
-  return json({ ok: true, grants: rows.map((r) => ({ ...r, appName: getClient(r.clientId)?.name ?? r.clientId, validUntil: validUntilOf(r, CONTRACTS.timestampEnforcer) })) });
+  return json({ ok: true, grants: rows.map((r) => ({ ...r, appName: getClient(r.clientId)?.name ?? r.clientId, validUntil: validUntilOf(r, CONTRACTS.timestampEnforcer), ...(r.wires ? { wires: r.wires.map((w) => ({ ...w, validUntil: validUntilOf({ ...r, delegation: w.wire }, CONTRACTS.timestampEnforcer) })) } : {}) })) });
 };
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
   const person = await personFrom(request, env);
   if (!person) return json({ error: 'session required' }, 401);
-  const body = (await request.json().catch(() => null)) as { clientId?: string; revoked?: boolean; delegation?: Row['delegation'] & { delegator?: string; delegate?: string; signature?: string } } | null;
+  const body = (await request.json().catch(() => null)) as { clientId?: string; revoked?: boolean; ref?: string; delegation?: Row['delegation'] & { delegator?: string; delegate?: string; signature?: string } } | null;
   if (!body?.clientId) return json({ error: 'clientId is required' }, 400);
   const key = `app-grants:${person}`;
   const rows = JSON.parse((await env.AUTH_CODES.get(key)) ?? '[]') as Row[];
+  // Spec 397 §11 — ONE act wire, by its ref: forgotten after she revoked it on chain, or re-pointed at its re-issued
+  // twin after a rotation (same delegator and delegate; the ref moves with the signature scheme, the capability stays).
+  if (typeof body.ref === 'string' && body.ref) {
+    const row = rows.find((r) => r.clientId === body.clientId);
+    const w = row?.wires?.find((x) => x.ref.toLowerCase() === body.ref!.toLowerCase());
+    if (!row || !w) return json({ error: 'no act wire with that ref' }, 404);
+    if (body.revoked === true) {
+      const wires = row.wires!.filter((x) => x.ref.toLowerCase() !== body.ref!.toLowerCase());
+      await env.AUTH_CODES.put(key, JSON.stringify(rows.map((r) => (r.clientId === body.clientId ? { ...r, wires } : r))));
+      return json({ ok: true, remaining: wires.length });
+    }
+    const rep = body.delegation as (Row['delegation'] & { delegator?: string; delegate?: string }) | undefined;
+    const nextRef = typeof (body as { nextRef?: unknown }).nextRef === 'string' ? (body as { nextRef: string }).nextRef : '';
+    if (!rep || !nextRef) return json({ error: 'revoked: true, or a replacement delegation with its nextRef, is required' }, 400);
+    if (String(rep.delegator ?? '').toLowerCase() !== String(w.wire.delegator ?? '').toLowerCase() || String(rep.delegate ?? '').toLowerCase() !== String(w.wire.delegate ?? '').toLowerCase()) return json({ error: 'the replacement must be the same wire re-issued (same delegator and delegate)' }, 400);
+    const wires = row.wires!.map((x) => (x.ref.toLowerCase() === body.ref!.toLowerCase() ? { ...x, wire: rep, ref: nextRef } : x));
+    await env.AUTH_CODES.put(key, JSON.stringify(rows.map((r) => (r.clientId === body.clientId ? { ...r, wires } : r))));
+    return json({ ok: true, replaced: true });
+  }
   if (body.revoked === true) {
     await env.AUTH_CODES.put(key, JSON.stringify(rows.filter((r) => r.clientId !== body.clientId)));
     return json({ ok: true });
