@@ -31,7 +31,7 @@ export interface NavItem {
 
 /** The sections that open a pane. Both are lists too long to hang under a heading in a 240px column,
  *  and both are somewhere you go to work on a set of things rather than a single page. */
-export type PaneId = 'stewardship' | 'settings' | 'security';
+export type PaneId = 'stewardship' | 'settings' | 'security' | 'connected';
 export interface NavGroup {
   id?: string;
   heading?: string;
@@ -276,7 +276,32 @@ export function paneGroups(
   orgRelationship: 'steward' | 'member' | 'self' = 'steward',
 ): SettingsGroup[] {
   if (pane === 'security') return securityPane();
+  if (pane === 'connected') return connectedPane();
   return pane === 'stewardship' ? stewardshipPane(active) : buildSettingsPane(active, orgRelationship);
+}
+
+/**
+ * spec 422 §8 / owner (2026-10-01): CONNECTED is a pane too — "a non-technical person needs to be able to read and
+ * understand this". One question per page, in words: which of my accounts can my agent use · which tools · which
+ * apps did I sign into · which assistants may ask my agent as me · who may read my records. About the signed-in
+ * person, like Security, so it takes no scope. How the agent is FOUND (its manifest, the directory) is not a
+ * connection and moved to Settings → Discovery.
+ */
+export function connectedPane(): SettingsGroup[] {
+  return [
+    { heading: 'Connected', items: [
+      { id: 'con-overview', label: 'Overview', href: '/apps', Icon: LinkIcon, status: 'live' },
+    ] },
+    { heading: 'Your agent can use', items: [
+      { id: 'con-accounts', label: 'Your accounts', href: '/apps/accounts', Icon: UserIcon, status: 'live' },
+      { id: 'con-tools', label: 'Tools', href: '/apps/tools', Icon: CodeIcon, status: 'live' },
+    ] },
+    { heading: 'Who may act as you', items: [
+      { id: 'con-signed-in', label: 'Apps you signed into', href: '/apps/signed-in', Icon: GlobeIcon, status: 'live' },
+      { id: 'con-assistants', label: 'Assistants', href: '/apps/assistants', Icon: BotIcon, status: 'live' },
+      { id: 'con-readers', label: 'Who can read your records', href: '/apps/readers', Icon: DatabaseIcon, status: 'live' },
+    ] },
+  ];
 }
 
 /**
@@ -413,7 +438,8 @@ export function buildUserMenu(wl: WhiteLabelConfig): NavItem[] {
   // section's pages in the second column. The row's href is the pane's first page.
   if (wl.services.devices) items.push({ id: 'security', label: 'Security', href: '/security', Icon: ShieldIcon, status: 'live', opensPane: 'security' });
   if (wl.services.connectedApps) {
-    items.push({ id: 'apps', label: 'Connected', href: '/apps', Icon: LinkIcon, status: 'live' });
+    // spec 422 §8 — Connected opens a pane: one page per plain question (accounts · tools · apps · assistants · readers).
+    items.push({ id: 'apps', label: 'Connected', href: '/apps', Icon: LinkIcon, status: 'live', opensPane: 'connected' });
     // The membership organizations an app supports for invite / register. NOT `.workspace` agents, and
     // not something you steward — it sits with the apps it belongs to, under the name it actually means.
     items.push({ id: 'workspaces', label: 'App workspaces', href: '/workspaces', Icon: GlobeIcon, status: 'live' });

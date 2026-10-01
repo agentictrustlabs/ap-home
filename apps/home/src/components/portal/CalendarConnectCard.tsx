@@ -34,7 +34,7 @@ export function connectorClient(token: string, name: ConnectorName) {
 /** Kept for the calendar's first callers. */
 export const calendarConnector = (token: string) => connectorClient(token, 'calendar');
 
-export function ConnectorCard({ name, returnTo = '/apps' }: { name: ConnectorName; returnTo?: string }) {
+export function ConnectorCard({ name, returnTo = '/apps/accounts' }: { name: ConnectorName; returnTo?: string }) {
   const { session } = useSession();
   const copy = COPY[name];
   const [status, setStatus] = useState<Status | null>(null);

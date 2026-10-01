@@ -53,6 +53,14 @@ export function resolveNavigationTarget(target: string, realm: InteractionRealm)
     case 'connected':
       // Spec 404 — the person's connectors live on her Connected screen.
       return realm.kind === 'person' || !realm.kind ? { href: '/apps', label: 'Open connected' } : null;
+    case 'connected-accounts':
+      return realm.kind === 'person' || !realm.kind ? { href: '/apps/accounts', label: 'Open your accounts' } : null;
+    case 'connected-tools':
+      return realm.kind === 'person' || !realm.kind ? { href: '/apps/tools', label: 'Open tools' } : null;
+    case 'connected-assistants':
+      return realm.kind === 'person' || !realm.kind ? { href: '/apps/assistants', label: 'Open assistants' } : null;
+    case 'connected-readers':
+      return realm.kind === 'person' || !realm.kind ? { href: '/apps/readers', label: 'Open who can read your records' } : null;
     case 'security':
       // Spec 422 — the person's Security section: about the signed-in person, never an organization.
       return realm.kind === 'person' || !realm.kind ? { href: '/security', label: 'Open security' } : null;

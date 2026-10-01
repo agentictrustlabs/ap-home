@@ -77,15 +77,15 @@ export function PortalBottomNav({
               ))}
             </div>
           ))}
-          {(['stewardship', 'settings', 'security'] as const).map((paneId) => {
+          {(['stewardship', 'settings', 'security', 'connected'] as const).map((paneId) => {
             const pane = panes?.[paneId] ?? [];
             if (!pane.length) return null;
             return (
               <div key={paneId}>
                 <div className="nav-group region-start">
                   <div className="nav-group-heading">
-                    {paneId === 'stewardship' ? 'Stewardship' : paneId === 'security' ? 'Security' : 'Settings'}
-                    {paneId !== 'security' && workspaceName ? ` · ${workspaceName}` : ''}
+                    {paneId === 'stewardship' ? 'Stewardship' : paneId === 'security' ? 'Security' : paneId === 'connected' ? 'Connected' : 'Settings'}
+                    {paneId !== 'security' && paneId !== 'connected' && workspaceName ? ` · ${workspaceName}` : ''}
                   </div>
                 </div>
                 {pane.map((g) => (

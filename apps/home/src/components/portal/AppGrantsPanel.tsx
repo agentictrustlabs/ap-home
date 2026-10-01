@@ -15,7 +15,7 @@ const WHAT: Record<string, { can: string; cannot: string }> = {
   'ask-as-me': { can: 'Put a question to your agent as you — your records, your organizations, your playbook.', cannot: 'Sign anything: every act still waits for your signature at this Home.' },
 };
 
-export function AppGrantsPanel() {
+export function AppGrantsPanel({ showEmpty = false }: { showEmpty?: boolean } = {}) {
   const { session, agentAddress } = useSession();
   const [grants, setGrants] = useState<AppGrant[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -36,7 +36,16 @@ export function AppGrantsPanel() {
       </div>
     );
   }
-  if (grants === null || grants.length === 0) return null;
+  if (grants === null) return null;
+  if (grants.length === 0) {
+    if (!showEmpty) return null;
+    return (
+      <div className="ui-empty" data-testid="app-grants-empty">
+        <span className="ui-empty-title">No assistant is connected</span>
+        <span>Connect one from the assistant's side (Claude: add this Home as a connector) — it appears here with what it may do, and a button that stops it.</span>
+      </div>
+    );
+  }
   const revoke = async (g: AppGrant) => {
     if (!window.confirm(`Revoke ${g.appName}? It takes effect immediately on chain — its next ask is refused at your agent.`)) return;
     setBusy(g.clientId); setErr(null);
