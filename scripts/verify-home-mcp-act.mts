@@ -30,7 +30,8 @@ const nameOf = async (n: string): Promise<Address> => { const b = await j(await 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const PAYEE = await nameOf(fx.treasuries.payee);
-const TREASURY = await nameOf(fx.treasuries.own);
+/** The treasury HER AGENT pays from — read from the parked need of the ask-as-me ask below (way 4), never assumed. */
+let TREASURY = '' as Address;
 const CB = 'https://claude.ai/api/mcp/auth_callback';
 
 /** Connect alice through a registration: `act` ⇒ the act set rides; else ask-as-me. Returns a tool caller. */
@@ -58,16 +59,23 @@ const pay = (usdc: string, tag: string) => ({ message: `pay ${PAYEE} ${usdc} usd
   if (r.error !== 'invalid_scope') fail(`a registration without the operator's say may not get scope act: ${JSON.stringify(r).slice(0, 300)}`);
 }
 
-// ── the act client: alice pre-authorizes one payment wire (payee nathan.treasury, cap 2 USDC) ──
+// ── 4 (first, so the need is known): an ask-as-me client — the same payment parks, as it always did ──
+const askC = await connect('verify-home-mcp-act-ask', false);
+const nonce = Date.now().toString(36);
+const four = await askC.call('ask', pay('1', `ask-as-me ${nonce}`));
+console.log(`4 · ask-as-me client pays 1 USDC → ${four.out.kind} · pays from ${four.out.delegator}`);
+if (four.out.kind !== 'authority_required' || !/^0x[0-9a-f]{40}$/i.test(String(four.out.delegator))) fail(`an ask-as-me client must park and name the treasury: ${JSON.stringify(four.out).slice(0, 400)}`);
+TREASURY = String(four.out.delegator).toLowerCase() as Address;
+
+// ── the act client: alice pre-authorizes one payment wire (payee nathan.treasury, cap 2 USDC, from that treasury) ──
 const actC = await connect('verify-home-mcp-act', true);
 console.log(`act client ${actC.clientId} · scope "${actC.scope}" · alice ${actC.agent}`);
 if (!/\bact\b/.test(actC.scope)) fail(`the token should carry scope act: ${actC.scope}`);
-const nonce = Date.now().toString(36);
 
 // ── 1. within the cap: completes with no second signature ──
 const one = await actC.call('ask', pay('1', `act-as-me within cap ${nonce}`));
 const run1 = String(one.out.runRef ?? '');
-console.log(`1 · pay 1 USDC → ${one.out.kind}${one.out.error ? ` ${one.out.error}` : ''} · run ${run1} · acted_under ${JSON.stringify(one.out.acted_under ?? null)}`);
+console.log(`1 · pay 1 USDC → ${one.out.kind}${one.out.error ? ` ${one.out.error}` : ''} · run ${run1} · acted_under ${JSON.stringify(one.out.acted_under ?? null)}${one.out.act_note ? ` · ${String(one.out.act_note).slice(0, 160)}` : ''}`);
 if (one.out.kind !== 'done') fail(`within the cap must complete without her signature: ${JSON.stringify(one.out).slice(0, 500)}`);
 const au = one.out.acted_under as { template?: string; capability?: string; wire?: string } | undefined;
 if (au?.template !== 'act-as-me' || au.capability !== 'treasury.payment.execute' || !au.wire) fail(`the reply must say it acted under act-as-me: ${JSON.stringify(one.out).slice(0, 300)}`);
@@ -132,10 +140,4 @@ const after = await j(await fetch(`${HOME}/connect/app-grants`, { headers: auth 
 const rowAfter = ((after.grants ?? []) as Array<{ clientId: string; wires?: unknown[] }>).find((g) => g.clientId === 'home-mcp-act');
 if (rowAfter?.wires?.length) fail('the revoked wire is still listed under Connected assistants');
 
-// ── 4. an ask-as-me client: the same payment parks, as it always did ──
-const askC = await connect('verify-home-mcp-act-ask', false);
-const four = await askC.call('ask', pay('1', `ask-as-me ${nonce}`));
-console.log(`4 · ask-as-me client pays 1 USDC → ${four.out.kind}`);
-if (four.out.kind !== 'authority_required') fail(`an ask-as-me client must park: ${JSON.stringify(four.out).slice(0, 400)}`);
-
-console.log('\n✓ spec 397 §11: within the cap paid without a second signature; over the cap parked; after her revoke refused; ask-as-me still parks; a plain registration cannot request act');
+console.log(`1 · pay 1 USDC → ${one.out.kind}${one.out.error ? ` ${one.out.error}` : ''} · run ${run1} · acted_under ${JSON.stringify(one.out.acted_under ?? null)}${one.out.act_note ? ` · ${String(one.out.act_note).slice(0, 160)}` : ''}`);console.log('\n✓ spec 397 §11: within the cap paid without a second signature; over the cap parked; after her revoke refused; ask-as-me still parks; a plain registration cannot request act');
