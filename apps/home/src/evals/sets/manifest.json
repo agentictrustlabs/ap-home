@@ -1,0 +1,157 @@
+{
+ "bakedAt": "2026-10-01T17:41:45.529Z",
+ "sets": [
+  {
+   "id": "cil-commons-chain-panel-1",
+   "domain": "cil-commons",
+   "title": "CIL Commons — chain panel 1 (spec 418): requests whose right plan is a two-step chain, for measuring what a chain costs and delivers with answers on — six from held-out 7/8/9 (the chain cases) and six new",
+   "cases": 12,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "cil-commons-chain-panel-2",
+   "domain": "cil-commons",
+   "title": "CIL Commons — chain panel 2 (spec 418): chains asked producer-first ('work out X and then do Y'), chains asked outcome-first, and controls where only the first step is wanted — judging downstream extension",
+   "cases": 15,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "cil-commons-chain-panel-3",
+   "domain": "cil-commons",
+   "title": "CIL Commons — chain panel 3 (spec 418): judging the widened absence question — chains that ask for the input to be made as a step, chains that say it is missing, and single-step controls where the input is given, merely unmentioned, or the only thing asked for",
+   "cases": 14,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "cil-commons-chain-panel-4",
+   "domain": "cil-commons",
+   "title": "CIL Commons — chain panel 4 (spec 418 §11): judging plan choice — chains asked in either order, chains where the input is missing, and single-step controls (input given, unmentioned, or only the first step wanted)",
+   "cases": 14,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "cil-commons-fresh-heldout-10",
+   "domain": "cil-commons",
+   "title": "CIL Commons — fresh held-out 10 (spec 418): declines — requests about another organization's AI (grantee vs vendor) with and without the asker's context, requests missing a required input, and controls that must still decline or route",
+   "cases": 21,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "cil-commons-fresh-heldout-2",
+   "domain": "cil-commons",
+   "title": "CIL Commons — fresh held-out 2: the two attractors (8 adjacent out-of-scope + 4 in-scope asks each) + one in-scope control per other skill",
+   "cases": 34,
+   "fixtures": false,
+   "recommended": false
+  },
+  {
+   "id": "cil-commons-fresh-heldout-3",
+   "domain": "cil-commons",
+   "title": "CIL Commons — fresh held-out 3: HARD adjacent negatives for the two attractors (multi-reader writing that is not recent activity; one-audience reports; options-shaped low-stakes organizational picks) + 4 in-scope each",
+   "cases": 24,
+   "fixtures": false,
+   "recommended": false
+  },
+  {
+   "id": "cil-commons-fresh-heldout-4",
+   "domain": "cil-commons",
+   "title": "CIL Commons — fresh held-out 4: collisions and contradictions for the ontology's veto (spec 416 W1) — in-scope asks that happen to use a word from the skill's excluded vocabulary; out-of-scope asks that ARE the excluded thing; plain in-scope asks",
+   "cases": 32,
+   "fixtures": false,
+   "recommended": false
+  },
+  {
+   "id": "cil-commons-fresh-heldout-5",
+   "domain": "cil-commons",
+   "title": "CIL Commons — fresh held-out 5: when no ONE skill is right — ambiguous asks (ask the person which) and compound asks (two skills in sequence), with plain in-scope and out-of-scope controls (spec 416 W2 follow-up)",
+   "cases": 28,
+   "fixtures": false,
+   "recommended": false
+  },
+  {
+   "id": "cil-commons-fresh-heldout-6",
+   "domain": "cil-commons",
+   "title": "CIL Commons — fresh held-out 6: when WHO ASKS decides the skill (spec 416 §4h) — the same ambiguous request from two askers whose histories point to different skills; controls where the history must not win; the ambiguous requests with no history",
+   "cases": 19,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "cil-commons-fresh-heldout-7",
+   "domain": "cil-commons",
+   "title": "CIL Commons — fresh held-out 7: OUTCOMES, not skills (spec 417) — the plan that reaches what the person wants: a chain when an input is producible and not in hand, one step when the asker holds it or the request gives it, and the input named when nothing can make it",
+   "cases": 18,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "cil-commons-fresh-heldout-8",
+   "domain": "cil-commons",
+   "title": "CIL Commons — fresh held-out 8: the domain, covered (spec 418 D2) — every skill in its own vocabulary (the classes no earlier case reached), whose it is (our own vs a grantee's vs a vendor's), who it is for, chains with and without their input, offices as context, the new near-misses, and clarify",
+   "cases": 77,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "cil-commons-fresh-heldout-9",
+   "domain": "cil-commons",
+   "title": "CIL Commons — fresh held-out 9: when to chain and whose office asks (spec 418 D4) — enriching inputs said to be absent vs merely not mentioned vs supplied; required inputs missing; the same ambiguous request from each office; whose it is; controls",
+   "cases": 38,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "cil-commons-fresh-heldout",
+   "domain": "cil-commons",
+   "title": "CIL Commons — fresh held-out: 24 out-of-scope asks adjacent to each skill + 24 in-scope asks, written after the examples and checked against them",
+   "cases": 48,
+   "fixtures": false,
+   "recommended": true
+  },
+  {
+   "id": "cil-commons-long-answer-panel-1",
+   "domain": "cil-commons",
+   "title": "CIL Commons — long-answer panel 1 (spec 418): eight single-skill requests whose answers are long documents, for a side-by-side of the default answer model against a stronger one (kept small on purpose)",
+   "cases": 8,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "cil-commons-routing-stratum-1",
+   "domain": "cil-commons",
+   "title": "CIL Commons routing — stratum 1 (12 skills, pre-registered)",
+   "cases": 84,
+   "fixtures": false,
+   "recommended": false
+  },
+  {
+   "id": "cil-commons-routing-stratum-2",
+   "domain": "cil-commons",
+   "title": "CIL Commons routing — stratum 2 (external distractors)",
+   "cases": 29,
+   "fixtures": false,
+   "recommended": false
+  },
+  {
+   "id": "cil-commons-ol-fresh-heldout-4",
+   "domain": "cil-commons-ol",
+   "title": "CIL Commons — fresh held-out 4: collisions and contradictions for the ontology's veto (spec 416 W1) — in-scope asks that happen to use a word from the skill's excluded vocabulary; out-of-scope asks that ARE the excluded thing; plain in-scope asks",
+   "cases": 32,
+   "fixtures": false,
+   "recommended": false
+  },
+  {
+   "id": "cil-commons-ol-fresh-heldout-8",
+   "domain": "cil-commons-ol",
+   "title": "CIL Commons — fresh held-out 8: the domain, covered (spec 418 D2) — every skill in its own vocabulary (the classes no earlier case reached), whose it is (our own vs a grantee's vs a vendor's), who it is for, chains with and without their input, offices as context, the new near-misses, and clarify",
+   "cases": 77,
+   "fixtures": true,
+   "recommended": false
+  }
+ ]
+}
