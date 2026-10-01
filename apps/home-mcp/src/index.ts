@@ -145,6 +145,10 @@ app.get('/oauth/authorize', async (c) => {
   home.searchParams.set('code_challenge', await sha256b64(homeVerifier));
   home.searchParams.set('code_challenge_method', 'S256');
   home.searchParams.set('delegation_template', act ? ACT_TEMPLATE : 'ask-as-me');
+  // The HOST's registered name (Claude, Muse, …) as a DISPLAY hint for the consent — never an identity, never a
+  // claim about what it may do: the Home's client registry still decides the template and the delegate.
+  const hostName = String(parsed.client.client_name ?? '').replace(/[^\p{L}\p{N} .,'()&_-]/gu, '').trim().slice(0, 60);
+  if (hostName) home.searchParams.set('via_host', hostName);
   return c.redirect(home.toString(), 302);
 });
 

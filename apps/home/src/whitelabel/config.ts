@@ -136,7 +136,7 @@ const faithImpact: WhiteLabelConfig = {
     // ⇒ faithnet's, the estate Ring 0 deploys.
     {
       client_id: 'home-mcp',
-      name: 'Claude (Home MCP)',
+      name: 'Assistant via Home MCP',
       redirect_uris: [
         `${HOME_MCP_ORIGIN}/oauth/callback`,
         // The Worker's workers.dev host — the connector URL until 2026-09-21; a connection made under it still completes there.
@@ -154,7 +154,7 @@ const faithImpact: WhiteLabelConfig = {
     // ask rides the same ceremony. A stolen ask key still cannot pay.
     {
       client_id: 'home-mcp-act',
-      name: 'Claude (Home MCP, acts you pre-authorized)',
+      name: 'Assistant via Home MCP (acts you pre-authorized)',
       redirect_uris: [
         `${HOME_MCP_ORIGIN}/oauth/callback`,
         'https://home-mcp-faithnet.richardpedersen3.workers.dev/oauth/callback',

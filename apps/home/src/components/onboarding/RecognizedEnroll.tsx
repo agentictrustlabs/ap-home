@@ -108,7 +108,10 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
   /** The ordinary sign-in, as opposed to a named ceremony run on the way into one. */
   const plainSignIn = !enroll?.template || enroll.template === 'site-login';
   const appHost = enroll ? hostOf(enroll.redirectUri) : '';
-  const appName = displayAppName(relyingApp?.name, appHost);
+  // A Home MCP connects on behalf of a HOST (Claude, Muse, …): the consent names the host, and the registered client's
+  // name becomes the "through" line, so the person reads who is asking rather than which relay carries it.
+  const registeredName = displayAppName(relyingApp?.name, appHost);
+  const appName = enroll?.viaHost ? enroll.viaHost : registeredName;
   const appDomain = displayAppDomain(appHost);
   const signedInAs =
     home?.name?.trim() ||
@@ -907,7 +910,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           title={fmt(c.authorizeStepTitle, { app: appName })}
           signedInAs={signedInAs}
           appName={appName}
-          appDomain={appDomain}
+          appDomain={enroll.viaHost ? `through ${registeredName} · ${appDomain}` : appDomain}
           appLogo={relyingApp?.logo}
           template={tpl}
           authorizeLabel={fmt(c.authorizeStepCta, { app: appName })}
