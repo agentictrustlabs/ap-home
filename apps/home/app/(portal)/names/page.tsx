@@ -8,6 +8,7 @@ import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { getRegisteredNameMetadata, listRegisteredNames, type RegisteredName } from '../../../src/lib/name-directory';
 import { cardSty, btnSty, mono, mutedText, errorText, inputSty, badgeStyle, shortAddr, modalOverlaySty, type BadgeKind } from '../../../src/components/portal/theme';
 
+import { Loading } from '../../../src/components/shared/Loading';
 const KIND_LABEL: Record<string, { label: string; badge: BadgeKind }> = {
   PersonAgent: { label: 'Person', badge: 'ok' },
   OrganizationAgent: { label: 'Organization', badge: 'warn' },
@@ -78,7 +79,7 @@ export default function NamesPage() {
         onChange={(e) => setQ(e.target.value)}
       />
       {err && <p style={errorText}>{err}</p>}
-      {!err && names === null && <p style={mutedText}>Loading…</p>}
+      {!err && names === null && <Loading />}
       {names !== null && !filtered.length && <p style={mutedText}>{q ? 'No names match the filter.' : 'No names indexed yet.'}</p>}
       {filtered.length > 0 && (
         <div style={{ ...cardSty, padding: 0, overflowX: 'auto' }}>
@@ -148,7 +149,7 @@ function MetadataDialog({ name, onClose }: { name: RegisteredName; onClose: () =
           <Info label="Site URL" value={name.siteUrl ?? '—'} />
         </div>
         {err && <p style={errorText}>{err}</p>}
-        {!err && !meta && <p style={mutedText}>Loading public metadata…</p>}
+        {!err && !meta && <Loading compact label="Loading public metadata…" />}
         {meta && (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '.82rem' }}>
             <tbody>

@@ -26,6 +26,7 @@ import type { DelegationWire } from '../../../src/lib/delegation';
 import { mutedText, errorText, infoBannerSty } from '../../../src/components/portal/theme';
 import { AgentCapabilitiesEditor } from '../../../src/components/portal/capabilities/AgentCapabilitiesEditor';
 
+import { Loading } from '../../../src/components/shared/Loading';
 const toViaForSign = (via: string | undefined): Via => {
   const v = (via ?? '').toLowerCase();
   if (v === 'wallet') return 'wallet';
@@ -175,7 +176,7 @@ export default function CapabilitiesPage() {
       )}
 
       {!agentAddress ? <p style={mutedText}>Sign in to manage what your agent can do.</p>
-        : loading ? <p style={mutedText}>Loading your capability record…</p>
+        : loading ? <Loading label="Loading your capability record…" />
         : (
           <>
             {/* STICKY. Autosave feedback has to be visible where the editing happens: this sat above the

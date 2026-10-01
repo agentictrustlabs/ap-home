@@ -22,6 +22,7 @@ import {
 } from '../../lib/entitlements-admin';
 import type { Via } from '../../home/onboarding';
 
+import { Loading } from '../shared/Loading';
 const RECORD_SUGGESTIONS = ['impact-profile', 'impact-entitlements', 'uupg:attestation'];
 
 const inputStyle: React.CSSProperties = {
@@ -158,7 +159,7 @@ export function OrgEntitlementsPanel({ org, stewardship, requester }: {
       </div>
 
       {loading && issued.length === 0 ? (
-        <p className="manage-card-blurb">Loading issued entitlements…</p>
+        <Loading label="Loading issued entitlements…" />
       ) : issued.length === 0 ? (
         <p className="manage-card-blurb">
           No member entitlements yet. Issue one above to grant a member scoped, revocable access to this org&apos;s vault.

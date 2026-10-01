@@ -26,6 +26,7 @@ import {
 } from '../../../src/lib/alliance-store';
 import { addToAllianceGroup, issueOrgEntitlement } from '../../../src/lib/entitlements-admin';
 
+import { Loading } from '../../../src/components/shared/Loading';
 const EXPLORER = 'https://sepolia.basescan.org/address/';
 const isAddr = (s: string) => /^0x[0-9a-fA-F]{40}$/.test(s.trim());
 
@@ -254,7 +255,7 @@ function AllianceCard({ alliance, personSA }: { alliance: ImpactRelationship; pe
 
           <b style={{ fontSize: '.92rem' }}>Member organizations</b>
           {rosterErr && <p style={{ color: 'var(--color-danger)', fontSize: '.85rem', margin: '0.4rem 0 0' }}>{rosterErr}</p>}
-          {members === null && !rosterErr && <p className="manage-card-blurb" style={{ margin: '0.4rem 0 0' }}>Loading members…</p>}
+          {members === null && !rosterErr && <Loading compact label="Loading members…" />}
           {members !== null && members.length === 0 && !rosterErr && (
             <p className="manage-card-blurb" style={{ margin: '0.4rem 0 0' }}>No member organizations yet — add one by its address above.</p>
           )}

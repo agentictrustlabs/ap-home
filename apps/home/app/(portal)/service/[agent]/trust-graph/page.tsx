@@ -6,6 +6,7 @@ import { useSession } from '../../../../../src/context/session';
 import { SectionShell } from '../../../../../src/components/portal/SectionShell';
 import { ClassExplainer, GraphCard, useLivePerson } from '../../../../../src/components/graph/TrustGraph';
 
+import { Loading } from '../../../../../src/components/shared/Loading';
 const lc = (s: string) => s.toLowerCase();
 
 export default function ServiceTrustGraphPage({ params }: { params: Promise<{ agent: string }> }) {
@@ -14,7 +15,7 @@ export default function ServiceTrustGraphPage({ params }: { params: Promise<{ ag
   const { live, loaded } = useLivePerson();
 
   if (!session) return <SectionShell title="Trust graph"><p>Not signed in.</p></SectionShell>;
-  if (!live || !loaded) return <SectionShell title="Trust graph"><p className="manage-card-blurb">Loading your relationships…</p></SectionShell>;
+  if (!live || !loaded) return <SectionShell title="Trust graph"><Loading label="Loading your relationships…" /></SectionShell>;
 
   const rel = live.agents.find((a) => lc(a.agent) === lc(agent));
   if (!rel) {
