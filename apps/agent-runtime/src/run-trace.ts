@@ -149,6 +149,12 @@ export interface VariantRequestV1 {
   /** How instruction skills are selected: the model over the descriptions, or the declared utterances (holds on a miss). */
   selection?: SelectionArmV1;
   provider?: string;
+  /** Per-area providers (2026-10-01): the selector (planner + selection judge), the answer (skill.apply, the pairwise's
+   *  second answer) and the judge (quality · outcome · pairwise) may each run on their own provider; each falls back to
+   *  `provider`, then the deployment default. Validated against what the deployment offers, like `provider`. */
+  selectionProvider?: string;
+  answerProvider?: string;
+  judgeProvider?: string;
   toggles?: Record<string, string>;
   playbook?: string;
   /** The seeded records the run begins from — identified by their DIGEST (what the record and the graph keep); the domain
@@ -224,7 +230,7 @@ export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantR
   for (const k of Object.keys(v)) {
     if (k === 'plannerKind') { if (v[k] !== 'model' && v[k] !== 'rule-based') return { ok: false, error: 'plannerKind must be model | rule-based' }; out.plannerKind = v[k] as 'model' | 'rule-based'; }
     else if (k === 'selection') { if (!SELECTION_ARMS.includes(v[k] as SelectionArmV1)) return { ok: false, error: `selection must be ${SELECTION_ARMS.join(' | ')}` }; out.selection = v[k] as SelectionArmV1; }
-    else if (k === 'provider') { if (typeof v[k] !== 'string' || !/^[a-z][a-z0-9-]{1,30}$/.test(v[k] as string)) return { ok: false, error: 'provider must be a provider name' }; out.provider = v[k] as string; }
+    else if (k === 'provider' || k === 'selectionProvider' || k === 'answerProvider' || k === 'judgeProvider') { if (typeof v[k] !== 'string' || !/^[a-z][a-z0-9-]{1,30}$/.test(v[k] as string)) return { ok: false, error: `${k} must be a provider name` }; out[k] = v[k] as string; }
     else if (k === 'playbook') { if (typeof v[k] !== 'string' || !/^(0x[0-9a-fA-F]{64}|sha256:[0-9a-f]{64})$/.test(v[k] as string)) return { ok: false, error: 'playbook must be a definition digest' }; out.playbook = v[k] as string; }
     else if (k === 'toggles') {
       if (!v[k] || typeof v[k] !== 'object' || Array.isArray(v[k])) return { ok: false, error: 'toggles must map a capability notation to a value' };

@@ -129,7 +129,7 @@ import {
   type AuditSink,
 } from '@agenticprimitives/audit';
 import { createD1AuditSink } from './audit-d1.js';
-import { runOrchestration } from './orchestration.js';
+import { runOrchestration, llmAllowlist, type LlmProvider } from './orchestration.js';
 import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker, householdMembers, ownAgentsOfType, choicesFor } from '@agenticprimitives/context';
 import { KB_QUESTION_TOOL, kbQuestionInvoker, KB_RETRIEVE_TOOL, kbRetrieveInvoker } from '@agenticprimitives/context';
 import { discoveryFetchFor, structuredCallFor, type StructuredCallRecordV1 } from './context-wiring.js';
@@ -145,6 +145,8 @@ import { claimableBy, receiptEvidence, checkpointForCommittedStep, committedStep
 import { parkableCommittedSteps } from './endeavor-committed-steps.js';
 import { publicLibraryRead } from './library-tools.js';
 import { internalHeaders, markInWorker, isInWorkerRequest } from './internal-marker.js';
+import { parseExperimentRequest, type ExperimentJobV1 } from './experiment-job.js';
+import { validateCaptureWindow } from '@agenticprimitives/evaluation';
 import { standardServerFor } from './standard-a2a.js';
 import { withStandardCardFields } from '@agenticprimitives/a2a/standard';
 import type { AgentCardV1 } from '@agenticprimitives/a2a/standard';
@@ -269,6 +271,7 @@ export { A2aTaskDO } from './a2a-task-do.js';
 export { InteractionsDO } from './interactions-do.js';
 export { HuddleRoomDO } from './huddle-room-do.js';
 export { ProviderMeterDO } from './provider-meter-do.js';
+export { ExperimentDO } from './experiment-do.js';
 
 export interface Env {
   /** Spec 369 — Workers AI, for HEARING (`/harness/hear`, Whisper). Optional: unbound ⇒ 503 and the
@@ -290,6 +293,9 @@ export interface Env {
   /** Spec 388 W3 — the deployment's shared per-minute token meter (one object). Unbound ⇒ each isolate
    *  counts its own minute, which is W1's behaviour and is said so on the trace. */
   PROVIDER_METER?: DurableObjectNamespace;
+  /** Spec 415 A5 — the Lab's experiments: one object per plan id, a comparison run on this deployment one case per
+   *  alarm (experiment-do.ts). Unbound ⇒ `/harness/experiments` answers 503 and comparisons run from the CLI only. */
+  EXPERIMENTS?: DurableObjectNamespace;
   /** Spec 388 — the third offered provider: OpenAI's cheapest tool-calling model, between the free tier
    *  and Haiku. */
   OPENAI_API_KEY?: string;
@@ -2969,6 +2975,56 @@ app.post('/harness/records', async (c) => {
 
 // POST /harness/spans { session, addressee, runRef } — spec 381. The run as a firewalled trace: step names,
 // verdicts, receipt digests, timings — never a payee, an argument or the words. What a collector receives.
+// ── Spec 415 A5 — THE LAB RUNS A COMPARISON HERE. `POST /harness/experiments { session, addressee, set, criterion,
+// variants, split?, repeats?, planId?, fixtures?, window? }` submits a job the experiment object drives one case per
+// alarm through the deployment's own ask route (the same gates as every ask; the variant is the steward's to send).
+// `GET /harness/experiments/:id?session=&addressee=` is its progress and, when done, its scores; `…/:id/cancel` stops it.
+// Only the agent's steward may start, read or cancel one — the same claim the variant knob requires. ─────────────────
+const experimentStub = (env: Env, planId: string) => env.EXPERIMENTS!.get(env.EXPERIMENTS!.idFromName(planId));
+async function experimentOp(env: Env, planId: string, op: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }> {
+  const res = await experimentStub(env, planId).fetch(new Request('https://experiment-do/', { method: 'POST', headers: internalHeaders(env, { 'content-type': 'application/json' }), body: JSON.stringify(op) }));
+  return { status: res.status, body: (await res.json().catch(() => ({ ok: false, error: `the experiment object answered ${res.status}` }))) as Record<string, unknown> };
+}
+async function experimentGate(c: { env: Env; req: { json(): Promise<unknown>; query(k: string): string | undefined } }, body: { session?: unknown; addressee?: unknown }): Promise<{ ok: true; sa: Address; addressee: Address } | { ok: false; status: number; body: Record<string, unknown> }> {
+  if (!c.env.EXPERIMENTS) return { ok: false, status: 503, body: { ok: false, error: 'experiments_not_configured' } };
+  if (String(c.env.EVAL_CAPTURE ?? '').trim().toLowerCase() !== 'on') return { ok: false, status: 403, body: { ok: false, error: 'this estate does not run comparisons (EVAL_CAPTURE is not on)', refused: 'variant.estate.capture-off' } };
+  if (typeof body.session !== 'string' || !body.session || typeof body.addressee !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(body.addressee)) return { ok: false, status: 400, body: { ok: false, error: 'session and addressee (0x…) are required' } };
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return { ok: false, status: who.status, body: { ok: false, error: who.error } };
+  const addressee = body.addressee.toLowerCase() as Address;
+  if (!(await mayOverseeAgent(c.env, String(who.sa).toLowerCase() as Address, addressee).catch(() => false))) return { ok: false, status: 403, body: { ok: false, error: 'only the agent itself or its steward may run a comparison on it', refused: 'variant.not-steward' } };
+  return { ok: true, sa: who.sa, addressee };
+}
+app.post('/harness/experiments', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!body) return c.json({ ok: false, error: 'a JSON body is required' }, 400);
+  const gate = await experimentGate(c, body);
+  if (!gate.ok) return c.json(gate.body, gate.status as 400);
+  const parsed = await parseExperimentRequest(body, new Date());
+  if (!parsed.ok) return c.json({ ok: false, error: parsed.error }, 400);
+  let window = null;
+  if (body['window'] !== undefined && body['window'] !== null) { const v = validateCaptureWindow(body['window']); if (!v.ok) return c.json({ ok: false, error: `window: ${v.errors.join('; ')}` }, 400); window = v.window; }
+  const job: ExperimentJobV1 = {
+    type: 'ap.lab-experiment-job.v1', planId: parsed.plan.id, plan: parsed.plan, set: parsed.request.set, criterion: parsed.request.criterion, ...(parsed.request.fixtures ? { fixtures: parsed.request.fixtures } : {}),
+    asker: String(gate.sa).toLowerCase(), addressee: gate.addressee, session: body['session'] as string, origin: new URL(c.req.url).origin, submittedAt: new Date().toISOString(),
+  };
+  const r = await experimentOp(c.env, job.planId, { op: 'start', job, window });
+  return c.json(r.body, r.status as 200);
+});
+app.get('/harness/experiments/:id', async (c) => {
+  const gate = await experimentGate(c, { session: c.req.query('session') ?? '', addressee: c.req.query('addressee') ?? '' });
+  if (!gate.ok) return c.json(gate.body, gate.status as 400);
+  const r = await experimentOp(c.env, c.req.param('id'), { op: c.req.query('record') === '1' ? 'record' : 'status' });
+  return c.json(r.body, r.status as 200);
+});
+app.post('/harness/experiments/:id/cancel', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+  const gate = await experimentGate(c, body ?? {});
+  if (!gate.ok) return c.json(gate.body, gate.status as 400);
+  const r = await experimentOp(c.env, c.req.param('id'), { op: 'cancel' });
+  return c.json(r.body, r.status as 200);
+});
+
 app.post('/harness/spans', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; runRef?: string } | null;
   if (!body?.session || !body.addressee || !body.runRef) return c.json({ ok: false, error: 'session, addressee and runRef are required' }, 400);
@@ -3001,7 +3057,9 @@ app.post('/harness/spans', async (c) => {
 // GET /harness/comparison — spec 415 A4. WHETHER THIS ESTATE RUNS COMPARISONS, and what its `variant` knob knows: a
 // comparison runner reads it before it asks (the estate's half of the eval-store capture gate). Public and secret-free:
 // that an estate is a comparison estate is a fact about the estate, not about anyone's records.
-app.get('/harness/comparison', (c) => c.json({ ok: true, evalCapture: String(c.env.EVAL_CAPTURE ?? '').trim().toLowerCase() === 'on' ? 'on' : 'off', plannerKinds: ['model', 'rule-based'], selections: [...SELECTION_ARMS], toggles: VARIANT_TOGGLES, ...(String(c.env.HARNESS_BUILD ?? '').trim() ? { build: String(c.env.HARNESS_BUILD).trim() } : {}) }));
+app.get('/harness/comparison', (c) => c.json({ ok: true, evalCapture: String(c.env.EVAL_CAPTURE ?? '').trim().toLowerCase() === 'on' ? 'on' : 'off', plannerKinds: ['model', 'rule-based'], selections: [...SELECTION_ARMS], toggles: VARIANT_TOGGLES,
+  // Per-area providers (2026-10-01): the roles a variant may put on their own provider, and what this deployment offers.
+  providerRoles: ['provider', 'selectionProvider', 'answerProvider', 'judgeProvider'], providers: llmAllowlist(c.env), ...(String(c.env.HARNESS_BUILD ?? '').trim() ? { build: String(c.env.HARNESS_BUILD).trim() } : {}) }));
 
 app.post('/harness/provenance', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { session?: string; addressee?: Address; runRef?: string; format?: 'jsonld' | 'prov-n' | 'record' | 'measures' } | null;
@@ -4204,6 +4262,17 @@ app.post('/harness/ask', async (c) => {
   // made every call look chosen, so the route never ran and the planner prompt was trimmed to Groq's budget
   // with Anthropic offered (seen live 2026-09-10: 7,813 tokens cut to 6,500, every drop taken, over-budget).
   const provider = String(variantReq?.provider ?? body.model ?? '').trim() ? chosen.provider ?? undefined : undefined;
+  // Per-area providers (2026-10-01): each role's provider resolved like `provider` — offered by this deployment and keyed —
+  // or the turn is refused by name. Unset roles fall back to `provider` inside the run.
+  const roleProviders: { selectionProvider?: LlmProvider; answerProvider?: LlmProvider; judgeProvider?: LlmProvider } = {};
+  for (const role of ['selectionProvider', 'answerProvider', 'judgeProvider'] as const) {
+    const want = variantReq?.[role];
+    if (!want) continue;
+    const r = resolveProvider(c.env, want);
+    if (!r.ok) return c.json({ ok: false, error: `variant.${role}: ${r.error}`, refused: 'variant.provider.not-offered' }, 400);
+    if (r.provider) roleProviders[role] = r.provider;
+  }
+  const judgeProvider = roleProviders.judgeProvider ?? provider;
   // Spec 388 W2 — the structured calls route per request; each decision is collected for the trace.
   const structuredRoutes: RouteDecision[] = [];
   const structuredCalls: StructuredCallRecordV1[] = [];
@@ -4387,7 +4456,7 @@ app.post('/harness/ask', async (c) => {
       ...(memory && memory.entries.length ? { memory } : {}),
       ...(inResponseTo ? { inResponseTo } : {}),
       ...(body.channel === 'voice' ? { channel: 'voice' as const } : {}),
-      ...(provider ? { provider } : {}),
+      ...(provider ? { provider } : {}), ...roleProviders,
       // Spec 418 §12 — any variant makes this a comparison run: its self-acting writes are held, even a provider-only variant.
       ...(variantReq ? { comparison: true } : {}),
       ...(variantReq && (variantReq.plannerKind || variantReq.selection || variantReq.toggles || variantReq.acceptance || variantReq.judgeProfile || variantReq.askerContext) ? { variant: { ...(variantReq.plannerKind ? { plannerKind: variantReq.plannerKind } : {}), ...(variantReq.selection ? { selection: variantReq.selection } : {}), ...(variantReq.toggles ? { toggles: variantReq.toggles } : {}), ...(variantReq.acceptance ? { acceptance: variantReq.acceptance } : {}), ...(variantReq.judgeProfile ? { judgeProfile: variantReq.judgeProfile } : {}), ...(variantReq.askerContext ? { askerContext: variantReq.askerContext } : {}) } } : {}),
@@ -4818,7 +4887,7 @@ app.post('/harness/ask', async (c) => {
     // Spec 418 A2 — THE OUTCOME CHECK: did the answer DELIVER each class the plan was for (the ontology's `produces`)?
     if (variantReq?.toggles?.['quality/judge'] === 'outcome' && reply?.kind === 'answer' && typeof (reply as { text?: unknown }).text === 'string' && trace.expectedDelivers?.length) {
       let usage: { tokensIn?: number; tokensOut?: number } | undefined;
-      const ocall = structuredCallFor(c.env, provider, { onCall: (rec) => { usage = { tokensIn: rec.tokensIn, tokensOut: rec.tokensOut }; } });
+      const ocall = structuredCallFor(c.env, judgeProvider, { onCall: (rec) => { usage = { tokensIn: rec.tokensIn, tokensOut: rec.tokensOut }; } });
       if (ocall) {
         const oc = await judgeOutcomeDelivered({ request: String(body.message ?? ''), answer: (reply as { text: string }).text, expected: trace.expectedDelivers }, ocall).catch((e: unknown) => ({ judge: OUTCOME_CHECK_JUDGE, classes: {}, score: 0, ms: 0, error: e instanceof Error ? e.message : String(e) }));
         (trace as { outcomeCheck?: unknown }).outcomeCheck = { judge: oc.judge.name, classes: oc.classes, ...('requested' in oc ? { requested: oc.requested } : {}), score: oc.score, ms: oc.ms, ...(usage?.tokensIn !== undefined ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut ?? 0 } : {}), ...(oc.error ? { error: oc.error.slice(0, 200) } : {}) };
@@ -4830,7 +4899,7 @@ app.post('/harness/ask', async (c) => {
       const tool = planned.length ? offeredTools.find((t) => t.id === planned[planned.length - 1] && t.answer) : undefined;
       if (tool) {
         let usage: { tokensIn?: number; tokensOut?: number } | undefined;
-        const qcall = structuredCallFor(c.env, provider, { onCall: (rec) => { usage = { tokensIn: rec.tokensIn, tokensOut: rec.tokensOut }; } });
+        const qcall = structuredCallFor(c.env, judgeProvider, { onCall: (rec) => { usage = { tokensIn: rec.tokensIn, tokensOut: rec.tokensOut }; } });
         if (qcall) {
           const q = await judgeAnswerQuality({ request: String(body.message ?? ''), skillCard: tool.description, answer: (reply as { text: string }).text }, qcall).catch((e: unknown) => ({ judge: ANSWER_QUALITY_JUDGE, scores: {}, score: 0, ms: 0, error: e instanceof Error ? e.message : String(e) }));
           trace.quality = { judge: q.judge.name, scores: q.scores, score: q.score, ms: q.ms, ...(usage?.tokensIn !== undefined ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut ?? 0 } : {}), ...(q.error ? { error: q.error.slice(0, 200) } : {}) };

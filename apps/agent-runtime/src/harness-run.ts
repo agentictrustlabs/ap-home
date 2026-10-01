@@ -2550,6 +2550,12 @@ export interface HarnessRunInput {
   /** Spec 377 — the provider this turn plans, composes and looks things up with. Absent ⇒ the deployment
    *  default. Validated by the caller against what the deployment offers; never a gate input. */
   provider?: LlmProvider;
+  /** Per-area providers (2026-10-01), each already resolved by the caller against what the deployment offers: the
+   *  SELECTOR's (planner + selection judge), the ANSWER's (skill.apply and the pairwise's second answer) and the JUDGE's
+   *  (quality · outcome · pairwise). Absent ⇒ `provider`. Behaviour, never authority. */
+  selectionProvider?: LlmProvider;
+  answerProvider?: LlmProvider;
+  judgeProvider?: LlmProvider;
   /** Spec 415 A4 — what a COMPARISON asked this run to do differently (already admitted by the caller: a
    *  comparison estate, the agent's own steward). The planner kind and the capability toggles apply here; the
    *  provider was folded into `provider`. Behaviour, never authority. */
@@ -5019,7 +5025,10 @@ step is then handed to that agent under authority the person grants; leave it ou
   // estimate (see `plan` below); `selected` is the deployment's default, kept for the rule-based case.
   // The planner's reported usage lands on the trace (declared below; the planner runs after it exists).
   const notePlannerUsage = (u: ModelUsageV1) => { trace.plannerUsage = addUsage(trace.plannerUsage, u); };
-  const selected = selectPlanner(env as never, { systemPrompt: withPlaybook, maxTokens: ASK_PLANNER_MAX_TOKENS, ...(input.provider ? { provider: input.provider } : {}), onUsage: notePlannerUsage });
+  const selectionProvider = input.selectionProvider ?? input.provider;
+  const answerProvider = input.answerProvider ?? input.provider;
+  const judgeProvider = input.judgeProvider ?? input.provider;
+  const selected = selectPlanner(env as never, { systemPrompt: withPlaybook, maxTokens: ASK_PLANNER_MAX_TOKENS, ...(selectionProvider ? { provider: selectionProvider } : {}), onUsage: notePlannerUsage });
   let plannerModel = selected.model;
   // The compiler answers for the shapes it claims; the model answers for the rest. Not a fallback pair
   // (ADR-0013): the match is deterministic and decided BEFORE any planner runs, the way a rule-based
@@ -5082,7 +5091,7 @@ step is then handed to that agent under authority the person grants; leave it ou
             // The judge's model call is a model invocation of the run like the planner's: on the trace, with its provider,
             // model and why — role `judge`, so a reader can tell the call that chose the skill from the one that answered.
             const fast = input.variant?.judgeProfile === 'fast' || input.variant?.judgeProfile === 'logprob';
-            const choose = input.variant?.judgeProfile === 'logprob' ? logprobChoiceFor(env as never, input.provider, { onCall: recordStructured('judge') }) : undefined;
+            const choose = input.variant?.judgeProfile === 'logprob' ? logprobChoiceFor(env as never, selectionProvider, { onCall: recordStructured('judge') }) : undefined;
             // Spec 416 §4f — WHAT IS KNOWN OF THE ASKER, for the judge's typed reading: their standing (already derived for
             // the receipts, memoised), and under `full` their recent skills here (the operator index, one range read) and
             // — at their own agent — short memory entries. Labels and counts go on the trace, never the memory's words.
@@ -5102,7 +5111,7 @@ step is then handed to that agent under authority the person grants; leave it ou
               const memoryTags = input.memory ? factsOf(input.memory).entries.slice(0, 6).map((e) => (e.tags?.length ? e.tags.join(', ') : e.fact).slice(0, 80)) : [];
               return { ...(rel ? { relation: rel } : {}), ...(recentSkills.length ? { recentSkills } : {}), ...(memoryTags.length ? { memoryTags } : {}) };
             })();
-            const call = structuredCallFor(env as never, input.provider, { onCall: recordStructured('judge'), ...(fast ? { tier: 'light' as const } : {}) }) as never;
+            const call = structuredCallFor(env as never, selectionProvider, { onCall: recordStructured('judge'), ...(fast ? { tier: 'light' as const } : {}) }) as never;
             let chose: string | null;
             const judgeParams = { ...(input.variant?.acceptance ? { acceptance: input.variant.acceptance } : {}), ...(fast ? { profile: input.variant?.judgeProfile === 'logprob' ? 'logprob' as const : 'fast' as const } : {}) };
             if (arm === 'ontology') { const r = selectByOntology(rest, skills, lexicon); trace.selection = { approach: 'ontology', ...r }; chose = r.chose; }
@@ -5160,7 +5169,7 @@ step is then handed to that agent under authority the person grants; leave it ou
             const skills = Object.values(playbook?.tools ?? {}).filter((t) => skillSources[t.id]).map((t) => ({ id: t.id, description: t.description, covers: t.covers ?? [], ...(t.excludes?.length ? { excludes: t.excludes } : {}), ...(t.produces?.length ? { produces: t.produces } : {}), ...(t.consumes?.length ? { consumes: t.consumes } : {}) }));
             const st = standingOnce ? await standingOnce : undefined;
             const relation = !input.person ? undefined : String(input.person).toLowerCase() === String(input.addressee ?? '').toLowerCase() ? 'self' as const : st?.relation === 'steward' || st?.relation === 'self' ? 'steward' as const : st?.relation === 'member' ? 'member' as const : 'stranger' as const;
-            const call = structuredCallFor(env as never, input.provider, { onCall: recordStructured('judge'), tier: 'light' }) as never;
+            const call = structuredCallFor(env as never, selectionProvider, { onCall: recordStructured('judge'), tier: 'light' }) as never;
             const seeded = input.variant?.toggles?.['skill-selection/asker-context'] ? undefined : input.variant?.askerContext;
             // LIVE history (the asker's recent skills here + their memory) only on a REAL ask with the deployment's
             // `SKILL_SELECTION_ASKER_CONTEXT=full` — never under a comparison, whose asker's history is its own test runs.
@@ -5237,7 +5246,7 @@ step is then handed to that agent under authority the person grants; leave it ou
           // prompt's estimate against each offered provider's budget and this minute's spend. A provider that
           // carries the whole prompt gets it untrimmed; only when none does is the first one served a fitted prompt.
           const user = `Goal: ${pin.intent.goal}\nContext: ${JSON.stringify(pin.intent.context ?? {})}`;
-          const route = await routeProvider(env as never, input.provider, { call: 'planner', estimatedTokens: estimatePromptTokens(withPlaybook, pin.tools, user) });
+          const route = await routeProvider(env as never, selectionProvider, { call: 'planner', estimatedTokens: estimatePromptTokens(withPlaybook, pin.tools, user) });
           trace.route = { ...(trace.route ?? { policy: routePolicy(env as never) }), meter: meterFor(env as never).kind, planner: route };
           const provider = route.provider ?? undefined;
           const chosen = provider && provider !== selected.kind ? selectPlanner(env as never, { systemPrompt: withPlaybook, maxTokens: ASK_PLANNER_MAX_TOKENS, provider, onUsage: notePlannerUsage }) : selected;
@@ -5528,9 +5537,9 @@ step is then handed to that agent under authority the person grants; leave it ou
   // Spec 418 A1 — stream the answer (`answer/stream` on, or the deployment's ANSWER_STREAM_DEFAULT); never for the
   // side-by-side's second answer. Drafts go to the progress stream; the first words' time goes on the trace.
   const streamOn = ((input.variant?.toggles?.['answer/stream'] ?? ((env as { ANSWER_STREAM_DEFAULT?: string }).ANSWER_STREAM_DEFAULT?.trim() || 'off')) === 'on');
-  const applyWith = (tier: AnswerTier, recorded: boolean) => skillApplyInvoker({ call: undefined, callFor: (stepRef) => structuredCallFor(env as never, input.provider, { ...(recorded ? { onCall: recordStructured('structured', stepRef) } : {}), ...(tier !== 'default' ? { tier } : {}) }),
+  const applyWith = (tier: AnswerTier, recorded: boolean) => skillApplyInvoker({ call: undefined, callFor: (stepRef) => structuredCallFor(env as never, answerProvider, { ...(recorded ? { onCall: recordStructured('structured', stepRef) } : {}), ...(tier !== 'default' ? { tier } : {}) }),
     ...(streamOn && recorded ? {
-      streamFor: (stepRef: string) => textStreamFor(env as never, input.provider, { onCall: recordStructured('structured', stepRef), ...(tier !== 'default' ? { tier } : {}) }),
+      streamFor: (stepRef: string) => textStreamFor(env as never, answerProvider, { onCall: recordStructured('structured', stepRef), ...(tier !== 'default' ? { tier } : {}) }),
       onDraft: (stepRef: string, draft: string) => input.onProgress?.({ type: 'AnswerDraft', stepRef, said: 'Writing the answer…', draft: draft.slice(-6000) }),
       onFirstWords: (_stepRef: string, ms: number) => { if (trace.answerFirstWordsMs === undefined) { trace.answerFirstWordsMs = ms; trace.answerFirstWordsAt = Date.now(); } },
     } : {}), ...(input.variant?.toggles?.['skill-selection/answer'] === 'off' ? { pickOnly: true } : {}), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: agentNameForSkill });
@@ -5540,7 +5549,7 @@ step is then handed to that agent under authority the person grants; leave it ou
     const a = (x: unknown) => (x && typeof x === 'object' && typeof (x as { answer?: unknown }).answer === 'string' ? (x as { answer: string }).answer : null);
     const ownA = a(own), otherA = a(other);
     const card = instructionTools.find((t) => t.id === toolId)?.description ?? toolId;
-    const qcall = structuredCallFor(env as never, input.provider);
+    const qcall = structuredCallFor(env as never, judgeProvider);
     if (ownA && otherA && qcall) {
       const pref = await judgeAnswerPreference({ request: String(args.question ?? input.intent.goal), skillCard: card, answers: { [ownTier]: ownA, [otherTier]: otherA } }, qcall as never).catch(() => null);
       if (pref) trace.pairwise = { judge: pref.judge.name, preference: pref.preference, ms: pref.ms, ...(pref.error ? { error: pref.error.slice(0, 200) } : {}) };
