@@ -628,11 +628,13 @@ function ArtifactList({ rows, selectedId, ownerLabel, onOpen, onDescend, onDelet
   /** Only passed for the OWNED vault lens — you cannot delete an artifact someone shared with you. */
   onDelete?: (a: Artifact) => void;
 }) {
-  const cols = onDelete ? '2.2fr 1.1fr .8fr .8fr 1fr .5fr 2rem' : '2.2fr 1.1fr .8fr .8fr 1fr .5fr';
+  // THE NAME GETS THE ROW (owner, 2026-10-01: "folder and file name has no space; other fields … could be icons or a
+  // multi-field row"). One wide name cell, then a compact cluster — access · freshness · version — as short chips with
+  // their meaning in the tooltip; owner and what you may do go on a small second line under the name.
   return (
     <div style={{ ...cardSty, padding: 0, overflow: 'hidden', color: 'var(--color-text-body)' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: cols, gap: '.5rem', padding: '.5rem .8rem', ...mutedText, fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', borderBottom: '1px solid var(--color-border)' }}>
-        <span>Name</span><span>Owner</span><span>Access</span><span>Fresh</span><span>Authority</span><span>Ver</span>{onDelete && <span />}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: '.5rem', padding: '.5rem .8rem', ...mutedText, fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', borderBottom: '1px solid var(--color-border)' }}>
+        <span>Name</span><span title="Access · freshness · version">Access · fresh · ver</span>
       </div>
       {rows.map((a) => {
         const mode: AccessMode = a.accessMode ?? 'Owned';
@@ -641,37 +643,43 @@ function ArtifactList({ rows, selectedId, ownerLabel, onOpen, onDescend, onDelet
         const authority = a.myActions?.length ? a.myActions.join(' · ') : authorityText(mode);
         const on = a.id === selectedId;
         const activate = () => (a.isFolder ? onDescend(a.name) : onOpen(a.id));
+        const chip = (text: string, tone: BadgeKind, title: string) => <span title={title} style={{ ...badgeStyle(tone), fontSize: 11, whiteSpace: 'nowrap' }}>{text}</span>;
         return (
           <div key={a.id} role="button" tabIndex={0}
             onClick={activate} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } }}
-            style={{ display: 'grid', gridTemplateColumns: cols, gap: '.5rem', alignItems: 'center', padding: '.55rem .8rem', minHeight: 44, cursor: 'pointer',
+            style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: '.6rem', alignItems: 'center', padding: '.45rem .8rem', minHeight: 44, cursor: 'pointer',
               borderBottom: '1px solid var(--color-border)', background: on ? 'var(--color-surface-raised)' : 'transparent', boxShadow: on ? 'inset 3px 0 0 var(--color-amber-500)' : 'none',
               // Explicit, not inherited: an ancestor that sets no colour leaves this at the browser
               // default, which on a light surface reads as white on white.
               color: 'var(--color-text-primary)' }}
             onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = 'var(--color-surface-sunken)'; }}
             onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = 'transparent'; }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '.5rem', minWidth: 0 }}>
-              <Icon name={a.isFolder ? 'folder' : KIND_META[a.kind].icon} size={17} style={{ color: 'var(--color-text-muted)' }} />
-              <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.name}>{a.name}</span>
-              <span style={{ ...badgeStyle('neutral'), fontSize: 10 }}>{a.isFolder ? (a.id.startsWith('folder:') && a.size ? `Folder · ${a.size}` : 'Folder') : KIND_META[a.kind].label}</span>
-              {!a.isFolder && <button type="button" onClick={(e) => { e.stopPropagation(); onOpen(a.id); }} title={`Open ${a.name}`} data-testid={`library-view-${a.id}`} style={{ ...btnSty, padding: '.1rem .5rem', fontSize: 11, flexShrink: 0 }}>View</button>}
-              {a.effectiveAccessPolicy === 'public' && <span style={{ ...badgeStyle('ok'), fontSize: 10 }} title={a.accessPolicy === 'public' ? 'Anyone may read this — you made it public' : 'Anyone may read this — a folder above it is public'} data-testid="public-chip">Public</span>}
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '.5rem', minWidth: 0 }}>
+                <Icon name={a.isFolder ? 'folder' : KIND_META[a.kind].icon} size={17} style={{ flexShrink: 0, color: 'var(--color-text-muted)' }} />
+                <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }} title={a.name}>{a.name}</span>
+                <span style={{ ...badgeStyle('neutral'), fontSize: 10, flexShrink: 0 }}>{a.isFolder ? (a.id.startsWith('folder:') && a.size ? `Folder · ${a.size}` : 'Folder') : KIND_META[a.kind].label}</span>
+                {a.effectiveAccessPolicy === 'public' && <span style={{ ...badgeStyle('ok'), fontSize: 10, flexShrink: 0 }} title={a.accessPolicy === 'public' ? 'Anyone may read this — you made it public' : 'Anyone may read this — a folder above it is public'}>Public</span>}
+                {!a.isFolder && <button type="button" onClick={(e) => { e.stopPropagation(); onOpen(a.id); }} title={`Open ${a.name}`} data-testid={`library-view-${a.id}`} style={{ ...btnSty, padding: '.1rem .5rem', fontSize: 11, flexShrink: 0 }}>View</button>}
+              </span>
+              <span style={{ ...mutedText, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`Owner: ${owner} · you may: ${authority}`}>
+                <b style={{ fontWeight: 600 }}>{owner}</b> · {authority}
+              </span>
             </span>
-            <span style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><b>{owner}</b></span>
-            <span><span style={{ ...badgeStyle(ACCESS_TONE[mode]), fontSize: 11 }}>{mode}</span></span>
-            <span>{a.isFolder ? <span style={{ ...mutedText, fontSize: 12 }}>—</span> : <span style={{ ...badgeStyle(FRESH_TONE[fresh]), fontSize: 11 }}>{fresh}</span>}</span>
-            <span style={{ ...mutedText, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{authority}</span>
-            <span style={{ ...mono, ...mutedText, fontSize: 12 }} title={a.registry ? `v${a.version ?? 1} in this vault · registry v${a.registry.version}` : undefined}>{a.isFolder ? '—' : a.registry ? `v${a.version ?? 1} · reg v${a.registry.version}` : `v${a.version ?? 1}`}</span>
-            {onDelete && (
-              <button type="button" title={a.isFolder ? 'Delete this folder and everything in it' : 'Delete this file'}
-                aria-label={`Delete ${a.name}`}
-                onClick={(e) => { e.stopPropagation(); onDelete(a); }}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, lineHeight: 1,
-                  color: 'var(--color-text-muted)', fontSize: 15 }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-danger, #c0392b)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)'; }}>×</button>
-            )}
+            <span style={{ display: 'flex', alignItems: 'center', gap: '.35rem', flexShrink: 0 }}>
+              {chip(mode, ACCESS_TONE[mode], `Access: ${mode}`)}
+              {!a.isFolder && chip(fresh, FRESH_TONE[fresh], `Freshness: ${fresh}`)}
+              {!a.isFolder && <span style={{ ...mono, ...mutedText, fontSize: 11, whiteSpace: 'nowrap' }} title={a.registry ? `v${a.version ?? 1} in this vault · registry v${a.registry.version}` : `v${a.version ?? 1} in this vault`}>{a.registry ? `v${a.version ?? 1}·r${a.registry.version}` : `v${a.version ?? 1}`}</span>}
+              {onDelete && (
+                <button type="button" title={a.isFolder ? 'Delete this folder and everything in it' : 'Delete this file'}
+                  aria-label={`Delete ${a.name}`}
+                  onClick={(e) => { e.stopPropagation(); onDelete(a); }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, lineHeight: 1,
+                    color: 'var(--color-text-muted)', fontSize: 15 }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-danger, #c0392b)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)'; }}>×</button>
+              )}
+            </span>
           </div>
         );
       })}
