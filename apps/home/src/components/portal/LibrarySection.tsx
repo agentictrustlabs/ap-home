@@ -45,7 +45,9 @@ interface Artifact { id: string; kind: Kind; name: string; source: Source; folde
   /** Spec 412 — the owner's declaration (`apcnt:accessPolicy`) and what it comes to after the folder cascade. */
   accessPolicy?: AccessPolicy; effectiveAccessPolicy?: AccessPolicy;
   // present on "Shared with me" rows (a federated inbound grant from another vault)
-  accessMode?: AccessMode; sharedBy?: string; sharedByKind?: string; myActions?: string[] }
+  accessMode?: AccessMode; sharedBy?: string; sharedByKind?: string; myActions?: string[];
+  /** The registry edition this copy was written from, when a registry wrote it (shown beside the vault's own v-count). */
+  registry?: { id: string; version: string; at?: number } }
 interface TreeNode { name: string; path: string; children: TreeNode[] }
 
 /** The shape of the list while the vault is being read — never the empty state. */
@@ -660,7 +662,7 @@ function ArtifactList({ rows, selectedId, ownerLabel, onOpen, onDescend, onDelet
             <span><span style={{ ...badgeStyle(ACCESS_TONE[mode]), fontSize: 11 }}>{mode}</span></span>
             <span>{a.isFolder ? <span style={{ ...mutedText, fontSize: 12 }}>—</span> : <span style={{ ...badgeStyle(FRESH_TONE[fresh]), fontSize: 11 }}>{fresh}</span>}</span>
             <span style={{ ...mutedText, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{authority}</span>
-            <span style={{ ...mono, ...mutedText, fontSize: 12 }}>{a.isFolder ? '—' : `v${a.version ?? 1}`}</span>
+            <span style={{ ...mono, ...mutedText, fontSize: 12 }} title={a.registry ? `v${a.version ?? 1} in this vault · registry v${a.registry.version}` : undefined}>{a.isFolder ? '—' : a.registry ? `v${a.version ?? 1} · reg v${a.registry.version}` : `v${a.version ?? 1}`}</span>
             {onDelete && (
               <button type="button" title={a.isFolder ? 'Delete this folder and everything in it' : 'Delete this file'}
                 aria-label={`Delete ${a.name}`}
@@ -748,7 +750,8 @@ function DetailPanel({ artifact, items, ownerLabel, ownerVaultKind, ownerSa, fol
       actions={<Button variant="primary" size="sm" disabled={opening} onClick={() => (owned ? setTab('access') : void openLive())}>{owned ? 'Manage access' : opening ? 'Opening…' : 'Open live'}</Button>}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 'var(--sp-3)' }}>
         <Chip>{artifact.isFolder ? 'Folder' : KIND_META[artifact.kind].label}</Chip>
-        <Chip>v{artifact.version ?? 1}{id.latestRelease ? ` · released ${id.latestRelease.version}` : ''}</Chip>
+        <Chip title="This vault's own save count: it advances every time this entry is written here">v{artifact.version ?? 1} in this vault{id.latestRelease ? ` · released ${id.latestRelease.version}` : ''}</Chip>
+        {id.registryEdition && <Chip tone="ok" title={`The skills registry's edition this copy was written from (${id.registryEdition.id}); the registry counts publishes, this vault counts saves`}>registry v{id.registryEdition.version}</Chip>}
         <Chip tone={ACCESS_TONE[mode] === 'ok' ? 'ok' : ACCESS_TONE[mode] === 'warn' ? 'warn' : undefined}>{mode}</Chip>
         {!artifact.isFolder && <Chip tone={FRESH_TONE[mode !== 'Owned' ? 'Cached' : freshnessOf(artifact)] === 'ok' ? 'ok' : undefined}>{mode !== 'Owned' ? 'Cached' : freshnessOf(artifact)}</Chip>}
         {!owned && artifact.sharedBy && <Meta>shared by {shortAddr(artifact.sharedBy)}</Meta>}
