@@ -9,6 +9,7 @@ import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { ClassExplainer, GraphCard, useLivePerson } from '../../../src/components/graph/TrustGraph';
 
+import { Loading } from '../../../src/components/shared/Loading';
 export default function TrustGraphPage() {
   const { phase } = useSession();
   const { live, loaded } = useLivePerson();
@@ -32,7 +33,7 @@ export default function TrustGraphPage() {
   if (!live || !loaded) {
     return (
       <SectionShell title="Trust graph">
-        <p className="manage-card-blurb">Loading your relationships…</p>
+        <Loading label="Loading your relationships…" />
       </SectionShell>
     );
   }

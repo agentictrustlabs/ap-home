@@ -8,6 +8,7 @@
 import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { PersonalInfoPanel } from '../../../src/components/portal/settings/PersonalInfoPanel';
+import { GoogleSignInPanel } from '../../../src/components/portal/settings/GoogleSignInPanel';
 
 export default function ProfilePage() {
   const { agentAddress } = useSession();
@@ -17,6 +18,10 @@ export default function ProfilePage() {
       description="Who you are, held in your own vault. Private by default — shared only through a delegation you issue."
     >
       <PersonalInfoPanel agentAddress={agentAddress ?? null} />
+      {/* spec 422 §0: this panel's one action makes a NEW home for the Google account (a new C_sub, a new address —
+          spec 235 §5b). It is not a credential change and never belonged under Security; it renders only for a
+          Google session. */}
+      <GoogleSignInPanel />
     </SectionShell>
   );
 }

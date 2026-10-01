@@ -47,13 +47,15 @@ function Item({ item, active }: { item: NavItem; active: boolean }) {
 }
 
 export function PortalSidebar({
-  groups, panes, workspaceName,
+  groups, panes, workspaceName, personName,
 }: {
   groups: NavGroup[];
   /** Every pane this workspace can show, by id. The OPEN one is whichever holds the current route —
    *  it is where you are, not a preference, so nothing about it is remembered. */
   panes?: Partial<Record<PaneId, SettingsGroup[]>>;
   workspaceName?: string;
+  /** The signed-in person's display name — the Security pane's header (spec 422 §2.1). */
+  personName?: string | null;
 }) {
   const pathname = usePathname();
   const isActive = (href: string): boolean => pathname === href;
@@ -63,11 +65,15 @@ export function PortalSidebar({
   // `/profiles`.
   const isWithin = (href: string): boolean => pathname === href || pathname.startsWith(`${href}/`);
 
+  // A cross-link row (spec 422 §2.1) is a door, not a residence: being on its page does not open this pane.
   const openPane = (Object.keys(panes ?? {}) as PaneId[]).find((id) =>
-    (panes?.[id] ?? []).some((g) => g.items.some((i) => isWithin(i.href))),
+    (panes?.[id] ?? []).some((g) => g.items.some((i) => !i.crossLink && isWithin(i.href))),
   );
   const openGroups = openPane ? panes![openPane]! : null;
-  const PANE_TITLE: Record<PaneId, string> = { stewardship: 'Stewardship', settings: 'Settings' };
+  const PANE_TITLE: Record<PaneId, string> = { stewardship: 'Stewardship', settings: 'Settings', security: 'Security', connected: 'Connected' };
+  // The Security pane is about the signed-in PERSON, whatever workspace is open: its header names her, not the
+  // workspace, because the keys and the vault behind it are hers (348 §2.3's disclosure rule, applied to her).
+  const paneName = openPane === 'security' || openPane === 'connected' ? (personName ?? 'You') : workspaceName;
 
   return (
     <div className="portal-sidebar-wrap">
@@ -101,14 +107,14 @@ export function PortalSidebar({
       {openGroups && (
         <nav
           className="portal-settings-pane"
-          aria-label={workspaceName ? `${PANE_TITLE[openPane!]} for ${workspaceName}` : PANE_TITLE[openPane!]}
+          aria-label={paneName ? `${PANE_TITLE[openPane!]} for ${paneName}` : PANE_TITLE[openPane!]}
         >
           {/* The header is DISCLOSURE, not decoration: a person's pane and an org's are near-identical
               lists, but the org's writes go to that organization's vault under your stewardship
               delegation. Which agent you are working on belongs on this screen. */}
           <div className="pane-head">
             <span className="pane-head-eyebrow">{PANE_TITLE[openPane!]}</span>
-            <span className="pane-head-name" title={workspaceName}>{workspaceName ?? 'Your agent'}</span>
+            <span className="pane-head-name" title={paneName}>{paneName ?? 'Your agent'}</span>
           </div>
           {openGroups.map((g) => (
             <div className="nav-group" key={g.heading}>

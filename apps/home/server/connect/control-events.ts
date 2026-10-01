@@ -27,6 +27,10 @@ const EVENT_TYPES: readonly HomeControlEventV1['eventType'][] = [
   'credential-received',
   'inbox-decision',
   'home-rotated',
+  'credential-added',
+  'credential-retired',
+  'channel-linked',
+  'channel-unlinked',
 ];
 
 function cors(request: Request): Record<string, string> {

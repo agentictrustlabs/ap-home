@@ -19,6 +19,7 @@ import { vaultListWithDelegation, vaultReadWithDelegation, vaultWriteWithDelegat
 import { AddressChip } from '../shared/AddressChip';
 import { BuildingIcon, LinkIcon } from '../shared/Icons';
 
+import { Loading } from '../shared/Loading';
 /** The org's managed profile — the canonical "org details" record the steward edits.
  *  Stored in the ORG's own vault under `org:profile`, written over the stewardship
  *  delegation (delegator = org). Free-form, vertical-agnostic. */
@@ -213,7 +214,7 @@ export function OrgProfileManager({ delegation }: { delegation: DelegationWire }
         <b> organization’s own vault</b> over your stewardship delegation — never copied into your home.
       </p>
       {busy ? (
-        <p className="manage-card-blurb">Loading the org’s details…</p>
+        <Loading label="Loading the org’s details…" />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '.6rem', maxWidth: 520 }}>
           {FIELDS.map((f) => (

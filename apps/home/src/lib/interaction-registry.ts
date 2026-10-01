@@ -53,6 +53,19 @@ export function resolveNavigationTarget(target: string, realm: InteractionRealm)
     case 'connected':
       // Spec 404 — the person's connectors live on her Connected screen.
       return realm.kind === 'person' || !realm.kind ? { href: '/apps', label: 'Open connected' } : null;
+    case 'connected-accounts':
+      return realm.kind === 'person' || !realm.kind ? { href: '/apps/accounts', label: 'Open your accounts' } : null;
+    case 'connected-tools':
+      return realm.kind === 'person' || !realm.kind ? { href: '/apps/tools', label: 'Open tools' } : null;
+    case 'connected-assistants':
+      return realm.kind === 'person' || !realm.kind ? { href: '/apps/assistants', label: 'Open assistants' } : null;
+    case 'connected-readers':
+      return realm.kind === 'person' || !realm.kind ? { href: '/apps/readers', label: 'Open who can read your records' } : null;
+    case 'security':
+      // Spec 422 — the person's Security section: about the signed-in person, never an organization.
+      return realm.kind === 'person' || !realm.kind ? { href: '/security', label: 'Open security' } : null;
+    case 'security-sign-in':
+      return realm.kind === 'person' || !realm.kind ? { href: '/security/sign-in', label: 'Open sign-in' } : null;
     case 'build':
       // Spec 398 §9 — a WORKSPACE's surface: the build runs are the organization's records.
       return org ? { href: `/org/${org}/build`, label: 'Open build' } : null;

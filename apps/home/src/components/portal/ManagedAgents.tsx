@@ -32,6 +32,7 @@ import { ConnectedHosts } from './ConnectedHosts';
 import { agentClassOf, orgKindWordOf, creatableKinds, type CreatableKind } from '../../lib/agent-class';
 import { BasisLine } from './BasisLine';
 
+import { Loading } from '../shared/Loading';
 const ERC20_BALANCE_ABI = [
   { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'a', type: 'address' }], outputs: [{ type: 'uint256' }] },
 ] as const;
@@ -589,7 +590,7 @@ export function OrganizationsManager({
   return (
     <div className="dash-section">
       {!loaded ? (
-        <p className="manage-card-blurb">Loading…</p>
+        <Loading />
       ) : (
         <>
         <Filter />
@@ -732,7 +733,7 @@ export function TreasuriesRollup({ token, person, via }: { token: string | null;
   return (
     <div className="dash-section">
       {!loaded ? (
-        <p className="manage-card-blurb">Loading…</p>
+        <Loading />
       ) : (
         <>
           <div className="ui-section-head"><h2>Personal<span className="ui-count">{personal.length}</span></h2></div>

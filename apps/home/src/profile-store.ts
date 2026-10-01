@@ -165,7 +165,7 @@ async function postProfile(path: 'get' | 'set', principal: Address, data?: Impac
 // whitelist-gated by design (unlike the org viewer, which lists everything through the stewardship
 // delegation's record scope). Showing every vault record would need a server `record.list` op.
 // `skills.data` — the person's CAPABILITY RECORD (capability claim credentials); record-type key is legacy.
-export const PERSON_CAPABILITY_RECORDS = ['impact-profile', 'skills.data', 'home.manifest', 'control-events.data'] as const;
+export const PERSON_CAPABILITY_RECORDS = ['impact-profile', 'skills.data', 'home.manifest', 'control-events.data', 'security.credentials', 'security.channels'] as const;
 export type PersonRecordType = (typeof PERSON_CAPABILITY_RECORDS)[number];
 
 /** A record ref the person's vault list returns (spec 315 vault viewer). */
@@ -212,6 +212,24 @@ export async function readPersonRecord(principal: Address, recordType: string): 
   if (res.status === 409) throw new InteractionsNotEnabledError();
   if (!res.ok) throw new Error(`record ${recordType} read failed: ${String(body.error ?? res.status)}`);
   return body.record ?? null;
+}
+
+/** Write one of the person's OWN Home-managed records (self-gated `record.put`; the runtime whitelists the record
+ *  types it accepts — `PERSON_CAPABILITY_RECORDS` mirrors that list). Same fail-closed surface as the reads. */
+export async function writePersonRecord(principal: Address, recordType: PersonRecordType, record: unknown): Promise<void> {
+  await ensureCsrfToken();
+  const session = homeBearer();
+  if (!session) throw new Error(`record ${recordType} write failed: no home session`);
+  const res = await fetch(`/a2a/interactions/${principal.toLowerCase()}/record.put`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ session, recordType, record }),
+  });
+  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (body.error === 'vault_key_unauthorized') throw new VaultKeyUnauthorizedError();
+  if (res.status === 409) throw new InteractionsNotEnabledError();
+  if (!res.ok) throw new Error(`record ${recordType} write failed: ${String(body.error ?? res.status)}`);
 }
 
 /** Read the member's encrypted community profile from their vault. Returns an empty profile if the

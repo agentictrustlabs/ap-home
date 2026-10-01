@@ -218,7 +218,7 @@ function McpConnectorsCard({ result }: ResultAppProps) {
   const r = result as { connectors?: Array<{ id: string; name: string; server: string | null; tools: Array<{ name: string; kind: string }> }> } | null;
   if (!r?.connectors) return null;
   return rows(<>
-    <div className="ask-app__head">MCP servers · {r.connectors.length}</div>
+    <div className="ask-app__head">Tool servers · {r.connectors.length}</div>
     {r.connectors.length === 0 && <Meta>None attached.</Meta>}
     {r.connectors.map((c) => line(<span>{c.name}{c.server ? <Meta> · {c.server}</Meta> : null}</span>, c.tools.map((t) => `${t.name} [${t.kind}]`).join(', ')))}
   </>);
@@ -292,7 +292,32 @@ function ReviewCard({ requirement, capability, args }: ReviewAppProps) {
   return rows(<KeyValue rows={[['Act', capability], ...a.map(([k, v]) => [k, String(v)] as [ReactNode, ReactNode]), ['Under', `a mandate for ${requirement.actions.join(', ')}${requirement.locations?.length ? ` at ${requirement.locations.length} place${requirement.locations.length === 1 ? '' : 's'}` : ''}`]]} />);
 }
 
+// ── Security (spec 422 §9.1) ──
+function CredentialsCard({ result }: ResultAppProps) {
+  const r = result as { items?: Array<{ grade: string; kind: string; label: string; detail: string; state: string }>; unlabelled?: { passkeys: number; custodians: number } } | null;
+  if (!r?.items) return null;
+  const signs = r.items.filter((i) => i.grade === 'custody-grade');
+  const opens = r.items.filter((i) => i.grade === 'login-grade');
+  const extra = (r.unlabelled?.passkeys ?? 0) + (r.unlabelled?.custodians ?? 0);
+  return rows(<>
+    <div className="ask-app__head">Signs for you</div>
+    {signs.length === 0 && extra === 0 && <Meta>Nothing signs for this home.</Meta>}
+    {signs.map((i) => line(<>{i.label} {i.state !== 'active' && <Chip>{i.state}</Chip>}</>, i.detail))}
+    {extra > 0 && <Meta>{extra} on chain with no label in your Home.</Meta>}
+    <div className="ask-app__head" style={{ marginTop: 6 }}>Opens this home</div>
+    {opens.length === 0 && <Meta>No email or phone linked.</Meta>}
+    {opens.map((i) => line(i.label, i.detail))}
+  </>);
+}
+function PostureCard({ result }: ResultAppProps) {
+  const r = result as { rung?: string; counts?: { custodians: number; passkeys: number }; kinds?: string[]; channels?: number } | null;
+  if (!r?.rung) return null;
+  const words: Record<string, string> = { 'just-you': 'Just you', backups: 'You and your backups', trustees: 'You, your backups and your trustees' };
+  return rows(<KeyValue rows={[['Protection', words[r.rung] ?? r.rung], ['Signs for you', `${(r.counts?.passkeys ?? 0) + (r.counts?.custodians ?? 0)} credential${(r.counts?.passkeys ?? 0) + (r.counts?.custodians ?? 0) === 1 ? '' : 's'}${r.kinds?.length ? ` (${r.kinds.join(', ')})` : ''}`], ['Opens this home', `${r.channels ?? 0} channel${r.channels === 1 ? '' : 's'}`]]} />);
+}
+
 export const RESULT_APPS: Record<string, (p: ResultAppProps) => ReactNode> = {
+  CredentialsCard, PostureCard,
   CalendarEventsCard, CalendarEventCard, MailThreadsCard, MailThreadCard, MailDraftCard, MailSentCard, DriveFilesCard, DriveFileCard, MemoryFactsCard, RoutinesCard, RoutineCard, PaymentReceiptCard, WebPageCard, WebSearchCard, BuildArtifactView, BuildRunsCard, RepositoriesCard, McpToolCard, McpConnectorsCard, LibraryFilesCard, LibraryFileCard, BuildReviewCard, BuildPromotionCard,
 };
 export const REVIEW_APPS: Record<string, (p: ReviewAppProps) => ReactNode> = {

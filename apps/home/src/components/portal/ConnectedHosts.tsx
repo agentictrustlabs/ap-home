@@ -10,6 +10,7 @@ import { namehash } from '@agenticprimitives/agent-naming';
 import { CONTRACTS, CHAIN } from '../../lib/chain';
 import { useRegisteredName } from '../../lib/reverse-name';
 
+import { Loading } from '../shared/Loading';
 const NAME_RESOLVER_ABI = [
   { type: 'function', name: 'getString', stateMutability: 'view', inputs: [{ name: 'subject', type: 'bytes32' }, { name: 'predicate', type: 'bytes32' }], outputs: [{ type: 'string' }] },
 ] as const;
@@ -120,7 +121,7 @@ function A2aSkills({ endpoint }: { endpoint: string }) {
   return (
     <div style={drawer}>
       <b>Offerings — what this agent advertises</b>
-      {!skills && !err && <span style={{ ...muted }}> · loading…</span>}
+      {!skills && !err && <Loading compact label="loading…" style={{ display: 'inline-flex', padding: 0 }} />}
       {err && <span style={{ color: 'var(--color-danger)' }}> · couldn’t reach the card ({err})</span>}
       {skills && skills.length > 0 && (
         <div style={{ display: 'flex', gap: '.3rem', flexWrap: 'wrap', marginTop: '.35rem' }}>

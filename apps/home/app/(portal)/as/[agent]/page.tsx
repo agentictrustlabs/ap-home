@@ -18,6 +18,7 @@ import { Section, Card, Empty, Meta } from '../../../../src/ui';
 import { nameLabel } from '../../../../src/lib/domain';
 import { agentClassOf } from '../../../../src/lib/agent-class';
 
+import { Loading } from '../../../../src/components/shared/Loading';
 const lc = (s: string) => s.toLowerCase();
 
 export default function PersonaWorkspacePage({ params }: { params: Promise<{ agent: string }> }) {
@@ -39,7 +40,7 @@ export default function PersonaWorkspacePage({ params }: { params: Promise<{ age
       description={who ? <>another name of yours · custodied by the same credential as {you} · never the one your home opens as</> : undefined}
     >
       {!loaded ? (
-        <Meta>Loading…</Meta>
+        <Loading />
       ) : !who ? (
         <Empty>You don&apos;t have another name at this address. Pick one from the switcher.</Empty>
       ) : (

@@ -46,7 +46,7 @@ function passkeyOfferHost(homeName: string | null | undefined): boolean {
   return !home || home === label;
 }
 
-export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
+export function EmailAuthCard({ onLinked }: { /** Called with the verified address/number once it is LINKED to this home (spec 422 §3.3 records it as a channel). */ onLinked?: (value: string) => void }) {
   const { session, openSession } = useSession();
   const [step, setStep] = useState<'email' | 'code' | 'existing-home' | 'passkey-offer'>('email');
   const [email, setEmail] = useState('');
@@ -84,7 +84,7 @@ export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
   /** Open the session + seed the verified email (the shared tail of every issued path). */
   const finishSignIn = async (token: string) => {
     const p = await openSession(token, 'email', false);
-    onLinked?.();
+    onLinked?.(email.trim().toLowerCase());
     // Metadata-tiers doctrine: the VERIFIED email is tier-1 PII — seed the private vault profile
     // (fill-only-empty, best-effort; the member edits/removes it on /profile anytime).
     const addr = p?.agent?.split(':').pop();
@@ -150,8 +150,9 @@ export function EmailAuthCard({ onLinked }: { onLinked?: () => void }) {
       const d = (await r.json().catch(() => ({}))) as { status?: string; token?: string; custody?: boolean; error?: string };
       if (!r.ok) throw new Error(d.error ?? 'verification failed');
       if (d.status === 'linked') {
-        setStep('email'); setEmail(''); setOtp(''); setNote('Email added as a sign-in method.');
-        onLinked?.();
+        const linked = email.trim().toLowerCase();
+        setStep('email'); setEmail(''); setOtp(''); setNote('Email added — it opens this home and is where we tell you about changes.');
+        onLinked?.(linked);
       } else if (d.status === 'issued' && d.token) {
         if (d.custody) {
           // Email-bootstrap: this email owns a KMS-custodied home. Secure it on-chain FIRST (demo-a2a

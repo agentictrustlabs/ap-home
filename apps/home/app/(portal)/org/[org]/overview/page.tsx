@@ -22,6 +22,7 @@ import { Section, Card, Empty, Meta } from '../../../../../src/ui';
 import { nameLabel } from '../../../../../src/lib/domain';
 import { agentClassOf, orgKindWordOf } from '../../../../../src/lib/agent-class';
 
+import { Loading } from '../../../../../src/components/shared/Loading';
 const lc = (s: string) => s.toLowerCase();
 
 export default function OrgOverviewPage({ params }: { params: Promise<{ org: string }> }) {
@@ -39,7 +40,7 @@ export default function OrgOverviewPage({ params }: { params: Promise<{ org: str
   return (
     <SectionShell title={title} description={orgAgent ? <>{orgKindWordOf(orgAgent.kind)} · {orgAgent.name || 'unnamed'} · you steward it</> : undefined}>
       {!loaded ? (
-        <Meta>Loading…</Meta>
+        <Loading />
       ) : !orgAgent ? (
         <Empty>You don&apos;t steward an organization at this address. Pick one from the workspace switcher.</Empty>
       ) : (

@@ -66,7 +66,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
   // A selection belongs to the screen it was made on: leaving the screen clears it (spec 361 I6).
   useEffect(() => { setAskSelection(null); }, [pathname]);
   const active = parseWorkspacePath(pathname ?? '/');
-  const { session, agentAddress, agentName } = useSession();
+  const { session, agentAddress, agentName, personName } = useSession();
   // 'any' (spec 342): the shell must name and route the workspace the URL points at, whatever the
   // org's lifecycle status — a deactivated org is hidden from lists, not made unreachable.
   const { agents } = useManagedAgents(session?.token ?? null, 'any');
@@ -95,6 +95,9 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
   const panes = {
     stewardship: paneGroups('stewardship', active, rel),
     settings: buildSettingsPane(active, rel, hasName),
+    // spec 422 — the person's Security pane, the same from every workspace (it is about her, not the agent).
+    security: paneGroups('security'),
+    connected: paneGroups('connected'),
   };
   const tabs = bottomNav(groups);
   // spec 342 — the workspace of a deactivated or deleted org still opens (a hidden row is a view
@@ -124,7 +127,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
       <PortalTopbar brandName={whitelabel.brand.name} {...(canAsk ? { askOpen, onToggleAsk: () => openAsk(!askOpen) } : {})} menuOpen={menuOpen} onMenuOpenChange={(open) => { setMenuOpen(open); if (open) setAskOpen(false); }} />
       <HuddleDock nameOf={nameOfAgent} />
       <div className="portal-body">
-        <PortalSidebar groups={groups} panes={panes} workspaceName={workspaceName} />
+        <PortalSidebar groups={groups} panes={panes} workspaceName={workspaceName} personName={personName ?? (agentName ? nameLabel(agentName) : null)} />
         <main className="portal-main">
           {orgStatus !== 'active' && active.kind === 'org' && (
             <div
