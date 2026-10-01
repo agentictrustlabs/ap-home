@@ -1794,6 +1794,14 @@ a.ui-row:hover, .ui-row--link:hover { background: var(--color-surface-raised); }
 .ui-h2 { font-size: var(--fs-lg); font-weight: 700; color: var(--color-text-primary); margin: 0 0 var(--sp-1); letter-spacing: -.01em; }
 /* prose or a form inside a panel keeps the panel's inset */
 .ui-panel-body { padding: var(--sp-3) var(--sp-4) var(--sp-4); }
+/* …and so does ANYTHING placed directly in a panel that is not a list, an empty state or a skeleton — a note, a
+   key-value block, an unknown read, a paragraph, a row of buttons. Seen 2026-10-01 on every Security panel: text
+   railed to the card's left edge because only `.ui-list` and `.ui-panel-body` knew the inset. The rule is here so
+   no page has to remember it. */
+.ui-panel > :not(.ui-panel-head):not(.ui-list):not(.ui-panel-body):not(.ui-empty):not(.ui-skel-rows) { margin-left: var(--sp-4); margin-right: var(--sp-4); }
+.ui-panel > .ui-kv, .ui-panel > .ui-note, .ui-panel > .ui-meta, .ui-panel > p { margin-top: var(--sp-3); margin-bottom: var(--sp-3); }
+.ui-panel > .ui-unknown, .ui-panel > .ui-error { margin-top: var(--sp-3); margin-bottom: var(--sp-3); }
+.ui-panel > .ui-list + .ui-panel-body { padding-top: var(--sp-3); }
 .ui-panel > .ui-empty, .ui-panel > .ui-skel-rows { border: 0; border-radius: 0; box-shadow: none; }
 .ui-panel + .ui-panel { margin-top: var(--sp-4); }
 /* empty: a calm fact on a sunken ground, an icon, one line, at most one action — never a dashed box */
