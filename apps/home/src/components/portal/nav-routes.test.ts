@@ -13,7 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildNav, buildSettingsPane, buildUserMenu } from './nav';
+import { buildNav, buildSettingsPane, buildUserMenu, securityPane } from './nav';
 import { whitelabel } from '../../whitelabel/config';
 
 const PORTAL = join(process.cwd(), 'app', '(portal)');
@@ -100,6 +100,11 @@ describe('every nav item resolves to a real route', () => {
       expect(resolves(card.href)).toBe(true);
       expect(resolves(`${card.href}/card-abc123`)).toBe(true);
     }
+  });
+
+  it('the Security pane (spec 422) — every row resolves, and its pages have no children that need the pane held open', () => {
+    const dead = securityPane().flatMap((g) => g.items).filter((i) => !resolves(i.href)).map((i) => `${i.label} → ${i.href}`);
+    expect(dead).toEqual([]);
   });
 
   it('the user menu', () => {

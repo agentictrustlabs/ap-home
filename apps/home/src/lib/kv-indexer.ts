@@ -22,7 +22,26 @@ const rotationKey = (iss: string, sub: string): string => `rotation:${iss}#${sub
 /** `ap:DefaultPersonChoice` — which of the people this credential custodies its home opens as. */
 const defaultPersonKey = (kind: string, id: string): string => `default-person:${kind}:${id}`;
 
-async function readLinks(kv: KvLike, key: string): Promise<EvidenceLink[]> {
+/** Spec 422 §3.3 — a facet is UNLINKED by appending a tombstone, never by deleting (SEC-009 stays append-only):
+ *  `{ agent, assurance:'unverified', ref:'tombstone:<ref>' }`. A tombstone removes every EARLIER link of that agent
+ *  under the key; a link appended AFTER it (re-linking the same address) counts again. */
+const TOMBSTONE_PREFIX = 'tombstone:';
+export const isTombstone = (l: EvidenceLink): boolean => l.ref.startsWith(TOMBSTONE_PREFIX);
+
+/** The links that are LIVE after tombstones are applied, in append order. Pure; exported for the test. */
+export function liveLinks(all: EvidenceLink[]): EvidenceLink[] {
+  const out: EvidenceLink[] = [];
+  for (const l of all) {
+    if (isTombstone(l)) {
+      for (let i = out.length - 1; i >= 0; i--) if (out[i]!.agent === l.agent) out.splice(i, 1);
+      continue;
+    }
+    out.push(l);
+  }
+  return out;
+}
+
+async function readRawLinks(kv: KvLike, key: string): Promise<EvidenceLink[]> {
   const raw = await kv.get(key);
   if (!raw) return []; // empty is terminal (ADR-0013) — no fallback
   // SEC-009: facets are stored as an APPEND-ONLY array so historic enrollments are
@@ -36,15 +55,29 @@ async function readLinks(kv: KvLike, key: string): Promise<EvidenceLink[]> {
   }
 }
 
+/** The live links under a key (tombstones applied). Every reader goes through here; the raw array stays the audit. */
+async function readLinks(kv: KvLike, key: string): Promise<EvidenceLink[]> {
+  return liveLinks(await readRawLinks(kv, key));
+}
+
 /** SEC-009: append-only facet writer. De-dupes by (agent, assurance, ref) — a second
  *  enrollment with identical evidence is idempotent; a new triple appends. Replaces
  *  the prior `kv.put` overwrite (which silently bridged agents on credKey collision). */
 async function appendLink(kv: KvLike, key: string, link: EvidenceLink): Promise<void> {
-  const existing = await readLinks(kv, key);
-  if (existing.some((e) => e.agent === link.agent && e.assurance === link.assurance && e.ref === link.ref)) {
+  const existing = await readRawLinks(kv, key);
+  // De-dupe against the LIVE set: a link that was tombstoned may be appended again (re-linking is real).
+  if (liveLinks(existing).some((e) => e.agent === link.agent && e.assurance === link.assurance && e.ref === link.ref)) {
     return; // already present — no-op
   }
   await kv.put(key, JSON.stringify([...existing, link]));
+}
+
+/** Append a tombstone for `agent` under `key` — only when a live link of that agent exists (idempotent). */
+async function tombstoneLink(kv: KvLike, key: string, agent: CanonicalAgentId, ref: string): Promise<boolean> {
+  const existing = await readRawLinks(kv, key);
+  if (!liveLinks(existing).some((e) => e.agent === agent)) return false;
+  await kv.put(key, JSON.stringify([...existing, { agent, assurance: 'unverified', ref: `${TOMBSTONE_PREFIX}${ref}` } satisfies EvidenceLink]));
+  return true;
 }
 
 /** A persistent IndexerPort over KV. Proposes only; the directory confirms on-chain. */
@@ -103,6 +136,11 @@ export async function recordEmailFacet(kv: KvLike, email: string, agent: Canonic
   await appendLink(kv, emailFacetKey(await emailHash(email)), { agent, assurance: 'asserted', ref: 'kv-email' });
 }
 
+/** Spec 422 §3.3 — unlink an email from THIS agent (a tombstone; the facet history stays). `false` = it was not linked. */
+export async function unlinkEmailFacet(kv: KvLike, email: string, agent: CanonicalAgentId): Promise<boolean> {
+  return tombstoneLink(kv, emailFacetKey(await emailHash(email)), agent, 'kv-email');
+}
+
 /** Hash-keyed variants for the invite magic-link path — the redeeming server holds only the invited
  *  email's SHA-256 (blast-zone: the raw address was never stored), so it reads/writes the facet by hash.
  *  Identical to `readEmailFacet`/`recordEmailFacet` otherwise (the hash IS the facet key). */
@@ -139,6 +177,11 @@ export async function readPhoneFacet(kv: KvLike, phoneE164: string): Promise<Can
 /** Record a phone->agent login facet (login-grade). SEC-009: append-only. */
 export async function recordPhoneFacet(kv: KvLike, phoneE164: string, agent: CanonicalAgentId): Promise<void> {
   await appendLink(kv, phoneFacetKey(await phoneHash(phoneE164)), { agent, assurance: 'asserted', ref: 'kv-phone' });
+}
+
+/** Spec 422 §3.3 — unlink a phone from THIS agent (a tombstone; the facet history stays). `false` = it was not linked. */
+export async function unlinkPhoneFacet(kv: KvLike, phoneE164: string, agent: CanonicalAgentId): Promise<boolean> {
+  return tombstoneLink(kv, phoneFacetKey(await phoneHash(phoneE164)), agent, 'kv-phone');
 }
 
 /** Read the per-(iss,sub) Google × KMS custody rotation (spec 235 §5b). Default 0 — the first

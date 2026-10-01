@@ -46,6 +46,7 @@ import { remembered, forget } from './run-memo.js';
 import { DISCOVERY_FIND_TOOL, ENGAGEMENT_INVOKE_TOOL, DISCOVERY_INSPECT_TOOL, DISCOVERY_FIND_CAPABILITY, ENGAGEMENT_INVOKE_CAPABILITY, discoveryFindInvoker } from './enterprise-tools.js';
 import { WAITING_LIST_TOOL } from './waiting-on-me.js';
 import { INVITATIONS_RECEIVED_TOOL, MEMBERSHIP_ACCEPT_TOOL, MEMBERSHIP_ACCEPT_CAPABILITY, membershipAcceptInvoker } from './invitations-received.js';
+import { SECURITY_READ_TOOLS, SECURITY_ACT_TOOLS, isSecurityTool, securityInvoker, securityChainDeps } from './security-tools.js';
 import { INBOX_LIST_TOOL, inboxListInvoker } from './inbox-list.js';
 import { WORK_SEARCH_TOOL, workSearchInvoker } from './work-search-tool.js';
 import { GITHUB_TOOLS, GITHUB_ACTS, githubInvoker } from './connectors/github-tools.js';
@@ -407,6 +408,9 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   ...MEMORY_TOOLS.filter((t) => MEMORY_ACTS.has(t.id)),
   // Spec 421 — accepting an invitation: the invitee's own act; her Home runs the Join ceremony, her records say it happened.
   MEMBERSHIP_ACCEPT_TOOL,
+  // Spec 422 §9.1 — the Security section's acts: add a credential (a ceremony her Home runs under her credential), rename one,
+  // link / unlink an email or phone. Self-acting: her own account, her own vault; her Home runs the ceremony, her records say.
+  ...SECURITY_ACT_TOOLS,
   // Spec 412 W5 — her Library, written by her agent: save / visibility / publish, self-acting (her own records).
   ...LIBRARY_TOOLS.filter((t) => LIBRARY_ACTS.has(t.id)),
   // Spec 402 W3 — a routine of the person's own, from a sentence: declare / remove, self-acting (her own clock).
@@ -2279,6 +2283,8 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (toolId === HOUSEHOLD_RECORD_CAPABILITY) return householdRecordInvoker(deps, person)(toolId, args, ctx);
     if (toolId === STANDING_INSTRUCTION_CAPABILITY) return standingInstructionInvoker(deps, person, addressee)(toolId, args, ctx);
     if (ROUTINE_TOOLS.some((t) => t.id === toolId)) return routineInvoker({ ...(deps.listTriggers ? { listTriggers: deps.listTriggers } : {}), ...(deps.declareTrigger ? { declareTrigger: deps.declareTrigger } : {}), ...(deps.removeTrigger ? { removeTrigger: deps.removeTrigger } : {}), ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}) }, person, addressee, (i) => { throw new InputRequired(i); }, (c, ref) => dataFor((c as { supplied?: unknown }).supplied as never, ref))(toolId, args, ctx);
+    // Spec 422 §9.1 — the Security section, asked: reads from the chain + her vault; acts as ceremonies her Home runs.
+    if (isSecurityTool(toolId)) return securityInvoker({ ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...securityChainDeps(env as never) }, person)(toolId, args, ctx);
     if (toolId === MEMBERSHIP_ACCEPT_CAPABILITY) return membershipAcceptInvoker({ ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, person)(toolId, args, ctx);
     if (MEMORY_TOOLS.some((t) => t.id === toolId)) return memoryFactsInvoker(deps, person, (ctx as { runRef?: string }).runRef ?? (ctx.idempotencyKey ? ctx.idempotencyKey.split(':').slice(0, -1).join(':') : undefined), addressee)(toolId, args, ctx);
     // Spec 387 W2 — the addressee's own catalog: bound by ITS name's records at call time (cached by the reader),
@@ -4458,6 +4464,7 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'resolution.invitation.request': ['signature'],   // the mandate — asking is an act of yours too
   'treasury.primary.declare': ['signature'],        // the mandate — a public statement of yours
   'access.grant.revoke': ['signature'],             // the mandate — taking authority back is an act too
+  'person.credential.add': ['signature'],          // spec 422 — a credential that signs for her is added under one that already does; a surface that cannot sign cannot add
   'organization.membership.accept': ['signature'], // spec 421 — joining SIGNS her membership (at her Home, the Join ceremony); a surface that cannot sign cannot join
 };
 
@@ -5407,6 +5414,8 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(playbook?.tools?.[INVITATIONS_RECEIVED_TOOL.id] ? [mergeContractTool(INVITATIONS_RECEIVED_TOOL, playbook.tools[INVITATIONS_RECEIVED_TOOL.id])] : []),
     // Gap register B6a — what is waiting on her (the bell, asked): parked runs + invitations, from her own records.
     ...(playbook?.tools?.[WAITING_LIST_TOOL.id] ? [mergeContractTool(WAITING_LIST_TOOL, playbook.tools[WAITING_LIST_TOOL.id])] : []),
+    // Spec 422 §9.1 — what signs for her / how protected her home is (the person-steward playbook offers them).
+    ...SECURITY_READ_TOOLS.flatMap((t) => (playbook?.tools?.[t.id] ? [mergeContractTool(t, playbook.tools[t.id])] : [])),
     // Spec 400 W1 — the agent's own inbox since a cursor (the runtime-member playbook offers it; a person's may too).
     ...(playbook?.tools?.[INBOX_LIST_TOOL.id] ? [mergeContractTool(INBOX_LIST_TOOL, playbook.tools[INBOX_LIST_TOOL.id])] : []),
     ...(playbook?.tools?.[WORK_SEARCH_TOOL.id] ? [mergeContractTool(WORK_SEARCH_TOOL, playbook.tools[WORK_SEARCH_TOOL.id])] : []),

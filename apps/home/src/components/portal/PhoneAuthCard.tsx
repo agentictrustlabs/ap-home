@@ -28,7 +28,7 @@ function formatPhoneInput(raw: string): string {
 
 const RESEND_SECONDS = 30;
 
-export function PhoneAuthCard({ onLinked }: { onLinked?: () => void }) {
+export function PhoneAuthCard({ onLinked }: { /** Called with the verified address/number once it is LINKED to this home (spec 422 §3.3 records it as a channel). */ onLinked?: (value: string) => void }) {
   const { session, openSession } = useSession();
   const [step, setStep] = useState<'phone' | 'code'>('phone');
   const [phone, setPhone] = useState('');
@@ -77,8 +77,9 @@ export function PhoneAuthCard({ onLinked }: { onLinked?: () => void }) {
       const d = (await r.json().catch(() => ({}))) as { status?: string; token?: string; custody?: boolean; error?: string };
       if (!r.ok) throw new Error(d.error ?? 'verification failed');
       if (d.status === 'linked') {
-        setStep('phone'); setPhone(''); setOtp(''); setNote('Phone added as a sign-in / recovery method.');
-        onLinked?.();
+        const linked = phone;
+        setStep('phone'); setPhone(''); setOtp(''); setNote('Phone added — it opens this home and is where we tell you about changes.');
+        onLinked?.(linked);
       } else if (d.status === 'issued' && d.token) {
         if (d.custody) {
           // Phone-bootstrap: this phone owns a KMS-custodied home. Secure it on-chain (no gesture), then
@@ -89,7 +90,7 @@ export function PhoneAuthCard({ onLinked }: { onLinked?: () => void }) {
           void activateVault(res.home.address, 'phone', { token: d.token }); // spec 278 — best-effort vault
         }
         const p = await openSession(d.token, 'phone', false);
-        onLinked?.();
+        onLinked?.(phone);
         // Metadata-tiers doctrine: the VERIFIED phone number is tier-1 PII — seed the private vault
         // profile (fill-only-empty, best-effort; the member edits/removes it on /profile anytime).
         const addr = p?.agent?.split(':').pop();
