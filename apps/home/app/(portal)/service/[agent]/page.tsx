@@ -13,6 +13,7 @@ import { AddressChip } from '../../../../src/components/shared/AddressChip';
 import { agentClassOf, serviceRoleOf, authorityLineage } from '../../../../src/lib/agent-class';
 import { nameLabel } from '../../../../src/lib/domain';
 
+import { Loading } from '../../../../src/components/shared/Loading';
 const lc = (s: string) => s.toLowerCase();
 
 export default function ServiceWorkspacePage({ params }: { params: Promise<{ agent: string }> }) {
@@ -36,7 +37,7 @@ export default function ServiceWorkspacePage({ params }: { params: Promise<{ age
   return (
     <SectionShell title={svc?.name ? nameLabel(svc.name) : 'Service'}>
       {!loaded ? (
-        <p className="manage-card-blurb">Loading…</p>
+        <Loading />
       ) : !svc ? (
         <p className="manage-card-blurb">
           You don&apos;t manage a service agent at this address. Pick one from the workspace switcher.

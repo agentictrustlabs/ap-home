@@ -23,6 +23,7 @@ import { registryArchetypesFor, type RegistryArchetype } from '../../lib/skills-
 import { KIND_TO_TYPE_SLUG } from '../../lib/archetype-catalog';
 import { BusyButton } from '../shared/BusyButton';
 
+import { Loading } from '../shared/Loading';
 /** The record shape written to the agent's vault (`archetype.assignment`). */
 interface ArchetypeAssignmentRecord {
   type: 'ap.archetype-assignment.v1';
@@ -235,7 +236,7 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
       {error && <p role="alert" className="manage-card-blurb" style={{ color: 'var(--color-danger, #b3261e)' }}>{error}</p>}
 
       {!loaded ? (
-        <p className="manage-card-blurb">Loading…</p>
+        <Loading />
       ) : (
         <>
           <div style={{ marginBottom: '.8rem', fontSize: '.85rem' }}>

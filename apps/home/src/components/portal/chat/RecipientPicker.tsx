@@ -17,6 +17,7 @@ import { readContactsThroughHarness } from '../../../home/contacts-harness';
 import { AvatarUpload } from './AvatarUpload';
 import { personAvatarKey } from '../../../lib/avatar-store';
 import { useAvatar } from './use-avatar';
+import { Loading } from '../../shared/Loading';
 import {
   fetchRoster,
   filterRecipients,
@@ -237,7 +238,7 @@ export function RecipientPicker({
           <div className="chat-picker__section">
             {paneTitle}{rows && !loading ? ` · ${listed.length}` : ''}
           </div>
-          {loading && <div className="chat-compose-result chat-compose-result--note">Loading…</div>}
+          {loading && <Loading compact />}
           {note && <div className="chat-compose-result chat-compose-result--note" style={{ color: 'var(--color-danger)' }}>{note}</div>}
           {!loading && !note && rows && listed.length === 0 && (
             <div className="chat-compose-result chat-compose-result--note">

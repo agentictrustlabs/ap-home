@@ -13,6 +13,7 @@ import { ErrorLine } from './ui';
 import { TONE_COLOR } from './parts';
 import { notifyCardChanged } from './useStudio';
 
+import { Loading } from '../shared/Loading';
 export function CardList({
   delegation, cards, projections, loaded, error, basePath, onReload,
 }: {
@@ -44,7 +45,7 @@ export function CardList({
     }
   }, [delegation, basePath, router]);
 
-  if (!loaded) return <p className="manage-card-blurb">Loading…</p>;
+  if (!loaded) return <Loading />;
 
   const listedTotal = 2; // the places this Home can list an agent (name record, directory)
   const listedCount = projections.filter((p) => p.instance.lastPublication).length;

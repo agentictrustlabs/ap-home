@@ -18,6 +18,7 @@ import { ListingFlow } from '../../studio/ListingFlow';
 import { SectionShell } from '../SectionShell';
 import { mutedText } from '../theme';
 
+import { Loading } from '../../shared/Loading';
 export function AgentRegistryListing({ kind, agent }: { kind: StudioScopeKind; agent: string }) {
   const ctx = useStudioAgent(kind, agent);
   const { cards, loaded: cardsLoaded } = useCards(ctx.delegation);
@@ -30,7 +31,7 @@ export function AgentRegistryListing({ kind, agent }: { kind: StudioScopeKind; a
   const canSign = useCanSignFor(ctx.sa);
 
   if (!ctx.session) return <SectionShell title="Registry"><p className="ui-meta">Not signed in.</p></SectionShell>;
-  if (!ctx.loaded || !cardsLoaded) return <SectionShell title="Registry"><p className="ui-meta">Loading…</p></SectionShell>;
+  if (!ctx.loaded || !cardsLoaded) return <SectionShell title="Registry"><Loading /></SectionShell>;
   if (!ctx.delegation || !ctx.sa) {
     return (
       <SectionShell title="Registry">
@@ -58,7 +59,7 @@ export function AgentRegistryListing({ kind, agent }: { kind: StudioScopeKind; a
           listing becomes available here.
         </p>
       ) : !state.loaded ? (
-        <p style={{ ...mutedText, fontSize: '.85rem' }}>Loading the card…</p>
+        <Loading compact label="Loading the card…" />
       ) : !state.detail ? (
         <p style={{ ...mutedText, fontSize: '.85rem' }}>Couldn&rsquo;t read the card just now.</p>
       ) : (
