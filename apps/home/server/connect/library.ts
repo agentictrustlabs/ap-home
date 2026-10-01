@@ -168,6 +168,10 @@ interface LibraryArtifact {
   grants: ArtifactGrant[];
   /** Published skill releases (Phase 5) — a signed, append-only, version-monotonic release chain. */
   releases?: SkillReleaseRecord[];
+  /** The REGISTRY EDITION this copy was written from (owner, 2026-10-01): a skills registry publishes editions of a
+   *  skill (v9 of 9) while this vault counts its own saves (`version`, v5) — two records of two acts, shown side by
+   *  side rather than made equal. Set by the writer that copied the edition in; a re-save that says nothing keeps it. */
+  registry?: { id: string; version: string; at?: number };
   /** Spec 412 — `apcnt:accessPolicy` (C-box `apcnt:Public | Private`): the owner's declaration that ANYONE may read
    *  this entry, served by the owner's agent on the public lane. Absent = private. On a FOLDER it cascades to
    *  everything under it (containment, like a folder grant); the nearest declared ancestor decides. Public ≠ shared
@@ -792,6 +796,15 @@ async function sha256Hex(b64: string): Promise<string> {
   return `0x${[...new Uint8Array(digest)].map((x) => x.toString(16).padStart(2, '0')).join('')}`;
 }
 
+/** A well-formed registry edition, or null: a short id and a version word; the time optional. */
+function registryOf(v: unknown): { id: string; version: string; at?: number } | null {
+  const r = v as { id?: unknown; version?: unknown; at?: unknown } | undefined;
+  if (!r || typeof r !== 'object' || typeof r.id !== 'string' || !r.id.trim() || r.id.length > 200) return null;
+  const version = typeof r.version === 'number' ? String(r.version) : typeof r.version === 'string' ? r.version.trim().slice(0, 40) : '';
+  if (!version) return null;
+  return { id: r.id.trim(), version, ...(typeof r.at === 'number' ? { at: r.at } : {}) };
+}
+
 /** Build + upsert one artifact into the list (mutating), preserving grants on update. Bumps the version
  *  and (for blobs) recomputes the content commitment. Returns the entry, or null when invalid (no name). */
 async function upsert(list: LibraryArtifact[], a: Partial<LibraryArtifact> | undefined): Promise<LibraryArtifact | null> {
@@ -816,6 +829,8 @@ async function upsert(list: LibraryArtifact[], a: Partial<LibraryArtifact> | und
     grants: [],
     // Spec 412 — a declared policy on the save is kept; a re-save that says nothing keeps what the entry had.
     ...(ACCESS_POLICIES.has(String(a.accessPolicy)) ? { accessPolicy: a.accessPolicy as 'public' | 'private' } : idx >= 0 && list[idx]!.accessPolicy ? { accessPolicy: list[idx]!.accessPolicy } : {}),
+    // The registry edition this save carries, when the writer named one; otherwise what the entry had.
+    ...(registryOf(a.registry) ? { registry: registryOf(a.registry)! } : idx >= 0 && list[idx]!.registry ? { registry: list[idx]!.registry } : {}),
   };
   if (idx >= 0) { entry.grants = list[idx]!.grants; entry.releases = list[idx]!.releases; list[idx] = entry; } else list.push(entry);
   return entry;
