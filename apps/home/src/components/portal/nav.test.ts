@@ -13,7 +13,7 @@
  * the fix is to delete the exception, not to loosen the test.
  */
 import { describe, it, expect } from 'vitest';
-import { buildNav, buildSettingsPane, buildUserMenu, paneGroups, stewardshipPane, securityPane, connectedPane, type NavGroup } from './nav';
+import { buildNav, buildSettingsPane, buildUserMenu, paneGroups, stewardshipPane, securityPane, connectedPane, developerPane, type NavGroup } from './nav';
 import { whitelabel } from '../../whitelabel/config';
 
 const ORG = '0xe26157068af46629691e2ab19726bf61476e6b6c';
@@ -288,12 +288,10 @@ describe('the "You steward" pane', () => {
     expect(items).not.toContain('agents');
   });
 
-  it('does not list app workspaces — you join those, you do not steward them', () => {
+  it('does not list app workspaces — you join those, you do not steward them; nor does the user menu (owner, 2026-10-01)', () => {
     expect(items).not.toContain('workspaces');
-    // Moved, not dropped: it sits with the apps it belongs to, under the name it actually means.
     const menu = buildUserMenu(whitelabel).map((i) => i.id);
-    expect(menu).toContain('workspaces');
-    expect(menu.indexOf('workspaces')).toBeGreaterThan(menu.indexOf('apps'));
+    expect(menu).not.toContain('workspaces');
   });
 
   it('keeps the surfaces that are about something other than a kind; what is YOURS is in the person nav', () => {
@@ -356,5 +354,22 @@ describe('spec 422 §8 — the Connected pane', () => {
     expect(items.map((i) => i.id)).toEqual(['con-overview', 'con-accounts', 'con-tools', 'con-signed-in', 'con-assistants', 'con-readers']);
     for (const i of items) { expect(i.href.startsWith('/apps')).toBe(true); expect(i.status).toBe('live'); expect(i.disabledReason).toBeUndefined(); }
     expect(connectedPane().map((g) => g.heading)).toEqual(['Connected', 'Your agent can use', 'Who may act as you']);
+  });
+});
+
+describe('owner 2026-10-01 — the Developer tools pane', () => {
+  it('"Your apps" became Developer tools and opens its pane; the pane takes no workspace scope', () => {
+    const row = buildUserMenu(whitelabel).find((i) => i.id === 'developer');
+    expect(row?.label).toBe('Developer tools');
+    expect(row?.opensPane).toBe('developer');
+    expect(row?.href).toBe('/developer');
+    expect(buildUserMenu(whitelabel).map((i) => i.label)).not.toContain('Your apps');
+    expect(paneGroups('developer', ORG_SCOPE, 'member')).toEqual(developerPane());
+  });
+  it('one page per thing: apps, the five evals surfaces, the kit — every resident row under /developer, none a placeholder', () => {
+    const items = developerPane().flatMap((g) => g.items);
+    expect(items.map((i) => i.id)).toEqual(['dev-overview', 'dev-apps', 'dev-evals-skills', 'dev-evals-acts', 'dev-evals-techniques', 'dev-evals-gates', 'dev-evals-run', 'dev-registry']);
+    for (const i of items) { expect(i.status).toBe('live'); expect(i.disabledReason).toBeUndefined(); if (!i.crossLink) expect(i.href.startsWith('/developer')).toBe(true); }
+    expect(developerPane().map((g) => g.heading)).toEqual(['Developer tools', 'Evals', 'The kit']);
   });
 });

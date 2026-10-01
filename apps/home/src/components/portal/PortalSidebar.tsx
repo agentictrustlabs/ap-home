@@ -70,10 +70,10 @@ export function PortalSidebar({
     (panes?.[id] ?? []).some((g) => g.items.some((i) => !i.crossLink && isWithin(i.href))),
   );
   const openGroups = openPane ? panes![openPane]! : null;
-  const PANE_TITLE: Record<PaneId, string> = { stewardship: 'Stewardship', settings: 'Settings', security: 'Security', connected: 'Connected' };
+  const PANE_TITLE: Record<PaneId, string> = { stewardship: 'Stewardship', settings: 'Settings', security: 'Security', connected: 'Connected', developer: 'Developer tools' };
   // The Security pane is about the signed-in PERSON, whatever workspace is open: its header names her, not the
   // workspace, because the keys and the vault behind it are hers (348 §2.3's disclosure rule, applied to her).
-  const paneName = openPane === 'security' || openPane === 'connected' ? (personName ?? 'You') : workspaceName;
+  const paneName = openPane === 'security' || openPane === 'connected' || openPane === 'developer' ? (personName ?? 'You') : workspaceName;
 
   return (
     <div className="portal-sidebar-wrap">

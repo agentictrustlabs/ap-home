@@ -31,7 +31,7 @@ export interface NavItem {
 
 /** The sections that open a pane. Both are lists too long to hang under a heading in a 240px column,
  *  and both are somewhere you go to work on a set of things rather than a single page. */
-export type PaneId = 'stewardship' | 'settings' | 'security' | 'connected';
+export type PaneId = 'stewardship' | 'settings' | 'security' | 'connected' | 'developer';
 export interface NavGroup {
   id?: string;
   heading?: string;
@@ -277,7 +277,33 @@ export function paneGroups(
 ): SettingsGroup[] {
   if (pane === 'security') return securityPane();
   if (pane === 'connected') return connectedPane();
+  if (pane === 'developer') return developerPane();
   return pane === 'stewardship' ? stewardshipPane(active) : buildSettingsPane(active, orgRelationship);
+}
+
+/**
+ * Owner (2026-10-01): DEVELOPER TOOLS is a pane — "totally redo that page to break it up with left menu and support
+ * evals and other stuff". About the signed-in person (what she builds and measures), so it takes no scope. One page
+ * per thing: the apps she registers; the five evals surfaces that were tabs on one page (each a page now, so a link
+ * names one of them); the kit's entrances. A row goes only to a page that exists (nav-routes.test).
+ */
+export function developerPane(): SettingsGroup[] {
+  return [
+    { heading: 'Developer tools', items: [
+      { id: 'dev-overview', label: 'Overview', href: '/developer', Icon: CodeIcon, status: 'live' },
+      { id: 'dev-apps', label: 'Your apps', href: '/developer/apps', Icon: GlobeIcon, status: 'live' },
+    ] },
+    { heading: 'Evals', items: [
+      { id: 'dev-evals-skills', label: 'Skill selection', href: '/developer/evals', Icon: DatabaseIcon, status: 'live' },
+      { id: 'dev-evals-acts', label: 'Acts', href: '/developer/evals/acts', Icon: BotIcon, status: 'live' },
+      { id: 'dev-evals-techniques', label: 'Techniques', href: '/developer/evals/techniques', Icon: DatabaseIcon, status: 'live' },
+      { id: 'dev-evals-gates', label: 'Live gates', href: '/developer/evals/gates', Icon: ShieldIcon, status: 'live' },
+      { id: 'dev-evals-run', label: 'Run a comparison', href: '/developer/evals/run', Icon: CodeIcon, status: 'live' },
+    ] },
+    { heading: 'The kit', items: [
+      { id: 'dev-registry', label: 'Component registry', href: '/registry', Icon: LinkIcon, status: 'live', crossLink: true },
+    ] },
+  ];
 }
 
 /**
@@ -440,10 +466,10 @@ export function buildUserMenu(wl: WhiteLabelConfig): NavItem[] {
   if (wl.services.connectedApps) {
     // spec 422 §8 — Connected opens a pane: one page per plain question (accounts · tools · apps · assistants · readers).
     items.push({ id: 'apps', label: 'Connected', href: '/apps', Icon: LinkIcon, status: 'live', opensPane: 'connected' });
-    // The membership organizations an app supports for invite / register. NOT `.workspace` agents, and
-    // not something you steward — it sits with the apps it belongs to, under the name it actually means.
-    items.push({ id: 'workspaces', label: 'App workspaces', href: '/workspaces', Icon: GlobeIcon, status: 'live' });
-    items.push({ id: 'developer', label: 'Your apps', href: '/developer', Icon: CodeIcon, status: 'live' });
+    // Owner (2026-10-01): "App workspaces" left the menu — the page stays reachable from the apps that name it, but
+    // it is not a question a person opens the menu to ask. "Your apps" became DEVELOPER TOOLS, a pane: the apps you
+    // register, the evals (skill selection, acts, techniques, live gates, a comparison you run), and the kit.
+    items.push({ id: 'developer', label: 'Developer tools', href: '/developer', Icon: CodeIcon, status: 'live', opensPane: 'developer' });
   }
   // P1.4 — everything the person stewards, one screen; budgets set here.
   items.push({ id: 'estate', label: 'Estate', href: '/estate', Icon: BuildingIcon, status: 'live' });

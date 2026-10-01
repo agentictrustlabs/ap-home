@@ -98,6 +98,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
     // spec 422 — the person's Security pane, the same from every workspace (it is about her, not the agent).
     security: paneGroups('security'),
     connected: paneGroups('connected'),
+    developer: paneGroups('developer'),
   };
   const tabs = bottomNav(groups);
   // spec 342 — the workspace of a deactivated or deleted org still opens (a hidden row is a view
