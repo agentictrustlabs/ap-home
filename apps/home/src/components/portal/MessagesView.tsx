@@ -36,6 +36,7 @@ import { AttentionGroups } from './AttentionBar';
 import { assembleAttention, needsYouCount } from '../../home/attention';
 import { useTodayReads } from '../../home/use-today-inputs';
 import { useMyWork } from './work/useWork';
+import { parseMessageDeepLink } from '../../lib/message-deep-link';
 import type { AttentionInputs } from '../../home/attention';
 
 
@@ -257,10 +258,17 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
     [dmByKey, openDm],
   );
 
-  // Deep link `?to=<name|0x…>` — a relying app or profile page asking to message someone.
+  // Deep link `?to=<name|0x…>[&text=<words>]` — a relying app or profile page asking to message someone.
+  // `text` PROPOSES the first message; it is seeded into the box once and never sent on its own. WHY: the
+  // skills app's "Propose a skill for this domain" hands the request to the domain organization this way,
+  // because the Home is where the person's messaging authority is approved (Home is for ceremonies) — the
+  // app may suggest the words, only the person's Send under their own wire approval delivers them.
+  const deepLinkText = useRef<string | null>(null);
   useEffect(() => {
-    const to = new URLSearchParams(window.location.search).get('to')?.trim().toLowerCase();
-    if (!to) return;
+    const link = parseMessageDeepLink(window.location.search);
+    if (!link) return;
+    const { to } = link;
+    deepLinkText.current = link.text;
     let cancelled = false;
     // An address is the identity. A relying app already resolved the name; do not search again.
     if (ADDR_RE.test(to)) {
@@ -278,6 +286,15 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [setWireRequired]);
+  // Seed the deep link's `text` once the view lands (so we know whether a DM already exists): into the
+  // existing DM's reply box, or into the new-message box. An unsent draft already there wins — never overwritten.
+  useEffect(() => {
+    const text = deepLinkText.current;
+    if (!text || !view || !composing || !toRecipient) return;
+    deepLinkText.current = null;
+    if (dmByKey.has(directMessageKey([toRecipient.address]))) setDraft((d) => (d.trim() ? d : text));
+    else setComposeBody((b) => (b.trim() ? b : text));
+  }, [view, composing, toRecipient, dmByKey]);
   // Once the view lands, a deep-linked recipient we already talk to opens their DM instead.
   useEffect(() => {
     if (!composing || !toRecipient) return;
