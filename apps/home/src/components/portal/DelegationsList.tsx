@@ -16,6 +16,7 @@ import {
   type ReceivedDelegation,
 } from '../../connect-client';
 import type { DelegationWire } from '../../lib/delegation';
+import { SkeletonRows } from '../../ui';
 import { orgStatusOf, STATUS_LABEL } from '../../lib/org-lifecycle';
 import { emitControlEvent, toConnectedAppGrant } from '../../home/control-plane';
 import { signHashFor, type Via } from '../../home/onboarding';
@@ -131,7 +132,12 @@ export function DelegationsList({ token, heading = true }: { token: string | nul
       </p>
 
       {!loaded ? (
-        <p className="manage-card-blurb">Loading…</p>
+        // STRUCTURE FIRST (owner, 2026-10-02): keep the sub-headings and skeleton rows so the page looks complete
+        // while the grants/received reads are out, rather than one "Loading…" line.
+        <>
+          <h3 style={{ fontSize: '.9rem', margin: '.4rem 0' }}>Granted by you</h3>
+          <SkeletonRows rows={2} lead />
+        </>
       ) : (
         <>
           <h3 style={{ fontSize: '.9rem', margin: '.4rem 0' }}>Granted by you</h3>

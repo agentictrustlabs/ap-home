@@ -10,6 +10,7 @@ import { actWireWords } from '../../lib/act-as-me';
 import { revokeGrantedDelegation } from '../../connect-client';
 import { signHashFor, type Via } from '../../home/onboarding';
 import { BusyButton } from '../shared/BusyButton';
+import { SkeletonRows } from '../../ui';
 
 const fmt = (ms: number | null) => (ms ? new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : 'no expiry');
 const WHAT: Record<string, { can: string; cannot: string }> = {
@@ -39,7 +40,14 @@ export function AppGrantsPanel({ showEmpty = false }: { showEmpty?: boolean } = 
       </div>
     );
   }
-  if (grants === null) return null;
+  // STRUCTURE FIRST (owner, 2026-10-02): the heading + a skeleton while the grants read is out, not a blank nothing —
+  // so the panel looks complete and does not read as "no assistants" before the read has even answered.
+  if (grants === null) return (
+    <div style={{ marginTop: '1.5rem' }} data-testid="app-grants">
+      <h3 style={{ margin: '0 0 .3rem', fontSize: '.95rem' }}>Connected assistants</h3>
+      <SkeletonRows rows={2} />
+    </div>
+  );
   if (grants.length === 0) {
     if (!showEmpty) return null;
     return (

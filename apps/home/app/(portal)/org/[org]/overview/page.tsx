@@ -18,11 +18,10 @@ import {
 } from '../../../../../src/components/portal/ManagedAgents';
 import { AddressChip } from '../../../../../src/components/shared/AddressChip';
 import { BuildingIcon } from '../../../../../src/components/shared/Icons';
-import { Section, Card, Empty, Meta } from '../../../../../src/ui';
+import { Section, Card, Empty, Meta, SkeletonRows } from '../../../../../src/ui';
 import { nameLabel } from '../../../../../src/lib/domain';
 import { agentClassOf, orgKindWordOf } from '../../../../../src/lib/agent-class';
 
-import { Loading } from '../../../../../src/components/shared/Loading';
 const lc = (s: string) => s.toLowerCase();
 
 export default function OrgOverviewPage({ params }: { params: Promise<{ org: string }> }) {
@@ -37,17 +36,22 @@ export default function OrgOverviewPage({ params }: { params: Promise<{ org: str
   const orgAgent = agents.find((a) => agentClassOf(a.kind) === 'org' && lc(a.agent) === lc(org));
   const title = orgAgent?.name ? nameLabel(orgAgent.name) : 'Organization';
 
+  // STRUCTURE FIRST (owner, 2026-10-02 — the Today treatment): Today is scoped to the org SA in the URL and reads
+  // nothing from the managed-agent tree, so it renders and self-skeletons immediately. Only the identity card and the
+  // "not yours" message depend on the tree read — skeleton the card while it is out, and show the empty note only
+  // once the tree has LOADED and confirmed you do not steward this address (never a spinner over the whole page).
   return (
     <SectionShell title={title} description={orgAgent ? <>{orgKindWordOf(orgAgent.kind)} · {orgAgent.name || 'unnamed'} · you steward it</> : undefined}>
-      {!loaded ? (
-        <Loading />
-      ) : !orgAgent ? (
+      {loaded && !orgAgent ? (
         <Empty>You don&apos;t steward an organization at this address. Pick one from the workspace switcher.</Empty>
       ) : (
         <>
         <TodayView scope={{ kind: 'org', org }} />
         {/* Overview SHOWS this organization; it does not operate on it — each fact says where it is changed. */}
-        <Section title="This organization" aside={<ExplorerLink address={orgAgent.agent} label="explorer ↗" />}>
+        <Section title="This organization" aside={orgAgent ? <ExplorerLink address={orgAgent.agent} label="explorer ↗" /> : undefined}>
+          {!loaded || !orgAgent ? (
+            <Card><SkeletonRows rows={1} lead /></Card>
+          ) : (
           <Card>
             <div style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'center', flexWrap: 'wrap' }}>
               <span className="ui-card-title" style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}><BuildingIcon size={16} /> {orgAgent.name || 'Unnamed organization'}</span>
@@ -56,6 +60,7 @@ export default function OrgOverviewPage({ params }: { params: Promise<{ org: str
             </div>
             {!orgAgent.name && <p className="ui-meta" style={{ margin: 'var(--sp-2) 0 0' }}>It has no public name yet, so nothing can look it up. <a href={`/org/${org}/naming`}>Give it one under Naming →</a></p>}
           </Card>
+          )}
         </Section>
         </>
       )}
