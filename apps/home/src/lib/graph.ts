@@ -24,6 +24,7 @@ export type EdgeKind =
   | 'entitlement' // SA → SA — a granted credential/capability
   | 'stewardship' // SA → SA — an agent manages/stewards another (person → org)
   | 'membership' // person SA → org SA — belongs to (authority-only, spec 318)
+  | 'governance' // org SA → workspace SA — the organization that governs a workspace (aporg:governedBy)
   | 'assertion' // org/person SA → org SA — trust attestation / corroboration
   | 'payment'; // treasury SA → payee SA — payment mandate
 
@@ -33,6 +34,7 @@ export const EDGE_CLASS: Record<EdgeKind, EdgeClass> = {
   entitlement: 'authority',
   stewardship: 'authority',
   membership: 'authority',
+  governance: 'authority',
   assertion: 'authority',
   payment: 'authority',
 };
@@ -114,7 +116,37 @@ export interface LivePerson {
     /** The agent this one hangs under in the tree (the person for a person-treasury or an org; the org for an
      *  org-treasury or a team) — what decides which ring it sits on when the graph centres on an agent. */
     parent?: string;
+    /** A WORKSPACE'S GOVERNOR (the owner's rule, 2026-10-02; `org.ttl` §2): the organization agent that governs
+     *  this workspace (`aporg:governedBy`). A `.workspace` agent is a service that coordinates and holds no
+     *  members, so where both the workspace and its governor are drawn the graph joins them with a `governs` edge
+     *  and says "governed by …" under the workspace's name. Lowercase address; absent for everything else. */
+    governedBy?: string;
   }[];
+}
+
+/**
+ * ORGANIZATION → WORKSPACE, drawn where both are already on the view (the owner's rule, 2026-10-02). A governed
+ * workspace is a service the organization governs (`aporg:governedBy`); the centred graph puts the workspace in
+ * the governor's ring, so when the view holds both this adds the distinct `governs` edge between them and notes
+ * the governor under the workspace's name. Additive: a workspace with no governor, or a view that holds only one
+ * of the pair, is drawn exactly as before. Mutates the passed nodes' sub-labels in place (fresh arrays from the
+ * builder) and returns the edges with the governance edges appended.
+ */
+function appendGovernance(g: GView, p: LivePerson): GView {
+  const lc = (a: string) => a.toLowerCase();
+  const nameOf = (a: string) => p.agents.find((o) => lc(o.agent) === lc(a))?.name || shortAddr(a);
+  const nodeByAddr = new Map(g.nodes.map((n) => [lc(n.id), n] as const));
+  const edges = [...g.edges];
+  for (const o of p.agents) {
+    if (!o.governedBy) continue;
+    const wsNode = nodeByAddr.get(lc(o.agent));
+    const govNode = nodeByAddr.get(lc(o.governedBy));
+    if (!wsNode || !govNode) continue;
+    if (!wsNode.data.sub.includes('governed by')) wsNode.data.sub = `${wsNode.data.sub} · governed by ${nameOf(o.governedBy)}`;
+    const id = `e:governs-${wsNode.id}`;
+    if (!edges.some((e) => e.id === id)) edges.push({ id, source: govNode.id, target: wsNode.id, kind: 'governance', label: 'governs', weight: 0.8 });
+  }
+  return { nodes: g.nodes, edges };
 }
 
 /** The id of the overflow node that stands for the agents a ring does not show. */
@@ -201,17 +233,17 @@ export function buildAgentGraphLive(p: LivePerson, opts: { center: string; showA
   const custodian: CenteredItem = { id: CUSTODIAN_ID, kind: 'custodian', name: 'You', sub: 'passkey custodian', edge: { kind: 'control', label: 'holds keys', weight: 1, toCenter: true }, dim: !isPerson };
   if (isPerson) {
     const ring = p.agents.filter((o) => o.agent.toLowerCase() !== center && (!o.parent || o.parent.toLowerCase() === center)).map(ringItemOf).sort(byRole);
-    return buildCenteredGraph({ center: { id: personId, kind: 'person', name: p.name, sub: p.agentName }, above: [{ ...custodian, dim: false }], ring, showAll: opts.showAll, maxRing: opts.maxRing });
+    return appendGovernance(buildCenteredGraph({ center: { id: personId, kind: 'person', name: p.name, sub: p.agentName }, above: [{ ...custodian, dim: false }], ring, showAll: opts.showAll, maxRing: opts.maxRing }), p);
   }
   const rel = self?.relationship ?? 'steward';
   const personAbove: CenteredItem = rel === 'self'
     ? { id: personId, kind: 'person', name: p.name, sub: `${p.agentName} · another name of yours`, edge: { kind: 'control', label: 'same custodian', weight: 1, toCenter: true } }
     : { id: personId, kind: 'person', name: p.name, sub: p.agentName, edge: rel === 'member' ? { kind: 'membership', label: 'member of', weight: 0.5 } : { kind: 'stewardship', label: 'stewards', weight: 0.8 } };
   const ring = p.agents.filter((o) => o.agent.toLowerCase() !== center && o.parent?.toLowerCase() === center).map(ringItemOf).sort(byRole);
-  return buildCenteredGraph({
+  return appendGovernance(buildCenteredGraph({
     center: { id: self?.agent ?? opts.center, kind: self?.cls ?? 'org', name: self?.name || shortAddr(opts.center), sub: self ? (rel === 'member' ? `${wordOf(self)} · member` : wordOf(self)) : 'agent' },
     above: [custodian, personAbove], ring, showAll: opts.showAll, maxRing: opts.maxRing,
-  });
+  }), p);
 }
 
 // ── Edge styling (one entry per EdgeKind — the legend derives from this) ──────
@@ -233,6 +265,7 @@ export const EDGE_KIND_STYLE: Record<EdgeKind, EdgeStyle> = {
   entitlement: { color: '#0891b2', dashed: false, label: 'Entitlement', cls: 'authority' },
   stewardship: { color: '#d97706', dashed: false, label: 'Stewardship', cls: 'authority' },
   membership: { color: '#a8a29e', dashed: false, label: 'Membership', cls: 'authority' },
+  governance: { color: '#4f7a5a', dashed: false, label: 'Governs (organization → workspace)', cls: 'authority' },
   assertion: { color: '#10b981', dashed: false, label: 'Trust assertion', cls: 'authority' },
   payment: { color: '#f59e0b', dashed: true, label: 'Payment mandate', cls: 'authority' },
 };

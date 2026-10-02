@@ -135,7 +135,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       readGrantDelegation?: unknown;
     };
     if (clientId && link.requestedBy !== clientId) continue; // relying-app view is scoped
-    const l = link as typeof link & { kind?: string; parent?: string; relationship?: string; status?: string };
+    const l = link as typeof link & { kind?: string; parent?: string; relationship?: string; status?: string; governor?: string };
     // Name self-heal: a link written while the chain read lagged stored the ADDRESS as orgName (the
     // member's dropdowns then show 0x…). The link is a PROJECTION — reconcile it from the naming
     // service on read (ADR-0013-safe: reconciling a projection from its source, not a fallback).
@@ -185,6 +185,10 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       // spec 318: 'member' = authority-only (channels + switcher visibility, NO custody). Legacy
       // records default to 'steward' — the pre-membership control semantics, preserved.
       relationship: l.relationship ?? 'steward',
+      // The ORGANIZATION THAT GOVERNS a workspace (2026-10-02, `aporg:governedBy`), when the link was written with
+      // one: a governed workspace hangs under it (`parent`) and its membership lives there. Omitted for a legacy
+      // workspace and for every organization; absent means "the agent itself", as the runtime reads it.
+      ...(l.governor ? { governor: l.governor } : {}),
       // spec 342 — the org's lifecycle status, PROJECTED from its `org.lifecycle` vault record (the
       // authority for it is the org's vault, not this KV). Omitted when never set: absent means
       // active, so a link that predates the feature reads as active without a migration.
@@ -260,6 +264,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // because a person could legitimately steward a person agent that is NOT them — a dependent's, an
     // estate's — and a tree that cannot tell those apart cannot say which agent is the person reading it.
     relationship?: 'steward' | 'member' | 'self';
+    /** The ORGANIZATION that governs this workspace (2026-10-02, `aporg:governedBy`) — written by workspace-create,
+     *  by a governed join, and by the migration. A projection of the pair of vault records; never authority. */
+    governor?: string;
     /** Org-context display name the member shares (shown on the steward's roster / delegated-idx). */
     displayName?: string;
     /**
@@ -446,6 +453,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // spec 275 — agent kind + parent (defaults keep legacy org links person-parented).
     kind: pick(body?.kind, existing.kind, 'org'),
     parent: pick(body?.parent, existing.parent, person).toLowerCase(),
+    ...(/^0x[0-9a-fA-F]{40}$/.test(String(body?.governor ?? '')) ? { governor: String(body!.governor).toLowerCase() } : {}),
     relationship,
     ...(displayName ? { displayName } : {}),
     // spec 342 — set only when the caller decided something; otherwise whatever `...existing` held
@@ -462,7 +470,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   }
   // Member seeds (external custodian path): also project onto the org's inbound roster so the
   // steward's Members panel / org-directory can find them without a naming-service claim.
-  if (relationship === 'member' && link.membershipDelegation) {
+  // NOT FOR A GOVERNED WORKSPACE (2026-10-02): a workspace agent has no roster — its members are the governing
+  // organization's, projected onto `delegated-idx:<governor>` by the join's own membership write. The wire on
+  // this link is the member's READ of the workspace's records and stays on the link; it is not a roster row.
+  if (relationship === 'member' && link.membershipDelegation && !(link as { governor?: string }).governor) {
     const dKey = `delegated-idx:${org}`;
     const dIdx = JSON.parse((await env.AUTH_CODES.get(dKey)) ?? '[]') as Array<{ orgAgent: string; orgName: string; displayName?: string; delegation: unknown }>;
     if (!dIdx.some((x) => x.orgAgent.toLowerCase() === person)) {

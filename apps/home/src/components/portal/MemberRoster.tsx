@@ -4,10 +4,20 @@
 // carry, and what they may read here — searchable, filterable by kind; a row opens the member's contract (spec 398
 // §4.5: type · sponsor · responsibility · permissions · active work) in a drawer, and hands them to the Ask as its
 // selection (361 I6). Managing membership is Settings → Membership; this is the participation view.
+//
+// A WORKSPACE'S MEMBERS ARE ITS GOVERNOR'S (the owner's rule, 2026-10-02; `org.ttl` §2): a `.workspace` agent is a
+// service that coordinates a workspace and holds no members; who belongs is the organization that governs it. So
+// for a workspace this page resolves the governor — the viewer's own link to the workspace names it as `parent`,
+// and a steward with the workspace's wire can read the `workspace.governor` pointer out of its vault — and reads
+// the roster THERE, saying so in one line. A workspace with no governor (paired before the rule) reads its own.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSession } from '../../context/session';
 import { SectionShell } from './SectionShell';
-import { fetchRoster, type RosterMember } from '../../lib/recipient-directory';
+import { fetchWorkspaceRoster, workspaceGovernorOf, type RosterMember } from '../../lib/recipient-directory';
+import { useManagedAgents } from './ManagedAgents';
+import { vaultReadWithDelegation } from '../../lib/vault-client';
+import type { DelegationWire } from '../../lib/delegation';
+import { nameLabel } from '../../lib/domain';
 import { AddressChip } from '../shared/AddressChip';
 import { setAskSelection } from '../../home/ask-selection';
 import { rosterRows, type RosterRow } from '../../home/roster-contract';
@@ -23,18 +33,37 @@ const typeWords = (t: string) => (t === 'unknown' ? 'member' : t.replace(/[_-]+/
 
 export function MemberRoster({ agent, title = 'Members' }: { agent: string; title?: string }) {
   const { session, agentAddress } = useSession();
+  // 'any': the roster of a deactivated org still opens from its URL (spec 342), and the governor of a workspace
+  // must be findable whatever its lifecycle row says.
+  const { agents: managed, loaded: managedLoaded } = useManagedAgents(session?.token ?? null, 'any');
   const [members, setMembers] = useState<RosterMember[] | null>(null);
+  /** Whose records the roster is: the governing organization (address + name), or null for an organization's own
+   *  page and for a legacy workspace reading its own. */
+  const [heldBy, setHeldBy] = useState<{ agent: string; name: string } | null>(null);
   const [executors, setExecutors] = useState<Map<string, number>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [kind, setKind] = useState<KindFilter>('all');
 
+  const row = managed.find((a) => a.agent.toLowerCase() === agent.toLowerCase());
   const load = useCallback(async () => {
-    if (!session?.token) return;
+    if (!session?.token || !managedLoaded) return;
     setError(null);
     try {
-      setMembers(await fetchRoster(session.token, agent));
+      // THE GOVERNOR, cheapest door first: the viewer's own link (`parent`, no request); then, for a steward holding
+      // the workspace's wire, the pointer in the workspace's vault — the vault read this app already makes for an
+      // agent the person stewards. A member without the wire and without a parent link reads the workspace itself.
+      let governor = workspaceGovernorOf(row, managed);
+      if (!governor && row?.kind === 'workspace' && row.stewardshipDelegation) {
+        const ptr = await vaultReadWithDelegation<{ governedBy?: string }>(row.stewardshipDelegation as DelegationWire, 'workspace.governor').catch(() => null);
+        const g = String(ptr?.governedBy ?? '').toLowerCase();
+        governor = /^0x[0-9a-f]{40}$/.test(g) && g !== agent.toLowerCase() ? g : null;
+      }
+      const roster = await fetchWorkspaceRoster(session.token, agent, row?.kind === 'workspace' ? governor : null);
+      setMembers(roster.members);
+      const gov = roster.governedBy ? managed.find((a) => a.agent.toLowerCase() === roster.governedBy) : undefined;
+      setHeldBy(roster.governedBy ? { agent: roster.governedBy, name: gov?.name ? nameLabel(gov.name) : `${roster.governedBy.slice(0, 6)}…${roster.governedBy.slice(-4)}` } : null);
       const w = await fetchWorkList(session.token, agent).catch(() => null);
       const counts = new Map<string, number>();
       const me = (agentAddress ?? '').toLowerCase();
@@ -44,7 +73,7 @@ export function MemberRoster({ agent, title = 'Members' }: { agent: string; titl
       setError(e instanceof Error ? e.message : String(e));
       setMembers([]);
     }
-  }, [session?.token, agent, agentAddress]);
+  }, [session?.token, agent, agentAddress, managedLoaded, row, managed]);
   useEffect(() => { void load(); }, [load]);
 
   const rows = useMemo(() => (members ? rosterRows({ members, executors }) : []), [members, executors]);
@@ -66,6 +95,13 @@ export function MemberRoster({ agent, title = 'Members' }: { agent: string; titl
   return (
     <SectionShell title={title} description={<>The people and services in this workspace and how to reach them. Who belongs is decided under Settings → Membership.</>}>
       {error && <ErrorNote>{error}</ErrorNote>}
+      {heldBy && (
+        // The line that says WHOSE records these are: a workspace agent coordinates and holds no members; the
+        // organization governing it does. A link, because that is where membership is managed.
+        <p className="ui-note" data-testid="roster-held-by">
+          Membership is held by <a href={`/org/${heldBy.agent}/members`}>{heldBy.name}</a> (this workspace&apos;s organization).
+        </p>
+      )}
       <Stats>
         <Stat label="Members" value={rows.length} loading={members === null} hint="people and services admitted" />
         <Stat label="Services" value={agents} loading={members === null} hint="runtimes, coaches, treasuries" />

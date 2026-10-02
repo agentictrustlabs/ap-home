@@ -1546,7 +1546,18 @@ export async function demoCustodianFor(person: Address): Promise<Address | null>
  *  vault (MAM-D7). Custodied by the member's ROOT passkey (MAM-D2). Throws "name taken" rather
  *  than bumping a suffix (MAM-INV-2). */
 export async function createManagedAgent(
-  input: { kind: AgentKind; label?: string; parent: Address; person: Address; via: string },
+  input: {
+    kind: AgentKind; label?: string; parent: Address; person: Address; via: string;
+    /**
+     * WHO STEWARDS IT, when that is not the parent. The link's `parent` says whose the agent is (readable as
+     * `ap:charteredUnder`); the stewardship wire says who may act for it — and for a GOVERNED WORKSPACE those
+     * are two agents: the workspace hangs under the organization that governs it, while its custodian keeps
+     * stewarding it, because the organization has no session of its own and every steward gate
+     * (`verifyStewardship`, the field app's `act-as`) checks the wire against the PERSON. Defaults to the
+     * parent, which is every other kind: a treasury is stewarded by whoever it hangs under.
+     */
+    steward?: Address;
+  },
   sessionToken: string,
   onStep?: (s: string) => void,
 ): Promise<{ ok: true; result: CreateManagedAgentResult } | { ok: false; error: string }> {
@@ -1629,10 +1640,10 @@ export async function createManagedAgent(
     name = claim.name;
   }
 
-  // Stewardship grant child → parent so the parent SA can read/oversee this agent's vault
-  // (spec 246). The child is its own delegator, so it pre-approves the digest (0x03 sentinel,
-  // spec 253) INSIDE the deploy batch — no second prompt.
-  const stewardship = buildApprovedSiteDelegation(child, input.parent);
+  // Stewardship grant child → its steward (the parent, unless the caller split the two — see `steward`) so
+  // that SA can read/oversee this agent's vault (spec 246). The child is its own delegator, so it pre-approves
+  // the digest (0x03 sentinel, spec 253) INSIDE the deploy batch — no second prompt.
+  const stewardship = buildApprovedSiteDelegation(child, input.steward ?? input.parent);
   // spec 321 W0 credential mirror (same as createChildAgentForSite): also install the person's
   // cached KMS custodian so a phone/email session can steward this agent (never SA-as-custodian —
   // the contract forbids it; custody is credential-shaped).
@@ -1773,7 +1784,7 @@ async function resolveExactName(label: string, tld?: string): Promise<{ ok: true
 /** SOCIAL create (Google / YouVersion): the worker derives C_sub + deploys the child SA (named or
  *  nameless) + approves the stewardship grant in one sponsored userOp; we record the vault link. */
 async function createManagedAgentSocial(
-  input: { kind: AgentKind; label?: string; parent: Address; person: Address; via: string },
+  input: { kind: AgentKind; label?: string; parent: Address; person: Address; via: string; steward?: Address },
   sessionToken: string,
   onStep?: (s: string) => void,
 ): Promise<{ ok: true; result: CreateManagedAgentResult } | { ok: false; error: string }> {
@@ -1797,7 +1808,9 @@ async function createManagedAgentSocial(
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
-    body: JSON.stringify({ session: sessionToken, kind: input.kind, parent: input.parent, label, node, tld: typed?.tld, serviceRole: typed?.serviceRole }),
+    // The worker's `parent` is the STEWARDSHIP delegate (it pre-approves child → parent in the deploy batch and
+    // uses it for nothing else), so a split steward goes there; the tree's parent is written on the link below.
+    body: JSON.stringify({ session: sessionToken, kind: input.kind, parent: input.steward ?? input.parent, label, node, tld: typed?.tld, serviceRole: typed?.serviceRole }),
   });
   const b = (await res.json().catch(() => ({}))) as {
     ok?: boolean; agent?: Address; name?: string; stewardshipDelegation?: DelegationWire; custodyDescriptor?: unknown; error?: string; detail?: string;
