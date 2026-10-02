@@ -120,118 +120,98 @@ export interface LivePerson {
 /** The id of the overflow node that stands for the agents a ring does not show. */
 export const MORE_ID = 'more:ring';
 
+/** One agent drawn around (or above) the centre, with the edge that joins it. `toCenter` points the arrow at the
+ *  centre ("member of", "holds keys"); otherwise the centre points at it ("stewards", "holds"). */
+export interface CenteredItem {
+  id: string;
+  kind: GNodeKind;
+  name: string;
+  sub: string;
+  edge: { kind: EdgeKind; label: string; weight?: number; toCenter?: boolean };
+  dim?: boolean;
+}
+
+export interface CenteredInput {
+  center: { id: string; kind: GNodeKind; name: string; sub: string };
+  /** Who holds or stewards the centre: a small, faded chain drawn above it (custodian first). */
+  above: CenteredItem[];
+  /** The centre's own agents: its members, what it stewards, what it holds. */
+  ring: CenteredItem[];
+  showAll?: boolean;
+  maxRing?: number;
+}
+
 /**
  * THE GRAPH CENTRED ON ONE AGENT (owner, 2026-10-01: "center on the selected agent and graph out from there").
- *
- * The centre sits in the middle. Its own agents — the ones whose `parent` is the centre (for the person herself,
- * everything she holds directly) — ring it, stewards before members. Who HOLDS the centre is a small, faded chain
- * above it: the custodian, and for a persona or an organization the person agent between them, so a person with
- * forty organizations no longer fills the canvas when the question is one of her personas. A ring longer than
- * `maxRing` ends in a "+N more" node; clicking it shows them all.
+ * The centre in the middle; what it is made of around it; who holds it small and above. A ring longer than
+ * `maxRing` ends in a "+N more" door (`MORE_ID`); clicking it shows them all. Pure; the data is the caller's.
  */
-export function buildAgentGraphLive(p: LivePerson, opts: { center: string; showAll?: boolean; maxRing?: number }): GView {
-  const personId = p.personSA;
-  const center = opts.center.toLowerCase();
-  const isPerson = center === personId.toLowerCase();
-  const maxRing = Math.max(3, opts.maxRing ?? 12);
-  const self = p.agents.find((a) => a.agent.toLowerCase() === center) ?? null;
-  const word = (o: LivePerson['agents'][number]) => o.kindWord ?? (o.cls === 'service' ? 'service' : o.cls === 'person' ? 'person' : 'organization');
-
-  const nodes: GNode[] = [];
+export function buildCenteredGraph(i: CenteredInput): GView {
+  const maxRing = Math.max(3, i.maxRing ?? 12);
+  const nodes: GNode[] = [{ id: i.center.id, position: { x: 0, y: 0 }, data: { refId: i.center.id, kind: i.center.kind, name: i.center.name, sub: i.center.sub, focus: true } }];
   const edges: GEdge[] = [];
-  // The centre.
-  if (isPerson) nodes.push({ id: personId, position: { x: 0, y: 0 }, data: { refId: personId, kind: 'person', name: p.name, sub: p.agentName, focus: true } });
-  else nodes.push({ id: self?.agent ?? opts.center, position: { x: 0, y: 0 }, data: { refId: self?.agent ?? opts.center, kind: self?.cls ?? 'org', name: self?.name || shortAddr(opts.center), sub: self ? (self.relationship === 'member' ? `${word(self)} · member` : word(self)) : 'agent', focus: true } });
-  const centerId = nodes[0]!.id;
-
-  // Who holds the centre — small and above, never the subject.
-  if (isPerson) {
-    nodes.push({ id: CUSTODIAN_ID, position: { x: 0, y: -250 }, data: { refId: CUSTODIAN_ID, kind: 'custodian', name: 'You', sub: 'passkey custodian' } });
-    edges.push({ id: 'e:control-you', source: CUSTODIAN_ID, target: personId, kind: 'control', label: 'holds keys', weight: 1 });
-  } else {
-    nodes.push({ id: CUSTODIAN_ID, position: { x: -220, y: -270 }, data: { refId: CUSTODIAN_ID, kind: 'custodian', name: 'You', sub: 'passkey custodian', dim: true } });
-    nodes.push({ id: personId, position: { x: 220, y: -270 }, data: { refId: personId, kind: 'person', name: p.name, sub: p.agentName, dim: true } });
-    edges.push({ id: 'e:control-you', source: CUSTODIAN_ID, target: personId, kind: 'control', label: 'holds keys', weight: 1, dim: true });
-    const rel = self?.relationship ?? 'steward';
-    edges.push(rel === 'self'
-      ? { id: `e:self-${centerId}`, source: personId, target: centerId, kind: 'control', label: 'same custodian', weight: 1, dim: true }
-      : { id: `e:${rel === 'member' ? 'member' : 'stew'}-${centerId}`, source: personId, target: centerId, kind: rel === 'member' ? 'membership' : 'stewardship', label: rel === 'member' ? 'member of' : 'stewards', weight: rel === 'member' ? 0.5 : 0.8, dim: true });
-  }
-
-  // The ring: the centre's own agents.
-  const children = p.agents
-    .filter((o) => o.agent.toLowerCase() !== center && (isPerson ? (!o.parent || o.parent.toLowerCase() === center) : o.parent?.toLowerCase() === center))
-    .sort((a, b) => (a.relationship === 'member' ? 1 : 0) - (b.relationship === 'member' ? 1 : 0) || (a.name ?? a.agent).localeCompare(b.name ?? b.agent));
-  const overflow = !opts.showAll && children.length > maxRing;
-  const shown = overflow ? children.slice(0, maxRing - 1) : children;
+  const edgeOf = (it: CenteredItem, dim: boolean): GEdge => ({
+    id: `e:${it.edge.kind}-${it.id}`,
+    source: it.edge.toCenter ? it.id : i.center.id, target: it.edge.toCenter ? i.center.id : it.id,
+    kind: it.edge.kind, label: it.edge.label, weight: it.edge.weight ?? 0.8, ...(dim ? { dim: true } : {}),
+  });
+  // Above: spread across the top, chained left to right only by the edges the caller gave.
+  const ax = i.above.length <= 1 ? [0] : i.above.map((_, k) => Math.round(-220 + (440 * k) / (i.above.length - 1)));
+  i.above.forEach((it, k) => {
+    nodes.push({ id: it.id, position: { x: ax[k]!, y: -260 }, data: { refId: it.id, kind: it.kind, name: it.name, sub: it.sub, dim: it.dim !== false } });
+    edges.push(edgeOf(it, it.dim !== false));
+  });
+  // The ring, with the door.
+  const overflow = !i.showAll && i.ring.length > maxRing;
+  const shown = overflow ? i.ring.slice(0, maxRing - 1) : i.ring;
   const slots = shown.length + (overflow ? 1 : 0);
   const radius = Math.max(300, Math.round(slots * 34));
-  // Leave the top for the holders: slots sweep from 35° past the top, round to 325°.
-  const at = (i: number) => { const t = slots <= 1 ? Math.PI / 2 : ((35 + (290 * i) / (slots - 1)) * Math.PI) / 180 - Math.PI / 2 + Math.PI; return { x: Math.round(Math.cos(t) * radius), y: Math.round(Math.sin(t) * radius) }; };
-  shown.forEach((o, i) => {
-    const member = o.relationship === 'member';
-    nodes.push({ id: o.agent, position: at(i), data: { refId: o.agent, kind: o.cls, name: o.name || shortAddr(o.agent), sub: member ? `${word(o)} · member` : o.relationship === 'self' ? `${word(o)} · another name of yours` : word(o) } });
-    edges.push(o.relationship === 'self'
-      ? { id: `e:self-${o.agent}`, source: centerId, target: o.agent, kind: 'control', label: 'same custodian', weight: 1 }
-      : { id: `e:${member ? 'member' : 'stew'}-${o.agent}`, source: centerId, target: o.agent, kind: member ? 'membership' : 'stewardship', label: member ? 'member of' : 'stewards', weight: member ? 0.5 : 0.8 });
+  const at = (k: number) => { const t = slots <= 1 ? Math.PI / 2 : ((35 + (290 * k) / (slots - 1)) * Math.PI) / 180 - Math.PI / 2 + Math.PI; return { x: Math.round(Math.cos(t) * radius), y: Math.round(Math.sin(t) * radius) }; };
+  shown.forEach((it, k) => {
+    nodes.push({ id: it.id, position: at(k), data: { refId: it.id, kind: it.kind, name: it.name, sub: it.sub, ...(it.dim ? { dim: true } : {}) } });
+    edges.push(edgeOf(it, !!it.dim));
   });
   if (overflow) {
-    const rest = children.length - shown.length;
+    const rest = i.ring.length - shown.length;
     nodes.push({ id: MORE_ID, position: at(slots - 1), data: { refId: MORE_ID, kind: 'more', name: `+${rest} more`, sub: 'click to show them all' } });
-    edges.push({ id: 'e:more', source: centerId, target: MORE_ID, kind: 'stewardship', label: `${rest} not drawn`, weight: 0.3, dim: true });
+    edges.push({ id: 'e:more', source: i.center.id, target: MORE_ID, kind: 'stewardship', label: `${rest} not drawn`, weight: 0.3, dim: true });
   }
   return { nodes, edges };
 }
 
-export function buildPersonGraphLive(p: LivePerson, opts?: { focusAgent?: string }): GView {
+const wordOf = (o: LivePerson['agents'][number]) => o.kindWord ?? (o.cls === 'service' ? 'service' : o.cls === 'person' ? 'person' : 'organization');
+
+/** A tree row as a ring item: what the centre stewards, belongs to, or (a persona) is another name of. */
+export function ringItemOf(o: LivePerson['agents'][number]): CenteredItem {
+  const member = o.relationship === 'member';
+  if (o.relationship === 'self') return { id: o.agent, kind: o.cls, name: o.name || shortAddr(o.agent), sub: `${wordOf(o)} · another name of yours`, edge: { kind: 'control', label: 'same custodian', weight: 1 } };
+  return { id: o.agent, kind: o.cls, name: o.name || shortAddr(o.agent), sub: member ? `${wordOf(o)} · member` : wordOf(o), edge: member ? { kind: 'membership', label: 'member of', weight: 0.5, toCenter: true } : { kind: 'stewardship', label: 'stewards', weight: 0.8 } };
+}
+
+/** Stewards before members, then by name. */
+export const byRole = (a: CenteredItem, b: CenteredItem): number => (a.edge.kind === 'membership' ? 1 : 0) - (b.edge.kind === 'membership' ? 1 : 0) || a.name.localeCompare(b.name);
+
+/** The person's OWN view from her tree: the custodian above, every direct agent in the ring. Other centres are
+ *  composed by the surface from their own records (a roster, a persona's links) and handed to `buildCenteredGraph`. */
+export function buildAgentGraphLive(p: LivePerson, opts: { center: string; showAll?: boolean; maxRing?: number }): GView {
   const personId = p.personSA;
-  const focusAgent = opts?.focusAgent?.toLowerCase();
-  // The connected human custodian sits ABOVE the person SA they control — visually
-  // off the agent-to-agent plane where all the authority edges live.
-  const nodes: GNode[] = [
-    { id: CUSTODIAN_ID, position: { x: 70, y: 90 }, data: { refId: CUSTODIAN_ID, kind: 'custodian', name: 'You', sub: 'passkey custodian' } },
-    {
-      id: personId,
-      position: { x: 70, y: 360 },
-      data: { refId: personId, kind: 'person', name: p.name, sub: p.agentName, focus: !focusAgent },
-    },
-  ];
-  const ys = spread(p.agents.length, 360, 230);
-  p.agents.forEach((o, i) => {
-    const isFocus = !!focusAgent && o.agent.toLowerCase() === focusAgent;
-    const word = o.kindWord ?? (o.cls === 'service' ? 'service' : o.cls === 'person' ? 'person' : 'organization');
-    nodes.push({
-      id: o.agent,
-      position: { x: 430, y: ys[i]! },
-      data: {
-        refId: o.agent,
-        kind: o.cls,
-        name: o.name || shortAddr(o.agent),
-        sub: o.relationship === 'member' ? `${word} · member` : word,
-        focus: isFocus,
-        // On an agent-scoped view, siblings stay for context but fade back.
-        dim: !!focusAgent && !isFocus,
-      },
-    });
+  const center = opts.center.toLowerCase();
+  const isPerson = center === personId.toLowerCase();
+  const self = p.agents.find((a) => a.agent.toLowerCase() === center) ?? null;
+  const custodian: CenteredItem = { id: CUSTODIAN_ID, kind: 'custodian', name: 'You', sub: 'passkey custodian', edge: { kind: 'control', label: 'holds keys', weight: 1, toCenter: true }, dim: !isPerson };
+  if (isPerson) {
+    const ring = p.agents.filter((o) => o.agent.toLowerCase() !== center && (!o.parent || o.parent.toLowerCase() === center)).map(ringItemOf).sort(byRole);
+    return buildCenteredGraph({ center: { id: personId, kind: 'person', name: p.name, sub: p.agentName }, above: [{ ...custodian, dim: false }], ring, showAll: opts.showAll, maxRing: opts.maxRing });
+  }
+  const rel = self?.relationship ?? 'steward';
+  const personAbove: CenteredItem = rel === 'self'
+    ? { id: personId, kind: 'person', name: p.name, sub: `${p.agentName} · another name of yours`, edge: { kind: 'control', label: 'same custodian', weight: 1, toCenter: true } }
+    : { id: personId, kind: 'person', name: p.name, sub: p.agentName, edge: rel === 'member' ? { kind: 'membership', label: 'member of', weight: 0.5 } : { kind: 'stewardship', label: 'stewards', weight: 0.8 } };
+  const ring = p.agents.filter((o) => o.agent.toLowerCase() !== center && o.parent?.toLowerCase() === center).map(ringItemOf).sort(byRole);
+  return buildCenteredGraph({
+    center: { id: self?.agent ?? opts.center, kind: self?.cls ?? 'org', name: self?.name || shortAddr(opts.center), sub: self ? (rel === 'member' ? `${wordOf(self)} · member` : wordOf(self)) : 'agent' },
+    above: [custodian, personAbove], ring, showAll: opts.showAll, maxRing: opts.maxRing,
   });
-  const edges: GEdge[] = [
-    // The custody/control edge: the connected human → their person Smart Agent.
-    // The ONLY edge crossing the human↔agent boundary; never between two agents.
-    { id: 'e:control-you', source: CUSTODIAN_ID, target: personId, kind: 'control', label: 'holds keys', weight: 1 },
-    ...p.agents.map((o): GEdge => {
-      const member = o.relationship === 'member';
-      return {
-        id: `e:${member ? 'member' : 'stew'}-${o.agent}`,
-        source: personId,
-        target: o.agent,
-        kind: member ? 'membership' : 'stewardship',
-        label: member ? 'member of' : 'stewards',
-        weight: member ? 0.5 : 0.8,
-        dim: !!focusAgent && o.agent.toLowerCase() !== focusAgent,
-      };
-    }),
-  ];
-  return { nodes, edges };
 }
 
 // ── Edge styling (one entry per EdgeKind — the legend derives from this) ──────

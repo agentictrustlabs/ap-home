@@ -1,7 +1,7 @@
 // The trust graph centred on an agent (owner, 2026-10-01): the centre in the middle, its own agents around it, who
 // holds it small and above, and a "+N more" node when the ring is long.
 import { describe, it, expect } from 'vitest';
-import { buildAgentGraphLive, CUSTODIAN_ID, MORE_ID, type LivePerson } from './graph';
+import { buildAgentGraphLive, buildCenteredGraph, CUSTODIAN_ID, MORE_ID, type LivePerson } from './graph';
 
 const ALICE = '0xa000000000000000000000000000000000000001';
 const GRACE = '0xa000000000000000000000000000000000000002';
@@ -45,5 +45,26 @@ describe('the graph centred on an agent', () => {
     const g = buildAgentGraphLive(live, { center: ALICE, showAll: true });
     expect(g.nodes.some((n) => n.id === MORE_ID)).toBe(false);
     expect(g.nodes.filter((n) => n.id !== ALICE && n.id !== CUSTODIAN_ID)).toHaveLength(21);
+  });
+
+  it('a roster-built organization: its stewards above with arrows INTO it, members and what it holds around it', () => {
+    const TEAM = '0xd000000000000000000000000000000000000001';
+    const g = buildCenteredGraph({
+      center: { id: TEAM, kind: 'org', name: 'Weld Corridor Team', sub: 'team' },
+      above: [{ id: '0xd000000000000000000000000000000000000009', kind: 'person', name: 'jenna-alice', sub: 'steward', dim: true, edge: { kind: 'stewardship', label: 'stewards', toCenter: true } }],
+      ring: [
+        { id: '0xd000000000000000000000000000000000000002', kind: 'person', name: 'mark-bob', sub: 'member', edge: { kind: 'membership', label: 'member of', toCenter: true } },
+        { id: '0xd000000000000000000000000000000000000003', kind: 'org', name: 'Circle 2', sub: 'circle', edge: { kind: 'stewardship', label: 'holds' } },
+      ],
+    });
+    expect(g.nodes.find((n) => n.data.focus)!.id).toBe(TEAM);
+    const stew = g.edges.find((e) => e.label === 'stewards')!;
+    expect([stew.source, stew.target]).toEqual(['0xd000000000000000000000000000000000000009', TEAM]);
+    const mem = g.edges.find((e) => e.label === 'member of')!;
+    expect([mem.source, mem.target]).toEqual(['0xd000000000000000000000000000000000000002', TEAM]);
+    const holds = g.edges.find((e) => e.label === 'holds')!;
+    expect([holds.source, holds.target]).toEqual([TEAM, '0xd000000000000000000000000000000000000003']);
+    expect(g.nodes.find((n) => n.data.name === 'jenna-alice')!.position.y).toBeLessThan(0);
+    expect(g.nodes.some((n) => n.id === MORE_ID)).toBe(false);
   });
 });

@@ -8,7 +8,7 @@
 // block below) and remapped onto this app's --color-* / --radius-* tokens so the portal
 // stylesheet stays untouched.
 import '@xyflow/react/dist/style.css';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Background,
   BackgroundVariant,
@@ -23,13 +23,21 @@ import {
 } from '@xyflow/react';
 import { useSession } from '../../context/session';
 import { useManagedAgents } from '../portal/ManagedAgents';
+import { listManagedAgentsFor } from '../../connect-client';
+import { fetchRoster } from '../../lib/recipient-directory';
+import { participantType } from '../../home/roster-contract';
 import { nameLabel } from '../../lib/domain';
 import { agentClassOf, kindWordOf } from '../../lib/agent-class';
 
 /** The word under an agent's node: its subclass when that says more than the class does (`kindWordOf`). */
 import {
   buildAgentGraphLive,
+  buildCenteredGraph,
+  byRole,
+  ringItemOf,
+  CUSTODIAN_ID as CUSTODIAN,
   MORE_ID,
+  type CenteredItem,
   CUSTODIAN_ID,
   EDGE_KIND_STYLE,
   NODE_KIND_LABEL,
@@ -145,14 +153,94 @@ function TrustNode({ data, selected }: NodeProps<Node<NodeData>>) {
 
 const nodeTypes = { trust: TrustNode };
 
+/**
+ * WHAT THE CENTRE IS MADE OF, from its own records (owner, 2026-10-01: "the trust graph building out is the key part
+ * of the game — the interconnection of agents"). The person herself: her tree. A PERSONA of hers: the persona's own
+ * links (what she stewards and belongs to), read by her custodian. An ORGANIZATION, team, circle, church or service:
+ * its roster — every member with their role — plus what it holds in the tree. Nothing is inferred from a name.
+ */
+function useCenteredGraph(live: LivePerson, center: string, showAll: boolean): { g: ReturnType<typeof buildCenteredGraph>; reading: boolean; note: string | null } {
+  const { session } = useSession();
+  const token = session?.token ?? null;
+  const self = useMemo(() => live.agents.find((a) => a.agent.toLowerCase() === center) ?? null, [live.agents, center]);
+  const isPerson = center === live.personSA.toLowerCase();
+  const isPersona = self?.relationship === 'self';
+  const [fetched, setFetched] = useState<{ for: string; ring: CenteredItem[]; stewards: CenteredItem[] } | null>(null);
+  const [reading, setReading] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!token || isPerson) { setFetched(null); setNote(null); return; }
+    let on = true;
+    setReading(true); setNote(null);
+    (async () => {
+      try {
+        if (isPersona) {
+          const rows = await listManagedAgentsFor(token, center, 'any');
+          const ring = rows
+            .filter((o) => o.agent.toLowerCase() !== center && o.agent.toLowerCase() !== live.personSA.toLowerCase())
+            .map((o) => ringItemOf({ agent: o.agent, name: o.name ? nameLabel(o.name) : null, cls: agentClassOf(o.kind), kindWord: kindWordOf(o.kind), relationship: o.relationship }))
+            .sort(byRole);
+          if (on) setFetched({ for: center, ring, stewards: [] });
+        } else {
+          const members = await fetchRoster(token, center);
+          const ring: CenteredItem[] = [];
+          const stewards: CenteredItem[] = [];
+          for (const m of members) {
+            const t = participantType(m.publicName);
+            const kind: GNodeKind = t === 'organization' ? 'org' : t === 'service' ? 'service' : 'person';
+            const role = (m.role ?? '').toLowerCase();
+            const steward = /steward|founder|owner|lead/.test(role);
+            const item: CenteredItem = { id: m.address, kind, name: m.displayName, sub: role ? role : t === 'unknown' ? 'member' : t, edge: steward ? { kind: 'stewardship', label: 'stewards', weight: 0.8, toCenter: true } : { kind: 'membership', label: 'member of', weight: 0.5, toCenter: true } };
+            (steward ? stewards : ring).push(item);
+          }
+          if (on) setFetched({ for: center, ring: ring.sort((a, b) => a.name.localeCompare(b.name)), stewards: stewards.sort((a, b) => a.name.localeCompare(b.name)) });
+        }
+      } catch (e) {
+        if (on) { setFetched({ for: center, ring: [], stewards: [] }); setNote(`Could not read ${isPersona ? 'this person\'s links' : 'the roster'}: ${e instanceof Error ? e.message : String(e)}`); }
+      } finally { if (on) setReading(false); }
+    })();
+    return () => { on = false; };
+  }, [token, center, isPerson, isPersona, live.personSA]);
+
+  const g = useMemo(() => {
+    if (isPerson || !fetched || fetched.for !== center) return buildAgentGraphLive(live, { center, showAll });
+    const held = live.agents.filter((o) => o.agent.toLowerCase() !== center && o.parent?.toLowerCase() === center).map((o) => ({ ...ringItemOf(o), edge: { kind: 'stewardship' as const, label: 'holds', weight: 0.6 } }));
+    const custodian: CenteredItem = { id: CUSTODIAN, kind: 'custodian', name: 'You', sub: 'passkey custodian', edge: { kind: 'control', label: 'holds keys', weight: 1, toCenter: true } };
+    if (isPersona) {
+      // A persona is yours directly: You hold its keys. Your default name is a sibling, not a holder.
+      const sibling: CenteredItem = { id: live.personSA, kind: 'person', name: live.name, sub: `${live.agentName} · another name of yours`, edge: { kind: 'control', label: 'same custodian', weight: 1, toCenter: true } };
+      return buildCenteredGraph({ center: { id: self?.agent ?? center, kind: 'person', name: self?.name || center.slice(0, 10), sub: `${self?.kindWord ?? 'person'} · another name of yours` }, above: [{ ...custodian, dim: false }, sibling], ring: [...fetched.ring, ...held], showAll });
+    }
+    // An organization-class or service agent: its stewards above (You among them when the roster names you), its
+    // members and what it holds around it. The tree's own row, when it says you steward or belong, stays as a faded holder.
+    const me = live.personSA.toLowerCase();
+    const above: CenteredItem[] = fetched.stewards.map((st) => (st.id.toLowerCase() === me ? { ...st, name: `${live.name} (you)`, dim: true } : { ...st, dim: true }));
+    if (self && !above.some((a) => a.id.toLowerCase() === me)) above.push({ id: live.personSA, kind: 'person', name: `${live.name} (you)`, sub: live.agentName, dim: true, edge: self.relationship === 'member' ? { kind: 'membership', label: 'member of', weight: 0.5, toCenter: true } : { kind: 'stewardship', label: 'stewards', weight: 0.8, toCenter: true } });
+    const word = self?.kindWord ?? (self?.cls === 'service' ? 'service' : 'organization');
+    return buildCenteredGraph({ center: { id: self?.agent ?? center, kind: self?.cls ?? 'org', name: self?.name || center.slice(0, 10), sub: word }, above, ring: [...fetched.ring, ...held], showAll });
+  }, [live, center, showAll, fetched, isPerson, isPersona, self]);
+  return { g, reading, note };
+}
+
 export default function TrustGraph({ live, focusAgent }: { live: LivePerson; focusAgent?: string }) {
   const [selected, setSelected] = useState<string | null>(null);
   // THE CENTRE is the agent this page is about (the persona, organization or service in the route), or the person
   // herself at her own home. A long ring ends in "+N more" until it is clicked.
   const center = (focusAgent ?? live.personSA).toLowerCase();
   const [showAll, setShowAll] = useState(false);
-  // LIVE only — the graph is rebuilt whenever the managed-agent tree (or the centre) changes.
-  const g = useMemo(() => buildAgentGraphLive(live, { center, showAll }), [live, center, showAll]);
+  const { g, reading, note } = useCenteredGraph(live, center, showAll);
+  const personaOf = (id: string) => live.agents.find((a) => a.agent.toLowerCase() === id.toLowerCase());
+  // Where "centre the graph here" goes for a ring node: its own trust-graph page, when this Home has one for it.
+  const centerHref = (meta: NodeData): string | null => {
+    const id = meta.refId.toLowerCase();
+    if (id === center || id === CUSTODIAN || id === MORE_ID) return null;
+    const row = personaOf(id);
+    if (meta.kind === 'org') return `/org/${encodeURIComponent(meta.refId)}/trust-graph`;
+    if (meta.kind === 'service') return `/service/${encodeURIComponent(meta.refId)}/trust-graph`;
+    if (meta.kind === 'person' && row?.relationship === 'self') return `/as/${encodeURIComponent(meta.refId)}/trust-graph`;
+    if (meta.kind === 'person' && id === live.personSA.toLowerCase()) return '/trust-graph';
+    return null;
+  };
 
   const nodes: Node<NodeData>[] = g.nodes.map((n) => ({
     id: n.id,
@@ -209,10 +297,14 @@ export default function TrustGraph({ live, focusAgent }: { live: LivePerson; foc
       </ReactFlow>
 
       <Legend />
+      {(reading || note) && (
+        <div className="tg-pill" style={{ position: 'absolute', top: 10, left: 10, zIndex: 5 }} data-testid="trust-graph-status">{reading ? 'Reading its records…' : note}</div>
+      )}
       {selected && (
         <Inspector
           meta={g.nodes.find((n) => n.id === selected)?.data ?? null}
           agentName={live.agentName}
+          centerHref={(() => { const m = g.nodes.find((n) => n.id === selected)?.data; return m ? centerHref(m) : null; })()}
           onClose={() => setSelected(null)}
         />
       )}
@@ -253,7 +345,7 @@ function Legend() {
 }
 
 // ── Inspector — LIVE nodes only (custodian / your person SA / an org you hold) ─
-function Inspector({ meta, agentName, onClose }: { meta: NodeData | null; agentName: string; onClose: () => void }) {
+function Inspector({ meta, agentName, centerHref, onClose }: { meta: NodeData | null; agentName: string; centerHref?: string | null; onClose: () => void }) {
   if (!meta) return null;
   return (
     <div className="tg-inspector">
@@ -270,6 +362,7 @@ function Inspector({ meta, agentName, onClose }: { meta: NodeData | null; agentN
         </div>
       </div>
       <div style={{ padding: '.9rem 1rem', display: 'flex', flexDirection: 'column', gap: '.8rem' }}>
+        {centerHref && <a className="btn-primary" href={centerHref} style={{ width: 'auto', display: 'inline-block', fontSize: '.82rem' }} data-testid="trust-graph-center-here">Centre the graph on {meta.name} →</a>}
         <InspectorBody meta={meta} agentName={agentName} />
       </div>
     </div>
