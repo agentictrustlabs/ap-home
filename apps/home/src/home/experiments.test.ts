@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../csrf', () => ({ ensureCsrfToken: async () => 't', csrfHeaders: () => ({ 'x-csrf-token': 't' }), invalidateCsrfCache: () => undefined }));
 
-import { startExperiment, readExperiment, variantFromForm, readComparisonKnobs, prefillFromQuery } from './experiments';
+import { startExperiment, readExperiment, variantFromForm, readComparisonKnobs, prefillFromQuery, decodeBase64Url } from './experiments';
 
 function stubFetch(answer: (url: string, init?: RequestInit) => unknown) {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
@@ -18,6 +18,10 @@ describe('variantFromForm', () => {
     expect(variantFromForm({ name: 'live' } as never)).toEqual({});
     expect(variantFromForm({ provider: 'gemini', judgeProvider: 'anthropic', judge: 'outcome', judgeProfile: 'fast' })).toEqual({ provider: 'gemini', judgeProvider: 'anthropic', judgeProfile: 'fast', toggles: { 'quality/judge': 'outcome' } });
     expect(variantFromForm({ judge: 'off', judgeProfile: 'nonsense' })).toEqual({});
+  });
+  it('carries a row\'s other toggles alongside the judge mode', () => {
+    expect(variantFromForm({ provider: 'gemini', judge: 'outcome', toggles: { 'plan/chain-proceed': 'on' } })).toEqual({ provider: 'gemini', toggles: { 'plan/chain-proceed': 'on', 'quality/judge': 'outcome' } });
+    expect(variantFromForm({ judge: 'off', toggles: { 'quality/judge': 'pairwise' } })).toEqual({});
   });
 });
 
@@ -62,5 +66,50 @@ describe('prefillFromQuery', () => {
   it('ignores what the lists do not hold, and never types a value into the form', () => {
     expect(prefillFromQuery('?agent=0x999&set=nope', orgs, sets)).toEqual({});
     expect(prefillFromQuery('', orgs, sets)).toEqual({});
+  });
+});
+
+describe('prefillFromQuery — the whole run (repeats + arms)', () => {
+  const orgs = [{ agent: '0xABC', name: 'cil-commons-1e07.org' }];
+  const sets = [{ id: 'cil-commons-chain-panel-1' }];
+  const knobs = { providers: ['gemini', 'anthropic'], selections: ['model', 'outcome'], toggles: { 'quality/judge': ['off', 'on', 'pairwise', 'outcome'], 'plan/chain-proceed': ['off', 'on'], 'skill-selection/hold': ['ask', 'skeleton'], 'quality/judge-repeats': ['1', '2'] } };
+  const b64u = (o: unknown) => Buffer.from(JSON.stringify(o), 'utf8').toString('base64url');
+  const base = { provider: 'gemini', judgeProvider: 'anthropic', toggles: { 'quality/judge': 'outcome' } };
+  const arms = { off: { ...base, toggles: { ...base.toggles, 'plan/chain-proceed': 'off' } }, on: { ...base, toggles: { ...base.toggles, 'plan/chain-proceed': 'on' } } };
+
+  it('turns arms into the form\'s rows and reads repeats 1..5; the rows submit as exactly the arms that came in', () => {
+    const p = prefillFromQuery(`?agent=0xabc&set=cil-commons-chain-panel-1&repeats=3&arms=${b64u(arms)}`, orgs, sets, knobs);
+    expect(p).toMatchObject({ addressee: '0xABC', setId: 'cil-commons-chain-panel-1', repeats: 3 });
+    expect(p.notice).toBeUndefined();
+    expect(p.rows?.map((r) => [r.name, r.provider, r.judgeProvider, r.judge, r.toggles])).toEqual([['off', 'gemini', 'anthropic', 'outcome', { 'plan/chain-proceed': 'off' }], ['on', 'gemini', 'anthropic', 'outcome', { 'plan/chain-proceed': 'on' }]]);
+    expect(Object.fromEntries(p.rows!.map((r) => [r.name, variantFromForm(r)]))).toEqual(arms);
+  });
+  it('accepts padded base64url too, and a single arm with no judge as judge off', () => {
+    const raw = Buffer.from(JSON.stringify({ base: { provider: 'anthropic' } })).toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
+    expect(prefillFromQuery(`arms=${raw}`, orgs, sets, knobs).rows).toEqual([{ name: 'base', provider: 'anthropic', selectionProvider: '', answerProvider: '', judgeProvider: '', judgeProfile: '', judge: 'off', selection: '' }]);
+    expect(decodeBase64Url('!!')).toBeNull();
+  });
+  it('ignores repeats out of range or not a whole number', () => {
+    for (const r of ['0', '6', '2.5', 'three', '-1']) expect(prefillFromQuery(`?repeats=${r}`, orgs, sets, knobs).repeats).toBeUndefined();
+  });
+  it('refuses the whole arms parameter, with one line, for anything the form could not hold — never types it in', () => {
+    const bad: Array<[string, RegExp]> = [
+      ['%%%', /not base64url/],
+      [Buffer.from('not json').toString('base64url'), /not JSON/],
+      [b64u([1, 2]), /not an object/],
+      [b64u({}), /no arms/],
+      [b64u({ 'bad name!': {} }), /not a name/],
+      [b64u({ a: { provider: 'groq' } }), /provider "groq" is not offered/],
+      [b64u({ a: { toggles: { 'plan/chain-proceed': 'maybe' } } }), /plan\/chain-proceed=maybe/],
+      [b64u({ a: { toggles: { 'secret/knob': 'on' } } }), /secret\/knob/],
+      [b64u({ a: { plannerKind: 'model' } }), /plannerKind/],
+      [b64u({ a: { judgeProfile: 'lenient' } }), /judge profile/],
+      [b64u(Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`a${i}`, {}]))), /9 arms/],
+      [b64u({ ok: base, bad: { provider: 'groq' } }), /arm bad/],
+    ];
+    for (const [arms, why] of bad) { const p = prefillFromQuery(`?arms=${arms}`, orgs, sets, knobs); expect(p.rows).toBeUndefined(); expect(p.notice).toMatch(why); }
+  });
+  it('leaves arms alone until the deployment\'s knobs are known', () => {
+    expect(prefillFromQuery(`?arms=${b64u(arms)}`, orgs, sets, null)).toEqual({});
   });
 });

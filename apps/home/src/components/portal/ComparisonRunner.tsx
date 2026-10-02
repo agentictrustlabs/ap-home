@@ -13,7 +13,7 @@ import { listManagedAgents } from '../../connect-client';
 import { Section, Card, KeyValue, Button, Chip, Mono, ErrorNote, Note, Empty } from '../../ui';
 import { StatePill } from './StatePill';
 import { stateOf } from '../../home/run-state';
-import { readComparisonKnobs, startExperiment, readExperiment, cancelExperiment, variantFromForm, prefillFromQuery, type ComparisonKnobsV1, type ExperimentProgressV1 } from '../../home/experiments';
+import { readComparisonKnobs, startExperiment, readExperiment, cancelExperiment, variantFromForm, prefillFromQuery, ARM_NAME, type ComparisonKnobsV1, type ExperimentProgressV1 } from '../../home/experiments';
 import { applyWords, armWords, defaultDraft, emptyArm, readyWords, type ArmRow, type ComparisonDraft, type EvalSetSummary } from '../../home/comparison-defaults';
 
 const JUDGE_PROFILES = ['', 'thorough', 'fast', 'logprob'];
@@ -54,14 +54,22 @@ export function ComparisonRunner() {
   useEffect(() => { if (knobs && knobs !== 'loading' && !draft) setDraft(defaultDraft(knobs, sets)); }, [knobs, sets, draft]);
   // The recommended set arrives after the knobs sometimes: fill an empty set id once, never overwrite a chosen one.
   useEffect(() => { if (draft && !draft.setId && sets.length) setDraft({ ...draft, setId: defaultDraft({ providers: [], selections: [] }, sets).setId }); }, [sets, draft]);
-  // A deep link (`?agent=&set=`, e.g. from the skills app's Runner) preselects once the lists it names have arrived.
-  const [prefilled, setPrefilled] = useState<{ agent: boolean; set: boolean }>({ agent: false, set: false });
+  // A deep link (`?agent=&set=&repeats=&arms=`, e.g. from the skills app's Tests page) preselects once the lists it names
+  // have arrived; the arms are checked against this deployment's knobs and land as the person's own rows, editable.
+  const [prefilled, setPrefilled] = useState<{ agent: boolean; set: boolean; run: boolean }>({ agent: false, set: false, run: false });
+  const [prefillNotice, setPrefillNotice] = useState<string | null>(null);
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const want = prefillFromQuery(window.location.search, orgs, sets);
+    const k = knobs && knobs !== 'loading' ? knobs : null;
+    const want = prefillFromQuery(window.location.search, orgs, sets, k);
     if (!prefilled.agent && want.addressee && orgs.length) { setAddressee(want.addressee); setPrefilled((p) => ({ ...p, agent: true })); }
     if (!prefilled.set && want.setId && sets.length && draft) { setDraft({ ...draft, setId: want.setId }); setSource('named'); setPrefilled((p) => ({ ...p, set: true })); }
-  }, [orgs, sets, draft, prefilled]);
+    if (!prefilled.run && k && draft) {
+      if (want.rows || want.repeats) setDraft((d) => (d ? { ...d, ...(want.rows ? { rows: want.rows } : {}), ...(want.repeats ? { repeats: want.repeats } : {}) } : d));
+      if (want.notice) setPrefillNotice(want.notice);
+      setPrefilled((p) => ({ ...p, run: true }));
+    }
+  }, [orgs, sets, draft, prefilled, knobs]);
 
   const rows = draft?.rows ?? [];
   const split = draft?.split ?? 'held-out';
@@ -71,7 +79,7 @@ export function ComparisonRunner() {
   const setRows = (f: (rs: ArmRow[]) => ArmRow[]) => patch({ rows: f(rows) });
   const chosenSet = sets.find((x) => x.id === draft?.setId) ?? null;
   const haveSet = source === 'named' ? !!chosenSet : !!setFile && !!goldFile;
-  const canRun = !!token && knobs !== 'loading' && knobs !== null && knobs.evalCapture === 'on' && !!addressee && haveSet && rows.length > 0 && rows.every((r) => /^[a-z0-9][a-z0-9._-]{0,40}$/i.test(r.name));
+  const canRun = !!token && knobs !== 'loading' && knobs !== null && knobs.evalCapture === 'on' && !!addressee && haveSet && rows.length > 0 && rows.every((r) => ARM_NAME.test(r.name));
 
   const submit = useCallback(async () => {
     if (!token || !canRun || !draft) return;
@@ -139,6 +147,7 @@ export function ComparisonRunner() {
             <Button size="sm" variant="ghost" onClick={resetDefaults}>Back to the defaults</Button>
           </div>
         </Card>
+        {prefillNotice ? <Note>{prefillNotice}</Note> : null}
         {/* 2. In words: a deterministic reading over what this deployment offers; it says back what it understood. */}
         <Card title="Tell me what to compare" quiet testId="comparison-runner-words">
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -183,7 +192,7 @@ export function ComparisonRunner() {
         <Card title="Arms" testId="comparison-runner-arms">
           <p className="ui-micro" style={{ margin: '0 0 6px' }}>Each arm is one way of running the same cases. <strong>control</strong> is the live default; <strong>treatment</strong> starts one change away ({armWords(rows[1] ?? rows[0]!, rows[0]!) || 'no change yet'}). A blank choice means the deployment's default.</p>
           <table className="ui-table" style={{ width: '100%' }}>
-            <thead><tr><th>name</th><th>provider</th><th>selects with</th><th>answers with</th><th>judges with</th><th>judge profile</th><th>judge mode</th><th>selection arm</th><th /></tr></thead>
+            <thead><tr><th>name</th><th>provider</th><th>selects with</th><th>answers with</th><th>judges with</th><th>judge profile</th><th>judge mode</th><th>selection arm</th><th>other toggles</th><th /></tr></thead>
             <tbody>
               {rows.map((r, i) => (
                 <tr key={i} data-testid="comparison-runner-arm">
@@ -195,6 +204,7 @@ export function ComparisonRunner() {
                   <td>{sel(r.judgeProfile, (v) => setRow(i, { judgeProfile: v }), JUDGE_PROFILES.filter(Boolean), '(thorough)')}</td>
                   <td>{sel(r.judge, (v) => setRow(i, { judge: v || 'off' }), judgeModes, 'off')}</td>
                   <td>{sel(r.selection, (v) => setRow(i, { selection: v }), selections, '(model)')}</td>
+                  <td>{r.toggles && Object.keys(r.toggles).length ? <span style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>{Object.entries(r.toggles).map(([k, v]) => <Chip key={k} title="from the link; remove to run the deployment default">{k}={v} <button type="button" aria-label={`remove ${k}`} onClick={() => setRow(i, { toggles: Object.fromEntries(Object.entries(r.toggles ?? {}).filter(([x]) => x !== k)) })} style={{ border: 0, background: 'none', cursor: 'pointer', padding: 0 }}>×</button></Chip>)}</span> : <span className="ui-micro">—</span>}</td>
                   <td>{rows.length > 1 ? <Button size="sm" variant="ghost" onClick={() => setRows((rs) => rs.filter((_, k) => k !== i))}>remove</Button> : null}</td>
                 </tr>
               ))}
