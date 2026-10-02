@@ -1,10 +1,10 @@
 'use client';
 // The primary action for the currently-selected workspace, shown just right of the switcher (spec 315):
 //   • person  → "Add organization"  → the org-create surface (/organizations)
-//   • org      → "Invite member"     → the Members surface, where the Invite panel now lives (spec 324 §12)
+//   • org      → (nothing in the header) — inviting lives on the org's Members page only (owner, 2026-10-02)
 // URL-derived scope, same as the sidebar. Kept minimal; the invite flow itself is a follow-up.
 import { usePathname, useRouter } from 'next/navigation';
-import { parseWorkspacePath, orgHref } from '../../lib/workspace';
+import { parseWorkspacePath } from '../../lib/workspace';
 
 
 export function WorkspaceAction() {
@@ -28,12 +28,7 @@ export function WorkspaceAction() {
       </button>
     );
   }
-  if (active.kind === 'org') {
-    return (
-      <button type="button" className="ui-btn ui-btn--secondary ui-btn--sm" onClick={() => router.push(orgHref(active.org, 'membership'))} title="Invite someone to this organization">
-        Invite member
-      </button>
-    );
-  }
+  // owner (2026-10-02): the org header no longer carries "Invite member" — inviting lives on the organization's
+  // Members page only, so the topbar stays a switch-and-act bar and the long org name is not crowded by a button.
   return null;
 }
