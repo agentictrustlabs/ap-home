@@ -46,7 +46,15 @@ import {
   NODE_KIND_LABEL,
   type GNodeKind,
   type LivePerson,
+  buildMultiLevelView,
+  applyGraphFilters,
+  presentSubKinds,
+  presentEdgeKinds,
+  type GraphFilters,
+  type EdgeKind,
+  type GView,
 } from '../../lib/graph';
+import { layoutElk, type LayoutDirection } from '../../lib/graph-layout';
 
 const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
@@ -258,10 +266,30 @@ export default function TrustGraph({ live, focusAgent }: { live: LivePerson; foc
   // THE CENTRE is the agent this page is about (the persona, organization or service in the route), or the person
   // herself at her own home. A long ring ends in "+N more" until it is clicked.
   const center = (focusAgent ?? live.personSA).toLowerCase();
+  const isPerson = center === live.personSA.toLowerCase();
   const [showAll, setShowAll] = useState(false);
   const [showPeople, setShowPeople] = useState(false);
+  // FILTERS + DEPTH (owner, 2026-10-02). Depth walks the person's own tree (the data carries `parent`); the two
+  // filter axes hide a class/subtype of agent, or a kind of relationship. The sets list what is HIDDEN.
+  const [depth, setDepth] = useState(1);
+  const [direction, setDirection] = useState<LayoutDirection>('DOWN');
+  const [hiddenNodeKinds, setHiddenNodeKinds] = useState<ReadonlySet<GNodeKind>>(new Set());
+  const [hiddenSubKinds, setHiddenSubKinds] = useState<ReadonlySet<string>>(new Set());
+  const [hiddenEdgeKinds, setHiddenEdgeKinds] = useState<ReadonlySet<EdgeKind>>(new Set());
   const { g, reading, note } = useCenteredGraph(live, center, showAll, showPeople);
-  useEffect(() => { setShowAll(false); setShowPeople(false); }, [center]);
+  // A new centre resets the view to its ring, one level, nothing filtered.
+  useEffect(() => { setShowAll(false); setShowPeople(false); setDepth(1); setHiddenNodeKinds(new Set()); setHiddenSubKinds(new Set()); setHiddenEdgeKinds(new Set()); }, [center]);
+
+  // The centre's own tree out to `depth` (person centre only — that is where `live.agents` holds the descendants);
+  // otherwise the single-level centred view the roster/persona read produced.
+  const rawView = useMemo<GView>(() => (isPerson && depth > 1 ? buildMultiLevelView(live, { center, depth }) : g), [isPerson, depth, live, center, g]);
+  const filters = useMemo<GraphFilters>(() => ({ nodeKinds: hiddenNodeKinds, subKinds: hiddenSubKinds, edgeKinds: hiddenEdgeKinds }), [hiddenNodeKinds, hiddenSubKinds, hiddenEdgeKinds]);
+  const filtered = useMemo<GView>(() => applyGraphFilters(rawView, filters), [rawView, filters]);
+
+  // ELK lays the filtered view out (async). Keep the last laid view until the next is ready so the canvas never
+  // blanks; a failed layout keeps the input positions.
+  const [laid, setLaid] = useState<GView>(filtered);
+  useEffect(() => { let on = true; void layoutElk(filtered, { direction }).then((v) => { if (on) setLaid(v); }); return () => { on = false; }; }, [filtered, direction]);
   const personaOf = (id: string) => live.agents.find((a) => a.agent.toLowerCase() === id.toLowerCase());
   // Where "centre the graph here" goes for a ring node: its own trust-graph page, when this Home has one for it.
   const centerHref = (meta: NodeData): string | null => {
@@ -275,7 +303,7 @@ export default function TrustGraph({ live, focusAgent }: { live: LivePerson; foc
     return null;
   };
 
-  const nodes: Node<NodeData>[] = g.nodes.map((n) => ({
+  const nodes: Node<NodeData>[] = laid.nodes.map((n) => ({
     id: n.id,
     type: 'trust',
     position: n.position,
@@ -283,7 +311,7 @@ export default function TrustGraph({ live, focusAgent }: { live: LivePerson; foc
     selected: n.id === selected,
   }));
 
-  const edges: Edge[] = g.edges.map((e) => {
+  const edges: Edge[] = laid.edges.map((e) => {
     const st = EDGE_KIND_STYLE[e.kind];
     const isControl = st.cls === 'control';
     return {
@@ -311,7 +339,7 @@ export default function TrustGraph({ live, focusAgent }: { live: LivePerson; foc
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <style>{TG_CSS}</style>
       <ReactFlow
-        key={`${center}:${showAll ? 'all' : 'ring'}:${showPeople ? 'people' : 'cluster'}`}
+        key={`${center}:${depth}:${direction}:${laid.nodes.length}x${laid.edges.length}`}
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
@@ -329,15 +357,28 @@ export default function TrustGraph({ live, focusAgent }: { live: LivePerson; foc
         <Controls showInteractive={false} />
       </ReactFlow>
 
-      <Legend />
+      <FilterPanel
+        rawView={rawView}
+        isPerson={isPerson}
+        depth={depth}
+        setDepth={setDepth}
+        direction={direction}
+        setDirection={setDirection}
+        hiddenNodeKinds={hiddenNodeKinds}
+        setHiddenNodeKinds={setHiddenNodeKinds}
+        hiddenSubKinds={hiddenSubKinds}
+        setHiddenSubKinds={setHiddenSubKinds}
+        hiddenEdgeKinds={hiddenEdgeKinds}
+        setHiddenEdgeKinds={setHiddenEdgeKinds}
+      />
       {(reading || note) && (
         <div className="tg-pill" style={{ position: 'absolute', top: 10, left: 10, zIndex: 5 }} data-testid="trust-graph-status">{reading ? 'Reading its records…' : note}</div>
       )}
       {selected && (
         <Inspector
-          meta={g.nodes.find((n) => n.id === selected)?.data ?? null}
+          meta={laid.nodes.find((n) => n.id === selected)?.data ?? null}
           agentName={live.agentName}
-          centerHref={(() => { const m = g.nodes.find((n) => n.id === selected)?.data; return m ? centerHref(m) : null; })()}
+          centerHref={(() => { const m = laid.nodes.find((n) => n.id === selected)?.data; return m ? centerHref(m) : null; })()}
           onClose={() => setSelected(null)}
         />
       )}
@@ -345,34 +386,102 @@ export default function TrustGraph({ live, focusAgent }: { live: LivePerson; foc
   );
 }
 
-// ── Legend — derives straight from EDGE_KIND_STYLE so it never drifts ─────────
-function LegendRow({ color, dashed, dotted, label, faint }: { color: string; dashed?: boolean; dotted?: boolean; label: string; faint?: boolean }) {
+// ── Filter panel (owner, 2026-10-02: "filter based on all the types of agents and types of relationships
+//    and allow for it to expand to 3rd and 4th levels") ────────────────────────────────────────────────
+// Collapsible, bottom-left (where the read-only legend sat). It IS the legend now: every relationship row shows
+// its colour and toggles that relationship on the canvas. Agent types toggle by class and by subtype. Depth
+// walks the person's own tree. Nothing here is authority — it only changes what is drawn.
+
+function toggleIn<T>(set: ReadonlySet<T>, v: T): ReadonlySet<T> {
+  const next = new Set(set);
+  if (next.has(v)) next.delete(v); else next.add(v);
+  return next;
+}
+
+function Chip({ on, onClick, children, swatch }: { on: boolean; onClick: () => void; children: React.ReactNode; swatch?: { color: string; dashed?: boolean; dotted?: boolean } }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem', fontSize: '.74rem' }}>
-      <span style={{ width: 22, height: 0, borderTop: `2px ${dotted ? 'dotted' : dashed ? 'dashed' : 'solid'} ${color}` }} />
-      <span style={{ color: faint ? 'var(--color-text-faint)' : 'var(--color-text-muted)' }}>{label}</span>
-    </div>
+    <button type="button" className={`tg-chip ${on ? '' : 'off'}`} onClick={onClick} aria-pressed={on}>
+      {swatch && <span className="tg-chip-swatch" style={{ borderTop: `2px ${swatch.dotted ? 'dotted' : swatch.dashed ? 'dashed' : 'solid'} ${swatch.color}` }} />}
+      {children}
+    </button>
   );
 }
 
-function Legend() {
-  const entries = Object.values(EDGE_KIND_STYLE);
-  const control = entries.filter((s) => s.cls === 'control');
-  const authority = entries.filter((s) => s.cls === 'authority');
+const CLASS_CHIPS: { kind: GNodeKind; label: string }[] = [
+  { kind: 'person', label: 'People' },
+  { kind: 'org', label: 'Organizations' },
+  { kind: 'service', label: 'Services' },
+];
+
+function FilterPanel({
+  rawView, isPerson, depth, setDepth, direction, setDirection,
+  hiddenNodeKinds, setHiddenNodeKinds, hiddenSubKinds, setHiddenSubKinds, hiddenEdgeKinds, setHiddenEdgeKinds,
+}: {
+  rawView: GView; isPerson: boolean;
+  depth: number; setDepth: (n: number) => void;
+  direction: LayoutDirection; setDirection: (d: LayoutDirection) => void;
+  hiddenNodeKinds: ReadonlySet<GNodeKind>; setHiddenNodeKinds: (s: ReadonlySet<GNodeKind>) => void;
+  hiddenSubKinds: ReadonlySet<string>; setHiddenSubKinds: (s: ReadonlySet<string>) => void;
+  hiddenEdgeKinds: ReadonlySet<EdgeKind>; setHiddenEdgeKinds: (s: ReadonlySet<EdgeKind>) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  // Only the agent types and relationships actually on the view get a chip — the subtypes that appear, and the
+  // relationships that are drawn (so the panel is a true legend for THIS graph, not a fixed catalogue).
+  const subKinds = useMemo(() => presentSubKinds(rawView).filter((s) => !CLASS_CHIPS.some((c) => c.label.toLowerCase().startsWith(s))), [rawView]);
+  const edgeKinds = useMemo(() => presentEdgeKinds(rawView), [rawView]);
+  const classesPresent = useMemo(() => new Set(rawView.nodes.map((n) => n.data.kind)), [rawView]);
+
   return (
-    <div className="tg-legend">
-      <div className="tg-eyebrow" style={{ color: 'var(--color-text-faint)' }}>Control · custody</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '.3rem', marginBottom: '.6rem' }}>
-        {control.map((st) => (
-          <LegendRow key={st.label} color={st.color} dashed={st.dashed} dotted={st.dotted} label={st.label} faint />
-        ))}
-      </div>
-      <div className="tg-eyebrow">Authority &amp; trust · agent → agent</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '.3rem' }}>
-        {authority.map((st) => (
-          <LegendRow key={st.label} color={st.color} dashed={st.dashed} label={st.label} />
-        ))}
-      </div>
+    <div className="tg-legend tg-filters">
+      <button type="button" className="tg-filters-head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <span className="tg-eyebrow" style={{ margin: 0 }}>Filters &amp; legend</span>
+        <span style={{ opacity: 0.6, fontSize: '.8rem' }}>{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <div className="tg-filters-body">
+          {isPerson && (
+            <div className="tg-filter-row">
+              <span className="tg-filter-label">Depth</span>
+              <div className="tg-seg">
+                {[1, 2, 3, 4].map((d) => (
+                  <button key={d} type="button" className={`tg-seg-btn ${depth === d ? 'on' : ''}`} onClick={() => setDepth(d)}>{d}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="tg-filter-row">
+            <span className="tg-filter-label">Layout</span>
+            <div className="tg-seg">
+              <button type="button" className={`tg-seg-btn ${direction === 'DOWN' ? 'on' : ''}`} onClick={() => setDirection('DOWN')} title="Levels stack top to bottom">↓ Levels</button>
+              <button type="button" className={`tg-seg-btn ${direction === 'RIGHT' ? 'on' : ''}`} onClick={() => setDirection('RIGHT')} title="Levels flow left to right">→ Across</button>
+            </div>
+          </div>
+
+          <div className="tg-eyebrow" style={{ marginTop: '.5rem' }}>Agent types</div>
+          <div className="tg-chips">
+            {CLASS_CHIPS.filter((c) => classesPresent.has(c.kind)).map((c) => (
+              <Chip key={c.kind} on={!hiddenNodeKinds.has(c.kind)} onClick={() => setHiddenNodeKinds(toggleIn(hiddenNodeKinds, c.kind))}>{c.label}</Chip>
+            ))}
+          </div>
+          {subKinds.length > 0 && (
+            <div className="tg-chips" style={{ marginTop: '.35rem' }}>
+              {subKinds.map((s) => (
+                <Chip key={s} on={!hiddenSubKinds.has(s)} onClick={() => setHiddenSubKinds(toggleIn(hiddenSubKinds, s))}>{s}</Chip>
+              ))}
+            </div>
+          )}
+
+          <div className="tg-eyebrow" style={{ marginTop: '.6rem' }}>Relationships</div>
+          <div className="tg-chips">
+            {edgeKinds.map((k) => {
+              const st = EDGE_KIND_STYLE[k];
+              return (
+                <Chip key={k} on={!hiddenEdgeKinds.has(k)} onClick={() => setHiddenEdgeKinds(toggleIn(hiddenEdgeKinds, k))} swatch={{ color: st.color, dashed: st.dashed, dotted: st.dotted }}>{st.label.replace(/ \(.*\)$/, '')}</Chip>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -504,6 +613,20 @@ const TG_CSS = `
   padding: .7rem .85rem; box-shadow: 0 2px 8px rgba(28, 25, 23, .06);
   backdrop-filter: blur(6px);
 }
+.tg-filters { width: 232px; max-width: calc(100% - 28px); max-height: calc(100% - 28px); overflow-y: auto; padding: .55rem .7rem; }
+.tg-filters-head { display: flex; align-items: center; justify-content: space-between; width: 100%; background: none; border: 0; padding: 0; cursor: pointer; color: inherit; }
+.tg-filters-body { margin-top: .5rem; }
+.tg-filter-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .4rem; }
+.tg-filter-label { font-size: .72rem; font-weight: 700; color: var(--color-text-muted); }
+.tg-seg { display: inline-flex; border: 1px solid var(--color-border); border-radius: 999px; overflow: hidden; }
+.tg-seg-btn { background: var(--color-surface); border: 0; padding: .2rem .5rem; font-size: .72rem; font-weight: 700; color: var(--color-text-muted); cursor: pointer; }
+.tg-seg-btn + .tg-seg-btn { border-left: 1px solid var(--color-border); }
+.tg-seg-btn.on { background: var(--color-amber-500); color: #fff; }
+.tg-chips { display: flex; flex-wrap: wrap; gap: .3rem; }
+.tg-chip { display: inline-flex; align-items: center; gap: .32rem; padding: .18rem .5rem; border-radius: 999px; border: 1px solid var(--color-border); background: var(--color-surface); font-size: .72rem; font-weight: 600; color: var(--color-text-body); cursor: pointer; text-transform: capitalize; }
+.tg-chip:hover { border-color: var(--color-border-strong); }
+.tg-chip.off { opacity: .4; text-decoration: line-through; }
+.tg-chip-swatch { width: 14px; height: 0; flex: none; }
 .tg-inspector {
   position: absolute; top: 14px; right: 14px; z-index: 6;
   width: 320px; max-width: calc(100% - 28px); max-height: calc(100% - 28px); overflow-y: auto;
