@@ -28,6 +28,7 @@ import { fetchRoster } from '../../lib/recipient-directory';
 import { participantType } from '../../home/roster-contract';
 import { nameLabel } from '../../lib/domain';
 import { agentClassOf, kindWordOf } from '../../lib/agent-class';
+import { workspaceGovernorOf } from '../../lib/recipient-directory';
 
 /** The word under an agent's node: its subclass when that says more than the class does (`kindWordOf`). */
 import {
@@ -63,14 +64,20 @@ export function useLivePerson(): { live: LivePerson | null; loaded: boolean } {
       personSA: agentAddress,
       // EVERY managed agent, both classes. Filtering to org-class here is what kept workspaces,
       // treasuries and registry agents out of the graph entirely.
-      agents: agents.map((o) => ({
-        agent: o.agent,
-        name: o.name ? nameLabel(o.name) : null,
-        cls: agentClassOf(o.kind),
-        kindWord: kindWordOf(o.kind),
-        relationship: o.relationship,
-        ...(o.parent ? { parent: String(o.parent).toLowerCase() } : {}),
-      })),
+      agents: agents.map((o) => {
+        // A workspace's governor is the organization its link hangs under (the owner's rule, 2026-10-02): drawn
+        // beside it, and the person's membership hangs there rather than on the coordinator.
+        const governedBy = workspaceGovernorOf(o, agents);
+        return {
+          agent: o.agent,
+          name: o.name ? nameLabel(o.name) : null,
+          cls: agentClassOf(o.kind),
+          kindWord: kindWordOf(o.kind),
+          relationship: o.relationship,
+          ...(o.parent ? { parent: String(o.parent).toLowerCase() } : {}),
+          ...(governedBy ? { governedBy } : {}),
+        };
+      }),
     };
   }, [phase, agentAddress, agentName, agents]);
   return { live, loaded };

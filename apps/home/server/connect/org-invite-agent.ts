@@ -8,6 +8,10 @@
 import type { FnContext } from '../_lib/server-broker';
 import { orgVault } from '../lib/org-vault';
 import { stewardControl } from './org-invite';
+import { AgentNamingClient } from '@agenticprimitives/agent-naming';
+import type { Address } from '@agenticprimitives/types';
+import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
+import { notAnOrganization, workspaceCheck } from '../lib/workspace-governor';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
 const json = (b: unknown, s = 200): Response =>
@@ -38,6 +42,15 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     return json({ error: 'could not verify that you steward this organization', detail: String(e instanceof Error ? e.message : e) }, 502);
   }
   if (!control) return json({ error: 'you must steward this organization to invite' }, 403);
+  // AN ORGANIZATION INVITES; A WORKSPACE DOES NOT (the owner's rule, 2026-10-02; `../lib/workspace-governor.ts`).
+  // The steward's own link to the target says what it is, and names the governor when the pair was chartered;
+  // a name read is the fallback for a link with neither.
+  const naming = new AgentNamingClient({
+    rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL), chainId: CHAIN_ID,
+    registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver,
+  });
+  const ws = await workspaceCheck(env.AUTH_CODES, control.person, org, () => naming.reverseResolve(org as Address));
+  if (ws.workspace) return json(notAnOrganization(ws.governor), 400);
 
   let vault: Awaited<ReturnType<typeof orgVault>>;
   try {

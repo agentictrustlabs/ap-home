@@ -205,6 +205,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const orgPayload = body.org as {
     orgAgent?: string; orgName?: string; person?: string; purpose?: string;
     kind?: string; parent?: string;
+    /** workspace-create since 2026-10-02: the ORGANIZATION that governs this workspace (`aporg:governedBy`), with
+     *  its name. `orgAgent` stays the workspace — every field an app reads is unchanged — and this names what it
+     *  hangs under and where its membership lives. Returned verbatim on `/token` with the rest of `org`. */
+    governor?: string; governorName?: string;
     proofHash?: string; credential?: unknown; brokerDelegation?: { delegate?: string } | null;
     membershipDelegation?: unknown; stewardshipDelegation?: unknown; operationalDelegation?: unknown;
     readGrantDelegation?: unknown;
@@ -240,6 +244,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         existing.kind ??
         (orgPayload.purpose === 'field-workspace' ? 'workspace' : orgPayload.purpose === 'field-team' ? 'team' : orgPayload.purpose === 'field-circle' ? 'circle' : orgPayload.purpose === 'field-church' ? 'church' : 'org'),
       parent: orgPayload.parent ?? existing.parent ?? person,
+      // The governor rides the link so the invite ceremony can find it without a vault read (`lib/workspace-governor.ts`).
+      ...(orgPayload.governor ? { governor: String(orgPayload.governor).toLowerCase() } : existing.governor ? { governor: existing.governor } : {}),
       createdAt: existing.createdAt ?? Date.now(),
     };
     await env.AUTH_CODES.put(`related:${person}:${org}`, JSON.stringify(link));

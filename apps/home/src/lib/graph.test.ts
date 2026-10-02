@@ -1,7 +1,7 @@
 // The trust graph centred on an agent (owner, 2026-10-01): the centre in the middle, its own agents around it, who
 // holds it small and above, and a "+N more" node when the ring is long.
 import { describe, it, expect } from 'vitest';
-import { buildAgentGraphLive, buildCenteredGraph, CUSTODIAN_ID, MORE_ID, type LivePerson } from './graph';
+import { buildAgentGraphLive, buildCenteredGraph, CUSTODIAN_ID, MORE_ID, EDGE_CLASS, EDGE_KIND_STYLE, type LivePerson } from './graph';
 
 const ALICE = '0xa000000000000000000000000000000000000001';
 const GRACE = '0xa000000000000000000000000000000000000002';
@@ -66,5 +66,35 @@ describe('the graph centred on an agent', () => {
     expect([holds.source, holds.target]).toEqual([TEAM, '0xd000000000000000000000000000000000000003']);
     expect(g.nodes.find((n) => n.data.name === 'jenna-alice')!.position.y).toBeLessThan(0);
     expect(g.nodes.some((n) => n.id === MORE_ID)).toBe(false);
+  });
+});
+
+// A GOVERNED WORKSPACE (the owner's rule, 2026-10-02): the organization that governs a workspace is drawn with a
+// `governs` edge org → workspace, and the workspace says "governed by …" under its name. The port adapts the
+// apps/home test (which targeted the pre-refactor flat `buildPersonGraphLive`) to this app's centred graph: the
+// workspace sits in the governor's ring, so the pairing is asserted on the organization-centred view.
+describe('a governed workspace (the owner’s rule, 2026-10-02)', () => {
+  const ORG = '0xd000000000000000000000000000000000000aa1';
+  const WS = '0xd000000000000000000000000000000000000bb2';
+  const governed: LivePerson = {
+    name: 'alice', agentName: 'alice.me', personSA: ALICE,
+    agents: [
+      { agent: ORG, name: 'Northern Colorado Field (organization)', cls: 'org', kindWord: 'organization', relationship: 'member', parent: ALICE },
+      { agent: WS, name: 'Northern Colorado Field', cls: 'service', kindWord: 'workspace', relationship: 'member', parent: ORG, governedBy: ORG },
+    ],
+  };
+  it('draws the governs edge org → workspace and says "governed by" under the workspace, centred on the organization', () => {
+    const g = buildAgentGraphLive(governed, { center: ORG });
+    expect(g.edges.find((e) => e.kind === 'governance')).toMatchObject({ source: ORG, target: WS, label: 'governs' });
+    expect(g.nodes.find((n) => n.id === WS)!.data.sub).toContain('governed by Northern Colorado Field (organization)');
+  });
+  it('governance is an authority-class edge with its own legend entry', () => {
+    expect(EDGE_CLASS.governance).toBe('authority');
+    expect(EDGE_KIND_STYLE.governance.label).toContain('Governs');
+  });
+  it('a workspace with no governor draws no governance edge', () => {
+    const legacy: LivePerson = { name: 'alice', agentName: 'alice.me', personSA: ALICE, agents: [{ agent: WS, name: 'Legacy', cls: 'service', kindWord: 'workspace', relationship: 'steward', parent: ALICE }] };
+    const g = buildAgentGraphLive(legacy, { center: ALICE });
+    expect(g.edges.some((e) => e.kind === 'governance')).toBe(false);
   });
 });

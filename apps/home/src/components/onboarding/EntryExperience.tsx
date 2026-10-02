@@ -6,8 +6,8 @@ import { WorkingBar } from './WorkingBar';
 // (onboarding / sign-in). The onboarding journey itself lives in <OnboardingJourney/>.
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { openHome, createOrganization, personGrantForOrgCreate, continueWithGoogle, continueWithYouVersion, resolveVia, signHashFor, secureHomeWalletNoName, type Via, type Auth } from '../../home/onboarding';
-import { passkeyLogin, fetchProfile, siweLogin, claimName, createManagedAgent, resolveHomeNameForLabel } from '../../connect-client';
+import { openHome, createOrganization, createGovernedWorkspace, personGrantForOrgCreate, continueWithGoogle, continueWithYouVersion, resolveVia, signHashFor, secureHomeWalletNoName, type Via, type Auth } from '../../home/onboarding';
+import { passkeyLogin, fetchProfile, siweLogin, claimName, resolveHomeNameForLabel } from '../../connect-client';
 import { loadPasskey } from '../../lib/passkey';
 import { hasWallet } from '../../lib/wallet';
 import { initRemoteSigner } from '../../lib/remote-signer';
@@ -1289,23 +1289,15 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
         const name = orgBase.trim();
         if (name.length < 3) { setErr('Name this field workspace — at least 3 characters.'); setPhase('error'); return; }
         if (!auth?.token) { setErr('Your Home session is needed to create a workspace.'); setPhase('error'); return; }
-        const minted = await createManagedAgent(
-          { kind: 'workspace', label: name, parent: personAgent, person: personAgent, via },
-          auth.token,
-          (s) => setGrantProgress({ step: 1, total: 2, label: s }),
-        );
-        if (!minted.ok) { setErr(minted.error); setPhase('error'); return; }
-        created = {
-          ok: true,
-          org: {
-            orgAgent: minted.result.agent,
-            orgName: minted.result.name,
-            kind: 'workspace',
-            purpose: api.enroll.purpose ?? 'field-workspace',
-            person: personAgent,
-          },
-          grant: minted.result.stewardshipDelegation,
-        };
+        // THE ORGANIZATION FIRST, THEN THE WORKSPACE UNDER IT (`createGovernedWorkspace`, the same road the
+        // recognized path takes): a workspace agent is a service and holds no members, so `<name>.org` governs
+        // `<name>.workspace`, and the token's `org` payload — still the workspace's — names the governor.
+        created = await createGovernedWorkspace({ address: personAgent, name: api.enroll.name }, name, delegate, via, auth, {
+          purpose: api.enroll.purpose ?? 'field-workspace',
+          requestedBy: api.enroll.aud,
+          grantOrg: api.enroll.grantOrg,
+          onProgress: setGrantProgress,
+        });
       } else {
         created = await createOrganization({ address: personAgent, name: api.enroll.name }, orgBase, delegate, via, auth, {
           purpose: api.enroll.purpose,
@@ -1348,7 +1340,7 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
       <Shell>
         <CeremonyProgress
           label={grantProgress.label}
-          hint={grantProgress.hint ?? (existingOrg ? `${orgAppName} is connecting — this stays in your control.` : isWorkspace ? 'This can take a moment — we’re setting the workspace up.' : 'This can take a moment — we’re setting the organization up.')}
+          hint={grantProgress.hint ?? (existingOrg ? `${orgAppName} is connecting — this stays in your control.` : isWorkspace ? 'This can take a moment — we’re setting the organization and its workspace up.' : 'This can take a moment — we’re setting the organization up.')}
           step={grantProgress.step}
           total={grantProgress.total}
         />
@@ -1356,7 +1348,7 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
     );
   }
   // Spec 255 W4.1 — the org-create "connected" receipt: what the single approval accomplished.
-  if (phase === 'connected') return <Shell><BrandShield size={56} /><h1 className="onboarding-h1">{orgBase} is ready</h1><ReceiptCard title={`${orgBase} is ready`} body={existingOrg ? `${orgAppName} can now read what it posts — the organization stays in your control.` : isWorkspace ? `Its agent is started, its name is claimed, and ${orgAppName} can act as this workspace — revocably.` : `Its home is started, its name is claimed, and ${orgAppName} can now read what it posts.`} /><p className="onboarding-sub">Returning you to {orgAppName}…</p><WorkingBar /></Shell>;
+  if (phase === 'connected') return <Shell><BrandShield size={56} /><h1 className="onboarding-h1">{orgBase} is ready</h1><ReceiptCard title={`${orgBase} is ready`} body={existingOrg ? `${orgAppName} can now read what it posts — the organization stays in your control.` : isWorkspace ? `The organization and its workspace are started, their names are claimed, and ${orgAppName} can act as this workspace — revocably.` : `Its home is started, its name is claimed, and ${orgAppName} can now read what it posts.`} /><p className="onboarding-sub">Returning you to {orgAppName}…</p><WorkingBar /></Shell>;
   if (phase === 'error') return <Shell><h1 className="onboarding-h1">Couldn&apos;t finish</h1><p className="onboarding-hint taken">{err}</p><button className="btn-primary" onClick={() => setPhase(preselected ? 'consent' : 'choose')}>Try again</button></Shell>;
   return (
     <Shell>
@@ -1369,13 +1361,13 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
           {existingOrg
             ? `This single approval lets ${orgAppName} read what ${orgBase} posts. Nothing beyond that — no new organization is created.`
             : isWorkspace
-              ? `This single approval starts the workspace agent, claims its name, and lets ${orgAppName} act as that workspace. Nothing beyond that.`
+              ? `This single approval starts an organization under your name and the workspace it governs, claims both names, and lets ${orgAppName} act as that workspace. Nothing beyond that.`
               : `This single approval starts the organization, claims its name, and lets ${orgAppName} read what it posts. Nothing beyond that.`}
         </p>
         <p className="securing-wait">You can disconnect {orgAppName} at any time from your Impact home.</p>
       </div>
       <ConsentSheet
-        title={existingOrg ? `Connect ${orgBase} to ${orgAppName}` : isWorkspace ? `Create workspace ${orgBase}` : `Create ${orgBase} in the ${whitelabel.brand.community}`}
+        title={existingOrg ? `Connect ${orgBase} to ${orgAppName}` : isWorkspace ? `Create ${orgBase} and its workspace` : `Create ${orgBase} in the ${whitelabel.brand.community}`}
         appName={orgAppName}
         appDomain={orgAppDomain}
         template={tpl}

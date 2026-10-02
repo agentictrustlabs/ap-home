@@ -18,4 +18,17 @@ describe('expectedDeliversOf', () => {
     const lone = [{ id: 'x', produces: [{ iri: `${C}PlaybookStep`, label: 'Playbook Step', within: `${C}IncidentPlaybook` }] }];
     expect(expectedDeliversOf([{ tool: 'x' }], lone).map((x) => x.iri)).toEqual([`${C}PlaybookStep`]);
   });
+  // 2026-10-02 — the drafter's LOI | proposal: 51 of 68 grant runs (chain panels 1–4) lost ~⅓ for the one never written.
+  it('carries a terminal product\'s alternative group; an intermediate is required, never "one of"', () => {
+    const drafter = [
+      { id: 'track', produces: [{ iri: `${C}PipelineEntry`, label: 'Pipeline Entry', alternative: 'stray' }] },
+      { id: 'draft', produces: [{ iri: `${C}LetterOfInquiry`, label: 'Letter of Inquiry', alternative: 'drafted-application' }, { iri: `${C}GrantProposal`, label: 'Grant Proposal', alternative: 'drafted-application' }, { iri: `${C}ClaimPlaceholder`, label: 'Claim Placeholder' }] },
+    ];
+    expect(expectedDeliversOf([{ tool: 'track', for: `${C}PipelineEntry` }, { tool: 'draft' }], drafter)).toEqual([
+      { iri: `${C}PipelineEntry`, label: 'Pipeline Entry', required: true },
+      { iri: `${C}LetterOfInquiry`, label: 'Letter of Inquiry', alternative: 'drafted-application' },
+      { iri: `${C}GrantProposal`, label: 'Grant Proposal', alternative: 'drafted-application' },
+      { iri: `${C}ClaimPlaceholder`, label: 'Claim Placeholder' },
+    ]);
+  });
 });

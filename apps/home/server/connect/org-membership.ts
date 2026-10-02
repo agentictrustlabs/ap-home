@@ -14,6 +14,7 @@ import type { Address } from '@agenticprimitives/types';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { orgVault } from '../lib/org-vault';
+import { notAnOrganization, workspaceCheck } from '../lib/workspace-governor';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
 const json = (b: unknown, s = 200): Response =>
@@ -54,6 +55,16 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // The member consents for THEMSELVES, to THIS org — anything else is rejected (fail-closed).
   if (d.delegator.toLowerCase() !== person) return json({ error: 'delegation delegator must be your person agent' }, 403);
   if (d.delegate.toLowerCase() !== org) return json({ error: 'delegation delegate must be the org' }, 403);
+  // AND THIS ORG IS AN ORGANIZATION (the owner's rule, 2026-10-02; `../lib/workspace-governor.ts`). A workspace
+  // agent is a service and holds no members: a join that names one is refused by name, with the governor when
+  // the member's link knows it, so the ceremony that sent it learns where the membership belongs. The naming
+  // read is the one this route makes for the member's label anyway, pointed at the target.
+  const wsNaming = new AgentNamingClient({
+    rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL), chainId: CHAIN_ID,
+    registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver,
+  });
+  const ws = await workspaceCheck(env.AUTH_CODES, person, org, () => wsNaming.reverseResolve(org as Address));
+  if (ws.workspace) return json(notAnOrganization(ws.governor), 400);
   // W2 mismatch gate: a member-access grant is stored ONLY when it is org→THIS person. A grant to a
   // different (counterfactual) address is inert — dropped here, never re-targeted (ADR-0013).
   // Two delivery channels for the SAME steward-signed artifact, gated identically: the email path

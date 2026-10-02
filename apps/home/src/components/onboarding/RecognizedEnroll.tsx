@@ -20,10 +20,11 @@ import { WorkingBar } from './WorkingBar';
 // fallback, never a silent second mechanism).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { givePermission, createOrganization, personGrantForOrgCreate, collectDueSubscriptions, authorizeContentSigningForOwner,
+import { givePermission, createOrganization, createGovernedWorkspace, personGrantForOrgCreate, collectDueSubscriptions, authorizeContentSigningForOwner,
   authorizeServiceAgentWire, activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded,
   isKmsVia, resolveVia, publishSocialConnectionKindIfNeeded, signHashFor, type Via, type Auth } from '../../home/onboarding';
-import { issueAskAsMeDelegation, issueSiteDelegation, issueWorkspaceMembershipAccessDelegation, toWire } from '../../lib/delegation';
+import { issueAskAsMeDelegation, issueOrganizationResourceAccessDelegation, issueSiteDelegation, issueWorkspaceMembershipAccessDelegation, toWire, type DelegationWire } from '../../lib/delegation';
+import { offerRelationshipCredential, relationshipOfferOf, resolveWorkspaceGovernor, type RelationshipOfferV1 } from '../../lib/workspace-governor';
 import { buildActAsMeSet, signActAsMeSet, type ActChoice } from '../../lib/act-as-me';
 import { ActAsMeConsent } from './ActAsMeConsent';
 import { approveGrantHashes, signsWithoutPrompt } from '../../connect-client';
@@ -52,6 +53,11 @@ import { agentClassOf } from '../../lib/agent-class';
 import { withMissionRegistry } from '../../lib/mission-registry';
 
 type Phase = 'resolving' | 'choose-org' | 'consent' | 'granting' | 'connected' | 'error';
+
+/** What a person is told at a workspace with no governing organization (2026-10-02): membership is recorded on
+ *  organizations only, so neither an invitation into it nor a join of it can succeed until its host runs the
+ *  migration. One sentence, used by both ceremonies, so the host and the invitee read the same thing. */
+const LEGACY_WORKSPACE_MESSAGE = 'This workspace has no organization yet. Its host has to set one up before anybody can join (apps/demo-sso-next/scripts/workspace-governor.mts).';
 
 /** The CAIP-10 tail (`eip155:<chain>:0x…` → `0x…`), or null. Mirrors context/session. */
 function addressOf(caip10: string | undefined): Address | null {
@@ -365,11 +371,47 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         join:   the MEMBER claims their stash (single use) and writes their OWN related-agent link
         carrying the grant — the only party the link endpoint permits. The workspace roster still
         gates every relying-app call; this link is reach, not authority.
+
+        AND THE MEMBERSHIP IS THE GOVERNOR'S (2026-10-02, the owner's rule; `lib/workspace-governor.ts`).
+        A workspace agent is a service that coordinates a workspace and holds no members, so when the
+        workspace has a governing organization the invite ALSO invites into that organization — the org→member
+        access grant, the role word and the organization's signed half of the has-member credential, exactly
+        what `/connect/org-invite/agent` records, steward-gated on this person's stewardship of the governor —
+        and the join records the membership THERE: the organization's own `org.membership:member:<sa>`, the
+        member's OrganizationMembership naming the governor, the countersigned credential. The workspace's own
+        wires are still signed and still ride the link, because the member needs to READ the workspace's vault;
+        the link hangs under the governor. A LEGACY workspace (no governor) is invited into and joined exactly as
+        before, and `resolveWorkspaceGovernor` says so once in the console.
       */
       if (enroll.template === 'workspace-member-invite') {
         if (!enroll.grantOrg || !enroll.member) return fail('This invitation names no workspace or member.');
         if (!token) return fail('Your Home session is needed to invite into a workspace.');
-        setGrantProgress({ step: 1, total: 2, label: 'Signing the member’s access…' });
+        const governed = await resolveWorkspaceGovernor(token, enroll.grantOrg, home.address);
+        // A LEGACY WORKSPACE IS REFUSED HERE, NOT AT THE FAR END. The server records membership on organizations
+        // only, so an invitation into a workspace with no governor is one nobody can accept; stashing it would
+        // fail the invitee later, with no mention of why. The host is told what to set up, in the words every
+        // screen about this uses.
+        if (!governed) return fail(LEGACY_WORKSPACE_MESSAGE);
+        const total = 3;
+        let governorAccess: DelegationWire | null = null;
+        let relationshipOffer: RelationshipOfferV1 | null = null;
+        {
+          setGrantProgress({ step: 1, total, label: `Inviting them into ${governed.governorName || 'the organization'}…` });
+          // Signed AS THE ORGANIZATION — its custody is this person's credential, reached the way select-existing
+          // reaches an org it stewards — so both artifacts validate by the organization's ERC-1271.
+          const signAsOrg = await signHashFor(viaLower as Via, governed.governor, auth);
+          governorAccess = toWire(await issueOrganizationResourceAccessDelegation(governed.governor, enroll.member, MCP_SERVER_ID, signAsOrg));
+          relationshipOffer = await offerRelationshipCredential({ kind: 'has-member', subject: enroll.member, object: governed.governor, terms: { role: 'member' }, signAsObject: signAsOrg });
+          const inv = await fetch('/connect/org-invite/agent', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+            body: JSON.stringify({ org: governed.governor, agent: enroll.member, memberAccessDelegation: governorAccess, role: 'member', relationshipOffer }),
+          });
+          const invOut = (await inv.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+          // An invitation the organization cannot record admits nobody — the same refusal `/org-invite` makes.
+          if (!inv.ok || invOut.ok === false) return fail(invOut.error ?? `${governed.governorName || 'the organization'} could not record the invitation (HTTP ${inv.status})`);
+        }
+        setGrantProgress({ step: 2, total, label: 'Signing the member’s access…' });
         const signHash = await signHashFor(viaLower as Via, home.address, auth);
         const grant = await issueSiteDelegation(enroll.grantOrg, enroll.member, signHash);
         // P4 record coverage: the site delegation is reach; the MEMBERSHIP wire is what lets the
@@ -385,6 +427,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
             delegation: toWire(grant),
             membership: toWire(membership),
             workspaceName: enroll.orgBase ?? '',
+            governor: governed.governor, governorName: governed.governorName, governorAccess, relationshipOffer,
           }),
         });
         const out = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
@@ -394,7 +437,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         // (2026-09-13). So the host's own agent sends them one message, the way an organization's invitation
         // reaches an invitee (spec 341 §5.1b): delivered over A2A by the inviter's agent, never written by the
         // Home, carrying the app's link to where the join is. Best-effort: the invitation stands on the stash.
-        setGrantProgress({ step: 2, total: 2, label: 'Telling them…' });
+        setGrantProgress({ step: total, total, label: 'Telling them…' });
         try {
           const { approveMessagingContact, COMMUNITY_MESSAGING_VALIDITY_SECONDS } = await import('../../lib/messaging-ceremony');
           const { sendMessage } = await import('../../lib/messaging-send');
@@ -425,62 +468,77 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         const out = (await res.json().catch(() => ({}))) as {
           ok?: boolean;
           error?: string;
-          invite?: { delegation?: unknown; membership?: unknown; workspaceName?: string };
+          invite?: {
+            delegation?: unknown; membership?: unknown; workspaceName?: string;
+            governor?: string; governorName?: string; governorAccess?: { delegate?: string } | null; relationshipOffer?: unknown;
+          };
         };
         if (!res.ok || !out.ok || !out.invite?.delegation) {
           return fail(out.error ?? 'No invitation was found for you at this workspace — ask its steward to invite you.');
         }
         lapJoin('invitation claimed');
-        // THE LINK AND THE WORKSPACE'S OWN RECORD, TOGETHER. The link is the member's own note (and what the Home
-        // derives standing from); the record is the workspace's word about who belongs. Neither waits on the
-        // other, and each is seconds of vault work, so they run side by side — a join that took twenty seconds
-        // of "telling the workspace" took ten.
-        setGrantProgress({ step: 2, total: 2, label: 'Joining, and telling the workspace…' });
         const invite = out.invite;
-        const recordP = (async () => {
-          try {
-            const { recordOrgMembership } = await import('../../lib/org-membership');
-            const signHash = await signHashFor(viaLower as Via, home.address, token ? { token } : undefined);
-            await recordOrgMembership(home.address, enroll.grantOrg!, signHash, token, (invite.membership ?? null) as { delegate?: string } | null, homeLabel(home.name));
-          } catch (e) {
-            console.warn('[connect] workspace-join: the workspace could not record the membership', e);
+        const governor = typeof invite.governor === 'string' && /^0x[0-9a-fA-F]{40}$/.test(invite.governor) ? (invite.governor.toLowerCase() as Address) : null;
+        const signHash = await signHashFor(viaLower as Via, home.address, token ? { token } : undefined);
+        // THE MEMBER'S OWN LINK TO THE WORKSPACE. `siteDelegation` is the workspace's site grant — REACH, and
+        // nothing else. It was sent as `stewardshipDelegation` until 2026-10-02, and a site grant has exactly the
+        // caveat shape a stewardship wire has (governance targets, no record scope), so every member of every
+        // workspace verified as its STEWARD: `act-as` in the field app, the invite and remove gates here. A member
+        // must never come out as a steward, whichever branch below wrote the link.
+        const linkBody = {
+          person: home.address,
+          orgAgent: enroll.grantOrg,
+          orgName: invite.workspaceName || enroll.orgBase || 'Field Workspace',
+          // The org's purpose IS the kind of this link (related-orgs maps it back): a join into a
+          // field TEAM under a hard-coded 'field-workspace' listed the team as one of the person's
+          // workspaces (2026-08-30). The app says what it is in `org_purpose`; default stays workspace.
+          purpose: enroll.purpose ?? 'field-workspace',
+          requestedBy: enroll.aud,
+          kind:
+            enroll.purpose === 'field-team' ? 'team'
+            : enroll.purpose === 'field-circle' ? 'circle'
+            : enroll.purpose === 'field-church' ? 'church'
+            : 'workspace',
+          // Under the GOVERNOR when there is one: a workspace hangs under the organization that governs it.
+          parent: governor ?? home.address,
+          relationship: 'member',
+          siteDelegation: invite.delegation,
+          // The record-covering wire (P4): `scopedWireFor` reads this off the link, the library
+          // org-read presents it as scopedAccess, and the DO evaluates its scope per resource.
+          membershipDelegation: invite.membership ?? null,
+          ...(governor ? { governor } : {}),
+        };
+        const linkWorkspace = async (): Promise<void> => {
+          const linked = await fetch('/connect/related-orgs', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+            body: JSON.stringify(linkBody),
+          });
+          const link = (await linked.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+          if (!linked.ok || link.ok === false) {
+            throw new Error(link.error ?? `joined, but the workspace could not be linked to your home (HTTP ${linked.status})`);
           }
-        })();
-        const linked = await fetch('/connect/related-orgs', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-          body: JSON.stringify({
-            person: home.address,
-            orgAgent: enroll.grantOrg,
-            orgName: out.invite.workspaceName || enroll.orgBase || 'Field Workspace',
-            // The org's purpose IS the kind of this link (related-orgs maps it back): a join into a
-            // field TEAM under a hard-coded 'field-workspace' listed the team as one of the person's
-            // workspaces (2026-08-30). The app says what it is in `org_purpose`; default stays workspace.
-            purpose: enroll.purpose ?? 'field-workspace',
-            requestedBy: enroll.aud,
-            kind:
-              enroll.purpose === 'field-team' ? 'team'
-              : enroll.purpose === 'field-circle' ? 'circle'
-              : enroll.purpose === 'field-church' ? 'church'
-              : 'workspace',
-            parent: home.address,
-            relationship: 'member',
-            stewardshipDelegation: out.invite.delegation,
-            // The record-covering wire (P4): `scopedWireFor` reads this off the link, the library
-            // org-read presents it as scopedAccess, and the DO evaluates its scope per resource.
-            membershipDelegation: out.invite.membership ?? null,
-          }),
-        });
-        const link = (await linked.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-        if (!linked.ok || link.ok === false) {
-          return fail(link.error ?? `joined, but the workspace could not be linked to your home (HTTP ${linked.status})`);
+        };
+        const { recordOrgMembership } = await import('../../lib/org-membership');
+        if (governor) {
+          // THE MEMBERSHIP IS THE ORGANIZATION'S, and it goes first: `recordOrgMembership` writes the person's link
+          // to the governor, and the workspace link below hangs UNDER the governor, which the link store refuses
+          // until that link exists. Nothing is recorded on the workspace itself. The two-sided has-member credential
+          // (spec 410 §8) is countersigned INSIDE `recordOrgMembership` from the offer it is handed — the
+          // organization signed its half at the invitation.
+          setGrantProgress({ step: 2, total: 3, label: `Joining ${invite.governorName || 'the organization'}…` });
+          await recordOrgMembership(home.address, governor, signHash, token, invite.governorAccess ?? null, homeLabel(home.name), relationshipOfferOf(invite.relationshipOffer));
+          lapJoin('organization recorded the membership');
+          setGrantProgress({ step: 3, total: 3, label: 'Adding the workspace to where you can work…' });
+          try { await linkWorkspace(); } catch (e) { return fail(e instanceof Error ? e.message : String(e)); }
+          lapJoin('linked');
+        } else {
+          // A LEGACY WORKSPACE (the invitation names no governor) CANNOT BE JOINED. The server records membership on
+          // organizations only, so the workspace's own record — the roster the relying app reads — would never be
+          // written, and the person would be told they had joined a club that does not list them. The refusal is
+          // made here, in words that say what the host has to do, rather than in a warning nobody reads.
+          return fail(LEGACY_WORKSPACE_MESSAGE);
         }
-        lapJoin('linked');
-        // AND THE WORKSPACE'S OWN RECORD OF THEM (spec 325, finding ORG-MEM-1) — started above beside the link;
-        // waited for here, because the roster a relying app reads is that record, and a person sent back before
-        // it landed would arrive at a club that did not list them yet.
-        await recordP;
-        lapJoin('workspace recorded the membership');
       }
 
       let code: string;
@@ -557,32 +615,18 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         const name = (enroll.orgBase ?? orgSel?.orgName ?? '').trim();
         if (name.length < 3) return fail('Name this field workspace — at least 3 characters.');
         if (!token) return fail('Your Home session is needed to create a workspace.');
-        const created = await createManagedAgent(
-          { kind: 'workspace', label: name, parent: home.address, person: home.address, via: viaLower },
-          token,
-          (s) => setGrantProgress({ step: 1, total: 2, label: s }),
-        );
+        // THE ORGANIZATION FIRST, THEN THE WORKSPACE UNDER IT (`createGovernedWorkspace`): a workspace agent is a
+        // service and holds no members, so the name the app asked for charters `<name>.org` — the governor, by
+        // org-create's own road — and `<name>.workspace` chartered under it, stewarded by this person. The token's
+        // `org` payload is still the workspace's, with the governor beside it.
+        const created = await createGovernedWorkspace(home, name, delegate, viaLower as Via, auth, {
+          purpose: enroll.purpose ?? 'field-workspace',
+          requestedBy: enroll.aud,
+          grantOrg: enroll.grantOrg,
+          onProgress: setGrantProgress,
+        });
         if (!created.ok) return fail(created.error);
-        // The realm is USABLE from the first approval or it is not created: the same storage
-        // trio org-create runs (ManagedAgents) — vault binding is REQUIRED (every ws-* write
-        // gates on it), delivery + interactions grants are best-effort like everywhere else.
-        setGrantProgress({ step: 2, total: 2, label: 'Enabling workspace storage…' });
-        const bound = await activateVaultIfNeeded(created.result.agent, viaLower as Via, auth);
-        if (!bound.ok) return fail(bound.error);
-        const delivery = await activateInboxDeliveryIfNeeded(created.result.agent, viaLower as Via, auth);
-        if (!delivery.ok) console.warn('[workspace-create] delivery grant not provisioned:', delivery.error);
-        const ix = await activateInteractionsIfNeeded(created.result.agent, viaLower as Via, auth);
-        if (!ix.ok) console.warn('[workspace-create] interactions grant not provisioned:', ix.error);
-        const proved = await personGrantForOrgCreate(home, delegate, viaLower, auth, {
-          org: {
-            orgAgent: created.result.agent,
-            orgName: created.result.name,
-            kind: 'workspace',
-            purpose: enroll.purpose ?? 'field-workspace',
-            person: home.address,
-          },
-          grant: created.result.stewardshipDelegation,
-        }, enroll.sessionKey);
+        const proved = await personGrantForOrgCreate(home, delegate, viaLower, auth, created, enroll.sessionKey);
         if (!proved.ok) return fail(proved.error);
         code = await submitEnrollGrant(grant_id, proved.grant, proved.org, proved.sessionDelegation);
       } else if (enroll.template === 'org-create') {
