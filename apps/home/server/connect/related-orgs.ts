@@ -125,8 +125,15 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   }
 
   const orgs: Array<Record<string, unknown>> = [];
+  // PERF (2026-10-02): the per-org KV reads ran SEQUENTIALLY (one round-trip each, ~93 for a busy account) and,
+  // worse, an on-chain reverseResolve ran inside the loop and serialized — a handful of un-healed names made this
+  // endpoint take 7–19s live. Prefetch every KV row at once, and move the on-chain name heal to a BOUNDED, parallel
+  // pass after the loop (cap NAME_HEAL_PER_REQUEST) so a pathological account can no longer serialize the hot read.
+  const rawById = new Map(await Promise.all(idx.map(async (o) => [o, await env.AUTH_CODES.get(`related:${person}:${o}`)] as const)));
+  const NAME_HEAL_PER_REQUEST = 4;
+  const toHeal: Array<{ org: string; agent: string; idx: number }> = [];
   for (const org of idx) {
-    const raw = await env.AUTH_CODES.get(`related:${person}:${org}`);
+    const raw = rawById.get(org);
     if (!raw) continue;
     const link = JSON.parse(raw) as {
       orgAgent: string; orgName: string; purpose: string; requestedBy: string;
@@ -139,15 +146,10 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     // Name self-heal: a link written while the chain read lagged stored the ADDRESS as orgName (the
     // member's dropdowns then show 0x…). The link is a PROJECTION — reconcile it from the naming
     // service on read (ADR-0013-safe: reconciling a projection from its source, not a fallback).
+    // Name self-heal is DEFERRED out of the hot path (see NAME_HEAL_PER_REQUEST above): note which need it; the
+    // address stands in until a bounded parallel pass (below) resolves a few and writes them back for next time.
     if (!link.orgName || link.orgName.toLowerCase() === link.orgAgent.toLowerCase()) {
-      const healed = await new AgentNamingClient({
-        rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL), chainId: CHAIN_ID,
-        registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver,
-      }).reverseResolve(link.orgAgent as Address).catch(() => null);
-      if (healed) {
-        link.orgName = healed;
-        await env.AUTH_CODES.put(`related:${person}:${org}`, JSON.stringify({ ...l, orgName: healed }));
-      }
+      toHeal.push({ org, agent: link.orgAgent, idx: orgs.length });
     }
     orgs.push({
       orgAgent: link.orgAgent,
@@ -194,6 +196,19 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       // active, so a link that predates the feature reads as active without a migration.
       ...(l.status ? { status: l.status } : {}),
     });
+  }
+  // Bounded, PARALLEL name heal: at most NAME_HEAL_PER_REQUEST on-chain reverseResolves per request, concurrent, so a
+  // busy account's hot read never serializes them. The rest heal on later loads as the projection converges.
+  if (toHeal.length > 0) {
+    const naming = new AgentNamingClient({ rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL), chainId: CHAIN_ID, registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver });
+    await Promise.all(toHeal.slice(0, NAME_HEAL_PER_REQUEST).map(async (h) => {
+      const healed = await naming.reverseResolve(h.agent as Address).catch(() => null);
+      if (!healed) return;
+      const o = orgs[h.idx];
+      if (o) o.orgName = healed;
+      const raw = rawById.get(h.org);
+      if (raw) { try { await env.AUTH_CODES.put(`related:${person}:${h.org}`, JSON.stringify({ ...JSON.parse(raw), orgName: healed })); } catch { /* best-effort */ } }
+    }));
   }
   // ── THE RECONCILE THIS FILE ALREADY PROMISED ──────────────────────────────────────────────────
   // The POST above writes new links through to the person's AUTHORITATIVE vault doc, and says links
