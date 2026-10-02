@@ -3,7 +3,7 @@
 // and a record built that way projects a graph that names its door and its variant.
 import { describe, expect, it } from 'vitest';
 import type { RunRecordV1 } from '@agenticprimitives/orchestration';
-import { a2aDoor, doorFromBody, modelCallsOf, plannerKindOf, variantOf, parseVariantRequest } from '../../src/run-trace.js';
+import { a2aDoor, doorFromBody, modelCallsOf, plannerKindOf, variantOf, parseVariantRequest, operationalOf, VARIANT_TOGGLES } from '../../src/run-trace.js';
 import { provenanceGraphOf } from '../../src/run-export.js';
 
 const trace = {
@@ -87,6 +87,26 @@ describe('the variant knob is parsed, and anything unknown is refused by name', 
     expect(parseVariantRequest({ askerContext: { recentSkills: [] } })).toMatchObject({ ok: false });
     expect(parseVariantRequest({ askerContext: { digest: askerContext.digest, recentSkills: [{ id: 'x', times: 0 }] } })).toMatchObject({ ok: false });
     expect(variantOf({} as never, undefined, { askerContext }).toggles).toEqual({ 'skill-selection/asker-context': `seeded:${askerContext.digest}` });
+  });
+  it('2026-10-01 — the skeleton hold is an advertised toggle, parsed by value, and on the recorded variant', () => {
+    expect(VARIANT_TOGGLES['skill-selection/hold']).toEqual(['ask', 'skeleton']);
+    const toggles = { 'skill-selection/hold': 'skeleton', 'quality/judge': 'outcome' };
+    expect(parseVariantRequest({ toggles })).toEqual({ ok: true, variant: { toggles } });
+    expect(parseVariantRequest({ toggles: { 'skill-selection/hold': 'template' } })).toMatchObject({ ok: false, error: expect.stringMatching(/one of ask \| skeleton/) });
+    expect(variantOf({} as never, undefined, { toggles }).toggles).toEqual(toggles);
+  });
+  it('2026-10-01 — the judge repeats are an advertised toggle, parsed by value (a string, like every toggle), and on the recorded variant', () => {
+    expect(VARIANT_TOGGLES['quality/judge-repeats']).toEqual(['1', '2']);
+    const toggles = { 'quality/judge': 'outcome', 'quality/judge-repeats': '2' };
+    expect(parseVariantRequest({ toggles })).toEqual({ ok: true, variant: { toggles } });
+    expect(parseVariantRequest({ toggles: { 'quality/judge-repeats': 2 } })).toMatchObject({ ok: false, error: expect.stringMatching(/one of 1 \| 2/) });
+    expect(variantOf({} as never, undefined, { toggles }).toggles).toEqual(toggles);
+  });
+  it('2026-10-01 — a skeleton that ran is on the operational record as the skill stage', () => {
+    const t = { ...(trace as object), skillStage: 'skeleton', selection: { approach: 'outcome-selective', chose: 'cic.grants.draft', plan: { steps: [{ tool: 'cic.grants.draft' }], missing: ['https://x/#FunderDeadline'] } } } as never;
+    const op = operationalOf(t, [], { receivedAt: 0, runStartMs: 0, runEndMs: 0 });
+    expect(op?.skillStage).toBe('skeleton');
+    expect(op?.selection).toMatchObject({ chose: 'cic.grants.draft', missing: ['https://x/#FunderDeadline'] });
   });
   it('spec 416 W3 — a conformal map is a component, and which map ran is on the recorded variant', () => {
     const acceptance = { method: 'conformal' as const, alpha: 0.05, temperature: 1.2, qhat: 0.4, mapDigest: 'sha256:' + 'cd'.repeat(32) };

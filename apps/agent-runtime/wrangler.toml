@@ -477,6 +477,17 @@ ANSWER_STREAM_DEFAULT = "on"
 # Re-adopted 2026-09-28 on effort-c4r2 (chain panel 4, two repeats, 26 pairs): outcome check 0.753 vs 0.748 (6 better,
 # 8 worse, 12 same; p = 0.79) — the one-repeat drop on effort-c4 was per-case noise; first words 7.1 → 4.7 s, in-step 3.3 → 0.8 s.
 SKILL_ANSWER_MODEL_DEFAULT = "minimal"
+# 2026-10-01 — A PLAN WITH A REQUIRED INPUT MISSING (`skill-selection/hold`): `ask` (the skill is told "ask for it rather
+# than invent it" and answers with a question) or `skeleton` (the skill runs anyway: each output's full structure, filled
+# where the request gave the facts, every gap a named [MISSING: …] placeholder, the three to five questions first; the run
+# records `skillStage: 'skeleton'`). Measured 2026-10-01 (CIL Commons held-out 8, Gemini answering, Haiku judging): the
+# harness is +0.07 over a bare model on delivered classes and trails it on exactly these holds, because the outcome check
+# credits a filled-in template and a bare question scores 0. NOT SET: `ask` until the Lab measures the skeleton arm.
+# SKILL_HOLD_DEFAULT = "skeleton"
+# 2026-10-01 — THE OUTCOME CHECK'S REPEATS (`quality/judge-repeats`): the same answer judged N times, score and classes
+# averaged, `outcomeCheck.spread` (max − min) and `.repeats` on the trace. The judge moved 0.025 (Haiku; Gemini far more)
+# between two runs of the same check on a fixed answer. NOT SET: one call until the Lab measures whether two steady it.
+# QUALITY_JUDGE_REPEATS_DEFAULT = "2"
 # Spec 420 §2 — goal regression over situations on every ask (a comparison names its own arm): the room's roster and the
 # asker's standing check each act's preconditions before any signature is asked for.
 PLAN_REGRESSION_DEFAULT = "on"

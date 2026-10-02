@@ -193,6 +193,7 @@ import { exportRun, firewalledSpans, recordRetention, hasProvenanceRef, provenan
 import { vaultProvenanceStore, readCarriedProvenance } from './provenance-bindings.js';
 import { runMeasuresRecordKey } from '@agenticprimitives/evaluation';
 import { doorFromBody, modelCallsOf, variantOf, engagedFromTrace, operationalOf, parseVariantRequest, VARIANT_TOGGLES, type VariantRequestV1 , SELECTION_ARMS } from './run-trace.js';
+import { averageOutcomeChecks, judgeRepeatsOf } from './outcome-check-repeats.js';
 import { provenanceLinkHeader } from '@agenticprimitives/a2a';
 import { runProvenanceRecordKey } from '@agenticprimitives/orchestration';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
@@ -4909,11 +4910,20 @@ app.post('/harness/ask', async (c) => {
     // its time and tokens are the instrument's, reported apart from the ask's.
     // Spec 418 A2 — THE OUTCOME CHECK: did the answer DELIVER each class the plan was for (the ontology's `produces`)?
     if (variantReq?.toggles?.['quality/judge'] === 'outcome' && reply?.kind === 'answer' && typeof (reply as { text?: unknown }).text === 'string' && trace.expectedDelivers?.length) {
+      // 2026-10-01 — `quality/judge-repeats` (env QUALITY_JUDGE_REPEATS_DEFAULT; 1 until the Lab measures 2): the same
+      // answer judged N times, averaged, with the spread on the trace — the judge's own movement between repeats
+      // (Haiku 0.025 mean on a fixed answer) is then a number on the record, not noise inside the score. The repeats run
+      // ONE AFTER ANOTHER: `outcomeCheck.ms` is subtracted from the post-run phase below, so it must be the wall time the
+      // check took, which the sum of sequential calls is and the sum of parallel ones is not. Tokens are summed over them.
       let usage: { tokensIn?: number; tokensOut?: number } | undefined;
-      const ocall = structuredCallFor(c.env, judgeProvider, { onCall: (rec) => { usage = { tokensIn: rec.tokensIn, tokensOut: rec.tokensOut }; } });
+      const ocall = structuredCallFor(c.env, judgeProvider, { onCall: (rec) => { if (rec.tokensIn !== undefined) usage = { tokensIn: (usage?.tokensIn ?? 0) + rec.tokensIn, tokensOut: (usage?.tokensOut ?? 0) + (rec.tokensOut ?? 0) }; } });
       if (ocall) {
-        const oc = await judgeOutcomeDelivered({ request: String(body.message ?? ''), answer: (reply as { text: string }).text, expected: trace.expectedDelivers }, ocall).catch((e: unknown) => ({ judge: OUTCOME_CHECK_JUDGE, classes: {}, score: 0, ms: 0, error: e instanceof Error ? e.message : String(e) }));
-        (trace as { outcomeCheck?: unknown }).outcomeCheck = { judge: oc.judge.name, classes: oc.classes, ...('requested' in oc ? { requested: oc.requested } : {}), score: oc.score, ms: oc.ms, ...(usage?.tokensIn !== undefined ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut ?? 0 } : {}), ...(oc.error ? { error: oc.error.slice(0, 200) } : {}) };
+        const repeats = judgeRepeatsOf(variantReq?.toggles?.['quality/judge-repeats'], (c.env as { QUALITY_JUDGE_REPEATS_DEFAULT?: string }).QUALITY_JUDGE_REPEATS_DEFAULT);
+        const once = () => judgeOutcomeDelivered({ request: String(body.message ?? ''), answer: (reply as { text: string }).text, expected: trace.expectedDelivers! }, ocall).catch((e: unknown) => ({ judge: OUTCOME_CHECK_JUDGE, classes: {}, score: 0, ms: 0, error: e instanceof Error ? e.message : String(e) }));
+        const results: Awaited<ReturnType<typeof once>>[] = [];
+        for (let i = 0; i < repeats; i++) results.push(await once());
+        const oc = averageOutcomeChecks(results);
+        (trace as { outcomeCheck?: unknown }).outcomeCheck = { judge: oc.judge.name, classes: oc.classes, ...(oc.requested ? { requested: oc.requested } : {}), score: oc.score, ms: oc.ms, repeats: oc.repeats, spread: oc.spread, ...(oc.repeats > 1 ? { scores: oc.scores } : {}), ...(usage?.tokensIn !== undefined ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut ?? 0 } : {}), ...(oc.error ? { error: oc.error.slice(0, 200) } : {}) };
       }
     }
     if (variantReq?.toggles?.['quality/judge'] === 'on' && reply?.kind === 'answer' && typeof (reply as { text?: unknown }).text === 'string') {
