@@ -122,11 +122,11 @@ export function AgentSwitcher() {
             }}
           >
             {active.kind === 'org' ? <BuildingIcon size={16} /> : active.kind === 'service' ? <LandmarkIcon size={16} /> : <UserIcon size={16} />}
-            <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
+            <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0, maxWidth: 200 }}>
               <span style={{ fontWeight: 650, fontSize: '.84rem', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 170 }}>
                 {triggerName}
               </span>
-              <span style={{ fontSize: '.66rem', opacity: 0.6, lineHeight: 1.1 }}>{caption}</span>
+              <span style={{ fontSize: '.66rem', opacity: 0.6, lineHeight: 1.1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 190 }}>{caption}</span>
             </span>
             <span aria-hidden style={{ opacity: 0.5, fontSize: '.7rem' }}>▾</span>
           </button>

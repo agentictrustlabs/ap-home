@@ -36,6 +36,8 @@ import {
   buildCenteredGraph,
   byRole,
   ringItemOf,
+  clusterPeople,
+  CLUSTER_PEOPLE_ID,
   CUSTODIAN_ID as CUSTODIAN,
   MORE_ID,
   type CenteredItem,
@@ -138,12 +140,13 @@ const GLYPH_BG: Record<GNodeKind, string> = {
   org: 'var(--color-sage-100)',
   service: '#ede9fe',
   more: 'var(--color-surface-raised)',
+  cluster: 'var(--color-sage-100)',
 };
 
 function Glyph({ kind, name }: { kind: GNodeKind; name: string }) {
   return (
     <span className="tg-glyph" style={{ background: GLYPH_BG[kind] }} aria-hidden>
-      {kind === 'more' ? '…' : (name[0] ?? '?').toUpperCase()}
+      {kind === 'more' ? '…' : kind === 'cluster' ? '\u{1F465}' : (name[0] ?? '?').toUpperCase()}
     </span>
   );
 }
@@ -180,7 +183,7 @@ const nodeTypes = { trust: TrustNode };
  * links (what she stewards and belongs to), read by her custodian. An ORGANIZATION, team, circle, church or service:
  * its roster — every member with their role — plus what it holds in the tree. Nothing is inferred from a name.
  */
-function useCenteredGraph(live: LivePerson, center: string, showAll: boolean): { g: ReturnType<typeof buildCenteredGraph>; reading: boolean; note: string | null } {
+function useCenteredGraph(live: LivePerson, center: string, showAll: boolean, showPeople: boolean): { g: ReturnType<typeof buildCenteredGraph>; reading: boolean; note: string | null } {
   const { session } = useSession();
   const token = session?.token ?? null;
   const self = useMemo(() => live.agents.find((a) => a.agent.toLowerCase() === center) ?? null, [live.agents, center]);
@@ -230,7 +233,7 @@ function useCenteredGraph(live: LivePerson, center: string, showAll: boolean): {
     if (isPersona) {
       // A persona is yours directly: You hold its keys. Your default name is a sibling, not a holder.
       const sibling: CenteredItem = { id: live.personSA, kind: 'person', name: live.name, sub: `${live.agentName} · another name of yours`, edge: { kind: 'control', label: 'same custodian', weight: 1, toCenter: true } };
-      return buildCenteredGraph({ center: { id: self?.agent ?? center, kind: 'person', name: self?.name || center.slice(0, 10), sub: `${self?.kindWord ?? 'person'} · another name of yours` }, above: [{ ...custodian, dim: false }, sibling], ring: [...fetched.ring, ...held], showAll });
+      return buildCenteredGraph({ center: { id: self?.agent ?? center, kind: 'person', name: self?.name || center.slice(0, 10), sub: `${self?.kindWord ?? 'person'} · another name of yours` }, above: [{ ...custodian, dim: false }, sibling], ring: clusterPeople([...fetched.ring, ...held], { expanded: showPeople }), showAll, ...(showPeople ? { maxRing: 80 } : {}) });
     }
     // An organization-class or service agent: its stewards above (You among them when the roster names you), its
     // members and what it holds around it. The tree's own row, when it says you steward or belong, stays as a faded holder.
@@ -238,8 +241,15 @@ function useCenteredGraph(live: LivePerson, center: string, showAll: boolean): {
     const above: CenteredItem[] = fetched.stewards.map((st) => (st.id.toLowerCase() === me ? { ...st, name: `${live.name} (you)`, dim: true } : { ...st, dim: true }));
     if (self && !above.some((a) => a.id.toLowerCase() === me)) above.push({ id: live.personSA, kind: 'person', name: `${live.name} (you)`, sub: live.agentName, dim: true, edge: self.relationship === 'member' ? { kind: 'membership', label: 'member of', weight: 0.5, toCenter: true } : { kind: 'stewardship', label: 'stewards', weight: 0.8, toCenter: true } });
     const word = self?.kindWord ?? (self?.cls === 'service' ? 'service' : 'organization');
-    return buildCenteredGraph({ center: { id: self?.agent ?? center, kind: self?.cls ?? 'org', name: self?.name || center.slice(0, 10), sub: word }, above, ring: [...fetched.ring, ...held], showAll });
-  }, [live, center, showAll, fetched, isPerson, isPersona, self]);
+    // THE WORKSPACE THIS ORGANIZATION GOVERNS (owner's rule, 2026-10-02): a `.workspace` service whose `governedBy`
+    // points at this org. It is a service the person holds, so its `parent` is the person, not the org — it would
+    // never land in `held`; it is added here with the distinct `governs` edge so the org↔workspace link is drawn.
+    const held2 = new Set(held.map((h) => h.id.toLowerCase()));
+    const governed: CenteredItem[] = live.agents
+      .filter((o) => o.governedBy?.toLowerCase() === center && o.agent.toLowerCase() !== center && !held2.has(o.agent.toLowerCase()))
+      .map((o) => ({ id: o.agent, kind: o.cls, name: o.name ? nameLabel(o.name) : o.agent.slice(0, 10), sub: `${o.kindWord ?? o.cls} · governed workspace`, edge: { kind: 'governance' as const, label: 'governs', weight: 0.8 } }));
+    return buildCenteredGraph({ center: { id: self?.agent ?? center, kind: self?.cls ?? 'org', name: self?.name || center.slice(0, 10), sub: word }, above, ring: clusterPeople([...governed, ...held, ...fetched.ring], { expanded: showPeople }), showAll, ...(showPeople ? { maxRing: 80 } : {}) });
+  }, [live, center, showAll, showPeople, fetched, isPerson, isPersona, self]);
   return { g, reading, note };
 }
 
@@ -249,7 +259,9 @@ export default function TrustGraph({ live, focusAgent }: { live: LivePerson; foc
   // herself at her own home. A long ring ends in "+N more" until it is clicked.
   const center = (focusAgent ?? live.personSA).toLowerCase();
   const [showAll, setShowAll] = useState(false);
-  const { g, reading, note } = useCenteredGraph(live, center, showAll);
+  const [showPeople, setShowPeople] = useState(false);
+  const { g, reading, note } = useCenteredGraph(live, center, showAll, showPeople);
+  useEffect(() => { setShowAll(false); setShowPeople(false); }, [center]);
   const personaOf = (id: string) => live.agents.find((a) => a.agent.toLowerCase() === id.toLowerCase());
   // Where "centre the graph here" goes for a ring node: its own trust-graph page, when this Home has one for it.
   const centerHref = (meta: NodeData): string | null => {
@@ -299,7 +311,7 @@ export default function TrustGraph({ live, focusAgent }: { live: LivePerson; foc
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <style>{TG_CSS}</style>
       <ReactFlow
-        key={`${center}:${showAll ? 'all' : 'ring'}`}
+        key={`${center}:${showAll ? 'all' : 'ring'}:${showPeople ? 'people' : 'cluster'}`}
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
@@ -461,6 +473,7 @@ const TG_CSS = `
 .tg-node.kind-service { border-top: 4px solid #8b5cf6; }
 /* the overflow node — "+N more": dashed, quiet, a door rather than an agent */
 .tg-node.kind-more { border: 1.5px dashed var(--color-border-strong); background: var(--color-surface-raised); width: 150px; cursor: pointer; }
+.tg-node.kind-cluster { border: 1.5px dashed var(--color-sage-500, #5b8c6e); background: var(--color-sage-100); width: 150px; cursor: pointer; }
 /* the custodian (human) node — dashed, muted, off the agent plane */
 .tg-node.kind-custodian {
   border: 1.5px dashed var(--color-border-strong);

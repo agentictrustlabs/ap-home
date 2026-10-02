@@ -1,7 +1,7 @@
 // The trust graph centred on an agent (owner, 2026-10-01): the centre in the middle, its own agents around it, who
 // holds it small and above, and a "+N more" node when the ring is long.
 import { describe, it, expect } from 'vitest';
-import { buildAgentGraphLive, buildCenteredGraph, CUSTODIAN_ID, MORE_ID, EDGE_CLASS, EDGE_KIND_STYLE, type LivePerson } from './graph';
+import { buildAgentGraphLive, buildCenteredGraph, clusterPeople, CLUSTER_PEOPLE_ID, CUSTODIAN_ID, MORE_ID, EDGE_CLASS, EDGE_KIND_STYLE, type CenteredItem, type LivePerson } from './graph';
 
 const ALICE = '0xa000000000000000000000000000000000000001';
 const GRACE = '0xa000000000000000000000000000000000000002';
@@ -96,5 +96,19 @@ describe('a governed workspace (the owner’s rule, 2026-10-02)', () => {
     const legacy: LivePerson = { name: 'alice', agentName: 'alice.me', personSA: ALICE, agents: [{ agent: WS, name: 'Legacy', cls: 'service', kindWord: 'workspace', relationship: 'steward', parent: ALICE }] };
     const g = buildAgentGraphLive(legacy, { center: ALICE });
     expect(g.edges.some((e) => e.kind === 'governance')).toBe(false);
+  });
+
+  it('clusterPeople collapses many people into one node and keeps the structure (orgs/services/workspace) drawn', () => {
+    const person = (n: number): CenteredItem => ({ id: `0xp${n}`, kind: 'person', name: `person-${n}`, sub: 'member', edge: { kind: 'membership', label: 'member of', toCenter: true } });
+    const ws: CenteredItem = { id: '0xws', kind: 'service', name: 'club.workspace', sub: 'workspace', edge: { kind: 'governance', label: 'governs' } };
+    const ring = [ws, ...Array.from({ length: 9 }, (_, i) => person(i))];
+    const collapsed = clusterPeople(ring, { threshold: 6 });
+    expect(collapsed.map((x) => x.id)).toEqual(['0xws', CLUSTER_PEOPLE_ID]);
+    expect(collapsed.find((x) => x.id === CLUSTER_PEOPLE_ID)!.name).toBe('9 people');
+    const expanded = clusterPeople(ring, { threshold: 6, expanded: true });
+    expect(expanded.filter((x) => x.kind === 'person')).toHaveLength(9);
+    expect(expanded.some((x) => x.id === CLUSTER_PEOPLE_ID)).toBe(false);
+    // Below threshold: no cluster, people drawn.
+    expect(clusterPeople([ws, person(1), person(2)], { threshold: 6 }).some((x) => x.id === CLUSTER_PEOPLE_ID)).toBe(false);
   });
 });
