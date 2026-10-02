@@ -27,6 +27,7 @@ Promise<{ ok: true; members: HouseholdMemberRow[] } | { ok: false; error: string
   const out = await ask({
     session: input.session.token, addressee: input.person.toLowerCase(),
     message: 'who is in my household',
+    rowsOnly: true,
     plan: { steps: [{ toolId: 'household.roster', args: {} }] },
   });
   const reply = out.reply;

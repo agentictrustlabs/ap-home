@@ -15,7 +15,7 @@ export async function readCalendarThroughHarness(input: { person: Address; sessi
   const args = { ...(input.from ? { from: input.from } : {}), ...(input.to ? { to: input.to } : {}) };
   const out = await j(await fetch('/a2a/harness/ask', {
     method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', ...csrfHeaders() },
-    body: JSON.stringify({ session: input.session.token, addressee: input.person.toLowerCase(), message: "what's on my calendar today", plan: { steps: [{ toolId: 'calendar.events.list', args }] } }),
+    body: JSON.stringify({ session: input.session.token, addressee: input.person.toLowerCase(), message: "what's on my calendar today", rowsOnly: true, plan: { steps: [{ toolId: 'calendar.events.list', args }] } }),
   }));
   const reply = out.reply;
   if (reply?.kind === 'answer') {

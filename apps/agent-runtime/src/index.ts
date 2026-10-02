@@ -4193,6 +4193,10 @@ app.post('/harness/ask', async (c) => {
     /** Spec 361 I4 — a SCREEN's deterministic entry through the SAME conversational boundary: the form
      *  knows its intent and parameters, so no model re-derives them; every gate is unchanged. */
     plan?: HarnessRunInput['plan'];
+    /** Perf (2026-10-02) — a SCREEN that renders `results` and never shows the composed sentence: skip the
+     *  composer LLM for the informational reply. Honoured only with `plan` (a supplied plan); the rows ride
+     *  back regardless, so nothing the screen reads changes. */
+    rowsOnly?: boolean;
     /** Spec 366 R2 — another agent's routed request under the subject-ask profile. */
     subjectAsk?: unknown;
     /** Spec 397 — through a host: the registered client + template. Honoured only beside a verified A2A-Session admission. */
@@ -4630,6 +4634,7 @@ app.post('/harness/ask', async (c) => {
       ...(memory ? { memory } : {}),
       intent, result, addressee, composerFor: (need: RouteNeed) => selectComposerRouted(c.env, { ...(provider ? { provider } : {}), ...(answerLine ? { systemPrompt: answerLine } : {}), need, onUsage: (u) => { trace.composeUsage = addUsage(trace.composeUsage, u); } }), deps: askDeps, interactionFor, plannerTrace: trace, tools: offeredTools,
       ...(runPlan ? { suppliedPlan: true } : {}),
+      ...(runPlan && body.rowsOnly ? { rowsOnly: true } : {}),
       ...(body.surface ? { surface: body.surface } : {}),
       resolveName: (name) => askDeps.resolveName?.(name) ?? Promise.resolve(null),
       // WHAT THE ASKER IS to whoever must authorize the plan (spec 353 S5). Derived here from evidence they
