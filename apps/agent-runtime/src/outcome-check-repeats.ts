@@ -6,7 +6,7 @@
 // and each class are AVERAGED, and the SPREAD (max − min of the per-repeat scores) goes on the trace beside the number of
 // repeats — so a judge that disagreed with itself is visible on the record, never averaged away in silence. Ships at 1
 // (`QUALITY_JUDGE_REPEATS_DEFAULT` unset) until the Lab measures whether two calls buy a steadier instrument.
-import type { OutcomeCheckV1 } from '@agenticprimitives/orchestration';
+import type { OutcomeCheckV1, OutcomeUnitV1 } from '@agenticprimitives/orchestration';
 
 /** How many times to judge: a comparison's toggle first, else the deployment's knob, else 1. Bounded to 1..4 — the
  *  check is an instrument on EVERY run of an arm, and a misread knob must not turn one call into twenty. */
@@ -15,7 +15,7 @@ export function judgeRepeatsOf(toggle: string | undefined, envDefault: string | 
   return Number.isFinite(n) && n >= 1 ? Math.min(n, 4) : 1;
 }
 
-type OutcomeCheckLike = Pick<OutcomeCheckV1, 'judge' | 'classes' | 'score' | 'ms' | 'error'> & { requested?: Record<string, number> };
+type OutcomeCheckLike = Pick<OutcomeCheckV1, 'judge' | 'classes' | 'score' | 'ms' | 'error'> & { requested?: Record<string, number>; units?: OutcomeUnitV1[] };
 
 export interface OutcomeCheckAveragedV1 {
   judge: OutcomeCheckLike['judge'];
@@ -23,6 +23,9 @@ export interface OutcomeCheckAveragedV1 {
   classes: Record<string, number>;
   /** Per class, the mean of the repeats' P(requested) — when the judge reports it. */
   requested?: Record<string, number>;
+  /** v3 (2026-10-02) — the scoring units (a class, or an alternative group scored once), each with the mean of the
+   *  repeats' requested / delivered, `counted` when ANY repeat counted it — what was scored, on the record. */
+  units?: OutcomeUnitV1[];
   /** The mean of the per-repeat scores. */
   score: number;
   /** The repeats' own time, summed — the wall time of the check when the repeats ran one after another (they do). */
@@ -53,10 +56,18 @@ export function averageOutcomeChecks(results: ReadonlyArray<OutcomeCheckLike>): 
   const scores = results.map((r) => r.score);
   const requested = meanOf((r) => r.requested);
   const errors = results.flatMap((r) => (r.error ? [r.error] : []));
+  // Units are averaged over the repeats that reported them (a failed repeat reports none), like `requested`.
+  const unitRuns = results.flatMap((r) => (r.units ? [r.units] : []));
+  const units = unitRuns.length ? [...new Map(unitRuns.flat().map((u) => [u.id, u])).values()].map((u0) => {
+    const seen = unitRuns.map((us) => us.find((u) => u.id === u0.id));
+    const mean = (f: (u: OutcomeUnitV1) => number) => r4(seen.reduce((a, u) => a + (u ? f(u) : 0), 0) / unitRuns.length);
+    return { ...u0, requested: mean((u) => u.requested), delivered: mean((u) => u.delivered), counted: seen.some((u) => u?.counted) };
+  }) : undefined;
   return {
     judge: results[0]!.judge,
     classes: meanOf((r) => r.classes) ?? {},
     ...(requested ? { requested } : {}),
+    ...(units ? { units } : {}),
     score: r4(scores.reduce((a, b) => a + b, 0) / n),
     ms: results.reduce((a, r) => a + r.ms, 0),
     repeats: n,

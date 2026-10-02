@@ -4923,7 +4923,7 @@ app.post('/harness/ask', async (c) => {
         const results: Awaited<ReturnType<typeof once>>[] = [];
         for (let i = 0; i < repeats; i++) results.push(await once());
         const oc = averageOutcomeChecks(results);
-        (trace as { outcomeCheck?: unknown }).outcomeCheck = { judge: oc.judge.name, classes: oc.classes, ...(oc.requested ? { requested: oc.requested } : {}), score: oc.score, ms: oc.ms, repeats: oc.repeats, spread: oc.spread, ...(oc.repeats > 1 ? { scores: oc.scores } : {}), ...(usage?.tokensIn !== undefined ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut ?? 0 } : {}), ...(oc.error ? { error: oc.error.slice(0, 200) } : {}) };
+        (trace as { outcomeCheck?: unknown }).outcomeCheck = { judge: oc.judge.name, classes: oc.classes, ...(oc.requested ? { requested: oc.requested } : {}), ...(oc.units ? { units: oc.units } : {}), score: oc.score, ms: oc.ms, repeats: oc.repeats, spread: oc.spread, ...(oc.repeats > 1 ? { scores: oc.scores } : {}), ...(usage?.tokensIn !== undefined ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut ?? 0 } : {}), ...(oc.error ? { error: oc.error.slice(0, 200) } : {}) };
       }
     }
     if (variantReq?.toggles?.['quality/judge'] === 'on' && reply?.kind === 'answer' && typeof (reply as { text?: unknown }).text === 'string') {
