@@ -484,6 +484,15 @@ SKILL_ANSWER_MODEL_DEFAULT = "minimal"
 # harness is +0.07 over a bare model on delivered classes and trails it on exactly these holds, because the outcome check
 # credits a filled-in template and a bare question scores 0. NOT SET: `ask` until the Lab measures the skeleton arm.
 # SKILL_HOLD_DEFAULT = "skeleton"
+# 2026-10-02 — A CHAIN'S TERMINAL STEP PROCEEDS (`plan/chain-proceed`): `off` or `on`. When the plan is a chain (a producer
+# step whose output the terminal step consumes) and nothing is missing, `on` puts a proceed-anyway instruction in front
+# of the TERMINAL step's question only: full output now, assumptions on top, every unverified fact a [VERIFY: …] or
+# [MISSING: …] placeholder, never an invented figure/funder/deadline/quote, the three to five completing facts last; the
+# run records `chainProceed: true`. Measured 2026-10-01/02 (CIL Commons held-out 8 + chain panel 4, three repeats, Haiku
+# judging): the grant chain scored 0.35–0.46 in every arm because the drafter paused at its Stage 1 soft gate ("verify
+# the funder first") though the person asked for the draft in the same sentence. A held plan stays the hold's (skeleton
+# wins). NOT SET: `off` until the Lab measures the `on` arm.
+# PLAN_CHAIN_PROCEED_DEFAULT = "on"
 # 2026-10-01 — THE OUTCOME CHECK'S REPEATS (`quality/judge-repeats`): the same answer judged N times, score and classes
 # averaged, `outcomeCheck.spread` (max − min) and `.repeats` on the trace. The judge moved 0.025 (Haiku; Gemini far more)
 # between two runs of the same check on a fixed answer. NOT SET: one call until the Lab measures whether two steady it.

@@ -108,6 +108,18 @@ describe('the variant knob is parsed, and anything unknown is refused by name', 
     expect(op?.skillStage).toBe('skeleton');
     expect(op?.selection).toMatchObject({ chose: 'cic.grants.draft', missing: ['https://x/#FunderDeadline'] });
   });
+  it('2026-10-02 — chain-proceed is an advertised toggle, on the recorded variant, and a run that took it says so', () => {
+    expect(VARIANT_TOGGLES['plan/chain-proceed']).toEqual(['off', 'on']);
+    const toggles = { 'plan/chain-proceed': 'on' };
+    expect(parseVariantRequest({ toggles })).toEqual({ ok: true, variant: { toggles } });
+    expect(parseVariantRequest({ toggles: { 'plan/chain-proceed': 'yes' } })).toMatchObject({ ok: false, error: expect.stringMatching(/one of off \| on/) });
+    expect(variantOf({} as never, undefined, { toggles }).toggles).toEqual(toggles);
+    const t = { ...(trace as object), chainProceed: true, selection: { approach: 'outcome-selective', chose: 'cic.grants.pipeline', plan: { steps: [{ tool: 'cic.grants.pipeline' }, { tool: 'cic.grants.draft' }], missing: [] } } } as never;
+    const op = operationalOf(t, [], { receivedAt: 0, runStartMs: 0, runEndMs: 0 });
+    expect(op?.chainProceed).toBe(true);
+    expect(op?.selection?.chain).toEqual(['cic.grants.pipeline', 'cic.grants.draft']);
+    expect(operationalOf(trace as never, [], { receivedAt: 0, runStartMs: 0, runEndMs: 0 })?.chainProceed).toBeUndefined();
+  });
   it('spec 416 W3 — a conformal map is a component, and which map ran is on the recorded variant', () => {
     const acceptance = { method: 'conformal' as const, alpha: 0.05, temperature: 1.2, qhat: 0.4, mapDigest: 'sha256:' + 'cd'.repeat(32) };
     expect(parseVariantRequest({ selection: 'judgment', acceptance })).toEqual({ ok: true, variant: { selection: 'judgment', acceptance } });
