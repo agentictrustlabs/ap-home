@@ -15,7 +15,7 @@ export async function auditGrantsThroughHarness(input: { person: Address; sessio
   const args = input.subject ? { subject: input.subject } : {};
   const out = await j(await fetch('/a2a/harness/ask', {
     method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', ...csrfHeaders() },
-    body: JSON.stringify({ session: input.session.token, addressee: input.person.toLowerCase(), message: input.subject ? `what has ${input.subject} granted` : 'what have I granted', plan: { steps: [{ toolId: 'access.grants.audit', args }] } }),
+    body: JSON.stringify({ session: input.session.token, addressee: input.person.toLowerCase(), message: input.subject ? `what has ${input.subject} granted` : 'what have I granted', rowsOnly: true, plan: { steps: [{ toolId: 'access.grants.audit', args }] } }),
   }));
   const reply = out.reply;
   if (reply?.kind === 'answer') {

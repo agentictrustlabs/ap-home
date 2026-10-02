@@ -18,7 +18,7 @@ async function readInvitations(token: string, person: string): Promise<ReceivedI
   await ensureCsrfToken();
   const r = await fetch('/a2a/harness/ask', {
     method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', ...csrfHeaders() },
-    body: JSON.stringify({ session: token, addressee: person.toLowerCase(), message: 'what invitations do i have', plan: { steps: [{ toolId: 'person.invitations.list', args: {} }] } }),
+    body: JSON.stringify({ session: token, addressee: person.toLowerCase(), message: 'what invitations do i have', rowsOnly: true, plan: { steps: [{ toolId: 'person.invitations.list', args: {} }] } }),
   }).catch(() => null);
   const out = r ? ((await r.json().catch(() => ({}))) as { reply?: { kind?: string; results?: Array<{ toolId: string; result: unknown }> } }) : {};
   if (out.reply?.kind !== 'answer') return null;

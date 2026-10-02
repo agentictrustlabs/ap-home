@@ -4063,6 +4063,12 @@ async function askReplyForInner(env: HarnessEnv, input: {
    *  structured result as well as the sentence: a table rendered by parsing prose is a surface that will
    *  eventually disagree with the record it is showing. */
   suppliedPlan?: boolean;
+  /** The caller is a SCREEN that renders the structured `results` itself and does NOT show the composed
+   *  sentence (perf, 2026-10-02): skip the composer LLM entirely for an informational reply — the rows ride
+   *  back on `results` regardless (a supplied plan). Only honoured with `suppliedPlan`; never set by the
+   *  conversational surface, which shows the prose. The composer once took 15.6s of an 18.6s read whose
+   *  caller discarded the text. Not a correctness change: `results` is the same either way. */
+  rowsOnly?: boolean;
   /** Resolve a NAME the planner passed where an address is needed. The requirement is built from the
    *  step's args BEFORE any invoker runs, so "as nathan.treasury" has to become an address here or the
    *  person is asked to grant authority as a string nothing can sign. */
@@ -4394,6 +4400,11 @@ async function askReplyForInner(env: HarnessEnv, input: {
       const rendered = readSteps.map((o) => renderAnswer(offered.find((t) => t.id === o.step.toolId)!.answer!, o.result));
       if (rendered.every((x): x is string => typeof x === 'string' && x.length > 0)) return withEvidence(rendered.join(' '));
     }
+    // ROWS ONLY (perf, 2026-10-02). A screen that reads `results` and never shows the sentence asked for its
+    // rows, not prose — do not spend a composer call (up to ~15 s) to phrase text it will discard. The rows
+    // already ride back on `results` (a supplied plan). Honoured ONLY for a supplied plan, so the
+    // conversational surface — which never sets this and does show the prose — is untouched.
+    if (input.rowsOnly && input.suppliedPlan) return withEvidence(raw);
     // Spec 402 W1 — MEMORY AS EVIDENCE. What the asker's agent remembers about the asker rides into the composer as one
     // more observation (`person.memory.recall`), so a sentence that rests on it is GROUNDED in it and the reply's evidence
     // names it — "you told me on …" is checkable, not a hunch. Only for the person's own agent (the route reads the

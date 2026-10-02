@@ -391,6 +391,14 @@ new_sqlite_classes = ["ExperimentDO"]
 name = "demo-a2a-faithnet"
 workers_dev = true
 
+# Perf (2026-10-02) — keep the cold read chain warm. Every 2 minutes the `scheduled` handler reads each
+# WARM_AGENTS agent's playbook + type through the internal vault path an ask starts with, so the owner's
+# InteractionsDO, the demo-mcp vault and the faithchain RPC are resident when a real user arrives instead
+# of paying the cold-start on the first load ("the first load takes a minute"). A no-op if WARM_AGENTS is
+# empty. Declared IN wrangler (in-band) so a deploy does not drop it.
+[env.faithnet.triggers]
+crons = ["*/2 * * * *"]
+
 [[env.faithnet.routes]]
 pattern = "a2a.faithnet.io"
 custom_domain = true
@@ -414,6 +422,10 @@ zone_name = "faithnet.ai"
 binding = "AI"
 
 [env.faithnet.vars]
+# Perf (2026-10-02) — the agents the `scheduled` cron keeps warm (comma-separated SAs): the demo persons and
+# orgs a visitor lands on first. Read-only, credential-free. Extend as the demo roster people actually hit
+# grows; keep it small (each agent is two reads per tick). nathan.me + "Northern Colorado Field — Game Night".
+WARM_AGENTS = "0x1dba4a27c53d7babda99513080223fb3bfc4bad1,0x8e32c713f44c7747d97a589522806a8e1dd810fb"
 # Spec 408 — the contract generation this estate runs: "1" = the contracts deployed today (raw approved hashes,
 # 32-byte digest-binding args, anchorOf(digest)). Becomes "2" only with a deployments file that says so.
 CONTRACTS_GENERATION = "1"

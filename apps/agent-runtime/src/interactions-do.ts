@@ -507,6 +507,20 @@ export class InteractionsDO {
    *  doc across DISTINCT writers — channel posts (many members), deliveries (many senders), timeline
    *  appends (many server flows). Reads never take it; self-only single-writer ops don't need it. */
   private mutating: Promise<unknown> = Promise.resolve();
+
+  // VERIFY MEMO (perf, 2026-10-02). verifyWire does TWO on-chain RPC round-trips per read (an ERC-1271
+  // isValidSignature and an isRevoked) and runs on EVERY authorized read — a single Home page load fans
+  // out to many inbox/relationships/vault reads against the SAME standing wire, so the same two chain
+  // reads ran dozens of times (the 7-25s reads). This memoizes a wire that was PROVEN VALID, keyed by
+  // (expectedDelegator, expectedDelegate, signature), for a short TTL. It is NOT a fallback (ADR-0013):
+  // the one mechanism — verifyDelegationWire — still decides; this only skips re-running it when it just
+  // said yes. Only TRUE results are cached, so a failing verify is never locked in, and the TTL bounds
+  // how long a revocation or a removed credential can go unnoticed. The DO instance is per-owner and
+  // lives across requests, so the memo is warm for the burst that caused the problem.
+  private static readonly VERIFY_MEMO_TTL_MS = 20_000;
+  private static readonly VERIFY_MEMO_MAX = 256;
+  private verifyMemo = new Map<string, number>(); // key → expiry epoch ms (only proven-valid wires)
+
   private serialize<T>(fn: () => Promise<T>): Promise<T> {
     const run = this.mutating.then(fn, fn);
     this.mutating = run.then(() => undefined, () => undefined);
@@ -1194,7 +1208,16 @@ export class InteractionsDO {
    * "allowedMethods must be ABSENT" or "these terms must name the governance registries".
    */
   private async verifyWire(wire: IncomingDelegation, expectedDelegator: string, sessionSa: Address): Promise<boolean> {
-    return verifyDelegationWire({
+    // Memo hit: this exact wire was proven valid within the TTL — skip the two chain reads. The signature
+    // identifies the wire; delegator+delegate pin the expectation the proof was made against.
+    const memoKey = `${expectedDelegator.toLowerCase()}:${sessionSa.toLowerCase()}:${wire.signature ?? ''}`;
+    const now = Date.now();
+    const exp = this.verifyMemo.get(memoKey);
+    if (exp !== undefined) {
+      if (exp > now) return true;
+      this.verifyMemo.delete(memoKey);
+    }
+    const ok = await verifyDelegationWire({
       wire: wire as unknown as DelegationWireLike,
       expectedDelegator,
       expectedDelegate: sessionSa,
@@ -1211,6 +1234,20 @@ export class InteractionsDO {
           })) as boolean,
       },
     });
+    if (ok) {
+      // Only cache a proven-valid wire. Prune expired entries (and a few of the oldest if we are at the
+      // cap) so the memo stays bounded on a busy object.
+      if (this.verifyMemo.size >= InteractionsDO.VERIFY_MEMO_MAX) {
+        for (const [k, e] of this.verifyMemo) if (e <= now) this.verifyMemo.delete(k);
+        while (this.verifyMemo.size >= InteractionsDO.VERIFY_MEMO_MAX) {
+          const oldest = this.verifyMemo.keys().next().value;
+          if (oldest === undefined) break;
+          this.verifyMemo.delete(oldest);
+        }
+      }
+      this.verifyMemo.set(memoKey, now + InteractionsDO.VERIFY_MEMO_TTL_MS);
+    }
+    return ok;
   }
 
   private hasStewardshipShape(wire: IncomingDelegation): boolean {
