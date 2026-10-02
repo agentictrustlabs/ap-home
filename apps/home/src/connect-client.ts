@@ -1925,7 +1925,7 @@ export async function resolveTreasuryByConvention(memberName: string | undefined
  *  This is a cache, not a fallback (ADR-0013): it holds the canonical answer from the one read path, it
  *  never substitutes a different mechanism, and a failed read is never cached — the next caller retries.
  *  Writes invalidate it directly (below), so correctness does not depend on a UI event firing. */
-const RELATED_ORGS_TTL_MS = 10_000;
+const RELATED_ORGS_TTL_MS = 60_000; // raised from 10s (2026-10-02): page loads exceed 10s so the old TTL never hit; the tree rarely changes within a minute and every mutating write calls invalidateRelatedOrgs().
 type RelatedOrgsBody = { orgs?: Array<Record<string, unknown>> };
 let relatedOrgsCache: { token: string; at: number; body: RelatedOrgsBody } | null = null;
 let relatedOrgsInFlight: { token: string; p: Promise<RelatedOrgsBody> } | null = null;
