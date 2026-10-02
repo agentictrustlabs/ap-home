@@ -68,3 +68,17 @@ export function variantFromForm(row: { provider?: string; selectionProvider?: st
   if (row.judge && row.judge !== 'off') v.toggles = { 'quality/judge': row.judge };
   return v;
 }
+
+/** Spec 415 A5 — A DEEP LINK INTO THE RUN TAB. `?agent=<address|name>&set=<set id>` preselects the agent and the set
+ *  once both lists have loaded; a value that names nothing in the lists is ignored (never typed into the form). The
+ *  skills app's Runner links here with the agent it just tested and the archetype's set. Pure: given the query and
+ *  the lists, says what to select. */
+export function prefillFromQuery(search: string, orgs: ReadonlyArray<{ agent: string; name: string }>, sets: ReadonlyArray<{ id: string }>): { addressee?: string; setId?: string } {
+  const q = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
+  const out: { addressee?: string; setId?: string } = {};
+  const agent = (q.get('agent') ?? '').trim().toLowerCase();
+  if (agent) { const hit = orgs.find((o) => o.agent.toLowerCase() === agent || (o.name ?? '').toLowerCase() === agent); if (hit) out.addressee = hit.agent; }
+  const set = (q.get('set') ?? '').trim();
+  if (set && sets.some((x) => x.id === set)) out.setId = set;
+  return out;
+}

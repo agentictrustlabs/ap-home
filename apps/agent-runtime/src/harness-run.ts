@@ -69,7 +69,9 @@ import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
 import { ADAPTER, CARRIES } from './adapter-declarations.js';
 import { relationshipCredentialDigest, termsDigestOf, type RelationshipCredentialBodyV1 } from '@agenticprimitives/agent-relationships';
-import { replayingInvoker, inputsFor, type RunRecordV1, type RunMarks, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent , selectByDeclaredUtterances , selectByJudgment , selectByOntology, selectByOntologyThenJudgment, selectByProposalThenJudgment, selectByOntologyFirst, type OntologyFirstSelectionV1, type AskerContextV1, selectByFramedJudgment, addUsage, judgeAnswerPreference, type ModelUsageV1, type OntologySelectionV1, type JudgmentSelectionV1, type FramedSelectionV1, type ProposedSelectionV1, selectByOutcome, outcomeSteps, type OutcomeSelectionV1, planForPicked, type SelectivePlanV1, choosePlanAround } from '@agenticprimitives/orchestration';
+import { replayingInvoker, inputsFor, type RunRecordV1, type RunMarks, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent , selectByDeclaredUtterances , selectByJudgment , selectByOntology, selectByOntologyThenJudgment, selectByProposalThenJudgment, selectByOntologyFirst, type OntologyFirstSelectionV1, type AskerContextV1, selectByFramedJudgment, addUsage, judgeAnswerPreference, type ModelUsageV1, type OntologySelectionV1, type JudgmentSelectionV1, type FramedSelectionV1, type ProposedSelectionV1, selectByOutcome, outcomeSteps, type OutcomeSelectionV1, type OutcomePlanV1, planForPicked, type SelectivePlanV1, choosePlanAround } from '@agenticprimitives/orchestration';
+import { holdModeOf, stepsUnderHold } from './skeleton-hold.js';
+import { chainProceedModeOf, stepsUnderChainProceed } from './chain-proceed.js';
 import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, standingFor, declareInstruction, forgetInstruction, instructionContextOf, STANDING_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
@@ -365,18 +367,23 @@ export const ASK_CLARIFY_TOOL: ToolSpec = {
 };
 
 /** Spec 418 A2 — the classes a plan should deliver: each intermediate step's artifact, then the final skill's products. */
-export function expectedDeliversOf(steps: ReadonlyArray<{ tool: string; for?: string }>, skills: ReadonlyArray<{ id: string; produces?: ReadonlyArray<{ iri: string; label: string; within?: string }> }>, lexicon?: ReadonlyArray<{ iri: string; label: string; terms: readonly string[] }>): Array<{ iri: string; label: string; required?: boolean }> {
+export function expectedDeliversOf(steps: ReadonlyArray<{ tool: string; for?: string }>, skills: ReadonlyArray<{ id: string; produces?: ReadonlyArray<{ iri: string; label: string; within?: string; alternative?: string }> }>, lexicon?: ReadonlyArray<{ iri: string; label: string; terms: readonly string[] }>): Array<{ iri: string; label: string; required?: boolean; alternative?: string }> {
   const out = new Map<string, string>();
+  const alternative = new Map<string, string>();
   const required = new Set<string>();
   const gloss = (iri: string, label: string) => { const e = lexicon?.find((x) => x.iri === iri); const also = (e?.terms ?? []).filter((t) => t.toLowerCase() !== label.toLowerCase()).slice(0, 3); return also.length ? `${label} (also: ${also.join(', ')})` : label; };
   for (const st of steps.slice(0, -1)) if (st.for) { const lab = skills.flatMap((x) => x.produces ?? []).find((k) => k.iri === st.for)?.label ?? st.for.split('#').pop()!; out.set(st.for, gloss(st.for, lab)); required.add(st.for); }
   const last = steps[steps.length - 1];
   // A part of a whole the same skill produces (`within`) is not asked for on its own: the person asked for the whole.
   const made = skills.find((x) => x.id === last?.tool)?.produces ?? [];
-  for (const k of made) if (!(k.within && made.some((w) => w.iri === k.within))) out.set(k.iri, gloss(k.iri, k.label));
+  // 2026-10-02 — and a terminal product's ALTERNATIVE GROUP (the definition's `produces[].alternative`, from the data
+  // graph's `skills:alternativeGroup`) rides along, so the outcome check (v3) scores the group once: the drafter writes a
+  // Letter of Inquiry OR a Grant Proposal, and 51 of 68 grant runs on chain panels 1–4 lost ~⅓ for the one it never wrote.
+  // Only the terminal skill's: an intermediate is a specific artifact the plan was built on, never "one of".
+  for (const k of made) if (!(k.within && made.some((w) => w.iri === k.within))) { out.set(k.iri, gloss(k.iri, k.label)); if (k.alternative && !required.has(k.iri)) alternative.set(k.iri, k.alternative); }
   // The intermediate artifacts are REQUIRED (the plan was built on them); the terminal skill's products are candidates —
   // the outcome check asks which of them the request wants (spec 418 A2 v2).
-  return [...out].map(([iri, label]) => ({ iri, label, ...(required.has(iri) ? { required: true } : {}) }));
+  return [...out].map(([iri, label]) => ({ iri, label, ...(required.has(iri) ? { required: true } : {}), ...(alternative.has(iri) ? { alternative: alternative.get(iri)! } : {}) }));
 }
 
 export const UNSUPPORTED_TOOL: ToolSpec = {
@@ -2866,11 +2873,16 @@ export interface PlannerTraceV1 {
   pairwise?: { judge: string; preference: Record<string, number>; ms: number; error?: string };
   /** Spec 416 §4g — milliseconds per runtime stage of this ask (the marks, summed per name). */
   stages?: Record<string, number>;
-  /** Spec 416 §4f — the default skill stage's outcome: the fast judge chose a skill, or handed the ask to the planner. */
-  skillStage?: 'chose' | 'handed-to-planner' | 'clarify';
+  /** Spec 416 §4f — the default skill stage's outcome: the fast judge chose a skill, or handed the ask to the planner.
+   *  `skeleton` (2026-10-01, `skill-selection/hold`): a skill was chosen, a required input was missing, and the skill ran
+   *  under the skeleton instruction instead of only asking — a comparison reads this, never the answer, to tell them apart. */
+  skillStage?: 'chose' | 'handed-to-planner' | 'clarify' | 'skeleton';
+  /** 2026-10-02 (`plan/chain-proceed`) — a chain's TERMINAL step ran under the proceed-anyway instruction (the grant
+   *  chain paused at the drafter's Stage 1 soft gate in every arm, 0.35–0.46). Absent when it did not run. */
+  chainProceed?: boolean;
   /** Spec 418 A2 — what the planned skills should DELIVER (each intermediate step's artifact + the final skill's
    *  products), glossed from the lexicon — the outcome check's expected classes. */
-  expectedDelivers?: Array<{ iri: string; label: string; required?: boolean }>;
+  expectedDelivers?: Array<{ iri: string; label: string; required?: boolean; alternative?: string }>;
   /** Spec 420 §2 — what goal regression did to the plan: the reads it inserted, the gaps (a standing the asker lacks) and
    *  violations (facts that contradict a step) it named, the submissions it marked. Present only under `plan/regression`. */
   regression?: { inserted: Array<{ before: number; toolId: string; because: string }>; gaps: Array<{ index: number; toolId: string; because: string }>; violations: Array<{ index: number; toolId: string; because: string }>; submissions: Array<{ index: number; toolId: string; establishes: string }>; facts: { standingAtRoom: string; situations: number; known: string[] }; /** Spec 420 §3 — acts the offer marked or left out for the asker's standing. */ offer?: Array<{ toolId: string; needs: string; has: string; mode: string }> };
@@ -5079,6 +5091,23 @@ step is then handed to that agent under authority the person grants; leave it ou
           // Spec 376 W2 — "have X …": the executor is peeled off first, and the ask that remains is what the
           // compiled shapes match. A model-planned ask keeps the whole sentence: the planner is taught `$executor`.
           const { executor: named, rest } = executorPrefixOf(pin.intent.goal);
+          // 2026-10-01 — HOW A PLAN WITH A REQUIRED INPUT MISSING IS ANSWERED (`skill-selection/hold`, env SKILL_HOLD_DEFAULT;
+          // `ask` until the Lab measures `skeleton`). One place for every outcome plan below: the steps are built through
+          // this, and a skeleton that ran is on the trace as `skillStage: 'skeleton'` (the plan's `missing` stays on
+          // `trace.selection` either way — the hold is recorded; only the answer to it changes).
+          const holdMode = holdModeOf(input.variant?.toggles?.['skill-selection/hold'], (env as { SKILL_HOLD_DEFAULT?: string }).SKILL_HOLD_DEFAULT);
+          const chainProceedMode = chainProceedModeOf(input.variant?.toggles?.['plan/chain-proceed'], (env as { PLAN_CHAIN_PROCEED_DEFAULT?: string }).PLAN_CHAIN_PROCEED_DEFAULT);
+          const outcomeStepsUnderHold = (plan: OutcomePlanV1, labelOf: (iri: string) => string, opts?: Parameters<typeof outcomeSteps>[3]) => {
+            const r = stepsUnderHold(plan, holdMode, labelOf, (p) => outcomeSteps(p, pin.intent.goal, labelOf, opts));
+            if (r.skeleton) trace.skillStage = 'skeleton';
+            // 2026-10-02 — A CHAIN'S TERMINAL STEP PROCEEDS (`plan/chain-proceed`, env PLAN_CHAIN_PROCEED_DEFAULT; `off`
+            // until the Lab measures it). The grant chain scored 0.35–0.46 in every arm because the drafter paused at its
+            // Stage 1 soft gate after the tracker ran (`chain-proceed.ts`). Applied AFTER the hold: a held plan is the
+            // hold's (the skeleton wins — one instruction, never two), so this only ever reaches a plan with nothing missing.
+            const cp = stepsUnderChainProceed(r.steps, chainProceedMode, plan.missing.length > 0);
+            if (cp.chainProceed) trace.chainProceed = true;
+            return cp.steps;
+          };
           // Spec 402 W3 — a sentence with a clock, said at the person's own agent, is a routine to keep (read back first).
           // Spec 421 W1 — a CONTINUATION is always the model's: it plans from what was read, which no compiled shape knows.
           const compiled = pin.continuation ? null : compiledSkillAnswer() ?? compiledConsult(rest) ?? compiledRead(rest) ?? compiledFanOut(rest) ?? compiledPayment(rest) ?? (input.person && input.addressee && input.person.toLowerCase() === input.addressee.toLowerCase() ? compiledRoutine(rest) : null);
@@ -5156,7 +5185,7 @@ step is then handed to that agent under authority the person grants; leave it ou
                 const { judge: planJudge, ...plan2 } = r2;
                 trace.selection = { approach: 'outcome-selective', chose: r1.chose, distribution: r1.distribution, judge: r1.judge, ...(r1.reading ? { reading: r1.reading } : {}), ...plan2, planJudge };
                 const labels = new Map([...(lexicon ?? []).map((e) => [e.iri, e.label] as const), ...skills.flatMap((x) => [...(x.produces ?? []), ...(x.consumes ?? [])].map((k) => [k.iri, k.label] as const))]);
-                const steps = outcomeSteps(r2.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri, { briefIntermediate: input.variant?.toggles?.['skill-selection/intermediate'] === 'brief' });
+                const steps = outcomeStepsUnderHold(r2.plan, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri, { briefIntermediate: input.variant?.toggles?.['skill-selection/intermediate'] === 'brief' });
                 trace.expectedDelivers = expectedDeliversOf(r2.plan.steps, skills, playbook?.domainLexicon);
                 return withSpecialists({ steps, rationale: `outcome-selective: ${r2.plan.steps.map((x) => x.tool).join(' → ')}${r2.asked ? '' : ' (no dataflow call)'}` }, playbook?.specialists, pin.tools);
               }
@@ -5171,7 +5200,7 @@ step is then handed to that agent under authority the person grants; leave it ou
               plannerUsed = arm;
               if (r.chose && r.plan) {
                 const labels = new Map([...(lexicon ?? []).map((e) => [e.iri, e.label] as const), ...skills.flatMap((x) => [...(x.produces ?? []), ...(x.consumes ?? [])].map((k) => [k.iri, k.label] as const))]);
-                const steps = outcomeSteps(r.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri);
+                const steps = outcomeStepsUnderHold(r.plan, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri);
                 return withSpecialists({ steps, rationale: `outcome: ${r.plan.steps.map((x) => x.tool).join(' → ')}` }, playbook?.specialists, pin.tools);
               }
               chose = null;
@@ -5242,7 +5271,7 @@ step is then handed to that agent under authority the person grants; leave it ou
                 const pc = await choosePlanAround(rest, r.chose, skills, call, { ...(playbook?.domainLexicon ? { lexicon: playbook.domainLexicon } : {}), ...(askerHeld ? { asker: askerHeld } : {}) });
                 trace.selection = { approach: 'outcome-selective', chose: r.chose, distribution: r.distribution, judge: r.judge, ...(r.reading ? { reading: r.reading } : {}), ...(heldNow.from !== 'none' ? { held: heldNow } : {}), asked: pc.asked, plan: pc.plan, supplied: {}, planJudge: pc.judge };
                 const labels = new Map([...(playbook?.domainLexicon ?? []).map((e) => [e.iri, e.label] as const)]);
-                const steps = outcomeSteps(pc.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri, { briefIntermediate: input.variant?.toggles?.['skill-selection/intermediate'] === 'brief' });
+                const steps = outcomeStepsUnderHold(pc.plan, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri, { briefIntermediate: input.variant?.toggles?.['skill-selection/intermediate'] === 'brief' });
                 trace.expectedDelivers = expectedDeliversOf(pc.plan.steps, skills, playbook?.domainLexicon);
                 return withSpecialists({ steps, rationale: `skill stage (plan choice): ${pc.chosen.steps.join(' → ')}${pc.asked ? '' : ' (no plan call)'}` }, playbook?.specialists, pin.tools);
               }
@@ -5251,7 +5280,7 @@ step is then handed to that agent under authority the person grants; leave it ou
                 const { judge: planJudge, ...plan2 } = r2;
                 trace.selection = { approach: 'outcome-selective', chose: r.chose, distribution: r.distribution, judge: r.judge, ...(r.reading ? { reading: r.reading } : {}), ...plan2, planJudge };
                 const labels = new Map([...(playbook?.domainLexicon ?? []).map((e) => [e.iri, e.label] as const)]);
-                const steps = outcomeSteps(r2.plan, pin.intent.goal, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri, { briefIntermediate: input.variant?.toggles?.['skill-selection/intermediate'] === 'brief' });
+                const steps = outcomeStepsUnderHold(r2.plan, (iri) => labels.get(iri) ?? iri.split('#').pop() ?? iri, { briefIntermediate: input.variant?.toggles?.['skill-selection/intermediate'] === 'brief' });
                 trace.expectedDelivers = expectedDeliversOf(r2.plan.steps, skills, playbook?.domainLexicon);
                 return withSpecialists({ steps, rationale: `skill stage (selective): ${r2.plan.steps.map((x) => x.tool).join(' → ')}${r2.asked ? '' : ' (no dataflow call)'}` }, playbook?.specialists, pin.tools);
               }
