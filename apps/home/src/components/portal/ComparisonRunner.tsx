@@ -13,7 +13,7 @@ import { listManagedAgents } from '../../connect-client';
 import { Section, Card, KeyValue, Button, Chip, Mono, ErrorNote, Note, Empty } from '../../ui';
 import { StatePill } from './StatePill';
 import { stateOf } from '../../home/run-state';
-import { readComparisonKnobs, startExperiment, readExperiment, cancelExperiment, variantFromForm, type ComparisonKnobsV1, type ExperimentProgressV1 } from '../../home/experiments';
+import { readComparisonKnobs, startExperiment, readExperiment, cancelExperiment, variantFromForm, prefillFromQuery, type ComparisonKnobsV1, type ExperimentProgressV1 } from '../../home/experiments';
 import { applyWords, armWords, defaultDraft, emptyArm, readyWords, type ArmRow, type ComparisonDraft, type EvalSetSummary } from '../../home/comparison-defaults';
 
 const JUDGE_PROFILES = ['', 'thorough', 'fast', 'logprob'];
@@ -54,6 +54,14 @@ export function ComparisonRunner() {
   useEffect(() => { if (knobs && knobs !== 'loading' && !draft) setDraft(defaultDraft(knobs, sets)); }, [knobs, sets, draft]);
   // The recommended set arrives after the knobs sometimes: fill an empty set id once, never overwrite a chosen one.
   useEffect(() => { if (draft && !draft.setId && sets.length) setDraft({ ...draft, setId: defaultDraft({ providers: [], selections: [] }, sets).setId }); }, [sets, draft]);
+  // A deep link (`?agent=&set=`, e.g. from the skills app's Runner) preselects once the lists it names have arrived.
+  const [prefilled, setPrefilled] = useState<{ agent: boolean; set: boolean }>({ agent: false, set: false });
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const want = prefillFromQuery(window.location.search, orgs, sets);
+    if (!prefilled.agent && want.addressee && orgs.length) { setAddressee(want.addressee); setPrefilled((p) => ({ ...p, agent: true })); }
+    if (!prefilled.set && want.setId && sets.length && draft) { setDraft({ ...draft, setId: want.setId }); setSource('named'); setPrefilled((p) => ({ ...p, set: true })); }
+  }, [orgs, sets, draft, prefilled]);
 
   const rows = draft?.rows ?? [];
   const split = draft?.split ?? 'held-out';

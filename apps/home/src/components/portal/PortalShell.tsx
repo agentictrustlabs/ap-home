@@ -63,6 +63,15 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
     setAskResume(run);
     openAsk(true);
   }, [pathname, searchParams]);
+  // `?ask=<words>` on any workspace page: open the Ask on THIS workspace's agent with the words seeded, nothing sent — the
+  // skills app's Runner hands an intent over this way (its own session is not a Home session, and the App-Delegation
+  // scheme, spec 397 §4, is the in-app path still to be wired). The seed is read once; a value over 2000 chars is ignored.
+  useEffect(() => {
+    const seed = (searchParams?.get('ask') ?? '').trim();
+    if (!seed || seed.length > 2000) return;
+    setAskSeed(seed);
+    openAsk(true);
+  }, [pathname, searchParams]);
   // A selection belongs to the screen it was made on: leaving the screen clears it (spec 361 I6).
   useEffect(() => { setAskSelection(null); }, [pathname]);
   const active = parseWorkspacePath(pathname ?? '/');
