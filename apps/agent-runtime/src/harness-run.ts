@@ -71,6 +71,7 @@ import { ADAPTER, CARRIES } from './adapter-declarations.js';
 import { relationshipCredentialDigest, termsDigestOf, type RelationshipCredentialBodyV1 } from '@agenticprimitives/agent-relationships';
 import { replayingInvoker, inputsFor, type RunRecordV1, type RunMarks, type RunEvent, type CommitmentRefV1, externalExecutorsReadOnly, formatTraceparent, traceIdOf, spanIdOf, type TraceContextV1, fitEvidence, observed, isToolInvocationResult, reconcileByTool, type ReconcileRequest, type ReconcileAnswer, outcomeConformance, classifyOpenIntent , selectByDeclaredUtterances , selectByJudgment , selectByOntology, selectByOntologyThenJudgment, selectByProposalThenJudgment, selectByOntologyFirst, type OntologyFirstSelectionV1, type AskerContextV1, selectByFramedJudgment, addUsage, judgeAnswerPreference, type ModelUsageV1, type OntologySelectionV1, type JudgmentSelectionV1, type FramedSelectionV1, type ProposedSelectionV1, selectByOutcome, outcomeSteps, type OutcomeSelectionV1, type OutcomePlanV1, planForPicked, type SelectivePlanV1, choosePlanAround } from '@agenticprimitives/orchestration';
 import { holdModeOf, stepsUnderHold } from './skeleton-hold.js';
+import { chainProceedModeOf, stepsUnderChainProceed } from './chain-proceed.js';
 import { recentParties, conversationForPrompt, preferredChoice as pickPreferred, CONFIRMATION_RECORD, standingFor, declareInstruction, forgetInstruction, instructionContextOf, STANDING_RECORD, type ConversationMemoryV1, type ConfirmationPreferencesV1, type StandingInstructionsV1 } from '@agenticprimitives/context';
 import { COORDINATION_READ_TOOLS, COORDINATION_ACTION_TOOLS, COORDINATION_CAPABILITY_IDS, ENDEAVOR_LIST_CAPABILITY, ENDEAVOR_GET_CAPABILITY, endeavorReadInvoker, endeavorActInvoker } from './coordination-bindings.js';
 import { progressLine, type ProgressLineV1 } from './harness-progress.js';
@@ -2871,6 +2872,9 @@ export interface PlannerTraceV1 {
    *  `skeleton` (2026-10-01, `skill-selection/hold`): a skill was chosen, a required input was missing, and the skill ran
    *  under the skeleton instruction instead of only asking — a comparison reads this, never the answer, to tell them apart. */
   skillStage?: 'chose' | 'handed-to-planner' | 'clarify' | 'skeleton';
+  /** 2026-10-02 (`plan/chain-proceed`) — a chain's TERMINAL step ran under the proceed-anyway instruction (the grant
+   *  chain paused at the drafter's Stage 1 soft gate in every arm, 0.35–0.46). Absent when it did not run. */
+  chainProceed?: boolean;
   /** Spec 418 A2 — what the planned skills should DELIVER (each intermediate step's artifact + the final skill's
    *  products), glossed from the lexicon — the outcome check's expected classes. */
   expectedDelivers?: Array<{ iri: string; label: string; required?: boolean }>;
@@ -5087,10 +5091,17 @@ step is then handed to that agent under authority the person grants; leave it ou
           // this, and a skeleton that ran is on the trace as `skillStage: 'skeleton'` (the plan's `missing` stays on
           // `trace.selection` either way — the hold is recorded; only the answer to it changes).
           const holdMode = holdModeOf(input.variant?.toggles?.['skill-selection/hold'], (env as { SKILL_HOLD_DEFAULT?: string }).SKILL_HOLD_DEFAULT);
+          const chainProceedMode = chainProceedModeOf(input.variant?.toggles?.['plan/chain-proceed'], (env as { PLAN_CHAIN_PROCEED_DEFAULT?: string }).PLAN_CHAIN_PROCEED_DEFAULT);
           const outcomeStepsUnderHold = (plan: OutcomePlanV1, labelOf: (iri: string) => string, opts?: Parameters<typeof outcomeSteps>[3]) => {
             const r = stepsUnderHold(plan, holdMode, labelOf, (p) => outcomeSteps(p, pin.intent.goal, labelOf, opts));
             if (r.skeleton) trace.skillStage = 'skeleton';
-            return r.steps;
+            // 2026-10-02 — A CHAIN'S TERMINAL STEP PROCEEDS (`plan/chain-proceed`, env PLAN_CHAIN_PROCEED_DEFAULT; `off`
+            // until the Lab measures it). The grant chain scored 0.35–0.46 in every arm because the drafter paused at its
+            // Stage 1 soft gate after the tracker ran (`chain-proceed.ts`). Applied AFTER the hold: a held plan is the
+            // hold's (the skeleton wins — one instruction, never two), so this only ever reaches a plan with nothing missing.
+            const cp = stepsUnderChainProceed(r.steps, chainProceedMode, plan.missing.length > 0);
+            if (cp.chainProceed) trace.chainProceed = true;
+            return cp.steps;
           };
           // Spec 402 W3 — a sentence with a clock, said at the person's own agent, is a routine to keep (read back first).
           // Spec 421 W1 — a CONTINUATION is always the model's: it plans from what was read, which no compiled shape knows.
