@@ -53,6 +53,9 @@ export interface GNode {
     kind: GNodeKind;
     name: string;
     sub: string;
+    /** The agent's subclass word (treasury / workspace / team / circle / church / household / registry …), when
+     *  it says more than the class does. Carried so the filter bar can hide/show by subtype. */
+    subKind?: string;
     focus?: boolean;
     /** de-emphasized (e.g. a sibling org on an org-scoped view) — rendered faded. */
     dim?: boolean;
@@ -299,3 +302,125 @@ export const NODE_KIND_LABEL: Record<GNodeKind, string> = {
   more: 'More agents',
   cluster: 'People',
 };
+
+// ── MULTI-LEVEL VIEW + FILTERS (owner, 2026-10-02: "filter based on all the types of agents and types of
+//    relationships and allow for it to expand to 3rd and 4th levels") ─────────────────────────────────────
+// The centred builders above draw ONE ring. This walks the person's own tree (`live.agents`, whose rows carry a
+// `parent`) breadth-first to an arbitrary depth, so the 2nd, 3rd and 4th levels — an org's treasuries and
+// workspaces, a team under an org — are drawn too. Positions are placeholders here; ELK (`graph-layout.ts`) lays
+// it out. Pure.
+
+const lc = (a: string) => a.toLowerCase();
+
+/** A node's subclass word, for the filter bar (treasury / workspace / team / circle / church / household …). */
+export function subKindOf(o: LivePerson['agents'][number]): string {
+  return o.kindWord ?? (o.cls === 'service' ? 'service' : o.cls === 'person' ? 'person' : 'organization');
+}
+
+export interface MultiLevelInput {
+  center: string;
+  /** How many levels of agents to draw out from the centre (1 = the centre's own ring; up to 4). */
+  depth: number;
+  /** A ceiling so a huge estate cannot freeze the layout; the centre and earlier levels win the budget. */
+  maxNodes?: number;
+}
+
+/**
+ * THE CENTRE AND ITS DESCENDANTS, `depth` levels deep, from the person's tree. The custodian sits above the person
+ * when the centre IS the person. Each agent hangs under its `parent`; the edge is the one its role implies
+ * (stewardship / membership / a persona's shared-custody link). Governance edges (org → workspace) are added where
+ * both ends are drawn. Returns an unpositioned view for ELK to lay out.
+ */
+export function buildMultiLevelView(p: LivePerson, i: MultiLevelInput): GView {
+  const depth = Math.max(1, Math.min(4, Math.round(i.depth)));
+  const maxNodes = Math.max(12, i.maxNodes ?? 160);
+  const center = lc(i.center);
+  const personId = lc(p.personSA);
+  const isPersonCenter = center === personId;
+  const self = p.agents.find((a) => lc(a.agent) === center) ?? null;
+
+  const node = (id: string, kind: GNodeKind, name: string, sub: string, extra: Partial<GNode['data']> = {}): GNode =>
+    ({ id, position: { x: 0, y: 0 }, data: { refId: id, kind, name, sub, ...extra } });
+
+  const centerName = isPersonCenter ? p.name : self?.name || shortAddr(i.center);
+  const centerKind: GNodeKind = isPersonCenter ? 'person' : self?.cls ?? 'org';
+  const centerSub = isPersonCenter ? p.agentName : self ? subKindOf(self) : 'agent';
+  const nodes: GNode[] = [node(i.center, centerKind, centerName, centerSub, { focus: true, ...(self ? { subKind: subKindOf(self) } : {}) })];
+  const edges: GEdge[] = [];
+  const seen = new Set<string>([center]);
+
+  // Above the person: the human custodian (control, muted).
+  if (isPersonCenter) {
+    nodes.push(node(CUSTODIAN_ID, 'custodian', 'You', 'passkey custodian'));
+    edges.push({ id: 'e:control-you', source: CUSTODIAN_ID, target: i.center, kind: 'control', label: 'holds keys', weight: 1 });
+  }
+
+  const childrenOf = (id: string): LivePerson['agents'] =>
+    p.agents.filter((o) => {
+      if (lc(o.agent) === id || seen.has(lc(o.agent))) return false;
+      const par = o.parent ? lc(o.parent) : null;
+      return par === id || (id === personId && isPersonCenter && !par);
+    });
+
+  // Breadth-first, level by level, so earlier (more important) levels fill the node budget first.
+  let frontier: string[] = [center];
+  for (let level = 0; level < depth; level++) {
+    const next: string[] = [];
+    for (const parentId of frontier) {
+      for (const o of childrenOf(parentId)) {
+        if (nodes.length >= maxNodes) break;
+        const id = o.agent;
+        if (seen.has(lc(id))) continue;
+        seen.add(lc(id));
+        const item = ringItemOf(o);
+        nodes.push(node(id, o.cls, item.name, item.sub, { subKind: subKindOf(o) }));
+        const toCenter = item.edge.toCenter ?? false;
+        edges.push({
+          id: `e:${item.edge.kind}-${id}`,
+          source: toCenter ? id : parentId,
+          target: toCenter ? parentId : id,
+          kind: item.edge.kind,
+          label: item.edge.label,
+          weight: item.edge.weight ?? 0.8,
+        });
+        next.push(lc(id));
+      }
+    }
+    frontier = next;
+    if (nodes.length >= maxNodes) break;
+  }
+  // Org → workspace governance, where both ends are on the view.
+  return appendGovernance({ nodes, edges }, p);
+}
+
+/** What the filter bar removes — a Set per axis lists what is HIDDEN. The focus node is never hidden. */
+export interface GraphFilters {
+  nodeKinds?: ReadonlySet<GNodeKind>;
+  subKinds?: ReadonlySet<string>;
+  edgeKinds?: ReadonlySet<EdgeKind>;
+}
+
+/** Drop hidden nodes (by class or by subtype) and hidden edges (by relationship), plus any edge that lost an end. */
+export function applyGraphFilters(view: GView, f: GraphFilters): GView {
+  const hidden = (n: GNode): boolean =>
+    n.id !== CUSTODIAN_ID && !n.data.focus &&
+    ((f.nodeKinds?.has(n.data.kind) ?? false) || (n.data.subKind ? (f.subKinds?.has(n.data.subKind) ?? false) : false));
+  const nodes = view.nodes.filter((n) => !hidden(n));
+  const kept = new Set(nodes.map((n) => n.id));
+  const edges = view.edges.filter((e) => kept.has(e.source) && kept.has(e.target) && !(f.edgeKinds?.has(e.kind) ?? false));
+  return { nodes, edges };
+}
+
+/** The agent SUBTYPES actually present on a view (for the filter chips) — deduped, in first-seen order. */
+export function presentSubKinds(view: GView): string[] {
+  const out: string[] = [];
+  for (const n of view.nodes) { const s = n.data.subKind; if (s && !out.includes(s)) out.push(s); }
+  return out;
+}
+
+/** The relationship kinds actually present on a view (for the filter chips). */
+export function presentEdgeKinds(view: GView): EdgeKind[] {
+  const out: EdgeKind[] = [];
+  for (const e of view.edges) if (!out.includes(e.kind)) out.push(e.kind);
+  return out;
+}
