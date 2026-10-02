@@ -8,6 +8,7 @@
 // service are both Smart Agents, and "is it registered / what is it named / what can it do" does not
 // change between them (ADR-0046). Only which class may be addressed at this route differs, so that a
 // /service URL cannot quietly render an organization or the reverse.
+import { SkeletonRows } from '../../../ui';
 import type { ReactNode } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../../context/session';
@@ -36,7 +37,7 @@ export function AgentDiscoveryShell({
   const { agents, loaded } = useManagedAgents(session?.token ?? null, 'any');
 
   if (!session) return <SectionShell title={title}><p>Not signed in.</p></SectionShell>;
-  if (!loaded) return <SectionShell title={title}><p className="manage-card-blurb">Loading…</p></SectionShell>;
+  if (!loaded) return <SectionShell title={title}><SkeletonRows rows={3} /></SectionShell>;
 
   const found = agents.find((a) => agentClassOf(a.kind) === cls && lc(a.agent) === lc(agent));
   if (!found) {

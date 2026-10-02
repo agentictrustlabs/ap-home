@@ -1,5 +1,6 @@
 'use client';
 
+import { SkeletonRows } from '../../../ui';
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import {
@@ -162,7 +163,14 @@ export function PersonalInfoPanel({
   }
 
   if (loading) {
-    return <div className="settings-banner settings-banner--warn">Loading from your encrypted vault…</div>;
+    // STRUCTURE FIRST (owner, 2026-10-02): say WHY the wait (the encrypted-vault read) and skeleton the fields, so
+    // the form reads as loading rather than a bare line.
+    return (
+      <>
+        <div className="settings-banner settings-banner--warn">Loading from your encrypted vault…</div>
+        <SkeletonRows rows={4} />
+      </>
+    );
   }
 
   if (needsVaultKey) {

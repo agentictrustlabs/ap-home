@@ -6,6 +6,7 @@
 // the same human, which is person-class — resolved to nothing and every page under `/as/<address>` said
 // "You don't manage a service agent at this address" about an agent the person plainly holds. What these
 // pages need is a stewardship wire, and what a wire proves is CONTROL, not what class the thing is.
+import { SkeletonRows } from '../../ui';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSession } from '../../context/session';
 import { useManagedAgents } from './ManagedAgents';
@@ -34,7 +35,7 @@ const wordFor = (kind: Parameters<typeof agentClassOf>[0]): string =>
 export function ServiceRecordsSection({ agent }: { agent: string }) {
   const { session, loaded, svc } = useServiceAgent(agent);
   if (!session) return <SectionShell title="Records"><p>Not signed in.</p></SectionShell>;
-  if (!loaded) return <SectionShell title="Records"><p className="manage-card-blurb">Loading…</p></SectionShell>;
+  if (!loaded) return <SectionShell title="Records"><SkeletonRows rows={3} /></SectionShell>;
   if (!svc) {
     return (
       <SectionShell title="Records">
@@ -66,7 +67,7 @@ export function ServiceRecordsSection({ agent }: { agent: string }) {
 export function ServiceAccessSection({ agent }: { agent: string }) {
   const { session, loaded, svc } = useServiceAgent(agent);
   if (!session) return <SectionShell title="Access"><p>Not signed in.</p></SectionShell>;
-  if (!loaded) return <SectionShell title="Access"><p className="manage-card-blurb">Loading…</p></SectionShell>;
+  if (!loaded) return <SectionShell title="Access"><SkeletonRows rows={3} /></SectionShell>;
   if (!svc) {
     return (
       <SectionShell title="Access">
@@ -147,7 +148,7 @@ export function ServicePlaybookSection({ agent }: { agent: string }) {
   }, [authed, communityId, text]);
 
   if (!session) return <SectionShell title="Playbook"><p>Not signed in.</p></SectionShell>;
-  if (!loaded) return <SectionShell title="Playbook"><p className="manage-card-blurb">Loading…</p></SectionShell>;
+  if (!loaded) return <SectionShell title="Playbook"><SkeletonRows rows={3} /></SectionShell>;
   if (!svc) {
     return (
       <SectionShell title="Playbook">

@@ -33,6 +33,7 @@ import { agentClassOf, orgKindWordOf, creatableKinds, type CreatableKind } from 
 import { BasisLine } from './BasisLine';
 
 import { Loading } from '../shared/Loading';
+import { SkeletonRows } from '../../ui';
 const ERC20_BALANCE_ABI = [
   { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'a', type: 'address' }], outputs: [{ type: 'uint256' }] },
 ] as const;
@@ -591,11 +592,9 @@ export function OrganizationsManager({
 
   return (
     <div className="dash-section">
-      {!loaded ? (
-        <Loading />
-      ) : (
-        <>
-        <Filter />
+      {/* STRUCTURE FIRST (owner, 2026-10-02): the filter and the prominent "Add an organization" card render
+          immediately — neither needs the agent tree — and the rows skeleton while that read is out. */}
+      <Filter />
         <div className="manage-grid">
           {/* ADD AN ORGANIZATION — the page's own primary action (owner, 2026-10-02: moved off the header and
               made prominent here, on the Stewardship organizations page). Full-width, amber-accented, at the top
@@ -612,6 +611,10 @@ export function OrganizationsManager({
               <CreateAgentForm kind="org" parent={person} person={person} token={token} via={via} onDone={reload} cta="Add an organization" prominent />
             </div>
           )}
+          {!loaded ? (
+            <div style={{ gridColumn: '1 / -1' }}><SkeletonRows rows={5} lead /></div>
+          ) : (
+          <>
           {/*
             * YOUR OWN PEOPLE LEAD, AND YOU ARE THE FIRST OF THEM.
             *
@@ -729,9 +732,9 @@ export function OrganizationsManager({
             <p className="manage-card-blurb">An organization, team, workspace or service you control — its own Smart Agent and typed name.</p>
             <CreateAgentForm choices={creatableKinds('person', claimable)} parent={person} person={person} token={token} via={via} onDone={reload} cta="Create agent" />
           </div>
+          </>
+          )}
         </div>
-        </>
-      )}
     </div>
   );
 }
@@ -750,7 +753,11 @@ export function TreasuriesRollup({ token, person, via }: { token: string | null;
   return (
     <div className="dash-section">
       {!loaded ? (
-        <Loading />
+        // STRUCTURE FIRST (owner, 2026-10-02): the section heading + skeleton cards while the agent tree is out.
+        <>
+          <div className="ui-section-head"><h2>Treasuries</h2></div>
+          <div className="manage-grid"><div style={{ gridColumn: '1 / -1' }}><SkeletonRows rows={2} lead /></div></div>
+        </>
       ) : (
         <>
           <div className="ui-section-head"><h2>Personal<span className="ui-count">{personal.length}</span></h2></div>
