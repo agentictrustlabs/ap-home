@@ -68,8 +68,22 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   }
   if (!v.ok) return jsonCors({ error: `invalid session token: ${v.reason}` }, request, 401);
 
-  const person = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
-  if (!person) return jsonCors({ error: 'no person address in token sub' }, request, 401);
+  const custodian = (v.session.sub.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
+  if (!custodian) return jsonCors({ error: 'no person address in token sub' }, request, 401);
+  // `for=<address>` — THE LINKS OF A PERSONA OF THIS CUSTODIAN (owner, 2026-10-01: the trust graph centred on
+  // jenna-alice must show what SHE stewards and belongs to, not alice's tree). Allowed only when the custodian's own
+  // tree lists that agent as a person of theirs (`relationship: self`, the charter ceremony's record); any other
+  // address is refused by name. The vault reconcile below is the session's own and is skipped for a persona view.
+  const forRaw = (url.searchParams.get('for') ?? '').trim().toLowerCase();
+  let person = custodian;
+  if (forRaw) {
+    if (clientId) return jsonCors({ error: 'for= is the person\'s own view, not a relying app\'s' }, request, 400);
+    if (!/^0x[0-9a-f]{40}$/.test(forRaw)) return jsonCors({ error: 'for must be an agent address' }, request, 400);
+    const raw = await env.AUTH_CODES.get(`related:${custodian}:${forRaw}`);
+    const link = raw ? (JSON.parse(raw) as { kind?: string; relationship?: string; status?: string }) : null;
+    if (!link || (link.kind ?? '').toLowerCase() !== 'person' || (link.relationship ?? '').toLowerCase() !== 'self') return jsonCors({ error: 'not a person of yours — your Home lists no person-class agent of yours at that address' }, request, 403);
+    person = forRaw;
+  }
 
   const idx = JSON.parse((await env.AUTH_CODES.get(`related-idx:${person}`)) ?? '[]') as string[];
 
@@ -78,7 +92,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // projection from the source: any org present in the vault doc but missing here gets a KV link
   // synthesized (self-heal — a second app's writes surface everywhere). Reconciling a projection
   // from its source is not a fallback mechanism (ADR-0013).
-  if (!clientId) {
+  if (!clientId && !forRaw) {
     // Reconcile from the authoritative vault doc when the token can read it. Best-effort:
     // a relying token may lack the vault-read scope — the KV projection below still serves.
     const { readRelationshipsDoc } = await import('../lib/relationships-doc');

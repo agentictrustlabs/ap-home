@@ -1916,11 +1916,26 @@ const RELATED_ORGS_TTL_MS = 10_000;
 type RelatedOrgsBody = { orgs?: Array<Record<string, unknown>> };
 let relatedOrgsCache: { token: string; at: number; body: RelatedOrgsBody } | null = null;
 let relatedOrgsInFlight: { token: string; p: Promise<RelatedOrgsBody> } | null = null;
+/** A persona's own links (`?for=`), cached by (token, persona) like the person's own. */
+const relatedOrgsForCache = new Map<string, { at: number; body: RelatedOrgsBody }>();
 
 /** Drop the shared payload — call after ANY write that changes the person's agents. */
 export function invalidateRelatedOrgs(): void {
   relatedOrgsCache = null;
   relatedOrgsInFlight = null;
+  relatedOrgsForCache.clear();
+}
+
+/** The links of a PERSONA of this custodian (the server checks the 'self' link; refused by name otherwise). */
+async function readRelatedOrgsFor(token: string, forAgent: string): Promise<RelatedOrgsBody> {
+  const key = `${token}|${forAgent.toLowerCase()}`;
+  const hit = relatedOrgsForCache.get(key);
+  if (hit && Date.now() - hit.at < RELATED_ORGS_TTL_MS) return hit.body;
+  const r = await fetch(`/connect/related-orgs?for=${encodeURIComponent(forAgent.toLowerCase())}`, { headers: { authorization: `Bearer ${token}` } });
+  const body = (await r.json().catch(() => ({}))) as RelatedOrgsBody & { error?: string };
+  if (!r.ok) throw new Error(body.error ?? `related-orgs failed (HTTP ${r.status})`);
+  relatedOrgsForCache.set(key, { at: Date.now(), body });
+  return body;
 }
 
 async function readRelatedOrgs(token: string): Promise<RelatedOrgsBody> {
@@ -1949,9 +1964,20 @@ async function readRelatedOrgs(token: string): Promise<RelatedOrgsBody> {
  *  spec 342 — lifecycle-filtered at the read boundary, and the filter CASCADES: an org-treasury
  *  whose parent org is hidden goes with it, so a deleted org can't reappear as a parent label. */
 export async function listManagedAgents(sessionToken: string, surface: OrgSurface = 'working'): Promise<ManagedAgent[]> {
-  const b = (await readRelatedOrgs(sessionToken).catch(() => ({}))) as {
-    orgs?: Array<{ orgAgent: Address; orgName: string; kind?: string; parent?: Address; createdAt: number | null; proofHash?: string; relationship?: string; stewardshipDelegation?: unknown; status?: string; purpose?: string }>;
-  };
+  const b = (await readRelatedOrgs(sessionToken).catch(() => ({}))) as RelatedOrgsRows;
+  return managedAgentsFrom(b, surface);
+}
+
+/** A PERSONA's managed agents — what SHE stewards and belongs to — read by her custodian (server `?for=`). Throws when
+ *  the address is not a person of theirs, so a graph never shows an empty ring for a refused read. */
+export async function listManagedAgentsFor(sessionToken: string, persona: string, surface: OrgSurface = 'any'): Promise<ManagedAgent[]> {
+  const b = (await readRelatedOrgsFor(sessionToken, persona)) as RelatedOrgsRows;
+  return managedAgentsFrom(b, surface);
+}
+
+type RelatedOrgsRows = { orgs?: Array<{ orgAgent: Address; orgName: string; kind?: string; parent?: Address; createdAt: number | null; proofHash?: string; relationship?: string; stewardshipDelegation?: unknown; status?: string; purpose?: string }> };
+
+function managedAgentsFrom(b: RelatedOrgsRows, surface: OrgSurface): ManagedAgent[] {
   const rows = (b.orgs ?? []).map((o) => ({
     agent: o.orgAgent,
     name: o.orgName,
