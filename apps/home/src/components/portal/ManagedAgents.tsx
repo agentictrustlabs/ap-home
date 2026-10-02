@@ -305,9 +305,11 @@ export async function createAgentWithBirthrights(
  *  suffix beside the name field is the one that kind will actually claim. The list is filtered to the
  *  typed roots this chain has provisioned, so it never offers a kind whose name would fail to claim. */
 export function CreateAgentForm({
-  kind: fixedKind, choices, parent, person, token, via, onDone, cta,
+  kind: fixedKind, choices, parent, person, token, via, onDone, cta, prominent,
 }: {
   kind?: AgentKind; choices?: CreatableKind[]; parent: string; person: string; token: string; via: string; onDone: () => void; cta: string;
+  /** Render the collapsed trigger as a PRIMARY button (the page's main action), not a quiet ghost link. */
+  prominent?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState('');
@@ -340,7 +342,7 @@ export function CreateAgentForm({
 
   if (!open) {
     return (
-      <button type="button" className="btn-ghost" style={{ marginTop: '.5rem', fontSize: '.8rem', padding: '.3rem .6rem' }} onClick={() => setOpen(true)}>
+      <button type="button" className={prominent ? 'ui-btn ui-btn--primary' : 'btn-ghost'} style={prominent ? { marginTop: '.5rem' } : { marginTop: '.5rem', fontSize: '.8rem', padding: '.3rem .6rem' }} onClick={() => setOpen(true)}>
         {cta}
       </button>
     );
@@ -595,6 +597,21 @@ export function OrganizationsManager({
         <>
         <Filter />
         <div className="manage-grid">
+          {/* ADD AN ORGANIZATION — the page's own primary action (owner, 2026-10-02: moved off the header and
+              made prominent here, on the Stewardship organizations page). Full-width, amber-accented, at the top
+              of the list, with the same gasless in-home charter ceremony. Shown while organizations are in view
+              and the `.org` typed root is provisioned on this chain. */}
+          {showOrgs && person && claimable('org') && (
+            <div className="manage-card" style={{ gridColumn: '1 / -1', borderColor: 'var(--color-amber-500)' }} data-testid="add-organization">
+              <div className="manage-card-head">
+                <span className="manage-card-icon"><BuildingIcon size={17} /></span>
+                <span className="manage-card-label">Add an organization</span>
+                <span className="manage-card-badge live">new</span>
+              </div>
+              <p className="manage-card-blurb">An organization you steward — its own Smart Agent and typed <code>.org</code> name, custodied by you and created gaslessly in your home.</p>
+              <CreateAgentForm kind="org" parent={person} person={person} token={token} via={via} onDone={reload} cta="Add an organization" prominent />
+            </div>
+          )}
           {/*
             * YOUR OWN PEOPLE LEAD, AND YOU ARE THE FIRST OF THEM.
             *

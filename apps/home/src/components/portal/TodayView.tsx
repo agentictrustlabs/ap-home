@@ -67,10 +67,15 @@ export function TodayView({ scope, children }: { scope: WorkspaceScope; children
   const { parked, triggers, vocabulary, artifacts, records, failed, pending, dropRun } = useTodayReads(session?.token, addressee, scope.kind === 'person' ? 'person' : 'other', held);
   const workLoading = scope.kind !== 'service' && bundles === null;
 
-  const today: Today | null = useMemo(() => {
-    if (parked === null) return null;
-    const mine = scope.kind === 'org' ? (bundles ?? []).filter((b) => b.org.toLowerCase().endsWith(scope.org.toLowerCase())) : scope.kind === 'service' ? [] : bundles;
-    return assembleToday({ now: Date.now(), parked, bundles: mine, artifacts, triggers, vocabulary, records, recentDays: RECENT_DAYS });
+  // ASSEMBLE FROM WHATEVER HAS LOADED — never hold the whole page on the slowest read (owner, 2026-10-02: "populate
+  // what is expected first so the page looks complete and then work the rest"). This used to return null until the
+  // runs read (`parked`) answered, so a block whose OWN read was already in (the schedule, the Library, the playbook
+  // vocabulary, the run records) still sat blank — or briefly showed "empty" — until runs landed. Now each block is
+  // assembled from its own inputs and its panel shows a skeleton (its `pending` flag) only while ITS read is out:
+  // the fast blocks populate immediately and the page looks complete; the decision/active blocks fill when runs lands.
+  const today: Today = useMemo(() => {
+    const mine = scope.kind === 'org' ? (bundles ?? []).filter((b) => b.org.toLowerCase().endsWith(scope.org.toLowerCase())) : scope.kind === 'service' ? [] : (bundles ?? []);
+    return assembleToday({ now: Date.now(), parked: parked ?? [], bundles: mine, artifacts, triggers, vocabulary, records, recentDays: RECENT_DAYS });
   }, [parked, bundles, artifacts, triggers, vocabulary, records, scope]);
 
   const ctx: CardCtx | undefined = addressee ? { token: session?.token ?? '', addressee: addressee as Address, onCanceled: dropRun } : undefined;
