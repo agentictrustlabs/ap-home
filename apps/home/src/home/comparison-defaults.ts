@@ -8,7 +8,9 @@
 // back exactly what it understood; everything it did not mention stays at the default. Pure; tested.
 import type { ComparisonKnobsV1 } from './experiments';
 
-export interface ArmRow { name: string; provider: string; selectionProvider: string; answerProvider: string; judgeProvider: string; judgeProfile: string; judge: string; selection: string }
+/** `toggles` holds the arm's OTHER deployment toggles (anything but `quality/judge`, which is `judge`) — set by a deep
+ *  link's `arms` (e.g. `plan/chain-proceed: on`), each one already checked against what this deployment offers. */
+export interface ArmRow { name: string; provider: string; selectionProvider: string; answerProvider: string; judgeProvider: string; judgeProfile: string; judge: string; selection: string; toggles?: Record<string, string> }
 export interface EvalSetSummary { id: string; domain: string; title: string; cases: number; fixtures: boolean; recommended: boolean }
 export interface ComparisonDraft { setId: string; rows: ArmRow[]; split: 'held-out' | 'development' | 'all'; repeats: number }
 
@@ -47,6 +49,8 @@ export function armWords(r: ArmRow, control: ArmRow): string {
   if (r.judgeProfile !== control.judgeProfile) parts.push(`judge profile ${r.judgeProfile || 'thorough'}`);
   if (r.judge !== control.judge) parts.push(`judge mode ${r.judge}`);
   if (r.selection !== control.selection) parts.push(`selection ${r.selection || 'model'}`);
+  const a = r.toggles ?? {}, b = control.toggles ?? {};
+  for (const k of [...new Set([...Object.keys(a), ...Object.keys(b)])].sort()) if (a[k] !== b[k]) parts.push(`${k} ${a[k] ?? 'default'}`);
   return parts.join(', ');
 }
 

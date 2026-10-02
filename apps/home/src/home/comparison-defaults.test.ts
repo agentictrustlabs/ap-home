@@ -47,3 +47,11 @@ describe('tell me what to compare', () => {
     expect(armWords(base.rows[0]!, base.rows[0]!)).toBe('');
   });
 });
+
+describe('an arm\'s other toggles', () => {
+  it('say how a treatment differs when only a toggle does', () => {
+    const c = { ...defaultArms(knobs)[0]!, toggles: { 'plan/chain-proceed': 'off' } };
+    expect(armWords({ ...c, name: 'on', toggles: { 'plan/chain-proceed': 'on' } }, c)).toBe('plan/chain-proceed on');
+    expect(armWords({ ...c, toggles: undefined }, c)).toBe('plan/chain-proceed default');
+  });
+});
