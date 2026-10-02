@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../csrf', () => ({ ensureCsrfToken: async () => 't', csrfHeaders: () => ({ 'x-csrf-token': 't' }), invalidateCsrfCache: () => undefined }));
 
-import { startExperiment, readExperiment, variantFromForm, readComparisonKnobs } from './experiments';
+import { startExperiment, readExperiment, variantFromForm, readComparisonKnobs, prefillFromQuery } from './experiments';
 
 function stubFetch(answer: (url: string, init?: RequestInit) => unknown) {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
@@ -49,5 +49,18 @@ describe('startExperiment / readExperiment', () => {
     expect(k?.providers).toEqual(['gemini', 'anthropic']);
     expect(calls[0]!.url).toBe('/a2a/harness/comparison');
     vi.unstubAllGlobals();
+  });
+});
+
+describe('prefillFromQuery', () => {
+  const orgs = [{ agent: '0xABC', name: 'cil-commons-1e07.org' }, { agent: '0xdef', name: 'faith.org' }];
+  const sets = [{ id: 'cil-commons-fresh-heldout-8' }, { id: 'long-answer-panel-1' }];
+  it('selects the agent by address or name and the set by id, case-insensitively for the agent', () => {
+    expect(prefillFromQuery('?agent=0xabc&set=long-answer-panel-1', orgs, sets)).toEqual({ addressee: '0xABC', setId: 'long-answer-panel-1' });
+    expect(prefillFromQuery('agent=CIL-commons-1e07.org', orgs, sets)).toEqual({ addressee: '0xABC' });
+  });
+  it('ignores what the lists do not hold, and never types a value into the form', () => {
+    expect(prefillFromQuery('?agent=0x999&set=nope', orgs, sets)).toEqual({});
+    expect(prefillFromQuery('', orgs, sets)).toEqual({});
   });
 });
