@@ -275,6 +275,12 @@ export { ProviderMeterDO } from './provider-meter-do.js';
 export { ExperimentDO } from './experiment-do.js';
 
 export interface Env {
+  /** Perf (2026-10-02) — agents whose cold read path the `scheduled` cron keeps warm (comma-separated SAs).
+   *  Each tick reads each agent's playbook + derived type through the SAME internal vault path an ask starts
+   *  with, so the owner's InteractionsDO, the demo-mcp vault and the RPC are resident when a real user
+   *  arrives, instead of paying the cold-start on the first load. Read-only, credential-free (the a2a's own
+   *  service credential), idempotent. Empty/unset ⇒ `scheduled` is a no-op, so this is safe on every env. */
+  WARM_AGENTS?: string;
   /** Spec 369 — Workers AI, for HEARING (`/harness/hear`, Whisper). Optional: unbound ⇒ 503 and the
    *  surface says so (never a silent switch to the browser's recognizer — ADR-0013). */
   AI?: { run(model: string, inputs: Record<string, unknown>): Promise<unknown> };
@@ -10552,12 +10558,35 @@ async function handleInboundEmail(message: ForwardableEmailMessage, env: Env): P
   }
 }
 
+// ── WARM THE COLD READ PATH (perf, 2026-10-02) ───────────────────────────────────────────────────────
+// "The first load takes a minute" is a cold-start tax: the owner's InteractionsDO, the demo-mcp vault and
+// the faithchain RPC client are all unspun when the first real user arrives. This cron reads, for each
+// WARM_AGENTS SA, the two things EVERY ask reads first — the agent's playbook record and its derived type
+// — through the same internal vault path the ask uses (`readSubjectRecord` → the owner's InteractionsDO →
+// demo-mcp). That resolves the cold start before a person pays for it. It is read-only, uses the a2a's own
+// service credential (no person's session), and is idempotent; an empty WARM_AGENTS makes it a no-op.
+async function warmReadChain(env: Env, ctx: ExecutionContext): Promise<void> {
+  const agents = (env.WARM_AGENTS ?? '')
+    .split(',').map((s) => s.trim().toLowerCase()).filter((a) => /^0x[0-9a-f]{40}$/.test(a));
+  if (!agents.length) return;
+  const deps = harnessDeps(env, buildAuditSink(env), { executionCtx: ctx });
+  await Promise.allSettled(
+    agents.flatMap((sa) => [
+      loadPlaybook(deps.readSubjectRecord, sa as Address, () => undefined).catch(() => null),
+      deps.agentTypeOf?.(sa as Address).catch(() => null) ?? Promise.resolve(null),
+    ]),
+  );
+}
+
 export default {
   fetch: app.fetch,
   // Present unconditionally; Cloudflare only calls it for zones routed at this Worker.
   email: handleInboundEmail,
   // Spec 400 W1c — the runtime-wake consumer (the only queue this Worker consumes).
   queue: (batch: MessageBatch<unknown>, env: Env) => consumeRuntimeWakes(batch, env),
+  // Perf (2026-10-02) — keep the heavy read chain warm for the agents ops names in WARM_AGENTS. Cloudflare
+  // only calls this on an env that declares a cron trigger; a no-op where WARM_AGENTS is empty.
+  scheduled: (_controller: ScheduledController, env: Env, ctx: ExecutionContext) => ctx.waitUntil(warmReadChain(env, ctx)),
 };
 export { RuntimeContainer } from './runtime-container.js';
 
