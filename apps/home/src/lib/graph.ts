@@ -40,7 +40,7 @@ export const EDGE_CLASS: Record<EdgeKind, EdgeClass> = {
 };
 
 /** A node kind, plus the synthetic "custodian" (the connected human controlling a SA). */
-export type GNodeKind = 'custodian' | 'person' | 'org' | 'service' | 'more';
+export type GNodeKind = 'custodian' | 'person' | 'org' | 'service' | 'more' | 'cluster';
 
 /** The connected human custodian, shown distinctly from the smart agents. */
 export const CUSTODIAN_ID = 'custodian:you';
@@ -151,6 +151,27 @@ function appendGovernance(g: GView, p: LivePerson): GView {
 
 /** The id of the overflow node that stands for the agents a ring does not show. */
 export const MORE_ID = 'more:ring';
+/** The id of the people-cluster node — "N people" that expands to show every person in the ring. */
+export const CLUSTER_PEOPLE_ID = 'cluster:people';
+
+/**
+ * COLLAPSE THE PEOPLE (owner, 2026-10-02: "if there are a bunch of people put all the people in a count and then …
+ * that when pressed shows all the people"). Person-class ring items beyond `threshold` become ONE "N people" node;
+ * organizations, services, treasuries and the workspace stay drawn, because they are the structure the graph is for.
+ * `expanded` draws every person instead. Pure: returns the ring to hand to `buildCenteredGraph`.
+ */
+export function clusterPeople(ring: readonly CenteredItem[], opts: { expanded?: boolean; threshold?: number } = {}): CenteredItem[] {
+  const threshold = Math.max(1, opts.threshold ?? 6);
+  const people = ring.filter((it) => it.kind === 'person');
+  const rest = ring.filter((it) => it.kind !== 'person');
+  if (opts.expanded || people.length <= threshold) return [...rest, ...people];
+  const anyMember = people.some((it) => it.edge.kind === 'membership');
+  const cluster: CenteredItem = {
+    id: CLUSTER_PEOPLE_ID, kind: 'cluster', name: `${people.length} people`, sub: 'click to show them all',
+    edge: { kind: anyMember ? 'membership' : 'stewardship', label: `${people.length} people`, weight: 0.4, toCenter: anyMember },
+  };
+  return [...rest, cluster];
+}
 
 /** One agent drawn around (or above) the centre, with the edge that joins it. `toCenter` points the arrow at the
  *  centre ("member of", "holds keys"); otherwise the centre points at it ("stewards", "holds"). */
@@ -276,4 +297,5 @@ export const NODE_KIND_LABEL: Record<GNodeKind, string> = {
   org: 'Organization agent',
   service: 'Service agent',
   more: 'More agents',
+  cluster: 'People',
 };
