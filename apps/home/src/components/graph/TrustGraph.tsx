@@ -8,7 +8,7 @@
 // block below) and remapped onto this app's --color-* / --radius-* tokens so the portal
 // stylesheet stays untouched.
 import '@xyflow/react/dist/style.css';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Background,
   BackgroundVariant,
@@ -261,6 +261,62 @@ function useCenteredGraph(live: LivePerson, center: string, showAll: boolean, sh
   return { g, reading, note };
 }
 
+// ── CLICK-TO-EXPAND (owner, 2026-10-02: "yes" — reach the 3rd and 4th levels on the org and persona pages too) ─
+// Depth 1–4 walks the PERSON'S OWN tree, whose rows carry `parent`. An organization or persona page is built from
+// that agent's roster/links fetched one level at a time, so there the tree is not in hand. Expanding a node here
+// fetches ITS children the same way the centre's were fetched, and splices them in UNDER that node — expand a
+// child in turn and you are three, four levels deep. Read-only; the same reads the roster view already makes.
+type ExpItem = CenteredItem & { subKind?: string };
+
+/** The children of one agent on the graph: a persona's managed agents, or an org/service's roster. Mirrors
+ *  `useCenteredGraph`'s own fetch, so an expanded node holds exactly what centring on it would show. */
+async function fetchChildrenOf(token: string, agentId: string, kind: GNodeKind, personSA: string): Promise<ExpItem[]> {
+  const self = agentId.toLowerCase();
+  const me = personSA.toLowerCase();
+  if (kind === 'person') {
+    const rows = await listManagedAgentsFor(token, agentId, 'any');
+    return rows
+      .filter((o) => o.agent.toLowerCase() !== self && o.agent.toLowerCase() !== me)
+      .map((o) => {
+        const cls = agentClassOf(o.kind);
+        const kindWord = kindWordOf(o.kind);
+        return { ...ringItemOf({ agent: o.agent, name: o.name ? nameLabel(o.name) : null, cls, kindWord, relationship: o.relationship }), subKind: kindWord ?? cls };
+      })
+      .sort(byRole);
+  }
+  // org / service — its roster (members + stewards), every edge pointing INTO this node.
+  const members = await fetchRoster(token, agentId);
+  return members
+    .filter((m) => m.address.toLowerCase() !== self)
+    .map((m) => {
+      const t = participantType(m.publicName);
+      const nKind: GNodeKind = t === 'organization' ? 'org' : t === 'service' ? 'service' : 'person';
+      const role = (m.role ?? '').toLowerCase();
+      const steward = /steward|founder|owner|lead/.test(role);
+      return { id: m.address, kind: nKind, name: m.displayName, sub: role ? role : t === 'unknown' ? 'member' : t, edge: steward ? { kind: 'stewardship' as const, label: 'stewards', weight: 0.8, toCenter: true } : { kind: 'membership' as const, label: 'member of', weight: 0.5, toCenter: true } };
+    })
+    .sort((a, b) => (a.edge.kind === 'membership' ? 1 : 0) - (b.edge.kind === 'membership' ? 1 : 0) || a.name.localeCompare(b.name));
+}
+
+/** Splice every expanded node's children into the base view, under that node. A child already on the view (the
+ *  centre reached it another way) is not duplicated. Returns a fresh unpositioned view for ELK. */
+function mergeExpanded(base: GView, expanded: Record<string, ExpItem[]>): GView {
+  const nodes = [...base.nodes];
+  const edges = [...base.edges];
+  const present = new Set(nodes.map((n) => n.id.toLowerCase()));
+  for (const [parentId, items] of Object.entries(expanded)) {
+    if (!present.has(parentId)) continue; // its parent is not (or no longer) on the view
+    for (const it of items) {
+      if (present.has(it.id.toLowerCase())) continue;
+      present.add(it.id.toLowerCase());
+      nodes.push({ id: it.id, position: { x: 0, y: 0 }, data: { refId: it.id, kind: it.kind, name: it.name, sub: it.sub, ...(it.subKind ? { subKind: it.subKind } : {}) } });
+      const toCenter = it.edge.toCenter ?? false;
+      edges.push({ id: `e:exp:${parentId}:${it.edge.kind}-${it.id}`, source: toCenter ? it.id : parentId, target: toCenter ? parentId : it.id, kind: it.edge.kind, label: it.edge.label, weight: it.edge.weight ?? 0.8 });
+    }
+  }
+  return { nodes, edges };
+}
+
 export default function TrustGraph({ live, focusAgent }: { live: LivePerson; focusAgent?: string }) {
   const [selected, setSelected] = useState<string | null>(null);
   // THE CENTRE is the agent this page is about (the persona, organization or service in the route), or the person
@@ -276,15 +332,35 @@ export default function TrustGraph({ live, focusAgent }: { live: LivePerson; foc
   const [hiddenNodeKinds, setHiddenNodeKinds] = useState<ReadonlySet<GNodeKind>>(new Set());
   const [hiddenSubKinds, setHiddenSubKinds] = useState<ReadonlySet<string>>(new Set());
   const [hiddenEdgeKinds, setHiddenEdgeKinds] = useState<ReadonlySet<EdgeKind>>(new Set());
+  // Click-to-expand: children fetched for a node (keyed by lowercased id), and the node currently fetching.
+  const { session } = useSession();
+  const token = session?.token ?? null;
+  const [expanded, setExpanded] = useState<Record<string, ExpItem[]>>({});
+  const [expanding, setExpanding] = useState<string | null>(null);
   const { g, reading, note } = useCenteredGraph(live, center, showAll, showPeople);
-  // A new centre resets the view to its ring, one level, nothing filtered.
-  useEffect(() => { setShowAll(false); setShowPeople(false); setDepth(1); setHiddenNodeKinds(new Set()); setHiddenSubKinds(new Set()); setHiddenEdgeKinds(new Set()); }, [center]);
+  // A new centre resets the view to its ring, one level, nothing filtered, nothing expanded.
+  useEffect(() => { setShowAll(false); setShowPeople(false); setDepth(1); setHiddenNodeKinds(new Set()); setHiddenSubKinds(new Set()); setHiddenEdgeKinds(new Set()); setExpanded({}); setExpanding(null); }, [center]);
+  // Changing depth re-walks the person's tree, which can re-draw or drop the nodes expansions hung under — start clean.
+  useEffect(() => { setExpanded({}); setExpanding(null); }, [depth]);
+
+  const toggleExpand = useCallback((nodeId: string, kind: GNodeKind) => {
+    const id = nodeId.toLowerCase();
+    if (expanded[id]) { setExpanded((e) => { const next = { ...e }; delete next[id]; return next; }); return; }
+    if (!token || kind === 'custodian' || kind === 'more' || kind === 'cluster') return;
+    setExpanding(id);
+    void fetchChildrenOf(token, nodeId, kind, live.personSA)
+      .then((items) => setExpanded((e) => ({ ...e, [id]: items })))
+      .catch(() => setExpanded((e) => ({ ...e, [id]: [] })))
+      .finally(() => setExpanding((cur) => (cur === id ? null : cur)));
+  }, [expanded, token, live.personSA]);
 
   // The centre's own tree out to `depth` (person centre only — that is where `live.agents` holds the descendants);
   // otherwise the single-level centred view the roster/persona read produced.
   const rawView = useMemo<GView>(() => (isPerson && depth > 1 ? buildMultiLevelView(live, { center, depth }) : g), [isPerson, depth, live, center, g]);
+  // Splice in whatever nodes the person expanded by clicking — this is how the org/persona pages reach deeper levels.
+  const expandedView = useMemo<GView>(() => (Object.keys(expanded).length ? mergeExpanded(rawView, expanded) : rawView), [rawView, expanded]);
   const filters = useMemo<GraphFilters>(() => ({ nodeKinds: hiddenNodeKinds, subKinds: hiddenSubKinds, edgeKinds: hiddenEdgeKinds }), [hiddenNodeKinds, hiddenSubKinds, hiddenEdgeKinds]);
-  const filtered = useMemo<GView>(() => applyGraphFilters(rawView, filters), [rawView, filters]);
+  const filtered = useMemo<GView>(() => applyGraphFilters(expandedView, filters), [expandedView, filters]);
 
   // ELK lays the filtered view out (async). Keep the last laid view until the next is ready so the canvas never
   // blanks; a failed layout keeps the input positions.
@@ -374,14 +450,24 @@ export default function TrustGraph({ live, focusAgent }: { live: LivePerson; foc
       {(reading || note) && (
         <div className="tg-pill" style={{ position: 'absolute', top: 10, left: 10, zIndex: 5 }} data-testid="trust-graph-status">{reading ? 'Reading its records…' : note}</div>
       )}
-      {selected && (
-        <Inspector
-          meta={laid.nodes.find((n) => n.id === selected)?.data ?? null}
-          agentName={live.agentName}
-          centerHref={(() => { const m = laid.nodes.find((n) => n.id === selected)?.data; return m ? centerHref(m) : null; })()}
-          onClose={() => setSelected(null)}
-        />
-      )}
+      {selected && (() => {
+        const meta = laid.nodes.find((n) => n.id === selected)?.data ?? null;
+        const id = selected.toLowerCase();
+        const expandable = !!meta && selected !== center && (meta.kind === 'org' || meta.kind === 'service' || meta.kind === 'person');
+        return (
+          <Inspector
+            meta={meta}
+            agentName={live.agentName}
+            centerHref={meta ? centerHref(meta) : null}
+            expandable={expandable}
+            isExpanded={!!expanded[id]}
+            expanding={expanding === id}
+            expandedCount={expanded[id]?.length}
+            onToggleExpand={() => meta && toggleExpand(selected, meta.kind)}
+            onClose={() => setSelected(null)}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -487,7 +573,7 @@ function FilterPanel({
 }
 
 // ── Inspector — LIVE nodes only (custodian / your person SA / an org you hold) ─
-function Inspector({ meta, agentName, centerHref, onClose }: { meta: NodeData | null; agentName: string; centerHref?: string | null; onClose: () => void }) {
+function Inspector({ meta, agentName, centerHref, onClose, expandable, isExpanded, expanding, expandedCount, onToggleExpand }: { meta: NodeData | null; agentName: string; centerHref?: string | null; onClose: () => void; expandable?: boolean; isExpanded?: boolean; expanding?: boolean; expandedCount?: number; onToggleExpand?: () => void }) {
   if (!meta) return null;
   return (
     <div className="tg-inspector">
@@ -504,6 +590,11 @@ function Inspector({ meta, agentName, centerHref, onClose }: { meta: NodeData | 
         </div>
       </div>
       <div style={{ padding: '.9rem 1rem', display: 'flex', flexDirection: 'column', gap: '.8rem' }}>
+        {expandable && onToggleExpand && (
+          <button type="button" className="btn-ghost" style={{ width: 'auto', alignSelf: 'flex-start', fontSize: '.82rem' }} onClick={onToggleExpand} disabled={expanding} data-testid="trust-graph-expand">
+            {expanding ? 'Reading its agents…' : isExpanded ? `Collapse${expandedCount ? ` (${expandedCount})` : ''}` : 'Expand — show its agents here'}
+          </button>
+        )}
         {centerHref && <a className="btn-primary" href={centerHref} style={{ width: 'auto', display: 'inline-block', fontSize: '.82rem' }} data-testid="trust-graph-center-here">Centre the graph on {meta.name} →</a>}
         <InspectorBody meta={meta} agentName={agentName} />
       </div>
