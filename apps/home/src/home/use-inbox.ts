@@ -3,7 +3,7 @@
 // the owner's inbox view + one POST helper, used by Inbox and Chats. The
 // chat/inbox partition is DETERMINISTIC (spec 313 §2): a conversation is a
 // chat iff none of its messages carries an interactionId and all are 'plain'.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import type {
   ContextRefV1,
   ConversationDescriptorV1,
@@ -68,8 +68,14 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
   const [pendingSend, setPendingSend] = useState<{ input: Omit<SendMessageInput, 'person'>; key: string } | null>(null);
   const agentQs = targetAgent ? `?agent=${encodeURIComponent(targetAgent)}` : '';
 
+  // Guard: the inbox metadata read can take many seconds on a busy account; a 5s poll must NOT fire a second
+  // request while the first is still in flight, or slow reads stack up (seen live: 6–7 concurrent /connect/inbox
+  // calls on /messages). One in flight at a time; the next tick picks up after it returns.
+  const refreshing = useRef(false);
   const refresh = useCallback(async () => {
-    if (!session) return;
+    if (!session || refreshing.current) return;
+    refreshing.current = true;
+    try {
     const res = await fetch(`/connect/inbox${agentQs}`, { headers: { authorization: `Bearer ${session.token}` } });
     if (res.ok) {
       const next = (await res.json()) as InboxView;
@@ -77,6 +83,7 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
       // open thread survive a re-poll (a plain setView would blank the open thread every 5s).
       setView((prev) => ({ ...next, bodies: { ...(prev?.bodies ?? {}), ...next.bodies } }));
     }
+    } finally { refreshing.current = false; }
   }, [session, agentQs]);
 
   // VL-W4 — lazily fetch ONE conversation's bodies when its thread is opened, merged into the view. The

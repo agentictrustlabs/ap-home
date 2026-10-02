@@ -2,7 +2,7 @@
 // Shared data hooks for the coordination Work surfaces (spec 334 §6/§7).
 // Same fetch/gating conventions as OrgDiscussionsView: bearer session to the
 // /connect proxy, 403 ⇒ non-member, slow poll to keep RPC headroom.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession, type Session } from '../../../context/session';
 import { activateInteractionsIfNeeded, resolveVia } from '../../../home/onboarding';
@@ -138,8 +138,10 @@ export function useWorkList(session: Session | null, org: string): WorkListState
   const [error, setError] = useState<string | null>(null);
   const [needsReEnable, setNeedsReEnable] = useState(false);
 
+  const refreshing = useRef(false);
   const refresh = useCallback(async () => {
-    if (!session || !org) return;
+    if (!session || !org || refreshing.current) return;
+    refreshing.current = true;
     try {
       const r = await fetchWorkList(session.token, org);
       if (r.member === false) { setMember(false); setData(null); setError(null); return; }
@@ -151,7 +153,7 @@ export function useWorkList(session: Session | null, org: string): WorkListState
       setNeedsReEnable(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    }
+    } finally { refreshing.current = false; }
   }, [session, org]);
 
   useEffect(() => { void refresh(); }, [refresh]);
