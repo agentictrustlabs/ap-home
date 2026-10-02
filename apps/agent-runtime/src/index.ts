@@ -10572,8 +10572,14 @@ async function warmReadChain(env: Env, ctx: ExecutionContext): Promise<void> {
   const deps = harnessDeps(env, buildAuditSink(env), { executionCtx: ctx });
   await Promise.allSettled(
     agents.flatMap((sa) => [
+      // The playbook + derived type: the first reads of every ask.
       loadPlaybook(deps.readSubjectRecord, sa as Address, () => undefined).catch(() => null),
       deps.agentTypeOf?.(sa as Address).catch(() => null) ?? Promise.resolve(null),
+      // The library index (`content.catalog`): the Home's cold `/connect/library` read for an org vault is
+      // the remaining cold-start cost on a first load (same rows each time), so keep that exact record — and
+      // the owner's InteractionsDO + demo-mcp vault it lives in — resident. An org with no library is a
+      // cheap miss; this never writes.
+      deps.readSubjectRecord?.(sa, 'content.catalog').catch(() => null) ?? Promise.resolve(null),
     ]),
   );
 }
