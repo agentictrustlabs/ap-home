@@ -38,7 +38,7 @@ export const EDGE_CLASS: Record<EdgeKind, EdgeClass> = {
 };
 
 /** A node kind, plus the synthetic "custodian" (the connected human controlling a SA). */
-export type GNodeKind = 'custodian' | 'person' | 'org' | 'service';
+export type GNodeKind = 'custodian' | 'person' | 'org' | 'service' | 'more';
 
 /** The connected human custodian, shown distinctly from the smart agents. */
 export const CUSTODIAN_ID = 'custodian:you';
@@ -111,7 +111,76 @@ export interface LivePerson {
      *  'member' (authority-only) draws a membership edge instead. */
     /** 'self' — another person of the same custodian: it is them, under a different name. */
     relationship?: 'steward' | 'member' | 'self';
+    /** The agent this one hangs under in the tree (the person for a person-treasury or an org; the org for an
+     *  org-treasury or a team) — what decides which ring it sits on when the graph centres on an agent. */
+    parent?: string;
   }[];
+}
+
+/** The id of the overflow node that stands for the agents a ring does not show. */
+export const MORE_ID = 'more:ring';
+
+/**
+ * THE GRAPH CENTRED ON ONE AGENT (owner, 2026-10-01: "center on the selected agent and graph out from there").
+ *
+ * The centre sits in the middle. Its own agents — the ones whose `parent` is the centre (for the person herself,
+ * everything she holds directly) — ring it, stewards before members. Who HOLDS the centre is a small, faded chain
+ * above it: the custodian, and for a persona or an organization the person agent between them, so a person with
+ * forty organizations no longer fills the canvas when the question is one of her personas. A ring longer than
+ * `maxRing` ends in a "+N more" node; clicking it shows them all.
+ */
+export function buildAgentGraphLive(p: LivePerson, opts: { center: string; showAll?: boolean; maxRing?: number }): GView {
+  const personId = p.personSA;
+  const center = opts.center.toLowerCase();
+  const isPerson = center === personId.toLowerCase();
+  const maxRing = Math.max(3, opts.maxRing ?? 12);
+  const self = p.agents.find((a) => a.agent.toLowerCase() === center) ?? null;
+  const word = (o: LivePerson['agents'][number]) => o.kindWord ?? (o.cls === 'service' ? 'service' : o.cls === 'person' ? 'person' : 'organization');
+
+  const nodes: GNode[] = [];
+  const edges: GEdge[] = [];
+  // The centre.
+  if (isPerson) nodes.push({ id: personId, position: { x: 0, y: 0 }, data: { refId: personId, kind: 'person', name: p.name, sub: p.agentName, focus: true } });
+  else nodes.push({ id: self?.agent ?? opts.center, position: { x: 0, y: 0 }, data: { refId: self?.agent ?? opts.center, kind: self?.cls ?? 'org', name: self?.name || shortAddr(opts.center), sub: self ? (self.relationship === 'member' ? `${word(self)} · member` : word(self)) : 'agent', focus: true } });
+  const centerId = nodes[0]!.id;
+
+  // Who holds the centre — small and above, never the subject.
+  if (isPerson) {
+    nodes.push({ id: CUSTODIAN_ID, position: { x: 0, y: -250 }, data: { refId: CUSTODIAN_ID, kind: 'custodian', name: 'You', sub: 'passkey custodian' } });
+    edges.push({ id: 'e:control-you', source: CUSTODIAN_ID, target: personId, kind: 'control', label: 'holds keys', weight: 1 });
+  } else {
+    nodes.push({ id: CUSTODIAN_ID, position: { x: -220, y: -270 }, data: { refId: CUSTODIAN_ID, kind: 'custodian', name: 'You', sub: 'passkey custodian', dim: true } });
+    nodes.push({ id: personId, position: { x: 220, y: -270 }, data: { refId: personId, kind: 'person', name: p.name, sub: p.agentName, dim: true } });
+    edges.push({ id: 'e:control-you', source: CUSTODIAN_ID, target: personId, kind: 'control', label: 'holds keys', weight: 1, dim: true });
+    const rel = self?.relationship ?? 'steward';
+    edges.push(rel === 'self'
+      ? { id: `e:self-${centerId}`, source: personId, target: centerId, kind: 'control', label: 'same custodian', weight: 1, dim: true }
+      : { id: `e:${rel === 'member' ? 'member' : 'stew'}-${centerId}`, source: personId, target: centerId, kind: rel === 'member' ? 'membership' : 'stewardship', label: rel === 'member' ? 'member of' : 'stewards', weight: rel === 'member' ? 0.5 : 0.8, dim: true });
+  }
+
+  // The ring: the centre's own agents.
+  const children = p.agents
+    .filter((o) => o.agent.toLowerCase() !== center && (isPerson ? (!o.parent || o.parent.toLowerCase() === center) : o.parent?.toLowerCase() === center))
+    .sort((a, b) => (a.relationship === 'member' ? 1 : 0) - (b.relationship === 'member' ? 1 : 0) || (a.name ?? a.agent).localeCompare(b.name ?? b.agent));
+  const overflow = !opts.showAll && children.length > maxRing;
+  const shown = overflow ? children.slice(0, maxRing - 1) : children;
+  const slots = shown.length + (overflow ? 1 : 0);
+  const radius = Math.max(300, Math.round(slots * 34));
+  // Leave the top for the holders: slots sweep from 35° past the top, round to 325°.
+  const at = (i: number) => { const t = slots <= 1 ? Math.PI / 2 : ((35 + (290 * i) / (slots - 1)) * Math.PI) / 180 - Math.PI / 2 + Math.PI; return { x: Math.round(Math.cos(t) * radius), y: Math.round(Math.sin(t) * radius) }; };
+  shown.forEach((o, i) => {
+    const member = o.relationship === 'member';
+    nodes.push({ id: o.agent, position: at(i), data: { refId: o.agent, kind: o.cls, name: o.name || shortAddr(o.agent), sub: member ? `${word(o)} · member` : o.relationship === 'self' ? `${word(o)} · another name of yours` : word(o) } });
+    edges.push(o.relationship === 'self'
+      ? { id: `e:self-${o.agent}`, source: centerId, target: o.agent, kind: 'control', label: 'same custodian', weight: 1 }
+      : { id: `e:${member ? 'member' : 'stew'}-${o.agent}`, source: centerId, target: o.agent, kind: member ? 'membership' : 'stewardship', label: member ? 'member of' : 'stewards', weight: member ? 0.5 : 0.8 });
+  });
+  if (overflow) {
+    const rest = children.length - shown.length;
+    nodes.push({ id: MORE_ID, position: at(slots - 1), data: { refId: MORE_ID, kind: 'more', name: `+${rest} more`, sub: 'click to show them all' } });
+    edges.push({ id: 'e:more', source: centerId, target: MORE_ID, kind: 'stewardship', label: `${rest} not drawn`, weight: 0.3, dim: true });
+  }
+  return { nodes, edges };
 }
 
 export function buildPersonGraphLive(p: LivePerson, opts?: { focusAgent?: string }): GView {
@@ -193,4 +262,5 @@ export const NODE_KIND_LABEL: Record<GNodeKind, string> = {
   person: 'Person agent',
   org: 'Organization agent',
   service: 'Service agent',
+  more: 'More agents',
 };

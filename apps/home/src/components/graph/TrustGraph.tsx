@@ -28,7 +28,8 @@ import { agentClassOf, kindWordOf } from '../../lib/agent-class';
 
 /** The word under an agent's node: its subclass when that says more than the class does (`kindWordOf`). */
 import {
-  buildPersonGraphLive,
+  buildAgentGraphLive,
+  MORE_ID,
   CUSTODIAN_ID,
   EDGE_KIND_STYLE,
   NODE_KIND_LABEL,
@@ -60,6 +61,7 @@ export function useLivePerson(): { live: LivePerson | null; loaded: boolean } {
         cls: agentClassOf(o.kind),
         kindWord: kindWordOf(o.kind),
         relationship: o.relationship,
+        ...(o.parent ? { parent: String(o.parent).toLowerCase() } : {}),
       })),
     };
   }, [phase, agentAddress, agentName, agents]);
@@ -106,12 +108,13 @@ const GLYPH_BG: Record<GNodeKind, string> = {
   person: 'var(--color-amber-100)',
   org: 'var(--color-sage-100)',
   service: '#ede9fe',
+  more: 'var(--color-surface-raised)',
 };
 
 function Glyph({ kind, name }: { kind: GNodeKind; name: string }) {
   return (
     <span className="tg-glyph" style={{ background: GLYPH_BG[kind] }} aria-hidden>
-      {(name[0] ?? '?').toUpperCase()}
+      {kind === 'more' ? '…' : (name[0] ?? '?').toUpperCase()}
     </span>
   );
 }
@@ -144,9 +147,12 @@ const nodeTypes = { trust: TrustNode };
 
 export default function TrustGraph({ live, focusAgent }: { live: LivePerson; focusAgent?: string }) {
   const [selected, setSelected] = useState<string | null>(null);
-
-  // LIVE only — the graph is rebuilt whenever the managed-agent tree (or the org focus) changes.
-  const g = useMemo(() => buildPersonGraphLive(live, { focusAgent }), [live, focusAgent]);
+  // THE CENTRE is the agent this page is about (the persona, organization or service in the route), or the person
+  // herself at her own home. A long ring ends in "+N more" until it is clicked.
+  const center = (focusAgent ?? live.personSA).toLowerCase();
+  const [showAll, setShowAll] = useState(false);
+  // LIVE only — the graph is rebuilt whenever the managed-agent tree (or the centre) changes.
+  const g = useMemo(() => buildAgentGraphLive(live, { center, showAll }), [live, center, showAll]);
 
   const nodes: Node<NodeData>[] = g.nodes.map((n) => ({
     id: n.id,
@@ -184,6 +190,7 @@ export default function TrustGraph({ live, focusAgent }: { live: LivePerson; foc
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <style>{TG_CSS}</style>
       <ReactFlow
+        key={`${center}:${showAll ? 'all' : 'ring'}`}
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
@@ -192,7 +199,7 @@ export default function TrustGraph({ live, focusAgent }: { live: LivePerson; foc
         minZoom={0.4}
         maxZoom={1.6}
         proOptions={{ hideAttribution: true }}
-        onNodeClick={(_, n) => setSelected(n.id)}
+        onNodeClick={(_, n) => { if (n.id === MORE_ID) { setShowAll(true); setSelected(null); } else setSelected(n.id); }}
         onPaneClick={() => setSelected(null)}
         nodesDraggable
         className="trustgraph"
@@ -338,6 +345,8 @@ const TG_CSS = `
 .tg-node.kind-person { border-top: 4px solid var(--color-amber-500); }
 .tg-node.kind-org { border-top: 4px solid var(--color-sage-500); }
 .tg-node.kind-service { border-top: 4px solid #8b5cf6; }
+/* the overflow node — "+N more": dashed, quiet, a door rather than an agent */
+.tg-node.kind-more { border: 1.5px dashed var(--color-border-strong); background: var(--color-surface-raised); width: 150px; cursor: pointer; }
 /* the custodian (human) node — dashed, muted, off the agent plane */
 .tg-node.kind-custodian {
   border: 1.5px dashed var(--color-border-strong);
