@@ -83,10 +83,11 @@ export function useLivePerson(): { live: LivePerson | null; loaded: boolean } {
   return { live, loaded };
 }
 
-/** The two relationship classes, kept visually distinct (mirrors the legend split). */
-export function ClassExplainer() {
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '.8rem', marginBottom: '1rem' }}>
+/** The two relationship classes, kept visually distinct (mirrors the legend split). `collapsible` folds it into a
+ *  one-line disclosure so the full-page graph keeps its height. */
+export function ClassExplainer({ collapsible }: { collapsible?: boolean } = {}) {
+  const cards = (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '.8rem', marginBottom: collapsible ? 0 : '1rem', marginTop: collapsible ? '.6rem' : 0 }}>
       <div className="manage-card" style={{ borderLeft: '3px dashed var(--color-border-strong)' }}>
         <div className="dash-section"><h2 style={{ margin: 0 }}>Control · custody</h2></div>
         <p className="manage-card-blurb" style={{ marginTop: 4 }}>
@@ -104,12 +105,25 @@ export function ClassExplainer() {
       </div>
     </div>
   );
+  if (!collapsible) return cards;
+  return (
+    <details style={{ marginBottom: '.7rem' }}>
+      <summary style={{ cursor: 'pointer', fontSize: '.82rem', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+        What the links mean — control (you → your agent) vs authority (agent → agent)
+      </summary>
+      {cards}
+    </details>
+  );
 }
 
 /** The graph canvas card — React Flow needs a fixed-height positioned parent. */
-export function GraphCard({ live, focusAgent }: { live: LivePerson; focusAgent?: string }) {
+export function GraphCard({ live, focusAgent, fill }: { live: LivePerson; focusAgent?: string; fill?: boolean }) {
+  // `fill` (the full-bleed trust-graph pages): take the page height so the diagram is as large as the screen allows,
+  // never the narrow 72vh box used when the graph sits under prose. The subtracted header/legend band keeps the whole
+  // card on screen without a page scroll.
+  const height = fill ? 'calc(100vh - 200px)' : 'min(72vh, 720px)';
   return (
-    <div className="manage-card" style={{ height: 'min(72vh, 720px)', overflow: 'hidden', padding: 0 }}>
+    <div className="manage-card" style={{ height, minHeight: fill ? 420 : undefined, overflow: 'hidden', padding: 0 }}>
       <TrustGraph live={live} focusAgent={focusAgent} />
     </div>
   );
