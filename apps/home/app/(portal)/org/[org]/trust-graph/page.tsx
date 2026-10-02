@@ -16,10 +16,10 @@ export default function OrgTrustGraphPage({ params }: { params: Promise<{ org: s
   const { session } = useSession();
   const { live, loaded } = useLivePerson();
 
-  if (!session) return <SectionShell title="Trust graph"><p>Not signed in.</p></SectionShell>;
+  if (!session) return <SectionShell wide title="Trust graph"><p>Not signed in.</p></SectionShell>;
   if (!live || !loaded) {
     return (
-      <SectionShell title="Trust graph">
+      <SectionShell wide title="Trust graph">
         <p className="manage-card-blurb">Loading your relationships…</p>
       </SectionShell>
     );
@@ -28,7 +28,7 @@ export default function OrgTrustGraphPage({ params }: { params: Promise<{ org: s
   const orgRel = live.agents.find((o) => lc(o.agent) === lc(org));
   if (!orgRel) {
     return (
-      <SectionShell title="Trust graph">
+      <SectionShell wide title="Trust graph">
         <p className="manage-card-blurb">
           You don&apos;t hold a relationship with an organization at this address. Pick one from the
           workspace switcher.
@@ -38,9 +38,9 @@ export default function OrgTrustGraphPage({ params }: { params: Promise<{ org: s
   }
 
   return (
-    <SectionShell title={`${orgRel.name ?? 'Organization'} — trust graph`}>
-      <ClassExplainer />
-      <GraphCard live={live} focusAgent={org} />
+    <SectionShell wide title={`${orgRel.name ?? 'Organization'} — trust graph`}>
+      <ClassExplainer collapsible />
+      <GraphCard live={live} focusAgent={org}  fill />
       <p style={{ fontSize: '.78rem', marginTop: '.9rem', color: 'var(--color-text-faint)' }}>
         Centered on <strong>{orgRel.name ?? org}</strong> — your other organizations are dimmed for
         context. Org-internal edges (members, service agents, partner assertions) bind live from

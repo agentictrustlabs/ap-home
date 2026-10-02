@@ -14,13 +14,13 @@ export default function PersonaTrustGraphPage({ params }: { params: Promise<{ ag
   const { session } = useSession();
   const { live, loaded } = useLivePerson();
 
-  if (!session) return <SectionShell title="Trust graph"><p>Not signed in.</p></SectionShell>;
-  if (!live || !loaded) return <SectionShell title="Trust graph"><Loading label="Loading your relationships…" /></SectionShell>;
+  if (!session) return <SectionShell wide title="Trust graph"><p>Not signed in.</p></SectionShell>;
+  if (!live || !loaded) return <SectionShell wide title="Trust graph"><Loading label="Loading your relationships…" /></SectionShell>;
 
   const rel = live.agents.find((a) => lc(a.agent) === lc(agent));
   if (!rel) {
     return (
-      <SectionShell title="Trust graph">
+      <SectionShell wide title="Trust graph">
         <p className="manage-card-blurb">
           You don&apos;t hold a relationship with an agent at this address. Pick one from the workspace switcher.
         </p>
@@ -29,9 +29,9 @@ export default function PersonaTrustGraphPage({ params }: { params: Promise<{ ag
   }
 
   return (
-    <SectionShell title={`${rel.name ?? 'Service'} — trust graph`}>
-      <ClassExplainer />
-      <GraphCard live={live} focusAgent={agent} />
+    <SectionShell wide title={`${rel.name ?? 'Service'} — trust graph`}>
+      <ClassExplainer collapsible />
+      <GraphCard live={live} focusAgent={agent}  fill />
       <p style={{ fontSize: '.78rem', marginTop: '.9rem', color: 'var(--color-text-faint)' }}>
         Centred on <strong>{rel.name ?? agent}</strong> — your other agents are dimmed for context. The
         edges drawn are the ones that exist today: who holds keys, and who granted authority to whom.

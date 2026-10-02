@@ -17,7 +17,7 @@ export default function TrustGraphPage() {
   // Not connected → no mock graph (the impact seed preview was dropped): invite them in.
   if (phase === 'anon') {
     return (
-      <SectionShell title="Trust graph">
+      <SectionShell wide title="Trust graph">
         <div className="manage-card" style={{ textAlign: 'center', padding: '2.5rem 1.5rem' }}>
           <p style={{ margin: '0 auto 1rem', maxWidth: 460, fontSize: '.9rem', color: 'var(--color-text-muted)' }}>
             Your trust graph is drawn from your <strong>own</strong> agent relationships — connect
@@ -32,7 +32,7 @@ export default function TrustGraphPage() {
   // Session restoring, or the managed-agent vault read still in flight — never flash the empty state.
   if (!live || !loaded) {
     return (
-      <SectionShell title="Trust graph">
+      <SectionShell wide title="Trust graph">
         <Loading label="Loading your relationships…" />
       </SectionShell>
     );
@@ -41,7 +41,7 @@ export default function TrustGraphPage() {
   // Connected but no org relationships yet — it's just the custodian + person SA.
   if (live.agents.length === 0) {
     return (
-      <SectionShell title="Trust graph">
+      <SectionShell wide title="Trust graph">
         <div className="manage-card" style={{ textAlign: 'center', padding: '2.5rem 1.5rem' }}>
           <div style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '.4rem' }}>It&apos;s just you and your agent so far</div>
           <p style={{ maxWidth: 460, margin: '0 auto 1.2rem', fontSize: '.9rem', color: 'var(--color-text-muted)' }}>
@@ -56,9 +56,9 @@ export default function TrustGraphPage() {
   }
 
   return (
-    <SectionShell title="Trust graph">
-      <ClassExplainer />
-      <GraphCard live={live} />
+    <SectionShell wide title="Trust graph">
+      <ClassExplainer collapsible />
+      <GraphCard live={live}  fill />
       <p style={{ fontSize: '.78rem', marginTop: '.9rem', color: 'var(--color-text-faint)' }}>
         Tip: click any node to inspect it; drag to rearrange. Your person→org edges are live from
         your managed-agent tree; org-internal trust dimensions bind from the org trust agent in a
