@@ -27,6 +27,18 @@ export interface RelatedOrg {
   relationship: 'steward' | 'member';
 }
 
+/** Run `fn` over `items` with at most `limit` in flight at once (perf, 2026-10-03). A person in many orgs
+ *  must not fan out one vault-backed read per org simultaneously — that burst is what tripped the throttle. */
+async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(Math.max(1, limit), items.length || 1) }, async () => {
+    while (next < items.length) { const i = next++; out[i] = await fn(items[i]!); }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 /** Orgs this person belongs to (steward or member) + whether the lookup has settled — the Home
  *  Request target options + the My Work aggregation set. `loaded` lets callers hold a spinner until
  *  the org set is known (so an empty result isn't flashed before the fetch returns). */
@@ -55,7 +67,7 @@ export function useRelatedOrgsState(session: Session | null): { orgs: RelatedOrg
       finally { if (!cancelled) setLoaded(true); }
     })();
     return () => { cancelled = true; };
-  }, [session]);
+  }, [session?.token]);
   return { orgs, loaded };
 }
 
@@ -99,7 +111,7 @@ export function useOrgMemberNames(session: Session | null, org: string): Record<
       } catch { /* names stay short-address */ }
     })();
     return () => { cancelled = true; };
-  }, [session, org]);
+  }, [session?.token, org]);
   return names;
 }
 
@@ -196,11 +208,19 @@ export function useMyWork(session: Session | null, agentAddress: string | null |
   const [bundles, setBundles] = useState<OrgWorkBundle[] | null>(null);
   const [staleOrgs, setStaleOrgs] = useState<StaleOrg[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // GUARD (perf, 2026-10-03): an unstable `load` identity made the `[load]` effect re-fire every render, and
+  // each firing fanned out ONE /connect/work read PER ORG — a storm that saturated the vault budget and
+  // surfaced as repeated 409s on almost every page. Never run two loads at once; never re-enter.
+  const inFlight = useRef(false);
   const load = useCallback(async () => {
     if (!session || !agentAddress || !orgsLoaded) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     const stale: StaleOrg[] = [];
     try {
-      const results = await Promise.all(orgs.map(async (o): Promise<OrgWorkBundle | null> => {
+      // Bounded concurrency: at most 3 org reads in flight, so a person in many orgs does not spike the
+      // per-minute vault budget in one burst.
+      const results = await mapLimit(orgs, 3, async (o): Promise<OrgWorkBundle | null> => {
         try {
           const r = await fetchWorkList(session.token, o.orgAgent);
           if (r.needsReEnable === true) {
@@ -224,14 +244,18 @@ export function useMyWork(session: Session | null, agentAddress: string | null |
           const myRequests = (r.requests ?? []).filter((q) => q.requester.toLowerCase() === agentAddress.toLowerCase());
           return { org: o.orgAgent, ...(o.orgName ? { orgName: o.orgName } : {}), allocations, entries, decisions, myRequests, endeavors: r.endeavors ?? [] };
         } catch { return null; }
-      }));
+      });
       setBundles(results.filter((b): b is OrgWorkBundle => b !== null));
       setStaleOrgs(stale);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    }
+    } finally { inFlight.current = false; }
   }, [session, agentAddress, orgs, orgsLoaded]);
-  useEffect(() => { void load(); }, [load]);
+  // Re-run ONLY when the real inputs change (a stable key), not on every render that recreates `load` — that
+  // identity churn was the loop. `loadRef` keeps the effect calling the latest closure.
+  const loadRef = useRef(load); loadRef.current = load;
+  const orgsKey = orgs.map((o) => o.orgAgent).join(',');
+  useEffect(() => { void loadRef.current(); }, [session?.token, agentAddress, orgsKey, orgsLoaded]);
   return { bundles, staleOrgs, error, load, orgsLoaded };
 }
