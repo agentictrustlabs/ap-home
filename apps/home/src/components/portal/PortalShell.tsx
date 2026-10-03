@@ -94,7 +94,7 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
   const groups = buildNav(whitelabel, {
     apps: appsBadge,
     inbox: inboxUnread > 0 ? inboxUnread : undefined,
-  }, active, rel, workspaceName, hasMembers);
+  }, active, rel, workspaceName, hasMembers, activeAgent?.governor);
   // "Has a name" means the NAMING SERVICE resolves to this agent — not that the managed-agent row has a
   // label. A workspace's row says "Northern Colorado Field", which is a display label and not a name
   // anything can resolve; keying off it would call a nameless agent named.

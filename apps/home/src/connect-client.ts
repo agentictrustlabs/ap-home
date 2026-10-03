@@ -1517,6 +1517,11 @@ export interface ManagedAgent {
   stewardshipDelegation?: unknown;
   /** spec 342 — projected lifecycle status (absent = active). See `lib/org-lifecycle.ts`. */
   status?: OrgLifecycleStatus;
+  /** spec 344/424 — for a governed `.workspace`, the ORGANIZATION that governs it (`aporg:governedBy`). A
+   *  workspace is parented by the person, so this carries the org relationship the `parent` chain does not —
+   *  the switcher reads it to show "workspace · you → <org>". Absent for an org, a standalone workspace, or a
+   *  person-held service. */
+  governor?: Address;
 }
 
 export interface CreateManagedAgentResult {
@@ -1988,7 +1993,7 @@ export async function listManagedAgentsFor(sessionToken: string, persona: string
   return managedAgentsFrom(b, surface);
 }
 
-type RelatedOrgsRows = { orgs?: Array<{ orgAgent: Address; orgName: string; kind?: string; parent?: Address; createdAt: number | null; proofHash?: string; relationship?: string; stewardshipDelegation?: unknown; status?: string; purpose?: string }> };
+type RelatedOrgsRows = { orgs?: Array<{ orgAgent: Address; orgName: string; kind?: string; parent?: Address; governor?: Address; createdAt: number | null; proofHash?: string; relationship?: string; stewardshipDelegation?: unknown; status?: string; purpose?: string }> };
 
 function managedAgentsFrom(b: RelatedOrgsRows, surface: OrgSurface): ManagedAgent[] {
   const rows = (b.orgs ?? []).map((o) => ({
@@ -2002,6 +2007,7 @@ function managedAgentsFrom(b: RelatedOrgsRows, surface: OrgSurface): ManagedAgen
     ...(o.purpose ? { purpose: o.purpose } : {}),
     ...(o.stewardshipDelegation ? { stewardshipDelegation: o.stewardshipDelegation } : {}),
     ...(o.status ? { status: o.status as OrgLifecycleStatus } : {}),
+    ...(o.governor ? { governor: o.governor } : {}),
   }));
   return filterByLifecycle(rows, surface);
 }

@@ -55,6 +55,14 @@ export function authorityLineage(agent: ManagedAgent, all: ManagedAgent[], youLa
     chain.unshift(p.name || 'unnamed');
     parent = p.parent;
   }
+  // A GOVERNED WORKSPACE is parented by the person, so the parent walk stops at "you" and loses the org it
+  // belongs to (spec 344/424). Surface the GOVERNOR at the front of the chain so the row reads "you → <org>" —
+  // the governance relationship, which `parent` does not carry. Absent for an org or a standalone workspace.
+  if (agent.governor) {
+    const g = all.find((a) => lc(a.agent) === lc(agent.governor!));
+    const gName = g?.name || 'unnamed';
+    if (!chain.includes(gName)) chain.unshift(gName);
+  }
   return [youLabel, ...chain];
 }
 
