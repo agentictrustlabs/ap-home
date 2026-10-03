@@ -3,8 +3,8 @@
 // CONFIG (never a host in code — ADR-0021), obtains a session for the RUN'S PRINCIPAL through one injected seam,
 // sends one A2A `message/send` carrying `metadata.skill = intent`, and returns the executor's receipt. Self-
 // acting (v1): the session is the authority, and the invoker takes it from the PRINCIPAL — never from an arg
-// (§6), which is why a contract may declare `invoke`/`selfAuthorized` without weakening a gate. This generalizes
-// the bespoke `field-tools.ts`: a new write is a contract declaration, not a new branch here.
+// (§6), which is why a contract may declare `invoke`/`selfAuthorized` without weakening a gate. It replaces every
+// bespoke per-domain write tool (Field Rails was the first): a new write is a contract declaration, not a branch.
 import type { ToolInvoker, ExecutorInvokeV1 } from '@agenticprimitives/orchestration';
 import type { Address } from '@agenticprimitives/types';
 
