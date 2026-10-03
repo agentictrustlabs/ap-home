@@ -17,6 +17,36 @@ const NODE_W = 196;
 const NODE_H = 58;
 
 export type LayoutDirection = 'DOWN' | 'RIGHT';
+/** The layout the panel offers: `across` is the fixed class arrangement below (the default); `down`/`right` are
+ *  ELK's layered layouts. */
+export type GraphLayout = 'across' | 'down' | 'right';
+
+/**
+ * The "ACROSS" layout (owner, 2026-10-03): the SELECTED/centre agent in the MIDDLE, PEOPLE in a column to its
+ * LEFT, ORGANIZATIONS in a column to its RIGHT, SERVICES in a column BELOW — every group ordered vertically. A
+ * fixed, legible arrangement by agent class (people ↔ orgs across the person, services beneath), not a force or
+ * layered graph. Pure data in, positioned data out; synchronous (no ELK). Reads only node kind + id.
+ */
+export function layoutAcross(view: GView, centerId: string | null): GView {
+  if (view.nodes.length === 0) return view;
+  const GAP = NODE_H + 30;   // vertical spacing within a column
+  const COL = 340;           // left/right column offset from the centre
+  const BELOW = 150;         // where the services column starts, below the centre
+  const centre = centerId ? view.nodes.find((n) => n.id === centerId) : null;
+  const rest = view.nodes.filter((n) => n.id !== centre?.id);
+  const of = (k: string) => rest.filter((n) => n.data.kind === k);
+  const people = of('person');
+  const orgs = of('org');
+  // services + any other kind (treasuries, teams surfaced as their own node) share the column below the centre
+  const below = [...of('service'), ...rest.filter((n) => !['person', 'org', 'service'].includes(n.data.kind))];
+  const colY = (i: number, n: number) => (i - (n - 1) / 2) * GAP; // a vertical column, centred on y = 0
+  const place = new Map<string, { x: number; y: number }>();
+  people.forEach((n, i) => place.set(n.id, { x: -COL, y: colY(i, people.length) }));
+  orgs.forEach((n, i) => place.set(n.id, { x: COL, y: colY(i, orgs.length) }));
+  below.forEach((n, i) => place.set(n.id, { x: 0, y: BELOW + i * GAP }));
+  if (centre) place.set(centre.id, { x: 0, y: 0 });
+  return { nodes: view.nodes.map((n) => ({ ...n, position: place.get(n.id) ?? n.position })), edges: view.edges };
+}
 
 /**
  * Lay the view out with ELK's layered algorithm and return a NEW view whose nodes carry real positions. The

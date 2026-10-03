@@ -54,7 +54,7 @@ import {
   type EdgeKind,
   type GView,
 } from '../../lib/graph';
-import { layoutElk, type LayoutDirection } from '../../lib/graph-layout';
+import { layoutElk, layoutAcross, type GraphLayout } from '../../lib/graph-layout';
 
 const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
@@ -328,7 +328,7 @@ export default function TrustGraph({ live, focusAgent }: { live: LivePerson; foc
   // FILTERS + DEPTH (owner, 2026-10-02). Depth walks the person's own tree (the data carries `parent`); the two
   // filter axes hide a class/subtype of agent, or a kind of relationship. The sets list what is HIDDEN.
   const [depth, setDepth] = useState(1);
-  const [direction, setDirection] = useState<LayoutDirection>('DOWN');
+  const [layout, setLayout] = useState<GraphLayout>('across');
   const [hiddenNodeKinds, setHiddenNodeKinds] = useState<ReadonlySet<GNodeKind>>(new Set());
   const [hiddenSubKinds, setHiddenSubKinds] = useState<ReadonlySet<string>>(new Set());
   const [hiddenEdgeKinds, setHiddenEdgeKinds] = useState<ReadonlySet<EdgeKind>>(new Set());
@@ -365,7 +365,12 @@ export default function TrustGraph({ live, focusAgent }: { live: LivePerson; foc
   // ELK lays the filtered view out (async). Keep the last laid view until the next is ready so the canvas never
   // blanks; a failed layout keeps the input positions.
   const [laid, setLaid] = useState<GView>(filtered);
-  useEffect(() => { let on = true; void layoutElk(filtered, { direction }).then((v) => { if (on) setLaid(v); }); return () => { on = false; }; }, [filtered, direction]);
+  useEffect(() => {
+    let on = true;
+    if (layout === 'across') { setLaid(layoutAcross(filtered, center)); return () => { on = false; }; } // synchronous, class-based
+    void layoutElk(filtered, { direction: layout === 'down' ? 'DOWN' : 'RIGHT' }).then((v) => { if (on) setLaid(v); });
+    return () => { on = false; };
+  }, [filtered, layout, center]);
   const personaOf = (id: string) => live.agents.find((a) => a.agent.toLowerCase() === id.toLowerCase());
   // Where "centre the graph here" goes for a ring node: its own trust-graph page, when this Home has one for it.
   const centerHref = (meta: NodeData): string | null => {
@@ -415,7 +420,7 @@ export default function TrustGraph({ live, focusAgent }: { live: LivePerson; foc
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <style>{TG_CSS}</style>
       <ReactFlow
-        key={`${center}:${depth}:${direction}:${laid.nodes.length}x${laid.edges.length}`}
+        key={`${center}:${depth}:${layout}:${laid.nodes.length}x${laid.edges.length}`}
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
@@ -438,8 +443,8 @@ export default function TrustGraph({ live, focusAgent }: { live: LivePerson; foc
         isPerson={isPerson}
         depth={depth}
         setDepth={setDepth}
-        direction={direction}
-        setDirection={setDirection}
+        layout={layout}
+        setLayout={setLayout}
         hiddenNodeKinds={hiddenNodeKinds}
         setHiddenNodeKinds={setHiddenNodeKinds}
         hiddenSubKinds={hiddenSubKinds}
@@ -500,12 +505,12 @@ const CLASS_CHIPS: { kind: GNodeKind; label: string }[] = [
 ];
 
 function FilterPanel({
-  rawView, isPerson, depth, setDepth, direction, setDirection,
+  rawView, isPerson, depth, setDepth, layout, setLayout,
   hiddenNodeKinds, setHiddenNodeKinds, hiddenSubKinds, setHiddenSubKinds, hiddenEdgeKinds, setHiddenEdgeKinds,
 }: {
   rawView: GView; isPerson: boolean;
   depth: number; setDepth: (n: number) => void;
-  direction: LayoutDirection; setDirection: (d: LayoutDirection) => void;
+  layout: GraphLayout; setLayout: (l: GraphLayout) => void;
   hiddenNodeKinds: ReadonlySet<GNodeKind>; setHiddenNodeKinds: (s: ReadonlySet<GNodeKind>) => void;
   hiddenSubKinds: ReadonlySet<string>; setHiddenSubKinds: (s: ReadonlySet<string>) => void;
   hiddenEdgeKinds: ReadonlySet<EdgeKind>; setHiddenEdgeKinds: (s: ReadonlySet<EdgeKind>) => void;
@@ -538,8 +543,9 @@ function FilterPanel({
           <div className="tg-filter-row">
             <span className="tg-filter-label">Layout</span>
             <div className="tg-seg">
-              <button type="button" className={`tg-seg-btn ${direction === 'DOWN' ? 'on' : ''}`} onClick={() => setDirection('DOWN')} title="Levels stack top to bottom">↓ Levels</button>
-              <button type="button" className={`tg-seg-btn ${direction === 'RIGHT' ? 'on' : ''}`} onClick={() => setDirection('RIGHT')} title="Levels flow left to right">→ Across</button>
+              <button type="button" className={`tg-seg-btn ${layout === 'across' ? 'on' : ''}`} onClick={() => setLayout('across')} title="Selected agent centred — people left, organizations right, services below">⤬ Across</button>
+              <button type="button" className={`tg-seg-btn ${layout === 'down' ? 'on' : ''}`} onClick={() => setLayout('down')} title="Levels stack top to bottom">↓ Levels</button>
+              <button type="button" className={`tg-seg-btn ${layout === 'right' ? 'on' : ''}`} onClick={() => setLayout('right')} title="Levels flow left to right">→ Flow</button>
             </div>
           </div>
 
@@ -704,7 +710,8 @@ const TG_CSS = `
   padding: .7rem .85rem; box-shadow: 0 2px 8px rgba(28, 25, 23, .06);
   backdrop-filter: blur(6px);
 }
-.tg-filters { width: 232px; max-width: calc(100% - 28px); max-height: calc(100% - 28px); overflow-y: auto; padding: .55rem .7rem; }
+/* Filters & legend sits in the UPPER-RIGHT corner (owner, 2026-10-03), overriding the .tg-legend bottom-left anchor. */
+.tg-filters { top: 14px; right: 14px; bottom: auto; left: auto; width: 232px; max-width: calc(100% - 28px); max-height: calc(100% - 28px); overflow-y: auto; padding: .55rem .7rem; }
 .tg-filters-head { display: flex; align-items: center; justify-content: space-between; width: 100%; background: none; border: 0; padding: 0; cursor: pointer; color: inherit; }
 .tg-filters-body { margin-top: .5rem; }
 .tg-filter-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .4rem; }
