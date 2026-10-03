@@ -8,7 +8,7 @@
 // handed off. Harness capabilities engaged on the run as a whole (skill selection with what it could choose from, what
 // it chose and what it rejected; standing instructions; memory) hang off the run node.
 
-export type RunDoorKindV1 = 'a2a-message' | 'harness-ask' | 'routed' | 'trigger' | 'resume' | 'home-mcp' | 'channel-mention';
+export type RunDoorKindV1 = 'a2a-message' | 'harness-ask' | 'routed' | 'trigger' | 'resume' | 'home-mcp' | 'channel-mention' | 'background';
 export interface RunDoorView { kind: RunDoorKindV1 | string; messageId?: string; contextId?: string; taskId?: string }
 export interface ModelCallView { role: string; model?: string; provider?: string; promptDigest?: string; tokensIn?: number; tokensOut?: number; routeReason?: string; startedAt?: string; endedAt?: string; /** Spec 418 §3 — the step whose call this was (a skill's answer); absent for plan, compose and judge. */ stepRef?: string; failed?: boolean; /** The record listing carries raw ms instead of ISO times. */ startMs?: number; endMs?: number }
 export interface VariantView { digest?: string; playbook?: string; plannerKind?: string; routePolicy?: string; build?: string; toggles?: Record<string, string> }
@@ -41,7 +41,7 @@ export interface TraceNode {
 
 const DOOR_WORDS: Record<string, string> = {
   'a2a-message': 'A2A message', 'harness-ask': 'direct ask', routed: 'routed from another agent', trigger: 'the agent\'s own trigger',
-  resume: 'a resumed run', 'home-mcp': 'Home MCP (a client of the person)', 'channel-mention': 'an @-mention in a channel',
+  resume: 'a resumed run', 'home-mcp': 'Home MCP (a client of the person)', 'channel-mention': 'an @-mention in a channel', background: 'a background read (the app checking)',
 };
 const short = (v: unknown, n = 14): string => { const t = String(v ?? ''); return t.length > n ? `${t.slice(0, n - 4)}…${t.slice(-3)}` : t; };
 const msBetween = (a?: string, b?: string): number | undefined => (a && b ? Math.max(0, Date.parse(b) - Date.parse(a)) : undefined);
