@@ -41,7 +41,7 @@ type Lens = 'vault' | 'shared';
 interface Grant { grantee: { address: string; kind: string; label?: string }; actions: string[]; grantedAt: number; revoked?: boolean; entitlementId?: string; resource?: string; signed?: boolean; inheritedFrom?: string; delegation?: { caveats?: unknown[] } }
 interface Release { canonicalId: string; version: string; bundleRoot: string; owner: string; publisher: string; riskTier: string; releaseId: string; signed: boolean; publishedAt: number }
 type AccessPolicy = 'public' | 'private';
-interface Artifact { id: string; kind: Kind; name: string; source: Source; folder: string; isFolder?: boolean; pointer?: string; discussionId?: string; contentType: string; bytesB64?: string; size: number; createdAt: number; version?: number; contentCommitment?: string; grants: Grant[]; effectiveGrants?: Grant[]; releases?: Release[];
+interface Artifact { id: string; kind: Kind; name: string; source: Source; folder: string; isFolder?: boolean; pointer?: string; discussionId?: string; contentType: string; bytesB64?: string; size: number; createdAt: number; updatedAt?: number; version?: number; contentCommitment?: string; grants: Grant[]; effectiveGrants?: Grant[]; releases?: Release[];
   /** Spec 412 — the owner's declaration (`apcnt:accessPolicy`) and what it comes to after the folder cascade. */
   accessPolicy?: AccessPolicy; effectiveAccessPolicy?: AccessPolicy;
   // present on "Shared with me" rows (a federated inbound grant from another vault)
@@ -84,6 +84,9 @@ const fullPath = (a: Pick<Artifact, 'folder' | 'name'>) => (a.folder ? `${a.fold
 // Phase-1a derivations. In your own vault everything is Owned; freshness follows the source until the
 // backend surfaces real signed/cached state (Phase 1b). A container has no single content version.
 const freshnessOf = (a: Artifact): Freshness => (a.isFolder ? 'Live' : a.source === 'blob' ? 'Signed' : a.source === 'external' ? 'Cached' : 'Live');
+// Compact date for a row ("Oct 3", or "Oct 3, 2025" off the current year); the full timestamp rides the tooltip.
+const whenShort = (ms: number): string => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(new Date(ms).getFullYear() === new Date().getFullYear() ? {} : { year: 'numeric' }) });
+const whenFull = (ms: number): string => new Date(ms).toLocaleString();
 const authorityText = (mode: AccessMode) => (mode === 'Owned' ? 'Read · write · share' : mode === 'Projection' ? 'Request access' : 'Read only');
 
 /** Build the nested folder tree (client-side) from flat folder paths — used for the destination picker
@@ -269,16 +272,22 @@ export function LibrarySection({ orgSa, heldAgent }: {
     // whose items all live in folders never reads "Nothing in your vault yet" (seen live, 2026-09-13).
     if (lens === 'vault' && !searching) {
       const present = new Set(arr.filter((a) => a.isFolder).map((a) => a.name));
-      const implicit = new Map<string, number>();
+      // Per child folder: how many files below it, and the span of activity (earliest create · latest update)
+      // so a folder row can show "what's been done in here" without opening it.
+      const implicit = new Map<string, { count: number; created: number; updated: number }>();
       for (const a of source) {
         if (a.isFolder ? !a.folder.startsWith(cwd) : !(a.folder === cwd || a.folder.startsWith(cwd ? `${cwd}/` : ''))) continue;
         const rest = a.isFolder ? fullPath(a) : a.folder;
         const below = cwd ? (rest.startsWith(`${cwd}/`) ? rest.slice(cwd.length + 1) : '') : rest;
         const child = below.split('/')[0];
         if (!child || (a.isFolder && rest === (cwd ? `${cwd}/${a.name}` : a.name) && a.folder === cwd)) continue;
-        implicit.set(child, (implicit.get(child) ?? 0) + (a.isFolder ? 0 : 1));
+        const cur = implicit.get(child) ?? { count: 0, created: Infinity, updated: 0 };
+        if (!a.isFolder) { cur.count += 1; if (a.createdAt > 0) cur.created = Math.min(cur.created, a.createdAt); }
+        const u = a.updatedAt ?? (a.createdAt > 0 ? a.createdAt : 0);
+        if (u > 0) cur.updated = Math.max(cur.updated, u);
+        implicit.set(child, cur);
       }
-      for (const [name, count] of implicit) if (!present.has(name)) arr = [...arr, { id: `folder:${cwd ? `${cwd}/` : ''}${name}`, kind: 'md', name, source: 'blob', folder: cwd, isFolder: true, contentType: 'inode/directory', size: count, createdAt: 0, grants: [] } as Artifact];
+      for (const [name, agg] of implicit) if (!present.has(name)) arr = [...arr, { id: `folder:${cwd ? `${cwd}/` : ''}${name}`, kind: 'md', name, source: 'blob', folder: cwd, isFolder: true, contentType: 'inode/directory', size: agg.count, createdAt: agg.created === Infinity ? 0 : agg.created, ...(agg.updated > 0 ? { updatedAt: agg.updated } : {}), grants: [] } as Artifact];
     }
     if (kindFilter !== 'all') arr = arr.filter((a) => !a.isFolder && a.kind === kindFilter);
     return [...arr].sort((a, b) => {
@@ -651,6 +660,8 @@ function ArtifactList({ rows, selectedId, ownerLabel, onOpen, onDescend, onDelet
         const fresh: Freshness = mode !== 'Owned' ? 'Cached' : freshnessOf(a);
         const owner = a.sharedBy ? shortAddr(a.sharedBy) : ownerLabel;
         const authority = a.myActions?.length ? a.myActions.join(' · ') : authorityText(mode);
+        const created = a.createdAt > 0 ? a.createdAt : undefined;       // first write (folders: earliest item under it)
+        const updated = a.updatedAt ?? created;                          // last write (folders: latest activity below)
         const on = a.id === selectedId;
         const activate = () => (a.isFolder ? onDescend(a.name) : onOpen(a.id));
         const chip = (text: string, tone: BadgeKind, title: string) => <span title={title} style={{ ...badgeStyle(tone), fontSize: 11, whiteSpace: 'nowrap' }}>{text}</span>;
@@ -671,8 +682,9 @@ function ArtifactList({ rows, selectedId, ownerLabel, onOpen, onDescend, onDelet
                 <span style={{ ...badgeStyle('neutral'), fontSize: 10, flexShrink: 0 }}>{a.isFolder ? (a.id.startsWith('folder:') && a.size ? `Folder · ${a.size}` : 'Folder') : KIND_META[a.kind].label}</span>
                 {a.effectiveAccessPolicy === 'public' && <span style={{ ...badgeStyle('ok'), fontSize: 10, flexShrink: 0 }} title={a.accessPolicy === 'public' ? 'Anyone may read this — you made it public' : 'Anyone may read this — a folder above it is public'}>Public</span>}
               </span>
-              <span style={{ ...mutedText, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`Owner: ${owner} · you may: ${authority}`}>
-                <b style={{ fontWeight: 600 }}>{owner}</b> · {authority}
+              <span style={{ ...mutedText, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                title={`Owner: ${owner} · you may: ${authority}${created ? ` · added ${whenFull(created)}` : ''}${updated && updated !== created ? ` · updated ${whenFull(updated)}` : ''}`}>
+                <b style={{ fontWeight: 600 }}>{owner}</b> · {authority}{updated ? <> · updated {whenShort(updated)}</> : null}
               </span>
             </span>
             <span style={{ display: 'flex', alignItems: 'center', gap: '.35rem', flexShrink: 0 }}>
