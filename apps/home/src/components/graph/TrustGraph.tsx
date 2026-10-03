@@ -214,7 +214,12 @@ function useCenteredGraph(live: LivePerson, center: string, showAll: boolean, sh
             .sort(byRole);
           if (on) setFetched({ for: center, ring, stewards: [] });
         } else {
-          const members = await fetchRoster(token, center);
+          // A GOVERNED WORKSPACE has no roster of its own — its members and teams live on the governing ORG
+          // (the hub). Read the GOVERNOR's roster so centring a workspace shows the same people an org would
+          // (spec 424 / the hub doctrine). A standalone workspace (no governor) or an org reads its own.
+          const selfRow = live.agents.find((a) => a.agent.toLowerCase() === center);
+          const rosterTarget = selfRow?.governedBy?.toLowerCase() ?? center;
+          const members = await fetchRoster(token, rosterTarget);
           const ring: CenteredItem[] = [];
           const stewards: CenteredItem[] = [];
           for (const m of members) {
@@ -232,7 +237,7 @@ function useCenteredGraph(live: LivePerson, center: string, showAll: boolean, sh
       } finally { if (on) setReading(false); }
     })();
     return () => { on = false; };
-  }, [token, center, isPerson, isPersona, live.personSA]);
+  }, [token, center, isPerson, isPersona, live.personSA, live.agents]);
 
   const g = useMemo(() => {
     if (isPerson || !fetched || fetched.for !== center) return buildAgentGraphLive(live, { center, showAll });
@@ -246,17 +251,27 @@ function useCenteredGraph(live: LivePerson, center: string, showAll: boolean, sh
     // An organization-class or service agent: its stewards above (You among them when the roster names you), its
     // members and what it holds around it. The tree's own row, when it says you steward or belong, stays as a faded holder.
     const me = live.personSA.toLowerCase();
-    const above: CenteredItem[] = fetched.stewards.map((st) => (st.id.toLowerCase() === me ? { ...st, name: `${live.name} (you)`, dim: true } : { ...st, dim: true }));
-    if (self && !above.some((a) => a.id.toLowerCase() === me)) above.push({ id: live.personSA, kind: 'person', name: `${live.name} (you)`, sub: live.agentName, dim: true, edge: self.relationship === 'member' ? { kind: 'membership', label: 'member of', weight: 0.5, toCenter: true } : { kind: 'stewardship', label: 'stewards', weight: 0.8, toCenter: true } });
-    const word = self?.kindWord ?? (self?.cls === 'service' ? 'service' : 'organization');
-    // THE WORKSPACE THIS ORGANIZATION GOVERNS (owner's rule, 2026-10-02): a `.workspace` service whose `governedBy`
-    // points at this org. It is a service the person holds, so its `parent` is the person, not the org — it would
-    // never land in `held`; it is added here with the distinct `governs` edge so the org↔workspace link is drawn.
-    const held2 = new Set(held.map((h) => h.id.toLowerCase()));
+    // THE HUB is the ORGANIZATION whose neighbourhood we draw. For an org centre it is the org itself; for a
+    // GOVERNED WORKSPACE centre it is the workspace's governor, so centring a workspace shows the SAME
+    // relationships an org shows — its teams, its members, its sibling workspaces (spec 424 / the hub doctrine).
+    const governorId = self?.governedBy?.toLowerCase() ?? null;        // set ⇒ this centre is a governed workspace
+    const hub = governorId ?? center;
+    const governorAgent = governorId ? live.agents.find((o) => o.agent.toLowerCase() === governorId) : null;
+    // What the hub holds + governs: its workspaces (`governs`) and its teams (`team of`), each labelled by kind so
+    // a team never reads as a workspace. Both are services the person holds (parent = the person), so they are
+    // gathered from `governedBy`/`parent` pointing at the hub, never from the hub's own `parent`.
+    const hubHeld = live.agents.filter((o) => { const a = o.agent.toLowerCase(); return a !== center && a !== hub && o.parent?.toLowerCase() === hub; }).map((o) => ({ ...ringItemOf(o), edge: { kind: 'stewardship' as const, label: 'holds', weight: 0.6 } }));
+    const heldIds = new Set(hubHeld.map((h) => h.id.toLowerCase()));
     const governed: CenteredItem[] = live.agents
-      .filter((o) => o.governedBy?.toLowerCase() === center && o.agent.toLowerCase() !== center && !held2.has(o.agent.toLowerCase()))
-      .map((o) => ({ id: o.agent, kind: o.cls, name: o.name ? nameLabel(o.name) : o.agent.slice(0, 10), sub: `${o.kindWord ?? o.cls} · governed workspace`, edge: { kind: 'governance' as const, label: 'governs', weight: 0.8 } }));
-    return buildCenteredGraph({ center: { id: self?.agent ?? center, kind: self?.cls ?? 'org', name: self?.name || center.slice(0, 10), sub: word }, above, ring: clusterPeople([...governed, ...held, ...fetched.ring], { expanded: showPeople }), showAll, ...(showPeople ? { maxRing: 80 } : {}) });
+      .filter((o) => { const a = o.agent.toLowerCase(); return o.governedBy?.toLowerCase() === hub && a !== center && a !== hub && !heldIds.has(a); })
+      .map((o) => { const w = o.kindWord ?? o.cls; const team = /team/.test(String(w)); return { id: o.agent, kind: o.cls, name: o.name ? nameLabel(o.name) : o.agent.slice(0, 10), sub: `${w} · ${team ? 'team' : 'governed workspace'}`, edge: { kind: 'governance' as const, label: team ? 'team of' : 'governs', weight: 0.8 } }; });
+    const above: CenteredItem[] = fetched.stewards.map((st) => (st.id.toLowerCase() === me ? { ...st, name: `${live.name} (you)`, dim: true } : { ...st, dim: true }));
+    // Centring a WORKSPACE: its governing org sits above with the 'governed by' edge (workspace → its org).
+    if (governorAgent) above.unshift({ id: governorAgent.agent, kind: 'org', name: governorAgent.name ? nameLabel(governorAgent.name) : governorAgent.agent.slice(0, 10), sub: `${governorAgent.kindWord ?? 'organization'} · governs this workspace`, edge: { kind: 'governance', label: 'governed by', weight: 0.9, toCenter: true } });
+    // Centring an ORG the person steers/belongs to: add 'you' as a faded holder when the roster didn't already.
+    if (self && !governorId && !above.some((a) => a.id.toLowerCase() === me)) above.push({ id: live.personSA, kind: 'person', name: `${live.name} (you)`, sub: live.agentName, dim: true, edge: self.relationship === 'member' ? { kind: 'membership', label: 'member of', weight: 0.5, toCenter: true } : { kind: 'stewardship', label: 'stewards', weight: 0.8, toCenter: true } });
+    const word = self?.kindWord ?? (self?.cls === 'service' ? 'service' : 'organization');
+    return buildCenteredGraph({ center: { id: self?.agent ?? center, kind: self?.cls ?? 'org', name: self?.name || center.slice(0, 10), sub: governorId ? `${word} · governed workspace` : word }, above, ring: clusterPeople([...governed, ...hubHeld, ...fetched.ring], { expanded: showPeople }), showAll, ...(showPeople ? { maxRing: 80 } : {}) });
   }, [live, center, showAll, showPeople, fetched, isPerson, isPersona, self]);
   return { g, reading, note };
 }
