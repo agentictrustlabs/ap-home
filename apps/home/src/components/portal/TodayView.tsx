@@ -81,7 +81,12 @@ export function TodayView({ scope, children }: { scope: WorkspaceScope; children
   const ctx: CardCtx | undefined = addressee ? { token: session?.token ?? '', addressee: addressee as Address, onCanceled: dropRun } : undefined;
   const libraryHref = workspaceHref(scope, 'library');
   const playbookHref = workspaceHref(scope, 'playbook');
-  const workHref = workspaceHref(scope, 'work');
+  // "In motion" counts the scoped agent's running/queued goals. A person and an org have a Work page for them
+  // (`MyWorkView` / the org's endeavors); a PERSONA or a SERVICE has no Work surface (the nav omits it — "a persona
+  // belongs to no organizations yet"), so its runs live on Activities. Pointing at `work` for those gave a 404 on
+  // `/as/<sa>/work` (reported live 2026-10-03). Send each scope where the page actually exists.
+  const workHref = scope.kind === 'persona' || scope.kind === 'service' ? workspaceHref(scope, 'activities') : workspaceHref(scope, 'work');
+  const workOpensActivity = scope.kind === 'persona' || scope.kind === 'service';
   if (!session) return null;
 
   const decisions = today?.decisions ?? []; const active = today?.active ?? []; const arts = today?.artifacts ?? []; const exceptions = today?.exceptions ?? [];
@@ -108,7 +113,7 @@ export function TodayView({ scope, children }: { scope: WorkspaceScope; children
         <List>{decisions.map((it) => <ItemRow key={it.id} item={it} {...(ctx ? { ctx } : {})} cta="Decide" />)}</List>
       </Panel>
 
-      <Panel title="Active goals" icon={<ActivityIcon />} count={active.length} state={activeState} rows={3} testId="today-active-goals" aside={<a href={workHref}>Open Work →</a>}
+      <Panel title="Active goals" icon={<ActivityIcon />} count={active.length} state={activeState} rows={3} testId="today-active-goals" aside={<a href={workHref}>{workOpensActivity ? 'Open activity →' : 'Open Work →'}</a>}
         empty={{ icon: <ActivityIcon />, title: 'Nothing in motion', hint: 'Ask for something, or take on a piece of work.', action: <a className="ui-btn ui-btn--secondary ui-btn--sm" href="/ask">Ask your agent</a> }}
         unknown={{ read: `your unfinished asks could not be read (${failed.runs})`, partial: active.length > 0 }}>
         <List>{active.map((it) => <ItemRow key={it.id} item={it} {...(ctx ? { ctx } : {})} />)}</List>
