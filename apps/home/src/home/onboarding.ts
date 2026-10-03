@@ -45,7 +45,7 @@ import { connectWallet, personalSign } from '../lib/wallet';
 import { isDemoCustodyHome, demoCustodySignHash } from '../lib/persona-custody';
 import { writeOrganizationMembership } from '../lib/membership-write';
 import { getClient } from '../lib/oidc-clients';
-import { buildApprovedSiteDelegation, buildApprovedOperationalIntentDelegation, buildApprovedOrgReadDelegation, buildApprovedSelfVaultGrant, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, issueServiceAgentWireDelegation, OPEN_DELEGATION, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, PERSON_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type SelfVaultGrantConfig, type VaultKeyCeremonyParams } from '../lib/delegation';
+import { buildApprovedSiteDelegation, buildApprovedOperationalIntentDelegation, buildApprovedOrgReadDelegation, buildApprovedSelfVaultGrant, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, issueServiceAgentWireDelegation, OPEN_DELEGATION, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, ORG_INTERACTIONS_SESSION_LEAF_LADDER_RUNGS, PERSON_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type SelfVaultGrantConfig, type VaultKeyCeremonyParams } from '../lib/delegation';
 import { vaultWriteWithDelegation, vaultReadWithDelegation } from '../lib/vault-client';
 import { saveStandingGrant, loadStandingGrant, saveStandingGrantWithSelfVault, loadStandingGrantWithSelfVault } from '../lib/grant-cache';
 import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
@@ -1545,11 +1545,23 @@ export async function activateInteractionsIfNeeded(
     // configured the interactions-session key (404), the DO stays on the server-mint bridge — the grant still
     // lands, so activation is never blocked. (One extra principal signature at enable; KMS homes sign silently.)
     let sessionLeafWire: DelegationWire | undefined;
+    let sessionLeavesWire: DelegationWire[] | undefined;
     try {
       const sk = (await fetch(`/a2a/agent/interactions-session-key`).then((r) => r.json()).catch(() => null)) as { ok?: boolean; address?: string } | null;
       if (sk?.ok && sk.address && /^0x[0-9a-fA-F]{40}$/.test(sk.address)) {
         // Spec 408 §2.1 — the DO's session key presents the person's grants to the two service agents only.
-        sessionLeafWire = toWire(await issueSessionDelegation(principal, sk.address as Address, signHash, [INTERACTIONS_SERVICE_SA, ...(DELIVERY_SERVICE_SA ? [DELIVERY_SERVICE_SA] : [])], leafTtl));
+        const presentsTo = [INTERACTIONS_SERVICE_SA, ...(DELIVERY_SERVICE_SA ? [DELIVERY_SERVICE_SA] : [])];
+        // Spec 423 §2.1 route A — a PERSON gets a single short leaf (re-signed each login); an ORG gets a LADDER of
+        // leaves whose windows tile forward (rung i valid for (i+1)·TTL), so a live rung exists for rungs·TTL with
+        // no steward present to re-sign. Here the steward signs them all at once (KMS/persona homes sign silently).
+        const rungs = leafTtl === PERSON_INTERACTIONS_SESSION_LEAF_TTL_SECONDS ? 1 : ORG_INTERACTIONS_SESSION_LEAF_LADDER_RUNGS;
+        if (rungs > 1) {
+          const leaves: DelegationWire[] = [];
+          for (let i = 0; i < rungs; i++) leaves.push(toWire(await issueSessionDelegation(principal, sk.address as Address, signHash, presentsTo, (i + 1) * leafTtl)));
+          sessionLeavesWire = leaves;
+        } else {
+          sessionLeafWire = toWire(await issueSessionDelegation(principal, sk.address as Address, signHash, presentsTo, leafTtl));
+        }
       }
     } catch { /* session-key fetch/sign hiccup — DO falls back to the server-mint bridge; grant still lands */ }
     await ensureCsrfToken();
@@ -1557,7 +1569,7 @@ export async function activateInteractionsIfNeeded(
       method: 'POST',
       credentials: 'include',
       headers: { 'content-type': 'application/json', ...csrfHeaders() },
-      body: JSON.stringify({ delegation: toWire(delegation), ...(sessionLeafWire ? { sessionLeaf: sessionLeafWire } : {}) }),
+      body: JSON.stringify({ delegation: toWire(delegation), ...(sessionLeavesWire ? { sessionLeaves: sessionLeavesWire } : sessionLeafWire ? { sessionLeaf: sessionLeafWire } : {}) }),
     });
     const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
     if (!res.ok || data.ok !== true) return { ok: false, error: data.error ?? `interactions grant store failed (HTTP ${res.status})` };
