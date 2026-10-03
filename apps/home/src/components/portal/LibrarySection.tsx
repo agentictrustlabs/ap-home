@@ -381,7 +381,7 @@ export function LibrarySection({ orgSa, heldAgent }: {
       {/* Explicit text color so every descendant inherits a defined token — never a white ambient
           (e.g. a browser/OS dark-mode default) on our light surfaces. */}
       <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', color: 'var(--color-text-body)' }}>
-        <FolderRail lens={lens} onLens={(l) => { setLens(l); setSelectedId(null); setPath([]); setPublicOnly(false); }} items={items} path={path} onGo={(segs) => { setLens('vault'); setPublicOnly(false); goTo(segs); }} />
+        <FolderRail lens={lens} onLens={(l) => { setLens(l); setSelectedId(null); setPath([]); setPublicOnly(false); }} items={items} path={path} onGo={(segs) => { setLens('vault'); setPublicOnly(false); goTo(segs); }} writable={writable} onNewFolder={() => void newFolder()} shelfHref={shelfHref} />
 
         <div style={{ flex: 1, minWidth: 0 }}>
           {/* toolbar */}
@@ -429,10 +429,6 @@ export function LibrarySection({ orgSa, heldAgent }: {
                   {(['name', 'kind', 'newest', 'freshness'] as Sort[]).map((s) => <option key={s} value={s}>{s === 'name' ? 'Name' : s === 'kind' ? 'Kind' : s === 'newest' ? 'Newest' : 'Freshness'}</option>)}
                 </select>
               </label>
-              {writable && <button style={{ ...btnSty, display: 'inline-flex', alignItems: 'center', gap: 5 }} onClick={() => void newFolder()} title="Create a new folder"><Icon name="folderPlus" size={14} />New folder</button>}
-              {/* The PUBLIC view — a stranger's-eye preview, served by the agent over A2A. Named "shelf" and kept as a
-                  subtle link so it reads as "go see the public page", distinct from the "Public" filter beside the kinds. */}
-              {shelfHref && lens === 'vault' && <a href={shelfHref} target="_blank" rel="noreferrer" data-testid="public-shelf-link" style={{ ...mutedText, display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, textDecoration: 'none' }} title="Open your public shelf — exactly what anyone in the world can read, served by your own agent">Public shelf<Icon name="external" size={13} /></a>}
             </div>
           )}
 
@@ -588,8 +584,9 @@ function FolderTree({ nodes, path, onGo, counts }: {
 /** A path no folder can have (a folder name never holds a slash), so the tree lights nothing while a place outside it is open. */
 const NOWHERE = ['/'];
 
-function FolderRail({ lens, onLens, items, path, onGo }: {
+function FolderRail({ lens, onLens, items, path, onGo, writable, onNewFolder, shelfHref }: {
   lens: Lens; onLens: (l: Lens) => void; items: Artifact[]; path: string[]; onGo: (segs: string[]) => void;
+  writable: boolean; onNewFolder: () => void; shelfHref: string | null;
 }) {
   // One pass over the artifacts rather than a scan per node: a vault with many folders would
   // otherwise walk the whole list once for every row it draws.
@@ -598,13 +595,21 @@ function FolderRail({ lens, onLens, items, path, onGo }: {
     for (const a of items) if (!a.isFolder) m.set(a.folder, (m.get(a.folder) ?? 0) + 1);
     return m;
   }, [items]);
-  const heading = (s: string) => (
-    <div style={{ ...mutedText, fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', padding: '.3rem .7rem' }}>{s}</div>
-  );
   const sharedOn = lens === 'shared';
   return (
     <div aria-label="Folders" style={{ ...cardSty, padding: '.4rem 0', width: 'clamp(260px, 24%, 420px)', flexShrink: 0, color: 'var(--color-text-body)' }}>
-      {heading('Folders')}
+      {/* Folders heading carries the New-folder action — the standard place to make one, with the tree it joins. */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, padding: '.3rem .7rem' }}>
+        <span style={{ ...mutedText, fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase' }}>Folders</span>
+        {writable && lens === 'vault' && (
+          <button type="button" onClick={onNewFolder} title="Create a new folder" aria-label="New folder" data-testid="library-new-folder"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 3, borderRadius: 6, display: 'inline-flex', color: 'var(--color-text-muted)' }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-text-primary)'; e.currentTarget.style.background = 'var(--color-surface-sunken)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)'; e.currentTarget.style.background = 'transparent'; }}>
+            <Icon name="folderPlus" size={16} />
+          </button>
+        )}
+      </div>
       {/* THE FOLDERS ARE THE NAVIGATION. The vault is a tree; "public" is a property a file or folder carries (a
           filter above the list, a chip on the row), and the workspace switcher in the header already says whose
           vault this is — so there is no scope rail to explain, only the tree and one mounted place beneath it. */}
@@ -621,6 +626,18 @@ function FolderRail({ lens, onLens, items, path, onGo }: {
         <Icon name="shared" size={14} style={{ flexShrink: 0, color: 'var(--color-text-muted)' }} />
         <span style={{ flex: 1 }}>Shared with me</span>
       </div>
+      {/* Public shelf — the world's-eye view of this vault, a mounted place beneath the tree (opens the public page,
+          served by the agent over A2A). Distinct from the "Public" filter on the list, which filters in place. */}
+      {shelfHref && lens === 'vault' && (
+        <a href={shelfHref} target="_blank" rel="noreferrer" data-testid="public-shelf-link"
+          style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, padding: '.28rem .5rem', textDecoration: 'none', color: 'var(--color-text-primary)', fontWeight: 500 }}
+          title="Open your public shelf — exactly what anyone in the world can read, served by your own agent">
+          <span style={{ width: 12, flexShrink: 0 }} />
+          <Icon name="public" size={14} style={{ flexShrink: 0, color: 'var(--color-text-muted)' }} />
+          <span style={{ flex: 1 }}>Public shelf</span>
+          <Icon name="external" size={12} style={{ flexShrink: 0, color: 'var(--color-text-muted)' }} />
+        </a>
+      )}
     </div>
   );
 }
