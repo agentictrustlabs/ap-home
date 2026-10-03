@@ -95,7 +95,23 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const client = clientId ? getClient(clientId) : null;
   if (!client) return json({ error: 'a registered client_id is required' }, 400);
 
-  const key = (body?.sa ?? body?.handle ?? '').trim();
+  let key = (body?.sa ?? body?.handle ?? '').trim();
+  // Spec 426 — THE SESSION SEAM asks the Home only "a session for this principal at this client"; the Home
+  // resolves the CUSTODIAN (the self-agent relationship is a Home fact, never a map in the runtime). When `as`
+  // is given with NO custodian, find the seeded account whose Home lists `as` as a name of its own, and act as
+  // that account — exactly the `related:<custodian>:<persona>` self-link the normal `{sa, as}` path validates.
+  const wantsAs = (body?.as ?? '').trim().toLowerCase();
+  if (!key && /^0x[0-9a-f]{40}$/.test(wantsAs)) {
+    for (const p of listDemoPersonas(env)) {
+      const raw = await env.AUTH_CODES.get(`related:${p.sa.toLowerCase()}:${wantsAs}`);
+      if (!raw) continue;
+      try {
+        const l = JSON.parse(raw) as { kind?: string; relationship?: string; status?: string };
+        if ((l.kind ?? '').toLowerCase() === 'person' && (l.relationship ?? '').toLowerCase() === 'self' && l.status !== 'deleted' && l.status !== 'inactive') { key = p.sa; break; }
+      } catch { /* skip a malformed link */ }
+    }
+    if (!key) return json({ error: 'no demo account steers that principal' }, 404);
+  }
   if (!key) return json({ error: 'handle or sa required' }, 400);
   const persona = demoPersonaFor(env, key);
   if (!persona) return json({ error: 'unknown demo account' }, 404);
