@@ -275,6 +275,12 @@ export { ProviderMeterDO } from './provider-meter-do.js';
 export { ExperimentDO } from './experiment-do.js';
 
 export interface Env {
+  /** Perf (2026-10-02) — agents whose cold read path the `scheduled` cron keeps warm (comma-separated SAs).
+   *  Each tick reads each agent's playbook + derived type through the SAME internal vault path an ask starts
+   *  with, so the owner's InteractionsDO, the demo-mcp vault and the RPC are resident when a real user
+   *  arrives, instead of paying the cold-start on the first load. Read-only, credential-free (the a2a's own
+   *  service credential), idempotent. Empty/unset ⇒ `scheduled` is a no-op, so this is safe on every env. */
+  WARM_AGENTS?: string;
   /** Spec 369 — Workers AI, for HEARING (`/harness/hear`, Whisper). Optional: unbound ⇒ 503 and the
    *  surface says so (never a silent switch to the browser's recognizer — ADR-0013). */
   AI?: { run(model: string, inputs: Record<string, unknown>): Promise<unknown> };
@@ -4193,6 +4199,14 @@ app.post('/harness/ask', async (c) => {
     /** Spec 361 I4 — a SCREEN's deterministic entry through the SAME conversational boundary: the form
      *  knows its intent and parameters, so no model re-derives them; every gate is unchanged. */
     plan?: HarnessRunInput['plan'];
+    /** Perf (2026-10-02) — a SCREEN that renders `results` and never shows the composed sentence: skip the
+     *  composer LLM for the informational reply. Honoured only with `plan` (a supplied plan); the rows ride
+     *  back regardless, so nothing the screen reads changes. */
+    rowsOnly?: boolean;
+    /** Spec 423 L1 — an APP BACKGROUND poll (a surface reading a deterministic, LLM-free supplied-plan read, e.g.
+     *  the bell checking invitations). Marks the run's door `background` so it stays traced but is kept out of the
+     *  human "What this agent did" list. Never changes authority — a read is a read. */
+    background?: boolean;
     /** Spec 366 R2 — another agent's routed request under the subject-ask profile. */
     subjectAsk?: unknown;
     /** Spec 397 — through a host: the registered client + template. Honoured only beside a verified A2A-Session admission. */
@@ -4630,6 +4644,7 @@ app.post('/harness/ask', async (c) => {
       ...(memory ? { memory } : {}),
       intent, result, addressee, composerFor: (need: RouteNeed) => selectComposerRouted(c.env, { ...(provider ? { provider } : {}), ...(answerLine ? { systemPrompt: answerLine } : {}), need, onUsage: (u) => { trace.composeUsage = addUsage(trace.composeUsage, u); } }), deps: askDeps, interactionFor, plannerTrace: trace, tools: offeredTools,
       ...(runPlan ? { suppliedPlan: true } : {}),
+      ...(runPlan && body.rowsOnly ? { rowsOnly: true } : {}),
       ...(body.surface ? { surface: body.surface } : {}),
       resolveName: (name) => askDeps.resolveName?.(name) ?? Promise.resolve(null),
       // WHAT THE ASKER IS to whoever must authorize the plan (spec 353 S5). Derived here from evidence they
@@ -4904,7 +4919,7 @@ app.post('/harness/ask', async (c) => {
         // Spec 414 A1b — THE TRACE FROM THE DOOR. The door is decided here: an in-process hop from this Worker's A2A
         // door names its message ids; a routed ask from another agent's run is `routed`; a continuation is a
         // `resume`; anything else is a direct ask. Plus the model calls and the variant this run ran under.
-        door: ((d) => (inResponseTo ? { ...(d ?? {}), kind: 'routed' as const } : d ?? (viaHost ? { kind: 'home-mcp' as const, ...viaHost } : body.runRef && (body.supplied?.length || body.approvals) ? { kind: 'resume' as const } : { kind: 'harness-ask' as const })))(doorFromBody(body, isInWorkerRequest(c.req.raw))),
+        door: ((d) => (inResponseTo ? { ...(d ?? {}), kind: 'routed' as const } : d ?? (viaHost ? { kind: 'home-mcp' as const, ...viaHost } : body.background ? { kind: 'background' as const } : body.runRef && (body.supplied?.length || body.approvals) ? { kind: 'resume' as const } : { kind: 'harness-ask' as const })))(doorFromBody(body, isInWorkerRequest(c.req.raw))),
         modelCalls: modelCallsOf(trace, marks.list), variant: variantOf(c.env as never, trace, variantReq), ...(variantReq?.startingState ? { startingState: { digest: variantReq.startingState.digest } } : {}), engaged: engagedFromTrace(trace),
         // Spec 417 §5 — how the turn went (stages, the selection, the turn), kept past the reply.
         operational: operationalOf(trace, marks.list, { receivedAt, runStartMs, runEndMs, ...(typeof doorFromBody(body, isInWorkerRequest(c.req.raw))?.contextId === 'string' ? { contextId: doorFromBody(body, isInWorkerRequest(c.req.raw))!.contextId! } : {}) }) }));
@@ -10547,12 +10562,41 @@ async function handleInboundEmail(message: ForwardableEmailMessage, env: Env): P
   }
 }
 
+// ── WARM THE COLD READ PATH (perf, 2026-10-02) ───────────────────────────────────────────────────────
+// "The first load takes a minute" is a cold-start tax: the owner's InteractionsDO, the demo-mcp vault and
+// the faithchain RPC client are all unspun when the first real user arrives. This cron reads, for each
+// WARM_AGENTS SA, the two things EVERY ask reads first — the agent's playbook record and its derived type
+// — through the same internal vault path the ask uses (`readSubjectRecord` → the owner's InteractionsDO →
+// demo-mcp). That resolves the cold start before a person pays for it. It is read-only, uses the a2a's own
+// service credential (no person's session), and is idempotent; an empty WARM_AGENTS makes it a no-op.
+async function warmReadChain(env: Env, ctx: ExecutionContext): Promise<void> {
+  const agents = (env.WARM_AGENTS ?? '')
+    .split(',').map((s) => s.trim().toLowerCase()).filter((a) => /^0x[0-9a-f]{40}$/.test(a));
+  if (!agents.length) return;
+  const deps = harnessDeps(env, buildAuditSink(env), { executionCtx: ctx });
+  await Promise.allSettled(
+    agents.flatMap((sa) => [
+      // The playbook + derived type: the first reads of every ask.
+      loadPlaybook(deps.readSubjectRecord, sa as Address, () => undefined).catch(() => null),
+      deps.agentTypeOf?.(sa as Address).catch(() => null) ?? Promise.resolve(null),
+      // The library index (`content.catalog`): the Home's cold `/connect/library` read for an org vault is
+      // the remaining cold-start cost on a first load (same rows each time), so keep that exact record — and
+      // the owner's InteractionsDO + demo-mcp vault it lives in — resident. An org with no library is a
+      // cheap miss; this never writes.
+      deps.readSubjectRecord?.(sa, 'content.catalog').catch(() => null) ?? Promise.resolve(null),
+    ]),
+  );
+}
+
 export default {
   fetch: app.fetch,
   // Present unconditionally; Cloudflare only calls it for zones routed at this Worker.
   email: handleInboundEmail,
   // Spec 400 W1c — the runtime-wake consumer (the only queue this Worker consumes).
   queue: (batch: MessageBatch<unknown>, env: Env) => consumeRuntimeWakes(batch, env),
+  // Perf (2026-10-02) — keep the heavy read chain warm for the agents ops names in WARM_AGENTS. Cloudflare
+  // only calls this on an env that declares a cron trigger; a no-op where WARM_AGENTS is empty.
+  scheduled: (_controller: ScheduledController, env: Env, ctx: ExecutionContext) => ctx.waitUntil(warmReadChain(env, ctx)),
 };
 export { RuntimeContainer } from './runtime-container.js';
 

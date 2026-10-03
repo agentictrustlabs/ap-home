@@ -8,11 +8,11 @@
 // a person's service and an org's service read differently at a glance. Selecting a workspace
 // scopes the left nav; switching = navigating (the shell derives the scope from the URL).
 // Connected apps are external grants with no custody — they stay in the person nav (/apps).
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSession } from '../../context/session';
 import { useManagedAgents } from './ManagedAgents';
-import { parseWorkspacePath, orgHref, serviceHref, personaHref } from '../../lib/workspace';
+import { parseWorkspacePath, orgHref, serviceHref } from '../../lib/workspace';
 import { agentClassOf, orgKindWordOf, kindWordOf, authorityLineage } from '../../lib/agent-class';
 import { UserIcon, BuildingIcon, LandmarkIcon, CheckIcon } from '../shared/Icons';
 import { nameLabel } from '../../lib/domain';
@@ -22,12 +22,45 @@ import { actingBasis } from '../../lib/acting-basis';
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const lc = (s: string) => s.toLowerCase();
 
+// Spec 425 — ENTER AS A PERSONA. A persona can do everything a person can, but its surfaces (Work, Contacts,
+// grants) read the ACTING agent's own data — so to be a persona you must ACT AS it, not view it under your session
+// (which would show YOUR data under its name). `demo-signin { sa, as }` mints a session acting as the persona
+// (steer-verified: the persona must be a `self` in your own tree), and we switch the whole Home to it. The return
+// stash keeps the session you left so "your home" brings you back without re-onboarding.
+const RETURN_KEY = 'agenticprimitives:acting-as-return';
+
 export function AgentSwitcher() {
-  const { session, profile, agentAddress, agentName, personName } = useSession();
+  const { session, profile, agentAddress, agentName, personName, openSession } = useSession();
   const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const { agents } = useManagedAgents(session?.token ?? null);
+  const [acting, setActing] = useState(false);
+  useEffect(() => { try { setActing(!!localStorage.getItem(RETURN_KEY)); } catch { /* private mode */ } }, [session?.token]);
+
+  const enterAs = useCallback(async (personaSa: string) => {
+    if (!session || !agentAddress) return;
+    try {
+      const res = await fetch('/connect/demo-signin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sa: agentAddress, as: personaSa, client_id: 'demo-web' }) });
+      const d = (await res.json().catch(() => ({}))) as { homeSession?: string; session?: string; error?: string };
+      const token = d.homeSession || d.session;
+      if (!token) throw new Error(d.error || 'could not enter as this name');
+      // Keep the session we are leaving (unless we're already acting-as — then the stash is the ORIGINAL you).
+      try { if (!localStorage.getItem(RETURN_KEY)) localStorage.setItem(RETURN_KEY, JSON.stringify({ token: session.token, via: session.via })); } catch { /* ignore */ }
+      await openSession(token, session.via, false);
+      setOpen(false);
+      router.push('/');
+    } catch { /* the row stays; nothing switched */ }
+  }, [session, agentAddress, openSession, router]);
+
+  const returnToYourHome = useCallback(async () => {
+    let stash: { token?: string; via?: string } | null = null;
+    try { stash = JSON.parse(localStorage.getItem(RETURN_KEY) || 'null'); localStorage.removeItem(RETURN_KEY); } catch { /* ignore */ }
+    setActing(false);
+    setOpen(false);
+    if (stash?.token) { await openSession(stash.token, stash.via || session?.via || 'passkey', false); }
+    router.push('/');
+  }, [openSession, router, session?.via]);
 
   const active = useMemo(() => parseWorkspacePath(pathname ?? '/'), [pathname]);
   const allOrgs = agents.filter((a) => agentClassOf(a.kind) === 'org');
@@ -135,10 +168,10 @@ export function AgentSwitcher() {
         {heading('Your smart agents')}
         <Row
           icon={<UserIcon size={17} />}
-          title={personLabel}
-          sub={personName && agentName ? `person · ${handleLabel}` : "person · your home"}
-          activeRow={active.kind === 'person'}
-          onClick={() => go('/')}
+          title={acting ? 'Return to your home' : personLabel}
+          sub={acting ? 'leave this name — back to you' : (personName && agentName ? `person · ${handleLabel}` : 'person · your home')}
+          activeRow={!acting && active.kind === 'person'}
+          onClick={() => { if (acting) void returnToYourHome(); else go('/'); }}
         />
 
         {/* EACH IS A NAME OF YOURS, not something you look after: the caption says whose vault it is rather
@@ -150,13 +183,12 @@ export function AgentSwitcher() {
             key={who.agent}
             icon={<UserIcon size={17} />}
             title={who.name ? nameLabel(who.name) : short(who.agent)}
-            sub="person · a name of yours, with its own vault"
+            sub="person · enter as this name of yours"
             activeRow={active.kind === 'persona' && lc(active.agent) === lc(who.agent)}
-            // SWITCHING TO A NAME OF YOURS, not going to look at a list of them. This row sent everybody to
-            // `/agents?kind=person` — the index — which is not a workspace path, so the switcher re-derived
-            // `person` from the URL and put the connected person back in the trigger: picking a persona
-            // selected the default instead of it.
-            onClick={() => go(personaHref(who.agent))}
+            // ENTER AS this name (spec 425): switch the whole Home to a session that ACTS AS this persona, so its
+            // Work, contacts and grants read ITS data, not yours under its name. Steer-verified server-side
+            // (demo-signin { as } accepts only a `self` of yours). "Return to your home" (above) brings you back.
+            onClick={() => void enterAs(who.agent)}
           />
         ))}
 

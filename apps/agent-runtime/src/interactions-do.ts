@@ -21,7 +21,7 @@ import { CONTACT_FIELD_ARGS, contactField, precisionOf } from '@agenticprimitive
 import { createPublicClient, http, decodeAbiParameters, type Address, type Hex } from 'viem';
 import { chainFor } from './chain';
 import { kinTermFor, householdRoleFor } from '@agenticprimitives/ontology';
-import { hashDelegation, decodeTimestampTerms, decodeVaultRecordScopeTerms, vaultRecordScopeAllows, VAULT_RECORD_SCOPE_ENFORCER, type Delegation, type VaultRecordScopeGrant, currentWireOf, LINEAGE_RECORD_PREFIX, type DelegationLineageV1 } from '@agenticprimitives/delegation';
+import { hashDelegation, decodeTimestampTerms, decodeVaultRecordScopeTerms, vaultRecordScopeAllows, VAULT_RECORD_SCOPE_ENFORCER, SESSION_AUDIENCE_ENFORCER, decodeSessionAudienceTerms, type Delegation, type VaultRecordScopeGrant, currentWireOf, LINEAGE_RECORD_PREFIX, type DelegationLineageV1 } from '@agenticprimitives/delegation';
 import { PrincipalGatewayDO } from '@agenticprimitives/fabric/cloudflare';
 import { governorOf, WORKSPACE_GOVERNOR_RECORD } from '@agenticprimitives/context';
 import { buildMountedGatewayDeps } from './gateway-mount.js';
@@ -450,6 +450,11 @@ interface StoredState {
    *  vaultFor CLIENT-MINTS a bound token (callMcpToolBound) instead of server-mint — no DEMO_ALLOW_SERVER_MINT.
    *  Absent ⇒ vaultFor falls back to the server-mint bridge (existing principals migrate on next enable). */
   sessionLeaf?: IncomingDelegation;
+  /** Spec 423 §2.1 route A — the PRE-APPROVED LEAF LADDER: N session leaves signed together at enable, windows
+   *  tiling forward, so a live rung exists for N·T with no steward present to re-sign. When set it supersedes
+   *  `sessionLeaf` (which stays the live-at-enable rung for back-compat readers). The DO picks the live rung
+   *  (`activeLeaf`); when all rungs expire it is `needsReEnable`, same as a lapsed single leaf. */
+  sessionLeaves?: IncomingDelegation[];
   /** spec 323 W3 — the WRITE-ONLY delivery wire (owner → DELIVERY_SERVICE_SA), custodied HERE (a
    *  stored wire is a bearer secret; the DO is the delegate-service side, spec 322 §2). The DO is
    *  now the sole holder+wielder for dm-body writes — no app (not even the Home) keeps it. */
@@ -507,6 +512,20 @@ export class InteractionsDO {
    *  doc across DISTINCT writers — channel posts (many members), deliveries (many senders), timeline
    *  appends (many server flows). Reads never take it; self-only single-writer ops don't need it. */
   private mutating: Promise<unknown> = Promise.resolve();
+
+  // VERIFY MEMO (perf, 2026-10-02). verifyWire does TWO on-chain RPC round-trips per read (an ERC-1271
+  // isValidSignature and an isRevoked) and runs on EVERY authorized read — a single Home page load fans
+  // out to many inbox/relationships/vault reads against the SAME standing wire, so the same two chain
+  // reads ran dozens of times (the 7-25s reads). This memoizes a wire that was PROVEN VALID, keyed by
+  // (expectedDelegator, expectedDelegate, signature), for a short TTL. It is NOT a fallback (ADR-0013):
+  // the one mechanism — verifyDelegationWire — still decides; this only skips re-running it when it just
+  // said yes. Only TRUE results are cached, so a failing verify is never locked in, and the TTL bounds
+  // how long a revocation or a removed credential can go unnoticed. The DO instance is per-owner and
+  // lives across requests, so the memo is warm for the burst that caused the problem.
+  private static readonly VERIFY_MEMO_TTL_MS = 20_000;
+  private static readonly VERIFY_MEMO_MAX = 256;
+  private verifyMemo = new Map<string, number>(); // key → expiry epoch ms (only proven-valid wires)
+
   private serialize<T>(fn: () => Promise<T>): Promise<T> {
     const run = this.mutating.then(fn, fn);
     this.mutating = run.then(() => undefined, () => undefined);
@@ -855,7 +874,10 @@ export class InteractionsDO {
     // dev key — the two gates MUST agree or a leaf gets minted that ops then refuse to use.
     if (interactionsSessionKeyConfigured(env)) {
       const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
-      const leaf = st.sessionLeaf;
+      // Route A — sign under the LIVE ladder rung (falls back to the single legacy leaf). When the ladder is
+      // exhausted there is no live rung, so we fall through to session_leaf_required (the endeavor pre-flight
+      // has already turned that into an actionable needsReEnable for the surfaces that poll).
+      const leaf = this.activeLeaf(st);
       if (leaf && leaf.delegator.toLowerCase() === grant.delegator.toLowerCase()) {
         // ONE THROTTLE MECHANISM FOR EVERY VAULT TOOL (spec 382, found live). demo-mcp's stage-2 soft
         // limiter (120 verified calls / 60 s per principal) rejects with the same opaque 401 as a credential
@@ -1194,7 +1216,16 @@ export class InteractionsDO {
    * "allowedMethods must be ABSENT" or "these terms must name the governance registries".
    */
   private async verifyWire(wire: IncomingDelegation, expectedDelegator: string, sessionSa: Address): Promise<boolean> {
-    return verifyDelegationWire({
+    // Memo hit: this exact wire was proven valid within the TTL — skip the two chain reads. The signature
+    // identifies the wire; delegator+delegate pin the expectation the proof was made against.
+    const memoKey = `${expectedDelegator.toLowerCase()}:${sessionSa.toLowerCase()}:${wire.signature ?? ''}`;
+    const now = Date.now();
+    const exp = this.verifyMemo.get(memoKey);
+    if (exp !== undefined) {
+      if (exp > now) return true;
+      this.verifyMemo.delete(memoKey);
+    }
+    const ok = await verifyDelegationWire({
       wire: wire as unknown as DelegationWireLike,
       expectedDelegator,
       expectedDelegate: sessionSa,
@@ -1211,6 +1242,20 @@ export class InteractionsDO {
           })) as boolean,
       },
     });
+    if (ok) {
+      // Only cache a proven-valid wire. Prune expired entries (and a few of the oldest if we are at the
+      // cap) so the memo stays bounded on a busy object.
+      if (this.verifyMemo.size >= InteractionsDO.VERIFY_MEMO_MAX) {
+        for (const [k, e] of this.verifyMemo) if (e <= now) this.verifyMemo.delete(k);
+        while (this.verifyMemo.size >= InteractionsDO.VERIFY_MEMO_MAX) {
+          const oldest = this.verifyMemo.keys().next().value;
+          if (oldest === undefined) break;
+          this.verifyMemo.delete(oldest);
+        }
+      }
+      this.verifyMemo.set(memoKey, now + InteractionsDO.VERIFY_MEMO_TTL_MS);
+    }
+    return ok;
   }
 
   private hasStewardshipShape(wire: IncomingDelegation): boolean {
@@ -1559,9 +1604,15 @@ export class InteractionsDO {
    * leaf or its window cannot be read; else whether NOW is inside it. Reported on status so the Home re-issues the leaf
    * on the person's next visit, and consulted before the DO signs as the agent.
    */
-  sessionLeafLive(st: StoredState): boolean | null {
-    const leaf = st.sessionLeaf;
-    if (!leaf) return null;
+  /** Spec 423 §2.1 route A — THE PRE-APPROVED LEAF LADDER. A steward signs N session leaves at once, their windows
+   *  tiling forward (each `[0, now + (i+1)·T]`), so a live leaf exists for N·T without the steward returning. The
+   *  ladder is `st.sessionLeaves`; a legacy single `st.sessionLeaf` is just a one-rung ladder (back-compat — an org
+   *  enabled before route A keeps working unchanged). */
+  private leafLadder(st: StoredState): IncomingDelegation[] {
+    return st.sessionLeaves && st.sessionLeaves.length ? st.sessionLeaves : (st.sessionLeaf ? [st.sessionLeaf] : []);
+  }
+  /** Is this one leaf's timestamp window live now? `null` when it carries no readable window. */
+  private leafWindowLive(leaf: IncomingDelegation): boolean | null {
     const ts = (leaf.caveats ?? []).find((c) => (c.enforcer ?? '').toLowerCase() === String(this.env.TIMESTAMP_ENFORCER ?? '').toLowerCase());
     if (!ts?.terms) return null;
     try {
@@ -1570,9 +1621,24 @@ export class InteractionsDO {
       return now >= w.validAfter && now < w.validUntil;
     } catch { return null; }
   }
+  /** The LIVE rung the DO signs under: the first ladder leaf whose window contains now. `undefined` when the
+   *  ladder is exhausted (every rung expired) — which is `needsReEnable` territory, caught before a vault read. */
+  private activeLeaf(st: StoredState): IncomingDelegation | undefined {
+    return this.leafLadder(st).find((l) => this.leafWindowLive(l) === true);
+  }
+
+  sessionLeafLive(st: StoredState): boolean | null {
+    const ladder = this.leafLadder(st);
+    if (!ladder.length) return null;                                   // no leaf at all — absence, not staleness
+    if (ladder.some((l) => this.leafWindowLive(l) === true)) return true; // a rung is live
+    // No rung is live: expired if any window was readable (→ re-enable); null only if none could be read.
+    return ladder.some((l) => this.leafWindowLive(l) !== null) ? false : null;
+  }
 
   private async sessionLeafMatchesSigner(st: StoredState): Promise<boolean> {
-    const leaf = st.sessionLeaf;
+    // Every rung binds the SAME session key (built together at enable), so the active rung — or any, for a
+    // status read when none is live — answers for all.
+    const leaf = this.activeLeaf(st) ?? this.leafLadder(st)[0];
     if (!leaf?.delegate) return true;
     try {
       const acct = await interactionsSessionAccount(this.env);
@@ -1580,6 +1646,32 @@ export class InteractionsDO {
     } catch {
       return true;
     }
+  }
+
+  /**
+   * Spec 408 §2.1 — DOES THE STORED LEAF CARRY AN AUDIENCE? A DEL-001 session leaf must name the delegates its
+   * key may present the principal's grants to (`SESSION_AUDIENCE_ENFORCER`); demo-mcp now REJECTS a leaf that
+   * names none ("session-delegation names no audience"). A leaf minted before 408 carries no such caveat, so
+   * every vault read it fuels fails at mcp with a bare "auth failed" — while `sessionLeafLive`/`-MatchesSigner`
+   * both report fine (the leaf is neither expired nor mis-signed), so `status.current` stayed true and the
+   * Home's self-heal SKIPPED it forever. This closes that blind spot: a PRESENT leaf with no (or empty)
+   * audience is stale and must be re-issued. `true` when there is no leaf at all — absence is a different state
+   * (handled by the fail-closed session_leaf_required path), not a reason to force a re-issue. (2026-10-03,
+   * found live: alice's pre-408 org leaves 409-stormed the Work page; see the org-leaf-decay incident.)
+   */
+  private sessionLeafAudienceOk(st: StoredState): boolean {
+    const leaf = this.activeLeaf(st) ?? this.leafLadder(st)[0];
+    if (!leaf) return true;
+    const c = (leaf.caveats ?? []).find((x) => (x.enforcer ?? '').toLowerCase() === SESSION_AUDIENCE_ENFORCER.toLowerCase());
+    if (!c?.terms) return false;
+    try { return decodeSessionAudienceTerms(c.terms as Hex).length > 0; } catch { return false; }
+  }
+
+  /** The deterministic ways a PRESENT leaf ladder is stale (every rung expired · wrong signer · no spec-408
+   *  audience), as one predicate. A principal on the older no-leaf path is NOT stale (empty ladder). */
+  private async sessionLeafStale(st: StoredState): Promise<boolean> {
+    if (!this.leafLadder(st).length) return false;
+    return this.sessionLeafLive(st) === false || !this.sessionLeafAudienceOk(st) || !(await this.sessionLeafMatchesSigner(st));
   }
 
   /** Bridge-HMAC gate for the Home-server channel (SEC-010 envelope; audience pins the op). */
@@ -1801,17 +1893,27 @@ export class InteractionsDO {
       // NEW-C1 — custody the PRINCIPAL-signed DEL-001 session leaf (principal → interactions-session key), if
       // supplied. Verify it ERC-1271 against the principal (== grant delegator) so the DO never bound-mints
       // with a junk leaf; demo-mcp re-checks the binding at enforceBinding. Absent ⇒ server-mint bridge.
-      const leafWire = body.sessionLeaf as IncomingDelegation | undefined;
-      if (leafWire?.signature) {
-        if (leafWire.delegator.toLowerCase() !== wire.delegator.toLowerCase()) {
-          return json({ error: 'session leaf delegator must equal the grant delegator (the principal) — NEW-C1' }, 400);
+      // Route A (spec 423 §2.1) — accept a LADDER (`sessionLeaves`) or a single legacy leaf (`sessionLeaf`). Each
+      // rung is verified ERC-1271 against the principal (== grant delegator) before storing, so the DO never signs
+      // under a junk leaf; demo-mcp re-checks the binding at enforceBinding. Absent ⇒ server-mint bridge.
+      const leavesWire = Array.isArray(body.sessionLeaves) ? (body.sessionLeaves as IncomingDelegation[]) : undefined;
+      const single = body.sessionLeaf as IncomingDelegation | undefined;
+      const candidates = (leavesWire && leavesWire.length ? leavesWire : single ? [single] : []).filter((l) => l?.signature);
+      if (candidates.length) {
+        const verified: IncomingDelegation[] = [];
+        for (const lw of candidates) {
+          if (lw.delegator.toLowerCase() !== wire.delegator.toLowerCase()) {
+            return json({ error: 'session leaf delegator must equal the grant delegator (the principal) — NEW-C1' }, 400);
+          }
+          const ld: Delegation = { ...lw, salt: BigInt(lw.salt), caveats: lw.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
+          const ldigest = hashDelegation(ld, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+          if (!(await this.erc1271(lw.delegator as Address, ldigest, lw.signature as Hex))) {
+            return json({ error: 'session leaf signature failed verification against the principal (NEW-C1)' }, 403);
+          }
+          verified.push(lw);
         }
-        const ld: Delegation = { ...leafWire, salt: BigInt(leafWire.salt), caveats: leafWire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
-        const ldigest = hashDelegation(ld, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
-        if (!(await this.erc1271(leafWire.delegator as Address, ldigest, leafWire.signature as Hex))) {
-          return json({ error: 'session leaf signature failed verification against the principal (NEW-C1)' }, 403);
-        }
-        st.sessionLeaf = leafWire;
+        st.sessionLeaf = verified[0];                              // the live-at-enable rung (back-compat readers)
+        if (leavesWire) st.sessionLeaves = verified; else delete st.sessionLeaves; // a single-leaf enable clears a stale ladder
       }
       // Ledger row (W3e): hash + delegate + decoded resources — never the wire (bearer secret).
       let resources: string[] = [];
@@ -1886,9 +1988,12 @@ export class InteractionsDO {
         // cheerfully reported `current: true` — so the Home's activateInteractionsIfNeeded skipped and
         // nothing ever re-issued. Seen live on the 2026-09-02 AKCS cutover. Including the leaf's delegate
         // here makes a key rotation self-heal on the principal's next sign-in.
-        current: !!st.grant && this.grantIsCurrent(st.grant) && await this.sessionLeafMatchesSigner(st) && this.sessionLeafLive(st) !== false,
+        current: !!st.grant && this.grantIsCurrent(st.grant) && await this.sessionLeafMatchesSigner(st) && this.sessionLeafLive(st) !== false && this.sessionLeafAudienceOk(st),
         // The leaf's own window, so a Home can say "your agent's session leaf expired on …" rather than "stale".
         leafLive: this.sessionLeafLive(st),
+        // Spec 408 §2.1 — does the leaf carry an audience? A pre-408 leaf reports live+matched but mcp rejects it;
+        // surfacing this lets a Home say "re-enable to renew the signing leaf" instead of a bare "auth failed".
+        leafAudienceOk: this.sessionLeafAudienceOk(st),
         // WHAT THE GRANT ACTUALLY COVERS. `granted` and `current` both say yes while a write is refused
         // with `record_scope_denied`, because a grant can be present, unstale, and still not name the
         // record someone is trying to write. Reporting the resources makes that answerable instead of
@@ -1915,7 +2020,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.channels.create' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'internal.wire.current' || op === 'internal.op.lookup' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'inbox.body.getMany' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.channels.create' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'internal.wire.current' || op === 'internal.op.lookup' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -1923,7 +2028,7 @@ export class InteractionsDO {
       let callerClientId: string | null = null;
       /** Set only when the caller got in on a SCOPED data grant — see the content handler's merge. */
       let scopedGrants: VaultRecordScopeGrant[] | null = null;
-      const OWNER_FACING = op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'controlevents.append' || op === 'dm.body.put';
+      const OWNER_FACING = op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'inbox.body.getMany' || op === 'controlevents.append' || op === 'dm.body.put';
       // spec 341 §5.3 — an ORG's governance docs are steward-facing, not owner-facing: the principal is
       // the org and it has no session. Same verified delegation the messaging rail uses.
       //
@@ -2084,6 +2189,19 @@ export class InteractionsDO {
           if (!resource.startsWith(DM_BODY_PREFIX)) return json({ error: 'dm body resources only' }, 400);
           const r = await this.vaultFor(g).read<unknown>({ owner: '', resource });
           return json({ ok: true, record: r?.data ?? null });
+        }
+        if (op === 'inbox.body.getMany') {
+          // BATCHED DM body read (perf, 2026-10-03) — ONE `get_vault_records` for a whole thread's bodies
+          // instead of one `get_vault_record` per message. The live failure: opening a 75-message thread
+          // fired 75 vault reads, saturated the principal's stage-2 verified-call budget (120/60s), and
+          // every body came back "auth failed" (the throttle's opaque reject) → "content in vault…". Reuses
+          // `readTopicBodies` — the same batched, per-envelope hash-verified read the channels use — and
+          // stays dm-namespace only (the grant's record scope is the real bound; this is the belt).
+          const raw = Array.isArray(body.envelopes) ? (body.envelopes as AnyMessageEnvelope[]) : [];
+          const envelopes = raw.filter((e) => typeof e?.body?.resource === 'string' && e.body.resource.startsWith(DM_BODY_PREFIX));
+          if (envelopes.length === 0) return json({ ok: true, bodies: {} });
+          const bodies = await this.readTopicBodies(g, envelopes);
+          return json({ ok: true, bodies });
         }
         // spec 327 §4b / spec 334 §6 — the org playbook, read for the COORDINATION turns (plan-draft
         // + work), which have no board channel to carry it the way internal.channels.read does. Same
@@ -3016,7 +3134,7 @@ export class InteractionsDO {
           // An EXPIRED leaf is handed to nobody: a signature under it verifies nowhere, and saying so here — with the
           // window — is what lets the signer refuse in words instead of minting an "invalid" release (spec 412 W5).
           const live = this.sessionLeafLive(st);
-          return json({ ok: true, leaf: live === false ? null : (st.sessionLeaf ?? null), leafLive: live, ...(live === false ? { reason: 'the session leaf has expired — the person refreshes it by opening their Home' } : {}) });
+          return json({ ok: true, leaf: live === false ? null : (this.activeLeaf(st) ?? st.sessionLeaf ?? null), leafLive: live, ...(st.sessionLeaves?.length ? { ladder: st.sessionLeaves.length } : {}), ...(live === false ? { reason: 'the session leaf has expired — the person refreshes it by opening their Home' } : {}) });
         }
         if (op === 'internal.consult.orgWire') {
           // The §3.1 wire, handed ONLY in-Worker to the org's own A2aTaskDO (the routing signer).
@@ -4075,6 +4193,17 @@ export class InteractionsDO {
       //    (`record_scope_denied`) — surfaced here as an explicit 409 re-enable signal, never a 500 and
       //    never a weaker read path.
       if (op.startsWith('endeavor.')) {
+        // Spec 408 §2.1 / org-leaf-decay (2026-10-03) — PRE-FLIGHT THE SIGNING LEAF. The org's 1-year
+        // interactions grant can be perfectly current while the DEL-001 session leaf that fuels the read
+        // is expired (12 h) or predates the audience requirement. That used to reach demo-mcp, fail with a
+        // bare "auth failed — mcp: auth failed", and 409-storm the Work page with no actionable signal —
+        // the self-heal never fired (status said current) and the UI showed no re-enable. Say it plainly
+        // here, BEFORE the read, with the same `needsReEnable` shape the coordination-scope path uses, so
+        // the Home surfaces the re-enable ceremony (a steward renews the leaf) instead of a dead loop.
+        const stLeaf = ((await this.state.storage.get('state')) ?? {}) as StoredState;
+        if (await this.sessionLeafStale(stLeaf)) {
+          return json({ ok: false, error: 'the agent’s signing session has expired — a steward must re-enable storage to renew it (the organization’s authority is unchanged; only the short-lived session leaf lapsed)', needsReEnable: true }, 409);
+        }
         try {
           const res = await handleEndeavorOp({
           principal,

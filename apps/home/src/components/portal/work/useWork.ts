@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState, useRef } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession, type Session } from '../../../context/session';
 import { activateInteractionsIfNeeded, resolveVia } from '../../../home/onboarding';
+import { ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS } from '../../../lib/delegation';
 import {
   fetchWorkList,
   projectAllocationEntry,
@@ -25,6 +26,18 @@ export interface RelatedOrg {
   orgAgent: string;
   orgName?: string;
   relationship: 'steward' | 'member';
+}
+
+/** Run `fn` over `items` with at most `limit` in flight at once (perf, 2026-10-03). A person in many orgs
+ *  must not fan out one vault-backed read per org simultaneously — that burst is what tripped the throttle. */
+async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(Math.max(1, limit), items.length || 1) }, async () => {
+    while (next < items.length) { const i = next++; out[i] = await fn(items[i]!); }
+  });
+  await Promise.all(workers);
+  return out;
 }
 
 /** Orgs this person belongs to (steward or member) + whether the lookup has settled — the Home
@@ -55,7 +68,7 @@ export function useRelatedOrgsState(session: Session | null): { orgs: RelatedOrg
       finally { if (!cancelled) setLoaded(true); }
     })();
     return () => { cancelled = true; };
-  }, [session]);
+  }, [session?.token]);
   return { orgs, loaded };
 }
 
@@ -99,7 +112,7 @@ export function useOrgMemberNames(session: Session | null, org: string): Record<
       } catch { /* names stay short-address */ }
     })();
     return () => { cancelled = true; };
-  }, [session, org]);
+  }, [session?.token, org]);
   return names;
 }
 
@@ -125,7 +138,9 @@ export function useReEnableInteractions(): (principal: Address) => Promise<{ ok:
     // Token always passed: KMS and demo-account homes both sign server-side with it; the wallet
     // and passkey paths ignore it.
     const auth = { token: session.token };
-    const r = await activateInteractionsIfNeeded(principal, via, auth, true);
+    // Org re-enable: the steward signs ONCE here and will not return to re-sign, so the leaf is long-lived
+    // (org-leaf-decay, 2026-10-03). A person's own leaf stays short (self-healed on login) and never uses this path.
+    const r = await activateInteractionsIfNeeded(principal, via, auth, true, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS);
     return r.ok ? { ok: true } : { ok: false, error: r.error ?? 'could not re-enable storage' };
   }, [session, profile]);
 }
@@ -139,26 +154,39 @@ export function useWorkList(session: Session | null, org: string): WorkListState
   const [needsReEnable, setNeedsReEnable] = useState(false);
 
   const refreshing = useRef(false);
+  // STOP THE STORM (spec 423 §3.2 / L1). A stale org (`needsReEnable`) or one this viewer is not a member of will
+  // answer the SAME 409 on every tick until a STEWARD re-enables it — nothing the 12s poll does can change that, so
+  // it only re-storms the console and the vault budget. Once we see that terminal state we PAUSE the interval; a
+  // steward's explicit re-enable calls `refresh()` directly (below), which bypasses the pause and resumes a live org.
+  const pausedRef = useRef(false);
+  // Read the session through a ref so `refresh` does NOT change identity when the session object/token churns
+  // between renders — that churn re-fired the `[refresh]` effect every render (the single-org twin of the My Work
+  // loop) and re-created the 12s poll each time. Keyed on `org` only; the latest session is read at call time.
+  const sessRef = useRef(session); sessRef.current = session;
   const refresh = useCallback(async () => {
+    const session = sessRef.current;
     if (!session || !org || refreshing.current) return;
     refreshing.current = true;
     try {
       const r = await fetchWorkList(session.token, org);
-      if (r.member === false) { setMember(false); setData(null); setError(null); return; }
+      if (r.member === false) { setMember(false); setData(null); setError(null); pausedRef.current = true; return; }
       setSteward(r.steward === true);
-      if (r.ok === false && r.error) { setError(r.error); setNeedsReEnable(r.needsReEnable === true); return; }
+      if (r.ok === false && r.error) { setError(r.error); setNeedsReEnable(r.needsReEnable === true); pausedRef.current = r.needsReEnable === true; return; }
       setMember(true);
       setData(r);
       setError(null);
       setNeedsReEnable(false);
+      pausedRef.current = false;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { refreshing.current = false; }
-  }, [session, org]);
+  }, [org]);
 
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
-    const t = setInterval(() => void refresh(), 12000);
+    // Skip a tick while paused (stale / not-a-member) instead of tearing the interval down, so it resumes
+    // on its own the moment a live read lands (e.g. after a steward re-enable clears `pausedRef`).
+    const t = setInterval(() => { if (pausedRef.current) return; void refresh(); }, 12000);
     return () => clearInterval(t);
   }, [refresh]);
 
@@ -196,11 +224,19 @@ export function useMyWork(session: Session | null, agentAddress: string | null |
   const [bundles, setBundles] = useState<OrgWorkBundle[] | null>(null);
   const [staleOrgs, setStaleOrgs] = useState<StaleOrg[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // GUARD (perf, 2026-10-03): an unstable `load` identity made the `[load]` effect re-fire every render, and
+  // each firing fanned out ONE /connect/work read PER ORG — a storm that saturated the vault budget and
+  // surfaced as repeated 409s on almost every page. Never run two loads at once; never re-enter.
+  const inFlight = useRef(false);
   const load = useCallback(async () => {
     if (!session || !agentAddress || !orgsLoaded) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     const stale: StaleOrg[] = [];
     try {
-      const results = await Promise.all(orgs.map(async (o): Promise<OrgWorkBundle | null> => {
+      // Bounded concurrency: at most 3 org reads in flight, so a person in many orgs does not spike the
+      // per-minute vault budget in one burst.
+      const results = await mapLimit(orgs, 3, async (o): Promise<OrgWorkBundle | null> => {
         try {
           const r = await fetchWorkList(session.token, o.orgAgent);
           if (r.needsReEnable === true) {
@@ -224,14 +260,22 @@ export function useMyWork(session: Session | null, agentAddress: string | null |
           const myRequests = (r.requests ?? []).filter((q) => q.requester.toLowerCase() === agentAddress.toLowerCase());
           return { org: o.orgAgent, ...(o.orgName ? { orgName: o.orgName } : {}), allocations, entries, decisions, myRequests, endeavors: r.endeavors ?? [] };
         } catch { return null; }
-      }));
+      });
       setBundles(results.filter((b): b is OrgWorkBundle => b !== null));
       setStaleOrgs(stale);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    }
+    } finally { inFlight.current = false; }
   }, [session, agentAddress, orgs, orgsLoaded]);
-  useEffect(() => { void load(); }, [load]);
+  // Re-run ONLY when the ORG SET or its loaded-flag changes — the two things that decide what to fetch. Keying on
+  // `session?.token` or `agentAddress` was the loop: in the live app those identities churn between renders (a token
+  // refresh, a new session object), the effect re-fired every render, and each firing fanned out one vault-backed
+  // read per org (incognito reproduced it; a fixed injected token hid it). `load` reads the latest session/address
+  // through `loadRef`; it needs no re-fire of its own, because a real account/acting-as change also changes the org
+  // set, so `orgsKey` already captures it.
+  const loadRef = useRef(load); loadRef.current = load;
+  const orgsKey = orgs.map((o) => o.orgAgent).join(',');
+  useEffect(() => { void loadRef.current(); }, [orgsKey, orgsLoaded]);
   return { bundles, staleOrgs, error, load, orgsLoaded };
 }

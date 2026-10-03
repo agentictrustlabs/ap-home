@@ -24,7 +24,14 @@ import { sha256Hex32, type MessageBodyStore, type MessageEnvelopeV1 } from '@age
 /** What the Home still needs of a body store: the READ half. The write half was deleted with the two
  *  paths that wrote into someone's inbox (spec 341 §5.2), and narrowing the TYPE is what stops one
  *  quietly coming back — a `MessageBodyStore` would compile the moment somebody re-added `putBody`. */
-export type MessageBodyReader = Pick<MessageBodyStore, 'loadBody'>;
+export type MessageBodyReader = Pick<MessageBodyStore, 'loadBody'> & {
+  /** BATCHED read (perf, 2026-10-03): ONE DO round-trip (`inbox.body.getMany` → one `get_vault_records`)
+   *  for many envelopes, hash-verified per envelope ON the DO. Returns decoded body strings keyed by message
+   *  id; an unverifiable or missing body is omitted. Replaces N per-message `loadBody` calls, whose
+   *  O(thread) vault-call volume tripped the principal's stage-2 verified-call budget (120/60s) and made a
+   *  whole thread come back "content in vault…". */
+  loadBodies(envelopes: ReadonlyArray<Pick<MessageEnvelopeV1, 'id' | 'bodyHash' | 'body'>>): Promise<Record<string, string>>;
+};
 import { interactionsBridgeConfigured, type InteractionsBridgeEnv } from '../lib/interactions-bridge';
 
 // spec 323 W3 — the body store is FULLY DO-mediated (bridge get/put); the Home no longer needs a
@@ -71,6 +78,22 @@ export function makeBodyStoreFactory(
         for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
         if ((await sha256Hex32(bytes)) !== envelope.bodyHash) throw new Error(`message body ${envelope.id} does not match envelope bodyHash`);
         return bytes;
+      },
+      // BATCHED read — one `inbox.body.getMany` (→ one `get_vault_records`) for a whole thread's bodies,
+      // verified per envelope on the DO. The envelope metadata (`id`, `bodyHash`, `body.resource`) rides
+      // up; the bytes never leave the owner's vault unverified. The throttle fix: 1 vault call, not N.
+      async loadBodies(envelopes) {
+        if (!session) throw new Error('batch message body read needs the owner\'s session');
+        const want = envelopes.filter((e) => typeof e?.body?.resource === 'string');
+        if (want.length === 0) return {};
+        const { callInteractions } = await import('./channels');
+        const raw = await callInteractions(env as never, owner, 'inbox.body.getMany', {
+          envelopes: want.map((e) => ({ id: e.id, bodyHash: e.bodyHash, body: { resource: e.body.resource } })),
+          session, ...(stewardship ? { stewardship } : {}),
+        });
+        const r = { ok: raw.status < 400 && raw.body.ok !== false, body: raw.body as { bodies?: Record<string, string>; error?: string } };
+        if (!r.ok) throw new Error(r.body.error ?? 'batch message body read failed');
+        return r.body.bodies ?? {};
       },
     } satisfies MessageBodyReader;
   };

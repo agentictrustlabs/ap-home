@@ -85,6 +85,10 @@ export function buildNav(
    *  a workspace; a treasury or a registry does not, and an always-empty Members page teaches nothing
    *  (§5's empty rule). The caller knows the agent's kind; the nav should not re-derive it. */
   hasMembers = false,
+  /** spec 344/424 — for a governed `.workspace` scope, the ORGANIZATION that governs it. Present ⇒ the nav shows
+   *  a "Governing organization" link, so a workspace points back at the org whose teams + members it serves
+   *  (the hub). Absent for an org, a standalone workspace, or a person. */
+  governor?: string,
 ): NavGroup[] {
   // PERSON-CLASS, not "is you": a persona wants the surfaces a person has (contacts, grants, attestations,
   // a search over its own records) because it IS a person agent — it just is not the one your home opens as.
@@ -115,6 +119,8 @@ export function buildNav(
       // spec 310's control-plane timeline, in the plural because the band is a place.
       { id: 'activities', label: 'Activities', href: href('activities'), Icon: HistoryIcon, status: 'live' },
       { id: 'library', label: 'Library', href: href('library'), Icon: DatabaseIcon, status: 'live' },
+      // A governed workspace points back at the ORG whose teams + members it serves (spec 344/424 — the hub).
+      ...(active.kind === 'service' && governor ? [{ id: 'governing-org', label: 'Governing organization', href: orgHref(governor as `0x${string}`, 'overview'), Icon: BuildingIcon, status: 'live' as const }] : []),
     ],
   };
 

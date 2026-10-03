@@ -312,6 +312,10 @@ export interface AskTurnState {
   /** Spec 361 I4 / 367 §7 — a SCREEN's own plan: the command it knows, with the person's words as arguments.
    *  Sent on the first turn only; a resume carries the runRef and the agent holds the plan. */
   plan?: { steps: Array<{ toolId: string; args: Record<string, unknown> }> };
+  /** Perf (2026-10-02) — this caller reads the structured `results` and never shows the composed sentence,
+   *  so the agent skips the composer LLM for an informational reply (the rows ride back regardless). Set it
+   *  on a screen's data read; NEVER on the conversation, which shows the prose. Honoured only with `plan`. */
+  rowsOnly?: boolean;
   runRef: string;
   presented: DelegationWire | null;
   supplied: SuppliedInput[];
@@ -672,6 +676,7 @@ export async function ask(session: { token: string }, state: AskTurnState): Prom
     // A plan travels on the first turn AND on a resume that edits the draft (spec 361 I5): the agent
     // re-plans from the edited version and re-verifies from scratch.
     ...(state.plan ? { plan: state.plan } : {}),
+    ...(state.plan && state.rowsOnly ? { rowsOnly: true } : {}),
     ...(state.presented ? { presented: state.presented } : {}),
     ...(state.channel ? { channel: state.channel } : {}),
     ...(state.model ? { model: state.model } : {}),
@@ -839,7 +844,7 @@ export interface BuildRunRow { runId: string; record: string; repository: string
 /** The build runs a workspace left (a supplied plan — `build.run.list` at the organization; the reply's structured result). */
 export async function listBuildRuns(session: { token: string }, workspace: Address): Promise<{ ok: true; runs: BuildRunRow[] } | { ok: false; error: string }> {
   try {
-    const out = await ask(session, { message: 'what has been built', addressee: workspace, runRef: `build-list-${Date.now().toString(36)}`, presented: null, supplied: [], plan: { steps: [{ toolId: 'build.run.list', args: { workspace } }] } });
+    const out = await ask(session, { message: 'what has been built', addressee: workspace, runRef: `build-list-${Date.now().toString(36)}`, presented: null, supplied: [], rowsOnly: true, plan: { steps: [{ toolId: 'build.run.list', args: { workspace } }] } });
     const r = out.reply;
     if (r.kind !== 'answer') return { ok: false, error: r.kind === 'authority_required' ? 'reading the build runs asked for authority — a read never should' : `the agent answered ${r.kind}` };
     const result = (r.results ?? []).find((x) => x.toolId === 'build.run.list')?.result as { runs?: BuildRunRow[]; refused?: string } | undefined;
@@ -854,7 +859,7 @@ export interface RepositoryRow { repo: string; defaultBranch: string; private: b
 /** ONE supplied-plan read at the workspace; the structured result of the named tool, or why not. */
 async function readAt<T>(session: { token: string }, workspace: Address, toolId: string, args: Record<string, unknown>, words: string): Promise<{ ok: true; result: T } | { ok: false; error: string }> {
   try {
-    const out = await ask(session, { message: words, addressee: workspace, runRef: `read-${toolId}-${Date.now().toString(36)}`, presented: null, supplied: [], plan: { steps: [{ toolId, args }] } });
+    const out = await ask(session, { message: words, addressee: workspace, runRef: `read-${toolId}-${Date.now().toString(36)}`, presented: null, supplied: [], rowsOnly: true, plan: { steps: [{ toolId, args }] } });
     const r = out.reply;
     if (r.kind !== 'answer') return { ok: false, error: r.kind === 'authority_required' ? `${toolId} asked for authority — a read never should` : `the agent answered ${r.kind}` };
     const result = (r.results ?? []).find((x) => x.toolId === toolId)?.result as (T & { refused?: string }) | undefined;

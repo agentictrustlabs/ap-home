@@ -12,8 +12,8 @@ import { useManagedAgents, TreasuryCard, NameAgentForm } from '../../../../src/c
 import { AddressChip } from '../../../../src/components/shared/AddressChip';
 import { agentClassOf, serviceRoleOf, authorityLineage } from '../../../../src/lib/agent-class';
 import { nameLabel } from '../../../../src/lib/domain';
+import { SkeletonRows } from '../../../../src/ui';
 
-import { Loading } from '../../../../src/components/shared/Loading';
 const lc = (s: string) => s.toLowerCase();
 
 export default function ServiceWorkspacePage({ params }: { params: Promise<{ agent: string }> }) {
@@ -34,17 +34,23 @@ export default function ServiceWorkspacePage({ params }: { params: Promise<{ age
   const parentOrg = svc?.kind === 'org-treasury' ? agents.find((a) => agentClassOf(a.kind) === 'org' && lc(a.agent) === lc(svc.parent)) : undefined;
   const sublabel = svc?.kind === 'person-treasury' ? 'Personal treasury' : parentOrg?.name ? `${nameLabel(parentOrg.name)} treasury` : 'Org treasury';
 
+  // STRUCTURE FIRST (owner, 2026-10-02 — the Today treatment): Today is scoped to the service SA and reads nothing
+  // from the managed-agent tree, so it renders and self-skeletons immediately. Only the role panel and the "not
+  // yours" note depend on the tree read — skeleton the panel while it is out, and show the note only once the tree
+  // has LOADED and confirmed you do not manage this address (never a spinner over the whole page).
   return (
     <SectionShell title={svc?.name ? nameLabel(svc.name) : 'Service'}>
-      {!loaded ? (
-        <Loading />
-      ) : !svc ? (
+      {loaded && !svc ? (
         <p className="manage-card-blurb">
           You don&apos;t manage a service agent at this address. Pick one from the workspace switcher.
         </p>
       ) : (
         <>
           <TodayView scope={{ kind: 'service', agent }} />
+          {!loaded || !svc ? (
+            <div className="manage-grid"><div className="manage-card"><SkeletonRows rows={2} lead /></div></div>
+          ) : (
+          <>
           <p className="manage-card-blurb" style={{ marginBottom: '.8rem' }}>
             Service agent · role: <b>{role}</b> · authority: <code style={{ fontSize: '.82rem' }}>{lineage}</code>
           </p>
@@ -73,6 +79,8 @@ export default function ServiceWorkspacePage({ params }: { params: Promise<{ age
                   : ' Role-specific actions land here as this service role gets its panel.'}
               </p>
             </div>
+          )}
+          </>
           )}
         </>
       )}

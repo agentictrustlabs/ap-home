@@ -41,7 +41,7 @@ type Lens = 'vault' | 'shared';
 interface Grant { grantee: { address: string; kind: string; label?: string }; actions: string[]; grantedAt: number; revoked?: boolean; entitlementId?: string; resource?: string; signed?: boolean; inheritedFrom?: string; delegation?: { caveats?: unknown[] } }
 interface Release { canonicalId: string; version: string; bundleRoot: string; owner: string; publisher: string; riskTier: string; releaseId: string; signed: boolean; publishedAt: number }
 type AccessPolicy = 'public' | 'private';
-interface Artifact { id: string; kind: Kind; name: string; source: Source; folder: string; isFolder?: boolean; pointer?: string; discussionId?: string; contentType: string; bytesB64?: string; size: number; createdAt: number; version?: number; contentCommitment?: string; grants: Grant[]; effectiveGrants?: Grant[]; releases?: Release[];
+interface Artifact { id: string; kind: Kind; name: string; source: Source; folder: string; isFolder?: boolean; pointer?: string; discussionId?: string; contentType: string; bytesB64?: string; size: number; createdAt: number; updatedAt?: number; version?: number; contentCommitment?: string; grants: Grant[]; effectiveGrants?: Grant[]; releases?: Release[];
   /** Spec 412 — the owner's declaration (`apcnt:accessPolicy`) and what it comes to after the folder cascade. */
   accessPolicy?: AccessPolicy; effectiveAccessPolicy?: AccessPolicy;
   // present on "Shared with me" rows (a federated inbound grant from another vault)
@@ -84,6 +84,9 @@ const fullPath = (a: Pick<Artifact, 'folder' | 'name'>) => (a.folder ? `${a.fold
 // Phase-1a derivations. In your own vault everything is Owned; freshness follows the source until the
 // backend surfaces real signed/cached state (Phase 1b). A container has no single content version.
 const freshnessOf = (a: Artifact): Freshness => (a.isFolder ? 'Live' : a.source === 'blob' ? 'Signed' : a.source === 'external' ? 'Cached' : 'Live');
+// Compact date for a row ("Oct 3", or "Oct 3, 2025" off the current year); the full timestamp rides the tooltip.
+const whenShort = (ms: number): string => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(new Date(ms).getFullYear() === new Date().getFullYear() ? {} : { year: 'numeric' }) });
+const whenFull = (ms: number): string => new Date(ms).toLocaleString();
 const authorityText = (mode: AccessMode) => (mode === 'Owned' ? 'Read · write · share' : mode === 'Projection' ? 'Request access' : 'Read only');
 
 /** Build the nested folder tree (client-side) from flat folder paths — used for the destination picker
@@ -105,7 +108,8 @@ const flattenPaths = (n: TreeNode, out: string[] = []): string[] => { if (n.path
 
 // ── icon system — monochrome line icons, currentColor, paired with words ──
 type IconName = 'skill' | 'ontology' | 'document' | 'record' | 'image' | 'folder' | 'vault' | 'org'
-  | 'shared' | 'public' | 'chevron' | 'plus' | 'search' | 'more' | 'close' | 'check' | 'lock';
+  | 'shared' | 'public' | 'chevron' | 'plus' | 'search' | 'more' | 'close' | 'check' | 'lock'
+  | 'eye' | 'trash' | 'external' | 'upload' | 'folderPlus';
 const ICONS: Record<IconName, ReactNode> = {
   document: <><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></>,
   folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
@@ -124,6 +128,11 @@ const ICONS: Record<IconName, ReactNode> = {
   close: <path d="M6 6l12 12M18 6L6 18" />,
   check: <path d="M20 6L9 17l-5-5" />,
   lock: <><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></>,
+  eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></>,
+  trash: <><path d="M4 7h16" /><path d="M10 11v6M14 11v6" /><path d="M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13" /><path d="M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3" /></>,
+  external: <><path d="M14 4h6v6" /><path d="M20 4l-9 9" /><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" /></>,
+  upload: <><path d="M12 15V3" /><path d="M7 8l5-5 5 5" /><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" /></>,
+  folderPlus: <><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M12 11v6M9 14h6" /></>,
 };
 function Icon({ name, size = 16, style }: { name: IconName; size?: number; style?: CSSProperties }) {
   return (
@@ -263,16 +272,22 @@ export function LibrarySection({ orgSa, heldAgent }: {
     // whose items all live in folders never reads "Nothing in your vault yet" (seen live, 2026-09-13).
     if (lens === 'vault' && !searching) {
       const present = new Set(arr.filter((a) => a.isFolder).map((a) => a.name));
-      const implicit = new Map<string, number>();
+      // Per child folder: how many files below it, and the span of activity (earliest create · latest update)
+      // so a folder row can show "what's been done in here" without opening it.
+      const implicit = new Map<string, { count: number; created: number; updated: number }>();
       for (const a of source) {
         if (a.isFolder ? !a.folder.startsWith(cwd) : !(a.folder === cwd || a.folder.startsWith(cwd ? `${cwd}/` : ''))) continue;
         const rest = a.isFolder ? fullPath(a) : a.folder;
         const below = cwd ? (rest.startsWith(`${cwd}/`) ? rest.slice(cwd.length + 1) : '') : rest;
         const child = below.split('/')[0];
         if (!child || (a.isFolder && rest === (cwd ? `${cwd}/${a.name}` : a.name) && a.folder === cwd)) continue;
-        implicit.set(child, (implicit.get(child) ?? 0) + (a.isFolder ? 0 : 1));
+        const cur = implicit.get(child) ?? { count: 0, created: Infinity, updated: 0 };
+        if (!a.isFolder) { cur.count += 1; if (a.createdAt > 0) cur.created = Math.min(cur.created, a.createdAt); }
+        const u = a.updatedAt ?? (a.createdAt > 0 ? a.createdAt : 0);
+        if (u > 0) cur.updated = Math.max(cur.updated, u);
+        implicit.set(child, cur);
       }
-      for (const [name, count] of implicit) if (!present.has(name)) arr = [...arr, { id: `folder:${cwd ? `${cwd}/` : ''}${name}`, kind: 'md', name, source: 'blob', folder: cwd, isFolder: true, contentType: 'inode/directory', size: count, createdAt: 0, grants: [] } as Artifact];
+      for (const [name, agg] of implicit) if (!present.has(name)) arr = [...arr, { id: `folder:${cwd ? `${cwd}/` : ''}${name}`, kind: 'md', name, source: 'blob', folder: cwd, isFolder: true, contentType: 'inode/directory', size: agg.count, createdAt: agg.created === Infinity ? 0 : agg.created, ...(agg.updated > 0 ? { updatedAt: agg.updated } : {}), grants: [] } as Artifact];
     }
     if (kindFilter !== 'all') arr = arr.filter((a) => !a.isFolder && a.kind === kindFilter);
     return [...arr].sort((a, b) => {
@@ -366,7 +381,7 @@ export function LibrarySection({ orgSa, heldAgent }: {
       {/* Explicit text color so every descendant inherits a defined token — never a white ambient
           (e.g. a browser/OS dark-mode default) on our light surfaces. */}
       <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', color: 'var(--color-text-body)' }}>
-        <FolderRail lens={lens} onLens={(l) => { setLens(l); setSelectedId(null); setPath([]); setPublicOnly(false); }} items={items} path={path} onGo={(segs) => { setLens('vault'); setPublicOnly(false); goTo(segs); }} />
+        <FolderRail lens={lens} onLens={(l) => { setLens(l); setSelectedId(null); setPath([]); setPublicOnly(false); }} items={items} path={path} onGo={(segs) => { setLens('vault'); setPublicOnly(false); goTo(segs); }} writable={writable} onNewFolder={() => void newFolder()} shelfHref={shelfHref} />
 
         <div style={{ flex: 1, minWidth: 0 }}>
           {/* toolbar */}
@@ -377,8 +392,7 @@ export function LibrarySection({ orgSa, heldAgent }: {
               <Icon name="search" size={14} style={{ color: 'var(--color-text-muted)' }} />
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`Search ${lens === 'vault' ? 'this vault' : lens === 'shared' ? 'shared items' : 'your public shelf'}…`} style={{ border: 'none', outline: 'none', background: 'transparent', color: 'inherit', width: 160 }} />
             </label>
-            {shelfHref && <a href={shelfHref} target="_blank" rel="noreferrer" data-testid="public-shelf-link" style={{ ...btnSty, display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none' }} title="What anyone can read of your Library — served by your own agent over A2A, the same way a stranger would read it">Your public shelf ↗</a>}
-            {writable && <button style={{ ...btnPrimarySty, display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setUploadOpen(true)}><Icon name="plus" size={14} />Add to vault</button>}
+            {writable && <button style={{ ...btnPrimarySty, display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setUploadOpen(true)} title="Add a file to your vault" data-testid="library-add"><Icon name="upload" size={15} />Add</button>}
           </div>
           {/* Spec 412 — THE CACHE IS NOT THE VAULT. An app that saved here under its own token could not write your vault, so
               your agent (and your public shelf) never saw these. One act under your own session moves them. */}
@@ -403,17 +417,18 @@ export function LibrarySection({ orgSa, heldAgent }: {
               <Tabs value={kindFilter} onChange={setKindFilter} label="Kind" items={(['all', ...KINDS] as const).map((k) => ({ id: k, label: k === 'all' ? 'All' : KIND_META[k].plural }))} />
               {lens === 'vault' && (
                 <button type="button" aria-pressed={publicOnly} data-testid="public-only" onClick={() => setPublicOnly((v) => !v)}
-                  title="Only what anyone can read — served by your own agent; the same list a stranger gets"
+                  title="Filter to only the items anyone can read (served by your own agent — the list a stranger gets)"
                   style={{ ...btnSty, display: 'inline-flex', alignItems: 'center', gap: 5, ...(publicOnly ? { background: 'var(--color-surface-sunken)', borderColor: 'var(--color-text-faint)' } : {}) }}>
-                  <Icon name="public" size={13} />Public only{publicCount > 0 ? ` · ${publicCount}` : ''}
+                  <Icon name="public" size={13} />Public{publicCount > 0 ? ` · ${publicCount}` : ''}
                 </button>
               )}
               <div style={{ flex: 1 }} />
-              <span style={{ ...mutedText, fontSize: 12 }}>Sort</span>
-              <select style={{ ...inputSty, fontSize: 12, padding: '.3rem .4rem' }} value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
-                {(['name', 'kind', 'newest', 'freshness'] as Sort[]).map((s) => <option key={s} value={s}>{s === 'name' ? 'Name' : s === 'kind' ? 'Kind' : s === 'newest' ? 'Newest' : 'Freshness'}</option>)}
-              </select>
-              {writable && <button style={btnSty} onClick={() => void newFolder()}>New folder</button>}
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }} title="Sort order">
+                <span style={{ ...mutedText, fontSize: 12 }}>Sort</span>
+                <select style={{ ...inputSty, fontSize: 12, padding: '.3rem .4rem' }} value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
+                  {(['name', 'kind', 'newest', 'freshness'] as Sort[]).map((s) => <option key={s} value={s}>{s === 'name' ? 'Name' : s === 'kind' ? 'Kind' : s === 'newest' ? 'Newest' : 'Freshness'}</option>)}
+                </select>
+              </label>
             </div>
           )}
 
@@ -569,8 +584,9 @@ function FolderTree({ nodes, path, onGo, counts }: {
 /** A path no folder can have (a folder name never holds a slash), so the tree lights nothing while a place outside it is open. */
 const NOWHERE = ['/'];
 
-function FolderRail({ lens, onLens, items, path, onGo }: {
+function FolderRail({ lens, onLens, items, path, onGo, writable, onNewFolder, shelfHref }: {
   lens: Lens; onLens: (l: Lens) => void; items: Artifact[]; path: string[]; onGo: (segs: string[]) => void;
+  writable: boolean; onNewFolder: () => void; shelfHref: string | null;
 }) {
   // One pass over the artifacts rather than a scan per node: a vault with many folders would
   // otherwise walk the whole list once for every row it draws.
@@ -579,13 +595,21 @@ function FolderRail({ lens, onLens, items, path, onGo }: {
     for (const a of items) if (!a.isFolder) m.set(a.folder, (m.get(a.folder) ?? 0) + 1);
     return m;
   }, [items]);
-  const heading = (s: string) => (
-    <div style={{ ...mutedText, fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', padding: '.3rem .7rem' }}>{s}</div>
-  );
   const sharedOn = lens === 'shared';
   return (
     <div aria-label="Folders" style={{ ...cardSty, padding: '.4rem 0', width: 'clamp(260px, 24%, 420px)', flexShrink: 0, color: 'var(--color-text-body)' }}>
-      {heading('Folders')}
+      {/* Folders heading carries the New-folder action — the standard place to make one, with the tree it joins. */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, padding: '.3rem .7rem' }}>
+        <span style={{ ...mutedText, fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase' }}>Folders</span>
+        {writable && lens === 'vault' && (
+          <button type="button" onClick={onNewFolder} title="Create a new folder" aria-label="New folder" data-testid="library-new-folder"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 3, borderRadius: 6, display: 'inline-flex', color: 'var(--color-text-muted)' }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-text-primary)'; e.currentTarget.style.background = 'var(--color-surface-sunken)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)'; e.currentTarget.style.background = 'transparent'; }}>
+            <Icon name="folderPlus" size={16} />
+          </button>
+        )}
+      </div>
       {/* THE FOLDERS ARE THE NAVIGATION. The vault is a tree; "public" is a property a file or folder carries (a
           filter above the list, a chip on the row), and the workspace switcher in the header already says whose
           vault this is — so there is no scope rail to explain, only the tree and one mounted place beneath it. */}
@@ -602,6 +626,18 @@ function FolderRail({ lens, onLens, items, path, onGo }: {
         <Icon name="shared" size={14} style={{ flexShrink: 0, color: 'var(--color-text-muted)' }} />
         <span style={{ flex: 1 }}>Shared with me</span>
       </div>
+      {/* Public shelf — the world's-eye view of this vault, a mounted place beneath the tree (opens the public page,
+          served by the agent over A2A). Distinct from the "Public" filter on the list, which filters in place. */}
+      {shelfHref && lens === 'vault' && (
+        <a href={shelfHref} target="_blank" rel="noreferrer" data-testid="public-shelf-link"
+          style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, padding: '.28rem .5rem', textDecoration: 'none', color: 'var(--color-text-primary)', fontWeight: 500 }}
+          title="Open your public shelf — exactly what anyone in the world can read, served by your own agent">
+          <span style={{ width: 12, flexShrink: 0 }} />
+          <Icon name="public" size={14} style={{ flexShrink: 0, color: 'var(--color-text-muted)' }} />
+          <span style={{ flex: 1 }}>Public shelf</span>
+          <Icon name="external" size={12} style={{ flexShrink: 0, color: 'var(--color-text-muted)' }} />
+        </a>
+      )}
     </div>
   );
 }
@@ -634,13 +670,15 @@ function ArtifactList({ rows, selectedId, ownerLabel, onOpen, onDescend, onDelet
   return (
     <div style={{ ...cardSty, padding: 0, overflow: 'hidden', color: 'var(--color-text-body)' }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: '.5rem', padding: '.5rem .8rem', ...mutedText, fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', borderBottom: '1px solid var(--color-border)' }}>
-        <span>Name</span><span title="Access · freshness · version">Access · fresh · ver</span>
+        <span>Name</span><span title="Who may read it · how fresh the copy is · version · actions">Access</span>
       </div>
       {rows.map((a) => {
         const mode: AccessMode = a.accessMode ?? 'Owned';
         const fresh: Freshness = mode !== 'Owned' ? 'Cached' : freshnessOf(a);
         const owner = a.sharedBy ? shortAddr(a.sharedBy) : ownerLabel;
         const authority = a.myActions?.length ? a.myActions.join(' · ') : authorityText(mode);
+        const created = a.createdAt > 0 ? a.createdAt : undefined;       // first write (folders: earliest item under it)
+        const updated = a.updatedAt ?? created;                          // last write (folders: latest activity below)
         const on = a.id === selectedId;
         const activate = () => (a.isFolder ? onDescend(a.name) : onOpen(a.id));
         const chip = (text: string, tone: BadgeKind, title: string) => <span title={title} style={{ ...badgeStyle(tone), fontSize: 11, whiteSpace: 'nowrap' }}>{text}</span>;
@@ -660,25 +698,34 @@ function ArtifactList({ rows, selectedId, ownerLabel, onOpen, onDescend, onDelet
                 <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }} title={a.name}>{a.name}</span>
                 <span style={{ ...badgeStyle('neutral'), fontSize: 10, flexShrink: 0 }}>{a.isFolder ? (a.id.startsWith('folder:') && a.size ? `Folder · ${a.size}` : 'Folder') : KIND_META[a.kind].label}</span>
                 {a.effectiveAccessPolicy === 'public' && <span style={{ ...badgeStyle('ok'), fontSize: 10, flexShrink: 0 }} title={a.accessPolicy === 'public' ? 'Anyone may read this — you made it public' : 'Anyone may read this — a folder above it is public'}>Public</span>}
-                {!a.isFolder && <button type="button" onClick={(e) => { e.stopPropagation(); onOpen(a.id); }} title={`Open ${a.name}`} data-testid={`library-view-${a.id}`} style={{ ...btnSty, padding: '.1rem .5rem', fontSize: 11, flexShrink: 0 }}>View</button>}
               </span>
-              <span style={{ ...mutedText, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`Owner: ${owner} · you may: ${authority}`}>
-                <b style={{ fontWeight: 600 }}>{owner}</b> · {authority}
+              <span style={{ ...mutedText, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                title={`Owner: ${owner} · you may: ${authority}${created ? ` · added ${whenFull(created)}` : ''}${updated && updated !== created ? ` · updated ${whenFull(updated)}` : ''}`}>
+                <b style={{ fontWeight: 600 }}>{owner}</b> · {authority}{updated ? <> · updated {whenShort(updated)}</> : null}
               </span>
             </span>
             <span style={{ display: 'flex', alignItems: 'center', gap: '.35rem', flexShrink: 0 }}>
               {chip(mode, ACCESS_TONE[mode], `Access: ${mode}`)}
               {!a.isFolder && chip(fresh, FRESH_TONE[fresh], `Freshness: ${fresh}`)}
               {!a.isFolder && <span style={{ ...mono, ...mutedText, fontSize: 11, whiteSpace: 'nowrap' }} title={a.registry ? `v${a.version ?? 1} in this vault · registry v${a.registry.version}` : `v${a.version ?? 1} in this vault`}>{a.registry ? `v${a.version ?? 1}·r${a.registry.version}` : `v${a.version ?? 1}`}</span>}
-              {onDelete && (
-                <button type="button" title={a.isFolder ? 'Delete this folder and everything in it' : 'Delete this file'}
-                  aria-label={`Delete ${a.name}`}
-                  onClick={(e) => { e.stopPropagation(); onDelete(a); }}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, lineHeight: 1,
-                    color: 'var(--color-text-muted)', fontSize: 15 }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-danger, #c0392b)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)'; }}>×</button>
-              )}
+              {/* Standard per-row actions as icon buttons: Open (the file), Delete. The whole row still opens on click;
+                  these give the explicit affordances people expect in a file library, grouped on the right. */}
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, marginLeft: 4 }}>
+                {!a.isFolder && (
+                  <button type="button" title={`Open ${a.name}`} aria-label={`Open ${a.name}`} data-testid={`library-view-${a.id}`}
+                    onClick={(e) => { e.stopPropagation(); onOpen(a.id); }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, lineHeight: 1, borderRadius: 6, display: 'inline-flex', color: 'var(--color-text-muted)' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-text-primary)'; e.currentTarget.style.background = 'var(--color-surface-sunken)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)'; e.currentTarget.style.background = 'transparent'; }}><Icon name="eye" size={16} /></button>
+                )}
+                {onDelete && (
+                  <button type="button" title={a.isFolder ? 'Delete this folder and everything in it' : 'Delete this file'} aria-label={`Delete ${a.name}`}
+                    onClick={(e) => { e.stopPropagation(); onDelete(a); }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, lineHeight: 1, borderRadius: 6, display: 'inline-flex', color: 'var(--color-text-muted)' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-danger, #c0392b)'; e.currentTarget.style.background = 'var(--color-surface-sunken)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)'; e.currentTarget.style.background = 'transparent'; }}><Icon name="trash" size={16} /></button>
+                )}
+              </span>
             </span>
           </div>
         );

@@ -112,3 +112,51 @@ describe('a governed workspace (the owner’s rule, 2026-10-02)', () => {
     expect(clusterPeople([ws, person(1), person(2)], { threshold: 6 }).some((x) => x.id === CLUSTER_PEOPLE_ID)).toBe(false);
   });
 });
+
+// MULTI-LEVEL + FILTERS (owner, 2026-10-02): depth walks the tree; the two axes hide a type or a relationship.
+import { buildMultiLevelView, applyGraphFilters, presentSubKinds, presentEdgeKinds, type GView } from './graph';
+
+describe('the multi-level view and the filters', () => {
+  const P = '0xa000000000000000000000000000000000000001';
+  const ORG = '0xd000000000000000000000000000000000000aa1';
+  const TRE = '0xd000000000000000000000000000000000000bb2'; // org's treasury (level 2)
+  const TEAM = '0xd000000000000000000000000000000000000cc3'; // team under the org (level 2)
+  const SUBTRE = '0xd000000000000000000000000000000000000dd4'; // the team's treasury (level 3)
+  const tree: LivePerson = {
+    name: 'alice', agentName: 'alice.me', personSA: P,
+    agents: [
+      { agent: ORG, name: 'Field', cls: 'org', kindWord: 'organization', relationship: 'steward', parent: P },
+      { agent: TRE, name: 'Field Treasury', cls: 'service', kindWord: 'treasury', relationship: 'steward', parent: ORG },
+      { agent: TEAM, name: 'Weld Team', cls: 'org', kindWord: 'team', relationship: 'steward', parent: ORG },
+      { agent: SUBTRE, name: 'Weld Treasury', cls: 'service', kindWord: 'treasury', relationship: 'steward', parent: TEAM },
+    ],
+  };
+
+  it('depth 1 draws only the person\'s direct agents; depth 3 reaches the grandchild', () => {
+    const d1 = buildMultiLevelView(tree, { center: P, depth: 1 });
+    expect(d1.nodes.some((n) => n.id === ORG)).toBe(true);
+    expect(d1.nodes.some((n) => n.id === TRE)).toBe(false); // a level-2 agent is not drawn at depth 1
+    const d3 = buildMultiLevelView(tree, { center: P, depth: 3 });
+    expect(d3.nodes.some((n) => n.id === TRE)).toBe(true);
+    expect(d3.nodes.some((n) => n.id === TEAM)).toBe(true);
+    expect(d3.nodes.some((n) => n.id === SUBTRE)).toBe(true); // level 3
+    // the treasury hangs under the ORG, not the person
+    expect(d3.edges.some((e) => e.source === ORG && e.target === TRE)).toBe(true);
+    // the custodian is above the person
+    expect(d3.edges.some((e) => e.source === CUSTODIAN_ID && e.target === P)).toBe(true);
+  });
+
+  it('a filter hides a subtype and its edges, and a relationship kind', () => {
+    const g: GView = buildMultiLevelView(tree, { center: P, depth: 3 });
+    expect(presentSubKinds(g)).toEqual(expect.arrayContaining(['treasury', 'team']));
+    expect(presentEdgeKinds(g)).toContain('stewardship');
+    const noTreasuries = applyGraphFilters(g, { subKinds: new Set(['treasury']) });
+    expect(noTreasuries.nodes.some((n) => n.id === TRE)).toBe(false);
+    expect(noTreasuries.edges.some((e) => e.target === TRE || e.source === TRE)).toBe(false);
+    const noStewardship = applyGraphFilters(g, { edgeKinds: new Set(['stewardship']) });
+    expect(noStewardship.edges.some((e) => e.kind === 'stewardship')).toBe(false);
+    // the focus node is never hidden, even if its class is filtered
+    const hidePeople = applyGraphFilters(g, { nodeKinds: new Set(['person']) });
+    expect(hidePeople.nodes.some((n) => n.id === P && n.data.focus)).toBe(true);
+  });
+});

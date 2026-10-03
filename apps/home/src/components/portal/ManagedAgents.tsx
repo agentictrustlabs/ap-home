@@ -21,6 +21,7 @@ import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteracti
 import { setOrgLifecycleStatus } from '../../home/org-lifecycle';
 import { orgStatusOf, STATUS_LABEL, type OrgSurface } from '../../lib/org-lifecycle';
 import type { DelegationWire } from '../../lib/delegation';
+import { ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS } from '../../lib/delegation';
 import { vaultWriteWithDelegation } from '../../lib/vault-client';
 import { COINS, FUNDING_COIN, shown, type Coin } from '../../lib/coins';
 import { CONTRACTS } from '../../lib/chain';
@@ -33,6 +34,7 @@ import { agentClassOf, orgKindWordOf, creatableKinds, type CreatableKind } from 
 import { BasisLine } from './BasisLine';
 
 import { Loading } from '../shared/Loading';
+import { SkeletonRows } from '../../ui';
 const ERC20_BALANCE_ABI = [
   { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'a', type: 'address' }], outputs: [{ type: 'uint256' }] },
 ] as const;
@@ -270,7 +272,7 @@ export async function createAgentWithBirthrights(
       const grant = await activateInboxDeliveryIfNeeded(res.result.agent, v, { token });
       if (!grant.ok) throw new Error(grant.error);
       // spec 322 W2.2 — plane-B interactions grant, same ceremony (inert until provisioned).
-      const ix = await activateInteractionsIfNeeded(res.result.agent, v, { token });
+      const ix = await activateInteractionsIfNeeded(res.result.agent, v, { token }, false, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS);
       if (!ix.ok) console.warn('[org-create] interactions grant not provisioned:', ix.error);
       // spec 321 items 1+3 — seed what members will look at first: the org's profile record (the
       // "About this organization" card + roster read) and a default #general channel, so a fresh
@@ -305,9 +307,11 @@ export async function createAgentWithBirthrights(
  *  suffix beside the name field is the one that kind will actually claim. The list is filtered to the
  *  typed roots this chain has provisioned, so it never offers a kind whose name would fail to claim. */
 export function CreateAgentForm({
-  kind: fixedKind, choices, parent, person, token, via, onDone, cta,
+  kind: fixedKind, choices, parent, person, token, via, onDone, cta, prominent,
 }: {
   kind?: AgentKind; choices?: CreatableKind[]; parent: string; person: string; token: string; via: string; onDone: () => void; cta: string;
+  /** Render the collapsed trigger as a PRIMARY button (the page's main action), not a quiet ghost link. */
+  prominent?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState('');
@@ -340,7 +344,7 @@ export function CreateAgentForm({
 
   if (!open) {
     return (
-      <button type="button" className="btn-ghost" style={{ marginTop: '.5rem', fontSize: '.8rem', padding: '.3rem .6rem' }} onClick={() => setOpen(true)}>
+      <button type="button" className={prominent ? 'ui-btn ui-btn--primary' : 'btn-ghost'} style={prominent ? { marginTop: '.5rem' } : { marginTop: '.5rem', fontSize: '.8rem', padding: '.3rem .6rem' }} onClick={() => setOpen(true)}>
         {cta}
       </button>
     );
@@ -589,12 +593,29 @@ export function OrganizationsManager({
 
   return (
     <div className="dash-section">
-      {!loaded ? (
-        <Loading />
-      ) : (
-        <>
-        <Filter />
+      {/* STRUCTURE FIRST (owner, 2026-10-02): the filter and the prominent "Add an organization" card render
+          immediately — neither needs the agent tree — and the rows skeleton while that read is out. */}
+      <Filter />
         <div className="manage-grid">
+          {/* ADD AN ORGANIZATION — the page's own primary action (owner, 2026-10-02: moved off the header and
+              made prominent here, on the Stewardship organizations page). Full-width, amber-accented, at the top
+              of the list, with the same gasless in-home charter ceremony. Shown while organizations are in view
+              and the `.org` typed root is provisioned on this chain. */}
+          {showOrgs && person && claimable('org') && (
+            <div className="manage-card" style={{ gridColumn: '1 / -1', borderColor: 'var(--color-amber-500)' }} data-testid="add-organization">
+              <div className="manage-card-head">
+                <span className="manage-card-icon"><BuildingIcon size={17} /></span>
+                <span className="manage-card-label">Add an organization</span>
+                <span className="manage-card-badge live">new</span>
+              </div>
+              <p className="manage-card-blurb">An organization you steward — its own Smart Agent and typed <code>.org</code> name, custodied by you and created gaslessly in your home.</p>
+              <CreateAgentForm kind="org" parent={person} person={person} token={token} via={via} onDone={reload} cta="Add an organization" prominent />
+            </div>
+          )}
+          {!loaded ? (
+            <div style={{ gridColumn: '1 / -1' }}><SkeletonRows rows={5} lead /></div>
+          ) : (
+          <>
           {/*
             * YOUR OWN PEOPLE LEAD, AND YOU ARE THE FIRST OF THEM.
             *
@@ -712,9 +733,9 @@ export function OrganizationsManager({
             <p className="manage-card-blurb">An organization, team, workspace or service you control — its own Smart Agent and typed name.</p>
             <CreateAgentForm choices={creatableKinds('person', claimable)} parent={person} person={person} token={token} via={via} onDone={reload} cta="Create agent" />
           </div>
+          </>
+          )}
         </div>
-        </>
-      )}
     </div>
   );
 }
@@ -733,7 +754,11 @@ export function TreasuriesRollup({ token, person, via }: { token: string | null;
   return (
     <div className="dash-section">
       {!loaded ? (
-        <Loading />
+        // STRUCTURE FIRST (owner, 2026-10-02): the section heading + skeleton cards while the agent tree is out.
+        <>
+          <div className="ui-section-head"><h2>Treasuries</h2></div>
+          <div className="manage-grid"><div style={{ gridColumn: '1 / -1' }}><SkeletonRows rows={2} lead /></div></div>
+        </>
       ) : (
         <>
           <div className="ui-section-head"><h2>Personal<span className="ui-count">{personal.length}</span></h2></div>

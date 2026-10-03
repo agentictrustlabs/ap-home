@@ -147,6 +147,13 @@ DEMO_VAULT_PROVISION_ENABLED = "true"
 DEMO_VAULT_PROVISION_SKIP_PROOF = "false"
 DEMO_NATIVE_MCP_ENABLED = "true"
 SA_BUDGET_LIMIT_UNITS = "50000"
+# Stage-2 soft per-principal verified-call limiter (spec 290 §6). Default 120/60s is too tight for this
+# DEMO's read patterns — an active Today page polling several reads every few seconds, a 100+ message
+# inbox, and rapid multi-page navigation saturated it and surfaced the throttle as "auth failed" (2026-10-03,
+# nathan). Raised to give headroom; it is a soft traffic limiter (abuse protection), not an authority gate,
+# and the cross-isolate HARD budget is still SA_BUDGET_LIMIT_UNITS. Paired with the batched message-body
+# read (one get_vault_records per thread instead of one per message), which removed the real spike.
+STAGE2_VERIFIED_LIMIT = "600"
 DEMO_REQUIRE_GATEWAY_ASSERTION = "false"
 # AKCS — both halves of the A2A→MCP hop must agree on the MAC mechanism. demo-a2a generates service
 # MACs from the tenant MAC root; a demo-mcp still on gcp-kms verified with a local A2A_MAC_SECRET and

@@ -125,8 +125,15 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   }
 
   const orgs: Array<Record<string, unknown>> = [];
+  // PERF (2026-10-02): the per-org KV reads ran SEQUENTIALLY (one round-trip each, ~93 for a busy account) and,
+  // worse, an on-chain reverseResolve ran inside the loop and serialized — a handful of un-healed names made this
+  // endpoint take 7–19s live. Prefetch every KV row at once, and move the on-chain name heal to a BOUNDED, parallel
+  // pass after the loop (cap NAME_HEAL_PER_REQUEST) so a pathological account can no longer serialize the hot read.
+  const rawById = new Map(await Promise.all(idx.map(async (o) => [o, await env.AUTH_CODES.get(`related:${person}:${o}`)] as const)));
+  const NAME_HEAL_PER_REQUEST = 4;
+  const toHeal: Array<{ org: string; agent: string; idx: number }> = [];
   for (const org of idx) {
-    const raw = await env.AUTH_CODES.get(`related:${person}:${org}`);
+    const raw = rawById.get(org);
     if (!raw) continue;
     const link = JSON.parse(raw) as {
       orgAgent: string; orgName: string; purpose: string; requestedBy: string;
@@ -139,15 +146,10 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     // Name self-heal: a link written while the chain read lagged stored the ADDRESS as orgName (the
     // member's dropdowns then show 0x…). The link is a PROJECTION — reconcile it from the naming
     // service on read (ADR-0013-safe: reconciling a projection from its source, not a fallback).
+    // Name self-heal is DEFERRED out of the hot path (see NAME_HEAL_PER_REQUEST above): note which need it; the
+    // address stands in until a bounded parallel pass (below) resolves a few and writes them back for next time.
     if (!link.orgName || link.orgName.toLowerCase() === link.orgAgent.toLowerCase()) {
-      const healed = await new AgentNamingClient({
-        rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL), chainId: CHAIN_ID,
-        registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver,
-      }).reverseResolve(link.orgAgent as Address).catch(() => null);
-      if (healed) {
-        link.orgName = healed;
-        await env.AUTH_CODES.put(`related:${person}:${org}`, JSON.stringify({ ...l, orgName: healed }));
-      }
+      toHeal.push({ org, agent: link.orgAgent, idx: orgs.length });
     }
     orgs.push({
       orgAgent: link.orgAgent,
@@ -195,6 +197,43 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       ...(l.status ? { status: l.status } : {}),
     });
   }
+  // Bounded, PARALLEL name heal: at most NAME_HEAL_PER_REQUEST on-chain reverseResolves per request, concurrent, so a
+  // busy account's hot read never serializes them. The rest heal on later loads as the projection converges.
+  if (toHeal.length > 0) {
+    const naming = new AgentNamingClient({ rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL), chainId: CHAIN_ID, registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver });
+    await Promise.all(toHeal.slice(0, NAME_HEAL_PER_REQUEST).map(async (h) => {
+      const healed = await naming.reverseResolve(h.agent as Address).catch(() => null);
+      if (!healed) return;
+      const o = orgs[h.idx];
+      if (o) o.orgName = healed;
+      const raw = rawById.get(h.org);
+      if (raw) { try { await env.AUTH_CODES.put(`related:${person}:${h.org}`, JSON.stringify({ ...JSON.parse(raw), orgName: healed })); } catch { /* best-effort */ } }
+    }));
+  }
+
+  // ── PRIVATE / LOCAL NAME — an agent with no PUBLIC name the viewer still knows by a local name ─────────────
+  // A member of an org that never claimed a public name has a link whose `orgName` is the raw address (the public
+  // reverseResolve above found nothing). The org's own name lives in its vault — readable by a member over member
+  // access, and captured once into a rebuildable `org-localname:<agent>` projection (at org-create and by the
+  // backfill). Fill it in here and MARK it local (`nameIsLocal`) so the surface can show "<name> *": a private
+  // name the viewer holds, never a public registration. Only rows still showing the raw address are touched, so a
+  // public name (healed above) always wins. Cheap KV gets, no vault read in this hot path.
+  {
+    const unnamed = orgs.filter((o) => String(o.orgName ?? '').toLowerCase() === String(o.orgAgent).toLowerCase());
+    if (unnamed.length > 0) {
+      await Promise.all(unnamed.map(async (o) => {
+        try {
+          const raw = await env.AUTH_CODES.get(`org-localname:${String(o.orgAgent).toLowerCase()}`);
+          if (!raw) return;
+          const proj = JSON.parse(raw) as { name?: string; isLocal?: boolean };
+          const name = String(proj.name ?? '').trim();
+          if (!name || name.toLowerCase() === String(o.orgAgent).toLowerCase()) return;
+          o.orgName = name;
+          if (proj.isLocal !== false) o.nameIsLocal = true;
+        } catch { /* a missing/malformed projection just leaves the address showing */ }
+      }));
+    }
+  }
   // ── THE RECONCILE THIS FILE ALREADY PROMISED ──────────────────────────────────────────────────
   // The POST above writes new links through to the person's AUTHORITATIVE vault doc, and says links
   // minted without a person session "surface in the doc at the person's next reconcile-capable
@@ -231,6 +270,69 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       }
     } catch { /* the view is the job here; the reconcile is opportunistic */ }
   }
+
+  // ── Spec 424 §2.3 — THE GOVERNED WORKSPACE A MEMBER MAY ENTER ─────────────────────────────────
+  // A member relates to the governing ORGANIZATION, never to the workspace agent (the hub doctrine,
+  // `lib/workspace-governor.ts`): `org → { members, teams, workspace }`, `workspace → org`. So the workspace
+  // never appears in her own links — yet she must be able to FIND it, and be handed the grant her field runtime
+  // chains her org membership onto to read its content (§2.4 B). We synthesize it here as DISCOVERY ONLY
+  // (ADR-0056 — resolution is not authority): for each org she is a member of, read the org's
+  // `org-workspace:<org>` projection — the governed workspace + its workspace→org content grant, written at
+  // workspace-create and by the 424 backfill. That projection is a REBUILDABLE serving-plane view of the org's
+  // `workspace:<ws>` vault record + the workspace's `workspace.governor.governorRead` (ADR-0055); the grant it
+  // carries is re-verified at the workspace vault by the field runtime, and nothing here authorizes a read.
+  // Synthesized AFTER the reconcile above, so these resolution rows never enter the person's authoritative
+  // relationships doc — a governed workspace is not one of her relationships, it is reached THROUGH one.
+  try {
+    // Every ORG-CLASS row the person holds is a candidate governor; its `org-workspace:<org>` projection (if any)
+    // names the workspace it governs. The projection repairs BOTH views the governor relationship is otherwise
+    // missing from: a STEWARD holds the workspace row but it is parented by the person, not the org, so it carries
+    // no `governor` (the graph then draws it standalone); a MEMBER has no workspace row at all.
+    const GOVERNOR_KINDS = new Set(['org', 'team', 'circle', 'church', 'household', 'organization']);
+    const governorRows = orgs.filter((o) => GOVERNOR_KINDS.has(String(o.kind ?? 'org').toLowerCase()));
+    if (governorRows.length > 0) {
+      const byAgent = new Map(orgs.map((o) => [String(o.orgAgent).toLowerCase(), o]));
+      const projections = await Promise.all(governorRows.map(async (o) => {
+        const raw = await env.AUTH_CODES.get(`org-workspace:${String(o.orgAgent).toLowerCase()}`);
+        return raw ? ({ governorRow: o, proj: JSON.parse(raw) as { workspace?: string; workspaceName?: string; governor?: string; grant?: unknown; createdAt?: number } }) : null;
+      }));
+      for (const hit of projections) {
+        if (!hit) continue;
+        const ws = String(hit.proj.workspace ?? '').toLowerCase();
+        const gov = String(hit.proj.governor ?? '').toLowerCase();
+        if (!/^0x[0-9a-f]{40}$/.test(ws) || !/^0x[0-9a-f]{40}$/.test(gov)) continue;
+        const existing = byAgent.get(ws);
+        if (existing) {
+          // The person already holds the workspace row (a steward): STAMP the governor so every reader — the
+          // trust graph especially — knows it is governed, not standalone. Relationship/kind are left as held.
+          if (!existing.governor) existing.governor = gov;
+          continue;
+        }
+        // No workspace row — synthesize one ONLY for a MEMBER of the governor (resolution; §2.3). A steward who
+        // simply lacks the row is not given a member row.
+        if (String(hit.governorRow.relationship ?? 'steward').toLowerCase() !== 'member') continue;
+        const row = {
+          orgAgent: ws,
+          orgName: hit.proj.workspaceName ?? '',
+          purpose: 'field-workspace',
+          requestedBy: clientId ?? '',
+          createdAt: hit.proj.createdAt ?? null,
+          kind: 'workspace',
+          // She belongs to the GOVERNOR and reads the workspace THROUGH it — never a relationship to the ws agent.
+          relationship: 'member',
+          governor: gov,
+          parent: gov,
+          // The workspace→org CONTENT grant (§2.1/§2.4 B). Her field runtime chains her org membership onto this
+          // to read the workspace's content; it is re-verified at the workspace vault, authorizing nothing here.
+          readGrantDelegation: hit.proj.grant ?? null,
+          // This row is a workspace she READS THROUGH the governor — not one she stewards, nor one she "joined".
+          via: 'governed',
+        };
+        orgs.push(row);
+        byAgent.set(ws, row);
+      }
+    }
+  } catch { /* discovery is best-effort; a missing projection just means no synthesized/stamped workspace row */ }
   return jsonCors({ orgs }, request);
 };
 
@@ -295,6 +397,19 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
      * because somebody asked for it, not because a read came back thin.
      */
     remove?: boolean;
+    /**
+     * Spec 424 §2.3 — write the org→governed-workspace serving-plane projection (`org-workspace:<orgAgent>`): the
+     * governed workspace + its workspace→org CONTENT grant (§2.4 B). The GET synthesizes this into an enterable
+     * row for every member of the governing org, so a member can FIND the workspace and be handed the grant her
+     * field runtime chains her org membership onto. REBUILDABLE from the org's `workspace:<ws>` vault record + the
+     * workspace's `workspace.governor.governorRead` (ADR-0055), so losing it is a rebuild, never a bereavement.
+     * Bearer path only — the person session must control the governor this projection keys on.
+     */
+    governedWorkspace?: { workspace?: string; workspaceName?: string; grant?: unknown };
+    /** The PRIVATE/LOCAL name of an agent that never claimed a public name (`org-localname:<orgAgent>`): a member
+     *  who holds it then sees a name, not an address. Rebuildable from the owner's vault; bearer path, caller must
+     *  steward the agent. `isLocal:false` marks that the agent IS publicly named (shown without the `*`). */
+    orgLocalName?: { name?: string; isLocal?: boolean };
   } | null;
   const person = (body?.person ?? '').toLowerCase();
   const org = (body?.orgAgent ?? '').toLowerCase();
@@ -330,6 +445,42 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       if (!ownIdx.includes(parent)) {
         return jsonCors({ error: 'parent is not an agent you control' }, request, 401);
       }
+    }
+    // Spec 424 §2.3 — the org→governed-workspace projection. The person stewards the governor (`org`) it keys on
+    // (they just created the pair, or they run the backfill under their session); the workspace→org content grant
+    // rides in and is re-verified at the workspace vault by the field runtime — this write authorizes nothing.
+    const gw = body?.governedWorkspace;
+    if (gw) {
+      const ws = String(gw.workspace ?? '').toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(ws)) return jsonCors({ error: 'governedWorkspace.workspace (0x…40) required' }, request, 400);
+      // The caller must STEWARD the governor this projection keys on — not merely hold a home session. The grant it
+      // carries is re-verified at the workspace vault downstream, so a bogus projection authorizes nothing; this
+      // check keeps a stranger from surfacing a fake workspace row to the org's members (resolution hygiene).
+      const stewardLinkRaw = await env.AUTH_CODES.get(`related:${person}:${org}`);
+      const stewardLink = stewardLinkRaw ? (JSON.parse(stewardLinkRaw) as { relationship?: string }) : null;
+      if (!stewardLink || (stewardLink.relationship ?? 'steward') === 'member') {
+        return jsonCors({ error: 'you do not steward the organization that governs this workspace' }, request, 403);
+      }
+      await env.AUTH_CODES.put(`org-workspace:${org}`, JSON.stringify({
+        workspace: ws, workspaceName: String(gw.workspaceName ?? ''), governor: org, grant: gw.grant ?? null, createdAt: Date.now(),
+      }));
+      return jsonCors({ ok: true, governedWorkspace: ws }, request);
+    }
+    // The org's PRIVATE/LOCAL name projection (`org-localname:<org>`) — the name the owner gave an agent that
+    // never claimed a public name, so a member who holds it sees a name rather than an address. The caller must
+    // steward the agent it names (same check as the governed-workspace write). `isLocal:false` records that the
+    // agent DOES have a public name (so a surface shows it without the `*`); default true.
+    const ln = body?.orgLocalName;
+    if (ln) {
+      const name = String(ln.name ?? '').trim();
+      if (!name) return jsonCors({ error: 'orgLocalName.name required' }, request, 400);
+      const stewardLinkRaw = await env.AUTH_CODES.get(`related:${person}:${org}`);
+      const stewardLink = stewardLinkRaw ? (JSON.parse(stewardLinkRaw) as { relationship?: string }) : null;
+      if (!stewardLink || (stewardLink.relationship ?? 'steward') === 'member') {
+        return jsonCors({ error: 'you do not steward this agent' }, request, 403);
+      }
+      await env.AUTH_CODES.put(`org-localname:${org}`, JSON.stringify({ name, isLocal: ln.isLocal !== false, at: Date.now() }));
+      return jsonCors({ ok: true, orgLocalName: name }, request);
     }
   } else {
     // ERC-1271 control-of-person proof (spec-247 external-custodian path, e.g. a demo-jp operator org).

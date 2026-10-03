@@ -179,12 +179,15 @@ async function resolveBodies(doc: InboxDataV1, bodyStore?: MessageBodyReader, sc
     : scope?.messageIds
       ? doc.envelopes.filter((e) => scope.messageIds!.has(e.id))
       : doc.envelopes;
-  await Promise.all(envelopes.map(async (e) => {
-    // Normalized ref = where persistBody wrote it; loadBody still hash-verifies against envelope.bodyHash.
-    // Fail-closed: a missing record or a bodyHash mismatch throws — omit rather than serve bad bytes.
-    const normalized: AnyMessageEnvelope = { ...e, body: { ...e.body, resource: messageBodyResource(e.id) } };
-    try { out[e.id] = new TextDecoder().decode(await bodyStore.loadBody(normalized)); } catch { /* omitted */ }
-  }));
+  // BATCHED (perf, 2026-10-03): one DO round-trip for the whole scope's bodies instead of one vault read per
+  // message. Opening a 75-message thread fired 75 reads, tripped the principal's stage-2 verified-call budget,
+  // and every body came back "auth failed" → "content in vault…". Normalized ref = where the body was written;
+  // the DO hash-verifies each against its envelope.bodyHash and omits any that fail (same fail-closed rule as
+  // loadBody). A whole-batch failure yields no bodies (placeholders), never a thrown inbox read.
+  const normalized: AnyMessageEnvelope[] = envelopes.map((e) => ({ ...e, body: { ...e.body, resource: messageBodyResource(e.id) } }));
+  try {
+    Object.assign(out, await bodyStore.loadBodies(normalized));
+  } catch { /* the scope's bodies stay lazy; the next poll retries */ }
   return out;
 }
 

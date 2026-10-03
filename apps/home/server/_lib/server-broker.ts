@@ -18,6 +18,10 @@ export interface KVNamespace {
   get(key: string): Promise<string | null>;
   put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>;
   delete(key: string): Promise<void>;
+  /** Cloudflare-KV-shaped prefix listing. The Vercel adapter backs it with Upstash SCAN (app/_lib/kv.ts).
+   *  Used to enumerate a custodian's `related:<sa>:*` records (demo-selves). Cursor-paged; a batch may be
+   *  partial or empty, so callers loop until `list_complete`. */
+  list(opts?: { prefix?: string; cursor?: string; limit?: number }): Promise<{ keys: { name: string }[]; list_complete: boolean; cursor?: string }>;
 }
 
 export interface Env {

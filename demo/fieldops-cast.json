@@ -1,0 +1,22 @@
+{
+  "note": "demo/fieldops-cast.faithnet.json",
+  "var": "FIELDOPS_CAST",
+  "cast": [
+    { "role": "naomi", "character": "Naomi Kyaw",         "handle": "elena",  "label": "naomi-elena" },
+    { "role": "yusuf", "character": "Yusuf Abdi",         "handle": "dave",   "label": "yusuf-dave" },
+    { "role": "carla", "character": "Carla Mendez",       "handle": "carol",  "label": "carla-carol" },
+    { "role": "farid", "character": "Farid Nazari",       "handle": "bob",    "label": "farid-bob" },
+    { "role": "grace", "character": "Grace Lin",          "handle": "alice",  "label": "grace-alice" },
+    { "role": "tomas", "character": "Tomás Herrera",      "handle": "nathan", "label": "tomas-nathan" },
+    { "role": "olena", "character": "Olena Shevchenko",   "handle": "david",  "label": "olena-david" },
+    { "role": "mark",  "character": "Mark Osei",          "handle": "bob",    "label": "mark-bob" },
+    { "role": "hodan", "character": "Hodan Warsame",      "handle": "elena",  "label": "hodan-elena" },
+    { "role": "luis",  "character": "Luis Camacho",       "handle": "dave",   "label": "luis-dave" },
+    { "role": "priya", "character": "Dr Priya Natarajan", "handle": "alice",  "label": "priya-alice" },
+    { "role": "sam",   "character": "Sam Whitaker",       "handle": "nathan", "label": "sam-nathan" },
+    { "role": "dan",   "character": "Pastor Dan Ellis",   "handle": "carol",  "label": "dan-carol" },
+    { "role": "kim",   "character": "Pastor Kim Park",    "handle": "david",  "label": "kim-david" },
+    { "role": "jenna", "character": "Pastor Jenna Ruiz",  "handle": "alice",  "label": "jenna-alice" },
+    { "role": "walt",  "character": "Pastor Walt Jensen", "handle": "bob",    "label": "walt-bob" }
+  ]
+}

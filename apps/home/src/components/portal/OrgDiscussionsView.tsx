@@ -23,7 +23,7 @@ import { joinOrganization } from '../../home/join-organization';
 import { provisionCommunityMessaging } from '../../lib/messaging-ceremony';
 import { notifyAgentsChanged } from './ManagedAgents';
 import { vaultReadWithDelegation } from '../../lib/vault-client';
-import { type DelegationWire } from '../../lib/delegation';
+import { ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, type DelegationWire } from '../../lib/delegation';
 import { DELIVERY_SERVICE_SA } from '../../lib/inbox-delivery';
 import { BusyButton } from '../shared/BusyButton';
 import {
@@ -387,7 +387,7 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       if (!grant.ok) throw new Error(grant.error);
       // spec 322 W2.2 — the interactions grant (plane B) rides the same enable ceremony; inert
       // until INTERACTIONS_SERVICE_SA is provisioned.
-      const ix = await activateInteractionsIfNeeded(org, via, auth);
+      const ix = await activateInteractionsIfNeeded(org, via, auth, false, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS);
       if (!ix.ok) console.warn('[channels] interactions grant not provisioned:', ix.error);
       setOrgVault(true);
       await load();

@@ -160,6 +160,9 @@ interface LibraryArtifact {
   bytesB64?: string;
   size: number;
   createdAt: number;
+  /** Last write (ms). Moves on every re-save; `createdAt` stays the first write. Absent on entries written
+   *  before this field existed — a reader falls back to `createdAt` (which, for those, was the last write). */
+  updatedAt?: number;
   /** Monotonic version — the append-only axis. Bumps on every re-save; starts at 1. */
   version: number;
   /** SHA-256 of the stored bytes (`0x…`), for blob artifacts — the content commitment the Provenance
@@ -822,7 +825,10 @@ async function upsert(list: LibraryArtifact[], a: Partial<LibraryArtifact> | und
     contentType: typeof a.contentType === 'string' ? a.contentType : defaultMime(kind),
     bytesB64,
     size: typeof a.size === 'number' ? a.size : (a.bytesB64?.length ?? 0),
-    createdAt: Date.now(),
+    // Created once, kept across every re-save; updatedAt moves on each save. (Before this, createdAt was reset on
+    // every save, so it actually read as the last-write time — which is why old entries have no distinct updatedAt.)
+    createdAt: idx >= 0 ? (list[idx]!.createdAt ?? Date.now()) : Date.now(),
+    updatedAt: Date.now(),
     // Append-only version axis: re-saving an existing id advances its version.
     version: idx >= 0 ? (list[idx]!.version ?? 1) + 1 : 1,
     contentCommitment: bytesB64 ? await sha256Hex(bytesB64) : undefined,

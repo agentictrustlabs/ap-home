@@ -18,7 +18,7 @@ export async function readContactsThroughHarness(input: { person: Address; sessi
   await ensureCsrfToken();
   const out = await j(await fetch('/a2a/harness/ask', {
     method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', ...csrfHeaders() },
-    body: JSON.stringify({ session: input.session.token, addressee: input.person.toLowerCase(), message: 'who are my contacts', plan: { steps: [{ toolId: 'person.contact.list', args: {} }] } }),
+    body: JSON.stringify({ session: input.session.token, addressee: input.person.toLowerCase(), message: 'who are my contacts', rowsOnly: true, plan: { steps: [{ toolId: 'person.contact.list', args: {} }] } }),
   }));
   const reply = out.reply;
   if (reply?.kind === 'answer') {

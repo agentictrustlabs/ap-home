@@ -67,16 +67,26 @@ export function TodayView({ scope, children }: { scope: WorkspaceScope; children
   const { parked, triggers, vocabulary, artifacts, records, failed, pending, dropRun } = useTodayReads(session?.token, addressee, scope.kind === 'person' ? 'person' : 'other', held);
   const workLoading = scope.kind !== 'service' && bundles === null;
 
-  const today: Today | null = useMemo(() => {
-    if (parked === null) return null;
-    const mine = scope.kind === 'org' ? (bundles ?? []).filter((b) => b.org.toLowerCase().endsWith(scope.org.toLowerCase())) : scope.kind === 'service' ? [] : bundles;
-    return assembleToday({ now: Date.now(), parked, bundles: mine, artifacts, triggers, vocabulary, records, recentDays: RECENT_DAYS });
+  // ASSEMBLE FROM WHATEVER HAS LOADED — never hold the whole page on the slowest read (owner, 2026-10-02: "populate
+  // what is expected first so the page looks complete and then work the rest"). This used to return null until the
+  // runs read (`parked`) answered, so a block whose OWN read was already in (the schedule, the Library, the playbook
+  // vocabulary, the run records) still sat blank — or briefly showed "empty" — until runs landed. Now each block is
+  // assembled from its own inputs and its panel shows a skeleton (its `pending` flag) only while ITS read is out:
+  // the fast blocks populate immediately and the page looks complete; the decision/active blocks fill when runs lands.
+  const today: Today = useMemo(() => {
+    const mine = scope.kind === 'org' ? (bundles ?? []).filter((b) => b.org.toLowerCase().endsWith(scope.org.toLowerCase())) : scope.kind === 'service' ? [] : (bundles ?? []);
+    return assembleToday({ now: Date.now(), parked: parked ?? [], bundles: mine, artifacts, triggers, vocabulary, records, recentDays: RECENT_DAYS });
   }, [parked, bundles, artifacts, triggers, vocabulary, records, scope]);
 
   const ctx: CardCtx | undefined = addressee ? { token: session?.token ?? '', addressee: addressee as Address, onCanceled: dropRun } : undefined;
   const libraryHref = workspaceHref(scope, 'library');
   const playbookHref = workspaceHref(scope, 'playbook');
-  const workHref = workspaceHref(scope, 'work');
+  // "In motion" counts the scoped agent's running/queued goals. A person and an org have a Work page for them
+  // (`MyWorkView` / the org's endeavors); a PERSONA or a SERVICE has no Work surface (the nav omits it — "a persona
+  // belongs to no organizations yet"), so its runs live on Activities. Pointing at `work` for those gave a 404 on
+  // `/as/<sa>/work` (reported live 2026-10-03). Send each scope where the page actually exists.
+  const workHref = scope.kind === 'persona' || scope.kind === 'service' ? workspaceHref(scope, 'activities') : workspaceHref(scope, 'work');
+  const workOpensActivity = scope.kind === 'persona' || scope.kind === 'service';
   if (!session) return null;
 
   const decisions = today?.decisions ?? []; const active = today?.active ?? []; const arts = today?.artifacts ?? []; const exceptions = today?.exceptions ?? [];
@@ -103,7 +113,7 @@ export function TodayView({ scope, children }: { scope: WorkspaceScope; children
         <List>{decisions.map((it) => <ItemRow key={it.id} item={it} {...(ctx ? { ctx } : {})} cta="Decide" />)}</List>
       </Panel>
 
-      <Panel title="Active goals" icon={<ActivityIcon />} count={active.length} state={activeState} rows={3} testId="today-active-goals" aside={<a href={workHref}>Open Work →</a>}
+      <Panel title="Active goals" icon={<ActivityIcon />} count={active.length} state={activeState} rows={3} testId="today-active-goals" aside={<a href={workHref}>{workOpensActivity ? 'Open activity →' : 'Open Work →'}</a>}
         empty={{ icon: <ActivityIcon />, title: 'Nothing in motion', hint: 'Ask for something, or take on a piece of work.', action: <a className="ui-btn ui-btn--secondary ui-btn--sm" href="/ask">Ask your agent</a> }}
         unknown={{ read: `your unfinished asks could not be read (${failed.runs})`, partial: active.length > 0 }}>
         <List>{active.map((it) => <ItemRow key={it.id} item={it} {...(ctx ? { ctx } : {})} />)}</List>

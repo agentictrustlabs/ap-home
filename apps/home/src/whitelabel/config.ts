@@ -332,6 +332,11 @@ const faithImpact: WhiteLabelConfig = {
       // Worker cannot present.
       ask_delegate: (process.env.NEXT_PUBLIC_FIELD_ASK_DELEGATE || '0xb6fb1ce89c3d3d8da7df378ed5cdc6e79cdc9260') as `0x${string}`,
       libraryFolders: ['field'],
+      // Spec 412 W6 — Field reads the person's OWN messages (the DMs screen; the game's whispers land
+      // in a character's inbox). demo-signin mints this on every sign-in (enter-as included), person →
+      // the interactions service SA, revocable by the person alone at Home. `inbox.get` needs
+      // `vault:inbox.data`; `inbox.body.get` needs `vault:message.body:dm:*` (interactions-do OP_RESOURCE).
+      read_grant: { resources: ['vault:inbox.data', 'vault:message.body:dm:*'] },
       // field-service.impact — a DIFFERENT SA per identity universe (the faithnet deploy sets
       // NEXT_PUBLIC_FIELD_SERVICE_SA to the SA minted on 34348; default is base-sepolia's).
       operational_delegate:

@@ -1215,6 +1215,38 @@ export async function issuePaymentDelegation(
 // the home only receives the public `sessionKeyAddress` and signs the leaf below. The home therefore
 // never mints or holds a session private key (no cross-origin key transport — spec 270 v4 secure design).
 
+/**
+ * The DEL-001 interactions session-leaf lifetime. It is signed ONCE — at the moment a steward enables storage,
+ * the one moment the steward is present — and binds the serving plane's (KMS-custodied, server-held) interactions
+ * session key to a principal's grant.
+ *
+ * TWO TIERS, because the two cases differ in who signs and whether they return (org-leaf-decay, 2026-10-03):
+ *   · A PERSON's own leaf: the connected user re-signs it every time they open their Home (the self-heal in
+ *     session.tsx + activateInteractionsIfNeeded), so a SHORT 12h window is correct hygiene and changes nothing —
+ *     they are present each session. This stays 12h.
+ *   · An ORG's leaf: signed by a STEWARD — possibly a different person — who may not come back for weeks and does
+ *     not want to be hassled. An org has no portal and cannot self-renew, so a 12h leaf guaranteed every org went
+ *     dark 12h after enable, 409-storming its Work / Discussions / Library / inbox with a bare "auth failed". The
+ *     short window bought little for a KMS-held key (its leak == a KMS compromise, which no leaf TTL survives) and
+ *     cost a live org a day. So an org's leaf lasts as long as the authority grant it rides (1y; it can never
+ *     usefully outlive the grant anyway) — signed once, by the steward, when they enable storage.
+ * Both are env-overridable. The DO's `status.current` audience check + the endeavor `needsReEnable` pre-flight
+ * catch the RARE lapse a long TTL can't cover (the DO's session key rotating, or a pre-408 leaf) and make it a
+ * one-signature re-enable instead of a silent failure.
+ */
+export const PERSON_INTERACTIONS_SESSION_LEAF_TTL_SECONDS =
+  Number(process.env.NEXT_PUBLIC_INTERACTIONS_LEAF_TTL_SECONDS) || 60 * 60 * 12;
+/** The ORG/third-party-steward leaf lifetime (see the note above): long, because the steward who signs it may
+ *  not return for weeks and nothing else re-signs it. Overridable per deployment. */
+export const ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS =
+  Number(process.env.NEXT_PUBLIC_ORG_INTERACTIONS_LEAF_TTL_SECONDS) || 60 * 60 * 24 * 365;
+/** Spec 423 §2.1 route A — the PRE-APPROVED LEAF LADDER depth for an org. The steward signs this many session
+ *  leaves at once (windows tiling forward by the org TTL), so a live rung exists for rungs × TTL — years of
+ *  autonomy from a single signing, with no new security surface (the DO just picks the live rung). A person's
+ *  leaf is always a single rung (they re-sign each login). Env-tunable. */
+export const ORG_INTERACTIONS_SESSION_LEAF_LADDER_RUNGS =
+  Math.max(1, Math.min(8, Number(process.env.NEXT_PUBLIC_ORG_INTERACTIONS_LEAF_LADDER_RUNGS) || 3));
+
 /** Issue the DEL-001 session-delegation leaf `personAgent → sessionKey`, signed by the SAME ROOT
  *  credential (`signHash`) that signs the site delegation at connect. Bound to the person SA (the
  *  canonical identity), so it works for whatever credential the member connected with (passkey / wallet /
@@ -1226,7 +1258,7 @@ export async function issueSessionDelegation(
   signHash: SignHash,
   /** Spec 408 §2.1 — the delegates this session key may present the principal's delegations to. */
   presentsTo: readonly Address[],
-  validitySeconds = 60 * 60 * 12, // 12h session
+  validitySeconds = PERSON_INTERACTIONS_SESSION_LEAF_TTL_SECONDS,
 ): Promise<Delegation> {
   const { leaf, digest } = buildSessionDelegation({
     delegator: personAgent,
@@ -1253,7 +1285,7 @@ export function buildApprovedSessionDelegation(
   sessionKeyAddress: Address,
   /** Spec 408 §2.1 — the delegates this session key may present the principal's delegations to. */
   presentsTo: readonly Address[],
-  validitySeconds = 60 * 60 * 12,
+  validitySeconds = PERSON_INTERACTIONS_SESSION_LEAF_TTL_SECONDS,
 ): { delegation: Delegation; digest: Hex } {
   const { leaf, digest } = buildSessionDelegation({
     delegator: personAgent,
