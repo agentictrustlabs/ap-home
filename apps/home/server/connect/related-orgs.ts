@@ -260,24 +260,39 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // Synthesized AFTER the reconcile above, so these resolution rows never enter the person's authoritative
   // relationships doc — a governed workspace is not one of her relationships, it is reached THROUGH one.
   try {
-    const memberOrgs = orgs.filter((o) => o.relationship === 'member' && !o.governor);
-    if (memberOrgs.length > 0) {
-      const already = new Set(orgs.map((o) => String(o.orgAgent).toLowerCase()));
-      const projections = await Promise.all(memberOrgs.map(async (o) => {
+    // Every ORG-CLASS row the person holds is a candidate governor; its `org-workspace:<org>` projection (if any)
+    // names the workspace it governs. The projection repairs BOTH views the governor relationship is otherwise
+    // missing from: a STEWARD holds the workspace row but it is parented by the person, not the org, so it carries
+    // no `governor` (the graph then draws it standalone); a MEMBER has no workspace row at all.
+    const GOVERNOR_KINDS = new Set(['org', 'team', 'circle', 'church', 'household', 'organization']);
+    const governorRows = orgs.filter((o) => GOVERNOR_KINDS.has(String(o.kind ?? 'org').toLowerCase()));
+    if (governorRows.length > 0) {
+      const byAgent = new Map(orgs.map((o) => [String(o.orgAgent).toLowerCase(), o]));
+      const projections = await Promise.all(governorRows.map(async (o) => {
         const raw = await env.AUTH_CODES.get(`org-workspace:${String(o.orgAgent).toLowerCase()}`);
-        return raw ? (JSON.parse(raw) as { workspace?: string; workspaceName?: string; governor?: string; grant?: unknown; createdAt?: number }) : null;
+        return raw ? ({ governorRow: o, proj: JSON.parse(raw) as { workspace?: string; workspaceName?: string; governor?: string; grant?: unknown; createdAt?: number } }) : null;
       }));
-      for (const proj of projections) {
-        const ws = String(proj?.workspace ?? '').toLowerCase();
-        const gov = String(proj?.governor ?? '').toLowerCase();
-        if (!/^0x[0-9a-f]{40}$/.test(ws) || !/^0x[0-9a-f]{40}$/.test(gov) || already.has(ws)) continue;
-        already.add(ws);
-        orgs.push({
+      for (const hit of projections) {
+        if (!hit) continue;
+        const ws = String(hit.proj.workspace ?? '').toLowerCase();
+        const gov = String(hit.proj.governor ?? '').toLowerCase();
+        if (!/^0x[0-9a-f]{40}$/.test(ws) || !/^0x[0-9a-f]{40}$/.test(gov)) continue;
+        const existing = byAgent.get(ws);
+        if (existing) {
+          // The person already holds the workspace row (a steward): STAMP the governor so every reader — the
+          // trust graph especially — knows it is governed, not standalone. Relationship/kind are left as held.
+          if (!existing.governor) existing.governor = gov;
+          continue;
+        }
+        // No workspace row — synthesize one ONLY for a MEMBER of the governor (resolution; §2.3). A steward who
+        // simply lacks the row is not given a member row.
+        if (String(hit.governorRow.relationship ?? 'steward').toLowerCase() !== 'member') continue;
+        const row = {
           orgAgent: ws,
-          orgName: proj?.workspaceName ?? '',
+          orgName: hit.proj.workspaceName ?? '',
           purpose: 'field-workspace',
           requestedBy: clientId ?? '',
-          createdAt: proj?.createdAt ?? null,
+          createdAt: hit.proj.createdAt ?? null,
           kind: 'workspace',
           // She belongs to the GOVERNOR and reads the workspace THROUGH it — never a relationship to the ws agent.
           relationship: 'member',
@@ -285,13 +300,15 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
           parent: gov,
           // The workspace→org CONTENT grant (§2.1/§2.4 B). Her field runtime chains her org membership onto this
           // to read the workspace's content; it is re-verified at the workspace vault, authorizing nothing here.
-          readGrantDelegation: proj?.grant ?? null,
+          readGrantDelegation: hit.proj.grant ?? null,
           // This row is a workspace she READS THROUGH the governor — not one she stewards, nor one she "joined".
           via: 'governed',
-        });
+        };
+        orgs.push(row);
+        byAgent.set(ws, row);
       }
     }
-  } catch { /* discovery is best-effort; a missing projection just means no synthesized workspace row */ }
+  } catch { /* discovery is best-effort; a missing projection just means no synthesized/stamped workspace row */ }
   return jsonCors({ orgs }, request);
 };
 

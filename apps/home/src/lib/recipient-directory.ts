@@ -164,7 +164,7 @@ export function filterRecipients<T extends { title: string; subtitle?: string; a
 
 /** A managed-agent row as the roster needs it — the fields `ManagedAgent` carries, typed loosely so a test can
  *  hand in four fields and the hook can hand in the real rows. */
-export interface GovernableRow { agent: string; kind: string; parent?: string; relationship?: string }
+export interface GovernableRow { agent: string; kind: string; parent?: string; relationship?: string; governor?: string }
 
 /** The org-class kinds a workspace can be governed by (`aporg:governedBy` ranges over ap:OrganizationAgent:
  *  org, team, alliance — and the Home's other organization shapes). A person is not a governor, nor a service. */
@@ -178,7 +178,14 @@ const ORGANIZATION_KINDS = new Set(['org', 'team', 'circle', 'church', 'househol
  * viewer can see (a workspace hung under a PERSON is the person's, and the person is not its governor).
  */
 export function workspaceGovernorOf(row: GovernableRow | undefined, all: readonly GovernableRow[]): string | null {
-  if (!row || row.kind !== 'workspace' || !row.parent) return null;
+  if (!row || row.kind !== 'workspace') return null;
+  // The STAMPED governor wins when present (spec 424 — `related-orgs` writes it from the `org-workspace:<org>`
+  // projection onto a steward's workspace row, which is parented by the person and so carries no org in `parent`).
+  const stamped = (row.governor ?? '').toLowerCase();
+  if (/^0x[0-9a-f]{40}$/.test(stamped) && stamped !== row.agent.toLowerCase()) return stamped;
+  // Legacy inference: the governor is the workspace link's `parent` when that parent is an org-class agent the
+  // viewer also holds (a workspace chartered under its org before the governor was stamped on the link).
+  if (!row.parent) return null;
   const parent = row.parent.toLowerCase();
   if (parent === row.agent.toLowerCase()) return null;
   const gov = all.find((a) => a.agent.toLowerCase() === parent);
