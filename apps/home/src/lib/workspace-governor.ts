@@ -13,6 +13,15 @@
 // `workspace:<ws sa>`, the `aporg:Workspace` entity. A workspace with NO pointer is a LEGACY one that still holds
 // its own membership records; every ceremony keeps today's behaviour for it and says so once in the console.
 //
+// THE SHAPE IS A HUB, NOT A CHAIN (owner, 2026-10-03). The ORGANIZATION is the hub: it holds the MEMBERS
+// (`org.membership:member:<sa>`) and the TEAMS (team affiliated WITH the org), and it governs the workspace.
+// The WORKSPACE agent sits to the SIDE and references exactly ONE thing — its governing org (`workspace.governor`
+// → `governedBy`) — and reaches that org's teams and members THROUGH it. A workspace does NOT reference teams or
+// members directly, and teams are NEVER nested under a workspace: `org → workspace → teams` is WRONG; it is
+// `org → { members, teams, workspace }` with `workspace → org`. (This is why a member reads a workspace by
+// belonging to the org that governs it — spec 424 — not by a relationship to the workspace agent.) The field /
+// engage and pokernight apps arrange their instances to this shape; nothing here nests a team under a workspace.
+//
 // This module is the Home's CLIENT side of the rule: the record shapes, how a ceremony finds a workspace's
 // governor, and the organization's half of the has-member credential (spec 410 §8) a join countersigns. The
 // server's guard that refuses membership on a workspace is `server/lib/workspace-governor.ts`.
