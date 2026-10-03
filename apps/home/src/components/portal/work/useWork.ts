@@ -151,7 +151,12 @@ export function useWorkList(session: Session | null, org: string): WorkListState
   const [needsReEnable, setNeedsReEnable] = useState(false);
 
   const refreshing = useRef(false);
+  // Read the session through a ref so `refresh` does NOT change identity when the session object/token churns
+  // between renders — that churn re-fired the `[refresh]` effect every render (the single-org twin of the My Work
+  // loop) and re-created the 12s poll each time. Keyed on `org` only; the latest session is read at call time.
+  const sessRef = useRef(session); sessRef.current = session;
   const refresh = useCallback(async () => {
+    const session = sessRef.current;
     if (!session || !org || refreshing.current) return;
     refreshing.current = true;
     try {
@@ -166,7 +171,7 @@ export function useWorkList(session: Session | null, org: string): WorkListState
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { refreshing.current = false; }
-  }, [session, org]);
+  }, [org]);
 
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
@@ -252,10 +257,14 @@ export function useMyWork(session: Session | null, agentAddress: string | null |
       setError(e instanceof Error ? e.message : String(e));
     } finally { inFlight.current = false; }
   }, [session, agentAddress, orgs, orgsLoaded]);
-  // Re-run ONLY when the real inputs change (a stable key), not on every render that recreates `load` — that
-  // identity churn was the loop. `loadRef` keeps the effect calling the latest closure.
+  // Re-run ONLY when the ORG SET or its loaded-flag changes — the two things that decide what to fetch. Keying on
+  // `session?.token` or `agentAddress` was the loop: in the live app those identities churn between renders (a token
+  // refresh, a new session object), the effect re-fired every render, and each firing fanned out one vault-backed
+  // read per org (incognito reproduced it; a fixed injected token hid it). `load` reads the latest session/address
+  // through `loadRef`; it needs no re-fire of its own, because a real account/acting-as change also changes the org
+  // set, so `orgsKey` already captures it.
   const loadRef = useRef(load); loadRef.current = load;
   const orgsKey = orgs.map((o) => o.orgAgent).join(',');
-  useEffect(() => { void loadRef.current(); }, [session?.token, agentAddress, orgsKey, orgsLoaded]);
+  useEffect(() => { void loadRef.current(); }, [orgsKey, orgsLoaded]);
   return { bundles, staleOrgs, error, load, orgsLoaded };
 }
