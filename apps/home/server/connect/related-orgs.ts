@@ -246,6 +246,52 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       }
     } catch { /* the view is the job here; the reconcile is opportunistic */ }
   }
+
+  // ── Spec 424 §2.3 — THE GOVERNED WORKSPACE A MEMBER MAY ENTER ─────────────────────────────────
+  // A member relates to the governing ORGANIZATION, never to the workspace agent (the hub doctrine,
+  // `lib/workspace-governor.ts`): `org → { members, teams, workspace }`, `workspace → org`. So the workspace
+  // never appears in her own links — yet she must be able to FIND it, and be handed the grant her field runtime
+  // chains her org membership onto to read its content (§2.4 B). We synthesize it here as DISCOVERY ONLY
+  // (ADR-0056 — resolution is not authority): for each org she is a member of, read the org's
+  // `org-workspace:<org>` projection — the governed workspace + its workspace→org content grant, written at
+  // workspace-create and by the 424 backfill. That projection is a REBUILDABLE serving-plane view of the org's
+  // `workspace:<ws>` vault record + the workspace's `workspace.governor.governorRead` (ADR-0055); the grant it
+  // carries is re-verified at the workspace vault by the field runtime, and nothing here authorizes a read.
+  // Synthesized AFTER the reconcile above, so these resolution rows never enter the person's authoritative
+  // relationships doc — a governed workspace is not one of her relationships, it is reached THROUGH one.
+  try {
+    const memberOrgs = orgs.filter((o) => o.relationship === 'member' && !o.governor);
+    if (memberOrgs.length > 0) {
+      const already = new Set(orgs.map((o) => String(o.orgAgent).toLowerCase()));
+      const projections = await Promise.all(memberOrgs.map(async (o) => {
+        const raw = await env.AUTH_CODES.get(`org-workspace:${String(o.orgAgent).toLowerCase()}`);
+        return raw ? (JSON.parse(raw) as { workspace?: string; workspaceName?: string; governor?: string; grant?: unknown; createdAt?: number }) : null;
+      }));
+      for (const proj of projections) {
+        const ws = String(proj?.workspace ?? '').toLowerCase();
+        const gov = String(proj?.governor ?? '').toLowerCase();
+        if (!/^0x[0-9a-f]{40}$/.test(ws) || !/^0x[0-9a-f]{40}$/.test(gov) || already.has(ws)) continue;
+        already.add(ws);
+        orgs.push({
+          orgAgent: ws,
+          orgName: proj?.workspaceName ?? '',
+          purpose: 'field-workspace',
+          requestedBy: clientId ?? '',
+          createdAt: proj?.createdAt ?? null,
+          kind: 'workspace',
+          // She belongs to the GOVERNOR and reads the workspace THROUGH it — never a relationship to the ws agent.
+          relationship: 'member',
+          governor: gov,
+          parent: gov,
+          // The workspace→org CONTENT grant (§2.1/§2.4 B). Her field runtime chains her org membership onto this
+          // to read the workspace's content; it is re-verified at the workspace vault, authorizing nothing here.
+          readGrantDelegation: proj?.grant ?? null,
+          // This row is a workspace she READS THROUGH the governor — not one she stewards, nor one she "joined".
+          via: 'governed',
+        });
+      }
+    }
+  } catch { /* discovery is best-effort; a missing projection just means no synthesized workspace row */ }
   return jsonCors({ orgs }, request);
 };
 
@@ -310,6 +356,15 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
      * because somebody asked for it, not because a read came back thin.
      */
     remove?: boolean;
+    /**
+     * Spec 424 §2.3 — write the org→governed-workspace serving-plane projection (`org-workspace:<orgAgent>`): the
+     * governed workspace + its workspace→org CONTENT grant (§2.4 B). The GET synthesizes this into an enterable
+     * row for every member of the governing org, so a member can FIND the workspace and be handed the grant her
+     * field runtime chains her org membership onto. REBUILDABLE from the org's `workspace:<ws>` vault record + the
+     * workspace's `workspace.governor.governorRead` (ADR-0055), so losing it is a rebuild, never a bereavement.
+     * Bearer path only — the person session must control the governor this projection keys on.
+     */
+    governedWorkspace?: { workspace?: string; workspaceName?: string; grant?: unknown };
   } | null;
   const person = (body?.person ?? '').toLowerCase();
   const org = (body?.orgAgent ?? '').toLowerCase();
@@ -345,6 +400,26 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       if (!ownIdx.includes(parent)) {
         return jsonCors({ error: 'parent is not an agent you control' }, request, 401);
       }
+    }
+    // Spec 424 §2.3 — the org→governed-workspace projection. The person stewards the governor (`org`) it keys on
+    // (they just created the pair, or they run the backfill under their session); the workspace→org content grant
+    // rides in and is re-verified at the workspace vault by the field runtime — this write authorizes nothing.
+    const gw = body?.governedWorkspace;
+    if (gw) {
+      const ws = String(gw.workspace ?? '').toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(ws)) return jsonCors({ error: 'governedWorkspace.workspace (0x…40) required' }, request, 400);
+      // The caller must STEWARD the governor this projection keys on — not merely hold a home session. The grant it
+      // carries is re-verified at the workspace vault downstream, so a bogus projection authorizes nothing; this
+      // check keeps a stranger from surfacing a fake workspace row to the org's members (resolution hygiene).
+      const stewardLinkRaw = await env.AUTH_CODES.get(`related:${person}:${org}`);
+      const stewardLink = stewardLinkRaw ? (JSON.parse(stewardLinkRaw) as { relationship?: string }) : null;
+      if (!stewardLink || (stewardLink.relationship ?? 'steward') === 'member') {
+        return jsonCors({ error: 'you do not steward the organization that governs this workspace' }, request, 403);
+      }
+      await env.AUTH_CODES.put(`org-workspace:${org}`, JSON.stringify({
+        workspace: ws, workspaceName: String(gw.workspaceName ?? ''), governor: org, grant: gw.grant ?? null, createdAt: Date.now(),
+      }));
+      return jsonCors({ ok: true, governedWorkspace: ws }, request);
     }
   } else {
     // ERC-1271 control-of-person proof (spec-247 external-custodian path, e.g. a demo-jp operator org).
