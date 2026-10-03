@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState, useRef } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession, type Session } from '../../../context/session';
 import { activateInteractionsIfNeeded, resolveVia } from '../../../home/onboarding';
+import { ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS } from '../../../lib/delegation';
 import {
   fetchWorkList,
   projectAllocationEntry,
@@ -137,7 +138,9 @@ export function useReEnableInteractions(): (principal: Address) => Promise<{ ok:
     // Token always passed: KMS and demo-account homes both sign server-side with it; the wallet
     // and passkey paths ignore it.
     const auth = { token: session.token };
-    const r = await activateInteractionsIfNeeded(principal, via, auth, true);
+    // Org re-enable: the steward signs ONCE here and will not return to re-sign, so the leaf is long-lived
+    // (org-leaf-decay, 2026-10-03). A person's own leaf stays short (self-healed on login) and never uses this path.
+    const r = await activateInteractionsIfNeeded(principal, via, auth, true, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS);
     return r.ok ? { ok: true } : { ok: false, error: r.error ?? 'could not re-enable storage' };
   }, [session, profile]);
 }

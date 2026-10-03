@@ -23,7 +23,7 @@ import type { Address } from '@agenticprimitives/types';
 import { givePermission, createOrganization, createGovernedWorkspace, personGrantForOrgCreate, collectDueSubscriptions, authorizeContentSigningForOwner,
   authorizeServiceAgentWire, activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded,
   isKmsVia, resolveVia, publishSocialConnectionKindIfNeeded, signHashFor, type Via, type Auth } from '../../home/onboarding';
-import { issueAskAsMeDelegation, issueOrganizationResourceAccessDelegation, issueSiteDelegation, issueWorkspaceMembershipAccessDelegation, toWire, type DelegationWire } from '../../lib/delegation';
+import { issueAskAsMeDelegation, issueOrganizationResourceAccessDelegation, issueSiteDelegation, issueWorkspaceMembershipAccessDelegation, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, toWire, type DelegationWire } from '../../lib/delegation';
 import { offerRelationshipCredential, relationshipOfferOf, resolveWorkspaceGovernor, type RelationshipOfferV1 } from '../../lib/workspace-governor';
 import { buildActAsMeSet, signActAsMeSet, type ActChoice } from '../../lib/act-as-me';
 import { ActAsMeConsent } from './ActAsMeConsent';
@@ -686,7 +686,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           if (!bound.ok) return fail(bound.error);
           const delivery = await activateInboxDeliveryIfNeeded(freshTeamAgent, viaLower as Via, auth);
           if (!delivery.ok) console.warn('[team-create] delivery grant not provisioned:', delivery.error);
-          const ix = await activateInteractionsIfNeeded(freshTeamAgent, viaLower as Via, auth);
+          const ix = await activateInteractionsIfNeeded(freshTeamAgent, viaLower as Via, auth, false, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS);
           if (!ix.ok) console.warn('[team-create] interactions grant not provisioned:', ix.error);
         }
         const proved = await personGrantForOrgCreate(home, delegate, viaLower, auth, created, enroll.sessionKey);

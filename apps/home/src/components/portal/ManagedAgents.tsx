@@ -21,6 +21,7 @@ import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteracti
 import { setOrgLifecycleStatus } from '../../home/org-lifecycle';
 import { orgStatusOf, STATUS_LABEL, type OrgSurface } from '../../lib/org-lifecycle';
 import type { DelegationWire } from '../../lib/delegation';
+import { ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS } from '../../lib/delegation';
 import { vaultWriteWithDelegation } from '../../lib/vault-client';
 import { COINS, FUNDING_COIN, shown, type Coin } from '../../lib/coins';
 import { CONTRACTS } from '../../lib/chain';
@@ -271,7 +272,7 @@ export async function createAgentWithBirthrights(
       const grant = await activateInboxDeliveryIfNeeded(res.result.agent, v, { token });
       if (!grant.ok) throw new Error(grant.error);
       // spec 322 W2.2 — plane-B interactions grant, same ceremony (inert until provisioned).
-      const ix = await activateInteractionsIfNeeded(res.result.agent, v, { token });
+      const ix = await activateInteractionsIfNeeded(res.result.agent, v, { token }, false, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS);
       if (!ix.ok) console.warn('[org-create] interactions grant not provisioned:', ix.error);
       // spec 321 items 1+3 — seed what members will look at first: the org's profile record (the
       // "About this organization" card + roster read) and a default #general channel, so a fresh

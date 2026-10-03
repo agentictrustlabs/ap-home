@@ -45,7 +45,7 @@ import { connectWallet, personalSign } from '../lib/wallet';
 import { isDemoCustodyHome, demoCustodySignHash } from '../lib/persona-custody';
 import { writeOrganizationMembership } from '../lib/membership-write';
 import { getClient } from '../lib/oidc-clients';
-import { buildApprovedSiteDelegation, buildApprovedOperationalIntentDelegation, buildApprovedOrgReadDelegation, buildApprovedSelfVaultGrant, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, issueServiceAgentWireDelegation, OPEN_DELEGATION, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type SelfVaultGrantConfig, type VaultKeyCeremonyParams } from '../lib/delegation';
+import { buildApprovedSiteDelegation, buildApprovedOperationalIntentDelegation, buildApprovedOrgReadDelegation, buildApprovedSelfVaultGrant, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, issueServiceAgentWireDelegation, OPEN_DELEGATION, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, PERSON_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type SelfVaultGrantConfig, type VaultKeyCeremonyParams } from '../lib/delegation';
 import { vaultWriteWithDelegation, vaultReadWithDelegation } from '../lib/vault-client';
 import { saveStandingGrant, loadStandingGrant, saveStandingGrantWithSelfVault, loadStandingGrantWithSelfVault } from '../lib/grant-cache';
 import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
@@ -718,7 +718,7 @@ export async function createOrganization(
       activateInboxDeliveryIfNeeded(x.childAgent, via, auth).then((g) => {
         if (!g.ok) throw new Error(g.error);
       }),
-      activateInteractionsIfNeeded(x.childAgent, via, auth).then((ix) => {
+      activateInteractionsIfNeeded(x.childAgent, via, auth, false, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS).then((ix) => {
         if (!ix.ok) console.warn('[org-create] interactions grant not provisioned:', ix.error);
       }),
       x.stewardshipDelegation
@@ -915,7 +915,7 @@ export async function createGovernedWorkspace(
   if (!bound.ok) return { ok: false, error: bound.error };
   const delivery = await activateInboxDeliveryIfNeeded(ws, via, auth);
   if (!delivery.ok) console.warn('[workspace-create] delivery grant not provisioned:', delivery.error);
-  const ix = await activateInteractionsIfNeeded(ws, via, auth);
+  const ix = await activateInteractionsIfNeeded(ws, via, auth, false, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS);
   if (!ix.ok) console.warn('[workspace-create] interactions grant not provisioned:', ix.error);
 
   // 3. THE PAIR. Required: a workspace without its pointer is a legacy one to every reader, which is the state this
@@ -1506,8 +1506,28 @@ export async function activateInteractionsIfNeeded(
   via: Via = 'passkey',
   auth?: Auth,
   force = false,
+  /** The session-leaf lifetime. Omit for the PERSON case (short, self-healed on login — the default). Pass
+   *  ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS when enabling/re-enabling an ORG, service or workspace, whose
+   *  steward signs once and will not return to re-sign (org-leaf-decay, 2026-10-03). */
+  leafTtlSeconds?: number,
 ): Promise<Result<{ skipped?: boolean }>> {
   if (!INTERACTIONS_SERVICE_SA) return { ok: true, skipped: true }; // not provisioned ⇒ inert (deploy-safe)
+  // TTL TIER (org-leaf-decay, 2026-10-03). An explicit value wins. Otherwise: a PERSON's own leaf is SHORT
+  // (the connected user re-signs it each login — correct hygiene, changes nothing); an ORG/service/workspace
+  // leaf is LONG (its steward signs once and will not return). We tell them apart by whether this principal is
+  // the connected user — a best-effort decode of the session token's subject (the TTL is not a security
+  // boundary, so an unreadable token falls to the org-long side: harmless for a person, never under-provisions
+  // an org). This keeps the ambiguous scoped-agent panels from clobbering an org's long leaf with a short one.
+  const connectedPerson = ((): string | undefined => {
+    try {
+      const p = auth?.token?.split('.')[1];
+      if (!p) return undefined;
+      return (JSON.parse(atob(p.replace(/-/g, '+').replace(/_/g, '/'))) as { sub?: string }).sub?.match(/0x[0-9a-fA-F]{40}/)?.[0]?.toLowerCase();
+    } catch { return undefined; }
+  })();
+  const leafTtl = leafTtlSeconds ?? (connectedPerson && connectedPerson === principal.toLowerCase()
+    ? PERSON_INTERACTIONS_SESSION_LEAF_TTL_SECONDS
+    : ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS);
   if (!force) {
     try {
       const st = (await fetch(`/a2a/interactions/${principal.toLowerCase()}/status`).then((r) => r.json())) as { granted?: boolean; current?: boolean; leafLive?: boolean | null };
@@ -1529,7 +1549,7 @@ export async function activateInteractionsIfNeeded(
       const sk = (await fetch(`/a2a/agent/interactions-session-key`).then((r) => r.json()).catch(() => null)) as { ok?: boolean; address?: string } | null;
       if (sk?.ok && sk.address && /^0x[0-9a-fA-F]{40}$/.test(sk.address)) {
         // Spec 408 §2.1 — the DO's session key presents the person's grants to the two service agents only.
-        sessionLeafWire = toWire(await issueSessionDelegation(principal, sk.address as Address, signHash, [INTERACTIONS_SERVICE_SA, ...(DELIVERY_SERVICE_SA ? [DELIVERY_SERVICE_SA] : [])]));
+        sessionLeafWire = toWire(await issueSessionDelegation(principal, sk.address as Address, signHash, [INTERACTIONS_SERVICE_SA, ...(DELIVERY_SERVICE_SA ? [DELIVERY_SERVICE_SA] : [])], leafTtl));
       }
     } catch { /* session-key fetch/sign hiccup — DO falls back to the server-mint bridge; grant still lands */ }
     await ensureCsrfToken();
