@@ -936,6 +936,15 @@ export async function createGovernedWorkspace(
   } catch (e) {
     return { ok: false, error: `${created.result.name} and ${governorName} were created, but the record that ${governorName} governs the workspace could not be written: ${e instanceof Error ? e.message : String(e)}` };
   }
+  // Spec 424 §2.3 — the serving-plane projection every MEMBER's `related-orgs` synthesizes into an enterable
+  // workspace row (so a member finds the workspace and is handed the workspace→org content grant to chain onto).
+  // Best-effort and rebuildable from the pair above; a member with no projection simply sees no workspace yet.
+  if (governorRead) {
+    await fetch('/connect/related-orgs', {
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      body: JSON.stringify({ person: home.address, orgAgent: governor, governedWorkspace: { workspace: ws, workspaceName: created.result.name || name, grant: governorRead } }),
+    }).catch((e) => console.warn('[workspace-create] governed-workspace projection not written:', e instanceof Error ? e.message : String(e)));
+  }
   return {
     ok: true,
     org: {
