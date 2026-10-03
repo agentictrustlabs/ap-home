@@ -4203,6 +4203,10 @@ app.post('/harness/ask', async (c) => {
      *  composer LLM for the informational reply. Honoured only with `plan` (a supplied plan); the rows ride
      *  back regardless, so nothing the screen reads changes. */
     rowsOnly?: boolean;
+    /** Spec 423 L1 — an APP BACKGROUND poll (a surface reading a deterministic, LLM-free supplied-plan read, e.g.
+     *  the bell checking invitations). Marks the run's door `background` so it stays traced but is kept out of the
+     *  human "What this agent did" list. Never changes authority — a read is a read. */
+    background?: boolean;
     /** Spec 366 R2 — another agent's routed request under the subject-ask profile. */
     subjectAsk?: unknown;
     /** Spec 397 — through a host: the registered client + template. Honoured only beside a verified A2A-Session admission. */
@@ -4915,7 +4919,7 @@ app.post('/harness/ask', async (c) => {
         // Spec 414 A1b — THE TRACE FROM THE DOOR. The door is decided here: an in-process hop from this Worker's A2A
         // door names its message ids; a routed ask from another agent's run is `routed`; a continuation is a
         // `resume`; anything else is a direct ask. Plus the model calls and the variant this run ran under.
-        door: ((d) => (inResponseTo ? { ...(d ?? {}), kind: 'routed' as const } : d ?? (viaHost ? { kind: 'home-mcp' as const, ...viaHost } : body.runRef && (body.supplied?.length || body.approvals) ? { kind: 'resume' as const } : { kind: 'harness-ask' as const })))(doorFromBody(body, isInWorkerRequest(c.req.raw))),
+        door: ((d) => (inResponseTo ? { ...(d ?? {}), kind: 'routed' as const } : d ?? (viaHost ? { kind: 'home-mcp' as const, ...viaHost } : body.background ? { kind: 'background' as const } : body.runRef && (body.supplied?.length || body.approvals) ? { kind: 'resume' as const } : { kind: 'harness-ask' as const })))(doorFromBody(body, isInWorkerRequest(c.req.raw))),
         modelCalls: modelCallsOf(trace, marks.list), variant: variantOf(c.env as never, trace, variantReq), ...(variantReq?.startingState ? { startingState: { digest: variantReq.startingState.digest } } : {}), engaged: engagedFromTrace(trace),
         // Spec 417 §5 — how the turn went (stages, the selection, the turn), kept past the reply.
         operational: operationalOf(trace, marks.list, { receivedAt, runStartMs, runEndMs, ...(typeof doorFromBody(body, isInWorkerRequest(c.req.raw))?.contextId === 'string' ? { contextId: doorFromBody(body, isInWorkerRequest(c.req.raw))!.contextId! } : {}) }) }));

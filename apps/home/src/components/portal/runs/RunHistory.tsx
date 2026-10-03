@@ -45,7 +45,10 @@ export function RunHistory({ token, addressee, limit = 60 }: { token: string; ad
     setRows(null); setUnknown(null);
     void listRunRecords({ token }, addressee).then((r) => {
       if (!live) return;
-      const sorted = r.records.sort((a, b) => b.at - a.at);
+      // Spec 423 L1 — "What this agent did" is a log of what the PERSON asked. An app background poll (the bell
+      // checking invitations every 60s) is traced for forensics but is not a deliberate ask, so it is kept out of
+      // this list by its door kind. (It remains in the full trace store, reachable by the operator view.)
+      const sorted = r.records.filter((x) => x.door?.kind !== 'background').sort((a, b) => b.at - a.at);
       setRows(sorted);
       // Spec 406 W1 — `?run=<runRef>` (the operator view's rows link here): open THAT run's inspector — the evidence.
       try { const want = new URL(window.location.href).searchParams.get('run'); const hit = want ? sorted.find((x) => x.runRef === want) : undefined; if (hit) setOpen(hit); } catch { /* no URL */ }
