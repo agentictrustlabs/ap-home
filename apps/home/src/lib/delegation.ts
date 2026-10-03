@@ -1240,6 +1240,12 @@ export const PERSON_INTERACTIONS_SESSION_LEAF_TTL_SECONDS =
  *  not return for weeks and nothing else re-signs it. Overridable per deployment. */
 export const ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS =
   Number(process.env.NEXT_PUBLIC_ORG_INTERACTIONS_LEAF_TTL_SECONDS) || 60 * 60 * 24 * 365;
+/** Spec 423 §2.1 route A — the PRE-APPROVED LEAF LADDER depth for an org. The steward signs this many session
+ *  leaves at once (windows tiling forward by the org TTL), so a live rung exists for rungs × TTL — years of
+ *  autonomy from a single signing, with no new security surface (the DO just picks the live rung). A person's
+ *  leaf is always a single rung (they re-sign each login). Env-tunable. */
+export const ORG_INTERACTIONS_SESSION_LEAF_LADDER_RUNGS =
+  Math.max(1, Math.min(8, Number(process.env.NEXT_PUBLIC_ORG_INTERACTIONS_LEAF_LADDER_RUNGS) || 3));
 
 /** Issue the DEL-001 session-delegation leaf `personAgent → sessionKey`, signed by the SAME ROOT
  *  credential (`signHash`) that signs the site delegation at connect. Bound to the person SA (the

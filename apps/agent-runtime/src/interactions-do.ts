@@ -450,6 +450,11 @@ interface StoredState {
    *  vaultFor CLIENT-MINTS a bound token (callMcpToolBound) instead of server-mint — no DEMO_ALLOW_SERVER_MINT.
    *  Absent ⇒ vaultFor falls back to the server-mint bridge (existing principals migrate on next enable). */
   sessionLeaf?: IncomingDelegation;
+  /** Spec 423 §2.1 route A — the PRE-APPROVED LEAF LADDER: N session leaves signed together at enable, windows
+   *  tiling forward, so a live rung exists for N·T with no steward present to re-sign. When set it supersedes
+   *  `sessionLeaf` (which stays the live-at-enable rung for back-compat readers). The DO picks the live rung
+   *  (`activeLeaf`); when all rungs expire it is `needsReEnable`, same as a lapsed single leaf. */
+  sessionLeaves?: IncomingDelegation[];
   /** spec 323 W3 — the WRITE-ONLY delivery wire (owner → DELIVERY_SERVICE_SA), custodied HERE (a
    *  stored wire is a bearer secret; the DO is the delegate-service side, spec 322 §2). The DO is
    *  now the sole holder+wielder for dm-body writes — no app (not even the Home) keeps it. */
@@ -869,7 +874,10 @@ export class InteractionsDO {
     // dev key — the two gates MUST agree or a leaf gets minted that ops then refuse to use.
     if (interactionsSessionKeyConfigured(env)) {
       const st = ((await this.state.storage.get('state')) ?? {}) as StoredState;
-      const leaf = st.sessionLeaf;
+      // Route A — sign under the LIVE ladder rung (falls back to the single legacy leaf). When the ladder is
+      // exhausted there is no live rung, so we fall through to session_leaf_required (the endeavor pre-flight
+      // has already turned that into an actionable needsReEnable for the surfaces that poll).
+      const leaf = this.activeLeaf(st);
       if (leaf && leaf.delegator.toLowerCase() === grant.delegator.toLowerCase()) {
         // ONE THROTTLE MECHANISM FOR EVERY VAULT TOOL (spec 382, found live). demo-mcp's stage-2 soft
         // limiter (120 verified calls / 60 s per principal) rejects with the same opaque 401 as a credential
@@ -1596,9 +1604,15 @@ export class InteractionsDO {
    * leaf or its window cannot be read; else whether NOW is inside it. Reported on status so the Home re-issues the leaf
    * on the person's next visit, and consulted before the DO signs as the agent.
    */
-  sessionLeafLive(st: StoredState): boolean | null {
-    const leaf = st.sessionLeaf;
-    if (!leaf) return null;
+  /** Spec 423 §2.1 route A — THE PRE-APPROVED LEAF LADDER. A steward signs N session leaves at once, their windows
+   *  tiling forward (each `[0, now + (i+1)·T]`), so a live leaf exists for N·T without the steward returning. The
+   *  ladder is `st.sessionLeaves`; a legacy single `st.sessionLeaf` is just a one-rung ladder (back-compat — an org
+   *  enabled before route A keeps working unchanged). */
+  private leafLadder(st: StoredState): IncomingDelegation[] {
+    return st.sessionLeaves && st.sessionLeaves.length ? st.sessionLeaves : (st.sessionLeaf ? [st.sessionLeaf] : []);
+  }
+  /** Is this one leaf's timestamp window live now? `null` when it carries no readable window. */
+  private leafWindowLive(leaf: IncomingDelegation): boolean | null {
     const ts = (leaf.caveats ?? []).find((c) => (c.enforcer ?? '').toLowerCase() === String(this.env.TIMESTAMP_ENFORCER ?? '').toLowerCase());
     if (!ts?.terms) return null;
     try {
@@ -1607,9 +1621,24 @@ export class InteractionsDO {
       return now >= w.validAfter && now < w.validUntil;
     } catch { return null; }
   }
+  /** The LIVE rung the DO signs under: the first ladder leaf whose window contains now. `undefined` when the
+   *  ladder is exhausted (every rung expired) — which is `needsReEnable` territory, caught before a vault read. */
+  private activeLeaf(st: StoredState): IncomingDelegation | undefined {
+    return this.leafLadder(st).find((l) => this.leafWindowLive(l) === true);
+  }
+
+  sessionLeafLive(st: StoredState): boolean | null {
+    const ladder = this.leafLadder(st);
+    if (!ladder.length) return null;                                   // no leaf at all — absence, not staleness
+    if (ladder.some((l) => this.leafWindowLive(l) === true)) return true; // a rung is live
+    // No rung is live: expired if any window was readable (→ re-enable); null only if none could be read.
+    return ladder.some((l) => this.leafWindowLive(l) !== null) ? false : null;
+  }
 
   private async sessionLeafMatchesSigner(st: StoredState): Promise<boolean> {
-    const leaf = st.sessionLeaf;
+    // Every rung binds the SAME session key (built together at enable), so the active rung — or any, for a
+    // status read when none is live — answers for all.
+    const leaf = this.activeLeaf(st) ?? this.leafLadder(st)[0];
     if (!leaf?.delegate) return true;
     try {
       const acct = await interactionsSessionAccount(this.env);
@@ -1631,17 +1660,17 @@ export class InteractionsDO {
    * found live: alice's pre-408 org leaves 409-stormed the Work page; see the org-leaf-decay incident.)
    */
   private sessionLeafAudienceOk(st: StoredState): boolean {
-    const leaf = st.sessionLeaf;
+    const leaf = this.activeLeaf(st) ?? this.leafLadder(st)[0];
     if (!leaf) return true;
     const c = (leaf.caveats ?? []).find((x) => (x.enforcer ?? '').toLowerCase() === SESSION_AUDIENCE_ENFORCER.toLowerCase());
     if (!c?.terms) return false;
     try { return decodeSessionAudienceTerms(c.terms as Hex).length > 0; } catch { return false; }
   }
 
-  /** The three deterministic ways a PRESENT session leaf is stale (expired · wrong signer · no spec-408 audience),
-   *  as one predicate. A principal on the older no-leaf path is NOT stale (every check passes for an absent leaf). */
+  /** The deterministic ways a PRESENT leaf ladder is stale (every rung expired · wrong signer · no spec-408
+   *  audience), as one predicate. A principal on the older no-leaf path is NOT stale (empty ladder). */
   private async sessionLeafStale(st: StoredState): Promise<boolean> {
-    if (!st.sessionLeaf) return false;
+    if (!this.leafLadder(st).length) return false;
     return this.sessionLeafLive(st) === false || !this.sessionLeafAudienceOk(st) || !(await this.sessionLeafMatchesSigner(st));
   }
 
@@ -1864,17 +1893,27 @@ export class InteractionsDO {
       // NEW-C1 — custody the PRINCIPAL-signed DEL-001 session leaf (principal → interactions-session key), if
       // supplied. Verify it ERC-1271 against the principal (== grant delegator) so the DO never bound-mints
       // with a junk leaf; demo-mcp re-checks the binding at enforceBinding. Absent ⇒ server-mint bridge.
-      const leafWire = body.sessionLeaf as IncomingDelegation | undefined;
-      if (leafWire?.signature) {
-        if (leafWire.delegator.toLowerCase() !== wire.delegator.toLowerCase()) {
-          return json({ error: 'session leaf delegator must equal the grant delegator (the principal) — NEW-C1' }, 400);
+      // Route A (spec 423 §2.1) — accept a LADDER (`sessionLeaves`) or a single legacy leaf (`sessionLeaf`). Each
+      // rung is verified ERC-1271 against the principal (== grant delegator) before storing, so the DO never signs
+      // under a junk leaf; demo-mcp re-checks the binding at enforceBinding. Absent ⇒ server-mint bridge.
+      const leavesWire = Array.isArray(body.sessionLeaves) ? (body.sessionLeaves as IncomingDelegation[]) : undefined;
+      const single = body.sessionLeaf as IncomingDelegation | undefined;
+      const candidates = (leavesWire && leavesWire.length ? leavesWire : single ? [single] : []).filter((l) => l?.signature);
+      if (candidates.length) {
+        const verified: IncomingDelegation[] = [];
+        for (const lw of candidates) {
+          if (lw.delegator.toLowerCase() !== wire.delegator.toLowerCase()) {
+            return json({ error: 'session leaf delegator must equal the grant delegator (the principal) — NEW-C1' }, 400);
+          }
+          const ld: Delegation = { ...lw, salt: BigInt(lw.salt), caveats: lw.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
+          const ldigest = hashDelegation(ld, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+          if (!(await this.erc1271(lw.delegator as Address, ldigest, lw.signature as Hex))) {
+            return json({ error: 'session leaf signature failed verification against the principal (NEW-C1)' }, 403);
+          }
+          verified.push(lw);
         }
-        const ld: Delegation = { ...leafWire, salt: BigInt(leafWire.salt), caveats: leafWire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
-        const ldigest = hashDelegation(ld, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
-        if (!(await this.erc1271(leafWire.delegator as Address, ldigest, leafWire.signature as Hex))) {
-          return json({ error: 'session leaf signature failed verification against the principal (NEW-C1)' }, 403);
-        }
-        st.sessionLeaf = leafWire;
+        st.sessionLeaf = verified[0];                              // the live-at-enable rung (back-compat readers)
+        if (leavesWire) st.sessionLeaves = verified; else delete st.sessionLeaves; // a single-leaf enable clears a stale ladder
       }
       // Ledger row (W3e): hash + delegate + decoded resources — never the wire (bearer secret).
       let resources: string[] = [];
@@ -3095,7 +3134,7 @@ export class InteractionsDO {
           // An EXPIRED leaf is handed to nobody: a signature under it verifies nowhere, and saying so here — with the
           // window — is what lets the signer refuse in words instead of minting an "invalid" release (spec 412 W5).
           const live = this.sessionLeafLive(st);
-          return json({ ok: true, leaf: live === false ? null : (st.sessionLeaf ?? null), leafLive: live, ...(live === false ? { reason: 'the session leaf has expired — the person refreshes it by opening their Home' } : {}) });
+          return json({ ok: true, leaf: live === false ? null : (this.activeLeaf(st) ?? st.sessionLeaf ?? null), leafLive: live, ...(st.sessionLeaves?.length ? { ladder: st.sessionLeaves.length } : {}), ...(live === false ? { reason: 'the session leaf has expired — the person refreshes it by opening their Home' } : {}) });
         }
         if (op === 'internal.consult.orgWire') {
           // The §3.1 wire, handed ONLY in-Worker to the org's own A2aTaskDO (the routing signer).
