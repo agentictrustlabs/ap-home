@@ -77,6 +77,8 @@ export function executorInvokeInvoker(deps: ExecutorInvokeDeps, invoke: Executor
     // the applied capability + executor + intent + this receipt in run.provenance (W3); the caller enforces
     // apply-iff-proof (§7). No fallback on error (ADR-0013): a refusal is a refusal.
     const receipt = body?.result ?? {};
-    return { answer: `Done — recorded with ${invoke.executor}.`, receipt, record: receipt };
+    // `invoked` names the executor + intent for provenance (spec 426 §7); the harness surfaces it + the receipt
+    // on the step's `run.provenance` entry, which the caller reads for apply-iff-proof. Opaque receipt, clean result.
+    return { answer: `Done — recorded with ${invoke.executor}.`, receipt, record: receipt, invoked: { executor: invoke.executor, intent: invoke.intent } };
   };
 }
