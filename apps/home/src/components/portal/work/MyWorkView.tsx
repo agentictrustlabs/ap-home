@@ -47,11 +47,30 @@ function EntryCard({
   );
 }
 
+// Spec 423 §3.3 — the "I don't need this" exit. A per-VIEWER dismissal of a paused org's row: it changes no org
+// record (ADR-0055 — a rebuild, not a bereavement), only this person's own Work view. localStorage is the right home
+// for a per-viewer convenience like a dismissed row (W1; the spec's vault-resident projection is a later upgrade).
+const DISMISS_KEY = (addr: string | null | undefined) => `faithnet:work:paused-dismissed:${(addr ?? 'anon').toLowerCase()}`;
+function readDismissed(addr: string | null | undefined): Set<string> {
+  try { const raw = localStorage.getItem(DISMISS_KEY(addr)); return new Set(raw ? (JSON.parse(raw) as string[]).map((s) => s.toLowerCase()) : []); } catch { return new Set(); }
+}
+function writeDismissed(addr: string | null | undefined, set: Set<string>): void {
+  try { localStorage.setItem(DISMISS_KEY(addr), JSON.stringify([...set])); } catch { /* private mode / disabled — the dismissal just won't persist across reloads */ }
+}
+
 export function MyWorkView() {
   const { session, profile: homeProfile, agentAddress } = useSession();
   const { bundles, staleOrgs, error: loadError, load } = useMyWork(session, agentAddress);
   const [actError, setError] = useState<string | null>(null);
   const error = actError ?? loadError;
+  // Per-viewer dismissal of paused-org rows (spec 423 §3.3). Empty on first render (SSR-safe); filled from
+  // localStorage once mounted, re-read when the acting person changes.
+  const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
+  useEffect(() => { setDismissed(readDismissed(agentAddress)); }, [agentAddress]);
+  const dismiss = useCallback((org: string) => {
+    setDismissed((prev) => { const next = new Set(prev); next.add(org.toLowerCase()); writeDismissed(agentAddress, next); return next; });
+  }, [agentAddress]);
+  const visibleStale = useMemo(() => staleOrgs.filter((s) => !dismissed.has(s.org.toLowerCase())), [staleOrgs, dismissed]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const reEnable = useReEnableInteractions();
@@ -166,16 +185,18 @@ export function MyWorkView() {
     >
       {error && <ErrorNote>{error}</ErrorNote>}
 
-      {staleOrgs.length > 0 && (
+      {visibleStale.length > 0 && (
         <div className="ui-card" style={{ marginBottom: 'var(--sp-4)', borderColor: 'var(--st-warn-dot)', background: 'var(--st-warn-bg)' }}>
-          <p className="ui-note" style={{ color: 'var(--st-warn-fg)' }}>Storage was upgraded for coordination — these organizations&rsquo; grants must be re-signed before their work loads:</p>
+          <p className="ui-note" style={{ color: 'var(--st-warn-fg)' }}>Storage is paused for these organizations — their signing session lapsed, so their work can&rsquo;t load. The organization&rsquo;s authority is unchanged; a steward renews it with one signature.</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {staleOrgs.map((s) => (
+            {visibleStale.map((s) => (
               <div key={s.org} style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600 }}>{s.orgName ?? `${s.org.slice(0, 10)}…`}</span>
                 {s.steward ? (
-                  <BusyButton busy={busyId === `reenable:${s.org}`} busyLabel="Re-enabling…" className="ui-btn ui-btn--secondary ui-btn--sm" onClick={() => void runReEnable(s)}>Re-enable storage</BusyButton>
-                ) : <span className="ui-micro">ask a steward to re-enable</span>}
+                  <BusyButton busy={busyId === `reenable:${s.org}`} busyLabel="Renewing…" className="ui-btn ui-btn--secondary ui-btn--sm" onClick={() => void runReEnable(s)}>Renew storage</BusyButton>
+                ) : <span className="ui-micro">its steward needs to renew it</span>}
+                {/* Spec 423 §3.3 — a way OUT, not just a way forward: hide this row from my Work (per-viewer, reversible). */}
+                <button type="button" className="ui-btn ui-btn--ghost ui-btn--sm" onClick={() => dismiss(s.org)} title="Remove this from my Work (does not change the organization)">I don&rsquo;t need this</button>
               </div>
             ))}
           </div>
