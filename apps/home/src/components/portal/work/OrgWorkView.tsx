@@ -117,11 +117,11 @@ export function OrgWorkView({ org }: { org: Address }) {
     >
       {needsReEnable ? (
         <Card quiet>
-          <p className="ui-meta" style={{ margin: '0 0 var(--sp-2)', color: 'var(--color-text-body)' }}>Storage was upgraded for coordination — the organization&rsquo;s grant must be re-signed before Work can load.</p>
+          <p className="ui-meta" style={{ margin: '0 0 var(--sp-2)', color: 'var(--color-text-body)' }}>Storage is paused — the organization&rsquo;s signing session lapsed, so Work can&rsquo;t load. Its authority is unchanged; a steward renews it with one signature.</p>
           {steward ? (
-            <BusyButton busy={reEnabling} busyLabel="Re-enabling…" className="ui-btn ui-btn--primary ui-btn--sm" onClick={() => void runReEnable()}>Re-enable storage</BusyButton>
+            <BusyButton busy={reEnabling} busyLabel="Renewing…" className="ui-btn ui-btn--primary ui-btn--sm" onClick={() => void runReEnable()}>Renew storage</BusyButton>
           ) : (
-            <Meta>Ask an organization steward to open this page and re-enable storage.</Meta>
+            <Meta>Its steward needs to renew storage for this organization.</Meta>
           )}
           {reEnableError && <ErrorNote>{reEnableError}</ErrorNote>}
         </Card>

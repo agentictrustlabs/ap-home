@@ -154,6 +154,11 @@ export function useWorkList(session: Session | null, org: string): WorkListState
   const [needsReEnable, setNeedsReEnable] = useState(false);
 
   const refreshing = useRef(false);
+  // STOP THE STORM (spec 423 §3.2 / L1). A stale org (`needsReEnable`) or one this viewer is not a member of will
+  // answer the SAME 409 on every tick until a STEWARD re-enables it — nothing the 12s poll does can change that, so
+  // it only re-storms the console and the vault budget. Once we see that terminal state we PAUSE the interval; a
+  // steward's explicit re-enable calls `refresh()` directly (below), which bypasses the pause and resumes a live org.
+  const pausedRef = useRef(false);
   // Read the session through a ref so `refresh` does NOT change identity when the session object/token churns
   // between renders — that churn re-fired the `[refresh]` effect every render (the single-org twin of the My Work
   // loop) and re-created the 12s poll each time. Keyed on `org` only; the latest session is read at call time.
@@ -164,13 +169,14 @@ export function useWorkList(session: Session | null, org: string): WorkListState
     refreshing.current = true;
     try {
       const r = await fetchWorkList(session.token, org);
-      if (r.member === false) { setMember(false); setData(null); setError(null); return; }
+      if (r.member === false) { setMember(false); setData(null); setError(null); pausedRef.current = true; return; }
       setSteward(r.steward === true);
-      if (r.ok === false && r.error) { setError(r.error); setNeedsReEnable(r.needsReEnable === true); return; }
+      if (r.ok === false && r.error) { setError(r.error); setNeedsReEnable(r.needsReEnable === true); pausedRef.current = r.needsReEnable === true; return; }
       setMember(true);
       setData(r);
       setError(null);
       setNeedsReEnable(false);
+      pausedRef.current = false;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { refreshing.current = false; }
@@ -178,7 +184,9 @@ export function useWorkList(session: Session | null, org: string): WorkListState
 
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
-    const t = setInterval(() => void refresh(), 12000);
+    // Skip a tick while paused (stale / not-a-member) instead of tearing the interval down, so it resumes
+    // on its own the moment a live read lands (e.g. after a steward re-enable clears `pausedRef`).
+    const t = setInterval(() => { if (pausedRef.current) return; void refresh(); }, 12000);
     return () => clearInterval(t);
   }, [refresh]);
 
