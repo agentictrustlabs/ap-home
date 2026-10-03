@@ -21,7 +21,7 @@ import { CONTACT_FIELD_ARGS, contactField, precisionOf } from '@agenticprimitive
 import { createPublicClient, http, decodeAbiParameters, type Address, type Hex } from 'viem';
 import { chainFor } from './chain';
 import { kinTermFor, householdRoleFor } from '@agenticprimitives/ontology';
-import { hashDelegation, decodeTimestampTerms, decodeVaultRecordScopeTerms, vaultRecordScopeAllows, VAULT_RECORD_SCOPE_ENFORCER, type Delegation, type VaultRecordScopeGrant, currentWireOf, LINEAGE_RECORD_PREFIX, type DelegationLineageV1 } from '@agenticprimitives/delegation';
+import { hashDelegation, decodeTimestampTerms, decodeVaultRecordScopeTerms, vaultRecordScopeAllows, VAULT_RECORD_SCOPE_ENFORCER, SESSION_AUDIENCE_ENFORCER, decodeSessionAudienceTerms, type Delegation, type VaultRecordScopeGrant, currentWireOf, LINEAGE_RECORD_PREFIX, type DelegationLineageV1 } from '@agenticprimitives/delegation';
 import { PrincipalGatewayDO } from '@agenticprimitives/fabric/cloudflare';
 import { governorOf, WORKSPACE_GOVERNOR_RECORD } from '@agenticprimitives/context';
 import { buildMountedGatewayDeps } from './gateway-mount.js';
@@ -1619,6 +1619,32 @@ export class InteractionsDO {
     }
   }
 
+  /**
+   * Spec 408 §2.1 — DOES THE STORED LEAF CARRY AN AUDIENCE? A DEL-001 session leaf must name the delegates its
+   * key may present the principal's grants to (`SESSION_AUDIENCE_ENFORCER`); demo-mcp now REJECTS a leaf that
+   * names none ("session-delegation names no audience"). A leaf minted before 408 carries no such caveat, so
+   * every vault read it fuels fails at mcp with a bare "auth failed" — while `sessionLeafLive`/`-MatchesSigner`
+   * both report fine (the leaf is neither expired nor mis-signed), so `status.current` stayed true and the
+   * Home's self-heal SKIPPED it forever. This closes that blind spot: a PRESENT leaf with no (or empty)
+   * audience is stale and must be re-issued. `true` when there is no leaf at all — absence is a different state
+   * (handled by the fail-closed session_leaf_required path), not a reason to force a re-issue. (2026-10-03,
+   * found live: alice's pre-408 org leaves 409-stormed the Work page; see the org-leaf-decay incident.)
+   */
+  private sessionLeafAudienceOk(st: StoredState): boolean {
+    const leaf = st.sessionLeaf;
+    if (!leaf) return true;
+    const c = (leaf.caveats ?? []).find((x) => (x.enforcer ?? '').toLowerCase() === SESSION_AUDIENCE_ENFORCER.toLowerCase());
+    if (!c?.terms) return false;
+    try { return decodeSessionAudienceTerms(c.terms as Hex).length > 0; } catch { return false; }
+  }
+
+  /** The three deterministic ways a PRESENT session leaf is stale (expired · wrong signer · no spec-408 audience),
+   *  as one predicate. A principal on the older no-leaf path is NOT stale (every check passes for an absent leaf). */
+  private async sessionLeafStale(st: StoredState): Promise<boolean> {
+    if (!st.sessionLeaf) return false;
+    return this.sessionLeafLive(st) === false || !this.sessionLeafAudienceOk(st) || !(await this.sessionLeafMatchesSigner(st));
+  }
+
   /** Bridge-HMAC gate for the Home-server channel (SEC-010 envelope; audience pins the op). */
   private async bridgeGate(request: Request, rawBody: string, op: string): Promise<{ ok: true } | { ok: false; reason: string }> {
     const secret = this.env.A2A_CUSTODY_BRIDGE_SECRET;
@@ -1923,9 +1949,12 @@ export class InteractionsDO {
         // cheerfully reported `current: true` — so the Home's activateInteractionsIfNeeded skipped and
         // nothing ever re-issued. Seen live on the 2026-09-02 AKCS cutover. Including the leaf's delegate
         // here makes a key rotation self-heal on the principal's next sign-in.
-        current: !!st.grant && this.grantIsCurrent(st.grant) && await this.sessionLeafMatchesSigner(st) && this.sessionLeafLive(st) !== false,
+        current: !!st.grant && this.grantIsCurrent(st.grant) && await this.sessionLeafMatchesSigner(st) && this.sessionLeafLive(st) !== false && this.sessionLeafAudienceOk(st),
         // The leaf's own window, so a Home can say "your agent's session leaf expired on …" rather than "stale".
         leafLive: this.sessionLeafLive(st),
+        // Spec 408 §2.1 — does the leaf carry an audience? A pre-408 leaf reports live+matched but mcp rejects it;
+        // surfacing this lets a Home say "re-enable to renew the signing leaf" instead of a bare "auth failed".
+        leafAudienceOk: this.sessionLeafAudienceOk(st),
         // WHAT THE GRANT ACTUALLY COVERS. `granted` and `current` both say yes while a write is refused
         // with `record_scope_denied`, because a grant can be present, unstale, and still not name the
         // record someone is trying to write. Reporting the resources makes that answerable instead of
@@ -4125,6 +4154,17 @@ export class InteractionsDO {
       //    (`record_scope_denied`) — surfaced here as an explicit 409 re-enable signal, never a 500 and
       //    never a weaker read path.
       if (op.startsWith('endeavor.')) {
+        // Spec 408 §2.1 / org-leaf-decay (2026-10-03) — PRE-FLIGHT THE SIGNING LEAF. The org's 1-year
+        // interactions grant can be perfectly current while the DEL-001 session leaf that fuels the read
+        // is expired (12 h) or predates the audience requirement. That used to reach demo-mcp, fail with a
+        // bare "auth failed — mcp: auth failed", and 409-storm the Work page with no actionable signal —
+        // the self-heal never fired (status said current) and the UI showed no re-enable. Say it plainly
+        // here, BEFORE the read, with the same `needsReEnable` shape the coordination-scope path uses, so
+        // the Home surfaces the re-enable ceremony (a steward renews the leaf) instead of a dead loop.
+        const stLeaf = ((await this.state.storage.get('state')) ?? {}) as StoredState;
+        if (await this.sessionLeafStale(stLeaf)) {
+          return json({ ok: false, error: 'the agent’s signing session has expired — a steward must re-enable storage to renew it (the organization’s authority is unchanged; only the short-lived session leaf lapsed)', needsReEnable: true }, 409);
+        }
         try {
           const res = await handleEndeavorOp({
           principal,
