@@ -1,0 +1,119 @@
+{
+  "purpose": "the cast of Snowfall at the Belvedere — each character a PERSON agent of a real demo person, never their default (an operator note, not a persona)",
+  "chainId": 34348,
+  "cast": [
+    {
+      "role": "naomi",
+      "character": "Naomi Kyaw",
+      "name": "naomi-elena.me",
+      "sa": "0x8482b1963f8435c111ffc57aa3b4754addb1a2a5",
+      "custodian": "elena"
+    },
+    {
+      "role": "yusuf",
+      "character": "Yusuf Abdi",
+      "name": "yusuf-dave.me",
+      "sa": "0xcfa3a0d66989cd821afc8ab7b592b429d4ac6a52",
+      "custodian": "dave"
+    },
+    {
+      "role": "carla",
+      "character": "Carla Mendez",
+      "name": "carla-carol.me",
+      "sa": "0x20d00a1d9dc3b9093eff8b4ae4f7c89ea1ff718d",
+      "custodian": "carol"
+    },
+    {
+      "role": "farid",
+      "character": "Farid Nazari",
+      "name": "farid-bob.me",
+      "sa": "0x52fe2f69adbc0d266111f26ba33381637db8d454",
+      "custodian": "bob"
+    },
+    {
+      "role": "grace",
+      "character": "Grace Lin",
+      "name": "grace-alice.me",
+      "sa": "0x4f4d0a2b4d8d42b50f06c5a6e936078d66c0e76f",
+      "custodian": "alice"
+    },
+    {
+      "role": "tomas",
+      "character": "Tomás Herrera",
+      "name": "tomas-nathan.me",
+      "sa": "0x368106f610b6bd7b5685ed005222f45b2326fd6b",
+      "custodian": "nathan"
+    },
+    {
+      "role": "olena",
+      "character": "Olena Shevchenko",
+      "name": "olena-david.me",
+      "sa": "0x5eb427ad88248a4def7027c52075d4ca0d4d8d37",
+      "custodian": "david"
+    },
+    {
+      "role": "mark",
+      "character": "Mark Osei",
+      "name": "mark-bob.me",
+      "sa": "0x33585c2e3abbdd46f7d4dc4aeb0dfa8506e9913e",
+      "custodian": "bob"
+    },
+    {
+      "role": "hodan",
+      "character": "Hodan Warsame",
+      "name": "hodan-elena.me",
+      "sa": "0x04d5bbc026eb5a20dcf24c8ce3beb84b97ef7623",
+      "custodian": "elena"
+    },
+    {
+      "role": "luis",
+      "character": "Luis Camacho",
+      "name": "luis-dave.me",
+      "sa": "0x59748637e9f1a651034e3078a24ed9ee6626959c",
+      "custodian": "dave"
+    },
+    {
+      "role": "priya",
+      "character": "Dr Priya Natarajan",
+      "name": "priya-alice.me",
+      "sa": "0x30b6024424772e2a6247a4a8ffcd4ced26c9856f",
+      "custodian": "alice"
+    },
+    {
+      "role": "sam",
+      "character": "Sam Whitaker",
+      "name": "sam-nathan.me",
+      "sa": "0x8777c65a87703fc432cff7b97311592b83b330ab",
+      "custodian": "nathan"
+    },
+    {
+      "role": "dan",
+      "character": "Pastor Dan Ellis",
+      "name": "dan-carol.me",
+      "sa": "0xa4485f10786815aa0df672d87066f70c2921e710",
+      "custodian": "carol"
+    },
+    {
+      "role": "kim",
+      "character": "Pastor Kim Park",
+      "name": "kim-david.me",
+      "sa": "0xacd2c1601eb245e3077823fcd573ba5ebe455cd5",
+      "custodian": "david"
+    },
+    {
+      "role": "jenna",
+      "character": "Pastor Jenna Ruiz",
+      "name": "jenna-alice.me",
+      "sa": "0xe43492038f6567055703d2f7a7b1ef288876625f",
+      "custodian": "alice"
+    },
+    {
+      "role": "walt",
+      "character": "Pastor Walt Jensen",
+      "name": "walt-bob.me",
+      "sa": "0x4fe8e324006c830899de9ac8c8f5426c34a97469",
+      "custodian": "bob"
+    }
+  ],
+  "charteredAt": "2026-10-01T21:58:01.825Z"
+}
