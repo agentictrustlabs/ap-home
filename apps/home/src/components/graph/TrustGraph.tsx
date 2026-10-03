@@ -80,7 +80,9 @@ export function useLivePerson(): { live: LivePerson | null; loaded: boolean } {
         const governedBy = workspaceGovernorOf(o, agents);
         return {
           agent: o.agent,
-          name: o.name ? nameLabel(o.name) : null,
+          // A PRIVATE/LOCAL name (no public registration) is marked with a trailing " *" so it reads as "a name
+          // you hold", not a public one (the node adds the tooltip). An unnamed agent stays null → short address.
+          name: o.name ? (o.nameIsLocal ? `${nameLabel(o.name)} *` : nameLabel(o.name)) : null,
           cls: agentClassOf(o.kind),
           kindWord: kindWordOf(o.kind),
           relationship: o.relationship,
@@ -171,7 +173,10 @@ function TrustNode({ data, selected }: NodeProps<Node<NodeData>>) {
       <div style={{ display: 'flex', alignItems: 'center', gap: '.55rem' }}>
         <Glyph kind={data.kind} name={data.name} />
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontWeight: 700, fontSize: '.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <div
+            style={{ fontWeight: 700, fontSize: '.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+            {...(typeof data.name === 'string' && data.name.endsWith(' *') ? { title: 'A private name you hold — this agent has no public name' } : {})}
+          >
             {data.name}
           </div>
           <div style={{ fontSize: '.68rem', color: 'var(--color-text-faint)' }}>{data.sub}</div>

@@ -1522,6 +1522,10 @@ export interface ManagedAgent {
    *  the switcher reads it to show "workspace · you → <org>". Absent for an org, a standalone workspace, or a
    *  person-held service. */
   governor?: Address;
+  /** The `name` is a PRIVATE/LOCAL name the viewer holds (from the owner's vault via member access, surfaced as a
+   *  rebuildable `org-localname:<agent>` projection), not a publicly registered naming-service name. Surfaces have
+   *  marked it so (a trailing `*`): the viewer can read it, but a stranger reading the chain could not. */
+  nameIsLocal?: boolean;
 }
 
 export interface CreateManagedAgentResult {
@@ -1993,7 +1997,7 @@ export async function listManagedAgentsFor(sessionToken: string, persona: string
   return managedAgentsFrom(b, surface);
 }
 
-type RelatedOrgsRows = { orgs?: Array<{ orgAgent: Address; orgName: string; kind?: string; parent?: Address; governor?: Address; createdAt: number | null; proofHash?: string; relationship?: string; stewardshipDelegation?: unknown; status?: string; purpose?: string }> };
+type RelatedOrgsRows = { orgs?: Array<{ orgAgent: Address; orgName: string; kind?: string; parent?: Address; governor?: Address; createdAt: number | null; proofHash?: string; relationship?: string; stewardshipDelegation?: unknown; status?: string; purpose?: string; nameIsLocal?: boolean }> };
 
 function managedAgentsFrom(b: RelatedOrgsRows, surface: OrgSurface): ManagedAgent[] {
   const rows = (b.orgs ?? []).map((o) => ({
@@ -2008,6 +2012,7 @@ function managedAgentsFrom(b: RelatedOrgsRows, surface: OrgSurface): ManagedAgen
     ...(o.stewardshipDelegation ? { stewardshipDelegation: o.stewardshipDelegation } : {}),
     ...(o.status ? { status: o.status as OrgLifecycleStatus } : {}),
     ...(o.governor ? { governor: o.governor } : {}),
+    ...(o.nameIsLocal ? { nameIsLocal: true } : {}),
   }));
   return filterByLifecycle(rows, surface);
 }

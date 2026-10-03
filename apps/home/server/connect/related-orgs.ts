@@ -210,6 +210,30 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       if (raw) { try { await env.AUTH_CODES.put(`related:${person}:${h.org}`, JSON.stringify({ ...JSON.parse(raw), orgName: healed })); } catch { /* best-effort */ } }
     }));
   }
+
+  // ── PRIVATE / LOCAL NAME — an agent with no PUBLIC name the viewer still knows by a local name ─────────────
+  // A member of an org that never claimed a public name has a link whose `orgName` is the raw address (the public
+  // reverseResolve above found nothing). The org's own name lives in its vault — readable by a member over member
+  // access, and captured once into a rebuildable `org-localname:<agent>` projection (at org-create and by the
+  // backfill). Fill it in here and MARK it local (`nameIsLocal`) so the surface can show "<name> *": a private
+  // name the viewer holds, never a public registration. Only rows still showing the raw address are touched, so a
+  // public name (healed above) always wins. Cheap KV gets, no vault read in this hot path.
+  {
+    const unnamed = orgs.filter((o) => String(o.orgName ?? '').toLowerCase() === String(o.orgAgent).toLowerCase());
+    if (unnamed.length > 0) {
+      await Promise.all(unnamed.map(async (o) => {
+        try {
+          const raw = await env.AUTH_CODES.get(`org-localname:${String(o.orgAgent).toLowerCase()}`);
+          if (!raw) return;
+          const proj = JSON.parse(raw) as { name?: string; isLocal?: boolean };
+          const name = String(proj.name ?? '').trim();
+          if (!name || name.toLowerCase() === String(o.orgAgent).toLowerCase()) return;
+          o.orgName = name;
+          if (proj.isLocal !== false) o.nameIsLocal = true;
+        } catch { /* a missing/malformed projection just leaves the address showing */ }
+      }));
+    }
+  }
   // ── THE RECONCILE THIS FILE ALREADY PROMISED ──────────────────────────────────────────────────
   // The POST above writes new links through to the person's AUTHORITATIVE vault doc, and says links
   // minted without a person session "surface in the doc at the person's next reconcile-capable
@@ -382,6 +406,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
      * Bearer path only — the person session must control the governor this projection keys on.
      */
     governedWorkspace?: { workspace?: string; workspaceName?: string; grant?: unknown };
+    /** The PRIVATE/LOCAL name of an agent that never claimed a public name (`org-localname:<orgAgent>`): a member
+     *  who holds it then sees a name, not an address. Rebuildable from the owner's vault; bearer path, caller must
+     *  steward the agent. `isLocal:false` marks that the agent IS publicly named (shown without the `*`). */
+    orgLocalName?: { name?: string; isLocal?: boolean };
   } | null;
   const person = (body?.person ?? '').toLowerCase();
   const org = (body?.orgAgent ?? '').toLowerCase();
@@ -437,6 +465,22 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         workspace: ws, workspaceName: String(gw.workspaceName ?? ''), governor: org, grant: gw.grant ?? null, createdAt: Date.now(),
       }));
       return jsonCors({ ok: true, governedWorkspace: ws }, request);
+    }
+    // The org's PRIVATE/LOCAL name projection (`org-localname:<org>`) — the name the owner gave an agent that
+    // never claimed a public name, so a member who holds it sees a name rather than an address. The caller must
+    // steward the agent it names (same check as the governed-workspace write). `isLocal:false` records that the
+    // agent DOES have a public name (so a surface shows it without the `*`); default true.
+    const ln = body?.orgLocalName;
+    if (ln) {
+      const name = String(ln.name ?? '').trim();
+      if (!name) return jsonCors({ error: 'orgLocalName.name required' }, request, 400);
+      const stewardLinkRaw = await env.AUTH_CODES.get(`related:${person}:${org}`);
+      const stewardLink = stewardLinkRaw ? (JSON.parse(stewardLinkRaw) as { relationship?: string }) : null;
+      if (!stewardLink || (stewardLink.relationship ?? 'steward') === 'member') {
+        return jsonCors({ error: 'you do not steward this agent' }, request, 403);
+      }
+      await env.AUTH_CODES.put(`org-localname:${org}`, JSON.stringify({ name, isLocal: ln.isLocal !== false, at: Date.now() }));
+      return jsonCors({ ok: true, orgLocalName: name }, request);
     }
   } else {
     // ERC-1271 control-of-person proof (spec-247 external-custodian path, e.g. a demo-jp operator org).
