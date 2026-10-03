@@ -13,14 +13,22 @@
 // `workspace:<ws sa>`, the `aporg:Workspace` entity. A workspace with NO pointer is a LEGACY one that still holds
 // its own membership records; every ceremony keeps today's behaviour for it and says so once in the console.
 //
-// THE SHAPE IS A HUB, NOT A CHAIN (owner, 2026-10-03). The ORGANIZATION is the hub: it holds the MEMBERS
-// (`org.membership:member:<sa>`) and the TEAMS (team affiliated WITH the org), and it governs the workspace.
-// The WORKSPACE agent sits to the SIDE and references exactly ONE thing — its governing org (`workspace.governor`
-// → `governedBy`) — and reaches that org's teams and members THROUGH it. A workspace does NOT reference teams or
-// members directly, and teams are NEVER nested under a workspace: `org → workspace → teams` is WRONG; it is
-// `org → { members, teams, workspace }` with `workspace → org`. (This is why a member reads a workspace by
-// belonging to the org that governs it — spec 424 — not by a relationship to the workspace agent.) The field /
-// engage and pokernight apps arrange their instances to this shape; nothing here nests a team under a workspace.
+// THE SHAPE IS A HUB, NOT A CHAIN (owner, 2026-10-03). A workspace is either GOVERNED by an organization or it
+// STANDS ALONE — a governor is NOT required.
+//
+//   · GOVERNED (has an org): the ORGANIZATION is the hub — it holds the MEMBERS (`org.membership:member:<sa>`) and
+//     the TEAMS (team affiliated WITH the org), and it governs the workspace. The WORKSPACE agent sits to the SIDE
+//     and references exactly ONE thing — its governing org (`workspace.governor` → `governedBy`) — reaching that
+//     org's teams and members THROUGH it. It does NOT reference teams/members directly, and teams are NEVER nested
+//     under a workspace: `org → workspace → teams` is WRONG; it is `org → { members, teams, workspace }`,
+//     `workspace → org`. A member reads the workspace by belonging to the governing org — spec 424 — not by a
+//     relationship to the workspace agent.
+//   · STANDALONE (no org): the workspace has NO governor, and therefore NO membership and NO teams. Access is a
+//     DIRECT person→workspace grant (an `aporg:WorkspaceParticipation` / the person's own grant on the workspace),
+//     retained for exactly this case. `governedBy` is absent; nothing reads through a governor that isn't there.
+//
+// The field / engage and pokernight apps arrange their instances to whichever shape fits; nothing here nests a
+// team under a workspace, and nothing here requires a workspace to have an org.
 //
 // This module is the Home's CLIENT side of the rule: the record shapes, how a ceremony finds a workspace's
 // governor, and the organization's half of the has-member credential (spec 410 §8) a join countersigns. The
@@ -44,12 +52,30 @@ export type { RelationshipOfferV1 };
 /** The pointer a governed workspace's agent keeps in its OWN vault. One record, one read. */
 export const WORKSPACE_GOVERNOR_RECORD = 'workspace.governor';
 
+/** Spec 424 §2.1 / §4 — the CONTENT a member may read of the workspace, through the governor. At workspace-create
+ *  the workspace grants its governing org a READ over exactly these record families (and nothing else of the
+ *  workspace agent — never its `workspace.governor`, custody, membership or other members' private records); a
+ *  member reads by chaining their org membership onto the org's grant (the field runtime presents the chain). The
+ *  generic default below is content + discussion + coordination; a realm whose content lives under other keys
+ *  overrides it (the `org_read_grant` precedent — resources are config, fixed server-side, never client-supplied). */
+export const WORKSPACE_CONTENT_SCOPE: readonly string[] = [
+  'vault:content.catalog',          // the Library index
+  'vault:content.artifact.*',       // the files
+  'vault:conversation.index',       // discussion boards
+  'vault:conversation.topic:*',
+  'vault:message.body:topic:*',
+  'vault:coordination.*',           // endeavors / the coordination surface
+];
+
 /** The `aporg:Workspace` entity, in the GOVERNOR's vault, keyed by the agent that coordinates it. */
 export const workspaceRecordKey = (ws: Address | string): string => `workspace:${ws.toLowerCase()}`;
 
 export interface WorkspaceGovernorPointer {
   governedBy: Address;
   coordinatedBy: Address;
+  /** Spec 424 — the workspace→governor CONTENT read grant (a member chains its org membership onto it to read the
+   *  workspace's content through the governor). Present only on workspaces created with the member-read path. */
+  governorRead?: DelegationWire;
 }
 
 /** The `aporg:Workspace` record as the organization keeps it. `governedBy` is the organization itself: the record
@@ -72,8 +98,8 @@ export function workspaceRecordOf(input: { governor: Address; workspace: Address
   };
 }
 
-export function governorPointerOf(input: { governor: Address; workspace: Address }): WorkspaceGovernorPointer {
-  return { governedBy: input.governor.toLowerCase() as Address, coordinatedBy: input.workspace.toLowerCase() as Address };
+export function governorPointerOf(input: { governor: Address; workspace: Address; governorRead?: DelegationWire }): WorkspaceGovernorPointer {
+  return { governedBy: input.governor.toLowerCase() as Address, coordinatedBy: input.workspace.toLowerCase() as Address, ...(input.governorRead ? { governorRead: input.governorRead } : {}) };
 }
 
 /** Pure: the governing organization a `workspace.governor` record names, or null for no pointer / a malformed one —
@@ -99,6 +125,10 @@ export async function writeGovernancePair(input: {
   workspace: Address;
   label: string;
   purpose: string;
+  /** Spec 424 — the workspace→governor CONTENT read grant, kept on the workspace's `workspace.governor` record so
+   *  the field runtime that resolves a workspace's governor also gets the grant a member chains their org
+   *  membership onto. Omitted ⇒ no member read path yet (the pre-424 state), never a broad read. */
+  governorRead?: DelegationWire;
 }): Promise<void> {
   await vaultWriteWithDelegation(input.orgStewardship, workspaceRecordKey(input.workspace), workspaceRecordOf(input));
   await vaultWriteWithDelegation(input.wsStewardship, WORKSPACE_GOVERNOR_RECORD, governorPointerOf(input));

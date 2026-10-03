@@ -35,7 +35,7 @@ import {
   AUD,
   type SignHash,
 } from '../connect-client';
-import { writeGovernancePair } from '../lib/workspace-governor';
+import { writeGovernancePair, WORKSPACE_CONTENT_SCOPE } from '../lib/workspace-governor';
 import type { ConnectionKind } from '@agenticprimitives/agent-naming';
 import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
 import { writePendingEnrollJson } from '../components/onboarding/pending-enroll';
@@ -45,7 +45,7 @@ import { connectWallet, personalSign } from '../lib/wallet';
 import { isDemoCustodyHome, demoCustodySignHash } from '../lib/persona-custody';
 import { writeOrganizationMembership } from '../lib/membership-write';
 import { getClient } from '../lib/oidc-clients';
-import { buildApprovedSiteDelegation, buildApprovedOperationalIntentDelegation, buildApprovedOrgReadDelegation, buildApprovedSelfVaultGrant, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, issueServiceAgentWireDelegation, OPEN_DELEGATION, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, ORG_INTERACTIONS_SESSION_LEAF_LADDER_RUNGS, PERSON_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type SelfVaultGrantConfig, type VaultKeyCeremonyParams } from '../lib/delegation';
+import { buildApprovedSiteDelegation, buildApprovedOperationalIntentDelegation, buildApprovedOrgReadDelegation, issueOrgReadDelegation, buildApprovedSelfVaultGrant, buildApprovedSessionDelegation, buildApprovedInboxDeliveryDelegation, buildApprovedInteractionsDelegation, issueSessionDelegation, issueSiteDelegation, issuePaymentDelegation, issueInboxDeliveryDelegation, issueInteractionsDelegation, issueServiceAgentWireDelegation, OPEN_DELEGATION, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, ORG_INTERACTIONS_SESSION_LEAF_LADDER_RUNGS, PERSON_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, toWire, buildVaultKeyAuthorization, APPROVED_HASH_SENTINEL, type DelegationWire, type SelfVaultGrantConfig, type VaultKeyCeremonyParams } from '../lib/delegation';
 import { vaultWriteWithDelegation, vaultReadWithDelegation } from '../lib/vault-client';
 import { saveStandingGrant, loadStandingGrant, saveStandingGrantWithSelfVault, loadStandingGrantWithSelfVault } from '../lib/grant-cache';
 import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
@@ -922,8 +922,17 @@ export async function createGovernedWorkspace(
   // ceremony exists to stop producing.
   step(5, 'Recording which organization governs it…');
   if (!wsStewardship) return { ok: false, error: `${created.result.name} was created without a stewardship wire, so its governor could not be recorded` };
+  // Spec 424 — the member-read path: the workspace grants its governing ORG a CONTENT read of itself, signed as the
+  // workspace (server-side for a KMS workspace). A member then reads the workspace's content by chaining their org
+  // membership onto this grant (the field runtime presents the chain) — "read through the governor", never a
+  // relationship to the workspace agent (the hub doctrine). Content only; best-effort, like the other ws grants.
+  let governorRead: DelegationWire | undefined;
   try {
-    await writeGovernancePair({ orgStewardship, wsStewardship, governor, workspace: ws, label: created.result.name || name, purpose });
+    const signWs = await signHashFor(via, ws, auth);
+    governorRead = toWire(await issueOrgReadDelegation(ws, governor, { server: MCP_SERVER_ID, resources: WORKSPACE_CONTENT_SCOPE }, signWs));
+  } catch (e) { console.warn('[workspace-create] governor content-read grant not minted:', e instanceof Error ? e.message : String(e)); }
+  try {
+    await writeGovernancePair({ orgStewardship, wsStewardship, governor, workspace: ws, label: created.result.name || name, purpose, ...(governorRead ? { governorRead } : {}) });
   } catch (e) {
     return { ok: false, error: `${created.result.name} and ${governorName} were created, but the record that ${governorName} governs the workspace could not be written: ${e instanceof Error ? e.message : String(e)}` };
   }
