@@ -31,7 +31,7 @@ export function ActAsMeConsent({ token, agent, onChange }: { token: string; agen
         const b = (await r.json().catch(() => ({}))) as { ok?: boolean; record?: { definition?: AgentHarnessDefinitionV1 } | null };
         if (!r.ok) throw new Error('your playbook could not be read');
         const list = actCapabilitiesOf(b.record?.definition);
-        const mine = (await listManagedAgents(token).catch(() => [])).filter((a) => a.kind === 'person-treasury' && (a.relationship ?? 'steward') === 'steward').map((a) => ({ agent: a.agent, name: a.name }));
+        const mine = (await listManagedAgents(token).catch(() => { throw new Error('your treasuries could not be read'); })).filter((a) => a.kind === 'person-treasury' && (a.relationship ?? 'steward') === 'steward').map((a) => ({ agent: a.agent, name: a.name }));
         if (!live) return;
         setCaps(list);
         setTreasuries(mine);
