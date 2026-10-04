@@ -427,6 +427,9 @@ binding = "AI"
 # the engage/field-a2a executor (its /a2a admits the `field-app` client; reached by custom domain, not
 # workers.dev, which would 1042). Absent ⇒ every invoke capability refuses.
 EXECUTORS = '{"field-circles":{"url":"https://field-a2a.faithnet.io","client":"field-app"}}'
+# Spec 377 / provider-outage — the exact page for THIS estate's Gemini failure mode (a monthly spend cap,
+# not a rate limit): the error links here, and whoever runs the Home raises it here. Overrides the generic default.
+ORCHESTRATION_GEMINI_BILLING_URL = "https://ai.studio/spend"
 # Perf (2026-10-02) — the agents the `scheduled` cron keeps warm (comma-separated SAs): the demo persons and
 # orgs a visitor lands on first. Read-only, credential-free. Extend as the demo roster people actually hit
 # grows; keep it small (each agent is two reads per tick). nathan.me + "Northern Colorado Field — Game Night".
