@@ -1473,18 +1473,23 @@ export class InteractionsDO {
     // harness's invitation, or before the directory wave, hold neither. Read back, the record is checked
     // against the chain: the member's grant must still be theirs and unrevoked.
     const recordedName = listingName || steward || memberAccess ? null : await this.recordedMemberName(grant, principal, sessionSa);
-    if (!listingName && !steward && !memberAccess && !recordedName) {
+    // The fifth: a member of the organization that GOVERNS this workspace (the owner's rule, 2026-10-02 — a
+    // workspace holds no members; they belong to its governor). Reads already go through the governor (spec
+    // 424); without this a member could read the workspace and never open a topic on its board. The board,
+    // its topics and its assistant stay the WORKSPACE's — only where membership is read moves.
+    const governedName = listingName || steward || memberAccess || recordedName ? null : await this.governedMemberName(grant, principal, sessionSa);
+    if (!listingName && !steward && !memberAccess && !recordedName && !governedName) {
       return { admitted: false, steward: false, listed: false, you: null };
     }
     const local = names[sessionSa.toLowerCase()];
     const localName = typeof local === 'string' && local.trim() ? local.trim() : null;
     let publicName: string | null = null;
-    if (!localName && !listingName && !recordedName && !steward) {
+    if (!localName && !listingName && !recordedName && !governedName && !steward) {
       const resolved = await this.resolvePublicNames([sessionSa]);
       const hit = resolved[sessionSa.toLowerCase()];
       publicName = typeof hit === 'string' && hit.trim() ? hit.trim() : null;
     }
-    const you = localName ?? listingName ?? recordedName ?? publicName ?? (steward ? 'Steward' : null);
+    const you = localName ?? listingName ?? recordedName ?? governedName ?? publicName ?? (steward ? 'Steward' : null);
     return { admitted: true, steward, listed: !!listingName, you };
   }
 
@@ -1508,6 +1513,43 @@ export class InteractionsDO {
     } catch { return null; } // unverifiable is not verified (ADR-0013)
     const name = String(rec.displayName ?? '').trim();
     return name || 'Member';
+  }
+
+  /** This workspace's governing organization (its own `workspace.governor` pointer), or null — an organization,
+   *  a person, or a legacy workspace holds none. Remembered for a few minutes: a pairing is chartered once. */
+  private governorMemo: { at: number; governor: string | null } | null = null;
+  private static readonly GOVERNOR_MEMO_TTL_MS = 300_000;
+  /** A positive answer from the governor, remembered a minute (the club standing's rule): the burst of board
+   *  reads that opens a topic must not cost one DO hop each. Only TRUE is kept, so an ended membership is
+   *  refused within the minute. */
+  private governedMemberMemo = new Map<string, { until: number; name: string }>();
+
+  /** Spec 424 — the board gate's governed-workspace proof: the session's principal is a CURRENT member of the
+   *  organization that governs this workspace, answered by that organization's own object
+   *  (`internal.member.recorded`). The display name it records, or null. Never authority (ADR-0041). */
+  private async governedMemberName(grant: IncomingDelegation, principal: string, sessionSa: Address): Promise<string | null> {
+    const now = Date.now();
+    if (!this.governorMemo || now - this.governorMemo.at > InteractionsDO.GOVERNOR_MEMO_TTL_MS) {
+      let doc: unknown;
+      try { doc = await this.readDoc<unknown>(grant, WORKSPACE_GOVERNOR_RECORD, null); } catch { return null; } // a failed read is not remembered
+      const read = governorOf(doc);
+      this.governorMemo = { at: now, governor: read ? read.toLowerCase() : null };
+    }
+    const governor = this.governorMemo.governor;
+    if (!governor || governor === principal.toLowerCase() || !this.env.INTERACTIONS) return null;
+    const me = sessionSa.toLowerCase();
+    const hit = this.governedMemberMemo.get(me);
+    if (hit && hit.until > now) return hit.name;
+    try {
+      const stub = this.env.INTERACTIONS.get(this.env.INTERACTIONS.idFromName(governor));
+      const resp = await stub.fetch(new Request(`https://do/interactions/${governor}/internal.member.recorded`, {
+        method: 'POST', headers: internalHeaders(this.env), body: JSON.stringify({ member: me }),
+      }));
+      const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; name?: string | null };
+      const name = resp.ok && out.ok && typeof out.name === 'string' && out.name.trim() ? out.name.trim() : null;
+      if (name) this.governedMemberMemo.set(me, { until: now + 60_000, name });
+      return name;
+    } catch { return null; } // unanswerable is not a member (ADR-0013)
   }
 
   /**
@@ -2020,7 +2062,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'inbox.body.getMany' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.channels.create' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'internal.wire.current' || op === 'internal.op.lookup' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'inbox.body.getMany' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.channels.create' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.member.recorded' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'internal.wire.current' || op === 'internal.op.lookup' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -3177,6 +3219,19 @@ export class InteractionsDO {
             current.push(addr);
           }
           return json({ ok: true, current });
+        }
+        if (op === 'internal.member.recorded') {
+          // A GOVERNED WORKSPACE'S BOARD ASKS ITS GOVERNOR (the owner's rule, 2026-10-02): a workspace holds no
+          // members, so its gate cannot find one in its own vault; it asks the organization that governs it
+          // whether this agent is a CURRENT member here. The same two tests this object's own gate applies —
+          // the spec-382 membership record re-checked on chain, else a current ERC-1271-proven listing —
+          // answered by the one object that reads this organization's records. A name, or null. Never a grant.
+          const member = String(body.member ?? '').toLowerCase();
+          if (!/^0x[0-9a-f]{40}$/.test(member)) return json({ error: 'member (address) required' }, 400);
+          const name =
+            (await this.recordedMemberName(g, principal, member as Address))
+            ?? (await this.memberName(g, principal, `eip155:${Number(this.env.CHAIN_ID ?? 84532)}:${member}`));
+          return json({ ok: true, name });
         }
         if (op === 'internal.library.packages') {
           // Every package in this org's library, FRONTMATTER ONLY. The archetype catalog is derived
