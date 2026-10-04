@@ -61,13 +61,13 @@ pnpm tsx scripts/gen-dev-vars.ts
 
 # 4. Apply D1 migrations to the local SQLite
 echo "[4/5] Applying D1 migrations to local demo-mcp database…"
-(cd apps/demo-mcp && CI=1 pnpm d1:migrate:local) || echo "  (D1 migrate failed — wrangler dev will retry on startup)"
+(cd apps/vault && CI=1 pnpm d1:migrate:local) || echo "  (D1 migrate failed — wrangler dev will retry on startup)"
 
 # 5. Start workers + web
 echo "[5/5] Starting demo-a2a (:8787) + demo-mcp (:8788) + demo-edge (:8789) + demo-web (:5173) + demo-web-pro (:5273) + demo-web-recovery (:5373)…"
-pnpm --filter @agenticprimitives-demo/a2a dev &
-pnpm --filter @agenticprimitives-demo/mcp dev &
-pnpm --filter @agenticprimitives-demo/edge dev &
+pnpm --filter @ap-home/agent-runtime dev &
+pnpm --filter @ap-home/vault dev &
+pnpm --filter @ap-home/edge dev &
 pnpm --filter @agenticprimitives-demo/web dev &
 pnpm --filter @agenticprimitives-demo/web-pro dev &
 pnpm --filter @agenticprimitives-demo/web-recovery dev &

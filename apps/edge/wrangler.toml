@@ -21,7 +21,7 @@ compatibility_flags = ["nodejs_compat"]
 # `scripts/dev.sh` runs demo-a2a (:8787), demo-mcp (:8788) and this edge (:8789) as sibling
 # `wrangler dev` sessions; the Service Bindings below resolve through wrangler's local dev registry
 # to the Workers NAMED demo-mcp / demo-a2a (their top-level `name`). Non-secret local values
-# (chain, contracts, origins) come from apps/demo-edge/.dev.vars written by scripts/gen-dev-vars.ts.
+# (chain, contracts, origins) come from apps/edge/.dev.vars written by scripts/gen-dev-vars.ts.
 # Production keeps its own block under [env.production] — nothing here is inherited by it.
 # ──────────────────────────────────────────────────────────────────────────
 [[services]]
@@ -49,67 +49,6 @@ simple = { limit = 120, period = 60 }
 port = 8789
 local_protocol = "http"
 
-[env.production]
-# Give the edge a public workers.dev URL for the smoke test (wrangler defaults workers_dev=false).
-workers_dev = true
-
-[env.production.vars]
-# Public on-chain config for the /.well-known/agentic-authorization discovery doc (Base Sepolia).
-# These are public addresses (app layer, ADR-0021) — safe to inline.
-#
-# ALL THREE were a generation behind: this doc TELLS CALLERS which contracts to trust, so it was
-# advertising an older EntryPoint / DelegationManager / UniversalSignatureValidator than the ones
-# demo-a2a and demo-mcp actually verify against — a client that believed the profile would build
-# delegations no relying service would accept. Each old address is a real deployed contract of the
-# right role (the USV byte-identical, the EntryPoint the same size, the DM one build older), which is
-# why nothing ever errored: the profile was coherent, just not current.
-#
-# Now the canonical set from packages/contracts/deployments-base-sepolia.json, matching demo-a2a and
-# demo-mcp. Keep these three moving TOGETHER — a mixed-generation profile is worse than a stale one.
-CHAIN_ID = "84532"
-ENTRY_POINT = "0x96E37dD695840AF7781E669bdca9d79E4d7d8040"
-DELEGATION_MANAGER = "0x9eD1dC0FD2284fcd4967beeF3317129fee7a92e5"
-UNIVERSAL_SIGNATURE_VALIDATOR = "0x3bc65655d4b6fb57731A256fcd47Db2F8Fe36907"
-# Per-Smart-Agent hard-budget unit cap (spec 290 §8 — demo value).
-SA_BUDGET_LIMIT_UNITS = "10"
-# OPS-EDGE-PROBE-PROD-1 (2026-07-05 completeness audit): the /budget/probe smoke-test runs BEFORE the
-# admission + Stage-1 rate-limiter, so enabling it publicly is an unauth, unthrottled write into the
-# SmartAgentBudgetDO. Left UNSET in production ⇒ the route 404s (src/index.ts:189). Enable only in a
-# transient dev/diagnostic env, never on a public deployment.
-# Browser Origins allowed to call the edge (so browser callers can be repointed at it — route-lockdown
-# prerequisite). App config (ADR-0021). `https://*.suffix` wildcards supported.
-EDGE_ALLOWED_ORIGINS = "https://agenticprimitives-demo-pro.pages.dev,https://agenticprimitives-demo.pages.dev,https://agenticprimitives-demo-org.pages.dev,https://agenticprimitives-demo-jp.pages.dev,https://agenticprimitives-demo-gs.pages.dev,https://*.impact-agent.io,https://*.impact-agent.me"
-
-# The authoritative per-SA hard-budget store (spec 290 §8). One DO per Smart Agent shard.
-[[env.production.durable_objects.bindings]]
-name = "SA_BUDGET"
-class_name = "SmartAgentBudgetDO"
-
-[[env.production.migrations]]
-tag = "v1"
-new_sqlite_classes = ["SmartAgentBudgetDO"]
-
-# Stage-1 abuse limiter (local, permissive, eventually-consistent — abuse only, fail-soft).
-[[env.production.ratelimits]]
-name = "EDGE_LIMITER"
-namespace_id = "2881"
-simple = { limit = 120, period = 60 }
-
-# Service Bindings to the private origins (same Cloudflare account). The edge dispatches here;
-# there is no public hop. Service names match the deployed --env production Workers.
-[[env.production.services]]
-binding = "MCP"
-service = "demo-mcp-production"
-
-[[env.production.services]]
-binding = "A2A"
-service = "demo-a2a-production"
-
-# DEPLOY WITH `--env production`. The real Worker is `demo-edge-production`; the service bindings to
-# demo-mcp/demo-a2a live under [env.production] ONLY. A bare `wrangler deploy` publishes a SEPARATE,
-# binding-less Worker named `demo-edge` whose dispatch then loops and returns Cloudflare error 1042.
-
-# ── FAITHNET (faithchain 34348) — edge in front of demo-a2a/mcp faithnet ──
 [env.faithnet]
 name = "demo-edge-faithnet"
 workers_dev = true

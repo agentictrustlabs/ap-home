@@ -506,7 +506,7 @@ export interface Env {
   /** AgentProfileResolver — read `atl:skills` to surface publicly-asserted skills on the A2A card (spec 282). */
   PROFILE_RESOLVER?: string;
   /** Permissionless `.agent` subregistry (spec 234 W2). Address is consumed by
-   *  clients (`apps/demo-sso-next/src/connect-client.ts::buildClaimCallData`) to
+   *  clients (`apps/home/src/connect-client.ts::buildClaimCallData`) to
    *  build the `register + setPrimary` `executeBatch` inside the deploy userOp —
    *  one signature, atomic deploy + claim. (The standalone relayer-paid
    *  `/session/register-name` was removed 2026-06-01: it allowed orphan name
@@ -7213,7 +7213,7 @@ app.post('/session/direct-deploy', async (c) => {
 //
 // Pre-`af17ea8` clients called this endpoint. Post-`af17ea8` clients bundle the
 // `register + setPrimary` into the same `executeBatch` callData inside the deploy
-// userOp itself (see `apps/demo-sso-next/src/connect-client.ts::buildClaimCallData`
+// userOp itself (see `apps/home/src/connect-client.ts::buildClaimCallData`
 // + `bootstrapWithPasskey`) — register and deploy are now atomic: if the deploy
 // reverts, the register reverts with it, no orphan possible.
 //

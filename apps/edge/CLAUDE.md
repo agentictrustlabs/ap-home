@@ -17,7 +17,7 @@ The route catalog (`CATALOG` in `src/index.ts`) is app config: concrete paths + 
 never in the generic packages (ADR-0021).
 
 ## Deploy (read first)
-- `cd apps/demo-edge && wrangler deploy --env production` (gets a `workers.dev` URL; `workers_dev=true`).
+- `cd apps/edge && wrangler deploy --env production` (gets a `workers.dev` URL; `workers_dev=true`).
 - Service Bindings (`wrangler.toml`): `MCP → demo-mcp-production`, `A2A → demo-a2a-production` (same account).
 - **Route lockdown is NOT done here.** Making demo-a2a/demo-mcp private (`workers_dev=false`, drop public
   routes) is sequenced LAST and gated on a caller-migration checklist (spec 288 §6) — pulling it early is
@@ -30,4 +30,4 @@ never in the generic packages (ADR-0021).
 - **Single generic error** on admission failure; the correlation id is the only client-visible handle.
 
 ## Validate
-`cd apps/demo-edge && pnpm typecheck`.
+`cd apps/edge && pnpm typecheck`.

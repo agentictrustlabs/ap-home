@@ -51,8 +51,8 @@ claiming, and the delegations it signs on the member's behalf.
 
 ## Validate
 ```bash
-pnpm --filter @agenticprimitives-demo/sso-next typecheck
-pnpm --filter @agenticprimitives-demo/sso-next test   # added W6 — the app HAD a vitest.config.ts and
+pnpm --filter @ap-home/home typecheck
+pnpm --filter @ap-home/home test   # added W6 — the app HAD a vitest.config.ts and
                                                       # test files but no `test` script or vitest dep,
                                                       # so its suites never ran. They do now.
 ```

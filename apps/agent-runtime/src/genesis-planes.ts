@@ -32,10 +32,10 @@ import {
 const APPROVED = '0x03' as Hex;
 
 import { vaultServerId } from './vault-server-id.js';
-import { INTERACTIONS_APP_SCOPES } from '@agenticprimitives-demo/home-shared';
+import { INTERACTIONS_APP_SCOPES } from '@ap-home/shared';
 
 /** The interactions grant's record scopes: the package CORE (`@agenticprimitives/fabric/interactions`) plus this
- *  product's own namespaces — the ONE list the Home's enable ceremony appends too (`@agenticprimitives-demo/home-shared`,
+ *  product's own namespaces — the ONE list the Home's enable ceremony appends too (`@ap-home/shared`,
  *  spec 399 §4). Nothing here is a local literal any more: a scope added for one app is added for both. */
 export const GENESIS_INTERACTIONS_APP_SCOPES: ReadonlyArray<RecordScopeSpec> = INTERACTIONS_APP_SCOPES;
 export const GENESIS_INTERACTIONS_SCOPES: ReadonlyArray<RecordScopeSpec> = [...INTERACTIONS_GRANT_CORE_SCOPES, ...GENESIS_INTERACTIONS_APP_SCOPES];

@@ -19,7 +19,7 @@ import {
 } from '@agenticprimitives/delegation';
 import { buildA2aGrantCaveats, hashA2aMessage } from '@agenticprimitives/a2a';
 import { delegatedInputPart, withDelegatedTask } from '@agenticprimitives/a2a/standard';
-import { hashDeliveryBody } from '../apps/demo-a2a/src/outbound-delivery.js';
+import { hashDeliveryBody } from '../apps/agent-runtime/src/outbound-delivery.js';
 
 registerDefaultSubsetHandlers();
 

@@ -4,7 +4,7 @@
 · **Doctrine:** [ADR-0054](../docs/architecture/decisions/0054-coordination-endeavor-doctrine.md) (Endeavor doctrine + normative coverage), [ADR-0044](../docs/architecture/decisions/0044-a2a-is-the-agentic-orchestration-layer.md) (intent-first — first-party web expresses INTENTS, never drives MCP directly), [ADR-0041](../docs/architecture/decisions/0041-web3-authority-not-oauth-on-a2a-to-mcp.md) (Web3 authority), [ADR-0040](../docs/architecture/decisions/0040-knowledge-base-only-public-onchain-data.md) (public-only KB), [ADR-0021](../docs/architecture/decisions/0021-generic-packages-vs-white-label-apps.md) (portable contracts vs app surfaces), [ADR-0013](../docs/architecture/decisions/0013-no-silent-fallbacks.md)
 · **Extends:** [332](332-coordination-endeavor-core.md) (semantic core: records, commands, events, reducer, provenance), [333](333-coordination-decisions-profiles-rules.md) (decisions/recommendations/profiles/rules/resources/collections)
 · **Coverage ledger:** [coordination-capability-coverage.yaml](../docs/architecture/coordination-capability-coverage.yaml) — the rows this spec advances are tagged `spec: 334` (chiefly the projection + runtime-behavior coverage forms)
-· **Surfaces:** `apps/demo-a2a` (`InteractionsDO` `endeavor.*` ops, `A2aTaskDO` execution binding), `apps/demo-sso-next` (person + org portal Work surfaces), `packages/home` (portable coordination projections), `packages/fabric` (`ContextRefV1` kind `'endeavor'`)
+· **Surfaces:** `apps/agent-runtime` (`InteractionsDO` `endeavor.*` ops, `A2aTaskDO` execution binding), `apps/home` (person + org portal Work surfaces), `packages/home` (portable coordination projections), `packages/fabric` (`ContextRefV1` kind `'endeavor'`)
 
 ---
 
@@ -27,7 +27,7 @@ Spec 332 defines the Endeavor machinery (records, commands, events, reducer); sp
 
 ## 3. Serving plane — `InteractionsDO` `endeavor.*` ops
 
-The org/person interactions DO (`apps/demo-a2a/src/interactions-do.ts`) gains an `endeavor.*` op family following the `channels.*` pattern **exactly**: session signature verification at ingress, steward/member gates via the DO's directory listings (`memberName` / `isSteward` with stewardship wire), all reads/writes over the interactions **grant** into the managing principal's vault, shared-doc read-modify-writes inside `serialize()` (ARCH-H1), an **audit row before commit** for every mutation, and vault resource keys from spec 332's record catalog.
+The org/person interactions DO (`apps/agent-runtime/src/interactions-do.ts`) gains an `endeavor.*` op family following the `channels.*` pattern **exactly**: session signature verification at ingress, steward/member gates via the DO's directory listings (`memberName` / `isSteward` with stewardship wire), all reads/writes over the interactions **grant** into the managing principal's vault, shared-doc read-modify-writes inside `serialize()` (ARCH-H1), an **audit row before commit** for every mutation, and vault resource keys from spec 332's record catalog.
 
 | Op | Actor gate | Effect (332/333 command) | Serialized RMW docs |
 | --- | --- | --- | --- |
@@ -69,7 +69,7 @@ Door 2 also re-expresses the spec-329 consultation flow: `find_members → ask×
 
 Door 4 closes the execution loop in both directions: an Endeavor's `PlanStep`s compile to `apexec:ExecutionIntent`s via the `orchestration` package, which execute as A2A Tasks dispatched by `A2aTaskDO` (spec 269) — each Task bound to its `ContributionCommitment` ref, plan revision hash, and step id per the adapter provenance contract (spec 332 §10), so `projectEndeavorProvenance` can join the run trace to the durable plan.
 
-> **W4 shipped state.** The compile step lives in `@agenticprimitives/coordination/execution` (`compilePlanToExecutionIntents`) with the descriptor shape defined locally to spec 330 §8 (importing `orchestration` from `coordination` would be a back-edge); the binding rides the task input as `endeavorBinding` (`apps/demo-a2a/src/endeavor-intake.ts`). Door 4's intake is LIVE and opt-in: an `orchestrate` task whose input carries `endeavor: true` is admitted as an `EndeavorRequest` against the managing principal (requester = the delegation-verified task sender, via the marker-gated `internal.endeavor.request` op — fail-closed, never a silent skip). Doors 2 and 3 ship as body-builder adapters (`endeavorRequestFromDiscussionAsk` / `endeavorRequestFromInboxAsk`): their live triggers are the spec-327/328 assistant turns, and auto-filing from message prose without a UX affordance would violate §3 rule 2d.
+> **W4 shipped state.** The compile step lives in `@agenticprimitives/coordination/execution` (`compilePlanToExecutionIntents`) with the descriptor shape defined locally to spec 330 §8 (importing `orchestration` from `coordination` would be a back-edge); the binding rides the task input as `endeavorBinding` (`apps/agent-runtime/src/endeavor-intake.ts`). Door 4's intake is LIVE and opt-in: an `orchestrate` task whose input carries `endeavor: true` is admitted as an `EndeavorRequest` against the managing principal (requester = the delegation-verified task sender, via the marker-gated `internal.endeavor.request` op — fail-closed, never a silent skip). Doors 2 and 3 ship as body-builder adapters (`endeavorRequestFromDiscussionAsk` / `endeavorRequestFromInboxAsk`): their live triggers are the spec-327/328 assistant turns, and auto-filing from message prose without a UX affordance would violate §3 rule 2d.
 
 ## 5. Home Request UX
 
@@ -171,6 +171,6 @@ Beyond spec 332 §13 (which covers the semantic ports), this spec ports the *sur
 
 | Wave | Contents | Gate |
 | --- | --- | --- |
-| W2 | serving plane: `endeavor.*` ops on `InteractionsDO` (gates, serialize, audit, event append, reducer wiring) | `pnpm --filter @agenticprimitives-demo/a2a typecheck` + demo-a2a tests + manual op checks (request → adopt → plan → allocate → commit → decide; stale-hash commit rejected; non-approver decide rejected) |
+| W2 | serving plane: `endeavor.*` ops on `InteractionsDO` (gates, serialize, audit, event append, reducer wiring) | `pnpm --filter @ap-home/agent-runtime typecheck` + demo-a2a tests + manual op checks (request → adopt → plan → allocate → commit → decide; stale-hash commit rejected; non-approver decide rejected) |
 | W3 | UX + Home projections: org Work section, person My Work cards, `packages/home` contracts (§8), endeavor contextRef chips | `pnpm check:demo-sso-next` + `pnpm check:home` |
 | W4 | execution binding (PlanStep → `apexec:ExecutionIntent` → A2A Task via `A2aTaskDO`, commitment-bound) + entry-point adapters (doors 2–4) + the spec-329 consultation fan-out golden fixture asserting the full `projectEndeavorProvenance` P-Plan/PROV trace | fixture green in `pnpm check:coordination` + `pnpm check:provenance`; coverage ledger rows advance to `implemented` |

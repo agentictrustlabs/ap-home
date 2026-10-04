@@ -5,7 +5,7 @@
  * using demo-a2a's AKCS token) and posts it to a running demo-mcp (`/tools/get_profile`), which must
  * recompute the same MAC through AKCS with ITS token. A `service-mac rejected` 401 = mismatch.
  *
- *   pnpm --filter @agenticprimitives-demo/mcp exec tsx scripts/akcs-mac-smoke.mts [http://127.0.0.1:8788]
+ *   pnpm --filter @ap-home/vault exec tsx scripts/akcs-mac-smoke.mts [http://127.0.0.1:8788]
  */
 import { readFileSync } from 'node:fs';
 import { buildMacProvider, loadSecret, staticTokenProvider } from '@agenticprimitives/key-custody';

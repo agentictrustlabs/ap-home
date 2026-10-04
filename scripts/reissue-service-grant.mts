@@ -18,7 +18,7 @@
  * The agent is named by address, or by a name found in `demo/*.faithnet.json` (an operator fixture).
  */
 import { readdirSync, readFileSync } from 'node:fs';
-import { buildInteractionsGrantForScript } from '../apps/demo-sso-next/src/lib/delegation';
+import { buildInteractionsGrantForScript } from '../apps/home/src/lib/delegation';
 
 const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
 const args = process.argv.slice(2);

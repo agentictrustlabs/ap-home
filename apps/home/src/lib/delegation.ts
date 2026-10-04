@@ -24,7 +24,7 @@ import {
 import type { Address, Hex } from '@agenticprimitives/types';
 import { interactionsGrantScopes } from '@agenticprimitives/fabric/interactions';
 import { CHAIN_ID, CONTRACTS } from './chain';
-import { INTERACTIONS_APP_SCOPES } from '@agenticprimitives-demo/home-shared';
+import { INTERACTIONS_APP_SCOPES } from '@ap-home/shared';
 import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from './inbox-delivery';
 
 type SignHash = (hash: Hex) => Promise<Hex>;
@@ -431,9 +431,9 @@ export const ARCHETYPE_ASSIGNMENT_RESOURCE_SCOPE = 'vault:archetype.assignment' 
 export const PAYMENT_RECEIPT_RESOURCE_SCOPE = 'vault:payment.receipt:*' as const;
 
 // The product's own namespaces on the interactions grant live in ONE module both apps import
-// (`@agenticprimitives-demo/home-shared`, spec 399 §4): re-exported here for the callers that always read them from
+// (`@ap-home/shared`, spec 399 §4): re-exported here for the callers that always read them from
 // this file; the caveat below is built from the same list the runtime's genesis planes append.
-export { APP_COORDINATION_READ_SCOPES, APP_OWN_NAMESPACE_READ_SCOPES, APP_OWN_NAMESPACE_SEED_SCOPES, INTERACTIONS_APP_SCOPES } from '@agenticprimitives-demo/home-shared';
+export { APP_COORDINATION_READ_SCOPES, APP_OWN_NAMESPACE_READ_SCOPES, APP_OWN_NAMESPACE_SEED_SCOPES, INTERACTIONS_APP_SCOPES } from '@ap-home/shared';
 
 /**
  * spec 322 §2 plane B — the INTERACTIONS grant `principal → INTERACTIONS_SERVICE_SA`, signed once

@@ -18,7 +18,7 @@
  *      scripts/gen-dev-vars.ts turns into the local Home's DEMO_PERSONA_KEYS.
  *
  * Usage (after `pnpm dev:contracts` / deploy:anvil, with demo-mcp running for step 4):
- *   pnpm --filter @agenticprimitives-demo/sso-next exec tsx scripts/provision-demo-personas-local.ts
+ *   pnpm --filter @ap-home/home exec tsx scripts/provision-demo-personas-local.ts
  *   LOCAL_RPC_URL=… DEMO_MCP_URL=… DEPLOY_NETWORK=anvil  (defaults: 127.0.0.1:8545 / 127.0.0.1:8788)
  *
  * Lives in the Home app (not scripts/) so it resolves the same packages + src/lib/delegation.ts the

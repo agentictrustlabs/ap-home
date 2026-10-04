@@ -22,8 +22,8 @@
 import { readFileSync } from 'node:fs';
 import { privateKeyToAccount } from 'viem/accounts';
 import type { Address, Hex } from 'viem';
-import { issueInteractionsDelegation, toWire } from '../apps/demo-sso-next/src/lib/delegation.js';
-import { MCP_SERVER_ID } from '../apps/demo-sso-next/src/lib/inbox-delivery.js';
+import { issueInteractionsDelegation, toWire } from '../apps/home/src/lib/delegation.js';
+import { MCP_SERVER_ID } from '../apps/home/src/lib/inbox-delivery.js';
 import { decodeVaultRecordScopeTerms, VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
 
 const A2A = process.env.A2A_BASE ?? 'https://demo-a2a-production.richardpedersen3.workers.dev';

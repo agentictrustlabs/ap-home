@@ -27,7 +27,7 @@ export const CHANNEL_UNLINK_CAPABILITY = 'person.channel.unlink' as const;
 export const CREDENTIALS_RECORD = 'security.credentials' as const;
 export const CHANNELS_RECORD = 'security.channels' as const;
 
-// ── Records, as the Home writes them (apps/demo-sso-next/src/home/credentials.ts) ──────────────────────────────────
+// ── Records, as the Home writes them (apps/home/src/home/credentials.ts) ──────────────────────────────────
 export type CredentialRef = { kind: 'passkey'; credentialIdDigest: Hex } | { kind: 'custodian'; address: Address };
 export interface CredentialLabelV1 { ref: CredentialRef; label: string; device?: string; method?: 'google' | 'email' | 'phone' | 'youversion'; createdAt: string; state?: string; retiredAt?: string }
 export interface ChannelV1 { kind: 'email' | 'phone'; value: string; linkedAt: string; unlinkedAt?: string }

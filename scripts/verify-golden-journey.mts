@@ -25,11 +25,11 @@
  */
 import { toHex, type Address, type Hex } from 'viem';
 import { buildDigestBindingCaveat, capabilityHandler, hashDelegation, ROOT_AUTHORITY, type Caveat, type Delegation, type MandateRequirementV1 } from '@agenticprimitives/delegation';
-import { assembleToday } from '../apps/demo-sso-next/src/home/today';
-import { assembleAttention } from '../apps/demo-sso-next/src/home/attention';
-import { workItemOf } from '../apps/demo-sso-next/src/home/work-item';
-import { artifactIdentity } from '../apps/demo-sso-next/src/home/artifact-identity';
-import { projectAllocationEntry, projectCommitmentEntry, projectDecisionCard } from '../apps/demo-sso-next/src/lib/work-client';
+import { assembleToday } from '../apps/home/src/home/today';
+import { assembleAttention } from '../apps/home/src/home/attention';
+import { workItemOf } from '../apps/home/src/home/work-item';
+import { artifactIdentity } from '../apps/home/src/home/artifact-identity';
+import { projectAllocationEntry, projectCommitmentEntry, projectDecisionCard } from '../apps/home/src/lib/work-client';
 import { fixture as fx, HOME, A2A, resolveOrgAgent } from './fixture.mts';
 
 

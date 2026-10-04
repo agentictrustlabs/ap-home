@@ -1,4 +1,4 @@
-# @agenticprimitives-demo/sso-next
+# @ap-home/home
 
 ## 0.0.2-alpha.32
 
@@ -23,7 +23,7 @@
   - @agenticprimitives/agent-account@1.0.0-alpha.27
   - @agenticprimitives/delegation@1.0.0-alpha.27
   - @agenticprimitives/agent-relationships@1.0.0-alpha.27
-  - @agenticprimitives-demo/home-shared@0.0.1-alpha.2
+  - @ap-home/shared@0.0.1-alpha.2
   - @agenticprimitives/home@0.0.0-alpha.16
   - @agenticprimitives/identity-directory@1.0.0-alpha.27
   - @agenticprimitives/verifiable-credentials@0.0.0-alpha.24
@@ -84,7 +84,7 @@
   - @agenticprimitives/vault@0.0.0-alpha.5
   - @agenticprimitives/verifiable-credentials@0.0.0-alpha.23
   - @agenticprimitives/treasury-service-agent@0.0.0-alpha.13
-  - @agenticprimitives-demo/home-shared@0.0.1-alpha.1
+  - @ap-home/shared@0.0.1-alpha.1
 
 ## 0.0.2-alpha.30
 
@@ -99,7 +99,7 @@
   - @agenticprimitives/connect-auth@1.0.0-alpha.25
   - @agenticprimitives/identity-directory@1.0.0-alpha.25
   - @agenticprimitives/verifiable-credentials@0.0.0-alpha.22
-  - @agenticprimitives-demo/home-shared@0.0.1-alpha.0
+  - @ap-home/shared@0.0.1-alpha.0
   - @agenticprimitives/home@0.0.0-alpha.14
   - @agenticprimitives/agent-account@1.0.0-alpha.25
   - @agenticprimitives/agent-naming@1.0.0-alpha.25

@@ -22,7 +22,7 @@ OUT="${OUT_DIR}/vault_key_bindings-${STAMP}.json"
 mkdir -p "${OUT_DIR}"
 
 echo "[export] dumping vault_key_bindings from PROD D1 (demo-mcp) -> ${OUT}"
-( cd "$(dirname "$0")/../apps/demo-mcp" && \
+( cd "$(dirname "$0")/../apps/vault" && \
   npx wrangler d1 execute DB --env production --remote --json \
     --command "SELECT owner_address, server_id, vault_id, kms_key_ref, allowed_resources, classification_ceiling, ops, expires_at, authorization_json, authorization_hash, created_at, updated_at, revoked_at FROM vault_key_bindings ORDER BY owner_address, server_id;" \
 ) > "${OUT}"

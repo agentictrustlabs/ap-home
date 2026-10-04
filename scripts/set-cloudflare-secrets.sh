@@ -32,7 +32,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 ENV=${ENV:-production}
-APP_DIR=apps/demo-a2a
+APP_DIR=apps/agent-runtime
 
 for cmd in openssl wrangler cast node; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "ERROR: $cmd not found in PATH"; exit 1; }
@@ -147,7 +147,7 @@ printf '%s' "$BASE_SEPOLIA_RPC" \
 echo "  ✓ RPC_URL  (demo-a2a)"
 
 printf '%s' "$BASE_SEPOLIA_RPC" \
-  | (cd apps/demo-mcp && wrangler secret put RPC_URL --env "$ENV") >/dev/null
+  | (cd apps/vault && wrangler secret put RPC_URL --env "$ENV") >/dev/null
 echo "  ✓ RPC_URL  (demo-mcp)"
 
 # 6. (removed) VAULT_MASTER_KEY — spec 278 P4 deleted the global vault master key. The
@@ -164,7 +164,7 @@ echo "  ✓ RPC_URL  (demo-mcp)"
 #    never trusted as authority (the entitlement→KAS→audit chain re-runs server-side).
 OAUTH_SIGNING_SECRET="${OAUTH_SIGNING_SECRET:-$(openssl rand -hex 32)}"
 printf '%s' "$OAUTH_SIGNING_SECRET" \
-  | (cd apps/demo-mcp && wrangler secret put OAUTH_SIGNING_SECRET --env "$ENV") >/dev/null
+  | (cd apps/vault && wrangler secret put OAUTH_SIGNING_SECRET --env "$ENV") >/dev/null
 unset OAUTH_SIGNING_SECRET
 echo "  ✓ OAUTH_SIGNING_SECRET  (demo-mcp)"
 
@@ -188,4 +188,4 @@ echo "   never printed. Address is safe to share publicly.)"
 echo ""
 echo "Verify with:"
 echo "  cd $APP_DIR && wrangler secret list --env $ENV"
-echo "  cd apps/demo-mcp && wrangler secret list --env $ENV"
+echo "  cd apps/vault && wrangler secret list --env $ENV"

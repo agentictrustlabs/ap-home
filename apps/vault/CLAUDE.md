@@ -32,7 +32,7 @@ events while consuming `@agenticprimitives/mcp-runtime`, `delegation`,
 - Generic MCP middleware → `packages/mcp-runtime`.
 - Tool risk taxonomy → `packages/tool-policy`.
 - Audit schema/sinks → `packages/audit`.
-- A2A relayer/session routes → `apps/demo-a2a`.
+- A2A relayer/session routes → `apps/agent-runtime`.
 
 ## Read These First
 
@@ -44,7 +44,7 @@ events while consuming `@agenticprimitives/mcp-runtime`, `delegation`,
 ## Validate
 
 ```bash
-pnpm --filter @agenticprimitives-demo/mcp typecheck
+pnpm --filter @ap-home/vault typecheck
 ```
 
 ## Generated Files

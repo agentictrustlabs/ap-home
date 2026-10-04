@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       home:
-        description: 'HOME_URL to run against (defaults to live-gates.json#home)'
+        description: 'HOME_URL to run against (defaults to scripts/live-gates.json#home)'
         required: false
 
 jobs:
@@ -25,10 +25,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --no-frozen-lockfile
       - name: live gates
-        run: pnpm exec ap test --live-gates live-gates.json --json > live-gates-report.json || (cat live-gates-report.json; exit 1)
+        run: pnpm exec ap test --live-gates scripts/live-gates.json --json > live-gates-report.json || (cat live-gates-report.json; exit 1)
       - name: A2A conformance of the deployment
         if: env.A2A_URL != ''
         env:

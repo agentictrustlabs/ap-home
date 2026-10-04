@@ -2,7 +2,7 @@
  * GIVE AN EXISTING WORKSPACE ITS GOVERNING ORGANIZATION — the owner's rule, 2026-10-02 (`org.ttl` §2, `core.ttl`;
  * `src/lib/workspace-governor.ts`).
  *
- *   npx tsx apps/demo-sso-next/scripts/workspace-governor.mts <custodian-handle> <workspace-sa> [--dry]
+ *   npx tsx apps/home/scripts/workspace-governor.mts <custodian-handle> <workspace-sa> [--dry]
  *
  * A `<label>.workspace` agent is a SERVICE that coordinates a workspace and holds no members; membership belongs
  * to the organization that governs it. Every club and field workspace chartered before today was chartered alone,

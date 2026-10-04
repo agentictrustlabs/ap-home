@@ -25,7 +25,7 @@ passed through (ADR-0041).
 `/oauth/register|authorize|callback|token|revoke`, `/oauth/demo-connect` (persona path for the live gate, gated by
 `DEMO_CONNECT_ENABLED`), `POST /mcp`, `/health`) · `src/oauth.ts` (the AS) · `src/store.ts` (`HomeMcpStoreDO` — clients,
 pending, codes, tokens, persons; wires sealed AES-GCM under a KEK from `TOKEN_SECRET`; a rebuild, never a bereavement:
-a wiped store means "authorize again") · `src/a2a.ts` (`askAsPerson`) · `src/tools.ts` (`ask`, `discover_agents`, `engage`, `my_runs`, `run`, `grant_link` — discover/engage are ONE supplied step each at her agent, `discovery.agents.find` / `engagement.agent.invoke` in `apps/demo-a2a/src/enterprise-tools.ts`; my_runs/run read her records under the same credential) · `src/stream.ts` (SSE frames, progress, elicitation shape — W3: a `tools/call` with `Accept: text/event-stream` streams progress, elicits a data prompt when the client declared it at initialize, never a signature) ·
+a wiped store means "authorize again") · `src/a2a.ts` (`askAsPerson`) · `src/tools.ts` (`ask`, `discover_agents`, `engage`, `my_runs`, `run`, `grant_link` — discover/engage are ONE supplied step each at her agent, `discovery.agents.find` / `engagement.agent.invoke` in `apps/agent-runtime/src/enterprise-tools.ts`; my_runs/run read her records under the same credential) · `src/stream.ts` (SSE frames, progress, elicitation shape — W3: a `tools/call` with `Accept: text/event-stream` streams progress, elicits a data prompt when the client declared it at initialize, never a signature) ·
 `src/whitelabel.ts` (name, instructions, scopes — the only branded module) · `src/act.ts` (spec 397 §11 — ACT-AS-ME: scope `act` for a
 registration the operator allowed (`x-act-registration` secret or `ACT_CLIENT_IDS`), the Home's `home-mcp-act` client, her standing wires
 sealed beside the ask wire (`act_enc`), and on a parked `authority_required` the derivation of the mandate from the covering wire with
@@ -44,7 +44,7 @@ reads it as `HOME_MCP_ACT_REGISTRATION_SECRET`; the operator keeps both in `~/.a
 
 ## Key rotation (runbook)
 
-`GET /health` shows `keyAddress`; it must equal the `delegate` on the Home's `home-mcp` client (`apps/demo-sso-next/src/whitelabel/config.ts`).
+`GET /health` shows `keyAddress`; it must equal the `delegate` on the Home's `home-mcp` client (`apps/home/src/whitelabel/config.ts`).
 To rotate: generate a new key, `wrangler secret put HOME_MCP_PRIVATE_KEY --env faithnet`, set the new address as that `delegate`, push
 the Home, deploy this Worker. Nothing else: every existing connection's assertion stops recovering to its wire's delegate, her agent
 refuses it, the transport answers 401 with the challenge, the host re-authorizes and the Home mints a wire to the new key.

@@ -38,7 +38,7 @@ pnpm dev
 pnpm dev:mcp    # wrangler dev on http://127.0.0.1:8788
 
 # Apply D1 migrations locally:
-pnpm --filter @agenticprimitives-demo/mcp d1:migrate:local
+pnpm --filter @ap-home/vault d1:migrate:local
 ```
 
 A dev-only `/_dev/seed` route exists for seeding test data; it is not part of the delegated surface.

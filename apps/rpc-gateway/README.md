@@ -3,7 +3,7 @@
 A Cloudflare Worker that fronts a **private chain JSON-RPC origin** for apps that cannot reach it
 directly: per-app tokens, a JSON-RPC method allow-list, per-app rate limits, a read cache, and an
 optional `eth_estimateGas` gas-cap injection. Deployed infrastructure (the same class as
-[`apps/demo-edge`](../demo-edge)), not a Ring-0 primitive. The implementation is chain-agnostic;
+[`apps/edge`](../demo-edge)), not a Ring-0 primitive. The implementation is chain-agnostic;
 every hostname, origin and Worker name lives in a `wrangler.toml` `[env.<name>]` block (ADR-0021).
 
 ```
@@ -51,9 +51,9 @@ The bare `name` at the top of `wrangler.toml` exists for `wrangler dev` only; `p
 to run without `WRANGLER_ENV`, so a second Worker cannot be published by accident.
 
 ```bash
-pnpm --filter @agenticprimitives-demo/chain-rpc-gateway typecheck
-pnpm --filter @agenticprimitives-demo/chain-rpc-gateway test
-WRANGLER_ENV=<env> pnpm --filter @agenticprimitives-demo/chain-rpc-gateway run deploy
+pnpm --filter @ap-home/rpc-gateway typecheck
+pnpm --filter @ap-home/rpc-gateway test
+WRANGLER_ENV=<env> pnpm --filter @ap-home/rpc-gateway run deploy
 ```
 
 Smoke after a deploy (with an issued read token, `$GW` = the env's custom domain):

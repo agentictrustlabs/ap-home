@@ -27,7 +27,7 @@ The surface: OIDC broker routes (`/connect/*`, `/token`, `/jwks`, `/oidc/*`), Fe
 ## Run it
 
 ```bash
-pnpm --filter @agenticprimitives-demo/sso-next dev   # next dev on http://localhost:5373
+pnpm --filter @ap-home/home dev   # next dev on http://localhost:5373
 ```
 
 Environment (broker key, RPC, redirect allowlist, optional Google OIDC) follows `.env.example`; key generation reuses `scripts/gen-broker-key.mjs`. Full setup: [DEPLOY.md](./DEPLOY.md).
@@ -38,4 +38,4 @@ Environment (broker key, RPC, redirect allowlist, optional Google OIDC) follows 
 
 Reference implementation, not a product. Runs live against Base Sepolia as the identity home for the relying-app demos. Production launch of the substrate is gated on the public checklist in the [root README](../../README.md); every security finding is tracked live in [`docs/audits/findings.yaml`](../../docs/audits/findings.yaml).
 
-Validate: `pnpm --filter @agenticprimitives-demo/sso-next typecheck`.
+Validate: `pnpm --filter @ap-home/home typecheck`.

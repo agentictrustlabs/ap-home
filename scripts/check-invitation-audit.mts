@@ -8,7 +8,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-const APP = 'apps/demo-sso-next';
+const APP = 'apps/home';
 const routes: string[] = [];
 const walk = (d: string) => { for (const n of readdirSync(d)) { const p = join(d, n); if (statSync(p).isDirectory()) walk(p); else if (n === 'route.ts' && /invite/.test(p)) routes.push(p); } };
 walk(join(APP, 'app', 'connect'));

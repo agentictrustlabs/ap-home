@@ -1,4 +1,4 @@
-# @agenticprimitives-demo/home-shared
+# @ap-home/shared
 
 ## 0.0.1-alpha.2
 

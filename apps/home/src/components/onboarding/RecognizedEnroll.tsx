@@ -57,7 +57,7 @@ type Phase = 'resolving' | 'choose-org' | 'consent' | 'granting' | 'connected' |
 /** What a person is told at a workspace with no governing organization (2026-10-02): membership is recorded on
  *  organizations only, so neither an invitation into it nor a join of it can succeed until its host runs the
  *  migration. One sentence, used by both ceremonies, so the host and the invitee read the same thing. */
-const LEGACY_WORKSPACE_MESSAGE = 'This workspace has no organization yet. Its host has to set one up before anybody can join (apps/demo-sso-next/scripts/workspace-governor.mts).';
+const LEGACY_WORKSPACE_MESSAGE = 'This workspace has no organization yet. Its host has to set one up before anybody can join (apps/home/scripts/workspace-governor.mts).';
 
 /** The CAIP-10 tail (`eip155:<chain>:0x…` → `0x…`), or null. Mirrors context/session. */
 function addressOf(caip10: string | undefined): Address | null {

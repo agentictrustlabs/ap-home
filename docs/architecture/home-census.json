@@ -1,1410 +1,1399 @@
 {
- "$comment": "Spec 398 §1 / §12 G0 — THE HOME CENSUS as data. One row per capability family the Home ships (or the review asked for): its review ids (H-rows, APUX items, M-rows from the 2026-09-10 workbook), what is TRUE about it today (shipped | partial | absent), and every binding a row claims — Home routes, Home components, capability ids the runtime offers, harness endpoints, unit tests, nightly live gates. scripts/check-home-census.mts verifies every claimed binding against the tree and reports what the tree has that no row claims (the census diff). A P0 row that is `shipped` must bind every kind it claims; a `partial` row names what is absent in `gaps`; an `absent` row binds nothing and names the 398 section that builds it. This file moves to ap-home at 399 W2 with `roots` re-pointed (apps/home, apps/agent-runtime).",
- "version": "2026-09-11.1",
- "roots": {
-  "home": "apps/demo-sso-next",
-  "homeApp": "apps/demo-sso-next/app",
-  "homeSrc": "apps/demo-sso-next/src",
-  "runtime": "apps/demo-a2a",
-  "runtimeIndex": "apps/demo-a2a/src/index.ts",
-  "liveGates": "scripts/live-gates.json",
-  "skillsCorpus": "~/skills",
-  "capabilitySources": [
-   "apps/demo-a2a/src",
-   "apps/demo-a2a/src/connectors",
-   "packages/context/src",
-   "packages/harness/src"
+  "$comment": "Spec 398 §1 / §12 G0 — THE HOME CENSUS as data. One row per capability family the Home ships (or the review asked for): its review ids (H-rows, APUX items, M-rows from the 2026-09-10 workbook), what is TRUE about it today (shipped | partial | absent), and every binding a row claims — Home routes, Home components, capability ids the runtime offers, harness endpoints, unit tests, nightly live gates. scripts/check-home-census.mts verifies every claimed binding against the tree and reports what the tree has that no row claims (the census diff). A P0 row that is `shipped` must bind every kind it claims; a `partial` row names what is absent in `gaps`; an `absent` row binds nothing and names the 398 section that builds it. This file moves to ap-home at 399 W2 with `roots` re-pointed (apps/home, apps/agent-runtime).",
+  "version": "2026-09-11.1",
+  "roots": {
+    "home": "apps/home",
+    "homeApp": "apps/home/app",
+    "homeSrc": "apps/home/src",
+    "runtime": "apps/agent-runtime",
+    "runtimeIndex": "apps/agent-runtime/src/index.ts",
+    "liveGates": "scripts/live-gates.json",
+    "skillsCorpus": "~/skills",
+    "capabilitySources": [
+      "apps/agent-runtime/src",
+      "apps/agent-runtime/node_modules/@agenticprimitives/context/dist",
+      "apps/agent-runtime/node_modules/@agenticprimitives/harness/dist"
+    ]
+  },
+  "rows": [
+    {
+      "id": "home.session",
+      "review": [
+        "H01",
+        "H02"
+      ],
+      "title": "Sign in, the person's Home, the identity a session names — and the credential ceremonies: rotation, the Home-to-Home move (spec 410 §1.2) — and the Security section's front door + Sign-in (spec 422 W1: the pane, credentials by grade from the chain, channels, the one policy table)",
+      "priority": "P0",
+      "status": "shipped",
+      "specs": [
+        234,
+        257,
+        259,
+        295,
+        311,
+        410,
+        422
+      ],
+      "section": "398 §2.2",
+      "routes": [
+        "(portal)",
+        "(portal)/you",
+        "(portal)/security",
+        "(portal)/settings",
+        "(portal)/agent",
+        "logout",
+        "handoff",
+        "link",
+        "(portal)/org/[org]/settings",
+        "(portal)/service/[agent]/settings",
+        "(portal)/org/[org]/agent",
+        "move",
+        "(portal)/security/sign-in",
+        "connect/email/unlink",
+        "connect/phone/unlink"
+      ],
+      "tests": [
+        "apps/home/src/context/session-restore.test.ts",
+        "apps/home/src/csrf.test.ts",
+        "apps/home/src/whitelabel/sign-in-methods.test.ts",
+        "apps/home/src/home/move.test.ts",
+        "apps/home/src/home/rotation.test.ts",
+        "apps/home/src/home/credentials.test.ts",
+        "apps/home/src/lib/kv-indexer.test.ts",
+        "apps/agent-runtime/test/unit/security-tools.test.ts"
+      ],
+      "components": [
+        "home/move.ts",
+        "home/rotation.ts",
+        "home/credentials.ts",
+        "lib/security-grade.ts",
+        "lib/kv-indexer.ts",
+        "home/security-ceremonies.ts"
+      ],
+      "capabilities": [
+        "person.credentials.list",
+        "person.security.posture",
+        "person.credential.add",
+        "person.credential.label",
+        "person.channel.link",
+        "person.channel.unlink"
+      ],
+      "gates": [
+        "verify-security-asks"
+      ]
+    },
+    {
+      "id": "home.principal-context",
+      "review": [
+        "H03",
+        "APUX-004",
+        "M06"
+      ],
+      "title": "Principal ≠ workspace context — the header switcher, acting-as / acting-in",
+      "priority": "P0",
+      "status": "shipped",
+      "specs": [
+        315,
+        348,
+        344
+      ],
+      "section": "398 §4.4",
+      "routes": [
+        "(portal)/workspaces",
+        "(portal)/workspaces/[id]",
+        "(portal)/organizations",
+        "(portal)/org/[org]/overview",
+        "(portal)/service/[agent]"
+      ],
+      "components": [
+        "components/portal/BasisLine.tsx",
+        "components/portal/FleetLines.tsx",
+        "components/portal/nav.ts",
+        "lib/acting-basis.ts",
+        "lib/workspace.ts"
+      ],
+      "tests": [
+        "apps/home/src/components/portal/nav-routes.test.ts",
+        "apps/home/src/components/portal/nav.test.ts",
+        "apps/home/src/lib/acting-basis.test.ts",
+        "apps/home/src/lib/org-membership-union.test.ts"
+      ],
+      "gaps": [
+        "the basis line is on the Ask's authority card, decisions, the endeavor detail, the request composer, invitations, join requests, treasury funding and the Card Studio's publish; M06's three lines (runs at · may spend · holds) on the organization roster — not yet on the services roster or the member rows (398 §4.4)"
+      ]
+    },
+    {
+      "id": "home.ask",
+      "review": [
+        "H04",
+        "H17",
+        "H18",
+        "H39"
+      ],
+      "title": "Ask — the conversational surface: classify → resolve → preview → confirmation-as-signature → receipt",
+      "priority": "P0",
+      "status": "shipped",
+      "specs": [
+        352,
+        353,
+        361,
+        369,
+        385
+      ],
+      "section": "398 §7",
+      "routes": [
+        "(portal)/ask",
+        "(portal)/org/[org]/ask"
+      ],
+      "components": [
+        "components/portal/ask/AskFlyout.tsx",
+        "home/ask.ts",
+        "lib/interaction-registry.ts"
+      ],
+      "capabilities": [
+        "ask.unsupported"
+      ],
+      "endpoints": [
+        "/harness/ask",
+        "/harness/run",
+        "/harness/progress",
+        "/harness/vocabulary",
+        "/harness/hear"
+      ],
+      "tests": [
+        "apps/home/src/home/ask.test.ts",
+        "apps/home/src/components/portal/ask/voice-text.test.ts",
+        "apps/agent-runtime/test/ask-vocabulary.test.ts",
+        "apps/agent-runtime/test/mandate-words.test.ts",
+        "apps/agent-runtime/test/voice.test.ts"
+      ],
+      "gates": [
+        "verify-route",
+        "verify-authority-chain",
+        "verify-confirmation-room"
+      ],
+      "gaps": [
+        "execution parity per family (361 I4) — buttons and Ask reach the same /harness boundary for invite/fund/profile/household/payee only; deploy and custody still post to the legacy /session/* and /account/* verbs (H18)"
+      ]
+    },
+    {
+      "id": "home.workspaces-membership",
+      "review": [
+        "H08",
+        "H09",
+        "H10",
+        "H11"
+      ],
+      "title": "Workspaces, organizations, teams, membership, roster, invitations",
+      "priority": "P0",
+      "status": "shipped",
+      "specs": [
+        318,
+        344,
+        346,
+        341
+      ],
+      "section": "398 §4.5",
+      "routes": [
+        "(portal)/workspaces",
+        "(portal)/org/[org]/membership",
+        "(portal)/org/[org]/members",
+        "(portal)/org/[org]/invite",
+        "(portal)/org/[org]/access",
+        "(portal)/agents",
+        "(portal)/service/[agent]/members",
+        "(portal)/service/[agent]/access",
+        "invite/[token]"
+      ],
+      "capabilities": [
+        "organization.create",
+        "organization.team.create",
+        "organization.membership.invite",
+        "service.create",
+        "person.invitations.list",
+        "person.affiliations.list"
+      ],
+      "endpoints": [
+        "/harness/ask",
+        "/harness/approve"
+      ],
+      "tests": [
+        "apps/agent-runtime/test/chartered-agents.test.ts",
+        "apps/agent-runtime/test/harness-team-create.test.ts",
+        "apps/agent-runtime/test/org-wire.test.ts",
+        "apps/home/src/components/onboarding/OrgChooser.test.ts",
+        "apps/home/src/home/roster-contract.test.ts",
+        "apps/home/src/lib/email-invite-home.test.ts",
+        "apps/home/src/lib/invitation-check.test.ts",
+        "apps/home/src/lib/invite-copy.test.ts",
+        "apps/home/src/lib/new-member.test.ts",
+        "scripts/check-invitation-audit.mts"
+      ],
+      "gates": [
+        "verify-home-mcp-people"
+      ],
+      "gaps": [
+        "398 §4.5 roster contract shipped (type · sponsor · responsibility · permissions · active work); another member's active work reads 'not visible to you' under §12 visibility rather than a false zero; the sponsor names the organization, not the steward who signed (the grant carries the delegator only)"
+      ],
+      "components": [
+        "home/roster-contract.ts"
+      ]
+    },
+    {
+      "id": "home.work",
+      "review": [
+        "H12",
+        "APUX-009"
+      ],
+      "title": "Work — endeavors, requests, allocations, commitments, decisions by declared approvers",
+      "priority": "P0",
+      "status": "shipped",
+      "specs": [
+        332,
+        333,
+        334,
+        382,
+        393
+      ],
+      "section": "398 §4.3",
+      "routes": [
+        "(portal)/work",
+        "(portal)/org/[org]/work",
+        "(portal)/org/[org]/work/new",
+        "(portal)/org/[org]/work/[endeavor]",
+        "(portal)/org/[org]/work/requests"
+      ],
+      "capabilities": [
+        "endeavor.create",
+        "endeavor.request",
+        "endeavor.propose",
+        "endeavor.allocate",
+        "endeavor.decide",
+        "endeavor.decision.request",
+        "endeavor.satisfy",
+        "endeavor.milestone.achieve",
+        "endeavor.abandon"
+      ],
+      "endpoints": [
+        "/harness/ask",
+        "/harness/approve"
+      ],
+      "tests": [
+        "apps/agent-runtime/test/endeavor-authority-steps.test.ts",
+        "apps/agent-runtime/test/endeavor-intake.test.ts",
+        "apps/agent-runtime/test/endeavors.test.ts",
+        "apps/agent-runtime/test/unit/endeavor-committed-steps.test.ts",
+        "apps/home/src/home/work-item.test.ts"
+      ],
+      "gates": [
+        "verify-endeavor-decision",
+        "verify-endeavor-offer-allocate-ask",
+        "verify-golden-journey"
+      ],
+      "gaps": [
+        "§4.3 work item on the endeavor detail; the same contract on the board row, the inbox card and the Ask's done reply is still native; artifacts and cost are not linked on the item record (391 refs, 396 bill) — said absent on the card"
+      ],
+      "components": [
+        "components/portal/StatePill.tsx",
+        "components/portal/work/WorkItemCard.tsx",
+        "home/work-item.ts"
+      ]
+    },
+    {
+      "id": "home.build",
+      "review": [
+        "APUX-050",
+        "APUX-052"
+      ],
+      "title": "Build — a build run in a sandbox under the workspace's mandate (public by clone, private by an archive fetched under the workspace's connector); review with recorded evidence apart from assertion; promotion under a signature over the exact commit",
+      "priority": "P1",
+      "status": "shipped",
+      "specs": [
+        398
+      ],
+      "section": "398 §9",
+      "routes": [
+        "(portal)/org/[org]/build"
+      ],
+      "capabilities": [
+        "build.run",
+        "build.run.list",
+        "build.review",
+        "build.promote",
+        "github.repos.list"
+      ],
+      "endpoints": [
+        "/harness/ask"
+      ],
+      "tests": [
+        "apps/agent-runtime/test/unit/build-tools.test.ts",
+        "apps/agent-runtime/test/github-connector.test.ts"
+      ],
+      "gates": [
+        "verify-build-run"
+      ],
+      "gaps": [
+        "no editor attached through ACP (B2's second half); the environment a promotion reaches is the default branch — a deployment target (preview URL, config, migration) attached to the workspace is B5's next; recovery controls (B6) not built; the artifact's thread projection on the work item"
+      ],
+      "components": [
+        "components/portal/BuildView.tsx",
+        "components/portal/ask/interaction-apps.tsx"
+      ]
+    },
+    {
+      "id": "home.messaging",
+      "review": [
+        "H13",
+        "H28"
+      ],
+      "title": "Messages, channels, discussions — one DM per pair, org channels, threaded replies, the merged inbox",
+      "priority": "P0",
+      "status": "shipped",
+      "specs": [
+        312,
+        313,
+        340,
+        341
+      ],
+      "section": "398 §5.5",
+      "routes": [
+        "(portal)/messages",
+        "(portal)/inbox",
+        "(portal)/chats",
+        "(portal)/channels",
+        "(portal)/discussion-replies",
+        "(portal)/enable-messaging",
+        "(portal)/approve-messaging",
+        "(portal)/approve-inbox-read",
+        "(portal)/org/[org]/messages",
+        "(portal)/org/[org]/channels",
+        "(portal)/org/[org]/discussions",
+        "(portal)/service/[agent]/messages"
+      ],
+      "capabilities": [
+        "messaging.direct.send"
+      ],
+      "tests": [
+        "apps/home/src/lib/messaging-wire.test.ts",
+        "apps/agent-runtime/test/messaging-scope.test.ts",
+        "apps/agent-runtime/test/interactions-do-channels.test.ts",
+        "apps/home/server/connect/channels-steward-proof.test.ts",
+        "apps/home/src/components/portal/chat/rail-date.test.ts"
+      ],
+      "gates": [
+        "verify-home-mcp-room"
+      ],
+      "gaps": [],
+      "components": [
+        "components/portal/AttentionBar.tsx"
+      ]
+    },
+    {
+      "id": "home.huddles",
+      "review": [
+        "H14"
+      ],
+      "title": "Huddles on topics (RealtimeKit)",
+      "priority": "P2",
+      "status": "shipped",
+      "specs": [
+        378
+      ],
+      "section": "398 §4.5",
+      "components": [
+        "components/portal/huddle/HuddleProvider.tsx",
+        "components/portal/huddle/HuddleDock.tsx"
+      ],
+      "tests": [
+        "apps/agent-runtime/test/unit/realtimekit.test.ts"
+      ]
+    },
+    {
+      "id": "home.external-agents",
+      "review": [
+        "H15",
+        "APUX-022"
+      ],
+      "title": "External agent invitation and engagement — an outside A2A agent answers inside a run",
+      "priority": "P1",
+      "status": "shipped",
+      "specs": [
+        379,
+        336,
+        338,
+        401
+      ],
+      "section": "398 §4.5",
+      "routes": [
+        "external-agent",
+        "(portal)/find",
+        "(portal)/network",
+        "(portal)/networks",
+        "(portal)/alliances",
+        "(portal)/contacts",
+        "(portal)/coaches"
+      ],
+      "capabilities": [
+        "discovery.agents.find",
+        "discovery.agent.inspect",
+        "engagement.agent.invoke",
+        "engagement.probe",
+        "resolution.invitation.request"
+      ],
+      "tests": [
+        "apps/agent-runtime/test/unit/external-agent.test.ts",
+        "apps/agent-runtime/test/unit/engagement-answer.test.ts",
+        "apps/agent-runtime/test/unit/engagement-trust.test.ts",
+        "apps/agent-runtime/test/resolution-grant-use.test.ts"
+      ],
+      "gates": [
+        "verify-home-mcp-discovery",
+        "verify-ap-gateway",
+        "verify-contacts",
+        "verify-runtime-pair"
+      ],
+      "gaps": [
+        "external specialist grants as a Home surface (APUX-022) — 398 G5"
+      ]
+    },
+    {
+      "id": "home.capabilities",
+      "review": [
+        "H20"
+      ],
+      "title": "Capability discoverability — the vocabulary, the definitions, the skills a Home mounts",
+      "priority": "P0",
+      "status": "shipped",
+      "specs": [
+        354,
+        355,
+        367
+      ],
+      "section": "398 §7",
+      "routes": [
+        "(portal)/capabilities",
+        "(portal)/capability-definitions",
+        "(portal)/capability-definitions/[id]",
+        "(portal)/skills",
+        "(portal)/org/[org]/capabilities",
+        "(portal)/service/[agent]/capabilities"
+      ],
+      "components": [
+        "components/portal/capabilities",
+        "home/retry.ts"
+      ],
+      "endpoints": [
+        "/harness/vocabulary"
+      ],
+      "tests": [
+        "apps/agent-runtime/test/ask-vocabulary.test.ts",
+        "apps/agent-runtime/test/capability-ids.test.ts",
+        "apps/agent-runtime/test/card-mounted-skills.test.ts",
+        "apps/home/src/components/portal/capabilities/editor.test.ts",
+        "apps/home/src/home/retry.test.ts"
+      ],
+      "gaps": [
+        "398 §7.2 — every agentic-trust contract declares idempotency + result.kind, every agentic-trust archetype compiles them from its contracts (0 fallback rows), the vocabulary publishes them; the parity pair runs as check:interaction-coverage:behaviour"
+      ]
+    },
+    {
+      "id": "home.runs",
+      "review": [
+        "H23",
+        "H25",
+        "H26",
+        "H40"
+      ],
+      "title": "Runs — checkpoints, resume, parked approvals, the inspector and timeline, spans",
+      "priority": "P0",
+      "status": "shipped",
+      "specs": [
+        350,
+        362,
+        370,
+        381,
+        382,
+        390,
+        391
+      ],
+      "section": "398 §5",
+      "routes": [
+        "(portal)/activities",
+        "(portal)/org/[org]/activities",
+        "(portal)/service/[agent]/activities",
+        "(portal)/consent-sign",
+        "(portal)/wea-sign"
+      ],
+      "components": [
+        "components/portal/ActivityTimeline.tsx",
+        "components/portal/StatePill.tsx",
+        "components/portal/runs/RunControls.tsx",
+        "components/portal/runs/RunHistory.tsx",
+        "components/portal/runs/RunInspector.tsx",
+        "components/portal/runs/RunTimeline.tsx",
+        "components/portal/runs/SaveAsRecipe.tsx",
+        "home/recipe.ts",
+        "home/run-state.ts"
+      ],
+      "endpoints": [
+        "/harness/approve",
+        "/harness/authorize",
+        "/harness/cancel",
+        "/harness/durable",
+        "/harness/progress",
+        "/harness/recipe",
+        "/harness/replay",
+        "/harness/run",
+        "/harness/runs",
+        "/harness/spans"
+      ],
+      "tests": [
+        "apps/agent-runtime/test/a2a-task-do.test.ts",
+        "apps/agent-runtime/test/harness-progress.test.ts",
+        "apps/agent-runtime/test/harness-runs.test.ts",
+        "apps/agent-runtime/test/harness-workflow-core.test.ts",
+        "apps/agent-runtime/test/unit/artifact-store.test.ts",
+        "apps/agent-runtime/test/unit/run-export.test.ts",
+        "apps/home/src/home/recipe.test.ts",
+        "apps/home/src/home/run-state.test.ts"
+      ],
+      "gates": [
+        "verify-cancel",
+        "verify-durable-run",
+        "verify-handoff",
+        "verify-recipe",
+        "verify-run-bill",
+        "verify-run-export"
+      ],
+      "gaps": [
+        "steer and pause as client surfaces (a pause is a trigger's, 375); cancel shipped 398 §5.3 — revoke stays on delegations, undo is a new intent",
+        "no replay UI over the spans (H40)"
+      ]
+    },
+    {
+      "id": "home.routines",
+      "review": [
+        "H27"
+      ],
+      "title": "Routines — triggers on the playbook, scheduled and hooked work under fresh authority",
+      "priority": "P1",
+      "status": "shipped",
+      "specs": [
+        375,
+        402,
+        403,
+        323
+      ],
+      "section": "398 G3",
+      "routes": [
+        "(portal)/org/[org]/routines",
+        "(portal)/playbook",
+        "(portal)/routines",
+        "(portal)/service/[agent]/routines"
+      ],
+      "components": [
+        "components/portal/RoutinesView.tsx",
+        "components/portal/StatePill.tsx",
+        "components/portal/TriggersPanel.tsx",
+        "home/routines.ts"
+      ],
+      "endpoints": [
+        "/harness/hooks/",
+        "/harness/triggers",
+        "/harness/triggers/fire",
+        "/harness/triggers/pause",
+        "/harness/triggers/rotate",
+        "/harness/triggers/remove",
+        "/harness/triggers/rebuild"
+      ],
+      "tests": [
+        "apps/agent-runtime/test/unit/trigger-kinds.test.ts",
+        "apps/agent-runtime/test/unit/triggers.test.ts",
+        "apps/home/src/home/routines.test.ts",
+        "apps/home/src/home/triggers.test.ts"
+      ],
+      "gaps": [
+        "a routine's budget is set by a steward on the row, not yet declared on the SKILL.md trigger (375 contract); save-as-recipe (398 G3) not built"
+      ],
+      "gates": [
+        "verify-routine-pause",
+        "verify-routine-from-sentence",
+        "verify-portable-home",
+        "verify-reminders-and-preferences"
+      ]
+    },
+    {
+      "id": "home.memory",
+      "review": [
+        "H31",
+        "APUX-035"
+      ],
+      "title": "Memory the person can see and clear — remembered confirmations, standing instructions",
+      "priority": "P1",
+      "status": "shipped",
+      "specs": [
+        385,
+        394,
+        402,
+        403
+      ],
+      "section": "398 §6.1",
+      "components": [
+        "components/portal/MemoryViews.tsx",
+        "components/portal/ask/AskFlyout.tsx",
+        "home/memory.ts",
+        "components/portal/TodayMemory.tsx",
+        "components/portal/AgentPreferencesPanel.tsx"
+      ],
+      "capabilities": [
+        "context.instruction.declare"
+      ],
+      "endpoints": [
+        "/harness/confirmations",
+        "/harness/confirmations/forget",
+        "/harness/instructions",
+        "/harness/instructions/forget",
+        "/harness/memory",
+        "/harness/memory/forget",
+        "/harness/preferences"
+      ],
+      "gates": [
+        "verify-standing-instruction",
+        "verify-standing-instruction-room",
+        "verify-confirmation-room",
+        "verify-home-mcp-instructions",
+        "verify-memory-follows"
+      ],
+      "gaps": [
+        "learned preferences (358 W5) — none kept yet; topic snapshots (340) not listed in the workspace view; promotion from Run to Library is not yet an act with a receipt (398 §6.1) — said in the view, not offered"
+      ],
+      "routes": [
+        "(portal)/memory",
+        "(portal)/org/[org]/memory",
+        "(portal)/service/[agent]/memory"
+      ],
+      "tests": [
+        "apps/home/src/home/memory.test.ts"
+      ]
+    },
+    {
+      "id": "home.library",
+      "review": [
+        "H33"
+      ],
+      "title": "Library — artifacts with versions, per person / org / service; the public shelf (412) served by the owner's agent and read at /published",
+      "priority": "P0",
+      "status": "shipped",
+      "specs": [
+        310,
+        391,
+        405,
+        412
+      ],
+      "section": "398 §6.2",
+      "routes": [
+        "(portal)/library",
+        "(portal)/org/[org]/library",
+        "(portal)/service/[agent]/library",
+        "published",
+        "published/[id]",
+        "published/shelf"
+      ],
+      "tests": [
+        "apps/agent-runtime/test/unit/library-public-shelf.test.ts",
+        "apps/agent-runtime/test/unit/library-tools.test.ts",
+        "apps/agent-runtime/test/unit/library-writes.test.ts",
+        "apps/home/server/connect/library.test.ts",
+        "apps/home/src/home/artifact-identity.test.ts"
+      ],
+      "gaps": [
+        "replicate as an act (an authorized copy in another vault) is not offered — said so on the card (398 §6.2); the linked work item is absent on every artifact (§4.3); stale is a state on the Library's freshness badge but the \"no organizations of 37\" rule (§6.3 — never render unknown as zero) is a ratchet (check:unknown-not-zero, ceiling 6 — Today, Memory and the run listing say which read failed)"
+      ],
+      "components": [
+        "components/portal/ask/interaction-apps.tsx",
+        "home/artifact-identity.ts",
+        "home/library-attach.ts",
+        "lib/public-shelf.ts",
+        "components/onboarding/AgentReachFold.tsx"
+      ],
+      "capabilities": [
+        "library.file.publish",
+        "library.file.read",
+        "library.file.save",
+        "library.file.visibility",
+        "library.files.list",
+        "library.public.list",
+        "library.public.read"
+      ],
+      "gates": [
+        "verify-files-of-her-own",
+        "verify-public-shelf"
+      ]
+    },
+    {
+      "id": "home.records",
+      "review": [
+        "H32",
+        "H34"
+      ],
+      "title": "Records — the vault, subject roles, the vault key, data sources, visibility",
+      "priority": "P0",
+      "status": "shipped",
+      "specs": [
+        277,
+        278,
+        356,
+        265,
+        400
+      ],
+      "section": "398 §6.1",
+      "routes": [
+        "(portal)/records",
+        "(portal)/vault-key",
+        "(portal)/vault-subject-role",
+        "(portal)/data-sources",
+        "(portal)/visibility",
+        "(portal)/org/[org]/records",
+        "(portal)/org/[org]/data",
+        "(portal)/service/[agent]/records",
+        "(portal)/search"
+      ],
+      "capabilities": [
+        "household.data"
+      ],
+      "endpoints": [
+        "/harness/records"
+      ],
+      "tests": [
+        "apps/home/src/lib/read-grants.test.ts",
+        "apps/agent-runtime/test/interactions-do-scoped-read.test.ts",
+        "apps/home/src/lib/typed-claim-paths.test.ts"
+      ]
+    },
+    {
+      "id": "home.household",
+      "review": [
+        "H07"
+      ],
+      "title": "Household — the .household agent, member records, invitations",
+      "priority": "P1",
+      "status": "shipped",
+      "specs": [
+        368
+      ],
+      "section": "398 §4.5",
+      "routes": [
+        "(portal)/household"
+      ],
+      "capabilities": [
+        "household.create",
+        "household.member.record"
+      ],
+      "tests": [
+        "apps/agent-runtime/test/household-next.test.ts"
+      ],
+      "gates": [
+        "verify-home-mcp-people"
+      ]
+    },
+    {
+      "id": "home.profile",
+      "review": [
+        "H05"
+      ],
+      "title": "Profile — the canonical profile, contact, location, the names it publishes",
+      "priority": "P0",
+      "status": "shipped",
+      "specs": [
+        217,
+        347
+      ],
+      "section": "398 §2.2",
+      "routes": [
+        "(portal)/profile",
+        "(portal)/org/[org]/profile",
+        "(portal)/service/[agent]/profile"
+      ],
+      "capabilities": [
+        "profile.contact.update"
+      ],
+      "tests": [
+        "apps/home/src/lib/profile-location.test.ts"
+      ]
+    },
+    {
+      "id": "home.treasury",
+      "review": [
+        "H06"
+      ],
+      "title": "Treasuries — create, connect, fund, pay; the value rail is treasuries only",
+      "priority": "P0",
+      "status": "shipped",
+      "specs": [
+        283,
+        371
+      ],
+      "section": "398 §2.4",
+      "routes": [
+        "(portal)/treasuries",
+        "(portal)/treasury-connect",
+        "(portal)/org/[org]/treasury",
+        "choose-treasury"
+      ],
+      "capabilities": [
+        "treasury.create",
+        "treasury.fund",
+        "treasury.payment.execute",
+        "treasury.primary.declare",
+        "treasury.balance.read"
+      ],
+      "tests": [
+        "apps/home/src/lib/treasury-ceremony.test.ts",
+        "apps/home/src/lib/coins.test.ts",
+        "apps/agent-runtime/test/value-rail.test.ts",
+        "apps/agent-runtime/test/unit/balance-read.test.ts",
+        "apps/agent-runtime/test/unit/payment-purpose.test.ts"
+      ],
+      "gates": [
+        "verify-receipt-recompute",
+        "verify-grant-revocation"
+      ]
+    },
+    {
+      "id": "home.playbook",
+      "review": [
+        "H19",
+        "H21"
+      ],
+      "title": "Playbook — the archetype ceremony, the behaviour a person chose for their agent, versioned and receipted",
+      "priority": "P0",
+      "status": "shipped",
+      "specs": [
+        354,
+        367
+      ],
+      "section": "398 §8.2",
+      "routes": [
+        "(portal)/playbook",
+        "(portal)/org/[org]/playbook",
+        "(portal)/service/[agent]/playbook"
+      ],
+      "tests": [
+        "apps/agent-runtime/test/playbook.test.ts",
+        "apps/agent-runtime/test/playbook-injection.test.ts",
+        "apps/agent-runtime/test/archetype-skill.test.ts",
+        "apps/home/src/lib/archetype-grant.test.ts",
+        "apps/agent-runtime/test/unit/specialists.test.ts"
+      ]
+    },
+    {
+      "id": "home.card-studio",
+      "review": [
+        "H16",
+        "H46"
+      ],
+      "title": "Agent Card & Projection Studio — canonical profile → released signed card → projections → publications → bindings",
+      "priority": "P0",
+      "status": "shipped",
+      "specs": [
+        347
+      ],
+      "section": "398 §1.1",
+      "routes": [
+        "(portal)/card",
+        "(portal)/card/[cardResourceId]",
+        "(portal)/card/[cardResourceId]/history",
+        "(portal)/card/[cardResourceId]/listing/[family]",
+        "(portal)/card/[cardResourceId]/names",
+        "(portal)/card/[cardResourceId]/projections",
+        "(portal)/card/[cardResourceId]/releases",
+        "(portal)/org/[org]/card",
+        "(portal)/service/[agent]/card",
+        "(portal)/org/[org]/card/[cardResourceId]",
+        "(portal)/org/[org]/card/[cardResourceId]/history",
+        "(portal)/org/[org]/card/[cardResourceId]/listing/[family]",
+        "(portal)/org/[org]/card/[cardResourceId]/names",
+        "(portal)/org/[org]/card/[cardResourceId]/projections",
+        "(portal)/org/[org]/card/[cardResourceId]/releases",
+        "(portal)/service/[agent]/card/[cardResourceId]",
+        "(portal)/service/[agent]/card/[cardResourceId]/history",
+        "(portal)/service/[agent]/card/[cardResourceId]/listing/[family]",
+        "(portal)/service/[agent]/card/[cardResourceId]/names",
+        "(portal)/service/[agent]/card/[cardResourceId]/projections",
+        "(portal)/service/[agent]/card/[cardResourceId]/releases"
+      ],
+      "components": [
+        "components/studio/Inspector.tsx"
+      ],
+      "tests": [
+        "apps/home/src/lib/studio-flow.test.ts",
+        "apps/home/src/lib/studio-view.test.ts",
+        "apps/home/src/components/studio/card-save-wiring.test.ts",
+        "apps/home/src/lib/publish-to-card.test.ts",
+        "apps/home/src/lib/card-changed.test.ts",
+        "apps/home/src/lib/publish-gate.test.ts",
+        "apps/agent-runtime/test/agent-card-studio.test.ts"
+      ],
+      "gaps": [
+        "the Inspector inspects cards, not runs (H46) — the run inspector is 398 §5.2"
+      ]
+    },
+    {
+      "id": "home.naming-registry",
+      "review": [
+        "H22"
+      ],
+      "title": "Names, naming, registry, trust graph, attestations — the public facets",
+      "priority": "P1",
+      "status": "shipped",
+      "specs": [
+        222,
+        346,
+        279,
+        338
+      ],
+      "section": "398 §1.1",
+      "routes": [
+        "(portal)/names",
+        "(portal)/naming",
+        "(portal)/registry",
+        "(portal)/trust-graph",
+        "(portal)/attestations",
+        "(portal)/org/[org]/naming",
+        "(portal)/org/[org]/registry",
+        "(portal)/org/[org]/trust-graph",
+        "(portal)/org/[org]/network",
+        "(portal)/org/[org]/status",
+        "(portal)/service/[agent]/naming",
+        "(portal)/service/[agent]/registry",
+        "(portal)/service/[agent]/trust-graph",
+        "(portal)/service/[agent]/network"
+      ],
+      "tests": [
+        "apps/home/src/lib/qualified-agent-name.test.ts",
+        "apps/home/src/lib/typed-tld.test.ts",
+        "apps/home/src/lib/name-change.test.ts",
+        "apps/agent-runtime/test/typed-naming-endpoints.test.ts",
+        "apps/agent-runtime/test/public-graph.test.ts"
+      ]
+    },
+    {
+      "id": "home.access",
+      "review": [
+        "H24"
+      ],
+      "title": "Access — delegations received and granted, app grants, revocation",
+      "priority": "P0",
+      "status": "shipped",
+      "specs": [
+        277,
+        295,
+        397,
+        400
+      ],
+      "section": "398 §2.3",
+      "routes": [
+        "(portal)/apps",
+        "(portal)/org/[org]/access",
+        "(portal)/service/[agent]/access",
+        "(portal)/grants",
+        "(portal)/org/[org]/grants",
+        "(portal)/apps/signed-in",
+        "(portal)/apps/assistants",
+        "(portal)/apps/readers"
+      ],
+      "capabilities": [
+        "access.grant.revoke"
+      ],
+      "tests": [
+        "apps/home/server/connect/self-grant.test.ts",
+        "apps/home/src/lib/discovery-authority.test.ts"
+      ],
+      "gates": [
+        "verify-grant-revocation",
+        "verify-home-mcp-revoke",
+        "verify-home-mcp-authority",
+        "verify-grants-admin"
+      ]
+    },
+    {
+      "id": "home.connectors-mcp",
+      "review": [
+        "APUX-030"
+      ],
+      "title": "External MCP servers as connectors — any server attached as the holder's, its tools compiled (acts by default under her mandate; reads where the server or she says), the credential the runtime's",
+      "priority": "P0",
+      "status": "shipped",
+      "specs": [
+        404
+      ],
+      "section": "404 §1–§2",
+      "routes": [
+        "(portal)/apps",
+        "(portal)/apps/accounts",
+        "(portal)/apps/tools"
+      ],
+      "capabilities": [
+        "mcp.connectors.list"
+      ],
+      "endpoints": [
+        "/harness/connectors/mcp",
+        "/harness/ask"
+      ],
+      "tests": [
+        "apps/agent-runtime/test/unit/mcp-connector.test.ts"
+      ],
+      "gates": [
+        "verify-mcp-connector"
+      ],
+      "gaps": [
+        "OAuth-flow attach (a server that wants an authorization code); resources and prompts; listChanged re-probe; Slack/Notion as first-party connectors (W2)"
+      ],
+      "components": [
+        "components/portal/McpConnectorsCard.tsx",
+        "components/portal/ask/interaction-apps.tsx"
+      ]
+    },
+    {
+      "id": "home.provenance",
+      "review": [
+        "H38"
+      ],
+      "title": "Receipts and provenance — PROV-O bundles, public projection, counterparty recompute, the dispute on the receipt (spec 410 §10)",
+      "priority": "P1",
+      "status": "shipped",
+      "specs": [
+        389,
+        395,
+        410
+      ],
+      "section": "398 §2.4",
+      "endpoints": [
+        "/harness/provenance",
+        "/harness/dispute",
+        "/harness/dispute/exchange"
+      ],
+      "gates": [
+        "verify-provenance-hop",
+        "verify-public-provenance",
+        "verify-receipt-recompute"
+      ],
+      "gaps": [
+        "the publicly-verifiable badge on the timeline row — 398 §2.4/§5.2"
+      ],
+      "components": [
+        "components/portal/runs/DisputePanel.tsx",
+        "home/dispute.ts"
+      ],
+      "tests": [
+        "apps/agent-runtime/test/unit/dispute.test.ts"
+      ]
+    },
+    {
+      "id": "home.home-mcp",
+      "review": [
+        "H29",
+        "H30"
+      ],
+      "title": "Home MCP — Claude.ai as a client of the person: ask-as-me delegation, discovery and engagement through her agent, acts park for her signature; act-as-me (397 §11): standing wires she decided once, one per capability, derived into the parked run's mandate by the Worker's act key, revocable one by one",
+      "priority": "P1",
+      "status": "shipped",
+      "specs": [
+        397
+      ],
+      "section": "398 §1.1 (spec 397)",
+      "routes": [
+        "(portal)/apps"
+      ],
+      "tests": [
+        "apps/home-mcp/test/oauth.test.ts",
+        "apps/home-mcp/test/stream.test.ts",
+        "apps/home-mcp/test/act.test.ts",
+        "apps/home/src/lib/act-as-me.test.ts"
+      ],
+      "gates": [
+        "verify-home-mcp",
+        "verify-home-mcp-browser-path",
+        "verify-home-mcp-stream",
+        "verify-home-mcp-routed",
+        "verify-home-mcp-act"
+      ]
+    },
+    {
+      "id": "home.as-persona",
+      "review": [
+        "M06"
+      ],
+      "title": "Another of your names — a persona (relationship 'self') opened AS itself: its own Today, Ask, memory, messages, routines, library, card, naming, network, playbook, records, trust graph — the same surfaces, under the other name",
+      "priority": "P1",
+      "status": "shipped",
+      "specs": [
+        398
+      ],
+      "section": "the persona realm (23c17dea, 40acecba)",
+      "routes": [
+        "(portal)/as/[agent]",
+        "(portal)/as/[agent]/access",
+        "(portal)/as/[agent]/activities",
+        "(portal)/as/[agent]/ask",
+        "(portal)/as/[agent]/capabilities",
+        "(portal)/as/[agent]/card",
+        "(portal)/as/[agent]/card/[cardResourceId]",
+        "(portal)/as/[agent]/card/[cardResourceId]/history",
+        "(portal)/as/[agent]/card/[cardResourceId]/listing/[family]",
+        "(portal)/as/[agent]/card/[cardResourceId]/names",
+        "(portal)/as/[agent]/card/[cardResourceId]/projections",
+        "(portal)/as/[agent]/card/[cardResourceId]/releases",
+        "(portal)/as/[agent]/library",
+        "(portal)/as/[agent]/memory",
+        "(portal)/as/[agent]/messages",
+        "(portal)/as/[agent]/naming",
+        "(portal)/as/[agent]/network",
+        "(portal)/as/[agent]/playbook",
+        "(portal)/as/[agent]/profile",
+        "(portal)/as/[agent]/records",
+        "(portal)/as/[agent]/registry",
+        "(portal)/as/[agent]/routines",
+        "(portal)/as/[agent]/settings",
+        "(portal)/as/[agent]/trust-graph"
+      ],
+      "capabilities": [],
+      "endpoints": [
+        "/harness/ask"
+      ],
+      "tests": [
+        "apps/home/src/lib/acting-basis.test.ts",
+        "apps/home/src/components/portal/nav-routes.test.ts"
+      ],
+      "gates": [],
+      "gaps": [
+        "no live gate yet for opening a persona and acting under its name; the persona's playbook assignment and vault planes are provisioned by scripts (charter-cast, activate-cast-vaults), not by the Home's own ceremony"
+      ],
+      "components": [
+        "components/portal/AgentSwitcher.tsx",
+        "components/portal/WorkspaceAction.tsx",
+        "lib/workspace.ts",
+        "lib/acting-basis.ts"
+      ]
+    },
+    {
+      "id": "home.estate",
+      "review": [
+        "APUX-040",
+        "M06"
+      ],
+      "title": "Estate + Operations — everything the person stewards on one screen (playbook · fleet · grants · this week · the budget she sets) and the operator view over the records (counts, kinds, capabilities, providers, p50/p95, the bill, failure classes; every row opens the run — the evidence)",
+      "priority": "P1",
+      "status": "shipped",
+      "specs": [
+        396,
+        398,
+        406
+      ],
+      "section": "gap analysis P1.4",
+      "routes": [
+        "(portal)/estate",
+        "(portal)/estate/ops"
+      ],
+      "capabilities": [],
+      "endpoints": [
+        "/harness/ask",
+        "/harness/budget",
+        "/harness/ops",
+        "/harness/records/import"
+      ],
+      "tests": [
+        "apps/agent-runtime/test/unit/agent-budget.test.ts",
+        "apps/agent-runtime/test/unit/ops-index.test.ts",
+        "apps/agent-runtime/test/unit/receipt-anchor.test.ts"
+      ],
+      "gates": [
+        "verify-agent-budget",
+        "verify-operator-view",
+        "verify-receipt-anchor",
+        "verify-record-carried"
+      ],
+      "gaps": [
+        "a MODEL budget (tokens / planner calls per day) beside asks and vault calls — the meter is deployment-wide (spec 388), not per agent yet; spend in currency is the treasury mandate's, shown elsewhere; an estate-wide policy (one rule for all agents) is not modelled"
+      ],
+      "components": [
+        "components/portal/EstateView.tsx",
+        "components/portal/FleetLines.tsx",
+        "components/portal/OperationsView.tsx"
+      ]
+    },
+    {
+      "id": "home.developer",
+      "review": [
+        "H41",
+        "H42",
+        "H43",
+        "H44",
+        "H45"
+      ],
+      "title": "Developer tools (a pane since 2026-10-01: overview · your apps · the five evals pages · the kit) — entry — create-app, agentic.lock.json, doctor, rules projection, Developer MCP; the public entry pages (about, llms.txt)",
+      "priority": "P1",
+      "status": "partial",
+      "specs": [
+        398,
+        399
+      ],
+      "section": "398 §10",
+      "routes": [
+        "(portal)/developer",
+        "(portal)/developer/evals",
+        "llms.txt",
+        "registry/[[...path]]",
+        "about",
+        "(portal)/developer/apps",
+        "(portal)/developer/evals/acts",
+        "(portal)/developer/evals/techniques",
+        "(portal)/developer/evals/gates",
+        "(portal)/developer/evals/run",
+        "(portal)/developer/evals/skills",
+        "connect/eval-sets",
+        "connect/eval-sets/[id]"
+      ],
+      "gaps": [
+        "P1.3 evals as a product (2026-09-16): `ap eval <cases.eval.json>` (cases as data, deterministic judge, a persona or a session, `--report`), `ap eval --from-runs` (a dataset from an agent's live runs), `evals/faithnet.eval.json` (5 cases: the authority twins + truthfulness, 5/5 live), the Evals screen (/developer/evals: recurring failures first, gates by night, the latest ap eval) folded by `scripts/build-evals-dashboard.mts`. Open: experiments compared side by side (two reports diffed); the nightly writing its report into the repo needs GitHub Actions billing",
+        "G2's clean-machine exit RUNS (2026-09-16, `verify-devkit-starter`: the home-client starter generated, installed from the registry, doctor clean, built, the two acts live in ~90 s) — with the WORKSPACE generator; `npx @agenticprimitives/create-app` reaches it at the next publish (create-app alpha.7). Also 09-16: `ap generate client|cli|parity` (398 §7.2 projections through the kit), `/llms.txt` on the Home (the coding agent's entrance), the `ap-add-capability` Claude Code skill in the starter and in Ring 0. Open: `npx` reach at the next publish; measured time-to-first-verified-outcome across developers",
+        "`ap mcp` is registered in the product template (.mcp.json, .cursor/mcp.json) but the devkit alpha that ships it is not published yet, and the clean-machine CI job (T21) does not exercise it",
+        "the component registry (398 §10.5) serves 9 items at /registry with their contracts; it is not yet reachable through the Developer MCP (which answers from the install only) and the items are not yet installable by the shadcn CLI end to end (the files reference the Home's own imports)",
+        "`ap upgrade` stops for review when a pinned definition's authority or effects change (398 §10.3) — shipped; the estate pins five archetypes at extraction; `ap test --interaction-coverage` / `--ask-truth` modes are still not wired (399 W1)"
+      ],
+      "tests": [
+        "apps/home/src/home/comparison-defaults.test.ts"
+      ],
+      "notes": null,
+      "components": [
+        "components/portal/EvalsDashboard.tsx",
+        "registry/registry.json",
+        "components/portal/DeveloperApps.tsx",
+        "components/portal/ActLaboratory.tsx",
+        "components/portal/TechniqueLedger.tsx",
+        "components/portal/HowToRead.tsx",
+        "home/comparison-defaults.ts",
+        "evals/sets/manifest.json"
+      ],
+      "gates": [
+        "verify-devkit-starter"
+      ]
+    },
+    {
+      "id": "home.lab",
+      "title": "The Lab — skill selection assessed: tests run, per-intent expected vs chosen skill, per-skill results, comparisons, recommendations; the run tree",
+      "priority": "P1",
+      "status": "partial",
+      "specs": [
+        414,
+        415
+      ],
+      "section": "415 §5a–c",
+      "components": [
+        "components/portal/SkillAssessmentLab.tsx",
+        "components/portal/runs/RunTraceTree.tsx",
+        "home/run-trace-view.ts",
+        "evals/skill-assessment.json",
+        "components/portal/ComparisonRunner.tsx",
+        "home/experiments.ts"
+      ],
+      "endpoints": [
+        "/harness/comparison",
+        "/harness/experiments"
+      ],
+      "tests": [
+        "apps/home/src/components/portal/skill-assessment-lab.test.ts",
+        "apps/home/src/home/run-trace-view.test.ts",
+        "apps/agent-runtime/test/unit/run-trace.test.ts",
+        "apps/home/src/home/experiments.test.ts",
+        "apps/home/src/components/portal/comparison-runner.test.ts",
+        "apps/agent-runtime/test/unit/experiment-job.test.ts"
+      ],
+      "gates": [
+        "verify-variant-knob",
+        "verify-intent-trace"
+      ],
+      "gaps": [
+        "the Lab renders a report BAKED at build (ap eval report → build-evals-dashboard), not the eval store read through the developer's agent (415 §5b)",
+        "Operations (A6) not started",
+        "Ask the Lab is not built; live experiment progress is (the Run tab, 2026-10-01)"
+      ]
+    },
+    {
+      "id": "home.build",
+      "review": [
+        "H48",
+        "H49",
+        "H50",
+        "H51",
+        "H52"
+      ],
+      "title": "Home Build — repository workspace, sandbox, preview, review, promotion, rollback",
+      "priority": "P2",
+      "status": "absent",
+      "specs": [
+        398
+      ],
+      "section": "398 §9 (G4; product repo ap-build)"
+    },
+    {
+      "id": "home.today",
+      "review": [
+        "APUX-009",
+        "APUX-012",
+        "APUX-033"
+      ],
+      "title": "Today — the outcome-led first page: decisions, attention, cost",
+      "priority": "P0",
+      "status": "partial",
+      "specs": [
+        398
+      ],
+      "section": "398 §4.2 / §5.4 / §5.5 (G1)",
+      "routes": [
+        "(portal)",
+        "(portal)/org/[org]/overview",
+        "(portal)/service/[agent]"
+      ],
+      "components": [
+        "components/portal/AttentionBar.tsx",
+        "components/portal/StatePill.tsx",
+        "components/portal/TodayView.tsx",
+        "home/attention.ts",
+        "home/today.ts",
+        "home/use-today-inputs.ts"
+      ],
+      "endpoints": [
+        "/harness/records",
+        "/harness/runs",
+        "/harness/triggers",
+        "/harness/vocabulary"
+      ],
+      "tests": [
+        "apps/home/src/components/portal/nav.test.ts",
+        "apps/home/src/home/attention.test.ts",
+        "apps/home/src/home/today.test.ts"
+      ],
+      "gates": [
+        "verify-golden-journey"
+      ],
+      "gaps": [
+        "approve ceremonies delivered by mail (hear) are not yet a Today decision card — one durable decision record per decision (393) is the prerequisite",
+        "a golden-journey gate (398 §13) runs the charter → Today → inspector → work item → decision journey live; not yet: specialist artifacts on the item, the run's own send decision, the page publish, the parity pair"
+      ]
+    },
+    {
+      "id": "home.presence",
+      "review": [
+        "APUX-018"
+      ],
+      "title": "Presence",
+      "priority": "P2",
+      "status": "absent",
+      "specs": [
+        398
+      ],
+      "section": "398 §4.5 — deliberately not before the roster is right"
+    }
   ]
- },
- "rows": [
-  {
-   "id": "home.session",
-   "review": [
-    "H01",
-    "H02"
-   ],
-   "title": "Sign in, the person's Home, the identity a session names — and the credential ceremonies: rotation, the Home-to-Home move (spec 410 §1.2) — and the Security section's front door + Sign-in (spec 422 W1: the pane, credentials by grade from the chain, channels, the one policy table)",
-   "priority": "P0",
-   "status": "shipped",
-   "specs": [
-    234,
-    257,
-    259,
-    295,
-    311,
-    410,
-    422
-   ],
-   "section": "398 §2.2",
-   "routes": [
-    "(portal)",
-    "(portal)/you",
-    "(portal)/security",
-    "(portal)/settings",
-    "(portal)/agent",
-    "logout",
-    "handoff",
-    "link",
-    "(portal)/org/[org]/settings",
-    "(portal)/service/[agent]/settings",
-    "(portal)/org/[org]/agent",
-    "move",
-    "(portal)/security/sign-in",
-    "connect/email/unlink",
-    "connect/phone/unlink"
-   ],
-   "tests": [
-    "apps/demo-sso-next/src/context/session-restore.test.ts",
-    "apps/demo-sso-next/src/csrf.test.ts",
-    "apps/demo-sso-next/src/whitelabel/sign-in-methods.test.ts",
-    "apps/demo-sso-next/src/home/move.test.ts",
-    "apps/demo-sso-next/src/home/rotation.test.ts",
-    "apps/demo-sso-next/src/home/credentials.test.ts",
-    "apps/demo-sso-next/src/lib/kv-indexer.test.ts",
-    "packages/connect/test/unit/security-policy.test.ts",
-    "apps/demo-a2a/test/unit/security-tools.test.ts"
-   ],
-   "components": [
-    "home/move.ts",
-    "home/rotation.ts",
-    "home/credentials.ts",
-    "lib/security-grade.ts",
-    "lib/kv-indexer.ts",
-    "home/security-ceremonies.ts"
-   ],
-   "capabilities": [
-    "person.credentials.list",
-    "person.security.posture",
-    "person.credential.add",
-    "person.credential.label",
-    "person.channel.link",
-    "person.channel.unlink"
-   ],
-   "gates": [
-    "verify-security-asks"
-   ]
-  },
-  {
-   "id": "home.principal-context",
-   "review": [
-    "H03",
-    "APUX-004",
-    "M06"
-   ],
-   "title": "Principal ≠ workspace context — the header switcher, acting-as / acting-in",
-   "priority": "P0",
-   "status": "shipped",
-   "specs": [
-    315,
-    348,
-    344
-   ],
-   "section": "398 §4.4",
-   "routes": [
-    "(portal)/workspaces",
-    "(portal)/workspaces/[id]",
-    "(portal)/organizations",
-    "(portal)/org/[org]/overview",
-    "(portal)/service/[agent]"
-   ],
-   "components": [
-    "components/portal/BasisLine.tsx",
-    "components/portal/FleetLines.tsx",
-    "components/portal/nav.ts",
-    "lib/acting-basis.ts",
-    "lib/workspace.ts"
-   ],
-   "tests": [
-    "apps/demo-sso-next/src/components/portal/nav-routes.test.ts",
-    "apps/demo-sso-next/src/components/portal/nav.test.ts",
-    "apps/demo-sso-next/src/lib/acting-basis.test.ts",
-    "apps/demo-sso-next/src/lib/org-membership-union.test.ts"
-   ],
-   "gaps": [
-    "the basis line is on the Ask's authority card, decisions, the endeavor detail, the request composer, invitations, join requests, treasury funding and the Card Studio's publish; M06's three lines (runs at · may spend · holds) on the organization roster — not yet on the services roster or the member rows (398 §4.4)"
-   ]
-  },
-  {
-   "id": "home.ask",
-   "review": [
-    "H04",
-    "H17",
-    "H18",
-    "H39"
-   ],
-   "title": "Ask — the conversational surface: classify → resolve → preview → confirmation-as-signature → receipt",
-   "priority": "P0",
-   "status": "shipped",
-   "specs": [
-    352,
-    353,
-    361,
-    369,
-    385
-   ],
-   "section": "398 §7",
-   "routes": [
-    "(portal)/ask",
-    "(portal)/org/[org]/ask"
-   ],
-   "components": [
-    "components/portal/ask/AskFlyout.tsx",
-    "home/ask.ts",
-    "lib/interaction-registry.ts"
-   ],
-   "capabilities": [
-    "ask.unsupported"
-   ],
-   "endpoints": [
-    "/harness/ask",
-    "/harness/run",
-    "/harness/progress",
-    "/harness/vocabulary",
-    "/harness/hear"
-   ],
-   "tests": [
-    "apps/demo-sso-next/src/home/ask.test.ts",
-    "apps/demo-sso-next/src/components/portal/ask/voice-text.test.ts",
-    "apps/demo-a2a/test/ask-vocabulary.test.ts",
-    "apps/demo-a2a/test/mandate-words.test.ts",
-    "apps/demo-a2a/test/voice.test.ts"
-   ],
-   "gates": [
-    "verify-route",
-    "verify-authority-chain",
-    "verify-confirmation-room"
-   ],
-   "gaps": [
-    "execution parity per family (361 I4) — buttons and Ask reach the same /harness boundary for invite/fund/profile/household/payee only; deploy and custody still post to the legacy /session/* and /account/* verbs (H18)"
-   ]
-  },
-  {
-   "id": "home.workspaces-membership",
-   "review": [
-    "H08",
-    "H09",
-    "H10",
-    "H11"
-   ],
-   "title": "Workspaces, organizations, teams, membership, roster, invitations",
-   "priority": "P0",
-   "status": "shipped",
-   "specs": [
-    318,
-    344,
-    346,
-    341
-   ],
-   "section": "398 §4.5",
-   "routes": [
-    "(portal)/workspaces",
-    "(portal)/org/[org]/membership",
-    "(portal)/org/[org]/members",
-    "(portal)/org/[org]/invite",
-    "(portal)/org/[org]/access",
-    "(portal)/agents",
-    "(portal)/service/[agent]/members",
-    "(portal)/service/[agent]/access",
-    "invite/[token]"
-   ],
-   "capabilities": [
-    "organization.create",
-    "organization.team.create",
-    "organization.membership.invite",
-    "service.create",
-    "person.invitations.list",
-    "person.affiliations.list"
-   ],
-   "endpoints": [
-    "/harness/ask",
-    "/harness/approve"
-   ],
-   "tests": [
-    "apps/demo-a2a/test/chartered-agents.test.ts",
-    "apps/demo-a2a/test/harness-team-create.test.ts",
-    "apps/demo-a2a/test/org-wire.test.ts",
-    "apps/demo-sso-next/src/components/onboarding/OrgChooser.test.ts",
-    "apps/demo-sso-next/src/home/roster-contract.test.ts",
-    "apps/demo-sso-next/src/lib/email-invite-home.test.ts",
-    "apps/demo-sso-next/src/lib/invitation-check.test.ts",
-    "apps/demo-sso-next/src/lib/invite-copy.test.ts",
-    "apps/demo-sso-next/src/lib/new-member.test.ts",
-    "scripts/check-invitation-audit.mts"
-   ],
-   "gates": [
-    "verify-home-mcp-people"
-   ],
-   "gaps": [
-    "398 §4.5 roster contract shipped (type · sponsor · responsibility · permissions · active work); another member's active work reads 'not visible to you' under §12 visibility rather than a false zero; the sponsor names the organization, not the steward who signed (the grant carries the delegator only)"
-   ],
-   "components": [
-    "home/roster-contract.ts"
-   ]
-  },
-  {
-   "id": "home.work",
-   "review": [
-    "H12",
-    "APUX-009"
-   ],
-   "title": "Work — endeavors, requests, allocations, commitments, decisions by declared approvers",
-   "priority": "P0",
-   "status": "shipped",
-   "specs": [
-    332,
-    333,
-    334,
-    382,
-    393
-   ],
-   "section": "398 §4.3",
-   "routes": [
-    "(portal)/work",
-    "(portal)/org/[org]/work",
-    "(portal)/org/[org]/work/new",
-    "(portal)/org/[org]/work/[endeavor]",
-    "(portal)/org/[org]/work/requests"
-   ],
-   "capabilities": [
-    "endeavor.create",
-    "endeavor.request",
-    "endeavor.propose",
-    "endeavor.allocate",
-    "endeavor.decide",
-    "endeavor.decision.request",
-    "endeavor.satisfy",
-    "endeavor.milestone.achieve",
-    "endeavor.abandon"
-   ],
-   "endpoints": [
-    "/harness/ask",
-    "/harness/approve"
-   ],
-   "tests": [
-    "apps/demo-a2a/test/endeavor-authority-steps.test.ts",
-    "apps/demo-a2a/test/endeavor-intake.test.ts",
-    "apps/demo-a2a/test/endeavors.test.ts",
-    "apps/demo-a2a/test/unit/endeavor-committed-steps.test.ts",
-    "apps/demo-sso-next/src/home/work-item.test.ts"
-   ],
-   "gates": [
-    "verify-endeavor-decision",
-    "verify-endeavor-offer-allocate-ask",
-    "verify-golden-journey"
-   ],
-   "gaps": [
-    "§4.3 work item on the endeavor detail; the same contract on the board row, the inbox card and the Ask's done reply is still native; artifacts and cost are not linked on the item record (391 refs, 396 bill) — said absent on the card"
-   ],
-   "components": [
-    "components/portal/StatePill.tsx",
-    "components/portal/work/WorkItemCard.tsx",
-    "home/work-item.ts"
-   ]
-  },
-  {
-   "id": "home.build",
-   "review": [
-    "APUX-050",
-    "APUX-052"
-   ],
-   "title": "Build — a build run in a sandbox under the workspace's mandate (public by clone, private by an archive fetched under the workspace's connector); review with recorded evidence apart from assertion; promotion under a signature over the exact commit",
-   "priority": "P1",
-   "status": "shipped",
-   "specs": [
-    398
-   ],
-   "section": "398 §9",
-   "routes": [
-    "(portal)/org/[org]/build"
-   ],
-   "capabilities": [
-    "build.run",
-    "build.run.list",
-    "build.review",
-    "build.promote",
-    "github.repos.list"
-   ],
-   "endpoints": [
-    "/harness/ask"
-   ],
-   "tests": [
-    "apps/demo-a2a/test/unit/build-tools.test.ts",
-    "apps/demo-a2a/test/github-connector.test.ts"
-   ],
-   "gates": [
-    "verify-build-run"
-   ],
-   "gaps": [
-    "no editor attached through ACP (B2's second half); the environment a promotion reaches is the default branch — a deployment target (preview URL, config, migration) attached to the workspace is B5's next; recovery controls (B6) not built; the artifact's thread projection on the work item"
-   ],
-   "components": [
-    "components/portal/BuildView.tsx",
-    "components/portal/ask/interaction-apps.tsx"
-   ]
-  },
-  {
-   "id": "home.messaging",
-   "review": [
-    "H13",
-    "H28"
-   ],
-   "title": "Messages, channels, discussions — one DM per pair, org channels, threaded replies, the merged inbox",
-   "priority": "P0",
-   "status": "shipped",
-   "specs": [
-    312,
-    313,
-    340,
-    341
-   ],
-   "section": "398 §5.5",
-   "routes": [
-    "(portal)/messages",
-    "(portal)/inbox",
-    "(portal)/chats",
-    "(portal)/channels",
-    "(portal)/discussion-replies",
-    "(portal)/enable-messaging",
-    "(portal)/approve-messaging",
-    "(portal)/approve-inbox-read",
-    "(portal)/org/[org]/messages",
-    "(portal)/org/[org]/channels",
-    "(portal)/org/[org]/discussions",
-    "(portal)/service/[agent]/messages"
-   ],
-   "capabilities": [
-    "messaging.direct.send"
-   ],
-   "tests": [
-    "apps/demo-sso-next/src/lib/messaging-wire.test.ts",
-    "apps/demo-a2a/test/messaging-scope.test.ts",
-    "apps/demo-a2a/test/interactions-do-channels.test.ts",
-    "apps/demo-sso-next/server/connect/channels-steward-proof.test.ts",
-    "apps/demo-sso-next/src/components/portal/chat/rail-date.test.ts"
-   ],
-   "gates": [
-    "verify-home-mcp-room"
-   ],
-   "gaps": [],
-   "components": [
-    "components/portal/AttentionBar.tsx"
-   ]
-  },
-  {
-   "id": "home.huddles",
-   "review": [
-    "H14"
-   ],
-   "title": "Huddles on topics (RealtimeKit)",
-   "priority": "P2",
-   "status": "shipped",
-   "specs": [
-    378
-   ],
-   "section": "398 §4.5",
-   "components": [
-    "components/portal/huddle/HuddleProvider.tsx",
-    "components/portal/huddle/HuddleDock.tsx"
-   ],
-   "tests": [
-    "apps/demo-a2a/test/unit/realtimekit.test.ts"
-   ]
-  },
-  {
-   "id": "home.external-agents",
-   "review": [
-    "H15",
-    "APUX-022"
-   ],
-   "title": "External agent invitation and engagement — an outside A2A agent answers inside a run",
-   "priority": "P1",
-   "status": "shipped",
-   "specs": [
-    379,
-    336,
-    338,
-    401
-   ],
-   "section": "398 §4.5",
-   "routes": [
-    "external-agent",
-    "(portal)/find",
-    "(portal)/network",
-    "(portal)/networks",
-    "(portal)/alliances",
-    "(portal)/contacts",
-    "(portal)/coaches"
-   ],
-   "capabilities": [
-    "discovery.agents.find",
-    "discovery.agent.inspect",
-    "engagement.agent.invoke",
-    "engagement.probe",
-    "resolution.invitation.request"
-   ],
-   "tests": [
-    "apps/demo-a2a/test/unit/external-agent.test.ts",
-    "apps/demo-a2a/test/unit/engagement-answer.test.ts",
-    "apps/demo-a2a/test/unit/engagement-trust.test.ts",
-    "apps/demo-a2a/test/resolution-grant-use.test.ts"
-   ],
-   "gates": [
-    "verify-home-mcp-discovery",
-    "verify-ap-gateway",
-    "verify-contacts",
-    "verify-runtime-pair"
-   ],
-   "gaps": [
-    "external specialist grants as a Home surface (APUX-022) — 398 G5"
-   ]
-  },
-  {
-   "id": "home.capabilities",
-   "review": [
-    "H20"
-   ],
-   "title": "Capability discoverability — the vocabulary, the definitions, the skills a Home mounts",
-   "priority": "P0",
-   "status": "shipped",
-   "specs": [
-    354,
-    355,
-    367
-   ],
-   "section": "398 §7",
-   "routes": [
-    "(portal)/capabilities",
-    "(portal)/capability-definitions",
-    "(portal)/capability-definitions/[id]",
-    "(portal)/skills",
-    "(portal)/org/[org]/capabilities",
-    "(portal)/service/[agent]/capabilities"
-   ],
-   "components": [
-    "components/portal/capabilities",
-    "home/retry.ts"
-   ],
-   "endpoints": [
-    "/harness/vocabulary"
-   ],
-   "tests": [
-    "apps/demo-a2a/test/ask-vocabulary.test.ts",
-    "apps/demo-a2a/test/capability-ids.test.ts",
-    "apps/demo-a2a/test/card-mounted-skills.test.ts",
-    "apps/demo-sso-next/src/components/portal/capabilities/editor.test.ts",
-    "apps/demo-sso-next/src/home/retry.test.ts"
-   ],
-   "gaps": [
-    "398 §7.2 — every agentic-trust contract declares idempotency + result.kind, every agentic-trust archetype compiles them from its contracts (0 fallback rows), the vocabulary publishes them; the parity pair runs as check:interaction-coverage:behaviour"
-   ]
-  },
-  {
-   "id": "home.runs",
-   "review": [
-    "H23",
-    "H25",
-    "H26",
-    "H40"
-   ],
-   "title": "Runs — checkpoints, resume, parked approvals, the inspector and timeline, spans",
-   "priority": "P0",
-   "status": "shipped",
-   "specs": [
-    350,
-    362,
-    370,
-    381,
-    382,
-    390,
-    391
-   ],
-   "section": "398 §5",
-   "routes": [
-    "(portal)/activities",
-    "(portal)/org/[org]/activities",
-    "(portal)/service/[agent]/activities",
-    "(portal)/consent-sign",
-    "(portal)/wea-sign"
-   ],
-   "components": [
-    "components/portal/ActivityTimeline.tsx",
-    "components/portal/StatePill.tsx",
-    "components/portal/runs/RunControls.tsx",
-    "components/portal/runs/RunHistory.tsx",
-    "components/portal/runs/RunInspector.tsx",
-    "components/portal/runs/RunTimeline.tsx",
-    "components/portal/runs/SaveAsRecipe.tsx",
-    "home/recipe.ts",
-    "home/run-state.ts"
-   ],
-   "endpoints": [
-    "/harness/approve",
-    "/harness/authorize",
-    "/harness/cancel",
-    "/harness/durable",
-    "/harness/progress",
-    "/harness/recipe",
-    "/harness/replay",
-    "/harness/run",
-    "/harness/runs",
-    "/harness/spans"
-   ],
-   "tests": [
-    "apps/demo-a2a/test/a2a-task-do.test.ts",
-    "apps/demo-a2a/test/harness-progress.test.ts",
-    "apps/demo-a2a/test/harness-runs.test.ts",
-    "apps/demo-a2a/test/harness-workflow-core.test.ts",
-    "apps/demo-a2a/test/unit/artifact-store.test.ts",
-    "apps/demo-a2a/test/unit/run-export.test.ts",
-    "apps/demo-sso-next/src/home/recipe.test.ts",
-    "apps/demo-sso-next/src/home/run-state.test.ts",
-    "packages/harness/test/unit/recipe.test.ts",
-    "packages/harness/test/unit/run-state.test.ts"
-   ],
-   "gates": [
-    "verify-cancel",
-    "verify-durable-run",
-    "verify-handoff",
-    "verify-recipe",
-    "verify-run-bill",
-    "verify-run-export"
-   ],
-   "gaps": [
-    "steer and pause as client surfaces (a pause is a trigger's, 375); cancel shipped 398 §5.3 — revoke stays on delegations, undo is a new intent",
-    "no replay UI over the spans (H40)"
-   ]
-  },
-  {
-   "id": "home.routines",
-   "review": [
-    "H27"
-   ],
-   "title": "Routines — triggers on the playbook, scheduled and hooked work under fresh authority",
-   "priority": "P1",
-   "status": "shipped",
-   "specs": [
-    375,
-    402,
-    403,
-    323
-   ],
-   "section": "398 G3",
-   "routes": [
-    "(portal)/org/[org]/routines",
-    "(portal)/playbook",
-    "(portal)/routines",
-    "(portal)/service/[agent]/routines"
-   ],
-   "components": [
-    "components/portal/RoutinesView.tsx",
-    "components/portal/StatePill.tsx",
-    "components/portal/TriggersPanel.tsx",
-    "home/routines.ts"
-   ],
-   "endpoints": [
-    "/harness/hooks/",
-    "/harness/triggers",
-    "/harness/triggers/fire",
-    "/harness/triggers/pause",
-    "/harness/triggers/rotate",
-    "/harness/triggers/remove",
-    "/harness/triggers/rebuild"
-   ],
-   "tests": [
-    "apps/demo-a2a/test/unit/trigger-kinds.test.ts",
-    "apps/demo-a2a/test/unit/triggers.test.ts",
-    "apps/demo-sso-next/src/home/routines.test.ts",
-    "apps/demo-sso-next/src/home/triggers.test.ts",
-    "packages/capability-claims/test/unit/harness-contract.test.ts"
-   ],
-   "gaps": [
-    "a routine's budget is set by a steward on the row, not yet declared on the SKILL.md trigger (375 contract); save-as-recipe (398 G3) not built"
-   ],
-   "gates": [
-    "verify-routine-pause",
-    "verify-routine-from-sentence",
-    "verify-portable-home",
-    "verify-reminders-and-preferences"
-   ]
-  },
-  {
-   "id": "home.memory",
-   "review": [
-    "H31",
-    "APUX-035"
-   ],
-   "title": "Memory the person can see and clear — remembered confirmations, standing instructions",
-   "priority": "P1",
-   "status": "shipped",
-   "specs": [
-    385,
-    394,
-    402,
-    403
-   ],
-   "section": "398 §6.1",
-   "components": [
-    "components/portal/MemoryViews.tsx",
-    "components/portal/ask/AskFlyout.tsx",
-    "home/memory.ts",
-    "components/portal/TodayMemory.tsx",
-    "components/portal/AgentPreferencesPanel.tsx"
-   ],
-   "capabilities": [
-    "context.instruction.declare"
-   ],
-   "endpoints": [
-    "/harness/confirmations",
-    "/harness/confirmations/forget",
-    "/harness/instructions",
-    "/harness/instructions/forget",
-    "/harness/memory",
-    "/harness/memory/forget",
-    "/harness/preferences"
-   ],
-   "gates": [
-    "verify-standing-instruction",
-    "verify-standing-instruction-room",
-    "verify-confirmation-room",
-    "verify-home-mcp-instructions",
-    "verify-memory-follows"
-   ],
-   "gaps": [
-    "learned preferences (358 W5) — none kept yet; topic snapshots (340) not listed in the workspace view; promotion from Run to Library is not yet an act with a receipt (398 §6.1) — said in the view, not offered"
-   ],
-   "routes": [
-    "(portal)/memory",
-    "(portal)/org/[org]/memory",
-    "(portal)/service/[agent]/memory"
-   ],
-   "tests": [
-    "apps/demo-sso-next/src/home/memory.test.ts"
-   ]
-  },
-  {
-   "id": "home.library",
-   "review": [
-    "H33"
-   ],
-   "title": "Library — artifacts with versions, per person / org / service; the public shelf (412) served by the owner's agent and read at /published",
-   "priority": "P0",
-   "status": "shipped",
-   "specs": [
-    310,
-    391,
-    405,
-    412
-   ],
-   "section": "398 §6.2",
-   "routes": [
-    "(portal)/library",
-    "(portal)/org/[org]/library",
-    "(portal)/service/[agent]/library",
-    "published",
-    "published/[id]",
-    "published/shelf"
-   ],
-   "tests": [
-    "apps/demo-a2a/test/unit/library-public-shelf.test.ts",
-    "apps/demo-a2a/test/unit/library-tools.test.ts",
-    "apps/demo-a2a/test/unit/library-writes.test.ts",
-    "apps/demo-sso-next/server/connect/library.test.ts",
-    "apps/demo-sso-next/src/home/artifact-identity.test.ts"
-   ],
-   "gaps": [
-    "replicate as an act (an authorized copy in another vault) is not offered — said so on the card (398 §6.2); the linked work item is absent on every artifact (§4.3); stale is a state on the Library's freshness badge but the \"no organizations of 37\" rule (§6.3 — never render unknown as zero) is a ratchet (check:unknown-not-zero, ceiling 6 — Today, Memory and the run listing say which read failed)"
-   ],
-   "components": [
-    "components/portal/ask/interaction-apps.tsx",
-    "home/artifact-identity.ts",
-    "home/library-attach.ts",
-    "lib/public-shelf.ts",
-    "components/onboarding/AgentReachFold.tsx"
-   ],
-   "capabilities": [
-    "library.file.publish",
-    "library.file.read",
-    "library.file.save",
-    "library.file.visibility",
-    "library.files.list",
-    "library.public.list",
-    "library.public.read"
-   ],
-   "gates": [
-    "verify-files-of-her-own",
-    "verify-public-shelf"
-   ]
-  },
-  {
-   "id": "home.records",
-   "review": [
-    "H32",
-    "H34"
-   ],
-   "title": "Records — the vault, subject roles, the vault key, data sources, visibility",
-   "priority": "P0",
-   "status": "shipped",
-   "specs": [
-    277,
-    278,
-    356,
-    265,
-    400
-   ],
-   "section": "398 §6.1",
-   "routes": [
-    "(portal)/records",
-    "(portal)/vault-key",
-    "(portal)/vault-subject-role",
-    "(portal)/data-sources",
-    "(portal)/visibility",
-    "(portal)/org/[org]/records",
-    "(portal)/org/[org]/data",
-    "(portal)/service/[agent]/records",
-    "(portal)/search"
-   ],
-   "capabilities": [
-    "household.data"
-   ],
-   "endpoints": [
-    "/harness/records"
-   ],
-   "tests": [
-    "apps/demo-sso-next/src/lib/read-grants.test.ts",
-    "apps/demo-a2a/test/interactions-do-scoped-read.test.ts",
-    "apps/demo-sso-next/src/lib/typed-claim-paths.test.ts"
-   ]
-  },
-  {
-   "id": "home.household",
-   "review": [
-    "H07"
-   ],
-   "title": "Household — the .household agent, member records, invitations",
-   "priority": "P1",
-   "status": "shipped",
-   "specs": [
-    368
-   ],
-   "section": "398 §4.5",
-   "routes": [
-    "(portal)/household"
-   ],
-   "capabilities": [
-    "household.create",
-    "household.member.record"
-   ],
-   "tests": [
-    "apps/demo-a2a/test/household-next.test.ts"
-   ],
-   "gates": [
-    "verify-home-mcp-people"
-   ]
-  },
-  {
-   "id": "home.profile",
-   "review": [
-    "H05"
-   ],
-   "title": "Profile — the canonical profile, contact, location, the names it publishes",
-   "priority": "P0",
-   "status": "shipped",
-   "specs": [
-    217,
-    347
-   ],
-   "section": "398 §2.2",
-   "routes": [
-    "(portal)/profile",
-    "(portal)/org/[org]/profile",
-    "(portal)/service/[agent]/profile"
-   ],
-   "capabilities": [
-    "profile.contact.update"
-   ],
-   "tests": [
-    "apps/demo-sso-next/src/lib/profile-location.test.ts"
-   ]
-  },
-  {
-   "id": "home.treasury",
-   "review": [
-    "H06"
-   ],
-   "title": "Treasuries — create, connect, fund, pay; the value rail is treasuries only",
-   "priority": "P0",
-   "status": "shipped",
-   "specs": [
-    283,
-    371
-   ],
-   "section": "398 §2.4",
-   "routes": [
-    "(portal)/treasuries",
-    "(portal)/treasury-connect",
-    "(portal)/org/[org]/treasury",
-    "choose-treasury"
-   ],
-   "capabilities": [
-    "treasury.create",
-    "treasury.fund",
-    "treasury.payment.execute",
-    "treasury.primary.declare",
-    "treasury.balance.read"
-   ],
-   "tests": [
-    "apps/demo-sso-next/src/lib/treasury-ceremony.test.ts",
-    "apps/demo-sso-next/src/lib/coins.test.ts",
-    "apps/demo-a2a/test/value-rail.test.ts",
-    "apps/demo-a2a/test/unit/balance-read.test.ts",
-    "apps/demo-a2a/test/unit/payment-purpose.test.ts"
-   ],
-   "gates": [
-    "verify-receipt-recompute",
-    "verify-grant-revocation"
-   ]
-  },
-  {
-   "id": "home.playbook",
-   "review": [
-    "H19",
-    "H21"
-   ],
-   "title": "Playbook — the archetype ceremony, the behaviour a person chose for their agent, versioned and receipted",
-   "priority": "P0",
-   "status": "shipped",
-   "specs": [
-    354,
-    367
-   ],
-   "section": "398 §8.2",
-   "routes": [
-    "(portal)/playbook",
-    "(portal)/org/[org]/playbook",
-    "(portal)/service/[agent]/playbook"
-   ],
-   "tests": [
-    "apps/demo-a2a/test/playbook.test.ts",
-    "apps/demo-a2a/test/playbook-injection.test.ts",
-    "apps/demo-a2a/test/archetype-skill.test.ts",
-    "apps/demo-sso-next/src/lib/archetype-grant.test.ts",
-    "apps/demo-a2a/test/unit/specialists.test.ts"
-   ]
-  },
-  {
-   "id": "home.card-studio",
-   "review": [
-    "H16",
-    "H46"
-   ],
-   "title": "Agent Card & Projection Studio — canonical profile → released signed card → projections → publications → bindings",
-   "priority": "P0",
-   "status": "shipped",
-   "specs": [
-    347
-   ],
-   "section": "398 §1.1",
-   "routes": [
-    "(portal)/card",
-    "(portal)/card/[cardResourceId]",
-    "(portal)/card/[cardResourceId]/history",
-    "(portal)/card/[cardResourceId]/listing/[family]",
-    "(portal)/card/[cardResourceId]/names",
-    "(portal)/card/[cardResourceId]/projections",
-    "(portal)/card/[cardResourceId]/releases",
-    "(portal)/org/[org]/card",
-    "(portal)/service/[agent]/card",
-    "(portal)/org/[org]/card/[cardResourceId]",
-    "(portal)/org/[org]/card/[cardResourceId]/history",
-    "(portal)/org/[org]/card/[cardResourceId]/listing/[family]",
-    "(portal)/org/[org]/card/[cardResourceId]/names",
-    "(portal)/org/[org]/card/[cardResourceId]/projections",
-    "(portal)/org/[org]/card/[cardResourceId]/releases",
-    "(portal)/service/[agent]/card/[cardResourceId]",
-    "(portal)/service/[agent]/card/[cardResourceId]/history",
-    "(portal)/service/[agent]/card/[cardResourceId]/listing/[family]",
-    "(portal)/service/[agent]/card/[cardResourceId]/names",
-    "(portal)/service/[agent]/card/[cardResourceId]/projections",
-    "(portal)/service/[agent]/card/[cardResourceId]/releases"
-   ],
-   "components": [
-    "components/studio/Inspector.tsx"
-   ],
-   "tests": [
-    "apps/demo-sso-next/src/lib/studio-flow.test.ts",
-    "apps/demo-sso-next/src/lib/studio-view.test.ts",
-    "apps/demo-sso-next/src/components/studio/card-save-wiring.test.ts",
-    "apps/demo-sso-next/src/lib/publish-to-card.test.ts",
-    "apps/demo-sso-next/src/lib/card-changed.test.ts",
-    "apps/demo-sso-next/src/lib/publish-gate.test.ts",
-    "apps/demo-a2a/test/agent-card-studio.test.ts"
-   ],
-   "gaps": [
-    "the Inspector inspects cards, not runs (H46) — the run inspector is 398 §5.2"
-   ]
-  },
-  {
-   "id": "home.naming-registry",
-   "review": [
-    "H22"
-   ],
-   "title": "Names, naming, registry, trust graph, attestations — the public facets",
-   "priority": "P1",
-   "status": "shipped",
-   "specs": [
-    222,
-    346,
-    279,
-    338
-   ],
-   "section": "398 §1.1",
-   "routes": [
-    "(portal)/names",
-    "(portal)/naming",
-    "(portal)/registry",
-    "(portal)/trust-graph",
-    "(portal)/attestations",
-    "(portal)/org/[org]/naming",
-    "(portal)/org/[org]/registry",
-    "(portal)/org/[org]/trust-graph",
-    "(portal)/org/[org]/network",
-    "(portal)/org/[org]/status",
-    "(portal)/service/[agent]/naming",
-    "(portal)/service/[agent]/registry",
-    "(portal)/service/[agent]/trust-graph",
-    "(portal)/service/[agent]/network"
-   ],
-   "tests": [
-    "apps/demo-sso-next/src/lib/qualified-agent-name.test.ts",
-    "apps/demo-sso-next/src/lib/typed-tld.test.ts",
-    "apps/demo-sso-next/src/lib/name-change.test.ts",
-    "apps/demo-a2a/test/typed-naming-endpoints.test.ts",
-    "apps/demo-a2a/test/public-graph.test.ts"
-   ]
-  },
-  {
-   "id": "home.access",
-   "review": [
-    "H24"
-   ],
-   "title": "Access — delegations received and granted, app grants, revocation",
-   "priority": "P0",
-   "status": "shipped",
-   "specs": [
-    277,
-    295,
-    397,
-    400
-   ],
-   "section": "398 §2.3",
-   "routes": [
-    "(portal)/apps",
-    "(portal)/org/[org]/access",
-    "(portal)/service/[agent]/access",
-    "(portal)/grants",
-    "(portal)/org/[org]/grants",
-    "(portal)/apps/signed-in",
-    "(portal)/apps/assistants",
-    "(portal)/apps/readers"
-   ],
-   "capabilities": [
-    "access.grant.revoke"
-   ],
-   "tests": [
-    "apps/demo-sso-next/server/connect/self-grant.test.ts",
-    "apps/demo-sso-next/src/lib/discovery-authority.test.ts"
-   ],
-   "gates": [
-    "verify-grant-revocation",
-    "verify-home-mcp-revoke",
-    "verify-home-mcp-authority",
-    "verify-grants-admin"
-   ]
-  },
-  {
-   "id": "home.connectors-mcp",
-   "review": [
-    "APUX-030"
-   ],
-   "title": "External MCP servers as connectors — any server attached as the holder's, its tools compiled (acts by default under her mandate; reads where the server or she says), the credential the runtime's",
-   "priority": "P0",
-   "status": "shipped",
-   "specs": [
-    404
-   ],
-   "section": "404 §1–§2",
-   "routes": [
-    "(portal)/apps",
-    "(portal)/apps/accounts",
-    "(portal)/apps/tools"
-   ],
-   "capabilities": [
-    "mcp.connectors.list"
-   ],
-   "endpoints": [
-    "/harness/connectors/mcp",
-    "/harness/ask"
-   ],
-   "tests": [
-    "apps/demo-a2a/test/unit/mcp-connector.test.ts"
-   ],
-   "gates": [
-    "verify-mcp-connector"
-   ],
-   "gaps": [
-    "OAuth-flow attach (a server that wants an authorization code); resources and prompts; listChanged re-probe; Slack/Notion as first-party connectors (W2)"
-   ],
-   "components": [
-    "components/portal/McpConnectorsCard.tsx",
-    "components/portal/ask/interaction-apps.tsx"
-   ]
-  },
-  {
-   "id": "home.provenance",
-   "review": [
-    "H38"
-   ],
-   "title": "Receipts and provenance — PROV-O bundles, public projection, counterparty recompute, the dispute on the receipt (spec 410 §10)",
-   "priority": "P1",
-   "status": "shipped",
-   "specs": [
-    389,
-    395,
-    410
-   ],
-   "section": "398 §2.4",
-   "endpoints": [
-    "/harness/provenance",
-    "/harness/dispute",
-    "/harness/dispute/exchange"
-   ],
-   "gates": [
-    "verify-provenance-hop",
-    "verify-public-provenance",
-    "verify-receipt-recompute"
-   ],
-   "gaps": [
-    "the publicly-verifiable badge on the timeline row — 398 §2.4/§5.2"
-   ],
-   "components": [
-    "components/portal/runs/DisputePanel.tsx",
-    "home/dispute.ts"
-   ],
-   "tests": [
-    "apps/demo-a2a/test/unit/dispute.test.ts"
-   ]
-  },
-  {
-   "id": "home.home-mcp",
-   "review": [
-    "H29",
-    "H30"
-   ],
-   "title": "Home MCP — Claude.ai as a client of the person: ask-as-me delegation, discovery and engagement through her agent, acts park for her signature; act-as-me (397 §11): standing wires she decided once, one per capability, derived into the parked run's mandate by the Worker's act key, revocable one by one",
-   "priority": "P1",
-   "status": "shipped",
-   "specs": [
-    397
-   ],
-   "section": "398 §1.1 (spec 397)",
-   "routes": [
-    "(portal)/apps"
-   ],
-   "tests": [
-    "apps/home-mcp/test/oauth.test.ts",
-    "apps/home-mcp/test/stream.test.ts",
-    "apps/home-mcp/test/act.test.ts",
-    "apps/demo-sso-next/src/lib/act-as-me.test.ts",
-    "packages/delegation/test/unit/standing.test.ts"
-   ],
-   "gates": [
-    "verify-home-mcp",
-    "verify-home-mcp-browser-path",
-    "verify-home-mcp-stream",
-    "verify-home-mcp-routed",
-    "verify-home-mcp-act"
-   ]
-  },
-  {
-   "id": "home.as-persona",
-   "review": [
-    "M06"
-   ],
-   "title": "Another of your names — a persona (relationship 'self') opened AS itself: its own Today, Ask, memory, messages, routines, library, card, naming, network, playbook, records, trust graph — the same surfaces, under the other name",
-   "priority": "P1",
-   "status": "shipped",
-   "specs": [
-    398
-   ],
-   "section": "the persona realm (23c17dea, 40acecba)",
-   "routes": [
-    "(portal)/as/[agent]",
-    "(portal)/as/[agent]/access",
-    "(portal)/as/[agent]/activities",
-    "(portal)/as/[agent]/ask",
-    "(portal)/as/[agent]/capabilities",
-    "(portal)/as/[agent]/card",
-    "(portal)/as/[agent]/card/[cardResourceId]",
-    "(portal)/as/[agent]/card/[cardResourceId]/history",
-    "(portal)/as/[agent]/card/[cardResourceId]/listing/[family]",
-    "(portal)/as/[agent]/card/[cardResourceId]/names",
-    "(portal)/as/[agent]/card/[cardResourceId]/projections",
-    "(portal)/as/[agent]/card/[cardResourceId]/releases",
-    "(portal)/as/[agent]/library",
-    "(portal)/as/[agent]/memory",
-    "(portal)/as/[agent]/messages",
-    "(portal)/as/[agent]/naming",
-    "(portal)/as/[agent]/network",
-    "(portal)/as/[agent]/playbook",
-    "(portal)/as/[agent]/profile",
-    "(portal)/as/[agent]/records",
-    "(portal)/as/[agent]/registry",
-    "(portal)/as/[agent]/routines",
-    "(portal)/as/[agent]/settings",
-    "(portal)/as/[agent]/trust-graph"
-   ],
-   "capabilities": [],
-   "endpoints": [
-    "/harness/ask"
-   ],
-   "tests": [
-    "apps/demo-sso-next/src/lib/acting-basis.test.ts",
-    "apps/demo-sso-next/src/components/portal/nav-routes.test.ts"
-   ],
-   "gates": [],
-   "gaps": [
-    "no live gate yet for opening a persona and acting under its name; the persona's playbook assignment and vault planes are provisioned by scripts (charter-cast, activate-cast-vaults), not by the Home's own ceremony"
-   ],
-   "components": [
-    "components/portal/AgentSwitcher.tsx",
-    "components/portal/WorkspaceAction.tsx",
-    "lib/workspace.ts",
-    "lib/acting-basis.ts"
-   ]
-  },
-  {
-   "id": "home.estate",
-   "review": [
-    "APUX-040",
-    "M06"
-   ],
-   "title": "Estate + Operations — everything the person stewards on one screen (playbook · fleet · grants · this week · the budget she sets) and the operator view over the records (counts, kinds, capabilities, providers, p50/p95, the bill, failure classes; every row opens the run — the evidence)",
-   "priority": "P1",
-   "status": "shipped",
-   "specs": [
-    396,
-    398,
-    406
-   ],
-   "section": "gap analysis P1.4",
-   "routes": [
-    "(portal)/estate",
-    "(portal)/estate/ops"
-   ],
-   "capabilities": [],
-   "endpoints": [
-    "/harness/ask",
-    "/harness/budget",
-    "/harness/ops",
-    "/harness/records/import"
-   ],
-   "tests": [
-    "apps/demo-a2a/test/unit/agent-budget.test.ts",
-    "apps/demo-a2a/test/unit/ops-index.test.ts",
-    "apps/demo-a2a/test/unit/receipt-anchor.test.ts"
-   ],
-   "gates": [
-    "verify-agent-budget",
-    "verify-operator-view",
-    "verify-receipt-anchor",
-    "verify-record-carried"
-   ],
-   "gaps": [
-    "a MODEL budget (tokens / planner calls per day) beside asks and vault calls — the meter is deployment-wide (spec 388), not per agent yet; spend in currency is the treasury mandate's, shown elsewhere; an estate-wide policy (one rule for all agents) is not modelled"
-   ],
-   "components": [
-    "components/portal/EstateView.tsx",
-    "components/portal/FleetLines.tsx",
-    "components/portal/OperationsView.tsx"
-   ]
-  },
-  {
-   "id": "home.developer",
-   "review": [
-    "H41",
-    "H42",
-    "H43",
-    "H44",
-    "H45"
-   ],
-   "title": "Developer tools (a pane since 2026-10-01: overview · your apps · the five evals pages · the kit) — entry — create-app, agentic.lock.json, doctor, rules projection, Developer MCP; the public entry pages (about, llms.txt)",
-   "priority": "P1",
-   "status": "partial",
-   "specs": [
-    398,
-    399
-   ],
-   "section": "398 §10",
-   "routes": [
-    "(portal)/developer",
-    "(portal)/developer/evals",
-    "llms.txt",
-    "registry/[[...path]]",
-    "about",
-    "(portal)/developer/apps",
-    "(portal)/developer/evals/acts",
-    "(portal)/developer/evals/techniques",
-    "(portal)/developer/evals/gates",
-    "(portal)/developer/evals/run",
-    "(portal)/developer/evals/skills",
-    "connect/eval-sets",
-    "connect/eval-sets/[id]"
-   ],
-   "gaps": [
-    "P1.3 evals as a product (2026-09-16): `ap eval <cases.eval.json>` (cases as data, deterministic judge, a persona or a session, `--report`), `ap eval --from-runs` (a dataset from an agent's live runs), `evals/faithnet.eval.json` (5 cases: the authority twins + truthfulness, 5/5 live), the Evals screen (/developer/evals: recurring failures first, gates by night, the latest ap eval) folded by `scripts/build-evals-dashboard.mts`. Open: experiments compared side by side (two reports diffed); the nightly writing its report into the repo needs GitHub Actions billing",
-    "G2's clean-machine exit RUNS (2026-09-16, `verify-devkit-starter`: the home-client starter generated, installed from the registry, doctor clean, built, the two acts live in ~90 s) — with the WORKSPACE generator; `npx @agenticprimitives/create-app` reaches it at the next publish (create-app alpha.7). Also 09-16: `ap generate client|cli|parity` (398 §7.2 projections through the kit), `/llms.txt` on the Home (the coding agent's entrance), the `ap-add-capability` Claude Code skill in the starter and in Ring 0. Open: `npx` reach at the next publish; measured time-to-first-verified-outcome across developers",
-    "`ap mcp` is registered in the product template (.mcp.json, .cursor/mcp.json) but the devkit alpha that ships it is not published yet, and the clean-machine CI job (T21) does not exercise it",
-    "the component registry (398 §10.5) serves 9 items at /registry with their contracts; it is not yet reachable through the Developer MCP (which answers from the install only) and the items are not yet installable by the shadcn CLI end to end (the files reference the Home's own imports)",
-    "`ap upgrade` stops for review when a pinned definition's authority or effects change (398 §10.3) — shipped; the estate pins five archetypes at extraction; `ap test --interaction-coverage` / `--ask-truth` modes are still not wired (399 W1)"
-   ],
-   "tests": [
-    "packages/create-app/test/unit/create-app.test.ts",
-    "packages/devkit/test/definitions.test.ts",
-    "packages/devkit/test/developer-mcp.test.ts",
-    "packages/evaluation/test/unit/eval-file.test.ts",
-    "apps/demo-sso-next/src/home/comparison-defaults.test.ts"
-   ],
-   "notes": null,
-   "components": [
-    "components/portal/EvalsDashboard.tsx",
-    "registry/registry.json",
-    "components/portal/DeveloperApps.tsx",
-    "components/portal/ActLaboratory.tsx",
-    "components/portal/TechniqueLedger.tsx",
-    "components/portal/HowToRead.tsx",
-    "home/comparison-defaults.ts",
-    "evals/sets/manifest.json"
-   ],
-   "gates": [
-    "verify-devkit-starter"
-   ]
-  },
-  {
-   "id": "home.lab",
-   "title": "The Lab — skill selection assessed: tests run, per-intent expected vs chosen skill, per-skill results, comparisons, recommendations; the run tree",
-   "priority": "P1",
-   "status": "partial",
-   "specs": [
-    414,
-    415
-   ],
-   "section": "415 §5a–c",
-   "components": [
-    "components/portal/SkillAssessmentLab.tsx",
-    "components/portal/runs/RunTraceTree.tsx",
-    "home/run-trace-view.ts",
-    "evals/skill-assessment.json",
-    "components/portal/ComparisonRunner.tsx",
-    "home/experiments.ts"
-   ],
-   "endpoints": [
-    "/harness/comparison",
-    "/harness/experiments"
-   ],
-   "tests": [
-    "apps/demo-sso-next/src/components/portal/skill-assessment-lab.test.ts",
-    "apps/demo-sso-next/src/home/run-trace-view.test.ts",
-    "packages/evaluation/test/unit/experiment.test.ts",
-    "apps/demo-a2a/test/unit/run-trace.test.ts",
-    "apps/demo-sso-next/src/home/experiments.test.ts",
-    "apps/demo-sso-next/src/components/portal/comparison-runner.test.ts",
-    "apps/demo-a2a/test/unit/experiment-job.test.ts"
-   ],
-   "gates": [
-    "verify-variant-knob",
-    "verify-intent-trace"
-   ],
-   "gaps": [
-    "the Lab renders a report BAKED at build (ap eval report → build-evals-dashboard), not the eval store read through the developer's agent (415 §5b)",
-    "Operations (A6) not started",
-    "Ask the Lab is not built; live experiment progress is (the Run tab, 2026-10-01)"
-   ]
-  },
-  {
-   "id": "home.build",
-   "review": [
-    "H48",
-    "H49",
-    "H50",
-    "H51",
-    "H52"
-   ],
-   "title": "Home Build — repository workspace, sandbox, preview, review, promotion, rollback",
-   "priority": "P2",
-   "status": "absent",
-   "specs": [
-    398
-   ],
-   "section": "398 §9 (G4; product repo ap-build)"
-  },
-  {
-   "id": "home.today",
-   "review": [
-    "APUX-009",
-    "APUX-012",
-    "APUX-033"
-   ],
-   "title": "Today — the outcome-led first page: decisions, attention, cost",
-   "priority": "P0",
-   "status": "partial",
-   "specs": [
-    398
-   ],
-   "section": "398 §4.2 / §5.4 / §5.5 (G1)",
-   "routes": [
-    "(portal)",
-    "(portal)/org/[org]/overview",
-    "(portal)/service/[agent]"
-   ],
-   "components": [
-    "components/portal/AttentionBar.tsx",
-    "components/portal/StatePill.tsx",
-    "components/portal/TodayView.tsx",
-    "home/attention.ts",
-    "home/today.ts",
-    "home/use-today-inputs.ts"
-   ],
-   "endpoints": [
-    "/harness/records",
-    "/harness/runs",
-    "/harness/triggers",
-    "/harness/vocabulary"
-   ],
-   "tests": [
-    "apps/demo-sso-next/src/components/portal/nav.test.ts",
-    "apps/demo-sso-next/src/home/attention.test.ts",
-    "apps/demo-sso-next/src/home/today.test.ts"
-   ],
-   "gates": [
-    "verify-golden-journey"
-   ],
-   "gaps": [
-    "approve ceremonies delivered by mail (hear) are not yet a Today decision card — one durable decision record per decision (393) is the prerequisite",
-    "a golden-journey gate (398 §13) runs the charter → Today → inspector → work item → decision journey live; not yet: specialist artifacts on the item, the run's own send decision, the page publish, the parity pair"
-   ]
-  },
-  {
-   "id": "home.presence",
-   "review": [
-    "APUX-018"
-   ],
-   "title": "Presence",
-   "priority": "P2",
-   "status": "absent",
-   "specs": [
-    398
-   ],
-   "section": "398 §4.5 — deliberately not before the roster is right"
-  }
- ]
 }

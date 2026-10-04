@@ -26,7 +26,7 @@ export const AGENT_NAME_PARENT = process.env.NEXT_PUBLIC_AGENT_NAME_PARENT || 'i
 export const DEMO_EDGE_ORIGIN_DEFAULT = process.env.NEXT_PUBLIC_DEMO_EDGE_ORIGIN || 'https://demo-edge-production.richardpedersen3.workers.dev';
 
 /** THIS DEPLOYMENT'S VAULT SERVER ID — the `server` every record-scope grant the Home issues names, and the
- *  `vaultId` a person signs in the vault-key ceremony. The vault (`VAULT_SERVER_ID` on `apps/demo-mcp`) and the
+ *  `vaultId` a person signs in the vault-key ceremony. The vault (`VAULT_SERVER_ID` on `apps/vault`) and the
  *  runtime hold the SAME value; a second deployment on the same chain (spec 399 — a product repo's own estate)
  *  names its own, so a grant made to one estate's vault never satisfies another's. Unset ⇒ `demo-mcp`, the id
  *  Ring 0's estates were provisioned under. */

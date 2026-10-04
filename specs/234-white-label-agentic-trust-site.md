@@ -69,7 +69,7 @@ vocab) + `check:forbidden-terms`; the rest is doctrine + per-package CLAUDE.md.
 
 ## 5. White-label config model (app-level, build-time) — the new artifact
 
-A single typed config object in `apps/demo-sso-next` (e.g.
+A single typed config object in `apps/home` (e.g.
 `src/whitelabel/config.ts`), the ONE place a deployment's identity lives.
 Build-time now; a runtime/on-chain adapter is a future phase (deliberately not
 built — user, 2026-05-28). Shape (sketch, to refine in build):
@@ -101,11 +101,11 @@ Each registered relying app's `delegationTemplate` + caveats come from §5 confi
 
 ## 7. Mapping to current code
 
-- `apps/demo-sso-next` = the Central Site + Personal Trust Home. Add `src/whitelabel/`
+- `apps/home` = the Central Site + Personal Trust Home. Add `src/whitelabel/`
   (the config + schema); refactor `domain.ts` + `oidc-clients.ts` + the Experience
   Layer to read it.
 - `apps/demo-org` = the Faith App / Impact Portal relying app.
-- `apps/demo-a2a` = the A2A surface backend (Cloudflare).
+- `apps/agent-runtime` = the A2A surface backend (Cloudflare).
 - `packages/*` = Core Trust Services — stay generic (ADR-0021).
 
 ## 8. Reference: patterns to port
@@ -119,7 +119,7 @@ Each registered relying app's `delegationTemplate` + caveats come from §5 confi
 ## 9. Phase plan
 
 - **W1 — Config model:** define `WhiteLabelConfig` + the `faith-impact` config in
-  `apps/demo-sso-next/src/whitelabel/`; route `domain.ts` + `oidc-clients.ts`
+  `apps/home/src/whitelabel/`; route `domain.ts` + `oidc-clients.ts`
   through it (no behavior change — same values, now config-sourced).
 - **W2 — Experience Layer:** brand/theme + onboarding + copy read from config
   (faith branding becomes data); the Personal Trust Home view (manage apps /

@@ -1,4 +1,4 @@
-# @agenticprimitives-demo/a2a
+# @ap-home/agent-runtime
 
 ## 0.0.2-alpha.32
 
@@ -22,7 +22,7 @@
   - @agenticprimitives/agent-account@1.0.0-alpha.27
   - @agenticprimitives/delegation@1.0.0-alpha.27
   - @agenticprimitives/agent-relationships@1.0.0-alpha.27
-  - @agenticprimitives-demo/home-shared@0.0.1-alpha.2
+  - @ap-home/shared@0.0.1-alpha.2
   - @agenticprimitives/home@0.0.0-alpha.16
   - @agenticprimitives/context@0.0.0-alpha.6
   - @agenticprimitives/orchestration-anthropic@0.0.0-alpha.7
@@ -99,7 +99,7 @@
   - @agenticprimitives/types@1.0.0-alpha.26
   - @agenticprimitives/vault@0.0.0-alpha.5
   - @agenticprimitives/verification-receipts@0.0.0-alpha.7
-  - @agenticprimitives-demo/home-shared@0.0.1-alpha.1
+  - @ap-home/shared@0.0.1-alpha.1
 
 ## 0.0.2-alpha.30
 
@@ -113,7 +113,7 @@
   - @agenticprimitives/fabric@0.0.0-alpha.14
   - @agenticprimitives/connect-auth@1.0.0-alpha.25
   - @agenticprimitives/coordination@0.0.0-alpha.8
-  - @agenticprimitives-demo/home-shared@0.0.1-alpha.0
+  - @ap-home/shared@0.0.1-alpha.0
   - @agenticprimitives/home@0.0.0-alpha.14
   - @agenticprimitives/agent-account@1.0.0-alpha.25
   - @agenticprimitives/agent-naming@1.0.0-alpha.25
@@ -705,7 +705,7 @@
 
   ### demo-a2a
 
-  Two callsites updated in `apps/demo-a2a/src/index.ts`:
+  Two callsites updated in `apps/agent-runtime/src/index.ts`:
   - `smartAccountFromCookie` uses `verifySession(cookie, { developmentMode: true })`
     with a clear comment that spec 227 (Real-Connect) will replace the
     demo-mode bypass with real iss/aud bindings.
@@ -785,7 +785,7 @@
 
   ### demo-a2a
 
-  `apps/demo-a2a/src/index.ts`:
+  `apps/agent-runtime/src/index.ts`:
   - CSRF middleware passes `actualOrigin: reqOrigin ?? ''` with
     `developmentMode: true` for the testnet demo (spec 227
     Real-Connect will tighten the gate).
@@ -801,7 +801,7 @@
   callsites onto the relayer-pattern package primitives (R5.12a+b+c).
 
   ### What changed in demo-a2a
-  - New `apps/demo-a2a/src/relayer.ts` factory module:
+  - New `apps/agent-runtime/src/relayer.ts` factory module:
     - `getRelayerAccount(env, role, sink)` → KMS-backed viem `LocalAccount`
       via `createRelayerAccount` from `@agenticprimitives/key-custody`.
       `A2A_KMS_BACKEND` env var picks the backend (same as the UserOp

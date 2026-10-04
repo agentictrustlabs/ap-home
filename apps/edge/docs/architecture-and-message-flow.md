@@ -1,6 +1,6 @@
 # demo-edge — architecture & message flow
 
-How the **Agentic Edge** ([`apps/demo-edge`](../src/index.ts), [spec 288](../../../specs/288-agentic-edge-admission-and-surface-catalog.md))
+How the **Agentic Edge** ([`apps/edge`](../src/index.ts), [spec 288](../../../specs/288-agentic-edge-admission-and-surface-catalog.md))
 sits in front of the demo stack and what an end-to-end request looks like from a browser client
 ([`apps/demo-web-pro`](../../demo-web-pro/), the Treasury Service Agent demo) through **demo-edge → demo-a2a → demo-mcp**.
 
@@ -89,7 +89,7 @@ flowchart TD
   GA --> D[dispatchToBinding<br/>exact bytes → MCP or A2A]
 ```
 
-Key properties (all in [`apps/demo-edge/src/index.ts`](../src/index.ts)):
+Key properties (all in [`apps/edge/src/index.ts`](../src/index.ts)):
 
 - **Route catalog is app config** (`CATALOG`), never in the generic packages ([ADR-0021](../../../docs/architecture/decisions/0021-generic-packages-vs-white-label-apps.md)):
   `POST /mcp/native` → MCP, `POST /mcp` → MCP, `POST /api/a2a` → A2A, `GET /.well-known/agent-card.json` → A2A.
@@ -324,4 +324,4 @@ signal the origin keys on, not a client-supplied header.
 - [spec 288 — Agentic Edge admission & surface catalog](../../../specs/288-agentic-edge-admission-and-surface-catalog.md)
 - [spec 290 — rate-control & usage accounting](../../../specs/290-rate-control-and-usage-accounting.md)
 - [Edge admission & authority hardening plan](../../../docs/architecture/edge-admission-and-authority-hardening-plan.md)
-- Code: [`apps/demo-edge/src/index.ts`](../src/index.ts) · [`apps/demo-a2a/src/index.ts`](../../demo-a2a/src/index.ts) · [`apps/demo-mcp/src/index.ts`](../../demo-mcp/src/index.ts) · [`apps/demo-web-pro/src/treasury/acts/Act6OrgDashboard.tsx`](../../demo-web-pro/src/treasury/acts/Act6OrgDashboard.tsx)
+- Code: [`apps/edge/src/index.ts`](../src/index.ts) · [`apps/agent-runtime/src/index.ts`](../../agent-runtime/src/index.ts) · [`apps/vault/src/index.ts`](../../vault/src/index.ts) · [`apps/demo-web-pro/src/treasury/acts/Act6OrgDashboard.tsx`](../../demo-web-pro/src/treasury/acts/Act6OrgDashboard.tsx)

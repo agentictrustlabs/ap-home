@@ -54,7 +54,7 @@ const ENFORCERS = { delegationManager: DM, timestamp: C.timestampEnforcer, allow
 process.env.NEXT_PUBLIC_CHAIN_ID = String(CHAIN);
 process.env.NEXT_PUBLIC_CONTRACTS_JSON = JSON.stringify(C);
 process.env.NEXT_PUBLIC_VAULT_SERVER_ID = fx.vaultServerId;
-const { buildVaultKeyAuthorization, issueMemberProfileAccessDelegation, toWire } = await import('../apps/demo-sso-next/src/lib/delegation');
+const { buildVaultKeyAuthorization, issueMemberProfileAccessDelegation, toWire } = await import('../apps/home/src/lib/delegation');
 
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 250), _status: r.status }; } };
 const fail = (m: string): never => { console.error(`\n✗ ${m}`); process.exit(1); };

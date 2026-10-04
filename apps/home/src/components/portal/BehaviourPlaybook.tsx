@@ -7,7 +7,7 @@
 // changes what the agent knows how to DO; the mandate still decides what it MAY do (spec 354 §1). The
 // approval writes `ArchetypeAssignmentV1` to the agent's own vault (`archetype.assignment`, self-gated
 // record.put), where the harness's run admission re-derives the digest and loads it — a tampered or
-// absent playbook leaves the bare harness standing (`apps/demo-a2a/src/playbook.ts`).
+// absent playbook leaves the bare harness standing (`apps/agent-runtime/src/playbook.ts`).
 //
 // This is the STEWARDSHIP surface for the same record the a2a harness reads. It never signs and never
 // grants; the only on-chain thing near it is the vault write itself, gated by the interactions grant's

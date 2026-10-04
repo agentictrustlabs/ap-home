@@ -38,7 +38,7 @@ pnpm dev
 pnpm dev:a2a    # wrangler dev on http://127.0.0.1:8787
 ```
 
-Local secrets and contract addresses come from `.dev.vars` (wrangler convention). Deploy with `pnpm --filter @agenticprimitives-demo/a2a deploy`.
+Local secrets and contract addresses come from `.dev.vars` (wrangler convention). Deploy with `pnpm --filter @ap-home/agent-runtime deploy`.
 
 ## Status
 

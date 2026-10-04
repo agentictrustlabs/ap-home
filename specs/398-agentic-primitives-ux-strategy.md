@@ -52,14 +52,14 @@ spec itself moves to `ap-home` at 399 W2 and Ring 0 keeps a pointer in `specs/IN
 | §11 Home stack choice (CopilotKit / assistant-ui / own), Sandbox bake-off | `ap-home` | product dependency choices |
 | §12 G0 census script (`check:home-census`), `check:golden-journey` | `ap-home` CI, built on `packages/evaluation` runner | 399 §2.3 |
 
-Until 399 W2 cuts, work on §4–§9 continues in `apps/demo-sso-next` / `apps/demo-a2a` here, importing promoted
+Until 399 W2 cuts, work on §4–§9 continues in `apps/home` / `apps/agent-runtime` here, importing promoted
 symbols from published packages as 399 §4 lands them — never adding new app-resident primitives.
 
 ---
 
 ## 1. Census: what the review could not see (its G0, done here)
 
-The review marked 25 of 52 Home rows *Unverified* or *Design*. Against the tree (`apps/demo-sso-next/app/(portal)/*`*,
+The review marked 25 of 52 Home rows *Unverified* or *Design*. Against the tree (`apps/home/app/(portal)/*`*,
 `src/components/portal/nav.ts`, `src/home/*`, harness endpoints called from Home) the honest picture is:
 
 ### 1.1 Shipped, and the review under-counted it
@@ -171,7 +171,7 @@ labels name *what* was verified (signer, digest, scope, chain state at step time
 4. **The vault is the record; DO storage is the serving plane** (ADR-0055). Nothing in this spec adds a Home-local
   store of work, memory, artifacts or decisions. A Home export (§6.4) is a vault export.
 5. **Ring 0 ships data and events; the UX consumer renders them** (351 §9). Run inspector, review cards, roster and
-  registry components live in `apps/demo-sso-next` (and the Developer Kit's templates), never in `packages/*`.
+  registry components live in `apps/home` (and the Developer Kit's templates), never in `packages/*`.
    `packages/home` carries portable *contracts* (310), not React.
 6. **Packages are generic; white-label lives in apps** (ADR-0021). The Developer Kit's starter is vertical-free; the
   Home component registry is an app-level artifact.
@@ -589,7 +589,7 @@ Tooling that generates against `@agenticprimitives/*` is part of the Operations 
 repo as generic, vertical-free packages: `packages/create-app` (the generator), `packages/devkit` (commands,
 doctor, lock, inspector server), and a `templates/` tree the generator consumes. White-label content stays out
 (ADR-0021; `check:no-domain-in-packages` applies). The Home **component registry** (§10.5) is an artifact served by
-`apps/demo-sso-next` (it contains React), not a package.
+`apps/home` (it contains React), not a package.
 
 ### 10.3 Commands (each with `--json` for coding agents)
 

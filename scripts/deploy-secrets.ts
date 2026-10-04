@@ -36,7 +36,7 @@ export async function readSecretValue(valueEnvVar: string | undefined): Promise<
 // ─── Cloudflare Worker secret (via wrangler, value on stdin — no echo) ──────
 
 export interface CloudflareSecretTarget {
-  /** Worker app directory (so wrangler.toml resolves), e.g. apps/demo-mcp. */
+  /** Worker app directory (so wrangler.toml resolves), e.g. apps/vault. */
   cwd: string;
   /** wrangler --env (e.g. production). */
   env?: string;

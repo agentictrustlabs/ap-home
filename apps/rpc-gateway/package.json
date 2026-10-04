@@ -1,5 +1,5 @@
 {
-  "name": "@agenticprimitives-demo/chain-rpc-gateway",
+  "name": "@ap-home/rpc-gateway",
   "version": "0.0.1",
   "private": true,
   "description": "Chain RPC gateway Worker: per-app tokens (Bearer or ?k=), JSON-RPC method allow-list, per-app rate limit (Durable Object), read cache, optional eth_estimateGas gas-cap injection, forward to a private origin. Deployed infra (apps/*), not a Ring-0 primitive.",
@@ -11,9 +11,9 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240909.0",
-    "typescript": "^5.5.0",
-    "vitest": "^4.1.8",
-    "wrangler": "^3.78.0"
+    "@cloudflare/workers-types": "4.20260605.1",
+    "typescript": "5.7.3",
+    "vitest": "4.1.8",
+    "wrangler": "3.114.17"
   }
 }

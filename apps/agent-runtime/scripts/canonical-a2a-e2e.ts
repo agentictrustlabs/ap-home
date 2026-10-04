@@ -25,7 +25,7 @@
  * transport + authority + dispatch + composition reached MCP.
  *
  * Run (from the app dir so workspace deps resolve):
- *   cd apps/demo-a2a && npx tsx scripts/canonical-a2a-e2e.ts
+ *   cd apps/agent-runtime && npx tsx scripts/canonical-a2a-e2e.ts
  * Env overrides:
  *   EDGE_BASE   (default demo-edge-production…workers.dev)  — where message/send is POSTed
  *   A2A_BASE    (default demo-a2a-production…workers.dev)   — relayer onboarding endpoints
