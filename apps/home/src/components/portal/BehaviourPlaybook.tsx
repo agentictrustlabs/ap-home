@@ -109,18 +109,18 @@ function ToolLine({ id, description, risk }: { id: string; description: string; 
 
 /** The diff panel: what this definition would make the agent able to do, and what it would start
  *  asking authority for. Reads only real fields of the definition. */
-function DiffPreview({ def }: { def: AgentHarnessDefinitionV1 }) {
+function DiffPreview({ def, assigned = false }: { def: AgentHarnessDefinitionV1; assigned?: boolean }) {
   const mandates = def.requiredMandateTypes ?? [];
   return (
     <div style={{ border: '1px solid var(--color-border)', borderRadius: 10, padding: '.85rem 1rem', background: 'var(--color-surface, #fff)' }}>
       <p style={{ margin: '0 0 .5rem', fontSize: '.82rem', color: 'var(--color-text-muted)', whiteSpace: 'pre-wrap' }}>{def.instructions}</p>
-      <h4 style={{ margin: '.6rem 0 .2rem', fontSize: '.82rem' }}>Tools it would use</h4>
+      <h4 style={{ margin: '.6rem 0 .2rem', fontSize: '.82rem' }}>{assigned ? 'Tools this agent runs' : 'Tools it would use'}</h4>
       <ul style={{ margin: 0, paddingLeft: '1.1rem', listStyle: 'disc' }}>
-        {def.tools.map((t) => (
+        {(def.tools ?? []).map((t) => (
           <ToolLine key={t.id} id={t.id} description={t.description} risk={t.risk} />
         ))}
       </ul>
-      <h4 style={{ margin: '.7rem 0 .2rem', fontSize: '.82rem' }}>Authority it would start asking for</h4>
+      <h4 style={{ margin: '.7rem 0 .2rem', fontSize: '.82rem' }}>{assigned ? 'Authority it asks for' : 'Authority it would start asking for'}</h4>
       {mandates.length === 0 ? (
         <p style={{ margin: 0, fontSize: '.8rem', color: 'var(--color-text-muted)' }}>None — this archetype only reads and converses.</p>
       ) : (
@@ -129,6 +129,32 @@ function DiffPreview({ def }: { def: AgentHarnessDefinitionV1 }) {
             <li key={m} style={{ margin: '.2rem 0' }}>{mandateWords(m)} <span style={{ color: 'var(--color-text-muted)', fontSize: '.72rem' }}>({rarLabel(m)})</span></li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+/** WHERE A PLAYBOOK COMES FROM — its skills context and the SKILL.md contracts that compiled it. Shown only when a
+ *  registry row for it is loaded; absent says nothing, because a definition held in the vault is real without it. */
+function RegistrySource({ registry }: { registry: RegistryArchetype }) {
+  return (
+    <div style={{ fontSize: '.7rem', color: 'var(--color-text-muted)', marginTop: '.35rem' }}>
+      <div>
+        from <code>{registry.context}</code>
+        {registry.skills.length === 0 && <> · no SKILL.md linked yet</>}
+      </div>
+      {registry.skills.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '.25rem .3rem', marginTop: '.25rem' }}>
+          <span>driven by</span>
+          {registry.skills.map((sk) => (
+            <code key={sk} title={sk} style={{ fontSize: '.68rem', whiteSpace: 'nowrap', overflowWrap: 'anywhere' }}>{skillLabel(sk)}</code>
+          ))}
+        </div>
+      )}
+      {registry.warnings.length > 0 && (
+        <div style={{ color: 'var(--color-warning, #92700e)', marginTop: '.2rem' }}>
+          {registry.warnings.length} capabilit{registry.warnings.length === 1 ? 'y has' : 'ies have'} no contract — running the built-in shape
+        </div>
       )}
     </div>
   );
@@ -164,6 +190,8 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [published, setPublished] = useState<{ binding: PublishedBinding | null; releaseId: string | null } | null>(null);
+  /** The registry row for the ASSIGNED playbook, when this Home happens to load its context — for its source chips. */
+  const currentRegistry = useMemo(() => (current ? options.find((o) => o.registry && o.definition.archetypeId === current.archetypeId)?.registry : undefined), [current, options]);
 
   useEffect(() => {
     if (!token) return;
@@ -216,7 +244,7 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
     } finally { setBusy(false); }
   }, []);
 
-  if (options.length === 0) {
+  if (options.length === 0 && loaded && !current) {
     return (
       <div style={{ marginBottom: '1.2rem' }}>
         <h3>Archetype</h3>
@@ -241,11 +269,18 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
         <>
           <div style={{ marginBottom: '.8rem', fontSize: '.85rem' }}>
             {current ? (
-              <span>
-                Currently: <strong>{current.archetypeId.replace(/^skill:archetypes\//, '')}</strong>{' '}
-                <span style={{ color: 'var(--color-text-muted)', fontSize: '.72rem' }}>v{current.archetypeVersion}</span>
-                {saved && <span role="status" style={{ marginLeft: '.5rem', color: 'var(--color-sage-700)' }}>Saved ✓</span>}
-              </span>
+              // WHAT THIS AGENT RUNS, from the record it runs — the vault's `archetype.assignment` (compiled definition +
+              // digest), never the picker below. The picker is the registry's offer and may not even list this playbook
+              // (a domain context this Home does not browse); the assignment is real either way.
+              <div style={{ border: '1px solid var(--color-sage-700, #3f6212)', borderRadius: 10, padding: '.7rem .85rem', background: 'var(--color-sage-50, #f2f7ec)' }}>
+                <div>
+                  Assigned: <strong>{current.archetypeId.replace(/^skill:[^/]+\//, '')}</strong>{' '}
+                  <span style={{ color: 'var(--color-text-muted)', fontSize: '.72rem' }}>v{current.archetypeVersion}</span>
+                  {saved && <span role="status" style={{ marginLeft: '.5rem', color: 'var(--color-sage-700)' }}>Saved ✓</span>}
+                </div>
+                {currentRegistry && <RegistrySource registry={currentRegistry} />}
+                {current.definition && <div style={{ marginTop: '.6rem' }}><DiffPreview def={current.definition} assigned /></div>}
+              </div>
             ) : (
               <span style={{ color: 'var(--color-text-muted)' }}>No archetype assigned — the agent runs the bare harness.</span>
             )}
@@ -289,6 +324,7 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
             </p>
           )}
 
+          {options.length > 0 && current && <h4 style={{ margin: '.2rem 0 .45rem', fontSize: '.85rem' }}>Switch playbook</h4>}
           <div style={{ display: 'grid', gap: '.55rem' }}>
             {options.map((opt) => {
               const isCurrent = current?.archetypeId === opt.definition.archetypeId;
@@ -317,27 +353,7 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
                   {/* WHERE THIS BEHAVIOUR COMES FROM. A steward picking a playbook should be able to see
                       which SKILL.md contract defines it — that file is the editable source, and an
                       archetype with no contract behind a capability is running a built-in fallback. */}
-                  {opt.registry && (
-                    <div style={{ fontSize: '.7rem', color: 'var(--color-text-muted)', marginTop: '.35rem' }}>
-                      <div>
-                        from <code>{opt.registry.context}</code>
-                        {opt.registry.skills.length === 0 && <> · no SKILL.md linked yet</>}
-                      </div>
-                      {opt.registry.skills.length > 0 && (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '.25rem .3rem', marginTop: '.25rem' }}>
-                          <span>driven by</span>
-                          {opt.registry.skills.map((sk) => (
-                            <code key={sk} title={sk} style={{ fontSize: '.68rem', whiteSpace: 'nowrap', overflowWrap: 'anywhere' }}>{skillLabel(sk)}</code>
-                          ))}
-                        </div>
-                      )}
-                      {opt.registry.warnings.length > 0 && (
-                        <div style={{ color: 'var(--color-warning, #92700e)', marginTop: '.2rem' }}>
-                          {opt.registry.warnings.length} capabilit{opt.registry.warnings.length === 1 ? 'y has' : 'ies have'} no contract — running the built-in shape
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  {opt.registry && <RegistrySource registry={opt.registry} />}
                 </button>
               );
             })}
