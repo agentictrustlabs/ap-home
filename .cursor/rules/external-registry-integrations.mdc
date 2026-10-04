@@ -1,0 +1,20 @@
+---
+description: Keep external registry integrations out of primitive packages
+alwaysApply: true
+---
+
+# External Registry Boundary
+
+Agentic Primitives builds its own Ring 0 intent, discovery, registry, and agent-card standards in `packages/*`, `apps/contracts`, and `specs/*`.
+
+Integrations with ERC-8004, GoDaddy ANS, Hashgraph/HCS registries, DNS-AID, OASF, Veramo, hosted discovery APIs, indexers, explorers, and registry publication/sync services belong in external repos that import `@agenticprimitives/*`.
+
+Do not add protocol-specific integration code, conformance adapters, registry clients, publication flows, hosted-service wiring, or external protocol vocabulary as package semantics inside primitive packages or contracts.
+
+It is acceptable to study those systems and port generic design principles: signed cards, binding proofs, registry lifecycle, skill claims, validation hooks, transparency logs, fee-gated inboxes, and discovery metadata. When doing so, express them as AP-native primitives with AP-native vocabulary and stable extension points.
+
+Default direction:
+
+- Build AP-native signed agent cards, registry-kit contracts, skill/attestation schemas, intent/resolution/matching primitives, and fulfillment evidence in this repo.
+- Put ERC-8004/ANS/HCS/DNS/OASF/MCP Registry bridges and publication adapters in sibling integration repos.
+- If a feature name or type only exists to satisfy one external protocol, route it out of Ring 0.

@@ -1,0 +1,33 @@
+name: ci
+
+# Product CI (spec 399 §3.6): typecheck + tests + `ap doctor` (the doctrine gates as CLIs) + `ap doctor --rules`
+# (drift between the projected rules and the pinned source). Conformance of the SHADOW deployment runs in the
+# nightly beside the live gates, not here.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: ap doctor
+        run: pnpm exec ap doctor --json > doctor-report.json || (cat doctor-report.json; exit 1)
+      - name: ap doctor --rules (projection drift)
+        run: pnpm exec ap doctor --rules
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: doctor-report
+          path: doctor-report.json

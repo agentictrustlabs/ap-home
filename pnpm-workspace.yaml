@@ -1,0 +1,6 @@
+# A product repository: its apps (Workers, Next.js, DOs), its ops scripts, and the examples that demonstrate its
+# ceremonies. Every @agenticprimitives/* import is a published EXACT version (agentic.lock.json#packages) —
+# never a workspace alias, never a fork (ADR-0037 / ADR-0063 §2). `ap doctor` (lock-coherent) refuses otherwise.
+packages:
+  - 'apps/*'
+  - 'examples/*'

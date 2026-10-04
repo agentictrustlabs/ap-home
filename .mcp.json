@@ -1,0 +1,6 @@
+{
+  "$comment": "Claude Code reads this: the DEVELOPER MCP (spec 398 §10.4) — read-only; package exports, ontology terms, contract deployments, recipes, the doctor. Not the runtime MCP, not the Home MCP. Holds no key, reads no vault.",
+  "mcpServers": {
+    "ap-dev": { "command": "npx", "args": ["ap", "mcp", "--root", "."] }
+  }
+}

@@ -1,0 +1,13 @@
+---
+description: Prefer vault-backed authority and standards-based ontology patterns
+alwaysApply: true
+---
+
+# Vault Storage And Ontology
+
+- Do not introduce app-local persistent storage for durable authority state when a vault-backed record or Agentic Primitives rail should own it. This includes membership, invitations, roles, reports, relationships, attestations, discussions, messages, onboarding state, and access decisions.
+- Treat D1, KV, R2, Durable Objects, local JSON, and app-specific ledgers as caches, indexes, queues, or runtime infrastructure only. Durable domain truth belongs in person/org/service vault records, Home/a2a rails, MCP vault records, chain state, or package-owned canonical stores.
+- Model onboarding and membership with standards-aligned situations: pending invite/request situation first, then approved/accepted membership or role situation. Approval writes canonical relationships, delegations, entitlements, rosters, attestations, or vault records.
+- Smart Agent address is the canonical identifier. Agent names, email addresses, display names, handles, registry entries, and UI labels are facets used for lookup/contact, never canonical membership identity.
+- Prefer existing specs, ADRs, package ontologies, PROV/VC/delegation/relationship semantics, and Agentic Primitives vocabulary before creating new fields or classes.
+- Do not create one-off app hacks that bypass ontology relationships, vault authorization, delegation verification, package boundaries, or a2a/mcp data routes. If a needed class/property/pattern is missing, update the spec/ontology first and implement against that standard.

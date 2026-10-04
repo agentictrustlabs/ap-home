@@ -1,0 +1,45 @@
+---
+description: A demo person SA is never also their organization SA (ADR-0046)
+alwaysApply: true
+---
+
+# A demo person is never also their organization
+
+**Applies to every demo identity** in this repo and every derived roster (`engage`, `skills`, `uupg`).
+
+## One sentence
+
+A Person Smart Agent and an Organization Smart Agent are different classes (ADR-0046). **Never
+point both labels at the same address** — not as a seed shortcut, not “his own SA”, not to make
+`isOperator(address)` cheaper.
+
+## Why this keeps getting re-derived
+
+An org that is “just the person” skips a deploy. The operator check then compares the caller to
+that one address and everything goes green. Home’s workspace switcher then walks the person as
+if they were a parent org (`you → unnamed → unnamed → workspace`), Gather27 treats David’s
+home as Gather, and stewardship/vault gates cannot tell custody of a person from custody of
+an org.
+
+The check that would have caught it is “are these two addresses equal?” — not “does the demo
+sign in.”
+
+## The pattern
+
+1. **Person SA** = the human demo identity (`alice`, `david`, …).
+2. **Org SA** = a second, deployed account the person *custodies*. Named. Own vault.
+3. **Stewardship** = `org → person` (and Home’s related-orgs link). Custody of the org’s
+   key is not the org.
+4. Operator / allow-lists compare the **person** address (or a dedicated operator list),
+   never reuse the org field.
+
+```ts
+// ❌ BAD — one address, two classes
+{ handle: 'david', sa: '0xfd13…', org: '0xfd13…', orgName: 'Gather' }
+
+// ✅ GOOD — Alice already looks like this
+{ handle: 'alice', sa: '0xc35c…', org: '0xe261…', orgName: 'Missio Nexus' }
+```
+
+Roster of record: [`demo/personas.json`](../../../demo/personas.json).
+Enforced by `pnpm check:demo-person-org-distinct`.

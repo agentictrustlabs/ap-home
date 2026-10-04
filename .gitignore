@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.wrangler/
+.next/
+coverage/
+*.log
+.dev.vars
+.env*.local
+live-gates-report.json
+# Every *.local.json is a local secret — a roster with private keys, a service-account file. Never committed.
+*.local.json
+.vercel/
