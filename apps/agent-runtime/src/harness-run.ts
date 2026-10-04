@@ -34,6 +34,7 @@
 import { contractsGenerationOf, type ContractsGeneration } from '@agenticprimitives/agent-account';
 import { CONTACT_FIELDS, CONTACT_FIELD_ARGS, ONTOLOGY_MANIFEST_DIGEST, OUTCOME_CLASSES, outcomeClassOf as ontologyOutcomeClassOf } from '@agenticprimitives/ontology';
 import { bindSelectedOffer, type SelectedOfferBindingV1 } from './engagement-campaign.js';
+import { classifyProviderFailure } from './provider-outage.js';
 import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
 import { HOLDINGS_READ_TOOL, HOLDINGS_READ_CAPABILITY, holdingsReadInvoker } from './holdings-read.js';
@@ -4469,6 +4470,21 @@ async function askReplyForInner(env: HarnessEnv, input: {
       // another model; nothing here retries on a different one (ADR-0013).
       const why = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, ' ').slice(0, 240);
       return withEvidence(`${raw}\n\n(The answer could not be put into words — ${why} — so the evidence is shown as it was found.)`);
+    }
+  }
+  // When the run failed because the MODEL PROVIDER was the reason there is no answer — rate-limited, or the
+  // account is out of credit — say so plainly and actionably instead of the raw adapter error. This is the
+  // shape a capped single provider (no working fallback) produces for ANY run that needed the model: e.g. a
+  // persona answering a question outside its archetype's capabilities (no rule to resolve it ⇒ a model call),
+  // where the default person, which has that capability, answers by rule and never touches the model.
+  if (r.error) {
+    const f = classifyProviderFailure((input.plannerTrace?.route as { composer?: { provider?: string }; provider?: string } | undefined)?.composer?.provider ?? (input.plannerTrace?.route as { provider?: string } | undefined)?.provider, r.error, env as unknown as Record<string, unknown>);
+    if (f.kind !== 'other') {
+      const where = f.url ? ` Whoever runs this Home can check ${f.url}.` : '';
+      const msg = f.kind === 'exhausted'
+        ? `The model this agent runs on (${f.label}) is temporarily unavailable — its account has reached its credit or spending limit.${where} Nothing was answered; please try again once it is restored.`
+        : `The model this agent runs on (${f.label}) is temporarily unavailable — it is rate-limited right now. Nothing was answered; please try again in a moment.${f.url ? ` If it keeps happening, the plan's limits are at ${f.url}.` : ''}`;
+      return withProv({ kind: 'refused', runRef: r.runRef, outcome: r.outcome, error: msg, receipts: r.receipts });
     }
   }
   return withProv({ kind: 'refused', runRef: r.runRef, outcome: r.outcome, error: r.error ?? 'the run did not complete', receipts: r.receipts });
