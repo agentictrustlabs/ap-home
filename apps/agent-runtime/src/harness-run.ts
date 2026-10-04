@@ -2554,6 +2554,9 @@ export interface HarnessRunInput {
    * offer fails the loop's own unknown-tool gate.
    */
   plan?: { steps: Array<{ toolId: string; args: Record<string, unknown>; id?: string }> };
+  /** A SCREEN reading rows (its supplied plan is informational and it never shows the sentence). A screen read of a
+   *  tool this agent does not expose is answered "not offered" without running — never recorded as a denial. */
+  rowsOnly?: boolean;
   /** Spec 384 W3 — a campaign selected a provider for this run's step: every step exercising that capability is
    *  handed to the provider and carries the offer's digest (`bindSelectedOffer`), so the requirement names the
    *  offer and a mandate that does not is refused. Shapes the plan; no gate reads it. */
@@ -5726,7 +5729,17 @@ step is then handed to that agent under authority the person grants; leave it ou
         onlyIf: (plan: { steps: ReadonlyArray<{ toolId: string }> }) => !plan.steps.every((st) => !!tools.find((t) => t.id === st.toolId)?.answer) }
     : null;
   if (input.comparison || input.variant) trace.comparison = true;
-  const result = await runIntent(input.intent, {
+  // A SCREEN'S READ OF A CAPABILITY THIS AGENT DOES NOT HAVE (the Today calendar card on a persona whose archetype
+  // never exposes calendar.events.list) is not a failed run and not a denial: the honest answer to the screen is
+  // "not offered here", one row per step, and nothing runs. Only a rowsOnly supplied plan — a screen — gets this; a
+  // conversational ask never sets rowsOnly and still meets admission's refusal in words.
+  const unoffered = !!(input.plan && input.rowsOnly && !input.resume && input.plan.steps.length
+    && input.plan.steps.every((st) => !tools.some((t) => t.id === st.toolId)));
+  const result: RunResult = unoffered ? {
+    outcome: 'completed', runRef: input.runRef ?? 'run', receipts: [], plan: { steps: input.plan!.steps.map((st) => ({ toolId: st.toolId, args: st.args ?? {}, ...(st.id ? { id: st.id } : {}) })) },
+    steps: input.plan!.steps.map((st, i) => ({ step: { toolId: st.toolId, args: st.args ?? {} }, ok: true, stepRef: st.id ?? `s${i}`, result: { connected: false, offered: false, refused: `this agent does not offer ${st.toolId}` } })),
+    result: { connected: false, offered: false },
+  } : await runIntent(input.intent, {
     planner: boundPlanner, tools, bindingFor,
     ...(continuationOn && !input.plan ? { continuation: { max: 2 } } : {}),
     ...(input.resume ? { resume: input.resume } : {}),
