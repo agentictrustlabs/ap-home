@@ -132,6 +132,7 @@ import { withStandardCardFields } from '@agenticprimitives/a2a/standard';
 import type { AgentCardV1 } from '@agenticprimitives/a2a/standard';
 import { chainStewardshipCheck, deriveStanding } from '@agenticprimitives/context';
 import { clubTurn, CLUB_RECORDS } from './card-room-club.js';
+import { governingSubjectOf } from './workspace-governor.js';
 import { charteredAgentsReader, charteredOwnerReader } from './chartered-agents.js';
 import { relationshipRows } from '@agenticprimitives/context';
 import { grantBody } from '@agenticprimitives/agent-resolution';
@@ -2328,18 +2329,24 @@ function huddleScopeOf(raw: HuddleScopeIn | undefined): { kind: HuddleScopeKind;
   return { kind: kind as HuddleScopeKind, principal: principal as Address, ...(id ? { id } : {}) };
 }
 /**
- * A CLUB IS A WORKSPACE, AND ITS MEMBERSHIP LIVES HERE (spec 378 `club` scope; pokernight WORKSPACES.md §5 as
- * amended 2026-09-13). The club is a `.workspace` agent the host custodies, and who belongs to it is what this
- * Home records: the host's stewardship wire, a member's own related-agent link written by the `workspace-join`
- * ceremony, and the workspace's own `org.membership:member:<sa>` record written at that join. So a club scope's
- * standing is `deriveStanding` over those records, the same read every organization-class scope gets — the
- * card room's roster is a PROJECTION of this and is asked nothing. A member the card room lists but this Home
- * does not know is `none` here, truthfully: they have not joined the club at their Home yet, and the card room
- * tells them so. (Until this the Home asked the card room under a paired secret, which made the relying app
- * the authority on who belongs to an agent it does not custody.)
+ * A WORKSPACE IS A SERVICE, AND ITS MEMBERSHIP LIVES ON THE ORGANIZATION THAT GOVERNS IT (the owner's rule,
+ * 2026-10-02; `org.ttl` §2, `core.ttl`; spec 378 `workspace` / `club` scopes). A `<label>.workspace` agent — a
+ * club is one (pokernight WORKSPACES.md §5) — is `ap:WorkspaceAgent ⊑ ap:ServiceAgent`: it COORDINATES a
+ * workspace (`aporg:coordinatedBy`) and cannot have members. Who belongs is `aporg:OrganizationMembership` on
+ * the workspace's GOVERNOR (`aporg:governedBy`): the `org.membership:member:<sa>` records in the organization's
+ * vault, its roster index, the stewardship wire its custodian holds. So a workspace scope's standing is
+ * `deriveStanding` against the GOVERNOR — resolved from the one pointer the workspace agent keeps
+ * (`workspace.governor`, written when the pair is chartered; `workspace-governor.ts`) — the same read every
+ * organization-class scope gets. A workspace with NO pointer is a legacy one that still holds its own
+ * membership records, and it is read as it was: the workspace itself is the subject. The relying app's roster
+ * (the card room's) is a PROJECTION of this and is asked nothing; a member it lists whom the governor does not
+ * know is `none` here, truthfully. (Until 2026-09-13 the Home asked the card room under a paired secret, which
+ * made the relying app the authority on who belongs to an agent it does not custody; until 2026-10-02 it read
+ * the workspace agent as if it were the organization.)
  */
 /** The caller's standing AT THE SCOPE (spec 378 §2): for an organization-class scope, derived from records
- *  the organization keeps (spec 366); for a conversation, whether the caller is one of its parties. */
+ *  the organization keeps (spec 366) — for a workspace, the organization that governs it; for a conversation,
+ *  whether the caller is one of its parties. */
 async function huddleStandingFor(env: Env, caller: Address, scope: NonNullable<ReturnType<typeof huddleScopeOf>>): Promise<'steward' | 'member' | 'party' | 'none'> {
   if (scope.kind === 'conversation') {
     const parties: string[] = (scope.id ?? '').toLowerCase().match(/0x[0-9a-f]{40}/g) ?? [];
@@ -2347,6 +2354,13 @@ async function huddleStandingFor(env: Env, caller: Address, scope: NonNullable<R
   }
   if (scope.principal === caller.toLowerCase()) return 'steward';
   const askDeps = harnessDeps(env, buildAuditSink(env));
+  // THE SUBJECT IS THE ORGANIZATION. A workspace or club scope names the workspace agent (the card room binds to
+  // it; the huddle room is keyed by it) and standing is derived against whatever governs it. Nothing else about
+  // the scope changes: the room, the key, the provider token are the workspace's.
+  const { subject } = scope.kind === 'workspace' || scope.kind === 'club'
+    ? await governingSubjectOf(askDeps.readSubjectRecord, scope.principal)
+    : { subject: scope.principal };
+  if (subject === caller.toLowerCase()) return 'steward';
   const standing = await deriveStanding({
     ...(askDeps.readSubjectRecord ? { readSubjectRecord: askDeps.readSubjectRecord } : {}),
     verifyStewardship: chainStewardshipCheck({
@@ -2356,7 +2370,7 @@ async function huddleStandingFor(env: Env, caller: Address, scope: NonNullable<R
       isRevokedAbi: IS_REVOKED_ABI_FOR_STANDING, validatorAbi: universalSignatureValidatorAbi,
       ...(env.UNIVERSAL_SIGNATURE_VALIDATOR ? { validator: env.UNIVERSAL_SIGNATURE_VALIDATOR as Address } : {}),
     }),
-  }, { principal: caller, subject: scope.principal }).catch(() => null);
+  }, { principal: caller, subject }).catch(() => null);
   return standing?.relation === 'steward' || standing?.relation === 'self' ? 'steward' : standing?.relation === 'member' ? 'member' : 'none';
 }
 async function huddleRoom(env: Env, scope: NonNullable<ReturnType<typeof huddleScopeOf>>, body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }> {

@@ -117,10 +117,10 @@ export function mergeRosters(listings: readonly RosterMember[], received: readon
 }
 
 /**
- * Read an organization's / workspace's roster: the community directory (every member who published a
- * listing — readable by any member) UNIONED with the steward's members index (invite-redeemed members,
- * readable when the person stewards the org). A directory refusal (403 = not a member) is thrown and
- * named by the picker; it is never papered over by the other source.
+ * Read an ORGANIZATION's roster: the community directory (every member who published a listing — readable by
+ * any member) UNIONED with the steward's members index (invite-redeemed members, readable when the person
+ * stewards the org). A directory refusal (403 = not a member) is thrown and named by the picker; it is never
+ * papered over by the other source. For a WORKSPACE, read its governor — `fetchWorkspaceRoster`.
  */
 export async function fetchRoster(token: string, community: string): Promise<RosterMember[]> {
   const headers = { authorization: `Bearer ${token}` };
@@ -154,4 +154,57 @@ export function filterRecipients<T extends { title: string; subtitle?: string; a
   const needle = q.trim().toLowerCase();
   if (!needle) return [...rows];
   return rows.filter((r) => r.title.toLowerCase().includes(needle) || (r.subtitle ?? '').toLowerCase().includes(needle) || r.address.includes(needle));
+}
+
+// ── A WORKSPACE'S MEMBERS ARE ITS GOVERNOR'S (the owner's rule, 2026-10-02; `org.ttl` §2) ─────────────────────
+// A `<label>.workspace` agent is a SERVICE that coordinates a workspace (`ap:WorkspaceAgent ⊑ ap:ServiceAgent`,
+// `aporg:coordinatedBy`); it cannot have members. Who belongs is `aporg:OrganizationMembership` on the
+// ORGANIZATION that GOVERNS the workspace (`aporg:governedBy`). A workspace paired before the rule holds no
+// governor and still keeps its own records: it is read as it was.
+
+/** A managed-agent row as the roster needs it — the fields `ManagedAgent` carries, typed loosely so a test can
+ *  hand in four fields and the hook can hand in the real rows. */
+export interface GovernableRow { agent: string; kind: string; parent?: string; relationship?: string }
+
+/** The org-class kinds a workspace can be governed by (`aporg:governedBy` ranges over ap:OrganizationAgent:
+ *  org, team, alliance — and the Home's other organization shapes). A person is not a governor, nor a service. */
+const ORGANIZATION_KINDS = new Set(['org', 'team', 'circle', 'church', 'household']);
+
+/**
+ * Pure: the organization that governs a workspace, from the viewer's own link to it. The Home writes the
+ * governor as the workspace link's `parent` (ADR-0046 lineage: `ap:charteredUnder`, "whose it is"), so the
+ * cheapest resolution the client has is that field read against the viewer's own managed-agent rows — no
+ * request. Null when the row is not a workspace, has no parent, or the parent is not an organization the
+ * viewer can see (a workspace hung under a PERSON is the person's, and the person is not its governor).
+ */
+export function workspaceGovernorOf(row: GovernableRow | undefined, all: readonly GovernableRow[]): string | null {
+  if (!row || row.kind !== 'workspace' || !row.parent) return null;
+  const parent = row.parent.toLowerCase();
+  if (parent === row.agent.toLowerCase()) return null;
+  const gov = all.find((a) => a.agent.toLowerCase() === parent);
+  return gov && ORGANIZATION_KINDS.has(gov.kind) ? parent : null;
+}
+
+export interface WorkspaceRoster {
+  members: RosterMember[];
+  /** Whose membership records these are: the governor's, or the workspace's own (legacy). */
+  heldBy: string;
+  /** The governor, when the workspace has one — even when its roster could not be read and the legacy one was. */
+  governedBy: string | null;
+}
+
+/**
+ * The roster of a WORKSPACE: its governor's when it has one, its own otherwise. The governor is tried first and
+ * the workspace's own records are read only when the governor's cannot be (a viewer the organization does not
+ * list reads 403 there) or are empty — a workspace paired before the rule still holds its own, and showing
+ * nobody for it would be the regression the fallback exists to prevent. Both reads go through `fetchRoster`.
+ */
+export async function fetchWorkspaceRoster(token: string, workspace: string, governor: string | null): Promise<WorkspaceRoster> {
+  if (!governor) return { members: await fetchRoster(token, workspace), heldBy: workspace.toLowerCase(), governedBy: null };
+  const fromGovernor = await fetchRoster(token, governor).catch(() => null);
+  if (fromGovernor && fromGovernor.length) return { members: fromGovernor, heldBy: governor.toLowerCase(), governedBy: governor.toLowerCase() };
+  const own = await fetchRoster(token, workspace).catch((e: unknown) => { if (fromGovernor) return [] as RosterMember[]; throw e; });
+  return own.length || !fromGovernor
+    ? { members: own, heldBy: workspace.toLowerCase(), governedBy: governor.toLowerCase() }
+    : { members: fromGovernor, heldBy: governor.toLowerCase(), governedBy: governor.toLowerCase() };
 }

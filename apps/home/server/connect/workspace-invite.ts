@@ -55,6 +55,14 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     /** Custodian leg: the record-covering MEMBERSHIP wire (P4) — stashed beside the site grant. */
     membership?: unknown;
     workspaceName?: string;
+    /** Custodian leg, GOVERNED workspace (2026-10-02): the organization that governs it, the org→member access
+     *  grant and the organization's signed half of the has-member credential — the same artifacts
+     *  `/connect/org-invite/agent` just recorded, carried here so the member's join records the membership on
+     *  the governor and countersigns. Absent for a legacy workspace. Opaque: verified where they are used. */
+    governor?: string;
+    governorName?: string;
+    governorAccess?: unknown;
+    relationshipOffer?: unknown;
     /** Member leg: claim (and consume) the pending invitation addressed to the session's person. */
     claim?: boolean;
   } | null;
@@ -100,6 +108,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       delegation: body.delegation,
       membership: body.membership ?? null,
       workspaceName: body.workspaceName ?? '',
+      ...(typeof body.governor === 'string' && ADDRESS.test(body.governor.toLowerCase())
+        ? { governor: body.governor.toLowerCase(), governorName: body.governorName ?? '', governorAccess: body.governorAccess ?? null, relationshipOffer: body.relationshipOffer ?? null }
+        : {}),
       invitedBy: person,
       createdAt: Date.now(),
     }),

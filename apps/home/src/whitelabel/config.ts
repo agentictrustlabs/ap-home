@@ -741,14 +741,20 @@ const faithImpact: WhiteLabelConfig = {
     //
     // "this app" is correct for all of them, and the sheet already shows the asking app's name and
     // domain directly above these bullets, so nothing is lost by not repeating it here.
+    //
+    // TWO AGENTS, SAID AS TWO (2026-10-02, the owner's rule — `lib/workspace-governor.ts`): a workspace agent is a
+    // service and holds no members, so the ceremony charters the ORGANIZATION that governs the workspace first and
+    // the workspace under it. The roster is the organization's; the workspace keeps its records. A sheet that
+    // said "a workspace" while two agents were being started under the person's name would be the untruth this
+    // copy exists to avoid.
     'workspace-create': {
       canDo: [
-        'Create a workspace under your name',
-        'Hold its shared roster and associations in its own vault',
+        'Create an organization under your name, and the workspace it governs',
+        'Keep who belongs on the organization, and the workspace’s shared records in its own vault',
         'Authorize this app to act as that workspace, revocably',
       ],
       cannotDo: [
-        'Take custody of the workspace agent away from you',
+        'Take custody of the organization or the workspace agent away from you',
         'Move funds, or touch your sign-in methods or recovery',
         'Copy records out of steward vaults',
       ],
@@ -756,7 +762,8 @@ const faithImpact: WhiteLabelConfig = {
     },
     'workspace-member-invite': {
       canDo: [
-        'Let the person you named read this workspace, revocably',
+        'Invite the person you named into the organization that governs this workspace',
+        'Let them read this workspace, revocably',
         'Hold that access for them until they join',
       ],
       cannotDo: [
@@ -768,6 +775,7 @@ const faithImpact: WhiteLabelConfig = {
     },
     'workspace-join': {
       canDo: [
+        'Join the organization that governs this workspace, as a member',
         'Add this workspace to the places you can work',
         'Accept the access its steward set aside for you',
       ],

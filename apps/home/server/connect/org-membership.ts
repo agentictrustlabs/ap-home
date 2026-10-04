@@ -14,6 +14,7 @@ import type { Address } from '@agenticprimitives/types';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { orgVault } from '../lib/org-vault';
+import { notAnOrganization, workspaceCheck } from '../lib/workspace-governor';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
 const json = (b: unknown, s = 200): Response =>
@@ -54,12 +55,23 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // The member consents for THEMSELVES, to THIS org — anything else is rejected (fail-closed).
   if (d.delegator.toLowerCase() !== person) return json({ error: 'delegation delegator must be your person agent' }, 403);
   if (d.delegate.toLowerCase() !== org) return json({ error: 'delegation delegate must be the org' }, 403);
+  // AND THIS ORG IS AN ORGANIZATION (the owner's rule, 2026-10-02; `../lib/workspace-governor.ts`). A workspace
+  // agent is a service and holds no members: a join that names one is refused by name, with the governor when
+  // the member's link knows it, so the ceremony that sent it learns where the membership belongs. The naming
+  // read is the one this route makes for the member's label anyway, pointed at the target.
+  const naming = new AgentNamingClient({
+    rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL), chainId: CHAIN_ID,
+    registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver,
+  });
+  const ws = await workspaceCheck(env.AUTH_CODES, person, org, () => naming.reverseResolve(org as Address));
+  if (ws.workspace) return json(notAnOrganization(ws.governor), 400);
   // W2 mismatch gate: a member-access grant is stored ONLY when it is org→THIS person. A grant to a
   // different (counterfactual) address is inert — dropped here, never re-targeted (ADR-0013).
   // Two delivery channels for the SAME steward-signed artifact, gated identically: the email path
   // POSTs it (redeem handed it to the invitee); the in-app path stored it in the org vault at invite
   // time (`org.invite:agent:<sa>`, spec 321 W2b) — looked up here when none was posted.
   let mad = body?.memberAccessDelegation;
+  let relationshipOffer: unknown = null;
   // Household facets the invitation carried (spec 368) — read from the org's own record, never from the
   // joiner's body: how they are related is the founder's statement, made when they invited.
   let facets: { kin?: string; role?: string } = {};
@@ -69,9 +81,12 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       // `org.invite:agent:*` read to `invite.claim`, where the AGENT derives the key from the session.
       // The address below is not sent — passing one would re-open the hole that op closes.
       const vault = await orgVault(env, org, token);
-      const rec = vault ? ((await vault.get(`org.invite:agent:${person}`)) as { delegation?: typeof mad; status?: string; kin?: string; role?: string } | null) : null;
+      const rec = vault ? ((await vault.get(`org.invite:agent:${person}`)) as { delegation?: typeof mad; status?: string; kin?: string; role?: string; relationshipOffer?: unknown } | null) : null;
       if (rec?.delegation && rec.status !== 'removed') mad = rec.delegation;
       if (rec) facets = { ...(typeof rec.kin === 'string' ? { kin: rec.kin } : {}), ...(typeof rec.role === 'string' ? { role: rec.role } : {}) };
+      // The organization's signed half of the has-member credential, when the invitation carried one (spec 410
+      // §8): handed back so the joiner can countersign it at the estate's door. Nothing here verifies it.
+      if (rec?.relationshipOffer && rec.status !== 'removed') relationshipOffer = rec.relationshipOffer;
     } catch { /* unreachable — membership still records; the grant can be re-looked-up later */ }
   }
   const madValid = !!mad && (mad.delegator ?? '').toLowerCase() === org && (mad.delegate ?? '').toLowerCase() === person && !!mad.signature;
@@ -151,5 +166,5 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // The membership stands on the signed grant; this is the organization's own note of it.
     membershipError = e instanceof Error ? e.message : String(e);
   }
-  return json({ ok: true, memberAccess: madValid, membershipRecorded, ...(membershipError ? { membershipError } : {}) });
+  return json({ ok: true, memberAccess: madValid, membershipRecorded, ...(membershipError ? { membershipError } : {}), ...(relationshipOffer ? { relationshipOffer } : {}) });
 };

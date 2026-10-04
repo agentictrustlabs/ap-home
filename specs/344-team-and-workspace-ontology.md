@@ -139,6 +139,23 @@ structure; the litmus:
 > context that apps, agents, entities and activities layer into — Workspace. If it is an informal
 > huddle — WorkingGroup.**
 
+**A `<label>.workspace` agent is a SERVICE, and a workspace holds no members** (the owner's rule,
+2026-10-02; `core.ttl` `ap:WorkspaceAgent ⊑ ap:ServiceAgent`, `org.ttl` `aporg:coordinatedBy`). The
+agent the `.workspace` suffix names is the workspace's agentive face — it coordinates the plane — and it
+is NOT an organization: it cannot have `aporg:OrganizationMembership`, and it is a type error to write
+`org.membership:member:<sa>` on it. Every workspace that needs membership has an accompanying
+ORGANIZATION agent (`.org` root) that GOVERNS it (`aporg:governedBy`), and membership — the
+`org.membership:member:<sa>` record with its `aporg:RoleAssignment` `materializedByDelegation` —
+lives on the GOVERNING ORGANIZATION. Stewardship (`ap:Stewardship`) is a separate situation, and an
+`ap:RelationshipCredential` (has-member, steward-of) grants nothing. The Home's `workspace-create`
+charters the organization first and the workspace under it, and writes the pair as records: the
+organization's vault holds the `aporg:Workspace` entity keyed `workspace:<ws sa>`
+(`{ type, governedBy, coordinatedBy, label, purpose, createdAt }`) and the workspace agent's vault holds
+the pointer `workspace.governor` (`{ governedBy, coordinatedBy }`), so any reader holding either agent
+finds the other. A workspace chartered before the rule has no pointer and is LEGACY: it still holds its
+own membership records, every reader treats it as it was, and `apps/home/scripts/workspace-governor.mts`
+charters its governor and moves its membership.
+
 ### 1.4 Alliance and the informal counterpart
 
 An **Alliance Agent** is an OrganizationAgent (`profileType: 'alliance'`) whose members are
@@ -202,14 +219,17 @@ each with a steward, not individual people):
   Steward, Security/Data Steward, Contributor, Partner Observer + domain-profile additions). Roles
   are recognized capacities — the capability is still only ever a delegation.
 
-**The coordinator.** A workspace MAY be operated by a **WorkspaceCoordinatorAgent** — a
-service-kind SA the governor delegates to (exactly the spec-327 org-assistant pattern, scoped to
-the workspace). It provides the workspace's A2A/MCP surface: context resolution, projection
-publishing, notification generation, audit recording. It is **never an independent source of
-authority** — revoke the governor's delegation and the coordinator is inert. Gather27's
-`gather27-a2a` worker (serving `gather.workspace`, `gather.groups-near` as public skills) is this
-coordinator, currently without the named delegation; field-web's `field-a2a` is the same for its
-richer workspace.
+**The coordinator.** A workspace MAY be operated by an **`ap:WorkspaceAgent`** (called
+`WorkspaceCoordinatorAgent` until 2026-08-31) — a service-kind SA the governor delegates to (exactly
+the spec-327 org-assistant pattern, scoped to the workspace), the one the `.workspace` suffix names
+(`aporg:coordinatedBy` / `aporg:coordinatesWorkspace`). It provides the workspace's A2A/MCP surface:
+context resolution, projection publishing, notification generation, audit recording. It is **never an
+independent source of authority** — revoke the governor's delegation and the coordinator is inert —
+**and it is never a membership subject**: who belongs is the governor's roster (§1.3), read through the
+pointer the workspace agent keeps (`workspace.governor`). Gather27's `gather27-a2a` worker (serving
+`gather.workspace`, `gather.groups-near` as public skills) is this coordinator, currently without the
+named delegation; field-web's `field-a2a` is the same for its richer workspace; a Game Night club is
+one too, with its governing organization chartered beside it.
 
 **Bound domain agents.** Beyond the coordinator, a workspace binds specialized agents (the review's
 research/planning/validation agents; engage's matching). The binding record answers three questions
@@ -421,12 +441,17 @@ aporg:Workspace a owl:Class ; rdfs:subClassOf prov:Entity ;
       agents, roles, responsibilities, policies, app/agent/resource bindings and representations.
       NOT an agent, NOT a tenant: no custody, no address, no authority of its own. Governance
       inherited from its governor; records in the governor's vault (ADR-0055). Several apps may
-      bind to ONE workspace — none of them recreates the org, team, roles, or domain context." .
+      bind to ONE workspace — none of them recreates the org, team, roles, or domain context.
+      MEMBERSHIP IS THE GOVERNOR'S: a workspace has no members and its coordinating agent cannot
+      have any (it is a ServiceAgent); who belongs is aporg:OrganizationMembership on the
+      organization that governs it. The entity is recorded in the governor's vault as
+      `workspace:<coordinating sa>`; the coordinating agent keeps the pointer `workspace.governor`." .
 
 aporg:governedBy a owl:ObjectProperty ;
     rdfs:domain aporg:Workspace ; rdfs:range ap:OrganizationAgent ;
     rdfs:comment "Exactly one governing agent (org, team, or alliance). Source of every policy the
-      workspace has. Switching workspace = switching authority/policy/disclosure/audit context." .
+      workspace has, AND the subject of every membership read about it. Switching workspace =
+      switching authority/policy/disclosure/audit context." .
 aporg:workspacePurpose a owl:DatatypeProperty ;
     rdfs:domain aporg:Workspace ; rdfs:range xsd:string .
 aporg:workspaceProfile a owl:ObjectProperty ;
@@ -455,11 +480,21 @@ aporg:inWorkspace a owl:ObjectProperty ;
     rdfs:domain aporg:WorkspaceParticipation ; rdfs:range aporg:Workspace .
 
 aporg:coordinatedBy a owl:ObjectProperty ;
-    rdfs:domain aporg:Workspace ; rdfs:range ap:ServiceAgent ;
-    rdfs:comment "The WorkspaceCoordinatorAgent: a service-kind SA the GOVERNOR delegates to (the
+    rdfs:domain aporg:Workspace ; rdfs:range ap:WorkspaceAgent ;
+    rdfs:comment "The ap:WorkspaceAgent: a service-kind SA the GOVERNOR delegates to (the
       spec-327 assistant pattern, workspace-scoped). Provides the workspace's A2A/MCP surface —
       projection publishing, notifications, audit. NEVER an independent source of authority:
-      revoke the governor's delegation and it is inert." .
+      revoke the governor's delegation and it is inert. NEVER a membership subject: it is a
+      service, and a service has no members. Range narrowed from ap:ServiceAgent to
+      ap:WorkspaceAgent by spec 346 §2.2 — the workspace agent is the derived type the
+      '.workspace' suffix names." .
+
+aporg:coordinatesWorkspace a owl:ObjectProperty ;
+    rdfs:domain ap:WorkspaceAgent ; rdfs:range aporg:Workspace ;
+    owl:inverseOf aporg:coordinatedBy ;
+    rdfs:comment "The workspace context this workspace agent custodies and serves. At most one. The
+      NAME binds to the workspace agent SA (the workspace's agentive face); the context is a governed
+      Entity in the governor's vault (§5) and is never itself named." .
 
 aporg:boundAgent a owl:ObjectProperty ;
     rdfs:domain aporg:Workspace ; rdfs:range ap:Agent ;

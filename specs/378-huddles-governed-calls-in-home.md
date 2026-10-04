@@ -65,6 +65,20 @@ against it:
 | `huddles.removeParticipant` | a steward of the scope, or the starter |
 | `huddles.list` / `huddles.get` | standing at the scope; a stranger is told nothing exists |
 
+**A `workspace` scope — and a `club`, which is one — derives standing against the ORGANIZATION THAT
+GOVERNS IT** (the owner's rule, 2026-10-02; spec 344 §1.3, `org.ttl` `aporg:governedBy`). The scope
+names the workspace agent (the card room binds to it; the room is keyed by it), but a `<label>.workspace`
+agent is a SERVICE (`ap:WorkspaceAgent ⊑ ap:ServiceAgent`) that coordinates the workspace and cannot have
+members: who belongs is `aporg:OrganizationMembership` on its governor — the `org.membership:member:<sa>`
+records in the organization's vault, its roster index, the stewardship wire its custodian holds. So the
+huddle service resolves the scope to its governor from the one pointer the workspace agent keeps
+(`workspace.governor`, written by the Home's `workspace-create` beside the `aporg:Workspace` record in the
+governor's vault) and runs `deriveStanding` there, the same read every organization-class scope gets.
+Nothing else about the scope changes: the room, the key and the provider token are the workspace's. A
+workspace with no pointer is a legacy one that still holds its own membership records and is read as it
+was — the workspace itself is the subject. The relying app's roster (the card room's) is a PROJECTION of
+this and is asked nothing; a member it lists whom the governor does not know is `none` here, truthfully.
+
 Permission to listen, publish audio, share a screen, invite outsiders, record and admit an AI participant
 are SEPARATE facts and map to separate provider preset powers. The presets Home selects server-side are
 no broader than what the authority intends; a button hidden in the dock is not enforcement, and a

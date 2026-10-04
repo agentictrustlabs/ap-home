@@ -2,11 +2,20 @@
 //
 // A club (pokernight, `docs/WORKSPACES.md` §5.0 as amended 2026-09-13) is a `.workspace` Smart Agent its host
 // custodies. It used to exist twice: as that agent at the Home and as a SQLite roster in the card room's
-// Durable Object, with the card room the authority and the Home asked nothing. Now it exists ONCE. Who belongs
-// is the organization's own membership (`org.membership:member:<sa>`, written at the workspace-join ceremony —
-// spec 325); what the club calls itself, when it meets and how each night diverges from the rule are three
-// records in the workspace's own vault (apctx:CardRoomClub / CardRoomClubSchedule / CardRoomClubNights —
-// cr:Club, cr:ClubSchedule, cr:ClubNight in the card-room ontology). The card room keeps no copy.
+// Durable Object, with the card room the authority and the Home asked nothing. Now it exists ONCE. What the
+// club calls itself, when it meets and how each night diverges from the rule are three records in the
+// workspace's own vault (apctx:CardRoomClub / CardRoomClubSchedule / CardRoomClubNights — cr:Club,
+// cr:ClubSchedule, cr:ClubNight in the card-room ontology). The card room keeps no copy.
+//
+// WHO BELONGS IS NOT THE WORKSPACE'S TO SAY (the owner's rule, 2026-10-02; `org.ttl` §2). A `.workspace` agent
+// is a SERVICE that coordinates a workspace (`ap:WorkspaceAgent ⊑ ap:ServiceAgent`, `aporg:coordinatedBy`); it
+// cannot have members. The club's membership — `aporg:OrganizationMembership`, the `org.membership:member:<sa>`
+// records written at the join ceremony (spec 325) — lives on the ORGANIZATION that GOVERNS the workspace
+// (`aporg:governedBy`), which the workspace agent names in its own `workspace.governor` pointer. So the club's
+// id stays the workspace address (the card room binds to it, the wire is the workspace's), the three records
+// stay in the workspace's vault, and only WHERE MEMBERSHIP IS READ moves: the roster is the governor's records
+// and a person's standing is derived against the governor. A club chartered before the pairing holds no pointer
+// and still keeps its own records; it is read as it was (`workspace-governor.ts`).
 //
 // WHO WRITES THEM. The club's own agent — and the card room reaches it by acting AS the club under a
 // service-agent wire the host signed once at charter (`workspace → the card room's session key`, pinned to
@@ -20,6 +29,7 @@
 // a read is a vault read, a write is a vault put, and an unknown skill is a one-line refusal.
 import type { Address } from '@agenticprimitives/types';
 import { deriveStanding, membershipRows, type StandingDeps } from '@agenticprimitives/context';
+import { governingSubjectOf } from './workspace-governor.js';
 
 /** The two verbs. Selectors are not the gate (the wire pins `harness.ask`); the NAME is what this dispatches on. */
 export const CLUB_READ_SKILL = 'club.read' as const;
@@ -70,8 +80,12 @@ export interface ClubReadOut {
   profile: unknown;
   schedule: unknown;
   nights: unknown;
-  /** The organization's own membership records — the roster, from the club's word about who belongs. */
+  /** The GOVERNING organization's own membership records — the roster, from the organization's word about who
+   *  belongs. (A legacy club with no governor: its own records, as before.) */
   roster: ClubMemberOut[];
+  /** The organization whose membership this roster is, when the club's workspace names one. Absent for a legacy
+   *  club that still holds its own records. The card room shows it; it decides nothing on it. */
+  governedBy?: string;
   /** The named agent's standing at this club, derived (spec 353 S5): host = self or a verified steward. */
   you?: { agent: string; standing: 'host' | 'member' | 'none'; because: string };
 }
@@ -98,11 +112,15 @@ export async function clubTurn(deps: ClubDeps, input: { caller: string; club: st
     const t0 = Date.now();
     const remember = deps.remember ?? (<T,>(_k: string, fn: () => Promise<T>) => fn());
     const agent = typeof m.agent === 'string' && /^0x[0-9a-fA-F]{40}$/.test(m.agent) ? lc(m.agent) : null;
+    // THE SUBJECT OF MEMBERSHIP IS THE GOVERNOR — one pointer read, remembered with the rest of the club's
+    // reads, before the roster and the standing are asked for. A club with no pointer answers itself.
+    const { subject: holder, governor } = await remember(`club-governor:${club}`, () => governingSubjectOf(deps.readRecord, club));
     // THE PERSON'S STANDING is derived beside the records, not after them — it depends on their tree and the
-    // chain, not on anything read here. A positive answer is remembered a minute; `none` is asked again.
+    // chain, not on anything read here. A positive answer is remembered a minute; `none` is asked again. The
+    // memo is keyed by the club AND the holder: a club whose pointer moves must not answer from the old one.
     const standingP = agent
-      ? remember(`club-standing:${agent}:${club}`, async () => {
-          const st = await deriveStanding(deps, { principal: agent as Address, subject: club as Address }).catch(() => null);
+      ? remember(`club-standing:${agent}:${club}:${holder}`, async () => {
+          const st = await deriveStanding(deps, { principal: agent as Address, subject: holder }).catch(() => null);
           const standing = st?.relation === 'self' || st?.relation === 'steward' ? 'host' : st?.relation === 'member' ? 'member' : 'none';
           const you = { agent, standing, because: st?.because ?? 'this agent could not read your links' } as NonNullable<ClubReadOut['you']>;
           if (standing === 'none') throw Object.assign(new Error('not remembered'), { you });
@@ -113,10 +131,10 @@ export async function clubTurn(deps: ClubDeps, input: { caller: string; club: st
       deps.readRecord(club, CLUB_RECORDS.profile).catch(() => null),
       deps.readRecord(club, CLUB_RECORDS.schedule).catch(() => null),
       deps.readRecord(club, CLUB_RECORDS.nights).catch(() => null),
-      rosterOf(deps, club),
+      rosterOf(deps, holder),
       standingP,
     ]);
-    const out: ClubReadOut = { club, profile, schedule, nights, roster, ...(you ? { you } : {}) };
+    const out: ClubReadOut = { club, profile, schedule, nights, roster, ...(governor ? { governedBy: governor } : {}), ...(you ? { you } : {}) };
     // WHO TO SHOW AS HOST: the founder the profile names (their standing is still derived when they ask),
     // with the name the estate calls them — a member's roster row carries a name, the steward's would not.
     const founder = profile && typeof profile === 'object' && typeof (profile as { foundedBy?: unknown }).foundedBy === 'string' ? lc(String((profile as { foundedBy: string }).foundedBy)) : null;
@@ -138,12 +156,14 @@ export async function clubTurn(deps: ClubDeps, input: { caller: string; club: st
   return { kind: 'answer', data: { club, record, value: stamped } };
 }
 
-/** The roster from the organization's own membership records (an ended membership is not a member). */
-export async function rosterOf(deps: Pick<ClubDeps, 'survey' | 'readRecords' | 'nameOf'>, club: string): Promise<ClubMemberOut[]> {
-  const inventory = await deps.survey(club).catch(() => [] as Array<{ recordType: string }>);
+/** The roster from an organization's own membership records (an ended membership is not a member). `holder` is
+ *  the agent whose vault holds them: the club's GOVERNOR, resolved by the caller — or the club itself when it has
+ *  none (legacy). Surveying the workspace agent of a governed club finds nothing, correctly: it holds no members. */
+export async function rosterOf(deps: Pick<ClubDeps, 'survey' | 'readRecords' | 'nameOf'>, holder: string): Promise<ClubMemberOut[]> {
+  const inventory = await deps.survey(holder).catch(() => [] as Array<{ recordType: string }>);
   const keys = inventory.map((r) => r.recordType).filter((rt) => rt.startsWith('org.membership:member:')).slice(0, 500);
   if (!keys.length) return [];
-  const bodies = await deps.readRecords(club, keys).catch(() => ({}));
+  const bodies = await deps.readRecords(holder, keys).catch(() => ({}));
   const rows = membershipRows(keys, bodies);
   const out: ClubMemberOut[] = rows.map((r) => ({ agent: r.agent, name: r.name, ...(r.role ? { role: r.role } : {}) }));
   if (deps.nameOf) {

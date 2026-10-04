@@ -8,6 +8,10 @@
 import type { FnContext } from '../_lib/server-broker';
 import { orgVault } from '../lib/org-vault';
 import { stewardControl } from './org-invite';
+import { AgentNamingClient } from '@agenticprimitives/agent-naming';
+import type { Address } from '@agenticprimitives/types';
+import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
+import { notAnOrganization, workspaceCheck } from '../lib/workspace-governor';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
 const json = (b: unknown, s = 200): Response =>
@@ -19,7 +23,11 @@ const isAddress = (s: string): boolean => /^0x[0-9a-fA-F]{40}$/.test(s);
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
   const body = (await request.json().catch(() => null)) as
-    | { org?: string; agent?: string; memberAccessDelegation?: { delegator?: string; delegate?: string; signature?: string }; kin?: string; role?: string }
+    | {
+        org?: string; agent?: string; memberAccessDelegation?: { delegator?: string; delegate?: string; signature?: string }; kin?: string; role?: string;
+        /** Spec 410 §8 — the organization's signed half of the has-member credential; the invitee countersigns at join. */
+        relationshipOffer?: unknown;
+      }
     | null;
   const org = (body?.org ?? '').toLowerCase();
   const agent = (body?.agent ?? '').toLowerCase();
@@ -38,6 +46,15 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     return json({ error: 'could not verify that you steward this organization', detail: String(e instanceof Error ? e.message : e) }, 502);
   }
   if (!control) return json({ error: 'you must steward this organization to invite' }, 403);
+  // AN ORGANIZATION INVITES; A WORKSPACE DOES NOT (the owner's rule, 2026-10-02; `../lib/workspace-governor.ts`).
+  // The steward's own link to the target says what it is, and names the governor when the pair was chartered;
+  // a name read is the fallback for a link with neither.
+  const naming = new AgentNamingClient({
+    rpcUrl: (env.RPC_URL || DEFAULT_RPC_URL), chainId: CHAIN_ID,
+    registry: CONTRACTS.agentNameRegistry, universalResolver: CONTRACTS.agentNameUniversalResolver,
+  });
+  const ws = await workspaceCheck(env.AUTH_CODES, control.person, org, () => naming.reverseResolve(org as Address));
+  if (ws.workspace) return json(notAnOrganization(ws.governor), 400);
 
   let vault: Awaited<ReturnType<typeof orgVault>>;
   try {
@@ -52,7 +69,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // Household facets (spec 368) ride on the record so redemption can put them on the membership. Declarative.
     const kin = typeof body?.kin === 'string' ? body.kin.trim().toLowerCase().slice(0, 40) : '';
     const role = typeof body?.role === 'string' ? body.role.trim().toLowerCase().slice(0, 40) : '';
-    await vault.set(`org.invite:agent:${agent}`, { delegation: mad, createdAt: Date.now(), status: 'pending', ...(kin ? { kin } : {}), ...(role ? { role } : {}) });
+    // The organization's half of the two-sided credential rides the same record (spec 410 §8) — opaque here;
+    // the estate's accept door is what checks both signatures on chain.
+    const offer = body?.relationshipOffer && typeof body.relationshipOffer === 'object' ? body.relationshipOffer : undefined;
+    await vault.set(`org.invite:agent:${agent}`, { delegation: mad, createdAt: Date.now(), status: 'pending', ...(kin ? { kin } : {}), ...(role ? { role } : {}), ...(offer ? { relationshipOffer: offer } : {}) });
   } catch (e) {
     return json({ error: 'could not store the invitation in the organization vault', detail: String(e instanceof Error ? e.message : e) }, 502);
   }

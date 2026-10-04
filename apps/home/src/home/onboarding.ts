@@ -30,9 +30,12 @@ import {
   setConnectionInfo,
   isAgentDeployed,
   derivePasskeySa,
+  createManagedAgent,
+  invalidateRelatedOrgs,
   AUD,
   type SignHash,
 } from '../connect-client';
+import { writeGovernancePair } from '../lib/workspace-governor';
 import type { ConnectionKind } from '@agenticprimitives/agent-naming';
 import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
 import { writePendingEnrollJson } from '../components/onboarding/pending-enroll';
@@ -808,6 +811,135 @@ export async function createOrganization(
       readGrantDelegation: x.readGrantDelegation,      // org→app workspace (read one record family)
     },
     grant: x.delegation,
+  };
+}
+
+/**
+ * A WORKSPACE AND THE ORGANIZATION THAT GOVERNS IT — the `workspace-create` ceremony since 2026-10-02 (the owner's
+ * rule; `org.ttl` §2, `core.ttl`; `lib/workspace-governor.ts`).
+ *
+ * A `<label>.workspace` agent is a SERVICE that coordinates a workspace. It is not an organization and cannot have
+ * members, so a workspace chartered on its own — which is what this ceremony did until today — was a roster with
+ * nothing to belong to: the clubs and field workspaces wrote `org.membership:member:<sa>` records on a service agent.
+ * Now the ceremony charters TWO agents from the one name the app asked for, in this order:
+ *
+ *   1. the GOVERNING ORGANIZATION, `<label>.org`, by exactly the road `org-create` takes (`createOrganization`): its
+ *      vault, its planes, the founder's own OrganizationMembership, the steward relationship, the app's site grant;
+ *      then its link in the person's tree — org-create writes that link at `/oidc/grant` from the token's `org`
+ *      payload, and here that payload is the workspace's, so the organization's is written directly;
+ *   2. the WORKSPACE agent, `<label>.workspace`, with the organization as the PARENT on its link (`ap:charteredUnder`
+ *      — "whose it is") and the PERSON as its steward (`steward`: the custodian keeps acting for it, because an
+ *      organization has no session and every steward gate checks the wire against the person);
+ *   3. the pair of records that make the governance readable from either side: `workspace:<ws>` in the
+ *      organization's vault and `workspace.governor` in the workspace's.
+ *
+ * NO WORKSPACE WITHOUT A GOVERNOR. A failure at step 1 charters nothing else; a failure after the workspace is
+ * deployed fails the ceremony and names both agents, the way a failed vault binding already does, rather than
+ * returning a workspace every reader would treat as legacy. The token's `org` payload stays the workspace's —
+ * `orgAgent` is still the workspace, every field an app reads today is unchanged — and gains the governor.
+ */
+export async function createGovernedWorkspace(
+  home: Home,
+  name: string,
+  delegate: Address,
+  via: Via,
+  auth: Auth | undefined,
+  opts: {
+    purpose?: string;
+    requestedBy?: string;
+    grantOrg?: Address;
+    onProgress?: (p: { step: number; total: number; label: string; hint?: string }) => void;
+  } = {},
+): Promise<Result<{ org: Record<string, unknown>; grant: unknown }>> {
+  via = (String(via ?? '').toLowerCase() || 'passkey') as Via;
+  const token = homeBearerToken(auth);
+  if (!token) return { ok: false, error: 'Your Home session is needed to create a workspace.' };
+  const purpose = opts.purpose ?? 'field-workspace';
+  const say = opts.onProgress;
+  const total = 5;
+  const step = (n: number, label: string, hint?: string) => say?.({ step: n, total, label, ...(hint ? { hint } : {}) });
+
+  // 1. THE ORGANIZATION FIRST. Its progress is org-create's own, re-stepped under this ceremony's count.
+  step(1, 'Creating the organization that will govern it…', 'This is the longer step — hang tight.');
+  const org = await createOrganization(home, name, delegate, via, auth, {
+    purpose,
+    requestedBy: opts.requestedBy,
+    grantOrg: opts.grantOrg,
+    onProgress: (p) => step(1, p.label, p.hint),
+  });
+  if (!org.ok) return { ok: false, error: `the organization could not be created, so no workspace was: ${org.error}` };
+  const governor = (org.org.orgAgent as Address | undefined)?.toLowerCase() as Address | undefined;
+  const governorName = String(org.org.orgName ?? '');
+  const orgStewardship = org.org.stewardshipDelegation as DelegationWire | undefined;
+  if (!governor || !orgStewardship) return { ok: false, error: 'the organization was created without a stewardship wire, so no workspace was' };
+  // Its link, in the person's tree — org-create leaves this to `/oidc/grant`, whose `org` payload here is the
+  // workspace's. Written now rather than later because the workspace's own link hangs UNDER it, and the link
+  // store refuses a parent the person does not already hold.
+  step(2, 'Recording that you steward the organization…');
+  const linked = await fetch('/connect/related-orgs', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      person: home.address,
+      orgAgent: governor,
+      orgName: governorName,
+      purpose,
+      requestedBy: opts.requestedBy ?? '',
+      kind: 'org',
+      parent: home.address,
+      relationship: 'steward',
+      siteDelegation: org.grant ?? null,
+      stewardshipDelegation: orgStewardship,
+      proofHash: (org.org.proofHash as string | undefined) ?? null,
+    }),
+  });
+  invalidateRelatedOrgs();
+  if (!linked.ok) {
+    const e = (await linked.json().catch(() => ({}))) as { error?: string };
+    return { ok: false, error: `${governorName || 'the organization'} was created but could not be linked to your home, so no workspace was: ${e.error ?? linked.status}` };
+  }
+
+  // 2. THE WORKSPACE, under the organization, stewarded by the person.
+  const created = await createManagedAgent(
+    { kind: 'workspace', label: name, parent: governor, steward: home.address, person: home.address, via },
+    token,
+    (s) => step(3, s),
+  );
+  if (!created.ok) return { ok: false, error: `${governorName} is ready, but its workspace could not be created: ${created.error}` };
+  const ws = created.result.agent;
+  const wsStewardship = created.result.stewardshipDelegation;
+  // The realm is USABLE from the first approval or it is not created: the same storage trio org-create runs —
+  // vault binding is REQUIRED (every ws-* write gates on it), delivery + interactions are best-effort like everywhere.
+  step(4, 'Enabling workspace storage…');
+  const bound = await activateVaultIfNeeded(ws, via, auth);
+  if (!bound.ok) return { ok: false, error: bound.error };
+  const delivery = await activateInboxDeliveryIfNeeded(ws, via, auth);
+  if (!delivery.ok) console.warn('[workspace-create] delivery grant not provisioned:', delivery.error);
+  const ix = await activateInteractionsIfNeeded(ws, via, auth);
+  if (!ix.ok) console.warn('[workspace-create] interactions grant not provisioned:', ix.error);
+
+  // 3. THE PAIR. Required: a workspace without its pointer is a legacy one to every reader, which is the state this
+  // ceremony exists to stop producing.
+  step(5, 'Recording which organization governs it…');
+  if (!wsStewardship) return { ok: false, error: `${created.result.name} was created without a stewardship wire, so its governor could not be recorded` };
+  try {
+    await writeGovernancePair({ orgStewardship, wsStewardship, governor, workspace: ws, label: created.result.name || name, purpose });
+  } catch (e) {
+    return { ok: false, error: `${created.result.name} and ${governorName} were created, but the record that ${governorName} governs the workspace could not be written: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  return {
+    ok: true,
+    org: {
+      orgAgent: ws,
+      orgName: created.result.name,
+      kind: 'workspace',
+      purpose,
+      person: home.address,
+      parent: governor,
+      governor,
+      governorName,
+    },
+    grant: wsStewardship,
   };
 }
 

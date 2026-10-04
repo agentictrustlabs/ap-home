@@ -23,6 +23,7 @@ import { chainFor } from './chain';
 import { kinTermFor, householdRoleFor } from '@agenticprimitives/ontology';
 import { hashDelegation, decodeVaultRecordScopeTerms, vaultRecordScopeAllows, VAULT_RECORD_SCOPE_ENFORCER, type Delegation, type VaultRecordScopeGrant } from '@agenticprimitives/delegation';
 import { PrincipalGatewayDO } from '@agenticprimitives/fabric/cloudflare';
+import { governorOf, WORKSPACE_GOVERNOR_RECORD } from './workspace-governor.js';
 import { buildMountedGatewayDeps } from './gateway-mount.js';
 import { loadPlaybook, countedOp, countVaultCall } from '@agenticprimitives/harness';
 import { classifyDivergence, recordDivergence, shouldShadow, SHADOW_INTERVAL_MS, type Divergence } from '@agenticprimitives/fabric';
@@ -3492,6 +3493,16 @@ export class InteractionsDO {
         // delegation must be granted TO this principal BY that member — an organization records a
         // membership OF ITSELF and of nobody else. Enforced here rather than only at the Home, because
         // the Home is not the only thing that can reach this DO.
+        //
+        // AND ONLY AN ORGANIZATION RECORDS ONE (the owner's rule, 2026-10-02; `org.ttl` §2). A `.workspace` agent
+        // is a SERVICE that coordinates a workspace and cannot have members; its membership lives on the
+        // organization that GOVERNS it. The cheapest thing this object can know about itself without a chain
+        // call is the pointer a governed workspace keeps in its own vault (`workspace.governor`, written when
+        // the pair is chartered): present, this principal is a workspace agent and the record belongs on its
+        // governor — refused by name, so a ceremony that still joins the workspace learns where to join. A
+        // legacy workspace with no pointer is indistinguishable here from an organization and keeps writing
+        // its own records, which is the fallback the rule allows. (The DO does not know its own typed name;
+        // learning it is a naming-service read, and a membership write must not cost a chain call.)
         const record = body.record as {
           memberAgent?: string; organizationAgent?: string;
           roleAssignment?: { materializedByDelegation?: { delegate?: string; delegator?: string } };
@@ -3511,6 +3522,10 @@ export class InteractionsDO {
         }
         if (String(wire.delegator ?? '').toLowerCase() !== member) {
           return json({ error: 'the membership delegation must be granted BY the member it records' }, 403);
+        }
+        const governor = governorOf(await this.readDoc<unknown>(grant, WORKSPACE_GOVERNOR_RECORD, null).catch(() => null));
+        if (governor && governor !== principal) {
+          return json({ ok: false, code: 'not_an_organization', error: `this is a workspace agent, and a workspace holds no members — membership is recorded on the organization that governs it (${governor})`, governedBy: governor }, 409);
         }
         return this.serialize(async () => {
           await this.writeDoc(grant, `org.membership:member:${member}`, record);
