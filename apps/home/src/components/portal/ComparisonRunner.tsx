@@ -46,7 +46,7 @@ export function ComparisonRunner() {
   const [progress, setProgress] = useState<ExperimentProgressV1 | null>(null);
 
   useEffect(() => { void readComparisonKnobs().then(setKnobs); }, []);
-  useEffect(() => { void fetch('/connect/eval-sets').then((r) => r.json()).then((m: { sets?: EvalSetSummary[] }) => setSets(m.sets ?? [])).catch(() => setSets([])); }, []);
+  useEffect(() => { void fetch('/connect/eval-sets').then((r) => r.json()).then((m: { sets?: EvalSetSummary[] }) => setSets(m.sets ?? [])).catch(() => setError('the eval sets could not be read — none are listed because of that, not because there are none')); }, []);
   useEffect(() => {
     if (!token) return;
     void listManagedAgents(token, 'any').then((o) => { const mine = o.filter((a) => a.relationship === 'steward' && a.kind !== 'service' && a.kind !== 'person-treasury' && a.kind !== 'org-treasury').map((a) => ({ agent: a.agent, name: a.name })); setOrgs(mine); setAddressee((cur) => cur || mine[0]?.agent || ''); });

@@ -27,6 +27,7 @@ const SKILLS_WEB = whitelabel.footer.links.find((l) => /skills library/i.test(l.
 const fmtK = (v: number | null | undefined): string => (v === null || v === undefined ? '—' : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v));
 const pct = (v: number | null | undefined): string => (v === null || v === undefined ? '—' : `${Math.round(v * 100)}%`);
 const skillName = (s: string | null | undefined): string => (s ? s.replace(/^skill:/, '').replace(/^[^/]+\//, '') : 'no skill');
+const testsTitleFor = (s: string | null | undefined): string => `the tests for ${skillName(s)}`;
 const slateName = (e: Experiment): string => `${e.slate.replace(/^cil-commons-routing-/, '').replace(/@\d+$/, '')} · ${e.split}`;
 const outcomeTone = (o: IntentRow): 'ok' | 'warn' | 'danger' | undefined => (o.ok === true ? 'ok' : o.ok === false ? 'danger' : 'warn');
 const SEVERITY: Record<Recommendation['severity'], { label: string; tone?: 'ok' | 'warn' | 'danger' }> = { act: { label: 'act on this', tone: 'danger' }, watch: { label: 'watch', tone: 'warn' }, info: { label: 'good to know' } };
@@ -182,7 +183,7 @@ export function SkillAssessmentLab() {
               </>}
               side={<>
                 {s.recommendations ? <Chip tone="warn">{s.recommendations} recommendation{s.recommendations === 1 ? '' : 's'}</Chip> : <Chip tone="ok">no open issue</Chip>}
-                <button type="button" className="btn ghost" onClick={() => focusOn({ title: `the tests for ${skillName(s.skill)}`, skill: s.skill })}>Show its tests ↑</button>
+                <button type="button" className="btn ghost" onClick={() => focusOn({ title: testsTitleFor(s.skill), skill: s.skill })}>Show its tests ↑</button>
                 {SKILLS_WEB && <a className="btn ghost" href={`${SKILLS_WEB}/?skill=${encodeURIComponent(s.skill)}`} target="_blank" rel="noreferrer">in the skills library ↗</a>}
               </>} />
           ))}
