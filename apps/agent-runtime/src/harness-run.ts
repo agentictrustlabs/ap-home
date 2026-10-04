@@ -34,6 +34,7 @@
 import { contractsGenerationOf, type ContractsGeneration } from '@agenticprimitives/agent-account';
 import { CONTACT_FIELDS, CONTACT_FIELD_ARGS, ONTOLOGY_MANIFEST_DIGEST, OUTCOME_CLASSES, outcomeClassOf as ontologyOutcomeClassOf } from '@agenticprimitives/ontology';
 import { bindSelectedOffer, type SelectedOfferBindingV1 } from './engagement-campaign.js';
+import { classifyProviderFailure } from './provider-outage.js';
 import type { TriggerV1 } from '@agenticprimitives/capability-claims';
 import { BALANCE_READ_TOOL, BALANCE_READ_CAPABILITY, balanceReadInvoker, renderAnswer } from './balance-read.js';
 import { HOLDINGS_READ_TOOL, HOLDINGS_READ_CAPABILITY, holdingsReadInvoker } from './holdings-read.js';
@@ -58,6 +59,7 @@ import { ROUTINE_TOOLS, ROUTINE_ACTS, ROUTINE_LIST, routineInvoker, compiledRout
 import { WEB_TOOLS, webReadInvoker } from './web-read.js';
 import { WEB_SEARCH_TOOLS, webSearchInvoker } from './web-search.js';
 import { BUILD_TOOLS, BUILD_ACTS, buildInvoker } from './build-tools.js';
+import { executorInvokeInvoker, readExecutors, type ExecutorSessionSeam } from './executor-invoke.js';
 import { LIBRARY_TOOLS, LIBRARY_ACTS, libraryInvoker, stewardshipOver } from './library-tools.js';
 import { MCP_CONNECTOR_PREFIX, MCP_CONNECTORS_LIST, MCP_CONNECTORS_LIST_TOOL, isMcpTool, isMcpConnectorRecord, mcpConnectorTools, mcpConnectorInvoker, type McpConnectorRecordV1 } from './connectors/mcp-connector.js';
 import { PREFERENCES_TOOLS, PREFERENCES_ACTS, PREFERENCES_GET, preferencesInvoker } from './preferences-tools.js';
@@ -83,7 +85,7 @@ registerDefaultSubsetHandlers();
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
 import { type Plan, type Planner,
   runIntent, CONTINUE_STEP_ID, deriveArgs, type ArgDerivationV1, InputRequired, dataFor, signatureFor,
-  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, partiesDistinct, actingPartyFromTheWords, kindNamedIsChartered, completePlan, transitionsHold, type FactsV1, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
+  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, capabilitiesAvailable, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, partiesDistinct, actingPartyFromTheWords, kindNamedIsChartered, completePlan, transitionsHold, type FactsV1, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
 import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep, composeOfferedTools, mergeContractTool as composeMergeContractTool, loadPlaybook, declaredEffectSink, setBillStep, declaredCapabilities, type AskScopeV1 } from '@agenticprimitives/harness';
 // Spec 353 — the scope schema is Ring 0 now (spec 399 §4); this app keeps exporting it for its callers.
 export type { AskScopeV1 } from '@agenticprimitives/harness';
@@ -132,6 +134,9 @@ import { vaultServerId } from './vault-server-id.js';
 export interface HarnessEnv {
   /** Spec 408 — the estate's contract generation ("1" pre-spec-408, "2" spec 408); absent ⇒ "1". */
   CONTRACTS_GENERATION?: string;
+  /** Spec 426 — operator config for executor-invoke: a JSON map `executor-ref → { url, client }`. Absent ⇒ no
+   *  executor is configured and every invoke capability refuses (fail-closed). */
+  EXECUTORS?: string;
   /** Spec 415 A4 — the skills corpus (service binding to skills-mcp): where an INSTRUCTION skill's body is read, by the
    *  digest its playbook tool names, when the planner chooses it. Absent ⇒ instruction skills are not offered. */
   SKILLS_MCP?: Fetcher;
@@ -929,6 +934,10 @@ const REDEEM_ABI = [{
 /** What the Worker must supply: chain reads and the service SA's signing + submission. Injected so the
  *  module is testable without a Worker. */
 export interface HarnessDeps {
+  /** Spec 426 §5 — THE SESSION SEAM for executor-invoke: an id_token for the run's principal, scoped to the
+   *  executor's client (prod: the principal's own credential; demo: demo-signin `{ as }`). null ⇒ the invoke
+   *  step refuses. Absent ⇒ invoke capabilities refuse (the estate wires this where demo-signin lives). */
+  executorSession?: ExecutorSessionSeam;
   /** Spec 370 P4 — a PUBLIC op on a principal's InteractionsDO as the session (the `/connect/work` door),
    *  for the coordination acts. The DO derives standing and validates the command; this only carries it. */
   interactionsOp?: (principal: Address, op: string, body: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -2170,7 +2179,7 @@ export function rootDelegatorOf(leaf: MandatePresentation, chain: { presentedAll
 
 /** The invoker: informational tools go to the existing MCP path; the payment tool redeems on chain; the
  *  team tool builds a genesis the connected user signs. */
-export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInput: MandatePresentation | MandatePresentation[] | null, mcpInvoke: ToolInvoker, person?: Address, session?: string, surface?: AskScopeV1, addressee?: Address, playbook?: { capabilityIds: Set<string> } | null): ToolInvoker {
+export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInput: MandatePresentation | MandatePresentation[] | null, mcpInvoke: ToolInvoker, person?: Address, session?: string, surface?: AskScopeV1, addressee?: Address, playbook?: { capabilityIds: Set<string>; tools?: Record<string, DefinitionToolV1> } | null): ToolInvoker {
   const presentedAll: MandatePresentation[] = presentedInput == null ? [] : Array.isArray(presentedInput) ? presentedInput : [presentedInput];
   // Non-payment invokers redeem the single mandate the turn presented (unchanged). The PAYMENT invoker
   // redeems the one whose caveat names the step's payee — the same selection the verifier used, so what
@@ -2308,6 +2317,16 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     // Spec 387 W2 — the addressee's own catalog: bound by ITS name's records at call time (cached by the reader),
     // so an unattended run at a service (a gateway's task, a routed ask) reads it exactly as a person's does.
     if (isCatalogTool(toolId)) return catalogInvoker(await catalogBindingFor(deps, addressee ? String(addressee) : undefined))(toolId, args, ctx);
+    // Spec 426 — ONE generic branch for every executor-invoke capability (no branch per domain): the
+    // definition carries the `invoke` block; call the resolved executor as the run's principal (the acting
+    // agent). Self-acting — no mandate; `deps.executorSession` is the authority seam, refusing on null.
+    {
+      const invoke = playbook?.tools?.[toolId]?.invoke;
+      if (invoke) {
+        if (!deps.executorSession) return { refused: `executor-invoke is not configured on this deployment (no session seam) for ${toolId}` };
+        return executorInvokeInvoker({ executors: readExecutors(env.EXECUTORS), session: deps.executorSession }, invoke, addressee ?? person)(toolId, args, ctx);
+      }
+    }
     if (toolId !== 'treasury.payment.execute') return mcpInvoke(toolId, args, ctx);
     const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
     // THE KEY THAT WAS JUDGED IS THE KEY THAT REDEEMS (spec 358 W4). With several presented, pick by the
@@ -2535,6 +2554,9 @@ export interface HarnessRunInput {
    * offer fails the loop's own unknown-tool gate.
    */
   plan?: { steps: Array<{ toolId: string; args: Record<string, unknown>; id?: string }> };
+  /** A SCREEN reading rows (its supplied plan is informational and it never shows the sentence). A screen read of a
+   *  tool this agent does not expose is answered "not offered" without running — never recorded as a denial. */
+  rowsOnly?: boolean;
   /** Spec 384 W3 — a campaign selected a provider for this run's step: every step exercising that capability is
    *  handed to the provider and carries the offer's digest (`bindSelectedOffer`), so the requirement names the
    *  offer and a mandate that does not is refused. Shapes the plan; no gate reads it. */
@@ -4453,6 +4475,21 @@ async function askReplyForInner(env: HarnessEnv, input: {
       return withEvidence(`${raw}\n\n(The answer could not be put into words — ${why} — so the evidence is shown as it was found.)`);
     }
   }
+  // When the run failed because the MODEL PROVIDER was the reason there is no answer — rate-limited, or the
+  // account is out of credit — say so plainly and actionably instead of the raw adapter error. This is the
+  // shape a capped single provider (no working fallback) produces for ANY run that needed the model: e.g. a
+  // persona answering a question outside its archetype's capabilities (no rule to resolve it ⇒ a model call),
+  // where the default person, which has that capability, answers by rule and never touches the model.
+  if (r.error) {
+    const f = classifyProviderFailure((input.plannerTrace?.route as { composer?: { provider?: string }; provider?: string } | undefined)?.composer?.provider ?? (input.plannerTrace?.route as { provider?: string } | undefined)?.provider, r.error, env as unknown as Record<string, unknown>);
+    if (f.kind !== 'other') {
+      const where = f.url ? ` Whoever runs this Home can check ${f.url}.` : '';
+      const msg = f.kind === 'exhausted'
+        ? `The model this agent runs on (${f.label}) is temporarily unavailable — its account has reached its credit or spending limit.${where} Nothing was answered; please try again once it is restored.`
+        : `The model this agent runs on (${f.label}) is temporarily unavailable — it is rate-limited right now. Nothing was answered; please try again in a moment.${f.url ? ` If it keeps happening, the plan's limits are at ${f.url}.` : ''}`;
+      return withProv({ kind: 'refused', runRef: r.runRef, outcome: r.outcome, error: msg, receipts: r.receipts });
+    }
+  }
   return withProv({ kind: 'refused', runRef: r.runRef, outcome: r.outcome, error: r.error ?? 'the run did not complete', receipts: r.receipts });
 }
 
@@ -5692,7 +5729,17 @@ step is then handed to that agent under authority the person grants; leave it ou
         onlyIf: (plan: { steps: ReadonlyArray<{ toolId: string }> }) => !plan.steps.every((st) => !!tools.find((t) => t.id === st.toolId)?.answer) }
     : null;
   if (input.comparison || input.variant) trace.comparison = true;
-  const result = await runIntent(input.intent, {
+  // A SCREEN'S READ OF A CAPABILITY THIS AGENT DOES NOT HAVE (the Today calendar card on a persona whose archetype
+  // never exposes calendar.events.list) is not a failed run and not a denial: the honest answer to the screen is
+  // "not offered here", one row per step, and nothing runs. Only a rowsOnly supplied plan — a screen — gets this; a
+  // conversational ask never sets rowsOnly and still meets admission's refusal in words.
+  const unoffered = !!(input.plan && input.rowsOnly && !input.resume && input.plan.steps.length
+    && input.plan.steps.every((st) => !tools.some((t) => t.id === st.toolId)));
+  const result: RunResult = unoffered ? {
+    outcome: 'completed', runRef: input.runRef ?? 'run', receipts: [], plan: { steps: input.plan!.steps.map((st) => ({ toolId: st.toolId, args: st.args ?? {}, ...(st.id ? { id: st.id } : {}) })) },
+    steps: input.plan!.steps.map((st, i) => ({ step: { toolId: st.toolId, args: st.args ?? {} }, ok: true, stepRef: st.id ?? `s${i}`, result: { connected: false, offered: false, refused: `this agent does not offer ${st.toolId}` } })),
+    result: { connected: false, offered: false },
+  } : await runIntent(input.intent, {
     planner: boundPlanner, tools, bindingFor,
     ...(continuationOn && !input.plan ? { continuation: { max: 2 } } : {}),
     ...(input.resume ? { resume: input.resume } : {}),
@@ -6036,6 +6083,10 @@ step is then handed to that agent under authority the person grants; leave it ou
         // refused as "an instruction answered by a lookup" (live 2026-09-29, the invite e2e).
         ...(input.plan ? [] : [instructionNeedsAct]),
         noPlaceholders,
+        // A plan naming a tool this agent does not offer is refused here (one re-plan, told which
+        // tools it has) rather than hard-failing in the loop with `unknown_tool` — the model naming a
+        // capability the agent lacks (e.g. calendar.events.list on a game persona) recovers to a tool it has.
+        capabilitiesAvailable,
         dependenciesProvided,
         branchesDecidable,
         ...(input.plan ? [] : [questionAnsweredByRead]),

@@ -24,6 +24,13 @@ export async function readCalendarThroughHarness(input: { person: Address; sessi
     if (found?.connected === false || found?.refused) return { ok: true, read: { connected: false } };
     if (found?.events && found.window) return { ok: true, read: { connected: true, events: found.events, window: found.window } };
   }
+  // An agent that does not even EXPOSE calendar.events.list (a persona with no calendar capability, not merely an
+  // unconnected one) has the plan refused by admission (CAPABILITY_UNAVAILABLE) rather than running the tool. For this
+  // screen that is the same answer as "not connected" — the person has no calendar — never an error with a raw
+  // plan_refused dump. "Not connected is an answer, never an empty list" (and never a stack of tool ids).
+  if (reply?.kind === 'refused' && /calendar\.events\.list/.test(reply.error ?? '') && /(does not offer|CAPABILITY_UNAVAILABLE|plan_refused)/.test(reply.error ?? '')) {
+    return { ok: true, read: { connected: false } };
+  }
   return { ok: false, error: out.detail ?? out.error ?? (reply?.kind === 'refused' ? reply.error : 'the calendar could not be read') };
 }
 

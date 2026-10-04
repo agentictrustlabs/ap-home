@@ -4512,6 +4512,7 @@ app.post('/harness/ask', async (c) => {
       ...(variantReq ? { comparison: true } : {}),
       ...(variantReq && (variantReq.plannerKind || variantReq.selection || variantReq.toggles || variantReq.acceptance || variantReq.judgeProfile || variantReq.askerContext) ? { variant: { ...(variantReq.plannerKind ? { plannerKind: variantReq.plannerKind } : {}), ...(variantReq.selection ? { selection: variantReq.selection } : {}), ...(variantReq.toggles ? { toggles: variantReq.toggles } : {}), ...(variantReq.acceptance ? { acceptance: variantReq.acceptance } : {}), ...(variantReq.judgeProfile ? { judgeProfile: variantReq.judgeProfile } : {}), ...(variantReq.askerContext ? { askerContext: variantReq.askerContext } : {}) } } : {}),
       ...(runPlan ? { plan: runPlan } : {}),
+      ...(runPlan && body.rowsOnly ? { rowsOnly: true } : {}),
       // Spec 384 W3 — a campaign selected a provider for this step: the plan is bound to it and to its offer.
       ...(stored?.origin?.engagement ? { engagement: stored.origin.engagement } : {}),
       // Spec 370 P1 — what already ran, replayed; what has not, attempted. The planner is not asked again.
@@ -6099,6 +6100,18 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     if (!homeOrigin) return { status: 503, body: { error: 'no Home origin configured' } };
     const r = await fetch(`${homeOrigin}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session}`, origin: homeOrigin, 'user-agent': 'agenticprimitives-a2a/1.0' }, body: JSON.stringify(body) });
     return { status: r.status, body: (await r.json().catch(() => ({}))) as Record<string, unknown> };
+  };
+  // Spec 426 §5 — THE EXECUTOR-INVOKE SESSION SEAM, resolved through the Home (neutral: no game/persona→custodian
+  // map in the runtime). The runtime asks only "a session for this principal at this client"; the Home's
+  // demo-signin resolves the custodian from the self-agent relationship and mints the session acting AS the
+  // principal. null ⇒ the invoke step refuses (never a silent success). On a real estate the principal's own
+  // credential mints it; this is the demo binding of the same seam.
+  deps.executorSession = async (principal: Address, client: string): Promise<string | null> => {
+    if (!homeOrigin) return null;
+    const r = await fetch(`${homeOrigin}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json', origin: homeOrigin, 'user-agent': 'agenticprimitives-a2a/1.0' }, body: JSON.stringify({ as: principal, client_id: client }) }).catch(() => null);
+    if (!r || !r.ok) return null;
+    const b = (await r.json().catch(() => ({}))) as { homeSession?: string; session?: string };
+    return b.homeSession ?? b.session ?? null;
   };
   deps.predictAgentForEmail = async ({ org, email, session }) => {
     const r = await homeCall('/connect/org-invite/predict', session, { org, email });
