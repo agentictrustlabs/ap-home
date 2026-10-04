@@ -353,3 +353,90 @@ describe('org.endMembership', () => {
     expect((w.records.get(`org.membership:member:${MEMBER}`) as { endedAt?: string }).endedAt).toBeUndefined();
   });
 });
+
+// A GOVERNED WORKSPACE'S BOARD ADMITS ITS GOVERNOR'S MEMBERS (spec 424; the owner's rule, 2026-10-02). A workspace
+// holds no members — they belong to the organization that governs it — so the workspace's own records never name
+// one. Before this, a member could read the workspace (through the governor) and never open a topic on its board:
+// the Ask refused every non-steward with "join this community first". The workspace asks its governor, in-Worker.
+describe('a governed workspace admits members of its governing organization', () => {
+  const WS = '0x5555555555555555555555555555555555555555';
+  const MARKER = 'test-internal-marker';
+  let orgWorld: World;
+  let wsWorld: World;
+  let wsDo: InteractionsDO;
+
+  const mkDo = (world: World, interactions: unknown) => {
+    const m = new Map<string, unknown>();
+    m.set('state', { grant: grantWire });
+    return new InteractionsDO(
+      { storage: {
+        async get(k: string) { return m.get(k); },
+        async put(k: string, v: unknown) { m.set(k, v); },
+        async delete(k: string) { m.delete(k); },
+      } } as unknown as DurableObjectState,
+      { RPC_URL: 'https://rpc.example.test', CHAIN_ID: String(CHAIN), MCP_URL: 'https://mcp.example.test',
+        BROKER_ISS, BROKER_JWKS_URL: JWKS_URL, DEMO_SSO_AUD: AUD, A2A_INTERNAL_MARKER: MARKER,
+        INTERACTIONS: interactions } as unknown as ConstructorParameters<typeof InteractionsDO>[1],
+      depsFor(world),
+    );
+  };
+
+  beforeEach(() => {
+    orgWorld = { records: new Map(), proofsValid: true };
+    wsWorld = { records: new Map(), proofsValid: true };
+    const orgDo = mkDo(orgWorld, undefined);
+    const ns = { idFromName: (n: string) => n, get: (id: string) => ({ fetch: (r: Request) => (id === ORG.toLowerCase() ? orgDo.fetch(r) : Promise.resolve(new Response('{}', { status: 404 }))) }) };
+    wsDo = mkDo(wsWorld, ns);
+    wsWorld.records.set('workspace.governor', { governedBy: ORG });
+  });
+
+  async function wsCall(op: string, asSa: string) {
+    const token = await mint(signer, caip(asSa));
+    return wsDo.fetch(new Request(`https://do.test/interactions/${WS}/${op}`, {
+      method: 'POST', body: JSON.stringify({ session: token }),
+      headers: { 'Content-Type': 'application/json', authorization: `Bearer ${token}` },
+    }));
+  }
+
+  it('ADMITS a member listed on the governor, by the name the governor knows', async () => {
+    orgWorld.records.set('directory.data', [{ listing: {
+      subject: caip(MEMBER), displayName: 'Naomi', publishedAt: new Date(Date.now() - 60_000).toISOString(),
+      proof: { signature: `0x${'cd'.repeat(65)}` },
+    } }]);
+    const r = await wsCall('channels.list', MEMBER);
+    expect(r.status).toBe(200);
+    expect((await r.json() as { you: string }).you).toBe('Naomi');
+  });
+
+  it('REFUSES someone who is not a member of the governor', async () => {
+    const r = await wsCall('channels.list', OUTSIDER);
+    expect(r.status).toBe(403);
+    expect((await r.json() as { error: string }).error).toMatch(/join this community first/);
+  });
+
+  it('REFUSES when the governor\'s proof no longer verifies', async () => {
+    orgWorld.records.set('directory.data', [{ listing: {
+      subject: caip(MEMBER), displayName: 'Naomi', publishedAt: new Date(Date.now() - 60_000).toISOString(),
+      proof: { signature: `0x${'cd'.repeat(65)}` },
+    } }]);
+    orgWorld.proofsValid = false;
+    expect((await wsCall('channels.list', MEMBER)).status).toBe(403);
+  });
+
+  it('a workspace with no governor pointer asks nobody (legacy: its own records only)', async () => {
+    wsWorld.records.delete('workspace.governor');
+    orgWorld.records.set('directory.data', [{ listing: {
+      subject: caip(MEMBER), displayName: 'Naomi', publishedAt: new Date(Date.now() - 60_000).toISOString(),
+      proof: { signature: `0x${'cd'.repeat(65)}` },
+    } }]);
+    expect((await wsCall('channels.list', MEMBER)).status).toBe(403);
+  });
+
+  it('the governor refuses internal.member.recorded without the in-Worker marker', async () => {
+    const orgDo = mkDo(orgWorld, undefined);
+    const r = await orgDo.fetch(new Request(`https://do/interactions/${ORG}/internal.member.recorded`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ member: MEMBER }),
+    }));
+    expect(r.status).toBe(403);
+  });
+});
