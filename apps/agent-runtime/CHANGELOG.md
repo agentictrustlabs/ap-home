@@ -1,5 +1,54 @@
 # @agenticprimitives-demo/a2a
 
+## 0.0.2-alpha.32
+
+### Patch Changes
+
+- Updated dependencies [96a06bf]
+- Updated dependencies [a7052b6]
+- Updated dependencies [d0e5c51]
+- Updated dependencies [0a84913]
+- Updated dependencies [2b9e0fd]
+- Updated dependencies [c448255]
+- Updated dependencies [b328b0b]
+- Updated dependencies [16685e0]
+- Updated dependencies [42655e7]
+- Updated dependencies [3ad61ef]
+  - @agenticprimitives/fabric@0.0.0-alpha.16
+  - @agenticprimitives/orchestration@0.0.0-alpha.6
+  - @agenticprimitives/capability-claims@0.0.0-alpha.25
+  - @agenticprimitives/harness@0.0.0-alpha.7
+  - @agenticprimitives/ontology@1.0.0-alpha.27
+  - @agenticprimitives/agent-account@1.0.0-alpha.27
+  - @agenticprimitives/delegation@1.0.0-alpha.27
+  - @agenticprimitives/agent-relationships@1.0.0-alpha.27
+  - @agenticprimitives-demo/home-shared@0.0.1-alpha.2
+  - @agenticprimitives/home@0.0.0-alpha.16
+  - @agenticprimitives/context@0.0.0-alpha.6
+  - @agenticprimitives/orchestration-anthropic@0.0.0-alpha.7
+  - @agenticprimitives/orchestration-openai-compat@0.0.0-alpha.6
+  - @agenticprimitives/coordination@0.0.0-alpha.10
+  - @agenticprimitives/verifiable-credentials@0.0.0-alpha.24
+  - @agenticprimitives/agent-naming@1.0.0-alpha.27
+  - @agenticprimitives/agent-profile@1.0.0-alpha.27
+  - @agenticprimitives/a2a@0.0.0-alpha.25
+  - @agenticprimitives/mcp-runtime@1.0.0-alpha.27
+  - @agenticprimitives/related-agents@0.0.0-alpha.23
+  - @agenticprimitives/connect@1.0.0-alpha.27
+  - @agenticprimitives/content-primitives@1.0.0-alpha.28
+  - @agenticprimitives/content-storage@1.0.0-alpha.6
+  - @agenticprimitives/types@1.0.0-alpha.27
+  - @agenticprimitives/audit@1.0.0-alpha.27
+  - @agenticprimitives/connect-auth@1.0.0-alpha.27
+  - @agenticprimitives/key-custody@1.0.0-alpha.27
+  - @agenticprimitives/agent-resolution@0.0.0-alpha.8
+  - @agenticprimitives/collaboration@0.0.0-alpha.6
+  - @agenticprimitives/edge-runtime@0.0.0-alpha.9
+  - @agenticprimitives/intent-engagement@0.0.0-alpha.6
+  - @agenticprimitives/registry-kit@0.0.0-alpha.15
+  - @agenticprimitives/situations@0.0.0-alpha.11
+  - @agenticprimitives/verification-receipts@0.0.0-alpha.8
+
 ## 0.0.2-alpha.31
 
 ### Patch Changes

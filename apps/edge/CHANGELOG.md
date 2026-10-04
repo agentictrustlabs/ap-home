@@ -1,5 +1,14 @@
 # @agenticprimitives-demo/edge
 
+## 0.0.1-alpha.9
+
+### Patch Changes
+
+- Updated dependencies [fd6c57c]
+  - @agenticprimitives/admission@0.0.0-alpha.8
+  - @agenticprimitives/edge-cloudflare@0.0.0-alpha.9
+  - @agenticprimitives/edge-runtime@0.0.0-alpha.9
+
 ## 0.0.1-alpha.8
 
 ### Patch Changes

@@ -1,5 +1,13 @@
 # @agenticprimitives-demo/home-shared
 
+## 0.0.1-alpha.2
+
+### Patch Changes
+
+- Updated dependencies [96a06bf]
+- Updated dependencies [2b9e0fd]
+  - @agenticprimitives/fabric@0.0.0-alpha.16
+
 ## 0.0.1-alpha.1
 
 ### Patch Changes
