@@ -13,13 +13,12 @@ contracts and the Developer Kit. This repository is a **product** on published `
 (ADR-0063, [spec 399](https://github.com/agentictrustlabs/agenticprimitives/blob/master/specs/399-repository-split-program.md) W2),
 extracted with history from Ring 0 by `scripts/split/extract-ap-home.sh` (the commit is named in `git log`).
 
-## One estate — Home on faithchain
+## Faithnet — the estate this repository deploys
 
-This repository deploys **one** estate: Home on faithchain (chain 34348) — five Workers named `home-*` on `faithnet.io`
-hosts and the Home on Vercel — `[env.production]` in every `wrangler.toml`. **It does not deploy Faithnet**: Faithnet
-(`www.faithnet.me`, `demo-*-faithnet`) is Ring 0's deployment of the same apps, and the Base Sepolia `production` estate
-(impact-agent) with its treasury Workers and relying-app examples is not here either. `DEPLOYER.md` says which name
-means what and who deploys what; `deploy/estate.json` lists the estate's names and ids.
+This repository deploys **Faithnet**: the Home at `www.faithnet.me` (Vercel project `faithnet-home`) and the
+`*-faithnet` Workers behind it, on faithchain (chain 34348) — `[env.faithnet]` (and `[env.faithnet-b]`, the second
+deployment) in every `wrangler.toml`. Ring 0 (`agenticprimitives`) keeps packages and contracts; it no longer deploys
+any app. The Base Sepolia `production` estate (impact-agent) is not here. `DEPLOYER.md` has the map.
 
 ## What is here
 
@@ -31,13 +30,14 @@ means what and who deploys what; `deploy/estate.json` lists the estate's names a
 | `apps/home-mcp` | `apps/home-mcp` | Home MCP — Claude.ai as a client of the person (spec 397) |
 | `apps/edge` | `apps/edge` | the admission edge (ADR-0057): HTTPS required, mTLS optional, admission always |
 | `apps/rpc-gateway` | `apps/rpc-gateway` | the chain RPC gateway Home's Workers read through |
-| `scripts/` | root `scripts/` (the Home subset) | secrets (`ENV=production`), local dev vars, provisioning, the live gates (`scripts/live-gates.json`), every `verify-*` gate, the census; each Worker deploys with `wrangler deploy --env production` from its directory |
+| `scripts/` | root `scripts/` (the Home subset) | secrets, local dev vars, provisioning, the live gates (`scripts/live-gates.json`), every `verify-*` gate, the census; each Worker deploys with `wrangler deploy --env faithnet` from its directory |
 | `demo/` | `demo/` | the estate roster and deployment placements (→ `@agenticprimitives-demo/estate`, 399 §2.6) |
 | `docs/architecture/` | the product docs | harness architecture, outside-in flow, inbox UX synthesis, the UX product brief, **the Home census** |
 | `specs/398-…` | `specs/398-…` | the UX strategy this repository carries out: Home Work · Home Build · the Developer Kit |
 
-Worker names are the estate's own (`home-runtime`, `home-vault`, `home-edge`, `home-mcp`, `home-rpc` — new Workers, fresh
-Durable Objects); DO classes and migration tags are the code's and never change. `DEPLOYER.md` has the map.
+Worker names are faithnet's (`demo-a2a-faithnet`, `demo-mcp-faithnet`, `demo-edge-faithnet`, `home-mcp-faithnet`,
+`faithchain-rpc-gateway`) — the directories were renamed, the deployment was not; DO classes and migration tags never
+change. `DEPLOYER.md` has the map.
 
 ## The UX program (spec 398)
 

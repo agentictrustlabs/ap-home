@@ -71,7 +71,7 @@ proxies selected MCP requests during local demos.
   ADMITS a message into a member whose custodian declared where its runtime lives (`runtime.host.put`, DO-local
   config), the deliverer enqueues one wake on `RUNTIME_WAKE` and the consumer (this Worker's `queue`) POSTs `/wake` to
   the member's Container (`RUNTIME`, `RuntimeContainer` — Node + `ap runtime serve` + the ACP agent, image from
-  `runtime-container/`; `node runtime-container/build.mjs` before deploy) or a URL; the receipt lands DO-local
+  `runtime-container/`, which installs the kit from npm) or a URL; the receipt lands DO-local
   (`runtime.wake.get`). The Worker never polls and never speaks ACP; a wake carries no content and no authority.
   **W2a — the open mandate:** an AUTH_REQUIRED task says what it needs (`requirement/delegator/delegate`); an agent
   caller continues its own parked run with `metadata.presented` = the chain it derived from a standing grant
@@ -111,7 +111,7 @@ the knowledge/memory tiers (`ask-discovery.ts` + `@agenticprimitives/context` + 
 
 Deploy ONLY via `pnpm deploy:cloudflare` (repo root). The wrangler.toml production vars are fail-closed
 placeholders (`ALLOWED_ORIGINS=""`, `MCP_URL=""`); the script injects the real values via `--var` (plus
-PAYMASTER, BROKER_ISS/JWKS, edge flags, KMS backend). A bare `wrangler deploy --env production` wipes
+PAYMASTER, BROKER_ISS/JWKS, edge flags, KMS backend). A bare `wrangler deploy --env faithnet` wipes
 them → every browser POST fails CSRF with 403 (2026-07-07 incident; fixed by `wrangler rollback`).
 
 Generated (ignore): `.wrangler/`, `dist/`, `node_modules/`.

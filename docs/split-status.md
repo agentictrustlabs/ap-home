@@ -2,6 +2,14 @@
 
 Spec 399 §5 (migration mechanics) and §6 W2. Update it as each line closes; delete it at the cut.
 
+## 2026-10-04 — re-cut with `ESTATE=faithnet`
+
+The owner's decision: ap-home becomes the repository **faithnet** deploys from (`www.faithnet.me` + the `*-faithnet`
+Workers), and Ring 0 keeps no apps. Re-extracted from Ring 0 `00de5311` with `ESTATE=faithnet`: `[env.faithnet]` /
+`[env.faithnet-b]` carried verbatim (dry-run bindings identical to Ring 0's for all five Workers), `[env.production]`
+stripped. The separate `home-*` estate described below (item 4) is RETIRED once faithnet deploys from here. The
+runtime Container installs the kit from npm. Item 4's runbook (`docs/runbooks/estate.md`) is removed.
+
 ## Done at extraction
 
 - **§5.1 history-preserving extraction** from a fresh clone of Ring 0 (the commit is named in `git log`): the eight
