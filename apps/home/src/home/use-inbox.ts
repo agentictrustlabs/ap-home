@@ -72,8 +72,15 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
   // request while the first is still in flight, or slow reads stack up (seen live: 6–7 concurrent /connect/inbox
   // calls on /messages). One in flight at a time; the next tick picks up after it returns.
   const refreshing = useRef(false);
+  // A READ THAT FAILED IS SAID, never left as a loader (398 §6.3). Before this a 403 — a member opening an
+  // organization's Messages, whose inbox is its stewards' — left `view` null: the page showed its skeleton
+  // forever and re-polled the same refusal every 5s. A refusal (401/403) will not change on its own, so the
+  // poll stops; any other failure is shown and the next tick tries again.
+  const [readError, setReadError] = useState<string | null>(null);
+  const refused = useRef(false);
+  useEffect(() => { refused.current = false; setReadError(null); }, [session, agentQs]);
   const refresh = useCallback(async () => {
-    if (!session || refreshing.current) return;
+    if (!session || refreshing.current || refused.current) return;
     refreshing.current = true;
     try {
     const res = await fetch(`/connect/inbox${agentQs}`, { headers: { authorization: `Bearer ${session.token}` } });
@@ -82,9 +89,22 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
       // VL-W4 — the list/poll is metadata-only (bodies:{}). MERGE so bodies already lazily fetched for an
       // open thread survive a re-poll (a plain setView would blank the open thread every 5s).
       setView((prev) => ({ ...next, bodies: { ...(prev?.bodies ?? {}), ...next.bodies } }));
+      setReadError(null);
+    } else {
+      const why = ((await res.json().catch(() => ({}))) as { error?: string }).error;
+      if (res.status === 401 || res.status === 403) {
+        refused.current = true;
+        setReadError(targetAgent
+          ? `These messages are not yours to read — an agent's inbox is read by those who steward it${why ? ` (${why})` : ''}.`
+          : `Your messages could not be read — sign in again${why ? ` (${why})` : ''}.`);
+      } else {
+        setReadError(`Your messages could not be read just now${why ? ` — ${why}` : ''}. Trying again.`);
+      }
     }
+    } catch {
+      setReadError('Your messages could not be read just now — the Home did not answer. Trying again.');
     } finally { refreshing.current = false; }
-  }, [session, agentQs]);
+  }, [session, agentQs, targetAgent]);
 
   // VL-W4 — lazily fetch ONE conversation's bodies when its thread is opened, merged into the view. The
   // list never resolves bodies (zero KMS on first paint + on every poll); only the open thread pays.
@@ -244,7 +264,7 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
     [view, isChat],
   );
 
-  return { view, refresh, loadThread, loadPreviews, post, send, approved, wireRequired, setWireRequired, busy, error, setError, chatConversations, inboxConversations };
+  return { view, refresh, loadThread, loadPreviews, post, send, approved, wireRequired, setWireRequired, busy, error, readError, setError, chatConversations, inboxConversations };
 }
 
 export const shortId = (caip: string): string => {

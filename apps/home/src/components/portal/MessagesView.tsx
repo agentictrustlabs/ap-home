@@ -189,9 +189,9 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const managed = targetAgent ? agents.find((a) => a.agent.toLowerCase() === targetAgent.toLowerCase()) : undefined;
   const sendingAs = (targetAgent ?? agentAddress ?? undefined) as Address | undefined;
   const stewardship = targetAgent ? managed?.stewardshipDelegation : undefined;
-  const { view, refresh, loadThread, loadPreviews, post, send, approved, wireRequired, setWireRequired, busy, error, setError } = useInboxView(session, targetAgent, sendingAs, stewardship);
+  const { view, refresh, loadThread, loadPreviews, post, send, approved, wireRequired, setWireRequired, busy, error, readError, setError } = useInboxView(session, targetAgent, sendingAs, stewardship);
   // Readiness (design system v2): the rail shows a skeleton until the inbox view has landed — never "no messages yet".
-  useReadyReport('messages-inbox', view === null);
+  useReadyReport('messages-inbox', view === null && !readError);
   const me = (sendingAs ?? '').toLowerCase();
 
   // Spec 398 §5.5 — the attention model reads what Today reads (parked runs, schedule, Library) plus this inbox's cases.
@@ -588,7 +588,9 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
               />
             )}
             {railView === 'needs-you' ? null : (<>
-            {view === null && <div style={{ padding: 8 }}><SkeletonRows rows={6} lead /></div>}
+            {view === null && (readError
+              ? <p role="alert" style={{ padding: 8, color: 'var(--color-danger)' }}>{readError}</p>
+              : <div style={{ padding: 8 }}><SkeletonRows rows={6} lead /></div>)}
             {view !== null && dms.length === 0 && (
               <p className="chat-rail-empty">
                 No conversations yet.{' '}
