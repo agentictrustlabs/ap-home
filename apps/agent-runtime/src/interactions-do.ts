@@ -1531,7 +1531,14 @@ export class InteractionsDO {
     const now = Date.now();
     if (!this.governorMemo || now - this.governorMemo.at > InteractionsDO.GOVERNOR_MEMO_TTL_MS) {
       let doc: unknown;
-      try { doc = await this.readDoc<unknown>(grant, WORKSPACE_GOVERNOR_RECORD, null); } catch { return null; } // a failed read is not remembered
+      try { doc = await this.readDoc<unknown>(grant, WORKSPACE_GOVERNOR_RECORD, null); } catch (e) {
+        // A grant signed before `vault:workspace.governor` was in its scope is DENIED this read (it reads as "no
+        // governor" until re-issued). Remembered a minute, not five, and said once — every refused caller would
+        // otherwise repeat a read that cannot succeed.
+        console.log(`[board-gate] ${principal} workspace.governor unreadable — ${(e instanceof Error ? e.message : String(e)).slice(0, 120)}`);
+        this.governorMemo = { at: now - InteractionsDO.GOVERNOR_MEMO_TTL_MS + 60_000, governor: null };
+        return null;
+      }
       const read = governorOf(doc);
       this.governorMemo = { at: now, governor: read ? read.toLowerCase() : null };
     }
@@ -1547,7 +1554,10 @@ export class InteractionsDO {
       }));
       const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; name?: string | null };
       const name = resp.ok && out.ok && typeof out.name === 'string' && out.name.trim() ? out.name.trim() : null;
-      if (name) this.governedMemberMemo.set(me, { until: now + 60_000, name });
+      if (name) {
+        if (this.governedMemberMemo.size >= 256) this.governedMemberMemo.clear();
+        this.governedMemberMemo.set(me, { until: now + 60_000, name });
+      }
       return name;
     } catch { return null; } // unanswerable is not a member (ADR-0013)
   }
