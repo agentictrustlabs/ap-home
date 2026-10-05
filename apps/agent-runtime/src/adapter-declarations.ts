@@ -30,6 +30,8 @@ export const CARRIES = {
   payment: { usdc: [T.Money], memo: [T.FreeText] },
   /** An invitation's terms: kinship and role words; the invitee is a party, not a payload. */
   membership: { kin: [T.MembershipTerms], role: [T.MembershipTerms] },
+  /** A member's role in an organization (spec 427): the role offer — a definition id, words, registry references. */
+  memberRole: { role: [T.MembershipTerms] },
   /** A contact invitation's role word. */
   contact: { role: [T.MembershipTerms] },
   /** A standing instruction: the default an argument will take from now on. */

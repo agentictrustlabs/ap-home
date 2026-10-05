@@ -179,6 +179,7 @@ import { EXTERNAL_AGENT_TOOL, externalAgentInvoker } from './external-agent.js';
 import { remembered, forget, rememberValue } from './run-memo.js';
 import { DISCOVERY_INSPECT_CAPABILITY, discoveryInspectInvoker } from './enterprise-tools.js';
 import { INVITATIONS_RECEIVED_CAPABILITY, invitationsReceivedInvoker } from './invitations-received.js';
+import { PERSON_ROLES_CAPABILITY, personRolesInvoker, type OrgMembershipAnswer } from './member-roles.js';
 import { WAITING_LIST_CAPABILITY, waitingListInvoker } from './waiting-on-me.js';
 import { subjectAddress, nameRecordsReader, servesUnpublishedNames, type SubjectAddressEnv } from './subject-address.js';
 import { MEMBER_CONSULT_TOOL, memberConsultInvoker } from './member-consult.js';
@@ -4560,6 +4561,11 @@ app.post('/harness/ask', async (c) => {
         // Spec 397 — the invitations that reached the person, from their own inbox record.
         // Gap register B6a — what is waiting on her: her own agent's parked runs + invitations not yet accepted (the bell's read).
         if (toolId === WAITING_LIST_CAPABILITY) return waitingListInvoker({ ...(askDeps.readSubjectRecord ? { readSubjectRecord: askDeps.readSubjectRecord } : {}), ...(askDeps.nameOf ? { nameOf: askDeps.nameOf } : {}), listRuns: (a) => listRuns(c.env as never, a) }, String(who.sa).toLowerCase())(toolId, args, ctx);
+        // Spec 427 §5.3 — the roles the person holds: each organization's own object answers for its record of the ASKER.
+        if (toolId === PERSON_ROLES_CAPABILITY) {
+          if (!askDeps.memberRoleAt) return { refused: 'reading roles is not configured on this estate' };
+          return personRolesInvoker({ membershipAt: askDeps.memberRoleAt, ...(askDeps.readSubjectRecord ? { readSubjectRecord: askDeps.readSubjectRecord } : {}), ...(askDeps.nameOf ? { nameOf: askDeps.nameOf } : {}) }, String(who.sa).toLowerCase())(toolId, args, ctx);
+        }
         if (toolId === INVITATIONS_RECEIVED_CAPABILITY) return invitationsReceivedInvoker({ ...(askDeps.readSubjectRecord ? { readSubjectRecord: askDeps.readSubjectRecord } : {}), ...(askDeps.readRecords ? { readRecords: askDeps.readRecords } : {}), ...(askDeps.nameOf ? { nameOf: askDeps.nameOf } : {}) }, String(who.sa).toLowerCase())(toolId, args, ctx);
         if (toolId === EXTERNAL_AGENT_TOOL.id) return externalAgentInvoker({ timeoutMs: 20_000, fetch: reachFetch,
           // Spec 379 W2 — a registry NAME resolves through its own on-chain records to a card, pinned by `atl:cardDigest`.
@@ -5729,6 +5735,19 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     readContract: (a) => pub.readContract(a as never) as Promise<unknown>,
     audit,
     teamGenesis: teamGenesisDeps(env, audit),
+    // Spec 427 — an organization's own object, asked and written IN-WORKER (the in-Worker marker; never a session RPC):
+    // what it records of one member, and the role on that record under the organization's mandate.
+    memberRoleAt: async (org, member) => {
+      const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(org.toLowerCase()));
+      const resp = await stub.fetch(new Request(`https://do/interactions/${org.toLowerCase()}/internal.member.role`, { method: 'POST', headers: internalHeaders(env as never, { 'content-type': 'application/json' }), body: JSON.stringify({ member }) }));
+      const out = (await resp.json().catch(() => null)) as (OrgMembershipAnswer & { ok?: boolean }) | null;
+      return resp.ok && out?.ok === true ? out : null;
+    },
+    setMemberRoleAt: async (org, input) => {
+      const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(org.toLowerCase()));
+      const resp = await stub.fetch(new Request(`https://do/interactions/${org.toLowerCase()}/internal.member.setRole`, { method: 'POST', headers: internalHeaders(env as never, { 'content-type': 'application/json' }), body: JSON.stringify(input) }));
+      return { status: resp.status, body: ((await resp.json().catch(() => ({}))) as Record<string, unknown>) };
+    },
     // Spec 412 W5 — a Library release is signed AS its owner under the owner's session leaf (spec 384's signer).
     signAsAgent: (agent, digest) => signAsAgent(env, agent, digest),
     // Spec 413 — after a Library act, a hint to the public tier's indexer (two public identifiers; the indexer re-reads

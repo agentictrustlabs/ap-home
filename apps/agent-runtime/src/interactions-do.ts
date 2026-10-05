@@ -1172,6 +1172,55 @@ export class InteractionsDO {
     return Object.fromEntries(Object.entries(bytes).map(([id, b]) => [id, decoder.decode(b)]));
   }
 
+  /**
+   * WHAT THIS ORGANIZATION RECORDS OF ONE MEMBER (spec 427 §5.3) — the record, the role on it, and the offer that role
+   * came from; never the delegation, which is the member's own. Two callers, one reading: the member's own session
+   * (`org.membership.mine`, the key derived from the session) and the member's own AGENT asking in-Worker on a run
+   * the member started (`internal.member.role`, capability `person.roles.list`). Neither can name somebody else:
+   * the first has no such argument and the second is called only with the run's verified asker.
+   * A workspace holds no members; asked of one, the answer names the organization that does.
+   */
+  private async membershipAnswer(grant: IncomingDelegation, principal: string, member: string): Promise<Record<string, unknown>> {
+    const me = member.toLowerCase();
+    const rec = await this.readDoc<Record<string, unknown> | null>(grant, `org.membership:member:${me}`, null);
+    if (!rec || String(rec.memberAgent ?? '').toLowerCase() !== me) {
+      const governor = governorOf(await this.readDoc<unknown>(grant, WORKSPACE_GOVERNOR_RECORD, null).catch(() => null));
+      return { ok: true, organization: principal.toLowerCase(), membership: null, ...(governor && governor !== principal.toLowerCase() ? { governedBy: governor } : {}) };
+    }
+    const ra = (rec.roleAssignment ?? {}) as Record<string, unknown>;
+    const { materializedByDelegation: _wire, ...roleAssignment } = ra;
+    return {
+      ok: true,
+      organization: principal.toLowerCase(),
+      membership: { ...rec, roleAssignment: { assignedRole: PLAIN_MEMBER, ...roleAssignment } },
+      ended: typeof rec.endedAt === 'string' && !!rec.endedAt,
+      offer: offerFromRoleFields(roleAssignment as Partial<AssignedRoleFields>),
+    };
+  }
+
+  /**
+   * THE ROLE ON A MEMBERSHIP IS REPLACED (spec 427 §3.3): the role fields change, the delegation that materializes
+   * the membership and the household facets stay. Two callers, one write: a steward's session presenting the
+   * stewardship wire (`org.setMemberRole`), and the organization's own agent on a run that presented the
+   * organization's MANDATE for the act (`internal.member.setRole`, capability `organization.member.role.set`).
+   * Whoever calls has already been judged; this only writes, audits and tells the room.
+   */
+  private async setMemberRole(grant: IncomingDelegation, principal: string, member: string, fields: AssignedRoleFields, actor: string, audit: ReturnType<typeof buildAuditSink>): Promise<Response> {
+    return this.serialize(async () => {
+      const key = `org.membership:member:${member}`;
+      const rec = await this.readDoc<Record<string, unknown> | null>(grant, key, null);
+      if (!rec) return json({ ok: false, code: 'no_membership', error: 'that agent holds no membership record here — a role hangs on a membership' }, 404);
+      if (typeof rec.endedAt === 'string' && rec.endedAt) return json({ ok: false, code: 'membership_ended', error: 'that membership has ended — invite them back, with the role' }, 409);
+      const before = (rec.roleAssignment ?? {}) as Partial<AssignedRoleFields>;
+      await this.writeDoc(grant, key, { ...rec, roleAssignment: { ...withoutRoleFields(rec.roleAssignment as Record<string, unknown>), ...fields } });
+      await audit.write({ id: crypto.randomUUID(), timestamp: fields.assignedAt ?? new Date().toISOString(), action: 'interactions.org.membership.role', outcome: 'success', actor: { type: 'user', id: actor }, subject: { type: 'membership', id: member } });
+      const say = async () => { try { await this.postWelcome(grant, principal, `🎭 ${await this.boardNameFor(grant, member)} is now ${fields.roleName ?? 'a member'} here.`, true); } catch { /* narration, never the fact */ } };
+      const later = (this.state as { waitUntil?: (p: Promise<unknown>) => void }).waitUntil;
+      if (typeof later === 'function') later.call(this.state, say()); else await say();
+      return json({ ok: true, member, role: fields.assignedRole, ...(fields.roleName ? { roleName: fields.roleName } : {}), previous: before.assignedRole ?? PLAIN_MEMBER, changed: (before.roleDefinitionId ?? '') !== (fields.roleDefinitionId ?? '') || (before.assignedRole ?? PLAIN_MEMBER) !== fields.assignedRole });
+    });
+  }
+
   private async readDoc<T>(grant: IncomingDelegation, resource: string, empty: T): Promise<T> {
     const r = await this.vaultFor(grant).read<T>({ owner: '', resource });
     return (r?.data as T) ?? empty;
@@ -2111,7 +2160,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'inbox.body.getMany' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.channels.create' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.member.recorded' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'internal.wire.current' || op === 'internal.op.lookup' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.getMany' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'inbox.body.getMany' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.channels.create' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.member.recorded' || op === 'internal.member.role' || op === 'internal.member.setRole' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'internal.wire.current' || op === 'internal.op.lookup' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.getMany' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -3282,6 +3331,34 @@ export class InteractionsDO {
             ?? (await this.memberName(g, principal, `eip155:${Number(this.env.CHAIN_ID ?? 84532)}:${member}`));
           return json({ ok: true, name });
         }
+        if (op === 'internal.member.role') {
+          // THE MEMBER'S OWN AGENT ASKS WHAT THIS ORGANIZATION RECORDS OF THEM (spec 427 §5.3; capability
+          // `person.roles.list`). In-Worker only, and the caller passes the run's VERIFIED asker — a person's agent
+          // reads its own person's membership, the same answer `org.membership.mine` gives their session. Words,
+          // never authority: the role is what they do here, and nothing gates on it.
+          const member = String(body.member ?? '').toLowerCase();
+          if (!/^0x[0-9a-f]{40}$/.test(member)) return json({ error: 'member (address) required' }, 400);
+          return json(await this.membershipAnswer(g, principal, member));
+        }
+        if (op === 'internal.member.setRole') {
+          // THE ORGANIZATION'S OWN AGENT SETS A MEMBER'S ROLE (capability `organization.member.role.set`) on a run that
+          // presented the organization's mandate for exactly that act — the harness verified it; this object writes.
+          // The offer is parsed here again: nothing reaches a membership record but ids and words (invariant 6).
+          const member = String(body.member ?? '').toLowerCase();
+          const by = String(body.by ?? '').toLowerCase();
+          if (!/^0x[0-9a-f]{40}$/.test(member)) return json({ error: 'member (address) required' }, 400);
+          if (!/^0x[0-9a-f]{40}$/.test(by)) return json({ error: 'by (the steward whose mandate this is) required' }, 400);
+          const now = new Date().toISOString();
+          let fields: AssignedRoleFields;
+          if (body.orgRole === null || body.orgRole === undefined) {
+            fields = { assignedRole: PLAIN_MEMBER, assignedBy: by, assignedAt: now, roleSetAt: now };
+          } else {
+            const parsed = parseRoleOffer(body.orgRole);
+            if (!parsed.ok) return json({ ok: false, code: 'invalid_role_offer', error: parsed.error }, 400);
+            fields = { ...roleFieldsFromOffer(parsed.offer, by, now), roleSetAt: now };
+          }
+          return this.setMemberRole(g, principal, member, fields, by, buildAuditSink(this.env));
+        }
         if (op === 'internal.library.packages') {
           // Every package in this org's library, FRONTMATTER ONLY. The archetype catalog is derived
           // from it rather than hand-maintained, because a catalog that can disagree with the
@@ -3982,19 +4059,7 @@ export class InteractionsDO {
           if (!parsed.ok) return json({ ok: false, code: 'invalid_role_offer', error: parsed.error }, 400);
           fields = { ...roleFieldsFromOffer(parsed.offer, sessionSa, now), roleSetAt: now };
         }
-        return this.serialize(async () => {
-          const key = `org.membership:member:${member}`;
-          const rec = await this.readDoc<Record<string, unknown> | null>(grant, key, null);
-          if (!rec) return json({ ok: false, code: 'no_membership', error: 'that agent holds no membership record here — a role hangs on a membership' }, 404);
-          if (typeof rec.endedAt === 'string' && rec.endedAt) return json({ ok: false, code: 'membership_ended', error: 'that membership has ended — invite them back, with the role' }, 409);
-          const before = (rec.roleAssignment ?? {}) as Partial<AssignedRoleFields>;
-          await this.writeDoc(grant, key, { ...rec, roleAssignment: { ...withoutRoleFields(rec.roleAssignment as Record<string, unknown>), ...fields } });
-          await audit.write({ id: crypto.randomUUID(), timestamp: now, action: 'interactions.org.membership.role', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'membership', id: member } });
-          const say = async () => { try { await this.postWelcome(grant, principal, `🎭 ${await this.boardNameFor(grant, member)} is now ${fields.roleName ?? 'a member'} here.`, true); } catch { /* narration, never the fact */ } };
-          const later = (this.state as { waitUntil?: (p: Promise<unknown>) => void }).waitUntil;
-          if (typeof later === 'function') later.call(this.state, say()); else await say();
-          return json({ ok: true, member, role: fields.assignedRole, ...(fields.roleName ? { roleName: fields.roleName } : {}), previous: before.assignedRole ?? PLAIN_MEMBER, changed: (before.roleDefinitionId ?? '') !== (fields.roleDefinitionId ?? '') || (before.assignedRole ?? PLAIN_MEMBER) !== fields.assignedRole });
-        });
+        return this.setMemberRole(grant, principal, member, fields, sessionSa, audit);
       }
       if (op === 'org.membership.mine') {
         // WHAT THIS ORGANIZATION RECORDS OF ME (spec 427 §5.3). A person cannot read an organization's vault and
@@ -4002,23 +4067,7 @@ export class InteractionsDO {
         // same property as `invite.claim`. It answers that member's record and nothing else, ended or not (a
         // person's Home drops a role's pack when the membership it came from has ended, and must be able to see
         // that it has). The delegation on the record is the member's own; it is not echoed — the role is the point.
-        const me = sessionSa.toLowerCase();
-        const rec = await this.readDoc<Record<string, unknown> | null>(grant, `org.membership:member:${me}`, null);
-        if (!rec || String(rec.memberAgent ?? '').toLowerCase() !== me) {
-          // A WORKSPACE HOLDS NO MEMBERS — asked of one, the answer names the organization that does (the pointer a
-          // governed workspace keeps in its own vault), so a Home that asked the wrong agent learns where to ask.
-          const governor = governorOf(await this.readDoc<unknown>(grant, WORKSPACE_GOVERNOR_RECORD, null).catch(() => null));
-          return json({ ok: true, organization: principal.toLowerCase(), membership: null, ...(governor && governor !== principal.toLowerCase() ? { governedBy: governor } : {}) });
-        }
-        const ra = (rec.roleAssignment ?? {}) as Record<string, unknown>;
-        const { materializedByDelegation: _wire, ...roleAssignment } = ra;
-        return json({
-          ok: true,
-          organization: principal.toLowerCase(),
-          membership: { ...rec, roleAssignment: { assignedRole: PLAIN_MEMBER, ...roleAssignment } },
-          ended: typeof rec.endedAt === 'string' && !!rec.endedAt,
-          offer: offerFromRoleFields(roleAssignment as Partial<AssignedRoleFields>),
-        });
+        return json(await this.membershipAnswer(grant, principal, sessionSa.toLowerCase()));
       }
       if (op === 'org.endMembership') {
         // THE ORGANIZATION'S RECORD SAYS WHEN A MEMBERSHIP ENDED (spec 324 §11). Removal and leaving cleared every

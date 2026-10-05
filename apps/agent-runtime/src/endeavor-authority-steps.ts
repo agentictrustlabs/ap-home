@@ -79,6 +79,10 @@ export const NOT_PLAN_STEPS: readonly string[] = [
   // decision-kind STEP that a record satisfies, but raising or recording is never itself assignable work.
   'coordination.decision.request',
   'coordination.decision.record',
+  // Spec 427 — a member's ROLE is the organization's statement about a membership that already exists: a word on a
+  // record, changed by a steward under the organization's mandate. It is not work a plan hands somebody — the work
+  // is inviting them (a plan step above); what they are called once they are in is said, not assigned.
+  'organization.member.role.set',
   'treasury.fund',
   'messaging.direct.send',
   // Spec 400 W2 (B3) — a reply in a topic is a message like a DM: words to a thread, never assignable work.

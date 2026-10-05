@@ -47,6 +47,9 @@ import { remembered, forget } from './run-memo.js';
 import { DISCOVERY_FIND_TOOL, ENGAGEMENT_INVOKE_TOOL, DISCOVERY_INSPECT_TOOL, DISCOVERY_FIND_CAPABILITY, ENGAGEMENT_INVOKE_CAPABILITY, discoveryFindInvoker } from './enterprise-tools.js';
 import { WAITING_LIST_TOOL } from './waiting-on-me.js';
 import { INVITATIONS_RECEIVED_TOOL, MEMBERSHIP_ACCEPT_TOOL, MEMBERSHIP_ACCEPT_CAPABILITY, membershipAcceptInvoker } from './invitations-received.js';
+import { PERSON_ROLES_TOOL, type OrgMembershipAnswer } from './member-roles.js';
+import { MEMBER_ROLE_SET_TOOL, MEMBER_ROLE_SET_CAPABILITY, memberRoleSetInvoker } from './member-role-set.js';
+import type { RoleOfferV1 } from './org-role.js';
 import { SECURITY_READ_TOOLS, SECURITY_ACT_TOOLS, isSecurityTool, securityInvoker, securityChainDeps } from './security-tools.js';
 import { INBOX_LIST_TOOL, inboxListInvoker } from './inbox-list.js';
 import { WORK_SEARCH_TOOL, workSearchInvoker } from './work-search-tool.js';
@@ -420,6 +423,8 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   ...MEMORY_TOOLS.filter((t) => MEMORY_ACTS.has(t.id)),
   // Spec 421 — accepting an invitation: the invitee's own act; her Home runs the Join ceremony, her records say it happened.
   MEMBERSHIP_ACCEPT_TOOL,
+  // Spec 427 — a steward sets what a member does in the organization: the organization's act, under its mandate.
+  MEMBER_ROLE_SET_TOOL,
   // Spec 422 §9.1 — the Security section's acts: add a credential (a ceremony her Home runs under her credential), rename one,
   // link / unlink an email or phone. Self-acting: her own account, her own vault; her Home runs the ceremony, her records say.
   ...SECURITY_ACT_TOOLS,
@@ -942,6 +947,12 @@ export interface HarnessDeps {
    *  for the coordination acts. The DO derives standing and validates the command; this only carries it. */
   interactionsOp?: (principal: Address, op: string, body: Record<string, unknown>) => Promise<Record<string, unknown>>;
   readContract: (args: { address: Address; abi: readonly unknown[]; functionName: string; args: readonly unknown[] }) => Promise<unknown>;
+  /** Spec 427 — an organization's own object, asked IN-WORKER what it records of `member` (`person.roles.list`: a
+   *  person's agent reading its own person's memberships). null ⇒ that organization could not be asked. */
+  memberRoleAt?: (org: string, member: string) => Promise<OrgMembershipAnswer | null>;
+  /** Spec 427 — the organization's own object writes the role on a member's record, in-Worker, for a run that
+   *  presented the organization's mandate (`organization.member.role.set`). */
+  setMemberRoleAt?: (org: string, input: { member: string; orgRole: RoleOfferV1 | null; by: string }) => Promise<{ status: number; body: Record<string, unknown> }>;
   /** Build, sign (with the service SA's custodian) and submit a sponsored userOp from `sender`. */
   executeAsServiceSa: (sender: Address, callData: Hex) => Promise<{ txHash: Hex }>;
   audit: AuditSink;
@@ -2190,7 +2201,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     setBillStep(ctx.step.id ?? `s${ctx.index}`);
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
     // mandate); explicit so a future caller cannot make it reachable quietly.
-    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === 'messaging.topic.post' || GITHUB_ACTS.has(toolId) || BUILD_ACTS.has(toolId) || CALENDAR_ACTS.has(toolId) || MAIL_DRIVE_ACTS.has(toolId) || toolId === ORG_INVITE_CAPABILITY || toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === 'messaging.topic.post' || GITHUB_ACTS.has(toolId) || BUILD_ACTS.has(toolId) || CALENDAR_ACTS.has(toolId) || MAIL_DRIVE_ACTS.has(toolId) || toolId === ORG_INVITE_CAPABILITY || toolId === MEMBER_ROLE_SET_CAPABILITY || toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
     if (toolId === ASK_CLARIFY_TOOL.id) {
       const ids = Array.isArray(args.options) ? (args.options as unknown[]).map(String).slice(0, 2) : [];
       const purposes = Array.isArray(args.purposes) ? (args.purposes as unknown[]).map(String) : [];
@@ -2312,6 +2323,11 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (ROUTINE_TOOLS.some((t) => t.id === toolId)) return routineInvoker({ ...(deps.listTriggers ? { listTriggers: deps.listTriggers } : {}), ...(deps.declareTrigger ? { declareTrigger: deps.declareTrigger } : {}), ...(deps.removeTrigger ? { removeTrigger: deps.removeTrigger } : {}), ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}) }, person, addressee, (i) => { throw new InputRequired(i); }, (c, ref) => dataFor((c as { supplied?: unknown }).supplied as never, ref))(toolId, args, ctx);
     // Spec 422 §9.1 — the Security section, asked: reads from the chain + her vault; acts as ceremonies her Home runs.
     if (isSecurityTool(toolId)) return securityInvoker({ ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...securityChainDeps(env as never) }, person)(toolId, args, ctx);
+    // Spec 427 — the organization's agent rewrites the role on its member's record, under the mandate this run presented.
+    if (toolId === MEMBER_ROLE_SET_CAPABILITY) {
+      if (!deps.setMemberRoleAt) throw new Error('setting a member\u2019s role is not configured on this estate');
+      return memberRoleSetInvoker({ setRoleAt: deps.setMemberRoleAt, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, (presented!.wire as Delegation).delegator, person)(toolId, args, ctx);
+    }
     if (toolId === MEMBERSHIP_ACCEPT_CAPABILITY) return membershipAcceptInvoker({ ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, person)(toolId, args, ctx);
     if (MEMORY_TOOLS.some((t) => t.id === toolId)) return memoryFactsInvoker(deps, person, (ctx as { runRef?: string }).runRef ?? (ctx.idempotencyKey ? ctx.idempotencyKey.split(':').slice(0, -1).join(':') : undefined), addressee)(toolId, args, ctx);
     // Spec 387 W2 — the addressee's own catalog: bound by ITS name's records at call time (cached by the reader),
@@ -2688,6 +2704,7 @@ export const CAPABILITY_WORDS: Record<string, string> = {
   'person.create': 'add another person of your own',
   'treasury.create': 'create treasuries',
   'organization.membership.invite': 'invite members',
+  'organization.member.role.set': 'set what a member does here',
   'coordination.endeavor.list': 'see what the organization is working on',
   'treasury.balance.read': 'read a balance',
   'coordination.endeavor.get': 'read one endeavor',
@@ -2953,6 +2970,7 @@ const RESOURCE_ARG_FOR: Record<string, string> = {
   'treasury.payment.execute': 'asset',
   'treasury.fund': 'asset',
   'organization.membership.invite': 'org',
+  'organization.member.role.set': 'org',
   'messaging.direct.send': 'recipient',
   'messaging.topic.post': 'org',
   'github.pr.open': 'holder',
@@ -4518,6 +4536,7 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'person.create': ['signature'],
   'treasury.create': ['signature'],
   'organization.membership.invite': ['signature'],  // the org signs the invitation grant
+  'organization.member.role.set': ['signature'],    // spec 427 — the organization's mandate for the change
   'coordination.endeavor.request': ['signature'],   // the mandate — asking as you is an act of yours
   'coordination.contribution.propose': ['signature'],
   'coordination.contribution.allocate': ['signature'],  // the org's decision, under a steward's signature
@@ -5534,6 +5553,8 @@ step is then handed to that agent under authority the person grants; leave it ou
     ...(playbook?.tools?.[DISCOVERY_INSPECT_TOOL.id] ? [mergeContractTool(DISCOVERY_INSPECT_TOOL, playbook.tools[DISCOVERY_INSPECT_TOOL.id])] : []),
     // Spec 397 / 341 §5.1b — what the person has been invited to, from their own inbox (their playbook offers it).
     ...(playbook?.tools?.[INVITATIONS_RECEIVED_TOOL.id] ? [mergeContractTool(INVITATIONS_RECEIVED_TOOL, playbook.tools[INVITATIONS_RECEIVED_TOOL.id])] : []),
+    // Spec 427 §5.3 — the roles she holds, each organization answering for its own record of her (her playbook offers it).
+    ...(playbook?.tools?.[PERSON_ROLES_TOOL.id] ? [mergeContractTool(PERSON_ROLES_TOOL, playbook.tools[PERSON_ROLES_TOOL.id])] : []),
     // Gap register B6a — what is waiting on her (the bell, asked): parked runs + invitations, from her own records.
     ...(playbook?.tools?.[WAITING_LIST_TOOL.id] ? [mergeContractTool(WAITING_LIST_TOOL, playbook.tools[WAITING_LIST_TOOL.id])] : []),
     // Spec 422 §9.1 — what signs for her / how protected her home is (the person-steward playbook offers them).
