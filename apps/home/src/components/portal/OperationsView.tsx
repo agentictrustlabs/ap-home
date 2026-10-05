@@ -15,7 +15,9 @@ const when = (t: number) => new Date(t).toLocaleString([], { month: 'short', day
 const agentActivitiesHref = (agent: string, me: string) => (agent.toLowerCase() === me.toLowerCase() ? '/activities' : `/org/${agent}/activities`);
 const kindTone = (k: string): 'ok' | 'warn' | 'danger' | undefined => (k === 'answer' ? 'ok' : k === 'authority_required' || k === 'prompt' ? 'warn' : k === 'error' || k === 'refused' ? 'danger' : undefined);
 
-export function OperationsView() {
+/** `org` set ⇒ THE ORGANIZATION'S view (owner, 2026-10-05): the org, its teams and their circles, the workspace it governs —
+ *  never its members' own agents. Unset ⇒ everything the person stewards (the estate). */
+export function OperationsView({ org }: { org?: `0x${string}` } = {}) {
   const { session } = useSession();
   const [window_, setWindow] = useState<Window>('7d');
   const [summary, setSummary] = useState<OpsSummaryView | null | undefined>(undefined);
@@ -24,14 +26,14 @@ export function OperationsView() {
   const load = useCallback(async (w: Window) => {
     if (!session) return;
     setError(null);
-    const r = await operatorView({ token: session.token }, { scope: 'estate', window: w });
+    const r = await operatorView({ token: session.token }, org ? { scope: 'organization', addressee: org, window: w } : { scope: 'estate', window: w });
     if (r.ok) setSummary(r.summary); else { setSummary(null); setError(r.error); }
-  }, [session]);
+  }, [session, org]);
   useEffect(() => { void load(window_); }, [load, window_]);
   const rebuild = async () => {
     if (!session) return;
     setBusy('Rebuilding…');
-    const r = await rebuildOperatorIndex({ token: session.token }, { scope: 'estate' }, (done, total) => setBusy(`Rebuilding… ${done}/${total} agents`));
+    const r = await rebuildOperatorIndex({ token: session.token }, org ? { scope: 'organization', addressee: org } : { scope: 'estate' }, (done, total) => setBusy(`Rebuilding… ${done}/${total} agents`));
     setBusy(false);
     if (!r.ok) { setError(r.error); return; }
     await load(window_);

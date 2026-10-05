@@ -150,7 +150,7 @@ import { validateCaptureWindow } from '@agenticprimitives/evaluation';
 import { standardServerFor } from './standard-a2a.js';
 import { withStandardCardFields } from '@agenticprimitives/a2a/standard';
 import type { AgentCardV1 } from '@agenticprimitives/a2a/standard';
-import { chainStewardshipCheck, deriveStanding, governingSubjectOf } from '@agenticprimitives/context';
+import { chainStewardshipCheck, deriveStanding, governingSubjectOf, governorOf, WORKSPACE_GOVERNOR_RECORD } from '@agenticprimitives/context';
 import { clubTurn, CLUB_RECORDS } from './card-room-club.js';
 import { charteredAgentsReader, charteredOwnerReader } from './chartered-agents.js';
 import { relationshipRows } from '@agenticprimitives/context';
@@ -1949,11 +1949,11 @@ app.post('/harness/budget', async (c) => {
   const days = await budgetCounters(c.env as never, agent, Math.min(Math.max(Number(body.days ?? 7), 1), 31));
   return c.json({ ok: true, agent, budget: current, days });
 });
-// POST /harness/ops { session, scope: 'agent'|'estate', addressee?, window?: '24h'|'7d'|'30d' } — spec 406 W1. THE OPERATOR
+// POST /harness/ops { session, scope: 'agent'|'estate'|'organization', addressee?, window?: '24h'|'7d'|'30d' } — spec 406 W1. THE OPERATOR
 // VIEW: counts, kinds, capabilities, providers, latency percentiles, the bill and the failure classes over the agents the
 // caller stewards (or one). A projection over the records; every row names a run whose evidence is elsewhere.
 app.post('/harness/ops', async (c) => {
-  const body = (await c.req.json().catch(() => null)) as { session?: string; scope?: 'agent' | 'estate'; addressee?: string; window?: string; rebuild?: boolean } | null;
+  const body = (await c.req.json().catch(() => null)) as { session?: string; scope?: 'agent' | 'estate' | 'organization'; addressee?: string; window?: string; rebuild?: boolean } | null;
   if (!body?.session) return c.json({ ok: false, error: 'session is required' }, 400);
   const who = await verifyHomeSession(body.session, c.env);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
@@ -1966,6 +1966,24 @@ app.post('/harness/ops', async (c) => {
     if (!/^0x[0-9a-f]{40}$/.test(a)) return c.json({ ok: false, error: 'addressee must be an address' }, 400);
     if (a !== me && !(await mayDriveTriggers(c.env, me, a as Address))) return c.json({ ok: false, error: 'only a steward reads an agent\'s operations' }, 403);
     agents = [a];
+  } else if (body.scope === 'organization') {
+    // THE ORGANIZATION'S OWN AGENTS (owner, 2026-10-05): the org, everything chartered under it (its teams, their
+    // circles — followed down `parent`), and every workspace it GOVERNS (the workspace's own `workspace.governor` record
+    // names it) with what that workspace holds. NEVER its members' own agents: a person's runs are hers, and belonging
+    // to an organization does not show them to its stewards. Only a steward of the organization reads this view; the
+    // agents are drawn from the caller's own tree (what she holds), each workspace's governor read from its record.
+    const org = String(body.addressee ?? '').toLowerCase();
+    if (!/^0x[0-9a-f]{40}$/.test(org)) return c.json({ ok: false, error: 'addressee (the organization) must be an address' }, 400);
+    if (org !== me && !(await mayDriveTriggers(c.env, me, org as Address))) return c.json({ ok: false, error: 'only a steward of the organization reads its operations' }, 403);
+    const rows = relationshipRows(await deps.readSubjectRecord?.(me, 'relationships.data').catch(() => null));
+    const governed = await Promise.all(rows.filter((r) => /workspace/i.test(String(r.kind ?? '')) || /\.workspace$/i.test(String((r as { name?: string }).name ?? '')))
+      .map(async (r) => (governorOf(await deps.readSubjectRecord?.(r.agent.toLowerCase(), WORKSPACE_GOVERNOR_RECORD).catch(() => null)) === org ? r.agent.toLowerCase() : null)));
+    const within = new Set<string>([org, ...governed.filter((x): x is string => !!x)]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const r of rows) { const a = r.agent.toLowerCase(); if (!within.has(a) && r.parent && within.has(r.parent.toLowerCase())) { within.add(a); grew = true; } }
+    }
+    agents = [...within];
   } else {
     const doc = await deps.readSubjectRecord?.(me, 'relationships.data').catch(() => null);
     agents = [me, ...relationshipRows(doc).filter((r) => r.relationship === 'steward').map((r) => r.agent.toLowerCase())];

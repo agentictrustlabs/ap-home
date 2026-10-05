@@ -1194,7 +1194,8 @@
       "section": "gap analysis P1.4",
       "routes": [
         "(portal)/estate",
-        "(portal)/estate/ops"
+        "(portal)/estate/ops",
+        "(portal)/org/[org]/operations"
       ],
       "capabilities": [],
       "endpoints": [

@@ -914,12 +914,12 @@ export interface OpsSummaryView {
   conversations?: { conversations: number; turns: number; turnsPerConversationP50: number | null; msPerTurnP50: number | null; tokensPerTurnP50: number | null;
     rows: Array<{ conversation: string; turns: number; firstAt: number; lastAt: number; totalMs: number | null; msPerTurnP50: number | null; tokens: number | null; tokensPerTurn: number | null }> };
 }
-export async function operatorView(session: { token: string }, input: { scope: 'agent' | 'estate'; addressee?: Address; window?: '24h' | '7d' | '30d' }): Promise<{ ok: true; summary: OpsSummaryView | null } | { ok: false; error: string }> {
+export async function operatorView(session: { token: string }, input: { scope: 'agent' | 'estate' | 'organization'; addressee?: Address; window?: '24h' | '7d' | '30d' }): Promise<{ ok: true; summary: OpsSummaryView | null } | { ok: false; error: string }> {
   const out = (await postA2a('/a2a/harness/ops', { session: session.token, ...input })) as { ok?: boolean; error?: string; summary?: OpsSummaryView | null };
   return out.ok ? { ok: true, summary: out.summary ?? null } : { ok: false, error: out.error ?? 'the runtime did not answer' };
 }
 /** Rebuild the operator index from the records — eight agents per call; walks until the runtime says there is no next. */
-export async function rebuildOperatorIndex(session: { token: string }, scope: { scope: 'agent' | 'estate'; addressee?: Address }, onProgress?: (done: number, total: number) => void): Promise<{ ok: true; agents: number; indexed: number } | { ok: false; error: string }> {
+export async function rebuildOperatorIndex(session: { token: string }, scope: { scope: 'agent' | 'estate' | 'organization'; addressee?: Address }, onProgress?: (done: number, total: number) => void): Promise<{ ok: true; agents: number; indexed: number } | { ok: false; error: string }> {
   let offset: number | null = 0; let agents = 0; let indexed = 0;
   while (offset !== null) {
     const out = (await postA2a('/a2a/harness/ops', { session: session.token, ...scope, rebuild: true, offset })) as { ok?: boolean; error?: string; rebuilt?: Array<{ agent: string; records: number; indexed: number }>; next?: number | null; total?: number };
