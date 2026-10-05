@@ -518,4 +518,24 @@ describe('org content accepts either identity, still gated on stewardship', () =
     const r = await call('content.get', token, MEMBER);
     expect(r.status).toBe(401);
   });
+
+  // `content.getMany` is the batch a steward's library listing hydrates with. It sits behind the SAME gate as
+  // `content.get` — the bounds below are the ones that matter, since a batch reads many records at once.
+  it('holds the batch read to the same gate: no stewardship, a junk wire, a junk token, another person — all refused', async () => {
+    const noWire = await call('content.getMany', await relying(caip(MEMBER)), ORG);
+    expect(noWire.ok).toBe(false);
+    const junkWire = await doInstance.fetch(new Request(`https://do.test/interactions/${ORG}/content.getMany`, {
+      method: 'POST',
+      body: JSON.stringify({ session: await relying(caip(MEMBER)), resources: ['content.catalog'], stewardship: { delegator: ORG, delegate: MEMBER, caveats: [], salt: '1', signature: '0xdead' } }),
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    expect(junkWire.ok).toBe(false);
+    expect((await call('content.getMany', 'not-a-jwt', ORG)).status).toBe(401);
+    expect((await call('content.getMany', await relying(caip(ORG)), MEMBER)).status).toBe(401);
+  });
+
+  it('lets the principal past the gate for the batch read, as for the single one', async () => {
+    const r = await call('content.getMany', await relying(caip(MEMBER)), MEMBER);
+    expect(r.status).not.toBe(401);
+  });
 });

@@ -1919,6 +1919,13 @@ export class InteractionsDO {
     const rawBody = await request.text();
     let body: Record<string, unknown> = {};
     try { body = JSON.parse(rawBody) as Record<string, unknown>; } catch { /* empty body ok */ }
+    // WHERE AN OP'S TIME GOES, on request (`timings: true`): milliseconds from this point to the end of each named
+    // stage, returned beside the answer as `ms`. Numbers only — nothing the op read. A caller that waits on a topic
+    // read or a post can then say which hop it waited on, instead of "the board was slow".
+    const opT0 = Date.now();
+    const opMs: Record<string, number> = {};
+    const timedOp = <T,>(name: string, p: Promise<T>): Promise<T> => p.finally(() => { opMs[name] = Date.now() - opT0; });
+    const withMs = <T extends Record<string, unknown>>(out: T): T => (body.timings === true ? { ...out, ms: { ...opMs, total: Date.now() - opT0 } } : out);
 
     // ── Grant custody (plane B): the Worker pre-verifies the steward session + delegator match. ──
     if (op === 'grant' && request.method === 'POST') {
@@ -2072,7 +2079,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'inbox.body.getMany' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.channels.create' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.member.recorded' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'internal.wire.current' || op === 'internal.op.lookup' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'inbox.body.getMany' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.channels.create' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.member.recorded' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'internal.wire.current' || op === 'internal.op.lookup' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.getMany' || op === 'content.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -2087,7 +2094,7 @@ export class InteractionsDO {
       // `content.*` joins them (§5.4). The Home route that drives those ops ALREADY fetched the org's
       // stewardship wire and then authorized the call with the shared secret instead — the authority
       // artifact was obtained and discarded. Now it is the thing that decides.
-      const STEWARD_FACING = op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.put'
+      const STEWARD_FACING = op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.getMany' || op === 'content.put'
         // spec 341 §5.5b — ISSUING an invite is the org acting, so it takes the steward's proof like
         // every other org act. CLAIMING one is not here: it is the invitee's own op (`invite.claim`),
         // and they hold no stewardship by definition.
@@ -3527,6 +3534,27 @@ export class InteractionsDO {
           }
           return json({ ok: true });
         }
+        if (op === 'content.getMany') {
+          // MANY OF THE ORG'S CONTENT RECORDS IN ONE VAULT ROUND TRIP. A library listing hydrates a folder's
+          // artifacts, and it did so with one `content.get` per artifact — a steward opening a team that holds a few
+          // hundred records paid a few hundred hops through this object. Same wire (the delivery grant), same
+          // `content.` namespace pin, the vault's own batch read.
+          //
+          // FOR A CALLER THE GATE ADMITS WHOLE — a steward, the owner, the bridge. A SCOPED grant is judged one
+          // resource at a time (`scopedContentOp`), and a batch has many; rather than restate that judgement here
+          // and risk the two disagreeing, a scoped caller is refused and keeps the per-record read.
+          if (scopedGrants) return json({ error: 'a scoped grant reads one record at a time — use content.get' }, 403);
+          const dg = st0.deliveryGrant;
+          if (!dg) return json({ error: 'no delivery grant — enable storage for this org first' }, 409);
+          const resources = (Array.isArray(body.resources) ? body.resources : []).filter((r): r is string => typeof r === 'string').slice(0, 200);
+          if (resources.some((r) => !r.startsWith('content.'))) return json({ error: 'content.* resources only' }, 400);
+          if (!resources.length) return json({ ok: true, records: {} });
+          const resp = await this.mcpVaultTool(dg, 'get_vault_records', { recordTypes: resources });
+          const got = (await resp.json().catch(() => ({}))) as { ok?: boolean; records?: Record<string, unknown>; error?: string };
+          // A batch that failed is an error, never an empty answer: "no bytes" would read as "nothing stored".
+          if (!resp.ok || got.ok === false || !got.records) return json({ error: `content.getMany: ${got.error ?? `the vault answered ${resp.status}`}` }, 502);
+          return json({ ok: true, records: got.records });
+        }
         if (op === 'content.get' || op === 'content.put') {
           // ADR-0055 — the ORG's own Content Artifacts (`content.*`), read/written via the DO-held delivery
           // wire (its scope now covers vault:content.*). Steward-gated upstream (demo-sso-next scopeFor →
@@ -4031,11 +4059,12 @@ export class InteractionsDO {
         // seconds. The admission decision still gates what is RETURNED: a refused caller gets the 403 and
         // nothing of what was read alongside it (every read is under the org's grant, as before).
         const topicId = op === 'channels.read' && typeof body.channelId === 'string' ? body.channelId : null;
+        opMs.admitted = Date.now() - opT0;
         const [presence, index0, invitations, messages] = await Promise.all([
-          this.communityPresence(grant, principal, sessionSa, sessionCaip, body),
-          this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []),
-          this.readDoc<DiscussionInvitationRowV1[]>(grant, DISCUSSION_INVITATIONS_RESOURCE, []),
-          topicId ? this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, TOPIC_RESOURCE(topicId), []) : Promise.resolve([] as { envelope: MessageEnvelopeV1; authorName: string }[]),
+          timedOp('presence', this.communityPresence(grant, principal, sessionSa, sessionCaip, body)),
+          timedOp('index', this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, [])),
+          timedOp('invitations', this.readDoc<DiscussionInvitationRowV1[]>(grant, DISCUSSION_INVITATIONS_RESOURCE, [])),
+          topicId ? timedOp('topic', this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, TOPIC_RESOURCE(topicId), [])) : Promise.resolve([] as { envelope: MessageEnvelopeV1; authorName: string }[]),
         ]);
         if (!presence.admitted) {
           return json({ error: 'join this community first — a member-access grant, a current directory listing, or stewardship is required' }, 403);
@@ -4083,9 +4112,9 @@ export class InteractionsDO {
           const after = typeof body.after === 'string' ? body.after : '';
           const at = after ? messages.findIndex((m) => m.envelope.id === after) : -1;
           const fresh = at >= 0 ? messages.slice(at + 1) : messages;
-          if (fresh.length > 0) Object.assign(bodies, await this.readTopicBodies(grant, fresh.map((m) => m.envelope)));
+          if (fresh.length > 0) Object.assign(bodies, await timedOp('bodies', this.readTopicBodies(grant, fresh.map((m) => m.envelope))));
         }
-        return json({ ok: true, channels: wire, bodies, you: presence.you ?? '', steward, invitedTopicIds: pendingInvites });
+        return json(withMs({ ok: true, channels: wire, bodies, you: presence.you ?? '', steward, invitedTopicIds: pendingInvites }));
       }
 
       if (op === 'channels.create') {
@@ -4132,14 +4161,16 @@ export class InteractionsDO {
         // The presence proofs (a listing read + ERC-1271, the steward wire's two chain reads) and the two
         // board documents are independent: the proofs start now and are JOINED under the write lock, before
         // anything is appended or written. Nothing of the board reaches a caller the proofs refuse.
-        const presenceP = this.communityPresence(grant, principal, sessionSa, sessionCaip, body);
+        opMs.admitted = Date.now() - opT0;
+        const presenceP = timedOp('presence', this.communityPresence(grant, principal, sessionSa, sessionCaip, body));
         // Board split (W3): only the ONE channel doc is read + rewritten — same-channel conflicts only.
         const channelId = String(body.channelId ?? '');
         return this.serialize(async () => { // ARCH-H1 — serialize the channel append (many members → one channel doc)
+          opMs.lock = Date.now() - opT0;
           const [presence, index, messages] = await Promise.all([
             presenceP,
-            this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []),
-            this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, TOPIC_RESOURCE(channelId), []),
+            timedOp('index', this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, [])),
+            timedOp('topic', this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, TOPIC_RESOURCE(channelId), [])),
           ]);
           if (!presence.admitted) {
             return json({ error: 'join this community first — a member-access grant, a current directory listing, or stewardship is required' }, 403);
@@ -4159,11 +4190,11 @@ export class InteractionsDO {
           const composed: ChannelV1[] = [{ ...entry, messages }];
           const r = await appendBoardPost(composed, { channelId, from: sessionCaip as AnyMessageEnvelope['from'], authorName: name ?? 'Steward', bodyText: String(body.bodyText ?? '') });
           if (!r.ok) return json({ error: r.error }, r.error === 'unknown channel' ? 404 : 400);
-          await audit.write({ id: crypto.randomUUID(), timestamp: r.envelope.createdAt, action: 'interactions.channels.post', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel-post', id: r.envelope.id } });
+          await timedOp('audit', audit.write({ id: crypto.randomUUID(), timestamp: r.envelope.createdAt, action: 'interactions.channels.post', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'channel-post', id: r.envelope.id } }));
           const store = createVaultMessageBodyStore(this.vaultFor(grant), principal);
           // Channel bodies live in the CHANNEL namespace (the envelope's own resource — closes FAB-SSO-2).
-          await store.putBody({ messageId: r.envelope.id, bytes: new TextEncoder().encode(String(body.bodyText ?? '').trim()), contentType: 'text/plain', classification: 'internal', resource: r.envelope.body.resource });
-          await this.writeDoc(grant, TOPIC_RESOURCE(channelId), composed[0]!.messages);
+          await timedOp('putBody', store.putBody({ messageId: r.envelope.id, bytes: new TextEncoder().encode(String(body.bodyText ?? '').trim()), contentType: 'text/plain', classification: 'internal', resource: r.envelope.body.resource }));
+          await timedOp('writeTopic', this.writeDoc(grant, TOPIC_RESOURCE(channelId), composed[0]!.messages));
           await this.indexForSearch(r.envelope.id, { kind: 'topic', at: r.envelope.createdAt, snippet: '', ref: { org: principal, channelId, messageId: r.envelope.id, from: sessionSa.toLowerCase(), fromName: name ?? 'Steward', title: entry.title } }, String(body.bodyText ?? '').trim());
           // spec 327 §3 — post-commit assistant trigger: fire-and-forget AFTER the member's post is
           // durable; a failed/limited dispatch is audited + dropped, never affecting this response.
@@ -4173,8 +4204,8 @@ export class InteractionsDO {
           // Spec 400 W2 (B3) — every MEMBER AGENT the post names hears it: the mention is admitted into that
           // member's inbox on the topic's thread, post-commit, fire-and-forget (audited, never queued).
           this.dispatchMentions({ entry, channelId, principal, grant, posterCaip: sessionCaip, posterName: name ?? 'Steward', bodyText: String(body.bodyText ?? '').trim(), messageId: r.envelope.id });
-          await this.recordOperation(body, 'send', r.envelope.id);
-          return json({ ok: true, messageId: r.envelope.id });
+          await timedOp('recordOp', this.recordOperation(body, 'send', r.envelope.id));
+          return json(withMs({ ok: true, messageId: r.envelope.id }));
         });
       }
 

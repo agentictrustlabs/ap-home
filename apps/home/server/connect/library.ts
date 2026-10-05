@@ -291,6 +291,10 @@ interface LibraryScope {
   indexOnly?: boolean;
   /** Read one record (`content.artifact.<id>`) — what hydration uses. Org scope only. */
   getRecord?: (recordType: string) => Promise<unknown>;
+  /** Read MANY records in one round trip — a steward's hydration. Absent for a scoped (member) reader, whose grant
+   *  is judged one record at a time; `null` when the batch itself failed, so the caller reads them singly instead
+   *  of taking a failure for "no bytes". */
+  getRecords?: (recordTypes: readonly string[]) => Promise<Record<string, unknown> | null>;
   /** The catalog (index) list — `content.catalog`. */
   read: () => Promise<LibraryArtifact[]>;
   write: (list: LibraryArtifact[]) => Promise<void>;
@@ -424,6 +428,17 @@ async function scopeFor(request: Request, env: FnContext['env'], person: string,
         const r = await orgOp<{ record?: unknown }>('content.get', { resource: recordType });
         return r.ok ? (r.body.record ?? null) : null;
       },
+      // A STEWARD HYDRATES A FOLDER IN ONE CALL (`content.getMany`, the vault's own batch read). A team that holds a
+      // few hundred records was a few hundred `content.get` hops per listing, eight at a time.
+      ...(wire ? { getRecords: async (recordTypes: readonly string[]) => {
+        const out: Record<string, unknown> = {};
+        for (let i = 0; i < recordTypes.length; i += 200) {
+          const r = await orgOp<{ records?: Record<string, unknown> }>('content.getMany', { resources: recordTypes.slice(i, i + 200) });
+          if (!r.ok || !r.body.records) return null;
+          Object.assign(out, r.body.records);
+        }
+        return out;
+      } } : {}),
       read: async () => {
         const r = await orgOp<{ record?: unknown }>('content.get', { resource: 'content.catalog' });
         if (!r.ok) throw new LibraryReadError(r.body.error ?? `the organization's library could not be read (${r.status})`, 'content.catalog', r.status);
@@ -500,8 +515,13 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
     const wanted = artifacts.filter((a) => !a.isFolder && !a.bytesB64 && a.source === 'blob'
       && (!folderQ || a.folder === folderQ || a.folder.startsWith(`${folderQ}/`))
       && (!namesQ.size || namesQ.has(a.name)));
-    for (let i = 0; i < wanted.length; i += HYDRATE_CONCURRENCY) {
-      await Promise.all(wanted.slice(i, i + HYDRATE_CONCURRENCY).map(async (a) => {
+    // One batch when the scope has one (a steward); the per-record read otherwise, and for anything a batch that
+    // failed left unfilled — a failed batch is never taken for "these have no bytes".
+    const batch = scope.getRecords && wanted.length > 1 ? await scope.getRecords(wanted.map((a) => `content.artifact.${a.id}`)).catch(() => null) : null;
+    if (batch) for (const a of wanted) { const rec = batch[`content.artifact.${a.id}`] as { bytesB64?: string } | null | undefined; if (rec && typeof rec.bytesB64 === 'string') a.bytesB64 = rec.bytesB64; }
+    const still = batch ? [] : wanted;
+    for (let i = 0; i < still.length; i += HYDRATE_CONCURRENCY) {
+      await Promise.all(still.slice(i, i + HYDRATE_CONCURRENCY).map(async (a) => {
         const rec = (await scope.getRecord!(`content.artifact.${a.id}`).catch(() => null)) as { bytesB64?: string } | null;
         if (rec && typeof rec.bytesB64 === 'string') a.bytesB64 = rec.bytesB64;
       }));
