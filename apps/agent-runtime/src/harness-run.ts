@@ -4905,7 +4905,16 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
       .then((st) => ({ relation: st.relation, subject: st.subject, principal: standingPrincipal.toLowerCase(), because: st.because, ...(st.wireRef ? { wireRef: st.wireRef } : {}) }))
       .catch(() => undefined))
     : null;
-  const catalogOnce = remembered(`catalog:${String(input.addressee ?? '').toLowerCase()}`, () => catalogBindingFor(deps, input.addressee ? String(input.addressee) : undefined));
+  // A SCREEN'S FIXED READ PREPARES ONLY WHAT IT NAMES (2026-10-04). A rowsOnly supplied plan — the bell asking "what
+  // invitations do I have" every minute — never re-plans (a tool it names that the agent lacks answers "not offered", see
+  // `unoffered` below), so a tool SOURCE its plan does not name cannot change its answer: the catalog, the holder's MCP
+  // connectors (a vault survey + read, 1.2–2 s, its minute's memo always expired by a 60 s poll) and the Google status
+  // are prepared only when the plan names one of their tools. A conversational ask prepares everything, as before.
+  const screenPlanned: Set<string> | null = input.plan && input.rowsOnly && !input.resume ? new Set(input.plan.steps.map((st) => st.toolId)) : null;
+  const screenNames = (pred: (id: string) => boolean): boolean => !screenPlanned || [...screenPlanned].some(pred);
+  const catalogOnce = screenNames((id) => CATALOG_TOOLS.some((t) => t.id === id))
+    ? remembered(`catalog:${String(input.addressee ?? '').toLowerCase()}`, () => catalogBindingFor(deps, input.addressee ? String(input.addressee) : undefined))
+    : Promise.resolve(null);
   // THE PERSON'S STUDY, STARTED NOW (`card-room.ts`): four reads of HER vault under the grant, independent of
   // everything the harness does before the answering step, so they run beside the playbook load rather than
   // after the gates — read later, where the tool is built. A consultation is on the table's clock.
@@ -5474,7 +5483,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   // (they are the holder's, not the archetype's); a read is her standing, an act her mandate at risk high.
   // Remembered a minute per holder (`run-memo.ts`): a survey and a read of the holder's vault, 1.2–2 s on every ask
   // for a list that changes when she attaches a server at her Home. The records carry no token (`hasToken` only).
-  const mcpConnectors = await timed('prepare:mcp-connectors', () => remembered(`mcp-connectors:${String(input.addressee ?? '').toLowerCase()}`, () => mcpConnectorsOf(deps, input.addressee ? String(input.addressee) : undefined)));
+  const mcpConnectors = !screenNames((id) => isMcpTool(id) || id === MCP_CONNECTORS_LIST) ? [] : await timed('prepare:mcp-connectors', () => remembered(`mcp-connectors:${String(input.addressee ?? '').toLowerCase()}`, () => mcpConnectorsOf(deps, input.addressee ? String(input.addressee) : undefined)));
   const mcpTools = mcpConnectors.length ? [...mcpConnectorTools(mcpConnectors), (playbook?.tools?.[MCP_CONNECTORS_LIST] ? mergeContractTool(MCP_CONNECTORS_LIST_TOOL, playbook.tools[MCP_CONNECTORS_LIST]!) : MCP_CONNECTORS_LIST_TOOL)] : (playbook?.tools?.[MCP_CONNECTORS_LIST] && deps.survey ? [mergeContractTool(MCP_CONNECTORS_LIST_TOOL, playbook.tools[MCP_CONNECTORS_LIST]!)] : []);
   // A QUESTION OF JUDGEMENT over material the message carried (`playbook.answer`). Listed ONLY when the
   // message names a skill and the addressee's profile publicly advertises it — an agent answers exactly
@@ -5495,7 +5504,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   // read leaves the tools as they are (the invoker still says "not connected" if it is not).
   const person = input.person ? String(input.person).toLowerCase() : '';
   const atOwnAgent = !!person && person === String(input.addressee ?? '').toLowerCase();
-  const googleConnected = atOwnAgent ? await remembered(`google-connected:${person}`, async () => {
+  const googleConnected = atOwnAgent && screenNames((id) => /^(gmail|drive|calendar)\./.test(id)) ? await remembered(`google-connected:${person}`, async () => {
     const [mail, drive, cal] = await Promise.all((['google-gmail', 'google-drive', 'google-calendar'] as const).map((p) => connectorStatus(env as never, person as Address, p).then((x) => x.connected).catch(() => null)));
     return { 'google-gmail': mail, 'google-drive': drive, 'google-calendar': cal } as Record<string, boolean | null>;
   }).catch(() => null) : null;
@@ -5722,7 +5731,9 @@ step is then handed to that agent under authority the person grants; leave it ou
   // enables it (`KB_RETRIEVAL=playbook`). The query is the person's own sentence; the topics are the playbook's, sent as
   // declared scope and echoed on the receipt. The passages ground the composed answer; no planner reads them.
   const goalText = String((input.intent as { goal?: unknown }).goal ?? '').trim();
-  const retrieval = kbModeOf(env as never, input.variant) === 'playbook' && playbook?.retrievalQueries?.length && goalText && tools.some((t) => t.id === KB_RETRIEVE_TOOL.id)
+  // A rowsOnly ask composes nothing (the screen renders the rows), so it has no answer to ground: no retrieval — the bell's
+  // minute-by-minute invitations read spent an embedding + a vector search on every poll for passages nothing read.
+  const retrieval = !input.rowsOnly && kbModeOf(env as never, input.variant) === 'playbook' && playbook?.retrievalQueries?.length && goalText && tools.some((t) => t.id === KB_RETRIEVE_TOOL.id)
     ? { toolId: KB_RETRIEVE_TOOL.id, args: { query: goalText, topics: playbook.retrievalQueries },
         // 416 §4g — the passages ground a COMPOSED answer; a plan whose every step renders its own sentence (an
         // instruction skill's answer) needs none, so the retrieval is decided on the plan and skipped then.

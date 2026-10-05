@@ -4912,7 +4912,13 @@ app.post('/harness/ask', async (c) => {
     // agent's own object for looking back and replaying (verdicts re-derived, tools never re-run). The
     // mandates ride along ONLY there; a listing strips them. Fire-and-forget: a record that failed to land
     // costs a replay, never the run.
-    {
+    // A BACKGROUND READ THAT ANSWERED KEEPS NO RECORD (2026-10-04). The bell's minute-by-minute "what invitations do I
+    // have" was 87% of the records on a person's agent (1,488 in 33 hours) — each a week-long record plus a provenance
+    // export into her vault, for a read that changed nothing and that no one replays. It is logged with its timing; a
+    // background run that PARKS, acts or fails still keeps its full record, because that one someone will look at.
+    const quietRead = body.background === true && reply.kind === 'answer';
+    if (quietRead) console.log(`[harness/ask] background read ${runRef} answered in ${Date.now() - receivedAt}ms (no record kept)`);
+    if (!quietRead) {
       // Spec 390 W2 — the W3C Trace Context the request arrived with joins this run's spans to the caller's
       // trace. Recorded here and read by nothing else: correlation, never trust.
       const formP = recordForm ? Promise.resolve(recordForm) : recordFormOf(c.env, askDeps, addressee, runRef, result);
