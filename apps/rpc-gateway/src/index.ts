@@ -2,11 +2,25 @@
 // forward to the private origin. Generic over the chain; every hostname lives in wrangler.toml [env.*].
 import { isAllowed, isWrite, CACHE_TTL_S, injectEstimateGasCap, type Rpc } from './config';
 export { RateLimiter } from './ratelimit';
-interface Env { TOKENS: KVNamespace; RATE: DurableObjectNamespace; ORIGIN: string; ESTIMATE_GAS_CAP?: string; }
+// ORIGIN_CLIENT_ID / ORIGIN_CLIENT_SECRET are secrets (`wrangler secret put`), never vars. They are what
+// this gateway presents TO its origin. TOKENS answers "may this caller use the chain"; this pair answers
+// "is this request really from the gateway". Without it, publishing the origin on a hostname makes the
+// token check decorative — anyone who learns the hostname skips the allow-list, the gas cap and the rate
+// limiter and talks to the node directly. On a free-gas chain that is an invitation to bloat the state,
+// not just a read leak. Unset is allowed: a VNet-private origin needs no second factor, and an estate
+// whose origin is fronted by Cloudflare Access sets the pair and nothing else changes.
+interface Env { TOKENS: KVNamespace; RATE: DurableObjectNamespace; ORIGIN: string; ESTIMATE_GAS_CAP?: string; ORIGIN_CLIENT_ID?: string; ORIGIN_CLIENT_SECRET?: string; }
 const err = (id: unknown, code: number, message: string, status = 200) =>
   new Response(JSON.stringify({ jsonrpc: '2.0', id: id ?? null, error: { code, message } }), { status, headers: { 'content-type': 'application/json' } });
 const sha256 = async (s: string) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map(b => b.toString(16).padStart(2, '0')).join('');
-const forward = (env: Env, body: unknown) => fetch(env.ORIGIN, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+// Cloudflare Access service-token header names — also ordinary headers, so an origin fronted some other
+// way (nginx, say) can check the same pair without Access being involved.
+export const originHeaders = (env: Pick<Env, 'ORIGIN_CLIENT_ID' | 'ORIGIN_CLIENT_SECRET'>): Record<string, string> => {
+  const h: Record<string, string> = { 'content-type': 'application/json' };
+  if (env.ORIGIN_CLIENT_ID && env.ORIGIN_CLIENT_SECRET) { h['CF-Access-Client-Id'] = env.ORIGIN_CLIENT_ID; h['CF-Access-Client-Secret'] = env.ORIGIN_CLIENT_SECRET; }
+  return h;
+};
+const forward = (env: Env, body: unknown) => fetch(env.ORIGIN, { method: 'POST', headers: originHeaders(env), body: JSON.stringify(body) })
   .then(u => new Response(u.body, { status: u.status, headers: { 'content-type': 'application/json' } }));
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
