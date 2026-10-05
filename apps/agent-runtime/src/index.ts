@@ -4542,7 +4542,7 @@ app.post('/harness/ask', async (c) => {
         // Spec 397 — the invitations that reached the person, from their own inbox record.
         // Gap register B6a — what is waiting on her: her own agent's parked runs + invitations not yet accepted (the bell's read).
         if (toolId === WAITING_LIST_CAPABILITY) return waitingListInvoker({ ...(askDeps.readSubjectRecord ? { readSubjectRecord: askDeps.readSubjectRecord } : {}), ...(askDeps.nameOf ? { nameOf: askDeps.nameOf } : {}), listRuns: (a) => listRuns(c.env as never, a) }, String(who.sa).toLowerCase())(toolId, args, ctx);
-        if (toolId === INVITATIONS_RECEIVED_CAPABILITY) return invitationsReceivedInvoker({ ...(askDeps.readSubjectRecord ? { readSubjectRecord: askDeps.readSubjectRecord } : {}), ...(askDeps.nameOf ? { nameOf: askDeps.nameOf } : {}) }, String(who.sa).toLowerCase())(toolId, args, ctx);
+        if (toolId === INVITATIONS_RECEIVED_CAPABILITY) return invitationsReceivedInvoker({ ...(askDeps.readSubjectRecord ? { readSubjectRecord: askDeps.readSubjectRecord } : {}), ...(askDeps.readRecords ? { readRecords: askDeps.readRecords } : {}), ...(askDeps.nameOf ? { nameOf: askDeps.nameOf } : {}) }, String(who.sa).toLowerCase())(toolId, args, ctx);
         if (toolId === EXTERNAL_AGENT_TOOL.id) return externalAgentInvoker({ timeoutMs: 20_000, fetch: reachFetch,
           // Spec 379 W2 — a registry NAME resolves through its own on-chain records to a card, pinned by `atl:cardDigest`.
           nameRecords: nameRecordsReader(c.env) ?? (async () => null) })(toolId, args, ctx);

@@ -26,6 +26,8 @@ interface InboxDoc { envelopes?: Array<{ id?: string; from?: string; createdAt?:
 
 export interface InvitationsDeps {
   readSubjectRecord?: (subject: string, recordType: string) => Promise<unknown>;
+  /** One batched vault round trip for several of the person's records (`get_vault_records`) — preferred when present. */
+  readRecords?: (subject: string, recordTypes: string[]) => Promise<Record<string, unknown>>;
   nameOf?: (address: string) => Promise<string | null>;
 }
 
@@ -51,13 +53,18 @@ export async function invitationsOf(deps: InvitationsDeps, person: string): Prom
   const read = deps.readSubjectRecord;
   if (!read) return { invitations: [], messages: 0 };
   {
-    const inbox = (await read(person.toLowerCase(), 'inbox.data').catch(() => null)) as InboxDoc | null;
+    // THE TWO RECORDS IN ONE ROUND TRIP (2026-10-04). They were read one after the other — ~1.3 s each, the whole of the
+    // bell's 3 s poll — though neither depends on the other: batched when the deps can, else side by side.
+    const me = person.toLowerCase();
+    const [inboxRaw, rels] = deps.readRecords
+      ? await deps.readRecords(me, ['inbox.data', 'relationships.data']).then((r) => [r['inbox.data'] ?? null, r['relationships.data'] ?? null] as const).catch(() => [null, null] as const)
+      : await Promise.all([read(me, 'inbox.data').catch(() => null), read(me, 'relationships.data').catch(() => null)]);
+    const inbox = inboxRaw as InboxDoc | null;
     // The ENVELOPES are the record (each message carries its references); the descriptors are this side's mirror.
     const descriptors = [
       ...(inbox?.envelopes ?? []).map((e) => ({ participants: e.from ? [e.from] : [], contextRefs: e.contextRefs, createdAt: e.createdAt })),
       ...(inbox?.conversations ?? []).filter((c) => !c.archived).map((c) => ({ participants: c.participants ?? [], contextRefs: c.contextRefs, createdAt: c.createdAt })),
     ];
-    const rels = await read(person.toLowerCase(), 'relationships.data').catch(() => null);
     // ONE PARSER for relationships.data (`{ orgs: { <address>: entry } }` — a map, in several entry shapes). This read
     // `rels.data`, which the record does not have, so `joined` was false for everyone: an invitation listed as pending
     // after its invitee joined, and accept could never confirm a join (invite e2e, live 2026-09-29).
@@ -70,9 +77,11 @@ export async function invitationsOf(deps: InvitationsDeps, person: string): Prom
         const from = (d.participants ?? []).map((p) => p.match(/0x[0-9a-fA-F]{40}$/)?.[0]?.toLowerCase()).filter((a): a is string => !!a && a !== person.toLowerCase());
         const cur = seen.get(org);
         if (cur) { for (const f of from) if (!cur.from.includes(f)) cur.from.push(f); continue; }
-        seen.set(org, { org, name: deps.nameOf ? await deps.nameOf(org).catch(() => null) : null, ...(ref.label ? { label: ref.label } : {}), from, ...(d.createdAt ? { invitedAt: d.createdAt } : {}), joined: belongs.has(org) });
+        seen.set(org, { org, name: null, ...(ref.label ? { label: ref.label } : {}), from, ...(d.createdAt ? { invitedAt: d.createdAt } : {}), joined: belongs.has(org) });
       }
     }
+    // The organizations' names side by side, not one after another inside the loop.
+    if (deps.nameOf) await Promise.all([...seen.values()].map(async (v) => { v.name = await deps.nameOf!(v.org).catch(() => null); }));
     const invitations = [...seen.values()];
     return { invitations, messages: (inbox?.envelopes ?? []).length };
   }
