@@ -333,6 +333,40 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       }
     }
   } catch { /* discovery is best-effort; a missing projection just means no synthesized/stamped workspace row */ }
+  // Spec 428 — THE ORGANIZATION'S TEAMS, FOR ITS STEWARDS. A team keeps its records in its own vault; a steward of the
+  // organization it belongs to, who is not on the team, held nothing to present there (circles read as pointers,
+  // Progress as 0). Each team that granted its organization a CONTENT read (`team → org`, `org-teams:<org>`) is
+  // synthesized for the org's STEWARDS as a `via:'governed'` row carrying that grant — discovery only (ADR-0056): the
+  // team's vault re-verifies the grant, nothing here authorizes a read, and the row never enters her relationships.
+  // Members of the organization are not given these rows (spec 428 D3).
+  try {
+    const stewarded = orgs.filter((o) => String(o.relationship ?? 'steward').toLowerCase() !== 'member' && (o as { via?: string }).via !== 'governed');
+    if (stewarded.length > 0) {
+      const byAgent = new Map(orgs.map((o) => [String(o.orgAgent).toLowerCase(), o]));
+      const projections = await Promise.all(stewarded.map(async (o) => {
+        const raw = await env.AUTH_CODES.get(`org-teams:${String(o.orgAgent).toLowerCase()}`);
+        return raw ? (JSON.parse(raw) as { governor?: string; teams?: Record<string, { teamName?: string; grant?: unknown; createdAt?: number }> }) : null;
+      }));
+      for (const proj of projections) {
+        const gov = String(proj?.governor ?? '').toLowerCase();
+        if (!proj || !/^0x[0-9a-f]{40}$/.test(gov)) continue;
+        for (const [team, t] of Object.entries(proj.teams ?? {})) {
+          if (!/^0x[0-9a-f]{40}$/.test(team) || !t.grant) continue;
+          const held = byAgent.get(team);
+          if (held) { if (!(held as { governor?: string }).governor) (held as { governor?: string }).governor = gov; continue; }
+          const row = {
+            orgAgent: team, orgName: t.teamName ?? '', purpose: 'field-team', requestedBy: clientId ?? '', createdAt: t.createdAt ?? null,
+            kind: 'team', relationship: 'member', governor: gov, parent: gov,
+            // The team→org CONTENT grant; the reader's field runtime presents it to the team's vault, which re-verifies it.
+            readGrantDelegation: t.grant,
+            via: 'governed',
+          };
+          orgs.push(row as never);
+          byAgent.set(team, row as never);
+        }
+      }
+    }
+  } catch { /* best-effort discovery; a missing projection means no synthesized team rows */ }
   return jsonCors({ orgs }, request);
 };
 
@@ -406,6 +440,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
      * Bearer path only — the person session must control the governor this projection keys on.
      */
     governedWorkspace?: { workspace?: string; workspaceName?: string; grant?: unknown };
+    /** Spec 428 — write (or, with `grant: null`, drop) one team in the org→teams projection (`org-teams:<orgAgent>`): a
+     *  team affiliated with the organization + its team→org CONTENT grant. Caller must STEWARD the organization. */
+    governedTeam?: { team?: string; teamName?: string; grant?: unknown };
     /** The PRIVATE/LOCAL name of an agent that never claimed a public name (`org-localname:<orgAgent>`): a member
      *  who holds it then sees a name, not an address. Rebuildable from the owner's vault; bearer path, caller must
      *  steward the agent. `isLocal:false` marks that the agent IS publicly named (shown without the `*`). */
@@ -449,6 +486,25 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // Spec 424 §2.3 — the org→governed-workspace projection. The person stewards the governor (`org`) it keys on
     // (they just created the pair, or they run the backfill under their session); the workspace→org content grant
     // rides in and is re-verified at the workspace vault by the field runtime — this write authorizes nothing.
+    // Spec 428 — the org→teams projection: a team affiliated with the organization + its team→org content grant, so
+    // the organization's stewards can read the team's content (re-verified at the team's vault; authorizes nothing here).
+    const gt = body?.governedTeam;
+    if (gt) {
+      const team = String(gt.team ?? '').toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(team)) return jsonCors({ error: 'governedTeam.team (0x…40) required' }, request, 400);
+      const stewardLinkRaw = await env.AUTH_CODES.get(`related:${person}:${org}`);
+      const stewardLink = stewardLinkRaw ? (JSON.parse(stewardLinkRaw) as { relationship?: string }) : null;
+      if (!stewardLink || (stewardLink.relationship ?? 'steward') === 'member') {
+        return jsonCors({ error: 'you do not steward the organization this team belongs to' }, request, 403);
+      }
+      const key = `org-teams:${org}`;
+      const cur = JSON.parse((await env.AUTH_CODES.get(key)) ?? 'null') as { governor?: string; teams?: Record<string, { teamName?: string; grant?: unknown; createdAt?: number }> } | null;
+      const teams = { ...(cur?.teams ?? {}) };
+      if (gt.grant === null) delete teams[team];
+      else teams[team] = { teamName: String(gt.teamName ?? ''), grant: gt.grant ?? null, createdAt: Date.now() };
+      await env.AUTH_CODES.put(key, JSON.stringify({ governor: org, teams }));
+      return jsonCors({ ok: true, governedTeam: team, removed: gt.grant === null }, request);
+    }
     const gw = body?.governedWorkspace;
     if (gw) {
       const ws = String(gw.workspace ?? '').toLowerCase();

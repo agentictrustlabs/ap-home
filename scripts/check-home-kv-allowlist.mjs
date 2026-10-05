@@ -58,6 +58,7 @@ const ALLOWLIST = {
   'inbox-data': { class: 'cache', why: 'intercepted docKey — makeInboxKv routes it to the InteractionsDO; never written to KV (spec 323 W3f)' },
   'inbox-audit': { class: 'cache', why: 'projection of the D1 audit log (spec 291)' },
   'namecache': { class: 'cache', why: 'reverse-resolve name cache (chain is canonical, ADR-0013)' },
+  'org-teams': { class: 'cache', why: 'spec 428 — an org\'s teams + each team→org content grant, for the org stewards\' related-orgs rows. Rebuildable: re-run backfill-428-team-read.mts (re-mints + approves). Discovery only (ADR-0056).' },
   'org-workspace': { class: 'cache', why: 'spec 424 — an org\'s governed workspace + its ws→org content grant, for members\' related-orgs rows. Rebuildable: the grant\'s original is on the workspace\'s own `workspace.governor` record (backfill-424-governed-workspace.mts). Discovery only (ADR-0056).' },
   'org-localname': { class: 'cache', why: 'an agent\'s owner-chosen LOCAL name for the trust graph when it has no public name. Rebuildable from the steward\'s own records (backfill-local-names.mts); a public name always wins.' },
   // ── Member-registered OIDC clients (spec 230 §6 self-service half) ──

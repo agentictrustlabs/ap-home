@@ -67,6 +67,11 @@ export const WORKSPACE_CONTENT_SCOPE: readonly string[] = [
   'vault:coordination.*',           // endeavors / the coordination surface
 ];
 
+/** Spec 428 — the CONTENT an organization's stewards may read of a team affiliated with it (`team → org` grant). The same
+ *  families as a governed workspace's (424): content, discussion, coordination — never custody, membership,
+ *  relationships, the playbook or a member's private records. */
+export const GOVERNED_CONTENT_SCOPE: readonly string[] = WORKSPACE_CONTENT_SCOPE;
+
 /** The `aporg:Workspace` entity, in the GOVERNOR's vault, keyed by the agent that coordinates it. */
 export const workspaceRecordKey = (ws: Address | string): string => `workspace:${ws.toLowerCase()}`;
 
