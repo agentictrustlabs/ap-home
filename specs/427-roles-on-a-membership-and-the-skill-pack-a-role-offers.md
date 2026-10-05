@@ -1,6 +1,8 @@
 # Spec 427 — Roles on a membership, and the skill pack a role offers
 
-**Status:** PROPOSED 2026-10-05. **Owner:** the Home (`apps/home` — the invitation and join ceremonies, the equip
+**Status:** PROPOSED 2026-10-05; **W1 BUILT** the same day (`~/skills` 390e235: `composeDefinitions`, `POST
+/context/compose`, five role packs published and composing live). Reviewed by the Home's other maintainer; §3.3 and
+§5.2–5.4 carry the amendments. **Owner:** the Home (`apps/home` — the invitation and join ceremonies, the equip
 step, the roster) and the agent runtime (`apps/agent-runtime` — the membership record). **First consumers:** the
 field app (`~/engage`) and Field Operations (`~/pokernight`), never the subject.
 
@@ -53,7 +55,8 @@ steward may issue more or less access through the 343 ceremony without changing 
 **D4 — The organization assigns; only the person equips.** An organization may name a role, and sign the
 delegations it needs. It may not write a person's playbook: `archetype.assignment` is writable by the agent's own
 custodian (`isSelf || isSteward`), and this spec adds no other writer. The pack is OFFERED at join and the person
-accepts it — one press, no signature beyond their session — or joins without it.
+accepts it — one press, no signature beyond their session — or joins without it. Equipping writes the playbook and
+nothing on chain (§5.4).
 
 **D5 — One definition per agent, composed.** A person's playbook is their BASE (the default archetype for their
 agent type, or whatever they chose) plus one PACK per active role assignment. The composition is done by the
@@ -135,6 +138,10 @@ the member's signed grant) — from the offer on the invitation the organization
 role being recorded IS the one on the organization's own invite record for that member: a member cannot join as a
 role they were not offered. No new vault record type, no new scope, no grant re-issue.
 
+BOTH RECORDS LIVE ON THE ORGANIZATION, and for a governed workspace that is its GOVERNOR (344; the 2026-10-02
+rule): `org.recordMembership` already refuses a `.workspace` with `not_an_organization` and names the governor, so
+the invitation, the role and the membership of a workspace's people are the governing organization's records.
+
 A role CHANGE is a steward act on the same record (`org.setMemberRole`, steward-gated like `org.endMembership`): it
 replaces the role fields, keeps the delegation, and tells the member (a message with the new offer).
 
@@ -189,7 +196,8 @@ The same record, by the same op, under the same gate (`channels.archetypeAssignm
   composedFrom: {
     base: { context, archetype, version, digest },
     packs: Array<{ context, archetype, version, digest,
-                   organization: string, roleDefinitionId: string, roleName: string, equippedAt: string }>,
+                   organization: string, roleDefinitionId: string, roleName: string, equippedAt: string,
+                   equippedBy: string, equippedAs: 'self' | 'steward' }>,
   } }
 ```
 
@@ -198,18 +206,32 @@ runtime change is needed. A playbook somebody edited by hand (no `composedFrom`)
 composition, kept by reference when the registry still serves it and refused — with the reason said — when it does
 not: equipping never silently replaces a hand-made playbook.
 
+`equippedBy` / `equippedAs` say WHO pressed. The gate stays `isSelf || isSteward` — a steward equips an agent they
+custody (a service, a character in a game) — but the record and the Playbook page say when somebody's agent was
+equipped by its steward rather than by them.
+
+A composed playbook's `archetypeId` is `<base>+<packs>`, which no registry archetype carries, so the Playbook page's
+"a newer version is published" check cannot match on it. For a composition it compares EACH PART: the digest in
+`composedFrom` against what the registry compiles for that reference now.
+
 ### 5.3 Reconciling
 
 The person's Home recomposes when the set of packs it SHOULD hold differs from `composedFrom.packs`: on equip, on a
 role change, and when a membership the person holds has ended or lost its role. The set is read from the person's
-own memberships (their links and each organization's membership record of them), by the person's own session. A
-pack whose membership ended is dropped; nothing is ever added without the person's press.
+own memberships: their links say which organizations, and each organization answers for ITS record of them through a
+member-self read on its own object — `org.membership.mine`, gated like `org.endMembership`'s self branch (the session
+must be the member; it returns that member's record and nothing else). A person cannot read an organization's vault,
+and does not need to. A pack whose membership ended is dropped; nothing is ever added without the person's press.
 
-### 5.4 Capabilities on the card
+### 5.4 The card catches up; equip does not write it
 
-A pack that offers a capability the agent does not advertise (`atl:capabilities`) cannot be reached by another
-agent asking for it. Equipping adds the pack's capabilities to the person's private capability record and, where
-the pack says a capability is offered to others, to the card — the same two writes connect-time defaults make.
+Equip writes the playbook. It does NOT write `atl:capabilities`: that is an on-chain profile write needing the
+person's signature (which D4 promises equip will not ask for), and what a card advertises comes from a Card Studio
+release bound to the playbook (354 K6) — never from a second hand editing the capability list. So after equipping,
+the Playbook page says what it already says of any private playbook — "your card does not advertise this yet" — and
+names the capabilities the new pack offers that the card lacks, with the one link to release a card bound to it.
+Until then the person's own asks reach the pack's tools; another agent asking for a capability the card does not
+advertise is told so.
 
 ## 6. Invariants
 
@@ -226,7 +248,10 @@ the pack says a capability is offered to others, to the card — the same two wr
 **The field app.** Five default role definitions, created with a workspace in its governing organization and
 inherited by its teams: field worker (`field-recorder`), team lead (`community-steward`), coach (`member`), partner
 liaison (`member`), coordinator (`progress-steward`). Its invite forms send the offer; its rosters show the role;
-the access ceremony opens on the role's default. Packs live in the registry's `field-circles` context.
+the access ceremony opens on the role's default. Packs are `role-field-worker`, `role-team-lead`, `role-coach`,
+`role-partner-liaison` and `role-coordinator`, registered in the `field-operations` context beside the real
+`field-worker` archetype (`field-circles` has no recorded owner and refuses writes; `register-field-roles.mjs` moves
+them with one variable once it has one).
 
 **Field Operations.** A character's playbook becomes its character sheet (the base) plus the pack of its part. The
 season writes real roles as it plays: founding a team makes the founder its lead, an invitation carries the role,
@@ -237,8 +262,8 @@ joining records it, and the character's playbook is composed from its membership
 | Wave | Where | What |
 |---|---|---|
 | **W1** | `~/skills` | `composeDefinitions` in the compiler; `POST /context/compose`; the five field role packs published |
-| **W2** | `apps/agent-runtime`, `apps/home` | `orgRole` on the invitation; the role on the membership record, checked against the invite; `org.setMemberRole`; the role on roster reads |
-| **W3** | `apps/home` | the role on the join screen; the equip step and the Playbook page's "Roles" section; `composedFrom`; reconcile |
+| **W2** | `apps/agent-runtime`, `apps/home` | `orgRole` on the invitation; the role on the membership record, checked against the invite; `org.setMemberRole`; `org.membership.mine`; the role on roster reads |
+| **W3** | `apps/home` | the role on the join screen; the equip step and the Playbook page's "Roles" section; `composedFrom` with who equipped; per-part freshness; "your card does not advertise X yet"; reconcile |
 | **W4** | `~/engage` | the role catalogue, the offer on invites, roles on rosters and in Ask |
 | **W5** | `~/pokernight` | the season writes roles; characters composed from sheet + pack; the walks check both |
 | **W6** | `~/agenticprimitives/packages` | `skillPackRefs` on `OrganizationRoleDefinition`, `proposedRoleDefinitionRefs` on `MembershipInvitationV1` (324 §5), `aporg:offersSkillPack`, the membership binding's new fields |
