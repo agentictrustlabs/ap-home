@@ -273,6 +273,19 @@ function useCenteredGraph(live: LivePerson, center: string, showAll: boolean, sh
     const above: CenteredItem[] = fetched.stewards.map((st) => (st.id.toLowerCase() === me ? { ...st, name: `${live.name} (you)`, dim: true } : { ...st, dim: true }));
     // Centring a WORKSPACE: its governing org sits above with the 'governed by' edge (workspace → its org).
     if (governorAgent) above.unshift({ id: governorAgent.agent, kind: 'org', name: governorAgent.name ? nameLabel(governorAgent.name) : governorAgent.agent.slice(0, 10), sub: `${governorAgent.kindWord ?? 'organization'} · governs this workspace`, edge: { kind: 'governance', label: 'governed by', weight: 0.9, toCenter: true } });
+    // Centring a TEAM (or any organization-class agent chartered under another): the organization it is a TEAM OF sits
+    // above it — the hub doctrine's link, `TeamAffiliation → org` — and the workspace that organization governs is shown
+    // faded, reached THROUGH it ("via <org>"), never as a direct team↔workspace relationship (2026-10-05: a team page
+    // showed its stewards, members and circle but neither its organization nor the workspace it works in).
+    const parentId = !governorId && self?.parent ? self.parent.toLowerCase() : null;
+    const parentOrg = parentId && parentId !== me && parentId !== center ? live.agents.find((o) => o.agent.toLowerCase() === parentId && o.cls === 'org') ?? null : null;
+    if (parentOrg) {
+      const orgName = parentOrg.name ? nameLabel(parentOrg.name) : parentOrg.agent.slice(0, 10);
+      above.unshift({ id: parentOrg.agent, kind: 'org', name: orgName, sub: `${parentOrg.kindWord ?? 'organization'} · ${/team/.test(String(self?.kindWord ?? '')) ? 'this team belongs to it' : 'chartered under it'}`, edge: { kind: 'membership', label: /team/.test(String(self?.kindWord ?? '')) ? 'team of' : 'chartered under', weight: 0.9, toCenter: false } });
+      for (const ws of live.agents.filter((o) => o.governedBy?.toLowerCase() === parentId && o.agent.toLowerCase() !== center)) {
+        above.push({ id: ws.agent, kind: ws.cls, name: ws.name ? nameLabel(ws.name) : ws.agent.slice(0, 10), sub: `${ws.kindWord ?? 'workspace'} · governed by ${orgName}`, dim: true, edge: { kind: 'governance', label: `via ${orgName}`, weight: 0.4, toCenter: false } });
+      }
+    }
     // Centring an ORG the person steers/belongs to: add 'you' as a faded holder when the roster didn't already.
     if (self && !governorId && !above.some((a) => a.id.toLowerCase() === me)) above.push({ id: live.personSA, kind: 'person', name: `${live.name} (you)`, sub: live.agentName, dim: true, edge: self.relationship === 'member' ? { kind: 'membership', label: 'member of', weight: 0.5, toCenter: true } : { kind: 'stewardship', label: 'stewards', weight: 0.8, toCenter: true } });
     const word = self?.kindWord ?? (self?.cls === 'service' ? 'service' : 'organization');
