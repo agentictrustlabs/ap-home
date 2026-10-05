@@ -1699,6 +1699,39 @@ export class InteractionsDO {
     return (await this.verifyWire(wire, principal, sessionSa)) ? { ok: true, grants } : { ok: false };
   }
 
+  /**
+   * Spec 428 §6.2 — A STEWARD OF THE ORGANIZATION THIS BODY OPENED ITS CONTENT TO MAY READ ITS BOARD.
+   *
+   * A team keeps its own board. It may sign its ORGANIZATION a content-read grant (428 D1: `team → org`, read-only,
+   * naming the discussion families among its resources), and the Home hands that grant to the organization's
+   * stewards. Presented to the team's VAULT it already reads the team's records; presented here it reads the board —
+   * the same grant, the same reader, the other door. Two proofs, both checked against the chain, and BOTH must hold:
+   *
+   *   · `grant`        this body → some organization, a vault-record-scope READ that names the conversation index,
+   *                    live and unrevoked (`hasScopedAccess` with the organization as the delegate). A grant that does
+   *                    not name discussions reads none; the body revokes the grant and this door closes with it.
+   *   · `stewardship`  THAT organization → this session's person, a stewardship wire by shape and by chain. A member
+   *                    of the organization is not its steward (428 D3) and is refused.
+   *
+   * READ ONLY, AND ONLY WHAT IS OPEN. This is not one of `communityPresence`'s proofs and never becomes one: it
+   * admits nobody to the community. The one caller is the board READ (`channels.list` / `channels.read`), which then
+   * serves the OPEN topics and nothing a restricted topic holds; every op that writes still asks for presence, which
+   * this reader does not have. Nothing is remembered about the reader on the body's side.
+   */
+  private async governedBoardReader(principal: string, sessionSa: Address, body: Record<string, unknown>): Promise<boolean> {
+    const presented = body.governedRead as { grant?: IncomingDelegation; stewardship?: IncomingDelegation } | undefined;
+    const grant = presented?.grant;
+    const stewardship = presented?.stewardship;
+    if (!grant || !stewardship || typeof grant.delegate !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(grant.delegate)) return false;
+    const organization = grant.delegate as Address;
+    // The grant must run from THIS body to ANOTHER agent that is not the caller: a grant to the session itself is a
+    // member's scoped read (its own door), and a body does not govern itself.
+    if (organization.toLowerCase() === principal.toLowerCase() || organization.toLowerCase() === sessionSa.toLowerCase()) return false;
+    const reads = await this.hasScopedAccess(principal, organization, grant, CONVERSATION_INDEX_RESOURCE, 'read');
+    if (!reads.ok) return false;
+    return this.isSteward(organization, sessionSa, stewardship);
+  }
+
   /** Steward proof: a presented org→person organizationStewardshipDelegation wire, org-verified + unrevoked on-chain, AND
    *  carrying the stewardship caveat shape (SEC-C1 — never a data grant). */
   private async isSteward(principal: string, sessionSa: Address, wire: IncomingDelegation | undefined): Promise<boolean> {
@@ -4260,13 +4293,17 @@ export class InteractionsDO {
           timedOp('invitations', this.readDoc<DiscussionInvitationRowV1[]>(grant, DISCUSSION_INVITATIONS_RESOURCE, [])),
           topicId ? timedOp('topic', this.readDoc<{ envelope: MessageEnvelopeV1; authorName: string }[]>(grant, TOPIC_RESOURCE(topicId), [])) : Promise.resolve([] as { envelope: MessageEnvelopeV1; authorName: string }[]),
         ]);
-        if (!presence.admitted) {
+        // Spec 428 §6.2 — not in the community, but a steward of the organization this body opened its content to:
+        // a READER. Asked only when presence refused, so nobody already admitted pays for it.
+        const reader = !presence.admitted && (await timedOp('governed-reader', this.governedBoardReader(principal, sessionSa, body)));
+        if (!presence.admitted && !reader) {
           return json({ error: 'join this community first — a member-access grant, a current directory listing, or stewardship is required' }, 403);
         }
         const steward = presence.steward;
         // Every board opens with a Welcome topic (created here if the organization has none yet). The index
-        // just read answers whether one exists; only a board without one pays the create.
-        const index = index0.some((c) => c.title.trim().toLowerCase() === 'welcome')
+        // just read answers whether one exists; only a board without one pays the create. A READER writes nothing,
+        // so a reader's look never creates one.
+        const index = reader || index0.some((c) => c.title.trim().toLowerCase() === 'welcome')
           ? index0
           : await this.ensureWelcomeTopic(grant, principal).then(() => this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, [])).catch(() => index0);
         // Conversation/topic split (§10): descriptors from conversation.index; ONE topic's messages from its own doc.
@@ -4291,7 +4328,9 @@ export class InteractionsDO {
             interaction: interactionViewOfChannel(c),
             messages: [] as { envelope: MessageEnvelopeV1; authorName: string }[],
           }));
-        if (topicId) {
+        // A READER is served the topics they can SEE and nothing else: asking for a topic by id that is not among
+        // them (a restricted one) returns the board without its messages or their bodies.
+        if (topicId && !(reader && !wire.some((c) => c.descriptor.id === topicId))) {
           wire = wire.map((c) => (c.descriptor.id === topicId ? { ...c, messages } : c));
           // Bodies load at the envelope's OWN resource (channel namespace) — never re-normalized.
           // ONE batched round-trip for the whole topic (was one delegated read PER MESSAGE — the
@@ -4308,7 +4347,7 @@ export class InteractionsDO {
           const fresh = at >= 0 ? messages.slice(at + 1) : messages;
           if (fresh.length > 0) Object.assign(bodies, await timedOp('bodies', this.readTopicBodies(grant, fresh.map((m) => m.envelope))));
         }
-        return json(withMs({ ok: true, channels: wire, bodies, you: presence.you ?? '', steward, invitedTopicIds: pendingInvites }));
+        return json(withMs({ ok: true, channels: wire, bodies, you: presence.you ?? '', steward, invitedTopicIds: pendingInvites, ...(reader ? { readOnly: true, readVia: 'governed' } : {}) }));
       }
 
       if (op === 'channels.create') {

@@ -1,6 +1,6 @@
 # Spec 428 — An organization's steward reads what its teams hold
 
-**Status:** W1 + W2 + W3 built and live, 2026-10-05 (W1 backfilled for the field realm’s four teams; W2 in `~/engage` 8eb83ce — §6.1). **Owner decision:** "yes to 3" (the Home developer's list, item 3).
+**Status:** W1 + W2 + W3 built and live, 2026-10-05 (W1 backfilled for the field realm’s four teams; W2 in `~/engage` 8eb83ce — §6.1), and the team’s BOARD admits the same reader, read-only (§6.2). **Owner decision:** "yes to 3" (the Home developer's list, item 3).
 **Builds on:** spec 424 (a member reads the governed workspace through the governor — approach B), spec 344 (team ⊑
 organization; the hub: `org → { members, teams, workspace }`), ADR-0055 (the vault is the record), ADR-0056
 (resolution is not authority), ADR-0041 (Web3 authority; a projection authorizes nothing).
@@ -98,6 +98,40 @@ The board shows such a row with all its detail and no edit. Proven live by `~/po
 `scripts/walk-field-org-steward.cjs`: Nathan (steward of the organization, on none of Weld, Plains or Larimer) reads
 Weld's circle with its people and count; the team's roster is kept back; Bob, neither on the team nor a steward of
 the organization, is refused and told why.
+
+### 6.2 The board is a second door, and the same reader reads it (owner, 2026-10-05)
+
+A team's DISCUSSIONS are not read from its vault by a reader: they are served by its board (`channels.list` /
+`channels.read` on the team's own object), which admits people who are IN the community — a listing, stewardship of
+the team, a member access grant, the team's membership record, or membership of a governing organization (a workspace
+only). The organization's steward is none of those, so W1–W3 left them reading a team's circles and being told
+"join this community first" on its Discussions, although D2 names the discussion families in the grant. The owner's
+decision: they read the conversations too.
+
+`governedBoardReader` (agent-runtime) is that door. The caller presents `governedRead: { grant, stewardship }` and the
+team's object checks BOTH against the chain:
+
+- `grant` — this team → an organization, a vault-record-scope READ that names `conversation.index`, live and
+  unrevoked (`hasScopedAccess` with the organization as the delegate);
+- `stewardship` — THAT organization → the caller, a stewardship wire by shape and by chain. A member of the
+  organization is not its steward (D3) and is refused.
+
+What it gives is deliberately less than admission:
+
+- **Read only.** It is NOT one of `communityPresence`'s proofs. Only the board READ consults it, and only after
+  presence has refused; every op that writes (post, react, create, the assistant, a local name) still asks for
+  presence, which this reader does not have. The answer carries `readOnly: true, readVia: 'governed'`.
+- **Open topics only.** The reader is served what any member of the team may see and nothing a RESTRICTED topic
+  holds — not its descriptor, not its messages, and not their bodies when asked for by id.
+- **Nothing is written for the reader**: no Welcome topic is created by their look, and the team records nothing
+  about them.
+- **The team closes it.** Revoking the team → organization grant (§5) closes this door with the vault's.
+
+In the field app (`~/engage`): the gateway picks the two proofs out of the caller's own roster (`governedBoardProofOf`
+— the governed row's grant, and the caller's stewardship wire for the governor) and sends them with every board read;
+Discussions shows the open conversations with no composer, no reactions and no "new"; and a reader is told that
+Attention is worked out for a team's stewards instead of being shown a refusal. Somebody who is not on the team and
+does not steward its organization is told so plainly, where the screen used to say "usually momentary — try again".
 
 ## 7. Open questions
 
