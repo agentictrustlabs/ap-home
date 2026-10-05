@@ -11,6 +11,7 @@
     "skillsCorpus": "~/skills",
     "capabilitySources": [
       "apps/agent-runtime/src",
+      "apps/agent-runtime/src/connectors",
       "apps/agent-runtime/node_modules/@agenticprimitives/context/dist",
       "apps/agent-runtime/node_modules/@agenticprimitives/harness/dist"
     ]
