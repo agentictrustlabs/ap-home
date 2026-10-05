@@ -1,0 +1,43 @@
+name: Ask truthfulness (nightly)
+
+# Spec 358 W2 — the truthfulness eval set, against the LIVE faithnet estate.
+#
+# Every case memorialises a real incident in which every authority gate held and the ANSWER lied. The
+# suite is deterministic (no model judges a model) but its subject is a deployed agent over a moving
+# estate, so like the Echidna nightly it is ARTIFACT-ONLY at first (continue-on-error) — a red night is
+# visible in the morning without breaking the bar. Graduates to blocking once the track record earns it.
+#
+# No secrets: the demo personas sign in openly (they are a published cast; demo/personas.json).
+
+on:
+  schedule:
+    - cron: '47 3 * * *'   # 03:47 UTC nightly — after the discovery indexer's runs, so counts are settled
+  workflow_dispatch:
+
+jobs:
+  ask-truth:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6 (R917-A-12: SHA-pinned)
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+      - run: pnpm install --no-frozen-lockfile --ignore-scripts
+      - name: Run the truth set against faithnet
+        run: pnpm check:ask-truth | tee ask-truth-report.txt
+      - name: Summary
+        if: always()
+        run: |
+          echo '## Ask truthfulness (faithnet)' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -30 ask-truth-report.txt >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: ask-truth-report
+          path: ask-truth-report.txt
+          retention-days: 30
