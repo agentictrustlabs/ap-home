@@ -81,7 +81,7 @@ export function OrgChooser({
   const [orgs, setOrgs] = useState<Array<{ agent: Address; name: string; asSteward: boolean }> | null>(token ? null : []);
   const [selected, setSelected] = useState<'new' | Address>('new');
   const [name, setName] = useState(defaultCommonName(defaultName));
-  // The web address follows the name until the person edits it; null = still following.
+  // The handle follows the name until the person edits it; null = still following.
   const [labelEdit, setLabelEdit] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [err, setErr] = useState('');
@@ -196,14 +196,15 @@ export function OrgChooser({
           onKeyDown={(e) => { if (e.key === 'Enter') go(); }}
         />
       )}
-      {/* The NAME and the WEB ADDRESS are two things: the first is what people call the organization and is
-          what apps show, the second is the handle it claims and must be `[a-z0-9-]`. One field produced an
-          organization known to every app as `global-church.org`. The address follows the name until edited. */}
+      {/* The NAME and the HANDLE are two things: the first is what people call the organization and is
+          what apps show, the second is the label it claims and must be `[a-z0-9-]`. One field produced an
+          organization known to every app as `global-church.org` — which people read as a website, and it is
+          not one, so the handle is never called an address on screen. It follows the name until edited. */}
       {selected === 'new' && (
         <input
           className="onboarding-input"
-          placeholder="Web address"
-          aria-label="Web address"
+          placeholder="Handle"
+          aria-label="Handle"
           value={labelEdit ?? slug}
           onChange={(e) => { setLabelEdit(e.target.value); setErr(''); }}
           onKeyDown={(e) => { if (e.key === 'Enter') go(); }}
@@ -217,7 +218,7 @@ export function OrgChooser({
         </p>
       )}
       {selected === 'new' && slug && (
-        <p className="onboarding-hint">Its web address will be <strong>{slug}.impact</strong>; apps will show it as <strong>{name.trim() || slug}</strong>.</p>
+        <p className="onboarding-hint">Its handle will be <strong>{slug}.impact</strong> (not a website); apps will show it as <strong>{name.trim() || slug}</strong>.</p>
       )}
 
       {orgs.length > 0 && (
