@@ -41,6 +41,11 @@ wrangler kv key delete --binding TOKENS --env <env> "$KEY"            # revoke
   2 s; `pending` never. Errors and `null` results are never cached (receipt polls stay live).
 - `ESTIMATE_GAS_CAP` (hex) is injected into `eth_estimateGas` calls that set no `gas`; empty = never.
 - CORS reflects `Origin` — auth is the token, never a cookie.
+- `ORIGIN_CLIENT_ID` / `ORIGIN_CLIENT_SECRET` (secrets, optional): when both are set, every request to
+  `ORIGIN` carries them as `CF-Access-Client-Id` / `CF-Access-Client-Secret`. Set them when the origin
+  is published on a hostname behind Cloudflare Access (or any front that checks the same pair);
+  leave them unset for a VNet-private origin. TOKENS says who may use the chain; this pair says the
+  request really came from the gateway.
 
 ## Environments and deploy
 
