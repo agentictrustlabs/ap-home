@@ -98,7 +98,10 @@ const NAMES: Record<string, string> = { 'goose-2.svc': GOOSE, 'stranger.svc': ST
 beforeAll(async () => { const k = await brokerKey(); jwks = k.jwks; signer = k.privateKey; });
 beforeEach(async () => {
   w = { records: new Map(), proofsValid: true };
-  handed = [];
+  // EACH TEST ITS OWN SINK, captured by the stub: a late fire-and-forget delivery from the previous test lands in THAT
+  // test's array, never this one's (CI flake 2026-10-05 — one test saw another's admission).
+  const sink: typeof handed = [];
+  handed = sink;
   const original = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(typeof input === 'string' || input instanceof URL ? input : (input as Request).url);
@@ -110,7 +113,7 @@ beforeEach(async () => {
   m.set('state', { grant: grantWire });
   const A2A_TASKS = {
     idFromName: (n: string) => n,
-    get: (id: string) => ({ fetch: async (req: Request) => { handed.push({ agent: id, path: new URL(req.url).pathname, body: await req.json() as Record<string, unknown> }); return new Response(JSON.stringify({ ok: true, fired: [] }), { headers: { 'content-type': 'application/json' } }); } }),
+    get: (id: string) => ({ fetch: async (req: Request) => { sink.push({ agent: id, path: new URL(req.url).pathname, body: await req.json() as Record<string, unknown> }); return new Response(JSON.stringify({ ok: true, fired: [] }), { headers: { 'content-type': 'application/json' } }); } }),
   };
   doInstance = new InteractionsDO(
     { storage: { async get(k: string) { return m.get(k); }, async put(k: string, v: unknown) { m.set(k, v); }, async delete(k: string) { m.delete(k); } } } as unknown as DurableObjectState,
@@ -131,7 +134,12 @@ async function call(op: string, asSa: string, extra: Record<string, unknown> = {
   const token = await mint(signer, caip(asSa));
   return doInstance.fetch(new Request(`https://do.test/interactions/${ORG}/${op}`, { method: 'POST', body: JSON.stringify({ session: token, ...extra }), headers: { 'Content-Type': 'application/json', authorization: `Bearer ${token}` } }));
 }
-const settle = () => new Promise((r) => setTimeout(r, 30));
+// Deliveries are fire-and-forget after the post commits: wait for what a test EXPECTS (bounded), never a fixed sleep
+// that a slow runner outlasts; a NEGATIVE check waits a little longer before asserting nothing arrived.
+const settle = () => new Promise((r) => setTimeout(r, 300));
+async function until(cond: () => boolean, ms = 2000): Promise<void> {
+  for (const t0 = Date.now(); !cond() && Date.now() - t0 < ms;) await new Promise((r) => setTimeout(r, 10));
+}
 
 describe('mentions leave the topic for the member (B3)', () => {
   it('a post naming @goose-2 is admitted to goose-2 on the topic thread; a non-member handle and the org itself are not', async () => {
@@ -139,7 +147,8 @@ describe('mentions leave the topic for the member (B3)', () => {
     w.records.set(`org.invite:agent:${GOOSE}`, { invited: true });
     const r = await call('channels.post', MEMBER, { channelId: 'conv_abc', bodyText: '@goose-2 what is the plan? cc @stranger and @org' });
     expect(r.status).toBe(200);
-    await settle();
+    await until(() => handed.some((h) => h.path === '/internal/admit-message'));
+    await settle(); // and nothing more (the non-member and the org must not follow)
     const admits = handed.filter((h) => h.path === '/internal/admit-message');
     expect(admits.map((h) => h.agent)).toEqual([GOOSE]);
     const env = admits[0]!.body.envelope as { from: string; to: string[]; conversationId: string; contextRefs: Array<{ kind: string; id: string; label?: string }>; actor?: string; subject: string };
@@ -163,15 +172,15 @@ describe('a reaction is a trigger source (B7)', () => {
   it("adding an emoji fires the post author's reaction triggers; removing it fires nothing", async () => {
     seedListing('Bob', MEMBER); seedListing('Cara', CARA); seedOpenTopic();
     const posted = await (await call('channels.post', MEMBER, { channelId: 'conv_abc', bodyText: 'I propose Friday' })).json() as { messageId: string };
-    handed = [];
+    handed.length = 0; // cleared in place — the stub holds this test's array
     const r1 = await call('channels.react', CARA, { channelId: 'conv_abc', messageId: posted.messageId, emoji: '👍' });
     expect(r1.status).toBe(200);
-    await settle();
+    await until(() => handed.some((h) => h.path === '/internal/fire-triggers'));
     const fired = handed.filter((h) => h.path === '/internal/fire-triggers');
     expect(fired.map((h) => h.agent)).toEqual([MEMBER]);
     const source = fired[0]!.body.source as { kind: string; message: { profile: string; text: string; from: string; thread: string; topic: { org: string; channelId: string } } };
     expect(source.message).toMatchObject({ profile: 'reaction', text: '👍', from: CARA.toLowerCase(), thread: `conv_topic-${ORG}-conv_abc`, topic: { org: ORG, channelId: 'conv_abc' } });
-    handed = [];
+    handed.length = 0; // cleared in place — the stub holds this test's array
     await call('channels.react', CARA, { channelId: 'conv_abc', messageId: posted.messageId, emoji: '👍' });   // toggle off
     await settle();
     expect(handed.filter((h) => h.path === '/internal/fire-triggers')).toHaveLength(0);
