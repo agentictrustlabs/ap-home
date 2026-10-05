@@ -25,7 +25,9 @@
     "check:gate-fixture": "tsx scripts/check-gate-fixture.mts",
     "check:invitation-audit": "tsx scripts/check-invitation-audit.mts",
     "check:unknown-not-zero": "tsx scripts/check-unknown-not-zero.mts",
-    "build:home": "pnpm --filter @ap-home/home build && node -e \"const fs=require('fs');const src='apps/home/dist';if(process.env.VERCEL&&fs.existsSync(src)&&!fs.existsSync('dist'))fs.cpSync(src,'dist',{recursive:true})\""
+    "build:home": "pnpm --filter @ap-home/home build && node -e \"const fs=require('fs');const src='apps/home/dist';if(process.env.VERCEL&&fs.existsSync(src)&&!fs.existsSync('dist'))fs.cpSync(src,'dist',{recursive:true})\"",
+    "build:component-registry": "tsx scripts/build-component-registry.mts",
+    "check:component-registry": "tsx scripts/build-component-registry.mts --check"
   },
   "devDependencies": {
     "@agenticprimitives/a2a": "0.0.0-alpha.25",
@@ -49,7 +51,8 @@
     "@agenticprimitives/key-custody": "1.0.0-alpha.27",
     "@agenticprimitives/orchestration": "0.0.0-alpha.6",
     "@agenticprimitives/registry-kit": "0.0.0-alpha.15",
-    "@agenticprimitives/runtime-member": "0.0.0-alpha.4"
+    "@agenticprimitives/runtime-member": "0.0.0-alpha.4",
+    "@agenticprimitives/types": "1.0.0-alpha.27"
   },
   "pnpm": {
     "overrides": {
