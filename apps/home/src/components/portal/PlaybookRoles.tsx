@@ -63,7 +63,8 @@ export function PlaybookRoles({ agent, typeSlug, name, current, cardBound, onCha
   const orgName = useCallback((org: string, fromRead?: string | null): string | null => {
     if (fromRead?.trim()) return fromRead.trim();
     const row = managed.find((a) => a.agent.toLowerCase() === org.toLowerCase());
-    return row?.name ? nameLabel(row.name) : null;
+    // A naming-service name is shown by its label; a name with spaces in it is somebody's own words, kept as written.
+    return row?.name ? (/\s/.test(row.name) ? row.name.trim() : nameLabel(row.name)) : null;
   }, [managed]);
 
   const [rawRead, setRead] = useState<RolesRead | null>(null);
