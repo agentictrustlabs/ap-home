@@ -9,7 +9,7 @@
 import type { Address } from '@agenticprimitives/types';
 import { issueDirectoryListing } from './directory';
 import { activateInteractionsIfNeeded, isKmsVia, resolveVia, signHashFor, type Via } from './onboarding';
-import { recordOrgMembership } from '../lib/org-membership';
+import { recordOrgMembership, type JoinedRole } from '../lib/org-membership';
 import { provisionCommunityMessaging } from '../lib/messaging-ceremony';
 
 export interface JoinOrganizationInput {
@@ -24,7 +24,9 @@ export interface JoinOrganizationInput {
   named: boolean;
 }
 
-export async function joinOrganization(input: JoinOrganizationInput): Promise<void> {
+/** Resolves with the ROLE the organization recorded the member as (spec 427), when it named one — so whatever ran the
+ *  ceremony can say "you joined as Field worker" and point at the pack that role offers. Null for a plain member. */
+export async function joinOrganization(input: JoinOrganizationInput): Promise<JoinedRole | null> {
   const org = input.org.toLowerCase();
   const via = resolveVia(input.credential as never, input.session.via as never);
   const sign = await signHashFor(via, input.member, { token: input.session.token });
@@ -38,7 +40,8 @@ export async function joinOrganization(input: JoinOrganizationInput): Promise<vo
   // spec 322 W3d — the member's own interactions plane, when it costs no extra device prompt.
   if (isKmsVia(via)) await activateInteractionsIfNeeded(input.member, via, { token: input.session.token }).catch(() => null);
   // spec 321 W1/W2b — the membership delegation (member→org); the server attaches any steward-pre-signed grant.
-  await recordOrgMembership(input.member, org, sign, input.session.token, null, input.displayName);
+  const joinedRole = await recordOrgMembership(input.member, org, sign, input.session.token, null, input.displayName);
   await provisionCommunityMessaging({ person: input.member, org: org as Address, named: input.named, via, token: input.session.token })
     .catch((e) => { console.warn('[join] community messaging provision failed (non-fatal):', e); });
+  return joinedRole;
 }

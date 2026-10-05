@@ -22,6 +22,8 @@ import { catalogForKind, type CatalogArchetype } from '../../lib/archetype-catal
 import { registryArchetypesFor, type RegistryArchetype } from '../../lib/skills-registry';
 import { KIND_TO_TYPE_SLUG } from '../../lib/archetype-catalog';
 import { BusyButton } from '../shared/BusyButton';
+import { PlaybookRoles } from './PlaybookRoles';
+import { recomposePlaybook, type ComposedFrom } from '../../home/role-playbook';
 
 import { Loading } from '../shared/Loading';
 /** The record shape written to the agent's vault (`archetype.assignment`). */
@@ -31,6 +33,9 @@ interface ArchetypeAssignmentRecord {
   archetypeVersion: string;
   definitionDigest: string;
   definition: AgentHarnessDefinitionV1;
+  /** Spec 427 §5.2 — when the playbook is a base plus role packs: which part came from which membership. The runtime
+   *  reads `definition` and `definitionDigest` only. */
+  composedFrom?: ComposedFrom;
 }
 
 /** Read/write the agent's archetype assignment through the STEWARD-gated `/connect/channels` path — the
@@ -166,8 +171,9 @@ function RegistrySource({ registry }: { registry: RegistryArchetype }) {
  * previews the diff, and on approval writes the assignment record — one write, no signature, no grant.
  */
 export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind: string; name?: string }) {
-  const { session } = useSession();
+  const { session, agentAddress } = useSession();
   const token = session?.token ?? null;
+  const typeSlug = KIND_TO_TYPE_SLUG[(kind ?? '').toLowerCase()] ?? '';
   // TWO SOURCES, ONE SHAPE. The app-config catalog is spec 354 §3's defaults; the registry is where a
   // domain author's SKILL.md contracts actually live, so an archetype edited there shows up here. Both
   // hand back an AgentHarnessDefinitionV1, which is the point of compiling one.
@@ -224,7 +230,15 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
     if (!selected || !token) return;
     setBusy(true); setSaved(false); setError(null);
     try {
-      await writeAssignment(token, agent, selected.definition);
+      // SWITCHING PLAYBOOK KEEPS THE ROLE PACKS (spec 427): a person who equipped a role and then picks a different
+      // base did not un-equip the role. A registry archetype is recomposed with the packs they hold; a built-in one
+      // cannot be composed with anything, and the button says so before it is pressed.
+      const packs = current?.composedFrom?.packs ?? [];
+      if (packs.length && selected.registry && agentAddress) {
+        await recomposePlaybook({ agent, token, typeSlug, actor: agentAddress, base: { context: selected.registry.context, archetype: selected.registry.key.slice(selected.registry.context.length + 1) } });
+      } else {
+        await writeAssignment(token, agent, selected.definition);
+      }
       setSaved(true);
       setSelected(null);
       const rec = await readAssignment(token, agent).catch(() => null);
@@ -232,7 +246,7 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setBusy(false); }
-  }, [agent, selected, token]);
+  }, [agent, selected, token, current?.composedFrom, agentAddress, typeSlug]);
 
   const clear = useCallback(async () => {
     setBusy(true); setSaved(false); setError(null);
@@ -274,8 +288,13 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
               // (a domain context this Home does not browse); the assignment is real either way.
               <div style={{ border: '1px solid var(--color-sage-700, #3f6212)', borderRadius: 10, padding: '.7rem .85rem', background: 'var(--color-sage-50, #f2f7ec)' }}>
                 <div>
-                  Assigned: <strong>{current.archetypeId.replace(/^skill:[^/]+\//, '')}</strong>{' '}
+                  Assigned: <strong>{current.composedFrom ? current.composedFrom.base.archetype : current.archetypeId.replace(/^skill:[^/]+\//, '')}</strong>{' '}
                   <span style={{ color: 'var(--color-text-muted)', fontSize: '.72rem' }}>v{current.archetypeVersion}</span>
+                  {current.composedFrom && current.composedFrom.packs.length > 0 && (
+                    <span style={{ marginLeft: '.4rem', fontSize: '.78rem' }}>
+                      with {current.composedFrom.packs.length === 1 ? 'one role pack' : `${current.composedFrom.packs.length} role packs`} — {current.composedFrom.packs.map((p) => p.roleName).join(', ')}
+                    </span>
+                  )}
                   {saved && <span role="status" style={{ marginLeft: '.5rem', color: 'var(--color-sage-700)' }}>Saved ✓</span>}
                 </div>
                 {currentRegistry && <RegistrySource registry={currentRegistry} />}
@@ -322,6 +341,16 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
             <p style={{ margin: '0 0 .8rem', fontSize: '.78rem', color: 'var(--color-text-muted)' }}>
               This playbook is private — no card release binds it. Publishing is the steward’s call; bind it in the Card Studio to make the version verifiable.
             </p>
+          )}
+
+          {/* Spec 427 — the roles this agent's person holds, and the skill packs those roles offer. A person's agent
+              only: a role hangs on a person's membership. */}
+          {typeSlug === 'person' && (
+            <PlaybookRoles
+              agent={agent} typeSlug={typeSlug} name={name} current={current}
+              cardBound={!current || !published ? null : published.binding ? published.binding.definitionDigest === current.definitionDigest : null}
+              onChanged={(rec) => { setCurrent(rec); setSaved(false); }}
+            />
           )}
 
           {options.length > 0 && current && <h4 style={{ margin: '.2rem 0 .45rem', fontSize: '.85rem' }}>Switch playbook</h4>}
@@ -373,7 +402,10 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
                   {current?.archetypeId === selected.definition.archetypeId ? 'Re-assign' : `Assign ${selected.label}`}
                 </BusyButton>
                 <button type="button" className="btn btn-ghost" style={{ width: 'auto' }} onClick={() => void clear()} disabled={busy}>Cancel</button>
-                <span style={{ marginLeft: 'auto', fontSize: '.72rem', color: 'var(--color-text-muted)' }}>Writes to the agent’s vault · no signature, no grant</span>
+                <span style={{ marginLeft: 'auto', fontSize: '.72rem', color: 'var(--color-text-muted)' }}>
+                  Writes to the agent’s vault · no signature, no grant
+                  {(current?.composedFrom?.packs.length ?? 0) > 0 && (selected.registry ? ' · your role packs come along' : ' · this built-in playbook cannot carry role packs — they are removed; re-equip after choosing a registry playbook')}
+                </span>
               </div>
             </div>
           )}

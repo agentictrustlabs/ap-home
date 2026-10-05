@@ -106,6 +106,9 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   const [orgAbout, setOrgAbout] = useState<{ displayName?: string; description?: string; website?: string } | null>(null);
   const [active, setActive] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Spec 427 — the role the organization recorded this person as when they joined just now, with the offer it came
+   *  from. Said once, on the screen they land on, with the way to the pack the role offers. */
+  const [joinedAs, setJoinedAs] = useState<import('../../lib/org-membership').JoinedRole | null>(null);
   const [busy, setBusy] = useState(false);
   const [joinName, setJoinName] = useState('');
   const [applyMessage, setApplyMessage] = useState('');
@@ -224,7 +227,8 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
       // still override via the optional field). Falls back to a short address label only if unnamed.
       const displayName = joinName.trim() || agentName || `member-${agentAddress.slice(2, 8)}`;
       // THE ceremony — shared with the Ask's accept (spec 421): listing, interactions plane, membership, messaging.
-      await joinOrganization({ member: agentAddress as Address, org: communityId, displayName, session, credential: homeProfile?.credential, named: !!agentName?.trim() });
+      const role = await joinOrganization({ member: agentAddress as Address, org: communityId, displayName, session, credential: homeProfile?.credential, named: !!agentName?.trim() });
+      setJoinedAs(role);
       await load();
       // The join added this org to the member's tree — reload every dropdown/list instance NOW (the
       // triggered related-orgs read also runs the org-name self-heal, so it arrives named, not 0x…).
@@ -645,6 +649,19 @@ export function OrgDiscussionsView({ org }: { org: Address }) {
   return (
     <SectionShell title="Discussions" description="Topic discussion inside this organization" wide>
       {error && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem' }}>{error}</p>}
+      {/* Spec 427 §4 — JOINED AS A ROLE. The organization named what this person does here; the join recorded it.
+          The role may offer a skill pack for their agent: offered, never installed — equipping is their own press on
+          their Playbook page, and declining changes nothing about the membership. */}
+      {joinedAs && (
+        <div role="status" data-testid="joined-as-role" style={{ margin: '0 0 .8rem', padding: '.6rem .8rem', borderRadius: 10, border: '1px solid var(--color-sage-700, #3f6212)', background: 'var(--color-sage-50, #f2f7ec)', fontSize: '.85rem' }}>
+          You joined as <strong>{joinedAs.role.roleName ?? joinedAs.role.assignedRole}</strong>.
+          {joinedAs.offer?.description ? <> {joinedAs.offer.description}</> : null}
+          {joinedAs.offer?.skillPackRefs.length ? (
+            <> This role offers a skill pack for your agent — <a href="/playbook">equip it on your Playbook page</a>. It is yours to add; the role itself grants nothing.</>
+          ) : <> The role is what you do here; it grants nothing by itself.</>}
+          <button type="button" className="btn-ghost" style={{ marginLeft: '.5rem', padding: '.05rem .45rem', fontSize: '.74rem' }} onClick={() => setJoinedAs(null)}>Dismiss</button>
+        </div>
+      )}
 
       {/* SEC-H1 regression fix — a steward can reach channels without a directory listing, so they show
           up as Members · 0 with no way to be seen/messaged. Offer an explicit self-add (publishes the

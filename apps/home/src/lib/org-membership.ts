@@ -83,6 +83,13 @@ export async function revokeRelationshipCredential(input: { session: { token: st
   return out.ok && out.credential ? { ok: true, credential: out.credential, ...(out.note ? { note: out.note } : {}) } : { ok: false, error: out.error ?? `HTTP ${res.status}` };
 }
 
+/** Spec 427 — what the organization recorded the joiner AS: the role on the membership, and the offer it came from
+ *  (the role's words and the skill packs it offers their agent). Null for a plain member, or when nothing was recorded. */
+export interface JoinedRole {
+  role: { assignedRole: string; roleName?: string; roleDefinitionId?: string };
+  offer?: { roleDefinitionId: string; name: string; description: string; scope: 'organization' | 'team'; accessRole?: string; skillPackRefs: Array<{ context: string; archetype: string; version?: string }> };
+}
+
 export async function recordOrgMembership(
   member: Address,
   org: string,
@@ -97,7 +104,8 @@ export async function recordOrgMembership(
   /** Spec 410 §8 — the organization's side of the membership credential, when the redeem handed it over (the
    *  in-app path finds it in the organization's invitation record server-side). */
   relationshipOffer?: RelationshipOfferV1 | null,
-): Promise<void> {
+): Promise<JoinedRole | null> {
+  let joinedRole: JoinedRole | null = null;
   const t0 = Date.now();
   const lap = (what: string) => console.info(`[org-membership] ${what} +${Date.now() - t0}ms`);
   try {
@@ -142,7 +150,9 @@ export async function recordOrgMembership(
     // Spec 410 §8 — THE COUNTERSIGNATURE. The organization signed the credential's digest when it invited; the
     // member signs the same digest now, and the agent verifies both on chain and writes one copy into each vault.
     // Best-effort like the rest of this ceremony: a membership stands without it, and the miss is logged by name.
-    const joinedBody = (await joined.json().catch(() => ({}))) as { relationshipOffer?: RelationshipOfferV1 };
+    const joinedBody = (await joined.json().catch(() => ({}))) as { relationshipOffer?: RelationshipOfferV1; role?: JoinedRole['role']; roleOffer?: JoinedRole['offer'] };
+    // The ROLE the organization's own object recorded (never what this client sent) — a named one only.
+    if (joinedBody.role?.assignedRole && joinedBody.role.assignedRole !== 'member') joinedRole = { role: joinedBody.role, ...(joinedBody.roleOffer ? { offer: joinedBody.roleOffer } : {}) };
     const offer = joinedBody.relationshipOffer ?? relationshipOffer ?? null;
     if (offer && (offer.subject ?? '').toLowerCase() === member.toLowerCase() && (offer.object ?? '').toLowerCase() === org.toLowerCase()) {
       try {
@@ -201,4 +211,5 @@ export async function recordOrgMembership(
   } catch (e) {
     console.warn('[org-membership] membership delegation not recorded (join still succeeded):', e);
   }
+  return joinedRole;
 }

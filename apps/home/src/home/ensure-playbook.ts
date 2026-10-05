@@ -11,6 +11,7 @@
 // Best-effort and said: a registry that cannot be reached leaves the bare harness standing and a console line.
 import { definitionDigest, validateAgentHarnessDefinition, type AgentHarnessDefinitionV1 } from '@agenticprimitives/capability-claims';
 import { assignDefaultArchetype, currentDefaultArchetype } from './default-archetype';
+import { reconcileRolePacks, recomposePlaybook, type ComposedAssignmentRecord } from './role-playbook';
 
 const done = new Set<string>();
 
@@ -20,7 +21,7 @@ export async function ensurePlaybook(agent: string, token: string): Promise<void
   done.add(key);
   try {
     const r = await fetch('/connect/channels', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ action: 'archetypeAssignmentGet', communityId: key }) });
-    const b = (await r.json().catch(() => ({}))) as { ok?: boolean; record?: { archetypeId?: string; definitionDigest?: string; definition?: AgentHarnessDefinitionV1 } | null };
+    const b = (await r.json().catch(() => ({}))) as { ok?: boolean; record?: { archetypeId?: string; definitionDigest?: string; definition?: AgentHarnessDefinitionV1; composedFrom?: ComposedAssignmentRecord['composedFrom'] } | null };
     if (!r.ok) { console.warn('[playbook] assignment could not be read; not assigning a default over an unknown'); return; }
     // THE RUNTIME'S OWN RULE (harness `loadPlaybook`): an assignment stands only when its embedded definition hashes to
     // the pinned digest AND validates. One that does not is IGNORED there — the agent runs bare with a record that
@@ -31,6 +32,31 @@ export async function ensurePlaybook(agent: string, token: string): Promise<void
     if (!rec?.archetypeId || !rec.definitionDigest || !rec.definition) why = 'no playbook';
     else if (definitionDigest(rec.definition) !== rec.definitionDigest) why = `its definition does not hash to the pinned digest (${rec.archetypeId})`;
     else { const v = validateAgentHarnessDefinition(rec.definition); if (!v.ok) why = `its definition no longer validates (${rec.archetypeId}: ${v.errors[0]})`; }
+    // A COMPOSED PLAYBOOK (spec 427 §5.3) — a base plus the packs of roles the person chose to equip — is healed and
+    // reconciled as a composition, never replaced by the bare default (which would silently drop every pack):
+    //   · one that no longer hashes or validates is RECOMPOSED from the same parts;
+    //   · a pack whose membership has ended, or whose role no longer offers it, is DROPPED (each organization
+    //     answers for its own record; one that could not be asked decides nothing);
+    //   · when its base is the estate's default and the default has moved on, it is recomposed onto the current one —
+    //     the same rule as below, for the same reason: the person chose a role, not a version of the default.
+    // Nothing is ever ADDED here. Adding a pack is the person's press, on Behaviour → Playbook.
+    const composed = rec?.composedFrom;
+    if (composed && rec?.archetypeId && rec.definitionDigest && rec.definition) {
+      if (why) {
+        const re = await recomposePlaybook({ agent: key, token, typeSlug: 'person', actor: key }).catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));
+        console.info('error' in re ? `[playbook] ${why}, and it could not be recomposed: ${re.error}` : `[playbook] ${why} — recomposed from the same base and role packs`);
+        return;
+      }
+      const { dropped } = await reconcileRolePacks({ agent: key, token, typeSlug: 'person', record: rec as ComposedAssignmentRecord });
+      if (dropped.length) { console.info(`[playbook] dropped ${dropped.length} role pack(s) whose membership ended or whose role changed: ${dropped.map((p) => `${p.roleName} (${p.archetype})`).join(', ')}`); return; }
+      const def = await currentDefaultArchetype('person');
+      const baseIsDefault = composed.base.context === 'agentic-trust' && composed.base.archetype === 'person-steward';
+      if (def && baseIsDefault && def.digest !== composed.base.digest) {
+        const re = await recomposePlaybook({ agent: key, token, typeSlug: 'person', actor: key }).catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));
+        console.info('error' in re ? `[playbook] the default base has moved on but the playbook could not be recomposed: ${re.error}` : '[playbook] the default base has moved on — recomposed onto it, keeping the role packs');
+      }
+      return;
+    }
     // THE DEFAULT FOLLOWS THE CORPUS. An assignment is a digest-pinned SNAPSHOT of the definition as compiled when it was
     // made; a domain author attaching a new contract later (the Library reads, 2026-09-21) changes the corpus, not the
     // snapshot — so an agent assigned person-steward last month runs last month's person-steward and refuses this
