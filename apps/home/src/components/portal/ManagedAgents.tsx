@@ -248,11 +248,12 @@ export function FundForm({
  * person's new agent must not fail to exist because a courtesy failed.
  */
 export async function createAgentWithBirthrights(
-  input: { kind: AgentKind; label?: string; parent: string; person: string; via: string },
+  input: { kind: AgentKind; label?: string; parent: string; person: string; via: string; displayName?: string },
   token: string,
   onStep: (s: string) => void,
 ): Promise<{ ok: true; result: CreateManagedAgentResult } | { ok: false; error: string }> {
   const { kind, label, parent, person, via } = input;
+  const commonName = (input.displayName ?? '').trim();
   const res = await createManagedAgent(
     { kind, label, parent: parent as `0x${string}`, person: person as `0x${string}`, via },
     token, onStep,
@@ -279,7 +280,16 @@ export async function createAgentWithBirthrights(
       // org is USABLE without any steward follow-up. Best-effort, like the storage enable above.
       onStep('Setting up the organization…');
       if (res.result.stewardshipDelegation) {
-        await vaultWriteWithDelegation(res.result.stewardshipDelegation, 'org.profile', { v: 1, displayName: res.result.name || label || '' }).catch((e) => console.warn('[org-create] org profile seed failed:', e));
+        await vaultWriteWithDelegation(res.result.stewardshipDelegation, 'org.profile', { v: 1, displayName: commonName || res.result.name || label || '' }).catch((e) => console.warn('[org-create] org profile seed failed:', e));
+      }
+      // The common name onto the steward's link (`lib/org-profile.ts`), after the record it mirrors — the link
+      // exists by now (createManagedAgent wrote it), which the projection write requires.
+      if (commonName) {
+        await fetch('/connect/related-orgs', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+          body: JSON.stringify({ person, orgAgent: res.result.agent.toLowerCase(), orgProfile: { displayName: commonName } }),
+        }).catch((e) => console.warn('[org-create] common name not projected:', e));
       }
       await fetch('/connect/channels', {
         method: 'POST',
@@ -333,6 +343,7 @@ export function CreateAgentForm({
 }) {
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState('');
+  const [commonName, setCommonName] = useState('');
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState('');
   const [err, setErr] = useState('');
@@ -352,11 +363,11 @@ export function CreateAgentForm({
     }
     setBusy(true); setErr(''); setStep('');
     const res = await createAgentWithBirthrights(
-      { kind, label: named ? clean : undefined, parent, person, via }, token, setStep,
+      { kind, label: named ? clean : undefined, parent, person, via, ...(kind === 'org' ? { displayName: commonName } : {}) }, token, setStep,
     );
     setBusy(false);
     if (!res.ok) { setErr(res.error); return; }
-    setOpen(false); setLabel('');
+    setOpen(false); setLabel(''); setCommonName('');
     onDone();
   }
 
@@ -393,6 +404,13 @@ export function CreateAgentForm({
             about an agent that would be. */}
         <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>.{typedTldForKind(kind)?.tld ?? AGENT_NAME_PARENT}</span>
       </div>
+      {/* An organization's NAME is not its handle: the handle above is what it claims, this is what people call
+          it and what relying apps show (`org.profile.displayName`). Optional here — the profile card can set it later. */}
+      {kind === 'org' && (
+        <input value={commonName} onChange={(e) => setCommonName(e.target.value)} placeholder="name people know it by (optional)" disabled={busy}
+          aria-label="Common name"
+          style={{ padding: '.4rem .55rem', fontSize: '.85rem', border: '1px solid var(--c-g200, #e2e8f0)', borderRadius: 6 }} />
+      )}
       <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap' }}>
         <BusyButton busy={busy} busyLabel={step || 'Working…'} className="btn-primary" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} onClick={() => void create(true)}>
           Create + name

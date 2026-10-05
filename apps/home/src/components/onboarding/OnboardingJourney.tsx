@@ -37,7 +37,7 @@ import { ValueStepList, type ValueStep } from '../shared/ValueStepList';
 import { OnboardingProgress } from '../shared/OnboardingProgress';
 import { ReceiptCard } from '../shared/ReceiptCard';
 import { ConsentSheet } from '../shared/ConsentSheet';
-import { displayAppDomain, displayAppName } from './org-chooser-label';
+import { defaultCommonName, displayAppDomain, displayAppName } from './org-chooser-label';
 import { NewMemberSetup } from './NewMemberSetup';
 import { coinMandateLeg, grantsCoinAtConnect, newMemberPlan, planIsEmpty, withCurrencyConsent, withEmailClaimConsent, withProfileNameConsent } from '../../lib/new-member';
 
@@ -368,6 +368,8 @@ export function OnboardingJourney({
           requestedBy: api.enroll.aud,
           grantOrg: api.enroll.grantOrg,
           existingOrg,
+          // No chooser on this path: the name typed at the app is the common name (a pre-slugged one is rendered).
+          displayName: defaultCommonName(orgBase),
         });
         if (!created.ok) return fail(created.error, 'grant');
         // THE MISSION REGISTRY step, when the app asked for it — the same one the recognized ceremony runs, so a

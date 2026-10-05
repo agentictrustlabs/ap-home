@@ -573,9 +573,14 @@ export async function createOrganization(
     grantOrg?: Address;
     existingOrg?: Address;
     signAsOrg?: boolean;
+    /** The name people know the new organization by, asked for separately from the label it claims. Seeds
+     *  `org.profile.displayName` and rides the `org` payload as `orgProfile`, which `/oidc/grant` projects onto
+     *  the steward's link — so the first `/token` and `related-orgs` read already carry `displayName`. */
+    displayName?: string;
     onProgress?: (p: { step: number; total: number; label: string; hint?: string }) => void;
   } = {},
 ): Promise<Result<{ org: Record<string, unknown>; grant: unknown }>> {
+  const commonName = (opts.displayName ?? '').trim();
   // Normalize via: the session stores the display form ('Google'/'YouVersion' from the OAuth callback), but
   // isKmsVia/signHashFor/createChildAgentForSite match lowercase. Without this, a SOCIAL home's org-create
   // is misrouted to the passkey path (createChildAgentForSite → loadPasskey → empty pubkey → the account
@@ -722,7 +727,7 @@ export async function createOrganization(
         if (!ix.ok) console.warn('[org-create] interactions grant not provisioned:', ix.error);
       }),
       x.stewardshipDelegation
-        ? vaultWriteWithDelegation(x.stewardshipDelegation, 'org.profile', { v: 1, displayName: x.childName }).catch((e: unknown) =>
+        ? vaultWriteWithDelegation(x.stewardshipDelegation, 'org.profile', { v: 1, displayName: commonName || x.childName }).catch((e: unknown) =>
             console.warn('[org-create] org profile seed failed:', e),
           )
         : Promise.resolve(),
@@ -809,6 +814,7 @@ export async function createOrganization(
       stewardshipDelegation: x.stewardshipDelegation,  // org→person (person reads org)
       operationalDelegation: x.operationalDelegation,  // org→app service agent (submit intents)
       readGrantDelegation: x.readGrantDelegation,      // org→app workspace (read one record family)
+      ...(commonName ? { orgProfile: { displayName: commonName } } : {}), // → the steward's link, at /oidc/grant
     },
     grant: x.delegation,
   };
