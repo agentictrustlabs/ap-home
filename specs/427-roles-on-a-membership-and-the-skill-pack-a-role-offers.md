@@ -1,10 +1,10 @@
 # Spec 427 — Roles on a membership, and the skill pack a role offers
 
-**Status:** PROPOSED 2026-10-05; **W1 BUILT** the same day (`~/skills` 390e235: `composeDefinitions`, `POST
-/context/compose`, five role packs published and composing live). Reviewed by the Home's other maintainer; §3.3 and
-§5.2–5.4 carry the amendments. **Owner:** the Home (`apps/home` — the invitation and join ceremonies, the equip
-step, the roster) and the agent runtime (`apps/agent-runtime` — the membership record). **First consumers:** the
-field app (`~/engage`) and Field Operations (`~/pokernight`), never the subject.
+**Status:** **W1–W5 BUILT AND LIVE, 2026-10-05**; W6 (the Ring 0 statement) open. §10 records what was built where
+it differs from the proposal — read it with §3–§5. Reviewed by the Home's other maintainer; §3.3 and §5.2–5.4 carry
+the amendments. **Owner:** the Home (`apps/home` — the invitation and join ceremonies, the equip step, the roster)
+and the agent runtime (`apps/agent-runtime` — the membership record). **First consumers:** the field app
+(`~/engage`) and Field Operations (`~/pokernight`), never the subject.
 
 **Depends on:** 324 (the organization ontology — §8 roles: a role definition is a template, a RoleAssignment is
 materialized by Delegations and is never authority; §5 an invitation may propose role definitions), 325 (the
@@ -261,11 +261,11 @@ joining records it, and the character's playbook is composed from its membership
 
 | Wave | Where | What |
 |---|---|---|
-| **W1** | `~/skills` | `composeDefinitions` in the compiler; `POST /context/compose`; the five field role packs published |
-| **W2** | `apps/agent-runtime`, `apps/home` | `orgRole` on the invitation; the role on the membership record, checked against the invite; `org.setMemberRole`; `org.membership.mine`; the role on roster reads |
-| **W3** | `apps/home` | the role on the join screen; the equip step and the Playbook page's "Roles" section; `composedFrom` with who equipped; per-part freshness; "your card does not advertise X yet"; reconcile |
-| **W4** | `~/engage` | the role catalogue, the offer on invites, roles on rosters and in Ask |
-| **W5** | `~/pokernight` | the season writes roles; characters composed from sheet + pack; the walks check both |
+| **W1** ✔ | `~/skills` | `composeDefinitions` in the compiler; `POST /context/compose` (deterministic: parts assembled in sorted order, so one composition has one digest); the five field role packs published |
+| **W2** ✔ | `apps/agent-runtime`, `apps/home` | `orgRole` on the invitation; the role on the membership record, resolved against the invite; `org.setMemberRole`; `org.membership.mine`; the role on roster reads; the two capabilities of §10.1 |
+| **W3** ✔ | `apps/home` | the role on the join screen; the Playbook page's "Roles" section; `composedFrom` with who equipped; per-part freshness; reconcile |
+| **W4** ✔ | `~/engage`, `apps/home` | the role catalogue, the offer on invites, roles on rosters and in Ask; the Home ceremonies carry `role_offer`, and a team's invitee holds a membership on the team (§10.3) |
+| **W5** ✔ | `~/pokernight` | the season writes roles; characters composed from sheet + pack; the walks check both |
 | **W6** | `~/agenticprimitives/packages` | `skillPackRefs` on `OrganizationRoleDefinition`, `proposedRoleDefinitionRefs` on `MembershipInvitationV1` (324 §5), `aporg:offersSkillPack`, the membership binding's new fields |
 
 W6 is the Ring 0 statement of the model and can land at any point: W1–W5 ride the flat records the apps already
@@ -280,3 +280,98 @@ write and need no package release.
 3. **Equip on behalf of a custodied agent.** A steward may write the playbook of an agent they steward. For a
    character in a game that is how it must work; for a person's own agent it must never be used. Is the existing
    `isSteward` gate enough, or does equip need to say which it is?
+
+## 10. As built (2026-10-05)
+
+What the waves produced, where it is narrower or different from §3–§5. Where this section and an earlier one
+disagree, this one describes the code.
+
+### 10.1 A first-party surface is an intent, not a Home route
+
+W2 first shipped two Home routes (`/connect/org-member-role`, `/connect/my-roles`) calling the organization's object
+with the Home's session. The bridge ratchet (`ap doctor`, `no-hmac-home-bridge`) refuses new Home→object session
+calls, and it is right to: both are reads and acts an AGENT performs. They are two capabilities, each offered only
+when the agent's playbook carries the tool:
+
+| Capability | Who | What |
+|---|---|---|
+| `person.roles.list` | a person's own agent | a `lookup`: for each organization the person's links name THAT CAN HOLD MEMBERS (never a workspace, a service or a person), the organization's own record of them (`org.membership.mine`). An organization that answers "no interactions grant" has answered: no membership. At most 40 are asked |
+| `organization.member.role.set` | the organization's agent, under its steward's mandate | the §3.3 change. `subject: 'org'`, mandate-bearing (`action: 'assign'`), low risk; one signature. It is in `CAPABILITY_WORDS`, `RESOURCE_ARG_FOR`, `CAPABILITY_CEREMONIES` and the authority-bearing set, so a plan cannot run it as an unsigned step |
+
+The read and the act live in separate modules (`member-roles.ts`, `member-role-set.ts`) because a module that
+declares `subject: 'org'` may not also read records (`no-cross-subject-vault-reads`). Both skills are registered in
+`~/skills` (`agentic-trust/person-roles-read`, `agentic-trust/org-member-role-set`) and attached to `person-steward`,
+`person-steward-runtime` and `org-steward`. `scripts/verify-member-role.mts` proves both live: an outsider cannot
+grant, a steward signs once, the role is set, and the member's own agent reports it.
+
+### 10.2 The record, and which role a join records
+
+`roleAssignment` gained two fields beyond §3.3: `roleDescription` (the offer's sentence, so a roster and a Playbook
+page explain a role without a second read) and `roleSetAt` (present only when a STEWARD set the role after
+admission). `org-role.ts` is one file kept byte-identical in the runtime and the Home, held to that by a parity test.
+
+`resolveAssignedRole` decides what a join records, and it is not simply "the invitation's":
+
+1. a role a steward SET on a live membership (`roleSetAt`) stands — re-running an idempotent join never undoes it;
+2. otherwise the offer on the organization's own invitation;
+3. otherwise plain `member`.
+
+A join may CLAIM a role; the claim must match the resolved role or the invitation's, else `role_not_offered`
+(invariant 3). An offer is parsed strictly: ids and words only, an unknown key refused (invariant 6).
+
+An invitation by EMAIL also writes the agent-keyed record (`org.invite:agent:<sa>`, marked `viaEmailInvite`) when
+the invitee's agent is known, so both invitation doors feed one resolver. `directory.list` returns each member's role beside their listing (one batch read), and the Home's
+`delegated-idx` row carries it, which is §3.4.
+
+### 10.3 A team's invitee is a member of the TEAM
+
+§3.3 says both records live on the organization, and for a WORKSPACE that is its governor. A TEAM is an organization
+(344) and holds its own members, so an invitation to a team with a team-scoped offer records the membership on the
+TEAM, and on the governing organization as a plain member when the person is not yet one. "Is this a team" is
+decided from the agent's KIND in the inviter's own tree, never from the offer's `scope` — a scope is a word the
+inviting app wrote.
+
+The team's access grant to its new member is CONTENT-COVERING (`issueWorkspaceMembershipAccessDelegation`), not the
+profile-only grant: a relying app reads a team through its member's access grant, and a profile-only grant read an
+empty roster. The team membership is recorded BEFORE the link, so a failure leaves no link to a team that does not
+know the person.
+
+The ceremonies take one new optional parameter, `role_offer` (the offer, base64url), on `workspace-member-invite`
+and `workspace-join`. An organization-scoped offer rides the governor's invitation; a team-scoped one adds the
+team's own `/connect/org-invite/agent`, signed as the team.
+
+### 10.4 The catalogue is the app's defaults
+
+§3.1 and §7 have the field app keep role definitions as records in the governing organization's library. It does
+not yet: the five definitions are the app's own defaults (`@engage/field-domain` `org-roles.ts`), identified as
+`roledef:<org>:<slug>@1`, so every organization has the same five without a write at charter. Nothing in the Home
+depends on which — an invitation carries the offer. An organization that wants its own definitions needs the
+catalogue as records; that is the field app's next step, not the Home's.
+
+The field app's FUNCTION role (`orgRole` on its roster rows) and its ACCESS role (`role`) stay two columns (D3); a
+steward changes the first with `field.member-role-set`, which asks the Home through `org.setMemberRole`.
+
+### 10.5 Equip, on the Playbook page
+
+"Roles" sits ABOVE the assigned playbook's full text (the instructions run to tens of thousands of pixels, and a
+section under them was never seen). It lists the roles `person.roles.list` reports; each offers Equip, Update (a part
+whose registry digest moved) or Remove. Switching the base keeps the equipped packs. A pack whose membership ended is
+dropped on the next reconcile; nothing is added without the person's press (D4). An organization is named as the
+person's own link names it.
+
+§5.4 is built in its general form: the section says the public card is not bound to this playbook and so does not
+advertise what the roles add, and that the person's own asks reach those tools meanwhile. It does not yet NAME the
+capabilities the card lacks.
+
+### 10.6 Field Operations
+
+A part maps to a role: a team's founder is its team lead, a worker a field worker, a coach a coach; coordinator and
+steward parts are coordinators on the organization and a partner's representative its partner liaison. A character's
+playbook is `field-operations/north-<part>` plus `field-operations/role-<slug>`, composed by the registry and written
+by the character's custodian (`equippedAs: 'steward'` — §9 Q3's case, and the record says so). `pnpm roles:fieldops`
+in `~/pokernight` is the idempotent repair for a season opened before this.
+
+§9 Q2 is answered in practice for teams: a founder DOES pass through an invitation there — the charter has the new
+team invite its founder with the team-lead offer and the founder join, the same two ceremonies as anybody — so the
+role is on the membership by the ordinary road and the charter credential names no definition.
+
