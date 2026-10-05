@@ -1,6 +1,6 @@
 # Spec 428 — An organization's steward reads what its teams hold
 
-**Status:** W1 + W3 built, 2026-10-05 (W1 backfilled for Boulder–Longmont 0xf98d…; W2 is the field app’s). **Owner decision:** "yes to 3" (the Home developer's list, item 3).
+**Status:** W1 + W2 + W3 built and live, 2026-10-05 (W1 backfilled for the field realm’s four teams; W2 in `~/engage` 8eb83ce — §6.1). **Owner decision:** "yes to 3" (the Home developer's list, item 3).
 **Builds on:** spec 424 (a member reads the governed workspace through the governor — approach B), spec 344 (team ⊑
 organization; the hub: `org → { members, teams, workspace }`), ADR-0055 (the vault is the record), ADR-0056
 (resolution is not authority), ADR-0041 (Web3 authority; a projection authorizes nothing).
@@ -76,6 +76,28 @@ it from that moment. The projection is then stale and harmless; the next charter
 | **W1** | `ap-home` | `GOVERNED_CONTENT_SCOPE`; the `governedTeam` projection write + the steward-row synthesis in `related-orgs`; `org-teams` in the KV allowlist; `scripts/backfill-428-team-read.mts`; run for the field realm's teams |
 | **W2** | `~/engage` (field) | team/circle/progress readers use the `via:'governed'` team row's grant |
 | **W3** | `ap-home` onboarding | mint the grant at team charter (the Home's team-create ceremony), so new teams need no backfill |
+
+### 6.1 W2 as built (`~/engage` 8eb83ce)
+
+The gateway's roll-ups (`workspace-circles`, `workspace-progress`) already read a team through `workspaceVault`, which
+presents the `via:'governed'` row's grant. Three readers did not, and now do:
+
+- **`field.records-list`** was steward-only, so a board named a circle from the roll-up and was then refused its
+  record. A caller who does not steward the organization but holds a content grant for it — this grant, or their own
+  member access grant (`reader-grant.ts`; the roster wire alone is not one) — lists a kind's folder READ-ONLY. The
+  answer says so (`readOnly`, `readVia: 'governed' | 'member'`), keeps back what must not leave the vault (rosters,
+  grant indexes, L5 — `keptBack` counts them; D2), and a grant that reads no catalog stays the steward's refusal with
+  how far the reader got (`reader: 'no-relationship' | 'no-content-grant' | 'grant-reads-no-content'`). Writes are
+  unchanged: still stewardship.
+- **`workspace-progress`** learned whom a body serves only from the body's own vault. A body sealed to the reader
+  takes it from its steward team's genealogy record (`communitiesSource: 'team-record'`), so Progress counts a team's
+  circle for the organization's steward. The body's own vault stays sealed (§7.2).
+- **`workspace-circles`** prefers that exact record over the coarse list of every people the team works with.
+
+The board shows such a row with all its detail and no edit. Proven live by `~/pokernight`
+`scripts/walk-field-org-steward.cjs`: Nathan (steward of the organization, on none of Weld, Plains or Larimer) reads
+Weld's circle with its people and count; the team's roster is kept back; Bob, neither on the team nor a steward of
+the organization, is refused and told why.
 
 ## 7. Open questions
 
