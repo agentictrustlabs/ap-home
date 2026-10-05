@@ -30,7 +30,8 @@
     "check:component-registry": "tsx scripts/build-component-registry.mts --check",
     "check:home-kv-allowlist": "node scripts/check-home-kv-allowlist.mjs",
     "check:ask-truth": "tsx scripts/ask-truth.mts",
-    "check:interaction-coverage": "tsx scripts/check-interaction-coverage.ts"
+    "check:interaction-coverage": "tsx scripts/check-interaction-coverage.ts",
+    "check:no-vector-over-vault": "tsx scripts/check-no-vector-over-vault.ts"
   },
   "devDependencies": {
     "@agenticprimitives/a2a": "0.0.0-alpha.25",
