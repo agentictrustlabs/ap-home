@@ -4549,7 +4549,11 @@ export class InteractionsDO {
       //    all topics); the must-post contract stays STRUCTURAL (single tool) regardless of its text. ──
       if (op === 'channels.assistantSkill.get' || op === 'channels.assistantSkill.put') {
         const steward = await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
-        if (!steward) return json({ error: 'only the organization custodian may author the assistant playbook' }, 403);
+        // A MEMBER MAY READ the playbook that answers them (owner, 2026-10-05); only a steward writes it. Membership is
+        // the same admission the boards use (a governed workspace's members through its governor). Reading it grants nothing.
+        if (!steward && !(op === 'channels.assistantSkill.get' && (await this.communityPresence(grant, principal, sessionSa, sessionCaip, body)).admitted)) {
+          return json({ error: op === 'channels.assistantSkill.get' ? 'only a member or steward of this organization may read its assistant playbook' : 'only the organization custodian may author the assistant playbook' }, 403);
+        }
         if (op === 'channels.assistantSkill.get') {
           const doc = await this.readDoc<AssistantSkillDocV1 | null>(grant, ASSISTANT_SKILL_RESOURCE, null);
           return json({ ok: true, skill: doc });
@@ -4605,7 +4609,11 @@ export class InteractionsDO {
         // assignment. Both are custody; only the shape of the proof differs.
         const isSelf = sessionSa.toLowerCase() === principal;
         const steward = isSelf || await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined);
-        if (!steward) return json({ error: 'only the agent’s custodian may assign an archetype' }, 403);
+        // A MEMBER MAY READ the playbook that answers them (owner, 2026-10-05) — reading is not assigning; only the
+        // custodian (self or steward) writes it. Membership is the boards' admission (a workspace's via its governor).
+        if (!steward && !(op === 'channels.archetypeAssignment.get' && (await this.communityPresence(grant, principal, sessionSa, sessionCaip, body)).admitted)) {
+          return json({ error: op === 'channels.archetypeAssignment.get' ? 'only a member or the custodian of this agent may read its playbook' : 'only the agent’s custodian may assign an archetype' }, 403);
+        }
         if (op === 'channels.archetypeAssignment.get') {
           const doc = await this.readDoc<unknown>(grant, 'archetype.assignment', null);
           return json({ ok: true, record: doc });

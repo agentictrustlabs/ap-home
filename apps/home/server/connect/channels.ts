@@ -302,7 +302,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     });
     return jsonCors(r.body, request, r.status);
   }
-  // Archetype assignment (spec 354 K3) — steward-only; the agent's compiled behaviour, written to its
+  // Archetype assignment (spec 354 K3) — a member or custodian READS it, only the custodian writes; the agent's compiled behaviour, written to its
   // own vault through the same steward gate as the assistant playbook. Grants no authority.
   if (body?.action === 'archetypeAssignmentGet' || body?.action === 'archetypeAssignmentPut') {
     const r = await callInteractions(env, communityId, body.action === 'archetypeAssignmentGet' ? 'channels.archetypeAssignment.get' : 'channels.archetypeAssignment.put', {
