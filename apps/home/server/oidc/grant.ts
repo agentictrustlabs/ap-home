@@ -28,6 +28,7 @@ import { getClient } from '../../src/lib/oidc-clients';
 import type { StoredEnrollmentGrant } from './authorize-grant';
 import { idTokenTtl } from '../_lib/session-ttl';
 import { nameClaimForIdToken } from '../../src/lib/new-member';
+import { orgCommonNameFields } from '../../src/lib/org-profile';
 
 const CODE_TTL_MS = 300_000; // 5 min PKCE exchange window
 
@@ -213,6 +214,12 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     membershipDelegation?: unknown; stewardshipDelegation?: unknown; operationalDelegation?: unknown;
     readGrantDelegation?: unknown;
   } | null;
+  // The organization's common name (and website) for the `/token` response, read from the link below — the
+  // steward's projection of `org.profile` (`lib/org-profile.ts`). SERVER-read, never taken from the request body:
+  // the rest of `org` is what the ceremony just did, this is what the steward saved earlier. A newly created
+  // organization has no projection (its profile is seeded with the name it was created under, which is `orgName`),
+  // so these are present only when the ceremony connected an EXISTING organization whose steward has named it.
+  let orgCommonName: { displayName?: string; website?: string } = {};
   if (orgPayload?.orgAgent && orgPayload.person) {
     const person = orgPayload.person.toLowerCase();
     const org = orgPayload.orgAgent.toLowerCase();
@@ -249,6 +256,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       createdAt: existing.createdAt ?? Date.now(),
     };
     await env.AUTH_CODES.put(`related:${person}:${org}`, JSON.stringify(link));
+    orgCommonName = orgCommonNameFields(link.orgName, existing.orgProfile);
     const idxKey = `related-idx:${person}`;
     const idx = JSON.parse((await env.AUTH_CODES.get(idxKey)) ?? '[]') as string[];
     if (!idx.includes(org)) { idx.push(org); await env.AUTH_CODES.put(idxKey, JSON.stringify(idx)); }
@@ -289,7 +297,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       treasury: body.treasury ?? null,
       selfVaultGrant: body.selfVaultGrant ?? null,
       delegations: actTemplate ? body.delegations : null,
-      org: body.org ?? null,
+      org: body.org ? { ...(body.org as Record<string, unknown>), ...orgCommonName } : null,
       // Returned verbatim by /token so an app can read the HUMAN name explicitly rather than
       // inferring it from `agent_name`. '' (never absent) when the client isn't `profile`-scoped.
       profile_name: profileName,
