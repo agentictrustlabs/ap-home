@@ -25,6 +25,8 @@ jobs:
         run: pnpm exec ap doctor --json > doctor-report.json || (cat doctor-report.json; exit 1)
       - name: ap doctor --rules (projection drift)
         run: pnpm exec ap doctor --rules
+      - name: Home census (spec 398 G0 — moved from Ring 0 at the cut)
+        run: pnpm census
       - name: the gates read their roster from the fixture
         run: pnpm check:gate-fixture
       - uses: actions/upload-artifact@v4
