@@ -281,6 +281,17 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
         <Loading />
       ) : (
         <>
+          {/* Spec 427 — the roles this agent's person holds, and the skill packs those roles offer. A person's agent
+              only: a role hangs on a person's membership. ABOVE the assigned playbook's full text: that panel prints
+              every instruction and tool the agent runs (tens of screens), and an offer nobody scrolls to is no offer. */}
+          {typeSlug === 'person' && (
+            <PlaybookRoles
+              agent={agent} typeSlug={typeSlug} name={name} current={current}
+              cardBound={!current || !published ? null : published.binding ? published.binding.definitionDigest === current.definitionDigest : null}
+              onChanged={(rec) => { setCurrent(rec); setSaved(false); }}
+            />
+          )}
+
           <div style={{ marginBottom: '.8rem', fontSize: '.85rem' }}>
             {current ? (
               // WHAT THIS AGENT RUNS, from the record it runs — the vault's `archetype.assignment` (compiled definition +
@@ -341,16 +352,6 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
             <p style={{ margin: '0 0 .8rem', fontSize: '.78rem', color: 'var(--color-text-muted)' }}>
               This playbook is private — no card release binds it. Publishing is the steward’s call; bind it in the Card Studio to make the version verifiable.
             </p>
-          )}
-
-          {/* Spec 427 — the roles this agent's person holds, and the skill packs those roles offer. A person's agent
-              only: a role hangs on a person's membership. */}
-          {typeSlug === 'person' && (
-            <PlaybookRoles
-              agent={agent} typeSlug={typeSlug} name={name} current={current}
-              cardBound={!current || !published ? null : published.binding ? published.binding.definitionDigest === current.definitionDigest : null}
-              onChanged={(rec) => { setCurrent(rec); setSaved(false); }}
-            />
           )}
 
           {options.length > 0 && current && <h4 style={{ margin: '.2rem 0 .45rem', fontSize: '.85rem' }}>Switch playbook</h4>}

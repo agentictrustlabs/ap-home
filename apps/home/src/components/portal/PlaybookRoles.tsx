@@ -18,6 +18,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
 import { BusyButton } from '../shared/BusyButton';
+import { useManagedAgents } from './ManagedAgents';
+import { nameLabel } from '../../lib/domain';
 import {
   currentPart, packHeading, planRolePacks, readMyRoles, recomposePlaybook,
   type ComposedAssignmentRecord, type ComposedPack, type PackOffer, type RolesRead,
@@ -54,7 +56,17 @@ export function PlaybookRoles({ agent, typeSlug, name, current, cardBound, onCha
   const packs = current?.composedFrom?.packs ?? [];
   const packOrgs = useMemo(() => [...new Set(packs.map((p) => p.organization.toLowerCase()))].join(','), [packs]);
 
-  const [read, setRead] = useState<RolesRead | null>(null);
+  // WHAT THE PERSON CALLS EACH ORGANIZATION. The read names an organization by its naming-service name, and many have
+  // none (a team chartered an hour ago); the person's own links do carry what it is called. Their words win the gap,
+  // so a pack reads "Coordinator at Northern Colorado Field" and not "Coordinator at 0x8e32…10fb".
+  const { agents: managed } = useManagedAgents(token, 'any');
+  const orgName = useCallback((org: string, fromRead?: string | null): string | null => {
+    if (fromRead?.trim()) return fromRead.trim();
+    const row = managed.find((a) => a.agent.toLowerCase() === org.toLowerCase());
+    return row?.name ? nameLabel(row.name) : null;
+  }, [managed]);
+
+  const [rawRead, setRead] = useState<RolesRead | null>(null);
   const [reading, setReading] = useState(false);
   const [readFailed, setReadFailed] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -71,6 +83,7 @@ export function PlaybookRoles({ agent, typeSlug, name, current, cardBound, onCha
   }, [token, own, agent, packOrgs]);
   useEffect(() => { void load(); }, [load]);
 
+  const read = useMemo<RolesRead | null>(() => (rawRead ? { ...rawRead, roles: rawRead.roles.map((r) => ({ ...r, name: orgName(r.org, r.name) })) } : null), [rawRead, orgName]);
   const plan = useMemo(() => planRolePacks(current?.composedFrom, own ? read : null), [current?.composedFrom, read, own]);
 
   // The parts worth knowing about: the base and every equipped pack (freshness), every offered pack (what it adds).
@@ -162,7 +175,7 @@ export function PlaybookRoles({ agent, typeSlug, name, current, cardBound, onCha
             return (
               <li key={`${pack.organization}:${keyOf(pack)}`} style={{ border: '1px solid var(--color-border)', borderRadius: 10, padding: '.55rem .75rem', background: 'var(--color-surface, #fff)' }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '.4rem' }}>
-                  <strong style={{ fontSize: '.86rem' }}>{packHeading(pack)}</strong>
+                  <strong style={{ fontSize: '.86rem' }}>{packHeading({ ...pack, organizationName: pack.organizationName ?? orgName(pack.organization) ?? undefined })}</strong>
                   {own && <Chip tone={words.tone}>{words.text}</Chip>}
                   {newer && <Chip tone="warn">a newer version is published</Chip>}
                   <button type="button" className="btn-ghost" style={{ marginLeft: 'auto', padding: '.15rem .55rem', fontSize: '.76rem' }} disabled={!!busy} onClick={() => void remove(pack)}>
