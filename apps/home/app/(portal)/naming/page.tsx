@@ -86,7 +86,7 @@ function NamingPageInner() {
       title="Naming"
       description="Your public name, and what it says about you to anyone who looks it up."
     >
-      {handoff && <TownHandoffNote handoff={handoff} claimed={handoffClaimed} />}
+      {handoff && <TownHandoffNote handoff={handoff} claimed={handoffClaimed} kind="person" />}
 
       {/* Nameless → named (spec 257/280): claim a name, and everything below becomes available. */}
       {isNameless && agentAddress && (
