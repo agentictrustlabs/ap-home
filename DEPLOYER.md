@@ -25,13 +25,16 @@ the **AKCS pilot** (`akcs-pilot.faithnet.io`, the KMS operator's).
 | `apps/vault` | `@ap-home/vault` | `demo-mcp-faithnet` | `mcp.faithnet.io` | " |
 | `apps/edge` | `@ap-home/edge` | `demo-edge-faithnet` | `edge.faithnet.io` | " |
 | `apps/home-mcp` | `@ap-home/home-mcp` | `home-mcp-faithnet` | `home-mcp.faithnet.io` | " |
-| `apps/rpc-gateway` | `@ap-home/rpc-gateway` | `faithchain-rpc-gateway` | `rpc.faithnet.io` | " |
 
 Every value lives in `[env.faithnet.vars]` — no `--var` injection. Dry-run first:
 `wrangler deploy --env faithnet --dry-run --outdir <scratch>`. The runtime's Container image installs
 `@agenticprimitives/runtime-member` + `acp` from npm at the versions pinned in `runtime-container/Dockerfile`.
 
-Deploy order (each needs the one before it reachable): rpc-gateway → vault → agent-runtime → edge → home-mcp → the Home.
+Deploy order (each needs the one before it reachable): vault → agent-runtime → edge → home-mcp → the Home.
+
+The chain RPC gateway (`faithchain-rpc-gateway`, `rpc.faithnet.io`) is a TOWN service: it serves every estate on
+faithchain, and it deploys from [`ap-town`](https://github.com/agentictrustlabs/ap-town) (`apps/chain-gateway`) since
+2026-10-05 (spec 429). The town's other services — the registry, the public graph, discovery — deploy from there too.
 
 ## Rules
 

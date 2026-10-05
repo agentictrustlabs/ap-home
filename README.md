@@ -28,15 +28,15 @@ any app. The Base Sepolia `production` estate (impact-agent) is not here. `DEPLO
 | `apps/vault` | `apps/vault` | the vault: the person's / org's records behind delegated MCP (ADR-0055 — the vault is the record) |
 | `apps/home-mcp` | `apps/home-mcp` | Home MCP — Claude.ai as a client of the person (spec 397) |
 | `apps/edge` | `apps/edge` | the admission edge (ADR-0057): HTTPS required, mTLS optional, admission always |
-| `apps/rpc-gateway` | `apps/rpc-gateway` | the chain RPC gateway Home's Workers read through |
 | `scripts/` | root `scripts/` (the Home subset) | secrets, local dev vars, provisioning, the live gates (`scripts/live-gates.json`), every `verify-*` gate, the census; each Worker deploys with `wrangler deploy --env faithnet` from its directory |
 | `demo/` | `demo/` | the estate roster and deployment placements (→ `@agenticprimitives-demo/estate`, 399 §2.6) |
 | `docs/architecture/` | the product docs | harness architecture, outside-in flow, inbox UX synthesis, the UX product brief, **the Home census** |
 | `specs/398-…` | `specs/398-…` | the UX strategy this repository carries out: Home Work · Home Build · the Developer Kit |
 
-Worker names are faithnet's (`demo-a2a-faithnet`, `demo-mcp-faithnet`, `demo-edge-faithnet`, `home-mcp-faithnet`,
-`faithchain-rpc-gateway`) — the directories were renamed, the deployment was not; DO classes and migration tags never
-change. `DEPLOYER.md` has the map.
+Worker names are faithnet's (`demo-a2a-faithnet`, `demo-mcp-faithnet`, `demo-edge-faithnet`, `home-mcp-faithnet`)
+— the directories were renamed, the deployment was not; DO classes and migration tags never
+change. `DEPLOYER.md` has the map. The services every estate on faithchain shares — the chain RPC gateway, the
+registry, the public graph — are the town's, in [`ap-town`](https://github.com/agentictrustlabs/ap-town).
 
 ## The UX program (spec 398)
 
