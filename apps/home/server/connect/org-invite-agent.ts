@@ -12,7 +12,7 @@ import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import type { Address } from '@agenticprimitives/types';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { notAnOrganization, workspaceCheck } from '../lib/workspace-governor';
-import { parseRoleOffer, type RoleOfferV1 } from '../lib/org-role';
+import { parseRoleOffer, type RoleOfferV1 } from '../../src/lib/org-role';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
 const json = (b: unknown, s = 200): Response =>

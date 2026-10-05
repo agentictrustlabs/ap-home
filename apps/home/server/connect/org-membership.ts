@@ -15,7 +15,7 @@ import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { orgVault } from '../lib/org-vault';
 import { notAnOrganization, workspaceCheck } from '../lib/workspace-governor';
-import { parseRoleOffer, roleSlugOf, type RoleOfferV1 } from '../lib/org-role';
+import { parseRoleOffer, roleSlugOf, type RoleOfferV1 } from '../../src/lib/org-role';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
 const json = (b: unknown, s = 200): Response =>

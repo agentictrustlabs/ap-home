@@ -6,6 +6,21 @@
 //
 // SEC-005: the relying-origin allowlist is no longer hardcoded here. It's derived from
 // `whitelabel.relyingApps[].redirect_uris` so the two sources cannot drift.
+import { parseRoleOffer, type RoleOfferV1 } from '../../lib/org-role';
+
+/** `role_offer` — base64url of the offer's JSON. An offer that does not parse is DROPPED WITH A WARNING here and the
+ *  ceremony refuses to run with it (see RecognizedEnroll): a role nobody could record is not silently ignored. */
+export function roleOfferFromParam(raw: string | null): { roleOffer?: RoleOfferV1; roleOfferRaw?: string } {
+  if (!raw) return {};
+  try {
+    const bin = atob(raw.replace(/-/g, '+').replace(/_/g, '/'));
+    const parsed = parseRoleOffer(JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)))));
+    if (parsed.ok) return { roleOffer: parsed.offer, roleOfferRaw: raw };
+    console.warn(`[connect] role_offer refused: ${parsed.error}`);
+  } catch (e) { console.warn('[connect] role_offer could not be read', e); }
+  return { roleOfferRaw: raw };
+}
+
 import { CLIENT_DEFAULTS, applyClientDefaults } from '../../lib/client-defaults';
 import { isPaymentTemplate } from '../../whitelabel/config';
 import { useCallback, useEffect, useState } from 'react';
@@ -31,6 +46,11 @@ export interface EnrollReq {
   purpose?: string; // org_create: app-level purpose tag (e.g. jp-adopter-org) — ADR-0025
   grantOrg?: Address; // org_create: a broker org SA to also grant scoped read (spec 246)
   member?: Address; // workspace-member-invite: the person SA being granted into the workspace (P4)
+  /** workspace-member-invite (spec 427): the ROLE the invitation offers — a snapshot of the organization's own role
+   *  definition (ids and words only; anything else on it is refused when it is parsed, and again by the server).
+   *  `roleOfferRaw` is the parameter as it arrived, so a ceremony that is resumed carries the same bytes. */
+  roleOffer?: RoleOfferV1;
+  roleOfferRaw?: string;
   /** workspace-member-invite: where the invited person picks the invitation up IN THE APP — the page the
    *  message the host's agent sends them points at. Accepted only on the relying app's own origin. */
   appLink?: string;
@@ -91,6 +111,7 @@ export function parseEnrollReq(): EnrollReq | null {
       purpose: p.get('org_purpose') ?? undefined,
       grantOrg: (p.get('grant_org') as Address) ?? undefined,
       member: (p.get('member') as Address) ?? undefined,
+      ...roleOfferFromParam(p.get('role_offer')),
       appLink: sameOriginLink(p.get('app_link'), redirectUri),
       existingOrg: (p.get('existing_org') as Address) ?? undefined,
       sessionKey: (p.get('session_key') as Address) ?? undefined,

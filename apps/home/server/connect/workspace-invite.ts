@@ -63,6 +63,13 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     governorName?: string;
     governorAccess?: unknown;
     relationshipOffer?: unknown;
+    /** Custodian leg, when the invitation is INTO A TEAM and offers a role (spec 427): a team is an organization and
+     *  holds its own members, so the invite also invited into the team itself — these are the team→member access
+     *  grant and the team's signed half of the has-member credential that `/connect/org-invite/agent` just recorded
+     *  (with the role), carried so the member's join records the membership ON THE TEAM. Opaque, like the governor's. */
+    teamAccess?: unknown;
+    teamRelationshipOffer?: unknown;
+    teamRoleName?: string;
     /** Member leg: claim (and consume) the pending invitation addressed to the session's person. */
     claim?: boolean;
   } | null;
@@ -110,6 +117,9 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       workspaceName: body.workspaceName ?? '',
       ...(typeof body.governor === 'string' && ADDRESS.test(body.governor.toLowerCase())
         ? { governor: body.governor.toLowerCase(), governorName: body.governorName ?? '', governorAccess: body.governorAccess ?? null, relationshipOffer: body.relationshipOffer ?? null }
+        : {}),
+      ...(body.teamAccess && typeof body.teamAccess === 'object'
+        ? { teamAccess: body.teamAccess, teamRelationshipOffer: body.teamRelationshipOffer ?? null, ...(typeof body.teamRoleName === 'string' ? { teamRoleName: body.teamRoleName.slice(0, 60) } : {}) }
         : {}),
       invitedBy: person,
       createdAt: Date.now(),

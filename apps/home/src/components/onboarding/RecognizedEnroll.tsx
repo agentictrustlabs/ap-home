@@ -25,6 +25,7 @@ import { givePermission, createOrganization, createGovernedWorkspace, personGran
   isKmsVia, resolveVia, publishSocialConnectionKindIfNeeded, signHashFor, type Via, type Auth } from '../../home/onboarding';
 import { issueAskAsMeDelegation, issueOrganizationResourceAccessDelegation, issueSiteDelegation, issueWorkspaceMembershipAccessDelegation, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, toWire, type DelegationWire } from '../../lib/delegation';
 import { offerRelationshipCredential, relationshipOfferOf, resolveWorkspaceGovernor, type RelationshipOfferV1 } from '../../lib/workspace-governor';
+import { roleSlugOf } from '../../lib/org-role';
 import { buildActAsMeSet, signActAsMeSet, type ActChoice } from '../../lib/act-as-me';
 import { ActAsMeConsent } from './ActAsMeConsent';
 import { approveGrantHashes, signsWithoutPrompt } from '../../connect-client';
@@ -51,6 +52,10 @@ import { displayAppDomain, displayAppName } from './org-chooser-label';
 import { knownRelyingClient } from '../../lib/relying-clients';
 import { agentClassOf } from '../../lib/agent-class';
 import { withMissionRegistry } from '../../lib/mission-registry';
+
+/** The kinds of agent that ARE an organization holding its own members — where a team-scoped role can be offered. A
+ *  workspace is not one (a service, with no members): its people belong to the organization that governs it. */
+const TEAM_CLASS = new Set(['team', 'org', 'organization', 'circle', 'church', 'household']);
 
 type Phase = 'resolving' | 'choose-org' | 'consent' | 'granting' | 'connected' | 'error';
 
@@ -392,26 +397,66 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         // fail the invitee later, with no mention of why. The host is told what to set up, in the words every
         // screen about this uses.
         if (!governed) return fail(LEGACY_WORKSPACE_MESSAGE);
-        const total = 3;
+        // THE ROLE THIS INVITATION OFFERS (spec 427) — what the invitee will DO, as the organization's own definition.
+        // A parameter that arrived but did not parse is refused outright: an invitation that was meant to carry a
+        // role and silently carried none would tell the host one thing and the invitee another.
+        if (enroll.roleOfferRaw && !enroll.roleOffer) return fail('This invitation names a role the Home could not read — nothing was sent. Invite again from the app.');
+        const roleOffer = enroll.roleOffer ?? null;
+        const roleSlug = roleOffer ? roleSlugOf(roleOffer.roleDefinitionId) : '';
+        // A TEAM-SCOPED ROLE IS HELD ON THE TEAM. A team is an organization and holds its own members; the governor
+        // redirect above exists only because a `.workspace` agent is a service with none. So a team role needs
+        // `grant_org` to BE a team — decided from the agent's TYPE as this person's own tree records it, never from
+        // the offer's word: a `scope: 'team'` naming a workspace must not produce an invitation into a service.
+        let teamInvite = false;
+        if (roleOffer?.scope === 'team') {
+          const tree = (await fetch('/connect/related-orgs', { headers: { authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => ({}))) as { orgs?: Array<{ orgAgent?: string; kind?: string }> };
+          const kind = (tree.orgs ?? []).find((r) => (r.orgAgent ?? '').toLowerCase() === enroll.grantOrg!.toLowerCase())?.kind?.toLowerCase() ?? '';
+          if (!TEAM_CLASS.has(kind)) return fail(`"${roleOffer.name}" is a role held on a team, and this invitation is not into one — nothing was sent.`);
+          teamInvite = true;
+        }
+        const total = teamInvite ? 4 : 3;
         let governorAccess: DelegationWire | null = null;
         let relationshipOffer: RelationshipOfferV1 | null = null;
+        let teamAccess: DelegationWire | null = null;
+        let teamRelationshipOffer: RelationshipOfferV1 | null = null;
         {
           setGrantProgress({ step: 1, total, label: `Inviting them into ${governed.governorName || 'the organization'}…` });
           // Signed AS THE ORGANIZATION — its custody is this person's credential, reached the way select-existing
           // reaches an org it stewards — so both artifacts validate by the organization's ERC-1271.
           const signAsOrg = await signHashFor(viaLower as Via, governed.governor, auth);
           governorAccess = toWire(await issueOrganizationResourceAccessDelegation(governed.governor, enroll.member, MCP_SERVER_ID, signAsOrg));
-          relationshipOffer = await offerRelationshipCredential({ kind: 'has-member', subject: enroll.member, object: governed.governor, terms: { role: 'member' }, signAsObject: signAsOrg });
+          // An ORGANIZATION-scoped role is the governor's to offer, and rides this invitation; a team's rides the
+          // team's own, below. The credential's terms name the role's word; the access is the wire beside it.
+          const orgScoped = roleOffer?.scope === 'organization' ? roleOffer : null;
+          relationshipOffer = await offerRelationshipCredential({ kind: 'has-member', subject: enroll.member, object: governed.governor, terms: { role: orgScoped ? roleSlug : 'member' }, signAsObject: signAsOrg });
           const inv = await fetch('/connect/org-invite/agent', {
             method: 'POST',
             headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-            body: JSON.stringify({ org: governed.governor, agent: enroll.member, memberAccessDelegation: governorAccess, role: 'member', relationshipOffer }),
+            body: JSON.stringify({ org: governed.governor, agent: enroll.member, memberAccessDelegation: governorAccess, role: 'member', relationshipOffer, ...(orgScoped ? { orgRole: orgScoped } : {}) }),
           });
           const invOut = (await inv.json().catch(() => ({}))) as { ok?: boolean; error?: string };
           // An invitation the organization cannot record admits nobody — the same refusal `/org-invite` makes.
           if (!inv.ok || invOut.ok === false) return fail(invOut.error ?? `${governed.governorName || 'the organization'} could not record the invitation (HTTP ${inv.status})`);
         }
-        setGrantProgress({ step: 2, total, label: 'Signing the member’s access…' });
+        if (teamInvite && roleOffer) {
+          // THE TEAM INVITES TOO — exactly what the governor just did, signed AS THE TEAM by the same steward
+          // credential: the team→member access grant, the team's half of the has-member credential, and the role.
+          // The governor's invitation above is unchanged: somebody on a team also belongs to the organization.
+          // A team that cannot record it (its storage is not enabled, or this person does not steward it) FAILS the
+          // invitation here, by name — a role that was offered and landed nowhere is the one outcome not allowed.
+          setGrantProgress({ step: 2, total, label: `Inviting them onto ${enroll.orgBase?.trim() || 'the team'} as ${roleOffer.name}…` });
+          const signAsTeam = await signHashFor(viaLower as Via, enroll.grantOrg, auth);
+          teamAccess = toWire(await issueOrganizationResourceAccessDelegation(enroll.grantOrg, enroll.member, MCP_SERVER_ID, signAsTeam));
+          teamRelationshipOffer = await offerRelationshipCredential({ kind: 'has-member', subject: enroll.member, object: enroll.grantOrg, terms: { role: roleSlug }, signAsObject: signAsTeam });
+          const tinv = await fetch('/connect/org-invite/agent', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+            body: JSON.stringify({ org: enroll.grantOrg, agent: enroll.member, memberAccessDelegation: teamAccess, role: 'member', relationshipOffer: teamRelationshipOffer, orgRole: roleOffer }),
+          });
+          const tout = (await tinv.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+          if (!tinv.ok || tout.ok === false) return fail(`${enroll.orgBase?.trim() || 'The team'} could not record the invitation as ${roleOffer.name}: ${tout.error ?? `HTTP ${tinv.status}`}. Nothing further was sent — invite again without a role, or enable the team's storage first.`);
+        }
+        setGrantProgress({ step: teamInvite ? 3 : 2, total, label: 'Signing the member’s access…' });
         const signHash = await signHashFor(viaLower as Via, home.address, auth);
         const grant = await issueSiteDelegation(enroll.grantOrg, enroll.member, signHash);
         // P4 record coverage: the site delegation is reach; the MEMBERSHIP wire is what lets the
@@ -428,6 +473,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
             membership: toWire(membership),
             workspaceName: enroll.orgBase ?? '',
             governor: governed.governor, governorName: governed.governorName, governorAccess, relationshipOffer,
+            ...(teamAccess ? { teamAccess, teamRelationshipOffer, teamRoleName: roleOffer?.name ?? '' } : {}),
           }),
         });
         const out = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
@@ -447,7 +493,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           await sendMessage({
             person: home.address,
             recipient: enroll.member,
-            bodyText: `${homeLabel(home.name)} invited you into ${place} at ${appName}. Open ${place}'s page there and press "Join at your Home" — your Home will then know you as a member.`,
+            bodyText: `${homeLabel(home.name)} invited you into ${place} at ${appName}${roleOffer ? ` as ${roleOffer.name}` : ''}. Open ${place}'s page there and press "Join at your Home" — your Home will then know you as a member.`,
             contextRefs: enroll.appLink ? [{ kind: 'app-link', id: enroll.appLink, label: `Join ${place} at ${appName}` }] : [],
           });
         } catch (e) {
@@ -471,6 +517,8 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           invite?: {
             delegation?: unknown; membership?: unknown; workspaceName?: string;
             governor?: string; governorName?: string; governorAccess?: { delegate?: string } | null; relationshipOffer?: unknown;
+            /** Spec 427 — the invitation was into a TEAM and offered a role: the team's own grant and credential half. */
+            teamAccess?: { delegate?: string } | null; teamRelationshipOffer?: unknown; teamRoleName?: string;
           };
         };
         if (!res.ok || !out.ok || !out.invite?.delegation) {
@@ -529,6 +577,16 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           setGrantProgress({ step: 2, total: 3, label: `Joining ${invite.governorName || 'the organization'}…` });
           await recordOrgMembership(home.address, governor, signHash, token, invite.governorAccess ?? null, homeLabel(home.name), relationshipOfferOf(invite.relationshipOffer));
           lapJoin('organization recorded the membership');
+          // AND THE TEAM'S OWN MEMBERSHIP, when the invitation was into a team and offered a role (spec 427): a team is
+          // an organization and holds its own members. The team's object stamps the role from ITS invitation record.
+          // BEFORE the link below, on purpose: `recordOrgMembership` writes this person's link to the team as a plain
+          // member link, and the link write that follows is the one that must stand — it carries the record-covering
+          // wire the member reads the team's vault with.
+          if (invite.teamAccess && enroll.grantOrg.toLowerCase() !== governor) {
+            setGrantProgress({ step: 2, total: 3, label: `Joining the team${invite.teamRoleName ? ` as ${invite.teamRoleName}` : ''}…` });
+            await recordOrgMembership(home.address, enroll.grantOrg, signHash, token, invite.teamAccess, homeLabel(home.name), relationshipOfferOf(invite.teamRelationshipOffer));
+            lapJoin('team recorded the membership');
+          }
           setGrantProgress({ step: 3, total: 3, label: 'Adding the workspace to where you can work…' });
           try { await linkWorkspace(); } catch (e) { return fail(e instanceof Error ? e.message : String(e)); }
           lapJoin('linked');

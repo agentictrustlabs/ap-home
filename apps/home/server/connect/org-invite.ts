@@ -14,7 +14,7 @@ import type { IncomingDelegation } from '../_lib/verify-delegation';
 import { sendEmail, inviteEmail, emailSendingEnabled } from '../_lib/email-sender';
 import { emailHash } from '../../src/lib/kv-indexer';
 import { orgVault } from '../lib/org-vault';
-import { parseRoleOffer, type RoleOfferV1 } from '../lib/org-role';
+import { parseRoleOffer, type RoleOfferV1 } from '../../src/lib/org-role';
 import { whitelabel } from '../../src/whitelabel/config';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';

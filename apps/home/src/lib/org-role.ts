@@ -16,9 +16,10 @@
 // Pure: no I/O, no clock unless handed one. The object that records a membership and the Home route that
 // stores an invitation both call it, so the two cannot disagree about what an offer is.
 //
-// ONE FILE IN TWO PLACES: `apps/agent-runtime/src/org-role.ts` and `apps/home/server/lib/org-role.ts` are
+// ONE FILE IN TWO PLACES: `apps/agent-runtime/src/org-role.ts` and `apps/home/src/lib/org-role.ts` are
 // byte-identical (the two apps share no package, and the Home's build does not reach into the runtime's tree).
-// `apps/home/server/lib/org-role.parity.test.ts` fails the moment they differ — edit one, copy it to the other.
+// `apps/home/src/lib/org-role.parity.test.ts` fails the moment they differ — edit one, copy it to the other.
+// In the Home it sits under `src/` because both its server routes and its ceremony pages read an offer.
 
 /** A skill pack in the skills registry — a reference, never content. */
 export interface SkillPackRef { context: string; archetype: string; version?: string }
