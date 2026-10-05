@@ -290,6 +290,24 @@ export async function createAgentWithBirthrights(
       console.warn('[org-create] channel storage not auto-enabled (use Enable on the channels page):', e);
     }
   }
+  // SPEC 428 W3 — A TEAM GRANTS ITS ORGANIZATION A CONTENT READ OF ITSELF, at charter. The team's records stay the team's
+  // (its vault); the organization's stewards read them through this `team → org` grant (content, discussion,
+  // coordination only — never custody, membership or members' private records). Signed AS THE TEAM by the person who
+  // just chartered it (its custodian), projected into `org-teams:<org>` for the org's stewards. Best-effort: a team is
+  // never refused for want of it, and `scripts/backfill-428-team-read.mts` is the recovery path.
+  if (kind === 'team' && parent.toLowerCase() !== person.toLowerCase()) {
+    try {
+      const { issueOrgReadDelegation, toWire } = await import('../../lib/delegation');
+      const { MCP_SERVER_ID } = await import('../../lib/inbox-delivery');
+      const { GOVERNED_CONTENT_SCOPE } = await import('../../lib/workspace-governor');
+      const signTeam = await signHashFor(via.toLowerCase() as Via, res.result.agent, { token });
+      const grant = toWire(await issueOrgReadDelegation(res.result.agent, parent as `0x${string}`, { server: MCP_SERVER_ID, resources: GOVERNED_CONTENT_SCOPE }, signTeam));
+      await fetch('/connect/related-orgs', {
+        method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify({ person, orgAgent: parent.toLowerCase(), governedTeam: { team: res.result.agent.toLowerCase(), teamName: res.result.name || label || '', grant } }),
+      });
+    } catch (e) { console.warn('[team-create] the organization content-read grant was not minted:', e instanceof Error ? e.message : String(e)); }
+  }
   // THE PLAYBOOK IT IS BORN WITH (spec 354 §3). A treasury with no assignment runs the bare harness —
   // which is a documented state, except that the spec-360 effect resolver reads the PAYER's playbook,
   // so an unassigned treasury moves money and tells nobody.

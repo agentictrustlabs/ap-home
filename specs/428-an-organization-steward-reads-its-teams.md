@@ -1,6 +1,6 @@
 # Spec 428 — An organization's steward reads what its teams hold
 
-**Status:** draft → W1 in build, 2026-10-05. **Owner decision:** "yes to 3" (the Home developer's list, item 3).
+**Status:** W1 + W3 built, 2026-10-05 (W1 backfilled for Boulder–Longmont 0xf98d…; W2 is the field app’s). **Owner decision:** "yes to 3" (the Home developer's list, item 3).
 **Builds on:** spec 424 (a member reads the governed workspace through the governor — approach B), spec 344 (team ⊑
 organization; the hub: `org → { members, teams, workspace }`), ADR-0055 (the vault is the record), ADR-0056
 (resolution is not authority), ADR-0041 (Web3 authority; a projection authorizes nothing).
