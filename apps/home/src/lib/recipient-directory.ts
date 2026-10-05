@@ -33,6 +33,8 @@ export interface RosterMember {
   /** Their CURRENT naming-service name — null for the nameless. */
   publicName: string | null;
   role?: string;
+  /** Spec 427 — the organization's role definition this member's role points at, when the organization named one. */
+  roleDefinitionId?: string;
   /** Household membership (spec 368): how this member is related to the founder — `aphh:kinRelation`. */
   kin?: string;
   /** Spec 398 §4.5 — which view of membership found them: their own signed listing, or the organization's grant on an
@@ -49,6 +51,9 @@ export interface DirectoryResponse {
   listings?: Array<{
     listing?: { subject?: string; displayName?: string; localName?: string; publicName?: string | null; orgRole?: string };
     label?: string;
+    /** Spec 427 §3.4 — the role the ORGANIZATION records for this member (from its membership record, never from the
+     *  member's own listing). Absent for a plain member. */
+    role?: { assignedRole?: string; roleName?: string; roleDefinitionId?: string };
   }>;
 }
 
@@ -70,7 +75,9 @@ export function rosterFromDirectoryResponse(body: DirectoryResponse): RosterMemb
       displayName: displayName || `${address.slice(0, 6)}…${address.slice(-4)}`,
       publicName: l?.publicName?.trim() || null,
       admittedVia: 'listing',
-      ...(l?.orgRole ? { role: l.orgRole } : {}),
+      // The organization's own record of the role wins over the word a member put on their listing.
+      ...(row.role?.roleName || row.role?.assignedRole || l?.orgRole ? { role: row.role?.roleName || row.role?.assignedRole || l?.orgRole } : {}),
+      ...(row.role?.roleDefinitionId ? { roleDefinitionId: row.role.roleDefinitionId } : {}),
     });
   }
   return out.sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }));
@@ -80,7 +87,7 @@ export function rosterFromDirectoryResponse(body: DirectoryResponse): RosterMemb
  *  redeemed an invite and delegated to the org, with the display name they chose at join. Keyed by
  *  the ORG they joined (`viaOrg`); the member's own SA is — confusingly — `orgAgent`. */
 export interface ReceivedMembersResponse {
-  received?: Array<{ viaOrg?: string; orgAgent?: string; displayName?: string; orgName?: string; kin?: string; role?: string; delegation?: { caveats?: Array<{ enforcer?: string; terms?: string }> } }>;
+  received?: Array<{ viaOrg?: string; orgAgent?: string; displayName?: string; orgName?: string; kin?: string; role?: string; /** spec 427 — the organization's role on the membership (a projection of its record). */ orgRole?: { assignedRole?: string; roleName?: string; roleDefinitionId?: string }; delegation?: { caveats?: Array<{ enforcer?: string; terms?: string }> } }>;
 }
 
 /** Pure: the members of `org` from the received-delegations index. Empty for an org the person does
@@ -99,7 +106,10 @@ export function membersFromReceivedDelegations(body: ReceivedMembersResponse, or
     // name once the thread opens.
     const displayName = r.displayName?.trim() || `${address.slice(0, 6)}…${address.slice(-4)}`;
     const caveats = (r.delegation?.caveats ?? []).filter((c): c is { enforcer: string; terms: string } => typeof c.enforcer === 'string' && typeof c.terms === 'string');
-    out.push({ address, displayName, publicName: null, admittedVia: 'invite', ...(caveats.length ? { grantCaveats: caveats } : {}), ...(r.role ? { role: r.role } : {}), ...(r.kin ? { kin: r.kin } : {}) });
+    // THE ROLE A ROSTER SHOWS is what the member does here: the organization's role when it named one (spec 427),
+    // else the household role (368). Both are words; neither is a basis for authority.
+    const orgRoleName = r.orgRole?.roleName?.trim() || r.orgRole?.assignedRole?.trim() || '';
+    out.push({ address, displayName, publicName: null, admittedVia: 'invite', ...(caveats.length ? { grantCaveats: caveats } : {}), ...(orgRoleName || r.role ? { role: orgRoleName || r.role } : {}), ...(r.orgRole?.roleDefinitionId ? { roleDefinitionId: r.orgRole.roleDefinitionId } : {}), ...(r.kin ? { kin: r.kin } : {}) });
   }
   return out;
 }

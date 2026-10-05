@@ -354,6 +354,140 @@ describe('org.endMembership', () => {
   });
 });
 
+// A ROLE ON A MEMBERSHIP (spec 427 §3) — what somebody does here, stated by the organization and recorded on the
+// membership the member writes. The member cannot choose it; a steward may change it; the member may read their own.
+// Nothing reads it as authority, which is why nothing below is a gate test.
+describe('a role on a membership (spec 427)', () => {
+  const STEWARD = '0x3333333333333333333333333333333333333333';
+  const offer = {
+    type: 'ap.org.role-offer.v1', roleDefinitionId: `roledef:${ORG}:field-worker@1`, name: 'Field worker',
+    description: 'Records the work among a people.', scope: 'team', accessRole: 'field-recorder',
+    skillPackRefs: [{ context: 'field-operations', archetype: 'role-field-worker' }],
+  };
+  const lead = { ...offer, roleDefinitionId: `roledef:${ORG}:team-lead@1`, name: 'Team lead', accessRole: 'community-steward', skillPackRefs: [{ context: 'field-operations', archetype: 'role-team-lead' }] };
+  const wire = { delegate: ORG, delegator: MEMBER };
+  const base = { type: 'ap.org.membership.v1', memberAgent: MEMBER, organizationAgent: ORG };
+  const stored = () => w.records.get(`org.membership:member:${MEMBER}`) as { roleAssignment: Record<string, unknown>; endedAt?: string };
+  const invited = (orgRole?: unknown) => w.records.set(`org.invite:agent:${MEMBER}`, { delegation: {}, status: 'pending', invitedBy: STEWARD, ...(orgRole ? { orgRole } : {}) });
+
+  it('records the role ON THE INVITATION, whatever the member sent', async () => {
+    seedListing('Alice', MEMBER);
+    invited(offer);
+    const r = await call('org.recordMembership', MEMBER, { record: { ...base, roleAssignment: { assignedRole: 'member', materializedByDelegation: wire, householdRole: 'parent' } } });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toMatchObject({ ok: true, role: 'field-worker', roleName: 'Field worker', roleFrom: 'invitation' });
+    const ra = stored().roleAssignment;
+    expect(ra).toMatchObject({ assignedRole: 'field-worker', roleDefinitionId: offer.roleDefinitionId, roleName: 'Field worker', scope: 'team', accessRole: 'field-recorder', assignedBy: STEWARD, householdRole: 'parent' });
+    expect(ra.skillPackRefs).toEqual(offer.skillPackRefs);
+    expect(ra.materializedByDelegation).toEqual(wire);
+  });
+
+  it('with no role offered, a member is a member', async () => {
+    seedListing('Alice', MEMBER);
+    invited();
+    const r = await call('org.recordMembership', MEMBER, { record: { ...base, roleAssignment: { materializedByDelegation: wire } } });
+    expect(r.status).toBe(200);
+    expect(stored().roleAssignment.assignedRole).toBe('member');
+    expect(stored().roleAssignment.roleDefinitionId).toBeUndefined();
+  });
+
+  it('REFUSES a role the organization did not offer — and writes nothing', async () => {
+    seedListing('Alice', MEMBER);
+    invited(offer);
+    const r = await call('org.recordMembership', MEMBER, { record: { ...base, roleAssignment: { assignedRole: 'team-lead', roleDefinitionId: lead.roleDefinitionId, materializedByDelegation: wire } } });
+    expect(r.status).toBe(403);
+    expect(((await r.json()) as { code: string }).code).toBe('role_not_offered');
+    expect(w.records.has(`org.membership:member:${MEMBER}`)).toBe(false);
+    // …and with no invitation at all, a claimed role is the same refusal.
+    w.records.delete(`org.invite:agent:${MEMBER}`);
+    const r2 = await call('org.recordMembership', MEMBER, { record: { ...base, roleAssignment: { assignedRole: 'field-worker', materializedByDelegation: wire } } });
+    expect(r2.status).toBe(403);
+  });
+
+  it('invite.put refuses an offer carrying anything but ids and words', async () => {
+    // The bridge gate admits nobody here; what is under test is the parse — exercised through the pure module in
+    // `org-role.test.ts` — so this only pins that a stored offer the object cannot parse offers NO role.
+    seedListing('Alice', MEMBER);
+    invited({ ...offer, delegation: { delegate: MEMBER } });
+    const r = await call('org.recordMembership', MEMBER, { record: { ...base, roleAssignment: { materializedByDelegation: wire } } });
+    expect(r.status).toBe(200);
+    expect(stored().roleAssignment.assignedRole).toBe('member');
+  });
+
+  it('the member reads their OWN record, without the delegation; nobody reads another\'s', async () => {
+    seedListing('Alice', MEMBER);
+    invited(offer);
+    await call('org.recordMembership', MEMBER, { record: { ...base, roleAssignment: { materializedByDelegation: wire } } });
+    const mine = (await (await call('org.membership.mine', MEMBER)).json()) as { membership: { roleAssignment: Record<string, unknown> } | null; offer: { name: string; skillPackRefs: unknown[] } | null; ended: boolean };
+    expect(mine.membership?.roleAssignment.assignedRole).toBe('field-worker');
+    expect(mine.membership?.roleAssignment.materializedByDelegation).toBeUndefined();
+    expect(mine.offer).toMatchObject({ name: 'Field worker', skillPackRefs: offer.skillPackRefs });
+    expect(mine.ended).toBe(false);
+    // The key is derived from the session: a `member` in the body names nobody.
+    const other = (await (await call('org.membership.mine', OUTSIDER, { member: MEMBER })).json()) as { membership: unknown };
+    expect(other.membership).toBeNull();
+  });
+
+  it('a member cannot set a role — their own or anybody\'s', async () => {
+    seedListing('Alice', MEMBER);
+    invited(offer);
+    await call('org.recordMembership', MEMBER, { record: { ...base, roleAssignment: { materializedByDelegation: wire } } });
+    expect((await call('org.setMemberRole', MEMBER, { member: MEMBER, orgRole: lead })).status).toBe(403);
+    expect((await call('org.setMemberRole', OUTSIDER, { member: MEMBER, orgRole: lead, stewardship: { delegator: ORG, delegate: OUTSIDER, caveats: [], salt: '1', signature: '0xdead' } })).status).toBe(403);
+    expect(stored().roleAssignment.assignedRole).toBe('field-worker');
+  });
+
+  it('a steward changes the role: the delegation is kept, and a re-run of the join does not undo it', async () => {
+    seedListing('Alice', MEMBER);
+    invited(offer);
+    await call('org.recordMembership', MEMBER, { record: { ...base, roleAssignment: { materializedByDelegation: wire, kinRelation: 'spouse' } } });
+    // The steward gate is `isSteward` (wire shape + chain liveness), covered by the gate tests; here it is admitted.
+    (doInstance as unknown as { isSteward: () => Promise<boolean> }).isSteward = async () => true;
+    const bad = await call('org.setMemberRole', STEWARD, { member: MEMBER, orgRole: { ...lead, tools: ['x'] } });
+    expect(bad.status).toBe(400);
+    const r = await call('org.setMemberRole', STEWARD, { member: MEMBER, orgRole: lead });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toMatchObject({ ok: true, role: 'team-lead', roleName: 'Team lead', previous: 'field-worker', changed: true });
+    expect(stored().roleAssignment).toMatchObject({ assignedRole: 'team-lead', accessRole: 'community-steward', assignedBy: STEWARD, materializedByDelegation: wire, kinRelation: 'spouse' });
+    expect(stored().roleAssignment.roleSetAt).toBeTruthy();
+    // The join again (an idempotent ceremony): the steward's role stands over the invitation's.
+    const again = await call('org.recordMembership', MEMBER, { record: { ...base, roleAssignment: { materializedByDelegation: wire } } });
+    expect(await again.json()).toMatchObject({ role: 'team-lead', roleFrom: 'steward' });
+    expect(stored().roleAssignment.assignedRole).toBe('team-lead');
+    // `orgRole: null` is the plain member again.
+    const plain = await call('org.setMemberRole', STEWARD, { member: MEMBER, orgRole: null });
+    expect(await plain.json()).toMatchObject({ role: 'member', previous: 'team-lead' });
+    expect(stored().roleAssignment.roleDefinitionId).toBeUndefined();
+    expect(stored().roleAssignment.materializedByDelegation).toEqual(wire);
+  });
+
+  it('the roster shows the role the ORGANIZATION records, beside the listing — never the word a member put on it', async () => {
+    seedListing('Alice', MEMBER);
+    seedListing('Olive', OUTSIDER);
+    invited(offer);
+    await call('org.recordMembership', MEMBER, { record: { ...base, roleAssignment: { materializedByDelegation: wire } } });
+    const body = (await (await call('directory.list', MEMBER)).json()) as { listings: Array<{ listing: { subject: string; orgRole?: string }; role?: { assignedRole: string; roleName?: string } }> };
+    const alice = body.listings.find((l) => l.listing.subject === caip(MEMBER));
+    const olive = body.listings.find((l) => l.listing.subject === caip(OUTSIDER));
+    expect(alice?.role).toMatchObject({ assignedRole: 'field-worker', roleName: 'Field worker' });
+    expect(alice?.listing.orgRole).toBeUndefined();
+    expect(olive?.role).toBeUndefined();
+    // An ended membership has no role on the roster.
+    await call('org.endMembership', MEMBER, { member: MEMBER });
+  });
+
+  it('a role hangs on a membership: none, or an ended one, takes no role', async () => {
+    (doInstance as unknown as { isSteward: () => Promise<boolean> }).isSteward = async () => true;
+    expect((await call('org.setMemberRole', STEWARD, { member: MEMBER, orgRole: lead })).status).toBe(404);
+    seedListing('Alice', MEMBER);
+    await call('org.recordMembership', MEMBER, { record: { ...base, roleAssignment: { materializedByDelegation: wire } } });
+    await call('org.endMembership', MEMBER, { member: MEMBER });
+    expect((await call('org.setMemberRole', STEWARD, { member: MEMBER, orgRole: lead })).status).toBe(409);
+    const mine = (await (await call('org.membership.mine', MEMBER)).json()) as { ended: boolean };
+    expect(mine.ended).toBe(true);
+  });
+});
+
 // A GOVERNED WORKSPACE'S BOARD ADMITS ITS GOVERNOR'S MEMBERS (spec 424; the owner's rule, 2026-10-02). A workspace
 // holds no members — they belong to the organization that governs it — so the workspace's own records never name
 // one. Before this, a member could read the workspace (through the governor) and never open a topic on its board:

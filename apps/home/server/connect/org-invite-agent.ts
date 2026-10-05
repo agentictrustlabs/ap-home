@@ -12,6 +12,7 @@ import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import type { Address } from '@agenticprimitives/types';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { notAnOrganization, workspaceCheck } from '../lib/workspace-governor';
+import { parseRoleOffer, type RoleOfferV1 } from '../lib/org-role';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
 const json = (b: unknown, s = 200): Response =>
@@ -23,7 +24,7 @@ const isAddress = (s: string): boolean => /^0x[0-9a-fA-F]{40}$/.test(s);
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
   const body = (await request.json().catch(() => null)) as
-    | { org?: string; agent?: string; memberAccessDelegation?: { delegator?: string; delegate?: string; signature?: string }; kin?: string; role?: string; relationshipOffer?: { subject?: string; object?: string; digest?: string } }
+    | { org?: string; agent?: string; memberAccessDelegation?: { delegator?: string; delegate?: string; signature?: string }; kin?: string; role?: string; relationshipOffer?: { subject?: string; object?: string; digest?: string }; /** spec 427 — the role this organization offers with the invitation (a snapshot of its own role definition). */ orgRole?: unknown }
     | null;
   const org = (body?.org ?? '').toLowerCase();
   const agent = (body?.agent ?? '').toLowerCase();
@@ -31,6 +32,18 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (!isAddress(org) || !isAddress(agent) || !mad?.signature) return json({ error: 'org + agent + signed memberAccessDelegation required' }, 400);
   if ((mad.delegator ?? '').toLowerCase() !== org) return json({ error: 'memberAccessDelegation delegator must be the org' }, 400);
   if ((mad.delegate ?? '').toLowerCase() !== agent) return json({ error: 'memberAccessDelegation delegate must be the invited agent' }, 400);
+  // Spec 427 §3.2 — THE ROLE THIS ORGANIZATION OFFERS, beside (never instead of) the household `role` of 368. It is
+  // what the invitee will DO here: a snapshot of the organization's own role definition — a name, a description,
+  // the access role that explains it and the skill packs it offers their agent. Ids and words only: anything else
+  // on it is refused here, before a signature is asked of anybody, because an offer that could carry a grant
+  // would be a second road to authority. It confers nothing; the join records it, and the member alone decides
+  // whether their agent is equipped for it.
+  let orgRole: RoleOfferV1 | null = null;
+  if (body?.orgRole !== undefined && body.orgRole !== null) {
+    const parsed = parseRoleOffer(body.orgRole);
+    if (!parsed.ok) return json({ error: parsed.error, code: 'invalid_role_offer' }, 400);
+    orgRole = parsed.offer;
+  }
   // Each leg says which leg it was. This route answered a well-formed request with an EMPTY 500: any
   // throw — the chain read behind the stewardship check, a vault that was never enabled — arrived as the
   // same blank failure, and the caller could not tell "you may not" from "it broke" from "not set up yet".
@@ -69,9 +82,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // names THIS organization and THIS invitee (anything else is inert, never re-targeted).
     const offer = body?.relationshipOffer;
     const offerFits = !!offer && (offer.subject ?? '').toLowerCase() === agent && (offer.object ?? '').toLowerCase() === org && /^0x[0-9a-fA-F]{64}$/.test(String(offer.digest ?? ''));
-    await vault.set(`org.invite:agent:${agent}`, { delegation: mad, createdAt: Date.now(), status: 'pending', ...(kin ? { kin } : {}), ...(role ? { role } : {}), ...(offerFits ? { relationshipOffer: offer } : {}) });
+    // `invitedBy` is who offered: the join records them as the role's `assignedBy`, and the room's line names them.
+    await vault.set(`org.invite:agent:${agent}`, { delegation: mad, createdAt: Date.now(), status: 'pending', invitedBy: control.person.toLowerCase(), ...(kin ? { kin } : {}), ...(role ? { role } : {}), ...(orgRole ? { orgRole } : {}), ...(offerFits ? { relationshipOffer: offer } : {}) });
   } catch (e) {
     return json({ error: 'could not store the invitation in the organization vault', detail: String(e instanceof Error ? e.message : e) }, 502);
   }
-  return json({ ok: true });
+  return json({ ok: true, ...(orgRole ? { orgRole: { roleDefinitionId: orgRole.roleDefinitionId, name: orgRole.name } } : {}) });
 };

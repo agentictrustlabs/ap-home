@@ -30,6 +30,7 @@ import { classifyDivergence, recordDivergence, shouldShadow, SHADOW_INTERVAL_MS,
 import { gatewayStage, GATEWAY_ADOPTION } from './gateway-adoption.js';
 import { verifyDelegationWire, type DelegationWireLike } from '@agenticprimitives/a2a';
 import { enforcersFromEnv } from './org-wire.js';
+import { parseRoleOffer, resolveAssignedRole, roleFieldsFromOffer, withoutRoleFields, offerFromRoleFields, PLAIN_MEMBER, type AssignedRoleFields } from './org-role.js';
 import { A2A_ANY_SKILL, decodeAllowedMethodsTerms, decodeAllowedTargetsTerms, skillSelector } from '@agenticprimitives/a2a';
 import {
   appendBoardPost,
@@ -3550,16 +3551,24 @@ export class InteractionsDO {
             return json({ ok: true, record: r?.data ?? null });
           }
           if (body.data === undefined) return json({ error: 'data required' }, 400);
+          // Spec 427 invariant 6 — a ROLE OFFER on an invitation carries ids and words only. Checked at the door
+          // the record is written through, so no caller can store one this object would later refuse to read.
+          const offered = (body.data && typeof body.data === 'object' ? (body.data as { orgRole?: unknown }).orgRole : undefined);
+          if (offered !== undefined && offered !== null) {
+            const parsed = parseRoleOffer(offered);
+            if (!parsed.ok) return json({ ok: false, code: 'invalid_role_offer', error: parsed.error }, 400);
+          }
           await this.vaultFor(dg).write({ owner: '', resource, data: body.data, classification: 'internal' } as never);
           // The room says so (Welcome topic): an invitation went out — to a named agent, or by email (the
           // address itself is never on the board; the record never held it either).
           if (op === 'invite.put' && st0.grant) {
-            const data = (body.data && typeof body.data === 'object' ? body.data : {}) as { invitedBy?: string; displayName?: string; status?: string; kin?: string };
+            const data = (body.data && typeof body.data === 'object' ? body.data : {}) as { invitedBy?: string; displayName?: string; status?: string; kin?: string; orgRole?: { name?: string } | null };
             if (!data.status || data.status === 'pending') {
               const by = typeof data.invitedBy === 'string' && /^0x[0-9a-f]{40}$/i.test(data.invitedBy) ? await this.boardNameFor(st0.grant, data.invitedBy) : null;
               const who = resource.startsWith('org.invite:agent:') ? await this.boardNameFor(st0.grant, resource.slice('org.invite:agent:'.length)) : (data.displayName || 'someone, by email');
               // A household's line says the kinship (spec 368) — "invited Bob to join as spouse".
-              const asKin = typeof data.kin === 'string' && data.kin.trim() ? ` as ${data.kin.trim()}` : '';
+              // …and an organization's line says the role it offered (spec 427) — "invited Bob to join as Field worker".
+              const asKin = typeof data.kin === 'string' && data.kin.trim() ? ` as ${data.kin.trim()}` : (data.orgRole && typeof data.orgRole.name === 'string' && data.orgRole.name.trim() ? ` as ${data.orgRole.name.trim().slice(0, 60)}` : '');
               await this.postWelcome(st0.grant, principal, `📨 ${by ? `${by} invited` : 'An invitation went to'} ${who}${by ? ' to join' : ''}${asKin}.`);
             }
           }
@@ -3918,15 +3927,97 @@ export class InteractionsDO {
           return json({ ok: false, code: 'not_an_organization', error: `this is a workspace agent, and a workspace holds no members — membership is recorded on the organization that governs it (${governor})`, governedBy: governor }, 409);
         }
         return this.serialize(async () => {
-          await this.writeDoc(grant, `org.membership:member:${member}`, record);
+          // THE ROLE IS THE ORGANIZATION'S STATEMENT, NOT THE MEMBER'S (spec 427 §3.3, invariant 3). The member
+          // writes this record, for themselves; what they DO here was decided by whoever invited them. So the role
+          // is never taken from the body: it is read from the organization's own records — a role a steward set on
+          // a standing membership, else the offer on the invitation it stored for this member, else the plain
+          // member — and whatever the body claimed is only CHECKED against that. A member cannot join as a role
+          // they were not offered, and an older Home that still sends the constant 'member' records the right one.
+          // The role authorizes nothing either way (324): no gate in this file reads it.
+          const memberKey = `org.membership:member:${member}`;
+          const claimed = (record.roleAssignment ?? {}) as { assignedRole?: unknown; roleDefinitionId?: unknown };
+          const claimsRole = (!!claimed.assignedRole && String(claimed.assignedRole).toLowerCase() !== PLAIN_MEMBER) || !!claimed.roleDefinitionId;
+          let invite: { orgRole?: unknown; invitedBy?: unknown; status?: unknown } | null = null;
+          let inviteReadable = true;
+          // The invitation is read under the DELIVERY wire: `org.invite:*` is in that grant's record scope and in
+          // none the interactions grant carries (the same wire `invite.put` wrote it under).
+          try { invite = await this.readDoc<{ orgRole?: unknown; invitedBy?: unknown; status?: unknown } | null>(st.deliveryGrant ?? grant, `org.invite:agent:${member}`, null); } catch { inviteReadable = false; }
+          // "Could not look" is not "was not offered": a claimed role is refused as unverifiable, never as a lie.
+          if (!inviteReadable && claimsRole) return json({ ok: false, code: 'role_unverifiable', error: 'could not read the invitation this role is recorded from — try again' }, 503);
+          const existing = await this.readDoc<{ endedAt?: unknown; roleAssignment?: Partial<AssignedRoleFields> | null } | null>(grant, memberKey, null).catch(() => null);
+          const role = resolveAssignedRole({ claimed, invite, existing, now: new Date().toISOString() });
+          if (!role.ok) return json({ ok: false, code: role.code, error: role.error }, 403);
+          const stamped = { ...record, roleAssignment: { ...withoutRoleFields(record.roleAssignment as Record<string, unknown>), ...role.fields } };
+          await this.writeDoc(grant, memberKey, stamped);
           // The room says so: a new member is announced in the Welcome topic — best-effort, never gating, and
           // AFTER the answer: a join ceremony waited on the topic being created, read and appended to (several
           // vault operations) before the person could be told they were in.
-          const announce = async () => { try { await this.postWelcome(grant, principal, `👋 ${await this.boardNameFor(grant, member)} joined.`, true); } catch { /* the welcome is not the membership */ } };
+          const asRole = role.fields.roleName ? ` as ${role.fields.roleName}` : '';
+          const announce = async () => { try { await this.postWelcome(grant, principal, `👋 ${await this.boardNameFor(grant, member)} joined${asRole}.`, true); } catch { /* the welcome is not the membership */ } };
           // A test's fake state has no `waitUntil`; there the line is simply awaited.
           const later = (this.state as { waitUntil?: (p: Promise<unknown>) => void }).waitUntil;
           if (typeof later === 'function') later.call(this.state, announce()); else await announce();
-          return json({ ok: true, member });
+          return json({ ok: true, member, role: role.fields.assignedRole, ...(role.fields.roleName ? { roleName: role.fields.roleName } : {}), ...(role.fields.roleDefinitionId ? { roleDefinitionId: role.fields.roleDefinitionId } : {}), roleFrom: role.from });
+        });
+      }
+      if (op === 'org.setMemberRole') {
+        // A STEWARD CHANGES WHAT A MEMBER DOES HERE (spec 427 §3.3). The same record, the same key: the role fields
+        // are replaced, the delegation that materializes the membership and the household facets are kept. `orgRole:
+        // null` puts the member back to the plain role. It is a statement and confers nothing — the access a role
+        // needs is issued (or revoked) by its own ceremony, and the pack it offers is the member's to accept: nothing
+        // here reaches into anybody's playbook, and nothing could (invariant 2).
+        //
+        // WHO: a steward of this organization, like removal (`org.endMembership`). A member does not promote themself.
+        const member = String(body.member ?? '').toLowerCase();
+        if (!/^0x[0-9a-f]{40}$/.test(member)) return json({ error: 'member required' }, 400);
+        if (!(await this.isSteward(principal, sessionSa, body.stewardship as IncomingDelegation | undefined))) {
+          return json({ error: 'a member\u2019s role is set by a steward of the organization' }, 403);
+        }
+        const now = new Date().toISOString();
+        let fields: AssignedRoleFields;
+        if (body.orgRole === null || body.orgRole === undefined) {
+          fields = { assignedRole: PLAIN_MEMBER, assignedBy: sessionSa.toLowerCase(), assignedAt: now, roleSetAt: now };
+        } else {
+          const parsed = parseRoleOffer(body.orgRole);
+          if (!parsed.ok) return json({ ok: false, code: 'invalid_role_offer', error: parsed.error }, 400);
+          fields = { ...roleFieldsFromOffer(parsed.offer, sessionSa, now), roleSetAt: now };
+        }
+        return this.serialize(async () => {
+          const key = `org.membership:member:${member}`;
+          const rec = await this.readDoc<Record<string, unknown> | null>(grant, key, null);
+          if (!rec) return json({ ok: false, code: 'no_membership', error: 'that agent holds no membership record here — a role hangs on a membership' }, 404);
+          if (typeof rec.endedAt === 'string' && rec.endedAt) return json({ ok: false, code: 'membership_ended', error: 'that membership has ended — invite them back, with the role' }, 409);
+          const before = (rec.roleAssignment ?? {}) as Partial<AssignedRoleFields>;
+          await this.writeDoc(grant, key, { ...rec, roleAssignment: { ...withoutRoleFields(rec.roleAssignment as Record<string, unknown>), ...fields } });
+          await audit.write({ id: crypto.randomUUID(), timestamp: now, action: 'interactions.org.membership.role', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'membership', id: member } });
+          const say = async () => { try { await this.postWelcome(grant, principal, `🎭 ${await this.boardNameFor(grant, member)} is now ${fields.roleName ?? 'a member'} here.`, true); } catch { /* narration, never the fact */ } };
+          const later = (this.state as { waitUntil?: (p: Promise<unknown>) => void }).waitUntil;
+          if (typeof later === 'function') later.call(this.state, say()); else await say();
+          return json({ ok: true, member, role: fields.assignedRole, ...(fields.roleName ? { roleName: fields.roleName } : {}), previous: before.assignedRole ?? PLAIN_MEMBER, changed: (before.roleDefinitionId ?? '') !== (fields.roleDefinitionId ?? '') || (before.assignedRole ?? PLAIN_MEMBER) !== fields.assignedRole });
+        });
+      }
+      if (op === 'org.membership.mine') {
+        // WHAT THIS ORGANIZATION RECORDS OF ME (spec 427 §5.3). A person cannot read an organization's vault and
+        // does not need to: the session says who is asking and the key is DERIVED from it, never supplied — the
+        // same property as `invite.claim`. It answers that member's record and nothing else, ended or not (a
+        // person's Home drops a role's pack when the membership it came from has ended, and must be able to see
+        // that it has). The delegation on the record is the member's own; it is not echoed — the role is the point.
+        const me = sessionSa.toLowerCase();
+        const rec = await this.readDoc<Record<string, unknown> | null>(grant, `org.membership:member:${me}`, null);
+        if (!rec || String(rec.memberAgent ?? '').toLowerCase() !== me) {
+          // A WORKSPACE HOLDS NO MEMBERS — asked of one, the answer names the organization that does (the pointer a
+          // governed workspace keeps in its own vault), so a Home that asked the wrong agent learns where to ask.
+          const governor = governorOf(await this.readDoc<unknown>(grant, WORKSPACE_GOVERNOR_RECORD, null).catch(() => null));
+          return json({ ok: true, organization: principal.toLowerCase(), membership: null, ...(governor && governor !== principal.toLowerCase() ? { governedBy: governor } : {}) });
+        }
+        const ra = (rec.roleAssignment ?? {}) as Record<string, unknown>;
+        const { materializedByDelegation: _wire, ...roleAssignment } = ra;
+        return json({
+          ok: true,
+          organization: principal.toLowerCase(),
+          membership: { ...rec, roleAssignment: { assignedRole: PLAIN_MEMBER, ...roleAssignment } },
+          ended: typeof rec.endedAt === 'string' && !!rec.endedAt,
+          offer: offerFromRoleFields(roleAssignment as Partial<AssignedRoleFields>),
         });
       }
       if (op === 'org.endMembership') {
@@ -4068,18 +4159,39 @@ export class InteractionsDO {
         // The member's CURRENT naming-service name rides each listing (live reverse resolution,
         // null for the nameless) — so a roster can show who a member is to the world as well as
         // who they are here, without every consumer re-running the same chain reads.
-        const publicNames = await this.resolvePublicNames(
-          rows.map((r) => String((r.listing as { subject?: string } | undefined)?.subject ?? '').match(/0x[0-9a-fA-F]{40}/)?.[0] ?? ''),
-        );
+        const subjects = rows.map((r) => String((r.listing as { subject?: string } | undefined)?.subject ?? '').match(/0x[0-9a-fA-F]{40}/)?.[0] ?? '');
+        // THE ROLE EACH MEMBER HOLDS HERE rides beside their listing (spec 427 §3.4) — beside, never inside: the
+        // listing is what the member signed about THEMSELVES, the role is what the ORGANIZATION records of them, and
+        // a roster that took the role from the listing would let anybody title themselves. One batch read of the
+        // membership records for the people listed, alongside the name resolution; a failed read costs the roles,
+        // never the roster. Words for people to read — nothing here or anywhere gates on them.
+        const rolesOf = async (): Promise<Record<string, { assignedRole: string; roleName?: string; roleDefinitionId?: string }>> => {
+          const keys = [...new Set(subjects.filter(Boolean).map((a) => `org.membership:member:${a.toLowerCase()}`))].slice(0, 200);
+          if (!keys.length) return {};
+          try {
+            const got = (await this.mcpVaultTool(grant, 'get_vault_records', { recordTypes: keys }).then((r) => r.json())) as { records?: Record<string, unknown> };
+            const out: Record<string, { assignedRole: string; roleName?: string; roleDefinitionId?: string }> = {};
+            for (const [k, v] of Object.entries(got.records ?? {})) {
+              const rec = v as { endedAt?: unknown; roleAssignment?: Partial<AssignedRoleFields> } | null;
+              const ra = rec && !rec.endedAt ? rec.roleAssignment : null;
+              if (!ra?.assignedRole || ra.assignedRole === PLAIN_MEMBER) continue;
+              out[k.slice('org.membership:member:'.length)] = { assignedRole: ra.assignedRole, ...(ra.roleName ? { roleName: ra.roleName } : {}), ...(ra.roleDefinitionId ? { roleDefinitionId: ra.roleDefinitionId } : {}) };
+            }
+            return out;
+          } catch { return {}; }
+        };
+        const [publicNames, roles] = await Promise.all([this.resolvePublicNames(subjects), rolesOf()]);
         const listings = rows.map((r) => {
           const subject = String((r.listing as { subject?: string } | undefined)?.subject ?? '');
           const addr = (subject.match(/0x[0-9a-fA-F]{40}/)?.[0] ?? '').toLowerCase();
           const localName = addr ? localNames[addr] : undefined;
           const publicName = addr ? (publicNames[addr] ?? null) : null;
+          const role = addr ? roles[addr] : undefined;
           if (!r.listing) return r;
           return {
             ...r,
             listing: { ...r.listing, ...(localName ? { localName } : {}), ...(publicName ? { publicName } : {}) },
+            ...(role ? { role } : {}),
           };
         });
         return json({ ok: true, listings, you: presence.you ?? '' });

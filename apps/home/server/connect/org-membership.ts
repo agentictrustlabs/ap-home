@@ -15,6 +15,7 @@ import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { orgVault } from '../lib/org-vault';
 import { notAnOrganization, workspaceCheck } from '../lib/workspace-governor';
+import { parseRoleOffer, roleSlugOf, type RoleOfferV1 } from '../lib/org-role';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
 const json = (b: unknown, s = 200): Response =>
@@ -78,13 +79,21 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // email path hands it over at redeem and the joiner posts it). Returned to the joiner to countersign; nothing
   // here signs for anyone.
   let relationshipOffer: unknown = (body as { relationshipOffer?: unknown } | null)?.relationshipOffer ?? null;
-  if (!mad || !relationshipOffer) {
+  // Spec 427 §3.3 — THE ROLE THE ORGANIZATION OFFERED, read from ITS invitation record and never from the joiner's
+  // body: what somebody does here is the inviter's statement. The organization's own object reads the same record
+  // when it writes the membership and is the one that decides (a member cannot record a role they were not
+  // offered); this copy is what the roster projection and the answer to the joiner carry.
+  let offeredRole: RoleOfferV1 | null = null;
+  // ALWAYS looked up now: the role lives only on the organization's record, so a join that posted its own grant
+  // and credential offer (the email path) still has something to read there.
+  {
     try {
       // spec 341 §5.5b — the invitee CLAIMS the invite addressed to them: `orgVault` routes an
       // `org.invite:agent:*` read to `invite.claim`, where the AGENT derives the key from the session.
       // The address below is not sent — passing one would re-open the hole that op closes.
       const vault = await orgVault(env, org, token);
-      const rec = vault ? ((await vault.get(`org.invite:agent:${person}`)) as { delegation?: typeof mad; status?: string; kin?: string; role?: string; relationshipOffer?: unknown } | null) : null;
+      const rec = vault ? ((await vault.get(`org.invite:agent:${person}`)) as { delegation?: typeof mad; status?: string; kin?: string; role?: string; relationshipOffer?: unknown; orgRole?: unknown } | null) : null;
+      if (rec?.orgRole && rec.status !== 'removed') { const parsed = parseRoleOffer(rec.orgRole); if (parsed.ok) offeredRole = parsed.offer; }
       if (!mad && rec?.delegation && rec.status !== 'removed') mad = rec.delegation;
       if (!relationshipOffer && rec?.relationshipOffer && rec.status !== 'removed') relationshipOffer = rec.relationshipOffer;
       if (rec) facets = { ...(typeof rec.kin === 'string' ? { kin: rec.kin } : {}), ...(typeof rec.role === 'string' ? { role: rec.role } : {}) };
@@ -128,6 +137,17 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     dIdx.push({ orgAgent: person, orgName: memberLabel ?? '', ...(displayName ? { displayName } : {}), delegation: d, ...(facets.kin ? { kin: facets.kin } : {}), ...(facets.role ? { role: facets.role } : {}) });
     await env.AUTH_CODES.put(dKey, JSON.stringify(dIdx));
   }
+  // The steward's roster row carries the ORGANIZATION's role beside the household one (spec 427 §3.4) — a
+  // projection of the membership record written below, corrected after that write says which role it recorded.
+  const projectRole = async (r: { assignedRole: string; roleName?: string; roleDefinitionId?: string } | null): Promise<void> => {
+    const rows = JSON.parse((await env.AUTH_CODES.get(dKey)) ?? '[]') as Array<Record<string, unknown>>;
+    const row = rows.find((x) => String(x.orgAgent ?? '').toLowerCase() === person);
+    if (!row) return;
+    const next = r && r.assignedRole !== 'member' ? { assignedRole: r.assignedRole, ...(r.roleName ? { roleName: r.roleName } : {}), ...(r.roleDefinitionId ? { roleDefinitionId: r.roleDefinitionId } : {}) } : null;
+    if (JSON.stringify(row.orgRole ?? null) === JSON.stringify(next)) return;
+    if (next) row.orgRole = next; else delete row.orgRole;
+    await env.AUTH_CODES.put(dKey, JSON.stringify(rows));
+  };
   // 3. THE MEMBERSHIP ITSELF, in the ORGANIZATION's own vault — spec 325's OrganizationMembership
   //    (finding ORG-MEM-1). Steps 1 and 2 record the member's own link and a Home-side index; neither is
   //    the organization's record of whom it admitted, and until this existed no such record was written
@@ -143,6 +163,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   //    true and useless. Best-effort must still say what happened.
   let membershipRecorded = false;
   let membershipError: string | undefined;
+  // What the organization's object says it recorded — the role is ITS answer, not what this route sent.
+  let recordedRole: { assignedRole: string; roleName?: string; roleDefinitionId?: string } | null = null;
   try {
     const { callInteractions } = await import('./channels');
     const r = await callInteractions(env, org, 'org.recordMembership', {
@@ -158,15 +180,31 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         // named here so a reader can see which role a given grant materialises (aporg:RoleAssignment).
         // A household membership carries its `aphh:` facets beside the generic role (spec 368): the
         // household role and the kinship — declarative, both; the delegation is still the authority.
-        roleAssignment: { assignedRole: 'member', materializedByDelegation: d, ...(facets.role ? { householdRole: facets.role } : {}), ...(facets.kin ? { kinRelation: facets.kin } : {}) },
+        // THE ORGANIZATION'S ROLE (spec 427) is named when the invitation offered one — the slug and the definition
+        // it points at. The object re-reads its own invitation and stamps the whole role from THAT; what is sent
+        // here is only checked against it, so an invitation this route could not read still records its role.
+        roleAssignment: {
+          assignedRole: offeredRole ? roleSlugOf(offeredRole.roleDefinitionId) : 'member',
+          ...(offeredRole ? { roleDefinitionId: offeredRole.roleDefinitionId } : {}),
+          materializedByDelegation: d,
+          ...(facets.role ? { householdRole: facets.role } : {}), ...(facets.kin ? { kinRelation: facets.kin } : {}),
+        },
       },
     });
     membershipRecorded = r.status === 200;
     if (!membershipRecorded) membershipError = JSON.stringify(r.body).slice(0, 200);
+    else {
+      const b = r.body as { role?: unknown; roleName?: unknown; roleDefinitionId?: unknown };
+      if (typeof b.role === 'string' && b.role) recordedRole = { assignedRole: b.role, ...(typeof b.roleName === 'string' ? { roleName: b.roleName } : {}), ...(typeof b.roleDefinitionId === 'string' ? { roleDefinitionId: b.roleDefinitionId } : {}) };
+      await projectRole(recordedRole).catch(() => undefined);
+    }
   } catch (e) {
     // The membership stands on the signed grant; this is the organization's own note of it.
     membershipError = e instanceof Error ? e.message : String(e);
   }
   const offerFits = !!relationshipOffer && typeof relationshipOffer === 'object' && String((relationshipOffer as { subject?: string }).subject ?? '').toLowerCase() === person && String((relationshipOffer as { object?: string }).object ?? '').toLowerCase() === org;
-  return json({ ok: true, memberAccess: madValid, membershipRecorded, ...(membershipError ? { membershipError } : {}), ...(offerFits ? { relationshipOffer } : {}) });
+  // The joiner is told the role and shown its offer (spec 427 §4): the name and description they read, and the
+  // skill packs their agent may be equipped with — theirs to accept, on their own Playbook page.
+  const roleOffer = offeredRole && recordedRole && recordedRole.roleDefinitionId === offeredRole.roleDefinitionId ? offeredRole : null;
+  return json({ ok: true, memberAccess: madValid, membershipRecorded, ...(membershipError ? { membershipError } : {}), ...(offerFits ? { relationshipOffer } : {}), ...(recordedRole ? { role: recordedRole } : {}), ...(roleOffer ? { roleOffer } : {}) });
 };

@@ -14,6 +14,7 @@ import type { IncomingDelegation } from '../_lib/verify-delegation';
 import { sendEmail, inviteEmail, emailSendingEnabled } from '../_lib/email-sender';
 import { emailHash } from '../../src/lib/kv-indexer';
 import { orgVault } from '../lib/org-vault';
+import { parseRoleOffer, type RoleOfferV1 } from '../lib/org-role';
 import { whitelabel } from '../../src/whitelabel/config';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
@@ -155,11 +156,20 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         returnUrl?: string;
         /** Optional client_id when the steward is on a Home session and naming the destination app. */
         app?: string;
+        /** Spec 427 §3.2 — the role this organization offers with the invitation (a snapshot of its own definition). */
+        orgRole?: unknown;
       }
     | null;
   const org = (body?.org ?? '').toLowerCase();
   const email = (body?.email ?? '').trim().toLowerCase();
   if (!isAddress(org) || !EMAIL_RE.test(email)) return json({ error: 'org (SA) + valid email required' }, 400);
+  // The offered role is ids and words only (spec 427 invariant 6) — refused here, before anything is sent.
+  let orgRole: RoleOfferV1 | null = null;
+  if (body?.orgRole !== undefined && body.orgRole !== null) {
+    const parsed = parseRoleOffer(body.orgRole);
+    if (!parsed.ok) return json({ error: parsed.error, code: 'invalid_role_offer' }, 400);
+    orgRole = parsed.offer;
+  }
   const caller = await callerFromInviteAuth(env, request);
   if (!caller || !(await stewardsOrg(env, caller.person, org))) {
     return json({ error: 'you must steward this organization to invite' }, 403);
@@ -228,6 +238,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       ...(returnUrl ? { returnUrl } : {}),
       ...(appName ? { appName } : {}),
       ...(namedApp ? { app: namedApp } : {}),
+      ...(orgRole ? { orgRole } : {}),
       invitedBy: caller.person.toLowerCase(),
     });
   } catch (e) {
@@ -235,6 +246,28 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       { error: `could not record the invitation in the organization's vault: ${e instanceof Error ? e.message : String(e)}` },
       502,
     );
+  }
+  // THE ROLE RIDES TO THE JOIN ON THE AGENT-KEYED RECORD (spec 427 §3.3). A membership records the role the
+  // organization offered, and the object reads that from `org.invite:agent:<member>` — the one record it can find
+  // from the member alone. An emailed invitation is keyed by its token, so when it offers a role the same grant
+  // and the same offer are also written against the address the grant was minted FOR (the invitee's predicted
+  // home, `mad.delegate`): the record an in-app invitation writes, and nothing a redeemer could not already get.
+  // It needs the steward's session and wire (an agent-keyed record is a steward's act); a caller without them
+  // still sends the invitation, and is told the role did not travel rather than left to find out at the join.
+  let roleOnInvite: boolean | undefined;
+  if (orgRole) {
+    roleOnInvite = false;
+    try {
+      const invitee = (mad.delegate ?? '').toLowerCase();
+      const bearer = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
+      const linkRaw = await env.AUTH_CODES.get(`related:${caller.person}:${org}`);
+      const stewardship = linkRaw ? (JSON.parse(linkRaw) as { stewardshipDelegation?: unknown }).stewardshipDelegation : undefined;
+      const agentVault = isAddress(invitee) && bearer ? await orgVault(env, org, bearer, stewardship) : null;
+      if (agentVault) {
+        await agentVault.set(`org.invite:agent:${invitee}`, { delegation: mad, createdAt: Date.now(), status: 'pending', invitedBy: caller.person.toLowerCase(), orgRole, viaEmailInvite: true });
+        roleOnInvite = true;
+      }
+    } catch { /* reported below — the invitation itself stands */ }
   }
 
   const join = new URL(`/invite/${token}`, resolveOrigin(request, env));
@@ -248,5 +281,5 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const declineUrl = env.A2A_CUSTODY_URL?.trim() ? `${env.A2A_CUSTODY_URL.trim().replace(/\/$/, '')}/invite/decline?org=${org}&token=${token}` : null;
   const sent = await sendEmail(env, inviteEmail(email, joinUrl, orgName ?? 'the organization', whitelabel.brand.name, appName, declineUrl), session ? { session, as: org } : undefined);
   if (!sent.ok) return json({ error: `could not send invite: ${sent.error}` }, 502);
-  return json({ ok: true, delivery: emailSendingEnabled(env) ? 'sent' : 'logged', joinUrl, ...(appName ? { appName } : {}) });
+  return json({ ok: true, delivery: emailSendingEnabled(env) ? 'sent' : 'logged', joinUrl, ...(appName ? { appName } : {}), ...(roleOnInvite !== undefined ? { roleOnInvite } : {}) });
 };
