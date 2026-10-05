@@ -756,6 +756,9 @@ const faithImpact: WhiteLabelConfig = {
     // /api/auth/callback and is exchanged server-side; the id_token is the session. `profile` so the
     // member's human name can label the account. No email claim — engage keys identity on `sub`.
     // Re-registers verbatim on gcid.me when GC ID launches.
+    // `org-create` for the reason source-publishing has it: an ORGANIZATION that files needs, commitments and
+    // engagement attestations in engage is one the person holds at their Home, never a row GC grants. The person
+    // creates or picks it here (chooser mode) and engage reads who belongs to it from /connect/related-orgs.
     {
       client_id: 'gc-engage',
       name: 'Global.Church Engage',
@@ -764,7 +767,7 @@ const faithImpact: WhiteLabelConfig = {
         'http://localhost:3000/api/auth/callback',
       ],
       allowed_scopes: ['openid', 'profile', 'agent'],
-      allowed_delegation_templates: ['site-login'],
+      allowed_delegation_templates: ['site-login', 'org-create'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
     // Global.Church Platform (platform.global.church) — GC's church explorer, developer portal
@@ -773,6 +776,8 @@ const faithImpact: WhiteLabelConfig = {
     // session. `profile` so the member's human name can label the account and the admin user list.
     // No email claim — platform keys identity on `sub`. Local dev on :3001 so it runs beside engage.
     // Re-registers verbatim on gcid.me when GC ID launches.
+    // `org-create` as on `gc-engage`: platform's organization page sends the person here to create or pick the
+    // organization they hold, and reads its members from the Home.
     {
       client_id: 'gc-platform',
       name: 'Global.Church Platform',
@@ -781,7 +786,7 @@ const faithImpact: WhiteLabelConfig = {
         'http://localhost:3001/api/auth/callback',
       ],
       allowed_scopes: ['openid', 'profile', 'agent'],
-      allowed_delegation_templates: ['site-login'],
+      allowed_delegation_templates: ['site-login', 'org-create'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
     },
     // Engagement Campaign Studio (uupg apps/campaign) — org-scoped ask over demo-a2a needs a
