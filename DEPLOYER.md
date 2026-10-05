@@ -10,7 +10,7 @@ Three names, three things — never one word for two of them:
 | Name | What it is | Where it appears |
 | --- | --- | --- |
 | **faithchain** | the chain (Azure, id 34348, free gas, dev-mode paymaster) | `CHAIN_ID`, `RPC_URL`, the contract addresses — vars, never an env name |
-| **Faithnet** | the deployment: `www.faithnet.me` + the `*-faithnet` Workers (and `faithnet-b`, the second deployment of spec 366) | `[env.faithnet]` / `[env.faithnet-b]` in every Worker's `wrangler.toml` |
+| **Faithnet** | the deployment: `www.faithnet.me` + the `*-faithnet` Workers | `[env.faithnet]` in every Worker's `wrangler.toml` |
 | **Home** / `ap-home` | this product and this repository | package names `@ap-home/*` |
 
 Shared with other products on purpose: **discovery** (`discovery.faithnet.io` — the public KB, its own repository) and

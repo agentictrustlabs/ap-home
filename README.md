@@ -16,8 +16,7 @@ extracted with history from Ring 0 by `scripts/split/extract-ap-home.sh` (the co
 ## Faithnet — the estate this repository deploys
 
 This repository deploys **Faithnet**: the Home at `www.faithnet.me` (Vercel project `faithnet-home`) and the
-`*-faithnet` Workers behind it, on faithchain (chain 34348) — `[env.faithnet]` (and `[env.faithnet-b]`, the second
-deployment) in every `wrangler.toml`. Ring 0 (`agenticprimitives`) keeps packages and contracts; it no longer deploys
+`*-faithnet` Workers behind it, on faithchain (chain 34348) — `[env.faithnet]` in every `wrangler.toml`. Ring 0 (`agenticprimitives`) keeps packages and contracts; it no longer deploys
 any app. The Base Sepolia `production` estate (impact-agent) is not here. `DEPLOYER.md` has the map.
 
 ## What is here
