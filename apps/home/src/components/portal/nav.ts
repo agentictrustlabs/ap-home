@@ -118,8 +118,6 @@ export function buildNav(
       { id: 'messages', label: 'Messages', href: href('messages'), Icon: ChatIcon, status: 'live', ...(badges.inbox ? { badge: badges.inbox } : {}) },
       // spec 310's control-plane timeline, in the plural because the band is a place.
       { id: 'activities', label: 'Activities', href: href('activities'), Icon: HistoryIcon, status: 'live' },
-      // The ORGANIZATION'S operations (owner, 2026-10-05): its own agents — teams, circles, the workspace it governs — never its members'.
-      ...(active.kind === 'org' && orgRelationship !== 'member' ? [{ id: 'operations', label: 'Operations', href: href('operations'), Icon: HistoryIcon, status: 'live' as const }] : []),
       { id: 'library', label: 'Library', href: href('library'), Icon: DatabaseIcon, status: 'live' },
       // A governed workspace points back at the ORG whose teams + members it serves (spec 344/424 — the hub).
       ...(active.kind === 'service' && governor ? [{ id: 'governing-org', label: 'Governing organization', href: orgHref(governor as `0x${string}`, 'overview'), Icon: BuildingIcon, status: 'live' as const }] : []),
@@ -210,6 +208,9 @@ export function buildNav(
   // others" surfaces read as one band.
   groups.push({ items: [
     { id: 'trust-graph', label: 'Trust graph', href: href('trust-graph'), Icon: ShieldIcon, status: 'live' },
+    // The ORGANIZATION'S operations (owner, 2026-10-05): its own agents — teams, circles, the workspace it governs — never
+    // its members'. Out of the top band (the same four for every class); a member never reaches this group.
+    ...(active.kind === 'org' ? [{ id: 'operations', label: 'Operations', href: href('operations'), Icon: HistoryIcon, status: 'live' as const }] : []),
   ] });
 
   // ── Stewardship, then Settings — the two PANES are neighbours at the bottom, so the one second-level
