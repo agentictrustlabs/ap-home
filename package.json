@@ -31,7 +31,10 @@
     "check:home-kv-allowlist": "node scripts/check-home-kv-allowlist.mjs",
     "check:ask-truth": "tsx scripts/ask-truth.mts",
     "check:interaction-coverage": "tsx scripts/check-interaction-coverage.ts",
-    "check:no-vector-over-vault": "tsx scripts/check-no-vector-over-vault.ts"
+    "check:no-vector-over-vault": "tsx scripts/check-no-vector-over-vault.ts",
+    "check:live-gates": "tsx scripts/live-gates.mts",
+    "check:live-gates-trend": "tsx scripts/live-gates-trend.mts",
+    "check:live-gates:runner": "tsx scripts/live-gates-runner.mts"
   },
   "devDependencies": {
     "@agenticprimitives/a2a": "0.0.0-alpha.25",
