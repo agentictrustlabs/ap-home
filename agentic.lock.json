@@ -1,7 +1,7 @@
 {
   "lockVersion": 1,
   "packages": {
-    "@agenticprimitives/devkit": "0.0.0-alpha.9",
+    "@agenticprimitives/devkit": "0.0.0-alpha.10",
     "@agenticprimitives/evaluation": "0.0.0-alpha.5",
     "@agenticprimitives/a2a": "0.0.0-alpha.25",
     "@agenticprimitives/mcp-protocol": "0.0.0-alpha.4"
@@ -10,7 +10,7 @@
     "coordination-vs-orchestration": "sha256:f2754939240133643e020043fac5b7e97b2ca250e0824771d19ca578976defd6",
     "demo-person-org-distinct": "sha256:533f89b8c8e55d3a252c30ea06a772ae51c789512abe3cfcd42b1167adc7dc4d",
     "external-registry-integrations": "sha256:1e23b29977d0248c78c82f0aa90d3b5fbd7e2eb2bb9e21c2ad28259d0eb8dec6",
-    "hard-rules": "sha256:f4b32119e477e819cdfc7a4a4675281de79daf2e5e12402f7874c1427309c914",
+    "hard-rules": "sha256:443a34a33287f678d22a8d6e3ca43bee532bf56acc6ba816d384f9ffe5075a6a",
     "one-capability-model-generates-both": "sha256:50d46f01e41c2ffa2dc12732e9c77609d4fbeb2c174588345d8999a11aa6428a",
     "ontology-drives-behavior": "sha256:1324bb1aec2d8242b2fffe490e9ff05b963ccb295d258bb08f8de911c1f25c00",
     "service-agent-signing": "sha256:3f41d62dc56a18789b7c54cfbaf2446afcf7956c52c2b855720fdc1300519d7f",
@@ -19,7 +19,7 @@
     "vault-is-the-record-apps-hold-references": "sha256:e6a6e859a16071dff5c30a7b7dc2d4cb0b8307e19dc416387cf181084236e685",
     "vault-records-are-ontology-shaped": "sha256:6a739d1a10d5b62e4ab5ed910fdccc67b9c024dd519c9c3e1fea916b3899a90b"
   },
-  "devkit": "0.0.0-alpha.9",
+  "devkit": "0.0.0-alpha.10",
   "template": {
     "name": "product-repo",
     "revision": "2026-09-16.1"

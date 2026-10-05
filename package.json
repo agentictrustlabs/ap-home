@@ -38,7 +38,7 @@
   },
   "devDependencies": {
     "@agenticprimitives/a2a": "0.0.0-alpha.25",
-    "@agenticprimitives/devkit": "0.0.0-alpha.9",
+    "@agenticprimitives/devkit": "0.0.0-alpha.10",
     "@agenticprimitives/evaluation": "0.0.0-alpha.5",
     "@agenticprimitives/mcp-protocol": "0.0.0-alpha.4",
     "typescript": "^5.7.3",
