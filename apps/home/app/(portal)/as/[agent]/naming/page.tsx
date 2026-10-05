@@ -25,7 +25,7 @@ function PersonaNamingInner({ params }: { params: Promise<{ agent: string }> }) 
     <AgentDiscoveryShell agent={agent} cls="service" title="Naming">
       {(a, name, kind) => (
         <>
-          {handoff && <TownHandoffNote handoff={handoff} claimed={claimed} />}
+          {handoff && <TownHandoffNote handoff={handoff} claimed={claimed} kind={kind} />}
           <AgentNamingPanel agent={a} name={name} />
           <ChangeNameCard agent={a} kind={kind} via={via} token={session?.token ?? null} initialLabel={handoff?.label}
             onChanged={(n) => { if (n && handoff) setClaimed(n); else window.location.reload(); }} />

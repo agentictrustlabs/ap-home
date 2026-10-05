@@ -19,7 +19,10 @@ export function useTownHandoff(): TownHandoff | null {
   return { label, tld: (params?.get('tld') || fromClaim || null), returnUrl: townReturnUrl(params?.get('return')) };
 }
 
-export function TownHandoffNote({ handoff, claimed }: { handoff: TownHandoff; claimed: string | null }) {
+/** Which agent a suffix names (ADR-0061); a person's Home can claim `.me`, an organization's agent its `.org`, … */
+const OWNER_OF_TLD: Record<string, string> = { me: 'a person', org: 'an organization', team: 'a team', church: 'a church', circle: 'a circle', household: 'a household', svc: 'a service', workspace: 'a workspace', treasury: 'a treasury', registry: 'a registry' };
+
+export function TownHandoffNote({ handoff, claimed, kind }: { handoff: TownHandoff; claimed: string | null; kind?: string }) {
   const host = new URL(TOWN_NAMING_ORIGIN).host;
   const want = `${handoff.label}${handoff.tld ? `.${handoff.tld}` : ''}`;
   return (
@@ -32,7 +35,10 @@ export function TownHandoffNote({ handoff, claimed }: { handoff: TownHandoff; cl
       ) : (
         <p style={{ margin: '.3rem 0 .6rem' }}>
           You came from <span style={mono as React.CSSProperties}>{host}</span> to claim <strong style={mono as React.CSSProperties}>{want}</strong>.
-          A claim is signed by your own account, here — the town cannot do it for you. The name is filled in below.
+          A claim is signed by your own account, here — the town cannot do it for you.{' '}
+          {kind === 'person' && handoff.tld && handoff.tld !== 'me' && OWNER_OF_TLD[handoff.tld]
+            ? <>A <span style={mono as React.CSSProperties}>.{handoff.tld}</span> name belongs to {OWNER_OF_TLD[handoff.tld]}'s agent, not to you as a person: open that agent under <strong>Stewardship</strong>, then its <strong>Naming</strong> page, and claim it there with the same label.</>
+            : 'The name is filled in below.'}
         </p>
       )}
       {handoff.returnUrl && (
