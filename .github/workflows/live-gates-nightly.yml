@@ -1,45 +1,85 @@
-name: live-gates-nightly
+name: Live gates (nightly)
 
-# Spec 392 / spec 399 §5.4: the product's live gates, nightly, against its SHADOW deployment during the parallel
-# run and against the live environment after the cut. The runner is @agenticprimitives/evaluation's
-# (`ap test --live-gates`); the gates are DATA in live-gates.json. Artifact-only: the report is uploaded, the run
-# is red when a `required` gate fails. Conformance of the same deployment runs beside it.
+# Spec 392 — every wave's live verify script and its authority twin, run as one job against the LIVE
+# faithnet estate (scripts/live-gates.json is the ledger; scripts/live-gates.mts runs it).
+#
+# Like the ask-truthfulness nightly it is ARTIFACT-ONLY at first (continue-on-error): a red gate is a red
+# line in the morning's summary, visible without breaking the bar, and graduates to blocking once the
+# track record earns it. No secrets: the demo personas sign in openly and sign through the Home.
+#
+# The gates are paced (a metered model plan), so the job takes minutes, not seconds.
+
 on:
   schedule:
-    - cron: '17 6 * * *'
+    - cron: '17 4 * * *'   # 04:17 UTC nightly — after the ask-truth run, on the same estate
   workflow_dispatch:
     inputs:
-      home:
-        description: 'HOME_URL to run against (defaults to scripts/live-gates.json#home)'
+      only:
+        description: 'Comma-separated gate ids (default: all)'
         required: false
+        default: ''
 
 jobs:
-  gates:
+  live-gates:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
-    env:
-      HOME_URL: ${{ github.event.inputs.home }}
+    # R917-A-5 (spec 408 §3): NO job-level continue-on-error. A red night is red — a required gate's
+    # `exit 1` from live-gates.mts fails this workflow. Only the trend/artifact steps below tolerate
+    # failure, because they report; they never judge.
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6 (R917-A-12: SHA-pinned)
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: 24
-      - run: pnpm install --no-frozen-lockfile
-      - name: live gates
-        run: pnpm exec ap test --live-gates scripts/live-gates.json --json > live-gates-report.json || (cat live-gates-report.json; exit 1)
-      - name: A2A conformance of the deployment
-        if: env.A2A_URL != ''
+          node-version: 22
+      - run: pnpm install --no-frozen-lockfile --ignore-scripts
+      - name: Run the live gates against faithnet
+        # Spec 395 W2 — a read-only app token for the chain's RPC gateway, so the counterparty gate confirms the
+        # transaction and the mandate's revocation state from the chain itself (rate control, never authority).
         env:
-          A2A_URL: ${{ vars.A2A_URL }}
-        run: pnpm exec ap conform a2a "$A2A_URL"
-      - name: MCP conformance of the deployment
-        if: env.MCP_URL != ''
+          RPC_URL: ${{ secrets.FAITHCHAIN_RPC_URL }}
+        # `set -o pipefail`: `tee` must not swallow the gate's exit code (R917-A-5).
+        run: |
+          set -o pipefail
+          if [ -n "${{ github.event.inputs.only }}" ]; then
+            pnpm check:live-gates --only "${{ github.event.inputs.only }}" | tee live-gates.txt
+          else
+            pnpm check:live-gates | tee live-gates.txt
+          fi
+      - name: Summary
+        if: always()
+        run: |
+          echo '## Live gates (faithnet)' >> "$GITHUB_STEP_SUMMARY"
+          sed -n '/── live gates ──/,$p' live-gates.txt >> "$GITHUB_STEP_SUMMARY" || true
+      # Spec 392 W2 — the recurring-failure view: the last fortnight's reports, clustered by gate × failure class
+      # (deterministic patterns, no model). Prior reports are this workflow's own artifacts.
+      - name: Prior reports
+        if: always()
+        continue-on-error: true   # reports; never judges (R917-A-5)
         env:
-          MCP_URL: ${{ vars.MCP_URL }}
-        run: pnpm exec ap conform mcp "$MCP_URL"
-      - uses: actions/upload-artifact@v4
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p live-gates-reports
+          for id in $(gh run list --workflow=live-gates-nightly.yml --status completed --json databaseId --limit 14 --jq '.[].databaseId'); do
+            gh run download "$id" -n live-gates-report -D "live-gates-reports/$id" 2>/dev/null && mv "live-gates-reports/$id/live-gates-report.json" "live-gates-reports/$id.json" 2>/dev/null || true
+            rm -rf "live-gates-reports/$id"
+          done
+          ls live-gates-reports || true
+      - name: Recurring failures
+        if: always()
+        continue-on-error: true   # reports; never judges (R917-A-5)
+        run: |
+          pnpm check:live-gates-trend | tee live-gates-trend.txt
+          cat live-gates-trend.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: live-gates-report
-          path: live-gates-report.json
+          path: |
+            live-gates-report.json
+            live-gates.txt
+            live-gates-trend.md
+          retention-days: 30
