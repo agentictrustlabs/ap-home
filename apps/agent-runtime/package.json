@@ -32,7 +32,7 @@
     "@agenticprimitives/coordination": "0.0.0-alpha.10",
     "@agenticprimitives/delegation": "1.0.0-alpha.27",
     "@agenticprimitives/edge-runtime": "0.0.0-alpha.9",
-    "@agenticprimitives/evaluation": "0.0.0-alpha.4",
+    "@agenticprimitives/evaluation": "0.0.0-alpha.5",
     "@agenticprimitives/fabric": "0.0.0-alpha.16",
     "@agenticprimitives/harness": "0.0.0-alpha.7",
     "@agenticprimitives/home": "0.0.0-alpha.16",
@@ -60,7 +60,7 @@
   "devDependencies": {
     "@agenticprimitives/estate-projection": "0.0.0-alpha.1",
     "@agenticprimitives/provenance": "0.0.0-alpha.5",
-    "@agenticprimitives/provenance-node": "0.0.0-alpha.2",
+    "@agenticprimitives/provenance-node": "0.0.0-alpha.3",
     "@cloudflare/workers-types": "4.20260605.1",
     "@types/node": "22.19.19",
     "typescript": "5.7.3",

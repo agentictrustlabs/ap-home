@@ -1,8 +1,8 @@
 {
   "lockVersion": 1,
   "packages": {
-    "@agenticprimitives/devkit": "0.0.0-alpha.8",
-    "@agenticprimitives/evaluation": "0.0.0-alpha.4",
+    "@agenticprimitives/devkit": "0.0.0-alpha.9",
+    "@agenticprimitives/evaluation": "0.0.0-alpha.5",
     "@agenticprimitives/a2a": "0.0.0-alpha.25",
     "@agenticprimitives/mcp-protocol": "0.0.0-alpha.4"
   },
