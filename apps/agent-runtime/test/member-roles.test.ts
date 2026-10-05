@@ -12,7 +12,8 @@ const WORKSPACE = '0x6666666666666666666666666666666666666666';
 const TREASURY = '0x7777777777777777777777777777777777777777';
 const STEWARD = '0x3333333333333333333333333333333333333333';
 const lead = { type: 'ap.org.role-offer.v1' as const, roleDefinitionId: `roledef:${ORG}:team-lead@1`, name: 'Team lead', description: 'Leads a team.', scope: 'team' as const, accessRole: 'community-steward', skillPackRefs: [{ context: 'field-operations', archetype: 'role-team-lead' }] };
-const rels = { orgs: { [WELD]: { relationship: 'member' }, [WORKSPACE]: { relationship: 'member' }, [TREASURY]: { relationship: 'steward' } } };
+const PERSONA = '0x8888888888888888888888888888888888888888';
+const rels = { orgs: { [WELD]: { relationship: 'member', kind: 'team' }, [WORKSPACE]: { relationship: 'member', kind: 'workspace' }, [TREASURY]: { relationship: 'steward', kind: 'person-treasury' }, [PERSONA]: { relationship: 'self', kind: 'person' } } };
 const ctx = { step: { id: 's1' }, index: 0, supplied: [], intent: {} } as never;
 
 function world(answers: Record<string, OrgMembershipAnswer | null | 'throw'>) {
@@ -39,7 +40,8 @@ describe('person.roles.list', () => {
     expect(r.roles.map((x) => [x.org, x.assignedRole, x.askedOf ?? null])).toEqual([[ORG, 'member', WORKSPACE], [WELD, 'team-lead', null]]);
     const weld = r.roles.find((x) => x.org === WELD)!;
     expect(weld).toMatchObject({ name: 'weld.team', roleName: 'Team lead', roleDefinitionId: lead.roleDefinitionId, accessRole: 'community-steward', skillPackRefs: lead.skillPackRefs, ended: false, assignedBy: STEWARD });
-    // The treasury records no membership of them — linked, and not a role.
+    // A treasury and another name of their own hold no members: they are not even asked.
+    expect(w.asked.some(([o]) => o === TREASURY || o === PERSONA)).toBe(false);
     expect(r.roles.some((x) => x.org === TREASURY)).toBe(false);
     expect(r.unread).toEqual([]);
   });

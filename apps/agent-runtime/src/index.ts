@@ -5740,7 +5740,10 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     memberRoleAt: async (org, member) => {
       const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(org.toLowerCase()));
       const resp = await stub.fetch(new Request(`https://do/interactions/${org.toLowerCase()}/internal.member.role`, { method: 'POST', headers: internalHeaders(env as never, { 'content-type': 'application/json' }), body: JSON.stringify({ member }) }));
-      const out = (await resp.json().catch(() => null)) as (OrgMembershipAnswer & { ok?: boolean }) | null;
+      const out = (await resp.json().catch(() => null)) as (OrgMembershipAnswer & { ok?: boolean; error?: string }) | null;
+      // An agent that never enabled storage keeps no records, so it records no membership — that is an ANSWER. Any
+      // other failure (a stale grant, a slow vault) is "could not be asked", which the caller must not read as "no role".
+      if (resp.status === 409 && /no interactions grant/i.test(String(out?.error ?? ''))) return { membership: null };
       return resp.ok && out?.ok === true ? out : null;
     },
     setMemberRoleAt: async (org, input) => {

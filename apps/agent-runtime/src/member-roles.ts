@@ -76,6 +76,10 @@ export interface HeldRoleV1 {
 }
 
 const ADDR = /^0x[0-9a-f]{40}$/;
+/** The kinds of agent that record members — an organization in any of the Home's shapes — or coordinate for one that
+ *  does (a workspace, which answers with its governor). Everything else a person is linked to is theirs, not a body. */
+const MEMBER_HOLDING_KINDS = new Set(['org', 'organization', 'team', 'circle', 'church', 'household', 'alliance', 'workspace']);
+export const canHoldMembers = (kind: string | undefined): boolean => !kind || MEMBER_HOLDING_KINDS.has(kind.toLowerCase());
 /** How many organizations one read asks. A person in more than this is told the read was cut, never shown a partial list as whole. */
 export const MAX_ORGS_ASKED = 40;
 
@@ -91,7 +95,11 @@ export async function rolesOf(deps: MemberRolesDeps, person: string, only?: stri
   if (only) orgs = [only.toLowerCase()];
   else {
     const rels = deps.readSubjectRecord ? await deps.readSubjectRecord(me, 'relationships.data').catch(() => null) : null;
-    orgs = [...new Set(relationshipRows(rels).map((r) => String(r.agent ?? '').toLowerCase()).filter((a) => ADDR.test(a) && a !== me))];
+    // ONLY WHAT CAN HOLD A MEMBER. A person's links are mostly not organizations — their treasuries, their other
+    // names, a service they custody (27 of one demo person's 58) — and none of those records a membership of
+    // anybody: asking them spent the whole budget on agents with nothing to say, and the organization that did
+    // name a role fell off the end. A link whose kind is unrecorded is still asked (an older link says nothing).
+    orgs = [...new Set(relationshipRows(rels).filter((r) => canHoldMembers(r.kind) && r.recorded !== 'self').map((r) => String(r.agent ?? '').toLowerCase()).filter((a) => ADDR.test(a) && a !== me))];
   }
   const truncated = orgs.length > MAX_ORGS_ASKED;
   orgs = orgs.slice(0, MAX_ORGS_ASKED);
