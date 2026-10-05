@@ -108,8 +108,9 @@
       "sessionRpcCall": "callInteractions",
       "ceilings": {
         "hmac": 0,
-        "total": 47
-      }
+        "total": 53
+      },
+      "note": "2026-10-04 (owner): raised 47 → 53 to the count inherited at the faithnet cut-over; it only goes down from here — each Work/membership/channel bridge converted to the Ask (spec 341) lowers it."
     },
     "noCrossSubjectVaultReads": {
       "roots": [
