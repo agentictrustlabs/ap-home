@@ -1175,7 +1175,7 @@ export class A2aTaskDO {
     }
     if (url.pathname === '/internal/discussion-respond') {
       if (!isInternalCall(req, this.env)) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
-      const p = (await req.json().catch(() => null)) as (DiscussionRespondInput & { trigger?: string; mentionHandle?: string }) | null;
+      const p = (await req.json().catch(() => null)) as (DiscussionRespondInput & { trigger?: string; mentionHandle?: string; triggerAuthorSa?: string }) | null;
       if (!p || !/^0x[0-9a-f]{40}$/.test(String(p.principal ?? '')) || !p.channelId) {
         return Response.json({ ok: false, error: 'principal + channelId required' }, { status: 400 });
       }
@@ -1279,7 +1279,9 @@ export class A2aTaskDO {
           const org = p.principal.toLowerCase() as Address;
           const record = recordOf({
             runRef: `topic-${crypto.randomUUID()}`, now: turnStarted, receivedAt: turnStarted,
-            intent: { goal: String(p.triggerBody ?? ''), context: { addressee: org, channelId: p.channelId, topicTitle: p.topicTitle, triggerAuthor: p.triggerAuthor } },
+            // `asker` is the poster's own address (the session that posted): the person who asked looks back on the run
+            // the way an ask route's asker does (`/harness/records`), and the custodian sees every one.
+            intent: { goal: String(p.triggerBody ?? ''), context: { addressee: org, ...(p.triggerAuthorSa && /^0x[0-9a-f]{40}$/.test(p.triggerAuthorSa) ? { asker: p.triggerAuthorSa } : {}), channelId: p.channelId, topicTitle: p.topicTitle, triggerAuthor: p.triggerAuthor } },
             result: turn.result, events: [], door: { kind: 'channel-mention' },
           });
           this.state.waitUntil(putRecord(this.env as never, org, record).catch((e) => console.warn('[discussion-respond] record not kept:', e instanceof Error ? e.message : String(e))));

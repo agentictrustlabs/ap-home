@@ -542,7 +542,7 @@ export class InteractionsDO {
    *  in-Worker call to the org's OWN A2aTaskDO (`/internal/discussion-respond`, the 318 §8.1
    *  intent-native gateway) carrying the ARCH-H2 internal marker. Every drop/failure is AUDITED and
    *  DROPPED — no retry into another mechanism (ADR-0013), no queue, no effect on the human post. */
-  private dispatchAssistant(opts: { entry: ChannelV1; channelId: string; principal: string; triggerAuthor: string; triggerBody: string }): void {
+  private dispatchAssistant(opts: { entry: ChannelV1; channelId: string; principal: string; triggerAuthor: string; triggerAuthorSa?: string; triggerBody: string }): void {
     const assistant = opts.entry.assistant;
     // The in-Worker marker, not the custody secret: this dispatch is a DO↔DO call (spec 341 §7).
     if (!assistant || !internalMarker(this.env)) return;
@@ -565,7 +565,7 @@ export class InteractionsDO {
         body: JSON.stringify({
           principal: opts.principal, channelId: opts.channelId, topicTitle: opts.entry.title,
           trigger: assistant.trigger, displayName: assistant.displayName, mentionHandle: assistant.mentionHandle,
-          triggerAuthor: opts.triggerAuthor, triggerBody: opts.triggerBody,
+          triggerAuthor: opts.triggerAuthor, ...(opts.triggerAuthorSa ? { triggerAuthorSa: opts.triggerAuthorSa } : {}), triggerBody: opts.triggerBody,
         }),
       }));
       const out = (await resp.json().catch(() => ({}))) as { ok?: boolean; error?: string };
@@ -4168,7 +4168,7 @@ export class InteractionsDO {
           // spec 327 §3 — post-commit assistant trigger: fire-and-forget AFTER the member's post is
           // durable; a failed/limited dispatch is audited + dropped, never affecting this response.
           if (assistantTrigger(entry, { from: sessionCaip as AnyMessageEnvelope['from'], bodyText: String(body.bodyText ?? '') })) {
-            this.dispatchAssistant({ entry, channelId, principal, triggerAuthor: name ?? 'Steward', triggerBody: String(body.bodyText ?? '').trim() });
+            this.dispatchAssistant({ entry, channelId, principal, triggerAuthor: name ?? 'Steward', triggerAuthorSa: sessionSa.toLowerCase(), triggerBody: String(body.bodyText ?? '').trim() });
           }
           // Spec 400 W2 (B3) — every MEMBER AGENT the post names hears it: the mention is admitted into that
           // member's inbox on the topic's thread, post-commit, fire-and-forget (audited, never queued).
