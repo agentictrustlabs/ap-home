@@ -446,7 +446,12 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           // invitation here, by name — a role that was offered and landed nowhere is the one outcome not allowed.
           setGrantProgress({ step: 2, total, label: `Inviting them onto ${enroll.orgBase?.trim() || 'the team'} as ${roleOffer.name}…` });
           const signAsTeam = await signHashFor(viaLower as Via, enroll.grantOrg, auth);
-          teamAccess = toWire(await issueOrganizationResourceAccessDelegation(enroll.grantOrg, enroll.member, MCP_SERVER_ID, signAsTeam));
+          // THE TEAM'S GRANT TO ITS MEMBER IS THE ONE THEY READ THE TEAM WITH — the record-covering wire (the team's
+          // catalog and artifacts, its directory and board index), not the profile-only grant an organization gives a
+          // member of the governor above. A relying app presents a member's ACCESS grant for their reads; a team
+          // invitation that stored the narrow one gave the new coach an empty roster on the team they had just joined
+          // (walked live, 2026-10-05). One wire, signed as the team, for the invitation and for the link.
+          teamAccess = toWire(await issueWorkspaceMembershipAccessDelegation(enroll.grantOrg, enroll.member, MCP_SERVER_ID, signAsTeam));
           teamRelationshipOffer = await offerRelationshipCredential({ kind: 'has-member', subject: enroll.member, object: enroll.grantOrg, terms: { role: roleSlug }, signAsObject: signAsTeam });
           const tinv = await fetch('/connect/org-invite/agent', {
             method: 'POST',
