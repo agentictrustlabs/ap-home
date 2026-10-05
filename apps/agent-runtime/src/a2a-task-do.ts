@@ -11,6 +11,8 @@
 // (A2A-INV-04). No long-lived signing key here — push delivery (which needs a terminal signer) is a
 // follow-up; this leg is poll-based (`tasks/get`), so the worker holds no agent key (SC-8 honored).
 /// <reference types="@cloudflare/workers-types" />
+import { recordOf } from '@agenticprimitives/orchestration';
+import { putRecord } from './run-records.js';
 import { createPublicClient, http, keccak256, toBytes, type Address, type Hex } from 'viem';
 import { chainFor } from './chain';
 import { hashDelegation, type Delegation } from '@agenticprimitives/delegation';
@@ -1266,7 +1268,22 @@ export class A2aTaskDO {
       }
 
       try {
+        const turnStarted = Date.now();
         const turn = await handleDiscussionRespond(this.env, p, io);
+        // THE TOPIC ANSWER IS A RUN ON THE RECORD (2026-10-04). The routed turn above is one harness run and is recorded
+        // (runAgentAsk); the org answering ALONE went through this loop and left only an audit row, so Activities and
+        // Operations showed nothing for a workspace or team that answered — even to its custodian. Recorded the same way
+        // (spec 370 P6, on the agent's own object, door `channel-mention`), posted or not: a failed answer is the one a
+        // custodian most needs to see. Off the reply's path; a record that fails to land is logged, never a failed turn.
+        {
+          const org = p.principal.toLowerCase() as Address;
+          const record = recordOf({
+            runRef: `topic-${crypto.randomUUID()}`, now: turnStarted, receivedAt: turnStarted,
+            intent: { goal: String(p.triggerBody ?? ''), context: { addressee: org, channelId: p.channelId, topicTitle: p.topicTitle, triggerAuthor: p.triggerAuthor } },
+            result: turn.result, events: [], door: { kind: 'channel-mention' },
+          });
+          this.state.waitUntil(putRecord(this.env as never, org, record).catch((e) => console.warn('[discussion-respond] record not kept:', e instanceof Error ? e.message : String(e))));
+        }
         if (!turn.posted) {
           const cause = turn.result.error ?? 'assistant turn completed without posting a reply';
           console.error(`[discussion-respond] 502 — no reply posted (step=turn outcome=${turn.result.outcome} planner=${turn.plannerKind}): ${cause}`);
