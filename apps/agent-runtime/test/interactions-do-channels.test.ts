@@ -17,6 +17,7 @@
 // the moment its proof stops verifying.
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
+import { createHash } from 'node:crypto';
 import { InteractionsDO, type InteractionsDeps } from '../src/interactions-do.js';
 import { REQUIRED_SCOPES as SOURCE_REQUIRED_SCOPES } from '../src/interactions-do.js';
 import { buildVaultRecordScopeCaveat } from '@agenticprimitives/delegation';
@@ -572,5 +573,27 @@ describe('a governed workspace admits members of its governing organization', ()
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ member: MEMBER }),
     }));
     expect(r.status).toBe(403);
+  });
+});
+
+// A RESTRICTED TOPIC'S BODIES ARE THE PARTICIPANTS' (2026-10-05). An admitted member who names a restricted topic's id
+// they do not participate in is served the board WITHOUT that topic — and, before this, still got its message BODIES
+// back (the wire hid the topic; the bodies map did not). Every caller is now served only topics they can see.
+describe('a member cannot read a restricted topic by naming its id', () => {
+  it('returns neither the topic nor its bodies', async () => {
+    seedListing('Alice', MEMBER);
+    const id = 'conv_secret';
+    w.records.set('conversation.index', [{
+      descriptor: { version: 'ap.conversation.v1', id, owner: caip(ORG), title: 'Stewards only', participants: [caip(ORG)], participantPolicy: 'restricted', contextRefs: [{ kind: 'community', id: ORG.toLowerCase() }], createdAt: '2026-08-01T00:00:00.000Z' },
+      title: 'Stewards only', createdBy: caip(ORG), messages: [], participationPolicy: 'restricted', members: [OUTSIDER],
+    }]);
+    const resource = `message.body:topic:${id}:m1`;
+    w.records.set(`conversation.topic:${id}`, [{ envelope: { id: 'm1', from: caip(ORG), to: [], conversationId: id, createdAt: '2026-08-02T00:00:00.000Z', body: { resource }, bodyHash: `0x${createHash('sha256').update('the secret').digest('hex')}` }, authorName: 'Org' }]);
+    w.records.set(resource, { b64: Buffer.from('the secret').toString('base64'), contentType: 'text/plain' });
+    const r = await call('channels.read', MEMBER, { channelId: id });
+    expect(r.status).toBe(200);
+    const out = await r.json() as { channels: Array<{ descriptor: { id: string } }>; bodies: Record<string, string> };
+    expect(out.channels.some((c) => c.descriptor.id === id)).toBe(false);
+    expect(Object.keys(out.bodies)).toHaveLength(0);
   });
 });

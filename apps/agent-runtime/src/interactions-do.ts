@@ -4328,9 +4328,11 @@ export class InteractionsDO {
             interaction: interactionViewOfChannel(c),
             messages: [] as { envelope: MessageEnvelopeV1; authorName: string }[],
           }));
-        // A READER is served the topics they can SEE and nothing else: asking for a topic by id that is not among
-        // them (a restricted one) returns the board without its messages or their bodies.
-        if (topicId && !(reader && !wire.some((c) => c.descriptor.id === topicId))) {
+        // EVERY CALLER is served the topics they can SEE and nothing else — a member, a pending invitee, or a governed
+        // reader alike: asking for a topic by id that is not among them (a restricted one they do not participate in)
+        // returns the board without its messages or their bodies. (Before 2026-10-05 only the reader was guarded; an
+        // admitted member naming a restricted topic's id got its bodies back though `wire` hid the topic.)
+        if (topicId && wire.some((c) => c.descriptor.id === topicId)) {
           wire = wire.map((c) => (c.descriptor.id === topicId ? { ...c, messages } : c));
           // Bodies load at the envelope's OWN resource (channel namespace) — never re-normalized.
           // ONE batched round-trip for the whole topic (was one delegated read PER MESSAGE — the
