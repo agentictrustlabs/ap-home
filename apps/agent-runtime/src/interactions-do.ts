@@ -1178,6 +1178,8 @@ export class InteractionsDO {
 
   private async writeDoc(grant: IncomingDelegation, resource: string, data: unknown): Promise<void> {
     await this.vaultFor(grant).write({ owner: '', resource, data, classification: 'internal' } as never);
+    // What admission and naming are derived from changed: the remembered admissions are dropped, never served stale.
+    if (resource === DIRECTORY_RESOURCE || resource === LOCAL_NAMES_RESOURCE || resource.startsWith('org.membership:')) this.presenceMemo.clear();
   }
 
   /** GATE-TIME listing verification (spec 322 §4): current + ERC-1271-proven + not tombstoned. */
@@ -1447,7 +1449,36 @@ export class InteractionsDO {
    * stewardship. The name is a facet: a local name they chose, else the listing displayName, else
    * "Steward". The canonical person address is never the name.
    */
+  /** A POSITIVE admission, remembered 30 s per (principal · session subject · the wires presented) — the topic read's
+   *  slowest stage (1.5–4.5 s, measured 2026-10-05 from the field gateway) for an answer that does not change between a
+   *  topic's list, read and post. ONLY admissions are kept (a refusal is asked again), and the TTL bounds how long a
+   *  revoked listing, grant or stewardship can go unnoticed — the same rule as `verifyMemo` (20 s) and the governor's
+   *  member memo (60 s). Presenting a different wire is a different key, so it is checked afresh. */
+  private static readonly PRESENCE_MEMO_TTL_MS = 30_000;
+  private presenceMemo = new Map<string, { until: number; value: { admitted: true; steward: boolean; listed: boolean; you: string | null } }>();
+
   private async communityPresence(
+    grant: IncomingDelegation,
+    principal: string,
+    sessionSa: Address,
+    sessionCaip: string,
+    body: Record<string, unknown>,
+  ): Promise<{ admitted: boolean; steward: boolean; listed: boolean; you: string | null }> {
+    const presented = JSON.stringify({ s: body.stewardship ?? null, m: body.memberAccess ?? null });
+    const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(presented)))).map((b) => b.toString(16).padStart(2, '0')).join('');
+    const key = `${principal.toLowerCase()}|${sessionSa.toLowerCase()}|${digest}`;
+    const now = Date.now();
+    const hit = this.presenceMemo.get(key);
+    if (hit && hit.until > now) return hit.value;
+    const out = await this.computeCommunityPresence(grant, principal, sessionSa, sessionCaip, body);
+    if (out.admitted) {
+      if (this.presenceMemo.size >= 256) this.presenceMemo.clear();
+      this.presenceMemo.set(key, { until: now + InteractionsDO.PRESENCE_MEMO_TTL_MS, value: { admitted: true, steward: out.steward, listed: out.listed, you: out.you } });
+    }
+    return out;
+  }
+
+  private async computeCommunityPresence(
     grant: IncomingDelegation,
     principal: string,
     sessionSa: Address,
@@ -3986,6 +4017,7 @@ export class InteractionsDO {
         await audit.write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.directory.revoke', outcome: 'success', actor: { type: 'user', id: sessionSa }, subject: { type: 'listing', id: me } });
         await this.writeDoc(grant, DIRECTORY_RESOURCE, rows);
         st.subjects = { ...(st.subjects ?? {}), [me]: { publishedAt: st.subjects?.[me]?.publishedAt ?? new Date().toISOString(), tombstoned: true } };
+        this.presenceMemo.clear();
         await this.state.storage.put('state', st);
         return json({ ok: true });
       }
@@ -4003,6 +4035,7 @@ export class InteractionsDO {
         await this.writeDoc(grant, DIRECTORY_RESOURCE, rows);
         const key = Object.keys(st.subjects ?? {}).find((k) => k.endsWith(subject)) ?? subject;
         st.subjects = { ...(st.subjects ?? {}), [key]: { publishedAt: st.subjects?.[key]?.publishedAt ?? new Date().toISOString(), tombstoned: true } };
+        this.presenceMemo.clear();
         await this.state.storage.put('state', st);
         return json({ ok: true });
       }
