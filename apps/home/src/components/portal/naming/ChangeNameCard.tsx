@@ -28,20 +28,23 @@ import { cardSty, btnSty, btnPrimarySty, mono, mutedText, errorText, inputSty } 
 type Root = HeldRoot;
 
 export function ChangeNameCard({
-  agent, kind, via, token, onChanged,
+  agent, kind, via, token, onChanged, initialLabel,
 }: {
   agent: Address;
   kind: AgentKind | 'person';
   via: Via;
   token: string | null;
-  onChanged: () => void;
+  /** Called after a change lands; with the name when one was claimed (the town hand-off wants it). */
+  onChanged: (claimed?: string) => void;
+  /** A label the town's naming service sent along (spec 430 N2) — filled in, never submitted by itself. */
+  initialLabel?: string | undefined;
 }) {
   const [held, setHeld] = useState<Root[] | null>(null);
   const [primary, setPrimary] = useState<Hex | null>(null);
   const [busy, setBusy] = useState('');
   const [step, setStep] = useState('');
   const [err, setErr] = useState<string | null>(null);
-  const [label, setLabel] = useState('');
+  const [label, setLabel] = useState(initialLabel ?? '');
   const [confirmClear, setConfirmClear] = useState(false);
 
   const load = useCallback(async () => {
@@ -57,13 +60,13 @@ export function ChangeNameCard({
   const typed = typedTldForKind(kind);
   const claimable = claimableSuffix(typed, held ?? []);
 
-  const run = async (what: string, fn: () => Promise<{ ok: true } | { ok: false; error: string }>) => {
+  const run = async (what: string, fn: () => Promise<{ ok: true; claimed?: string } | { ok: false; error: string }>) => {
     setBusy(what); setErr(null); setStep('');
     try {
       const res = await fn();
       if (!res.ok) { setErr(res.error); return; }
       await load();
-      onChanged();
+      onChanged(res.claimed);
     } catch (e) { setErr(String((e as Error)?.message ?? e)); }
     finally { setBusy(''); setStep(''); }
   };
@@ -90,7 +93,7 @@ export function ChangeNameCard({
       return { ok: false as const, error: `This agent already holds ${res.name} under .${claimable?.tld ?? AGENT_NAME_PARENT} — a root gives each agent one name, permanently.` };
     }
     setLabel('');
-    return { ok: true as const };
+    return { ok: true as const, claimed: res.name };
   });
 
   if (held === null) {

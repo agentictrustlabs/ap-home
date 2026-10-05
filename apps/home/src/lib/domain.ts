@@ -179,3 +179,12 @@ export const SKILLS_REGISTRY_ORIGIN =
  *  treasury is not a domain concept); the white-label domain follows. */
 export const SKILLS_CONTEXTS = (process.env.NEXT_PUBLIC_SKILLS_CONTEXTS || 'agentic-trust,faith')
   .split(',').map((s) => s.trim()).filter(Boolean);
+
+/** The town's naming service (ap-town spec 430 N2): where a visitor reads names and is sent HERE to claim or change
+ *  one. A hand-off arrives as `?claim=<label>&tld=<tld>&return=<url>`; the return is honoured only for this origin —
+ *  a Home never bounces a person to an arbitrary URL after they sign. */
+export const TOWN_NAMING_ORIGIN = (process.env.NEXT_PUBLIC_TOWN_NAMING_ORIGIN || 'https://names.faithnet.io').replace(/\/+$/, '');
+export function townReturnUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  try { const u = new URL(raw); return u.origin === TOWN_NAMING_ORIGIN ? u.toString() : null; } catch { return null; }
+}

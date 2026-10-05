@@ -6,11 +6,12 @@
 // public directory lookup by necessity (ADR-0040 amendment). Owner-signed, gasless — one custody prompt.
 // Styling uses the shared inline theme (src/components/portal/theme.ts) — same amber tokens as the
 // rest of the portal.
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { AgentNamingEditor } from '../../../src/components/portal/discovery/AgentNamingEditor';
 import { ChangeNameCard } from '../../../src/components/portal/naming/ChangeNameCard';
+import { TownHandoffNote, useTownHandoff } from '../../../src/components/portal/naming/TownHandoff';
 import { loadRegistry, markCustody, type AgentRegistryRow } from '../../../src/lib/registry';
 import { setConnectionInfo, resolveCredential, claimName, fetchProfile } from '../../../src/connect-client';
 import { notifyAgentsChanged } from '../../../src/components/portal/ManagedAgents';
@@ -41,7 +42,15 @@ interface NameRow extends AgentRegistryRow {
 }
 
 export default function NamingPage() {
+  // `useSearchParams` needs a Suspense boundary for the static shell; the page itself is unchanged below it.
+  return <Suspense fallback={null}><NamingPageInner /></Suspense>;
+}
+
+function NamingPageInner() {
   const { session, profile, agentName, agentAddress, agentDeployed, refreshProfile } = useSession();
+  // ap-town spec 430 N2 — sent here by the town's naming service with a label to claim and a way back.
+  const handoff = useTownHandoff();
+  const [handoffClaimed, setHandoffClaimed] = useState<string | null>(null);
   // Resolve the SIGNING credential from the profile's credential kind (not the cookie's defaulted via):
   // a Google/YouVersion session's credential is `oidc` → KMS signing, NOT a (nonexistent) passkey.
   // Without this, a social member's name claim mis-routes to a passkey prompt that times out.
@@ -77,13 +86,17 @@ export default function NamingPage() {
       title="Naming"
       description="Your public name, and what it says about you to anyone who looks it up."
     >
+      {handoff && <TownHandoffNote handoff={handoff} claimed={handoffClaimed} />}
+
       {/* Nameless → named (spec 257/280): claim a name, and everything below becomes available. */}
       {isNameless && agentAddress && (
         <ClaimNameCard
           agent={agentAddress}
           via={memberVia}
           token={session?.token ?? null}
-          onNamed={() => {
+          initialLabel={handoff?.label}
+          onNamed={(n) => {
+            setHandoffClaimed(n);
             // The claim is MINED, but the server's reverse-resolve can lag the RPC read replica — a
             // single immediate refresh raced it and lost. Poll until the name resolves (bounded), then
             // commit the profile + nudge every agents dropdown (topbar switcher included).
@@ -143,7 +156,8 @@ export default function NamingPage() {
           kind="person"
           via={memberVia}
           token={session?.token ?? null}
-          onChanged={() => { void (async () => { await refreshProfile(); await load(); notifyAgentsChanged(); })(); }}
+          initialLabel={handoff?.label}
+          onChanged={(n) => { if (n) setHandoffClaimed(n); void (async () => { await refreshProfile(); await load(); notifyAgentsChanged(); })(); }}
         />
       )}
 
@@ -241,8 +255,8 @@ function PublishPanel({ row, via: viaStr, name, token, onClose, onDone }: {
 /** Nameless → named (spec 257). Claim a public name for the deployed-but-unnamed home, signed by the
  *  member's current credential, gasless. Publishing a connection record is a SEPARATE opt-in step. Reuses
  *  the existing `claimName` primitive (which also fires the discovery re-index). */
-function ClaimNameCard({ agent, via, token, onNamed }: { agent: Address; via: Via; token: string | null; onNamed: (name: string) => void }) {
-  const [value, setValue] = useState('');
+function ClaimNameCard({ agent, via, token, onNamed, initialLabel }: { agent: Address; via: Via; token: string | null; onNamed: (name: string) => void; initialLabel?: string | undefined }) {
+  const [value, setValue] = useState(initialLabel ?? '');
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState('');
   const [err, setErr] = useState<string | null>(null);
