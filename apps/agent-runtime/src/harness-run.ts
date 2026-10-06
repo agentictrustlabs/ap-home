@@ -2340,7 +2340,10 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
       const invoke = playbook?.tools?.[toolId]?.invoke;
       if (invoke) {
         if (!deps.executorSession) return { refused: `executor-invoke is not configured on this deployment (no session seam) for ${toolId}` };
-        return executorInvokeInvoker({ executors: readExecutors(env.EXECUTORS), session: deps.executorSession }, invoke, addressee ?? person)(toolId, args, ctx);
+        // The run's own session rides to the seam (§5 production binding): the Home mints the principal's
+        // id_token from it. The seam still refuses a principal the session does not own.
+        const seam = deps.executorSession;
+        return executorInvokeInvoker({ executors: readExecutors(env.EXECUTORS), session: (p, c) => seam(p, c, session) }, invoke, addressee ?? person)(toolId, args, ctx);
       }
     }
     if (toolId !== 'treasury.payment.execute') return mcpInvoke(toolId, args, ctx);

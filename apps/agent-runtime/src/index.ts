@@ -135,6 +135,7 @@ import { KB_QUESTION_TOOL, kbQuestionInvoker, KB_RETRIEVE_TOOL, kbRetrieveInvoke
 import { discoveryFetchFor, structuredCallFor, type StructuredCallRecordV1 } from './context-wiring.js';
 import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@agenticprimitives/context';
 import { selectComposer, selectComposerRouted, resolveProvider, availableModels, plannerPromptBudget, defaultProvider, widestPromptBudget, type RouteNeed, type RouteDecision } from './orchestration.js';
+import { homeSessionSeam } from './executor-invoke.js';
 import { loadRun, saveRun, dropRun, listRuns, openRunOnThread, mergeTurn, type HarnessRunCheckpointV1, completedStepsOf, isExpired, AWAIT_WINDOW_MS, expiryFor, canceledRecord } from './harness-runs.js';
 import { buildGenesisPlanes, type GenesisPlaneWires } from './genesis-planes.js';
 import { vaultServerId } from './vault-server-id.js';
@@ -6147,18 +6148,11 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     const r = await fetch(`${homeOrigin}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session}`, origin: homeOrigin, 'user-agent': 'agenticprimitives-a2a/1.0' }, body: JSON.stringify(body) });
     return { status: r.status, body: (await r.json().catch(() => ({}))) as Record<string, unknown> };
   };
-  // Spec 426 §5 — THE EXECUTOR-INVOKE SESSION SEAM, resolved through the Home (neutral: no game/persona→custodian
-  // map in the runtime). The runtime asks only "a session for this principal at this client"; the Home's
-  // demo-signin resolves the custodian from the self-agent relationship and mints the session acting AS the
-  // principal. null ⇒ the invoke step refuses (never a silent success). On a real estate the principal's own
-  // credential mints it; this is the demo binding of the same seam.
-  deps.executorSession = async (principal: Address, client: string): Promise<string | null> => {
-    if (!homeOrigin) return null;
-    const r = await fetch(`${homeOrigin}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json', origin: homeOrigin, 'user-agent': 'agenticprimitives-a2a/1.0' }, body: JSON.stringify({ as: principal, client_id: client }) }).catch(() => null);
-    if (!r || !r.ok) return null;
-    const b = (await r.json().catch(() => ({}))) as { homeSession?: string; session?: string };
-    return b.homeSession ?? b.session ?? null;
-  };
+  // Spec 426 §5 — THE EXECUTOR-INVOKE SESSION SEAM, resolved through the Home: first the run's OWN session
+  // (`/connect/session-token` — the principal's own credential, minted for the executor's client), then the
+  // demo binding (`demo-signin { as }`) for a seeded persona with no session of its own. null ⇒ the step
+  // refuses (never a silent success). Both bindings and their order live in `homeSessionSeam`.
+  deps.executorSession = homeSessionSeam({ homeOrigin });
   deps.predictAgentForEmail = async ({ org, email, session }) => {
     const r = await homeCall('/connect/org-invite/predict', session, { org, email });
     const agent = String(r.body.agent ?? '').toLowerCase();
