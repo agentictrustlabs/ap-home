@@ -7,7 +7,7 @@ import { useSearchParams } from 'next/navigation';
 import { nameLabel, townReturnUrl, TOWN_NAMING_ORIGIN } from '../../../lib/domain';
 import { btnSty, cardSty, mono, mutedText } from '../theme';
 
-export interface TownHandoff { label: string; tld: string | null; returnUrl: string | null; popup: boolean }
+export interface TownHandoff { label: string; tld: string | null; returnUrl: string | null; popup: boolean; /** 430 N6a — a line about the agent, to write with the name. */ about?: string }
 
 /** What the URL asks for, or null when nobody was sent here. Safe for a static page: it reads nothing until mounted. */
 export function useTownHandoff(): TownHandoff | null {
@@ -17,7 +17,8 @@ export function useTownHandoff(): TownHandoff | null {
   const label = claim ? nameLabel(claim.split('.')[0] ?? '') : '';
   if (!label) return null;
   const fromClaim = claim.includes('.') ? claim.split('.')[1] ?? null : null;
-  return { label, tld: (params?.get('tld') || fromClaim || null), ...ret };
+  const about = params?.get('about')?.slice(0, 280);
+  return { label, tld: (params?.get('tld') || fromClaim || null), ...ret, ...(about ? { about } : {}) };
 }
 
 export interface TownReturn { returnUrl: string | null; popup: boolean }

@@ -100,6 +100,7 @@ function NamingPageInner() {
           token={session?.token ?? null}
           tld={NEW_PERSON_TLD}
           initialLabel={handoff?.label}
+          initialAbout={handoff?.about}
           onDone={(n) => { setHandoffClaimed(n); if (handoff) finishTownHandoff(handoff, { name: n, agent: agentAddress }); void (async () => { for (let i = 0; i < 10; i++) { const p = session?.token ? await fetchProfile(session.token).catch(() => null) : null; if (p?.name) break; await new Promise((r) => setTimeout(r, 1500)); } await refreshProfile(); await load(); notifyAgentsChanged(); })(); }}
         />
       )}

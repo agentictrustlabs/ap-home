@@ -18,10 +18,10 @@ export function kindNameIsBought(kind: AgentKind): boolean {
 }
 
 export async function buyNameForNewAgent(
-  input: { agent: Address; label: string; kind: AgentKind; parent: Address; person: Address; via: string; token: string; email?: string },
+  input: { agent: Address; label: string; kind: AgentKind; parent: Address; person: Address; via: string; token: string; email?: string; displayName?: string; about?: string },
   onStep?: (s: string) => void,
 ): Promise<{ ok: true; name: string; price: number } | PurchaseRefusal> {
-  const { agent, label, kind, parent, person, token, email } = input;
+  const { agent, label, kind, parent, person, token, email, displayName, about } = input;
   const via = (String(input.via ?? '').toLowerCase() || 'passkey') as Via;
   const typed = typedTldForKind(kind);
   if (!typed || !NAMING_COIN) return { ok: false, error: `no priced ending for ${kind} on this chain` };
@@ -35,6 +35,7 @@ export async function buyNameForNewAgent(
     token, owner: agent, payer: treasury.treasury, label, tld: typed.tld, coin: NAMING_COIN.address,
     ...(email ? { email } : {}), ...(custodian ? { custodian } : {}), signPayer, signOwner,
     ...(typed.serviceRole ? { serviceRole: typed.serviceRole } : {}), ...(onStep ? { onStep } : {}),
+    ...(displayName || about ? { records: { ...(displayName ? { displayName } : {}), ...(about ? { description: about } : {}) } } : {}),
   });
   if (!bought.ok) return bought;
   onStep?.('Saving the name…');

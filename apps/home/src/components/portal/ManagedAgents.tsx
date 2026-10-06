@@ -250,7 +250,7 @@ export function FundForm({
  * person's new agent must not fail to exist because a courtesy failed.
  */
 export async function createAgentWithBirthrights(
-  input: { kind: AgentKind; label?: string; parent: string; person: string; via: string; displayName?: string; /** For a protected label (431 §3): the person's verified email at that domain. */ email?: string },
+  input: { kind: AgentKind; label?: string; parent: string; person: string; via: string; displayName?: string; /** For a protected label (431 §3): the person's verified email at that domain. */ email?: string; /** A line about it, written with the name (430 N6a). */ about?: string },
   token: string,
   onStep: (s: string) => void,
 ): Promise<{ ok: true; result: CreateManagedAgentResult } | { ok: false; error: string }> {
@@ -269,7 +269,7 @@ export async function createAgentWithBirthrights(
   );
   if (!res.ok) return res;
   if (bought) {
-    const name = await buyNameForNewAgent({ agent: res.result.agent, label: input.label!.trim().toLowerCase(), kind, parent: parent as `0x${string}`, person: person as `0x${string}`, via, token, ...(input.email ? { email: input.email } : {}) }, onStep);
+    const name = await buyNameForNewAgent({ agent: res.result.agent, label: input.label!.trim().toLowerCase(), kind, parent: parent as `0x${string}`, person: person as `0x${string}`, via, token, ...(input.email ? { email: input.email } : {}), ...(commonName ? { displayName: commonName } : {}), ...(input.about?.trim() ? { about: input.about.trim() } : {}) }, onStep);
     if (!name.ok) return { ok: false, error: `${res.result.agent} exists, unnamed — its name was not bought: ${name.error}. Name it from its Naming page.` };
     res.result.name = name.name;
   }
