@@ -31,6 +31,7 @@ import { DemoPeopleFold } from './DemoPeopleFold';
 import { RecognizedEnroll } from './RecognizedEnroll';
 import { CeremonyProgress } from './CeremonyProgress';
 import { OrgChooser, type OrgChoice } from './OrgChooser';
+import { defaultCommonName } from './org-chooser-label';
 import { BrandShield } from '../shared/BrandShield';
 import { ConsentSheet } from '../shared/ConsentSheet';
 import { ReceiptCard } from '../shared/ReceiptCard';
@@ -1305,6 +1306,7 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
           grantOrg: api.enroll.grantOrg,
           existingOrg,
           signAsOrg: choice?.asSteward,
+          displayName: choice?.displayName ?? defaultCommonName(api.enroll?.orgBase),
           onProgress: setGrantProgress,
         });
       }

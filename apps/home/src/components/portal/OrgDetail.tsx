@@ -172,9 +172,27 @@ const inputStyle: React.CSSProperties = {
   fontSize: '.85rem', fontFamily: 'inherit', background: '#fff',
 };
 
+/** Project the two fields a relying app is given — the common name and the website — onto the steward's
+ *  related-org link (`lib/org-profile.ts`). The vault record stays the authority; `description`, `contactEmail` and
+ *  `location` are never sent. The link is the one the stewardship wire was read from: org = its delegator, steward =
+ *  its delegate (the server refuses a session that is not that person). Best-effort: the projection is rebuilt from
+ *  the record whenever this card is opened. */
+async function projectOrgProfile(input: { delegation: DelegationWire; token: string; profile: OrgProfile }): Promise<void> {
+  await fetch('/connect/related-orgs', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${input.token}` },
+    body: JSON.stringify({
+      person: input.delegation.delegate,
+      orgAgent: input.delegation.delegator,
+      orgProfile: { displayName: input.profile.displayName ?? '', website: input.profile.website ?? '' },
+    }),
+  }).catch(() => null);
+}
+
 /** Manage the org's own details over the STEWARDSHIP delegation (write to the org's vault).
  *  Read on mount, edit the fields, Save → vaultWriteWithDelegation(stewardship, org:profile). */
 export function OrgProfileManager({ delegation }: { delegation: DelegationWire }) {
+  const { session } = useSession();
   const [p, setP] = useState<OrgProfile>({ v: 1 });
   const [busy, setBusy] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -186,7 +204,13 @@ export function OrgProfileManager({ delegation }: { delegation: DelegationWire }
     setBusy(true);
     setErr(null);
     vaultReadWithDelegation<OrgProfile>(delegation, RT_ORG_PROFILE)
-      .then((r) => { if (!cancelled && r) setP({ ...r, v: 1 }); })
+      .then((r) => {
+        if (cancelled || !r) return;
+        setP({ ...r, v: 1 });
+        // Reconcile the projection from its source: a profile saved before the projection existed (or from another
+        // Home) reaches relying apps the first time its steward opens this card, without a migration.
+        if (session?.token) void projectOrgProfile({ delegation, token: session.token, profile: r });
+      })
       .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : 'read failed'); })
       .finally(() => { if (!cancelled) setBusy(false); });
     return () => { cancelled = true; };
@@ -198,6 +222,9 @@ export function OrgProfileManager({ delegation }: { delegation: DelegationWire }
     setMsg(null);
     try {
       await vaultWriteWithDelegation(delegation, RT_ORG_PROFILE, p);
+      // Record first, projection second (the order `home/org-lifecycle.ts` keeps, for the same reason). A failed
+      // projection leaves the save standing; the read above repairs it the next time this card opens.
+      if (session?.token) void projectOrgProfile({ delegation, token: session.token, profile: p });
       setMsg('Saved to the organization’s vault ✓');
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'save failed');

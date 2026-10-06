@@ -17,7 +17,7 @@ import { WorkingBar } from './WorkingBar';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { listManagedAgents } from '../../connect-client';
-import { humanizeOrgName, shortAppHost, toOrgLabel } from './org-chooser-label';
+import { defaultCommonName, humanizeOrgName, shortAppHost, toOrgLabel } from './org-chooser-label';
 import { canGrantAsOrg, eligibleConnectOrgs } from './org-chooser-eligible';
 
 export { shortAppHost, toOrgLabel } from './org-chooser-label';
@@ -27,6 +27,9 @@ export interface OrgChoice {
   existingOrg?: Address;
   /** The org's display name (existing) or the new org's label to claim. */
   orgName: string;
+  /** New org only: the name people know it by ("Global.Church"), typed separately from the label
+   *  (`global-church`) it claims. Seeds `org.profile.displayName`; a relying app receives it beside the `.org` name. */
+  displayName?: string;
   /** True when they can sign as the org. Members connect as themselves with this org as context. */
   asSteward?: boolean;
 }
@@ -77,7 +80,9 @@ export function OrgChooser({
   // null = loading; [] = none (or no session to list with).
   const [orgs, setOrgs] = useState<Array<{ agent: Address; name: string; asSteward: boolean }> | null>(token ? null : []);
   const [selected, setSelected] = useState<'new' | Address>('new');
-  const [name, setName] = useState(defaultName ?? '');
+  const [name, setName] = useState(defaultCommonName(defaultName));
+  // The handle follows the name until the person edits it; null = still following.
+  const [labelEdit, setLabelEdit] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [err, setErr] = useState('');
   const autoRan = useRef(false);
@@ -109,7 +114,7 @@ export function OrgChooser({
     const slugged = toOrgLabel(defaultName ?? '');
     if (slugged.length < 3) return;
     autoRan.current = true;
-    onChoose({ orgName: slugged });
+    onChoose({ orgName: slugged, displayName: defaultCommonName(defaultName) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgs, defaultName]);
 
@@ -133,7 +138,7 @@ export function OrgChooser({
   }
 
   const chosen = selected !== 'new' ? orgs.find((o) => o.agent.toLowerCase() === selected.toLowerCase()) : undefined;
-  const slug = toOrgLabel(name);
+  const slug = toOrgLabel(labelEdit ?? name);
   const host = appName ?? shortAppHost(appHost);
   // The name the person typed AT THE APP may already be an org they belong to — showing a
   // prefilled "create" AND the same org in the list, with nothing saying which to pick, is how
@@ -147,7 +152,7 @@ export function OrgChooser({
   const go = () => {
     if (chosen) return onChoose({ existingOrg: chosen.agent, orgName: chosen.name, asSteward: chosen.asSteward });
     if (slug.length < 3) { setErr('Give the new organization a name of at least 3 letters or numbers.'); return; }
-    onChoose({ orgName: slug });
+    onChoose({ orgName: slug, displayName: name.trim() });
   };
 
   const pickNew = () => { setSelected('new'); setErr(''); };
@@ -184,9 +189,24 @@ export function OrgChooser({
         <input
           className="onboarding-input"
           placeholder="New organization name"
+          aria-label="Organization name"
           value={name}
           autoFocus
           onChange={(e) => { setName(e.target.value); setErr(''); }}
+          onKeyDown={(e) => { if (e.key === 'Enter') go(); }}
+        />
+      )}
+      {/* The NAME and the HANDLE are two things: the first is what people call the organization and is
+          what apps show, the second is the label it claims and must be `[a-z0-9-]`. One field produced an
+          organization known to every app as `global-church.org` — which people read as a website, and it is
+          not one, so the handle is never called an address on screen. It follows the name until edited. */}
+      {selected === 'new' && (
+        <input
+          className="onboarding-input"
+          placeholder="Handle"
+          aria-label="Handle"
+          value={labelEdit ?? slug}
+          onChange={(e) => { setLabelEdit(e.target.value); setErr(''); }}
           onKeyDown={(e) => { if (e.key === 'Enter') go(); }}
         />
       )}
@@ -197,8 +217,8 @@ export function OrgChooser({
           it, select it there instead of creating it again.
         </p>
       )}
-      {selected === 'new' && slug && slug !== name.trim() && (
-        <p className="onboarding-hint">Its web address will be <strong>{slug}.impact</strong>.</p>
+      {selected === 'new' && slug && (
+        <p className="onboarding-hint">Its handle will be <strong>{slug}.impact</strong> (not a website); apps will show it as <strong>{name.trim() || slug}</strong>.</p>
       )}
 
       {orgs.length > 0 && (

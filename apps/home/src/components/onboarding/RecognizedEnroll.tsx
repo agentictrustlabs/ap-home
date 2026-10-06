@@ -48,6 +48,7 @@ import { ConsentSheet } from '../shared/ConsentSheet';
 import { CeremonyProgress } from './CeremonyProgress';
 import { coinMandateLeg, grantsCoinAtConnect, withCurrencyConsent, withEmailClaimConsent, withProfileNameConsent } from '../../lib/new-member';
 import { OrgChooser, type OrgChoice } from './OrgChooser';
+import { defaultCommonName } from './org-chooser-label';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
 import { knownRelyingClient } from '../../lib/relying-clients';
 import { agentClassOf } from '../../lib/agent-class';
@@ -723,6 +724,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
             grantOrg: enroll.grantOrg,
             existingOrg,
             signAsOrg: orgSel?.asSteward,
+            displayName: orgSel?.displayName ?? defaultCommonName(enroll.orgBase),
             onProgress: setGrantProgress,
           },
         );

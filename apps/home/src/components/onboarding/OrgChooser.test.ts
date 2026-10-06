@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { displayAppDomain, displayAppName, shortAppHost, toOrgLabel } from './org-chooser-label';
+import { defaultCommonName, displayAppDomain, displayAppName, shortAppHost, toOrgLabel } from './org-chooser-label';
 
 describe('toOrgLabel', () => {
   it('normalizes spaces and capitals to a web-safe handle', () => {
@@ -39,5 +39,20 @@ describe('displayAppDomain', () => {
 
   it('keeps a public host', () => {
     expect(displayAppDomain('gather.example.org')).toBe('gather.example.org');
+  });
+});
+
+describe('defaultCommonName', () => {
+  it('keeps what the person typed at the app as the name people know', () => {
+    expect(defaultCommonName('Global.Church')).toBe('Global.Church');
+    expect(defaultCommonName('  Grace Community Church ')).toBe('Grace Community Church');
+  });
+
+  it('renders a pre-slugged org_base rather than offering the handle as the name', () => {
+    expect(defaultCommonName('global-church')).toBe('Global Church');
+  });
+
+  it('is empty when the app sent nothing', () => {
+    expect(defaultCommonName(undefined)).toBe('');
   });
 });

@@ -28,6 +28,7 @@ import { getClient } from '../../src/lib/oidc-clients';
 import type { StoredEnrollmentGrant } from './authorize-grant';
 import { idTokenTtl } from '../_lib/session-ttl';
 import { nameClaimForIdToken } from '../../src/lib/new-member';
+import { orgCommonNameFields, sanitizeOrgProfileProjection } from '../../src/lib/org-profile';
 
 const CODE_TTL_MS = 300_000; // 5 min PKCE exchange window
 
@@ -212,7 +213,15 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     proofHash?: string; credential?: unknown; brokerDelegation?: { delegate?: string } | null;
     membershipDelegation?: unknown; stewardshipDelegation?: unknown; operationalDelegation?: unknown;
     readGrantDelegation?: unknown;
+    /** org-create: the common name the ceremony asked for, already seeded into the new org's `org.profile` by the
+     *  SPA. Projected onto the link here (`lib/org-profile.ts`) so the first read carries it; not returned raw. */
+    orgProfile?: unknown;
   } | null;
+  // The organization's common name (and website) for the `/token` response, read from the LINK below — the
+  // steward's projection of `org.profile` (`lib/org-profile.ts`): for a new organization the name the ceremony
+  // just asked for (sanitized and written to the link here), for an existing one whatever its steward saved
+  // earlier. Either way the app reads one answer, and a name that only repeats `orgName` is omitted.
+  let orgCommonName: { displayName?: string; website?: string } = {};
   if (orgPayload?.orgAgent && orgPayload.person) {
     const person = orgPayload.person.toLowerCase();
     const org = orgPayload.orgAgent.toLowerCase();
@@ -248,7 +257,12 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       ...(orgPayload.governor ? { governor: String(orgPayload.governor).toLowerCase() } : existing.governor ? { governor: existing.governor } : {}),
       createdAt: existing.createdAt ?? Date.now(),
     };
+    // The ceremony's common name, when it carried one: the seed of a record the steward can edit later, so a
+    // later `orgProfile` write replaces it. Nothing sent leaves what `...existing` carried alone.
+    const seeded = orgPayload.orgProfile !== undefined ? sanitizeOrgProfileProjection(orgPayload.orgProfile) : null;
+    if (seeded?.displayName || seeded?.website) (link as Record<string, unknown>).orgProfile = seeded;
     await env.AUTH_CODES.put(`related:${person}:${org}`, JSON.stringify(link));
+    orgCommonName = orgCommonNameFields(link.orgName, (link as Record<string, unknown>).orgProfile);
     const idxKey = `related-idx:${person}`;
     const idx = JSON.parse((await env.AUTH_CODES.get(idxKey)) ?? '[]') as string[];
     if (!idx.includes(org)) { idx.push(org); await env.AUTH_CODES.put(idxKey, JSON.stringify(idx)); }
@@ -289,7 +303,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       treasury: body.treasury ?? null,
       selfVaultGrant: body.selfVaultGrant ?? null,
       delegations: actTemplate ? body.delegations : null,
-      org: body.org ?? null,
+      org: body.org ? { ...(({ orgProfile: _seed, ...rest }) => rest)(body.org as Record<string, unknown>), ...orgCommonName } : null,
       // Returned verbatim by /token so an app can read the HUMAN name explicitly rather than
       // inferring it from `agent_name`. '' (never absent) when the client isn't `profile`-scoped.
       profile_name: profileName,

@@ -13,6 +13,7 @@ import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/ser
 import { isAllowedClientOrigin } from '../../src/lib/oidc-clients';
 // Curated white-label entries AND member-registered ones (server/_lib/oidc-registry.ts).
 import { resolveClient } from '../_lib/oidc-registry';
+import { orgCommonNameFields, sanitizeOrgProfileProjection } from '../../src/lib/org-profile';
 
 /** The `aud` of a JWT without verifying it (only used to pick which expectedAud to verify against). */
 function unverifiedAud(token: string): string | null {
@@ -142,7 +143,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       readGrantDelegation?: unknown;
     };
     if (clientId && link.requestedBy !== clientId) continue; // relying-app view is scoped
-    const l = link as typeof link & { kind?: string; parent?: string; relationship?: string; status?: string; governor?: string };
+    const l = link as typeof link & { kind?: string; parent?: string; relationship?: string; status?: string; governor?: string; orgProfile?: unknown };
     // Name self-heal: a link written while the chain read lagged stored the ADDRESS as orgName (the
     // member's dropdowns then show 0x…). The link is a PROJECTION — reconcile it from the naming
     // service on read (ADR-0013-safe: reconciling a projection from its source, not a fallback).
@@ -195,6 +196,12 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       // authority for it is the org's vault, not this KV). Omitted when never set: absent means
       // active, so a link that predates the feature reads as active without a migration.
       ...(l.status ? { status: l.status } : {}),
+      // The organization's COMMON NAME (and website), PROJECTED from its `org.profile` vault record by the steward
+      // who saved it (`lib/org-profile.ts`) — beside `orgName`, never instead of it: `orgName` is the naming-service
+      // name, which people read as a website address. `displayName` is omitted when the link carries none or when
+      // it only repeats `orgName` (the profile is seeded with that name at creation), so absent means "show orgName".
+      // Read from the row already in hand — no vault read, no further KV get on this path.
+      ...orgCommonNameFields(link.orgName, l.orgProfile),
     });
   }
   // Bounded, PARALLEL name heal: at most NAME_HEAL_PER_REQUEST on-chain reverseResolves per request, concurrent, so a
@@ -414,6 +421,14 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
      * is one that can hide an organization by typo.
      */
     status?: string;
+    /**
+     * The organization's common name and website, PROJECTED onto the caller's own link from `org.profile` in the
+     * org's vault so a relying app can be given them without a vault read (`lib/org-profile.ts`). Sent by the
+     * steward's Home after the vault write succeeds; it is the record's cache and carries no authority of its own.
+     * Bearer path only, caller must steward the organization. A profile with neither field REMOVES the projection
+     * — a steward who clears the name must be able to make it stop appearing.
+     */
+    orgProfile?: unknown;
     // AUDIT NEW-RAG-2 — the ERC-1271 write path binds the signature to a one-shot nonce + short expiry.
     nonce?: string;
     expiry?: number;
@@ -537,6 +552,26 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       }
       await env.AUTH_CODES.put(`org-localname:${org}`, JSON.stringify({ name, isLocal: ln.isLocal !== false, at: Date.now() }));
       return jsonCors({ ok: true, orgLocalName: name }, request);
+    }
+    // The organization's COMMON NAME projection (`orgProfile` on the caller's own link). Its own write rather than
+    // a field of the upsert below, for three reasons: it must never CREATE a link (a projection of a profile onto
+    // a relationship that is not there would invent the relationship); only a steward can have written the record
+    // it mirrors, so only a steward may project it (same check as the writes above); and it is re-sent whenever
+    // the steward opens the profile card, which must not cost a relationships-doc merge each time. The projection
+    // replaces as a WHOLE — it mirrors one vault record, so a field the steward cleared must not survive.
+    if (body?.orgProfile !== undefined) {
+      const stewardLinkRaw = await env.AUTH_CODES.get(`related:${person}:${org}`);
+      const stewardLink = stewardLinkRaw ? (JSON.parse(stewardLinkRaw) as Record<string, unknown>) : null;
+      if (!stewardLink || (stewardLink.relationship ?? 'steward') === 'member') {
+        return jsonCors({ error: 'you do not steward this organization' }, request, 403);
+      }
+      const next = sanitizeOrgProfileProjection(body.orgProfile);
+      const { orgProfile: prev, ...rest } = stewardLink;
+      // Unchanged is the common case (the card re-projects on every open) — skip the write.
+      if (JSON.stringify(sanitizeOrgProfileProjection(prev)) !== JSON.stringify(next)) {
+        await env.AUTH_CODES.put(`related:${person}:${org}`, JSON.stringify({ ...rest, ...(next.displayName || next.website ? { orgProfile: next } : {}) }));
+      }
+      return jsonCors({ ok: true, orgProfile: next }, request);
     }
   } else {
     // ERC-1271 control-of-person proof (spec-247 external-custodian path, e.g. a demo-jp operator org).

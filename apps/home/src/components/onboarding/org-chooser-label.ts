@@ -10,6 +10,15 @@ export function toOrgLabel(input: string): string {
     .replace(/-+$/g, '');
 }
 
+/** The COMMON NAME a ceremony starts from, given what the person typed at the app (`org_base`). What they typed
+ *  is the name as they know it — unless it is already a handle (`global-church`, the slug an app pre-computed),
+ *  which is rendered for them like any other handle. Editable on the chooser; the ceremony seeds `org.profile`
+ *  with it and a relying app receives it as `displayName` beside the `.org` name (`lib/org-profile.ts`). */
+export function defaultCommonName(orgBase: string | undefined): string {
+  const typed = (orgBase ?? '').trim();
+  return /^[a-z0-9-]+$/.test(typed) ? humanizeOrgName(typed) : typed;
+}
+
 /** First label of a hostname — `field-web.richardpedersen3.workers.dev` → `field-web`. */
 export function shortAppHost(host: string): string {
   const h = host.replace(/^https?:\/\//, '').replace(/\/$/, '');
