@@ -43,12 +43,14 @@ export function PurchaseNameCard({ owner, kind, via, token, tld, serviceRole, in
   // The payer: a person's own treasury, or an organization's.
   const loadTreasury = useCallback(async () => {
     if (!token) return;
-    const all = await listManagedAgents(token, 'any').catch(() => []);
-    const t = isPerson
-      ? all.find((a) => a.kind === 'person-treasury' && (a.relationship ?? 'steward') === 'steward')
-      : all.find((a) => a.kind === 'org-treasury' && (a.parent ?? '').toLowerCase() === owner.toLowerCase());
-    setTreasury(t?.agent ?? null);
-    if (t) setBalance(await treasuryBalance(t.agent).catch(() => null));
+    // The payer: a person's own treasury; an organization's treasury; a treasury pays for its own name.
+    const isTreasury = kind === 'person-treasury' || kind === 'org-treasury' || kind === 'treasury';
+    const all = isTreasury ? [] : await listManagedAgents(token, 'any').catch(() => []);
+    const payer = isTreasury ? owner : isPerson
+      ? all.find((a) => a.kind === 'person-treasury' && (a.relationship ?? 'steward') === 'steward')?.agent
+      : all.find((a) => a.kind === 'org-treasury' && (a.parent ?? '').toLowerCase() === owner.toLowerCase())?.agent;
+    setTreasury(payer ?? null);
+    if (payer) setBalance(await treasuryBalance(payer).catch(() => null));
   }, [token, owner, isPerson]);
   useEffect(() => { void loadTreasury(); }, [loadTreasury]);
 
@@ -124,7 +126,7 @@ export function PurchaseNameCard({ owner, kind, via, token, tld, serviceRole, in
         </div>
       ) : (
         <p style={{ fontSize: '.82rem', ...mutedText, margin: '0 0 .6rem' }}>
-          Paid from <span style={mono as React.CSSProperties}>{treasury.slice(0, 6)}…{treasury.slice(-4)}</span> · balance {balance === null ? '…' : `${coins(balance)} SHQ`}
+          Paid from {treasury.toLowerCase() === owner.toLowerCase() ? 'this treasury itself' : <span style={mono as React.CSSProperties}>{`${treasury.slice(0, 6)}…${treasury.slice(-4)}`}</span>} · balance {balance === null ? '…' : `${coins(balance)} SHQ`}
         </p>
       )}
 
