@@ -17,9 +17,50 @@ export interface ExecutorConfigV1 {
 export type ExecutorsV1 = Record<string, ExecutorConfigV1>;
 
 /** THE ONE SEAM (§5): an id_token for the principal, scoped to the executor's client. Production: the
- *  principal's own credential. Demo estate: `demo-signin { client_id: <client>, handle: <custodian>, as:
- *  <principal> }`. `null` ⇒ the step is REFUSED (never a silent success). */
-export type ExecutorSessionSeam = (principal: Address, client: string) => Promise<string | null>;
+ *  principal's own credential — the Home session the run runs under, handed in as `session`, which the
+ *  Home turns into an id_token for that session's own agent (`/connect/session-token`). Demo estate:
+ *  `demo-signin { client_id: <client>, as: <principal> }`. `null` ⇒ the step is REFUSED (never a silent
+ *  success). */
+export type ExecutorSessionSeam = (principal: Address, client: string, session?: string) => Promise<string | null>;
+
+/**
+ * The Home-backed seam, in its two bindings and in this order:
+ *   1. PRODUCTION — the run's own session: `POST /connect/session-token { client_id, as: principal }` with
+ *      the session as the bearer. The Home mints for the session's OWN agent only; a run whose principal
+ *      is someone else gets no token here (self-acting, §6).
+ *   2. DEMO — `POST /connect/demo-signin { client_id, as: principal }`: the Home resolves a seeded
+ *      custodian for the principal and mints acting as them. Reached only when (1) gave nothing — a
+ *      demo persona has no session of its own in an unattended run.
+ * `null` when neither binds — the invoker refuses the step.
+ */
+export function homeSessionSeam(opts: { homeOrigin: string | null; fetch?: typeof fetch; userAgent?: string }): ExecutorSessionSeam {
+  const f = opts.fetch ?? fetch;
+  const ua = opts.userAgent ?? 'agenticprimitives-a2a/1.0';
+  const home = opts.homeOrigin;
+  const read = async (r: Response | null): Promise<string | null> => {
+    if (!r || !r.ok) return null;
+    const b = (await r.json().catch(() => ({}))) as { id_token?: string; homeSession?: string; session?: string };
+    return b.id_token ?? b.homeSession ?? b.session ?? null;
+  };
+  return async (principal, client, session) => {
+    if (!home) return null;
+    if (session) {
+      const r = await f(`${home}/connect/session-token`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${session}`, origin: home, 'user-agent': ua },
+        body: JSON.stringify({ client_id: client, as: principal }),
+      }).catch(() => null);
+      const tok = await read(r);
+      if (tok) return tok;
+    }
+    const r = await f(`${home}/connect/demo-signin`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: home, 'user-agent': ua },
+      body: JSON.stringify({ as: principal, client_id: client }),
+    }).catch(() => null);
+    return read(r);
+  };
+}
 
 export interface ExecutorInvokeDeps {
   executors: ExecutorsV1;
