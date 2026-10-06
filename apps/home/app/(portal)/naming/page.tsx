@@ -11,7 +11,7 @@ import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { AgentNamingEditor } from '../../../src/components/portal/discovery/AgentNamingEditor';
 import { ChangeNameCard } from '../../../src/components/portal/naming/ChangeNameCard';
-import { TownHandoffNote, useTownHandoff } from '../../../src/components/portal/naming/TownHandoff';
+import { TownHandoffNote, finishTownHandoff, useTownHandoff } from '../../../src/components/portal/naming/TownHandoff';
 import { PurchaseNameCard } from '../../../src/components/portal/naming/PurchaseNameCard';
 import { isPricedTld } from '../../../src/lib/naming-price';
 import { loadRegistry, markCustody, type AgentRegistryRow } from '../../../src/lib/registry';
@@ -100,7 +100,7 @@ function NamingPageInner() {
           token={session?.token ?? null}
           tld={NEW_PERSON_TLD}
           initialLabel={handoff?.label}
-          onDone={(n) => { setHandoffClaimed(n); void (async () => { for (let i = 0; i < 10; i++) { const p = session?.token ? await fetchProfile(session.token).catch(() => null) : null; if (p?.name) break; await new Promise((r) => setTimeout(r, 1500)); } await refreshProfile(); await load(); notifyAgentsChanged(); })(); }}
+          onDone={(n) => { setHandoffClaimed(n); if (handoff) finishTownHandoff(handoff, { name: n, agent: agentAddress }); void (async () => { for (let i = 0; i < 10; i++) { const p = session?.token ? await fetchProfile(session.token).catch(() => null) : null; if (p?.name) break; await new Promise((r) => setTimeout(r, 1500)); } await refreshProfile(); await load(); notifyAgentsChanged(); })(); }}
         />
       )}
       {isNameless && agentAddress && !isPricedTld(NEW_PERSON_TLD) && (
@@ -111,6 +111,7 @@ function NamingPageInner() {
           initialLabel={handoff?.label}
           onNamed={(n) => {
             setHandoffClaimed(n);
+            if (handoff) finishTownHandoff(handoff, { name: n, agent: agentAddress });
             // The claim is MINED, but the server's reverse-resolve can lag the RPC read replica — a
             // single immediate refresh raced it and lost. Poll until the name resolves (bounded), then
             // commit the profile + nudge every agents dropdown (topbar switcher included).
@@ -171,7 +172,7 @@ function NamingPageInner() {
           via={memberVia}
           token={session?.token ?? null}
           initialLabel={handoff?.label}
-          onChanged={(n) => { if (n) setHandoffClaimed(n); void (async () => { await refreshProfile(); await load(); notifyAgentsChanged(); })(); }}
+          onChanged={(n) => { if (n) { setHandoffClaimed(n); if (handoff) finishTownHandoff(handoff, { name: n, agent: agentAddress }); } void (async () => { await refreshProfile(); await load(); notifyAgentsChanged(); })(); }}
         />
       )}
 

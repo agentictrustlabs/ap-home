@@ -14,7 +14,8 @@ import { kindNameIsBought } from '../../../../src/home/charter-name';
 import { resolveVia } from '../../../../src/home/onboarding';
 import { coins, treasuryBalance } from '../../../../src/home/treasury-birthright';
 import { creatableKinds, type CreatableKind } from '../../../../src/lib/agent-class';
-import { nameLabel, townReturnUrl, TOWN_NAMING_ORIGIN } from '../../../../src/lib/domain';
+import { nameLabel, TOWN_NAMING_ORIGIN } from '../../../../src/lib/domain';
+import { finishTownHandoff, townResultUrl, useTownReturn } from '../../../../src/components/portal/naming/TownHandoff';
 import { NAMING_COIN, TREASURY_BIRTHRIGHT_COINS, namePrice } from '../../../../src/lib/naming-price';
 import { listManagedAgents, requestClaimTicket, resolveCredential, typedTldForKind, type AgentKind, type PurchaseRefusal } from '../../../../src/connect-client';
 import { btnPrimarySty, btnSty, cardSty, errorText, inputSty, mono, mutedText } from '../../../../src/components/portal/theme';
@@ -31,7 +32,8 @@ function RegisterInner() {
   const params = useSearchParams();
   const wantKind = (params?.get('charter') ?? '') as AgentKind;
   const wantTld = params?.get('tld') ?? '';
-  const returnUrl = townReturnUrl(params?.get('return'));
+  const ret = useTownReturn();
+  const returnUrl = ret.returnUrl;
   const via = resolveVia(profile?.credential as string | undefined, session?.via);
   const token = session?.token ?? null;
 
@@ -101,13 +103,11 @@ function RegisterInner() {
     if (!res.ok) { setErr(res.error); return; }
     setMade({ agent: res.result.agent, name: res.result.name });
     notifyAgentsChanged();
+    finishTownHandoff(ret, { name: res.result.name, agent: res.result.agent });
   };
 
   const host = new URL(TOWN_NAMING_ORIGIN).host;
-  const back = (name: string) => {
-    if (!returnUrl) return null;
-    try { const u = new URL(returnUrl); if (u.pathname.startsWith('/name/')) u.pathname = `/name/${encodeURIComponent(name)}`; return u.toString(); } catch { return returnUrl; }
-  };
+  const back = (name: string) => townResultUrl(ret, { name, agent: made?.agent ?? null });
 
   return (
     <SectionShell title="Register a new agent" description="An agent you keep, named at creation. Your Home signs; the town's naming service only reads.">
