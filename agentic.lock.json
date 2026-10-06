@@ -1,9 +1,9 @@
 {
   "lockVersion": 1,
   "packages": {
-    "@agenticprimitives/devkit": "0.0.0-alpha.10",
+    "@agenticprimitives/devkit": "0.0.0-alpha.12",
     "@agenticprimitives/evaluation": "0.0.0-alpha.5",
-    "@agenticprimitives/a2a": "0.0.0-alpha.25",
+    "@agenticprimitives/a2a": "0.0.0-alpha.27",
     "@agenticprimitives/mcp-protocol": "0.0.0-alpha.4"
   },
   "rules": {
@@ -19,7 +19,7 @@
     "vault-is-the-record-apps-hold-references": "sha256:e6a6e859a16071dff5c30a7b7dc2d4cb0b8307e19dc416387cf181084236e685",
     "vault-records-are-ontology-shaped": "sha256:6a739d1a10d5b62e4ab5ed910fdccc67b9c024dd519c9c3e1fea916b3899a90b"
   },
-  "devkit": "0.0.0-alpha.10",
+  "devkit": "0.0.0-alpha.12",
   "template": {
     "name": "product-repo",
     "revision": "2026-09-16.1"
@@ -89,6 +89,10 @@
         {
           "file": "apps/home/server/connect/demo-accounts.ts",
           "why": "derives the seeded persona custodian address"
+        },
+        {
+          "file": "apps/home/server/connect/naming-ticket.ts",
+          "why": "ap-town spec 431 \u2014 the naming gate signs claim tickets (EIP-712) with NAMING_GATE_PRIVATE_KEY after the domain rule; a ticket moves no value and confers no authority (the chain checks it; the treasury pays). Posture item: move the gate signer to KMS and rotate via PricedSubregistry.setGate."
         }
       ],
       "toleratedEnvNames": [
