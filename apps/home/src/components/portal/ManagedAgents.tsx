@@ -16,6 +16,8 @@ import { typedTldForKind, createManagedAgent, nameManagedAgent, personSignHash, 
 import { BusyButton } from '../shared/BusyButton';
 import { PrimaryPayee } from './PrimaryPayee';
 import { assignDefaultArchetype } from '../../home/default-archetype';
+import { buyNameForNewAgent, kindNameIsBought } from '../../home/charter-name';
+import { NAMING_COIN, namePrice } from '../../lib/naming-price';
 import { emitControlEvent } from '../../home/control-plane';
 import { activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded, signHashFor, type Via } from '../../home/onboarding';
 import { setOrgLifecycleStatus } from '../../home/org-lifecycle';
@@ -248,17 +250,29 @@ export function FundForm({
  * person's new agent must not fail to exist because a courtesy failed.
  */
 export async function createAgentWithBirthrights(
-  input: { kind: AgentKind; label?: string; parent: string; person: string; via: string; displayName?: string },
+  input: { kind: AgentKind; label?: string; parent: string; person: string; via: string; displayName?: string; /** For a protected label (431 §3): the person's verified email at that domain. */ email?: string },
   token: string,
   onStep: (s: string) => void,
 ): Promise<{ ok: true; result: CreateManagedAgentResult } | { ok: false; error: string }> {
-  const { kind, label, parent, person, via } = input;
+  const { kind, parent, person, via } = input;
   const commonName = (input.displayName ?? '').trim();
+  // ap-town spec 431 — on a priced ending the name is BOUGHT, not registered: deploy nameless, then the person's
+  // treasury pays for the new agent's name and the agent presents it (`home/charter-name.ts`). The legacy
+  // `register(label, owner)` the claim path builds no longer exists on those roots; sending it reverted the
+  // whole deploy, so "Add an organization" with a name failed on faithnet from the root switch until this.
+  const wantName = !!input.label && input.label.trim().length >= 3;
+  const bought = wantName && kindNameIsBought(kind);
+  const label = bought ? undefined : input.label;
   const res = await createManagedAgent(
-    { kind, label, parent: parent as `0x${string}`, person: person as `0x${string}`, via },
+    { kind, label, parent: parent as `0x${string}`, person: person as `0x${string}`, via, ...(bought ? { nameLater: true } : {}) },
     token, onStep,
   );
   if (!res.ok) return res;
+  if (bought) {
+    const name = await buyNameForNewAgent({ agent: res.result.agent, label: input.label!.trim().toLowerCase(), kind, parent: parent as `0x${string}`, person: person as `0x${string}`, via, token, ...(input.email ? { email: input.email } : {}) }, onStep);
+    if (!name.ok) return { ok: false, error: `${res.result.agent} exists, unnamed — its name was not bought: ${name.error}. Name it from its Naming page.` };
+    res.result.name = name.name;
+  }
   // spec 321 — enable channel storage AT CREATE so the steward never meets the "Enable (steward)"
   // banner: bind the org's vault key + issue its standing delivery grant (channels.data + message
   // bodies + invite tracking) signed AS THE ORG. Zero prompts on the KMS family (C_sub custodies
@@ -404,6 +418,12 @@ export function CreateAgentForm({
             about an agent that would be. */}
         <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>.{typedTldForKind(kind)?.tld ?? AGENT_NAME_PARENT}</span>
       </div>
+      {/* ap-town spec 431 — a name on a priced ending is bought from YOUR treasury for the new agent. */}
+      {kindNameIsBought(kind) && label.trim().length >= 3 && (
+        <span style={{ fontSize: '.78rem', color: 'var(--c-g500, #64748b)' }}>
+          {(() => { const p = namePrice(label.trim().toLowerCase(), typedTldForKind(kind)!.tld); return p === null ? 'Not a buyable name.' : `${label.trim().toLowerCase()}.${typedTldForKind(kind)!.tld} costs ${p} ${NAMING_COIN?.symbol ?? 'SHQ'}, paid from your treasury.`; })()}
+        </span>
+      )}
       {/* An organization's NAME is not its handle: the handle above is what it claims, this is what people call
           it and what relying apps show (`org.profile.displayName`). Optional here — the profile card can set it later. */}
       {kind === 'org' && (
@@ -449,10 +469,13 @@ export function NameAgentForm({
     const clean = label.trim().toLowerCase();
     if (clean.length < 3) { setErr('Pick a name with at least 3 characters.'); return; }
     setBusy(true); setErr(''); setStep('');
-    const res = await nameManagedAgent(
-      { agent: agent as `0x${string}`, label: clean, kind, parent: parent as `0x${string}`, person: person as `0x${string}`, via },
-      token, setStep,
-    );
+    // ap-town spec 431 — on a priced ending the name is bought (the person's treasury pays), never registered.
+    const res = kindNameIsBought(kind)
+      ? await buyNameForNewAgent({ agent: agent as `0x${string}`, label: clean, kind, parent: parent as `0x${string}`, person: person as `0x${string}`, via, token }, setStep)
+      : await nameManagedAgent(
+        { agent: agent as `0x${string}`, label: clean, kind, parent: parent as `0x${string}`, person: person as `0x${string}`, via },
+        token, setStep,
+      );
     setBusy(false);
     if (!res.ok) { setErr(res.error); return; }
     setOpen(false); setLabel('');
@@ -479,6 +502,12 @@ export function NameAgentForm({
             about an agent that would be. */}
         <span style={{ fontSize: '.82rem', color: 'var(--c-g500, #64748b)' }}>.{typedTldForKind(kind)?.tld ?? AGENT_NAME_PARENT}</span>
       </div>
+      {/* ap-town spec 431 — a name on a priced ending is bought from YOUR treasury for the new agent. */}
+      {kindNameIsBought(kind) && label.trim().length >= 3 && (
+        <span style={{ fontSize: '.78rem', color: 'var(--c-g500, #64748b)' }}>
+          {(() => { const p = namePrice(label.trim().toLowerCase(), typedTldForKind(kind)!.tld); return p === null ? 'Not a buyable name.' : `${label.trim().toLowerCase()}.${typedTldForKind(kind)!.tld} costs ${p} ${NAMING_COIN?.symbol ?? 'SHQ'}, paid from your treasury.`; })()}
+        </span>
+      )}
       <div style={{ display: 'flex', gap: '.4rem' }}>
         <BusyButton busy={busy} busyLabel={step || 'Naming…'} className="btn-primary" style={{ fontSize: '.8rem', padding: '.35rem .7rem' }} onClick={() => void go()}>
           Name it
