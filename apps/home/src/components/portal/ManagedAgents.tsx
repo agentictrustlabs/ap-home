@@ -735,7 +735,8 @@ export function OrganizationsManager({
               <div style={{ margin: '.45rem 0' }}><AddressChip address={svc.agent as `0x${string}`} size="sm" /></div>
               <p className="manage-card-blurb">You steward it — your key signs for it. <ExplorerLink address={svc.agent} label="explorer ↗" /></p>
               {/* M06 (398 §4.4) — the fleet boundary on the services roster too: runs at · may spend · holds. */}
-              <FleetLines agent={svc.agent as `0x${string}`} token={token} stewardship />
+              <FleetLines agent={svc.agent as `0x${string}`} token={token} stewardship
+                onActivateVault={() => activateVaultIfNeeded(svc.agent as `0x${string}`, via.toLowerCase() as Via, { token })} />
               {!svc.name && <NameAgentForm agent={svc.agent} kind={svc.kind} parent={svc.parent} person={person} token={token} via={via} onDone={reload} />}
             </div>
           ))}
