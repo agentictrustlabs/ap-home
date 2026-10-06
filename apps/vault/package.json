@@ -14,7 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@agenticprimitives/agent-naming": "1.0.0-alpha.27",
+    "@agenticprimitives/agent-naming": "1.0.0-alpha.29",
     "@agenticprimitives/audit": "1.0.0-alpha.27",
     "@agenticprimitives/chain-state": "0.0.0-alpha.4",
     "@agenticprimitives/chain-state-viem": "0.0.0-alpha.6",

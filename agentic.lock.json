@@ -48,7 +48,7 @@
         },
         {
           "file": "apps/home-mcp/src/act.ts",
-          "why": "home-mcp-raw-act-key (findings.yaml, accepted-risk): the act-as-me key is the delegate of the person's capped, per-wire-revocable standing wires (spec 397 §11); KMS signer + re-issued wires scheduled with the ask key"
+          "why": "home-mcp-raw-act-key (findings.yaml, accepted-risk): the act-as-me key is the delegate of the person's capped, per-wire-revocable standing wires (spec 397 \u00a711); KMS signer + re-issued wires scheduled with the ask key"
         },
         {
           "file": "apps/home-mcp/src/index.ts",
@@ -99,6 +99,10 @@
         {
           "name": "A2A_INTERACTIONS_SESSION_PRIVATE_KEY",
           "why": "workstation-only InteractionsDO session signer when no Cloud KMS is present"
+        },
+        {
+          "name": "NAMING_GATE_PRIVATE_KEY",
+          "why": "ap-town spec 431 \u2014 the Home's naming gate signs claim tickets (EIP-712) with this key; it vouches for the domain rule, moves no value and holds no identity; rotatable by the subregistry governor (setGate). Posture item: move to KMS."
         }
       ]
     },
@@ -110,7 +114,7 @@
         "hmac": 0,
         "total": 53
       },
-      "note": "2026-10-04 (owner): raised 47 → 53 to the count inherited at the faithnet cut-over; it only goes down from here — each Work/membership/channel bridge converted to the Ask (spec 341) lowers it."
+      "note": "2026-10-04 (owner): raised 47 \u2192 53 to the count inherited at the faithnet cut-over; it only goes down from here \u2014 each Work/membership/channel bridge converted to the Ask (spec 341) lowers it."
     },
     "noCrossSubjectVaultReads": {
       "roots": [
@@ -197,7 +201,7 @@
         "apps/demo-gs",
         "apps/demo-jp"
       ],
-      "skip": "the relying-app half names demo-web — enable when examples/ lands (split-status item 6)"
+      "skip": "the relying-app half names demo-web \u2014 enable when examples/ lands (split-status item 6)"
     },
     "archetypeCatalog": {
       "module": "apps/home/src/lib/archetype-catalog.ts",

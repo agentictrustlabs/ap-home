@@ -12,6 +12,8 @@ import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { AgentNamingEditor } from '../../../src/components/portal/discovery/AgentNamingEditor';
 import { ChangeNameCard } from '../../../src/components/portal/naming/ChangeNameCard';
 import { TownHandoffNote, useTownHandoff } from '../../../src/components/portal/naming/TownHandoff';
+import { PurchaseNameCard } from '../../../src/components/portal/naming/PurchaseNameCard';
+import { isPricedTld } from '../../../src/lib/naming-price';
 import { loadRegistry, markCustody, type AgentRegistryRow } from '../../../src/lib/registry';
 import { setConnectionInfo, resolveCredential, claimName, fetchProfile } from '../../../src/connect-client';
 import { notifyAgentsChanged } from '../../../src/components/portal/ManagedAgents';
@@ -89,7 +91,19 @@ function NamingPageInner() {
       {handoff && <TownHandoffNote handoff={handoff} claimed={handoffClaimed} kind="person" />}
 
       {/* Nameless → named (spec 257/280): claim a name, and everything below becomes available. */}
-      {isNameless && agentAddress && (
+      {/* ap-town spec 431 — a purchased ending: the person buys their first name from their treasury. */}
+      {isNameless && agentAddress && isPricedTld(NEW_PERSON_TLD) && (
+        <PurchaseNameCard
+          owner={agentAddress}
+          kind="person"
+          via={memberVia}
+          token={session?.token ?? null}
+          tld={NEW_PERSON_TLD}
+          initialLabel={handoff?.label}
+          onDone={(n) => { setHandoffClaimed(n); void (async () => { for (let i = 0; i < 10; i++) { const p = session?.token ? await fetchProfile(session.token).catch(() => null) : null; if (p?.name) break; await new Promise((r) => setTimeout(r, 1500)); } await refreshProfile(); await load(); notifyAgentsChanged(); })(); }}
+        />
+      )}
+      {isNameless && agentAddress && !isPricedTld(NEW_PERSON_TLD) && (
         <ClaimNameCard
           agent={agentAddress}
           via={memberVia}

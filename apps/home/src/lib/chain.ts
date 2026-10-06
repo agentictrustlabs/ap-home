@@ -154,5 +154,13 @@ export const CONTRACTS = {
 /** spec 346 — per-suffix PermissionlessSubregistry map (`me org team svc workspace treasury registry`), present only on
  *  deployments where `AddTypedRoots.s.sol` has run. An absent suffix means "no typed claim on this chain" — never a
  *  fall-back to the legacy subregistry. */
+/** ap-town spec 431 — per-suffix PricedSubregistry map, present once `AddPricedSubregistries.s.sol` has run on this
+ *  chain. A suffix listed here is PURCHASED (a ticket from this Home's naming gate + the fee from the person's
+ *  treasury); one absent is claimed free through `PERMISSIONLESS_SUBREGISTRIES`, or not at all. */
+export const PRICED_SUBREGISTRIES: Partial<Record<string, Address>> =
+  ((DEPLOYED as unknown as { pricedSubregistries?: Record<string, string> }).pricedSubregistries ?? {}) as Partial<Record<string, Address>>;
+/** Where every naming fee goes — the town's naming treasury (spec 431 §4). */
+export const NAMING_FEE_TREASURY: Address | null = ((DEPLOYED as unknown as { namingFeeTreasury?: string }).namingFeeTreasury as Address | undefined) ?? null;
+
 export const PERMISSIONLESS_SUBREGISTRIES: Partial<Record<string, Address>> =
   ((DEPLOYED as unknown as { permissionlessSubregistries?: Record<string, string> }).permissionlessSubregistries ?? {}) as Partial<Record<string, Address>>;
