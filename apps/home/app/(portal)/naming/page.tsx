@@ -7,11 +7,12 @@
 // Styling uses the shared inline theme (src/components/portal/theme.ts) — same amber tokens as the
 // rest of the portal.
 import { Suspense, useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { AgentNamingEditor } from '../../../src/components/portal/discovery/AgentNamingEditor';
 import { ChangeNameCard } from '../../../src/components/portal/naming/ChangeNameCard';
-import { TownHandoffNote, finishTownHandoff, useTownHandoff } from '../../../src/components/portal/naming/TownHandoff';
+import { TownDoneNote, TownHandoffNote, finishTownHandoff, useTownHandoff, useTownReturn } from '../../../src/components/portal/naming/TownHandoff';
 import { PurchaseNameCard } from '../../../src/components/portal/naming/PurchaseNameCard';
 import { isPricedTld } from '../../../src/lib/naming-price';
 import { loadRegistry, markCustody, type AgentRegistryRow } from '../../../src/lib/registry';
@@ -52,6 +53,8 @@ function NamingPageInner() {
   const { session, profile, agentName, agentAddress, agentDeployed, refreshProfile } = useSession();
   // ap-town spec 430 N2 — sent here by the town's naming service with a label to claim and a way back.
   const handoff = useTownHandoff();
+  const ret = useTownReturn();
+  const editing = useSearchParams()?.get('name') ?? null;
   const [handoffClaimed, setHandoffClaimed] = useState<string | null>(null);
   // Resolve the SIGNING credential from the profile's credential kind (not the cookie's defaulted via):
   // a Google/YouVersion session's credential is `oidc` → KMS signing, NOT a (nonexistent) passkey.
@@ -89,6 +92,7 @@ function NamingPageInner() {
       description="Your public name, and what it says about you to anyone who looks it up."
     >
       {handoff && <TownHandoffNote handoff={handoff} claimed={handoffClaimed} kind="person" />}
+      {!handoff && editing && <TownDoneNote ret={ret} name={editing} />}
 
       {/* Nameless → named (spec 257/280): claim a name, and everything below becomes available. */}
       {/* ap-town spec 431 — a purchased ending: the person buys their first name from their treasury. */}
@@ -100,6 +104,7 @@ function NamingPageInner() {
           token={session?.token ?? null}
           tld={NEW_PERSON_TLD}
           initialLabel={handoff?.label}
+          initialAbout={handoff?.about}
           onDone={(n) => { setHandoffClaimed(n); if (handoff) finishTownHandoff(handoff, { name: n, agent: agentAddress }); void (async () => { for (let i = 0; i < 10; i++) { const p = session?.token ? await fetchProfile(session.token).catch(() => null) : null; if (p?.name) break; await new Promise((r) => setTimeout(r, 1500)); } await refreshProfile(); await load(); notifyAgentsChanged(); })(); }}
         />
       )}
@@ -172,7 +177,7 @@ function NamingPageInner() {
           via={memberVia}
           token={session?.token ?? null}
           initialLabel={handoff?.label}
-          onChanged={(n) => { if (n) { setHandoffClaimed(n); if (handoff) finishTownHandoff(handoff, { name: n, agent: agentAddress }); } void (async () => { await refreshProfile(); await load(); notifyAgentsChanged(); })(); }}
+          onChanged={(n) => { if (n) { setHandoffClaimed(n); if (handoff) finishTownHandoff(handoff, { name: n, agent: agentAddress }); else if (ret.popup) finishTownHandoff(ret, { name: n, agent: agentAddress, changed: true }); } void (async () => { await refreshProfile(); await load(); notifyAgentsChanged(); })(); }}
         />
       )}
 

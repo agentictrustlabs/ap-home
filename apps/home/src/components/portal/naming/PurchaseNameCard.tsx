@@ -15,7 +15,7 @@ import { nameLabel } from '../../../lib/domain';
 
 type Phase = 'idle' | 'treasury' | 'buying' | 'done' | 'error';
 
-export function PurchaseNameCard({ owner, kind, via, token, tld, serviceRole, initialLabel, onDone, title }: {
+export function PurchaseNameCard({ owner, kind, via, token, tld, serviceRole, initialLabel, initialAbout, onDone, title }: {
   owner: Address;
   kind: 'person' | 'org' | 'service' | string;
   via: Via;
@@ -23,6 +23,8 @@ export function PurchaseNameCard({ owner, kind, via, token, tld, serviceRole, in
   tld: string;
   serviceRole?: string | undefined;
   initialLabel?: string | undefined;
+  /** Profile at registration (ap-town spec 430 N6a): a line about the agent, written with the name. */
+  initialAbout?: string | undefined;
   onDone: (name: string) => void;
   title?: string;
 }) {
@@ -36,6 +38,7 @@ export function PurchaseNameCard({ owner, kind, via, token, tld, serviceRole, in
   const [balance, setBalance] = useState<bigint | null>(null);
   const [avail, setAvail] = useState<'checking' | 'available' | 'taken' | null>(null);
   const [preview, setPreview] = useState<{ domain: string | null } | PurchaseRefusal | null>(null);
+  const [about, setAbout] = useState(initialAbout ?? '');
   const [email, setEmail] = useState('');
   const [phase, setPhase] = useState<Phase>('idle');
   const [step, setStep] = useState('');
@@ -93,7 +96,7 @@ export function PurchaseNameCard({ owner, kind, via, token, tld, serviceRole, in
     try {
       const signPayer = await signHashFor(via, treasury, { token });
       const signOwner = await signHashFor(via, owner, { token });
-      const r = await purchaseName({ token, owner, payer: treasury, label, tld, coin: NAMING_COIN.address, ...(email ? { email } : {}), ...(custodian ? { custodian } : {}), signPayer, signOwner, ...(serviceRole ? { serviceRole } : {}), onStep: setStep });
+      const r = await purchaseName({ token, owner, payer: treasury, label, tld, coin: NAMING_COIN.address, ...(email ? { email } : {}), ...(custodian ? { custodian } : {}), signPayer, signOwner, ...(serviceRole ? { serviceRole } : {}), onStep: setStep, ...(about.trim() ? { records: { description: about.trim() } } : {}) });
       if (!r.ok) { setPreview(r); setErr(r.error); setPhase('error'); return; }
       setBought({ name: r.name, price: r.price }); setPhase('done');
       setBalance(await treasuryBalance(treasury).catch(() => null));
@@ -140,6 +143,7 @@ export function PurchaseNameCard({ owner, kind, via, token, tld, serviceRole, in
         <span style={{ fontSize: '.95rem', fontWeight: 650, minWidth: 64 }}>{price === null ? '' : `${price} SHQ`}</span>
         <BusyButton busy={phase === 'buying'} busyLabel={step || 'Buying…'} style={btnPrimarySty} onClick={() => void buy()} disabled={!canBuy}>Buy + present</BusyButton>
       </div>
+      <input value={about} onChange={(e) => setAbout(e.target.value)} placeholder="a line about you (optional, public)" aria-label="About" maxLength={280} disabled={phase === 'buying'} style={{ ...inputSty, marginTop: '.5rem', width: '100%' }} />
       {label.length >= 3 && (
         <p style={{ fontSize: '.8rem', margin: '.45rem 0 0', ...mutedText }}>
           {avail === 'checking' ? 'Checking…' : avail === 'taken' ? `${label}.${tld} is already registered.` : avail === 'available' ? `${label}.${tld} is free${price !== null ? ` · ${price} SHQ` : ''}${short ? ' · your treasury is short' : ''}.` : ''}

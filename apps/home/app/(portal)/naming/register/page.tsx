@@ -47,7 +47,8 @@ function RegisterInner() {
   const [value, setValue] = useState(params?.get('claim')?.split('.')[0] ?? '');
   const label = nameLabel(value);
   const price = label.length >= 3 && tld ? namePrice(label, tld) : null;
-  const [commonName, setCommonName] = useState('');
+  const [commonName, setCommonName] = useState(params?.get('displayName')?.slice(0, 80) ?? '');
+  const [about, setAbout] = useState(params?.get('about')?.slice(0, 280) ?? '');
   const [email, setEmail] = useState('');
   const [treasury, setTreasury] = useState<{ address: `0x${string}`; balance: bigint } | null | undefined>(undefined);
   const [avail, setAvail] = useState<'checking' | 'available' | 'taken' | null>(null);
@@ -98,7 +99,7 @@ function RegisterInner() {
   const go = async () => {
     if (!kind || !token || !agentAddress) return;
     setBusy(true); setErr(''); setStep('');
-    const res = await createAgentWithBirthrights({ kind, label, parent: agentAddress, person: agentAddress, via, ...(kind === 'org' ? { displayName: commonName } : {}), ...(email ? { email } : {}) }, token, setStep);
+    const res = await createAgentWithBirthrights({ kind, label, parent: agentAddress, person: agentAddress, via, ...(commonName.trim() ? { displayName: commonName.trim() } : {}), ...(about.trim() ? { about: about.trim() } : {}), ...(email ? { email } : {}) }, token, setStep);
     setBusy(false); setStep('');
     if (!res.ok) { setErr(res.error); return; }
     setMade({ agent: res.result.agent, name: res.result.name });
@@ -150,9 +151,10 @@ function RegisterInner() {
                   {avail === 'checking' ? 'Checking…' : avail === 'taken' ? `${label}.${tld} is already registered.` : avail === 'available' ? `${label}.${tld} is free${price !== null ? ` · ${price} SHQ` : ''}${short ? ' · your treasury is short' : ''}.` : ''}
                 </p>
               )}
-              {kind === 'org' && (
-                <input value={commonName} onChange={(e) => setCommonName(e.target.value)} placeholder="name people know it by (optional)" disabled={busy} aria-label="Common name" style={{ ...inputSty, marginTop: '.5rem', width: '100%' }} />
-              )}
+              {/* Profile at registration (ap-town spec 430 N6a): what people call it and a line about it, written as
+                  the name's public records in the same ceremony. Optional; the name page can set them later. */}
+              <input value={commonName} onChange={(e) => setCommonName(e.target.value)} placeholder="what people call it (optional, public)" disabled={busy} aria-label="Display name" maxLength={80} style={{ ...inputSty, marginTop: '.5rem', width: '100%' }} />
+              <input value={about} onChange={(e) => setAbout(e.target.value)} placeholder="a line about it (optional, public)" disabled={busy} aria-label="About" maxLength={280} style={{ ...inputSty, marginTop: '.4rem', width: '100%' }} />
 
               <p style={{ fontSize: '.82rem', ...mutedText, margin: '.7rem 0 0' }}>
                 {treasury === undefined ? 'Finding your treasury…' : treasury === null ? `You have no treasury yet; one is made on the way, with ${TREASURY_BIRTHRIGHT_COINS} SHQ.` : <>Paid from your treasury <span style={mono as React.CSSProperties}>{`${treasury.address.slice(0, 6)}…${treasury.address.slice(-4)}`}</span> · balance {coins(treasury.balance)} SHQ.</>}

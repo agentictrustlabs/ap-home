@@ -7,7 +7,7 @@ import { useSearchParams } from 'next/navigation';
 import { nameLabel, townReturnUrl, TOWN_NAMING_ORIGIN } from '../../../lib/domain';
 import { btnSty, cardSty, mono, mutedText } from '../theme';
 
-export interface TownHandoff { label: string; tld: string | null; returnUrl: string | null; popup: boolean }
+export interface TownHandoff { label: string; tld: string | null; returnUrl: string | null; popup: boolean; /** 430 N6a — a line about the agent, to write with the name. */ about?: string }
 
 /** What the URL asks for, or null when nobody was sent here. Safe for a static page: it reads nothing until mounted. */
 export function useTownHandoff(): TownHandoff | null {
@@ -17,7 +17,8 @@ export function useTownHandoff(): TownHandoff | null {
   const label = claim ? nameLabel(claim.split('.')[0] ?? '') : '';
   if (!label) return null;
   const fromClaim = claim.includes('.') ? claim.split('.')[1] ?? null : null;
-  return { label, tld: (params?.get('tld') || fromClaim || null), ...ret };
+  const about = params?.get('about')?.slice(0, 280);
+  return { label, tld: (params?.get('tld') || fromClaim || null), ...ret, ...(about ? { about } : {}) };
 }
 
 export interface TownReturn { returnUrl: string | null; popup: boolean }
@@ -34,11 +35,11 @@ export function useTownReturn(): TownReturn {
 }
 
 /** The return address with the result on it, when there is one. */
-export function townResultUrl(ret: TownReturn, result: { name: string; agent?: string | null }): string | null {
+export function townResultUrl(ret: TownReturn, result: { name: string; agent?: string | null; /** A record or presentation change, not a registration (430 N6c). */ changed?: boolean }): string | null {
   if (!ret.returnUrl) return null;
   try {
     const u = new URL(ret.returnUrl);
-    u.searchParams.set('registered', result.name);
+    u.searchParams.set(result.changed ? 'changed' : 'registered', result.name);
     if (result.agent) u.searchParams.set('agent', result.agent);
     if (ret.popup) u.searchParams.set('popup', '1');
     return u.toString();
@@ -46,7 +47,7 @@ export function townResultUrl(ret: TownReturn, result: { name: string; agent?: s
 }
 
 /** In popup mode, go back now with the result; otherwise do nothing (the page shows the link). */
-export function finishTownHandoff(ret: TownReturn, result: { name: string; agent?: string | null }): void {
+export function finishTownHandoff(ret: TownReturn, result: { name: string; agent?: string | null; changed?: boolean }): void {
   if (!ret.popup) return;
   const u = townResultUrl(ret, result);
   if (u) window.location.assign(u);
@@ -54,6 +55,22 @@ export function finishTownHandoff(ret: TownReturn, result: { name: string; agent
 
 /** Which agent a suffix names (ADR-0061); a person's Home can claim `.me`, an organization's agent its `.org`, … */
 const OWNER_OF_TLD: Record<string, string> = { me: 'a person', org: 'an organization', team: 'a team', church: 'a church', circle: 'a circle', household: 'a household', svc: 'a service', workspace: 'a workspace', treasury: 'a treasury', registry: 'a registry' };
+
+/**
+ * EDIT AT YOUR HOME (430 N6c): the naming service opened this page in a popup for a name's records; nothing here has
+ * a single "done" moment, so the note offers one — back to the name's page, which re-reads it.
+ */
+export function TownDoneNote({ ret, name }: { ret: TownReturn; name: string }) {
+  if (!ret.popup || !ret.returnUrl) return null;
+  const host = new URL(TOWN_NAMING_ORIGIN).host;
+  return (
+    <div style={{ ...cardSty, marginBottom: '1.1rem', borderColor: 'var(--color-sage-500, #059669)' }}>
+      <div style={{ fontSize: '.7rem', letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--color-text-faint)' }}>From the town's naming service</div>
+      <p style={{ margin: '.3rem 0 .6rem' }}>Change what you need below — every write is signed by your own account, here. When you are done, go back and <span style={mono as React.CSSProperties}>{host}</span> shows the name as it is now.</p>
+      <a style={{ ...btnSty, textDecoration: 'none', display: 'inline-block' }} href={townResultUrl(ret, { name, changed: true }) ?? ret.returnUrl}>Done · back to {host} →</a>
+    </div>
+  );
+}
 
 export function TownHandoffNote({ handoff, claimed, kind }: { handoff: TownHandoff; claimed: string | null; kind?: string }) {
   const host = new URL(TOWN_NAMING_ORIGIN).host;

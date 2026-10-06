@@ -635,8 +635,10 @@ export async function requestClaimTicket(token: string, input: { label: string; 
 export async function purchaseName(input: {
   token: string; owner: Address; payer: Address; label: string; tld: string; coin: Address; email?: string; custodian?: ConnectedCredential | null;
   signPayer: SignHash; signOwner: SignHash; serviceRole?: string; onStep?: (s: string) => void;
+  /** Profile at registration (ap-town spec 430 N6a): what it is called and a line about it, written with the name. */
+  records?: { displayName?: string; description?: string };
 }): Promise<{ ok: true; name: string; price: number; txHash?: Hex } | PurchaseRefusal> {
-  const { token, owner, payer, label, tld, coin, email, custodian, signPayer, signOwner, serviceRole, onStep } = input;
+  const { token, owner, payer, label, tld, coin, email, custodian, signPayer, signOwner, serviceRole, onStep, records } = input;
   const clean = label.trim().toLowerCase();
   onStep?.('Asking your Home for a ticket…');
   const t = await requestClaimTicket(token, { label: clean, tld, owner, payer, ...(email ? { email } : {}), ...(custodian ? { custodian } : {}) });
@@ -648,7 +650,7 @@ export async function purchaseName(input: {
   onStep?.(`Presenting ${clean}.${tld}…`);
   const declare = isAgentTld(tld) ? await declareTypeCalls(owner, tld, serviceRole) : [];
   const agentKind = isAgentTld(tld) ? rootClassForDerivedType(derivedTypeForTld(tld as never)) : 'person';
-  const present = await executeCalls(owner, signOwner, [...declare, buildSetPrimaryNameCall({ registry: CONTRACTS.agentNameRegistry, node }), ...buildNameRecordCalls(node, owner, { agentKind })]);
+  const present = await executeCalls(owner, signOwner, [...declare, buildSetPrimaryNameCall({ registry: CONTRACTS.agentNameRegistry, node }), ...buildNameRecordCalls(node, owner, { agentKind, ...(records?.displayName?.trim() ? { displayName: records.displayName.trim().slice(0, 80) } : {}), ...(records?.description?.trim() ? { description: records.description.trim().slice(0, 280) } : {}) })]);
   if (!present.ok) return { ok: false, error: `the name is bought and registered, but presenting it failed: ${present.error}. Present it from the Naming page.` };
   requestReindex([owner]);
   return { ok: true, name: `${clean}.${tld}`, price: t.price, txHash: pay.txHash };
