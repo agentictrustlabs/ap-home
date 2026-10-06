@@ -135,7 +135,7 @@ import { KB_QUESTION_TOOL, kbQuestionInvoker, KB_RETRIEVE_TOOL, kbRetrieveInvoke
 import { discoveryFetchFor, structuredCallFor, type StructuredCallRecordV1 } from './context-wiring.js';
 import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@agenticprimitives/context';
 import { selectComposer, selectComposerRouted, resolveProvider, availableModels, plannerPromptBudget, defaultProvider, widestPromptBudget, type RouteNeed, type RouteDecision } from './orchestration.js';
-import { homeSessionSeam } from './executor-invoke.js';
+import { homeSessionSeam, pickHomeOrigin } from './executor-invoke.js';
 import { loadRun, saveRun, dropRun, listRuns, openRunOnThread, mergeTurn, type HarnessRunCheckpointV1, completedStepsOf, isExpired, AWAIT_WINDOW_MS, expiryFor, canceledRecord } from './harness-runs.js';
 import { buildGenesisPlanes, type GenesisPlaneWires } from './genesis-planes.js';
 import { vaultServerId } from './vault-server-id.js';
@@ -6142,7 +6142,8 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
   // invitation record + join link it mails — and both are steward-gated by the same session the harness
   // runs under. The harness binds the predicted agent, signs the org's grant to it as for any invitee, and
   // has the Home record + deliver the invitation as the act's declared effect.
-  const homeOrigin = (env.ALLOWED_ORIGINS ?? '').split(',').map((o) => o.trim()).find((o) => /^https:\/\/(www\.)?[^/]+$/.test(o) && !/localhost|127\.0\.0\.1/.test(o)) ?? null;
+  // The Home origin that SERVES (its `www` when listed — the apex 308s every POST to it and the redirect drops the bearer).
+  const homeOrigin = pickHomeOrigin(env.ALLOWED_ORIGINS);
   const homeCall = async (path: string, session: string, body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }> => {
     if (!homeOrigin) return { status: 503, body: { error: 'no Home origin configured' } };
     const r = await fetch(`${homeOrigin}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session}`, origin: homeOrigin, 'user-agent': 'agenticprimitives-a2a/1.0' }, body: JSON.stringify(body) });

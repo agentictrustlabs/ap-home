@@ -46,3 +46,13 @@ describe('spec 426 §5 — homeSessionSeam', () => {
     expect(await homeSessionSeam({ homeOrigin: HOME, fetch: failing })(PRINCIPAL, 'gc-engage', 's')).toBeNull();
   });
 });
+
+describe('pickHomeOrigin — the Home origin that serves', () => {
+  it('prefers the www form when the list carries apex and www, skips wildcards and local origins', async () => {
+    const { pickHomeOrigin } = await import('../../src/executor-invoke.js');
+    expect(pickHomeOrigin('http://localhost:5175,https://faithnet.me,https://www.faithnet.me,https://*.faithnet.me,https://other.example')).toBe('https://www.faithnet.me');
+    expect(pickHomeOrigin('https://faithnet.me,https://*.faithnet.me')).toBe('https://faithnet.me');
+    expect(pickHomeOrigin('http://localhost:5173')).toBeNull();
+    expect(pickHomeOrigin(undefined)).toBeNull();
+  });
+});
