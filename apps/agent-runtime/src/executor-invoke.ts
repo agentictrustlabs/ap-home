@@ -33,6 +33,19 @@ export type ExecutorSessionSeam = (principal: Address, client: string, session?:
  *      demo persona has no session of its own in an unattended run.
  * `null` when neither binds — the invoker refuses the step.
  */
+/**
+ * THE HOME ORIGIN THE RUNTIME CALLS, from the estate's ALLOWED_ORIGINS. The list names the Home's apex AND its `www`
+ * (both are browser origins the runtime must admit); only one of them SERVES. On faithnet the apex answers every POST
+ * with a 308 to `www`, and a fetch that follows a cross-origin redirect drops the Authorization header — so a seam
+ * call to the apex arrived at `www` with no bearer and every executor-invoke refused "could not obtain a session"
+ * (seen live 2026-10-06). Prefer the `www` form when the list has it; a wildcard (`https://*.faithnet.me`) is never
+ * an origin to call. Null when nothing qualifies.
+ */
+export function pickHomeOrigin(allowedOrigins: string | undefined): string | null {
+  const all = (allowedOrigins ?? '').split(',').map((o) => o.trim()).filter((o) => /^https:\/\/[^/*]+$/.test(o) && !/localhost|127\.0\.0\.1/.test(o));
+  return all.find((o) => /^https:\/\/www\./.test(o)) ?? all[0] ?? null;
+}
+
 export function homeSessionSeam(opts: { homeOrigin: string | null; fetch?: typeof fetch; userAgent?: string }): ExecutorSessionSeam {
   const f = opts.fetch ?? fetch;
   const ua = opts.userAgent ?? 'agenticprimitives-a2a/1.0';
