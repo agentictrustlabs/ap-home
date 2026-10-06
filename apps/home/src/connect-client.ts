@@ -613,7 +613,11 @@ export type PurchaseRefusal = { ok: false; error: string; refused?: 'domain'; do
 export async function requestClaimTicket(token: string, input: { label: string; tld: string; owner: Address; payer: Address; email?: string; preview?: boolean; custodian?: ConnectedCredential | null }):
   Promise<{ ok: true; subregistry: Address; price: number; domain: string | null; ticket: ClaimTicketV1; signature: Hex } | PurchaseRefusal> {
   const res = await fetch('/connect/naming-ticket', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify(input) });
-  const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; detail?: string; domain?: string; need?: 'email' | 'verify'; subregistry?: Address; price?: number; ticket?: Record<string, string>; signature?: Hex };
+  const b = (await res.json().catch(() => ({}))) as { ok?: boolean; preview?: boolean; error?: string; detail?: string; domain?: string; need?: 'email' | 'verify'; subregistry?: Address; price?: number; ticket?: Record<string, string>; signature?: Hex };
+  // A preview ran every check and signed nothing: the price and the domain, no ticket.
+  if (res.ok && b.ok && b.preview && b.subregistry) {
+    return { ok: true, subregistry: b.subregistry, price: b.price ?? 0, domain: b.domain ?? null, signature: '0x' as Hex, ticket: null as unknown as ClaimTicketV1 };
+  }
   if (!res.ok || !b.ok || !b.ticket || !b.signature || !b.subregistry) {
     return { ok: false, error: b.detail ?? b.error ?? `ticket refused (HTTP ${res.status})`, ...(b.error === 'domain_protected' ? { refused: 'domain' as const, domain: b.domain, need: b.need } : {}) };
   }
