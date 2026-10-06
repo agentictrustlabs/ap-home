@@ -7,16 +7,49 @@ import { useSearchParams } from 'next/navigation';
 import { nameLabel, townReturnUrl, TOWN_NAMING_ORIGIN } from '../../../lib/domain';
 import { btnSty, cardSty, mono, mutedText } from '../theme';
 
-export interface TownHandoff { label: string; tld: string | null; returnUrl: string | null }
+export interface TownHandoff { label: string; tld: string | null; returnUrl: string | null; popup: boolean }
 
 /** What the URL asks for, or null when nobody was sent here. Safe for a static page: it reads nothing until mounted. */
 export function useTownHandoff(): TownHandoff | null {
   const params = useSearchParams();
+  const ret = useTownReturn();
   const claim = params?.get('claim') ?? '';
   const label = claim ? nameLabel(claim.split('.')[0] ?? '') : '';
   if (!label) return null;
   const fromClaim = claim.includes('.') ? claim.split('.')[1] ?? null : null;
-  return { label, tld: (params?.get('tld') || fromClaim || null), returnUrl: townReturnUrl(params?.get('return')) };
+  return { label, tld: (params?.get('tld') || fromClaim || null), ...ret };
+}
+
+export interface TownReturn { returnUrl: string | null; popup: boolean }
+
+/**
+ * The way back to the town's naming service, and HOW: `popup=1` means the naming service opened this Home in a
+ * popup (ap-town spec 431 §5.1 — the hop is meant to feel like connecting), so when the ceremony lands this window
+ * navigates to the return address carrying the result, and the naming service's page in the popup relays it to
+ * the opener and closes. Without `popup`, the page offers the link and stays.
+ */
+export function useTownReturn(): TownReturn {
+  const params = useSearchParams();
+  return { returnUrl: townReturnUrl(params?.get('return')), popup: params?.get('popup') === '1' };
+}
+
+/** The return address with the result on it, when there is one. */
+export function townResultUrl(ret: TownReturn, result: { name: string; agent?: string | null }): string | null {
+  if (!ret.returnUrl) return null;
+  try {
+    const u = new URL(ret.returnUrl);
+    u.searchParams.set('registered', result.name);
+    if (result.agent) u.searchParams.set('agent', result.agent);
+    if (ret.popup) u.searchParams.set('popup', '1');
+    return u.toString();
+  } catch { return ret.returnUrl; }
+}
+
+/** In popup mode, go back now with the result; otherwise do nothing (the page shows the link). */
+export function finishTownHandoff(ret: TownReturn, result: { name: string; agent?: string | null }): void {
+  if (!ret.popup) return;
+  const u = townResultUrl(ret, result);
+  if (u) window.location.assign(u);
 }
 
 /** Which agent a suffix names (ADR-0061); a person's Home can claim `.me`, an organization's agent its `.org`, … */
@@ -42,7 +75,7 @@ export function TownHandoffNote({ handoff, claimed, kind }: { handoff: TownHando
         </p>
       )}
       {handoff.returnUrl && (
-        <a style={{ ...btnSty, textDecoration: 'none', display: 'inline-block' }} href={handoff.returnUrl}>
+        <a style={{ ...btnSty, textDecoration: 'none', display: 'inline-block' }} href={claimed ? townResultUrl(handoff, { name: claimed }) ?? handoff.returnUrl : handoff.returnUrl}>
           {claimed ? `See ${claimed} on ${host} →` : `Back to ${host}`}
         </a>
       )}
