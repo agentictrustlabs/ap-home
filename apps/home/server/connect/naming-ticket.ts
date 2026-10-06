@@ -11,15 +11,20 @@ import { keccak256, toBytes, zeroHash, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { readEmailFacet } from '../../src/lib/kv-indexer';
 import { CHAIN_ID, PRICED_SUBREGISTRIES } from '../../src/lib/chain';
-import { verifyStewardship } from '../_lib/verify-stewardship';
-import type { IncomingDelegation } from '../_lib/verify-delegation';
-import { demoPersonaFor } from '../_lib/demo-custody';
+import { demoPersonaFor, demoCustodianAddress } from '../_lib/demo-custody';
+import { createPublicClient, http } from 'viem';
+import { DEFAULT_RPC_URL } from '../../src/lib/chain';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type, authorization' };
 const json = (b: unknown, s = 200): Response => new Response(JSON.stringify(b), { status: s, headers: { 'content-type': 'application/json', ...cors } });
 export const onRequestOptions = async (): Promise<Response> => new Response(null, { status: 204, headers: cors });
+
+const CUSTODY_ABI = [
+  { type: 'function', name: 'isCustodian', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'bool' }] },
+  { type: 'function', name: 'hasPasskey', stateMutability: 'view', inputs: [{ name: 'credentialIdDigest', type: 'bytes32' }], outputs: [{ type: 'bool' }] },
+] as const;
 
 const LABEL_RE = /^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/;
 const TICKET_TTL_S = 15 * 60;
@@ -78,7 +83,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (!v.ok) return json({ error: 'unauthorized' }, 401);
   const person = (v.session.sub as string).split(':').pop()!.toLowerCase() as Address;
 
-  const body = (await request.json().catch(() => ({}))) as { label?: string; tld?: string; owner?: string; payer?: string; email?: string; preview?: boolean; stewardship?: IncomingDelegation };
+  const body = (await request.json().catch(() => ({}))) as { label?: string; tld?: string; owner?: string; payer?: string; email?: string; preview?: boolean; custodian?: { kind: 'eoa'; address: string } | { kind: 'passkey'; digest: string } };
   const label = (body.label ?? '').trim().toLowerCase();
   const tld = (body.tld ?? '').trim().toLowerCase();
   const owner = (body.owner ?? '').toLowerCase() as Address;
@@ -87,16 +92,24 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const subregistry = subregistries[tld] as Address | undefined;
   if (!subregistry) return json({ error: 'not_priced', detail: `.${tld} is not a purchased ending on this chain.` }, 400);
   if (!/^0x[0-9a-f]{40}$/.test(owner) || !/^0x[0-9a-f]{40}$/.test(payer)) return json({ error: 'bad_party' }, 400);
-  // The owner is the signed-in person, or an agent that person STEWARDS: proven by a live owner→person stewardship
-  // wire (ERC-1271 by the owner, unrevoked — SEC-H2), or, for a demo persona, by the roster the Home itself holds
-  // the keys for (the same source `persona-sign` trusts). Never by a claim in the request alone.
+  // NAMING IS A CUSTODY ACT, not an authorization (owner, 2026-10-06): a name is claimed by the agent's own
+  // custodian, who signs the operation. So the one question here is "does this session's credential custody the
+  // owner?", answered by the owner's account on chain (`isCustodian` / `hasPasskey`) — never by a delegation, a
+  // relationship record or a claim in the request. The signed-in person custodies itself by definition; a demo
+  // persona's custodian is the key this Home holds for it; any other session names the credential it will sign
+  // with and the chain says whether it is a custodian.
   let yours = owner === person;
-  if (!yours && body.stewardship) yours = await verifyStewardship(env, owner, person, body.stewardship);
   if (!yours) {
     const persona = demoPersonaFor(env, person);
-    yours = !!persona?.custodies?.some((c) => c.sa.toLowerCase() === owner);
+    const cred = persona ? { kind: 'eoa' as const, address: demoCustodianAddress(persona) } : body.custodian ?? null;
+    if (cred) {
+      const pc = createPublicClient({ transport: http(((env as { RPC_URL?: string }).RPC_URL || DEFAULT_RPC_URL)) });
+      yours = cred.kind === 'eoa'
+        ? await pc.readContract({ address: owner, abi: CUSTODY_ABI, functionName: 'isCustodian', args: [cred.address as Address] }).catch(() => false) as boolean
+        : await pc.readContract({ address: owner, abi: CUSTODY_ABI, functionName: 'hasPasskey', args: [cred.digest as Hex] }).catch(() => false) as boolean;
+    }
   }
-  if (!yours) return json({ error: 'not_yours', detail: 'A ticket is issued to the agent you are signed in as, or to one you steward.' }, 403);
+  if (!yours) return json({ error: 'not_yours', detail: 'A name is claimed by its agent’s custodian. This session’s credential does not custody that agent.' }, 403);
 
   let price: number;
   try { price = priceOf(label, tld)!; } catch (err) { return json({ error: 'bad_label', detail: String((err as Error).message) }, 400); }
