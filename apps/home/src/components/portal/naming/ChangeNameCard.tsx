@@ -23,6 +23,8 @@ import { signHashFor, type Via } from '../../../home/onboarding';
 import { AGENT_NAME_PARENT } from '../../../lib/domain';
 import { claimableSuffix, isPresented, clearingLeavesNoName, type HeldRoot } from '../../../lib/name-change';
 import { BusyButton } from '../../shared/BusyButton';
+import { PurchaseNameCard } from './PurchaseNameCard';
+import { isPricedTld } from '../../../lib/naming-price';
 import { cardSty, btnSty, btnPrimarySty, mono, mutedText, errorText, inputSty } from '../theme';
 
 type Root = HeldRoot;
@@ -138,7 +140,10 @@ export function ChangeNameCard({
         </div>
       )}
 
-      {claimable ? (
+      {claimable && isPricedTld(claimable.tld) ? (
+        // ap-town spec 431 — a purchased ending: the agent's treasury pays, this agent presents.
+        <PurchaseNameCard owner={agent} kind={kind} via={via} token={token} tld={claimable.tld} serviceRole={claimable.serviceRole} initialLabel={initialLabel} title={`Buy this agent's .${claimable.tld} name`} onDone={(n) => { void load(); onChanged(n); }} />
+      ) : claimable ? (
         <div style={{ marginBottom: '.9rem' }}>
           <div style={{ fontSize: '.7rem', letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--color-text-faint)', marginBottom: '.35rem' }}>
             Claim your .{claimable.tld} name

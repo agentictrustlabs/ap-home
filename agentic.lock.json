@@ -1,9 +1,9 @@
 {
   "lockVersion": 1,
   "packages": {
-    "@agenticprimitives/devkit": "0.0.0-alpha.10",
+    "@agenticprimitives/devkit": "0.0.0-alpha.12",
     "@agenticprimitives/evaluation": "0.0.0-alpha.5",
-    "@agenticprimitives/a2a": "0.0.0-alpha.25",
+    "@agenticprimitives/a2a": "0.0.0-alpha.27",
     "@agenticprimitives/mcp-protocol": "0.0.0-alpha.4"
   },
   "rules": {
@@ -19,7 +19,7 @@
     "vault-is-the-record-apps-hold-references": "sha256:e6a6e859a16071dff5c30a7b7dc2d4cb0b8307e19dc416387cf181084236e685",
     "vault-records-are-ontology-shaped": "sha256:6a739d1a10d5b62e4ab5ed910fdccc67b9c024dd519c9c3e1fea916b3899a90b"
   },
-  "devkit": "0.0.0-alpha.10",
+  "devkit": "0.0.0-alpha.12",
   "template": {
     "name": "product-repo",
     "revision": "2026-09-16.1"
@@ -48,7 +48,7 @@
         },
         {
           "file": "apps/home-mcp/src/act.ts",
-          "why": "home-mcp-raw-act-key (findings.yaml, accepted-risk): the act-as-me key is the delegate of the person's capped, per-wire-revocable standing wires (spec 397 §11); KMS signer + re-issued wires scheduled with the ask key"
+          "why": "home-mcp-raw-act-key (findings.yaml, accepted-risk): the act-as-me key is the delegate of the person's capped, per-wire-revocable standing wires (spec 397 \u00a711); KMS signer + re-issued wires scheduled with the ask key"
         },
         {
           "file": "apps/home-mcp/src/index.ts",
@@ -89,6 +89,10 @@
         {
           "file": "apps/home/server/connect/demo-accounts.ts",
           "why": "derives the seeded persona custodian address"
+        },
+        {
+          "file": "apps/home/server/connect/naming-ticket.ts",
+          "why": "ap-town spec 431 \u2014 the naming gate signs claim tickets (EIP-712) with NAMING_GATE_PRIVATE_KEY after the domain rule; a ticket moves no value and confers no authority (the chain checks it; the treasury pays). Posture item: move the gate signer to KMS and rotate via PricedSubregistry.setGate."
         }
       ],
       "toleratedEnvNames": [
@@ -99,6 +103,10 @@
         {
           "name": "A2A_INTERACTIONS_SESSION_PRIVATE_KEY",
           "why": "workstation-only InteractionsDO session signer when no Cloud KMS is present"
+        },
+        {
+          "name": "NAMING_GATE_PRIVATE_KEY",
+          "why": "ap-town spec 431 \u2014 the Home's naming gate signs claim tickets (EIP-712) with this key; it vouches for the domain rule, moves no value and holds no identity; rotatable by the subregistry governor (setGate). Posture item: move to KMS."
         }
       ]
     },
@@ -110,7 +118,7 @@
         "hmac": 0,
         "total": 53
       },
-      "note": "2026-10-04 (owner): raised 47 → 53 to the count inherited at the faithnet cut-over; it only goes down from here — each Work/membership/channel bridge converted to the Ask (spec 341) lowers it."
+      "note": "2026-10-04 (owner): raised 47 \u2192 53 to the count inherited at the faithnet cut-over; it only goes down from here \u2014 each Work/membership/channel bridge converted to the Ask (spec 341) lowers it."
     },
     "noCrossSubjectVaultReads": {
       "roots": [
@@ -197,7 +205,7 @@
         "apps/demo-gs",
         "apps/demo-jp"
       ],
-      "skip": "the relying-app half names demo-web — enable when examples/ lands (split-status item 6)"
+      "skip": "the relying-app half names demo-web \u2014 enable when examples/ lands (split-status item 6)"
     },
     "archetypeCatalog": {
       "module": "apps/home/src/lib/archetype-catalog.ts",

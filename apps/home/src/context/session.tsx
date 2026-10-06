@@ -54,7 +54,11 @@ interface SessionCtx {
 import { DEPLOYMENT_EPOCH } from '../lib/chain';
 import { shouldRestoreFromUrl } from './session-restore';
 import { ensurePlaybook } from '../home/ensure-playbook';
-import { activateInteractionsIfNeeded, resolveVia } from '../home/onboarding';
+import { activateInteractionsIfNeeded, resolveVia, signHashFor } from '../home/onboarding';
+import { isDemoCustodyHome } from '../lib/persona-custody';
+import { ensurePersonTreasury } from '../home/treasury-birthright';
+import { isPricedTld } from '../lib/naming-price';
+import { NEW_PERSON_TLD } from '../lib/domain';
 function epochStale(stored: string | undefined): boolean {
   if (!DEPLOYMENT_EPOCH) return false; // unknowable → don't gate
   return stored !== DEPLOYMENT_EPOCH; // stale (differs) OR unstamped (absent) → reconnect
@@ -186,7 +190,23 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     // prompt for a device credential; best-effort and said (the plane keeps serving reads without a live leaf).
     const via = resolveVia((profile as { credential?: string } | null)?.credential, session.via);
     void activateInteractionsIfNeeded(addr as Address, via, { token: session.token }).then((r) => { if (!r.ok) console.warn('[interactions] leaf/grant refresh skipped:', r.error); }).catch(() => undefined);
-  }, [phase, session?.token, profile?.agent, profile?.deployed]);
+    // ap-town spec 431 D2 — every person has a treasury with 1,000 SHQ. Made here, once per agent per browser, only
+    // when the ceremony is PROMPTLESS (KMS / social / demo custody): a passkey or wallet home is asked at its first
+    // purchase instead of being surprised by a prompt. Only once names are purchased on this chain.
+    if (!isPricedTld(NEW_PERSON_TLD)) return;
+    const memo = `ap-treasury-birthright:${addr.toLowerCase()}`;
+    let done = false;
+    try { done = localStorage.getItem(memo) === '1'; } catch { /* storage blocked */ }
+    if (done) return;
+    void (async () => {
+      const promptless = ['google', 'youversion', 'email', 'phone'].includes(via) || (await isDemoCustodyHome(session.token).catch(() => false));
+      if (!promptless) return;
+      const sign = await signHashFor(via, addr as Address, { token: session.token });
+      const r = await ensurePersonTreasury({ person: addr as Address, via, token: session.token, signPerson: sign });
+      if (r.ok) { try { localStorage.setItem(memo, '1'); } catch { /* storage blocked */ } }
+      else console.warn('[treasury] birthright skipped:', r.error);
+    })().catch((e) => console.warn('[treasury] birthright skipped:', e));
+  }, [phase, session?.token, session?.via, profile?.agent, profile?.deployed]);
 
   // On mount: handle a Google return (?code / connect_status), else restore a stored session.
   useEffect(() => {

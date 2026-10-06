@@ -18,6 +18,8 @@ import {
   CONNECTION_KIND_ID,
   AGENT_KIND_ID,
   type ConnectionKind,
+  buildPricedClaimCalls,
+  type ClaimTicketV1,
 } from '@agenticprimitives/agent-naming';
 import {
   buildExecuteCallData,
@@ -594,6 +596,58 @@ export async function claimName(
   if (!res.ok) return { ok: false, error: `name claim failed: ${res.error}` };
   requestReindex([agent]); // auto-index: surface the freshly-named agent in discovery immediately
   return { ok: true, name: picked.name };
+}
+
+// ── Buying a name (ap-town spec 431) ─────────────────────────────────────────────────────────────────────────
+//
+// Two signed operations, in order:
+//   1. The TREASURY (the payer, custodied by the same person) approves the fee and claims — the priced subregistry
+//      checks the Home's ticket, pulls the Sheqel to the town's naming treasury, and registers the name to the owner.
+//   2. The OWNER declares its type (when needed), presents the name and writes its records — the same calls a free
+//      claim batched after `register`.
+// A ticket is asked for first; a refused ticket (the domain rule) ends here with the gate's words.
+
+export type PurchaseRefusal = { ok: false; error: string; refused?: 'domain'; domain?: string; need?: 'email' | 'verify' };
+
+/** Ask this Home's naming gate for a ticket. `email` is the person's answer to the domain rule, when asked. */
+export async function requestClaimTicket(token: string, input: { label: string; tld: string; owner: Address; payer: Address; email?: string }):
+  Promise<{ ok: true; subregistry: Address; price: number; domain: string | null; ticket: ClaimTicketV1; signature: Hex } | PurchaseRefusal> {
+  const res = await fetch('/connect/naming-ticket', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify(input) });
+  const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; detail?: string; domain?: string; need?: 'email' | 'verify'; subregistry?: Address; price?: number; ticket?: Record<string, string>; signature?: Hex };
+  if (!res.ok || !b.ok || !b.ticket || !b.signature || !b.subregistry) {
+    return { ok: false, error: b.detail ?? b.error ?? `ticket refused (HTTP ${res.status})`, ...(b.error === 'domain_protected' ? { refused: 'domain' as const, domain: b.domain, need: b.need } : {}) };
+  }
+  const t = b.ticket;
+  return {
+    ok: true, subregistry: b.subregistry, price: b.price ?? 0, domain: b.domain ?? null, signature: b.signature,
+    ticket: { parentNode: t.parentNode as Hex, label: t.label!, owner: t.owner as Address, payer: t.payer as Address, price: BigInt(t.price!), domain: t.domain as Hex, expiry: BigInt(t.expiry!), nonce: t.nonce as Hex },
+  };
+}
+
+/**
+ * Buy `<label>.<tld>` for `owner`, paid by `payer`. `signPayer` signs as the treasury, `signOwner` as the owner —
+ * the same credential, two agents. Returns the name presented.
+ */
+export async function purchaseName(input: {
+  token: string; owner: Address; payer: Address; label: string; tld: string; coin: Address; email?: string;
+  signPayer: SignHash; signOwner: SignHash; serviceRole?: string; onStep?: (s: string) => void;
+}): Promise<{ ok: true; name: string; price: number; txHash?: Hex } | PurchaseRefusal> {
+  const { token, owner, payer, label, tld, coin, email, signPayer, signOwner, serviceRole, onStep } = input;
+  const clean = label.trim().toLowerCase();
+  onStep?.('Asking your Home for a ticket…');
+  const t = await requestClaimTicket(token, { label: clean, tld, owner, payer, ...(email ? { email } : {}) });
+  if (!t.ok) return t;
+  onStep?.(`Paying ${t.price} SHQ from your treasury and claiming ${clean}.${tld}…`);
+  const pay = await executeCalls(payer, signPayer, buildPricedClaimCalls({ subregistry: t.subregistry, coin, ticket: t.ticket, gateSignature: t.signature }));
+  if (!pay.ok) return { ok: false, error: `the purchase did not go through: ${pay.error}` };
+  const node = namehash(`${clean}.${tld}`) as Hex;
+  onStep?.(`Presenting ${clean}.${tld}…`);
+  const declare = isAgentTld(tld) ? await declareTypeCalls(owner, tld, serviceRole) : [];
+  const agentKind = isAgentTld(tld) ? rootClassForDerivedType(derivedTypeForTld(tld as never)) : 'person';
+  const present = await executeCalls(owner, signOwner, [...declare, buildSetPrimaryNameCall({ registry: CONTRACTS.agentNameRegistry, node }), ...buildNameRecordCalls(node, owner, { agentKind })]);
+  if (!present.ok) return { ok: false, error: `the name is bought and registered, but presenting it failed: ${present.error}. Present it from the Naming page.` };
+  requestReindex([owner]);
+  return { ok: true, name: `${clean}.${tld}`, price: t.price, txHash: pay.txHash };
 }
 
 // ── Passkey (WebAuthn) ──────────────────────────────────────────────
