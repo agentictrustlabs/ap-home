@@ -22,6 +22,14 @@ export const originHeaders = (env: Pick<Env, 'ORIGIN_CLIENT_ID' | 'ORIGIN_CLIENT
 };
 const forward = (env: Env, body: unknown) => fetch(env.ORIGIN, { method: 'POST', headers: originHeaders(env), body: JSON.stringify(body) })
   .then(u => new Response(u.body, { status: u.status, headers: { 'content-type': 'application/json' } }));
+/** The read-cache key. caches.default is shared by EVERY Worker on the zone, so a key without the origin
+ *  lets two gateways on one zone — two estates, or two chains — answer from each other's entries: a
+ *  staging gateway's cached eth_chainId was served by production's (found 2026-10-06). The origin is the
+ *  chain this gateway forwards to, so it is exactly the scope a cached answer is true for. */
+export function cacheKey(origin: string, method: string, paramsHash: string): string {
+  return `https://cache/${encodeURIComponent(new URL(origin).host)}/${method}/${paramsHash}`;
+}
+
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     // CORS: browser apps call this RPC directly for read-only eth_call. Auth is the ?k= URL token,
@@ -60,7 +68,7 @@ export default {
       if (!Array.isArray(body)) {
         const ttl = CACHE_TTL_S(body.method, body.params ?? []);
         if (ttl > 0) {
-          const key = new Request(`https://cache/${body.method}/${await sha256(JSON.stringify(body.params ?? []))}`);
+          const key = new Request(cacheKey(env.ORIGIN, body.method, await sha256(JSON.stringify(body.params ?? []))));
           const hit = await caches.default.match(key);
           if (hit) { const j = await hit.json() as { result?: unknown }; return new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, result: j.result }), { headers: { 'content-type': 'application/json', 'x-cache': 'HIT' } }); }
           const res = await forward(env, body); const j = await res.clone().json() as { error?: unknown; result?: unknown };
