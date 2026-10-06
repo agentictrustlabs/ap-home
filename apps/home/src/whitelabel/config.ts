@@ -906,6 +906,25 @@ const faithImpact: WhiteLabelConfig = {
       ask_delegate: (process.env.NEXT_PUBLIC_OPENBOOK_READER_ASK_DELEGATE || '0xAB29Fb55ded14d3f917e65774988C019068Fc835') as `0x${string}`,
       libraryFolders: ['openbook'],
     },
+    // naming-app — the town's naming service (agentictrustlabs/ap-town apps/naming, ap-town spec 431 §5.1). A
+    // relying app so that REGISTER leads to CONNECT: a visitor who wants a name signs in here (a new person gets a
+    // nameless Home), and the naming service then shows their names and hands every purchase or charter back to
+    // this Home to sign. Login-grade; it reads as the person and signs nothing.
+    {
+      client_id: 'naming-app',
+      name: 'Names',
+      redirect_uris: [
+        'https://names.faithnet.io/',
+        'http://localhost:5873/',
+        'http://localhost:8791/',
+      ],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      // A person who arrives from the naming service with no Home yet gets one through this flow (KMS custody for a
+      // social / email sign-in), nameless, and buys their name next — the register flow's first step.
+      socialCustody: true,
+    },
   ],
   // Consent disclosure per template — the human-readable can/cannot shown at the permission
   // step. The caveats themselves are contract-enforced (spec 230); this is presentational.

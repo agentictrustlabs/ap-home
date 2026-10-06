@@ -18,7 +18,7 @@ const only = process.argv.slice(/^https?:/.test(process.argv[2] ?? '') ? 3 : 2);
   await page.goto(`${HOME}/`, { waitUntil: 'networkidle' });
   await page.getByText('Demo people').click();
   await page.waitForTimeout(500);
-  const names = await page.$$eval('button', (els) => els.map((e) => e.textContent?.trim() ?? '').filter((t) => /^[A-Z][a-z]+ [A-Z]/.test(t)));
+  const names = await page.$$eval('button', (els) => els.map((e) => e.textContent?.trim() ?? '').filter((t) => /^[A-Z][a-z]+( [A-Z]|$)/.test(t) && !/Demo people|Continue|Sign/.test(t)));
   const todo = only.length ? names.filter((n) => only.some((o) => n.toLowerCase().includes(o.toLowerCase()))) : names;
   console.log(`${todo.length} persona(s): ${todo.join(', ')}`);
   for (const name of todo) {
