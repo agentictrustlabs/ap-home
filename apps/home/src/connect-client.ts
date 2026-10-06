@@ -1624,13 +1624,19 @@ export async function createManagedAgent(
      * parent, which is every other kind: a treasury is stewarded by whoever it hangs under.
      */
     steward?: Address;
+    /**
+     * The caller buys the name right after (ap-town spec 431: a priced ending registers nothing without a ticket
+     * and a fee, so `home/charter-name.ts` deploys nameless and purchases next). Lifts the org-must-be-named rule
+     * for that one caller; the org is still named before the ceremony returns.
+     */
+    nameLater?: boolean;
   },
   sessionToken: string,
   onStep?: (s: string) => void,
 ): Promise<{ ok: true; result: CreateManagedAgentResult } | { ok: false; error: string }> {
   // Orgs MUST be named — name-deferral (nameless SA, name later) is for person
   // treasuries and org treasuries only. An org is a counterparty-facing identity.
-  if (input.kind === 'org' && !(input.label && input.label.trim().length >= 3)) {
+  if (input.kind === 'org' && !input.nameLater && !(input.label && input.label.trim().length >= 3)) {
     return { ok: false, error: 'Organizations require a name — pick a label of at least 3 characters.' };
   }
 
