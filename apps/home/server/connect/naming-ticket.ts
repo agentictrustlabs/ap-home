@@ -11,6 +11,9 @@ import { keccak256, toBytes, zeroHash, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { readEmailFacet } from '../../src/lib/kv-indexer';
 import { CHAIN_ID, PRICED_SUBREGISTRIES } from '../../src/lib/chain';
+import { verifyStewardship } from '../_lib/verify-stewardship';
+import type { IncomingDelegation } from '../_lib/verify-delegation';
+import { demoPersonaFor } from '../_lib/demo-custody';
 import { getServer, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
 
@@ -75,7 +78,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   if (!v.ok) return json({ error: 'unauthorized' }, 401);
   const person = (v.session.sub as string).split(':').pop()!.toLowerCase() as Address;
 
-  const body = (await request.json().catch(() => ({}))) as { label?: string; tld?: string; owner?: string; payer?: string; email?: string; preview?: boolean };
+  const body = (await request.json().catch(() => ({}))) as { label?: string; tld?: string; owner?: string; payer?: string; email?: string; preview?: boolean; stewardship?: IncomingDelegation };
   const label = (body.label ?? '').trim().toLowerCase();
   const tld = (body.tld ?? '').trim().toLowerCase();
   const owner = (body.owner ?? '').toLowerCase() as Address;
@@ -84,9 +87,16 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const subregistry = subregistries[tld] as Address | undefined;
   if (!subregistry) return json({ error: 'not_priced', detail: `.${tld} is not a purchased ending on this chain.` }, 400);
   if (!/^0x[0-9a-f]{40}$/.test(owner) || !/^0x[0-9a-f]{40}$/.test(payer)) return json({ error: 'bad_party' }, 400);
-  // The owner is the signed-in person, or an agent they are acting as (the session's `as` persona).
-  const acting = ((v.session as { as?: string }).as ?? '').split(':').pop()?.toLowerCase();
-  if (owner !== person && owner !== acting) return json({ error: 'not_yours', detail: 'A ticket is issued to the agent you are signed in as.' }, 403);
+  // The owner is the signed-in person, or an agent that person STEWARDS: proven by a live owner→person stewardship
+  // wire (ERC-1271 by the owner, unrevoked — SEC-H2), or, for a demo persona, by the roster the Home itself holds
+  // the keys for (the same source `persona-sign` trusts). Never by a claim in the request alone.
+  let yours = owner === person;
+  if (!yours && body.stewardship) yours = await verifyStewardship(env, owner, person, body.stewardship);
+  if (!yours) {
+    const persona = demoPersonaFor(env, person);
+    yours = !!persona?.custodies?.some((c) => c.sa.toLowerCase() === owner);
+  }
+  if (!yours) return json({ error: 'not_yours', detail: 'A ticket is issued to the agent you are signed in as, or to one you steward.' }, 403);
 
   let price: number;
   try { price = priceOf(label, tld)!; } catch (err) { return json({ error: 'bad_label', detail: String((err as Error).message) }, 400); }

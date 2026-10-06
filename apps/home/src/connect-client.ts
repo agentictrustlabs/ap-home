@@ -610,7 +610,7 @@ export async function claimName(
 export type PurchaseRefusal = { ok: false; error: string; refused?: 'domain'; domain?: string; need?: 'email' | 'verify' };
 
 /** Ask this Home's naming gate for a ticket. `email` is the person's answer to the domain rule, when asked. */
-export async function requestClaimTicket(token: string, input: { label: string; tld: string; owner: Address; payer: Address; email?: string }):
+export async function requestClaimTicket(token: string, input: { label: string; tld: string; owner: Address; payer: Address; email?: string; preview?: boolean; stewardship?: unknown }):
   Promise<{ ok: true; subregistry: Address; price: number; domain: string | null; ticket: ClaimTicketV1; signature: Hex } | PurchaseRefusal> {
   const res = await fetch('/connect/naming-ticket', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify(input) });
   const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; detail?: string; domain?: string; need?: 'email' | 'verify'; subregistry?: Address; price?: number; ticket?: Record<string, string>; signature?: Hex };
@@ -629,13 +629,13 @@ export async function requestClaimTicket(token: string, input: { label: string; 
  * the same credential, two agents. Returns the name presented.
  */
 export async function purchaseName(input: {
-  token: string; owner: Address; payer: Address; label: string; tld: string; coin: Address; email?: string;
+  token: string; owner: Address; payer: Address; label: string; tld: string; coin: Address; email?: string; stewardship?: unknown;
   signPayer: SignHash; signOwner: SignHash; serviceRole?: string; onStep?: (s: string) => void;
 }): Promise<{ ok: true; name: string; price: number; txHash?: Hex } | PurchaseRefusal> {
-  const { token, owner, payer, label, tld, coin, email, signPayer, signOwner, serviceRole, onStep } = input;
+  const { token, owner, payer, label, tld, coin, email, stewardship, signPayer, signOwner, serviceRole, onStep } = input;
   const clean = label.trim().toLowerCase();
   onStep?.('Asking your Home for a ticket…');
-  const t = await requestClaimTicket(token, { label: clean, tld, owner, payer, ...(email ? { email } : {}) });
+  const t = await requestClaimTicket(token, { label: clean, tld, owner, payer, ...(email ? { email } : {}), ...(stewardship ? { stewardship } : {}) });
   if (!t.ok) return t;
   onStep?.(`Paying ${t.price} SHQ from your treasury and claiming ${clean}.${tld}…`);
   const pay = await executeCalls(payer, signPayer, buildPricedClaimCalls({ subregistry: t.subregistry, coin, ticket: t.ticket, gateSignature: t.signature }));

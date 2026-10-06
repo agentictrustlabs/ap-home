@@ -30,6 +30,8 @@ export function PurchaseNameCard({ owner, kind, via, token, tld, serviceRole, in
   const label = nameLabel(value);
   const price = label.length >= 3 ? namePrice(label, tld) : null;
   const [treasury, setTreasury] = useState<Address | null | undefined>(undefined);
+  // The owner→person stewardship wire, when the owner is an agent this person stewards (the gate verifies it on chain).
+  const [stewardship, setStewardship] = useState<unknown>(null);
   const [balance, setBalance] = useState<bigint | null>(null);
   const [avail, setAvail] = useState<'checking' | 'available' | 'taken' | null>(null);
   const [preview, setPreview] = useState<{ domain: string | null } | PurchaseRefusal | null>(null);
@@ -45,7 +47,8 @@ export function PurchaseNameCard({ owner, kind, via, token, tld, serviceRole, in
     if (!token) return;
     // The payer: a person's own treasury; an organization's treasury; a treasury pays for its own name.
     const isTreasury = kind === 'person-treasury' || kind === 'org-treasury' || kind === 'treasury';
-    const all = isTreasury ? [] : await listManagedAgents(token, 'any').catch(() => []);
+    const all = await listManagedAgents(token, 'any').catch(() => []);
+    setStewardship(all.find((a) => a.agent.toLowerCase() === owner.toLowerCase())?.stewardshipDelegation ?? null);
     const payer = isTreasury ? owner : isPerson
       ? all.find((a) => a.kind === 'person-treasury' && (a.relationship ?? 'steward') === 'steward')?.agent
       : all.find((a) => a.kind === 'org-treasury' && (a.parent ?? '').toLowerCase() === owner.toLowerCase())?.agent;
@@ -64,7 +67,7 @@ export function PurchaseNameCard({ owner, kind, via, token, tld, serviceRole, in
       if (!live) return;
       setAvail(info.exists ? 'taken' : 'available');
       if (!info.exists && treasury) {
-        const p = await requestClaimTicket(token, { label, tld, owner, payer: treasury, ...(email ? { email } : {}), preview: true } as never);
+        const p = await requestClaimTicket(token, { label, tld, owner, payer: treasury, ...(email ? { email } : {}), ...(stewardship ? { stewardship } : {}), preview: true });
         if (live) setPreview(p.ok ? { domain: p.domain } : p);
       }
     }, 350);
@@ -89,7 +92,7 @@ export function PurchaseNameCard({ owner, kind, via, token, tld, serviceRole, in
     try {
       const signPayer = await signHashFor(via, treasury, { token });
       const signOwner = await signHashFor(via, owner, { token });
-      const r = await purchaseName({ token, owner, payer: treasury, label, tld, coin: NAMING_COIN.address, ...(email ? { email } : {}), signPayer, signOwner, ...(serviceRole ? { serviceRole } : {}), onStep: setStep });
+      const r = await purchaseName({ token, owner, payer: treasury, label, tld, coin: NAMING_COIN.address, ...(email ? { email } : {}), ...(stewardship ? { stewardship } : {}), signPayer, signOwner, ...(serviceRole ? { serviceRole } : {}), onStep: setStep });
       if (!r.ok) { setPreview(r); setErr(r.error); setPhase('error'); return; }
       setBought({ name: r.name, price: r.price }); setPhase('done');
       setBalance(await treasuryBalance(treasury).catch(() => null));
