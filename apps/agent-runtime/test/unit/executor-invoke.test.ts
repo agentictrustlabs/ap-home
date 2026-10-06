@@ -71,3 +71,18 @@ describe('spec 426 — executorInvokeInvoker', () => {
     expect(r.refused).toBe('not a member of that team');
   });
 });
+
+describe('spec 426 — what the invoker surfaces from a receipt', () => {
+  it('relays a receipt’s summary as the answer and names the executor + intent (and count) as evidence', async () => {
+    const calls: Array<{ url: string; auth?: string; body: Record<string, unknown> }> = [];
+    const inv = executorInvokeInvoker({ executors: EXECUTORS, session: async () => 'idtok', fetch: recorder(calls, { result: { summary: 'Row 1 — pop 10', rowCount: 3, rows: [] } }) }, INVOKE, PRINCIPAL);
+    const out = (await inv('field.record.save', { goal: 'g' }, ctx)) as Record<string, unknown>;
+    expect(out.answer).toBe('Row 1 — pop 10');
+    expect(out.interpretation).toBe('invoked field-circles · field.records-save — Row 1 — pop 10');
+    expect(out.count).toBe(3);
+    const plain = (await executorInvokeInvoker({ executors: EXECUTORS, session: async () => 'idtok', fetch: recorder([], { result: { storedIn: 'vault://x' } }) }, INVOKE, PRINCIPAL)('field.record.save', { goal: 'g' }, ctx)) as Record<string, unknown>;
+    expect(plain.answer).toBe('Done — recorded with field-circles.');
+    expect(plain.interpretation).toBe('invoked field-circles · field.records-save');
+    expect(plain.count).toBeUndefined();
+  });
+});

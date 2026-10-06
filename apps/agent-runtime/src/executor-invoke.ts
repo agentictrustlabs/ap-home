@@ -131,8 +131,21 @@ export function executorInvokeInvoker(deps: ExecutorInvokeDeps, invoke: Executor
     // the applied capability + executor + intent + this receipt in run.provenance (W3); the caller enforces
     // apply-iff-proof (§7). No fallback on error (ADR-0013): a refusal is a refusal.
     const receipt = body?.result ?? {};
+    // THE RECEIPT STAYS OPAQUE — but two things an executor may say about it are worth surfacing: a `summary`
+    // (its own words for what came back — the answer a READ's caller should relay, where a WRITE's is "recorded")
+    // and a `rowCount`. They feed the ask's evidence line ("read as: invoked …", "· N results") the way a built-in
+    // read's `interpretation` and `count` do, so the How panel names the executor and the intent instead of
+    // "no tool read anything". Nothing else of the receipt is read here.
+    const summary = typeof (receipt as { summary?: unknown }).summary === 'string' ? (receipt as { summary: string }).summary : '';
+    const rowCount = typeof (receipt as { rowCount?: unknown }).rowCount === 'number' ? (receipt as { rowCount: number }).rowCount : undefined;
     // `invoked` names the executor + intent for provenance (spec 426 §7); the harness surfaces it + the receipt
     // on the step's `run.provenance` entry, which the caller reads for apply-iff-proof. Opaque receipt, clean result.
-    return { answer: `Done — recorded with ${invoke.executor}.`, receipt, record: receipt, invoked: { executor: invoke.executor, intent: invoke.intent } };
+    return {
+      answer: summary || `Done — recorded with ${invoke.executor}.`,
+      receipt, record: receipt,
+      invoked: { executor: invoke.executor, intent: invoke.intent },
+      interpretation: `invoked ${invoke.executor} · ${invoke.intent}${summary ? ` — ${summary.slice(0, 240)}` : ''}`,
+      ...(rowCount !== undefined ? { count: rowCount } : {}),
+    };
   };
 }
