@@ -83,6 +83,9 @@ export function planRolePacks(composedFrom: ComposedFrom | undefined | null, rea
   for (const r of read?.roles ?? []) byOrg.set(lower(r.org), r);
   const equipped: EquippedPackState[] = packs.map((pack) => {
     const org = lower(pack.organization);
+    // A pack the person ADDED FOR THEMSELVES (§5.5): no organization offered it, so no membership can end it.
+    // It stays until they remove it.
+    if (isSelfPack(pack)) return { pack, state: 'held' as const };
     const role = byOrg.get(org);
     if (!read || (!role && !answered.has(org))) return { pack, state: 'unknown' as const };
     if (!role || role.ended) return { pack, state: 'ended' as const }; // answered, and records no live membership
@@ -97,9 +100,23 @@ export function planRolePacks(composedFrom: ComposedFrom | undefined | null, rea
   return { equipped, offers, drop: equipped.filter((e) => e.state === 'ended' || e.state === 'changed').map((e) => e.pack) };
 }
 
-/** The heading a pack's instructions sit under in the composed playbook: "Team lead at Weld Corridor Team". */
+/**
+ * A PACK THE PERSON ADDED FOR THEMSELVES (spec 427 §5.5, owner 2026-10-06: "I am using person steward and I need the
+ * gc/* tools in it"). Not every skill a person wants comes with a role somebody else gave them: a domain's skills
+ * published in a context this Home offers (the Global.Church gc/* through its executor) can be added to the base
+ * playbook by the person, with the same press, the same composition and the same write as a role's pack. It is
+ * recorded with an EMPTY organization and no role, so reconciliation never drops it — nothing offered it, nothing
+ * can withdraw it — and it grants nothing, like every pack: each act still waits on a mandate.
+ */
+export const SELF_PACK = '';
+export const isSelfPack = (p: Pick<ComposedPack, 'organization'>): boolean => !p.organization;
+/** The stand-in "role" a self-added pack is equipped under: no organization, the archetype's own label as the heading. */
+export const selfRole = (label: string): HeldRole => ({ org: SELF_PACK, name: null, assignedRole: 'self', roleName: label, roleDefinitionId: '', skillPackRefs: [], ended: false });
+
+/** The heading a pack's instructions sit under in the composed playbook: "Team lead at Weld Corridor Team", or for a
+ *  pack the person added themselves, its own label: "Gap Steward (added by you)". */
 export const packHeading = (p: Pick<ComposedPack, 'roleName' | 'organizationName' | 'organization'>): string =>
-  `${p.roleName} at ${p.organizationName?.trim() || `${p.organization.slice(0, 6)}…${p.organization.slice(-4)}`}`;
+  isSelfPack(p) ? `${p.roleName} (added by you)` : `${p.roleName} at ${p.organizationName?.trim() || `${p.organization.slice(0, 6)}…${p.organization.slice(-4)}`}`;
 
 // ── THE READ (an intent) ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -295,7 +312,7 @@ export async function recomposePlaybook(input: RecomposeInput): Promise<Recompos
 export async function reconcileRolePacks(input: { agent: string; token: string; typeSlug: string; record: ComposedAssignmentRecord | null }): Promise<{ dropped: ComposedPack[]; plan: RolePackPlan | null }> {
   const composedFrom = input.record?.composedFrom;
   if (!composedFrom?.packs.length) return { dropped: [], plan: null };
-  const read = await readMyRoles(input.token, input.agent, composedFrom.packs.map((p) => p.organization));
+  const read = await readMyRoles(input.token, input.agent, composedFrom.packs.filter((p) => !isSelfPack(p)).map((p) => p.organization));
   const plan = planRolePacks(composedFrom, read);
   if (!plan.drop.length) return { dropped: [], plan };
   await recomposePlaybook({ agent: input.agent, token: input.token, typeSlug: input.typeSlug, actor: input.agent, remove: plan.drop });

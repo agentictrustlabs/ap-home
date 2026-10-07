@@ -233,6 +233,22 @@ names the capabilities the new pack offers that the card lacks, with the one lin
 Until then the person's own asks reach the pack's tools; another agent asking for a capability the card does not
 advertise is told so.
 
+### 5.5 A pack the person adds for themselves (2026-10-06)
+
+**Owner:** "I am using person steward and I need the gc/* tools in it" — not a different playbook, the same one with
+more in it. Not every skill a person wants comes with a role somebody gave them: the Global.Church `gc/*` skills are
+published in a context this Home offers (`gc`, through the global-church executor, spec 426), and a person may want
+them on their own agent without belonging to any organization that names a role for them.
+
+So the Playbook page offers, on every registry archetype that is not the current base, **"Keep `<base>` and add its
+skills"**. The press runs the same composition as a role's pack (`recomposePlaybook` → the registry's `/context/compose`
+→ verify → write the one `archetype.assignment` record), with a stand-in role (`selfRole`): **no organization**
+(`organization: ''`), no role definition, the archetype's own label as the heading ("Gap Steward (added by you)").
+D4 holds in both directions: nothing was added without the person's press, and because nothing offered it, nothing
+can withdraw it — `planRolePacks` keeps a self-added pack `held` whatever the organizations answer, reconciliation
+never drops it, and only the person's Remove takes it out. Like every pack it grants nothing: each act still waits on
+a mandate signed for that request.
+
 ## 6. Invariants
 
 1. A role name authorizes nothing. No gate reads `assignedRole`, `roleName` or `accessRole` (324; ADR-0041).
