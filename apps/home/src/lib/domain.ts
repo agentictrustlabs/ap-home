@@ -177,7 +177,7 @@ export const SKILLS_REGISTRY_ORIGIN =
 
 /** Which skills CONTEXTS this Home offers archetypes from, in order. `agentic-trust` is the upper (a
  *  treasury is not a domain concept); the white-label domain follows. */
-export const SKILLS_CONTEXTS = (process.env.NEXT_PUBLIC_SKILLS_CONTEXTS || 'agentic-trust,faith')
+export const SKILLS_CONTEXTS = (process.env.NEXT_PUBLIC_SKILLS_CONTEXTS || 'agentic-trust,faith,gc')
   .split(',').map((s) => s.trim()).filter(Boolean);
 
 /** The town's naming service (ap-town spec 430 N2): where a visitor reads names and is sent HERE to claim or change
