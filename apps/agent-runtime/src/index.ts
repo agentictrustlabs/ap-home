@@ -518,6 +518,8 @@ export interface Env {
    *  root its suffix declares; without this map the four `/custody/oidc/*` naming endpoints can only
    *  serve the legacy untyped parent. */
   PERMISSIONLESS_SUBREGISTRIES?: string;
+  /** ap-town spec 431 — per-suffix PricedSubregistry map; a suffix listed here is BOUGHT, never registered here. */
+  PRICED_SUBREGISTRIES?: string;
   /** Public registrable base domain for personal A2A endpoints (spec 231).
    *  `<handle>.<A2A_PUBLIC_BASE_DOMAIN>` → agent `<handle>.demo.agent`.
    *  Defaults to `impact-agent.io`. */
@@ -7383,13 +7385,14 @@ app.post('/custody/oidc/bootstrap-and-claim', async (c) => {
   const gateCfg = custodyGateConfig(c.env);
   if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
 
-  const body = (await c.req.json().catch(() => null)) as { session?: string; label?: string; node?: Hex; tld?: string } | null;
-  if (!body?.session || !body?.label || !body?.node) {
-    return c.json({ ok: false, error: 'session + label + node required' }, 400);
+  const body = (await c.req.json().catch(() => null)) as { session?: string; label?: string; node?: Hex; tld?: string; /** ap-town spec 431 — deploy nameless; the Home buys the name next (see bootstrap-org). */ nameLater?: boolean } | null;
+  const nameLater = body?.nameLater === true;
+  if (!body?.session || (!nameLater && (!body.label || !body.node))) {
+    return c.json({ ok: false, error: nameLater ? 'session required' : 'session + label + node required' }, 400);
   }
-  const label = body.label.toLowerCase();
-  if (!/^[a-z0-9-]{1,63}$/.test(label)) return c.json({ ok: false, error: 'bad_label' }, 400);
-  if (!/^0x[0-9a-fA-F]{64}$/.test(body.node)) return c.json({ ok: false, error: 'bad_node' }, 400);
+  const label = (body.label ?? '').toLowerCase();
+  if (!nameLater && !/^[a-z0-9-]{1,63}$/.test(label)) return c.json({ ok: false, error: 'bad_label' }, 400);
+  if (!nameLater && !/^0x[0-9a-fA-F]{64}$/.test(body.node ?? '')) return c.json({ ok: false, error: 'bad_node' }, 400);
 
   const gate = await verifyCustodySession(body.session, gateCfg);
   if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
@@ -7406,26 +7409,27 @@ app.post('/custody/oidc/bootstrap-and-claim', async (c) => {
       return c.json({ ok: false, error: 'sa_mismatch', detail: 'session subject ≠ derived SA' }, 403);
     }
 
-    const root = subregistryForTld(c.env, body.tld);
-    if (!root.ok) return c.json({ ok: false, error: root.error }, 503);
-    const claimedName = `${label}.${root.typed ? root.tld : (c.env.AGENT_NAME_PARENT || AGENT_NAME_PARENT)}`;
+    let claimedName = '';
+    let nameCalls: Array<{ to: Address; value: bigint; data: Hex }> = [];
+    if (!nameLater) {
+      const root = subregistryForTld(c.env, body.tld);
+      if (!root.ok) return c.json({ ok: false, error: root.error }, 503);
+      claimedName = `${label}.${root.typed ? root.tld : (c.env.AGENT_NAME_PARENT || AGENT_NAME_PARENT)}`;
+      // Type first, then the claim — the record the suffix asserts must exist before the name does.
+      const declare = root.typed ? await declareTypeCallsFor(c.env, sa, root.tld) : [];
+      const register = buildSubregistryRegisterCall({ subregistry: root.subregistry, label, newOwner: sa });
+      const setPrimary = buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node! });
+      nameCalls = [...declare, register, setPrimary];
+    }
 
-    // Idempotent: if already deployed, the atomic deploy+claim already ran.
+    // Idempotent: if already deployed, the atomic deploy(+claim) already ran.
     const pub = createPublicClient({ chain: chainFor(c.env), transport: http(c.env.RPC_URL) });
     const code = await pub.getBytecode({ address: sa });
     if (code && code !== '0x') {
       return c.json({ ok: true, agent: sa, agentId: caip10(Number(c.env.CHAIN_ID), sa), name: claimedName, alreadyDeployed: true });
     }
 
-    // Type first, then the claim — the record the suffix asserts must exist before the name does.
-    const declare = root.typed ? await declareTypeCallsFor(c.env, sa, root.tld) : [];
-    const register = buildSubregistryRegisterCall({
-      subregistry: root.subregistry,
-      label,
-      newOwner: sa,
-    });
-    const setPrimary = buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node });
-    const callData = buildExecuteBatchCallData([...declare, register, setPrimary]);
+    const callData = buildExecuteBatchCallData(nameCalls);
 
     let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
@@ -7762,13 +7766,21 @@ app.post('/custody/oidc/bootstrap-org', async (c) => {
 
   const body = (await c.req.json().catch(() => null)) as {
     session?: string; label?: string; node?: Hex; delegate?: Address; grantOrg?: Address; tld?: string;
+    /**
+     * ap-town spec 431 — the org's name is BOUGHT after it exists (a ticket from the Home's naming gate + the fee
+     * from the person's treasury, through the PRICED subregistry), so the org deploys NAMELESS here and the Home
+     * buys next. The legacy `register(label, owner)` the batch built reverted on every priced root (0xea8e4eb5
+     * NotAuthorized: the root no longer names the permissionless subregistry) — five club charters on 2026-10-06.
+     */
+    nameLater?: boolean;
   } | null;
-  if (!body?.session || !body?.label || !body?.node || !body?.delegate) {
-    return c.json({ ok: false, error: 'session + label + node + delegate required' }, 400);
+  const nameLater = body?.nameLater === true;
+  if (!body?.session || !body?.delegate || (!nameLater && (!body.label || !body.node))) {
+    return c.json({ ok: false, error: nameLater ? 'session + delegate required' : 'session + label + node + delegate required' }, 400);
   }
-  const label = body.label.toLowerCase();
-  if (!/^[a-z0-9-]{1,63}$/.test(label)) return c.json({ ok: false, error: 'bad_label' }, 400);
-  if (!/^0x[0-9a-fA-F]{64}$/.test(body.node)) return c.json({ ok: false, error: 'bad_node' }, 400);
+  const label = (body.label ?? '').toLowerCase();
+  if (!nameLater && !/^[a-z0-9-]{1,63}$/.test(label)) return c.json({ ok: false, error: 'bad_label' }, 400);
+  if (!nameLater && !/^0x[0-9a-fA-F]{64}$/.test(body.node ?? '')) return c.json({ ok: false, error: 'bad_node' }, 400);
   if (!/^0x[0-9a-fA-F]{40}$/.test(body.delegate)) return c.json({ ok: false, error: 'bad_delegate' }, 400);
   if (body.grantOrg && !/^0x[0-9a-fA-F]{40}$/.test(body.grantOrg)) return c.json({ ok: false, error: 'bad_grantOrg' }, 400);
 
@@ -7805,14 +7817,19 @@ app.post('/custody/oidc/bootstrap-org', async (c) => {
     const stewardship = buildOrgGrant(c.env, orgSA, person);
     approveCalls.push(orgApproveHashCall(c.env, stewardship.digest, 0n, orgSA));
 
-    const root = subregistryForTld(c.env, body.tld);
-    if (!root.ok) return c.json({ ok: false, error: root.error }, 503);
-    const orgName = `${label}.${root.typed ? root.tld : (c.env.AGENT_NAME_PARENT || AGENT_NAME_PARENT)}`;
-    // Type first, then the claim — the record the suffix asserts must exist before the name does.
-    const declare = root.typed ? await declareTypeCallsFor(c.env, orgSA, root.tld) : [];
-    const register = buildSubregistryRegisterCall({ subregistry: root.subregistry, label, newOwner: orgSA });
-    const setPrimary = buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node });
-    const callData = buildExecuteBatchCallData([...declare, register, setPrimary, ...approveCalls]);
+    let orgName = '';
+    let nameCalls: Array<{ to: Address; value: bigint; data: Hex }> = [];
+    if (!nameLater) {
+      const root = subregistryForTld(c.env, body.tld);
+      if (!root.ok) return c.json({ ok: false, error: root.error }, 503);
+      orgName = `${label}.${root.typed ? root.tld : (c.env.AGENT_NAME_PARENT || AGENT_NAME_PARENT)}`;
+      // Type first, then the claim — the record the suffix asserts must exist before the name does.
+      const declare = root.typed ? await declareTypeCallsFor(c.env, orgSA, root.tld) : [];
+      const register = buildSubregistryRegisterCall({ subregistry: root.subregistry, label, newOwner: orgSA });
+      const setPrimary = buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node! });
+      nameCalls = [...declare, register, setPrimary];
+    }
+    const callData = buildExecuteBatchCallData([...nameCalls, ...approveCalls]);
 
     let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
     if (c.env.PAYMASTER_VERIFYING_SIGNER) {
@@ -7935,6 +7952,14 @@ function subregistryForTld(
     map = env.PERMISSIONLESS_SUBREGISTRIES ? (JSON.parse(env.PERMISSIONLESS_SUBREGISTRIES) as Record<string, string>) : {};
   } catch {
     return { ok: false, error: 'typed_roots_misconfigured: PERMISSIONLESS_SUBREGISTRIES is not valid JSON' };
+  }
+  // ap-town spec 431 — a PRICED root (faithchain, 2026-10-06) registers nothing through `register(label, owner)`:
+  // a name there is bought with a ticket from the Home's naming gate and the fee from a treasury. Say so, rather
+  // than let the chain answer 0xea8e4eb5 (NotAuthorized) after a sponsored deploy was built around the call.
+  let priced: Record<string, string> = {};
+  try { priced = env.PRICED_SUBREGISTRIES ? (JSON.parse(env.PRICED_SUBREGISTRIES) as Record<string, string>) : {}; } catch { priced = {}; }
+  if (priced[t]) {
+    return { ok: false, error: `priced_root: ".${t}" names are bought at the Home (a naming-gate ticket + the fee from the agent's treasury); deploy nameless (nameLater) and buy next` };
   }
   const addr = map[t];
   if (!addr || !/^0x[0-9a-fA-F]{40}$/.test(addr)) {
