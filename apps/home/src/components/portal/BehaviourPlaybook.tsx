@@ -169,24 +169,27 @@ function DiffPreview({ def, assigned = false }: { def: AgentHarnessDefinitionV1;
 /** WHERE A PLAYBOOK COMES FROM — its skills context and the SKILL.md contracts that compiled it. Shown only when a
  *  registry row for it is loaded; absent says nothing, because a definition held in the vault is real without it. */
 function RegistrySource({ registry }: { registry: RegistryArchetype }) {
+  // The skill list was what made this page unusable (owner, 2026-10-06): eighty lines per card for Person Steward,
+  // twenty-five for Gap Steward, on every card, under a playbook text thousands of lines long. A count by
+  // default; the list on a press that does not select the card.
+  const n = registry.skills.length;
   return (
-    <div style={{ fontSize: '.7rem', color: 'var(--color-text-muted)', marginTop: '.35rem' }}>
-      <div>
-        from <code>{registry.context}</code>
-        {registry.skills.length === 0 && <> · no SKILL.md linked yet</>}
-      </div>
-      {registry.skills.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '.25rem .3rem', marginTop: '.25rem' }}>
-          <span>driven by</span>
-          {registry.skills.map((sk) => (
-            <code key={sk} title={sk} style={{ fontSize: '.68rem', whiteSpace: 'nowrap', overflowWrap: 'anywhere' }}>{skillLabel(sk)}</code>
-          ))}
-        </div>
+    <div style={{ fontSize: '.72rem', color: 'var(--color-text-muted)', marginTop: '.3rem' }}>
+      <span>from <code>{registry.context}</code></span>
+      {n === 0 ? <> · no SKILL.md linked yet</> : (
+        <details style={{ display: 'inline', marginLeft: '.4rem' }} onClick={(e) => e.stopPropagation()}>
+          <summary style={{ display: 'inline', cursor: 'pointer', textDecoration: 'underline dotted' }}>{n} skill{n === 1 ? '' : 's'}</summary>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.2rem .3rem', marginTop: '.25rem' }}>
+            {registry.skills.map((sk) => (
+              <code key={sk} title={sk} style={{ fontSize: '.68rem', whiteSpace: 'nowrap' }}>{skillLabel(sk)}</code>
+            ))}
+          </div>
+        </details>
       )}
       {registry.warnings.length > 0 && (
-        <div style={{ color: 'var(--color-warning, #92700e)', marginTop: '.2rem' }}>
-          {registry.warnings.length} capabilit{registry.warnings.length === 1 ? 'y has' : 'ies have'} no contract — running the built-in shape
-        </div>
+        <span style={{ color: 'var(--color-warning, #92700e)', marginLeft: '.4rem' }} title={registry.warnings.slice(0, 6).join('\n')}>
+          · {registry.warnings.length} without a contract
+        </span>
       )}
     </div>
   );
@@ -395,7 +398,14 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
             </p>
           )}
 
-          {options.length > 0 && current && <h4 style={{ margin: '.2rem 0 .45rem', fontSize: '.85rem' }}>Switch playbook</h4>}
+          {options.length > 0 && current && (
+            <>
+              <h4 style={{ margin: '.2rem 0 .2rem', fontSize: '.85rem' }}>Other playbooks</h4>
+              <p style={{ margin: '0 0 .5rem', fontSize: '.78rem', color: 'var(--color-text-muted)' }}>
+                <strong>Add</strong> one's skills to the playbook you have (it stays your base), or press a card and <strong>Switch</strong> to it. Either way nothing gains authority.
+              </p>
+            </>
+          )}
           <div style={{ display: 'grid', gap: '.55rem' }}>
             {options.map((opt) => {
               const isCurrent = current?.archetypeId === opt.definition.archetypeId;
