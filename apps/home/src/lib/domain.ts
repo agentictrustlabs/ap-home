@@ -176,8 +176,10 @@ export const SKILLS_REGISTRY_ORIGIN =
   process.env.NEXT_PUBLIC_SKILLS_REGISTRY || 'https://skills-a2a-production.richardpedersen3.workers.dev';
 
 /** Which skills CONTEXTS this Home offers archetypes from, in order. `agentic-trust` is the upper (a
- *  treasury is not a domain concept); the white-label domain follows. */
-export const SKILLS_CONTEXTS = (process.env.NEXT_PUBLIC_SKILLS_CONTEXTS || 'agentic-trust,faith')
+ *  treasury is not a domain concept); the white-label domain follows; `gc` is the Global.Church domain (the
+ *  gc/* skills through the global-church executor, spec 426 — `gap-steward` pickable on Behaviour → Playbook
+ *  since 2026-10-06). The registry publishes more (`cil`, `cil-commons`, …); this list is what THIS Home offers. */
+export const SKILLS_CONTEXTS = (process.env.NEXT_PUBLIC_SKILLS_CONTEXTS || 'agentic-trust,faith,gc')
   .split(',').map((s) => s.trim()).filter(Boolean);
 
 /** The town's naming service (ap-town spec 430 N2): where a visitor reads names and is sent HERE to claim or change
