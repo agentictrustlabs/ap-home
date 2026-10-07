@@ -41,6 +41,8 @@ import { RequiredNameGate } from './RequiredNameGate';
 import { NewMemberSetup } from './NewMemberSetup';
 import { isNewHomeMoment, newMemberPlan, planIsEmpty, type NewMemberPlan } from '../../lib/new-member';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
+import { parseEnrollReq } from './useEnrollReq';
+import { clientCopy, clientProgressText, withClientConsent } from '../../whitelabel/client-consent';
 
 interface NameInfo { exists?: boolean; agent?: Address; deployed?: boolean; hasEoa?: boolean; hasPasskey?: boolean; connectionKind?: string | null; connectionAddress?: string | null; passkeySigningAvailable?: boolean | null }
 /** Human label for the owner-published connection kind (spec 280) — guides which button to use. */
@@ -526,10 +528,18 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
 }
 
 function Shell({ children, compact }: { children: React.ReactNode; compact?: boolean }) {
+  // A client that asked not to name the substrate (`consent.hideSubstrate`) doesn't, on its own sign-in
+  // card. Read off THIS page's authorize URL only — never the sessionStorage stash, which can outlive the
+  // request and would hide the line on a later, unrelated visit. This tree is client-only (ssr:false).
+  const [hideSubstrate] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    const aud = parseEnrollReq()?.aud;
+    return knownRelyingClient(aud)?.consent?.hideSubstrate === true;
+  });
   return (
     <div className="onboarding-screen">
       <div className={compact ? 'onboarding-card enroll-compact' : 'onboarding-card'}>{children}</div>
-      <HomeFooter compact />
+      <HomeFooter compact hideSubstrate={hideSubstrate} />
     </div>
   );
 }
@@ -679,6 +689,9 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
   enrollApi?: EnrollApi;
   appName?: string;
 }) {
+  // What the email card says while it makes a new home — the client's own words when it has them
+  // (Gather27: "Signing you in…"), the shared `copy.portalStepBusy` otherwise.
+  const emailBusyNote = clientCopy(enrollApi?.enroll ? knownRelyingClient(enrollApi.enroll.aud) : undefined, 'portalStepBusy');
   const [busy, setBusy] = useState<'passkey' | 'wallet' | null>(null);
   const [err, setErr] = useState('');
   // Email / phone sign-in / bootstrap: reveal an inline EmailAuthCard / PhoneAuthCard. Both call the SAME
@@ -843,7 +856,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
           )}
           {offers('email') && emailEnabled && (showEmail || soleMethod) && (
             <div style={{ margin: '.4rem 0 .2rem' }}>
-              <EmailAuthCard />
+              <EmailAuthCard busyNote={emailBusyNote} />
             </div>
           )}
           {offers('phone') && phoneEnabled && (
@@ -1229,19 +1242,27 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
     label: string;
     hint?: string;
   }>({
+    // Total unknown (no counter) until the ceremony names its own: a select-existing connect is 3
+    // steps, not the 5 this placeholder used to promise (see CeremonyProgress).
     step: 1,
-    total: 5,
+    total: 0,
     label: 'Starting…',
     hint: 'This can take a moment.',
   });
   const { session } = useSession();
-  const tpl = (isWorkspace
-    ? whitelabel.delegationTemplates['workspace-create']
-    : whitelabel.delegationTemplates['org-create'])
-    ?? { canDo: [], cannotDo: ['Move funds', 'Add members', 'Act outside this permission'] };
   const orgClient = api.enroll
     ? (whitelabel.relyingApps.find((a) => a.client_id === api.enroll!.aud) ?? knownRelyingClient(api.enroll.aud))
     : undefined;
+  const tplId = isWorkspace ? 'workspace-create' : 'org-create';
+  // The client's own wording wins when it registered one for this template (no-op for every other app).
+  const tpl = withClientConsent(
+    whitelabel.delegationTemplates[tplId] ?? { canDo: [], cannotDo: ['Move funds', 'Add members', 'Act outside this permission'] },
+    orgClient,
+    tplId,
+  );
+  // An app speaking in its own words also doesn't place the org "in the <community>" — that is the Home's
+  // vocabulary, not the app's (Gather27: a church listing a group).
+  const ownWording = Boolean(orgClient?.consent?.templates?.[tplId]);
   const orgAppName = displayAppName(orgClient?.name, api.host);
   const orgAppDomain = displayAppDomain(api.host);
   // The person's chooser pick wins over the URL's suggestion.
@@ -1339,8 +1360,8 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
     return (
       <Shell>
         <CeremonyProgress
-          label={grantProgress.label}
-          hint={grantProgress.hint ?? (existingOrg ? `${orgAppName} is connecting — this stays in your control.` : isWorkspace ? 'This can take a moment — we’re setting the organization and its workspace up.' : 'This can take a moment — we’re setting the organization up.')}
+          label={clientProgressText(orgClient, grantProgress.label)}
+          hint={clientProgressText(orgClient, grantProgress.hint ?? (existingOrg ? `${orgAppName} is connecting — this stays in your control.` : isWorkspace ? 'This can take a moment — we’re setting the organization and its workspace up.' : 'This can take a moment — we’re setting the organization up.'))}
           step={grantProgress.step}
           total={grantProgress.total}
         />
@@ -1367,9 +1388,10 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
         <p className="securing-wait">You can disconnect {orgAppName} at any time from your Impact home.</p>
       </div>
       <ConsentSheet
-        title={existingOrg ? `Connect ${orgBase} to ${orgAppName}` : isWorkspace ? `Create ${orgBase} and its workspace` : `Create ${orgBase} in the ${whitelabel.brand.community}`}
+        title={existingOrg ? `Connect ${orgBase} to ${orgAppName}` : isWorkspace ? `Create ${orgBase} and its workspace` : ownWording ? `Create ${orgBase}` : `Create ${orgBase} in the ${whitelabel.brand.community}`}
         appName={orgAppName}
         appDomain={orgAppDomain}
+        appDescription={orgClient?.description}
         template={tpl}
         authorizeLabel="Approve & connect"
         onAuthorize={authorize}

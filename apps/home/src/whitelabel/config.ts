@@ -379,9 +379,10 @@ const faithImpact: WhiteLabelConfig = {
     // custodied by the Gather org's custodian, who runs the ceremony from Home against a2aBase.
     {
       client_id: 'gather-app',
-      // Gather's own brand is two words, and the enroll screen shows this verbatim as
-      // "Continue to <name>".
-      name: 'Gather 27',
+      // Gather's own brand is ONE word, "Gather27" (Clayton, 2026-10-07), and the enroll screen shows
+      // this verbatim as "Continue to <name>".
+      name: 'Gather27',
+      description: 'Find and list Gather groups.',
       // Round-4 — Gather is starting hosts on ONE door. A host arrives from a Gather registration
       // email, so email is the method they already proved they have; offering four more is four
       // more ways for a church admin to get stuck. Everything else still works and is one line
@@ -448,6 +449,36 @@ const faithImpact: WhiteLabelConfig = {
       // their vault profile, handed over at /oidc/authorize-grant and re-gated there against this list;
       // consent says so on the sheet. Only this client: whitelabel/provisioning.test.ts pins that.
       idTokenClaims: ['email'],
+      // Gather's OWN consent wording (Clayton, 2026-10-07). A Gather host is a church admin listing a
+      // group: the shared lines — funds, custody, recovery, sign-in methods, "the missional community" —
+      // describe things Gather never touches and read as alarms. The shared templates are every app's,
+      // so Gather says it in its own words HERE (whitelabel/client-consent.ts); nothing else moves.
+      // "See your name and email" is the disclosure for `idTokenClaims` above — the override replaces
+      // the helper's email line, so it must say it itself (client-consent.test.ts pins that).
+      // service-agent-wire is run by Gather's own operators, not hosts, and keeps the shared text.
+      consent: {
+        templates: {
+          'site-login': {
+            canDo: ['Sign you in to Gather27', 'See your name and email', 'Set up your church’s listing'],
+            hideCannotDo: true,
+          },
+          'org-create': {
+            canDo: ['Sign you in to Gather27', 'See your name and email', 'Set up your church’s listing'],
+            hideCannotDo: true,
+          },
+        },
+        signedInAs: 'email',
+        hideCustodianSwitch: true,
+        hideSubstrate: true,
+        copy: { portalStepBusy: 'Signing you in…' },
+        // The shared ceremony narration says "chain", "custody" and "keys"; a host should read none of it.
+        progressText: {
+          'Confirming it on the chain…': 'Confirming…',
+          'This is how Gather27 gets a scoped, revocable grant — never custody.': 'This can take a moment.',
+          'One approval — Gather27 never holds its keys.': 'This can take a moment.',
+          'The listing will live here — Gather27 only gets a read grant.': 'Your listing will live here.',
+        },
+      },
     },
     // skills-corpus — the SKILL.md ceremony/admin surface (owner claims a skillset).
     {

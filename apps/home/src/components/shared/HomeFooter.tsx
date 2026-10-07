@@ -6,18 +6,21 @@
 // under the sign-in card, so a person and a search engine both find the substrate from any page of a Home.
 import { whitelabel } from '../../whitelabel/config';
 
-export function HomeFooter({ compact }: { compact?: boolean }) {
+// `hideSubstrate` drops the one HARD-CODED substrate line (and the nav's substrate wording) — set only on a
+// relying app's sign-in card when that app asked (RelyingApp.consent.hideSubstrate). The credit and links
+// are env-driven (NEXT_PUBLIC_FOOTER_*) and are a deployment's call, so they are left alone.
+export function HomeFooter({ compact, hideSubstrate }: { compact?: boolean; hideSubstrate?: boolean }) {
   const { credit, links } = whitelabel.footer;
   return (
     <footer className={compact ? 'home-footer home-footer-compact' : 'home-footer'} data-testid="home-footer">
       <span className="home-footer-credit">{credit}</span>
-      <nav aria-label="About this Home, its substrate and its studio" className="home-footer-links">
+      <nav aria-label={hideSubstrate ? 'About this Home' : 'About this Home, its substrate and its studio'} className="home-footer-links">
         <a href="/about">About {whitelabel.brand.name}</a>
         {links.map((l) => (
           <a key={l.href} href={l.href} rel={l.rel ?? 'noopener'} target="_blank">{l.label}</a>
         ))}
       </nav>
-      <span className="home-footer-brand">{whitelabel.brand.name} · a Home on the Agentic Primitives substrate</span>
+      {!hideSubstrate && <span className="home-footer-brand">{whitelabel.brand.name} · a Home on the Agentic Primitives substrate</span>}
     </footer>
   );
 }

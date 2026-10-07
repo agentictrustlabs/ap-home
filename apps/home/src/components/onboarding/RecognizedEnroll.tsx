@@ -52,6 +52,8 @@ import { displayAppDomain, displayAppName } from './org-chooser-label';
 import { knownRelyingClient } from '../../lib/relying-clients';
 import { agentClassOf } from '../../lib/agent-class';
 import { withMissionRegistry } from '../../lib/mission-registry';
+import { profileForConnect } from '../../lib/connect-profile-name';
+import { clientProgressText, signedInLabel, withClientConsent } from '../../whitelabel/client-consent';
 
 /** The kinds of agent that ARE an organization holding its own members — where a team-scoped role can be offered. A
  *  workspace is not one (a service, with no members): its people belong to the organization that governs it. */
@@ -96,8 +98,12 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
     label: string;
     hint?: string;
   }>({
+    // Total UNKNOWN (0 = no counter) until the ceremony that runs names its own. This used to say 3,
+    // which the plain sign-in happens to use, so an org-create (5 steps) showed "Step 1 of 3" through
+    // the pre-ceremony legs — beginEnrollmentGrant's profile read alone can take 5 s — then jumped to
+    // "Step 2 of 5" when createOrganization spoke. See CeremonyProgress.
     step: 1,
-    total: 3,
+    total: 0,
     label: 'Starting…',
     hint: 'This can take a moment.',
   });
@@ -124,9 +130,18 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
   const registeredName = displayAppName(relyingApp?.name, appHost);
   const appName = enroll?.viaHost ? enroll.viaHost : registeredName;
   const appDomain = displayAppDomain(appHost);
-  const signedInAs =
-    home?.name?.trim() ||
-    (home?.address ? `${home.address.slice(0, 6)}…${home.address.slice(-4)}` : '');
+  // A client that registered `consent.signedInAs: 'email'` (Gather27 — email is its only way in) names
+  // the person by the address they signed in with rather than `0x6a25…f058`. Read from their OWN vault
+  // over their own session (profileForConnect: best-effort, 5 s cap); no email → the usual rule.
+  const [signedInEmail, setSignedInEmail] = useState('');
+  const wantsEmailLabel = relyingApp?.consent?.signedInAs === 'email';
+  useEffect(() => {
+    if (!wantsEmailLabel || !home?.address) return;
+    let live = true;
+    void profileForConnect().then((p) => { if (live) setSignedInEmail(p.email); });
+    return () => { live = false; };
+  }, [wantsEmailLabel, home?.address]);
+  const signedInAs = signedInLabel(relyingApp, { email: signedInEmail, name: home?.name, address: home?.address });
 
   const fail = (e: unknown) => {
     setError(e instanceof Error ? e.message : typeof e === 'string' ? e : 'Something went wrong');
@@ -946,8 +961,8 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
     return (
       <Shell>
         <CeremonyProgress
-          label={grantProgress.label}
-          hint={grantProgress.hint ?? `This is how ${appName} gets a scoped, revocable grant — never custody.`}
+          label={clientProgressText(relyingApp, grantProgress.label)}
+          hint={clientProgressText(relyingApp, grantProgress.hint ?? `This is how ${appName} gets a scoped, revocable grant — never custody.`)}
           step={grantProgress.step}
           total={grantProgress.total}
         />
@@ -995,7 +1010,8 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
     relyingApp,
   );
   // The coin's consent lines belong to the plain sign-in, where the coin is granted (see the mandate leg).
-  const tpl = plainSignIn ? withCurrencyConsent(baseTpl, relyingApp, appName) : baseTpl;
+  // Last: the client's OWN wording for this template, when it registered one (no-op for every other app).
+  const tpl = withClientConsent(plainSignIn ? withCurrencyConsent(baseTpl, relyingApp, appName) : baseTpl, relyingApp, enroll.template);
   return (
     <div className="onboarding-screen">
       <div className="onboarding-card wide">
@@ -1019,14 +1035,17 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           appName={appName}
           appDomain={enroll.viaHost ? `through ${registeredName} · ${appDomain}` : appDomain}
           appLogo={relyingApp?.logo}
+          appDescription={relyingApp?.description}
           template={tpl}
           authorizeLabel={fmt(c.authorizeStepCta, { app: appName })}
           onAuthorize={onAuthorize}
           onDecline={onDecline}
         />
-        <button className="btn-ghost onboarding-secondary" onClick={() => { clearSsoCookie(); onUnrecognized(); }}>
-          Not {home?.name?.trim() || 'you'}? Use a different custodian
-        </button>
+        {!relyingApp?.consent?.hideCustodianSwitch && (
+          <button className="btn-ghost onboarding-secondary" onClick={() => { clearSsoCookie(); onUnrecognized(); }}>
+            Not {home?.name?.trim() || 'you'}? Use a different custodian
+          </button>
+        )}
       </div>
     </div>
   );

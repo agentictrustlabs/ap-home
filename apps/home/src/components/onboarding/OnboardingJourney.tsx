@@ -40,6 +40,7 @@ import { ConsentSheet } from '../shared/ConsentSheet';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
 import { NewMemberSetup } from './NewMemberSetup';
 import { coinMandateLeg, grantsCoinAtConnect, newMemberPlan, planIsEmpty, withCurrencyConsent, withEmailClaimConsent, withProfileNameConsent } from '../../lib/new-member';
+import { withClientConsent } from '../../whitelabel/client-consent';
 
 export type JourneyVariant = 'enroll-new' | 'enroll-existing' | 'self-serve';
 
@@ -696,16 +697,20 @@ export function OnboardingJourney({
   // to lose `setupToken` mid-flow). Losing a setup screen must never mean losing the consent — the
   // member connects, and the next connect asks again.
   if ((screen === 'grant' || screen === 'new-member') && api?.enroll) {
-    const tpl = withCurrencyConsent(
-      withEmailClaimConsent(
-        withProfileNameConsent(
-          whitelabel.delegationTemplates[api.enroll.template] ?? { canDo: [], cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'] },
+    const tpl = withClientConsent(
+      withCurrencyConsent(
+        withEmailClaimConsent(
+          withProfileNameConsent(
+            whitelabel.delegationTemplates[api.enroll.template] ?? { canDo: [], cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'] },
+            relyingApp,
+          ),
           relyingApp,
         ),
         relyingApp,
+        appName,
       ),
-      relyingApp,
-      appName,
+      relyingApp, // last: the client's own wording, when it registered one (no-op otherwise)
+      api.enroll.template,
     );
     return (
       <Frame wide>
@@ -716,6 +721,7 @@ export function OnboardingJourney({
           appName={appName}
           appDomain={appDomain}
           appLogo={relyingApp?.logo}
+          appDescription={relyingApp?.description}
           template={tpl}
           authorizeLabel={fmt(c.authorizeStepCta, { app: appName })}
           onAuthorize={onGivePermission}

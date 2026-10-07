@@ -29,6 +29,7 @@ import { RequiredNameGate } from './RequiredNameGate';
 import { NewMemberSetup } from './NewMemberSetup';
 import { coinMandateLeg, grantsCoinAtConnect, newMemberPlan, planIsEmpty, withCurrencyConsent, withEmailClaimConsent, withProfileNameConsent } from '../../lib/new-member';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
+import { withClientConsent } from '../../whitelabel/client-consent';
 import {
   clearPendingEnroll,
   enrollResumeHref,
@@ -350,19 +351,23 @@ export function GoogleEnrollResume() {
   // the same list as everything else it can do. The setup screen discloses it to a member who is
   // typing the name now; this is what a RETURNING member (whose name is already on file, and who
   // never sees that screen) gets to read before authorizing. No-op for every unscoped app.
-  const tpl = withCurrencyConsent(
-    withEmailClaimConsent(
-      withProfileNameConsent(
-        whitelabel.delegationTemplates[enroll.template] ?? {
-          canDo: [],
-          cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'],
-        },
+  const tpl = withClientConsent(
+    withCurrencyConsent(
+      withEmailClaimConsent(
+        withProfileNameConsent(
+          whitelabel.delegationTemplates[enroll.template] ?? {
+            canDo: [],
+            cannotDo: ['Move your funds', 'Add sign-in methods', 'Change your recovery'],
+          },
+          relyingApp,
+        ),
         relyingApp,
       ),
       relyingApp,
+      appName,
     ),
-    relyingApp,
-    appName,
+    relyingApp, // last: the client's own wording, when it registered one (no-op otherwise)
+    enroll.template,
   );
   return (
     <div className="onboarding-screen">
@@ -373,6 +378,7 @@ export function GoogleEnrollResume() {
           appName={appName}
           appDomain={appDomain}
           appLogo={relyingApp?.logo}
+          appDescription={relyingApp?.description}
           template={tpl}
           authorizeLabel={fmt(c.authorizeStepCta, { app: appName })}
           onAuthorize={onAuthorize}

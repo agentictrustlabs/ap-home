@@ -46,7 +46,13 @@ function passkeyOfferHost(homeName: string | null | undefined): boolean {
   return !home || home === label;
 }
 
-export function EmailAuthCard({ onLinked }: { /** Called with the verified address/number once it is LINKED to this home (spec 422 §3.3 records it as a channel). */ onLinked?: (value: string) => void }) {
+export function EmailAuthCard({ onLinked, busyNote = 'Securing your home…' }: {
+  /** Called with the verified address/number once it is LINKED to this home (spec 422 §3.3 records it as a channel). */
+  onLinked?: (value: string) => void;
+  /** The note while a new email home is made. A relying app's sign-in passes its own words
+   *  (whitelabel/client-consent.ts `clientCopy(…, 'portalStepBusy')`); everywhere else keeps the default. */
+  busyNote?: string;
+}) {
   const { session, openSession } = useSession();
   const [step, setStep] = useState<'email' | 'code' | 'existing-home' | 'passkey-offer'>('email');
   const [email, setEmail] = useState('');
@@ -158,7 +164,7 @@ export function EmailAuthCard({ onLinked }: { /** Called with the verified addre
           // Email-bootstrap: this email owns a KMS-custodied home. Secure it on-chain FIRST (demo-a2a
           // derives + holds the per-subject key — no device gesture), then open the session so the portal
           // loads a deployed, resolvable home.
-          setNote('Securing your home…');
+          setNote(busyNote);
           const res = await secureHomeNoName({ token: d.token }, { claimPendingNameVia: 'email' });
           if (!res.ok) throw new Error(res.error);
           void activateVault(res.home.address, 'email', { token: d.token }); // spec 278 — best-effort vault

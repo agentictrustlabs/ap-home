@@ -9,6 +9,9 @@ export interface ConsentTemplate {
   canDo: string[];
   cannotDo: string[];
   expiryDays?: number;
+  /** Drop the "This app cannot" block — only ever set by a client's OWN consent wording
+   *  (whitelabel/client-consent.ts), never by a shared template, which must keep disclosing. */
+  hideCannotDo?: boolean;
 }
 
 export function ConsentSheet({
@@ -17,6 +20,7 @@ export function ConsentSheet({
   appName,
   appDomain,
   appLogo,
+  appDescription,
   template,
   busy = false,
   authorizeLabel,
@@ -30,6 +34,8 @@ export function ConsentSheet({
   appName: string;
   appDomain: string;
   appLogo?: string;
+  /** One registered line on what the app is for (RelyingApp.description); absent shows nothing. */
+  appDescription?: string;
   template: ConsentTemplate;
   busy?: boolean;
   authorizeLabel: string;
@@ -37,7 +43,7 @@ export function ConsentSheet({
   onAuthorize: () => void;
   onDecline: () => void;
 }) {
-  if (process.env.NODE_ENV !== 'production' && template.cannotDo.length === 0) {
+  if (process.env.NODE_ENV !== 'production' && !template.hideCannotDo && template.cannotDo.length === 0) {
     throw new Error('ConsentSheet: template.cannotDo must be non-empty (honest disclosure is required).');
   }
   const politeName = displayAppName(appName, appDomain || appName);
@@ -67,6 +73,7 @@ export function ConsentSheet({
         <div>
           <div className="consent-app-name">{politeName}</div>
           {showDomain && <div className="consent-app-domain">{politeDomain}</div>}
+          {appDescription && <div className="consent-app-domain">{appDescription}</div>}
         </div>
       </div>
 
@@ -82,12 +89,16 @@ export function ConsentSheet({
           </ul>
         </>
       )}
-      <p className="consent-group">This app cannot</p>
-      <ul className="consent-list cannot" aria-label="What this app cannot do">
-        {template.cannotDo.map((c) => (
-          <li key={c}><span className="consent-icon no" aria-hidden="true"><XIcon size={14} /></span>{c}</li>
-        ))}
-      </ul>
+      {!template.hideCannotDo && (
+        <>
+          <p className="consent-group">This app cannot</p>
+          <ul className="consent-list cannot" aria-label="What this app cannot do">
+            {template.cannotDo.map((c) => (
+              <li key={c}><span className="consent-icon no" aria-hidden="true"><XIcon size={14} /></span>{c}</li>
+            ))}
+          </ul>
+        </>
+      )}
 
       <p className="consent-expiry">
         {template.expiryDays

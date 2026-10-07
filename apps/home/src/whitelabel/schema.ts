@@ -77,6 +77,13 @@ export interface RelyingApp {
   /** Friendly app name shown at consent (e.g. "Impact"); falls back to the host. From this
    *  registered config only — never a request param (anti-spoof). */
   name?: string;
+  /** OPTIONAL — one plain line saying what the app is for, shown under its name where the consent
+   *  sheet introduces it. Same provenance rule as `name`: registered config only, never a request
+   *  param. Absent (every client but the ones that set it) renders exactly as before. */
+  description?: string;
+  /** OPTIONAL — this client's OWN consent wording, in place of the shared defaults. See
+   *  {@link ClientConsentCopy}. Absent means the shared `delegationTemplates` / `copy`, unchanged. */
+  consent?: ClientConsentCopy;
   /** The CANONICAL relying-site delegate SA address for this client (ADR-0019). This is the
    *  ONLY delegate the broker will mint a grant for; the URL-supplied `delegate` is
    *  treated as untrusted hint and MUST match this. Address format: 0x-prefixed 20-byte hex.
@@ -286,6 +293,47 @@ export interface DelegationTemplate {
   cannotDo: string[];
   /** Drives "Permission expires in N days" (omit → "ongoing until you revoke"). */
   expiryDays?: number;
+}
+
+/**
+ * A relying app's OWN consent wording (per CLIENT, never per deployment).
+ *
+ * WHY THIS EXISTS. `delegationTemplates` and `copy` are shared by every app on this Home, and they are
+ * written in the Home's vocabulary — funds, custody, recovery, the community. An app whose people never
+ * meet any of that (a church host listing a group) reads those lines as alarms about things it cannot
+ * even do. Rewording the shared lines would change every other app's sheet, so the app says it in its
+ * own words HERE and the consent surfaces prefer it (`whitelabel/client-consent.ts`).
+ *
+ * PRESENTATION ONLY. The caveats are fixed by the template and enforced by contract (spec 230); nothing
+ * here widens or narrows what the grant can do — it changes which sentences describe it. Every field is
+ * optional and every omission means "the shared default", so a client without this renders as before.
+ */
+export interface ClientConsentCopy {
+  /** Keyed by delegation template id (`site-login`, `org-create`, …). A template not listed keeps the
+   *  shared disclosure. `canDo` REPLACES the composed list — including the lines the email / name /
+   *  currency helpers add — so it must itself say everything the app receives (client-consent.test.ts
+   *  pins that an email-claim client's lines mention the email). */
+  templates?: Record<string, {
+    canDo: string[];
+    /** Replaces the shared "cannot" list. Ignored when `hideCannotDo` is set. */
+    cannotDo?: string[];
+    /** Drop the "This app cannot" block. For an app whose people never hold funds, keys or recovery
+     *  through it, a list of those things is noise that reads as a warning. */
+    hideCannotDo?: boolean;
+  }>;
+  /** What "Signed in as" names. `'email'` — the member's own verified email off their vault profile
+   *  (best-effort; falls back to the name, then the short address). Absent — name, then short address. */
+  signedInAs?: 'email';
+  /** Hide "Not <you>? Use a different custodian" on the recognized consent screen. */
+  hideCustodianSwitch?: boolean;
+  /** Hide the hard-coded "<Home> · a Home on the Agentic Primitives substrate" line in the sign-in
+   *  card's footer. The credit and links are env-driven (NEXT_PUBLIC_FOOTER_*) and are NOT touched. */
+  hideSubstrate?: boolean;
+  /** Overrides of shared copy keys for this client's flow (e.g. `portalStepBusy`). */
+  copy?: Partial<WhiteLabelCopy>;
+  /** Exact-string replacements for ceremony progress labels and hints (`CeremonyProgress`), e.g. a
+   *  shared "Confirming it on the chain…" an app's people should never see. Unlisted text is unchanged. */
+  progressText?: Record<string, string>;
 }
 
 /** An agent kind the Portal lets the user manage. Person is live; others preview. */
