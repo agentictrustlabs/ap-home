@@ -87,3 +87,17 @@ describe('packHeading', () => {
     expect(packHeading({ roleName: 'Coach', organization: WELD })).toBe('Coach at 0x1111…1111');
   });
 });
+
+describe('a pack the person added for themselves (spec 427 §5.5)', () => {
+  const self: ComposedPack = { context: 'gc', archetype: 'gap-steward', version: '1.0.0', digest: '0xgc', organization: '', roleDefinitionId: '', roleName: 'Gap Steward', equippedAt: '2026-10-06T00:00:00Z', equippedBy: '0xme', equippedAs: 'self' };
+  it('is held whatever the organizations say, and is never on the drop list', () => {
+    const composedFrom: ComposedFrom = { base: { context: 'agentic-trust', archetype: 'person-steward', version: '1.0.0', digest: '0xbase' }, packs: [self] };
+    const plan = planRolePacks(composedFrom, { roles: [], asked: [], unread: [] });
+    expect(plan.equipped).toEqual([{ pack: self, state: 'held' }]);
+    expect(plan.drop).toEqual([]);
+    expect(plan.offers).toEqual([]);
+  });
+  it('heads its instructions by its own label', () => {
+    expect(packHeading(self)).toBe('Gap Steward (added by you)');
+  });
+});

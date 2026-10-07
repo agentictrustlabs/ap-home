@@ -12,7 +12,7 @@
 // This is the STEWARDSHIP surface for the same record the a2a harness reads. It never signs and never
 // grants; the only on-chain thing near it is the vault write itself, gated by the interactions grant's
 // additive `vault:archetype.assignment` scope.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import type { AgentHarnessDefinitionV1 } from '@agenticprimitives/capability-claims';
 import { useSession } from '../../context/session';
@@ -23,7 +23,7 @@ import { registryArchetypesFor, type RegistryArchetype } from '../../lib/skills-
 import { KIND_TO_TYPE_SLUG } from '../../lib/archetype-catalog';
 import { BusyButton } from '../shared/BusyButton';
 import { PlaybookRoles } from './PlaybookRoles';
-import { recomposePlaybook, type ComposedFrom } from '../../home/role-playbook';
+import { recomposePlaybook, selfRole, type ComposedFrom } from '../../home/role-playbook';
 
 import { Loading } from '../shared/Loading';
 /** The record shape written to the agent's vault (`archetype.assignment`). */
@@ -226,6 +226,20 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
     return () => { cancelled = true; };
   }, [agent, current?.definitionDigest]);
 
+  // Packs already composed into this playbook, by `context:archetype` — so a card says "in your playbook" instead of
+  // offering to add it twice.
+  const equippedKeys = useMemo(() => new Set((current?.composedFrom?.packs ?? []).map((p) => `${p.context}:${p.archetype}`)), [current?.composedFrom]);
+  const addPack = useCallback(async (opt: CatalogArchetype & { registry?: RegistryArchetype }) => {
+    if (!opt.registry || !token || !agentAddress) return;
+    setBusy(true); setSaved(false); setError(null);
+    try {
+      const archetype = opt.registry.key.slice(opt.registry.context.length + 1);
+      const r = await recomposePlaybook({ agent, token, typeSlug, actor: agentAddress, add: [{ role: selfRole(opt.label), pack: { context: opt.registry.context, archetype } }] });
+      setCurrent(r.record); setSelected(null); setSaved(true);
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  }, [agent, token, agentAddress, typeSlug]);
+
   const assign = useCallback(async () => {
     if (!selected || !token) return;
     setBusy(true); setSaved(false); setError(null);
@@ -360,8 +374,8 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
               const isCurrent = current?.archetypeId === opt.definition.archetypeId;
               const isSel = selected?.key === opt.key;
               return (
+                <Fragment key={opt.key}>
                 <button
-                  key={opt.key}
                   type="button"
                   onClick={() => { setSelected(isSel ? null : opt); setSaved(false); }}
                   style={{
@@ -385,6 +399,18 @@ export function BehaviourPlaybook({ agent, kind, name }: { agent: Address; kind:
                       archetype with no contract behind a capability is running a built-in fallback. */}
                   {opt.registry && <RegistrySource registry={opt.registry} />}
                 </button>
+                {/* ADD, DON'T SWITCH (spec 427 §5.5): the person keeps their base playbook and adds this archetype's
+                    skills to it as a pack — the composition a role's pack takes, pressed by the person for themselves. */}
+                {opt.registry && !isCurrent && current && (
+                  equippedKeys.has(opt.registry.key)
+                    ? <p style={{ margin: '-.2rem 0 .2rem .8rem', fontSize: '.74rem', color: 'var(--color-sage-700)' }}>its skills are in your playbook — see Roles below to remove them</p>
+                    : <p style={{ margin: '-.2rem 0 .2rem .8rem', fontSize: '.76rem' }}>
+                        <button type="button" className="btn-ghost" style={{ padding: '.1rem .5rem', fontSize: '.76rem' }} disabled={busy} onClick={() => void addPack(opt)}>
+                          {busy ? 'Working…' : `Keep ${current.archetypeId.split('/').pop()} and add its skills`}
+                        </button>
+                      </p>
+                )}
+              </Fragment>
               );
             })}
           </div>
