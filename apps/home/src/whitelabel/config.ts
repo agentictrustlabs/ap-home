@@ -468,7 +468,15 @@ const faithImpact: WhiteLabelConfig = {
           },
         },
         signedInAs: 'email',
-        hideCustodianSwitch: true,
+        // Same switch-account action as everyone's; a host signed in with an EMAIL, not a custodian.
+        switchAccountLabel: 'Not you? Use a different email',
+        // A host's "organization" is their church's listing; and the account they manage it from is
+        // their Global.Church ID, not an "Impact home".
+        orgCreate: {
+          explainer: 'This single approval sets up {org}. Your church gets its own listing page on {app}. Nothing beyond that.',
+          disconnect: 'You can disconnect {app} any time from your Global.Church ID.',
+          receipt: 'Your church is set up.',
+        },
         hideSubstrate: true,
         copy: { portalStepBusy: 'Signing you in…' },
         // The shared ceremony narration says "chain", "custody" and "keys"; a host should read none of it.

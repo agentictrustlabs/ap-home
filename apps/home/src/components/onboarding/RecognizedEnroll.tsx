@@ -53,7 +53,7 @@ import { knownRelyingClient } from '../../lib/relying-clients';
 import { agentClassOf } from '../../lib/agent-class';
 import { withMissionRegistry } from '../../lib/mission-registry';
 import { profileForConnect } from '../../lib/connect-profile-name';
-import { clientProgressText, signedInLabel, withClientConsent } from '../../whitelabel/client-consent';
+import { clientProgressText, signedInLabel, switchAccountLabel, withClientConsent } from '../../whitelabel/client-consent';
 
 /** The kinds of agent that ARE an organization holding its own members — where a team-scoped role can be offered. A
  *  workspace is not one (a service, with no members): its people belong to the organization that governs it. */
@@ -1041,11 +1041,9 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           onAuthorize={onAuthorize}
           onDecline={onDecline}
         />
-        {!relyingApp?.consent?.hideCustodianSwitch && (
-          <button className="btn-ghost onboarding-secondary" onClick={() => { clearSsoCookie(); onUnrecognized(); }}>
-            Not {home?.name?.trim() || 'you'}? Use a different custodian
-          </button>
-        )}
+        <button className="btn-ghost onboarding-secondary" onClick={() => { clearSsoCookie(); onUnrecognized(); }}>
+          {switchAccountLabel(relyingApp, home?.name)}
+        </button>
       </div>
     </div>
   );

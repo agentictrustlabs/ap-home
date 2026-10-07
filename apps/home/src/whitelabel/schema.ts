@@ -324,8 +324,20 @@ export interface ClientConsentCopy {
   /** What "Signed in as" names. `'email'` — the member's own verified email off their vault profile
    *  (best-effort; falls back to the name, then the short address). Absent — name, then short address. */
   signedInAs?: 'email';
-  /** Hide "Not <you>? Use a different custodian" on the recognized consent screen. */
-  hideCustodianSwitch?: boolean;
+  /** The account-switch button on the recognized consent screen, in the app's own words (same action:
+   *  clear the session, back to the sign-in door). Absent → "Not <you>? Use a different custodian". */
+  switchAccountLabel?: string;
+  /** The org-create sheet's own prose (OrgConsent), for an app whose org is something else to its
+   *  people (Gather27: a church's listing). `{app}` / `{org}` are interpolated (`fmt`). Each absent key
+   *  keeps the shared sentence; the select-existing wording is never replaced. */
+  orgCreate?: {
+    /** The explainer paragraph above the sheet for a NEW org. */
+    explainer?: string;
+    /** The "You can disconnect … from your … home" line. */
+    disconnect?: string;
+    /** The "is ready" receipt body for a NEW org. */
+    receipt?: string;
+  };
   /** Hide the hard-coded "<Home> · a Home on the Agentic Primitives substrate" line in the sign-in
    *  card's footer. The credit and links are env-driven (NEXT_PUBLIC_FOOTER_*) and are NOT touched. */
   hideSubstrate?: boolean;

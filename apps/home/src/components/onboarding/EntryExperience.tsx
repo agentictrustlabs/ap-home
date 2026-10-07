@@ -42,7 +42,7 @@ import { NewMemberSetup } from './NewMemberSetup';
 import { isNewHomeMoment, newMemberPlan, planIsEmpty, type NewMemberPlan } from '../../lib/new-member';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
 import { parseEnrollReq } from './useEnrollReq';
-import { clientCopy, clientProgressText, withClientConsent } from '../../whitelabel/client-consent';
+import { clientCopy, clientProgressText, orgCreateText, withClientConsent } from '../../whitelabel/client-consent';
 
 interface NameInfo { exists?: boolean; agent?: Address; deployed?: boolean; hasEoa?: boolean; hasPasskey?: boolean; connectionKind?: string | null; connectionAddress?: string | null; passkeySigningAvailable?: boolean | null }
 /** Human label for the owner-published connection kind (spec 280) — guides which button to use. */
@@ -1369,7 +1369,7 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
     );
   }
   // Spec 255 W4.1 — the org-create "connected" receipt: what the single approval accomplished.
-  if (phase === 'connected') return <Shell><BrandShield size={56} /><h1 className="onboarding-h1">{orgBase} is ready</h1><ReceiptCard title={`${orgBase} is ready`} body={existingOrg ? `${orgAppName} can now read what it posts — the organization stays in your control.` : isWorkspace ? `The organization and its workspace are started, their names are claimed, and ${orgAppName} can act as this workspace — revocably.` : `Its home is started, its name is claimed, and ${orgAppName} can now read what it posts.`} /><p className="onboarding-sub">Returning you to {orgAppName}…</p><WorkingBar /></Shell>;
+  if (phase === 'connected') return <Shell><BrandShield size={56} /><h1 className="onboarding-h1">{orgBase} is ready</h1><ReceiptCard title={`${orgBase} is ready`} body={existingOrg ? `${orgAppName} can now read what it posts — the organization stays in your control.` : isWorkspace ? `The organization and its workspace are started, their names are claimed, and ${orgAppName} can act as this workspace — revocably.` : orgCreateText(orgClient, 'receipt', { app: orgAppName, org: orgBase }, `Its home is started, its name is claimed, and ${orgAppName} can now read what it posts.`)} /><p className="onboarding-sub">Returning you to {orgAppName}…</p><WorkingBar /></Shell>;
   if (phase === 'error') return <Shell><h1 className="onboarding-h1">Couldn&apos;t finish</h1><p className="onboarding-hint taken">{err}</p><button className="btn-primary" onClick={() => setPhase(preselected ? 'consent' : 'choose')}>Try again</button></Shell>;
   return (
     <Shell>
@@ -1383,9 +1383,9 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
             ? `This single approval lets ${orgAppName} read what ${orgBase} posts. Nothing beyond that — no new organization is created.`
             : isWorkspace
               ? `This single approval starts an organization under your name and the workspace it governs, claims both names, and lets ${orgAppName} act as that workspace. Nothing beyond that.`
-              : `This single approval starts the organization, claims its name, and lets ${orgAppName} read what it posts. Nothing beyond that.`}
+              : orgCreateText(orgClient, 'explainer', { app: orgAppName, org: orgBase }, `This single approval starts the organization, claims its name, and lets ${orgAppName} read what it posts. Nothing beyond that.`)}
         </p>
-        <p className="securing-wait">You can disconnect {orgAppName} at any time from your Impact home.</p>
+        <p className="securing-wait">{orgCreateText(orgClient, 'disconnect', { app: orgAppName, org: orgBase }, `You can disconnect ${orgAppName} at any time from your Impact home.`)}</p>
       </div>
       <ConsentSheet
         title={existingOrg ? `Connect ${orgBase} to ${orgAppName}` : isWorkspace ? `Create ${orgBase} and its workspace` : ownWording ? `Create ${orgBase}` : `Create ${orgBase} in the ${whitelabel.brand.community}`}

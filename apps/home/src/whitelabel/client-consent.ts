@@ -7,7 +7,7 @@
 // says nothing, so an app without `consent` renders byte-for-byte as before (client-consent.test.ts
 // proves that over the whole registry). Presentation only: the caveats live in the template and the
 // contract; nothing here changes what a grant can do.
-import { whitelabel, type RelyingApp, type WhiteLabelCopy } from './config';
+import { fmt, whitelabel, type RelyingApp, type WhiteLabelCopy } from './config';
 
 type ConsentClient = Pick<RelyingApp, 'consent'> | null | undefined;
 
@@ -58,4 +58,25 @@ export function signedInLabel(
   const email = app?.consent?.signedInAs === 'email' ? (who.email ?? '').trim() : '';
   if (email) return email;
   return who.name?.trim() || (who.address ? `${who.address.slice(0, 6)}…${who.address.slice(-4)}` : '');
+}
+
+/** The account-switch button on the recognized consent screen — same action for every client, the
+ *  client's own words when it registered them. */
+export function switchAccountLabel(app: ConsentClient, name: string | undefined): string {
+  return app?.consent?.switchAccountLabel ?? `Not ${name?.trim() || 'you'}? Use a different custodian`;
+}
+
+/**
+ * One sentence of the org-create sheet (OrgConsent): the client's own, interpolated with `{app}` /
+ * `{org}`, or `fallback` — the shared sentence, passed in already built, so a client without
+ * `consent.orgCreate` gets exactly the string it got before.
+ */
+export function orgCreateText(
+  app: ConsentClient,
+  key: 'explainer' | 'disconnect' | 'receipt',
+  vars: { app: string; org: string },
+  fallback: string,
+): string {
+  const own = app?.consent?.orgCreate?.[key];
+  return own ? fmt(own, vars) : fallback;
 }

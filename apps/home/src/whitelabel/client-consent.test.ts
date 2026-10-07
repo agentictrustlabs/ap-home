@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { whitelabel } from './config';
-import { clientCopy, clientProgressText, signedInLabel, withClientConsent } from './client-consent';
+import { clientCopy, clientProgressText, orgCreateText, signedInLabel, switchAccountLabel, withClientConsent } from './client-consent';
 import { sharesEmailClaim } from './provisioning';
 
 const gather = whitelabel.relyingApps.find((a) => a.client_id === 'gather-app')!;
@@ -54,6 +54,22 @@ describe('gather-app — its own words', () => {
     expect(signedInLabel(gather, { email: '', address: ADDR })).toBe('0x6a25…f058');
   });
 
+  it('keeps an account switch, worded for email', () => {
+    expect(switchAccountLabel(gather, 'ana')).toBe('Not you? Use a different email');
+  });
+
+  it('the org-create prose is about the church listing, not a home or a name', () => {
+    const vars = { app: 'Gather27', org: 'Grace Church' };
+    expect(orgCreateText(gather, 'explainer', vars, 'SHARED')).toBe(
+      'This single approval sets up Grace Church. Your church gets its own listing page on Gather27. Nothing beyond that.',
+    );
+    expect(orgCreateText(gather, 'disconnect', vars, 'SHARED')).toBe('You can disconnect Gather27 any time from your Global.Church ID.');
+    expect(orgCreateText(gather, 'receipt', vars, 'SHARED')).toBe('Your church is set up.');
+    for (const k of ['explainer', 'disconnect', 'receipt'] as const) {
+      expect(orgCreateText(gather, k, vars, 'SHARED')).not.toMatch(/\bhome\b|chain|custod|Impact|name is claimed|claims its name/i);
+    }
+  });
+
   it('busy note and chain narration are plain', () => {
     expect(clientCopy(gather, 'portalStepBusy')).toBe('Signing you in…');
     expect(clientProgressText(gather, 'Confirming it on the chain…')).toBe('Confirming…');
@@ -80,6 +96,11 @@ describe('every other client — the shared defaults, unchanged', () => {
       expect(clientProgressText(app, 'Confirming it on the chain…')).toBe('Confirming it on the chain…');
       expect(signedInLabel(app, { email: 'x@y.z', name: 'ana', address: ADDR })).toBe('ana');
       expect(signedInLabel(app, { email: 'x@y.z', address: ADDR })).toBe('0x6a25…f058');
+      expect(switchAccountLabel(app, 'ana')).toBe('Not ana? Use a different custodian');
+      expect(switchAccountLabel(app, undefined)).toBe('Not you? Use a different custodian');
+      for (const k of ['explainer', 'disconnect', 'receipt'] as const) {
+        expect(orgCreateText(app, k, { app: 'X', org: 'Y' }, 'SHARED')).toBe('SHARED');
+      }
     }
   });
 
