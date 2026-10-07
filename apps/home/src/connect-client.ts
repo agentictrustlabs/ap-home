@@ -48,6 +48,7 @@ import { connectWallet, connectWalletAccounts, personalSign, rememberHomeEoa, re
 import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, connectAssertionDiscoverable, loadPasskey, clearPasskey, passkeyRpId, type DemoPasskey } from './lib/passkey';
 import { ensureCsrfToken, csrfHeaders } from './csrf';
 import { CONTRACTS, CONTRACTS_GENERATION, DEFAULT_RPC_URL, CHAIN, CHAIN_ID, PERMISSIONLESS_SUBREGISTRIES } from './lib/chain';
+import { NAMING_COIN, TREASURY_BIRTHRIGHT_COINS, isPricedTld } from './lib/naming-price';
 import { buildRegisterEntryCall, hashBindingProofBody, type RegistryId, type RegistryEntryId } from '@agenticprimitives/registry-kit';
 import { hashAgentCard, type AgentCard, agentProfileResolverAbi, buildRegisterProfileCall } from '@agenticprimitives/agent-profile';
 import { recordOrgMembership, issueFounderCredential } from './lib/org-membership';
@@ -724,17 +725,27 @@ export async function secureHomeWithGoogle(
     error?: string;
   };
   if (!picked.label || !picked.name || !picked.node) return { ok: false, error: picked.error ?? 'no free name' };
+  // ap-town spec 431 — on a PRICED person root the name is bought: deploy the home nameless, then buy `<label>.me`
+  // from the person's own treasury (born here with its 1,000 SHQ), the home presenting it. Same shape as the org
+  // path below; the legacy claim in the deploy batch reverts on a priced root.
+  const bought = !!typed.tld && isPricedTld(typed.tld) && !!NAMING_COIN;
   onStep?.('Securing your home on the network…');
   await ensureCsrfToken();
   const res = await fetch('/a2a/custody/oidc/bootstrap-and-claim', {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
-    body: JSON.stringify({ session: sessionToken, label: picked.label, node: picked.node, tld: typed.tld }),
+    body: JSON.stringify(bought ? { session: sessionToken, tld: typed.tld, nameLater: true } : { session: sessionToken, label: picked.label, node: picked.node, tld: typed.tld }),
   });
-  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; agent?: Address; name?: string; error?: string; detail?: string };
+  const body = (await res.json().catch(() => ({}))) as { ok?: boolean; agent?: Address; name?: string; error?: string; detail?: string; alreadyDeployed?: boolean };
   if (!res.ok || !body.ok || !body.agent) {
     return { ok: false, error: [body.error, body.detail].filter(Boolean).join(' — ') || `secure-home failed (HTTP ${res.status})` };
+  }
+  if (bought && typed.tld) {
+    onStep?.('Buying your name…');
+    const buy = await buyNameWithGoogle({ sessionToken, person: body.agent, owner: body.agent, label: picked.label, tld: typed.tld, onStep });
+    if (!buy.ok) return { ok: false, error: `your home is secured (${body.agent}) but nameless — the name was not bought: ${buy.error}. Choose one from Naming.` };
+    return { ok: true, agent: body.agent, name: buy.name };
   }
   try {
     const wr = await executeCalls(body.agent, googleSignHash(body.agent, sessionToken), buildNameRecordCalls(picked.node, body.agent, { agentKind: 'person' }));
@@ -2124,6 +2135,33 @@ export async function signsWithoutPrompt(via: string, sessionToken: string): Pro
 // `fundTreasury` (the browser-built mint userOp) retired 2026-09-06 — the Fund button goes through
 // the harness (`home/fund-harness.ts`), one implementation with the Ask (spec 361 I4). deletes > deprecations.
 
+/**
+ * Buy a name for an agent a KMS person custodies (ap-town spec 431), signing everything with C_sub: the person's
+ * treasury pays (found among their links; made, and given its 1,000 SHQ birthright, when missing), the agent
+ * presents. Zero device prompts, like the rest of the KMS family's ceremonies.
+ */
+async function buyNameWithGoogle(input: { sessionToken: string; person: Address; owner: Address; label: string; tld: string; onStep?: ((s: string) => void) | undefined }): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+  const { sessionToken, person, owner, label, tld, onStep } = input;
+  if (!NAMING_COIN) return { ok: false, error: 'no naming coin on this chain' };
+  let treasury = (await listManagedAgents(sessionToken, 'any').catch(() => [])).find((a) => a.kind === 'person-treasury' && (a.relationship ?? 'steward') === 'steward')?.agent ?? null;
+  if (!treasury) {
+    onStep?.('Making your treasury…');
+    const made = await createManagedAgent({ kind: 'person-treasury', parent: person, person, via: 'google' }, sessionToken, onStep);
+    if (!made.ok) return { ok: false, error: `treasury: ${made.error}` };
+    treasury = made.result.agent;
+    onStep?.(`Minting ${TREASURY_BIRTHRIGHT_COINS} SHQ into your treasury…`);
+    const mint = encodeFunctionData({ abi: MINT_ABI, functionName: 'mint', args: [treasury, BigInt(TREASURY_BIRTHRIGHT_COINS) * 10n ** BigInt(NAMING_COIN.decimals)] });
+    const minted = await executeCalls(person, googleSignHash(person, sessionToken), [{ to: NAMING_COIN.address, value: 0n, data: mint }]);
+    if (!minted.ok) return { ok: false, error: `mint: ${minted.error}` };
+  }
+  const custodian = await resolveCredential('google', null, sessionToken).catch(() => null);
+  const r = await purchaseName({
+    token: sessionToken, owner, payer: treasury, label, tld, coin: NAMING_COIN.address, ...(custodian ? { custodian } : {}),
+    signPayer: googleSignHash(treasury, sessionToken), signOwner: googleSignHash(owner, sessionToken), ...(onStep ? { onStep } : {}),
+  });
+  return r.ok ? { ok: true, name: r.name } : { ok: false, error: r.error };
+}
+
 /** spec 256 — org-create for a GOOGLE member: the org is custodied by their per-(iss,sub) KMS
  *  custodian C_sub and deployed + named + grant-approved SERVER-SIDE in one C_sub-signed userOp —
  *  ZERO device prompts (their only gesture was signing in with Google). Mirrors createChildAgentForSite's
@@ -2147,13 +2185,20 @@ export async function createOrganizationWithGoogle(
   };
   if (!picked.label || !picked.name || !picked.node) return { ok: false, error: picked.error ?? 'no free name' };
 
+  // ap-town spec 431 — on a PRICED ending the name is bought, not registered: the runtime deploys the org nameless
+  // (`nameLater`) and this Home buys the name next — a ticket from its naming gate, the fee from the person's
+  // treasury, the org presents it — the same purchase the Stewardship charter makes. The legacy register call the
+  // runtime used to put in the deploy batch reverted on every priced root (club charters at gamenight, 2026-10-06).
+  const bought = !!typed && isPricedTld(typed.tld) && !!NAMING_COIN;
   await ensureCsrfToken();
   onStep?.('Starting the organization…');
   const res = await fetch('/a2a/custody/oidc/bootstrap-org', {
     method: 'POST',
     credentials: 'include',
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
-    body: JSON.stringify({ session: sessionToken, label: picked.label, node: picked.node, delegate, grantOrg: cOpts.grantOrg, tld: typed?.tld }),
+    body: JSON.stringify(bought
+      ? { session: sessionToken, delegate, grantOrg: cOpts.grantOrg, tld: typed.tld, nameLater: true }
+      : { session: sessionToken, label: picked.label, node: picked.node, delegate, grantOrg: cOpts.grantOrg, tld: typed?.tld }),
   });
   const b = (await res.json().catch(() => ({}))) as {
     ok?: boolean; org?: Address; name?: string; person?: Address;
@@ -2166,7 +2211,13 @@ export async function createOrganizationWithGoogle(
 
   const childAgent = b.org;
   const personAgent = b.person;
-  const childName = b.name ?? picked.name;
+  let childName = b.name || picked.name;
+  if (bought && typed) {
+    onStep?.('Buying its name…');
+    const buy = await buyNameWithGoogle({ sessionToken, person: personAgent, owner: childAgent, label: picked.label, tld: typed.tld, onStep });
+    if (!buy.ok) return { ok: false, error: `${childAgent} exists, unnamed — its name was not bought: ${buy.error}. Name it from its Naming page.` };
+    childName = buy.name;
+  }
   try {
     const signHash = googleSignHash(childAgent, sessionToken);
     const writes = buildNameRecordCalls(picked.node, childAgent, childDiscoveryRecords(base, cOpts));
