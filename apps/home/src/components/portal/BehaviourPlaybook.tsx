@@ -114,17 +114,44 @@ function ToolLine({ id, description, risk }: { id: string; description: string; 
 
 /** The diff panel: what this definition would make the agent able to do, and what it would start
  *  asking authority for. Reads only real fields of the definition. */
+/**
+ * A composed playbook's text runs to thousands of lines (person-steward with a pack: ~50,000px of page), and the
+ * things a person can ADD sit below it (owner, 2026-10-06: "reduce the playbook text view so I can see the things I
+ * can add below it"). So the text and the tool list open on a press: a few lines and the counts by default.
+ */
+function Folded({ text, lines = 8, label }: { text: string; lines?: number; label: string }) {
+  const [open, setOpen] = useState(false);
+  const all = text.split('\n');
+  const long = all.length > lines || text.length > 900;
+  const shown = open || !long ? text : `${all.slice(0, lines).join('\n').slice(0, 900)}…`;
+  return (
+    <div>
+      <p style={{ margin: '0 0 .3rem', fontSize: '.82rem', color: 'var(--color-text-muted)', whiteSpace: 'pre-wrap' }}>{shown}</p>
+      {long && <button type="button" className="btn-ghost" style={{ padding: '.1rem .5rem', fontSize: '.76rem' }} onClick={() => setOpen((v) => !v)}>{open ? 'Show less' : label}</button>}
+    </div>
+  );
+}
+
 function DiffPreview({ def, assigned = false }: { def: AgentHarnessDefinitionV1; assigned?: boolean }) {
   const mandates = def.requiredMandateTypes ?? [];
+  const tools = def.tools ?? [];
+  const [toolsOpen, setToolsOpen] = useState(!assigned && tools.length <= 12);
   return (
     <div style={{ border: '1px solid var(--color-border)', borderRadius: 10, padding: '.85rem 1rem', background: 'var(--color-surface, #fff)' }}>
-      <p style={{ margin: '0 0 .5rem', fontSize: '.82rem', color: 'var(--color-text-muted)', whiteSpace: 'pre-wrap' }}>{def.instructions}</p>
-      <h4 style={{ margin: '.6rem 0 .2rem', fontSize: '.82rem' }}>{assigned ? 'Tools this agent runs' : 'Tools it would use'}</h4>
-      <ul style={{ margin: 0, paddingLeft: '1.1rem', listStyle: 'disc' }}>
-        {(def.tools ?? []).map((t) => (
-          <ToolLine key={t.id} id={t.id} description={t.description} risk={t.risk} />
-        ))}
-      </ul>
+      <Folded text={def.instructions} label={`Read the whole playbook (${def.instructions.split('\n').length} lines)`} />
+      <h4 style={{ margin: '.6rem 0 .2rem', fontSize: '.82rem' }}>
+        {assigned ? 'Tools this agent runs' : 'Tools it would use'} <span style={{ fontWeight: 400, color: 'var(--color-text-muted)' }}>· {tools.length}</span>
+        {tools.length > 12 && <button type="button" className="btn-ghost" style={{ marginLeft: '.5rem', padding: '.05rem .45rem', fontSize: '.74rem' }} onClick={() => setToolsOpen((v) => !v)}>{toolsOpen ? 'Hide' : 'List them'}</button>}
+      </h4>
+      {toolsOpen ? (
+        <ul style={{ margin: 0, paddingLeft: '1.1rem', listStyle: 'disc' }}>
+          {tools.map((t) => (
+            <ToolLine key={t.id} id={t.id} description={t.description} risk={t.risk} />
+          ))}
+        </ul>
+      ) : (
+        <p style={{ margin: 0, fontSize: '.78rem', color: 'var(--color-text-muted)', overflowWrap: 'anywhere' }}>{tools.slice(0, 14).map((t) => t.id).join(' · ')}{tools.length > 14 ? ` · +${tools.length - 14} more` : ''}</p>
+      )}
       <h4 style={{ margin: '.7rem 0 .2rem', fontSize: '.82rem' }}>{assigned ? 'Authority it asks for' : 'Authority it would start asking for'}</h4>
       {mandates.length === 0 ? (
         <p style={{ margin: 0, fontSize: '.8rem', color: 'var(--color-text-muted)' }}>None — this archetype only reads and converses.</p>
