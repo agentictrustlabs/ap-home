@@ -700,6 +700,16 @@ export async function createOrganization(
   // NAMELESS and buys its name next from the person's treasury, as the KMS path and the portal already do. Sending
   // the legacy register call in the deploy batch reverted the whole ceremony (0xea8e4eb5) for every such sign-in.
   const bought = !isKmsVia(via) && kindNameIsBought('org');
+  // Pick the label BEFORE anything is deployed: a label the naming gate refuses (a real domain, a taken name) must
+  // deploy nothing — 0xB992… exists unnamed because the pick came after the deploy on 2026-10-08.
+  let boughtLabel: string | null = null;
+  if (bought) {
+    const typed = typedTldForKind('org');
+    const pr = await fetch(`/connect/name?base=${encodeURIComponent(base)}${typed ? `&tld=${encodeURIComponent(typed.tld)}` : ''}`);
+    const picked = (await pr.json().catch(() => ({}))) as { label?: string; error?: string; detail?: string };
+    if (!pr.ok || !picked.label) return { ok: false, error: picked.detail ?? picked.error ?? `no free name for “${base}”` };
+    boughtLabel = picked.label;
+  }
   const r = isKmsVia(via)
     ? (auth?.token
         ? await createOrganizationWithGoogle(auth.token, base, delegate, opts, via, (s) =>
@@ -720,11 +730,8 @@ export async function createOrganization(
   if (bought) {
     if (!auth?.token) return { ok: false, error: `${x.childAgent} exists, unnamed — buying its name needs a Home session. Name it from its Naming page.` };
     say?.({ step: 2, total: 5, label: 'Buying its name…', hint: 'Your treasury pays; the organization presents it.' });
-    const typed = typedTldForKind('org');
-    const picked = (await (await fetch(`/connect/name?base=${encodeURIComponent(base)}${typed ? `&tld=${encodeURIComponent(typed.tld)}` : ''}`)).json().catch(() => ({}))) as { label?: string; error?: string };
-    if (!picked.label) return { ok: false, error: `${x.childAgent} exists, unnamed — no free name for “${base}”: ${picked.error ?? 'none offered'}. Name it from its Naming page.` };
     const name = await buyNameForNewAgent(
-      { agent: x.childAgent, label: picked.label, kind: 'org', parent: home.address, person: home.address, via, token: auth.token, ...(commonName ? { displayName: commonName } : {}) },
+      { agent: x.childAgent, label: boughtLabel!, kind: 'org', parent: home.address, person: home.address, via, token: auth.token, ...(commonName ? { displayName: commonName } : {}) },
       (s) => say?.({ step: 2, total: 5, label: s }),
     );
     if (!name.ok) return { ok: false, error: `${x.childAgent} exists, unnamed — its name was not bought: ${name.error}. Name it from its Naming page.` };
