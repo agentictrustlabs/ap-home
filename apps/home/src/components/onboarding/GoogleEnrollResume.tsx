@@ -198,9 +198,18 @@ export function GoogleEnrollResume() {
       // on-chain (C_sub looks like an EOA) and re-entry shows the credential chooser instead of
       // routing straight through the provider.
       void publishSocialConnectionKindIfNeeded(home.address, home.name, 'google', { token });
+      // `ask_with_login` — the SAME mint as RecognizedEnroll's plain sign-in: the ask-as-me wire (person → the app's
+      // ask key, harness.ask only, 30 days) rides this Google sign-in, so a social home never needs a second ceremony to
+      // put its person's question to their own agent. Without this leg a Google home connected to the Bible Explorer
+      // read "this session has no wire to your agent" after every reconnect (2026-10-08).
+      let askWire: unknown;
+      if ((!enroll.template || enroll.template === 'site-login') && relyingApp?.ask_with_login && relyingApp.ask_delegate) {
+        const signAsk = await signHashFor('google', home.address, { token });
+        askWire = toWire(await issueAskAsMeDelegation(home.address, relyingApp.ask_delegate, signAsk));
+      }
       let code: string;
       try {
-        code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation, granted.selfVaultGrant);
+        code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation, granted.selfVaultGrant, undefined, askWire);
       } catch (e) {
         // The REUSED standing grant was refused (revoked / no longer verifiable). Clear it and mint
         // fresh ONCE — the single explicit fallback (ADR-0013). A fresh-mint refusal is terminal.
@@ -209,7 +218,7 @@ export function GoogleEnrollResume() {
         clearStandingGrant(home.address, delegate);
         granted = await givePermission(home, delegate, 'google', { token }, enroll.sessionKey, payment, selfVaultScope);
         if (!granted.ok) return fail(granted.error);
-        code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation, granted.selfVaultGrant);
+        code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation, granted.selfVaultGrant, undefined, askWire);
       }
       // spec 256 — PERSIST the Google custody session as the cross-subdomain SSO cookie. The user just
       // proved control of their Impact home with Google; keeping that token (`.impact-agent.me`, spec 232)
