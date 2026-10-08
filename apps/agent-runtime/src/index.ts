@@ -4556,7 +4556,14 @@ app.post('/harness/ask', async (c) => {
         const zones = a2aBaseDomains(c.env);
         const reachFetch: typeof fetch = async (u, init) => {
           const host = (() => { try { return new URL(String(u instanceof Request ? u.url : u)).hostname.toLowerCase(); } catch { return ''; } })();
-          if (host && zones.some((z) => host === z || host.endsWith(`.${z}`))) return app.fetch(new Request(u instanceof Request ? u.url : String(u), init), c.env, executionContextFor(c.executionCtx));
+          if (host && zones.some((z) => host === z || host.endsWith(`.${z}`))) {
+            // In-process first. A zone host this Worker does NOT serve (a service on its own custom domain in the
+            // same zone — scripture.faithnet.io, bsb.faithnet.io) answers 404 here; THAT card lives on the network,
+            // and a Worker may fetch another Worker's custom domain (only its own hostname is unreachable).
+            const here = await app.fetch(new Request(u instanceof Request ? u.url : String(u), init), c.env, executionContextFor(c.executionCtx));
+            if (here.status !== 404) return here;
+            return fetch(u, init);
+          }
           return fetch(u, init);
         };
         // Spec 397 — the card through the name's records, at her agent (387's inspect): public facts, pinned when pinned.

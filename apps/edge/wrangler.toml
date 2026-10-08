@@ -63,7 +63,7 @@ ENTRY_POINT = "0xf7855250B3363AB7649B10957d8908A9AFcdD4B5"
 DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
 UNIVERSAL_SIGNATURE_VALIDATOR = "0xeDd56f500325D4701B9985A34e5Fa6EED6716137"
 SA_BUDGET_LIMIT_UNITS = "10"
-EDGE_ALLOWED_ORIGINS = "https://faithnet.me,https://www.faithnet.me,https://gather27-web-faithnet.richardpedersen3.workers.dev,https://gather27-web-churchglobal.richardpedersen3.workers.dev,http://localhost:5175"
+EDGE_ALLOWED_ORIGINS = "https://faithnet.me,https://www.faithnet.me,https://gather27-web-faithnet.richardpedersen3.workers.dev,https://gather27-web-churchglobal.richardpedersen3.workers.dev,https://explorer.faithnet.io,https://demo-bible-ontology-faithnet.richardpedersen3.workers.dev,http://localhost:8795,http://localhost:5175"
 
 [[env.faithnet.durable_objects.bindings]]
 name = "SA_BUDGET"

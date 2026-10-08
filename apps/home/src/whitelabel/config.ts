@@ -682,8 +682,16 @@ const faithImpact: WhiteLabelConfig = {
       allowed_scopes: ['openid', 'agent'],
       // spec 272/243 — `x402-pay`: the member authorizes (once) a capped payment delegation from
       // their person-treasury to the lbsb licensed-scripture treasury, redeemed per paid read (x402).
-      allowed_delegation_templates: ['site-login', 'org-create', 'x402-pay'],
+      // Spec 397 — `ask-as-me`: the Explorer's Ask puts the question to the PERSON'S OWN agent as them
+      // (their agent then engages scripture-resolver.svc under their standing and reads their context from
+      // their own vault — nothing personal leaves the Explorer page). The wire names `ask_delegate`.
+      allowed_delegation_templates: ['site-login', 'org-create', 'x402-pay', 'ask-as-me'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      // The key the Scripture Agent worker (demo-bible-a2a, the Explorer's backend) signs `A2A-Session`
+      // assertions with: scripture-resolver.svc's AKCS delegate key on faithchain (the Explorer is that
+      // service's registered site, atl:siteUrl). A dedicated Explorer ask key is an operator ceremony
+      // (`akcs operator create-key` + bind-caller) — set NEXT_PUBLIC_BIBLE_EXPLORER_ASK_DELEGATE to swap it.
+      ask_delegate: (process.env.NEXT_PUBLIC_BIBLE_EXPLORER_ASK_DELEGATE || '0x43a07B8c5F96FfD62B2c5Bc0f58bd21DACa6E881') as `0x${string}`,
       // x402 push: USDC lands at the lbsb-treasury SA; the reader redeems at access time (OPEN delegate).
       // 0.001 USDC/read (1000 atomic, 6-dp mock USDC), 1.0 USDC aggregate cap per delegation.
       paymentConfig: {
