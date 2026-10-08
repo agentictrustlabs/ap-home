@@ -87,7 +87,7 @@
     "eoaAddress": "0x4d71C7248A565ACA98d608E1c6C561d457D2f080"
   },
   "jpreg": {
-    "name": "Jordan Pike — Joshua Project",
+    "name": "Jordan Pike \u2014 Joshua Project",
     "sa": "0xdc94ef1f5c3dd1027859502d8b77665291cdaa95",
     "custodies": [
       {
@@ -98,7 +98,7 @@
     "eoaPrivateKey": "0xfa6583d164259c0de9373fef4ceea6f4d30db4d8876d875a7922daf0dfd31e35"
   },
   "imbreg": {
-    "name": "Imani Bell — PeopleGroups.org (IMB)",
+    "name": "Imani Bell \u2014 PeopleGroups.org (IMB)",
     "sa": "0x263a0e2fb14b17873307e5913cc25a9429ebb39d",
     "custodies": [
       {
@@ -109,7 +109,7 @@
     "eoaPrivateKey": "0x08d6e3a1bf0608e582a419c92aaa8d32a1f157a65865c74295d7225eb0d462e7"
   },
   "pokersite": {
-    "name": "Poker Site — Pokernight",
+    "name": "Poker Site \u2014 Pokernight",
     "sa": "0x52b28B0AF0f0e52378651a156A43Cf1044966976",
     "blurb": "Runs the Pokernight card room. Custodies its Service Agent and its Treasury.",
     "custodies": [
@@ -125,5 +125,11 @@
       }
     ],
     "eoaPrivateKey": "0x6df681145d25529156af8dd0b2f884dcb9fc471edbd07924af9c5024526da556"
+  },
+  "demo-admin": {
+    "name": "Demo Admin",
+    "sa": "0x6142b0fca982f6701cf2248bf368ab44a48c5725",
+    "custodies": [],
+    "eoaPrivateKey": "0xf31348ae2cad24bdeec2e1f517404281ed30ced66b656fd48a5990ab05dd9758"
   }
 }
