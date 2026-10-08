@@ -15,6 +15,7 @@ import { StatePill } from './StatePill';
 import { stateOf } from '../../home/run-state';
 import { readComparisonKnobs, startExperiment, readExperiment, cancelExperiment, variantFromForm, prefillFromQuery, ARM_NAME, type ComparisonKnobsV1, type ExperimentProgressV1 } from '../../home/experiments';
 import { applyWords, armWords, defaultDraft, emptyArm, readyWords, type ArmRow, type ComparisonDraft, type EvalSetSummary } from '../../home/comparison-defaults';
+import { parseLibraryEvalSets, librarySetIdOf, librarySetParam, type LibraryEvalSet } from '../../home/library-eval-sets';
 
 const JUDGE_PROFILES = ['', 'thorough', 'fast', 'logprob'];
 const POLL_MS = 4000;
@@ -34,7 +35,12 @@ export function ComparisonRunner() {
   // THE DRAFT (owner, 2026-10-01): everything has a default a person can run as-is — set once the deployment's knobs and
   // the baked sets are known; every control below edits it. `touched` keeps a person's own change from being overwritten.
   const [draft, setDraft] = useState<ComparisonDraft | null>(null);
-  const [source, setSource] = useState<'named' | 'upload'>('named');
+  // THREE SOURCES: a baked set, one of the organization's own LIBRARY sets (what the skills app saved there, versioned —
+  // read with the person's session the moment an organization is chosen, so a set runs without a pull or a re-upload),
+  // or an upload.
+  const [source, setSource] = useState<'named' | 'library' | 'upload'>('named');
+  const [librarySets, setLibrarySets] = useState<LibraryEvalSet[]>([]);
+  const [libraryNote, setLibraryNote] = useState<string | null>(null);
   const [setFile, setSetFile] = useState<File | null>(null);
   const [goldFile, setGoldFile] = useState<File | null>(null);
   const [fixturesFile, setFixturesFile] = useState<File | null>(null);
@@ -52,6 +58,20 @@ export function ComparisonRunner() {
     void listManagedAgents(token, 'any').then((o) => { const mine = o.filter((a) => a.relationship === 'steward' && a.kind !== 'service' && a.kind !== 'person-treasury' && a.kind !== 'org-treasury').map((a) => ({ agent: a.agent, name: a.name })); setOrgs(mine); setAddressee((cur) => cur || mine[0]?.agent || ''); });
   }, [token]);
   useEffect(() => { if (knobs && knobs !== 'loading' && !draft) setDraft(defaultDraft(knobs, sets)); }, [knobs, sets, draft]);
+  useEffect(() => {
+    if (!token || !addressee) { setLibrarySets([]); return; }
+    let live = true;
+    void fetch(`/connect/library?org=${encodeURIComponent(addressee)}&folder=evaluations`, { headers: { authorization: `Bearer ${token}` } })
+      .then(async (r) => {
+        if (!live) return;
+        if (r.status === 503 || r.status === 409 || r.status === 402) { setLibrarySets([]); setLibraryNote('this organization’s storage is off, so its library holds no sets'); return; }
+        if (!r.ok) { setLibrarySets([]); setLibraryNote(null); return; }
+        const b = (await r.json()) as { artifacts?: Parameters<typeof parseLibraryEvalSets>[0] };
+        setLibrarySets(parseLibraryEvalSets(b.artifacts ?? [])); setLibraryNote(null);
+      })
+      .catch(() => { if (live) { setLibrarySets([]); setLibraryNote(null); } });
+    return () => { live = false; };
+  }, [token, addressee]);
   // The recommended set arrives after the knobs sometimes: fill an empty set id once, never overwrite a chosen one.
   useEffect(() => { if (draft && !draft.setId && sets.length) setDraft({ ...draft, setId: defaultDraft({ providers: [], selections: [] }, sets).setId }); }, [sets, draft]);
   // A deep link (`?agent=&set=&repeats=&arms=`, e.g. from the skills app's Tests page) preselects once the lists it names
@@ -61,15 +81,20 @@ export function ComparisonRunner() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const k = knobs && knobs !== 'loading' ? knobs : null;
-    const want = prefillFromQuery(window.location.search, orgs, sets, k);
+    // A library set is named `library:<id>` in the link and exists only once the organization's library has been read.
+    const want = prefillFromQuery(window.location.search, orgs, [...sets, ...librarySets.map((x) => ({ id: librarySetParam(x.id) }))], k);
     if (!prefilled.agent && want.addressee && orgs.length) { setAddressee(want.addressee); setPrefilled((p) => ({ ...p, agent: true })); }
-    if (!prefilled.set && want.setId && sets.length && draft) { setDraft({ ...draft, setId: want.setId }); setSource('named'); setPrefilled((p) => ({ ...p, set: true })); }
+    if (!prefilled.set && want.setId && draft) {
+      const lib = librarySetIdOf(want.setId);
+      if (lib) { setDraft({ ...draft, setId: lib }); setSource('library'); setPrefilled((p) => ({ ...p, set: true })); }
+      else if (sets.length) { setDraft({ ...draft, setId: want.setId }); setSource('named'); setPrefilled((p) => ({ ...p, set: true })); }
+    }
     if (!prefilled.run && k && draft) {
       if (want.rows || want.repeats) setDraft((d) => (d ? { ...d, ...(want.rows ? { rows: want.rows } : {}), ...(want.repeats ? { repeats: want.repeats } : {}) } : d));
       if (want.notice) setPrefillNotice(want.notice);
       setPrefilled((p) => ({ ...p, run: true }));
     }
-  }, [orgs, sets, draft, prefilled, knobs]);
+  }, [orgs, sets, librarySets, draft, prefilled, knobs]);
 
   const rows = draft?.rows ?? [];
   const split = draft?.split ?? 'held-out';
@@ -78,7 +103,8 @@ export function ComparisonRunner() {
   const setRow = (i: number, patchRow: Partial<ArmRow>) => patch({ rows: rows.map((r, k) => (k === i ? { ...r, ...patchRow } : r)) });
   const setRows = (f: (rs: ArmRow[]) => ArmRow[]) => patch({ rows: f(rows) });
   const chosenSet = sets.find((x) => x.id === draft?.setId) ?? null;
-  const haveSet = source === 'named' ? !!chosenSet : !!setFile && !!goldFile;
+  const chosenLibrary = librarySets.find((x) => x.id === draft?.setId) ?? null;
+  const haveSet = source === 'named' ? !!chosenSet : source === 'library' ? !!chosenLibrary : !!setFile && !!goldFile;
   const canRun = !!token && knobs !== 'loading' && knobs !== null && knobs.evalCapture === 'on' && !!addressee && haveSet && rows.length > 0 && rows.every((r) => ARM_NAME.test(r.name));
 
   const submit = useCallback(async () => {
@@ -91,6 +117,9 @@ export function ComparisonRunner() {
         const b = (await r.json()) as { replay?: unknown; gold?: unknown; fixtures?: unknown; error?: string };
         if (!r.ok || !b.replay || !b.gold) throw new Error(b.error ?? 'the test set could not be read');
         set = b.replay; criterion = b.gold; fixtures = b.fixtures;
+      } else if (source === 'library') {
+        if (!chosenLibrary) throw new Error('the library set is no longer listed — choose it again');
+        set = chosenLibrary.replay; criterion = chosenLibrary.gold; fixtures = chosenLibrary.fixtures;
       } else {
         [set, criterion, fixtures] = await Promise.all([readJsonFile(setFile), readJsonFile(goldFile), readJsonFile(fixturesFile)]);
         if (fixtures && typeof fixtures === 'object' && 'fixtures' in (fixtures as object)) fixtures = (fixtures as { fixtures: unknown }).fixtures;
@@ -101,7 +130,7 @@ export function ComparisonRunner() {
       setProgress(r.progress);
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
-  }, [token, canRun, draft, source, setFile, goldFile, fixturesFile, rows, addressee, split, repeats, planId]);
+  }, [token, canRun, draft, source, chosenLibrary, setFile, goldFile, fixturesFile, rows, addressee, split, repeats, planId]);
 
   // One case per alarm on the deployment: poll until the object says it is done, failed or cancelled.
   useEffect(() => {
@@ -172,11 +201,19 @@ export function ComparisonRunner() {
               </select>
             ) : <span>No organization you steward is listed.</span>],
             ['Test set', <span key="set" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              <select value={source === 'named' ? draft.setId : '__upload'} onChange={(e) => { if (e.target.value === '__upload') setSource('upload'); else { setSource('named'); patch({ setId: e.target.value }); } }} data-testid="comparison-runner-set">
+              <select value={source === 'named' ? draft.setId : source === 'library' ? librarySetParam(draft.setId) : '__upload'}
+                      onChange={(e) => { const v = e.target.value; const lib = librarySetIdOf(v); if (v === '__upload') setSource('upload'); else if (lib) { setSource('library'); patch({ setId: lib }); } else { setSource('named'); patch({ setId: v }); } }} data-testid="comparison-runner-set">
                 {sets.map((x) => <option key={x.id} value={x.id}>{x.title} · {x.cases} cases{x.recommended ? ' · recommended' : ''}</option>)}
+                {librarySets.length > 0 && (
+                  <optgroup label="From this organization’s library">
+                    {librarySets.map((x) => <option key={x.id} value={librarySetParam(x.id)}>{x.title} · {x.cases} cases{x.version ? ` · v${x.version}` : ''}</option>)}
+                  </optgroup>
+                )}
                 <option value="__upload">Upload my own…</option>
               </select>
               {chosenSet && source === 'named' ? <span className="ui-micro">{chosenSet.domain} · {chosenSet.fixtures ? 'with fixtures' : 'no fixtures'}</span> : null}
+              {chosenLibrary && source === 'library' ? <span className="ui-micro" data-testid="comparison-runner-library-set">from the library · {chosenLibrary.version ? `v${chosenLibrary.version} · ` : ''}{chosenLibrary.fixtures ? 'with fixtures' : 'no fixtures'}</span> : null}
+              {libraryNote && !librarySets.length ? <span className="ui-micro">{libraryNote}</span> : null}
             </span>],
             ...(source === 'upload' ? [
               ['Replay set (.replay.json)', <input key="set" type="file" accept="application/json,.json" onChange={(e) => setSetFile(e.target.files?.[0] ?? null)} />] as [string, React.ReactNode],
