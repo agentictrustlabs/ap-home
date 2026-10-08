@@ -59,6 +59,14 @@ export function invalidateCsrfCache(): void {
   cached = null;
 }
 
+/** Drop the token cookie too, so the next `ensureCsrfToken` fetches a fresh one instead of trusting a cookie that is
+ *  "for this origin" but which the server has just rejected — stale past its validity, or minted under a rotated
+ *  secret. A deploy pressed from a long-open tab died on exactly that ("agent deploy failed: csrf invalid", 2026-10-08). */
+export function resetCsrf(): void {
+  cached = null;
+  try { document.cookie = `${CSRF_COOKIE}=; max-age=0; path=/`; } catch { /* not a browser */ }
+}
+
 export async function ensureCsrfToken(): Promise<string> {
   // SEC-012: if the cookie has changed (server-rotated) since we cached, drop
   // the cache and re-read. Module-cache is a hot-path optimization, not the
