@@ -11,6 +11,7 @@
 import { AgentNamingClient, namehash, isAgentTld, canonicalTld } from '@agenticprimitives/agent-naming';
 import { json, type FnContext } from '../_lib/server-broker';
 import { CHAIN_ID, CONTRACTS, DEFAULT_RPC_URL } from '../../src/lib/chain';
+import { protectingDomain } from './naming-ticket';
 import { AGENT_NAME_PARENT, AGENT_NAME_PARENTS, CLAIMABLE_TLDS } from '../../src/lib/domain';
 
 /** The suffix this request claims under: the legacy parent by default; a typed suffix only when claimable here. */
@@ -54,16 +55,34 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
   // spec 275 MAM-D4: exact-or-fail. The member named this agent deliberately; a taken
   // label is an error, NEVER a silent `<label>2` (MAM-INV-2 / ADR-0013 no fallback).
   const exact = url.searchParams.get('exact');
+  // THE DOMAIN RULE, HERE TOO (2026-10-08). The naming gate refuses a label that is a real internet domain unless the
+  // claimant has a verified email there (`domain_protected`, naming-ticket.ts). A free-name answer that ignores that
+  // rule sends a ceremony to deploy an organization whose name it then cannot buy — 0xB992… exists unnamed because
+  // `scripture` passed here and failed at the ticket. A label the gate will refuse is refused where the name is picked,
+  // with the gate's own words, so an app's "which label?" (the skills app asks with exact=1) falls through to its
+  // alternative BEFORE anything is deployed. A DNS check that could not run is said as such, never as "free".
+  const protectedBy = async (label: string): Promise<Response | null> => {
+    const { domain, unknown } = await protectingDomain(label);
+    if (unknown && !domain) return json({ error: 'dns_unavailable', detail: 'The domain check could not run just now; try again in a moment.', label }, 503);
+    if (domain) return json({ error: 'domain_protected', domain, label, name: `${label}.${tld}`, detail: `${label} is a domain. To claim ${label}.${tld} you need a verified email at ${domain} on this Home.`, need: 'email' }, 402);
+    return null;
+  };
+
   if (exact === '1' || exact === 'true') {
     const label = sanitize(url.searchParams.get('label') ?? url.searchParams.get('base') ?? '');
     const name = `${label}.${tld}`;
     if (await labelTaken(label)) {
       return json({ error: 'taken', taken: true, label, name }, 409);
     }
+    const refused = await protectedBy(label);
+    if (refused) return refused;
     return json({ label, name, node: namehash(name), tld });
   }
 
   const base = sanitize(url.searchParams.get('base') ?? 'agent');
+  // The base itself under the domain rule is a refusal, not a bump: `scripture2.org` is not what anyone asked for.
+  const baseRefused = await protectedBy(base);
+  if (baseRefused) return baseRefused;
   for (let i = 1; i < 50; i++) {
     const candidate = i === 1 ? base : `${base}${i}`;
     const name = `${candidate}.${tld}`;
