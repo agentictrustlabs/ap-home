@@ -1328,6 +1328,8 @@ export interface CreateChildOpts {
   grantOrg?: Address;
   /** Home session, for the demo-custody wallet branch (keys live at the Home, not the browser). */
   sessionToken?: string;
+  /** ap-town spec 431 — the org root is PRICED on this chain: deploy nameless, the caller buys the name next. */
+  nameLater?: boolean;
 }
 
 /** Deploy a child SA (org / service agent) custodied by the ROOT passkey, claim `<base>.demo.agent`,
@@ -1388,7 +1390,14 @@ export async function createChildAgentForSite(
   if (childAgent.toLowerCase() === personAgent.toLowerCase()) {
     return { ok: false, error: 'agent collided with your person agent (salt)' };
   }
-  const claim = await buildClaimCallData(base, childAgent, onStep, false, childDiscoveryRecords(base, cOpts), typedTldForKind('org') ?? {});
+  // ap-town spec 431 — on a priced root the deploy batch must carry NO register call: the root no longer names the
+  // permissionless subregistry, so `register(label, owner)` reverts the whole deploy (0xea8e4eb5 NotAuthorized — the
+  // first organization a demo persona created from the skills app after the root switch, 2026-10-08). The KMS path
+  // learned this on 2026-10-06; this is the passkey / wallet / demo-custody path. The caller deploys nameless and
+  // buys the name next (`home/charter-name.ts`), exactly as the portal's "Add an organization" does.
+  const claim: { ok: true; callData: Hex; calls: ContractCall[]; name: string } | { ok: false; error: string } = cOpts.nameLater
+    ? { ok: true, callData: '0x', calls: [], name: '' }
+    : await buildClaimCallData(base, childAgent, onStep, false, childDiscoveryRecords(base, cOpts), typedTldForKind('org') ?? {});
   if (!claim.ok) return { ok: false, error: claim.error };
 
   // spec 253 — ONE PROMPT. The org's outbound grants are built as approved-hash (0x03
@@ -1448,7 +1457,7 @@ export async function createChildAgentForSite(
   // deploy + claim name + approve every org grant (+ credential mirror) — all in ONE atomic userOp.
   const deployCallData = buildExecuteBatchCallData([...claim.calls, ...approveCalls, ...mirrorCalls]);
 
-  onStep?.('Deploying your organization — name + all access grants…');
+  onStep?.(cOpts.nameLater ? 'Deploying your organization (unnamed) — all access grants…' : 'Deploying your organization — name + all access grants…');
   // deploy + claim + approve all grants — ONE signature, on the member's resolved credential rail (the
   // deployBody + signHash chosen above by `via`: eoa for wallet, passkey otherwise).
   const dep = await deployAgent({ ...deployBody, callData: deployCallData }, signHash);

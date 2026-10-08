@@ -34,6 +34,7 @@ import {
   invalidateRelatedOrgs,
   AUD,
   type SignHash,
+  typedTldForKind,
 } from '../connect-client';
 import { writeGovernancePair, WORKSPACE_CONTENT_SCOPE } from '../lib/workspace-governor';
 import type { ConnectionKind } from '@agenticprimitives/agent-naming';
@@ -79,6 +80,7 @@ function homeBearerToken(auth?: Auth): string | null {
 
 export type Via = 'passkey' | 'wallet' | 'google' | 'youversion' | 'email' | 'phone';
 /** Extra auth a server-custodied op needs: the custody session token demo-a2a verifies. */
+import { buyNameForNewAgent, kindNameIsBought } from './charter-name';
 export type Auth = { token: string };
 type Result<T> = ({ ok: true } & T) | { ok: false; error: string };
 
@@ -694,6 +696,10 @@ export async function createOrganization(
     label: 'Finding a name…',
     hint: 'This can take a moment — we’re setting the organization up.',
   });
+  // ap-town spec 431 — a priced org root: the device-signed path (passkey / wallet / demo custody) deploys the org
+  // NAMELESS and buys its name next from the person's treasury, as the KMS path and the portal already do. Sending
+  // the legacy register call in the deploy batch reverted the whole ceremony (0xea8e4eb5) for every such sign-in.
+  const bought = !isKmsVia(via) && kindNameIsBought('org');
   const r = isKmsVia(via)
     ? (auth?.token
         ? await createOrganizationWithGoogle(auth.token, base, delegate, opts, via, (s) =>
@@ -706,11 +712,24 @@ export async function createOrganization(
         delegate,
         (s) => say?.({ step: 2, total: 5, label: s, hint: 'This is the longer step — hang tight.' }),
         undefined,
-        { ...opts, sessionToken: auth?.token },
+        { ...opts, sessionToken: auth?.token, ...(bought ? { nameLater: true } : {}) },
         via,
       );
   if (!r.ok) return r;
   const x = r.result;
+  if (bought) {
+    if (!auth?.token) return { ok: false, error: `${x.childAgent} exists, unnamed — buying its name needs a Home session. Name it from its Naming page.` };
+    say?.({ step: 2, total: 5, label: 'Buying its name…', hint: 'Your treasury pays; the organization presents it.' });
+    const typed = typedTldForKind('org');
+    const picked = (await (await fetch(`/connect/name?base=${encodeURIComponent(base)}${typed ? `&tld=${encodeURIComponent(typed.tld)}` : ''}`)).json().catch(() => ({}))) as { label?: string; error?: string };
+    if (!picked.label) return { ok: false, error: `${x.childAgent} exists, unnamed — no free name for “${base}”: ${picked.error ?? 'none offered'}. Name it from its Naming page.` };
+    const name = await buyNameForNewAgent(
+      { agent: x.childAgent, label: picked.label, kind: 'org', parent: home.address, person: home.address, via, token: auth.token, ...(commonName ? { displayName: commonName } : {}) },
+      (s) => say?.({ step: 2, total: 5, label: s }),
+    );
+    if (!name.ok) return { ok: false, error: `${x.childAgent} exists, unnamed — its name was not bought: ${name.error}. Name it from its Naming page.` };
+    x.childName = name.name;
+  }
   // spec 321 — enable channel storage AT CREATE (vault-key bind + standing delivery grant, signed as
   // the org): zero prompts on the KMS family; best-effort — the steward-gated Enable button on the
   // channels page remains the recovery path.
