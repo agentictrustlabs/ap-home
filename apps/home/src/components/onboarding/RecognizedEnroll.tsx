@@ -832,9 +832,18 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         let granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey, payment, selfVaultScope, reuse);
         if (!granted.ok) return fail(granted.error);
         lapCeremony(`permission given${granted.reused ? ' (reused)' : ''}`);
+        // `ask_with_login` — the ask-as-me wire (person → the app's ask key, harness.ask only, 30 days) is minted
+        // IN this sign-in, so the app never needs a second ceremony to put the person's question to their own agent.
+        let askWire: unknown;
+        if (plainSignIn && relyingApp?.ask_with_login && relyingApp.ask_delegate) {
+          setGrantProgress({ step: 2, total: 3, label: 'Letting this app ask your agent as you…' });
+          const signAsk = await signHashFor(viaLower as Via, home.address, auth);
+          askWire = toWire(await issueAskAsMeDelegation(home.address, relyingApp.ask_delegate, signAsk));
+          lapCeremony('ask-as-me wire minted in the sign-in');
+        }
         setGrantProgress({ step: 2, total: 3, label: 'Confirming it on the chain…' });
         try {
-          code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation, granted.selfVaultGrant);
+          code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation, granted.selfVaultGrant, undefined, askWire);
           lapCeremony('code minted');
         } catch (e) {
           // The REUSED standing grant was refused (revoked / no longer verifiable). Clear it and mint
@@ -844,7 +853,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           clearStandingGrant(home.address, delegate);
           granted = await givePermission(home, delegate, viaLower, auth, enroll.sessionKey, payment, selfVaultScope, reuse);
           if (!granted.ok) return fail(granted.error);
-          code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation, granted.selfVaultGrant);
+          code = await submitEnrollGrant(grant_id, granted.grant, undefined, granted.sessionDelegation, granted.paymentDelegation, granted.settlementHash, treasuryAddr, granted.pullDelegation, granted.selfVaultGrant, undefined, askWire);
         }
       }
       if (narratedSignIn) setGrantProgress({ step: 3, total: 3, label: 'Enabling your storage…' });

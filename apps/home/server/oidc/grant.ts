@@ -64,6 +64,9 @@ interface GrantBody {
    *  (`grant.delegate`); the main `delegation` is then the ask wire to the client's `ask_delegate`. Each wire is
    *  verified on its own (ERC-1271 + window against ITS delegator — the person, or her treasury for a payment). */
   delegations?: Array<{ v: 1; template: string; capability: string; wire: IncomingDelegation; ref: string; requirement: Record<string, unknown> }>;
+  /** The `ask-as-me` wire minted IN a plain sign-in for a client registered `ask_with_login`: person → the client's
+   *  `ask_delegate`, verified on its own (ERC-1271 + window, the connecting person, the registered ask key). */
+  askDelegation?: IncomingDelegation;
 }
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
@@ -146,6 +149,14 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       return json({ error: 'self-vault grant delegator does not match the connecting person' }, 401);
     }
     if (selfV && !selfV.ok) return json({ error: `self-vault grant proof failed: ${selfV.reason}` }, 401);
+  }
+  if (body.askDelegation) {
+    const askClient = getClient(grant.client_id);
+    if (!askClient?.ask_with_login || !askClient.ask_delegate) return json({ error: 'this client is not registered to receive an ask-as-me wire in its sign-in' }, 400);
+    if (body.askDelegation.delegator.toLowerCase() !== body.delegation.delegator.toLowerCase()) return json({ error: 'ask-as-me wire delegator does not match the connecting person' }, 401);
+    if (body.askDelegation.delegate.toLowerCase() !== askClient.ask_delegate.toLowerCase()) return json({ error: 'ask-as-me wire does not name the registered ask key' }, 401);
+    const askV = await verifyDelegation(env, body.askDelegation);
+    if (!askV.ok) return json({ error: `ask-as-me wire proof failed: ${askV.reason}` }, 401);
   }
 
   // Mint the id_token bound to the grant's client + nonce + agent_name.
@@ -302,6 +313,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       settlementHash: body.settlementHash ?? null,
       treasury: body.treasury ?? null,
       selfVaultGrant: body.selfVaultGrant ?? null,
+      askDelegation: body.askDelegation ?? null,
       delegations: actTemplate ? body.delegations : null,
       org: body.org ? { ...(({ orgProfile: _seed, ...rest }) => rest)(body.org as Record<string, unknown>), ...orgCommonName } : null,
       // Returned verbatim by /token so an app can read the HUMAN name explicitly rather than

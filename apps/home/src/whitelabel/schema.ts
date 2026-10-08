@@ -86,6 +86,11 @@ export interface RelyingApp {
    *  holds a site delegate for sign-in but asks the person's agent from a DIFFERENT key (a Worker's own
    *  custody key that signs `A2A-Session` assertions). Absent ⇒ `delegate`, as the Home MCP's entry has it. */
   ask_delegate?: `0x${string}`;
+  /** The `ask-as-me` wire is minted IN the plain sign-in (one ceremony, one more signature) instead of a separate
+   *  ask-as-me connect — for an app whose whole purpose is to put the person's question to their own agent. Needs
+   *  `ask_delegate` and `ask-as-me` among the allowed templates; the wire rides the token exchange as
+   *  `askDelegation` beside the site `delegation`, verified on its own (ERC-1271, the connecting person, the ask key). */
+  ask_with_login?: boolean;
   /** Spec 412 — the top-level Library folders THIS app writes into a person's vault (`publishing/…`, `field/…`), so the
    *  Library can say which app a folder belongs to instead of leaving a bare word. Declared by the app's registration —
    *  the app knows where it writes — never inferred from a name. */

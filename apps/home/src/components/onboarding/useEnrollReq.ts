@@ -231,11 +231,13 @@ export async function submitEnrollGrant(
   selfVaultGrant?: unknown,
   /** spec 397 §11 — the act-as-me standing wires (one per capability), beside the ask wire. */
   delegations?: unknown[],
+  /** The `ask-as-me` wire minted IN a plain sign-in for a client registered `ask_with_login` (beside the site grant). */
+  askDelegation?: unknown,
 ): Promise<string> {
   const r = await fetch('/oidc/grant', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ grant_id: grantId, delegation: delegationWire, org, sessionDelegation, paymentDelegation, settlementHash, treasury, pullDelegation, selfVaultGrant, ...(delegations ? { delegations } : {}) }),
+    body: JSON.stringify({ grant_id: grantId, delegation: delegationWire, org, sessionDelegation, paymentDelegation, settlementHash, treasury, pullDelegation, selfVaultGrant, ...(delegations ? { delegations } : {}), ...(askDelegation ? { askDelegation } : {}) }),
   });
   const b = (await r.json().catch(() => ({}))) as { code?: string; error?: string };
   if (!r.ok || !b.code) throw new Error(b.error ?? `grant failed (HTTP ${r.status})`);

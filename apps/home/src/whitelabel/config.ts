@@ -692,6 +692,8 @@ const faithImpact: WhiteLabelConfig = {
       // service's registered site, atl:siteUrl). A dedicated Explorer ask key is an operator ceremony
       // (`akcs operator create-key` + bind-caller) — set NEXT_PUBLIC_BIBLE_EXPLORER_ASK_DELEGATE to swap it.
       ask_delegate: (process.env.NEXT_PUBLIC_BIBLE_EXPLORER_ASK_DELEGATE || '0x43a07B8c5F96FfD62B2c5Bc0f58bd21DACa6E881') as `0x${string}`,
+      // The one connect gives the Explorer everything it needs: the ask wire is minted in the plain sign-in.
+      ask_with_login: true,
       // x402 push: USDC lands at the lbsb-treasury SA; the reader redeems at access time (OPEN delegate).
       // 0.001 USDC/read (1000 atomic, 6-dp mock USDC), 1.0 USDC aggregate cap per delegation.
       paymentConfig: {

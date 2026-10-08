@@ -6257,6 +6257,9 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     if (live) return { state: 'running' };
     return { state: 'absent' };
   };
+  // The person's engagement profile — the record and the type it must carry (see the share block below).
+  const ENGAGEMENT_PROFILE_RECORD = 'playbook.memory:engagement';
+  const ENGAGEMENT_PROFILE_TYPE = 'ap.engagement-profile.v1';
   deps.askSubjectAgent = async ({ subject, toolId, args, goal, session, appCredential, asker, via: routeVia, correlation, continue: cont, runRef: receiverRunRef, trace }) => {
     const name = await deps.nameOf?.(subject).catch(() => null) ?? null;
     if (!session && !appCredential) return { ok: false, via: { agent: subject, name, observedVia: 'serving-handler' }, refused: 'a routed ask carries the asker’s session, and this run has none' };
@@ -6278,8 +6281,25 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       const row = relationshipRows(tree).find((r) => r.agent.toLowerCase() === subject.toLowerCase());
       if (row?.relationship === 'steward' && row.stewardshipDelegation) presented.push(row.stewardshipDelegation);
     }
+    // WHAT THE PERSON SHARES WHEN THEIR AGENT ENGAGES A SERVICE FOR THEM — `vault:playbook.memory:engagement`
+    // (ap.engagement-profile.v1: who they are, their situation; edited or cleared by them, e.g. in the Bible
+    // Explorer's Profile; in the interactions grant's core scope, so their own agent reads it as itself). Read from
+    // THEIR vault here and carried as the routed ask's `args.context`. Engagements only (harness.ask). It never
+    // leaves through the app that asked: it travels agent → agent, and a receiver shapes its answer with it and
+    // must not echo it. No record ⇒ no context ⇒ the receiver answers a general reader.
+    let requestArgs = args;
+    if (toolId === STANDARD_SURFACE_SKILL && asker && deps.readSubjectRecord) {
+      const rec = await deps.readSubjectRecord(asker.toLowerCase(), ENGAGEMENT_PROFILE_RECORD).catch(() => null) as { type?: unknown; role?: unknown; situation?: unknown } | null;
+      const context = rec && typeof rec === 'object' && rec.type === ENGAGEMENT_PROFILE_TYPE
+        ? { ...(typeof rec.role === 'string' && rec.role ? { role: rec.role } : {}), ...(typeof rec.situation === 'string' && rec.situation ? { situation: rec.situation.slice(0, 500) } : {}) }
+        : {};
+      if (Object.keys(context).length) {
+        requestArgs = { ...args, context };
+        console.log(`[subject-ask] ${asker} shares ${ENGAGEMENT_PROFILE_RECORD} (${Object.keys(context).join(', ')}) with ${name ?? subject}`);
+      }
+    }
     const profile = subjectAsk({
-      request: { capability: toolId, args, goal },
+      request: { capability: toolId, args: requestArgs, goal },
       // Spec 397 — through a client, no session: the admission evidence travels instead, for the receiver to verify.
       asker: { agent: (asker ?? subject) as Address, credential: session ? { kind: 'home-session', token: session } : { kind: 'app-delegation', ...appCredential! }, ...(presented.length ? { presented } : {}) },
       correlation,
