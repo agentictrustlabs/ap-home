@@ -13,6 +13,7 @@ import {
 import type { McpResourceVerifyConfig } from '@agenticprimitives/mcp-runtime';
 import { buildMacProvider, akcsVaultKeyRef, AKCS_KEY_REF_PREFIX, provisionEnvelopeKey } from '@agenticprimitives/key-custody';
 import { agenticKmsConfig, isAgenticKms, type AkcsEnv } from './akcs.js';
+import type { AkcsProtectionLevel } from '@agenticprimitives/key-custody';
 import { executeGcpProvision, createGcpRestStepExecutor, sanitizeKeyId } from '@agenticprimitives/key-custody/provision-gcp';
 import { declareTool } from '@agenticprimitives/tool-policy';
 import {
@@ -2022,6 +2023,7 @@ app.post('/custody/vault-key/provision', async (c) => {
       const r = await provisionEnvelopeKey(agenticKmsConfig(c.env), {
         purpose: ref.slice(AKCS_KEY_REF_PREFIX.length),
         externalName: `vault-kek-${owner.toLowerCase()}`,
+        ...(c.env.AKCS_KEY_PROTECTION_LEVEL ? { protectionLevel: c.env.AKCS_KEY_PROTECTION_LEVEL as AkcsProtectionLevel } : {}),
       });
       return c.json({ ok: true, owner: owner.toLowerCase(), kmsKeyRef: ref, alreadyExisted: r.alreadyExisted });
     } catch (e) {
