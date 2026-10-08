@@ -46,7 +46,7 @@ import { encodeFunctionData, createPublicClient, http, keccak256, toBytes } from
 import { x402, computeMandateId, type PaymentMandate, type Hex32 } from '@agenticprimitives/payments';
 import { connectWallet, connectWalletAccounts, personalSign, rememberHomeEoa, recallHomeEoa, connectedAccountsSilent, rememberSessionCustodian, recallSessionCustodian } from './lib/wallet';
 import { registerPasskey, signWithPasskey, signWithDiscoverablePasskey, connectAssertionDiscoverable, loadPasskey, clearPasskey, passkeyRpId, type DemoPasskey } from './lib/passkey';
-import { ensureCsrfToken, csrfHeaders } from './csrf';
+import { ensureCsrfToken, csrfHeaders, resetCsrf } from './csrf';
 import { CONTRACTS, CONTRACTS_GENERATION, DEFAULT_RPC_URL, CHAIN, CHAIN_ID, PERMISSIONLESS_SUBREGISTRIES } from './lib/chain';
 import { NAMING_COIN, TREASURY_BIRTHRIGHT_COINS, isPricedTld } from './lib/naming-price';
 import { buildRegisterEntryCall, hashBindingProofBody, type RegistryId, type RegistryEntryId } from '@agenticprimitives/registry-kit';
@@ -1184,29 +1184,33 @@ export async function bootstrapWithPasskey(
 // ── A2A service agent + relationship edge (spec 227 §6 / M5) ────────
 
 /** Deploy a Smart Agent via demo-a2a (no facet enroll). Used for the A2A agent. */
+/** A POST that carries the CSRF token, retried ONCE with a fresh token when the server rejects the one we held
+ *  ("csrf invalid"): a tab open for longer than the token's validity, or a token minted before the runtime rotated its
+ *  secret, otherwise fails the whole ceremony on a stale cookie the page cannot tell is stale. */
+async function postWithCsrf(path: string, body: unknown): Promise<Response> {
+  await ensureCsrfToken();
+  const send = () => fetch(path, { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', ...csrfHeaders() }, body: JSON.stringify(body) });
+  const first = await send();
+  if (first.status !== 403) return first;
+  const err = await first.clone().json().catch(() => ({})) as { error?: string };
+  if (err.error !== 'csrf invalid') return first;
+  resetCsrf();
+  await ensureCsrfToken();
+  return send();
+}
+
 async function deployAgent(
   deployBody: Record<string, unknown>,
   signHash: SignHash,
 ): Promise<{ ok: true; agent: Address } | { ok: false; error: string }> {
-  await ensureCsrfToken();
-  const buildRes = await fetch('/a2a/session/deploy', {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'content-type': 'application/json', ...csrfHeaders() },
-    body: JSON.stringify(deployBody),
-  });
+  const buildRes = await postWithCsrf('/a2a/session/deploy', deployBody);
   if (buildRes.status === 409) return { ok: false, error: 'paymaster not enabled' };
   const built = (await buildRes.json()) as { ok?: boolean; userOpHash?: Hex; userOp?: Record<string, unknown>; error?: string };
   if (!buildRes.ok || !built.ok || !built.userOpHash || !built.userOp) {
     return { ok: false, error: built.error ?? `deploy build failed (HTTP ${buildRes.status})` };
   }
   const signature = await signHash(built.userOpHash);
-  const submitRes = await fetch('/a2a/session/deploy/submit', {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'content-type': 'application/json', ...csrfHeaders() },
-    body: JSON.stringify({ userOp: { ...built.userOp, signature } }),
-  });
+  const submitRes = await postWithCsrf('/a2a/session/deploy/submit', { userOp: { ...built.userOp, signature } });
   const submitted = (await submitRes.json()) as {
     ok?: boolean;
     deployedAddress?: Address;
