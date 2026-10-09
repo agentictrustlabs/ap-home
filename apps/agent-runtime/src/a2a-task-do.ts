@@ -51,6 +51,7 @@ import { handleConsultRespond } from './consult-skill.js';
 import { parseSessionWrappedSignature, verifySessionWrappedSignature, wrapSessionSignature } from '@agenticprimitives/a2a';
 // spec 341 §7 — the in-Worker marker, split off the custody secret.
 import { internalHeaders, internalMarker, isInternalCall } from './internal-marker.js';
+import { SELF_HOST_WIRE_KEY } from './self-host-wire.js';
 import { memberConsultGrant, readConsultArtifact, readDelegatedTask, signAsOrg, submitConsult, submitDelegatedTask } from './consult-rail.js';
 import { recordRetention } from './run-export.js';
 import { authorityCapabilityOf, checkpointForStep, awaitingAuthorityNote, engagesProvider } from './endeavor-authority-steps.js';
@@ -987,6 +988,18 @@ export class A2aTaskDO extends HarnessRunDO<Env> {
         const idx = ((await this.state.storage.get(SEARCH_INDEX_KEY)) as SearchIndexV1 | undefined) ?? emptyIndex();
         const hits = searchIndex(idx, String(body?.query ?? ''), { kinds: ['run'], ...(typeof body?.since === 'string' ? { since: body.since } : {}), ...(typeof body?.limit === 'number' ? { limit: body.limit } : {}) });
         return Response.json({ ok: true, hits, indexed: idx.order.length });
+      }
+      // Spec 433 W2 — this agent's READ WIRE at its own host (`self-host-wire.ts`): kept here as this runtime's credential,
+      // verified before it is put, read by the forward. A wipe is a rebuild (the steward runs the ceremony again).
+      if (op === 'self-host-wire-put') {
+        const wire = (body as { wire?: unknown } | null)?.wire;
+        if (!wire || typeof wire !== 'object') return Response.json({ ok: false, error: 'wire required' }, { status: 400 });
+        await this.state.storage.put(SELF_HOST_WIRE_KEY, { wire, at: Date.now() });
+        return Response.json({ ok: true });
+      }
+      if (op === 'self-host-wire-get') {
+        const row = (await this.state.storage.get(SELF_HOST_WIRE_KEY)) as { wire?: unknown; at?: number } | undefined;
+        return Response.json(row?.wire ? { ok: true, wire: row.wire, at: row.at } : { ok: true, wire: null });
       }
       if (RUN_STORE_OPS.has(op)) {
         const r = await this.runs.handle(op, body as Record<string, unknown>);
