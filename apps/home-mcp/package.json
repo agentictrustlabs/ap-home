@@ -11,10 +11,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@agenticprimitives/a2a": "0.0.0-alpha.28",
-    "@agenticprimitives/connect": "1.0.0-alpha.30",
-    "@agenticprimitives/delegation": "1.0.0-alpha.30",
-    "@agenticprimitives/mcp-oauth": "0.0.0-alpha.12",
+    "@agenticprimitives/a2a": "0.0.0-alpha.29",
+    "@agenticprimitives/connect": "1.0.0-alpha.31",
+    "@agenticprimitives/delegation": "1.0.0-alpha.31",
+    "@agenticprimitives/mcp-oauth": "0.0.0-alpha.13",
     "@agenticprimitives/mcp-protocol": "0.0.0-alpha.4",
     "hono": "4.13.0",
     "viem": "2.52.2"

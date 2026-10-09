@@ -1,10 +1,67 @@
 {
   "lockVersion": 1,
   "packages": {
-    "@agenticprimitives/devkit": "0.0.0-alpha.13",
+    "@agenticprimitives/devkit": "0.0.0-alpha.14",
     "@agenticprimitives/evaluation": "0.0.0-alpha.5",
-    "@agenticprimitives/a2a": "0.0.0-alpha.28",
-    "@agenticprimitives/mcp-protocol": "0.0.0-alpha.4"
+    "@agenticprimitives/a2a": "0.0.0-alpha.29",
+    "@agenticprimitives/mcp-protocol": "0.0.0-alpha.4",
+    "@agenticprimitives/service-host": "0.0.0-alpha.1",
+    "@agenticprimitives/admission": "0.0.0-alpha.12",
+    "@agenticprimitives/agent-account": "1.0.0-alpha.31",
+    "@agenticprimitives/agent-naming": "1.0.0-alpha.31",
+    "@agenticprimitives/agent-profile": "1.0.0-alpha.31",
+    "@agenticprimitives/agent-relationships": "1.0.0-alpha.31",
+    "@agenticprimitives/agent-resolution": "0.0.0-alpha.12",
+    "@agenticprimitives/agentic-authorization": "0.0.0-alpha.4",
+    "@agenticprimitives/audit": "1.0.0-alpha.31",
+    "@agenticprimitives/capability-claims": "0.0.0-alpha.29",
+    "@agenticprimitives/chain-state": "0.0.0-alpha.4",
+    "@agenticprimitives/chain-state-viem": "0.0.0-alpha.6",
+    "@agenticprimitives/collaboration": "0.0.0-alpha.10",
+    "@agenticprimitives/connect": "1.0.0-alpha.31",
+    "@agenticprimitives/connect-auth": "1.0.0-alpha.31",
+    "@agenticprimitives/content-primitives": "1.0.0-alpha.32",
+    "@agenticprimitives/content-storage": "1.0.0-alpha.10",
+    "@agenticprimitives/context": "0.0.0-alpha.10",
+    "@agenticprimitives/contracts": "1.0.0-alpha.31",
+    "@agenticprimitives/coordination": "0.0.0-alpha.14",
+    "@agenticprimitives/delegation": "1.0.0-alpha.31",
+    "@agenticprimitives/edge-cloudflare": "0.0.0-alpha.13",
+    "@agenticprimitives/edge-runtime": "0.0.0-alpha.13",
+    "@agenticprimitives/entitlements": "0.0.0-alpha.5",
+    "@agenticprimitives/estate-projection": "0.0.0-alpha.5",
+    "@agenticprimitives/fabric": "0.0.0-alpha.20",
+    "@agenticprimitives/fedcm-idp": "1.0.0-alpha.9",
+    "@agenticprimitives/harness": "0.0.0-alpha.11",
+    "@agenticprimitives/home": "0.0.0-alpha.20",
+    "@agenticprimitives/identity-directory": "1.0.0-alpha.31",
+    "@agenticprimitives/identity-directory-adapters": "1.0.0-alpha.31",
+    "@agenticprimitives/intent-engagement": "0.0.0-alpha.10",
+    "@agenticprimitives/key-authorization": "0.0.0-alpha.15",
+    "@agenticprimitives/key-custody": "1.0.0-alpha.31",
+    "@agenticprimitives/mcp-oauth": "0.0.0-alpha.13",
+    "@agenticprimitives/mcp-runtime": "1.0.0-alpha.31",
+    "@agenticprimitives/ontology": "1.0.0-alpha.31",
+    "@agenticprimitives/orchestration": "0.0.0-alpha.10",
+    "@agenticprimitives/orchestration-anthropic": "0.0.0-alpha.11",
+    "@agenticprimitives/orchestration-openai-compat": "0.0.0-alpha.10",
+    "@agenticprimitives/organization": "0.0.0-alpha.15",
+    "@agenticprimitives/payments": "0.0.0-alpha.27",
+    "@agenticprimitives/provenance": "0.0.0-alpha.5",
+    "@agenticprimitives/provenance-node": "0.0.0-alpha.7",
+    "@agenticprimitives/rate-control": "0.0.0-alpha.5",
+    "@agenticprimitives/rate-control-cloudflare": "0.0.0-alpha.5",
+    "@agenticprimitives/registry-kit": "0.0.0-alpha.19",
+    "@agenticprimitives/related-agents": "0.0.0-alpha.27",
+    "@agenticprimitives/runtime-member": "0.0.0-alpha.8",
+    "@agenticprimitives/situations": "0.0.0-alpha.15",
+    "@agenticprimitives/surface-catalog": "0.0.0-alpha.5",
+    "@agenticprimitives/tool-policy": "1.0.0-alpha.31",
+    "@agenticprimitives/treasury-service-agent": "0.0.0-alpha.18",
+    "@agenticprimitives/types": "1.0.0-alpha.31",
+    "@agenticprimitives/vault": "0.0.0-alpha.5",
+    "@agenticprimitives/verifiable-credentials": "0.0.0-alpha.28",
+    "@agenticprimitives/verification-receipts": "0.0.0-alpha.12"
   },
   "rules": {
     "coordination-vs-orchestration": "sha256:f2754939240133643e020043fac5b7e97b2ca250e0824771d19ca578976defd6",
@@ -13,13 +70,14 @@
     "hard-rules": "sha256:443a34a33287f678d22a8d6e3ca43bee532bf56acc6ba816d384f9ffe5075a6a",
     "one-capability-model-generates-both": "sha256:50d46f01e41c2ffa2dc12732e9c77609d4fbeb2c174588345d8999a11aa6428a",
     "ontology-drives-behavior": "sha256:1324bb1aec2d8242b2fffe490e9ff05b963ccb295d258bb08f8de911c1f25c00",
+    "service-agent-birthrights": "sha256:f6a7ba971eeade2a080fb21d90ed3489383c8df0c78478153e3e6ac94c3628af",
     "service-agent-signing": "sha256:3f41d62dc56a18789b7c54cfbaf2446afcf7956c52c2b855720fdc1300519d7f",
     "skill-terminology": "sha256:c28873bc0594c790987d817d83335674510ad91fbe785fc1f23a771da7f7f3b3",
     "vault-and-ontology": "sha256:825116963a4845bf358f3446ea5d4aad64436b2bd06ce878082daf5a23ea58f5",
     "vault-is-the-record-apps-hold-references": "sha256:e6a6e859a16071dff5c30a7b7dc2d4cb0b8307e19dc416387cf181084236e685",
     "vault-records-are-ontology-shaped": "sha256:6a739d1a10d5b62e4ab5ed910fdccc67b9c024dd519c9c3e1fea916b3899a90b"
   },
-  "devkit": "0.0.0-alpha.13",
+  "devkit": "0.0.0-alpha.14",
   "template": {
     "name": "product-repo",
     "revision": "2026-09-16.1"
@@ -48,7 +106,7 @@
         },
         {
           "file": "apps/home-mcp/src/act.ts",
-          "why": "home-mcp-raw-act-key (findings.yaml, accepted-risk): the act-as-me key is the delegate of the person's capped, per-wire-revocable standing wires (spec 397 \u00a711); KMS signer + re-issued wires scheduled with the ask key"
+          "why": "home-mcp-raw-act-key (findings.yaml, accepted-risk): the act-as-me key is the delegate of the person's capped, per-wire-revocable standing wires (spec 397 §11); KMS signer + re-issued wires scheduled with the ask key"
         },
         {
           "file": "apps/home-mcp/src/index.ts",
@@ -92,7 +150,7 @@
         },
         {
           "file": "apps/home/server/connect/naming-ticket.ts",
-          "why": "ap-town spec 431 \u2014 the naming gate signs claim tickets (EIP-712) with NAMING_GATE_PRIVATE_KEY after the domain rule; a ticket moves no value and confers no authority (the chain checks it; the treasury pays). Posture item: move the gate signer to KMS and rotate via PricedSubregistry.setGate."
+          "why": "ap-town spec 431 — the naming gate signs claim tickets (EIP-712) with NAMING_GATE_PRIVATE_KEY after the domain rule; a ticket moves no value and confers no authority (the chain checks it; the treasury pays). Posture item: move the gate signer to KMS and rotate via PricedSubregistry.setGate."
         }
       ],
       "toleratedEnvNames": [
@@ -106,7 +164,7 @@
         },
         {
           "name": "NAMING_GATE_PRIVATE_KEY",
-          "why": "ap-town spec 431 \u2014 the Home's naming gate signs claim tickets (EIP-712) with this key; it vouches for the domain rule, moves no value and holds no identity; rotatable by the subregistry governor (setGate). Posture item: move to KMS."
+          "why": "ap-town spec 431 — the Home's naming gate signs claim tickets (EIP-712) with this key; it vouches for the domain rule, moves no value and holds no identity; rotatable by the subregistry governor (setGate). Posture item: move to KMS."
         }
       ]
     },
@@ -118,7 +176,7 @@
         "hmac": 0,
         "total": 53
       },
-      "note": "2026-10-04 (owner): raised 47 \u2192 53 to the count inherited at the faithnet cut-over; it only goes down from here \u2014 each Work/membership/channel bridge converted to the Ask (spec 341) lowers it."
+      "note": "2026-10-04 (owner): raised 47 → 53 to the count inherited at the faithnet cut-over; it only goes down from here — each Work/membership/channel bridge converted to the Ask (spec 341) lowers it."
     },
     "noCrossSubjectVaultReads": {
       "roots": [
@@ -205,7 +263,7 @@
         "apps/demo-gs",
         "apps/demo-jp"
       ],
-      "skip": "the relying-app half names demo-web \u2014 enable when examples/ lands (split-status item 6)"
+      "skip": "the relying-app half names demo-web — enable when examples/ lands (split-status item 6)"
     },
     "archetypeCatalog": {
       "module": "apps/home/src/lib/archetype-catalog.ts",
@@ -247,7 +305,7 @@
       "registry": "https://skills-a2a-production.richardpedersen3.workers.dev",
       "context": "agentic-trust",
       "archetype": "org-steward",
-      "digest": "0x332f3e46a187e7725ec1dc283561554d9b60726ac67a92dd9e44624658f80732",
+      "digest": "0x0a8122f0996d7b1d0ce97bb4555437300d2889ca2f2506b26b23e6216697ed61",
       "version": "1.0.0",
       "authority": {
         "access.grant.revoke": {
@@ -431,6 +489,13 @@
         "organization.invitations.list": {
           "idempotency": "replay-safe"
         },
+        "organization.member.role.set": {
+          "risk": "low",
+          "action": "assign",
+          "resourceArg": "org",
+          "authorityArg": "org",
+          "idempotency": "replay-safe"
+        },
         "organization.membership.invite": {
           "risk": "medium",
           "action": "invite",
@@ -490,13 +555,13 @@
           "idempotency": "replay-safe"
         }
       },
-      "pinnedAt": "2026-10-04T23:31:43.192Z"
+      "pinnedAt": "2026-10-09T01:16:46.543Z"
     },
     "agentic-trust/person-steward": {
       "registry": "https://skills-a2a-production.richardpedersen3.workers.dev",
       "context": "agentic-trust",
       "archetype": "person-steward",
-      "digest": "0x44f6139f0bfcaca0cdbcfdf71b5375e9638e7dd73f1099235714ac95caadfe09",
+      "digest": "0x62275fa58e11038686e0d0f1f9e31d301bb84a5ad26825fcb0ad9075d500a817",
       "version": "1.0.0",
       "authority": {
         "access.grant.revoke": {
@@ -653,6 +718,13 @@
         "organization.invitations.list": {
           "idempotency": "replay-safe"
         },
+        "organization.member.role.set": {
+          "risk": "low",
+          "action": "assign",
+          "resourceArg": "org",
+          "authorityArg": "org",
+          "idempotency": "replay-safe"
+        },
         "organization.membership.accept": {
           "risk": "low",
           "action": "execute",
@@ -747,6 +819,9 @@
           "action": "execute",
           "idempotency": "replay-safe"
         },
+        "person.roles.list": {
+          "idempotency": "replay-safe"
+        },
         "person.routine.declare": {
           "risk": "low",
           "action": "execute",
@@ -832,7 +907,7 @@
           "idempotency": "replay-safe"
         }
       },
-      "pinnedAt": "2026-10-04T23:31:45.019Z"
+      "pinnedAt": "2026-10-09T01:16:48.022Z"
     },
     "agentic-trust/coordinator": {
       "registry": "https://skills-a2a-production.richardpedersen3.workers.dev",
@@ -998,7 +1073,7 @@
           "idempotency": "replay-safe"
         }
       },
-      "pinnedAt": "2026-10-04T23:31:45.959Z"
+      "pinnedAt": "2026-10-09T01:16:49.022Z"
     },
     "agentic-trust/treasury-steward": {
       "registry": "https://skills-a2a-production.richardpedersen3.workers.dev",
@@ -1035,7 +1110,7 @@
           "idempotency": "replay-safe"
         }
       },
-      "pinnedAt": "2026-10-04T23:31:46.580Z"
+      "pinnedAt": "2026-10-09T01:16:49.561Z"
     },
     "agentic-trust/household-steward": {
       "registry": "https://skills-a2a-production.richardpedersen3.workers.dev",
@@ -1102,7 +1177,7 @@
           "idempotency": "replay-safe"
         }
       },
-      "pinnedAt": "2026-10-04T23:31:47.259Z"
+      "pinnedAt": "2026-10-09T01:16:50.191Z"
     }
   }
 }

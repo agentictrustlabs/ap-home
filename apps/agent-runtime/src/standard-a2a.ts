@@ -53,7 +53,7 @@ import {
   type AgentCardV1, type ExecutionContext, type MessageV1, type Principal, type StandardServer, type SessionWirePrincipalDeps, type StandardTaskStore, type DelegatedRpc,
 } from '@agenticprimitives/a2a/standard';
 import { internalHeaders, markInWorker, isInWorkerRequest, type InternalMarkerEnv } from './internal-marker.js';
-import { subjectAskOf, subjectAnswerOf, handoffOf, routedRunRefFor, SUBJECT_ANSWER_ARTIFACT, type HandoffV1, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
+import { subjectAskOf, subjectAnswerOf, handoffOf, routedRunRefFor, subjectAnswerArtifact, type HandoffV1, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
 import { a2aDoor } from './run-trace.js';
 
 export interface StandardMountDeps {
@@ -197,7 +197,7 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           if (ctx.principal.agent.toLowerCase() !== handed.handoff.parent.agent.toLowerCase()) { await ctx.reject([{ text: 'the hand-off names a parent other than its caller' }]); return; }
           await ctx.working();
           const envelope = await deps.runHandoff({ executor: agent, parent: ctx.principal.agent as Address, handoff: handed.handoff });
-          await ctx.artifact({ name: SUBJECT_ANSWER_ARTIFACT, parts: [{ data: envelope }] });
+          await ctx.artifact(subjectAnswerArtifact(envelope as Record<string, unknown>));
           const reply = envelope.reply as { kind?: string; text?: string; error?: string; prompt?: { prompt?: string }; summary?: string } | undefined;
           const said = reply?.text || reply?.summary || reply?.prompt?.prompt || reply?.error || '';
           // A hand-off's need parks as INPUT_REQUIRED either way: the parent holds the mandate, not the caller here.
@@ -322,7 +322,7 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           const res = await deps.appFetch(markInWorker(new Request(`https://${host}/harness/ask`, { method: 'POST', headers: internalHeaders(deps.env, { 'content-type': 'application/json', accept: 'application/json', ...traceHeadersOf(ctx.headers) }), body })), deps.env);
           const envelope = (await res.json().catch(() => null)) as (AskEnvelope & { subjectAnswer?: { outcome?: string; said?: string } }) | null;
           if (!envelope) { await ctx.fail([{ text: `the ask answered ${res.status} with no envelope` }]); return; }
-          await ctx.artifact({ name: SUBJECT_ANSWER_ARTIFACT, parts: [{ data: envelope }] });
+          await ctx.artifact(subjectAnswerArtifact(envelope as Record<string, unknown>));
           const outcome = envelope.subjectAnswer?.outcome ?? (envelope.reply?.kind === 'answer' ? 'answer' : envelope.ok === false ? 'error' : 'refused');
           const said = envelope.subjectAnswer?.said || envelope.reply?.text || envelope.reply?.summary || envelope.error || '';
           if (outcome === 'answer') { await ctx.complete([{ text: said || 'Answered.' }]); return; }
