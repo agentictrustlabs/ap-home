@@ -26,7 +26,7 @@
     "@agenticprimitives/connect": "1.0.0-alpha.31",
     "@agenticprimitives/connect-auth": "1.0.0-alpha.31",
     "@agenticprimitives/content-primitives": "1.0.0-alpha.32",
-    "@agenticprimitives/content-storage": "1.0.0-alpha.4",
+    "@agenticprimitives/content-storage": "1.0.0-alpha.10",
     "@agenticprimitives/context": "0.0.0-alpha.10",
     "@agenticprimitives/coordination": "0.0.0-alpha.14",
     "@agenticprimitives/delegation": "1.0.0-alpha.31",
