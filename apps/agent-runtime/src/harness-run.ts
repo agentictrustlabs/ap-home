@@ -5999,10 +5999,27 @@ step is then handed to that agent under authority the person grants; leave it ou
           const list = (Array.isArray(res.resources) ? res.resources : Array.isArray(res.items) ? res.items : []) as Array<Record<string, unknown>>;
           return list.slice(0, 12).map((it) => ({ title: String(it.title ?? it.name ?? ''), ...(typeof it.url === 'string' ? { link: it.url } : typeof it.link === 'string' ? { link: it.link } : {}), ...(typeof it.type === 'string' ? { type: it.type } : {}) }));
         });
+        // Spec 433 W2 — WHAT THE OTHER AGENT CITED, compactly: a content service that answers from a signed corpus returns
+        // each verse it leaned on with its signed citation (~3.5 KB each, 28 KB for eight — over the 8 KB offload line, which
+        // is the very incident that reduced hops to words). The reader's page needs the reference, the text, the edition and
+        // the agent's grade to show the verse and to re-verify it live against the corpus; the signed credential it can fetch
+        // fresh. So those ride (≤ 12, text ≤ 240 chars, ~3 KB), the credentials stay at the service's own run.
+        const citedRaw = drawn.flatMap((d) => { const res = (d.result && typeof d.result === 'object') ? (d.result as { citations?: unknown[] }) : {}; return Array.isArray(res.citations) ? res.citations : []; })
+          .concat(Array.isArray((r as { citations?: unknown[] }).citations) ? ((r as { citations?: unknown[] }).citations as unknown[]) : []);
+        const cited = citedRaw.slice(0, 12).flatMap((c) => {
+          if (!c || typeof c !== 'object') return [];
+          const x = c as Record<string, unknown>;
+          const reference = String(x.reference ?? x.osis ?? '').trim(); if (!reference) return [];
+          return [{ reference, ...(typeof x.osis === 'string' ? { osis: x.osis } : {}), ...(typeof x.edition === 'string' ? { edition: x.edition } : {}),
+            ...(typeof x.text === 'string' ? { text: x.text.slice(0, 240) } : {}), ...(typeof x.support === 'string' ? { support: x.support } : {}),
+            ...(typeof x.commitmentVerified === 'boolean' ? { commitmentVerified: x.commitmentVerified } : {}), ...(typeof x.descriptorId === 'string' ? { descriptorId: x.descriptorId } : {}),
+            ...(typeof x.note === 'string' ? { note: x.note.slice(0, 200) } : {}) }];
+        });
         return {
           said: String(r.text ?? ''),
           source: { agent: subject, ...(answer.via.name ? { name: answer.via.name } : {}) },
           ...(items.length ? { drewOn: { steps: drawn.map((d) => d.toolId).filter(Boolean), items } } : {}),
+          ...(cited.length ? { cited, ...(typeof (r as { topic?: unknown }).topic === 'string' ? { topic: (r as { topic: string }).topic } : {}) } : {}),
           via: answer.via,
           note: `Said by ${who}'s own agent, answering as itself — relay its words and every link it gave, name it as the source, add nothing beside it. An observation, never a record of this agent's.`,
         };
