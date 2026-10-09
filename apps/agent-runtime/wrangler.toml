@@ -108,6 +108,10 @@ zone_name = "faithnet.ai"
 binding = "AI"
 
 [env.faithnet.vars]
+# Spec 410 §10 — THE ESTATE'S ADOPTED ONTOLOGY MANIFEST. Pinned to the digest faithnet has bound mandates to since ontology
+# 1.0.0-alpha.30; the packages moved to alpha.31 (spec 427 W6, org.ttl 0.4.0) on 2026-10-09 WITHOUT adopting it: adoption is a
+# governance act (`apgov:AdoptedVersion`), not a dependency bump. Remove or move this line when the estate adopts the new one.
+ADOPTED_ONTOLOGY_MANIFEST_DIGEST = "0xf64becd4c395e8b7f0d935ca97640a6d4b37fc087ee0073af48f3841ab3361c8"
 # Spec 426 — executor-invoke operator config: a JSON map `executor-ref → { url, client }`. The one generic
 # invoker resolves a capability's `invoke.executor` here (fail-closed; an unknown ref refuses). field-circles =
 # the engage/field-a2a executor (its /a2a admits the `field-app` client; reached by custom domain, not
