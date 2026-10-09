@@ -37,7 +37,7 @@
     "check:live-gates:runner": "tsx scripts/live-gates-runner.mts"
   },
   "devDependencies": {
-    "@agenticprimitives/a2a": "0.0.0-alpha.28",
+    "@agenticprimitives/a2a": "0.0.0-alpha.29",
     "@agenticprimitives/devkit": "0.0.0-alpha.13",
     "@agenticprimitives/evaluation": "0.0.0-alpha.5",
     "@agenticprimitives/mcp-protocol": "0.0.0-alpha.4",

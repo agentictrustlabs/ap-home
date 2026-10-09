@@ -3,8 +3,9 @@
   "packages": {
     "@agenticprimitives/devkit": "0.0.0-alpha.13",
     "@agenticprimitives/evaluation": "0.0.0-alpha.5",
-    "@agenticprimitives/a2a": "0.0.0-alpha.28",
-    "@agenticprimitives/mcp-protocol": "0.0.0-alpha.4"
+    "@agenticprimitives/a2a": "0.0.0-alpha.29",
+    "@agenticprimitives/mcp-protocol": "0.0.0-alpha.4",
+    "@agenticprimitives/service-host": "0.0.0-alpha.1"
   },
   "rules": {
     "coordination-vs-orchestration": "sha256:f2754939240133643e020043fac5b7e97b2ca250e0824771d19ca578976defd6",
