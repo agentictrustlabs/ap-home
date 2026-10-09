@@ -8,18 +8,26 @@ import type { Address, Hex } from 'viem';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { signedSelfHostRead } from './self-host-wire.js';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
-import { a2aBaseDomains, a2aCanonicalDomain, hostForName, AGENT_NAME_PARENT } from './host-context.js';
-import { nameRecordsReader } from './subject-address.js';
+import { a2aBaseDomains, AGENT_NAME_PARENT } from './host-context.js';
+import { nameRecordsReader, subjectAddress, servesUnpublishedNames } from './subject-address.js';
 
 export interface SelfHostedReadEnv {
   RPC_URL?: string; CHAIN_ID?: string; AGENT_NAME_REGISTRY?: string; AGENT_NAME_UNIVERSAL_RESOLVER?: string; PROFILE_RESOLVER?: string;
   A2A_PUBLIC_BASE_DOMAIN?: string; AGENT_NAME_PARENTS?: string; AGENT_NAME_PARENT?: string;
+  /** The ingress this deployment advertises on every card it serves — a record naming it is served HERE. */
+  DEMO_EDGE_URL?: string; A2A_SERVES_UNPUBLISHED_NAMES?: string;
 }
 
 const recent = new Map<string, { at: number; origin: string | null }>();
 const TTL_MS = 60_000;
 
-/** The origin the addressee's records publish for its A2A surface, when it is NOT one this Worker serves; else null. */
+/** The origin the addressee's records publish for its A2A surface, when it is NOT one this Worker serves; else null.
+ *
+ *  ONE RULE, the runtime's own (`subjectAddress`, subject-address.ts): `here` when the records name this deployment's
+ *  ingress (`DEMO_EDGE_URL` — the edge every card here advertises), the host this deployment serves the name at, or no
+ *  endpoint at all (the estate's unpublished names); `wire` when they name another host; `nowhere` when the registry does
+ *  not know the name. The first version of this forward re-derived a weaker copy that did not know the edge, and every
+ *  person whose records point at `edge.faithnet.io` lost their reads (2026-10-09: "this Home holds no read wire for it"). */
 export async function selfHostOriginOf(env: SelfHostedReadEnv, addressee: Address, selfOrigin: string): Promise<string | null> {
   const key = addressee.toLowerCase();
   const hit = recent.get(key);
@@ -31,14 +39,11 @@ export async function selfHostOriginOf(env: SelfHostedReadEnv, addressee: Addres
       const naming = new AgentNamingClient({ rpcUrl: env.RPC_URL, chainId: Number(env.CHAIN_ID), registry: env.AGENT_NAME_REGISTRY as Address, universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as Address, ...(env.PROFILE_RESOLVER ? { profileResolver: env.PROFILE_RESOLVER as Address } : {}) });
       const name = await naming.reverseResolve(addressee);
       const r = name ? await records(name) : null;
-      const endpoint = r?.a2aEndpoint ? new URL(r.a2aEndpoint).origin : null;
-      if (endpoint && name) {
-        const zones = a2aBaseDomains(env);
-        const parents = (env.AGENT_NAME_PARENTS ?? env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p: string) => p.trim()).filter(Boolean);
-        const servedHost = hostForName(name, a2aCanonicalDomain(env), parents);
-        const host = new URL(endpoint).hostname.toLowerCase();
-        const servedHere = endpoint === selfOrigin || (servedHost && host === servedHost.toLowerCase()) || zones.some((z) => host === `a2a.${z}`);
-        origin = servedHere ? null : endpoint;
+      const parents = (env.AGENT_NAME_PARENTS ?? env.AGENT_NAME_PARENT ?? AGENT_NAME_PARENT).split(',').map((p: string) => p.trim()).filter(Boolean);
+      const where = subjectAddress(name, r, { ownIngress: env.DEMO_EDGE_URL?.trim() || selfOrigin, ownDomains: a2aBaseDomains(env), parents, servesUnpublished: servesUnpublishedNames(env) });
+      if (where.where === 'wire') {
+        const host = new URL(where.cardUrl).origin;
+        origin = host === selfOrigin ? null : host;
       }
     } catch { origin = null; }
   }
