@@ -11,7 +11,8 @@
 // (A2A-INV-04). No long-lived signing key here — push delivery (which needs a terminal signer) is a
 // follow-up; this leg is poll-based (`tasks/get`), so the worker holds no agent key (SC-8 honored).
 /// <reference types="@cloudflare/workers-types" />
-import { durableObjectRunStorage } from '@agenticprimitives/service-host/cloudflare';
+import { HarnessRunDO, RUN_STORE_OPS } from '@agenticprimitives/service-host/cloudflare';
+import type { RunStorageOptions } from '@agenticprimitives/service-host';
 import { recordOf } from '@agenticprimitives/orchestration';
 import { putRecord } from './run-records.js';
 import { createPublicClient, http, keccak256, toBytes, type Address, type Hex } from 'viem';
@@ -576,9 +577,25 @@ export interface A2aTaskDeps {
   isRevoked?(delegationHash: Hex): Promise<boolean>;
 }
 
-export class A2aTaskDO {
+export class A2aTaskDO extends HarnessRunDO<Env> {
   private agent: A2aAgent | null = null;
-  constructor(private state: DurableObjectState, private env: Env, private deps?: A2aTaskDeps) {}
+  constructor(state: DurableObjectState, env: Env, private deps?: A2aTaskDeps) { super(state, env); }
+  /** Spec 341 §7 — the in-Worker marker is this Worker's; the package's DO core admits nothing until we say who is inside. */
+  protected isInternalCall(request: Request): boolean { return isInternalCall(request, this.env); }
+  /** Spec 433 W1 step 2 — what THIS host adds to the package's run storage: the Home's retention knob, and the search
+   *  index (spec 400 B5) a saved checkpoint feeds — a run is searchable by what was asked and what it waits for. */
+  protected override runStorageOptions(): RunStorageOptions {
+    return {
+      retentionDays: recordRetention(this.env).doDays,
+      onCheckpointSaved: async (c) => {
+        try {
+          const idx = ((await this.state.storage.get(SEARCH_INDEX_KEY)) as SearchIndexV1 | undefined) ?? emptyIndex();
+          const at = new Date(c.updatedAt ?? c.createdAt ?? Date.now()).toISOString();
+          await this.state.storage.put(SEARCH_INDEX_KEY, indexDoc(idx, `run:${c.runRef}`, { kind: 'run', at, snippet: '', ref: { runRef: c.runRef, ...(c.thread ? { conversationId: c.thread } : {}), ...(c.awaiting?.prompt ? { title: c.awaiting.prompt } : {}) } }, `${c.message ?? ''} ${c.awaiting?.prompt ?? ''}`));
+        } catch (e) { console.warn('[search] run index skipped:', e instanceof Error ? e.message : String(e)); }
+      },
+    };
+  }
 
   private build(agentSA: Address): A2aAgent {
     if (this.agent) return this.agent;
@@ -838,7 +855,7 @@ export class A2aTaskDO {
       }
   }
 
-  async fetch(req: Request): Promise<Response> {
+  override async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
     // ── spec 327 §4 — the org-assistant turn (`discussion.respond`). IN-WORKER ONLY: dispatched by
     // the org's InteractionsDO after a triggering topic post, gated by the ARCH-H2 internal marker.
@@ -919,20 +936,6 @@ export class A2aTaskDO {
       // landing on a second isolate was accepted, live, 2026-09-08). The agent's object is the estate's
       // single writer, so the claim happens here: first caller wins, the rest are refused. Rows are pruned
       // by their own expiry and are a rebuild, never a bereavement (ADR-0055).
-      if (op === 'assertion-claim') {
-        const b = body as { digest?: string; expiresAt?: number } | null;
-        const digest = String(b?.digest ?? '').toLowerCase();
-        if (!/^0x[0-9a-f]{64}$/.test(digest)) return Response.json({ ok: false, error: 'digest required' }, { status: 400 });
-        const akey = `a2a:assertion:${digest}`;
-        const now = Date.now();
-        if (await this.state.storage.get(akey)) return Response.json({ ok: true, claimed: false });
-        await this.state.storage.put(akey, { at: now, expiresAt: Number(b?.expiresAt ?? now + 300_000) });
-        // Opportunistic prune: an expired row proves nothing and costs storage.
-        const rows = await this.state.storage.list<{ expiresAt?: number }>({ prefix: 'a2a:assertion:', limit: 200 });
-        const dead = [...rows.entries()].filter(([, v]) => Number(v?.expiresAt ?? 0) < now).map(([k]) => k);
-        if (dead.length) await this.state.storage.delete(dead);
-        return Response.json({ ok: true, claimed: true });
-      }
       // Spec 402 W3 — DECLARE a routine of the person's own (a schedule row with `declared`), and REMOVE one. Only a
       // declared row can be removed here; the playbook's rows come and go with the playbook.
       if (op === 'trigger-declare') {
@@ -977,102 +980,16 @@ export class A2aTaskDO {
         await this.state.storage.put(tkey(triggerId), next);
         return Response.json({ ok: true, row: next });
       }
-      // Spec 370 P6 — THE RUN RECORD: what a finished run observed, decided and received, kept for a week
-      // on the agent's own object for looking back and replaying. Listed WITHOUT its mandates.
-      const rkey = (ref: string) => `harness:record:${ref}`;
-      if (op === 'record-put') {
-        const rec = (body as { record?: { runRef?: string; canceled?: unknown } } | null)?.record;
-        if (!rec?.runRef) return Response.json({ ok: false, error: 'record.runRef required' }, { status: 400 });
-        // Spec 398 §5.3 — A CANCEL MARK IS NEVER LOST TO A LATE WRITE. The turn writes its record after it has
-        // answered (waitUntil), and the exporter writes it again with the export report; a cancel that landed in
-        // between would be overwritten by either. The store is the one place both pass, so the mark is kept here.
-        // (Seen live on the estate: the gate's cancel beat the turn's record write and the record read as never
-        // canceled — a plausible falsehood about the one fact the person acted on.)
-        const prior = (await this.state.storage.get(rkey(rec.runRef))) as { canceled?: unknown } | undefined;
-        await this.state.storage.put(rkey(rec.runRef), prior?.canceled && !rec.canceled ? { ...rec, canceled: prior.canceled } : rec);
-        // P1.4 — THE DAY'S COUNTERS: the run's bill lands on the day it was recorded, once per run (the export writes the
-        // record again). Serving-plane; a wipe is a rebuild from the records.
-        if (!prior) {
-          const bill = (rec as { bill?: { vaultCalls?: number; doRequests?: number }; at?: number }).bill;
-          const day = new Date(Number((rec as { at?: number }).at ?? Date.now())).toISOString().slice(0, 10);
-          const bk = `harness:budget:${day}`;
-          const cur = ((await this.state.storage.get(bk)) as { asks?: number; vaultCalls?: number; doRequests?: number } | undefined) ?? {};
-          await this.state.storage.put(bk, { asks: cur.asks ?? 0, vaultCalls: (cur.vaultCalls ?? 0) + Number(bill?.vaultCalls ?? 0), doRequests: (cur.doRequests ?? 0) + Number(bill?.doRequests ?? 0) });
-        }
-        return Response.json({ ok: true });
-      }
-      if (op === 'budget-ask') {
-        const day = String((body as { day?: string } | null)?.day ?? new Date().toISOString().slice(0, 10));
-        const bk = `harness:budget:${day}`;
-        const cur = ((await this.state.storage.get(bk)) as { asks?: number; vaultCalls?: number; doRequests?: number } | undefined) ?? {};
-        await this.state.storage.put(bk, { asks: (cur.asks ?? 0) + 1, vaultCalls: cur.vaultCalls ?? 0, doRequests: cur.doRequests ?? 0 });
-        return Response.json({ ok: true });
-      }
-      if (op === 'budget-get') {
-        const days = Math.min(Math.max(Number((body as { days?: number } | null)?.days ?? 7), 1), 31);
-        const out: Array<{ day: string; asks: number; vaultCalls: number; doRequests: number }> = [];
-        for (let i = 0; i < days; i++) {
-          const day = new Date(Date.now() - i * 86_400_000).toISOString().slice(0, 10);
-          const cur = ((await this.state.storage.get(`harness:budget:${day}`)) as { asks?: number; vaultCalls?: number; doRequests?: number } | undefined) ?? {};
-          out.push({ day, asks: cur.asks ?? 0, vaultCalls: cur.vaultCalls ?? 0, doRequests: cur.doRequests ?? 0 });
-        }
-        return Response.json({ ok: true, days: out });
-      }
-      if (op === 'record-get') {
-        if (!body?.runRef) return Response.json({ ok: false, error: 'runRef required' }, { status: 400 });
-        return Response.json({ ok: true, record: (await this.state.storage.get(rkey(body.runRef))) ?? null });
-      }
-      if (op === 'record-list') {
-        const rows = [...(await this.state.storage.list<Record<string, unknown>>({ prefix: 'harness:record:' })).values()];
-        const now = Date.now();
-        // Spec 381 — THE RETENTION POLICY, declared: the DO copy lives `HARNESS_RECORD_RETENTION_DAYS` (7 by
-        // default) and is swept on listing; the run's provenance is in the acting agent's vault for good.
-        const ttl = recordRetention(this.env).doDays * 24 * 3600_000;
-        const stale = rows.filter((r) => now - Number(r.at ?? 0) > ttl).map((r) => rkey(String(r.runRef)));
-        if (stale.length) await this.state.storage.delete(stale);
-        // Spec 406 W1 — `full: true` keeps each step's ids and verdicts (never its args or results) for the operator
-        // index's rebuild: one call per agent instead of one per run.
-        const full = (body as { full?: boolean } | null)?.full === true;
-        const live = rows.filter((r) => now - Number(r.at ?? 0) <= ttl)
-          .map(({ presented: _p, events: _e, ...rest }): Record<string, unknown> => full
-            ? { ...rest, steps: ((rest.steps as Array<Record<string, unknown>> | undefined) ?? []).map((st) => ({ stepRef: st.stepRef, toolId: st.toolId, ok: st.ok, ...(st.error ? { error: st.error } : {}), ...(st.skipped ? { skipped: true } : {}) })), receipts: ((rest.receipts as unknown[] | undefined) ?? []).length }
-            // Spec 415 A3 — the list's facets: the skill contracts that governed the steps and the tools they ran (ids only).
-            : ({ ...rest, steps: (rest.steps as unknown[] | undefined)?.length ?? 0, receipts: (rest.receipts as unknown[] | undefined)?.length ?? 0,
-                skills: [...new Set(((rest.receipts as Array<{ skill?: { id?: string } }> | undefined) ?? []).map((r) => r.skill?.id).filter((x): x is string => !!x))],
-                tools: [...new Set(((rest.steps as Array<{ toolId?: string }> | undefined) ?? []).map((st) => st.toolId).filter((x): x is string => !!x))] }))
-          .sort((a, b) => Number(b.at ?? 0) - Number(a.at ?? 0));
-        return Response.json({ ok: true, records: live, retention: recordRetention(this.env) });
-      }
-      // Spec 433 W1 — the checkpoint + progress ops are the package's (`@agenticprimitives/service-host`): same keys,
-      // same expiry, same keyring-stripped listing, same asker-gated progress. This DO keeps what is ITS: the search
-      // index a saved run feeds (spec 400 B5), the triggers, the assertion ledger, the task store.
-      const runs = durableObjectRunStorage(this.state.storage);
-      if (op === 'progress-append' || op === 'progress-read') {
-        const r = await runs.handle(op, body as Record<string, unknown>);
-        return r.ok ? Response.json(r) : Response.json({ ok: false, error: r.error }, { status: r.status });
-      }
-      if (op === 'save') {
-        const cp = body?.checkpoint;
-        if (!cp?.runRef) return Response.json({ ok: false, error: 'checkpoint.runRef required' }, { status: 400 });
-        const saved = await runs.handle('save', body as Record<string, unknown>);
-        if (!saved.ok) return Response.json({ ok: false, error: saved.error }, { status: saved.status });
-        // Spec 400 W2 (B5) — a run is searchable by what was asked and what it waits for; a dropped run stays findable
-        // as history (the record of it is its receipts and provenance in the vault; the index cites the ref).
-        try {
-          const idx = ((await this.state.storage.get(SEARCH_INDEX_KEY)) as SearchIndexV1 | undefined) ?? emptyIndex();
-          const c = cp as { runRef: string; message?: string; awaiting?: { prompt?: string }; updatedAt?: number; createdAt?: number; thread?: string };
-          const at = new Date(c.updatedAt ?? c.createdAt ?? Date.now()).toISOString();
-          await this.state.storage.put(SEARCH_INDEX_KEY, indexDoc(idx, `run:${c.runRef}`, { kind: 'run', at, snippet: '', ref: { runRef: c.runRef, ...(c.thread ? { conversationId: c.thread } : {}), ...(c.awaiting?.prompt ? { title: c.awaiting.prompt } : {}) } }, `${c.message ?? ''} ${c.awaiting?.prompt ?? ''}`));
-        } catch (e) { console.warn('[search] run index skipped:', e instanceof Error ? e.message : String(e)); }
-        return Response.json({ ok: true });
-      }
+      // Spec 433 W1 step 2 — THE RUN STORE IS THE PACKAGE'S (`@agenticprimitives/service-host`): checkpoint, progress, the
+      // run record, the day's counters and the assertion ledger — same keys, same expiry, same listings. This object keeps
+      // what is ITS: the search index (fed through `runStorageOptions().onCheckpointSaved`), the triggers, the routing.
       if (op === 'search') {
         const idx = ((await this.state.storage.get(SEARCH_INDEX_KEY)) as SearchIndexV1 | undefined) ?? emptyIndex();
         const hits = searchIndex(idx, String(body?.query ?? ''), { kinds: ['run'], ...(typeof body?.since === 'string' ? { since: body.since } : {}), ...(typeof body?.limit === 'number' ? { limit: body.limit } : {}) });
         return Response.json({ ok: true, hits, indexed: idx.order.length });
       }
-      if (op === 'load' || op === 'drop' || op === 'list') {
-        const r = await runs.handle(op, body as Record<string, unknown>);
+      if (RUN_STORE_OPS.has(op)) {
+        const r = await this.runs.handle(op, body as Record<string, unknown>);
         return r.ok ? Response.json(r) : Response.json({ ok: false, error: r.error }, { status: r.status });
       }
       return Response.json({ ok: false, error: `unknown harness-run op: ${op}` }, { status: 404 });

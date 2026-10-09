@@ -1,3 +1,4 @@
+import { forwardToSelfHost } from './self-hosted-read.js';
 import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 // demo-a2a as a Cloudflare Worker.
 //
@@ -1759,6 +1760,8 @@ app.post('/harness/runs', async (c) => {
   const who = await askSurfacePrincipal(c, rawRuns, body);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const addressee = body.addressee.toLowerCase() as Address;
+  // Spec 433 W2 — a self-hosted addressee's reads go to its own host, by its records (never answered from the empty object here).
+  { const fwd = await forwardToSelfHost(c.env, c.req.raw, addressee, rawRuns); if (fwd) return fwd; }
   const caller = String(who.sa).toLowerCase() as Address;
   // The SAME rule that gates a resume decides what is listed — one mechanism (ADR-0013). A run this
   // person could not resume is a run they are not shown.
@@ -2989,6 +2992,8 @@ app.post('/harness/records', async (c) => {
   const who = await askSurfacePrincipal(c, rawRec, body);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const addressee = body.addressee.toLowerCase() as Address;
+  // Spec 433 W2 — a self-hosted addressee's reads go to its own host, by its records (never answered from the empty object here).
+  { const fwd = await forwardToSelfHost(c.env, c.req.raw, addressee, rawRec); if (fwd) return fwd; }
   const caller = String(who.sa).toLowerCase();
   /**
    * TWO CLAIMS ON A RUN, not one. "A run is looked back on by whoever asked it" keeps one asker's runs from
@@ -3112,6 +3117,8 @@ app.post('/harness/provenance', async (c) => {
   const who = await verifyHomeSession(body.session, c.env);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const addressee = body.addressee.toLowerCase() as Address;
+  // Spec 433 W2 — a self-hosted addressee's reads go to its own host, by its records (never answered from the empty object here).
+  { const fwd = await forwardToSelfHost(c.env, c.req.raw, addressee, JSON.stringify(body)); if (fwd) return fwd; }
   const rec = await getRecord(c.env as never, addressee, body.runRef);
   if (!rec) {
     // Spec 406 W3 — THE VAULT IS THE RECORD (ADR-0055): a run that did not run HERE may still have its provenance here —
@@ -3274,6 +3281,8 @@ app.post('/harness/progress', async (c) => {
     : await askSurfacePrincipal(c, rawProg, body);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const addressee = body.addressee.toLowerCase() as Address;
+  // Spec 433 W2 — a self-hosted addressee's reads go to its own host, by its records (never answered from the empty object here).
+  { const fwd = await forwardToSelfHost(c.env, c.req.raw, addressee, rawProg); if (fwd) return fwd; }
   const asker = String(who.sa).toLowerCase() as Address;
   const after = Math.max(0, Number(body.after ?? 0));
   const deadline = Date.now() + Math.min(4_000, Math.max(0, Number(body.wait ?? 3_000)));
