@@ -7,11 +7,11 @@
 // bespoke per-domain write tool (Field Rails was the first): a new write is a contract declaration, not a branch.
 import type { ToolInvoker, ExecutorInvokeV1 } from '@agenticprimitives/orchestration';
 
-/** Spec 426's SECOND transport (`mcp.tools-call`) — a stateless MCP server the operator maps by name; `intent` is the MCP
- *  tool name and `args.arguments` the capability's arg names forwarded as the tool's arguments. Declared here as well as in
- *  Ring 0 so this runtime reads a playbook carrying it before the pinned orchestration type learns it. */
-export interface McpToolsCallInvokeV1 { transport: 'mcp.tools-call'; executor: string; intent: string; args: { arguments?: string[] } }
-export type InvokeV1 = ExecutorInvokeV1 | McpToolsCallInvokeV1;
+/** Spec 426's SECOND transport (`mcp.tools-call`, orchestration ≥ alpha.11): a stateless MCP server the operator maps by
+ *  name; `intent` is the MCP tool name and `args.arguments` the capability's arg names forwarded as the tool's arguments. */
+export type McpToolsCallInvokeV1 = Extract<ExecutorInvokeV1, { transport: 'mcp.tools-call' }>;
+export type A2aInvokeV1 = Extract<ExecutorInvokeV1, { transport: 'a2a.message-send' }>;
+export type InvokeV1 = ExecutorInvokeV1;
 import type { Address } from '@agenticprimitives/types';
 
 export interface ExecutorConfigV1 {
@@ -150,7 +150,7 @@ export function executorInvokeInvoker(deps: ExecutorInvokeDeps, invoke: InvokeV1
       };
     }
     if (!ex?.url || !ex?.client || ex.kind === 'mcp') return { refused: `no executor is configured for "${invoke.executor}" on this deployment` };
-    const a2a = invoke as Exclude<InvokeV1, McpToolsCallInvokeV1>;
+    const a2a = invoke as A2aInvokeV1;
     const goal = String(args[a2a.args.goal] ?? '').trim();
     if (!goal) return { refused: `what happened? — ${toolId} needs ${a2a.args.goal} in the actor's own words` };
 
