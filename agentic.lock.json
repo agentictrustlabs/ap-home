@@ -1,11 +1,11 @@
 {
   "lockVersion": 1,
   "packages": {
-    "@agenticprimitives/devkit": "0.0.0-alpha.14",
+    "@agenticprimitives/devkit": "0.0.0-alpha.16",
     "@agenticprimitives/evaluation": "0.0.0-alpha.5",
-    "@agenticprimitives/a2a": "0.0.0-alpha.29",
+    "@agenticprimitives/a2a": "0.0.0-alpha.30",
     "@agenticprimitives/mcp-protocol": "0.0.0-alpha.4",
-    "@agenticprimitives/service-host": "0.0.0-alpha.1",
+    "@agenticprimitives/service-host": "0.0.0-alpha.4",
     "@agenticprimitives/admission": "0.0.0-alpha.12",
     "@agenticprimitives/agent-account": "1.0.0-alpha.31",
     "@agenticprimitives/agent-naming": "1.0.0-alpha.31",
@@ -53,7 +53,7 @@
     "@agenticprimitives/rate-control-cloudflare": "0.0.0-alpha.5",
     "@agenticprimitives/registry-kit": "0.0.0-alpha.19",
     "@agenticprimitives/related-agents": "0.0.0-alpha.27",
-    "@agenticprimitives/runtime-member": "0.0.0-alpha.8",
+    "@agenticprimitives/runtime-member": "0.0.0-alpha.9",
     "@agenticprimitives/situations": "0.0.0-alpha.15",
     "@agenticprimitives/surface-catalog": "0.0.0-alpha.5",
     "@agenticprimitives/tool-policy": "1.0.0-alpha.31",
@@ -70,14 +70,14 @@
     "hard-rules": "sha256:443a34a33287f678d22a8d6e3ca43bee532bf56acc6ba816d384f9ffe5075a6a",
     "one-capability-model-generates-both": "sha256:50d46f01e41c2ffa2dc12732e9c77609d4fbeb2c174588345d8999a11aa6428a",
     "ontology-drives-behavior": "sha256:1324bb1aec2d8242b2fffe490e9ff05b963ccb295d258bb08f8de911c1f25c00",
-    "service-agent-birthrights": "sha256:f6a7ba971eeade2a080fb21d90ed3489383c8df0c78478153e3e6ac94c3628af",
+    "service-agent-birthrights": "sha256:0a1601d625aa034ea53f7841db6a9b3fc28154cca8bebffc56f83a5c8ac53624",
     "service-agent-signing": "sha256:3f41d62dc56a18789b7c54cfbaf2446afcf7956c52c2b855720fdc1300519d7f",
     "skill-terminology": "sha256:c28873bc0594c790987d817d83335674510ad91fbe785fc1f23a771da7f7f3b3",
     "vault-and-ontology": "sha256:825116963a4845bf358f3446ea5d4aad64436b2bd06ce878082daf5a23ea58f5",
     "vault-is-the-record-apps-hold-references": "sha256:e6a6e859a16071dff5c30a7b7dc2d4cb0b8307e19dc416387cf181084236e685",
     "vault-records-are-ontology-shaped": "sha256:6a739d1a10d5b62e4ab5ed910fdccc67b9c024dd519c9c3e1fea916b3899a90b"
   },
-  "devkit": "0.0.0-alpha.14",
+  "devkit": "0.0.0-alpha.16",
   "template": {
     "name": "product-repo",
     "revision": "2026-09-16.1"
