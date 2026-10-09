@@ -1,4 +1,5 @@
-import { forwardToSelfHost } from './self-hosted-read.js';
+import { forwardToSelfHost , type SelfHostForwardAuth } from './self-hosted-read.js';
+import { getSelfHostWire, putSelfHostWire, verifySelfHostReadWire, isDelegationWire, type SelfHostWireChain } from './self-host-wire.js';
 import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 // demo-a2a as a Cloudflare Worker.
 //
@@ -1753,6 +1754,59 @@ function separationOfDuties(env: Env): 'strict' | 'off' | null {
 // The listing carries no mandates (the DO strips the keyring): it says a run is waiting and what it waits
 // FOR. Resuming is `/harness/ask` with the runRef, which re-verifies everything as always — so seeing a
 // run here grants nothing, exactly as claiming one does not.
+/** Spec 433 W2 — how a forwarded read authenticates at a self-hosted agent: the caller must be its steward (or itself) here,
+ *  and the read rides the agent's own wire, signed by this runtime's interactions-session key. */
+function selfHostForwardAuth(env: Env, caller: Address): SelfHostForwardAuth {
+  return {
+    caller,
+    mayOversee: (who, agent) => mayOverseeAgent(env, who, agent),
+    wire: (agent) => getSelfHostWire(env as never, agent),
+    signDigest: async (digest) => { const acct = await interactionsSessionAccount(env); if (!acct.sign) throw new Error('the interactions-session account cannot sign a raw digest'); return acct.sign({ hash: digest }); },
+  };
+}
+
+function selfHostWireChain(env: Env): SelfHostWireChain | null {
+  if (!env.UNIVERSAL_SIGNATURE_VALIDATOR || !env.TIMESTAMP_ENFORCER || !env.ALLOWED_METHODS_ENFORCER || !env.DELEGATION_MANAGER) return null;
+  const deps = harnessDeps(env, buildAuditSink(env));
+  return {
+    chainId: Number(env.CHAIN_ID), delegationManager: env.DELEGATION_MANAGER as Address, validator: env.UNIVERSAL_SIGNATURE_VALIDATOR as Address,
+    enforcers: { timestamp: env.TIMESTAMP_ENFORCER, allowedMethods: env.ALLOWED_METHODS_ENFORCER },
+    readContract: (args) => deps.readContract(args as never), validatorAbi: universalSignatureValidatorAbi, isRevokedAbi: IS_REVOKED_ABI_FOR_STANDING,
+  };
+}
+
+// POST /self-host/wire { session, agent, wire } — spec 433 W2, THE CEREMONY'S LAST STEP: a self-hosted agent's steward keeps
+// at this Home the read wire the agent issued to it (delegator = the agent, delegate = this runtime's interactions-session
+// key, `harness.read` only, time-boxed; signed by the steward as the agent's custodian — persona-sign for a script-chartered
+// service, the same signature its storage grant carries). Verified here exactly as the host will verify it, then kept on the
+// agent's object; the forward presents it. A steward's standing is derived from the agent's side (`mayOverseeAgent`).
+app.post('/self-host/wire', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { session?: string; agent?: string; wire?: unknown } | null;
+  if (!body?.session || !body.agent || !body.wire) return c.json({ ok: false, error: 'session, agent and wire are required' }, 400);
+  const who = await verifyHomeSession(body.session, c.env);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const agent = String(body.agent).toLowerCase() as Address;
+  if (!/^0x[0-9a-f]{40}$/.test(agent)) return c.json({ ok: false, error: 'agent (0x…40) required' }, 400);
+  if (!(await mayOverseeAgent(c.env, String(who.sa).toLowerCase() as Address, agent).catch(() => false))) return c.json({ ok: false, error: 'only the agent itself or a steward keeps its read wire here' }, 403);
+  if (!isDelegationWire(body.wire)) return c.json({ ok: false, error: 'wire must be a delegation wire (delegator, delegate, authority, caveats, salt, signature)' }, 400);
+  const chain = selfHostWireChain(c.env);
+  if (!chain) return c.json({ ok: false, error: 'the wire gate is not configured' }, 503);
+  if (!interactionsSessionKeyConfigured(c.env)) return c.json({ ok: false, error: 'this runtime has no interactions-session key to read with' }, 503);
+  const delegate = (await interactionsSessionAccount(c.env)).address as Address;
+  const why = await verifySelfHostReadWire(chain, agent, delegate, body.wire).catch((e) => (e instanceof Error ? e.message : String(e)));
+  if (why) return c.json({ ok: false, error: `the read wire did not verify: ${why}` }, 400);
+  const kept = await putSelfHostWire(c.env as never, agent, body.wire);
+  return c.json(kept ? { ok: true, agent, delegate } : { ok: false, error: 'the wire could not be kept' }, kept ? 200 : 500);
+});
+
+// GET /self-host/wire?agent= — whether this Home holds a read wire for the agent (the delegate and the window, never the wire).
+app.get('/self-host/wire', async (c) => {
+  const agent = String(c.req.query('agent') ?? '').toLowerCase() as Address;
+  if (!/^0x[0-9a-f]{40}$/.test(agent)) return c.json({ ok: false, error: 'agent (0x…40) required' }, 400);
+  const wire = await getSelfHostWire(c.env as never, agent);
+  return c.json({ ok: true, agent, held: !!wire, ...(wire ? { delegate: wire.delegate } : {}) });
+});
+
 app.post('/harness/runs', async (c) => {
   const rawRuns = await c.req.text();
   const body = ((): { session?: string; addressee?: Address } | null => { try { return JSON.parse(rawRuns); } catch { return null; } })();
@@ -1761,7 +1815,7 @@ app.post('/harness/runs', async (c) => {
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const addressee = body.addressee.toLowerCase() as Address;
   // Spec 433 W2 — a self-hosted addressee's reads go to its own host, by its records (never answered from the empty object here).
-  { const fwd = await forwardToSelfHost(c.env, c.req.raw, addressee, rawRuns); if (fwd) return fwd; }
+  { const fwd = await forwardToSelfHost(c.env, c.req.raw, addressee, rawRuns, selfHostForwardAuth(c.env, String(who.sa).toLowerCase() as Address)); if (fwd) return fwd; }
   const caller = String(who.sa).toLowerCase() as Address;
   // The SAME rule that gates a resume decides what is listed — one mechanism (ADR-0013). A run this
   // person could not resume is a run they are not shown.
@@ -2993,7 +3047,7 @@ app.post('/harness/records', async (c) => {
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const addressee = body.addressee.toLowerCase() as Address;
   // Spec 433 W2 — a self-hosted addressee's reads go to its own host, by its records (never answered from the empty object here).
-  { const fwd = await forwardToSelfHost(c.env, c.req.raw, addressee, rawRec); if (fwd) return fwd; }
+  { const fwd = await forwardToSelfHost(c.env, c.req.raw, addressee, rawRec, selfHostForwardAuth(c.env, String(who.sa).toLowerCase() as Address)); if (fwd) return fwd; }
   const caller = String(who.sa).toLowerCase();
   /**
    * TWO CLAIMS ON A RUN, not one. "A run is looked back on by whoever asked it" keeps one asker's runs from
@@ -3118,7 +3172,7 @@ app.post('/harness/provenance', async (c) => {
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const addressee = body.addressee.toLowerCase() as Address;
   // Spec 433 W2 — a self-hosted addressee's reads go to its own host, by its records (never answered from the empty object here).
-  { const fwd = await forwardToSelfHost(c.env, c.req.raw, addressee, JSON.stringify(body)); if (fwd) return fwd; }
+  { const fwd = await forwardToSelfHost(c.env, c.req.raw, addressee, JSON.stringify(body), selfHostForwardAuth(c.env, String(who.sa).toLowerCase() as Address)); if (fwd) return fwd; }
   const rec = await getRecord(c.env as never, addressee, body.runRef);
   if (!rec) {
     // Spec 406 W3 — THE VAULT IS THE RECORD (ADR-0055): a run that did not run HERE may still have its provenance here —
@@ -3282,7 +3336,7 @@ app.post('/harness/progress', async (c) => {
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const addressee = body.addressee.toLowerCase() as Address;
   // Spec 433 W2 — a self-hosted addressee's reads go to its own host, by its records (never answered from the empty object here).
-  { const fwd = await forwardToSelfHost(c.env, c.req.raw, addressee, rawProg); if (fwd) return fwd; }
+  { const fwd = await forwardToSelfHost(c.env, c.req.raw, addressee, rawProg, selfHostForwardAuth(c.env, String(who.sa).toLowerCase() as Address)); if (fwd) return fwd; }
   const asker = String(who.sa).toLowerCase() as Address;
   const after = Math.max(0, Number(body.after ?? 0));
   const deadline = Date.now() + Math.min(4_000, Math.max(0, Number(body.wait ?? 3_000)));

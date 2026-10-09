@@ -1,10 +1,12 @@
 // A SELF-HOSTED AGENT'S READS GO TO ITS OWN HOST — spec 433 W2. The Home sends every `/harness/*` read here (its `/a2a/*`
 // rewrite), but a service that embeds the Service Host keeps its runs on ITS object, at the origin its name records
 // publish. So before answering a read from THIS Worker's object, ask the records: when the addressee's `a2aEndpoint` is not
-// an origin this Worker serves, the read is forwarded there, same body, same bearer, and its answer returned verbatim.
+// an origin this Worker serves, the read is forwarded there under the agent's own read wire, and its answer returned verbatim.
 // Records-first and nothing else (ADR-0013): a self-hosted agent whose host cannot be reached is said to be unreachable —
 // never answered from the empty object here as if it had done nothing.
-import type { Address } from 'viem';
+import type { Address, Hex } from 'viem';
+import type { DelegationWireV1 } from '@agenticprimitives/a2a';
+import { signedSelfHostRead } from './self-host-wire.js';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { a2aBaseDomains, a2aCanonicalDomain, hostForName, AGENT_NAME_PARENT } from './host-context.js';
 import { nameRecordsReader } from './subject-address.js';
@@ -44,14 +46,40 @@ export async function selfHostOriginOf(env: SelfHostedReadEnv, addressee: Addres
   return origin;
 }
 
-/** Forward a `/harness/*` read to the addressee's own host; `null` when the addressee is served here. */
-export async function forwardToSelfHost(env: SelfHostedReadEnv, request: Request, addressee: Address, raw: string): Promise<Response | null> {
+export interface SelfHostForwardAuth {
+  /** The verified caller of the read (the Home session's person, or an app delegation's). */
+  caller: Address;
+  /** The runtime's rule: the agent itself, or a steward whose wire verifies on chain (`mayOverseeAgent`). */
+  mayOversee: (caller: Address, agent: Address) => Promise<boolean>;
+  /** The agent's read wire kept on its object here (`getSelfHostWire`); null ⇒ the ceremony has not been run. */
+  wire: (agent: Address) => Promise<DelegationWireV1 | null>;
+  /** This runtime's interactions-session key, signing the per-read assertion. */
+  signDigest: (digest: Hex) => Promise<Hex>;
+}
+
+/** Forward a `/harness/*` read to the addressee's own host; `null` when the addressee is served here.
+ *
+ *  UNDER THE AGENT'S OWN WIRE, never the caller's session: a self-hosted agent cannot verify this estate's session token, so
+ *  the read is presented as an `A2A-Session` assertion by this runtime's key over the agent's read wire (spec 433 W2) — the
+ *  credential the agent's custodian issued to this Home at charter. Which is why the caller must first be someone the
+ *  runtime would let read here: the agent itself or a steward; a signed-in stranger does not get to ride the Home's wire.
+ *  No wire ⇒ said, with the ceremony to run; never a fallback to the session (ADR-0013). */
+export async function forwardToSelfHost(env: SelfHostedReadEnv, request: Request, addressee: Address, raw: string, auth: SelfHostForwardAuth): Promise<Response | null> {
   const url = new URL(request.url);
   const origin = await selfHostOriginOf(env, addressee, url.origin);
   if (!origin) return null;
-  const auth = request.headers.get('authorization');
+  if (!(await auth.mayOversee(auth.caller, addressee).catch(() => false))) {
+    return Response.json({ ok: false, error: `${addressee} is served at ${origin}; only the agent itself or a steward reads its runs through this Home` }, { status: 403, headers: { 'x-ap-self-hosted': origin } });
+  }
+  const wire = await auth.wire(addressee).catch(() => null);
+  if (!wire) {
+    return Response.json({ ok: false, error: `${addressee} is served at ${origin} and this Home holds no read wire for it — its steward issues one (scripts/issue-self-host-read-wire.mts <name> --by <steward>)` }, { status: 401, headers: { 'x-ap-self-hosted': origin } });
+  }
+  let body: Record<string, unknown> = {};
+  try { body = (JSON.parse(raw) as Record<string, unknown>) ?? {}; } catch { body = {}; }
   try {
-    const res = await fetch(`${origin}${url.pathname}`, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', ...(auth ? { authorization: auth } : {}) }, body: raw });
+    const signed = await signedSelfHostRead(wire, body, origin, auth.signDigest);
+    const res = await fetch(`${origin}${url.pathname}`, { method: 'POST', headers: signed.headers, body: signed.raw });
     const text = await res.text();
     return new Response(text, { status: res.status, headers: { 'content-type': res.headers.get('content-type') ?? 'application/json', 'x-ap-self-hosted': origin } });
   } catch (e) {
