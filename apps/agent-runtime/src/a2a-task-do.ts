@@ -11,6 +11,7 @@
 // (A2A-INV-04). No long-lived signing key here — push delivery (which needs a terminal signer) is a
 // follow-up; this leg is poll-based (`tasks/get`), so the worker holds no agent key (SC-8 honored).
 /// <reference types="@cloudflare/workers-types" />
+import { durableObjectRunStorage } from '@agenticprimitives/service-host/cloudflare';
 import { recordOf } from '@agenticprimitives/orchestration';
 import { putRecord } from './run-records.js';
 import { createPublicClient, http, keccak256, toBytes, type Address, type Hex } from 'viem';
@@ -99,7 +100,6 @@ import { ERC1271_MAGIC_VALUE as ERC1271_MAGIC } from '@agenticprimitives/types';
 /** How long an unfinished harness run stays resumable. A day is well past the point: the mandate a
  *  suspended run holds expires in minutes, so a stale checkpoint offers a resume that would have to ask
  *  for fresh authority anyway. See the `list` op for why they are swept there rather than on a timer. */
-const RUN_TTL_MS = 24 * 60 * 60 * 1000;
 const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ name: 'magic', type: 'bytes4' }] }] as const;
 const IS_REVOKED_ABI = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ name: 'delegationHash', type: 'bytes32' }], outputs: [{ name: 'revoked', type: 'bool' }] }] as const;
 
@@ -854,11 +854,9 @@ export class A2aTaskDO {
       if (!isInternalCall(req, this.env)) return Response.json({ ok: false, error: 'internal op — not authorized' }, { status: 403 });
       const op = url.pathname.slice('/internal/harness-run/'.length);
       const body = (await req.json().catch(() => null)) as { runRef?: string; checkpoint?: { runRef?: string }; asker?: string; line?: Record<string, unknown> & { seq?: number; terminal?: boolean }; after?: number; query?: string; since?: string; limit?: number } | null;
-      const key = (ref: string) => `harness:run:${ref}`;
       // Spec 370 P2 — the run's PROGRESS LINES: a short list per run, appended by the ask route as the loop
       // narrates itself, long-polled by the surface. Rebuildable, TTL'd, and read only by the asker whose
       // run it is (recorded on the first append — a runRef is a client-chosen string).
-      const pkey = (ref: string) => `harness:progress:${ref}`;
       // Spec 370 P5 — THE AGENT'S OWN SCHEDULE, under its single alarm. Rows are rebuildable from the
       // playbook (a sync replaces what the digest no longer declares, keeps timing for what it still does).
       const tkey = (id: string) => `harness:trigger:${id}`;
@@ -1045,38 +1043,19 @@ export class A2aTaskDO {
           .sort((a, b) => Number(b.at ?? 0) - Number(a.at ?? 0));
         return Response.json({ ok: true, records: live, retention: recordRetention(this.env) });
       }
-      if (op === 'progress-append') {
-        if (!body?.runRef || !body.line || !body.asker) return Response.json({ ok: false, error: 'runRef, asker and line required' }, { status: 400 });
-        const cur = (await this.state.storage.get<{ asker: string; at: number; lines: unknown[] }>(pkey(body.runRef))) ?? { asker: body.asker, at: Date.now(), lines: [] };
-        if (cur.asker !== body.asker) return Response.json({ ok: false, error: 'this run belongs to someone else' }, { status: 403 });
-        // ONE SEQUENCE PER RUN, assigned here. A run is several turns and every turn narrates from its
-        // start; a reader keeps its cursor across turns, so a seq that restarted per turn re-read the
-        // earlier turns' lines ("checking your authority…" three times over).
-        // Spec 418 A1 — a streamed answer's drafts REPLACE each other (same step): the list keeps the latest, under a new seq.
-        const lines = cur.lines as Array<{ seq: number; type?: string; stepRef?: string }>;
-        const last = lines[lines.length - 1];
-        const seq = (last?.seq ?? 0) + 1;
-        const line = body.line as { type?: string; stepRef?: string };
-        if (line.type === 'AnswerDraft' && last?.type === 'AnswerDraft' && last.stepRef === line.stepRef) lines[lines.length - 1] = { ...body.line, seq };
-        else if (lines.length < 400) lines.push({ ...body.line, seq });
-        cur.at = Date.now();
-        await this.state.storage.put(pkey(body.runRef), cur);
-        return Response.json({ ok: true, seq });
-      }
-      if (op === 'progress-read') {
-        if (!body?.runRef || !body.asker) return Response.json({ ok: false, error: 'runRef and asker required' }, { status: 400 });
-        const cur = await this.state.storage.get<{ asker: string; at: number; lines: Array<{ seq: number; terminal?: boolean }> }>(pkey(body.runRef));
-        if (!cur) return Response.json({ ok: true, known: false, lines: [], terminal: false });
-        if (cur.asker !== body.asker) return Response.json({ ok: false, error: 'this run belongs to someone else' }, { status: 403 });
-        const after = Number(body.after ?? 0);
-        // Terminal = the LAST line says so: a new turn's lines after a reply make the run live again.
-        const last = cur.lines[cur.lines.length - 1];
-        return Response.json({ ok: true, known: true, lines: cur.lines.filter((l) => l.seq > after), terminal: !!last?.terminal });
+      // Spec 433 W1 — the checkpoint + progress ops are the package's (`@agenticprimitives/service-host`): same keys,
+      // same expiry, same keyring-stripped listing, same asker-gated progress. This DO keeps what is ITS: the search
+      // index a saved run feeds (spec 400 B5), the triggers, the assertion ledger, the task store.
+      const runs = durableObjectRunStorage(this.state.storage);
+      if (op === 'progress-append' || op === 'progress-read') {
+        const r = await runs.handle(op, body as Record<string, unknown>);
+        return r.ok ? Response.json(r) : Response.json({ ok: false, error: r.error }, { status: r.status });
       }
       if (op === 'save') {
         const cp = body?.checkpoint;
         if (!cp?.runRef) return Response.json({ ok: false, error: 'checkpoint.runRef required' }, { status: 400 });
-        await this.state.storage.put(key(cp.runRef), cp);
+        const saved = await runs.handle('save', body as Record<string, unknown>);
+        if (!saved.ok) return Response.json({ ok: false, error: saved.error }, { status: saved.status });
         // Spec 400 W2 (B5) — a run is searchable by what was asked and what it waits for; a dropped run stays findable
         // as history (the record of it is its receipts and provenance in the vault; the index cites the ref).
         try {
@@ -1092,50 +1071,9 @@ export class A2aTaskDO {
         const hits = searchIndex(idx, String(body?.query ?? ''), { kinds: ['run'], ...(typeof body?.since === 'string' ? { since: body.since } : {}), ...(typeof body?.limit === 'number' ? { limit: body.limit } : {}) });
         return Response.json({ ok: true, hits, indexed: idx.order.length });
       }
-      if (op === 'load') {
-        if (!body?.runRef) return Response.json({ ok: false, error: 'runRef required' }, { status: 400 });
-        return Response.json({ ok: true, checkpoint: (await this.state.storage.get(key(body.runRef))) ?? null });
-      }
-      if (op === 'drop') {
-        if (!body?.runRef) return Response.json({ ok: false, error: 'runRef required' }, { status: 400 });
-        await this.state.storage.delete(key(body.runRef));
-        return Response.json({ ok: true });
-      }
-      // spec 350 W3 — ENUMERATE the unfinished runs on this agent. A checkpoint already records what a run
-      // is `awaiting` and whether it is `openToStewards`, and until now nothing could read that back: a
-      // payment waiting on a signature was invisible to everyone including the person who owes it. The DO
-      // returns them all; WHOSE they are is decided by the caller's session at the route (a person sees
-      // their own; a steward additionally sees the unclaimed work items).
-      if (op === 'list') {
-        const rows = await this.state.storage.list<Record<string, unknown>>({ prefix: 'harness:run:' });
-        // AN UNFINISHED RUN EXPIRES. A checkpoint was only ever dropped on a terminal outcome, so every
-        // ask a person walked away from stayed forever — one estate reached 167 of them and the list
-        // buried the conversation it was supposed to sit beside.
-        //
-        // A day is well past the point of resumability: the mandate a suspended run holds has long since
-        // expired (they are minted for the request, minutes not days), so resuming would ask for a fresh
-        // one anyway — at which point asking again is the same act with less ceremony. Deleting them here
-        // rather than on a timer means the cleanup happens wherever the cost is already being paid.
-        const now = Date.now();
-        const live: Record<string, unknown>[] = [];
-        const expired: string[] = [];
-        for (const [key, run] of rows) {
-          const updatedAt = Number((run as { updatedAt?: number }).updatedAt ?? 0);
-          if (updatedAt && now - updatedAt > RUN_TTL_MS) { expired.push(key); continue; }
-          // Spec 370 P1 tail — a run past its own window is gone from the list, not shown as unfinished.
-          const r = run as { expiresAt?: number; awaiting?: { kind?: string; expiresAt?: number } };
-          const window = typeof r.awaiting?.expiresAt === 'number' ? r.awaiting.expiresAt : typeof r.expiresAt === 'number' ? r.expiresAt : r.awaiting?.kind === 'data' ? undefined : updatedAt ? updatedAt + 30 * 60_000 : undefined;
-          if (window !== undefined && window < now) { expired.push(key); continue; }
-          // Mandates are bearer-shaped wires; enumeration is a LISTING, not a resume, so the keyring
-          // never rides along. Loading the run by its ref is what hands those back.
-          const { presented: _presented, ...rest } = run;
-          live.push(rest);
-        }
-        // Progress lines outlive their run by an hour at most (a surface reads the tail after the reply).
-        const stale = [...(await this.state.storage.list<{ at?: number }>({ prefix: 'harness:progress:' }))].filter(([, v]) => now - Number(v?.at ?? 0) > 3600_000).map(([k]) => k);
-        if (expired.length || stale.length) await this.state.storage.delete([...expired, ...stale]);
-        live.sort((a, b) => Number((b as { updatedAt?: number }).updatedAt ?? 0) - Number((a as { updatedAt?: number }).updatedAt ?? 0));
-        return Response.json({ ok: true, runs: live, expired: expired.length });
+      if (op === 'load' || op === 'drop' || op === 'list') {
+        const r = await runs.handle(op, body as Record<string, unknown>);
+        return r.ok ? Response.json(r) : Response.json({ ok: false, error: r.error }, { status: r.status });
       }
       return Response.json({ ok: false, error: `unknown harness-run op: ${op}` }, { status: 404 });
     }
