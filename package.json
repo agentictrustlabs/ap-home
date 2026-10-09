@@ -37,7 +37,7 @@
     "check:live-gates:runner": "tsx scripts/live-gates-runner.mts"
   },
   "devDependencies": {
-    "@agenticprimitives/a2a": "0.0.0-alpha.30",
+    "@agenticprimitives/a2a": "0.0.0-alpha.31",
     "@agenticprimitives/devkit": "0.0.0-alpha.16",
     "@agenticprimitives/evaluation": "0.0.0-alpha.5",
     "@agenticprimitives/mcp-protocol": "0.0.0-alpha.4",
@@ -58,7 +58,7 @@
     "@agenticprimitives/key-custody": "1.0.0-alpha.31",
     "@agenticprimitives/orchestration": "0.0.0-alpha.10",
     "@agenticprimitives/registry-kit": "0.0.0-alpha.19",
-    "@agenticprimitives/runtime-member": "0.0.0-alpha.9",
+    "@agenticprimitives/runtime-member": "0.0.0-alpha.10",
     "@agenticprimitives/types": "1.0.0-alpha.31"
   },
   "pnpm": {
