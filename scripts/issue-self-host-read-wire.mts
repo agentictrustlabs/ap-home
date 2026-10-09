@@ -15,10 +15,11 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { buildCaveat, encodeAllowedMethodsTerms, encodeTimestampTerms, hashDelegation, ROOT_AUTHORITY, type Delegation } from '@agenticprimitives/delegation';
 import { skillSelector } from '@agenticprimitives/a2a';
-import { HARNESS_READ_SKILL } from '@agenticprimitives/service-host';
 import { CHAIN_ID, CONTRACTS } from '../apps/home/src/lib/chain';
 import { toWire } from '../apps/home/src/lib/delegation';
 
+/** service-host's `HARNESS_READ_SKILL` — the root workspace does not depend on service-host, so the literal lives here. */
+const HARNESS_READ_SKILL = 'harness.read';
 const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
 const args = process.argv.slice(2);
 const target = args.find((a) => !a.startsWith('--'));
