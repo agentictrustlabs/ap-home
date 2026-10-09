@@ -4,7 +4,7 @@
 // never disagree about what is waiting.
 import { useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { listRuns, listTriggers, homeVocabulary, listRunRecords, type ParkedRun, type TriggerRow, type AskVocabularyEntry, type RunRecordRow } from './ask';
+import { fetchParkedRuns, listTriggers, homeVocabulary, listRunRecords, type ParkedRun, type TriggerRow, type AskVocabularyEntry, type RunRecordRow } from './ask';
 import type { TodayArtifact } from './today';
 import type { RunStateV1 } from './run-state';
 import type { DelegationWire } from '../lib/delegation';
@@ -57,7 +57,7 @@ export function useTodayReads(token: string | undefined, addressee: string | nul
     setFailed({});
     setPending({ runs: true, triggers: true, vocabulary: true, records: true, artifacts: true });
     const done = (k: keyof typeof pending) => { if (live) setPending((p) => ({ ...p, [k]: false })); };
-    void listRuns({ token }, addressee as Address).then((rs) => { if (live) setParked(rs as TodayReads['parked']); }).catch((e) => { fail('runs', e); if (live) setParked([]); }).finally(() => done('runs'));
+    void fetchParkedRuns({ token }, addressee as Address).then((rs) => { if (live) setParked(rs as TodayReads['parked']); }).catch((e) => { fail('runs', e); if (live) setParked([]); }).finally(() => done('runs'));
     void listTriggers({ token }, addressee as Address).then((ts) => { if (live) setTriggers(ts); }).catch((e) => fail('triggers', e)).finally(() => done('triggers'));
     void homeVocabulary(addressee).then((v) => { if (live) setVocabulary(v); }).catch((e) => fail('vocabulary', e)).finally(() => done('vocabulary'));
     void listRunRecords({ token }, addressee as Address).then((r) => { if (live) setRecords(r.records); }).catch((e) => fail('records', e)).finally(() => done('records'));

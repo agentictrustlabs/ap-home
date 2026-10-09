@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import type { HomeContributionEntryV1, HomeDecisionCardV1 } from '@agenticprimitives/home';
 import { useSession } from '../../../context/session';
-import { listRuns, type ParkedRun } from '../../../home/ask';
+import { fetchParkedRuns, type ParkedRun } from '../../../home/ask';
 import { SectionShell } from '../SectionShell';
 import { List, Row, Empty, ErrorNote, Button, LinkButton, Chip, Panel, Stats, Stat, SearchInput, FilterChip, relativeLabel, type PanelState } from '../../../ui';
 import { AlertIcon, CheckIcon, InboxIcon, ActivityIcon } from '../today-icons';
@@ -88,7 +88,7 @@ export function MyWorkView() {
   useEffect(() => {
     if (!session || !agentAddress) return;
     let live = true;
-    void listRuns(session, agentAddress as Address).then((rs) => { if (live) setParked(rs.filter((r) => r.origin?.endeavorId)); }).catch(() => undefined);
+    void fetchParkedRuns(session, agentAddress as Address).then((rs) => { if (live) setParked(rs.filter((r) => r.origin?.endeavorId)); }).catch(() => undefined);
     return () => { live = false; };
   }, [session?.token, agentAddress, bundles]);
 
