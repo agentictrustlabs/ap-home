@@ -33,7 +33,7 @@ import { BUDGET_RECORD, budgetOf, overBudget, budgetCounters, countAsk } from '.
 import { probeMcpServer, keepMcpToken, dropMcpToken, toolsDiff, MCP_CONNECTOR_PREFIX, isMcpConnectorRecord, mcpToolId, type McpConnectorRecordV1 } from './connectors/mcp-connector.js';
 import { searchThreads } from './connectors/google-gmail.js';
 import { listEvents } from './connectors/google-calendar.js';
-import { appendProgress, readProgress, type ProgressLineV1 } from './harness-progress.js';
+import type { ProgressLineV1 } from './harness-progress.js';
 import { Hono, type Context } from 'hono';
 import { setCookie, getCookie } from 'hono/cookie';
 import { cors } from 'hono/cors';
@@ -137,7 +137,7 @@ import { discoveryFetchFor, structuredCallFor, type StructuredCallRecordV1 } fro
 import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@agenticprimitives/context';
 import { selectComposer, selectComposerRouted, resolveProvider, availableModels, plannerPromptBudget, defaultProvider, widestPromptBudget, type RouteNeed, type RouteDecision } from './orchestration.js';
 import { homeSessionSeam, pickHomeOrigin } from './executor-invoke.js';
-import { loadRun, saveRun, dropRun, listRuns, openRunOnThread, mergeTurn, type HarnessRunCheckpointV1, completedStepsOf, isExpired, AWAIT_WINDOW_MS, expiryFor, canceledRecord } from './harness-runs.js';
+import { runStoreFor, openRunOnThread, mergeTurn, type HarnessRunCheckpointV1, completedStepsOf, isExpired, AWAIT_WINDOW_MS, expiryFor, canceledRecord } from './harness-runs.js';
 import { buildGenesisPlanes, type GenesisPlaneWires } from './genesis-planes.js';
 import { vaultServerId } from './vault-server-id.js';
 import { bindHarnessAttempt, HarnessApprovalWorkflow, type HarnessWorkflowParams } from './harness-workflow.js';
@@ -1407,7 +1407,7 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
     // The answer joins the supplied inputs and the run is replayed from its checkpoint (spec 370 P1) — the
     // same re-verification every resume gets; nothing here is a second path around the loop.
     resumeAsAgent: async (input) => {
-      const stored = await loadRun(c.env as never, input.addressee, input.runRef).catch(() => null);
+      const stored = await runStoreFor(c.env as never).load(input.addressee, input.runRef).catch(() => null);
       if (!stored) return { refused: 'no run is waiting under that task' };
       if (String(stored.outsider?.agent ?? '').toLowerCase() !== input.agent.toLowerCase()) return { refused: 'that run is waiting on someone else' };
       // Spec 400 W2a — THE AGENT'S OWN RUN PARKED FOR AUTHORITY, and the agent now presents a chain: a standing grant
@@ -1415,17 +1415,17 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
       // message: the same run is re-entered with the chain as `presented`, and the harness verifies every link and
       // the intent binding before the step it parked on may act. A chain that does not verify parks it again.
       if (input.presented?.length && !stored.awaiting) {
-        if (isExpired(stored)) { await dropRun(c.env as never, input.addressee, input.runRef).catch(() => undefined); return { refused: 'that run has expired — ask again' }; }
+        if (isExpired(stored)) { await runStoreFor(c.env as never).drop(input.addressee, input.runRef).catch(() => undefined); return { refused: 'that run has expired — ask again' }; }
         const out = await runAgentAsk(c.env, {
           agent: input.agent, addressee: input.addressee, ask: stored.message, runRef: input.runRef,
           ...(stored.intent ? { intent: stored.intent } : {}),
           resume: { ...(stored.plan ? { plan: stored.plan } : stored.executed?.plan ? { plan: stored.executed.plan as never } : {}), ...(stored.executed?.completed ? { executed: stored.executed } : {}), presented: input.presented as never, supplied: stored.supplied ?? [] },
         });
-        if (out.reply.kind !== 'authority_required' && out.reply.kind !== 'prompt') await dropRun(c.env as never, input.addressee, input.runRef).catch(() => undefined);
+        if (out.reply.kind !== 'authority_required' && out.reply.kind !== 'prompt') await runStoreFor(c.env as never).drop(input.addressee, input.runRef).catch(() => undefined);
         return out;
       }
       if (!stored.awaiting || stored.awaiting.kind !== 'data') return { refused: stored.awaiting ? `that run waits on ${stored.awaiting.kind === 'authority' || stored.awaiting.kind === 'signature' ? 'a steward\'s signature' : `a ${stored.awaiting.kind}`}, which an outside caller cannot supply` : 'that run is not waiting on an answer' };
-      if (isExpired(stored)) { await dropRun(c.env as never, input.addressee, input.runRef).catch(() => undefined); return { refused: 'that run\'s prompt has expired — ask again' }; }
+      if (isExpired(stored)) { await runStoreFor(c.env as never).drop(input.addressee, input.runRef).catch(() => undefined); return { refused: 'that run\'s prompt has expired — ask again' }; }
       const supplied = [...(stored.supplied ?? []), { stepRef: stored.awaiting.stepRef, data: input.data }];
       const out = await runAgentAsk(c.env, {
         agent: input.agent, addressee: input.addressee, ask: stored.message, runRef: input.runRef,
@@ -1437,9 +1437,9 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
       });
       if (out.reply.kind === 'prompt' && out.reply.prompt) {
         const now = Date.now();
-        await saveRun(c.env as never, { ...stored, supplied, awaiting: { kind: (out.reply.prompt.kind as 'data') ?? 'data', prompt: out.reply.prompt.prompt, stepRef: out.reply.prompt.stepRef, expiresAt: now + AWAIT_WINDOW_MS.data }, expiresAt: now + AWAIT_WINDOW_MS.data, updatedAt: now } as never).catch(() => undefined);
+        await runStoreFor(c.env as never).save({ ...stored, supplied, awaiting: { kind: (out.reply.prompt.kind as 'data') ?? 'data', prompt: out.reply.prompt.prompt, stepRef: out.reply.prompt.stepRef, expiresAt: now + AWAIT_WINDOW_MS.data }, expiresAt: now + AWAIT_WINDOW_MS.data, updatedAt: now } as never).catch(() => undefined);
       } else if (out.reply.kind !== 'authority_required') {
-        await dropRun(c.env as never, input.addressee, input.runRef).catch(() => undefined);
+        await runStoreFor(c.env as never).drop(input.addressee, input.runRef).catch(() => undefined);
       }
       return out;
     },
@@ -1474,7 +1474,7 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
       const awaiting = p.reply.kind === 'prompt' && p.reply.prompt
         ? { awaiting: { kind, prompt: p.reply.prompt.prompt, stepRef: p.reply.prompt.stepRef, expiresAt: now + (AWAIT_WINDOW_MS[kind] ?? AWAIT_WINDOW_MS.data) } }
         : {};
-      await saveRun(c.env as never, {
+      await runStoreFor(c.env as never).save({
         runRef: p.runRef, message: p.ask, addressee: p.addressee, asker: p.asker, presented: [], supplied: [],
         openToStewards: true, outsider: { agent: p.asker, surface: 'a2a-standard' },
         ...awaiting,
@@ -1765,7 +1765,7 @@ app.post('/harness/runs', async (c) => {
   const caller = String(who.sa).toLowerCase() as Address;
   // The SAME rule that gates a resume decides what is listed — one mechanism (ADR-0013). A run this
   // person could not resume is a run they are not shown.
-  const runs = (await listRuns(c.env as never, addressee)).filter((r) => claimableBy(r, caller));
+  const runs = (await runStoreFor(c.env as never).list(addressee)).filter((r) => claimableBy(r, caller));
   // Spec 398 §5.1 — each row also carries the ONE projected state every surface renders from (`state`), beside
   // the native `awaiting` it always carried. Additive: nothing a caller read before this line changes.
   const rows = runs.sort((a, b) => b.updatedAt - a.updatedAt).map((r) => ({ ...r, state: projectRunState({ kind: 'suspended', awaiting: r.awaiting?.kind, expired: isExpired(r) }).state }));
@@ -2244,12 +2244,12 @@ export async function runAgentAsk(env: Env, input: { agent: Address; addressee: 
 async function resumeFromCommitment(env: Env, input: { addressee: Address; debtor: Address; answer: SubjectAnswerV1 }): Promise<{ ok: true; runRef: string; said: string } | { ok: false; reason: string }> {
   // The listing STRIPS what a run presented (a listing never hands out mandates); the match is made on
   // it, and the run itself is loaded for the resume.
-  const runs = await listRuns(env as never, input.addressee).catch(() => []);
+  const runs = await runStoreFor(env as never).list(input.addressee).catch(() => []);
   const found = runs.find((r) => r.awaiting?.kind === 'commitment' && r.awaiting.commitment
     && r.awaiting.commitment.debtor.toLowerCase() === input.debtor.toLowerCase()
     && r.awaiting.commitment.id === input.answer.inResponseTo.operationId
     && r.runRef === input.answer.inResponseTo.runRef);
-  const hit = found ? await loadRun(env as never, input.addressee, found.runRef).catch(() => null) : null;
+  const hit = found ? await runStoreFor(env as never).load(input.addressee, found.runRef).catch(() => null) : null;
   if (!hit || !hit.awaiting) return { ok: false, reason: 'no run waits on that' };
   const a = input.answer;
   const delivered: NonNullable<SuppliedInputV1['delivered']> = {
@@ -2274,14 +2274,14 @@ async function resumeFromCommitment(env: Env, input: { addressee: Address; debto
     // The plan had more to do and it needs the asker: the run parks for THEM again, as it would have
     // had the step finished in the first turn.
     const p = reply.prompt;
-    await saveRun(env as never, {
+    await runStoreFor(env as never).save({
       ...hit, supplied: [...hit.supplied, { stepRef: hit.awaiting.stepRef, delivered }],
       ...(p ? { awaiting: { kind: p.kind as 'data' | 'signature' | 'confirmation', prompt: p.prompt, stepRef: p.stepRef, expiresAt: now + (AWAIT_WINDOW_MS[p.kind as 'data'] ?? AWAIT_WINDOW_MS.data) } } : { awaiting: undefined }),
       executed: await (async () => { const kept = await recordFormOf(env, harnessDeps(env, buildAuditSink(env)), input.addressee, hit.runRef, result as never); return { plan: kept.result.plan, completed: completedStepsOf(kept.result as never) }; })(),
       expiresAt: now + AWAIT_WINDOW_MS.data, updatedAt: now,
     } as never);
   } else {
-    await dropRun(env as never, input.addressee, hit.runRef).catch(() => undefined);
+    await runStoreFor(env as never).drop(input.addressee, hit.runRef).catch(() => undefined);
     // The record of the run, the way the ask route keeps one: what was asked, what ran, what it came to.
     const intent = { goal: hit.message, context: { addressee: input.addressee, asker: hit.asker } };
     const record = recordOf({ runRef: hit.runRef, intent, result: result as never, events, presented: (hit.presented ?? []).map((w, i) => ({ ref: presentedRefs[i] ?? '', wire: w })), door: { kind: 'resume' }, ...(resumed.traceFacts ? { modelCalls: resumed.traceFacts.modelCalls, variant: resumed.traceFacts.variant } : {}) });
@@ -2358,11 +2358,11 @@ export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef:
   const thread = typeof (context.message as { thread?: unknown } | undefined)?.thread === 'string' ? String((context.message as { thread: string }).thread) : undefined;
   const words = typeof (context.message as { text?: unknown } | undefined)?.text === 'string' ? String((context.message as { text: string }).text) : '';
   const from = typeof (context.message as { from?: unknown } | undefined)?.from === 'string' ? String((context.message as { from: string }).from).toLowerCase() : '';
-  const open = thread ? openRunOnThread(await listRuns(env as never, agent).catch(() => []), thread) : null;
+  const open = thread ? openRunOnThread(await runStoreFor(env as never).list(agent).catch(() => []), thread) : null;
   // R917-E-2 (spec 409 §5): a parked run is continued by THE PARTY IT WAS TALKING TO. A run that recorded no peer
   // (parked before this rule) is not continued by anyone — a question nobody was asked has no answer to take.
   if (open?.awaiting && words && from && open.threadPeer && open.threadPeer.toLowerCase() === from) {
-    const stored = await loadRun(env as never, agent, open.runRef).catch(() => null);
+    const stored = await runStoreFor(env as never).load(agent, open.runRef).catch(() => null);
     if (stored) {
       const supplied = [...(stored.supplied ?? []), { stepRef: stored.awaiting!.stepRef, data: { text: words, message: words, answer: words } }];
       const cont = await runAgentAsk(env, {
@@ -2373,10 +2373,10 @@ export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef:
       });
       if (cont.reply.kind === 'prompt' && cont.reply.prompt) {
         const now = Date.now();
-        await saveRun(env as never, { ...stored, supplied, awaiting: { kind: (cont.reply.prompt.kind as 'data') ?? 'data', prompt: cont.reply.prompt.prompt, stepRef: cont.reply.prompt.stepRef, expiresAt: now + AWAIT_WINDOW_MS.data }, expiresAt: now + AWAIT_WINDOW_MS.data, updatedAt: now } as never);
+        await runStoreFor(env as never).save({ ...stored, supplied, awaiting: { kind: (cont.reply.prompt.kind as 'data') ?? 'data', prompt: cont.reply.prompt.prompt, stepRef: cont.reply.prompt.stepRef, expiresAt: now + AWAIT_WINDOW_MS.data }, expiresAt: now + AWAIT_WINDOW_MS.data, updatedAt: now } as never);
         return { outcome: 'parked', said: cont.spoken, runRef: stored.runRef, bill: cont.bill };
       }
-      if (cont.reply.kind !== 'authority_required') await dropRun(env as never, agent, stored.runRef).catch(() => undefined);
+      if (cont.reply.kind !== 'authority_required') await runStoreFor(env as never).drop(agent, stored.runRef).catch(() => undefined);
       if (cont.reply.kind === 'answer' || cont.reply.kind === 'done') return { outcome: 'answered', said: cont.reply.kind === 'answer' ? cont.reply.text : cont.spoken, runRef: stored.runRef, bill: cont.bill };
       if (cont.reply.kind === 'authority_required') return { outcome: 'parked', said: cont.spoken, runRef: stored.runRef, bill: cont.bill };
       return { outcome: 'failed', said: cont.reply.kind === 'refused' ? cont.reply.error : cont.spoken, runRef: stored.runRef, bill: cont.bill };
@@ -2405,7 +2405,7 @@ export async function runUnattendedAsk(env: Env, row: TriggerScheduleV1, runRef:
   const { reply, spoken, result, bill } = await runAgentAsk(env, { agent, addressee: agent, ask: askWords, runRef, context: { trigger: row.triggerId, ...context } });
   if (reply.kind === 'prompt' || reply.kind === 'authority_required') {
     const now = Date.now();
-    await saveRun(env as never, {
+    await runStoreFor(env as never).save({
       runRef, message: row.ask, addressee: agent, asker: agent, presented: [], supplied: [],
       openToStewards: true, trigger: { id: row.triggerId, playbookDigest: row.playbookDigest },
       ...(thread ? { thread } : {}),
@@ -2536,7 +2536,7 @@ export async function parkCommittedSteps(env: Env, principal: Address, endeavorI
   for (const item of steps) {
     const runRef = `run-${crypto.randomUUID()}`;
     const checkpoint = checkpointForCommittedStep({ runRef, participant: item.participant, principal, endeavorId, step: item.step, goal: item.goal, commitmentRef: item.commitmentRef, planHash: item.planHash });
-    await saveRun(env as never, checkpoint);
+    await runStoreFor(env as never).save(checkpoint);
     const name = await deps.nameOf?.(item.participant).catch(() => null) ?? null;
     await callInteractionsInternal(env, principal, 'internal.endeavor.post', { endeavorId, bodyText: committedStepNote({ participant: item.participant, name, runRef, step: item.step, commitmentRef: item.commitmentRef }) }).catch((e: unknown) => console.warn('[endeavor] note not posted:', e instanceof Error ? e.message : String(e)));
     parked.push({ participant: item.participant, stepId: item.step.stepId, runRef });
@@ -3287,8 +3287,8 @@ app.post('/harness/progress', async (c) => {
   const after = Math.max(0, Number(body.after ?? 0));
   const deadline = Date.now() + Math.min(4_000, Math.max(0, Number(body.wait ?? 3_000)));
   for (;;) {
-    let got: Awaited<ReturnType<typeof readProgress>>;
-    try { got = await readProgress(c.env as never, addressee, body.runRef, asker, after); }
+    let got: { lines: ProgressLineV1[]; terminal: boolean; known: boolean };
+    try { got = await runStoreFor(c.env as never).readProgress(addressee, body.runRef, (asker).toLowerCase() as Address, after); }
     catch (e) { return c.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, 403); }
     if (got.lines.length || got.terminal || Date.now() >= deadline) return c.json({ ok: true, ...got });
     await new Promise((r) => setTimeout(r, 250));
@@ -3313,7 +3313,7 @@ app.post('/harness/durable', async (c) => {
   const now = Date.now();
   // The checkpoint FIRST, then the instance: if the create's response is lost the run record already
   // names its executor, and retrying the create with the same id is idempotent at the engine.
-  await saveRun(c.env as never, {
+  await runStoreFor(c.env as never).save({
     runRef, message: body.intent.goal, intent: body.intent, addressee, asker: String(who.sa).toLowerCase() as Address,
     presented: body.presented == null ? [] : Array.isArray(body.presented) ? body.presented : [body.presented],
     supplied: [], executor: 'workflow', createdAt: now, updatedAt: now,
@@ -3623,10 +3623,10 @@ app.post('/harness/approve', async (c) => {
   const who = await verifyHomeSession(body.session, c.env);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const addressee = body.addressee.toLowerCase() as Address;
-  const stored = await loadRun(c.env as never, addressee, body.runRef).catch(() => null);
+  const stored = await runStoreFor(c.env as never).load(addressee, body.runRef).catch(() => null);
   if (!stored) return c.json({ ok: false, error: 'no such run' }, 404);
   if (stored.executor !== 'workflow') return c.json({ ok: false, error: 'this run is not advancing durably' }, 409);
-  await saveRun(c.env as never, {
+  await runStoreFor(c.env as never).save({
     ...stored,
     supplied: [...stored.supplied, {
       stepRef: body.approval.stepRef ?? 's0',
@@ -3663,7 +3663,7 @@ app.post('/harness/cancel', async (c) => {
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const addressee = body.addressee.toLowerCase() as Address;
   const caller = String(who.sa).toLowerCase() as Address;
-  const stored = await loadRun(c.env as never, addressee, body.runRef).catch(() => null);
+  const stored = await runStoreFor(c.env as never).load(addressee, body.runRef).catch(() => null);
   if (!stored) return c.json({ ok: false, error: 'no such unfinished run — it finished, expired, or was never here' }, 404);
   if (!claimableBy(stored, caller)) return c.json({ ok: false, error: 'this run is not yours to stop' }, 403);
   const happened = (stored.executed?.completed ?? []).map((x) => x.stepRef);
@@ -3671,7 +3671,7 @@ app.post('/harness/cancel', async (c) => {
   const existing = await getRecord(c.env as never, addressee, body.runRef).catch(() => null);
   const note = typeof body.note === 'string' ? body.note : undefined;
   await putRecord(c.env as never, addressee, canceledRecord(existing, stored, { at, by: caller, ...(note ? { note } : {}) }));
-  await dropRun(c.env as never, addressee, body.runRef);
+  await runStoreFor(c.env as never).drop(addressee, body.runRef);
   if (stored.executor === 'workflow' && c.env.HARNESS_WORKFLOW) {
     try { await (await c.env.HARNESS_WORKFLOW.get(body.runRef)).terminate(); } catch { /* already finished, or never started durably — the checkpoint is what held it */ }
   }
@@ -4206,7 +4206,7 @@ app.get('/harness/run', async (c) => {
   if (!session || !/^0x[0-9a-f]{40}$/.test(addressee) || !runRef) return c.json({ ok: false, error: 'session, addressee and runRef are required' }, 400);
   const who = await verifyHomeSession(session, c.env);
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
-  const stored = await loadRun(c.env as never, addressee, runRef).catch(() => null);
+  const stored = await runStoreFor(c.env as never).load(addressee, runRef).catch(() => null);
   if (!stored) return c.json({ ok: false, error: 'no such run' }, 404);
   if (!claimableBy(stored, String(who.sa).toLowerCase() as Address)) return c.json({ ok: false, error: 'this run belongs to someone else' }, 403);
   return c.json({
@@ -4383,7 +4383,7 @@ app.post('/harness/ask', async (c) => {
   const runRef = body.runRef ?? `run-${crypto.randomUUID()}`;
   let stored: HarnessRunCheckpointV1 | null = null;
   if (body.runRef) {
-    stored = await marks.time('read:checkpoint', () => loadRun(c.env as never, addressee, body.runRef!).catch(() => null));
+    stored = await marks.time('read:checkpoint', () => runStoreFor(c.env as never).load(addressee, body.runRef!).catch(() => null));
     // Only the asker may resume: the run carries their session's authority and their answers, and a run
     // someone else can pick up is a run someone else can finish.
     // A person's half-finished run is theirs; an unclaimed WORK ITEM (a plan step awaiting authority) is
@@ -4400,7 +4400,7 @@ app.post('/harness/ask', async (c) => {
     // be given an hour later; saying so — and dropping the checkpoint — beats a resume that fails a step
     // later with `not-live` and reads like weather.
     if (stored && isExpired(stored)) {
-      await dropRun(c.env as never, addressee, body.runRef).catch(() => undefined);
+      await runStoreFor(c.env as never).drop(addressee, body.runRef).catch(() => undefined);
       return c.json({ ok: false, error: 'this run expired while waiting — ask again', expired: true }, 410);
     }
     if (!stored && !body.message?.trim()) return c.json({ ok: false, error: 'no such run to resume — ask again' }, 404);
@@ -4527,7 +4527,7 @@ app.post('/harness/ask', async (c) => {
       const full: ProgressLineV1 = { ...line, seq: ++progressSeq, at: Date.now() };
       // Serialised: a reader advances its cursor to the newest seq it saw, so a line landing out of order
       // would be a line never shown.
-      progressChain = progressChain.then(() => appendProgress(c.env as never, addressee, runRef, askerSa, full)).catch(() => undefined);
+      progressChain = progressChain.then(async () => { await runStoreFor(c.env as never).appendProgress(addressee, runRef, (askerSa).toLowerCase() as Address, full); }).catch(() => undefined);
       c.executionCtx.waitUntil(progressChain);
     };
     const runStartMs = Date.now();
@@ -4579,7 +4579,7 @@ app.post('/harness/ask', async (c) => {
         if (toolId === DISCOVERY_INSPECT_CAPABILITY) return discoveryInspectInvoker({ nameRecords: nameRecordsReader(c.env) ?? (async () => null), fetch: reachFetch })(toolId, args, ctx);
         // Spec 397 — the invitations that reached the person, from their own inbox record.
         // Gap register B6a — what is waiting on her: her own agent's parked runs + invitations not yet accepted (the bell's read).
-        if (toolId === WAITING_LIST_CAPABILITY) return waitingListInvoker({ ...(askDeps.readSubjectRecord ? { readSubjectRecord: askDeps.readSubjectRecord } : {}), ...(askDeps.nameOf ? { nameOf: askDeps.nameOf } : {}), listRuns: (a) => listRuns(c.env as never, a) }, String(who.sa).toLowerCase())(toolId, args, ctx);
+        if (toolId === WAITING_LIST_CAPABILITY) return waitingListInvoker({ ...(askDeps.readSubjectRecord ? { readSubjectRecord: askDeps.readSubjectRecord } : {}), ...(askDeps.nameOf ? { nameOf: askDeps.nameOf } : {}), listRuns: (a) => runStoreFor(c.env as never).list(a) }, String(who.sa).toLowerCase())(toolId, args, ctx);
         // Spec 427 §5.3 — the roles the person holds: each organization's own object answers for its record of the ASKER.
         if (toolId === PERSON_ROLES_CAPABILITY) {
           if (!askDeps.memberRoleAt) return { refused: 'reading roles is not configured on this estate' };
@@ -4728,7 +4728,7 @@ app.post('/harness/ask', async (c) => {
         const routedAct = inResponseTo && reply.kind !== 'waiting'
           ? { openToStewards: true as const, outsider: { agent: String(who.sa).toLowerCase() as Address, surface: 'subject-ask' as const }, routedFrom: { creditor: inResponseTo.agent, correlation: { operationId: inResponseTo.operationId, runRef: inResponseTo.runRef, stepRef: inResponseTo.stepRef } } }
           : {};
-        await saveRun(c.env as never, {
+        await runStoreFor(c.env as never).save({
           runRef, message: turn.message, addressee, asker: String(who.sa).toLowerCase() as Address,
           // the intent WITH its context (the asker's zone), so a resume from any surface rebuilds the same object
           intent,
@@ -4832,7 +4832,7 @@ app.post('/harness/ask', async (c) => {
             console.warn('[harness/ask] step satisfied on chain but not recorded on the endeavor:', e);
           }
         }
-        await dropRun(c.env as never, addressee, runRef);
+        await runStoreFor(c.env as never).drop(addressee, runRef);
       }
     } catch (e) {
       // A checkpoint that failed to save costs the person the tab, not the run's correctness — say so
@@ -4850,7 +4850,7 @@ app.post('/harness/ask', async (c) => {
     // through `/harness/ask` and still re-verifies everything.
     // Started beside the wait above and the conversation write below — three independent reads and a write of
     // the asker's own planes, once run one after another (measured 2.5–3 s after the loop, 2026-09-21).
-    const otherRunsP = marks.time('read:runs', () => listRuns(c.env as never, addressee)
+    const otherRunsP = marks.time('read:runs', () => runStoreFor(c.env as never).list(addressee)
       .then((rs) => rs.filter((r) => r.runRef !== runRef && claimableBy(r, String(who.sa).toLowerCase() as Address)))
       .catch(() => []));
     // Spec 366 R2 — S: the profile answer naming R, with this agent's own run and receipts as evidence.
@@ -6262,7 +6262,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     const rec = await getRecord(env as never, subject, runRef);
     if (rec) { const hit = rec.steps.find((st) => st.ok && !st.skipped); return { state: 'done', outcome: rec.outcome, at: rec.at, ...(hit ? { result: hit.result } : {}), receipts: rec.receipts.length }; }
     // No record yet: a run that has started narrates itself; known and not terminal ⇒ still running.
-    const live = await loadRun(env as never, subject, runRef).catch(() => null);
+    const live = await runStoreFor(env as never).load(subject, runRef).catch(() => null);
     if (live) return { state: 'running' };
     return { state: 'absent' };
   };
@@ -10725,7 +10725,7 @@ bindHarnessAttempt(async (envIn, p, _approvalRefs) => {
   const deps = harnessDeps(env, audit);
   // EVERYTHING FROM THE CHECKPOINT (spec 362 §6.1): the engine handed us refs; the content — the
   // person's words, the keyring, the plan, the answers — lives on the run's own record, ours and TTL'd.
-  const stored = await loadRun(env as never, p.addressee as Address, p.runRef).catch(() => null);
+  const stored = await runStoreFor(env as never).load(p.addressee as Address, p.runRef).catch(() => null);
   if (!stored) return { outcome: 'failed', errorCode: 'run-record-missing' };
   const { result } = await runUnderMandate(env as unknown as HarnessEnv, deps, {
     intent: stored.intent ?? { goal: stored.message },
