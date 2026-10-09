@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@agenticprimitives/a2a": "0.0.0-alpha.29",
+    "@agenticprimitives/a2a": "0.0.0-alpha.30",
     "@agenticprimitives/connect": "1.0.0-alpha.31",
     "@agenticprimitives/delegation": "1.0.0-alpha.31",
     "@agenticprimitives/mcp-oauth": "0.0.0-alpha.13",
