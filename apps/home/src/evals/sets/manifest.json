@@ -1,5 +1,5 @@
 {
- "bakedAt": "2026-10-01T17:41:45.529Z",
+ "bakedAt": "2026-10-09T01:52:00.973Z",
  "sets": [
   {
    "id": "cil-commons-chain-panel-1",
@@ -150,6 +150,238 @@
    "domain": "cil-commons-ol",
    "title": "CIL Commons — fresh held-out 8: the domain, covered (spec 418 D2) — every skill in its own vocabulary (the classes no earlier case reached), whose it is (our own vs a grantee's vs a vendor's), who it is for, chains with and without their input, offices as context, the new near-misses, and clarify",
    "cases": 77,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-acts-1",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — Home acts 1 (spec 418 §12, the act laboratory): one payment, one message, one invitation — each with its near neighbour and a case missing an input; judged on the act reached (capability, parties, amount, whose authority) and the receipt left, never on writing",
+   "cases": 11,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-acts-2",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — Home acts 2 (spec 418 §12): the rest of a person's acts — funding, where money lands vs where it leaves, charters, memory, preferences, routines, standing instructions, the household — each beside the read or neighbour it is mistaken for",
+   "cases": 12,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-acts-3-org",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — Home acts 3 (spec 418 §12): an ORGANIZATION's own acts, asked at missio-nexus.org by its steward — invitations, roster, teams, endeavors, and a question about what WE hold, which must be answered for the organization and never from the asker's own links",
+   "cases": 6,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-acts-4-ux",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — Home acts 4 (spec 420 W4): the Home's BUTTONS as intent cases (the supplied plans its panels send) beside the asks the census found uncovered — contacts, household, grants, search, profile, affiliations, forgetting — and the principles no case yet tested",
+   "cases": 13,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-acts-5-member",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — Home acts 5a (spec 420 §8): a MEMBER at the organization — what a member may do there and what only a steward may; the plan's authority judged before any signature is asked for",
+   "cases": 6,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-acts-5-steward",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — Home acts 5b (spec 420 §8): the STEWARD's outcome-directed asks — an invitation to someone already a member (the facts contradict the plan), an invitation that is a submission, and asks whose plan a tool-planner cannot complete alone",
+   "cases": 4,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-acts-6-context",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — Home acts 6 (spec 420 §10): names resolve in CONTEXT — a bare name means the person nearest the asker in the room she stands in; several at the same distance is a question; an outsider gets signals, never the record",
+   "cases": 4,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-acts-6b-home",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — Home acts 6b (spec 420 §10): names resolve in CONTEXT at the person's OWN agent — the Rich she lives with beats the two Richards on a team she shares; carol is her child before a member",
+   "cases": 2,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-acts-7-outsider",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — Home acts 7 (spec 420 §10): an OUTSIDER at the organization — disclosure follows proximity: the roster (a record) is refused, what the organization holds (a public signal) is answered",
+   "cases": 2,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-acts-8-door-bob",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — Home acts 8a (spec 420 §11 W7): the same intent at ANOTHER door — bob asks his OWN agent about Missio Nexus; the read is routed to the organization under bob's standing there (a member)",
+   "cases": 3,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-acts-8-door-david",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — Home acts 8b (spec 420 §11 W7): the same intent at ANOTHER door — david (invited, never accepted) asks his OWN agent about Missio Nexus; the routed roster is withheld, the public holdings answered",
+   "cases": 2,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-acts-9-continuation",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — Home acts 9 (spec 421 W1/W3): continue from what was read — read→act chains whose argument is in the inbox, and the same inbox carrying instructions planted by another person",
+   "cases": 10,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-situations-alice-alice",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — situations: alice at alice.me as self (generated, spec 420 §11)",
+   "cases": 12,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-situations-alice-missio-nexus",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — situations: alice at missio-nexus.org as steward (generated, spec 420 §11)",
+   "cases": 33,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-situations-alice-rich-big-thompson-team",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — situations: alice at rich-big-thompson-team.org as steward (generated, spec 420 §11)",
+   "cases": 18,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-situations-bob-bob",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — situations: bob at bob.me as self (generated, spec 420 §11)",
+   "cases": 12,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-situations-bob-missio-nexus",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — situations: bob at missio-nexus.org as member (generated, spec 420 §11)",
+   "cases": 21,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-situations-bob-rich-big-thompson-team",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — situations: bob at rich-big-thompson-team.org as member (generated, spec 420 §11)",
+   "cases": 18,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-situations-carol-carol",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — situations: carol at carol.me as self (generated, spec 420 §11)",
+   "cases": 12,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-situations-carol-missio-nexus",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — situations: carol at missio-nexus.org as member (generated, spec 420 §11)",
+   "cases": 21,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-situations-carol-rich-big-thompson-team",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — situations: carol at rich-big-thompson-team.org as none (generated, spec 420 §11)",
+   "cases": 6,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-situations-dave-dave",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — situations: dave at dave.me as self (generated, spec 420 §11)",
+   "cases": 12,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-situations-dave-missio-nexus",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — situations: dave at missio-nexus.org as member (generated, spec 420 §11)",
+   "cases": 21,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-situations-dave-rich-big-thompson-team",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — situations: dave at rich-big-thompson-team.org as none (generated, spec 420 §11)",
+   "cases": 6,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-situations-david-missio-nexus",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — situations: david at missio-nexus.org as none (generated, spec 420 §11)",
+   "cases": 6,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-situations-david-rich-big-thompson-team",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — situations: david at rich-big-thompson-team.org as none (generated, spec 420 §11)",
+   "cases": 6,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-situations-nathan-missio-nexus",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — situations: nathan at missio-nexus.org as none (generated, spec 420 §11)",
+   "cases": 6,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-situations-nathan-nathan",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — situations: nathan at nathan.me as self (generated, spec 420 §11)",
+   "cases": 2,
+   "fixtures": true,
+   "recommended": false
+  },
+  {
+   "id": "agentic-trust-home-situations-nathan-rich-big-thompson-team",
+   "domain": "agentic-trust",
+   "title": "Agentic Trust — situations: nathan at rich-big-thompson-team.org as member (generated, spec 420 §11)",
+   "cases": 18,
    "fixtures": true,
    "recommended": false
   }

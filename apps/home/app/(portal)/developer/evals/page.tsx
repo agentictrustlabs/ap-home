@@ -13,7 +13,13 @@ const TAB_PAGES: Record<string, string> = { skills: '/developer/evals/skills', a
 
 export default function EvalsOverviewPage() {
   const router = useRouter();
-  useEffect(() => { try { const t = new URL(window.location.href).searchParams.get('tab'); if (t && TAB_PAGES[t]) router.replace(TAB_PAGES[t]!); } catch { /* no URL */ } }, [router]);
+  // A `?tab=` link is sent to the page that tab became — WITH the rest of its query. The Lab's link names the agent, the
+  // set, the repeats and the arms; dropping them here is why a click from the skills app opened the Run page on its
+  // defaults (scripture-294b.org and the CIL set) instead of the comparison it named.
+  useEffect(() => { try {
+    const u = new URL(window.location.href); const t = u.searchParams.get('tab');
+    if (t && TAB_PAGES[t]) { u.searchParams.delete('tab'); const q = u.searchParams.toString(); router.replace(`${TAB_PAGES[t]!}${q ? `?${q}` : ''}`); }
+  } catch { /* no URL */ } }, [router]);
   return (
     <SectionShell title="Evals" description="Evidence of what the agent actually did, so a change is adopted on a measurement and never on a feeling.">
       <Panel title="What an eval is here" icon={<CheckIcon size={18} />} state="ready" testId="evals-overview-what">
