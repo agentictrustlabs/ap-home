@@ -1080,6 +1080,28 @@ app.post('/mcp/native', async (c) => {
       },
     },
   };
+  // Spec 433 W2 — a SELF-HOSTED agent writes its own run records here: the only public door to a vault write. Verified as
+  // the runtime's writes are, with the DEL-001 binding ENFORCED (`vaultConfig(env, true)`: the token's signer must be the
+  // delegate of a principal-signed leaf whose audience admits the grant's delegate) and the per-call invocation proof;
+  // the grant's record-scope caveat decides what may be written. A token with no such leaf is refused.
+  if (reqBody.tool === 'set_vault_record') {
+    const writeHandler = withDelegation<SetVaultRecordArgs>(
+      withProof(c.env, vaultConfig(c.env, true), reqBody.invocationProof),
+      async ({ principal, args, recordScopes }) => enforceBudget(c.env, principal, 'set_vault_record', reqBody.invocationProof!.requestId, () => setVaultRecordRun(c.env, principal, args, recordScopes, 'demo-mcp:set_vault_record (native)')),
+      { toolName: 'set_vault_record', classification: SET_VAULT_RECORD_CLASSIFICATION, auditSink, correlationId, environment },
+    );
+    try {
+      const result = await writeHandler({ token: reqBody.token, invocationProof: reqBody.invocationProof, args: (reqBody as { args?: SetVaultRecordArgs['args'] }).args ?? {} } as SetVaultRecordArgs & { token: string; invocationProof: AgenticInvocationProofV1 });
+      return c.json(result as Record<string, unknown>);
+    } catch (e) {
+      if (e instanceof McpAuthError) {
+        console.error('[demo-mcp native] McpAuthError:', e.code, e.correlationId);
+        if (e.code === 'auth-failed') return buildInvalidInvocationProofResponse();
+        return c.json({ error: 'auth failed', code: e.code, correlationId: e.correlationId }, 401);
+      }
+      return c.json({ error: 'internal error', detail: String(e) }, 500);
+    }
+  }
   const entry = TOOLS[reqBody.tool ?? ''];
   if (!entry) return c.json({ error: 'unknown tool', detail: reqBody.tool ?? null }, 400);
 
@@ -1355,32 +1377,34 @@ const SET_VAULT_RECORD_CLASSIFICATION = {
 } as const;
 declareTool({ name: 'set_vault_record' }, SET_VAULT_RECORD_CLASSIFICATION);
 
+type SetVaultRecordArgs = { args?: { recordType?: string; data?: unknown } };
+/** THE WRITE, once: the record-scope caveat on the presented grant decides the record type (write, or delete for a
+ *  tombstone — a DISTINCT op, so a write-only delegate cannot censor records, spec 317 §3.2 / audit F1), then the
+ *  spec 278 write gate on the owner's vault-key authorization, then the seal. Shared by the MAC-protected `/tools`
+ *  route the runtime uses and the public native ingress a SELF-HOSTED agent uses (spec 433 W2: a service that keeps
+ *  its runs at its own host writes `run.provenance:<runRef>` into ITS vault under its grant + a DEL-001 leaf to its key). */
+async function setVaultRecordRun(env: Env, principal: Address, args: SetVaultRecordArgs['args'], recordScopes: Parameters<typeof recordScopeAllows>[1], servedBy: string): Promise<Record<string, unknown>> {
+  const recordType = args?.recordType;
+  if (!recordType) return { ok: false, error: 'recordType required' };
+  const resource = `${VAULT_RECORD_PREFIX}${recordType}`;
+  const isTombstone = (args?.data ?? null) === null;
+  if (!recordScopeAllows(env, recordScopes, resource, isTombstone ? 'delete' : 'write')) {
+    return { ok: false, error: 'record_scope_denied', served_by: servedBy };
+  }
+  const gate = await authorizePersonVaultOp(env, principal, resource, 'write', 'internal');
+  if (!gate.ok) return { ok: false, error: gate.error, served_by: servedBy };
+  await gate.pv.vault.write({ owner: principal, resource, data: args?.data ?? null });
+  return { ok: true, owner: principal, recordType, served_by: servedBy };
+}
+
 app.post('/tools/set_vault_record', async (c) => {
   const body = c.get('parsedBody');
   if (!body?.token) return c.json({ error: 'token required' }, 400);
   const auditSink = buildAuditSink(c.env);
-  type Args = { args?: { recordType?: string; data?: unknown } };
   try {
-    const handler = withDelegation<Args>(
+    const handler = withDelegation<SetVaultRecordArgs>(
       withProof(c.env, vaultConfig(c.env, body.enforceBinding), body.invocationProof),
-      async ({ principal, args, recordScopes }) => {
-        const recordType = args?.recordType;
-        if (!recordType) return { ok: false, error: 'recordType required' };
-        const resource = `${VAULT_RECORD_PREFIX}${recordType}`;
-        // `data === null` is a soft-delete (tombstone) by contract — a DISTINCT op for the record-scope
-        // gate, so a write-only delegate cannot censor records (spec 317 §3.2 / audit F1).
-        const isTombstone = (args?.data ?? null) === null;
-        // spec 317 §3.2: per-delegation record scope FIRST (narrows the binding), then the binding gate.
-        if (!recordScopeAllows(c.env, recordScopes, resource, isTombstone ? 'delete' : 'write')) {
-          return { ok: false, error: 'record_scope_denied', served_by: 'demo-mcp:set_vault_record' };
-        }
-        // spec 278 write gate: sealing requires op:'write' on the person's vault-key authorization
-        // (the binding has no separate delete op; the finer write/delete split is the record-scope gate's).
-        const gate = await authorizePersonVaultOp(c.env, principal, resource, 'write', 'internal');
-        if (!gate.ok) return { ok: false, error: gate.error, served_by: 'demo-mcp:set_vault_record' };
-        await gate.pv.vault.write({ owner: principal, resource, data: args?.data ?? null });
-        return { ok: true, owner: principal, recordType, served_by: 'demo-mcp:set_vault_record' };
-      },
+      async ({ principal, args, recordScopes }) => setVaultRecordRun(c.env, principal, args, recordScopes, 'demo-mcp:set_vault_record'),
       {
         toolName: 'set_vault_record',
         classification: SET_VAULT_RECORD_CLASSIFICATION,
