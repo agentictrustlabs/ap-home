@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
-import { listConfirmations, listInstructions, forgetConfirmation, forgetInstruction, listFacts, forgetFact, listRuns, listRunRecords, type RememberedChoice, type StandingInstruction, type ParkedRun, type RunRecordRow, type RememberedFact } from '../../home/ask';
+import { listConfirmations, listInstructions, forgetConfirmation, forgetInstruction, listFacts, forgetFact, fetchParkedRuns, listRunRecords, type RememberedChoice, type StandingInstruction, type ParkedRun, type RunRecordRow, type RememberedFact } from '../../home/ask';
 import { fetchWorkList, type EndeavorRow } from '../../lib/work-client';
 import { assembleMemory, type MemoryItem, type MemoryStore } from '../../home/memory';
 import type { TodayArtifact } from '../../home/today';
@@ -48,7 +48,7 @@ export function MemoryViews({ scope }: { scope: WorkspaceScope }) {
     const u: Partial<Record<MemoryStore, string>> = {};
     const [c, s, runs, recs, f] = await Promise.all([
       listConfirmations({ token }).catch((e) => { u.personal = `remembered choices: ${why(e)}`; return []; }), listInstructions({ token }).catch((e) => { u.personal = `standing instructions: ${why(e)}`; return []; }),
-      listRuns({ token }, workspace as Address).catch((e) => { u.run = `checkpoints: ${why(e)}`; return []; }), listRunRecords({ token }, workspace as Address).then((r) => r.records).catch((e) => { u.run = `run records: ${why(e)}`; return []; }),
+      fetchParkedRuns({ token }, workspace as Address).catch((e) => { u.run = `checkpoints: ${why(e)}`; return []; }), listRunRecords({ token }, workspace as Address).then((r) => r.records).catch((e) => { u.run = `run records: ${why(e)}`; return []; }),
       listFacts({ token }).catch((e) => { u.personal = `remembered facts: ${why(e)}`; return []; }),
     ]);
     setConfirmations(c); setInstructions(s); setCheckpoints(runs as never); setRecords(recs); setFacts(f);

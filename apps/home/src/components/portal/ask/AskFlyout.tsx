@@ -29,7 +29,7 @@ import { nameLabel } from '../../../lib/domain';
 import { activateVault, resolveVia, signHashFor } from '../../../home/onboarding';
 import { useVoice, blobToBase64 } from './useVoice';
 import { yesNo, matchChoice, listenAfter, plainSpeech, navigationIntent, closestOption } from './voice-text';
-import { ask, hear, warmHearing, readProgress, type ProgressLine, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, homeModels, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField, type AskModelOption, listConfirmations, forgetConfirmation, type RememberedChoice, listInstructions, forgetInstruction, type StandingInstruction } from '../../../home/ask';
+import { ask, hear, warmHearing, fetchProgress, type ProgressLine, mintMandate, mintApprovedMandate, canGrantAs, describeRequirement, homeScope, homeVocabulary, homeModels, readDraft, capabilityWords, type AskReply, type AskPrompt, type AskTurnState, type SuppliedInput, type AskField, type AskEvidence, type UnfinishedRun, type PlannerTrace, type AskVocabularyEntry, type CommandField, type AskModelOption, listConfirmations, forgetConfirmation, type RememberedChoice, listInstructions, forgetInstruction, type StandingInstruction } from '../../../home/ask';
 import type { AskSelection } from '../../../home/ask-selection';
 import { resolveNavigationTarget } from '../../../lib/interaction-registry';
 import { resultApp, reviewApp } from './interaction-apps';
@@ -257,7 +257,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
     void (async () => {
       while (polling) {
         try {
-          const got = await readProgress(session, state.addressee, state.runRef, progressCursor.current.after);
+          const got = await fetchProgress(session, state.addressee, state.runRef, progressCursor.current.after);
           if (!polling) break;
           if (got.lines.length) { progressCursor.current.after = got.lines[got.lines.length - 1]!.seq; setProgress((p) => { const drafts = new Set(got.lines.filter((l) => l.type === 'AnswerDraft').map((l) => l.stepRef)); return [...p.filter((l) => !(l.type === 'AnswerDraft' && drafts.has(l.stepRef))), ...got.lines]; }); }
           if (got.terminal) break;

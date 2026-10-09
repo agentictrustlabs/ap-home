@@ -569,7 +569,7 @@ export async function cancelRun(session: { token: string }, addressee: Address, 
   return out.ok ? { ok: true, stoppedAfter: out.stoppedAfter ?? 0, happened: out.happened ?? [] } : { ok: false, error: out.error ?? 'the run could not be stopped' };
 }
 
-export async function listRuns(session: { token: string }, addressee: Address): Promise<ParkedRun[]> {
+export async function fetchParkedRuns(session: { token: string }, addressee: Address): Promise<ParkedRun[]> {
   const out = (await postA2a('/a2a/harness/runs', { session: session.token, addressee })) as { ok?: boolean; runs?: ParkedRun[] };
   return out.ok ? out.runs ?? [] : [];
 }
@@ -653,7 +653,7 @@ export interface ProgressLine { seq: number; at: number; type: string; stepRef?:
 
 /** The run's progress lines after `after`, held by the agent for up to ~3 s until there is something new
  *  (a long poll). `known:false` = nothing recorded yet for this runRef. */
-export async function readProgress(session: { token: string }, addressee: Address, runRef: string, after: number): Promise<{ lines: ProgressLine[]; terminal: boolean; known: boolean }> {
+export async function fetchProgress(session: { token: string }, addressee: Address, runRef: string, after: number): Promise<{ lines: ProgressLine[]; terminal: boolean; known: boolean }> {
   const res = await postA2a('/a2a/harness/progress', { session: session.token, addressee: addressee.toLowerCase(), runRef, after, wait: 3_000 }) as { ok?: boolean; lines?: ProgressLine[]; terminal?: boolean; known?: boolean };
   if (!res.ok) return { lines: [], terminal: false, known: false };
   return { lines: res.lines ?? [], terminal: !!res.terminal, known: res.known !== false };

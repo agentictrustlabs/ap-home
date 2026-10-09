@@ -5,7 +5,7 @@
 // mount, on focus and every few minutes (it is one fetch per organization).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { listRuns, type ParkedRun } from './ask';
+import { fetchParkedRuns, type ParkedRun } from './ask';
 import { useMyWork } from '../components/portal/work/useWork';
 import { assembleWaiting, type ReceivedInvitation, type WaitingItem } from './waiting-on-me';
 import { ensureCsrfToken, csrfHeaders } from '../csrf';
@@ -65,7 +65,7 @@ export function useWaitingOnMe(session: Session | null, agentAddress: string | n
     const claimedElsewhere = !invFresh && typeof shared?.claimAt === 'number' && (now - shared.claimAt) < CLAIM_MS;
     if (!invFresh && !claimedElsewhere) writeShared(me, { ...(shared ?? {}), claimAt: now });
     const [runs, invs] = await Promise.all([
-      listRuns({ token }, me as Address).catch(() => null),
+      fetchParkedRuns({ token }, me as Address).catch(() => null),
       invFresh ? Promise.resolve(invCache.current!.value) : claimedElsewhere ? Promise.resolve(null) : readInvitations(token, me),
     ]);
     if (runs) setParked(runs);
