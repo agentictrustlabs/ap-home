@@ -36,7 +36,7 @@
     "@agenticprimitives/payments": "0.0.0-alpha.27",
     "@agenticprimitives/registry-kit": "0.0.0-alpha.19",
     "@agenticprimitives/related-agents": "0.0.0-alpha.27",
-    "@agenticprimitives/runtime-member": "0.0.0-alpha.8",
+    "@agenticprimitives/runtime-member": "0.0.0-alpha.9",
     "@agenticprimitives/situations": "0.0.0-alpha.15",
     "@agenticprimitives/treasury-service-agent": "0.0.0-alpha.18",
     "@agenticprimitives/types": "1.0.0-alpha.31",
