@@ -112,7 +112,8 @@ const kbModeOf = (env: { KB_RETRIEVAL?: string }, variant: HarnessRunInput['vari
   return t === 'off' || t === 'tool' || t === 'playbook' ? t : kbRetrievalMode(env);
 };
 import type { DefinitionToolV1 } from '@agenticprimitives/capability-claims';
-import { CATALOG_TOOLS, catalogBindingFor, catalogInvoker, isCatalogTool } from './catalog-tools.js';
+import { CATALOG_MCP_TOOL_NAMES, CATALOG_TOOLS, catalogBindingFor, catalogInvoker, isCatalogTool } from './catalog-tools.js';
+import { PEOPLE_GROUP_MCP_TOOL_NAMES, PEOPLE_GROUP_TOOLS, isPeopleGroupTool, peopleGroupInvoker, servesProfile, toolsServedAt } from './people-group-tools.js';
 import { playbookProvenanceFromReceipts } from './skill-provenance.js';
 import { checkGroundedComposition, groundedFallback } from '@agenticprimitives/context';
 import { KB_QUESTION_TOOL, kbQuestionAvailable, KB_RETRIEVE_TOOL } from '@agenticprimitives/context';
@@ -2333,6 +2334,8 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     // Spec 387 W2 — the addressee's own catalog: bound by ITS name's records at call time (cached by the reader),
     // so an unattended run at a service (a gateway's task, a routed ask) reads it exactly as a person's does.
     if (isCatalogTool(toolId)) return catalogInvoker(await catalogBindingFor(deps, addressee ? String(addressee) : undefined))(toolId, args, ctx);
+    // The people-group catalog (ap-people-group-catalog/v1) — the same record, a different profile; listed only where `tools/list` served it.
+    if (isPeopleGroupTool(toolId)) return peopleGroupInvoker(await catalogBindingFor(deps, addressee ? String(addressee) : undefined))(toolId, args, ctx);
     // Spec 426 — ONE generic branch for every executor-invoke capability (no branch per domain): the
     // definition carries the `invoke` block; call the resolved executor as the run's principal (the acting
     // agent). Self-acting — no mandate; `deps.executorSession` is the authority seam, refusing on null.
@@ -4409,7 +4412,7 @@ async function askReplyForInner(env: HarnessEnv, input: {
     // Spec 402 W4 — a read whose contract names a RESULT APP is the deliverable too: its rows ride back for any caller, so
     // the app can render over them beside the sentence (the same reason a catalog read's do).
     const results = r.steps
-      .filter((o) => o.ok && o.result && typeof o.result === 'object' && (input.suppliedPlan || isCatalogTool(o.step.toolId) || !!input.interactionFor?.[o.step.toolId]?.result))
+      .filter((o) => o.ok && o.result && typeof o.result === 'object' && (input.suppliedPlan || isCatalogTool(o.step.toolId) || isPeopleGroupTool(o.step.toolId) || !!input.interactionFor?.[o.step.toolId]?.result))
       .map((o) => ({ toolId: o.step.toolId, result: o.result }));
     const routed = routedStepsOf(r.steps);
     // Spec 402 W4 — the first answered read whose contract names a RESULT app: its binding rides on the reply, with the
@@ -4934,9 +4937,12 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   // are prepared only when the plan names one of their tools. A conversational ask prepares everything, as before.
   const screenPlanned: Set<string> | null = input.plan && input.rowsOnly && !input.resume ? new Set(input.plan.steps.map((st) => st.toolId)) : null;
   const screenNames = (pred: (id: string) => boolean): boolean => !screenPlanned || [...screenPlanned].some(pred);
-  const catalogOnce = screenNames((id) => CATALOG_TOOLS.some((t) => t.id === id))
+  const catalogOnce = screenNames((id) => CATALOG_TOOLS.some((t) => t.id === id) || isPeopleGroupTool(id))
     ? remembered(`catalog:${String(input.addressee ?? '').toLowerCase()}`, () => catalogBindingFor(deps, input.addressee ? String(input.addressee) : undefined))
     : Promise.resolve(null);
+  // WHICH PROFILE the record's endpoint serves (`tools/list`, remembered a minute per endpoint; a failed read is not
+  // remembered and lists no profile's tools): the content catalog and the people-group catalog share the record key.
+  const servedOnce: Promise<string[] | null> = catalogOnce.then((b) => (b ? remembered(`mcp-served:${b.endpoint}`, async () => { const t = await toolsServedAt(b.endpoint); if (!t) throw new Error('tools/list unreadable'); return t; }) : null), () => null).catch(() => null);
   // THE PERSON'S STUDY, STARTED NOW (`card-room.ts`): four reads of HER vault under the grant, independent of
   // everything the harness does before the answering step, so they run beside the playbook load rather than
   // after the gates — read later, where the tool is built. A consultation is on the table's clock.
@@ -5499,8 +5505,11 @@ step is then handed to that agent under authority the person grants; leave it ou
   // catalog itself: public metadata with a named source, never a record of ours.
   mark('planner-built');
   const catalog = await timed('prepare:catalog', () => catalogOnce);
+  const served = catalog ? await timed('prepare:catalog-profile', () => servedOnce) : null;
   mark('catalog');
-  const catalogTools = catalog ? CATALOG_TOOLS.map((t) => mergeContractTool(t, playbook?.tools?.[t.id])) : [];
+  const catalogTools = catalog && servesProfile(served, CATALOG_MCP_TOOL_NAMES) ? CATALOG_TOOLS.map((t) => mergeContractTool(t, playbook?.tools?.[t.id])) : [];
+  // The people-group catalog (ap-people-group-catalog/v1) on the same record — its own tools, never the content catalog's.
+  const peopleGroupTools = catalog && servesProfile(served, PEOPLE_GROUP_MCP_TOOL_NAMES) ? PEOPLE_GROUP_TOOLS.map((t) => mergeContractTool(t, playbook?.tools?.[t.id])) : [];
   // Spec 404 — the addressee's OWN external MCP connectors: compiled from its records, never narrowed by the playbook
   // (they are the holder's, not the archetype's); a read is her standing, an act her mandate at risk high.
   // Remembered a minute per holder (`run-memo.ts`): a survey and a read of the holder's vault, 1.2–2 s on every ask
@@ -5540,7 +5549,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   const tools = [
     ...playbookAnswer,
     ...instructionTools,
-    ...scopedActionTools(input.surface, playbook), ...catalogTools, ...mcpTools, ...ASK_DISCOVERY_TOOLS,
+    ...scopedActionTools(input.surface, playbook), ...catalogTools, ...peopleGroupTools, ...mcpTools, ...ASK_DISCOVERY_TOOLS,
     ...(kbQuestionAvailable({ call: structuredCallFor(env as never, input.provider) }) ? [KB_QUESTION_TOOL] : []),
     // Spec 413 — passages from the public tier (released shelf works + agent descriptions), where the estate binds an index.
     ...(kbModeOf(env as never, input.variant) !== 'off' ? [KB_RETRIEVE_TOOL] : []),

@@ -6,13 +6,21 @@
 // (§6), which is why a contract may declare `invoke`/`selfAuthorized` without weakening a gate. It replaces every
 // bespoke per-domain write tool (Field Rails was the first): a new write is a contract declaration, not a branch.
 import type { ToolInvoker, ExecutorInvokeV1 } from '@agenticprimitives/orchestration';
+
+/** Spec 426's SECOND transport (`mcp.tools-call`) — a stateless MCP server the operator maps by name; `intent` is the MCP
+ *  tool name and `args.arguments` the capability's arg names forwarded as the tool's arguments. Declared here as well as in
+ *  Ring 0 so this runtime reads a playbook carrying it before the pinned orchestration type learns it. */
+export interface McpToolsCallInvokeV1 { transport: 'mcp.tools-call'; executor: string; intent: string; args: { arguments?: string[] } }
+export type InvokeV1 = ExecutorInvokeV1 | McpToolsCallInvokeV1;
 import type { Address } from '@agenticprimitives/types';
 
 export interface ExecutorConfigV1 {
-  /** The executor's A2A base; its `/a2a` is the door. */
+  /** An A2A executor's base (its `/a2a` is the door), or — `kind: 'mcp'` — the MCP server's own `/mcp` URL. */
   url: string;
-  /** The OIDC client id the principal's session is minted for. */
+  /** The OIDC client id the principal's session is minted for. An MCP executor has none: a public read, no session. */
   client: string;
+  /** `mcp` — a stateless MCP server reached by `mcp.tools-call` (spec 426's second transport); absent ⇒ A2A. */
+  kind?: 'a2a' | 'mcp';
 }
 export type ExecutorsV1 = Record<string, ExecutorConfigV1>;
 
@@ -89,8 +97,10 @@ export function readExecutors(raw: string | undefined): ExecutorsV1 {
     const o = JSON.parse(raw) as Record<string, unknown>;
     const out: ExecutorsV1 = {};
     for (const [k, v] of Object.entries(o)) {
-      const e = v as { url?: unknown; client?: unknown };
-      if (typeof e?.url === 'string' && typeof e?.client === 'string') out[k] = { url: e.url, client: e.client };
+      const e = v as { url?: unknown; client?: unknown; kind?: unknown };
+      if (typeof e?.url !== 'string') continue;
+      if (e.kind === 'mcp') { if (/^https:\/\//.test(e.url)) out[k] = { url: e.url, client: typeof e.client === 'string' ? e.client : '', kind: 'mcp' }; continue; }
+      if (typeof e?.client === 'string') out[k] = { url: e.url, client: e.client };
     }
     return out;
   } catch {
@@ -102,20 +112,53 @@ export function readExecutors(raw: string | undefined): ExecutorsV1 {
  * The invoker for ONE resolved invoke capability, acting as `principal` (the run's principal — the agent the run
  * is for). The dispatch has already matched the toolId to its `invoke` block; this performs the call.
  */
-export function executorInvokeInvoker(deps: ExecutorInvokeDeps, invoke: ExecutorInvokeV1, principal: Address | undefined): ToolInvoker {
+export function executorInvokeInvoker(deps: ExecutorInvokeDeps, invoke: InvokeV1, principal: Address | undefined): ToolInvoker {
   const f = deps.fetch ?? fetch;
   return async (toolId, args) => {
     if (!principal) return { refused: `${toolId} acts as the principal, and this run has no principal` };
     const ex = deps.executors[invoke.executor];
-    if (!ex?.url || !ex?.client) return { refused: `no executor is configured for "${invoke.executor}" on this deployment` };
-    const goal = String(args[invoke.args.goal] ?? '').trim();
-    if (!goal) return { refused: `what happened? — ${toolId} needs ${invoke.args.goal} in the actor's own words` };
+    // ── mcp.tools-call: ONE stateless `tools/call` at a named MCP server. No session (a public read decides nothing
+    // about anyone; the server holds its own key for whatever it reads). The transport and the config kind must agree:
+    // an A2A executor is not called as an MCP, nor the reverse.
+    if ((invoke as { transport: string }).transport === 'mcp.tools-call') {
+      const mcp = invoke as McpToolsCallInvokeV1;
+      if (!ex?.url || ex.kind !== 'mcp') return { refused: `no MCP executor is configured for "${invoke.executor}" on this deployment` };
+      const names = mcp.args?.arguments;
+      const toolArgs: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(args)) if (v !== undefined && (!names || names.includes(k))) toolArgs[k] = v;
+      const t0 = Date.now();
+      let res: Response;
+      try {
+        res = await f(ex.url, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', 'mcp-protocol-version': '2025-06-18' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: invoke.intent, arguments: toolArgs } }) });
+      } catch (e) { return { refused: `${invoke.executor} did not answer: ${e instanceof Error ? e.message : String(e)}` }; }
+      const text = await res.text();
+      let rpc: { result?: { structuredContent?: unknown; content?: Array<{ type?: string; text?: string }>; isError?: boolean }; error?: { message?: string } } | null = null;
+      try { rpc = JSON.parse(text); } catch { rpc = null; }
+      if (!res.ok || !rpc) return { refused: `${invoke.executor} answered ${res.status}${rpc ? '' : ' with no JSON'}` };
+      if (rpc.error) return { refused: rpc.error.message ?? `${invoke.executor} refused ${invoke.intent}` };
+      const r = rpc.result ?? {};
+      let value: unknown = r.structuredContent;
+      if (value === undefined) { const tx = r.content?.find((c) => typeof c.text === 'string')?.text; try { value = tx ? JSON.parse(tx) : null; } catch { value = tx ?? null; } }
+      const v = (typeof value === 'object' && value ? value : {}) as Record<string, unknown>;
+      if (r.isError) return { refused: typeof v.error === 'string' ? v.error : `${invoke.executor} answered ${invoke.intent} with an error`, detail: v };
+      const rows = Array.isArray(v.rows) ? v.rows : undefined;
+      const invoked = { executor: invoke.executor, intent: invoke.intent, transport: 'mcp.tools-call' as const, ms: Date.now() - t0 };
+      return {
+        ...v, invoked,
+        ...(rows ? { count: rows.length } : {}),
+        interpretation: `invoked ${invoke.executor} · ${invoke.intent} (one MCP tools/call; ${rows ? `${rows.length} row(s)` : 'the server\'s answer'} — evidence with its source named; quote it, invent nothing beside it)`,
+      };
+    }
+    if (!ex?.url || !ex?.client || ex.kind === 'mcp') return { refused: `no executor is configured for "${invoke.executor}" on this deployment` };
+    const a2a = invoke as Exclude<InvokeV1, McpToolsCallInvokeV1>;
+    const goal = String(args[a2a.args.goal] ?? '').trim();
+    if (!goal) return { refused: `what happened? — ${toolId} needs ${a2a.args.goal} in the actor's own words` };
 
     const idToken = await deps.session(principal, ex.client).catch(() => null);
     if (!idToken) return { refused: `could not obtain a session for the principal at "${invoke.executor}"` };
 
     const metadata: Record<string, unknown> = { skill: invoke.intent };
-    for (const name of invoke.args.metadata ?? []) if (args[name] !== undefined) metadata[name] = args[name];
+    for (const name of a2a.args.metadata ?? []) if (args[name] !== undefined) metadata[name] = args[name];
 
     const res = await f(`${ex.url.replace(/\/$/, '')}/a2a`, {
       method: 'POST',

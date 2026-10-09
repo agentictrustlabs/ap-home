@@ -116,7 +116,7 @@ ADOPTED_ONTOLOGY_MANIFEST_DIGEST = "0xf64becd4c395e8b7f0d935ca97640a6d4b37fc087e
 # invoker resolves a capability's `invoke.executor` here (fail-closed; an unknown ref refuses). field-circles =
 # the engage/field-a2a executor (its /a2a admits the `field-app` client; reached by custom domain, not
 # workers.dev, which would 1042). Absent ⇒ every invoke capability refuses.
-EXECUTORS = '{"field-circles":{"url":"https://field-a2a.faithnet.io","client":"field-app"},"global-church":{"url":"https://a2a.global.church","client":"gc-engage"}}'
+EXECUTORS = '{"field-circles":{"url":"https://field-a2a.faithnet.io","client":"field-app"},"global-church":{"url":"https://a2a.global.church","client":"gc-engage"},"gc-people-groups":{"url":"https://demo-gc-pg.r-pedersen.workers.dev/mcp","kind":"mcp"}}'
 # Spec 377 / provider-outage — the exact page for THIS estate's Gemini failure mode (a monthly spend cap,
 # not a rate limit): the error links here, and whoever runs the Home raises it here. Overrides the generic default.
 ORCHESTRATION_GEMINI_BILLING_URL = "https://ai.studio/spend"

@@ -22,6 +22,8 @@ const MCP_TOOL: Record<string, string> = {
   [CATALOG_TOPICS_CAPABILITY]: 'list_topics',
   [CATALOG_GET_CAPABILITY]: 'get_resource',
 };
+/** What an endpoint must serve (`tools/list`) to be this profile — `people-group-tools.ts` tells the profiles apart by these. */
+export const CATALOG_MCP_TOOL_NAMES: readonly string[] = Object.values(MCP_TOOL);
 
 export const CATALOG_TOOLS: ToolSpec[] = [
   {
