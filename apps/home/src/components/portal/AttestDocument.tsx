@@ -162,7 +162,7 @@ export function AttestDocument({ doc }: { doc: AttestableDocument }) {
       description={
         request
           ? `${request.appLabel} is asking for your ${doc.title} attestation. Sign it once here at your home — every faith-aligned community app will see “✓ on file.”`
-          : `Affirm the ${doc.title} once at your home — re-used across every faith-aligned community app that needs it.`
+          : `Affirm ${doc.title} once at your home — re-used across every faith-aligned community app that needs it.`
       }
     >
       {request && (
