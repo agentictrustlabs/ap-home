@@ -232,6 +232,25 @@ export function FundForm({
   );
 }
 
+/** THE PLANES A CHARTERED AGENT IS BORN WITH — its vault key at the vault server, its standing inbox-delivery grant,
+ *  and its interactions grant with a long session leaf (spec 321 / 322 W2.2). Without them nothing can be written
+ *  to the agent AS ITSELF: a publisher service chartered from this page answered 409 "no interactions grant" on its
+ *  first release (2026-10-09), because only organizations got these at create. Signed as the agent by its
+ *  custodian — zero prompts on the KMS family, device prompts on passkey/wallet. Each leg is idempotent, so this is
+ *  also the steward's recovery for an agent that exists without them (the roster's "Enable storage"). */
+export async function enableAgentPlanes(agent: string, via: string, token: string, onStep?: (s: string) => void): Promise<{ ok: true } | { ok: false; error: string }> {
+  const v = via.toLowerCase() as Via;
+  const a = agent as `0x${string}`;
+  onStep?.('Enabling storage…');
+  const bound = await activateVaultIfNeeded(a, v, { token });
+  if (!bound.ok) return { ok: false, error: `vault key: ${bound.error}` };
+  const grant = await activateInboxDeliveryIfNeeded(a, v, { token });
+  if (!grant.ok) return { ok: false, error: `delivery grant: ${grant.error}` };
+  const ix = await activateInteractionsIfNeeded(a, v, { token }, false, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS);
+  if (!ix.ok) return { ok: false, error: `interactions grant: ${ix.error}` };
+  return { ok: true };
+}
+
 /**
  * Charter one managed agent AND everything it is born with — the create ceremony itself, the
  * storage an organization needs before its first member arrives, the playbook the effect resolver
@@ -278,17 +297,19 @@ export async function createAgentWithBirthrights(
   // bodies + invite tracking) signed AS THE ORG. Zero prompts on the KMS family (C_sub custodies
   // the org); device prompts on passkey/wallet. Best-effort — the steward-gated Enable button on
   // the channels page remains the recovery path if either leg fails.
+  // A SERVICE NEEDS THE SAME PLANES (2026-10-09): a publisher service chartered here, with the org as parent, had
+  // no interactions grant and no vault key, and its first release was refused — the Ask-chartered path mints them
+  // at genesis, this path did not. Same ceremony, same signer; the org-only seed below stays org-only.
+  if (kind === 'org' || kind === 'service') {
+    try {
+      const planes = await enableAgentPlanes(res.result.agent, via, token, onStep);
+      if (!planes.ok) throw new Error(planes.error);
+    } catch (e) {
+      console.warn(`[${kind}-create] storage planes not auto-enabled (the steward's Enable is the recovery):`, e);
+    }
+  }
   if (kind === 'org') {
     try {
-      const v = via.toLowerCase() as Via;
-      onStep('Enabling channel storage…');
-      const bound = await activateVaultIfNeeded(res.result.agent, v, { token });
-      if (!bound.ok) throw new Error(bound.error);
-      const grant = await activateInboxDeliveryIfNeeded(res.result.agent, v, { token });
-      if (!grant.ok) throw new Error(grant.error);
-      // spec 322 W2.2 — plane-B interactions grant, same ceremony (inert until provisioned).
-      const ix = await activateInteractionsIfNeeded(res.result.agent, v, { token }, false, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS);
-      if (!ix.ok) console.warn('[org-create] interactions grant not provisioned:', ix.error);
       // spec 321 items 1+3 — seed what members will look at first: the org's profile record (the
       // "About this organization" card + roster read) and a default #general channel, so a fresh
       // org is USABLE without any steward follow-up. Best-effort, like the storage enable above.
@@ -781,8 +802,9 @@ export function OrganizationsManager({
               </div>
               <div style={{ margin: '.45rem 0' }}><AddressChip address={svc.agent as `0x${string}`} size="sm" /></div>
               <p className="manage-card-blurb">You steward it — your key signs for it. <ExplorerLink address={svc.agent} label="explorer ↗" /></p>
-              {/* M06 (398 §4.4) — the fleet boundary on the services roster too: runs at · may spend · holds. */}
-              <FleetLines agent={svc.agent as `0x${string}`} token={token} stewardship />
+              {/* M06 (398 §4.4) — the fleet boundary on the services roster too: runs at · may spend · holds — and the
+                  steward's Enable when a plane is missing (a service chartered before 2026-10-10 was born without them). */}
+              <ServicePlanes agent={svc.agent} token={token} via={via} />
               {!svc.name && <NameAgentForm agent={svc.agent} kind={svc.kind} parent={svc.parent} person={person} token={token} via={via} onDone={reload} />}
             </div>
           ))}
@@ -806,6 +828,35 @@ export function OrganizationsManager({
 }
 
 // ── /treasuries — every treasury, personal + org ────────────────────────
+/** The fleet lines for a service you steward, plus "Enable storage" when its planes are not all in force. The
+ *  button runs the same ceremony charter runs (`enableAgentPlanes`) and re-reads the lines when it is done. */
+function ServicePlanes({ agent, token, via }: { agent: string; token: string; via: string }) {
+  const [complete, setComplete] = useState<boolean | null>(null);
+  const [refresh, setRefresh] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function enable(): Promise<void> {
+    setBusy(true); setError(null);
+    try {
+      const r = await enableAgentPlanes(agent, via, token);
+      if (!r.ok) { setError(r.error); return; }
+      setRefresh((n) => n + 1);
+    } finally { setBusy(false); }
+  }
+  return (
+    <>
+      <FleetLines agent={agent as `0x${string}`} token={token} stewardship refresh={refresh} onFacts={(f) => setComplete(f.complete)} />
+      {complete === false && (
+        <div style={{ marginTop: '.45rem', display: 'flex', gap: '.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <BusyButton busy={busy} busyLabel="Signing…" className="btn sm" onClick={() => void enable()}>Enable storage (steward)</BusyButton>
+          <span style={{ fontSize: '.72rem', opacity: 0.8 }}>Its vault key, delivery and interactions grants — signed as the service by you.</span>
+        </div>
+      )}
+      {error && <p role="alert" style={{ margin: '.3rem 0 0', fontSize: '.75rem', color: 'var(--color-danger, #b91c1c)' }}>{error}</p>}
+    </>
+  );
+}
+
 export function TreasuriesRollup({ token, person, via }: { token: string | null; person: string | null; via: string }) {
   const { agents, loaded, version, reload } = useManagedAgents(token);
   if (!token || !person) return null;
