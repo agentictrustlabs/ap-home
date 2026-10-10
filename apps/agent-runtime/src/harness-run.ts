@@ -2334,21 +2334,26 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     // Spec 387 W2 — the addressee's own catalog: bound by ITS name's records at call time (cached by the reader),
     // so an unattended run at a service (a gateway's task, a routed ask) reads it exactly as a person's does.
     if (isCatalogTool(toolId)) return catalogInvoker(await catalogBindingFor(deps, addressee ? String(addressee) : undefined))(toolId, args, ctx);
-    // The people-group catalog (ap-people-group-catalog/v1) — the same record, a different profile; listed only where `tools/list` served it.
-    if (isPeopleGroupTool(toolId)) return peopleGroupInvoker(await catalogBindingFor(deps, addressee ? String(addressee) : undefined))(toolId, args, ctx);
     // Spec 426 — ONE generic branch for every executor-invoke capability (no branch per domain): the
     // definition carries the `invoke` block; call the resolved executor as the run's principal (the acting
     // agent). Self-acting — no mandate; `deps.executorSession` is the authority seam, refusing on null.
+    // THE CONTRACT'S `invoke` WINS over a same-named built-in: a person's People-Group Steward pack reaches the
+    // people-group MCP by `mcp.tools-call` (executor gc-people-groups), while the SERVICE's People-Group Catalog
+    // archetype carries no invoke and binds by its own name record below. Dispatching the name-record path first
+    // sent alice's `peoplegroup.count` to a record she does not have ("publishes no people-group catalog", 2026-10-09).
     {
       const invoke = playbook?.tools?.[toolId]?.invoke;
       if (invoke) {
-        if (!deps.executorSession) return { refused: `executor-invoke is not configured on this deployment (no session seam) for ${toolId}` };
+        const needsSeam = (invoke as { transport?: string }).transport !== 'mcp.tools-call';
+        if (needsSeam && !deps.executorSession) return { refused: `executor-invoke is not configured on this deployment (no session seam) for ${toolId}` };
         // The run's own session rides to the seam (§5 production binding): the Home mints the principal's
         // id_token from it. The seam still refuses a principal the session does not own.
         const seam = deps.executorSession;
-        return executorInvokeInvoker({ executors: readExecutors(env.EXECUTORS), session: (p, c) => seam(p, c, session) }, invoke, addressee ?? person)(toolId, args, ctx);
+        return executorInvokeInvoker({ executors: readExecutors(env.EXECUTORS), session: (p, c) => (seam ? seam(p, c, session) : Promise.resolve(null)) }, invoke, addressee ?? person)(toolId, args, ctx);
       }
     }
+    // The people-group catalog (ap-people-group-catalog/v1) — the same record, a different profile; listed only where `tools/list` served it.
+    if (isPeopleGroupTool(toolId)) return peopleGroupInvoker(await catalogBindingFor(deps, addressee ? String(addressee) : undefined))(toolId, args, ctx);
     if (toolId !== 'treasury.payment.execute') return mcpInvoke(toolId, args, ctx);
     const serviceSa = (env.HARNESS_AGENT_SA ?? '').toLowerCase() as Address;
     // THE KEY THAT WAS JUDGED IS THE KEY THAT REDEEMS (spec 358 W4). With several presented, pick by the
