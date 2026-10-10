@@ -5654,12 +5654,23 @@ function teamGenesisDeps(env: Env, audit: AuditSink): TeamGenesisDeps {
     async build({ credential, salt, label, tld, parent, stewardship }) {
       if (!env.PAYMASTER) throw new Error('paymaster not configured');
       if (!env.APPROVED_HASH_REGISTRY || !env.AGENT_NAME_REGISTRY) throw new Error('grants / naming not configured');
-      const root = subregistryForTld(env, tld);
-      if (!root.ok) throw new Error(root.error);
-      if (!root.typed) throw new Error(`".${tld}" is not a typed root on this deployment`);
+      // ap-town spec 431 — on a PRICED root the name is BOUGHT at the Home (a naming-gate ticket + the fee from a
+      // treasury), never registered here: the genesis deploys the child NAMELESS, keeps its stewardship and plane
+      // approvals, and says `nameLater` so the Home buys `<label>.<tld>` next — what bootstrap-org and the device
+      // path have done since #26 / #35. Until this, an Ask-chartered service on faithnet (every typed root is priced
+      // there) refused with `priced_root` before anything was built (2026-10-09, the publishing wizard).
+      const priced = pricedRootFor(env, tld);
+      let typedRoot: { subregistry: Address; tld: string } | null = null;
+      if (!priced) {
+        const root = subregistryForTld(env, tld);
+        if (!root.ok) throw new Error(root.error);
+        if (!root.typed) throw new Error(`".${tld}" is not a typed root on this deployment`);
+        typedRoot = { subregistry: root.subregistry, tld: root.tld };
+      }
+      const canonical = priced ?? typedRoot!.tld;
       const spec = specFor(credential, salt);
       const child = await accountClient(env).getAddressForAgentAccount(spec);
-      const name = `${label}.${root.tld}`;
+      const name = priced ? '' : `${label}.${canonical}`;
       const grant = buildOrgGrant(env, child, parent, undefined, stewardship);
       // THE PLANES RIDE THE SAME SIGNATURE. A team that exists without its vault is the broken state
       // every "Enable (steward)" / "auth failed" report traces back to; the person signing "create a
@@ -5678,9 +5689,13 @@ function teamGenesisDeps(env: Env, audit: AuditSink): TeamGenesisDeps {
         );
       }
       const calls: Array<{ to: Address; value: bigint; data: Hex }> = [
-        ...(await declareTypeCallsFor(env, child, root.tld)),
-        buildSubregistryRegisterCall({ subregistry: root.subregistry, label, newOwner: child }),
-        buildSetPrimaryNameCall({ registry: env.AGENT_NAME_REGISTRY as Address, node: namehash(name) }),
+        // Nameless on a priced root: the Home's purchase declares the type, sets the primary name and writes the
+        // name records once the ticket is paid (`purchaseName`), so none of the three naming calls ride here.
+        ...(typedRoot ? [
+          ...(await declareTypeCallsFor(env, child, typedRoot.tld)),
+          buildSubregistryRegisterCall({ subregistry: typedRoot.subregistry, label, newOwner: child }),
+          buildSetPrimaryNameCall({ registry: env.AGENT_NAME_REGISTRY as Address, node: namehash(name) }),
+        ] : []),
         orgApproveHashCall(env, grant.digest, 0n, child), // the child is deployed in this batch: custody epoch 0
         ...(planes ? planes.digests.map((d: Hex) => orgApproveHashCall(env, d, 0n, child)) : []),
       ];
@@ -5691,7 +5706,7 @@ function teamGenesisDeps(env: Env, audit: AuditSink): TeamGenesisDeps {
       }
       const { userOp, userOpHash, sender } = await accountClient(env).buildDeployUserOpForAgentAccount({ spec, callData: buildExecuteBatchCallData(calls), paymaster: env.PAYMASTER as Address, verifyingPaymaster });
       if (sender.toLowerCase() !== child.toLowerCase()) throw new Error('built userOp sender ≠ predicted team SA');
-      return { child, name, userOp: toJson(userOp as never), userOpHash, stewardship: grant.wire as DelegationWireV1, ...(planes ? { planes } : {}) };
+      return { child, name, userOp: toJson(userOp as never), userOpHash, stewardship: grant.wire as DelegationWireV1, ...(planes ? { planes } : {}), ...(priced ? { nameLater: true, tld: canonical } : {}) };
     },
     async userOpHash(userOp) {
       return (await pub().readContract({ address: env.ENTRY_POINT as Address, abi: entryPointAbi, functionName: 'getUserOpHash', args: [fromJson(userOp)] })) as Hex;
@@ -8024,6 +8039,17 @@ async function sizeCallGas(
  *
  *  An explicitly requested typed suffix that this deployment cannot serve is an ERROR, never the legacy
  *  root quietly — silently substituting a different root is the bug this replaces (ADR-0013). */
+/** The canonical tld when `tld` is a PRICED root on this deployment — a name there is bought at the Home, so a
+ *  genesis deploys nameless (`nameLater`) rather than registering. Null for an untyped, legacy or permissionless root. */
+function pricedRootFor(env: Env, tld: string | undefined): string | null {
+  const raw = tld?.trim().toLowerCase();
+  if (!raw) return null;
+  const t = canonicalTld(raw) ?? raw;
+  let priced: Record<string, string> = {};
+  try { priced = env.PRICED_SUBREGISTRIES ? (JSON.parse(env.PRICED_SUBREGISTRIES) as Record<string, string>) : {}; } catch { priced = {}; }
+  return priced[t] ? t : null;
+}
+
 function subregistryForTld(
   env: Env,
   tld: string | undefined,

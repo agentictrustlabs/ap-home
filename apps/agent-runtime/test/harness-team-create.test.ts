@@ -115,6 +115,23 @@ describe('organization.team.create — the conversational ceremony', () => {
     expect(g.deps.submit).not.toHaveBeenCalled();
   });
 
+  it('on a PRICED root: the genesis deploys nameless, the prompt says so, and the result carries label + tld for the Home to buy', async () => {
+    const stewardshipOf = (i: { parent: `0x${string}`; stewardship: { salt: bigint } }) => ({ delegator: CHILD, delegate: i.parent, authority: '0x' as const, caveats: [], salt: i.stewardship.salt.toString(), signature: '0x03' as const });
+    const opOf = (label: string): GenesisUserOpJson => ({ sender: CHILD, nonce: '0', initCode: '0xinit-priced', callData: `0xcall${label}`, accountGasLimits: '0x00', preVerificationGas: '1', gasFees: '0x00', paymasterAndData: '0xpm', signature: '0x' });
+    const g = fakeGenesis({ build: vi.fn(async (i) => ({ child: CHILD, name: '', nameLater: true, tld: i.tld, userOp: opOf(i.label), userOpHash: `0xhash-${i.label}`, stewardship: stewardshipOf(i) })) });
+    const supplied = [{ stepRef: 's0', data: { label: 'xyz', custodian: { kind: 'eoa', address: EOA } } }];
+    const asked = await run(g.deps, { parent: WORKSPACE }, supplied);
+    const p = asked.prompt as Extract<NonNullable<typeof asked.prompt>, { kind: 'signature' }>;
+    expect(p.kind).toBe('signature');
+    expect(p.prompt).toContain('xyz.team');
+    expect(p.prompt).toContain('deploys unnamed');
+    expect(p.payload).toMatchObject({ name: 'xyz.team', nameLater: true, label: 'xyz', tld: 'team' });
+    const signedOp = (p.payload as { userOp: GenesisUserOpJson }).userOp;
+    const r = await run(g.deps, { parent: WORKSPACE }, [...supplied, { stepRef: 's0', signature: { digest: p.digest, signer: EOA, signature: '0xsig', payload: { userOp: signedOp } } }]);
+    expect(r.ok).toBe(true);
+    expect('result' in r ? r.result : null).toMatchObject({ txHash: '0xtx', agent: CHILD, name: '', nameLater: true, label: 'xyz', tld: 'team', kind: 'team', parent: WORKSPACE, person: PERSON });
+  });
+
   it('on a signed resume: re-derives, checks the signed op IS the derived one, and submits it with the signature', async () => {
     const g = fakeGenesis();
     const supplied = [{ stepRef: 's0', data: { label: 'xyz', custodian: { kind: 'eoa', address: EOA } } }];

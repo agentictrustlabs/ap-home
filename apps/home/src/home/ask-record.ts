@@ -26,6 +26,11 @@ export interface CreatedAgent {
   person: Address;
   stewardshipDelegation?: DelegationWire;
   alreadyCreated?: boolean;
+  /** ap-town spec 431 — the genesis deployed it NAMELESS on a priced root (`name` is empty); the Home buys
+   *  `<label>.<tld>` next from the person's treasury (`buyNameForNewAgent`). */
+  nameLater?: boolean;
+  label?: string;
+  tld?: string;
 }
 
 /** An invitation the harness produced: a signed org → invitee access grant that must be STORED in the
