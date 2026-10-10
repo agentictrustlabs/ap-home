@@ -105,3 +105,11 @@ const FROM_ORG: CreatableKind[] = [
 export function creatableKinds(under: 'person' | 'org', claimable: (k: AgentKind) => boolean): CreatableKind[] {
   return (under === 'person' ? FROM_PERSON : FROM_ORG).filter((c) => claimable(c.kind));
 }
+
+/** THE KINDS BORN WITH THEIR PLANES. A chartered agent that keeps records of its own — an organization's channels, a
+ *  team's or workspace's roster and artifacts, a service's Library — needs its vault key, delivery grant and
+ *  interactions grant from the moment it exists; the Ask-chartered genesis mints them for every child kind, and the
+ *  portal's charter enables the same three (`enableAgentPlanes`). A treasury holds money, not records, and a person's
+ *  planes are the onboarding ceremony's. Found twice: a service with no planes (2026-10-09) and a workspace with no vault
+ *  (Gather27, 2026-10-06). */
+export const KINDS_BORN_WITH_PLANES: ReadonlySet<string> = new Set(['org', 'team', 'workspace', 'service']);
