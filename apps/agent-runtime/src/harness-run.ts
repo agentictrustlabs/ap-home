@@ -2946,6 +2946,8 @@ export interface PlannerTraceV1 {
   selectionMs?: number;
   /** What the model planner's calls used, as the provider reported them (summed over re-plans). */
   plannerUsage?: ModelUsageV1;
+  /** Spec 434 W3 — the gateway receipts of the planning and composing calls, when the town's gateway carried them. */
+  gatewayReceipts?: Array<{ id: string; role: 'plan' | 'compose'; profile: string; profileVersion: string; model: string; attempt: number; costMicroUsd: number; fallbackOf?: string }>;
   /** What the composer's calls used, as the provider reported them. */
   composeUsage?: ModelUsageV1;
   route?: { policy: RoutePolicy; /** Spec 388 W3 — where the minute was counted: this isolate's own window, or the deployment's shared meter. */ meter?: 'isolate' | 'shared'; planner?: RouteDecision; composer?: RouteDecision; /** Spec 388 W2 — each structured call the run's steps made (the KB and vault choosers), in order. */ structured?: RouteDecision[] };
@@ -5154,10 +5156,11 @@ step is then handed to that agent under authority the person grants; leave it ou
   // estimate (see `plan` below); `selected` is the deployment's default, kept for the rule-based case.
   // The planner's reported usage lands on the trace (declared below; the planner runs after it exists).
   const notePlannerUsage = (u: ModelUsageV1) => { trace.plannerUsage = addUsage(trace.plannerUsage, u); };
+  const noteReceipt = (role: 'plan' | 'compose') => (r: { id: string; profile: string; profileVersion: string; model: string; attempt: number; costMicroUsd: number; fallbackOf?: string }) => { trace.gatewayReceipts = [...(trace.gatewayReceipts ?? []), { id: r.id, role, profile: r.profile, profileVersion: r.profileVersion, model: r.model, attempt: r.attempt, costMicroUsd: r.costMicroUsd, ...(r.fallbackOf ? { fallbackOf: r.fallbackOf } : {}) }]; };
   const selectionProvider = input.selectionProvider ?? input.provider;
   const answerProvider = input.answerProvider ?? input.provider;
   const judgeProvider = input.judgeProvider ?? input.provider;
-  const selected = selectPlanner(env as never, { systemPrompt: withPlaybook, maxTokens: ASK_PLANNER_MAX_TOKENS, ...(selectionProvider ? { provider: selectionProvider } : {}), onUsage: notePlannerUsage });
+  const selected = selectPlanner(env as never, { systemPrompt: withPlaybook, maxTokens: ASK_PLANNER_MAX_TOKENS, ...(selectionProvider ? { provider: selectionProvider } : {}), onUsage: notePlannerUsage, onReceipt: noteReceipt('plan') });
   let plannerModel = selected.model;
   // The compiler answers for the shapes it claims; the model answers for the rest. Not a fallback pair
   // (ADR-0013): the match is deterministic and decided BEFORE any planner runs, the way a rule-based

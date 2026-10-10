@@ -1,4 +1,5 @@
 import { forwardToSelfHost , type SelfHostForwardAuth } from './self-hosted-read.js';
+import { estateHeartbeat, heartbeatAuthorized } from './ops-heartbeat.js';
 import { getSelfHostWire, putSelfHostWire, verifySelfHostReadWire, isDelegationWire, type SelfHostWireChain } from './self-host-wire.js';
 import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
 // demo-a2a as a Cloudflare Worker.
@@ -298,6 +299,13 @@ export interface Env {
   A2A_TASKS: DurableObjectNamespace;
   /** Spec 406 W1 — the operator view's index (D1): a projection over the run records, rebuilt on request. */
   OPS?: D1Database;
+  /** Spec 434 W3 — the town's model gateway: when ORCHESTRATION_GATEWAY=on every model call goes through it by PROFILE under this estate's app key. Off ⇒ the direct adapters (spec 377/388), unchanged. */
+  ORCHESTRATION_GATEWAY?: string;
+  INFERENCE_URL?: string;
+  INFERENCE_APP_KEY?: string;
+  /** Spec 434 §10.2 — the estate's heartbeat to its town: the one token the town holds; the estate's id as the town lists it. */
+  TOWN_HEARTBEAT_TOKEN?: string;
+  ESTATE_ID?: string;
   INTERACTIONS: DurableObjectNamespace;
   /** Spec 378 — one huddle room per scope key. */
   HUDDLES?: DurableObjectNamespace;
@@ -1132,6 +1140,15 @@ app.get('/auth/csrf', (c) => {
   return c.json({ ok: true, token });
 });
 
+// Spec 434 §10.2 / 436 §5.3 — THE ESTATE'S HEARTBEAT to its town: counts over the last 24h from the operator index and the
+// registry's public facets, under the town's token. Never a name; the per-agent truth stays here, behind a steward's session.
+app.get('/ops/heartbeat', async (c) => {
+  const auth = heartbeatAuthorized(c.env as never, c.req.header('authorization') ?? null);
+  if (!auth.ok) return c.json({ ok: false, error: auth.error }, auth.status);
+  const hb = await estateHeartbeat(c.env as never);
+  if ('error' in hb) return c.json({ ok: false, error: hb.error }, 503);
+  return c.json(hb, 200, { 'cache-control': 'no-store' });
+});
 app.get('/health', (c) =>
   c.json({
     ok: true,
