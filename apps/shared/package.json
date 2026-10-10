@@ -14,7 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@agenticprimitives/fabric": "0.0.0-alpha.20"
+    "@agenticprimitives/fabric": "0.0.0-alpha.21"
   },
   "devDependencies": {
     "typescript": "5.7.3"

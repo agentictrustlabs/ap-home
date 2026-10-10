@@ -1,0 +1,33 @@
+{
+  "purpose": "the Global Church people-groups service agent in the faithnet estate (an operator note, not a persona) — the ap-people-group-catalog/v1 twin of ligonier.faithnet.json; its name record atl:mcpEndpoint points at the demo-gc-pg Worker (ap-demos/apps/demo-gc-pg)",
+  "chainId": 34348,
+  "org": {
+    "name": "globalchurch.org",
+    "sa": "0x6f9c3b34f639dd45bbff0b8343c65d206208d065",
+    "steward": "alice"
+  },
+  "service": {
+    "name": "people-groups.svc",
+    "sa": null,
+    "charteredUnder": "globalchurch.org",
+    "host": "people-groups-svc.faithnet.ai",
+    "facets": {
+      "displayName": "Global Church people-group counts",
+      "description": "How many people groups there are, by list — Joshua Project, IMB and the UUPG+ Base List — for a country, religion and affinity bloc, read live from the Global Church graph. Counts with their source named; never raw SPARQL, never a write.",
+      "capabilities": "gc:CFnPeopleGroupIntelligence",
+      "focusAreas": "people groups,unreached,frontier people groups,joshua project,imb,base list",
+      "languages": "en",
+      "a2aEndpoint": "https://people-groups-svc.faithnet.ai",
+      "siteUrl": "https://global.church",
+      "mcpEndpoint": "https://demo-gc-pg.r-pedersen.workers.dev/mcp"
+    },
+    "registry": "urn:ap:registry:faithnet-agents",
+    "facetsAt": null
+  },
+  "charteredAt": null,
+  "todo": [
+    "charter people-groups.svc under globalchurch.org (the ceremony sets sa, charteredAt)",
+    "set the name records above (set-typed-name-records: mcpEndpoint + a2aEndpoint), then facetsAt",
+    "wrangler secret put GC_API_KEY on demo-gc-pg (richcanvas) — the key lives on the Worker, never in the agent or its playbook"
+  ]
+}
