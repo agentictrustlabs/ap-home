@@ -43,8 +43,8 @@
     "@agenticprimitives/mcp-runtime": "1.0.0-alpha.31",
     "@agenticprimitives/ontology": "1.0.0-alpha.31",
     "@agenticprimitives/orchestration": "0.0.0-alpha.11",
-    "@agenticprimitives/orchestration-anthropic": "0.0.0-alpha.11",
-    "@agenticprimitives/orchestration-openai-compat": "0.0.0-alpha.10",
+    "@agenticprimitives/orchestration-anthropic": "0.0.0-alpha.12",
+    "@agenticprimitives/orchestration-openai-compat": "0.0.0-alpha.11",
     "@agenticprimitives/organization": "0.0.0-alpha.15",
     "@agenticprimitives/payments": "0.0.0-alpha.27",
     "@agenticprimitives/provenance": "0.0.0-alpha.5",
@@ -77,7 +77,7 @@
     "vault-is-the-record-apps-hold-references": "sha256:e6a6e859a16071dff5c30a7b7dc2d4cb0b8307e19dc416387cf181084236e685",
     "vault-records-are-ontology-shaped": "sha256:6a739d1a10d5b62e4ab5ed910fdccc67b9c024dd519c9c3e1fea916b3899a90b"
   },
-  "devkit": "0.0.0-alpha.16",
+  "devkit": "0.0.0-alpha.17",
   "template": {
     "name": "product-repo",
     "revision": "2026-09-16.1"
