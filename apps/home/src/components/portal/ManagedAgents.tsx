@@ -32,7 +32,7 @@ import { BuildingIcon, LandmarkIcon, UserIcon } from '../shared/Icons';
 import { useRegisteredName } from '../../lib/reverse-name';
 import { ConnectTreasuryModal } from './ConnectTreasuryModal';
 import { ConnectedHosts } from './ConnectedHosts';
-import { agentClassOf, orgKindWordOf, creatableKinds, type CreatableKind } from '../../lib/agent-class';
+import { agentClassOf, orgKindWordOf, creatableKinds, KINDS_BORN_WITH_PLANES, type CreatableKind } from '../../lib/agent-class';
 import { BasisLine } from './BasisLine';
 
 import { Loading } from '../shared/Loading';
@@ -297,10 +297,11 @@ export async function createAgentWithBirthrights(
   // bodies + invite tracking) signed AS THE ORG. Zero prompts on the KMS family (C_sub custodies
   // the org); device prompts on passkey/wallet. Best-effort — the steward-gated Enable button on
   // the channels page remains the recovery path if either leg fails.
-  // A SERVICE NEEDS THE SAME PLANES (2026-10-09): a publisher service chartered here, with the org as parent, had
-  // no interactions grant and no vault key, and its first release was refused — the Ask-chartered path mints them
+  // EVERY RECORD-KEEPING KIND NEEDS THE SAME PLANES (`KINDS_BORN_WITH_PLANES`): a publisher service chartered here
+  // had no interactions grant and no vault key and its first release was refused (2026-10-09); a workspace chartered
+  // here had no vault and its Library read "auth failed" (Gather27, 2026-10-06) — the Ask-chartered path mints them
   // at genesis, this path did not. Same ceremony, same signer; the org-only seed below stays org-only.
-  if (kind === 'org' || kind === 'service') {
+  if (KINDS_BORN_WITH_PLANES.has(kind)) {
     try {
       const planes = await enableAgentPlanes(res.result.agent, via, token, onStep);
       if (!planes.ok) throw new Error(planes.error);
