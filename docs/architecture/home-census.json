@@ -523,7 +523,8 @@
         "(portal)/org/[org]/activities",
         "(portal)/service/[agent]/activities",
         "(portal)/consent-sign",
-        "(portal)/wea-sign"
+        "(portal)/wea-sign",
+        "(portal)/attest/[doc]"
       ],
       "components": [
         "components/portal/ActivityTimeline.tsx",
