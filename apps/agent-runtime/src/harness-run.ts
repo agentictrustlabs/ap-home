@@ -802,7 +802,10 @@ export interface TeamGenesisDeps {
   resolveName(name: string): Promise<Address | null>;
   /** Predict the child and build its genesis userOp: initCode from (credential, salt); callData = declare
    *  type + register `<label>.<tld>` + set primary + approve the stewardship digest (child → parent). */
-  build(input: { credential: CredentialV1; salt: bigint; label: string; tld: string; parent: Address; stewardship: { salt: bigint; validUntil: number } }): Promise<{ child: Address; name: string; userOp: GenesisUserOpJson; userOpHash: Hex; stewardship: DelegationWireV1; planes?: unknown }>;
+  build(input: { credential: CredentialV1; salt: bigint; label: string; tld: string; parent: Address; stewardship: { salt: bigint; validUntil: number } }): Promise<{ child: Address; name: string; userOp: GenesisUserOpJson; userOpHash: Hex; stewardship: DelegationWireV1; planes?: unknown;
+    /** ap-town spec 431 — the root is PRICED: the genesis deployed nameless (`name` is empty) and the Home buys
+     *  `<label>.<tld>` next from the person's treasury. */
+    nameLater?: boolean; tld?: string }>;
   /** Store the child's plane wires on its DO after the genesis settles (the approveHash calls it batched
    *  make the 0x03 wires verifiable). IDEMPOTENT — called on the fresh create AND on the already-created
    *  resume, because a team that exists without its planes is the broken state this exists to end. */
@@ -883,7 +886,7 @@ export function childAgentCreateInvoker(genesis: TeamGenesisDeps, env: HarnessEn
       // A resume of a settled create still provisions: the genesis's approveHash calls are on chain, the
       // wires rebuild deterministically, and a team that exists without its planes is the broken state.
       const planes = g.planes && genesis.provisionPlanes ? await genesis.provisionPlanes(g.child, g.planes).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) })) : null;
-      return { agent: g.child, name: g.name, kind: recordedKind(noun, parent, person), parent, custodian: credential, person, stewardshipDelegation: g.stewardship, alreadyCreated: true, ...(planes && !planes.ok ? { planesError: planes.error } : {}) };
+      return { agent: g.child, name: g.name, kind: recordedKind(noun, parent, person), parent, custodian: credential, person, stewardshipDelegation: g.stewardship, alreadyCreated: true, ...(planes && !planes.ok ? { planesError: planes.error } : {}), ...(g.nameLater ? { nameLater: true, label, tld: g.tld ?? tld } : {}) };
     }
     // Taken by someone ELSE — the child this ask derives is not there yet, so the name is not ours.
     const holder = await genesis.resolveName(name);
@@ -893,9 +896,11 @@ export function childAgentCreateInvoker(genesis: TeamGenesisDeps, env: HarnessEn
     if (!signed) {
       throw new InputRequired({
         kind: 'signature', stepRef, toolId,
-        prompt: `Sign the genesis of ${g.name} — ${aNoun} under ${parent}, custodied by you.`,
+        prompt: g.nameLater
+          ? `Sign the genesis of ${name} — ${aNoun} under ${parent}, custodied by you. It deploys unnamed; its name is bought next, from your treasury.`
+          : `Sign the genesis of ${g.name} — ${aNoun} under ${parent}, custodied by you.`,
         digest: g.userOpHash, signer: signerOf(credential!),
-        payload: { child: g.child, name: g.name, parent, userOp: g.userOp },
+        payload: { child: g.child, name: g.nameLater ? name : g.name, parent, userOp: g.userOp, ...(g.nameLater ? { nameLater: true, label, tld: g.tld ?? tld } : {}) },
       });
     }
     // What was signed must be what this run derives. The paymaster window and gas may differ between the
@@ -917,7 +922,7 @@ export function childAgentCreateInvoker(genesis: TeamGenesisDeps, env: HarnessEn
     // thrown: the team is on chain, and a wire store that failed is a different fact from the create
     // failing — the same discipline as a declared effect.
     const planes = g.planes && genesis.provisionPlanes ? await genesis.provisionPlanes(g.child, g.planes).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) })) : null;
-    return { txHash, agent: g.child, name: g.name, kind: recordedKind(noun, parent, person), parent, custodian: credential, person, stewardshipDelegation: g.stewardship, ...(planes && !planes.ok ? { planesError: planes.error } : {}) };
+    return { txHash, agent: g.child, name: g.name, kind: recordedKind(noun, parent, person), parent, custodian: credential, person, stewardshipDelegation: g.stewardship, ...(planes && !planes.ok ? { planesError: planes.error } : {}), ...(g.nameLater ? { nameLater: true, label, tld: g.tld ?? tld } : {}) };
   };
 }
 
