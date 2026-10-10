@@ -129,6 +129,17 @@ export interface Env {
    *  + localhost). A request with a foreign Host is rejected — the broker will never
    *  sign `iss=<attacker-host>`. */
   ALLOWED_ISSUER_HOSTS?: string;
+  /** The Admin tab (2026-10-09): comma list of person addresses allowed to open it. Unset/empty = nobody. */
+  HOME_ADMINS?: string;
+  /** Azure spending on the Admin tab: a read-only (Cost Management Reader) service principal on one subscription. */
+  AZURE_TENANT_ID?: string;
+  AZURE_CLIENT_ID?: string;
+  AZURE_CLIENT_SECRET?: string;
+  AZURE_SUBSCRIPTION_ID?: string;
+  /** Which subscription budget to show (default: the first monthly one). */
+  AZURE_BUDGET_NAME?: string;
+  /** Friendly resource-group names: "rg-a=Chain,rg-b=Key service". */
+  AZURE_RG_LABELS?: string;
 }
 
 /** Pages Function context (the subset these handlers use). */

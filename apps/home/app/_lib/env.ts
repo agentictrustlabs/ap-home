@@ -66,5 +66,12 @@ export function makeEnv(): Env {
     DEMO_PERSONA_KEYS: t(process.env.DEMO_PERSONA_KEYS),
     DEMO_SIGNER_SECRET: t(process.env.DEMO_SIGNER_SECRET),
     ALLOWED_ISSUER_HOSTS: t(process.env.ALLOWED_ISSUER_HOSTS),
+    HOME_ADMINS: t(process.env.HOME_ADMINS),
+    AZURE_TENANT_ID: t(process.env.AZURE_TENANT_ID),
+    AZURE_CLIENT_ID: t(process.env.AZURE_CLIENT_ID),
+    AZURE_CLIENT_SECRET: t(process.env.AZURE_CLIENT_SECRET),
+    AZURE_SUBSCRIPTION_ID: t(process.env.AZURE_SUBSCRIPTION_ID),
+    AZURE_BUDGET_NAME: t(process.env.AZURE_BUDGET_NAME),
+    AZURE_RG_LABELS: t(process.env.AZURE_RG_LABELS),
   };
 }

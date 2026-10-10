@@ -13,10 +13,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useSession } from '../../context/session';
 import { whitelabel } from '../../whitelabel/config';
 import { buildUserMenu } from './nav';
+import { useIsAdmin } from '../../home/use-is-admin';
 import { AddressChip } from '../shared/AddressChip';
 
 export function SidebarFootMenu() {
   const { agentName, agentAddress, personName, signOut } = useSession();
+  const isAdmin = useIsAdmin();
   // The profile name leads (initial + label) when given; the handle is the fallback and, when both
   // exist, the handle stays as the second line of the menu heading.
   const shown = personName ?? agentName;
@@ -80,7 +82,7 @@ export function SidebarFootMenu() {
           </button>
           <div style={{ height: 1, background: 'var(--color-border)', margin: '4px 0' }} />
           <a role="menuitem" href="/" style={item}>View your portal</a>
-          {buildUserMenu(whitelabel).map((it) => (
+          {buildUserMenu(whitelabel, { isAdmin }).map((it) => (
             <a key={it.id} role="menuitem" href={it.href} style={item}>{it.label}</a>
           ))}
           <a role="menuitem" href="/names" style={item}>Registered names</a>

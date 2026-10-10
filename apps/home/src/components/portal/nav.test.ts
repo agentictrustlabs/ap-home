@@ -373,3 +373,12 @@ describe('owner 2026-10-01 — the Developer tools pane', () => {
     expect(developerPane().map((g) => g.heading)).toEqual(['Developer tools', 'Evals', 'The kit']);
   });
 });
+
+describe('2026-10-09 — the Admin row', () => {
+  it('is in the user menu only for an admin, and is never called Estate', () => {
+    expect(buildUserMenu(whitelabel).map((i) => i.id)).not.toContain('admin');
+    const row = buildUserMenu(whitelabel, { isAdmin: true }).find((i) => i.id === 'admin');
+    expect(row?.label).toBe('Admin');
+    expect(row?.href).toBe('/admin');
+  });
+});

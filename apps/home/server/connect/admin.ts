@@ -1,0 +1,196 @@
+// GET /connect/admin/{me,accounts,azure-costs}  (Bearer session) — the Admin tab (Global.Church, 2026-10-09).
+//
+// The SERVER decides who is an admin, on every call: the session's person address must be on `HOME_ADMINS`. The
+// menu only hides the row; these routes refuse a non-admin with 403 whatever the page does. An empty list is
+// nobody (no fallback admin).
+//
+// Numbers only: no emails, no names, no addresses leave these routes — counts and dollars.
+import { importJwks, verifyAgentSession } from '@agenticprimitives/connect';
+import { getServer, ownIssuer, type Env, type FnContext, type KVNamespace } from '../_lib/server-broker';
+import {
+  FACET_PREFIXES, countAccounts, countOrgs, dayOf, growth, isAdmin, parseAdmins, recordSnapshot,
+  type AccountCounts, type OrgCounts, type Snapshot,
+} from '../../src/lib/admin-stats';
+import { costQueries, parseLabels, shapeCosts, type CostTable, type CostsResult } from '../../src/lib/azure-costs';
+
+const json = (b: unknown, s = 200): Response =>
+  new Response(JSON.stringify(b), { status: s, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+
+type Gate = { ok: true; admin: boolean } | { ok: false; res: Response };
+
+async function session(request: Request, env: Env): Promise<Gate> {
+  const auth = request.headers.get('authorization') ?? '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (!token) return { ok: false, res: json({ error: 'session required' }, 401) };
+  const { jwks } = await getServer(env);
+  const keys = await importJwks(jwks);
+  const v = await verifyAgentSession(token, { keys, expectedAud: env.DEMO_SSO_AUD ?? 'demo-sso', expectedIss: ownIssuer(request, env) });
+  if (!v.ok) return { ok: false, res: json({ error: 'invalid session' }, 401) };
+  return { ok: true, admin: isAdmin(v.session.sub, parseAdmins(env.HOME_ADMINS)) };
+}
+
+/** 401 without a valid session, 403 for anyone not on HOME_ADMINS; null = go ahead. */
+export async function requireAdmin(request: Request, env: Env): Promise<Response | null> {
+  const g = await session(request, env);
+  if (!g.ok) return g.res;
+  return g.admin ? null : json({ error: 'not an admin of this Home' }, 403);
+}
+
+/** Whether to show the Admin row. A bad session is simply "no". */
+export const onAdminMe = async ({ request, env }: FnContext): Promise<Response> => {
+  const g = await session(request, env);
+  return json({ admin: g.ok && g.admin });
+};
+
+// ── Accounts ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const ACCOUNTS_CACHE = 'admin-cache:accounts';
+const SNAPSHOTS = 'admin-snap:accounts';
+const ACCOUNTS_TTL_S = 10 * 60;
+
+async function listKeys(kv: KVNamespace, prefix: string): Promise<string[]> {
+  const out: string[] = [];
+  let cursor: string | undefined;
+  for (let i = 0; i < 2000; i++) {
+    const page = await kv.list({ prefix, ...(cursor ? { cursor } : {}), limit: 1000 });
+    out.push(...page.keys.map((k) => k.name));
+    if (page.list_complete || !page.cursor) break;
+    cursor = page.cursor;
+  }
+  return [...new Set(out)];
+}
+
+async function readAll(kv: KVNamespace, keys: string[]): Promise<{ key: string; value: string | null }[]> {
+  const out: { key: string; value: string | null }[] = [];
+  for (let i = 0; i < keys.length; i += 50) {
+    const batch = keys.slice(i, i + 50);
+    out.push(...(await Promise.all(batch.map(async (key) => ({ key, value: await kv.get(key) })))));
+  }
+  return out;
+}
+
+export interface AccountsView extends AccountCounts, OrgCounts {
+  new7d: number | null;
+  new30d: number | null;
+  trackingSince: string | null;
+  history: Snapshot[];
+  asOf: number;
+}
+
+export async function computeAccounts(kv: KVNamespace, now: number): Promise<AccountsView> {
+  const facetKeys = (await Promise.all(FACET_PREFIXES.map((p) => listKeys(kv, p)))).flat();
+  const accounts = countAccounts(await readAll(kv, facetKeys));
+  const orgs = countOrgs(await readAll(kv, await listKeys(kv, 'related:')), now);
+  let history: Snapshot[] = [];
+  try {
+    history = JSON.parse((await kv.get(SNAPSHOTS)) ?? '[]') as Snapshot[];
+  } catch {
+    history = [];
+  }
+  history = recordSnapshot(history, { date: dayOf(now), accounts: accounts.accounts, organizations: orgs.organizations });
+  await kv.put(SNAPSHOTS, JSON.stringify(history));
+  return {
+    ...accounts,
+    ...orgs,
+    new7d: growth(history, now, 7, 'accounts'),
+    new30d: growth(history, now, 30, 'accounts'),
+    trackingSince: history[0]?.date ?? null,
+    history: history.slice(-90),
+    asOf: now,
+  };
+}
+
+export const onAdminAccounts = async ({ request, env }: FnContext): Promise<Response> => {
+  const refused = await requireAdmin(request, env);
+  if (refused) return refused;
+  const refresh = new URL(request.url).searchParams.get('refresh') === '1';
+  if (!refresh) {
+    const cached = await env.AUTH_CODES.get(ACCOUNTS_CACHE);
+    if (cached) return new Response(cached, { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+  }
+  const view = await computeAccounts(env.AUTH_CODES, Date.now());
+  const body = JSON.stringify(view);
+  await env.AUTH_CODES.put(ACCOUNTS_CACHE, body, { expirationTtl: ACCOUNTS_TTL_S });
+  return new Response(body, { headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+};
+
+// ── Azure ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+const AZURE_CACHE = 'admin-cache:azure';
+const AZURE_TTL_S = 6 * 60 * 60;
+/** A refresh within this long of the last real fetch serves the cache: Cost Management throttles hard. */
+const AZURE_MIN_REFRESH_MS = 10 * 60 * 1000;
+const ARM = 'https://management.azure.com';
+
+async function azureToken(env: Env): Promise<string> {
+  const res = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(env.AZURE_TENANT_ID!)}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: env.AZURE_CLIENT_ID!,
+      client_secret: env.AZURE_CLIENT_SECRET!,
+      scope: `${ARM}/.default`,
+    }),
+  });
+  const j = (await res.json().catch(() => ({}))) as { access_token?: string; error?: string };
+  if (!res.ok || !j.access_token) throw new Error(`Azure sign-in failed (${j.error ?? res.status})`);
+  return j.access_token;
+}
+
+async function arm<T>(token: string, method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${ARM}${path}`, {
+    method,
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  if (!res.ok) {
+    const j = (await res.json().catch(() => ({}))) as { error?: { code?: string } };
+    throw new Error(`Azure ${res.status}${j.error?.code ? ` ${j.error.code}` : ''}`);
+  }
+  return (await res.json()) as T;
+}
+
+export async function fetchCosts(env: Env, now: Date): Promise<CostsResult> {
+  if (!env.AZURE_TENANT_ID || !env.AZURE_CLIENT_ID || !env.AZURE_CLIENT_SECRET || !env.AZURE_SUBSCRIPTION_ID) {
+    return { ok: false, reason: 'Azure cost reading is not set up on this Home.', asOf: now.getTime() };
+  }
+  try {
+    const token = await azureToken(env);
+    const scope = `/subscriptions/${encodeURIComponent(env.AZURE_SUBSCRIPTION_ID)}`;
+    const q = costQueries(now);
+    const query = (b: unknown) => arm<CostTable>(token, 'POST', `${scope}/providers/Microsoft.CostManagement/query?api-version=2023-11-01`, b);
+    // Sequential, not parallel: Cost Management throttles concurrent queries per scope.
+    const monthByGroup = await query(q.monthByGroup);
+    const soft = async <T>(p: () => Promise<T>): Promise<T | null> => { try { return await p(); } catch { return null; } };
+    const lastMonth = await soft(() => query(q.lastMonth));
+    const daily = await soft(() => query(q.daily));
+    const forecast = q.forecast
+      ? await soft(() => arm<CostTable>(token, 'POST', `${scope}/providers/Microsoft.CostManagement/forecast?api-version=2023-11-01`, q.forecast))
+      : null;
+    const budgets = await soft(() => arm<{ value?: [] }>(token, 'GET', `${scope}/providers/Microsoft.Consumption/budgets?api-version=2023-05-01`));
+    return shapeCosts({
+      monthByGroup, lastMonth, daily, forecast, budgets,
+      ...(env.AZURE_BUDGET_NAME ? { budgetName: env.AZURE_BUDGET_NAME } : {}),
+      labels: parseLabels(env.AZURE_RG_LABELS),
+      monthStart: q.monthStart,
+      noDaysLeft: !q.forecast,
+      now: now.getTime(),
+    });
+  } catch (e) {
+    return { ok: false, reason: `Azure did not answer: ${(e as Error).message}`, asOf: now.getTime() };
+  }
+}
+
+export const onAdminAzureCosts = async ({ request, env }: FnContext): Promise<Response> => {
+  const refused = await requireAdmin(request, env);
+  if (refused) return refused;
+  const refresh = new URL(request.url).searchParams.get('refresh') === '1';
+  const cachedRaw = await env.AUTH_CODES.get(AZURE_CACHE);
+  const cached = cachedRaw ? (JSON.parse(cachedRaw) as CostsResult) : null;
+  if (cached && (!refresh || Date.now() - cached.asOf < AZURE_MIN_REFRESH_MS)) return json(cached);
+  const fresh = await fetchCosts(env, new Date());
+  // A failure is cached briefly only, so a fixed configuration shows up within minutes.
+  await env.AUTH_CODES.put(AZURE_CACHE, JSON.stringify(fresh), { expirationTtl: fresh.ok ? AZURE_TTL_S : 5 * 60 });
+  return json(fresh);
+};

@@ -12,6 +12,7 @@
 import { useSession } from '../../context/session';
 import { whitelabel } from '../../whitelabel/config';
 import { buildUserMenu } from './nav';
+import { useIsAdmin } from '../../home/use-is-admin';
 import { AddressChip } from '../shared/AddressChip';
 import { ChevronDownIcon } from '../shared/Icons';
 import { Popover } from '../shared/ui';
@@ -20,6 +21,7 @@ import { Popover } from '../shared/ui';
  *  panel at a time on the right edge. */
 export function IdentityChip({ open, onOpenChange }: { open?: boolean; onOpenChange?: (open: boolean) => void } = {}) {
   const { agentName, agentAddress, signOut } = useSession();
+  const isAdmin = useIsAdmin();
 
   return (
     <div className="identity-chip-wrap">
@@ -47,7 +49,7 @@ export function IdentityChip({ open, onOpenChange }: { open?: boolean; onOpenCha
         </button>
         <div className="identity-popover-divider" />
         <a className="identity-popover-item" href="/" role="menuitem">View your portal</a>
-        {buildUserMenu(whitelabel).map((item) => (
+        {buildUserMenu(whitelabel, { isAdmin }).map((item) => (
           <a key={item.id} className="identity-popover-item" href={item.href} role="menuitem">{item.label}</a>
         ))}
         <a className="identity-popover-item" href="/names" role="menuitem">Registered names</a>

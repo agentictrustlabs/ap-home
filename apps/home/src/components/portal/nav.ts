@@ -465,7 +465,7 @@ export function buildSettingsPane(
 /** spec 348 §4 — the topbar user menu: about the signed-in PERSON and the deployment, not about the
  *  agent in this workspace. Network is here rather than per-agent because it is one substrate for every
  *  agent, and a per-agent item for a non-per-agent fact invents a distinction that does not exist. */
-export function buildUserMenu(wl: WhiteLabelConfig): NavItem[] {
+export function buildUserMenu(wl: WhiteLabelConfig, opts: { isAdmin?: boolean } = {}): NavItem[] {
   const items: NavItem[] = [{ id: 'you', label: 'Your profile', href: '/profile', Icon: UserIcon, status: 'live' }];
   // Household is NOT here: it moved to the Stewardship pane, beside Treasuries and Alliances, because
   // that is where a person looks for the things that are theirs to keep — and a nav item in two places
@@ -484,6 +484,9 @@ export function buildUserMenu(wl: WhiteLabelConfig): NavItem[] {
   // P1.4 — everything the person stewards, one screen; budgets set here.
   items.push({ id: 'estate', label: 'Estate', href: '/estate', Icon: BuildingIcon, status: 'live' });
   items.push({ id: 'network', label: 'Network', href: '/network', Icon: GlobeIcon, status: 'live' });
+  // The deployment's Admin tab (2026-10-09) — accounts and Azure spending. Shown to HOME_ADMINS only; the server
+  // refuses everyone else whatever this menu shows. Named Admin, never Estate: Estate is what a person stewards.
+  if (opts.isAdmin) items.push({ id: 'admin', label: 'Admin', href: '/admin', Icon: SettingsIcon, status: 'live' });
   return items;
 }
 

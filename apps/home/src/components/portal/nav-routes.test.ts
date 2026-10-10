@@ -113,7 +113,7 @@ describe('every nav item resolves to a real route', () => {
   });
 
   it('the user menu', () => {
-    const dead = buildUserMenu(whitelabel).filter((i) => !resolves(i.href)).map((i) => `${i.label} → ${i.href}`);
+    const dead = buildUserMenu(whitelabel, { isAdmin: true }).filter((i) => !resolves(i.href)).map((i) => `${i.label} → ${i.href}`);
     expect(dead).toEqual([]);
   });
 });
