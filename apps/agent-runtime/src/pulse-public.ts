@@ -27,9 +27,21 @@ export interface PulseDayRecord {
   estate?: string;
   heartbeat?: { runs?: { completed?: number; failed?: number; total?: number }; inferenceMicroUsd?: number | null } | null;
   pulse?: {
-    infrastructure?: Array<{ platform?: string; resource?: string; latest?: { status?: string; ok?: boolean } }>;
-    cost?: Array<{ platform?: string; basis?: string; days?: Array<{ day?: string; amountMicroUsd?: number }> }>;
+    /**
+     * THE RECORDED SHAPE IS FLAT. `dayRollup` writes `{ platform, account, resource, kind, owner, status,
+     * ok, asOf, lagClass, metrics }` per resource — the live `/api/pulse` view nests the same facts under
+     * `latest`, and reading the record as though it were the live view found platform and owner and no
+     * status, no reading, no metrics at all. Both are accepted here so a reader of either is right.
+     */
+    infrastructure?: Array<{
+      platform?: string; account?: string; resource?: string; kind?: string;
+      owner?: { kind?: string; id?: string } | null;
+      status?: string; ok?: boolean; asOf?: string; lagClass?: string; error?: string; metrics?: Record<string, number | null>;
+      latest?: { status?: string; ok?: boolean; asOf?: string; lagClass?: string; error?: string; metrics?: Record<string, number | null> };
+    }>;
+    cost?: Array<{ platform?: string; basis?: string; owner?: { kind?: string; id?: string } | null; days?: Array<{ day?: string; amountMicroUsd?: number }> }>;
     costPerCompletedRun?: { microUsd?: number | null; completedRuns?: number; infraBasis?: string | null } | null;
+    unattributed?: Array<{ platform?: string; resource?: string; kind?: string }>;
   };
 }
 
@@ -81,6 +93,168 @@ function costOf(rec: PulseDayRecord): Map<string, number> {
   return by;
 }
 
+/**
+ * ── RETRIEVAL ────────────────────────────────────────────────────────────────────────────────────────
+ * What the question NAMES, found in the records. A town's day holds a hundred and fifty resources, every
+ * service's probe counts and each estate's run counts, so "tell me about demo-a2a-faithnet" is answerable
+ * exactly — the old answerer simply never looked at the subject and read the week back instead.
+ *
+ * Matching is by NAME, against names the records themselves carry: nothing is invented, and a name the
+ * records do not know is reported as unknown rather than guessed at. The result is a bounded set of facts
+ * drawn only from records that were read, which is the whole of what any answer may say.
+ */
+export interface PulseNamedThing {
+  name: string;
+  what: string;
+  /** Facts in the order a reader wants them; every value came out of a record. */
+  facts: Record<string, string | number>;
+  days: string[];
+}
+
+/** A resource's reading, from whichever shape it came in: the record is flat, the live view nests. */
+export function reading(r: { status?: string; ok?: boolean; asOf?: string; lagClass?: string; error?: string; metrics?: Record<string, number | null>; latest?: { status?: string; ok?: boolean; asOf?: string; lagClass?: string; error?: string; metrics?: Record<string, number | null> } }): { status?: string; ok?: boolean; asOf?: string; lagClass?: string; error?: string; metrics?: Record<string, number | null> } {
+  return r.latest ?? r;
+}
+
+const METRIC_WORD: Record<string, string> = {
+  requests: 'requests', errors: 'errors', subrequests: 'subrequests',
+  cpuP50Ms: 'CPU p50 (ms)', cpuP99Ms: 'CPU p99 (ms)', wallP50Ms: 'wall p50 (ms)', wallP99Ms: 'wall p99 (ms)',
+  rowsRead: 'rows read', rowsWritten: 'rows written', readQueries: 'read queries', writeQueries: 'write queries',
+  storageBytes: 'stored bytes', cpuPercent: 'CPU %', deployAgeMs: 'deploy age (ms)',
+  queryBatchTimeP50Ms: 'query p50 (ms)', queryBatchTimeP99Ms: 'query p99 (ms)',
+  statements: 'statements', heapUsedBytes: 'heap used', requestsPerMinute: 'requests/min',
+};
+
+/** Every name the records know, so a question can be matched against reality and nothing else. */
+export function namesIn(found: Array<{ day: string; rec: PulseDayRecord }>): Set<string> {
+  const names = new Set<string>();
+  for (const { rec } of found) {
+    for (const id of Object.keys(rec.services ?? {})) names.add(id.toLowerCase());
+    for (const r of rec.pulse?.infrastructure ?? []) if (r.resource && r.resource !== '*') names.add(r.resource.toLowerCase());
+    for (const e of Object.keys(rec.estates ?? {})) names.add(e.toLowerCase());
+    if (rec.estate) names.add(rec.estate.toLowerCase());
+    for (const c of rec.pulse?.cost ?? []) if (c.platform) names.add(c.platform.toLowerCase());
+  }
+  return names;
+}
+
+/**
+ * Identifier-shaped words — `demo-a2a-faithnet`, `town-mcp`, `faithnet.io`. When a question names one of
+ * these and the records know nothing by that name, saying so is far more use than answering about the
+ * week instead. Only consulted when NOTHING known was named, so an ordinary hyphenated word in a question
+ * that did match something is never reported as a missing resource.
+ */
+const HYPHENATED_ENGLISH = new Set(['open-ended', 'read-only', 'up-to-date', 'real-time', 'end-to-end', 'day-to-day', 'well-known', 'self-hosted', 'fail-closed', 'per-day']);
+export function identifierish(question: string): string[] {
+  return [...new Set((question.toLowerCase().match(/[a-z][a-z0-9]*(?:[-.][a-z0-9]+)+/g) ?? []))]
+    .filter((t) => t.length >= 4 && !HYPHENATED_ENGLISH.has(t))
+    .slice(0, 3);
+}
+
+/** The names this question mentions, longest first so `demo-a2a-faithnet` wins over `faithnet`. */
+export function subjectsNamed(question: string, found: Array<{ day: string; rec: PulseDayRecord }>): string[] {
+  const q = question.toLowerCase();
+  const all = [...namesIn(found)].sort((a, b) => b.length - a.length);
+  const hit: string[] = [];
+  for (const n of all) {
+    if (n.length < 3 || !q.includes(n)) continue;
+    // A name already covered by a longer one that matched is the same mention, not a second subject.
+    if (hit.some((h) => h.includes(n))) continue;
+    hit.push(n);
+  }
+  return hit.slice(0, 4);
+}
+
+/** Everything the records say about one named thing, across the window. */
+export function factsAbout(name: string, found: Array<{ day: string; rec: PulseDayRecord }>): PulseNamedThing | null {
+  const key = name.toLowerCase();
+  const facts: Record<string, string | number> = {};
+  const days: string[] = [];
+  let what = '';
+  for (const { day, rec } of found) {
+    let touched = false;
+    // A declared service, as the town's own probe saw it.
+    const svc = Object.entries(rec.services ?? {}).find(([id]) => id.toLowerCase() === key);
+    if (svc) {
+      what ||= 'a service the town lists and probes';
+      facts['probes'] = Number(facts['probes'] ?? 0) + (svc[1].samples ?? 0);
+      facts['answered'] = Number(facts['answered'] ?? 0) + (svc[1].up ?? 0);
+      touched = true;
+    }
+    // A resource a platform reports, with its last reading.
+    const res = (rec.pulse?.infrastructure ?? []).find((r) => (r.resource ?? '').toLowerCase() === key);
+    if (res) {
+      const r = reading(res);
+      what ||= `a ${res.kind ?? 'resource'} on ${res.platform ?? 'a platform'}`;
+      facts['platform'] = res.platform ?? '?';
+      facts['kind'] = res.kind ?? '?';
+      facts['owner'] = res.owner ? `${res.owner.kind}:${res.owner.id}` : 'not attributed in the manifest';
+      if (r.status) facts['status'] = r.status;
+      if (r.asOf) facts['last read'] = r.asOf;
+      if (r.lagClass) facts['how current'] = r.lagClass;
+      if (r.error) facts['unreadable because'] = r.error;
+      for (const [k, v] of Object.entries(r.metrics ?? {})) if (typeof v === 'number') facts[METRIC_WORD[k] ?? k] = v;
+      touched = true;
+    }
+    // An estate, as it reported itself.
+    if ((rec.estate ?? '').toLowerCase() === key || Object.keys(rec.estates ?? {}).some((e) => e.toLowerCase() === key)) {
+      what ||= 'an estate on this chain';
+      if (rec.heartbeat?.runs) {
+        facts['completed runs'] = Number(facts['completed runs'] ?? 0) + (rec.heartbeat.runs.completed ?? 0);
+        facts['failed runs'] = Number(facts['failed runs'] ?? 0) + (rec.heartbeat.runs.failed ?? 0);
+      }
+      touched = true;
+    }
+    // A platform, by what it cost on each basis — never added across bases.
+    for (const c of rec.pulse?.cost ?? []) {
+      if ((c.platform ?? '').toLowerCase() !== key) continue;
+      what ||= 'a platform the town reads';
+      const micro = (c.days ?? []).reduce((n, d) => n + (d.amountMicroUsd ?? 0), 0);
+      const label = `${c.basis ?? 'unlabelled'} cost (USD)`;
+      facts[label] = Number(((Number(facts[label] ?? 0) * 1e6 + micro) / 1e6).toFixed(4));
+      touched = true;
+    }
+    if (touched) days.push(day);
+  }
+  return days.length ? { name, what: what || 'named in the records', facts, days } : null;
+}
+
+export interface PulseFacts {
+  subjects: PulseNamedThing[];
+  /** Names the question mentioned that the records do not know — said, never guessed at. */
+  unknown: string[];
+  window: { from: string; to: string; words: string };
+  daysRead: string[];
+  daysMissing: string[];
+}
+
+/** Everything an answer to this question may draw on. Pure: the caller does the reading. */
+export function factsFor(question: string, window: PulseWindow, found: Array<{ day: string; rec: PulseDayRecord }>): PulseFacts {
+  const named = subjectsNamed(question, found);
+  const subjects = named.map((n) => factsAbout(n, found)).filter((x): x is PulseNamedThing => x !== null);
+  const known = new Set(subjects.map((s) => s.name));
+  const knownNames = namesIn(found);
+  // A question that named something we know is answered about that. A question that named NOTHING we know
+  // but did name something identifier-shaped is told so — the alternative is answering about the week at
+  // someone who asked about a machine, which reads as an answer and is not one.
+  const unknown = subjects.length
+    ? named.filter((n) => !known.has(n))
+    : identifierish(question).filter((t) => !knownNames.has(t));
+  return {
+    subjects,
+    unknown,
+    window: { from: window.from, to: window.to, words: window.words },
+    daysRead: found.map((f) => f.day),
+    daysMissing: window.days.filter((d) => !found.some((f) => f.day === d)),
+  };
+}
+
+/** One subject, stated. The deterministic fallback, and the shape the composer is given as evidence. */
+export function statedSubject(s: PulseNamedThing): string {
+  const parts = Object.entries(s.facts).map(([k, v]) => `${k} ${typeof v === 'number' ? (Number.isInteger(v) ? v.toLocaleString('en-US') : v) : v}`);
+  return `${s.name} is ${s.what}. ${parts.join('; ')}. Read from ${s.days.length === 1 ? 'the record for' : 'the records for'} ${s.days.join(', ')}.`;
+}
+
 export interface PulseAnswer {
   answer: string;
   /** Every record the answer was read from. An answer that cites nothing is a refusal. */
@@ -103,6 +277,18 @@ export function answerFromDays(question: string, window: PulseWindow, found: Arr
   }
   const parts: string[] = [];
 
+  // WHAT THE QUESTION NAMED COMES FIRST. A question about one thing is answered about that thing; the
+  // window summary is what you get when nothing in particular was asked about. Reading the week back at
+  // someone who asked about one Worker is the failure this fixes.
+  const facts = factsFor(question, window, found);
+  for (const sub of facts.subjects) parts.push(statedSubject(sub));
+  for (const miss of facts.unknown) parts.push(`I have no record of anything called "${miss}" — it is not a service the town probes, a resource a platform reports to it, or an estate on this chain.`);
+  if (facts.subjects.length || facts.unknown.length) {
+    const missing = window.days.filter((d) => !found.some((f) => f.day === d));
+    if (missing.length) parts.push(`${plural(missing.length, 'day')} in the window ${missing.length === 1 ? 'has' : 'have'} no record, so this is partial — never a smaller total.`);
+    return { ...head, read: true, answer: parts.join(' ') };
+  }
+
   if (subject === 'cost' || subject === 'overall') {
     const by = new Map<string, number>();
     let daysWithCost = 0;
@@ -118,7 +304,8 @@ export function answerFromDays(question: string, window: PulseWindow, found: Arr
   if (subject === 'status' || subject === 'overall') {
     const trouble = new Map<string, Set<string>>();
     for (const { day, rec } of found) for (const r of rec.pulse?.infrastructure ?? []) {
-      if (r.latest && (r.latest.ok === false || (r.latest.status && r.latest.status !== 'up'))) {
+      const v = reading(r);
+      if (v.ok === false || (v.status && v.status !== 'up')) {
         const k = r.resource ?? '?'; trouble.set(k, (trouble.get(k) ?? new Set()).add(day));
       }
     }
@@ -152,9 +339,78 @@ export function answerFromDays(question: string, window: PulseWindow, found: Arr
   return { ...head, read: true, answer: parts.join(' ') };
 }
 
-/** The whole capability: read the window's records from the agent's own vault, then answer from them. */
+/**
+ * THE EVIDENCE a composed answer may use, and nothing else: the facts retrieved for this question, each
+ * item naming where it came from. An open-ended question gets words written over THIS and no world
+ * knowledge — which is the only way "tell me about demo-a2a-faithnet" can be both fluent and true.
+ */
+export function evidenceFor(facts: PulseFacts, found: Array<{ day: string; rec: PulseDayRecord }>, stated: string): Array<{ tool: string; result: unknown }> {
+  const items: Array<{ tool: string; result: unknown }> = [];
+  for (const sub of facts.subjects) items.push({ tool: `pulse.record.about:${sub.name}`, result: { ...sub, stated: statedSubject(sub) } });
+  if (!facts.subjects.length) {
+    // No named thing: the window itself is the subject, so the evidence is the day-by-day shape of it.
+    items.push({ tool: 'pulse.window.summary', result: { window: facts.window, stated } });
+    for (const { day, rec } of found.slice(-3)) {
+      items.push({ tool: `pulse.day:${day}`, result: {
+        day,
+        services: rec.services ?? {},
+        runs: rec.heartbeat?.runs ?? null,
+        inferenceMicroUsd: rec.heartbeat?.inferenceMicroUsd ?? null,
+        cost: (rec.pulse?.cost ?? []).map((c) => ({ platform: c.platform, basis: c.basis, owner: c.owner, microUsd: (c.days ?? []).reduce((n, d) => n + (d.amountMicroUsd ?? 0), 0) })),
+        notUp: (rec.pulse?.infrastructure ?? []).map((r) => ({ r, v: reading(r) })).filter(({ v }) => v.ok === false || (v.status && v.status !== 'up')).map(({ r, v }) => ({ resource: r.resource, platform: r.platform, status: v.status, error: v.error })),
+        resources: (rec.pulse?.infrastructure ?? []).length,
+        unattributed: (rec.pulse?.unattributed ?? []).length,
+      } });
+    }
+  }
+  if (facts.unknown.length) items.push({ tool: 'pulse.record.unknown', result: { named: facts.unknown, note: 'the records know nothing by these names' } });
+  if (facts.daysMissing.length) items.push({ tool: 'pulse.window.gaps', result: { missing: facts.daysMissing, note: 'days in the window with no record at all' } });
+  return items;
+}
+
+/** The rules a composed answer must keep, on top of whatever doctrine the agent's own playbook carries. */
+export const COMPOSE_RULES = [
+  'Answer ONLY from the evidence below. It is the whole of what you know; you have no other knowledge of this deployment.',
+  'If the evidence does not contain the answer, say exactly that and name what would have to have been recorded. Never fill a gap.',
+  'A figure absent from the evidence is ABSENT, never zero.',
+  'Never add two cost figures that carry different bases (billed, effective, derived) — they measure different things.',
+  'Report counts and totals only. There is no person in these records; do not describe one.',
+  'Be brief and concrete: what the records say, over which days.',
+].join(' ');
+
+/** Compose over the evidence, or return null so the caller states the facts instead. */
+async function composed(
+  compose: ((input: { intent: { goal: string }; observations: never[]; evidence: Array<{ tool: string; result: unknown }> }) => Promise<string>) | undefined,
+  question: string,
+  evidence: Array<{ tool: string; result: unknown }>,
+): Promise<string | null> {
+  if (!compose) return null;
+  try {
+    const text = await compose({ intent: { goal: question }, observations: [] as never[], evidence });
+    const t = (text ?? '').trim();
+    return t.length > 0 ? t : null;
+  } catch {
+    // A composer that failed is not an answer that failed: the facts are still true and still sayable.
+    return null;
+  }
+}
+
+/**
+ * The whole capability: read the window's records from the agent's own vault, retrieve what the question
+ * names, and answer.
+ *
+ * TWO WAYS TO SAY IT, ONE SOURCE OF TRUTH. The facts come from the records either way. When the caller
+ * supplies a composer (and the question is open-ended), the words are written over those facts under the
+ * agent's OWN playbook instructions plus `COMPOSE_RULES` — the doctrine the archetype carries is exactly
+ * the rules a fluent answer about money and uptime has to keep. With no composer, or when it fails, the
+ * facts are STATED. The second is never silence and never a worse answer, only a plainer one.
+ */
 export async function publicPulseAsk(
-  deps: { readSubjectRecord: (subject: string, recordType: string) => Promise<unknown> },
+  deps: {
+    readSubjectRecord: (subject: string, recordType: string) => Promise<unknown>;
+    /** The agent's composer, already carrying its playbook instructions as the system prompt. */
+    compose?: (input: { intent: { goal: string }; observations: never[]; evidence: Array<{ tool: string; result: unknown }> }) => Promise<string>;
+  },
   owner: string,
   args: Record<string, unknown>,
   nowMs = Date.now(),
@@ -167,5 +423,8 @@ export async function publicPulseAsk(
     if (rec && typeof rec === 'object') found.push({ day, rec });
   }
   const a = answerFromDays(question, window, found);
-  return { ...a, owner, question };
+  const facts = factsFor(question, window, found);
+  // Nothing was read ⇒ there is nothing to compose over, and the refusal is already the right answer.
+  const words = found.length ? await composed(deps.compose, question, evidenceFor(facts, found, a.answer)) : null;
+  return { ...a, ...(words ? { answer: words, stated: a.answer, composed: true } : { composed: false }), owner, question, named: facts.subjects.map((x) => x.name), unknown: facts.unknown };
 }

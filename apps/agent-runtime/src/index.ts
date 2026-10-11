@@ -148,7 +148,7 @@ export { HarnessApprovalWorkflow };
 import { claimableBy, receiptEvidence, checkpointForCommittedStep, committedStepNote } from './endeavor-authority-steps.js';
 import { parkableCommittedSteps } from './endeavor-committed-steps.js';
 import { publicLibraryRead } from './library-tools.js';
-import { PULSE_PUBLIC_ASK, publicPulseAsk } from './pulse-public';
+import { PULSE_PUBLIC_ASK, publicPulseAsk, COMPOSE_RULES } from './pulse-public';
 import { internalHeaders, markInWorker, isInWorkerRequest } from './internal-marker.js';
 import { parseExperimentRequest, type ExperimentJobV1 } from './experiment-job.js';
 import { validateCaptureWindow } from '@agenticprimitives/evaluation';
@@ -1475,10 +1475,20 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
     // Spec 436 §5.5 T3 — and, for an agent that keeps a daily pulse, a question answered from those records with
     // every record it used named. Dispatched by capability id: the lane's allowlist decides what may arrive here.
     ...(deps.readSubjectRecord ? {
-      publicRead: ({ agent: who, skill, args }) =>
-        skill === PULSE_PUBLIC_ASK
-          ? publicPulseAsk({ readSubjectRecord: deps.readSubjectRecord! }, who.toLowerCase(), args)
-          : publicLibraryRead({ readSubjectRecord: deps.readSubjectRecord! }, who.toLowerCase(), skill, args),
+      publicRead: async ({ agent: who, skill, args }) => {
+        if (skill !== PULSE_PUBLIC_ASK) return publicLibraryRead({ readSubjectRecord: deps.readSubjectRecord! }, who.toLowerCase(), skill, args);
+        // THE AGENT'S OWN PLAYBOOK WRITES THE ANSWER. An open-ended question is composed over the facts
+        // retrieved from its records, under its archetype's instructions as the system prompt plus the
+        // rules that keep a fluent answer honest (`COMPOSE_RULES`). A bare agent — no assignment — gets no
+        // composer and states its facts instead: plainer, never less true. Model unavailable is the same.
+        const pb = await loadPlaybook(deps.readSubjectRecord, who.toLowerCase(), console.log).catch(() => null);
+        const systemPrompt = [pb?.instructions, COMPOSE_RULES].filter(Boolean).join('\n\n');
+        const composer = pb ? selectComposer(c.env, { systemPrompt }) : null;
+        return publicPulseAsk(
+          { readSubjectRecord: deps.readSubjectRecord!, ...(composer ? { compose: (i) => composer.compose(i as never) } : {}) },
+          who.toLowerCase(), args,
+        );
+      },
     } : {}),
     // Spec 374 §4 — a delivered answer resumes the run that asked, and only that run.
     resumeFromCommitment: (input) => resumeFromCommitment(c.env, input),

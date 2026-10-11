@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { answerFromDays, publicPulseAsk, subjectOf, windowOf, type PulseDayRecord } from '../src/pulse-public';
+import { answerFromDays, evidenceFor, factsFor, identifierish, publicPulseAsk, subjectOf, subjectsNamed, windowOf, type PulseDayRecord } from '../src/pulse-public';
 
 const NOW = Date.parse('2026-10-11T12:00:00Z');
 const day = (d: string, rec: Partial<PulseDayRecord> = {}): { day: string; rec: PulseDayRecord } => ({ day: d, rec: { type: 'ap.town-pulse.v1', day: d, ...rec } });
@@ -98,5 +98,154 @@ describe('the pulse a context agent keeps, answered to a stranger (spec 436 §5.
     const refused = await publicPulseAsk({ readSubjectRecord: async () => { throw new Error('vault_key_unauthorized'); } }, '0xabc', { question: 'yesterday' }, NOW);
     expect(refused.read).toBe(false);
     expect(refused.cited).toEqual([]);
+  });
+});
+
+// ── A GENERAL-PURPOSE ASK (the owner's 2026-10-11 request) ─────────────────────────────────────────
+// "tell me about demo-a2a-faithnet" used to come back as the week's summary, because the answerer never
+// looked at what the question NAMED. A town's day holds every service's probes and ~150 resources with
+// their last reading, so the answer was there the whole time.
+const DAY_FULL = (d: string): { day: string; rec: PulseDayRecord } => ({ day: d, rec: {
+  type: 'ap.town-pulse.v1', day: d,
+  services: { naming: { samples: 12, up: 12 }, skills: { samples: 12, up: 9 } },
+  estates: { faithnet: {} },
+  heartbeat: { runs: { completed: 40, failed: 3 }, inferenceMicroUsd: 1_500 },
+  pulse: {
+    infrastructure: [
+      { platform: 'cloudflare', account: 'acctA', resource: 'demo-a2a-faithnet', kind: 'worker', owner: { kind: 'estate', id: 'faithnet' },
+        latest: { status: 'up', ok: true, asOf: `${d}T11:00:00.000Z`, lagClass: 'hourly', metrics: { requests: 1106, errors: 0, cpuP50Ms: 1.237, cpuP99Ms: 314.663 } } },
+      { platform: 'graphdb', account: 'https://g', resource: 'graphdb', kind: 'node', owner: null,
+        latest: { status: 'unknown', ok: false, asOf: `${d}T11:00:00.000Z`, lagClass: 'hourly', error: 'answered 503', metrics: {} } },
+    ],
+    cost: [{ platform: 'vercel', basis: 'effective', owner: { kind: 'estate', id: 'faithnet' }, days: [{ day: d, amountMicroUsd: 3_000_000 }] }],
+    unattributed: [{ platform: 'cloudflare', resource: 'stray', kind: 'worker' }],
+  },
+} });
+
+describe('a general-purpose ask over everything the record holds', () => {
+  const w = windowOf('this week', NOW);
+  const found = [DAY_FULL('2026-10-10')];
+
+  it('answers about a RESOURCE the question names, with its last reading — not the week', () => {
+    const a = answerFromDays('tell me about demo-a2a-faithnet', w, found);
+    expect(a.answer).toContain('demo-a2a-faithnet is a worker on cloudflare');
+    expect(a.answer).toContain('estate:faithnet');
+    expect(a.answer).toContain('requests 1,106');
+    expect(a.answer).toContain('status up');
+    // the week's summary is NOT what was asked for
+    expect(a.answer).not.toContain('Every one of');
+    expect(a.cited).toEqual([{ key: 'pulse.day:2026-10-10', day: '2026-10-10' }]);
+  });
+
+  it('answers about a SERVICE, an ESTATE and a PLATFORM by name', () => {
+    expect(answerFromDays('how is skills doing', w, found).answer).toMatch(/skills is a service the town lists and probes.*probes 12; answered 9/s);
+    expect(answerFromDays('tell me about faithnet', w, found).answer).toMatch(/faithnet is an estate.*completed runs 40/s);
+    expect(answerFromDays('what about vercel', w, found).answer).toContain('effective cost (USD) 3');
+  });
+
+  it('a resource that could not be read says why, rather than reading as healthy', () => {
+    const a = answerFromDays('what is up with graphdb', w, found);
+    expect(a.answer).toContain('unreadable because answered 503');
+  });
+
+  it('a name the records do not know is said to be unknown, never guessed at', () => {
+    const a = answerFromDays('tell me about postgres-primary', w, found);
+    expect(a.answer).toContain('no record of anything called "postgres-primary"');
+    expect(a.read).toBe(true);
+  });
+
+  it('the longest matching name wins, so an estate inside a resource name is not a second subject', () => {
+    expect(subjectsNamed('tell me about demo-a2a-faithnet', found)).toEqual(['demo-a2a-faithnet']);
+  });
+
+  it('an ordinary hyphenated word is not mistaken for a machine', () => {
+    expect(identifierish('can I ask an open-ended question')).toEqual([]);
+    expect(identifierish('tell me about town-mcp and faithnet.io')).toEqual(['town-mcp', 'faithnet.io']);
+    // and a question that DID name something known never reports its other words as missing resources
+    expect(answerFromDays('is demo-a2a-faithnet up-to-date', w, found).answer).not.toContain('no record of anything called');
+  });
+
+  it('the evidence a composer may use is drawn only from the records, and names where each item came from', () => {
+    const facts = factsFor('tell me about demo-a2a-faithnet', w, found);
+    const ev = evidenceFor(facts, found, 'stated');
+    expect(ev.map((e) => e.tool)).toContain('pulse.record.about:demo-a2a-faithnet');
+    expect(ev.some((e) => e.tool === 'pulse.window.gaps')).toBe(true); // 6 of 7 days are missing
+    expect(JSON.stringify(ev)).toContain('1106');
+  });
+
+  it('WITH a composer the words are its own; WITHOUT one the facts are stated — same truth either way', async () => {
+    const read = async (_s: string, k: string) => (k === 'pulse.day:2026-10-10' ? DAY_FULL('2026-10-10').rec : null);
+    const stated = await publicPulseAsk({ readSubjectRecord: read }, '0xabc', { question: 'tell me about demo-a2a-faithnet' }, NOW);
+    expect(stated.composed).toBe(false);
+    expect(String(stated.answer)).toContain('requests 1,106');
+
+    let sawEvidence = '';
+    const composed = await publicPulseAsk({
+      readSubjectRecord: read,
+      compose: async (i) => { sawEvidence = JSON.stringify(i.evidence); return 'It is the estate’s A2A worker; it took 1,106 requests with no errors on 2026-10-10.'; },
+    }, '0xabc', { question: 'tell me about demo-a2a-faithnet' }, NOW);
+    expect(composed.composed).toBe(true);
+    expect(String(composed.answer)).toContain('1,106 requests');
+    expect(sawEvidence).toContain('demo-a2a-faithnet');
+    // the stated form is kept beside it, so what the model was given is never lost
+    expect(String(composed.stated)).toContain('requests 1,106');
+    expect(composed.cited).toEqual([{ key: 'pulse.day:2026-10-10', day: '2026-10-10' }]);
+  });
+
+  it('a composer that fails or says nothing falls back to the facts, never to silence', async () => {
+    const read = async (_s: string, k: string) => (k === 'pulse.day:2026-10-10' ? DAY_FULL('2026-10-10').rec : null);
+    for (const compose of [async () => { throw new Error('model down'); }, async () => '   ']) {
+      const out = await publicPulseAsk({ readSubjectRecord: read, compose: compose as never }, '0xabc', { question: 'tell me about demo-a2a-faithnet' }, NOW);
+      expect(out.composed).toBe(false);
+      expect(String(out.answer)).toContain('requests 1,106');
+    }
+  });
+
+  it('nothing read means nothing composed — a refusal is not something to write prose over', async () => {
+    let called = false;
+    const out = await publicPulseAsk({ readSubjectRecord: async () => null, compose: async () => { called = true; return 'invented'; } }, '0xabc', { question: 'anything' }, NOW);
+    expect(called).toBe(false);
+    expect(out.read).toBe(false);
+    expect(String(out.answer)).toContain('I have none');
+  });
+});
+
+// THE RECORDED SHAPE IS NOT THE LIVE SHAPE. `dayRollup` FLATTENS each resource — status/asOf/metrics sit at
+// the top of the row — while `/api/pulse` nests the same facts under `latest`. Reading the record as though
+// it were the live view found the platform and the owner and then silently nothing else: no status, no
+// reading, no metrics, on a record that had all three. This fixture is the recorded shape, verbatim.
+const RECORDED_DAY: PulseDayRecord = {
+  type: 'ap.town-pulse.v1', day: '2026-10-10',
+  services: { naming: { samples: 12, up: 12 } },
+  pulse: {
+    infrastructure: [
+      { platform: 'cloudflare', account: 'acctA', resource: 'demo-a2a-faithnet', kind: 'worker', owner: { kind: 'estate', id: 'faithnet' },
+        status: 'up', ok: true, asOf: '2026-10-10T11:00:00.000Z', lagClass: 'hourly',
+        metrics: { requests: 1106, errors: 0, cpuP50Ms: 1.237, wallP99Ms: 26116.5 } },
+      { platform: 'graphdb', account: 'https://g', resource: 'graphdb', kind: 'node', owner: null,
+        status: 'unknown', ok: false, asOf: '2026-10-10T11:00:00.000Z', lagClass: 'hourly', error: 'answered 503', metrics: {} },
+    ],
+  },
+};
+
+describe('the record as the town actually writes it', () => {
+  const w = windowOf('this week', NOW);
+  const found = [{ day: '2026-10-10', rec: RECORDED_DAY }];
+
+  it('reads the FLAT row: status, when it was read, how current, and every metric', () => {
+    const a = answerFromDays('tell me about demo-a2a-faithnet', w, found);
+    expect(a.answer).toContain('status up');
+    expect(a.answer).toContain('requests 1,106');
+    expect(a.answer).toContain('errors 0');
+    expect(a.answer).toContain('CPU p50 (ms) 1.237');
+    expect(a.answer).toContain('how current hourly');
+  });
+
+  it('an unreadable resource says why, from the flat row', () => {
+    expect(answerFromDays('what about graphdb', w, found).answer).toContain('unreadable because answered 503');
+  });
+
+  it('the status roll-up sees a flat not-up row too', () => {
+    expect(answerFromDays('which services were down', w, found).answer).toContain('graphdb');
   });
 });
