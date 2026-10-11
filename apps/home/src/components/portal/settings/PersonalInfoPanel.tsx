@@ -63,8 +63,18 @@ export function PersonalInfoPanel({
     if (!agentAddress) return false;
     const via = resolveVia(homeProfile?.credential, session?.via);
     const auth = session?.token ? { token: session.token } : undefined;
-    try { return (await activateInteractionsIfNeeded(agentAddress, via, auth)).ok; }
-    catch { return false; }
+    // SAY WHY IT FAILED. This swallowed its reason, so an estate where enabling cannot work looked
+    // identical to one where it simply had not been tried: the page sat on `interactions_not_enabled`
+    // and every record read 409'd with nothing anywhere naming the cause (imbnet, 2026-10-11).
+    // A `false` return still drives the same UI; the console line is for whoever is looking.
+    try {
+      const r = await activateInteractionsIfNeeded(agentAddress, via, auth);
+      if (!r.ok) console.error('[interactions] enable refused', { principal: agentAddress, via, error: r.error });
+      return r.ok;
+    } catch (e) {
+      console.error('[interactions] enable threw', { principal: agentAddress, via, error: e instanceof Error ? e.message : String(e) });
+      return false;
+    }
   }, [agentAddress, homeProfile?.credential, session?.via, session?.token]);
 
   const load = useCallback(async (autoEnable: boolean): Promise<void> => {
