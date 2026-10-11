@@ -14,3 +14,4 @@ live-gates-report.json
 # Vercel builds the Home from apps/home with the repo included; a committed root lock made pnpm link importers whose
 # directories the build checkout lacks (ENOENT apps/agent-runtime/node_modules). The install resolves fresh there.
 pnpm-lock.yaml
+.estate-*.local

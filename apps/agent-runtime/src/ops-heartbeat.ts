@@ -11,6 +11,18 @@ export interface HeartbeatEnv extends OpsEnv {
   ESTATE_ID?: string;
   TOWN_HEARTBEAT_TOKEN?: string;
   ARD_REGISTRY_ORIGIN?: string;
+  /**
+   * The registry whose agent census IS this estate's census — set only where that is true.
+   *
+   * `ARD_REGISTRY_ORIGIN` is the registry this deployment DISCOVERS other agents in, and on a chain with
+   * more than one estate it is shared: every estate on faithchain reads the same public KB (ADR-0040), so
+   * counting its agents as the estate's own makes each estate claim every other estate's people. imbnet's
+   * first heartbeat reported 74 persons and 82 organizations on an estate that had none, which is the
+   * knowledge plane telling a plausible falsehood (spec 358) — the authority plane was never involved.
+   *
+   * Unset ⇒ the heartbeat reports `agents: null`, which the Pulse renders as absent rather than as zero.
+   */
+  ESTATE_CENSUS_REGISTRY_ORIGIN?: string;
   CONTRACTS_GENERATION?: string;
   WORKERS_CI_COMMIT_SHA?: string;
 }
@@ -74,8 +86,9 @@ export async function estateHeartbeat(env: HeartbeatEnv, fetchImpl: typeof fetch
   await ensureOps(env.OPS);
   const now = Date.now();
   const res = await env.OPS.prepare('SELECT * FROM runs WHERE at >= ? AND at <= ? ORDER BY at DESC LIMIT 20000').bind(now - 86_400_000, now).all<OpsRowV1>();
-  const agents = await agentsByType(env.ARD_REGISTRY_ORIGIN, fetchImpl);
-  return heartbeatOfRows(res.results ?? [], { estate: env.ESTATE_ID ?? 'faithnet', now, agents, generation: env.CONTRACTS_GENERATION ?? '1', versions: { ...(env.WORKERS_CI_COMMIT_SHA ? { runtime: env.WORKERS_CI_COMMIT_SHA.slice(0, 9) } : {}) } });
+  const agents = await agentsByType(env.ESTATE_CENSUS_REGISTRY_ORIGIN, fetchImpl);
+  if (!env.ESTATE_ID) return { error: 'this deployment does not say which estate it is (ESTATE_ID unset)' };
+  return heartbeatOfRows(res.results ?? [], { estate: env.ESTATE_ID, now, agents, generation: env.CONTRACTS_GENERATION ?? '1', versions: { ...(env.WORKERS_CI_COMMIT_SHA ? { runtime: env.WORKERS_CI_COMMIT_SHA.slice(0, 9) } : {}) } });
 }
 
 /** The token check: the one the town holds, compared in constant time; absent on the deployment ⇒ the door is closed, said. */

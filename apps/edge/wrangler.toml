@@ -85,3 +85,39 @@ service = "demo-mcp-faithnet"
 [[env.faithnet.services]]
 binding = "A2A"
 service = "demo-a2a-faithnet"
+
+# ── IMBNET — the town's second estate (see apps/vault/wrangler.toml for what it shares and what is its own) ──
+# No zone: the workers.dev host is the estate's edge. Its own rate-limit namespace (2883) so imbnet traffic
+# never spends faithnet's bucket, and its own budget DO so a per-agent unit count is this estate's count.
+[env.imbnet]
+name = "imb-edge"
+workers_dev = true
+
+[env.imbnet.vars]
+CHAIN_ID = "34348"
+ENTRY_POINT = "0xf7855250B3363AB7649B10957d8908A9AFcdD4B5"
+DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
+UNIVERSAL_SIGNATURE_VALIDATOR = "0xeDd56f500325D4701B9985A34e5Fa6EED6716137"
+SA_BUDGET_LIMIT_UNITS = "10"
+EDGE_ALLOWED_ORIGINS = "https://imb-home.vercel.app,http://localhost:5175"
+
+[[env.imbnet.durable_objects.bindings]]
+name = "SA_BUDGET"
+class_name = "SmartAgentBudgetDO"
+
+[[env.imbnet.migrations]]
+tag = "v1"
+new_sqlite_classes = ["SmartAgentBudgetDO"]
+
+[[env.imbnet.ratelimits]]
+name = "EDGE_LIMITER"
+namespace_id = "2883"
+simple = { limit = 120, period = 60 }
+
+[[env.imbnet.services]]
+binding = "MCP"
+service = "imb-vault"
+
+[[env.imbnet.services]]
+binding = "A2A"
+service = "imb-runtime"
