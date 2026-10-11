@@ -642,7 +642,16 @@ DEMO_SSO_AUD = "demo-sso"
 ALLOWED_ORIGINS = "https://imb-home.vercel.app,http://localhost:5175,http://127.0.0.1:5175"
 A2A_PUBLIC_BASE_DOMAIN = "imb-runtime.richardpedersen3.workers.dev"
 A2A_SERVES_UNPUBLISHED_NAMES = "true"
-A2A_KMS_BACKEND = "local-aes"
+# The service MAC on AKCS, tenant `imb` (the vault verifies with the same tenant root — both halves of the
+# A2A→MCP hop must agree on the mechanism). Caller `imb-runtime` is bound to mac-generate/mac-verify only.
+A2A_KMS_BACKEND = "agentic-kms"
+AKCS_BASE_URL = "https://akcs-pilot.faithnet.io"
+AKCS_TENANT_ID = "imb"
+AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"
+# The RELAY signs locally (A2A_MASTER_PRIVATE_KEY; faithchain gas is free) — so no AKCS_RELAY_KEY_ID here.
+A2A_RELAYER_KMS_BACKEND = "local-aes"
+# CUSTODY STAYS LOCAL. A person's home is a CREATE2 address over their derived custodian; moving this root
+# derives a different, empty agent and locks out everyone already signed in. faithnet carries the same note.
 A2A_CUSTODY_KMS_BACKEND = "local-aes"
 A2A_ALLOW_LOCAL_MASTER_KEY = "true"
 # The estate's own service agents, deployed by scripts/bootstrap-estate.mts (salt 0 and salt 1 over its

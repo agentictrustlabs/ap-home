@@ -137,9 +137,15 @@ DEMO_NATIVE_MCP_ENABLED = "true"
 SA_BUDGET_LIMIT_UNITS = "50000"
 STAGE2_VERIFIED_LIMIT = "600"
 DEMO_REQUIRE_GATEWAY_ASSERTION = "false"
-# local-aes: the per-owner KEK is wrapped under DEMO_VAULT_LOCAL_KEK_SECRET (a wrangler secret), and the
-# service MAC under A2A_MAC_SECRET — the same value imb-runtime holds, or every hop reads "service-mac rejected".
-A2A_KMS_BACKEND = "local-aes"
+# AKCS, tenant `imb` — the estate's OWN tenant (a tenant is a derivation root, so it is an estate boundary).
+# Every per-person KEK is created CVM_WRAPPED from that root inside the confidential VM; the Azure HSM holds
+# only the platform root, so a person costs nothing. The caller `imb-vault` is bound to exactly the ops the
+# vault performs and to CVM_WRAPPED/CVM_DERIVED, so an HSM-direct (billable) key cannot be requested at all.
+A2A_KMS_BACKEND = "agentic-kms"
+AKCS_BASE_URL = "https://akcs-pilot.faithnet.io"
+AKCS_TENANT_ID = "imb"
+AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"
+# AKCS_TOKEN is a SECRET (the imb-vault caller token, minted on the pilot CVM).
 
 [[env.imbnet.d1_databases]]
 binding = "DB"
