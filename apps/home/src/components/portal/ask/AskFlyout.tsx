@@ -43,6 +43,8 @@ import { attachToLibrary } from '../../../home/library-attach';
 import { AgentName } from '../../shared/AgentName';
 import { connectedCredential } from './credential';
 import { createdAgentOf, recordCreatedAgent, invitationOf, recordInvitation } from '../../../home/ask-record';
+import { buyNameForNewAgent, kindNameIsBought } from '../../../home/charter-name';
+import type { AgentKind } from '../../../connect-client';
 import { joinOrganization } from '../../../home/join-organization';
 import { isSecurityCeremony, runSecurityCeremony, ceremonyButtonLabel, recordLinkedChannel, type SecurityCeremonySummary } from '../../../home/security-ceremonies';
 import { EmailAuthCard } from '../EmailAuthCard';
@@ -325,10 +327,23 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
         }
         const created = createdAgentOf(reply.result);
         if (created && !created.alreadyCreated) {
+          // Nameless on a priced root (ap-town spec 431): say what it will be called while the name is bought.
+          let shown = created.name || (created.label && created.tld ? `${created.label}.${created.tld}` : created.agent);
           const saved = await recordCreatedAgent(created, session.token);
           setThread((t) => [...t, saved.ok
-            ? { role: 'agent', text: `${created.name} is in your agents now.` }
-            : { role: 'agent', text: `${created.name} was created, but saving it to your private tree failed (${saved.error}) — it is on chain and yours; the list may not show it until that write succeeds.` }]);
+            ? { role: 'agent', text: `${shown} is in your agents now.` }
+            : { role: 'agent', text: `${shown} was created, but saving it to your private tree failed (${saved.error}) — it is on chain and yours; the list may not show it until that write succeeds.` }]);
+          // THE NAME IS BOUGHT NEXT. On a priced root the genesis deployed the agent unnamed and said so; the person's
+          // treasury pays for the name and the agent presents it — exactly what "Add an organization" does on this Home
+          // (`createAgentWithBirthrights`). The link above must exist first: the purchase merges the name into it.
+          // Best-effort and said: the agent exists either way, and its roster card offers "Name it".
+          if (saved.ok && created.nameLater && created.label && kindNameIsBought(created.kind as AgentKind)) {
+            const bought = await buyNameForNewAgent({ agent: created.agent, label: created.label, kind: created.kind as AgentKind, parent: created.parent, person: created.person, via, token: session.token }, () => {});
+            if (bought.ok) shown = bought.name;
+            setThread((t) => [...t, bought.ok
+              ? { role: 'agent', text: `${bought.name} is its name now — bought from your treasury.` }
+              : { role: 'agent', text: `${shown} exists, unnamed — its name was not bought: ${bought.error}. Name it from its card under Agents.` }]);
+          }
           // A SERVICE KEEPS A LIBRARY (a publisher service holds and releases its works), and a Library lives in the
           // agent's own vault — which, like a person's, needs its KEK provisioned and bound before any write (spec 278).
           // The person's credential custodies the new agent, so the same ceremony a Home runs for its person at
@@ -337,8 +352,8 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
           if (created.kind === 'service') {
             const vault = await activateVault(created.agent, via, { token: session.token });
             setThread((t) => [...t, vault.ok
-              ? { role: 'agent', text: `${created.name} has its own storage now — its Library is ready.` }
-              : { role: 'agent', text: `${created.name} was created, but its storage could not be enabled (${vault.error}) — it cannot keep a Library until that succeeds.` }]);
+              ? { role: 'agent', text: `${shown} has its own storage now — its Library is ready.` }
+              : { role: 'agent', text: `${shown} was created, but its storage could not be enabled (${vault.error}) — it cannot keep a Library until that succeeds.` }]);
           }
         }
       }

@@ -58,22 +58,41 @@ export interface ImpactContactProfile {
   organizationCountry?: string;
 }
 
+/** Where a `signed-release` document's commitment came from: the publisher's signed release, read over A2A.
+ *  The work root covers the text alone, so the record also binds who published it and which release. */
+export interface AttestationSource {
+  kind: 'signed-release';
+  /** The publisher's A2A interface the release was read from (found through its agent card). */
+  endpoint: string;
+  /** The publishing agent's address — the release owner whose signature the gateway verified. */
+  publisher: string;
+  handle: string;
+  slug: string;
+  version: number;
+  contentCommitment: string;
+  releaseId: string;
+  /** Where the words came from, for the reader. */
+  sourceUrl?: string;
+}
+
 export interface StoredAttestation {
+  /** The content commitment: SHA-256 of canonical bytes (`inline-text`) or a signed release's work root (`signed-release`). */
   docHash: string;
   docId: string;
   signedAt: number;
   consentBoundTo: string;
+  /** Present when the commitment is a signed release; absent for inline-text records (the WEA). */
+  source?: AttestationSource;
 }
 
 export interface ImpactStoredProfile {
   v: 1;
   contact?: ImpactContactProfile;
   /** Community-wide attestations the member has signed at their home, re-used across
-   *  relying apps. WEA Statement of Faith is the canonical example (signed once at
-   *  Impact, every faith-aligned community app gets the same attestation receipt). */
-  attestations?: {
-    wea?: StoredAttestation;
-  };
+   *  relying apps, keyed by the document's storage key (`src/whitelabel/attestable-documents.ts`).
+   *  `wea` — the WEA Statement of Faith — is the first and keeps its key; every faith-aligned
+   *  community app gets the same attestation receipt. */
+  attestations?: { wea?: StoredAttestation } & Record<string, StoredAttestation | undefined>;
 }
 
 export type ImpactContactScalarKey = Exclude<keyof ImpactContactProfile, 'location'>;

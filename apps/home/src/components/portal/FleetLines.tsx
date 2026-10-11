@@ -13,7 +13,12 @@ interface Facts {
   vault: { bound: boolean | null; resources: number };
 }
 
-export function FleetLines({ agent, token, stewardship }: { agent: Address; token: string; /** the steward's wire — one of what it may spend */ stewardship?: boolean }) {
+export function FleetLines({ agent, token, stewardship, refresh = 0, onFacts }: {
+  agent: Address; token: string; /** the steward's wire — one of what it may spend */ stewardship?: boolean;
+  /** Bump to re-read (after an enable ceremony). */ refresh?: number;
+  /** What was read, for a caller that acts on it — `complete` when every plane and the vault key are in force. */
+  onFacts?: (facts: Facts & { complete: boolean }) => void;
+}) {
   const [f, setF] = useState<Facts | null>(null);
   useEffect(() => {
     let live = true;
@@ -21,13 +26,16 @@ export function FleetLines({ agent, token, stewardship }: { agent: Address; toke
       const st = (await postA2a(`/a2a/interactions/${agent.toLowerCase()}/status`, { session: token }).catch(() => ({}))) as { granted?: boolean; current?: boolean; deliveryGranted?: boolean };
       const kb = (await fetch(`/mcp-bind/custody/vault-key/is-bound?owner=${agent.toLowerCase()}`).then((r) => r.json()).catch(() => ({}))) as { bound?: boolean; allowedResources?: string[] };
       if (!live) return;
-      setF({
+      const facts: Facts = {
         planes: { interactions: st.granted ?? null, delivery: st.deliveryGranted ?? null, current: st.current ?? null },
         vault: { bound: kb.bound ?? null, resources: kb.allowedResources?.length ?? 0 },
-      });
+      };
+      setF(facts);
+      onFacts?.({ ...facts, complete: facts.planes.interactions === true && facts.planes.delivery === true && facts.planes.current !== false && facts.vault.bound === true });
     })();
     return () => { live = false; };
-  }, [agent, token]);
+    // onFacts is a caller callback; re-reading on its identity would loop a parent that recreates it per render.
+  }, [agent, token, refresh]);
   const spends = f
     ? [stewardship ? 'your stewardship wire' : null, f.planes.interactions ? `interactions plane${f.planes.current === false ? ' (stale — re-enable)' : ''}` : null, f.planes.delivery ? 'delivery plane' : null].filter(Boolean)
     : [];
