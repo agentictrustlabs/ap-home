@@ -95,8 +95,14 @@ const lines = [
   `GATEWAY_ASSERTION_SECRET=${b64(32)}`,
   `A2A_CUSTODY_BRIDGE_SECRET=${b64(32)}`,
   `A2A_SESSION_SECRET=${b64(32)}`,
-  `SESSION_JWT_SECRETS=${b64(32)}`,
-  `CSRF_SECRET=${b64(32)}`,
+  // TWO SECRETS ARE NOT OPAQUE STRINGS, and a wrong shape is a 500 at the first browser request rather
+  // than a refusal at boot: `SESSION_JWT_SECRETS` is `<kid>:<0x + 64 hex>` (connect-auth splits on the
+  // first colon and hex-decodes the tail, requiring >= 16 bytes) and `CSRF_SECRET` is hex that viem's
+  // `hexToBytes` must accept. Base64url for either ends as
+  // `Invalid byte sequence (... ) at hexToBytes -> loadCsrfSecret`, which names the loader and not the
+  // secret. The rest below are opaque to their readers and may be any high-entropy string.
+  `SESSION_JWT_SECRETS=k1:${hex32()}`,
+  `CSRF_SECRET=${hex32()}`,
   `OAUTH_SIGNING_SECRET=${b64(32)}`,
   `DEMO_VAULT_LOCAL_KEK_SECRET=${b64(32)}`,
   `DEMO_SIGNER_SECRET=${b64(32)}`,
