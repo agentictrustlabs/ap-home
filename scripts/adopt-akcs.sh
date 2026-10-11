@@ -7,6 +7,11 @@
 # working token breaks the A2A→MCP service MAC in both directions, and a half-flipped estate cannot sign
 # anyone in. The vars and the secrets must land together, so they land here, together, or not at all.
 #
+# COST: DERIVED KEYS ONLY. `AZURE_HSM_DIRECT` is a real Azure Key Vault HSM key, billed per key. There are
+# a couple of HSM ROOT keys and that is the whole Azure spend; every agent key is CVM_WRAPPED/CVM_DERIVED
+# from a root inside the confidential VM and costs nothing per agent. Both callers are bound without
+# HSM-direct and both Workers refuse it, so a per-person KEK cannot quietly become a billable key.
+#
 # THE TENANT IS THE ESTATE. An AKCS tenant is a derivation root ("MAC keys are derived from the tenant
 # root"), so imbnet gets its own, `imb`. faithnet-b and skills-a2a share `faithnet` because they are a
 # second deployment OF faithnet and a service WITHIN it — imbnet is a different estate, and sharing a seed
@@ -33,6 +38,7 @@ cat <<'VARS'
     A2A_KMS_BACKEND = "agentic-kms"
     AKCS_BASE_URL   = "https://akcs-pilot.faithnet.io"
     AKCS_TENANT_ID  = "imb"
+    AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"   # never AZURE_HSM_DIRECT — that one bills
     # drop DEMO_VAULT_LOCAL_KEK_SECRET — it can never apply in a deployed Worker
 
   apps/agent-runtime/wrangler.toml [env.imbnet.vars]
@@ -40,6 +46,7 @@ cat <<'VARS'
     A2A_CUSTODY_KMS_BACKEND  = "local-aes"     # UNCHANGED — moving this orphans every existing home
     AKCS_BASE_URL            = "https://akcs-pilot.faithnet.io"
     AKCS_TENANT_ID           = "imb"
+    AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"
 VARS
 
 echo "3/3  deploy vault then runtime, and check:"

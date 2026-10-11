@@ -16,3 +16,7 @@ live-gates-report.json
 pnpm-lock.yaml
 .estate-*.local
 demo/personas.*.local.json
+
+# estate demo rosters hold custodian keys (0600, never committed)
+demo/personas.*.json
+scripts/.*.local.mjs
