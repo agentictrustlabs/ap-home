@@ -79,20 +79,7 @@
       "socket.io-parser": ">=4.2.7",
       "sharp": ">=0.35.4",
       "read-yaml-file>js-yaml": "^3.15.2",
-      "nanoid@3": "^3.3.18",
-      "@agenticprimitives/model-client>@agenticprimitives/types": "1.0.0-alpha.32",
-      "@agenticprimitives/model-client>@agenticprimitives/model-gateway": "0.0.0-alpha.0",
-      "@agenticprimitives/model-client>@agenticprimitives/orchestration": "0.0.0-alpha.12",
-      "@agenticprimitives/model-client>@agenticprimitives/orchestration-anthropic": "0.0.0-alpha.12",
-      "@agenticprimitives/model-client>@agenticprimitives/orchestration-openai-compat": "0.0.0-alpha.11",
-      "@agenticprimitives/model-gateway>@agenticprimitives/types": "1.0.0-alpha.32",
-      "@agenticprimitives/model-gateway>@agenticprimitives/orchestration": "0.0.0-alpha.12",
-      "@agenticprimitives/model-gateway>@agenticprimitives/orchestration-anthropic": "0.0.0-alpha.12",
-      "@agenticprimitives/model-gateway>@agenticprimitives/orchestration-openai-compat": "0.0.0-alpha.11",
-      "@agenticprimitives/service-host>@agenticprimitives/a2a": "0.0.0-alpha.33",
-      "@agenticprimitives/service-host>@agenticprimitives/types": "1.0.0-alpha.32",
-      "@agenticprimitives/service-host>@agenticprimitives/delegation": "1.0.0-alpha.32",
-      "@agenticprimitives/service-host>@agenticprimitives/agent-account": "1.0.0-alpha.32"
+      "nanoid@3": "^3.3.18"
     }
   },
   "packageManager": "pnpm@9.15.0"

@@ -104,7 +104,10 @@ const lines = [
   `SESSION_JWT_SECRETS=k1:${hex32()}`,
   `CSRF_SECRET=${hex32()}`,
   `OAUTH_SIGNING_SECRET=${b64(32)}`,
-  `DEMO_VAULT_LOCAL_KEK_SECRET=${b64(32)}`,
+  // HEX too: `localKekEnabled` tests /^(0x)?[0-9a-fA-F]{32,}$/ and a base64url value simply reads as
+  // 'no local KEK', so `POST /custody/vault-key/provision` answers 501 and the person's vault never
+  // turns on — the Home shows 'Turn on storage' forever and every record read is `vault_key_unauthorized`.
+  `DEMO_VAULT_LOCAL_KEK_SECRET=${hex32()}`,
   `DEMO_SIGNER_SECRET=${b64(32)}`,
   `TOKEN_SECRET=${b64(32)}`,
   `HOME_MCP_PRIVATE_KEY=${homeMcp}`,
