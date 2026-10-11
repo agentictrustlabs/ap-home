@@ -38,6 +38,7 @@
     "@agenticprimitives/intent-engagement": "0.0.0-alpha.11",
     "@agenticprimitives/key-custody": "1.0.0-alpha.32",
     "@agenticprimitives/mcp-runtime": "1.0.0-alpha.32",
+    "@agenticprimitives/model-client": "0.0.0-alpha.0",
     "@agenticprimitives/ontology": "1.0.0-alpha.32",
     "@agenticprimitives/orchestration": "0.0.0-alpha.12",
     "@agenticprimitives/orchestration-anthropic": "0.0.0-alpha.12",

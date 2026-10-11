@@ -685,7 +685,17 @@ KB_RETRIEVAL = "playbook"
 # ESTATE_CENSUS_REGISTRY_ORIGIN: the registry above is the TOWN's, shared with faithnet, so its agent
 # counts are not imbnet's — the heartbeat reports the census as absent instead of borrowing a sibling's.
 ESTATE_ID = "imbnet"
-# No zone, so no inbound mail and no outbound rail: an invitation by email is refused here, not sent quietly.
+# OUTBOUND MAIL ON A BORROWED SENDER. imbnet has no zone, so it has no address of its own to send from —
+# and the Home's OTP path needs a working rail or nobody can sign in at all (`DEV_OTP_ECHO` never fires,
+# because `emailSendingEnabled` reports from configuration present, not from the rail working). It sends on
+# `faithnet.ai`, which IS onboarded to Cloudflare Email Sending, with the display name saying who it really
+# is. The address is the one visible place imbnet is not yet its own thing; it changes the day imbnet has a
+# zone, and nothing else about this estate has to change with it.
+#
+# NO EMAIL_ZONES, deliberately: that names the zones this deployment answers INBOUND mail for, and
+# faithnet.ai's inbound belongs to faithnet. Sending as an address is not a claim to receive at it.
+EMAIL_FROM = "invites@faithnet.ai"
+EMAIL_FROM_NAME = "IMB Net"
 AP_RUNTIME_AGENT = "acp-stub-agent"
 
 [env.imbnet.durable_objects]
@@ -750,3 +760,8 @@ service = "skills-mcp"
 name = "imb-approval"
 binding = "HARNESS_WORKFLOW"
 class_name = "HarnessApprovalWorkflow"
+
+# Spec 365 — the outbound rail. Cloudflare Email Service sends to ANY address from a zone onboarded to
+# Email Sending; `faithnet.ai` is onboarded, and EMAIL_FROM above is the address it sends as.
+[[env.imbnet.send_email]]
+name = "SEND_EMAIL"
