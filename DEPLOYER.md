@@ -74,8 +74,11 @@ person's home on that estate; copying it elsewhere copies the authority to be ev
 What imbnet deliberately does NOT have, each failing closed rather than quietly:
 - **AKCS custody** — imbnet is NOT on AKCS yet, so the vault KEK path does not work at all: `POST
   /custody/vault-key/provision` answers 501 and every person's storage stays off. `DEMO_VAULT_LOCAL_KEK_SECRET`
-  cannot substitute — wrangler's esbuild constant-folds `process.env.NODE_ENV === 'production'` to `true`, so
-  `localKekEnabled` refuses in ANY deployed Worker. It is a `wrangler dev` path and nothing else.
+  cannot substitute, and GCP is not an option — **this org uses no Google KMS keys anywhere**; the
+  gcp-kms code paths stay in the tree and are never configured, so a 501 naming `GCP_SERVICE_ACCOUNT_JSON`
+  means "no KMS backend is configured here", never "add a GCP credential". The local KEK cannot substitute
+  because wrangler's esbuild constant-folds `process.env.NODE_ENV === 'production'` to `true`, so
+  `localKekEnabled` refuses in ANY deployed Worker — it is a `wrangler dev` path and nothing else.
 
   **It needs its OWN tenant, `imb`.** An AKCS tenant is a derivation root — "MAC keys are derived from
   the tenant root" (apps/vault/wrangler.toml) and the custody seed lives there too. A tenant is therefore
@@ -90,9 +93,16 @@ A NEW tenant, `imb`, with its own callers. On the Azure CVM (Bastion/JIT), as th
 
 ```
 akcs operator create-tenant --tenant imb
-akcs operator bind-caller --tenant imb --subject imb-vault   --operations data-key-generate,data-key-unwrap,mac-generate
-akcs operator bind-caller --tenant imb --subject imb-runtime --operations mac-generate
+akcs operator bind-caller --tenant imb --subject imb-vault   --operations data-key-generate,data-key-unwrap,mac-generate --protection-levels CVM_WRAPPED,CVM_DERIVED
+akcs operator bind-caller --tenant imb --subject imb-runtime --operations mac-generate                                   --protection-levels CVM_WRAPPED,CVM_DERIVED
 ```
+
+**NO `AZURE_HSM_DIRECT` ON EITHER CALLER — that is the one that costs money.** An HSM-direct key is a real
+Azure Key Vault HSM key and is billed per key; `CVM_WRAPPED` and `CVM_DERIVED` are derived inside the
+confidential VM from the ONE root and cost nothing per agent. Every per-person vault KEK and every service
+MAC here must be derived, never HSM-direct. Leaving the level off the caller is what makes an accidental
+billable key impossible rather than merely discouraged — a caller cannot ask for a protection level it was
+not bound for. (`skills-a2a`'s key is `CVM_WRAPPED`; its caller was bound permissively and did not have to be.)
 
 (Confirm the operator verbs against the AKCS CLI's own help — `create-tenant` is the shape this repo
 needs, not necessarily the spelling it uses.)
@@ -106,7 +116,9 @@ token can ask for one public key and one kind of signature"):
 | both | `mac-generate` | the A2A→MCP service MAC; both halves of the hop must agree on the mechanism |
 | `imb-runtime` | nothing else | its relay signs locally and its custody root stays local-aes |
 
-Then `scripts/adopt-akcs.sh imbnet <vault-token-file> <runtime-token-file>` and follow what it prints.
+Then `scripts/adopt-akcs.sh imbnet <vault-token-file> <runtime-token-file>` and follow what it prints. It
+sets `AKCS_ACCEPTED_PROTECTION_LEVELS=CVM_WRAPPED,CVM_DERIVED` on both Workers, so a key that came back
+HSM-direct would be REFUSED at the client as well — the cost guard holds at both ends.
 
 **`A2A_CUSTODY_KMS_BACKEND` stays `local-aes`.** A person's home is a CREATE2 address over their derived
 custodian; moving the custody root derives a different, empty Smart Agent and locks out everyone who
