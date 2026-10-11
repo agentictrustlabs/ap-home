@@ -28,6 +28,19 @@ echo "imb-runtime (apps/agent-runtime) — the agent:"
 for n in RPC_URL SESSION_JWT_SECRETS CSRF_SECRET A2A_SESSION_SECRET A2A_MASTER_PRIVATE_KEY A2A_INTERACTIONS_SESSION_PRIVATE_KEY A2A_CUSTODY_ROOT_KEY A2A_MAC_SECRET A2A_CUSTODY_BRIDGE_SECRET GATEWAY_ASSERTION_SECRET GEMINI_API_KEY; do
   put apps/agent-runtime/wrangler.toml "$n" "the path that needs it fails closed"; done
 
+# Spec 341 §7 — the IN-WORKER MARKER. Generated here and piped straight to `wrangler secret put`: it is
+# never written to the estate file, never shared with the Home, and never needs rotating in step with
+# anything else, because setter and checker are the same deployed code reading the same binding. Without
+# it every `internal.*` op is refused loudly — a Home onboarding dies at `POST /harness/runs` with a 500,
+# which is how imbnet found it (2026-10-11).
+echo "imb-runtime — the in-Worker marker (generated, never stored):"
+if node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("base64url"))' \
+   | npx -y wrangler secret put A2A_INTERNAL_MARKER --env "$EST" -c apps/agent-runtime/wrangler.toml >/dev/null; then
+  echo "  set   A2A_INTERNAL_MARKER"
+else
+  echo "  FAIL  A2A_INTERNAL_MARKER — every internal op will be refused"
+fi
+
 echo "imb-edge (apps/edge) — admission:"
 for n in RPC_URL GATEWAY_ASSERTION_SECRET; do put apps/edge/wrangler.toml "$n" "admission refuses"; done
 
