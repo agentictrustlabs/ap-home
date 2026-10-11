@@ -92,10 +92,22 @@ What imbnet deliberately does NOT have, each failing closed rather than quietly:
 A NEW tenant, `imb`, with its own callers. On the Azure CVM (Bastion/JIT), as the AKCS pilot operator:
 
 ```
-akcs operator create-tenant --tenant imb
-akcs operator bind-caller --tenant imb --subject imb-vault   --operations data-key-generate,data-key-unwrap,mac-generate --protection-levels CVM_WRAPPED,CVM_DERIVED
-akcs operator bind-caller --tenant imb --subject imb-runtime --operations mac-generate                                   --protection-levels CVM_WRAPPED,CVM_DERIVED
+akcs operator --config /etc/akcs/config.toml create-tenant --tenant-id imb --name "IMB Net"
+akcs operator --config /etc/akcs/config.toml bind-caller --tenant-id imb --issuer https://akcs-pilot.faithnet.internal --subject imb-vault-2   --name "imb-vault"   --operations data-key-generate,data-key-unwrap,mac-generate,key-create --purposes "*" --audiences urn:mcp:server:person --protection-levels CVM_WRAPPED,CVM_DERIVED --signing-purposes none
+akcs operator --config /etc/akcs/config.toml bind-caller --tenant-id imb --issuer https://akcs-pilot.faithnet.internal --subject imb-runtime-2 --name "imb-runtime" --operations mac-generate                                              --purposes "*" --audiences urn:mcp:server:person --protection-levels CVM_WRAPPED,CVM_DERIVED --signing-purposes none
+akcs dev mint-token --signing-key /etc/akcs/issuer/issuer-signing-key.pem --kid akcs-pilot-1 --issuer https://akcs-pilot.faithnet.internal --audience akcs-pilot --subject imb-vault-2 --ttl-secs 31536000     # → vault AKCS_TOKEN
+akcs dev mint-token … --subject imb-runtime-2 --ttl-secs 31536000                                                                                                                                # → runtime AKCS_TOKEN
 ```
+
+DONE 2026-10-11 (tenant `imb`, callers `imb-vault-2` / `imb-runtime-2`; the first pair, bound without the
+allowlists below, is DISABLED). Run on the pilot CVM with `az vm run-command invoke -g RG-AKCS-PILOT-WESTUS
+-n vm-akcs-pilot-0 --command-id RunShellScript` (set -a; . /etc/akcs/env) — no Bastion session needed.
+
+**The allowlists are EXACT MATCH or `*`** (`allows()` in akcs-auth): `--audiences` must name the MAC audience the
+Workers actually send, `urn:mcp:server:person` (`MCP_AUDIENCE`), or every A2A→vault MAC fails
+`AUDIENCE_NOT_ALLOWED` — which the Home surfaces as `interactions_not_enabled`/`vault_key_unauthorized` with nothing
+naming KMS until you curl `/connect/inbox` with a session. `--purposes` must be `*` because every person's KEK is
+its own purpose (`vault-kek:<owner>`), and the vault needs `key-create` to mint it (`provisionEnvelopeKey`).
 
 **NO `AZURE_HSM_DIRECT` ON EITHER CALLER — that is the one that costs money.** An HSM-direct key is a real
 Azure Key Vault HSM key and is billed per key; `CVM_WRAPPED` and `CVM_DERIVED` are derived inside the
@@ -104,8 +116,6 @@ MAC here must be derived, never HSM-direct. Leaving the level off the caller is 
 billable key impossible rather than merely discouraged — a caller cannot ask for a protection level it was
 not bound for. (`skills-a2a`'s key is `CVM_WRAPPED`; its caller was bound permissively and did not have to be.)
 
-(Confirm the operator verbs against the AKCS CLI's own help — `create-tenant` is the shape this repo
-needs, not necessarily the spelling it uses.)
 
 Each caller is scoped to what that Worker actually does, the way skills-a2a's is ("a leak of this worker's
 token can ask for one public key and one kind of signature"):
@@ -125,3 +135,16 @@ custodian; moving the custody root derives a different, empty Smart Agent and lo
 already signed in. Only the vault KEK and the MAC move onto AKCS, under tenant `imb`. faithnet carries the
 same staged-cutover note for the same reason — and when imbnet's custody does move, it moves to `imb`,
 never to `faithnet`, or every imbnet person's address changes.
+
+### imbnet demo people (2026-10-11)
+
+Five people of their own — never faithnet's — in `demo/personas.imbnet.json` (0600; the same JSON is `DEMO_PERSONA_KEYS`
+on imb-home): **maya-fernandes.me** Maya Fernandes · **samuel-adeyemi.me** Samuel Adeyemi · **priyaraghavan.me** Priya
+Raghavan · **tomas-vargas.me** Tomás Vargas · **hannah-whitfield.me** Hannah Whitfield. Each has an AKCS vault key
+(tenant `imb`), the interactions plane, first/last name in the vault, and a paid `.me` name (8 SHQ from the 1000 SHQ
+treasury birthright) registered and presented. `provision-estate-personas.mts` makes the people; the ceremonies ran
+through the Home with Playwright (sign in via `/connect/demo-signin`, `/vault-key`, `/profile`, `/naming`);
+`present-estate-names.mts` finishes a name whose presenting step was interrupted.
+
+The domain rule bit: `maya`, `mayafernandes`, `samueladeyemi`… are all somebody's `.com`, so the gate asks for a
+verified email there (spec 431 §3). Hyphenated full names were free; `priyaraghavan` happened not to be a domain.
