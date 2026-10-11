@@ -72,9 +72,41 @@ wrangler d1 migrations apply demo-mcp-<name> --remote -c apps/vault/wrangler.tom
 person's home on that estate; copying it elsewhere copies the authority to be every one of them.
 
 What imbnet deliberately does NOT have, each failing closed rather than quietly:
-- **AKCS custody** — no `imb` tenant (that needs a caller token minted on the Azure CVM), so custody,
-  the vault KEK and the service MAC are local-aes with the root an in-Worker secret.
+- **AKCS custody** — imbnet is NOT on AKCS yet, so the vault KEK path does not work at all: `POST
+  /custody/vault-key/provision` answers 501 and every person's storage stays off. `DEMO_VAULT_LOCAL_KEK_SECRET`
+  cannot substitute — wrangler's esbuild constant-folds `process.env.NODE_ENV === 'production'` to `true`, so
+  `localKekEnabled` refuses in ANY deployed Worker. It is a `wrangler dev` path and nothing else.
+
+  **It does not need an `imb` tenant.** The house pattern is one tenant, many least-privilege callers:
+  `skills-a2a` and `faithnet-b` both sit in tenant `faithnet` with their own. imbnet needs two callers in
+  that same tenant (see "Putting imbnet on AKCS" below), then `scripts/adopt-akcs.sh`.
 - **A paid-name gate key** — `NAMING_GATE_PRIVATE_KEY` is the town clerk's, not an estate's, so registering
   a priced name from this Home refuses until the town issues imbnet a gate credential.
 - **Mail** — no zone, so no inbound routing and no sending rail: an email invitation is refused, not dropped.
 - **Google sign-in** — no OAuth client for this redirect URI; the demo and credential paths are the way in.
+
+
+### Putting imbnet on AKCS
+
+Two callers in the EXISTING `faithnet` tenant — not a new tenant. On the Azure CVM (Bastion/JIT), as the
+AKCS pilot operator:
+
+```
+akcs operator bind-caller --tenant faithnet --subject imb-vault    --operations data-key-generate,data-key-unwrap,mac-generate
+akcs operator bind-caller --tenant faithnet --subject imb-runtime  --operations mac-generate
+```
+
+Each is scoped to what that Worker actually does, the way `skills-a2a`'s caller is ("a leak of this
+worker's token can ask for one public key and one kind of signature"):
+
+| caller | needs | why |
+| --- | --- | --- |
+| `imb-vault` | `data-key-generate`, `data-key-unwrap` | the per-person KEK envelope — the thing that is 501 today |
+| both | `mac-generate` | the A2A→MCP service MAC; both halves of the hop must agree on the mechanism |
+| `imb-runtime` | nothing else | its relay signs locally and its custody root stays local-aes |
+
+Then `scripts/adopt-akcs.sh imbnet <vault-token-file> <runtime-token-file>` and follow what it prints.
+
+**`A2A_CUSTODY_KMS_BACKEND` stays `local-aes`.** A person's home is a CREATE2 address over their derived
+custodian; moving the custody root derives a different, empty Smart Agent and locks out everyone who
+already signed in. Only the vault KEK and the MAC move. faithnet carries the same note for the same reason.
