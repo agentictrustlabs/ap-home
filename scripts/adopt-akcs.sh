@@ -7,6 +7,11 @@
 # working token breaks the A2A→MCP service MAC in both directions, and a half-flipped estate cannot sign
 # anyone in. The vars and the secrets must land together, so they land here, together, or not at all.
 #
+# THE TENANT IS THE ESTATE. An AKCS tenant is a derivation root ("MAC keys are derived from the tenant
+# root"), so imbnet gets its own, `imb`. faithnet-b and skills-a2a share `faithnet` because they are a
+# second deployment OF faithnet and a service WITHIN it — imbnet is a different estate, and sharing a seed
+# would dissolve the separate custody that makes it one.
+#
 # WHAT DOES *NOT* MOVE: `A2A_CUSTODY_KMS_BACKEND` stays `local-aes`. A person's KMS-custodied home IS a
 # CREATE2 address over their derived custodian, so changing the custody root derives a DIFFERENT — empty —
 # Smart Agent and locks out every existing member. faithnet carries the same staged-cutover note for the
@@ -27,14 +32,14 @@ cat <<'VARS'
   apps/vault/wrangler.toml        [env.imbnet.vars]
     A2A_KMS_BACKEND = "agentic-kms"
     AKCS_BASE_URL   = "https://akcs-pilot.faithnet.io"
-    AKCS_TENANT_ID  = "faithnet"
+    AKCS_TENANT_ID  = "imb"
     # drop DEMO_VAULT_LOCAL_KEK_SECRET — it can never apply in a deployed Worker
 
   apps/agent-runtime/wrangler.toml [env.imbnet.vars]
     A2A_KMS_BACKEND          = "agentic-kms"   # the MAC mechanism BOTH halves of the hop must agree on
     A2A_CUSTODY_KMS_BACKEND  = "local-aes"     # UNCHANGED — moving this orphans every existing home
     AKCS_BASE_URL            = "https://akcs-pilot.faithnet.io"
-    AKCS_TENANT_ID           = "faithnet"
+    AKCS_TENANT_ID           = "imb"
 VARS
 
 echo "3/3  deploy vault then runtime, and check:"
