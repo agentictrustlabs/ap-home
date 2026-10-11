@@ -226,6 +226,15 @@ export const MOUNTED_PEER_SKILLS: A2aSkill[] = [
     description: 'Read one public document from this agent’s owner’s shelf: text decoded and bounded, an image as bytes, the release beside it. No credential: SendMessage with a data part { "skill": "library.public.read", "id"?: string, "name"?: string }. A document not on the shelf is answered as not on the shelf.',
     tags: ['library', 'public', 'a2a'],
   },
+  // Spec 436 §5.5 — THE DAY'S PULSE a context agent keeps. Mounted for every agent, as the shelf is: an agent
+  // that is written no pulse record answers that it has none, which is the true answer and not an error.
+  // What comes back is counts, never a person — the records are aggregate by construction.
+  {
+    id: 'pulse.public.ask',
+    name: 'How things are going',
+    description: 'Ask this agent how things have been going, answered only from the daily pulse records it keeps and with every record it used named. No credential: SendMessage with a data part { "skill": "pulse.public.ask", "question": string }; the answer is a message whose data part carries `answer`, `cited` and the `window` it read. An agent with no record for the window says so rather than reporting zero.',
+    tags: ['pulse', 'public', 'a2a'],
+  },
 ];
 
 /** Merge the mounted peer skills into an agent's advertised set, dedup by id. Self-asserted labels win
