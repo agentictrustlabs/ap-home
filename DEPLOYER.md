@@ -136,6 +136,12 @@ already signed in. Only the vault KEK and the MAC move onto AKCS, under tenant `
 same staged-cutover note for the same reason — and when imbnet's custody does move, it moves to `imb`,
 never to `faithnet`, or every imbnet person's address changes.
 
+### Signing out of a second estate
+
+`NEXT_PUBLIC_LOGOUT_RP_APPS` defaults to faithnet's relying apps (`commons-app,field-app`); their `/sso-logout`
+refuses any other Home's return and strands the person on their root. imb-home sets it to `none` (build-time var —
+redeploy after changing). When imbnet gets relying apps of its own, list their client ids there.
+
 ### imbnet demo people (2026-10-11)
 
 Five people of their own — never faithnet's — in `demo/personas.imbnet.json` (0600; the same JSON is `DEMO_PERSONA_KEYS`
