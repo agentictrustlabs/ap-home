@@ -30,6 +30,7 @@ any app. The Base Sepolia `production` estate (impact-agent) is not here. `DEPLO
 | `apps/edge` | `apps/edge` | the admission edge (ADR-0057): HTTPS required, mTLS optional, admission always |
 | `scripts/` | root `scripts/` (the Home subset) | secrets, local dev vars, provisioning, the live gates (`scripts/live-gates.json`), every `verify-*` gate, the census; each Worker deploys with `wrangler deploy --env faithnet` from its directory |
 | `demo/` | `demo/` | the estate roster and deployment placements (→ `@agenticprimitives-demo/estate`, 399 §2.6) |
+| `docs/runbooks/new-estate.md` | **stand up another estate** — every command, in order, with what bit the second one (rung 2 of the [operator's ladder](https://github.com/agentictrustlabs/agenticprimitives/blob/master/docs/operators/README.md)) |
 | `docs/architecture/` | the product docs | harness architecture, outside-in flow, inbox UX synthesis, the UX product brief, **the Home census** |
 | `specs/398-…` | `specs/398-…` | the UX strategy this repository carries out: Home Work · Home Build · the Developer Kit |
 

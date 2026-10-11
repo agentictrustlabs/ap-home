@@ -46,6 +46,9 @@ faithchain, and it deploys from [`ap-town`](https://github.com/agentictrustlabs/
 
 ## imbnet — the town's second estate (2026-10-11)
 
+> The step-by-step for the NEXT estate is [`docs/runbooks/new-estate.md`](docs/runbooks/new-estate.md); this section is
+> the record of imbnet as deployed.
+
 Same chain (faithchain), same contracts, same town, same repository. Its own custody root, relay key,
 interactions key, service agents, vault, Workers and Home — an imbnet person is a different Smart Agent
 from a faithnet person of the same name, because a KMS-custodied home is a CREATE2 address over a derived
