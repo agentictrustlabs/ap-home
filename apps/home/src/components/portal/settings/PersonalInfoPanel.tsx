@@ -90,6 +90,17 @@ export function PersonalInfoPanel({
         // grant. On a KMS home we enable it SILENTLY (server-signed) and reload — no ceremony, no
         // wrong "activate vault key". Wallet/passkey need a user gesture → show the Enable button.
         const via = resolveVia(homeProfile?.credential, session?.via);
+        // WHY THE SELF-HEAL DID NOT RUN. Three things gate it, and when any is false the call never
+        // happens — so an estate where auto-enable is simply never attempted looked exactly like one
+        // where it was attempted and refused (imbnet, 2026-10-11: no log line at all was the finding).
+        // `via` is derived from the agent's ON-CHAIN credential first and the cookie second, so a brand
+        // new home whose profile has not landed yet resolves to `passkey` and is not KMS.
+        if (!(autoEnable && isKmsVia(via) && session?.token)) {
+          console.error('[interactions] self-heal skipped', {
+            autoEnable, via, isKms: isKmsVia(via), hasToken: !!session?.token,
+            credential: homeProfile?.credential ?? '(none)', cookieVia: session?.via ?? '(none)',
+          });
+        }
         if (autoEnable && isKmsVia(via) && session?.token && (await enableInteractions())) {
           const p = await loadImpactProfile(agentAddress);
           setStored(p); setContact(p.contact ?? {});
