@@ -29,6 +29,9 @@ function bucketOf(r: RunRecordRow): Exclude<Filter, 'all'> {
   return t === 'attention' || t === 'uncertain' ? 'attention' : t === 'active' ? 'active' : t === 'bad' ? 'bad' : 'done';
 }
 const dayKey = (at: number) => new Date(at).toDateString();
+/** Spec 438 §3 — the work a run was part of, when it says so. No work is NOT rendered as "none": a run that
+ *  named none simply has nothing here, and inventing a word for it would make absence look like a choice. */
+const workLabel = (r: RunRecordRow): string => (r.work?.endeavorId ? ` · work ${r.work.endeavorId}` : '');
 
 export function RunHistory({ token, addressee, limit = 60 }: { token: string; addressee: Address; limit?: number }) {
   const [rows, setRows] = useState<RunRecordRow[] | null>(null);
@@ -124,7 +127,7 @@ export function RunHistory({ token, addressee, limit = 60 }: { token: string; ad
               <List>
                 {t.runs.map((r) => (
                   <Row key={r.runRef} title={(r.intent?.goal ?? r.runRef).slice(0, 140)}
-                    meta={<>{r.steps} step{r.steps === 1 ? '' : 's'}{r.variant?.plannerKind ? ` · planner ${r.variant.plannerKind}` : ''}{r.skills?.length ? ` · ${r.skills.length} skill${r.skills.length === 1 ? '' : 's'}` : ''}{turnMsOf(r) !== undefined ? ` · ${fmtMs(turnMsOf(r))}` : ''}{turnTokensOf(r) !== undefined ? ` · ${turnTokensOf(r)!.toLocaleString()} tokens` : ''}</>}
+                    meta={<>{r.steps} step{r.steps === 1 ? '' : 's'}{r.variant?.plannerKind ? ` · planner ${r.variant.plannerKind}` : ''}{r.skills?.length ? ` · ${r.skills.length} skill${r.skills.length === 1 ? '' : 's'}` : ''}{turnMsOf(r) !== undefined ? ` · ${fmtMs(turnMsOf(r))}` : ''}{turnTokensOf(r) !== undefined ? ` · ${turnTokensOf(r)!.toLocaleString()} tokens` : ''}{workLabel(r)}</>}
                     side={<><StatePill state={stateOf(sourceOf(r))} native={r.outcome} compact /><Button size="sm" variant="ghost" onClick={() => setOpen(r)}>Inspect</Button></>} />
                 ))}
               </List>
@@ -138,7 +141,7 @@ export function RunHistory({ token, addressee, limit = 60 }: { token: string; ad
                   const goal = r.intent?.goal ?? r.runRef;
                   return (
                     <Row key={r.runRef} title={goal.length > 140 ? `${goal.slice(0, 137)}…` : goal}
-                      meta={<>{r.steps} step{r.steps === 1 ? '' : 's'} · {r.receipts} receipt{r.receipts === 1 ? '' : 's'}{r.export?.ok ? ' · in the vault' : ''}{r.canceled ? ` · ${canceledWords(r.canceled)}${r.canceled.note ? ` — “${r.canceled.note}”` : ''}` : ''}</>}
+                      meta={<>{r.steps} step{r.steps === 1 ? '' : 's'} · {r.receipts} receipt{r.receipts === 1 ? '' : 's'}{r.export?.ok ? ' · in the vault' : ''}{r.canceled ? ` · ${canceledWords(r.canceled)}${r.canceled.note ? ` — “${r.canceled.note}”` : ''}` : ''}{workLabel(r)}</>}
                       side={<>
                         <StatePill state={stateOf(sourceOf(r))} native={r.canceled ? canceledWords(r.canceled) : r.outcome} compact />
                         <span className="ui-row-time" title={new Date(r.at).toLocaleString()}>{timeLabel(r.at)}</span>

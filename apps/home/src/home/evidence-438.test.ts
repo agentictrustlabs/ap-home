@@ -19,6 +19,35 @@ const record = (over: Partial<RunRecordV1> = {}): RunRecordV1 =>
     ...over,
   }) as RunRecordV1;
 
+describe('TWIN 1 — a retry does not join its predecessor\u2019s work until somebody attaches it', () => {
+  // The surface half of the twin: the Home shows `work` from the record and NOTHING ELSE. Everything a
+  // heuristic would use to guess is right here — same agent, same goal, the next run along — and the second
+  // run still carries no work, because attaching is an act with an author (coordination.run.attach).
+  const attached = record({ runRef: 'run_a', work: { endeavorId: 'end_1' } } as Partial<RunRecordV1>);
+  const retry = record({ runRef: 'run_a_retry' });
+
+  it('the attached run names its work; the retry names none', () => {
+    expect((attached as { work?: { endeavorId: string } }).work?.endeavorId).toBe('end_1');
+    expect((retry as { work?: unknown }).work).toBeUndefined();
+  });
+
+  it('the label renders the work only when the record says so \u2014 absence is not "none"', () => {
+    const label = (r: RunRecordV1): string => {
+      const w = (r as { work?: { endeavorId?: string } }).work;
+      return w?.endeavorId ? ` \u00b7 work ${w.endeavorId}` : '';
+    };
+    expect(label(attached)).toBe(' \u00b7 work end_1');
+    expect(label(retry)).toBe('');
+  });
+
+  it('evidence status is read the same for both \u2014 work is a reference, never an input to a reading', () => {
+    const a = evidenceStatusOf(attached);
+    const b = evidenceStatusOf(retry);
+    expect(a.coverage).toEqual(b.coverage);
+    expect(a.consistency).toEqual(b.consistency);
+  });
+});
+
 describe('TWIN 2 — a run with unreported usage shows unavailable, not 0', () => {
   it('reports unavailable and invents no token totals', () => {
     const ev = evidenceStatusOf(record({ modelCalls: [{ role: 'plan' }, { role: 'compose' }] }));

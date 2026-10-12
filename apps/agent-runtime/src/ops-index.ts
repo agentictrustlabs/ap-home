@@ -20,6 +20,8 @@ export interface OpsRowV1 {
   /** Spec 418 §3 — the turn's operations: ms per stage (JSON, stage name → ms, bounded), the selection (approach, the
    *  chosen skill id or null, the hold code), the time spent choosing, the conversation (A2A context id) the turn belongs
    *  to, and the model calls with their reported tokens. Names, ids and numbers — never words. */
+  /** Spec 438 §4 — the plan's step count; `null` for a row indexed before the column existed. */
+  planned_steps: number | null;
   stages: string | null; selection_approach: string | null; selection_chose: string | null; selection_hold: string | null;
   selection_ms: number | null; conversation: string | null; model_calls: number; tokens_in: number | null; tokens_out: number | null;
   /** Spec 437 I5 — the run's `RunMetricsV1` and its model calls' timings (`PerfColumnV1`, JSON): the estate's performance block
@@ -56,6 +58,10 @@ export const OPS_ADDED_COLUMNS: ReadonlyArray<[string, string]> = [
   ['stages', 'TEXT'], ['selection_approach', 'TEXT'], ['selection_chose', 'TEXT'], ['selection_hold', 'TEXT'], ['selection_ms', 'INTEGER'],
   ['conversation', 'TEXT'], ['model_calls', 'INTEGER NOT NULL DEFAULT 0'], ['tokens_in', 'INTEGER'], ['tokens_out', 'INTEGER'],
   ['perf', 'TEXT'],
+  // Spec 438 §4 — how many steps the PLAN had, so the estate can say what share of its work left a complete
+  // record. Nullable on purpose: rows indexed before this column read `null`, and a null is excluded from the
+  // coverage denominator rather than counted as a gap it cannot know about.
+  ['planned_steps', 'INTEGER'],
 ];
 /** The most stage names one row keeps (the largest by ms) — the index stays bounded whatever a turn marks. */
 export const OPS_MAX_STAGES = 32;
@@ -94,6 +100,7 @@ export function rowOf(record: RunRecordV1, addressee: Address): OpsRowV1 {
     failure_class: record.outcome === 'completed' ? null : failureClassOf(error ?? String(record.outcome)), error: error ? String(error).slice(0, 200) : null,
     routed: steps.some((s) => (s.result as { routed?: unknown } | undefined)?.routed !== undefined) || typeof ctx.route === 'object' ? 1 : 0, canceled: record.canceled ? 1 : 0,
     playbook: typeof ctx.playbook === 'string' ? ctx.playbook : null, surface: typeof (ctx.surface as { realm?: string } | undefined)?.realm === 'string' ? String((ctx.surface as { realm: string }).realm) : null,
+    planned_steps: Array.isArray(record.plan?.steps) ? record.plan.steps.length : null,
     ...operationalColumnsOf(record),
     perf: perfOf(record),
   };

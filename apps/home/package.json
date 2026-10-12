@@ -27,7 +27,7 @@
     "@agenticprimitives/delegation": "1.0.0-alpha.34",
     "@agenticprimitives/fabric": "0.0.0-alpha.25",
     "@agenticprimitives/fedcm-idp": "1.0.0-alpha.9",
-    "@agenticprimitives/harness": "0.0.0-alpha.15",
+    "@agenticprimitives/harness": "0.0.0-alpha.16",
     "@agenticprimitives/home": "0.0.0-alpha.25",
     "@agenticprimitives/identity-directory": "1.0.0-alpha.34",
     "@agenticprimitives/identity-directory-adapters": "1.0.0-alpha.34",

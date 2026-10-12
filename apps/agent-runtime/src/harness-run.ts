@@ -4560,6 +4560,10 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'coordination.contribution.allocate': ['signature'],  // the org's decision, under a steward's signature
   'coordination.endeavor.satisfy': ['signature'],
   'coordination.milestone.achieve': ['signature'],
+  // Spec 438 §3 — attaching a run writes to the ORGANIZATION's endeavour log, not the person's own records,
+  // so it is signed like every other coordination command. The act is a reference and grants nothing; it is
+  // still somebody's assertion, and an assertion nobody signed is the guess this whole design refuses.
+  'coordination.run.attach': ['signature'],
   'coordination.step.satisfy': ['signature'],          // the doer's own record, or the steward's as the org
   'coordination.commitment.withdraw': ['signature'],   // the participant's own act
   'coordination.commitment.reallocate': ['signature'], // the org's, under a steward's signature

@@ -455,6 +455,9 @@ export interface RunRecordRow {
   skills?: string[]; tools?: string[];
   /** Spec 398 §5.3 — the run was stopped by the person who could resume it, after `afterSteps` completed steps. */
   canceled?: { at: number; by: string; afterSteps: number; note?: string };
+  /** Spec 438 §3 — the Endeavor this run was part of. A REFERENCE, never authority, and ABSENT is the honest
+   *  value: a run that named no work has none, and a retry does not inherit its predecessor's. */
+  work?: { endeavorId: string; commitmentId?: string; planStepId?: string };
   intent: { goal: string; context?: Record<string, unknown> };
   export?: { ok?: boolean; where?: string; error?: string } | null;
 }
@@ -523,6 +526,8 @@ export interface RunInspectorRecord {
   engagements?: EngagementView[];
   /** Spec 418 §3 — the turn's operations: ms per stage, the selection, the skill stage, the conversation. */
   operational?: RunOperationalView;
+  /** Spec 438 §3 — the Endeavor this run was part of, when it named one. Absent is the honest value. */
+  work?: { endeavorId: string; commitmentId?: string; planStepId?: string };
 }
 export async function fetchRunInspector(session: { token: string }, addressee: Address, runRef: string): Promise<RunInspectorRecord | { error: string }> {
   const out = (await postA2a('/a2a/harness/provenance', { session: session.token, addressee, runRef, format: 'record' })) as { ok?: boolean; error?: string; record?: RunInspectorRecord };

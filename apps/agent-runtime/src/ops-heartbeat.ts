@@ -59,6 +59,28 @@ export function heartbeatOfRows(rows: readonly OpsRowV1[], input: { estate: stri
   const kind = (k: string) => rows.filter((r) => r.kind === k).length;
   const answered = rows.filter((r) => r.kind === 'answer' && typeof r.duration_ms === 'number').map((r) => r.duration_ms as number);
   const performance = performanceOfRows(rows);
+  // Spec 438 §4 — the estate's coverage, over the rows that can answer it.
+  //
+  // A row indexed before `planned_steps` existed cannot say whether its run was complete, so it is left out
+  // of the denominator entirely rather than counted as a gap it has no opinion about — the block would
+  // otherwise read worse the further back the window reaches, which is an artefact of the schema and not a
+  // fact about the estate.
+  //
+  // A run that stopped before its plan finished (parked for a signature, denied, canceled) is `unknown`, not
+  // `incomplete`: the authority plane refusing something is it WORKING, and a tile that fell when an estate
+  // behaved correctly would train people to ignore it.
+  const coverage = ((): EstateHeartbeatV1['evidenceCoverage'] => {
+    const known = rows.filter((r) => typeof r.planned_steps === 'number' && r.planned_steps !== null);
+    if (known.length === 0) return undefined;
+    let complete = 0, incomplete = 0, unknown = 0;
+    for (const r of known) {
+      const stoppedEarly = r.canceled === 1 || r.kind === 'authority_required' || r.outcome === 'denied' || r.outcome === 'suspended' || r.outcome === 'authority-required';
+      if (stoppedEarly) unknown += 1;
+      else if (r.steps >= (r.planned_steps as number)) complete += 1;
+      else incomplete += 1;
+    }
+    return { runs: known.length, complete, incomplete, unknown };
+  })();
   return {
     type: 'ap.estate-heartbeat.v1',
     estate: input.estate,
@@ -78,6 +100,7 @@ export function heartbeatOfRows(rows: readonly OpsRowV1[], input: { estate: stri
     doRequests: rows.reduce((n, r) => n + r.do_requests, 0),
     askLatencyP95Ms: pct(answered, 0.95),
     ...(performance ? { performance } : {}),
+    ...(coverage ? { evidenceCoverage: coverage } : {}),
   };
 }
 

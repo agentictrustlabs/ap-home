@@ -17,6 +17,7 @@ import { RunTraceTree } from './RunTraceTree';
 import { TurnOperations } from './TurnOperations';
 import { DisputePanel } from './DisputePanel';
 import { EvidencePanel } from './EvidencePanel';
+import { WorkAndAssessment } from './WorkAndAssessment';
 import { SaveAsRecipe } from './SaveAsRecipe';
 import { canSaveAsRecipe } from '@agenticprimitives/harness/recipe';
 import { usePathname } from 'next/navigation';
@@ -42,6 +43,7 @@ export function RunInspector({ token, addressee, runRef, goal, open = true }: { 
   const [rec, setRec] = useState<RunInspectorRecord | { error: string } | null>(null);
   const [vocabulary, setVocabulary] = useState<AskVocabularyEntry[]>([]);
   const pathname = usePathname();
+  const scope = parseWorkspacePath(pathname ?? '/');
   useEffect(() => {
     if (!wanted) return;
     let live = true;
@@ -83,7 +85,7 @@ export function RunInspector({ token, addressee, runRef, goal, open = true }: { 
         </div>
       )}
       {/* Spec 398 §5 / APUX-034 — successful work becomes a draft recipe in the Library; a stopped or failed run does not. */}
-      {canSaveAsRecipe(state, rec.outcome) && <SaveAsRecipe token={token} addressee={addressee} runRef={runRef} scope={parseWorkspacePath(pathname ?? '/')} />}
+      {canSaveAsRecipe(state, rec.outcome) && <SaveAsRecipe token={token} addressee={addressee} runRef={runRef} scope={scope} />}
 
       {/* 2 · ARTIFACTS */}
       <H n={artifacts.length}>artifacts</H>
@@ -143,6 +145,18 @@ export function RunInspector({ token, addressee, runRef, goal, open = true }: { 
           detail below it: a run whose coverage is incomplete or whose parts disagree is not read the same way. */}
       <H>evidence</H>
       <EvidencePanel token={token} addressee={addressee} runRef={runRef} />
+
+      {/* 4c · WORK AND ASSESSMENT (spec 438 §3 / §5) — what this run was part of, and whether anyone has judged
+          it. Attaching is an ACT with an author, never an inference: everything needed to guess the endeavour is
+          already on the record, and a guess would be indistinguishable from somebody's assertion. */}
+      <H>work · assessment</H>
+      <WorkAndAssessment
+        token={token}
+        addressee={addressee}
+        runRef={runRef}
+        {...(rec.work ? { work: rec.work } : {})}
+        {...(scope.kind === 'org' ? { org: scope.org } : {})}
+      />
 
       {/* 5 · EXECUTION DETAIL + 6 · PROVENANCE — the span timeline and its downloads */}
       <H>execution detail · provenance</H>

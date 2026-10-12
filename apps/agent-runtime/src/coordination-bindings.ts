@@ -35,6 +35,10 @@ export const COMMITMENT_REALLOCATE_CAPABILITY = 'coordination.commitment.realloc
 export const STEP_SATISFY_CAPABILITY = 'coordination.step.satisfy' as const;
 /** Spec 382 W3 (M6 milestones) — a milestone the adopted plan defines, recorded achieved with criteria evidence. */
 export const MILESTONE_ACHIEVE_CAPABILITY = 'coordination.milestone.achieve' as const;
+/** Spec 438 §3 — a harness RUN claimed by an endeavor. Explicit by construction: nothing infers that a run
+ *  belongs to a piece of work from a shared contextId, a retry, or being next in time. A guess recorded here
+ *  would read exactly like something a participant asserted, and nobody could tell them apart later. */
+export const RUN_ATTACH_CAPABILITY = 'coordination.run.attach' as const;
 /** Spec 393 — a decision raised for DECLARED approvers, and recorded by one of them (immutable). */
 export const DECISION_REQUEST_CAPABILITY = 'coordination.decision.request' as const;
 export const DECISION_RECORD_CAPABILITY = 'coordination.decision.record' as const;
@@ -132,6 +136,18 @@ export const STEP_SATISFY_TOOL: ToolSpec = {
   establishes: 'authoritative',
 };
 
+/** Spec 438 §3 — attach a run to the work it was part of. A REFERENCE, never authority: it records that the
+ *  two belong together and changes nothing about what either may do. */
+export const RUN_ATTACH_TOOL: ToolSpec = {
+  id: RUN_ATTACH_CAPABILITY,
+  verbs: ['attach', 'attach the run', 'this run was for', 'count this run towards', 'link the run to'],
+  description: 'Attach a harness RUN to the endeavor it was part of, so the work can be read back with the runs that did it. Args: org, endeavorId, runRef (the run_* reference from the run log). By the organization\'s steward or an active participant. A REFERENCE ONLY — it grants nothing, and nothing is inferred: a retry does not join the work until somebody attaches it.',
+  inputSchema: { type: 'object', properties: { ...ORG_ARG, endeavorId: { type: 'string' }, runRef: { type: 'string', description: 'The run reference, from "What this agent did".' } }, required: ['org', 'endeavorId', 'runRef'] },
+  capability: { id: RUN_ATTACH_CAPABILITY, action: 'attach', resourceArg: 'org', authorityArg: 'org' },
+  risk: 'low', adapter: ADAPTER.sync,
+  establishes: 'authoritative',
+};
+
 /** A commitment taken back — the participant's own act; the step returns to the pool. */
 export const COMMITMENT_WITHDRAW_TOOL: ToolSpec = {
   id: COMMITMENT_WITHDRAW_CAPABILITY,
@@ -177,7 +193,7 @@ export const DECISION_RECORD_TOOL: ToolSpec = {
 };
 
 export const COORDINATION_READ_TOOLS: ToolSpec[] = [ENDEAVOR_LIST_TOOL, ENDEAVOR_GET_TOOL];
-export const COORDINATION_ACTION_TOOLS: ToolSpec[] = [ENDEAVOR_REQUEST_TOOL, CONTRIBUTION_PROPOSE_TOOL, CONTRIBUTION_ALLOCATE_TOOL, ENDEAVOR_SATISFY_TOOL, MILESTONE_ACHIEVE_TOOL, STEP_SATISFY_TOOL, COMMITMENT_WITHDRAW_TOOL, COMMITMENT_REALLOCATE_TOOL, DECISION_REQUEST_TOOL, DECISION_RECORD_TOOL];
+export const COORDINATION_ACTION_TOOLS: ToolSpec[] = [ENDEAVOR_REQUEST_TOOL, CONTRIBUTION_PROPOSE_TOOL, CONTRIBUTION_ALLOCATE_TOOL, ENDEAVOR_SATISFY_TOOL, MILESTONE_ACHIEVE_TOOL, STEP_SATISFY_TOOL, RUN_ATTACH_TOOL, COMMITMENT_WITHDRAW_TOOL, COMMITMENT_REALLOCATE_TOOL, DECISION_REQUEST_TOOL, DECISION_RECORD_TOOL];
 export const COORDINATION_CAPABILITY_IDS = new Set<string>([...COORDINATION_READ_TOOLS, ...COORDINATION_ACTION_TOOLS].map((t) => t.id));
 
 export interface CoordinationDeps extends StandingDeps {
@@ -293,6 +309,12 @@ export function endeavorActInvoker(deps: CoordinationDeps, addressee: Address, p
         const stepId = String(args.stepId ?? '').trim();
         const r = await deps.interactionsOp(o.org, 'endeavor.satisfyStep', { ...common, endeavorId: String(args.endeavorId ?? ''), stepId, evidence: String(args.note ?? '') });
         return { org: o.org, endeavorId: String(args.endeavorId ?? ''), stepId: r.stepId ?? stepId, note: 'Recorded as done in the endeavor\'s log, with the evidence given.' };
+      }
+      case RUN_ATTACH_CAPABILITY: {
+        const runRef = String(args.runRef ?? '').trim();
+        if (!runRef) throw new Error('a runRef is required — a run joins work by being named, never by being guessed');
+        const r = await deps.interactionsOp(o.org, 'endeavor.attachRun', { ...common, endeavorId: String(args.endeavorId ?? ''), runRef });
+        return { org: o.org, endeavorId: String(args.endeavorId ?? ''), runRef: r.runRef ?? runRef, note: 'Attached. The run is listed with this work; nothing was granted by attaching it.' };
       }
       case COMMITMENT_WITHDRAW_CAPABILITY: {
         const commitmentId = String(args.commitmentId ?? '').trim();

@@ -1191,6 +1191,36 @@ export async function handleEndeavorOp(
   // ── endeavor.satisfyStep — record a plan step as satisfied with completion evidence. Gated by
   //    the reducer to the managing principal or an active participant (execution is done by the
   //    people doing the work, not only the steward). ──
+  // ── endeavor.attachRun — spec 438 §3. A harness run claimed by this endeavor, by a participant or the
+  //    steward. Idempotent for the SAME record; a different digest under the same runRef is refused by the
+  //    reducer rather than silently overwritten, because the digest is how a later reader tells whether the
+  //    attached record is the one they are holding. Grants nothing. ──
+  if (op === 'endeavor.attachRun') {
+    const endeavorId = parseEndeavorId(body.endeavorId);
+    if (!endeavorId) return json({ error: 'endeavorId required' }, 400);
+    const runRef = String(body.runRef ?? '').trim();
+    if (!runRef) return json({ error: 'runRef required — a run joins work by being named' }, 400);
+    // The digest the attachment carries. The runtime does not re-read the record here (the attach is a
+    // claim about which run, not a re-verification of it); a caller that holds the digest passes it, and
+    // absent it the zero digest records honestly that none was supplied.
+    const recordDigest = (typeof body.recordDigest === 'string' && /^0x[0-9a-f]{64}$/i.test(body.recordDigest)
+      ? body.recordDigest.toLowerCase()
+      : `0x${'0'.repeat(64)}`) as `0x${string}`;
+    const command: CoordinationCommandV1 = {
+      kind: 'AttachRun',
+      actor: (await deps.isSteward()) ? principal : viewer,
+      issuedAt: new Date().toISOString(),
+      endeavorId: endeavorId as `end_${string}`,
+      runRef,
+      recordDigest,
+    };
+    return deps.serialize(async () => {
+      const r = await appendToEndeavorLog(deps, 'endeavor.attachRun', endeavorId, command, { type: 'run', id: runRef });
+      if (!r.ok) return r.response;
+      return json({ ok: true, runRef });
+    });
+  }
+
   if (op === 'endeavor.satisfyStep') {
     const endeavorId = parseEndeavorId(body.endeavorId);
     if (!endeavorId) return json({ error: 'endeavorId required' }, 400);

@@ -74,6 +74,10 @@ export const NOT_PLAN_STEPS: readonly string[] = [
   'coordination.milestone.achieve',
   'coordination.step.satisfy',
   'coordination.commitment.withdraw',
+  // Spec 438 §3 — attaching a run to work is the same class: it records that a run and an endeavour belong
+  // together. A plan step that attached runs would be the plan describing its own paperwork, and the act is
+  // a REFERENCE anyway — nobody can be assigned it as a piece of the work.
+  'coordination.run.attach',
   'coordination.commitment.reallocate',
   // Spec 393 — a decision is RAISED for declared approvers and RECORDED by one of them; a plan may carry a
   // decision-kind STEP that a record satisfies, but raising or recording is never itself assignable work.

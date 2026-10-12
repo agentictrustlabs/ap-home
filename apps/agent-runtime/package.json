@@ -33,7 +33,7 @@
     "@agenticprimitives/edge-runtime": "0.0.0-alpha.14",
     "@agenticprimitives/evaluation": "0.0.0-alpha.6",
     "@agenticprimitives/fabric": "0.0.0-alpha.25",
-    "@agenticprimitives/harness": "0.0.0-alpha.15",
+    "@agenticprimitives/harness": "0.0.0-alpha.16",
     "@agenticprimitives/home": "0.0.0-alpha.25",
     "@agenticprimitives/intent-engagement": "0.0.0-alpha.13",
     "@agenticprimitives/key-custody": "1.0.0-alpha.34",
