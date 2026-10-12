@@ -27,7 +27,7 @@
     "@agenticprimitives/connect-auth": "1.0.0-alpha.34",
     "@agenticprimitives/content-primitives": "1.0.0-alpha.33",
     "@agenticprimitives/content-storage": "1.0.0-alpha.12",
-    "@agenticprimitives/context": "0.0.0-alpha.14",
+    "@agenticprimitives/context": "0.0.0-alpha.15",
     "@agenticprimitives/coordination": "0.0.0-alpha.17",
     "@agenticprimitives/delegation": "1.0.0-alpha.34",
     "@agenticprimitives/edge-runtime": "0.0.0-alpha.14",
