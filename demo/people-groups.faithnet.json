@@ -1,19 +1,20 @@
 {
-  "purpose": "the Global Church people-groups service agent in the faithnet estate (an operator note, not a persona) — the ap-people-group-catalog/v1 twin of ligonier.faithnet.json; its name record atl:mcpEndpoint points at the demo-gc-pg Worker (ap-demos/apps/demo-gc-pg)",
+  "purpose": "the Global Church people-groups service agent in the faithnet estate (an operator note, not a persona) \u2014 the ap-people-group-catalog/v1 twin of ligonier.faithnet.json; its name record atl:mcpEndpoint points at the demo-gc-pg Worker (ap-demos/apps/demo-gc-pg)",
   "chainId": 34348,
-  "org": {
-    "name": "globalchurch.org",
-    "sa": "0x6f9c3b34f639dd45bbff0b8343c65d206208d065",
-    "steward": "alice"
+  "charteredBy": {
+    "persona": "demo-admin",
+    "sa": "0x6142b0fca982f6701cf2248bf368ab44a48c5725",
+    "why": "an operator fixture, not the Global Church organization's own service \u2014 so it is chartered under the demo admin who custodies the estate's other fixtures, and a demo person SA is never also an organization SA (ADR-0046)"
   },
   "service": {
     "name": "people-groups.svc",
     "sa": null,
-    "charteredUnder": "globalchurch.org",
+    "charteredUnder": "demo-admin",
+    "custodian": "0x423B0749c1b85a12A8b463c01F697D9E0072544d",
     "host": "people-groups-svc.faithnet.ai",
     "facets": {
       "displayName": "Global Church people-group counts",
-      "description": "How many people groups there are, by list — Joshua Project, IMB and the UUPG+ Base List — for a country, religion and affinity bloc, read live from the Global Church graph. Counts with their source named; never raw SPARQL, never a write.",
+      "description": "How many people groups there are, by list \u2014 Joshua Project, IMB and the UUPG+ Base List \u2014 for a country, religion and affinity bloc, read live from the Global Church graph. Counts with their source named; never raw SPARQL, never a write.",
       "capabilities": "gc:CFnPeopleGroupIntelligence",
       "focusAreas": "people groups,unreached,frontier people groups,joshua project,imb,base list",
       "languages": "en",
@@ -26,8 +27,8 @@
   },
   "charteredAt": null,
   "todo": [
-    "charter people-groups.svc under globalchurch.org (the ceremony sets sa, charteredAt)",
+    "charter people-groups.svc under demo-admin (the ceremony sets sa, charteredAt): npx tsx scripts/charter-service.mts --persona demo-admin --label people-groups --note demo/people-groups.faithnet.json",
     "set the name records above (set-typed-name-records: mcpEndpoint + a2aEndpoint), then facetsAt",
-    "wrangler secret put GC_API_KEY on demo-gc-pg (richcanvas) — the key lives on the Worker, never in the agent or its playbook"
+    "wrangler secret put GC_API_KEY on demo-gc-pg (richcanvas) \u2014 the key lives on the Worker, never in the agent or its playbook"
   ]
 }
