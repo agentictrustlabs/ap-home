@@ -204,7 +204,11 @@ import { averageOutcomeChecks, judgeRepeatsOf } from './outcome-check-repeats.js
 import { provenanceLinkHeader } from '@agenticprimitives/a2a';
 import { runProvenanceRecordKey, evidenceStatusOf, type RunRecordV1 } from '@agenticprimitives/orchestration';
 // Spec 438 §13 — the five stages joined per agent. The projection is Ring 0's; this app supplies the facts.
-import { agentRecordOf, agentRecordWords, type AgentRunFactsV1, type SignedAssessmentV1 } from '@agenticprimitives/evaluation';
+import {
+  agentRecordOf, agentRecordWords, assessmentDigest, outcomeCriteriaDigest, runAssessmentRecordKey,
+  validateAssessment, verifyAssessment,
+  type AgentRunFactsV1, type AssessmentOutcomeV1, type AssessmentV1, type SignedAssessmentV1,
+} from '@agenticprimitives/evaluation';
 /** A run's outcome as the ending vocabulary the record counts by. An outcome this build does not know is
  *  `unknown` rather than dropped: a run that happened and was not counted is the one error to avoid. */
 const RUN_ENDING_OF = (outcome: string): AgentRunFactsV1['ending'] =>
@@ -3309,6 +3313,161 @@ app.post('/harness/record', async (c) => {
     ...(unreadable.length ? { unreadable } : {}),
     assessmentsRead,
   });
+});
+
+/** What a caller may say when judging a run. Everything that identifies WHAT was judged is the server's —
+ *  a client that could name the subject digest could sign a judgment of a document that was never the run. */
+interface AssessRequestBody {
+  session?: string;
+  addressee?: string;
+  runRef?: string;
+  results?: Array<{ criterionId?: unknown; outcome: AssessmentOutcomeV1; evidenceRefs?: unknown }>;
+  /** Phase two. Absent ⇒ the server returns what it WOULD store and the digest to sign, and writes nothing. */
+  signature?: string;
+  /** Echoed from phase one so the two phases hash identically; a fresh moment is used when absent. */
+  at?: string;
+  /** A correction supersedes an earlier assessment by its digest; the earlier one stays readable (§5). */
+  supersedes?: string;
+  evaluatorKind?: 'human' | 'mechanical';
+}
+
+/**
+ * THE CRITERIA A RUN IS JUDGED AGAINST, read from the work it was attached to (spec 438 §5, J2).
+ *
+ * They are the endeavour's own adopted outcome specification. The digest is computed by the package that
+ * validates the assessment (`outcomeCriteriaDigest`), never here: two callers canonicalising one revision
+ * differently would produce two digests for it, and an assessment would then cite a criteria document nobody
+ * else can find.
+ *
+ * Every failure is a REFUSAL WITH THE NEXT STEP IN IT rather than an empty result, because every one of them
+ * is recoverable by somebody and none is recoverable by guessing.
+ */
+async function statedCriteriaFor(env: Env, agent: Address, endeavorId: string): Promise<{ criteria: AssessmentV1['criteria'] } | { error: string }> {
+  const out = (await callInteractionsInternal(env, agent, 'internal.endeavor.state', { endeavorId }).catch(() => null)) as
+    | { ok?: boolean; outcomeSpec?: { spec?: { outcomeId?: string; revision?: number; criteria?: Array<{ criterionId: string; kind: string; statement: string }> }; statedAt?: string | null } }
+    | null;
+  if (!out?.ok) return { error: `the endeavour ${endeavorId} could not be read, so its criteria are unknown rather than absent` };
+  const spec = out.outcomeSpec?.spec;
+  const statedAt = out.outcomeSpec?.statedAt;
+  if (!spec?.outcomeId || typeof spec.revision !== 'number' || !spec.criteria?.length) {
+    return { error: `${endeavorId} states no outcome criteria, so there is nothing to judge this run against` };
+  }
+  if (!statedAt) return { error: `${endeavorId}'s criteria carry no moment they were stated, and J2 cannot be checked without one` };
+  return {
+    criteria: {
+      outcomeId: spec.outcomeId,
+      revision: spec.revision,
+      digest: await outcomeCriteriaDigest({ outcomeId: spec.outcomeId, revision: spec.revision, criteria: spec.criteria }),
+      statedAt,
+    },
+  };
+}
+
+// POST /harness/assess — spec 438 §5. SOMEBODY JUDGES A RUN, and the judgment is a record of its own.
+//
+// The one design decision everything else follows from: **an assessment never edits the run it is about.** It
+// is a separate signed assertion stored beside it, and a correction is a NEW assessment that supersedes the
+// old one, with the earlier one still readable. A record of opinions that can be rewritten is not a record.
+//
+// TWO PHASES, because the evaluator signs a digest and cannot know it before the server has built the
+// document. `prepare: true` returns the assessment this server WOULD store and its digest; the evaluator
+// signs that digest with their own credential and posts it back. The server rebuilds the subject and the
+// criteria from its own reads either way — a client supplies only its verdicts and its signature, because a
+// client that could name the subject digest could sign a judgment of a document that was never the run.
+//
+// WHAT THE SERVER OWNS, AND WHY EACH ONE:
+//   subject.recordDigest  the run's ANCHOR digest, from its own record. The whole point of §13's currency
+//                         rule is that an assessment names the document it saw; letting a caller assert that
+//                         would make every later reader's comparison meaningless.
+//   subject.at            when the run ended. J2 compares it against the criteria's `statedAt`.
+//   criteria              the endeavour's adopted outcome specification, by revision, with the digest of that
+//                         revision and the moment it was stated. **Criteria stated after the run are refused**
+//                         by `validateAssessment` — a verdict in search of premises is not a judgment.
+//
+// A run with no endeavour cannot be assessed, and that is the rule rather than a gap: there are no criteria to
+// judge it against, and inventing some at judging time is exactly what J2 forbids. Attach the run to work
+// first (`coordination.run.attach`), then assess it.
+//
+// NOTHING HERE IS AUTHORITY (J1). No verifier, admission stage or mandate reads an assessment, and writing one
+// grants nothing to anybody.
+app.post('/harness/assess', async (c) => {
+  const rawAs = await c.req.text();
+  const body = ((): AssessRequestBody | null => { try { return JSON.parse(rawAs) as AssessRequestBody; } catch { return null; } })();
+  if (!body?.addressee || !body.runRef) return c.json({ ok: false, error: 'addressee and runRef are required' }, 400);
+  const who = await askSurfacePrincipal(c, rawAs, body);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const addressee = String(body.addressee).toLowerCase() as Address;
+  { const fwd = await forwardToSelfHost(c.env, c.req.raw, addressee, rawAs, selfHostForwardAuth(c.env, String(who.sa).toLowerCase() as Address)); if (fwd) return fwd; }
+  const evaluator = String(who.sa).toLowerCase();
+
+  // WHO MAY JUDGE A RUN OF THIS AGENT: whoever asked it, or whoever oversees the agent. Not because judging
+  // needs authority — it does not — but because the judgment is stored in THIS agent's vault, and writing
+  // into somebody's vault is always theirs to allow.
+  const rec = (await getRecord(c.env as never, addressee, body.runRef).catch(() => null)) as RunRecordV1 | null;
+  if (!rec) return c.json({ ok: false, error: 'no such record' }, 404);
+  const holds = await mayOverseeAgent(c.env, evaluator as Address, addressee).catch(() => false);
+  if (!holds && String(rec.intent?.context?.asker ?? '').toLowerCase() !== evaluator) {
+    return c.json({ ok: false, error: 'this run was not yours to judge' }, 403);
+  }
+
+  const results = Array.isArray(body.results) ? body.results : [];
+  if (!results.length) return c.json({ ok: false, error: 'results (one per criterion judged) are required' }, 400);
+
+  // THE SUBJECT, from the run itself. No anchor digest ⇒ no assessment: §13's currency rule compares an
+  // assessment's subject digest against the run's, and a judgment of a document with no digest can never be
+  // shown as current or stale. Refusing is the honest answer; the run's provenance anchors on export.
+  const ev = evidenceStatusOf(rec);
+  if (!ev.integrity.anchorDigest) {
+    return c.json({ ok: false, error: 'this run has no anchored digest yet, so a judgment of it could never be checked against the document it judged — it anchors when its provenance is exported' }, 409);
+  }
+
+  // THE CRITERIA, from the work this run was attached to. Absent is a refusal with the next step in it.
+  if (!rec.work?.endeavorId) {
+    return c.json({ ok: false, error: 'this run names no work, so there are no stated criteria to judge it against. Attach it to an endeavour first (coordination.run.attach); criteria invented at judging time are exactly what J2 refuses.' }, 409);
+  }
+  const criteria = await statedCriteriaFor(c.env, addressee, rec.work.endeavorId);
+  if ('error' in criteria) return c.json({ ok: false, error: criteria.error }, 409);
+
+  const assessment: AssessmentV1 = {
+    schema: 'apeval/AssessmentV1',
+    subject: { runRef: rec.runRef, recordDigest: ev.integrity.anchorDigest, at: new Date(rec.at).toISOString() },
+    criteria: criteria.criteria,
+    evaluator: { sa: evaluator, kind: body.evaluatorKind === 'mechanical' ? 'mechanical' : 'human' },
+    results: results.map((r) => ({ criterionId: String(r.criterionId), outcome: r.outcome, evidenceRefs: Array.isArray(r.evidenceRefs) ? r.evidenceRefs.map(String) : [] })),
+    at: typeof body.at === 'string' && body.at ? body.at : new Date().toISOString(),
+    ...(body.supersedes ? { supersedes: String(body.supersedes) } : {}),
+  };
+
+  const structural = validateAssessment(assessment);
+  if (!structural.ok) return c.json({ ok: false, error: structural.problems.join('; ') }, 400);
+  const digest = await assessmentDigest(assessment);
+
+  // PHASE ONE — here is what would be stored, and the digest to sign. Nothing is written.
+  if (!body.signature) return c.json({ ok: true, prepared: true, assessment, digest });
+
+  // PHASE TWO — the evaluator's own signature over that digest, checked against their Smart Agent through the
+  // UniversalSignatureValidator (ERC-1271 / 6492 / ECDSA). A human assessment is signed by the person's own
+  // account: §5's wire form is for a mechanical evaluator's session key, and this estate issues none yet.
+  const validator = c.env.UNIVERSAL_SIGNATURE_VALIDATOR as Address | undefined;
+  if (!validator) return c.json({ ok: false, error: 'this deployment cannot check a signature (no signature validator configured)' }, 503);
+  const depsAs = harnessDeps(c.env, buildAuditSink(c.env));
+  const signed: SignedAssessmentV1 = { assessment, digest, signature: String(body.signature) };
+  const verdict = await verifyAssessment(signed, async ({ digest: d, signature }) => {
+    const ok = (await depsAs.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [evaluator as Address, d as Hex, signature as Hex] }).catch(() => false)) === true;
+    return { ok, ...(ok ? { signer: evaluator } : {}) };
+  });
+  if (!verdict.ok) return c.json({ ok: false, error: verdict.problems.join('; ') }, 400);
+
+  // APPEND, never replace (§5). A correction is a new assessment that supersedes an earlier one, and the
+  // earlier one stays readable; a store that overwrote would quietly make the chain unverifiable.
+  if (!depsAs.readSubjectRecord || !depsAs.writeSubjectRecord) return c.json({ ok: false, error: 'no vault is bound on this deployment' }, 503);
+  const key = runAssessmentRecordKey(rec.runRef);
+  const held = (await depsAs.readSubjectRecord(addressee, key).catch(() => null)) as SignedAssessmentV1[] | null;
+  const rows = Array.isArray(held) ? held : [];
+  if (rows.some((r) => r.digest === digest)) return c.json({ ok: true, stored: false, digest, note: 'this exact assessment is already held' });
+  const w = await depsAs.writeSubjectRecord(addressee, key, [...rows, signed]);
+  if (!w.ok) return c.json({ ok: false, error: w.error ?? 'the assessment could not be written' }, 502);
+  return c.json({ ok: true, stored: true, digest, held: rows.length + 1 });
 });
 
 // POST /harness/spans { session, addressee, runRef } — spec 381. The run as a firewalled trace: step names,

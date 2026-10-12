@@ -206,3 +206,44 @@ describe('a step’s substance reaches the asker’s inspector and nothing else'
     for (const s of v.steps) expect(s).not.toHaveProperty('args');
   });
 });
+
+// ── WHAT /harness/assess REFUSES, AND WHY EACH REFUSAL IS THE RIGHT ANSWER (spec 438 §5) ──────────────────
+//
+// The route's value is almost entirely in what it will not do. These are the three refusals, each of which a
+// reasonable person would be tempted to turn into a default, and each of which would make every later reader's
+// check meaningless if it were.
+describe('an assessment refuses rather than inventing what it judges', () => {
+  it('J2 — criteria stated AFTER the run are refused, not reordered', async () => {
+    const { validateAssessment } = await import('@agenticprimitives/evaluation');
+    const late = {
+      schema: 'apeval/AssessmentV1' as const,
+      subject: { runRef: 'r1', recordDigest: 'sha256:a', at: '2026-02-01T00:00:00Z' },
+      // Stated a month AFTER the run it judges: a verdict in search of premises.
+      criteria: { outcomeId: 'out_1', revision: 1, digest: 'sha256:c', statedAt: '2026-03-01T00:00:00Z' },
+      evaluator: { sa: '0xeva1', kind: 'human' as const },
+      results: [{ criterionId: 'c1', outcome: 'passed' as const, evidenceRefs: ['urn:ap:receipt:1'] }],
+      at: '2026-03-02T00:00:00Z',
+    };
+    const v = validateAssessment(late);
+    expect(v.ok).toBe(false);
+    expect(v.problems.join(' ')).toMatch(/criteria|before/i);
+  });
+
+  it('the criteria digest is the one the judging package computes, so every reader finds the same document', async () => {
+    const { outcomeCriteriaDigest } = await import('@agenticprimitives/evaluation');
+    const spec = { outcomeId: 'out_1', revision: 1, criteria: [{ criterionId: 'c1', kind: 'acceptance', statement: 'answered' }] };
+    // Stable across key order, and different for a different revision — the two properties an assessment's
+    // citation rests on.
+    expect(await outcomeCriteriaDigest(spec)).toBe(await outcomeCriteriaDigest({ revision: 1, criteria: spec.criteria, outcomeId: 'out_1' }));
+    expect(await outcomeCriteriaDigest({ ...spec, revision: 2 })).not.toBe(await outcomeCriteriaDigest(spec));
+  });
+
+  it('a run with no anchored digest cannot be judged — §13 would never be able to check the judgment', async () => {
+    // The route refuses before building anything. Mirrored here as the property it rests on: evidence status
+    // reports no anchor digest for a record whose provenance has not been exported.
+    const { evidenceStatusOf } = await import('@agenticprimitives/orchestration');
+    const ev = evidenceStatusOf({ ...record, export: undefined } as RunRecordV1);
+    expect(ev.integrity.anchorDigest).toBeUndefined();
+    expect(ev.integrity.state).toBe('unchecked');
+  });
+});

@@ -31,7 +31,7 @@
     "@agenticprimitives/coordination": "0.0.0-alpha.17",
     "@agenticprimitives/delegation": "1.0.0-alpha.34",
     "@agenticprimitives/edge-runtime": "0.0.0-alpha.14",
-    "@agenticprimitives/evaluation": "0.0.0-alpha.7",
+    "@agenticprimitives/evaluation": "0.0.0-alpha.8",
     "@agenticprimitives/fabric": "0.0.0-alpha.25",
     "@agenticprimitives/harness": "0.0.0-alpha.16",
     "@agenticprimitives/home": "0.0.0-alpha.25",
