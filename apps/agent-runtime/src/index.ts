@@ -535,6 +535,18 @@ export interface Env {
    *  `<handle>.<A2A_PUBLIC_BASE_DOMAIN>` → agent `<handle>.demo.agent`.
    *  Defaults to `impact-agent.io`. */
   A2A_PUBLIC_BASE_DOMAIN?: string;
+  /**
+   * THE LANES THIS DEPLOYMENT REACHES BY BINDING — `{"<host>":"<binding>"}` (ap-town's `lanes`, the same
+   * idea and the same reason). A Worker's subrequest to a hostname served by another Worker on its OWN
+   * Cloudflare account does not come back: it hangs and the edge answers 522. A deployment that sits on
+   * the same zone as its neighbours never meets this (its in-zone fetch is routed in-process), which is
+   * why faithnet reaches `scripture.faithnet.io` and imbnet — on `workers.dev`, with no zone of its own —
+   * could not, and said so as "its card answered 522".
+   *
+   * A host named here is called through the binding instead of the network. Unset ⇒ every fetch is a
+   * plain fetch, which is right for a deployment whose neighbours are not its account-mates.
+   */
+  REACH_LANES?: string;
   /** Spec 397 W4 — peer deployments whose app-admitted runs may route a step here (their a2a origins, comma-separated). */
   A2A_TRUSTED_ORIGINS?: string;
   /**
@@ -871,6 +883,36 @@ function detectInnerOpFailure(
     return { ok: false, revertReason: undefined, sendersSeen, matched: false };
   }
   return { ok: success, revertReason, sendersSeen, matched: true, ...(actualGasUsed !== undefined ? { actualGasUsed } : {}) };
+}
+
+/** The hostname of whatever a fetch was handed, lower-case; '' when it is not a URL. */
+export function hostOf(u: RequestInfo | URL): string {
+  try { return new URL(String(u instanceof Request ? u.url : u)).hostname.toLowerCase(); } catch { return ''; }
+}
+
+/**
+ * The BINDING that reaches `host`, when this deployment declares a lane for it (`REACH_LANES`).
+ *
+ * A Worker's subrequest to a hostname served by another Worker on its OWN Cloudflare account does not
+ * come back — the edge answers 522 — so an account-mate is called through a service binding instead of
+ * over the network. ap-town's manifest calls the same thing a `lane`, for the same reason. A deployment
+ * that shares a zone with its neighbours never meets this, because an in-zone fetch is routed in-process:
+ * that is why faithnet reaches `scripture.faithnet.io` and imbnet, on `workers.dev` with no zone of its
+ * own, reported "its card answered 522" (2026-10-12).
+ *
+ * Returns null when no lane names the host, when the binding is not bound here, or when `REACH_LANES`
+ * does not parse — and the caller then fetches over the network, which is right for a deployment whose
+ * neighbours are not its account-mates.
+ */
+export function laneFor(env: object, host: string): typeof fetch | null {
+  if (!host) return null;
+  let lanes: Record<string, string>;
+  try { lanes = JSON.parse(String((env as { REACH_LANES?: string }).REACH_LANES ?? '{}')) as Record<string, string>; } catch { return null; }
+  const binding = lanes[host];
+  if (!binding) return null;
+  const svc = (env as Record<string, unknown>)[binding] as { fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> } | undefined;
+  if (!svc?.fetch) { console.warn(`[lane] ${host} names the binding "${binding}", which is not bound here — fetching over the network instead`); return null; }
+  return ((u: RequestInfo | URL, init?: RequestInit) => svc.fetch(u, init)) as typeof fetch;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -4656,6 +4698,8 @@ app.post('/harness/ask', async (c) => {
         const zones = a2aBaseDomains(c.env);
         const reachFetch: typeof fetch = async (u, init) => {
           const host = (() => { try { return new URL(String(u instanceof Request ? u.url : u)).hostname.toLowerCase(); } catch { return ''; } })();
+          const lane = laneFor(c.env, host);
+          if (lane) return lane(u, init);
           if (host && zones.some((z) => host === z || host.endsWith(`.${z}`))) {
             // In-process first. A zone host this Worker does NOT serve (a service on its own custom domain in the
             // same zone — scripture.faithnet.io, bsb.faithnet.io) answers 404 here; THAT card lives on the network,
@@ -6446,7 +6490,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       // card ⇒ said so, in the receiver's words where it has any — never read locally instead (R3).
       // Spec 397 W4 — an app-admitted run has no session: the profile carries the forwarded app credential, and the
       // receiver accepts it when it names this deployment as a peer (`A2A_TRUSTED_ORIGINS` there) — refused in its words otherwise.
-      const hop = await sendSubjectAskOverWire({ ...(trace ? { traceparent: trace.traceparent, ...(trace.tracestate ? { tracestate: trace.tracestate } : {}) } : {}), cardUrl: (at as { cardUrl: string }).cardUrl, ...((at as { pinnedDigest?: string }).pinnedDigest ? { pinnedDigest: (at as { pinnedDigest?: string }).pinnedDigest! } : {}), profile, ...(session ? { session } : {}), fetch: (u, init) => fetch(u, init) });
+      const hop = await sendSubjectAskOverWire({ ...(trace ? { traceparent: trace.traceparent, ...(trace.tracestate ? { tracestate: trace.tracestate } : {}) } : {}), cardUrl: (at as { cardUrl: string }).cardUrl, ...((at as { pinnedDigest?: string }).pinnedDigest ? { pinnedDigest: (at as { pinnedDigest?: string }).pinnedDigest! } : {}), profile, ...(session ? { session } : {}), fetch: (u, init) => (laneFor(env, hostOf(u)) ?? fetch)(u, init) });
       if (!hop.ok) return { ok: false, via, refused: `${name ?? subject} could not be asked over the wire — ${hop.refused}` };
       envelope = hop.envelope as unknown as AskReplyEnvelopeV1;
       status = 200;

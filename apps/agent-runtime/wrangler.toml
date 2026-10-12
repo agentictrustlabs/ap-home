@@ -642,6 +642,12 @@ DEMO_SSO_AUD = "demo-sso"
 ALLOWED_ORIGINS = "https://imb-home.vercel.app,https://explorer.faithnet.io,https://demo-bible-ontology-faithnet.richardpedersen3.workers.dev,http://localhost:5175,http://127.0.0.1:5175,http://localhost:8795"
 A2A_PUBLIC_BASE_DOMAIN = "imb-runtime.richardpedersen3.workers.dev"
 A2A_SERVES_UNPUBLISHED_NAMES = "true"
+# THE LANES THIS ESTATE REACHES BY BINDING (ap-town calls the same thing a lane, for the same reason): a
+# Worker's subrequest to a hostname served by another Worker on its OWN Cloudflare account does not come
+# back, and the edge answers 522. faithnet never meets this because it shares a zone with its neighbours
+# and an in-zone fetch is routed in-process; imbnet has no zone, so an imbnet person engaging
+# scripture-resolver.svc read "its card answered 522" until this line existed (2026-10-12).
+REACH_LANES = '{"scripture.faithnet.io":"LANE_SCRIPTURE"}'
 # AKCS, tenant `imb` (adopted 2026-10-11) — the service MAC on the A2A→MCP hop is derived from the tenant
 # MAC root, which is what imb-vault verifies with. Declared here and not only on the deployment: a
 # `wrangler deploy --env imbnet` re-asserts this block, and the day the adoption lived only in a live
@@ -751,6 +757,12 @@ id = "42452b087c0a4f4e851a9b57121264c3"
 [[env.imbnet.services]]
 binding = "MCP"
 service = "imb-vault"
+
+# The lane above. The Scripture Agent is not this estate's Worker — it is a service on the chain that
+# imbnet's people engage by name, and it answers on an account-mate's custom domain.
+[[env.imbnet.services]]
+binding = "LANE_SCRIPTURE"
+service = "demo-bible-a2a-faithnet"
 
 # The public agent directory is the town's, read-only (ADR-0040) — the same binding faithnet reads.
 [[env.imbnet.services]]
