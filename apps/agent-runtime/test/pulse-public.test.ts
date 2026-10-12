@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { answerFromDays, evidenceFor, factsFor, identifierish, kindWords, publicPulseAsk, rootsAsked, rootsIn, subjectOf, subjectsNamed, windowOf, type PulseDayRecord } from '../src/pulse-public';
+import { answerFromDays, censusAsked, censusIn, censusKinds, evidenceFor, factsFor, identifierish, kindWords, publicPulseAsk, rootsAsked, rootsIn, subjectOf, subjectsNamed, windowOf, type PulseDayRecord } from '../src/pulse-public';
 
 const NOW = Date.parse('2026-10-11T12:00:00Z');
 const day = (d: string, rec: Partial<PulseDayRecord> = {}): { day: string; rec: PulseDayRecord } => ({ day: d, rec: { type: 'ap.town-pulse.v1', day: d, ...rec } });
@@ -314,5 +314,65 @@ describe('the town of names, answered in counts (spec 430)', () => {
     const old = [day('2026-10-11', { services: { naming: { samples: 12, up: 12 } } })];
     expect(rootsIn(old)).toEqual([]);
     expect(answerFromDays('how many names are registered', w, old).answer).toContain('No name count is recorded');
+  });
+});
+
+describe('the estates\' census, answered in counts (2026-10-12)', () => {
+  // The TOWN's record: one heartbeat per estate, each carrying that estate's own census.
+  const HB = (person: number, org: number, service: number, homes = 4) => ({ agents: { person, org, service }, homesActive24h: homes, runs: { completed: 15, failed: 0 } });
+  const NAMES = { total: 297, roots: [{ tld: 'me', kind: 'person', names: 'a person', count: 86 }, { tld: 'svc', kind: 'service', names: 'a service', count: 24 }] };
+  const w = windowOf('this week', NOW);
+  const found = [
+    day('2026-10-10', { estates: { faithnet: HB(78, 80, 50), imbnet: HB(0, 0, 0) }, names: NAMES }),
+    day('2026-10-11', { estates: { faithnet: HB(80, 82, 50) }, names: NAMES }),
+  ];
+
+  it('a census is the latest day PER ESTATE, summed across estates and never across days', () => {
+    expect(censusIn(found)).toEqual([
+      { estate: 'faithnet', day: '2026-10-11', agents: { person: 80, org: 82, service: 50 }, homesActive24h: 4 },
+      { estate: 'imbnet', day: '2026-10-10', agents: { person: 0, org: 0, service: 0 }, homesActive24h: 4 },
+    ]);
+    expect(censusKinds(censusIn(found))).toEqual(['org', 'person', 'service']);
+  });
+
+  it('"how many agents are in town" counts agents — not runs, which is what it used to answer', () => {
+    expect(subjectOf('how many agents are in town')).toBe('agents');
+    const a = answerFromDays('how many agents are in town', w, found);
+    expect(a.read).toBe(true);
+    expect(a.answer).toContain('agents in the town 212');            // 80 + 82 + 50 + 0 + 0 + 0
+    expect(a.answer).toContain('faithnet person 80');
+    expect(a.answer).toContain('imbnet last counted 2026-10-10');    // not carried as if it were today's
+    expect(a.answer).not.toMatch(/completed run/);
+  });
+
+  it('"how many people" has two true answers and gives both, each said for what it is', () => {
+    const a = answerFromDays('how many people do we have', w, found);
+    expect(a.answer).toContain('names 86');                          // the .me root
+    expect(a.answer).toContain('person agents in the town 80');      // the estates' census
+    expect(a.answer).toContain('not a count of names and not a count of people');
+  });
+
+  it('a kind word still needs a counting phrase: "the naming service" is not the service agents', () => {
+    const c = censusIn(found);
+    expect(censusAsked('is the naming service up', c)).toEqual([]);
+    expect(censusAsked('how many services do we have', c)).toEqual(['agents:service']);
+    expect(censusAsked('how many agents are in town', c)).toEqual(['agents']);
+  });
+
+  it('an estate reading its OWN record sees its own census under `heartbeat`', () => {
+    const mine = [{ day: '2026-10-11', rec: { type: 'ap.town-pulse.v1', day: '2026-10-11', estate: 'faithnet', heartbeat: HB(80, 82, 50) } as PulseDayRecord }];
+    expect(censusIn(mine)).toEqual([{ estate: 'faithnet', day: '2026-10-11', agents: { person: 80, org: 82, service: 50 }, homesActive24h: 4 }]);
+  });
+
+  it('a record with no census says so — absent, never zero', () => {
+    const bare = [day('2026-10-11', { services: { naming: { samples: 12, up: 12 } } })];
+    expect(censusIn(bare)).toEqual([]);
+    expect(answerFromDays('how many agents are in town', w, bare).answer).toContain('No estate census is recorded');
+  });
+
+  it('the census is evidence a composer may use, labelled for what it is', () => {
+    const items = evidenceFor(factsFor('how is the town doing', w, found), found, 'stated');
+    const e = items.find((x) => x.tool === 'pulse.estates.census');
+    expect((e!.result as { note: string }).note).toContain('not a count of people');
   });
 });

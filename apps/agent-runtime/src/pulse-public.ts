@@ -136,6 +136,9 @@ export interface PulseNamedThing {
   /** Facts in the order a reader wants them; every value came out of a record. */
   facts: Record<string, string | number>;
   days: string[];
+  /** Opens the statement in place of "<name> is <what>." — for a subject that is a TALLY and not a thing
+   *  with a name, where "agents is the census each estate reports" is not a sentence anyone would write. */
+  lead?: string;
 }
 
 /** A resource's reading, from whichever shape it came in: the record is flat, the live view nests. */
@@ -313,6 +316,37 @@ export function factsAbout(name: string, found: Array<{ day: string; rec: PulseD
   const facts: Record<string, string | number> = {};
   const days: string[] = [];
   let what = '';
+  // THE CENSUS — `agents` for every kind, `agents:<kind>` for one. Summed across ESTATES on each estate's
+  // latest day, never across days (see `censusIn`), and the day each estate was counted on is said.
+  if (key === 'agents' || key.startsWith('agents:')) {
+    const want = key.startsWith('agents:') ? key.slice('agents:'.length) : null;
+    const census = censusIn(found).filter((c) => !want || typeof c.agents[want] === 'number');
+    if (!census.length) return null;
+    const asOf = census.reduce((a, b) => (a.day > b.day ? a : b)).day;
+    const f: Record<string, string | number> = {};
+    let total = 0;
+    for (const c of census) {
+      const kinds = want ? [want] : Object.keys(c.agents).sort();
+      for (const k of kinds) {
+        const n = c.agents[k] ?? 0;
+        f[want ? c.estate : `${c.estate} ${k}`] = n;
+        total += n;
+      }
+      // An estate last counted on an earlier day is said so, rather than quietly carried as if it were today's.
+      if (c.day !== asOf) f[`${c.estate} last counted`] = c.day;
+    }
+    f[want ? `${want} agents in the town` : 'agents in the town'] = total;
+    f['counted on'] = asOf;
+    return {
+      name: key,
+      what: 'what the estates report as their own census',
+      lead: want
+        ? `The ${want} agents the estates report — a count of AGENTS, which is not a count of names and not a count of people:`
+        : 'The agents the estates report as their own census, by estate and kind:',
+      facts: f,
+      days: [...new Set(census.map((c) => c.day))].sort(),
+    };
+  }
   // A ROOT, BY ITS COUNT — taken from the latest day that recorded it, never summed across days (see `rootsIn`).
   if (key.startsWith('.')) {
     const root = rootsIn(found).find((r) => r.tld === key.slice(1));
@@ -385,7 +419,13 @@ export interface PulseFacts {
 export function factsFor(question: string, window: PulseWindow, found: Array<{ day: string; rec: PulseDayRecord }>): PulseFacts {
   // What the question named outright, PLUS the roots it asked the count of by their kind ("how many people").
   // A kind word is not a name in the records, so it could never be matched by `subjectsNamed` alone.
-  const named = [...new Set([...subjectsNamed(question, found), ...rootsAsked(question, rootsIn(found)).map((t) => `.${t}`)])];
+  // A QUESTION MAY HAVE TWO TRUE ANSWERS and deserves both: "how many people" is the `.me` root's 86 names
+  // AND the estates' 80 person agents. They are different facts; reporting one as the other is the error.
+  const named = [...new Set([
+    ...subjectsNamed(question, found),
+    ...rootsAsked(question, rootsIn(found)).map((t) => `.${t}`),
+    ...censusAsked(question, censusIn(found)),
+  ])];
   const subjects = named.map((n) => factsAbout(n, found)).filter((x): x is PulseNamedThing => x !== null);
   const known = new Set(subjects.map((s) => s.name));
   const knownNames = namesIn(found);
@@ -407,7 +447,7 @@ export function factsFor(question: string, window: PulseWindow, found: Array<{ d
 /** One subject, stated. The deterministic fallback, and the shape the composer is given as evidence. */
 export function statedSubject(s: PulseNamedThing): string {
   const parts = Object.entries(s.facts).map(([k, v]) => `${k} ${typeof v === 'number' ? (Number.isInteger(v) ? v.toLocaleString('en-US') : v) : v}`);
-  return `${s.name} is ${s.what}. ${parts.join('; ')}. Read from ${s.days.length === 1 ? 'the record for' : 'the records for'} ${s.days.join(', ')}.`;
+  return `${s.lead ?? `${s.name} is ${s.what}.`} ${parts.join('; ')}. Read from ${s.days.length === 1 ? 'the record for' : 'the records for'} ${s.days.join(', ')}.`;
 }
 
 export interface PulseAnswer {
@@ -489,6 +529,16 @@ export function answerFromDays(question: string, window: PulseWindow, found: Arr
     if (per.length) parts.push(`Cost per completed run, last recorded: ${usd(per[per.length - 1]!.microUsd!)}${per[per.length - 1]!.infraBasis ? ` (infrastructure on the ${per[per.length - 1]!.infraBasis} basis)` : ''}.`);
   }
 
+  if (subject === 'agents' || subject === 'overall') {
+    const census = censusIn(found);
+    if (!census.length) { if (subject === 'agents') parts.push(`No estate census is recorded for ${window.words}.`); }
+    else {
+      const asOf = census.reduce((a, b) => (a.day > b.day ? a : b)).day;
+      const total = census.reduce((n, c) => n + Object.values(c.agents).reduce((m, x) => m + x, 0), 0);
+      parts.push(`Agents the estates report, counted on ${asOf}: ${total.toLocaleString('en-US')} across ${plural(census.length, 'estate')} — ${census.map((c) => `${c.estate} ${Object.entries(c.agents).sort(([a], [b]) => a.localeCompare(b)).map(([k, n]) => `${n.toLocaleString('en-US')} ${k}`).join(', ')}`).join('; ')}. A count of agents, not of names and not of people.`);
+    }
+  }
+
   if (subject === 'names' || subject === 'overall') {
     const rs = rootsIn(found);
     const counted = rs.filter((r) => r.count > 0);
@@ -535,6 +585,8 @@ export function evidenceFor(facts: PulseFacts, found: Array<{ day: string; rec: 
     }
   }
   if (facts.unknown.length) items.push({ tool: 'pulse.record.unknown', result: { named: facts.unknown, note: 'the records know nothing by these names' } });
+  const census = censusIn(found);
+  if (census.length) items.push({ tool: 'pulse.estates.census', result: { census, note: 'how many AGENTS each estate holds, as the estate reported it on the day given. A running total: never added across days, and added across estates only because a different estate is a different set of Smart Agents. Not a count of names and not a count of people.' } });
   const roots = rootsIn(found);
   if (roots.length) items.push({ tool: 'pulse.names.roots', result: { roots, total: roots.reduce((n, r) => n + r.count, 0), note: 'a count of NAMES under each root, as of the day given; counts are running totals and are never added across days, and no name or owner is recorded' } });
   if (facts.daysMissing.length) items.push({ tool: 'pulse.window.gaps', result: { missing: facts.daysMissing, note: 'days in the window with no record at all' } });
