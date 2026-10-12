@@ -156,3 +156,53 @@ describe('provenanceViewOf — spec 418 §3', () => {
     expect((await provenanceViewOf({}, ALICE, record)).operational).toBeUndefined();
   });
 });
+
+// ── THE SUBSTANCE OF A STEP, AND THE FIREWALL IT MUST NOT CROSS (spec 438 §13) ────────────────────────────
+//
+// The inspector showed everything ABOUT a run and nothing OF it: a step rendered as a tool id, a receipt
+// digest and a duration, with what it asked for and what came back both absent. Adding them is right for the
+// ASKER'S OWN view and wrong for the durable record — `provenanceOf` is content-free on purpose, because a
+// counterparty's address and a payment memo must not ride into every vault copy and every PROV graph of a
+// run. These two tests are the pair: content in the view, no content in the record.
+describe('a step’s substance reaches the asker’s inspector and nothing else', () => {
+  const chatty: RunRecordV1 = {
+    ...record,
+    steps: [{
+      stepRef: 's0', toolId: 'peoplegroup.count',
+      args: { countryCode: 'KE', list: 'jp-least-reached', memo: 'x'.repeat(400) },
+      ok: true,
+      result: { count: 97, source: 'joshua-project', rows: [{ name: 'a' }, { name: 'b' }], invoked: { executor: 'gc-people-groups', intent: 'count_people_groups' } },
+    }],
+  };
+
+  it('the view carries the arguments, a summary of the result, and the executor it reached', async () => {
+    const v = await provenanceViewOf({ CHAIN_ID: '34348' }, ALICE, chatty);
+    const s = v.steps[0]! as typeof v.steps[0] & { args?: Record<string, unknown>; output?: Record<string, unknown>; invoke?: { executor: string; intent: string } };
+    expect(s.args).toMatchObject({ countryCode: 'KE', list: 'jp-least-reached' });
+    expect(s.output).toBeDefined();
+    // The executor is the one fact that says WHICH other server this run reached.
+    expect(s.invoke).toMatchObject({ executor: 'gc-people-groups', intent: 'count_people_groups' });
+  });
+
+  it('a long argument is truncated WITH its true length, never silently cut', async () => {
+    const v = await provenanceViewOf({ CHAIN_ID: '34348' }, ALICE, chatty);
+    const memo = String(((v.steps[0] as { args?: Record<string, unknown> }).args ?? {}).memo ?? '');
+    expect(memo).toMatch(/\(400 chars\)$/);
+    expect(memo.length).toBeLessThan(300);
+  });
+
+  it('THE DURABLE PROVENANCE STAYS CONTENT-FREE — the view adds it, the record never carries it', async () => {
+    const { provenanceOf } = await import('@agenticprimitives/orchestration');
+    const durable = JSON.stringify(await provenanceOf(chatty, ALICE));
+    expect(durable).not.toContain('jp-least-reached');
+    expect(durable).not.toContain('joshua-project');
+    expect(durable).not.toContain('countryCode');
+    // And the view it is built from is a copy: adding to the view must not mutate the projection.
+    expect(JSON.parse(durable).steps[0]).not.toHaveProperty('args');
+  });
+
+  it('a step the record does not hold is left exactly as the projection made it', async () => {
+    const v = await provenanceViewOf({ CHAIN_ID: '34348' }, ALICE, { ...chatty, steps: [] });
+    for (const s of v.steps) expect(s).not.toHaveProperty('args');
+  });
+});

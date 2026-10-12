@@ -8,7 +8,7 @@ import { bundleDigest, ZERO32 } from './receipt-anchor.js';
 import { intentDigest } from '@agenticprimitives/delegation';
 import type { Hex, Address } from 'viem';
 import { estateIdOf } from '@agenticprimitives/estate-projection';
-import { engagementsOf, assertFirewalled, assertMetricsFirewalled, metricsOf, provenanceOf, runProvenanceRecordKey, spansOf, type RunRecordV1, type RunExportReportV1, type RunMetricsV1, type SpanV1 } from '@agenticprimitives/orchestration';
+import { engagementsOf, assertFirewalled, assertMetricsFirewalled, metricsOf, provenanceOf, runProvenanceRecordKey, spansOf, summarizeOutput, type RunRecordV1, type RunExportReportV1, type RunMetricsV1, type SpanV1 } from '@agenticprimitives/orchestration';
 import { agentIri, projectHarnessRunProvenance, toJsonLd, toProvN, type ProvenanceRecordV1, projectPublicProvenance, type PublicProvenanceProjection } from '@agenticprimitives/provenance';
 import { RUN_PROVENANCE_CONTEXT, RUN_MEASURES_CONTEXT } from '@agenticprimitives/ontology';
 import { measureRun, measuresToJsonLd, runMeasuresRecordKey } from '@agenticprimitives/evaluation';
@@ -66,13 +66,53 @@ export async function provenanceRecordOf(env: Pick<RunExportEnv, 'CHAIN_ID' | 'A
 /** Spec 398 §5.2 — THE INSPECTOR'S VIEW: the same structural record (`RunProvenanceV1`), as records rather than as a
  *  graph — outcome, artifacts, decisions, per-step authority, effects, bill — for a surface that orders it
  *  artifact-first. Never the arguments, results or words: the firewall is the same one the graph passes. */
+/**
+ * WHAT A STEP ASKED FOR AND WHAT CAME BACK — spec 438 §13, for the ASKER'S OWN inspector and nowhere else.
+ *
+ * This deliberately does NOT live in `provenanceOf`. That projection is the durable, exportable, graph-shaped
+ * record, and it is content-free on purpose: a counterparty's address, a payment memo and an organization's
+ * name must not ride into every vault copy and every PROV graph of a run (its own test asserts exactly that).
+ * The inspector is a different read with a different reader — the person whose run it was, holding their own
+ * record — so the content is added HERE, at the view, and goes no further.
+ *
+ * Bounded even so. The arguments are the planner's own and small by construction, but "by construction" is not
+ * a guarantee: a pasted document reaching an argument would otherwise be copied into every inspector read.
+ * Long strings are truncated with their true length said; a nested value is replaced by its shape. The result
+ * is SUMMARISED by the same rule the flow trace uses — counts, flags and sources, never the rows, because the
+ * rows are the artifact's job and belong behind the offload threshold.
+ */
+function boundedArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args).slice(0, 24)) {
+    if (typeof v === 'string') out[k] = v.length > 240 ? `${v.slice(0, 240)}\u2026 (${v.length} chars)` : v;
+    else if (v === null || typeof v === 'number' || typeof v === 'boolean') out[k] = v;
+    else if (Array.isArray(v)) out[k] = `array of ${v.length}`;
+    else if (typeof v === 'object') out[k] = `object{${Object.keys(v as object).slice(0, 8).join(',')}}`;
+    else out[k] = String(v);
+  }
+  return out;
+}
+
 export async function provenanceViewOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, agent: string, record: RunRecordV1): Promise<Omit<Awaited<ReturnType<typeof provenanceOf>>, 'modelCalls'> & { modelCalls?: Array<NonNullable<Awaited<ReturnType<typeof provenanceOf>>['modelCalls']>[number] & { stepRef?: string; failed?: boolean }>; chainId?: number; bill?: RunRecordV1['bill']; canceled?: RunRecordV1['canceled']; plannedSteps?: number; operational?: RunRecordV1['operational']; work?: RunRecordV1['work'] }> {
   const view = await provenanceOf(record, agent);
   const chainId = Number(env.CHAIN_ID);
   // Spec 418 §3 — the inspector nests a skill's model call under its STEP: the view's calls are the record's, in order,
   // so each keeps the step it names and whether it failed (ids and a flag; the graph projection is unchanged).
   const calls = view.modelCalls?.map((m, i) => { const r = record.modelCalls?.[i]; return { ...m, ...(r?.stepRef ? { stepRef: r.stepRef } : {}), ...(r?.failed ? { failed: true } : {}) }; });
-  return { ...view, ...(calls ? { modelCalls: calls } : {}), ...(Number.isFinite(chainId) && chainId > 0 ? { chainId } : {}), ...(record.bill ? { bill: record.bill } : {}), ...(record.canceled ? { canceled: record.canceled } : {}), plannedSteps: record.plan.steps.length, ...(record.operational ? { operational: record.operational } : {}), ...(record.work ? { work: record.work } : {}) };
+  // Spec 438 §13 — the step's own substance, for the asker's inspector. Joined by `stepRef` from the record
+  // this view was built from, so a step the projection carries but the record does not is left alone.
+  const byRef = new Map(record.steps.map((s) => [s.stepRef, s]));
+  const steps = view.steps.map((st) => {
+    const s = byRef.get(st.stepRef);
+    if (!s) return st;
+    const output = summarizeOutput(s.result);
+    return {
+      ...st,
+      ...(Object.keys(s.args ?? {}).length ? { args: boundedArgs(s.args) } : {}),
+      ...(output && Object.keys(output).length ? { output } : {}),
+    };
+  });
+  return { ...view, steps, ...(calls ? { modelCalls: calls } : {}), ...(Number.isFinite(chainId) && chainId > 0 ? { chainId } : {}), ...(record.bill ? { bill: record.bill } : {}), ...(record.canceled ? { canceled: record.canceled } : {}), plannedSteps: record.plan.steps.length, ...(record.operational ? { operational: record.operational } : {}), ...(record.work ? { work: record.work } : {}) };
 }
 /** Spec 414 A2 — THE RUN'S MEASUREMENTS: numbers from its trace alone (the same structural view the graph is made from,
  *  plus the record's plan size, bill and replans), as one DQV record under the published context. Descriptive; no words. */

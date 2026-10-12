@@ -508,6 +508,14 @@ export interface RunInspectorStep {
   /** Spec 414 A1 — the SKILL.md contract that governed this step, and harness capabilities it engaged. */
   skill?: { id: string; version: string; contractDigest: string };
   engagements?: Array<{ capability: string; effect: string; version?: string }>;
+  /** Spec 426 — WHICH EXECUTOR THIS STEP REACHED, when it called one: the executor's id and the intent it was
+   *  asked for. A run that crossed into another agent's MCP server used to render as a tool id and a duration,
+   *  with the server it reached nowhere in the record a person could read. */
+  invoke?: { executor: string; intent: string; receipt?: Record<string, unknown> };
+  /** Spec 438 §13 — what the step ASKED FOR and what CAME BACK, bounded. Present only on the asker's own
+   *  inspector read: the durable provenance is content-free on purpose, and this is added at the view. */
+  args?: Record<string, unknown>;
+  output?: Record<string, unknown>;
 }
 export interface RunInspectorRecord {
   runRef: string; endedAt: string; agent: string; asker?: string; outcome: string; chainId?: number;

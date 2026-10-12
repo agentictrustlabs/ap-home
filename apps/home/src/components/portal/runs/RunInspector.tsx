@@ -121,6 +121,28 @@ export function RunInspector({ token, addressee, runRef, goal, open = true }: { 
               {/* Spec 410 §2 — the one word the receipt attests, and the provider's reference. "confirmed" alone means read back. */}
               {s.observation ? ` · ${ATTESTS[s.observation.outcome]}${s.observation.providerRef ? ` (${short(s.observation.providerRef, 18)})` : ''}` : ''}
               {s.receiptDigest ? ` · receipt ${short(s.receiptDigest)}` : ''}
+              {/* WHAT THE STEP ASKED FOR, WHAT CAME BACK, AND WHO IT REACHED (spec 438 §13 / 426).
+                  The inspector showed everything ABOUT a run and nothing OF it: a step that asked how many
+                  unreached people groups are in Kenya rendered as a tool id, a receipt digest and a duration,
+                  with the country, the number and the MCP server it reached all absent. A reader cannot check
+                  a run whose substance is not in it. Bounded at the view: counts, flags and sources, never the
+                  rows — the rows are the artifact's, listed above. */}
+              {s.invoke && (
+                <div style={{ opacity: 0.75, marginTop: 2 }}>
+                  reached executor <strong>{s.invoke.executor}</strong> for <code>{s.invoke.intent}</code>
+                </div>
+              )}
+              {s.args && (
+                <div style={{ opacity: 0.75, marginTop: 2 }}>
+                  asked: {Object.entries(s.args).map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(' · ')}
+                </div>
+              )}
+              {s.output && (
+                <div style={{ opacity: 0.75, marginTop: 2 }}>
+                  came back: {Object.entries(s.output).map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(' · ')}
+                  <span style={{ opacity: 0.7 }}> — a summary; the rows, when any were kept, are under artifacts above</span>
+                </div>
+              )}
             </span>
           </div>
         );
