@@ -146,6 +146,19 @@ const cases: TruthCaseV1[] = [
     ],
   },
   {
+    id: 'registry-agent-not-the-web',
+    incident: '2026-10-12: “how many unreached people groups are there in india” answered from Web · Joshua Project in the Home, while people-groups.svc — the registered agent that serves the subject — was never engaged. The same sentence through an app-scoped ask (Explorer) reached it, because the app narrowed the tools.',
+    question: 'how many unreached people groups are there in india',
+    probes: {},
+    run: ask('alice', 'how many unreached people groups are there in india'),
+    checks: [
+      answered(),
+      evidenceFromTool('engagement.agent.invoke'),
+      (o) => (o.evidence.some((e) => e.toolId === 'web.search' || /^mcp\./.test(String(e.toolId))) ? 'the answer was taken from the web or a connector instead of the registered agent that serves the subject' : null),
+      (o) => (/\d/.test(o.text) ? null : 'the engaged agent answers with a figure; none is in the prose'),
+    ],
+  },
+  {
     id: 'payee-is-a-treasury-not-a-person',
     incident: '2026-09-04: “send alice 20 USDC” refused against her PERSON agent (0 USDC) — and earlier, a payment EXECUTED from a person SA while 7 treasuries sat untouched. Type was derived from a name.',
     question: 'send nathan 1 usdc',
