@@ -35,8 +35,16 @@ const csrf = (await j(csrfRes)) as { token?: string };
 const H = { 'content-type': 'application/json', origin: HOME, cookie: (csrfRes.headers.get('set-cookie') ?? '').split(';')[0] ?? '', 'x-csrf-token': csrf.token ?? '' };
 const assess = (body: Record<string, unknown>) => fetch(`${HOME}/a2a/harness/assess`, { method: 'POST', headers: H, body: JSON.stringify({ session: token, addressee: agent, runRef, results, ...body }) }).then(j);
 
-// PHASE ONE — what the server would store, and what to sign. Evidence refs are the run's receipt digests:
-// the server tells us the subject; the verdict rests on the receipts the run left.
+// THE EVIDENCE A VERDICT RESTS ON: the run's own receipts, by digest. A `passed` or `failed` that cites nothing
+// is refused by the validator, and rightly — a verdict with no evidence is an opinion with a signature on it.
+// Read from the run's provenance so the refs are the run's and not this script's.
+const prov = await fetch(`${HOME}/a2a/harness/provenance`, { method: 'POST', headers: H, body: JSON.stringify({ session: token, addressee: agent, runRef, format: 'record' }) }).then(j);
+const receipts = ((prov.record as { steps?: Array<{ receiptDigest?: string }> } | undefined)?.steps ?? []).map((st) => st.receiptDigest).filter((d): d is string => typeof d === 'string' && d.startsWith('0x'));
+if (!receipts.length) { console.error(`run ${runRef} left no receipt digest to cite; nothing to rest a verdict on`); process.exit(1); }
+for (const r of results) if (r.outcome === 'passed' || r.outcome === 'failed') r.evidenceRefs = receipts.map((d) => `urn:ap:receipt:${d}`);
+console.log(`citing ${receipts.length} receipt(s): ${receipts.map((d) => d.slice(0, 12) + '…').join(', ')}`);
+
+// PHASE ONE — what the server would store, and what to sign.
 const prepared = await assess({});
 if (prepared.ok !== true) { console.error('prepare refused:', JSON.stringify(prepared).slice(0, 400)); process.exit(1); }
 const a = prepared.assessment as { subject: { runRef: string; recordDigest: string; at: string }; criteria: { outcomeId: string; revision: number; digest: string; statedAt: string }; at: string };

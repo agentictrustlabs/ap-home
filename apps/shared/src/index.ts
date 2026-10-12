@@ -44,8 +44,15 @@ export const APP_OWN_NAMESPACE_READ_SCOPES = ['vault:newcity:*', 'vault:family:*
  *  grounded answer impossible to demonstrate. */
 export const APP_OWN_NAMESPACE_SEED_SCOPES = ['vault:family:*', 'vault:field:*', 'vault:cardroom.*'] as const;
 
+/** Spec 438 §5 — a judgment of a run, stored BESIDE it. ADDITIVE, not required (the household precedent in
+ *  interactions-do.ts): a grant issued before this keeps doing everything it did and cannot write an
+ *  assessment until re-issued, which is what the evaluator is told. Written through the agent's own grant,
+ *  never a caller's; the runtime has already verified the evaluator's signature before it writes. The
+ *  canonical home is Ring 0's `interactionsGrantScopes` (fabric); this is the extension that ships today. */
+export const APP_ASSESSMENT_SCOPES = ['vault:run.assessment:*'] as const;
+
 /** The extension both apps append to the core, as the grant builder takes it — the ONE list. */
 export const INTERACTIONS_APP_SCOPES: ReadonlyArray<RecordScopeSpec> = [
   { resources: [...APP_COORDINATION_READ_SCOPES, ...APP_OWN_NAMESPACE_READ_SCOPES], ops: ['read'] },
-  { resources: [...APP_OWN_NAMESPACE_SEED_SCOPES], ops: ['read', 'write'] },
+  { resources: [...APP_OWN_NAMESPACE_SEED_SCOPES, ...APP_ASSESSMENT_SCOPES], ops: ['read', 'write'] },
 ];
