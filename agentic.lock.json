@@ -274,8 +274,8 @@
         "treasury-steward": "0x00f5b03b5724864c5b8edf11048baa6693b520647594997bbffc2fa41391fc0e",
         "bookkeeper": "0xce101b9c3ba2df0ae0a969a1d058a34727a581a5a848d509f617eae68bbde219",
         "org-steward": "0xf00d3aef88f5d6a6c3e4021d714fbee0851e15ac5bfe1df5dbeb9d77f459fa52",
-        "town-steward": "0x981d661f2efc5b3cc84455b1a241f6461fb89e9a8deff3ffdf11572cfe28c13a",
-        "estate-steward": "0x7976e949af5cbfff88e0d01c844af2d514a1c8426c430711cf43b583b8b37650"
+        "town-steward": "0x3c800c74eeae54cc2f0eb0123907c0d5bc7953f28701f902ad574fe0857b8883",
+        "estate-steward": "0xd0547e51cd52cf0ce86904c18ec6b43dd7a05c665f9a8d5989b1e673495b1195"
       }
     },
     "capabilityVocabulary": {
