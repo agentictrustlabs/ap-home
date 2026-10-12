@@ -11,7 +11,7 @@
  * credential (`persona-sign`); the judge's account validates it by ERC-1271, so nothing is approved on chain and
  * nothing is spent. Re-running mints a FRESH key and wire; the old ones stay valid until they expire or are revoked.
  */
-import { buildCaveat, encodeAllowedTargetsTerms, encodeAllowedMethodsTerms, encodeTimestampTerms, encodeValueTerms, hashDelegation, ROOT_AUTHORITY, type Delegation } from '@agenticprimitives/delegation';
+import { buildCaveat, encodeAllowedTargetsTerms, encodeAllowedMethodsTerms, encodeTimestampTerms, hashDelegation, ROOT_AUTHORITY, type Delegation } from '@agenticprimitives/delegation';
 import { skillSelector } from '@agenticprimitives/a2a';
 import { CONTRACTS } from '@agenticprimitives/contracts/deployments/faithchain';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
@@ -42,7 +42,10 @@ const d: Delegation = {
   delegator: judge, delegate: signer.address.toLowerCase() as Address, authority: ROOT_AUTHORITY, salt, signature: '0x',
   caveats: [
     buildCaveat(CONTRACTS.timestampEnforcer as Address, encodeTimestampTerms(0, validUntil)),
-    buildCaveat(CONTRACTS.valueEnforcer as Address, encodeValueTerms(0n)),
+    // NO VALUE CAVEAT, on purpose. A judgment spends nothing, and the off-chain caveat evaluator refuses a value
+    // caveat it is handed no value for ("context-required") rather than treat it as inert — the first wire minted
+    // here carried value(0) out of habit and every judgment was refused for it. Target + method + window is the
+    // whole of what an assessment wire pins.
     // The judge acts only FOR ITSELF, and only to issue assessments. Both pins are what the runtime checks.
     buildCaveat(CONTRACTS.allowedTargetsEnforcer as Address, encodeAllowedTargetsTerms([judge])),
     buildCaveat(CONTRACTS.allowedMethodsEnforcer as Address, encodeAllowedMethodsTerms([skillSelector('assessment.issue')])),
