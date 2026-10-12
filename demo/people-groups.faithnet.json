@@ -41,16 +41,18 @@
         "peoplegroup.count",
         "peoplegroup.measures.list"
       ]
-    }
+    },
+    "mcpKeyConfigured": true,
+    "mcpVerifiedAt": "2026-10-12T15:58:00Z"
   },
   "charteredAt": "2026-10-12T12:22:10Z",
   "todo": [
-    "siteUrl is the one name record not written: its predicate is not active on this estate's ontology registry (`PredicateNotActive`), the same queue atl:focusAreas / atl:languages / atl:regions are in.",
-    "wrangler secret put GC_API_KEY on demo-gc-pg (richcanvas) \u2014 the key lives on the Worker, never in the agent or its playbook. Until it is set the MCP fails closed with `{error}`, never a table of zeros."
+    "siteUrl (https://global.church) is the one name record not written. It reverted PredicateNotActive() \u2014 selector 0x898efc7c, confirmed \u2014 because this estate's ontology registry has not activated that predicate; same queue as atl:focusAreas / atl:languages / atl:regions. The governor runs packages/contracts/script/AddDiscoveryFacetPredicates.s.sol in agenticprimitives. It is INFORMATIONAL only: nothing resolves through siteUrl, and a2aEndpoint + mcpEndpoint both landed."
   ],
   "notes": [
     "CHARTERING LEAVES THREE THINGS UNDONE, and `charter-service.mts` now does two of them: the Home's `related-orgs` link (without it the agent is absent from its steward's pulldown) and the vault key bind (without it every record at the agent is `vault_key_unauthorized`, its archetype assignment and playbook included). The third \u2014 buying the name on a priced root \u2014 is `buy-name.mts`.",
     "`service.create` is idempotent on the agent: the address derives from (custodian, parent, label). `--relink` re-runs it only to recover the stewardship wire, which lives in the act's result and nowhere else.",
-    "Ten SHQ, once: the treasury went 988 \u2192 978. `registry.owner(node)` is what says a name is bought \u2014 never `resolveName`, which reads the `addr` record an unpresented name does not have."
+    "Ten SHQ, once: the treasury went 988 \u2192 978. `registry.owner(node)` is what says a name is bought \u2014 never `resolveName`, which reads the `addr` record an unpresented name does not have.",
+    "GC_API_KEY was ALREADY set on demo-gc-pg (richcanvas) and answering \u2014 the original todo was stale and I repeated it unchecked. Re-set 2026-10-12 with the owner's current key and verified: count_people_groups IN returns 6 rows (jp-entries 2263, jp-least-reached 2033, jp-frontier 1701), isError false. The richcanvas Cloudflare credential is named in demo-gc-pg/wrangler.toml's own header comment: ap-discovery/apps/demo-discovery-connector/.env.richcanvas.local \u2014 the default login reaches faithnet-town only."
   ]
 }
