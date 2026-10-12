@@ -38,7 +38,7 @@
     "@agenticprimitives/related-agents": "0.0.0-alpha.28",
     "@agenticprimitives/runtime-member": "0.0.0-alpha.12",
     "@agenticprimitives/situations": "0.0.0-alpha.16",
-    "@agenticprimitives/treasury-service-agent": "0.0.0-alpha.18",
+    "@agenticprimitives/treasury-service-agent": "0.0.0-alpha.20",
     "@agenticprimitives/types": "1.0.0-alpha.32",
     "@agenticprimitives/vault": "0.0.0-alpha.5",
     "@agenticprimitives/verifiable-credentials": "0.0.0-alpha.29",
