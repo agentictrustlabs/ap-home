@@ -50,13 +50,24 @@ async function stewardshipWire(agent: Address): Promise<Record<string, unknown>>
 
 const orgs = ((await j(await fetch(`${HOME}/connect/related-orgs?surface=any`, { headers: auth }))).orgs ?? []) as Array<{ orgAgent: string; orgName: string; relationship: string }>;
 const has = (sa: string) => orgs.some((o) => o.orgAgent.toLowerCase() === sa.toLowerCase() && o.relationship === 'steward');
+/**
+ * FORCE=1 re-mints the wire over a link that already claims `steward`.
+ *
+ * A link's WORD is not its wire. `charter-service.mts` cached the stewardship delegation that
+ * `service.create` returns, whose signature is the ERC-1271 approved-hash branch (`0x03`) — valid only for
+ * the digest the agent approved in its own genesis userOp. Re-running the charter mints a fresh salt, so the
+ * cached wire names a digest nobody ever approved: the link reads `steward`, `isSteward` fails on chain, and
+ * every steward-gated call answers "only the agent's custodian may…" while the projection insists otherwise.
+ * Skipping on the word alone cannot repair that, and a link that looks right is worse than one that is absent.
+ */
+const FORCE = process.env.FORCE === '1';
 // An org and the service under it (ligonier), or a service chartered straight under the person (the coach).
 const agents: Array<[Address, string, string, Address]> = note.org
   ? [[note.org.sa, note.org.name, 'org', ME], [note.service.sa, note.service.name, 'service', note.org.sa]]
   : [[note.service.sa, note.service.name, 'service', ME]];
 for (const [agent, name, kind, parent] of agents) {
   const sa = agent.toLowerCase() as Address;
-  if (has(sa)) { console.log(`· ${name} ${sa}: already a steward link`); continue; }
+  if (has(sa) && !FORCE) { console.log(`· ${name} ${sa}: already a steward link (FORCE=1 to re-mint the wire)`); continue; }
   const wire = await stewardshipWire(sa);
   const r = await j(await fetch(`${HOME}/connect/related-orgs`, { method: 'POST', headers: auth, body: JSON.stringify({
     person: ME, orgAgent: sa, orgName: name, purpose: kind === 'service' ? 'service' : 'organization', requestedBy: 'record-service-stewardship',

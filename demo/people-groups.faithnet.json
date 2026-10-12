@@ -29,13 +29,24 @@
     "recordsNotWritten": [
       "siteUrl"
     ],
-    "vaultKeyBound": true
+    "vaultKeyBound": true,
+    "archetype": {
+      "context": "agentic-trust",
+      "id": "people-group-catalog",
+      "archetypeId": "skill:archetypes/people-group-catalog",
+      "version": "1.0.0",
+      "digest": "0xefae086f403dc24d0498aa2ca729f2c18d199e51afdf8a855bafdce2fc6db31a",
+      "assignedAt": "2026-10-12T13:05:00Z",
+      "tools": [
+        "peoplegroup.count",
+        "peoplegroup.measures.list"
+      ]
+    }
   },
   "charteredAt": "2026-10-12T12:22:10Z",
   "todo": [
-    "siteUrl is the one name record not written: its predicate is not active on this estate's ontology registry (`PredicateNotActive`), the same queue atl:focusAreas / atl:languages / atl:regions are in. Nothing else is outstanding on the name.",
-    "assign an archetype on the Playbook page if this agent should run one (People-Group Catalog is the matching one); the bare harness is a valid state.",
-    "wrangler secret put GC_API_KEY on demo-gc-pg (richcanvas) \u2014 the key lives on the Worker, never in the agent or its playbook"
+    "siteUrl is the one name record not written: its predicate is not active on this estate's ontology registry (`PredicateNotActive`), the same queue atl:focusAreas / atl:languages / atl:regions are in.",
+    "wrangler secret put GC_API_KEY on demo-gc-pg (richcanvas) \u2014 the key lives on the Worker, never in the agent or its playbook. Until it is set the MCP fails closed with `{error}`, never a table of zeros."
   ],
   "notes": [
     "CHARTERING LEAVES THREE THINGS UNDONE, and `charter-service.mts` now does two of them: the Home's `related-orgs` link (without it the agent is absent from its steward's pulldown) and the vault key bind (without it every record at the agent is `vault_key_unauthorized`, its archetype assignment and playbook included). The third \u2014 buying the name on a priced root \u2014 is `buy-name.mts`.",

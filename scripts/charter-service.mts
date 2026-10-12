@@ -209,6 +209,18 @@ else {
   console.log(named ? `  ${svcName} resolves` : `  ${svcName} is NOT registered — a priced root names nothing at charter (see the header)`);
 }
 
+// THE NOTE IS WRITTEN FIRST, because the two ceremonies below read it: `record-service-stewardship.mts`
+// takes the agent's address from `service.sa`, so a note written afterwards would hand it the PLAN rather
+// than what was just chartered, and the wire would be minted for `null`.
+// ── the operator note: what is true now, merged over what was planned ──
+const note: Record<string, unknown> = existsSync(NOTE) ? JSON.parse(readFileSync(NOTE, 'utf8')) : { chainId: CHAIN };
+const prior = (note.service ?? {}) as Record<string, unknown>;
+note.service = { ...prior, name: svcName, sa: svc, charteredUnder: parentName, custodian: CUSTODIAN, named };
+if (UNDER) note.org = { name: parentName, sa: parent, steward: PERSONA };
+else { delete note.org; note.charteredBy = { persona: PERSONA, sa: ME }; }
+note.charteredAt = (note.charteredAt as string | null) ?? new Date().toISOString();
+writeFileSync(NOTE, JSON.stringify(note, null, 2) + '\n');
+
 // ── THE AGENT'S OWN VAULT ──
 //
 // A charter deploys the agent and binds no vault key, so every read and write at the agent fails closed
@@ -240,24 +252,25 @@ if (svc && BIND_VAULT) {
 // own comment says that field "is its cache and carries no authority of its own", which is exactly what
 // this is: a record of a relationship the chain already holds, never a grant of one.
 if (svc) {
-  const link: Record<string, unknown> = {
-    person: ME, orgAgent: svc, orgName: named ? svcName : '', kind: 'service', parent,
-    ...(chartered?.stewardshipDelegation ? { stewardshipDelegation: chartered.stewardshipDelegation } : {}),
-  };
+  // NO CACHED WIRE HERE, deliberately. `service.create` returns a stewardship delegation whose signature is
+  // the ERC-1271 approved-hash branch (`0x03`) — valid only for the digest the agent approved inside its own
+  // genesis userOp. Re-run the charter and the act mints a fresh salt, so the returned wire names a digest
+  // nobody approved: `isSteward` fails on chain while the Home's link insists it has a steward, and every
+  // steward-gated call answers "only the agent's custodian may..." (2026-10-12, assigning an archetype).
+  // A link that LOOKS right is worse than one that is absent, so the wire is minted by the tool built for
+  // it — `record-service-stewardship.mts`, which signs a fresh wire with the custodian's own credential.
+  const link: Record<string, unknown> = { person: ME, orgAgent: svc, orgName: named ? svcName : '', kind: 'service', parent };
   const saved = await j(await fetch(`${HOME}/connect/related-orgs`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${who.homeSession}` }, body: JSON.stringify(link) }));
   console.log(saved?.error
     ? `  ✗ the Home would not list it: ${saved.error}`
-    : `  ✓ listed under ${PERSONA} (kind service${chartered?.stewardshipDelegation ? ', with its stewardship wire' : ', no stewardship wire in this run'})`);
+    : `  ✓ listed under ${PERSONA} (kind service)`);
+  // THE STEWARD WIRE IS ITS OWN CEREMONY, and the link is not usable without it.
+  const wire = spawnSync('npx', ['tsx', 'scripts/record-service-stewardship.mts'], { encoding: 'utf8', env: { ...process.env, NOTE: NOTE!, BY: PERSONA, FORCE: '1' } });
+  const wireSaid = `${wire.stdout ?? ''}${wire.stderr ?? ''}`.split('\n').filter((l) => l.trim() && !l.startsWith('npm warn')).join('\n  ');
+  console.log(`  ${wireSaid || 'record-service-stewardship said nothing'}`);
+  if (wire.status !== 0) console.log(`  ✗ no steward wire — steward-gated calls at this agent (assign a playbook, enable its assistant) will refuse`);
 }
 
-// ── the operator note: what is true now, merged over what was planned ──
-const note: Record<string, unknown> = existsSync(NOTE) ? JSON.parse(readFileSync(NOTE, 'utf8')) : { chainId: CHAIN };
-const prior = (note.service ?? {}) as Record<string, unknown>;
-note.service = { ...prior, name: svcName, sa: svc, charteredUnder: parentName, custodian: CUSTODIAN, named };
-if (UNDER) note.org = { name: parentName, sa: parent, steward: PERSONA };
-else { delete note.org; note.charteredBy = { persona: PERSONA, sa: ME }; }
-note.charteredAt = (note.charteredAt as string | null) ?? new Date().toISOString();
-writeFileSync(NOTE, JSON.stringify(note, null, 2) + '\n');
 console.log(`\n✓ ${svcName} ${svc} under ${parentName} — written to ${NOTE}`);
 if (named) console.log('  Next: set its name records (atl:mcpEndpoint + atl:a2aEndpoint) and its facets, then the indexer projects it.');
 else console.log(`  Next: BUY the name — 10 SHQ from the payer's treasury against a gate ticket, then present it and write its records (purchaseName). Until then the agent is real and anonymous, and nothing public lists it.`);
