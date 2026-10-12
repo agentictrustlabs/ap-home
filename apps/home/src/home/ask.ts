@@ -573,6 +573,32 @@ export async function fetchAttention(session: { token: string }, addressee: Addr
   return out.ok && out.findings ? { findings: out.findings, considered: out.considered ?? 0 } : { error: out.error ?? 'the attention feed could not be read' };
 }
 
+/** Spec 438 §13 — THE AGENT'S RECORD: the five stages joined. Counts and lists only; a surface may say
+ *  "3 of 11" out loud but receives no ratio, because a number arrives already interpreted and a pair of
+ *  counts does not. `assessmentsRead: false` means the vault could not be surveyed — which is a different
+ *  fact from "nobody has judged these" and must never render as the same thing. */
+export interface AgentRecordView {
+  agent: string;
+  endings: Record<'completed' | 'failed' | 'denied' | 'suspended' | 'authority-required' | 'canceled' | 'unknown', number>;
+  total: number;
+  firstEndedAt?: string;
+  lastEndedAt?: string;
+  evidence: { complete: number; incomplete: number; unknown: number; unreported: number; effectUncertain: number };
+  assessment: {
+    runsAssessed: number; runsUnassessed: number; current: number; stale: number; orphaned: number;
+    undetermined: number; superseded: number; evaluators: string[]; criteria: string[];
+    outcomes: Record<'passed' | 'failed' | 'cantTell' | 'inapplicable' | 'untested', number>;
+  };
+  work: { runsWithWork: number; endeavors: string[]; continuations: number };
+}
+export async function fetchAgentRecord(session: { token: string }, addressee: Address): Promise<{ record: AgentRecordView; words: string[]; read: number; assessmentsRead: boolean; unreadable?: string[] } | { error: string }> {
+  const out = (await postA2a('/a2a/harness/record', { session: session.token, addressee })) as
+    { ok?: boolean; error?: string; record?: AgentRecordView; words?: string[]; read?: number; assessmentsRead?: boolean; unreadable?: string[] };
+  return out.ok && out.record
+    ? { record: out.record, words: out.words ?? [], read: out.read ?? 0, assessmentsRead: out.assessmentsRead === true, ...(out.unreadable ? { unreadable: out.unreadable } : {}) }
+    : { error: out.error ?? 'this agent\u2019s record could not be read' };
+}
+
 /** Spec 414 A2 — THE RUN'S MEASUREMENTS (W3C DQV, `run.measures:<runRef>`) from the acting agent's vault, as metric →
  *  value rows. Absent while the export has not landed — said, never guessed. */
 export interface RunMeasureRow { metric: string; value: number; unit?: string; step?: string }

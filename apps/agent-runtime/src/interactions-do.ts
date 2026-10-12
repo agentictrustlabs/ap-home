@@ -3588,11 +3588,23 @@ export class InteractionsDO {
           } catch (e) {
             console.warn('[endeavor.state] outcome decode failed', e instanceof Error ? e.message : String(e));
           }
+          // Spec 438 §5 — THE STATED CRITERIA, and WHEN they were stated. `outcome` above is the display
+          // summary of what came of the endeavour; this is the specification runs are JUDGED against, which
+          // is a different thing with a different reader. `statedAt` is the moment the revision entered the
+          // log, and J2 compares it against the run's own end: criteria stated after the run they judge are
+          // a verdict in search of premises, and an assessment citing them is refused.
+          const outcomeSpec = state.outcome
+            ? {
+                spec: state.outcome,
+                statedAt: [...log].reverse().find((e) => e.kind === 'OutcomeRevised' || e.kind === 'EndeavorAdopted')?.occurredAt ?? null,
+              }
+            : null;
           return json({
             ok: true,
             endeavorId,
             status: 'adopted',
             ...(outcome ? { outcome } : {}),
+            ...(outcomeSpec ? { outcomeSpec } : {}),
             lifecycle: state.endeavor?.lifecycle ?? null,
             // Prefer the FULL request goal — the endeavor title is truncated to 80 chars at adopt
             // time, and the work turns need the whole ask.

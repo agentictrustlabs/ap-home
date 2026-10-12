@@ -9,6 +9,7 @@ import type { Address } from '@agenticprimitives/types';
 import { listRunRecords, type RunRecordRow } from '../../../home/ask';
 import { RunInspector } from './RunInspector';
 import { NeedsAttention } from './NeedsAttention';
+import { AgentRecord } from './AgentRecord';
 import { StatePill } from '../StatePill';
 import { List, Row, Panel, Stats, Stat, FilterChip, SearchInput, DayHeader, Drawer, Button, timeLabel, type PanelState } from '../../../ui';
 import { stateOf, stateTone, type RunStateSource } from '../../../home/run-state';
@@ -109,6 +110,16 @@ export function RunHistory({ token, addressee, limit = 60 }: { token: string; ad
         aside={<span>what the evidence says is unfinished, uncertain or unread — never what to do about it</span>}>
         <div style={{ padding: '0 var(--sp-4) var(--sp-3)' }}>
           <NeedsAttention token={token} addressee={addressee} onOpenRun={(runRef) => { const row = (rows ?? []).find((r) => r.runRef === runRef); if (row) setOpen(row); }} />
+        </div>
+      </Panel>
+
+      {/* Spec 438 §13 — THE RECORD, above the log and below what is stuck. The list says what happened one run
+          at a time; this is the five stages joined — how its executions ended, how complete what they left
+          behind is, who has judged them, and what work they served. Counts and never a score. */}
+      <Panel title="This agent's record" icon={<ClockIcon />} state="ready" testId="agent-record"
+        aside={<span>intent, execution, evidence, evaluation, continuation — joined, and never scored</span>}>
+        <div style={{ padding: '0 var(--sp-4) var(--sp-3)' }}>
+          <AgentRecord token={token} addressee={addressee} />
         </div>
       </Panel>
 

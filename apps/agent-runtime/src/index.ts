@@ -202,7 +202,15 @@ import { runMeasuresRecordKey } from '@agenticprimitives/evaluation';
 import { doorFromBody, modelCallsOf, variantOf, engagedFromTrace, operationalOf, parseVariantRequest, VARIANT_TOGGLES, type VariantRequestV1 , SELECTION_ARMS } from './run-trace.js';
 import { averageOutcomeChecks, judgeRepeatsOf } from './outcome-check-repeats.js';
 import { provenanceLinkHeader } from '@agenticprimitives/a2a';
-import { runProvenanceRecordKey, evidenceStatusOf } from '@agenticprimitives/orchestration';
+import { runProvenanceRecordKey, evidenceStatusOf, type RunRecordV1 } from '@agenticprimitives/orchestration';
+// Spec 438 §13 — the five stages joined per agent. The projection is Ring 0's; this app supplies the facts.
+import { agentRecordOf, agentRecordWords, type AgentRunFactsV1, type SignedAssessmentV1 } from '@agenticprimitives/evaluation';
+/** A run's outcome as the ending vocabulary the record counts by. An outcome this build does not know is
+ *  `unknown` rather than dropped: a run that happened and was not counted is the one error to avoid. */
+const RUN_ENDING_OF = (outcome: string): AgentRunFactsV1['ending'] =>
+  (['completed', 'failed', 'denied', 'suspended', 'authority-required', 'canceled'] as const).includes(outcome as never)
+    ? (outcome as AgentRunFactsV1['ending'])
+    : 'unknown';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
@@ -3226,6 +3234,81 @@ app.post('/harness/evidence', async (c) => {
     if (rec) full.push(rec); else unreadable.push(row.runRef);
   }
   return c.json({ ok: true, findings: findingsOf(full, { ...(unreadable.length ? { unreadable } : {}) }), considered: full.length });
+});
+
+// POST /harness/record { session, addressee } — spec 438 §13. THE AGENT'S RECORD: the five stages joined.
+//
+//   intent → execution → evidence → evaluation → continuation
+//
+// Everything here is already held; what was missing was the JOIN. The runs say how its executions ended and
+// how complete what they left behind is; the assessments in its own vault say who has judged them against
+// which stated criteria; the runs' `work` says which endeavour they serve.
+//
+// TWO THINGS THIS ROUTE IS CAREFUL ABOUT, both delegated to `agentRecordOf` so no surface can get them wrong:
+//
+//   AN ASSESSMENT IS ABOUT A DOCUMENT. It cites the digest of the record as judged, and a record grows after
+//   the fact, so each one is classified against the run's CURRENT digest — current, stale, orphaned or
+//   undetermined — and a stale verdict never counts as a judgment of what the reader is looking at.
+//
+//   NO SCORE. Counts and lists only. A rate over these buckets would fall whenever this agent correctly
+//   refused something, and an unassessed run is not a failed one.
+//
+// The digest compared against is the run's ANCHOR digest, which exists only once its provenance has been
+// anchored. A run without one leaves currency `undetermined` rather than guessing either way.
+app.post('/harness/record', async (c) => {
+  const rawRec = await c.req.text();
+  const body = ((): { session?: string; addressee?: Address } | null => { try { return JSON.parse(rawRec); } catch { return null; } })();
+  if (!body?.addressee) return c.json({ ok: false, error: 'session (or an app delegation) and addressee are required' }, 400);
+  const who = await askSurfacePrincipal(c, rawRec, body);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const addressee = body.addressee.toLowerCase() as Address;
+  { const fwd = await forwardToSelfHost(c.env, c.req.raw, addressee, rawRec, selfHostForwardAuth(c.env, String(who.sa).toLowerCase() as Address)); if (fwd) return fwd; }
+  const caller = String(who.sa).toLowerCase();
+  const holds = await mayOverseeAgent(c.env, caller as Address, addressee).catch(() => false);
+  const mine = (r: { intent?: { context?: { asker?: string } } }): boolean =>
+    holds || String(r.intent?.context?.asker ?? '').toLowerCase() === caller;
+
+  const listing = (await listRecords(c.env as never, addressee)).filter((r) => mine(r as never));
+  const facts: AgentRunFactsV1[] = [];
+  const unreadable: string[] = [];
+  for (const row of listing.slice(0, 200)) {
+    const rec = (await getRecord(c.env as never, addressee, row.runRef).catch(() => null)) as RunRecordV1 | null;
+    if (!rec) { unreadable.push(row.runRef); continue; }
+    const ev = evidenceStatusOf(rec);
+    facts.push({
+      runRef: rec.runRef,
+      agent: addressee,
+      endedAt: new Date(rec.at).toISOString(),
+      ending: RUN_ENDING_OF(rec.outcome),
+      ...(ev.integrity.anchorDigest ? { recordDigest: ev.integrity.anchorDigest } : {}),
+      evidence: { coverage: ev.coverage.state, ...(ev.effectUncertain ? { effectUncertain: true } : {}) },
+      ...(rec.work ? { work: rec.work } : {}),
+    });
+  }
+
+  // THE ASSESSMENTS, from the agent's OWN vault. Surveyed then read, the two-phase shape every vault read
+  // here uses. A survey that cannot be taken leaves `assessmentsRead: false` — which the surface says, because
+  // "nobody has judged these" and "we could not look" are opposite facts that render identically.
+  let assessments: SignedAssessmentV1[] = [];
+  let assessmentsRead = false;
+  try {
+    const survey = (await callInteractionsInternal(c.env, addressee, 'internal.coordination.vaultSurvey', {})) as { records?: Array<{ recordType?: string }> } | null;
+    const keys = (survey?.records ?? []).map((r) => String(r.recordType ?? '')).filter((k) => k.startsWith('run.assessment:'));
+    assessmentsRead = true;
+    if (keys.length) {
+      const read = (await callInteractionsInternal(c.env, addressee, 'internal.coordination.vaultQuery', { recordTypes: keys.slice(0, 200) })) as { records?: Record<string, unknown> } | null;
+      assessments = Object.values(read?.records ?? {}).flatMap((v) => (Array.isArray(v) ? v : [v])).filter((x): x is SignedAssessmentV1 => !!x && typeof x === 'object' && 'assessment' in (x as object));
+    }
+  } catch { assessmentsRead = false; }
+
+  return c.json({
+    ok: true,
+    record: agentRecordOf(addressee, facts, assessments),
+    words: agentRecordWords(agentRecordOf(addressee, facts, assessments)),
+    read: facts.length,
+    ...(unreadable.length ? { unreadable } : {}),
+    assessmentsRead,
+  });
 });
 
 // POST /harness/spans { session, addressee, runRef } — spec 381. The run as a firewalled trace: step names,
