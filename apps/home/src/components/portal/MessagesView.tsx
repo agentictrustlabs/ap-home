@@ -14,6 +14,7 @@ import { SectionShell } from '../../components/portal/SectionShell';
 import { issueMandateForCase } from '../../home/mandate';
 import { signHashFor, type Via } from '../../home/onboarding';
 import { useInboxView, shortId, agentLabel } from '../../home/use-inbox';
+import { activateInteractionsIfNeeded, resolveVia } from '../../home/onboarding';
 import { directMessageKey, type DirectMessageSummaryV1 } from '@agenticprimitives/fabric/messaging';
 import { searchAgentsKb } from '../../lib/agent-search';
 import { personAvatarKey, setPersonAvatar } from '../../lib/avatar-store';
@@ -189,7 +190,30 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
   const managed = targetAgent ? agents.find((a) => a.agent.toLowerCase() === targetAgent.toLowerCase()) : undefined;
   const sendingAs = (targetAgent ?? agentAddress ?? undefined) as Address | undefined;
   const stewardship = targetAgent ? managed?.stewardshipDelegation : undefined;
-  const { view, refresh, loadThread, loadPreviews, post, send, approved, wireRequired, setWireRequired, busy, error, readError, setError } = useInboxView(session, targetAgent, sendingAs, stewardship);
+  const { view, refresh, loadThread, loadPreviews, post, send, approved, wireRequired, setWireRequired, busy, error, readError, setError, needsEnable, retryRead } = useInboxView(session, targetAgent, sendingAs, stewardship);
+  const [enabling, setEnabling] = useState(false);
+  const [enableErr, setEnableErr] = useState<string | null>(null);
+  /**
+   * RENEW THE SIGNING SESSION, then read again — the same act the Memory, Records, Routines and Preferences
+   * panels already offer, which Messages lacked (2026-10-12). The principal is whoever's inbox this IS: the
+   * managed agent when the page is scoped to one, otherwise the person's own. `force` because a STALE grant
+   * still reports as granted, and without it the activation short-circuits and the person stays stuck.
+   *
+   * Nothing here is new authority: it re-issues the interactions grant and custodies a DEL-001 session leaf
+   * for a vault that is already this principal's own. One signature, and silent on a KMS Home.
+   */
+  const enableInteractions = async () => {
+    const principal = (targetAgent ?? agentAddress) as Address | undefined;
+    if (!principal || !session?.token) return;
+    setEnabling(true); setEnableErr(null);
+    try {
+      const res = await activateInteractionsIfNeeded(principal, resolveVia(profile?.credential as string | undefined, session.via), { token: session.token }, true);
+      if (!res.ok) { setEnableErr(res.error); return; }
+      await retryRead();
+    } catch (e) {
+      setEnableErr(e instanceof Error ? e.message : String(e));
+    } finally { setEnabling(false); }
+  };
   // Readiness (design system v2): the rail shows a skeleton until the inbox view has landed — never "no messages yet".
   useReadyReport('messages-inbox', view === null && !readError);
   const me = (sendingAs ?? '').toLowerCase();
@@ -589,7 +613,19 @@ export function MessagesView({ targetAgent }: { targetAgent?: Address }) {
             )}
             {railView === 'needs-you' ? null : (<>
             {view === null && (readError
-              ? <p role="alert" style={{ padding: 8, color: 'var(--color-danger)' }}>{readError}</p>
+              ? (
+                <div role="alert" style={{ padding: 8 }}>
+                  <p style={{ color: needsEnable ? undefined : 'var(--color-danger)' }}>{readError}</p>
+                  {needsEnable && (
+                    <>
+                      <button type="button" onClick={() => { void enableInteractions(); }} disabled={enabling || !session?.token}>
+                        {enabling ? 'Renewing…' : 'Renew the signing session'}
+                      </button>
+                      {enableErr && <p style={{ color: 'var(--color-danger)' }}>{enableErr}</p>}
+                    </>
+                  )}
+                </div>
+              )
               : <div style={{ padding: 8 }}><SkeletonRows rows={6} lead /></div>)}
             {view !== null && dms.length === 0 && (
               <p className="chat-rail-empty">

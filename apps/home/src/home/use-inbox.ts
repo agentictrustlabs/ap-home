@@ -52,6 +52,50 @@ export interface InboxView {
   names?: Record<string, string>;
 }
 
+export interface InboxReadFailureBody { error?: string; code?: string; needsEnable?: boolean }
+export interface InboxReadFailure {
+  said: string;
+  /** A state that will not change on its own: re-polling it is noise with a cost. */
+  stopPolling: boolean;
+  /** The person can resolve this themselves, with one act — so offer it instead of describing it. */
+  needsEnable: boolean;
+}
+
+/**
+ * WHAT A FAILED INBOX READ ACTUALLY IS — three kinds, and they are not interchangeable.
+ *
+ *   · a REFUSAL (401/403) — not yours to read, or sign in again. Will not change by waiting.
+ *   · a SIGNING SESSION that needs renewing (`session_leaf_required`, CRIT-2 — server-mint retired; or
+ *     storage never enabled). Will not change by waiting either, and the person can fix it in one act.
+ *   · anything else — transient, worth another tick.
+ *
+ * The middle one used to fall into the third: Messages polled the same 409 every five seconds forever and
+ * said "Trying again", which reads as a transient fault and is a permanent one. Seen live 2026-10-12 on
+ * faith-town.workspace, whose records were being written the whole time it claimed it could not read them.
+ * Ten other panels already offer the re-enable; this is Messages learning to tell the three apart.
+ */
+export function classifyInboxReadFailure(status: number, body: InboxReadFailureBody, scopedToAgent: boolean): InboxReadFailure {
+  const why = body.error;
+  if (status === 401 || status === 403) {
+    return {
+      said: scopedToAgent
+        ? `These messages are not yours to read — an agent's inbox is read by those who steward it${why ? ` (${why})` : ''}.`
+        : `Your messages could not be read — sign in again${why ? ` (${why})` : ''}.`,
+      stopPolling: true,
+      needsEnable: false,
+    };
+  }
+  if (body.needsEnable || /session_leaf_required|interactions storage not enabled/i.test(`${why ?? ''} ${body.code ?? ''}`)) {
+    return {
+      // Says where the messages ARE, because "could not be read" invites the reader to assume they are gone.
+      said: 'Your messages are in your vault and this Home cannot reach them yet — its signing session needs renewing. Nothing is lost and nothing is inferred: renew it below and they will read.',
+      stopPolling: true,
+      needsEnable: true,
+    };
+  }
+  return { said: `Your messages could not be read just now${why ? ` — ${why}` : ''}. Trying again.`, stopPolling: false, needsEnable: false };
+}
+
 /**
  * Shared Interactions view for a Home inbox. `targetAgent` scopes it to a managed org/service SA the person
  * controls (workspace-scoped Messages, spec 315); omitted → the person's own inbox. The server re-verifies
@@ -77,8 +121,17 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
   // forever and re-polled the same refusal every 5s. A refusal (401/403) will not change on its own, so the
   // poll stops; any other failure is shown and the next tick tries again.
   const [readError, setReadError] = useState<string | null>(null);
+  /**
+   * THE ONE READ FAILURE THE PERSON CAN RESOLVE — set when the inbox is unreachable because this principal
+   * has no custodied DEL-001 session leaf (`session_leaf_required`, CRIT-2 — server-mint retired) or its
+   * interactions storage was never enabled. Ten other panels already offer the re-enable; Messages polled
+   * the same 409 every five seconds forever and said "Trying again", which reads as a transient fault and
+   * is a permanent one (seen live 2026-10-12 on faith-town.workspace, whose records were being written the
+   * whole time). Kept separate from `readError` for the same reason `wireRequired` is.
+   */
+  const [needsEnable, setNeedsEnable] = useState(false);
   const refused = useRef(false);
-  useEffect(() => { refused.current = false; setReadError(null); }, [session, agentQs]);
+  useEffect(() => { refused.current = false; setReadError(null); setNeedsEnable(false); }, [session, agentQs]);
   const refresh = useCallback(async () => {
     if (!session || refreshing.current || refused.current) return;
     refreshing.current = true;
@@ -91,20 +144,27 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
       setView((prev) => ({ ...next, bodies: { ...(prev?.bodies ?? {}), ...next.bodies } }));
       setReadError(null);
     } else {
-      const why = ((await res.json().catch(() => ({}))) as { error?: string }).error;
-      if (res.status === 401 || res.status === 403) {
-        refused.current = true;
-        setReadError(targetAgent
-          ? `These messages are not yours to read — an agent's inbox is read by those who steward it${why ? ` (${why})` : ''}.`
-          : `Your messages could not be read — sign in again${why ? ` (${why})` : ''}.`);
-      } else {
-        setReadError(`Your messages could not be read just now${why ? ` — ${why}` : ''}. Trying again.`);
-      }
+      const body = (await res.json().catch(() => ({}))) as InboxReadFailureBody;
+      const v = classifyInboxReadFailure(res.status, body, !!targetAgent);
+      if (v.stopPolling) refused.current = true;
+      if (v.needsEnable) setNeedsEnable(true);
+      setReadError(v.said);
     }
     } catch {
       setReadError('Your messages could not be read just now — the Home did not answer. Trying again.');
     } finally { refreshing.current = false; }
   }, [session, agentQs, targetAgent]);
+
+  /**
+   * Read again after the person has renewed the signing session. The latch exists so a permanent refusal is
+   * not re-polled; clearing it is the caller saying the thing that made it permanent has been dealt with.
+   */
+  const retryRead = useCallback(async () => {
+    refused.current = false;
+    setNeedsEnable(false);
+    setReadError(null);
+    await refresh();
+  }, [refresh]);
 
   // VL-W4 — lazily fetch ONE conversation's bodies when its thread is opened, merged into the view. The
   // list never resolves bodies (zero KMS on first paint + on every poll); only the open thread pays.
@@ -264,7 +324,7 @@ export function useInboxView(session: { token: string } | null, targetAgent?: st
     [view, isChat],
   );
 
-  return { view, refresh, loadThread, loadPreviews, post, send, approved, wireRequired, setWireRequired, busy, error, readError, setError, chatConversations, inboxConversations };
+  return { view, refresh, loadThread, loadPreviews, post, send, approved, wireRequired, setWireRequired, busy, error, readError, setError, needsEnable, retryRead, chatConversations, inboxConversations };
 }
 
 export const shortId = (caip: string): string => {
