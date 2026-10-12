@@ -1938,13 +1938,12 @@ input:not([type=checkbox]):not([type=radio]), select, textarea { border-color: v
    in an app's colours, it still says the person is signing in with GCID. */
 .gcid-button {
   display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px;
-  padding: 10px 20px; border-radius: 6px; border: 1px solid; cursor: pointer;
-  font: 600 1rem/1.2 Inter, "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", sans-serif; letter-spacing: 0;
-  transition: background .15s ease, border-color .15s ease; white-space: nowrap;
+  padding: 12px 20px; border-radius: 8px; border: 1px solid; cursor: pointer; white-space: nowrap;
+  font: 600 15px/1 "IBM Plex Sans", system-ui, sans-serif; letter-spacing: 0; transition: box-shadow .2s ease;
 }
-.gcid-button.gcid-dark { background: #0D1117; color: #FFFFFF; border-color: #3A404B; }
-.gcid-button.gcid-dark:hover:not(:disabled) { background: #161B24; border-color: #5A6170; }
-.gcid-button.gcid-light { background: #FFFFFF; color: #1B1F24; border-color: #D3D8DE; }
-.gcid-button.gcid-light:hover:not(:disabled) { background: #F5F7F9; border-color: #B9C0C8; }
-.gcid-button:disabled { opacity: .55; cursor: not-allowed; }
-.gcid-button:focus-visible { outline: 2px solid #6E6AF0; outline-offset: 2px; }
+.gcid-button.gcid-dark { background: #0A0E17; color: #FFFFFF; border-color: rgba(255,255,255,.2); }
+.gcid-button.gcid-dark:hover:not(:disabled) { box-shadow: 0 0 0 3px rgba(96,165,250,.25); }
+.gcid-button.gcid-light { background: #FFFFFF; color: #0A0E17; border-color: rgba(10,14,23,.15); }
+.gcid-button.gcid-light:hover:not(:disabled) { box-shadow: 0 0 0 3px rgba(29,78,216,.2); }
+.gcid-button:disabled { opacity: .6; cursor: not-allowed; }
+.gcid-button:focus-visible { outline: 2px solid #60A5FA; outline-offset: 2px; }

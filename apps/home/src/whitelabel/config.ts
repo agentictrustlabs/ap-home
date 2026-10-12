@@ -499,7 +499,7 @@ const faithImpact: WhiteLabelConfig = {
       // dark-variant button (gcidButtons), so it is clear what the person is signing in WITH (Ryan, 2026-10-12).
       // Scoped to this client's window only (ClientThemeScope); nothing else moves.
       theme: {
-        fontHref: 'https://fonts.googleapis.com/css2?family=Inter:wght@600;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap',
+        fontHref: 'https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap',
         gcidButtons: 'dark',
         vars: {
           // Surfaces — Gather Dark Blue ground, the lifted card a step above it, hairlines in cream at low strength.

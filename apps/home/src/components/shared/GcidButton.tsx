@@ -6,9 +6,10 @@
 // A relying app opts its sign-in window into it (whitelabel `theme.gcidButtons`), so the person can see
 // that what they are signing in WITH is GCID even on a window dressed in the app's own colours.
 //
-// The mark here is drawn from the published button (a filled circle carrying "GCID"); swap the SVG for
-// Global.Church's file when it is in hand — it is the only place the mark is drawn.
+// The mark is Global.Church's published file (gcid-mark.ts); the styles are the guide's, exactly.
 import { createContext, useContext, type ButtonHTMLAttributes } from 'react';
+
+import { GCID_MARK_DARK, GCID_MARK_LIGHT } from './gcid-mark';
 
 export type GcidVariant = 'dark' | 'light';
 export type GcidLabel = 'Sign in with GCID' | 'Continue with GCID' | 'Sign up with GCID' | 'Connect your GCID';
@@ -17,16 +18,10 @@ export type GcidLabel = 'Sign in with GCID' | 'Continue with GCID' | 'Sign up wi
 export const GcidButtonContext = createContext<GcidVariant | null>(null);
 export const useGcidButtons = (): GcidVariant | null => useContext(GcidButtonContext);
 
-export function GcidMark({ variant, size = 22 }: { variant: GcidVariant; size?: number }) {
-  const fill = variant === 'dark' ? '#6E6AF0' : '#3B37A6';
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" focusable="false" style={{ flex: 'none' }}>
-      <circle cx="12" cy="12" r="12" fill={fill} />
-      <text x="12" y="14.6" textAnchor="middle" fontFamily="Inter, system-ui, sans-serif" fontSize="6.6" fontWeight="800" fill="#FFFFFF" letterSpacing=".2">
-        GCID
-      </text>
-    </svg>
-  );
+/** Global.Church's mark, from its published files (gcid-mark.ts) — never redrawn, recoloured or rescaled: 20px
+ *  inside the button, as the guide requires. Decorative here: the button's text says GCID. */
+export function GcidMark({ variant }: { variant: GcidVariant }) {
+  return <img src={variant === 'dark' ? GCID_MARK_DARK : GCID_MARK_LIGHT} width={20} height={20} alt="" aria-hidden="true" style={{ flex: 'none', display: 'block' }} />;
 }
 
 export function GcidButton({
