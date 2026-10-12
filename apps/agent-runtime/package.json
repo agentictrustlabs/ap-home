@@ -38,10 +38,13 @@
     "@agenticprimitives/intent-engagement": "0.0.0-alpha.11",
     "@agenticprimitives/key-custody": "1.0.0-alpha.32",
     "@agenticprimitives/mcp-runtime": "1.0.0-alpha.32",
+    "@agenticprimitives/model-client": "0.0.0-alpha.1",
+    "@agenticprimitives/model-gateway": "0.0.0-alpha.1",
     "@agenticprimitives/ontology": "1.0.0-alpha.32",
     "@agenticprimitives/orchestration": "0.0.0-alpha.12",
     "@agenticprimitives/orchestration-anthropic": "0.0.0-alpha.12",
     "@agenticprimitives/orchestration-openai-compat": "0.0.0-alpha.11",
+    "@agenticprimitives/rate-control": "0.0.0-alpha.5",
     "@agenticprimitives/rate-control-cloudflare": "0.0.0-alpha.5",
     "@agenticprimitives/registry-kit": "0.0.0-alpha.20",
     "@agenticprimitives/related-agents": "0.0.0-alpha.28",
@@ -56,9 +59,7 @@
     "@cloudflare/containers": "0.3.7",
     "hono": "4.13.0",
     "viem": "2.52.2",
-    "zod": "4.4.3",
-    "@agenticprimitives/model-client": "0.0.0-alpha.1",
-    "@agenticprimitives/model-gateway": "0.0.0-alpha.1"
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@agenticprimitives/estate-projection": "0.0.0-alpha.7",
