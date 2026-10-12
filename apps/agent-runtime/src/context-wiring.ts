@@ -6,6 +6,8 @@
 // WHICH vendor answers the one structured model call — the same provider the turn plans with (spec 377),
 // so the two adapter packages (`orchestration-anthropic`, `orchestration-openai-compat`) remain the only
 // vendor-touching ones.
+import { gatewayOn, gatewayModels, GATEWAY_PROFILE } from './orchestration.js';
+import { structuredCallFromModels, textStreamFromModels } from '@agenticprimitives/model-client/orchestration';
 import { defaultProvider, providerConfigured, modelFor, geminiClient, GEMINI_DEFAULTS, GROQ_DEFAULTS, OPENAI_DEFAULTS, XAI_DEFAULTS, OPENAI_REASONING_HEADROOM, routePolicy, routeProvider, llmAllowlist, type PlannerEnv, type LlmProvider, type RouteDecision } from './orchestration.js';
 import { createFetchAnthropicClient, usageOfAnthropic } from '@agenticprimitives/orchestration-anthropic';
 import { addUsage, type ModelUsageV1 } from '@agenticprimitives/orchestration';
@@ -43,11 +45,17 @@ export type ModelEnv = PlannerEnv;
  *  when no model is configured — the tools are then not offered rather than offered and broken. Runs on
  *  `provider` when the turn named one, else the deployment default; a listed-but-keyless provider throws. */
 /** One structured call as it ran — who carried it, on which model, why, and when. The trace's model invocation. */
-export interface StructuredCallRecordV1 { provider: LlmProvider; model: string; because?: string; startMs: number; endMs: number; failed?: boolean;
+export interface StructuredCallRecordV1 { provider: LlmProvider | 'gateway'; model: string; because?: string; startMs: number; endMs: number; failed?: boolean;
   /** What the provider reported the call used (absent when it reported nothing — never estimated). */
-  tokensIn?: number; tokensOut?: number; cachedIn?: number; reasoningOut?: number }
+  tokensIn?: number; tokensOut?: number; cachedIn?: number; reasoningOut?: number;
+  /** Spec 434 — when the town's gateway carried the call: its receipt, the profile and version, the cost, the attempt. */
+  receiptRef?: string; profile?: string; profileVersion?: string; costMicroUsd?: number; attempt?: number; fallbackOf?: string }
 
 export function structuredCallFor(env: ModelEnv, provider?: LlmProvider, opts: { /** Spec 388 W2 — each routed call's decision, for the trace. */ onRoute?: (d: RouteDecision) => void; /** Spec 415 — EVERY call, routed or named, as it ran: a model call the trace does not name is a model call nobody can audit. */ onCall?: (c: StructuredCallRecordV1) => void; /** `light`: the provider's lighter model where it names one (Gemini's planner model) — for a call that only has to choose. `minimal` (spec 418 A1): the default model, thinking at `minimal` effort — for an answer whose first words wait on its thinking. */ tier?: 'light' | 'strong' | 'minimal'; /** Test seam: build a provider's call without a client. */ make?: (p: LlmProvider) => StructuredCall } = {}): StructuredCall | undefined {
+  if (gatewayOn(env)) {
+    const startMs = Date.now();
+    return structuredCallFromModels(gatewayModels(env), { profile: GATEWAY_PROFILE.structured, purpose: 'selection', label: 'gateway', onReceipt: (r) => opts.onCall?.({ provider: 'gateway', model: r.model, because: 'structured', startMs, endMs: Date.now(), receiptRef: r.id, profile: r.profile, profileVersion: r.profileVersion, costMicroUsd: r.costMicroUsd, attempt: r.attempt, ...(r.fallbackOf ? { fallbackOf: r.fallbackOf } : {}) }) });
+  }
   const build = (p: LlmProvider, onUsage?: (u: ModelUsageV1) => void): StructuredCall => (opts.make ? opts.make(p) : providerStructuredCall(env, p, onUsage, opts.tier));
   const modelOf = (p: LlmProvider) => (opts.tier === 'strong' ? strongModelFor(env, p) : modelFor(env, p, opts.tier === 'light' ? 'planner' : undefined));
   // Each invocation is built with its own usage callback: two calls in flight at once (a judge's permutations) must not
@@ -167,6 +175,11 @@ export function logprobChoiceFor(env: ModelEnv, provider: LlmProvider | undefine
 /** Spec 418 A1 — a STREAMED text answer (Gemini only; any other provider ⇒ undefined, and the caller keeps the structured
  *  call — one mechanism per provider, never a silent switch mid-answer). Recorded on the trace like any structured call. */
 export function textStreamFor(env: ModelEnv, provider: LlmProvider | undefined, opts: { onCall?: (c: StructuredCallRecordV1) => void; tier?: 'light' | 'strong' | 'minimal' } = {}): TextStreamCall | undefined {
+  if (gatewayOn(env)) {
+    const startMs = Date.now();
+    const call = textStreamFromModels(gatewayModels(env), { profile: GATEWAY_PROFILE.stream, purpose: 'answer-stream', onReceipt: (r) => opts.onCall?.({ provider: 'gateway', model: r.model, because: 'stream', startMs, endMs: Date.now(), receiptRef: r.id, profile: r.profile, profileVersion: r.profileVersion, costMicroUsd: r.costMicroUsd, attempt: r.attempt, ...(r.fallbackOf ? { fallbackOf: r.fallbackOf } : {}) }) });
+    return call;
+  }
   const p = provider ?? (env.ORCHESTRATION_LLM ?? '').split(',').map((x) => x.trim()).filter(Boolean)[0] as LlmProvider | undefined;
   if (p !== 'gemini' || !(env as { GEMINI_API_KEY?: string }).GEMINI_API_KEY) return undefined;
   const model = opts.tier === 'strong' ? strongModelFor(env, 'gemini') : modelFor(env, 'gemini', opts.tier === 'light' ? 'planner' : undefined);

@@ -5,7 +5,7 @@
 // records on request — a projection over the evidence, never the evidence (the record, the receipts, the PROV bundle
 // are). No words, no arguments, no results: an operator screen may count what an agent did, not read what it was about.
 import type { Address } from 'viem';
-import type { RunRecordV1 } from '@agenticprimitives/orchestration';
+import { metricsOf, type RunMetricsV1, type RunRecordV1 } from '@agenticprimitives/orchestration';
 
 export interface OpsEnv { OPS?: D1Database }
 
@@ -22,6 +22,19 @@ export interface OpsRowV1 {
    *  to, and the model calls with their reported tokens. Names, ids and numbers — never words. */
   stages: string | null; selection_approach: string | null; selection_chose: string | null; selection_hold: string | null;
   selection_ms: number | null; conversation: string | null; model_calls: number; tokens_in: number | null; tokens_out: number | null;
+  /** Spec 437 I5 — the run's `RunMetricsV1` and its model calls' timings (`PerfColumnV1`, JSON): the estate's performance block
+   *  is rolled up from these across the window (`rollupMetrics`). Counts, buckets, providers and profiles — never words. */
+  perf: string | null;
+}
+
+/** What the `perf` column holds. `c`: provider · profile · start · end · failed per model call. */
+export interface PerfColumnV1 { m: RunMetricsV1; c: Array<{ provider?: string; profile?: string; startMs?: number; endMs?: number; failed?: boolean }> }
+export function perfOf(record: RunRecordV1): string | null {
+  try {
+    const m = metricsOf(record);
+    const c = (record.modelCalls ?? []).map((x) => ({ ...(x.provider ? { provider: x.provider } : {}), ...(x.profile ? { profile: x.profile } : {}), ...(typeof x.startMs === 'number' ? { startMs: x.startMs } : {}), ...(typeof x.endMs === 'number' ? { endMs: x.endMs } : {}), ...(x.failed ? { failed: true } : {}) }));
+    return JSON.stringify({ m, c } satisfies PerfColumnV1);
+  } catch { return null; }
 }
 
 export const OPS_SCHEMA = `CREATE TABLE IF NOT EXISTS runs (
@@ -32,7 +45,7 @@ export const OPS_SCHEMA = `CREATE TABLE IF NOT EXISTS runs (
   vault_calls INTEGER NOT NULL, do_requests INTEGER NOT NULL,
   failure_class TEXT, error TEXT, routed INTEGER NOT NULL, canceled INTEGER NOT NULL, playbook TEXT, surface TEXT,
   stages TEXT, selection_approach TEXT, selection_chose TEXT, selection_hold TEXT, selection_ms INTEGER, conversation TEXT,
-  model_calls INTEGER NOT NULL DEFAULT 0, tokens_in INTEGER, tokens_out INTEGER
+  model_calls INTEGER NOT NULL DEFAULT 0, tokens_in INTEGER, tokens_out INTEGER, perf TEXT
 );
 CREATE INDEX IF NOT EXISTS runs_agent_at ON runs(agent, at);
 CREATE INDEX IF NOT EXISTS runs_at ON runs(at);`;
@@ -42,6 +55,7 @@ CREATE INDEX IF NOT EXISTS runs_at ON runs(at);`;
 export const OPS_ADDED_COLUMNS: ReadonlyArray<[string, string]> = [
   ['stages', 'TEXT'], ['selection_approach', 'TEXT'], ['selection_chose', 'TEXT'], ['selection_hold', 'TEXT'], ['selection_ms', 'INTEGER'],
   ['conversation', 'TEXT'], ['model_calls', 'INTEGER NOT NULL DEFAULT 0'], ['tokens_in', 'INTEGER'], ['tokens_out', 'INTEGER'],
+  ['perf', 'TEXT'],
 ];
 /** The most stage names one row keeps (the largest by ms) — the index stays bounded whatever a turn marks. */
 export const OPS_MAX_STAGES = 32;
@@ -81,6 +95,7 @@ export function rowOf(record: RunRecordV1, addressee: Address): OpsRowV1 {
     routed: steps.some((s) => (s.result as { routed?: unknown } | undefined)?.routed !== undefined) || typeof ctx.route === 'object' ? 1 : 0, canceled: record.canceled ? 1 : 0,
     playbook: typeof ctx.playbook === 'string' ? ctx.playbook : null, surface: typeof (ctx.surface as { realm?: string } | undefined)?.realm === 'string' ? String((ctx.surface as { realm: string }).realm) : null,
     ...operationalColumnsOf(record),
+    perf: perfOf(record),
   };
 }
 
@@ -251,3 +266,6 @@ export async function recentToolsOf(env: OpsEnv, agent: Address, asker: Address,
   for (const r of rows.results ?? []) { let ts: unknown = []; try { ts = JSON.parse(r.tools); } catch { /* a row we cannot read is skipped */ } for (const t of Array.isArray(ts) ? ts : []) if (typeof t === 'string') counts.set(t, (counts.get(t) ?? 0) + 1); }
   return [...counts.entries()].map(([id, times]) => ({ id, times })).sort((a, b) => b.times - a.times || a.id.localeCompare(b.id));
 }
+
+/** The schema guard, for readers outside this file (the estate heartbeat). */
+export const ensureOps = ensure;

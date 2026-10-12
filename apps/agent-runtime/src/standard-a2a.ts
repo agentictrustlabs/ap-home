@@ -55,6 +55,7 @@ import {
 import { internalHeaders, markInWorker, isInWorkerRequest, type InternalMarkerEnv } from './internal-marker.js';
 import { subjectAskOf, subjectAnswerOf, handoffOf, routedRunRefFor, subjectAnswerArtifact, type HandoffV1, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
 import { a2aDoor } from './run-trace.js';
+import { PULSE_PUBLIC_ASK } from './pulse-public';
 
 export interface StandardMountDeps {
   env: InternalMarkerEnv & Record<string, unknown>;
@@ -107,7 +108,11 @@ export interface StandardMountDeps {
 }
 
 /** Spec 412 — the data-part shape a stranger sends: `{ skill: 'library.public.list' | 'library.public.read', ...args }`. */
-export const PUBLIC_LANE_SKILLS: ReadonlySet<string> = new Set(['library.public.list', 'library.public.read']);
+// The capabilities a STRANGER may ask for: no credential, no task, one message in and one message out. Each is a
+// read of what the owner has already made public — the shelf (spec 412) and, for a context agent, the day's pulse
+// it keeps (spec 436 §5.5 T3; `pulse.day:` is `apinf:TownPulse`, aggregate counts by construction). An allowlist,
+// never a prefix: a capability reaches this lane because it was named here, never because of what it is called.
+export const PUBLIC_LANE_SKILLS: ReadonlySet<string> = new Set(['library.public.list', 'library.public.read', PULSE_PUBLIC_ASK]);
 export function publicLaneSkillOf(message: { parts: MessageV1['parts'] }): { skill: string; args: Record<string, unknown> } | null {
   const data = partsData(message.parts);
   const skill = data && typeof data.skill === 'string' ? data.skill : null;

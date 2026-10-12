@@ -49,21 +49,51 @@ const root = rootClassForDerivedType(agentType);
 if (root !== 'service') throw new Error(`this script provisions SERVICE-class agents only (${HANDLE} is ${agentType} → ${root})`);
 const SERVICE_ROLE = process.env.SERVICE_ROLE ?? (ROLE_TYPED.has(agentType) ? agentType : undefined);
 
-const DEPLOYMENTS = join(REPO_ROOT, 'packages', 'contracts', `deployments-${NETWORK}.json`);
-if (!existsSync(DEPLOYMENTS)) throw new Error(`${DEPLOYMENTS} not found`);
+// Where the network's addresses live. Since the repository split (ADR-0063) this repo has no `packages/`: the
+// deployments ship INSIDE `@agenticprimitives/contracts` at the exact pinned version, which is the version this
+// app is built against. The old in-repo path is still tried first so a Ring-0 checkout keeps working.
+const DEPLOYMENT_CANDIDATES = [
+  join(REPO_ROOT, 'packages', 'contracts', `deployments-${NETWORK}.json`),
+  join(REPO_ROOT, 'node_modules', '@agenticprimitives', 'contracts', `deployments-${NETWORK}.json`),
+  join(APP_ROOT, 'node_modules', '@agenticprimitives', 'contracts', `deployments-${NETWORK}.json`),
+];
+const DEPLOYMENTS = DEPLOYMENT_CANDIDATES.find((p) => existsSync(p));
+if (!DEPLOYMENTS) throw new Error(`no deployments-${NETWORK}.json — looked in:\n  ${DEPLOYMENT_CANDIDATES.join('\n  ')}`);
 const d = JSON.parse(readFileSync(DEPLOYMENTS, 'utf8')) as {
   chainId: number; entryPoint: Address; agentAccountFactory: Address; agentNameRegistry: Address; agentNameResolver: Address;
   agentProfileResolver: Address; smartAgentPaymaster: Address; agentRegistryBase?: Address;
   permissionlessSubregistries?: Partial<Record<AgentTld, Address>>;
+  pricedSubregistries?: Partial<Record<AgentTld, Address>>;
 };
 const subregistry = d.permissionlessSubregistries?.[tld];
 if (!subregistry) throw new Error(`deployments-${NETWORK}.json has no permissionlessSubregistries.${tld} — run AddTypedRoots.s.sol first`);
+const priced = d.pricedSubregistries?.[tld];
 
 const pub = createPublicClient({ transport: http(RPC_URL) });
 const chainId = Number(await pub.getChainId());
 if (chainId !== d.chainId) throw new Error(`RPC chain ${chainId} ≠ deployments-${NETWORK}.json chain ${d.chainId}`);
 const custodian = privateKeyToAccount(CUSTODIAN_KEY);
 const accounts = new AgentAccountClient({ rpcUrl: RPC_URL, chainId, entryPoint: d.entryPoint, factory: d.agentAccountFactory });
+
+// A PRICED root (ap-town spec 431) owns the parent node now, and the permissionless registrar's
+// `register(label, owner)` is simply gone from it — calling it reverts with no reason, surfacing only as
+// `UserOperationEvent.success = false`. Asked BEFORE anything is deployed, so a charter this script cannot
+// finish does not leave a nameless Smart Agent behind. (Found chartering faith-town.workspace, 2026-10-11.)
+if (priced) {
+  const held = ((await pub.readContract({ address: d.agentNameRegistry, abi: agentNameRegistryAbi, functionName: 'owner', args: [parsed.node] }).catch(() => null)) as Address | null) ?? '0x0000000000000000000000000000000000000000';
+  if (held === '0x0000000000000000000000000000000000000000') {
+    throw new Error(
+      `.${tld} is a PRICED root on ${NETWORK} (${priced}) and ${HANDLE} is unclaimed — this script only claims through the permissionless registrar.\n` +
+      `  A priced claim is a gate-signed ClaimTicket plus a payer (spec 431 §4), not a call:\n` +
+      `    1. POST <home>/connect/naming-ticket as a session whose credential custodies the owner\n` +
+      `       { label, tld, owner, payer, custodian } -> { ticket, signature, subregistry, price }\n` +
+      `    2. the PAYER sends approve(subregistry, price) + claim(ticket, signature) in ONE userOp\n` +
+      `       (@agenticprimitives/agent-naming buildPricedClaimCalls)\n` +
+      `  Then re-run this script: it sees the name owned, skips the claim, and sets the type and the records.\n` +
+      `  Nothing was deployed.`,
+    );
+  }
+}
 
 // 1. The SA.
 const salt = process.env.SALT !== undefined ? BigInt(process.env.SALT) : BigInt(keccak256(toBytes(`typed-agent/${HANDLE}/v1`)));
@@ -97,6 +127,7 @@ if (!typeDeclared) {
   calls.push(...buildDeclareAgentTypeCalls({ profileResolver: d.agentProfileResolver, agent: sa, agentType, serviceRole: SERVICE_ROLE, registered, displayName: DISPLAY_NAME }));
 }
 if (owner === '0x0000000000000000000000000000000000000000') {
+  // A priced root was refused above, before anything was deployed.
   calls.push(buildSubregistryRegisterCall({ subregistry, label: parsed.handle!.label, newOwner: sa }));
 } else if (owner !== sa.toLowerCase()) {
   throw new Error(`${HANDLE} is owned by ${owner} — not this SA`);
