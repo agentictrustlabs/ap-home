@@ -8,7 +8,29 @@ const STOPS: Record<Variant, [string, string, string]> = {
   generic: ['#818cf8', '#4338ca', '#3730a3'],
 };
 
+/** A deployment can carry its operator's mark instead of the shield (NEXT_PUBLIC_BRAND_MARK). 'globe' is Global.Church's
+ *  (the globe from global.church's header, 2026-10-12): GCID is Global.Church's service, so its sign-in screens wear
+ *  it. Unset = the shield, as before. Inlined at build. */
+const BRAND_MARK = process.env.NEXT_PUBLIC_BRAND_MARK;
+
+/** Global.Church's globe, as drawn on global.church: a stroked circle with two meridians and two parallels, in its
+ *  blue. --brand-mark-color lets a themed window adjust the blue for its ground. */
+function GlobeMark({ size }: { size: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" aria-hidden="true" style={{ color: 'var(--brand-mark-color, #4F8BE0)' }}>
+      <g fill="none" stroke="currentColor" strokeWidth="5">
+        <circle cx="50" cy="50" r="44" />
+        <ellipse cx="50" cy="50" rx="0.5" ry="44" />
+        <ellipse cx="50" cy="50" rx="25" ry="44" />
+        <ellipse cx="50" cy="50" rx="44" ry="0.5" />
+        <ellipse cx="50" cy="50" rx="44" ry="25" />
+      </g>
+    </svg>
+  );
+}
+
 export function BrandShield({ size = 28, variant = 'brand' }: { size?: number; variant?: Variant }) {
+  if (BRAND_MARK === 'globe' && variant === 'brand') return <GlobeMark size={size} />;
   const id = `shield-${variant}`;
   const [a, b, c] = STOPS[variant];
   return (
