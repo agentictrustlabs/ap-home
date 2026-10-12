@@ -84,3 +84,11 @@ describe('the class a claim records', () => {
     for (const k of ['service', 'workspace', 'person-treasury', 'org-treasury'] as const) expect(agentClassOf(k)).toBe('service');
   });
 });
+
+describe('the kinds born with their planes', () => {
+  it('covers every record-keeping child kind the Ask-chartered genesis provisions, and no treasury or person', async () => {
+    const { KINDS_BORN_WITH_PLANES } = await import('./agent-class');
+    for (const k of ['org', 'team', 'workspace', 'service']) expect(KINDS_BORN_WITH_PLANES.has(k)).toBe(true);
+    for (const k of ['person', 'person-treasury', 'org-treasury']) expect(KINDS_BORN_WITH_PLANES.has(k)).toBe(false);
+  });
+});
