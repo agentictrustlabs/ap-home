@@ -28,6 +28,7 @@ import {
   collectSubscriptions,
   claimName,
   setConnectionInfo,
+  declareEstate,
   isAgentDeployed,
   derivePasskeySa,
   createManagedAgent,
@@ -40,7 +41,7 @@ import { writeGovernancePair, WORKSPACE_CONTENT_SCOPE } from '../lib/workspace-g
 import type { ConnectionKind } from '@agenticprimitives/agent-naming';
 import { startGoogleSignIn, startYouVersionSignIn } from '../server-client';
 import { writePendingEnrollJson } from '../components/onboarding/pending-enroll';
-import { nameLabel } from '../lib/domain';
+import { ESTATE_NAME, nameLabel } from '../lib/domain';
 import { mandateDelegate } from '../lib/new-member';
 import { connectWallet, personalSign } from '../lib/wallet';
 import { isDemoCustodyHome, demoCustodySignHash } from '../lib/persona-custody';
@@ -341,7 +342,28 @@ async function bornWithPlaybook(agent: string, auth?: Auth): Promise<void> {
     if (!token) { console.warn('[home-create] default archetype deferred: no session yet (assign from Behaviour → Playbook)'); return; }
     const a = await assignDefaultArchetype(agent, 'person', token);
     if (!a.ok) console.warn('[home-create] default archetype not assigned (the bare harness stands):', a.reason);
-  } catch (e) { console.warn('[home-create] default archetype deferred:', e); }
+  } catch (e) { console.warn('[home-create] default archetype not assigned (the bare harness stands):', e); }
+}
+
+/**
+ * THE AGENT IS BORN SAYING WHOSE ESTATE IT IS ON — `atl:estate` = this Home's estate agent name.
+ *
+ * Every estate on a chain shares the name registry, so `maya.me` resolves the same for all of them and
+ * nothing tells a relying app WHICH Home custodies her. That is not a cosmetic gap: a sign-in at the wrong
+ * Home does not fail, it derives a DIFFERENT Smart Agent for the same credential. The agent therefore
+ * carries its estate's name, written by the agent itself, where any reader can check it.
+ *
+ * Owner-authorized and gasless (the same rail as the connection-kind carve-out above: the person's own
+ * account signs, no gesture for a KMS/social home). Best-effort and idempotent — an estate that cannot be
+ * declared leaves the agent saying nothing, which readers already treat as "unknown", never as a default.
+ */
+export async function declareEstateIfConfigured(agent: Address, via: Via, auth?: Auth): Promise<void> {
+  if (!ESTATE_NAME) return; // this Home declares no estate; a reader is told so rather than guessing
+  try {
+    const signHash = await signHashFor(via, agent, auth);
+    const r = await declareEstate(agent, ESTATE_NAME, signHash);
+    if (!r.ok) console.warn('[estate] not declared on chain (readers will not know this home):', r.error);
+  } catch (e) { console.warn('[estate] declaration deferred:', e); }
 }
 
 export async function secureHome(

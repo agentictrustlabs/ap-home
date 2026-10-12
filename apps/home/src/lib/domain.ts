@@ -182,6 +182,18 @@ export const SKILLS_REGISTRY_ORIGIN =
 export const SKILLS_CONTEXTS = (process.env.NEXT_PUBLIC_SKILLS_CONTEXTS || 'agentic-trust,faith,gc')
   .split(',').map((s) => s.trim()).filter(Boolean);
 
+/**
+ * THIS ESTATE'S NAME ON THE CHAIN — `<label>.estate`, the agent that IS this estate (ap-town's manifest
+ * carries the same name as `estateName`). A person's agent declares it in `atl:estate`, and a relying app
+ * reads it to know WHICH Home to send that person to: on a chain with more than one estate, a name
+ * resolves everywhere, and signing in at the wrong Home mints a different Smart Agent for the same
+ * credential. The NAME is what travels because it is stable — the Home's URL lives on that estate agent's
+ * `atl:homepage` and can move.
+ *
+ * Unset ⇒ this Home declares nothing, and a reader is told the estate is unknown rather than guessing.
+ */
+export const ESTATE_NAME = (process.env.NEXT_PUBLIC_ESTATE_NAME || '').trim().toLowerCase();
+
 /** The town's naming service (ap-town spec 430 N2): where a visitor reads names and is sent HERE to claim or change
  *  one. A hand-off arrives as `?claim=<label>&tld=<tld>&return=<url>`; the return is honoured only for this origin —
  *  a Home never bounces a person to an arbitrary URL after they sign. */
