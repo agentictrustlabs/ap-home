@@ -450,6 +450,9 @@ export function statedSubject(s: PulseNamedThing): string {
   return `${s.lead ?? `${s.name} is ${s.what}.`} ${parts.join('; ')}. Read from ${s.days.length === 1 ? 'the record for' : 'the records for'} ${s.days.join(', ')}.`;
 }
 
+/** A day whose record could not be READ, with the reason the vault gave. Not the same as a day with none. */
+export interface UnreadableDay { day: string; why: string }
+
 export interface PulseAnswer {
   answer: string;
   /** Every record the answer was read from. An answer that cites nothing is a refusal. */
@@ -457,16 +460,31 @@ export interface PulseAnswer {
   window: { from: string; to: string; words: string };
   subject: PulseSubject;
   read: boolean;
+  /** Set when a day's record could not be read at all — so a caller can tell this from "there is none". */
+  unreadable?: UnreadableDay[];
 }
 
 /**
  * Answer one question from the days given. Pure: the caller does the reading, this composes the words — so the
  * whole of it is testable without a vault, which is the only way a sentence about money gets to be trusted.
  */
-export function answerFromDays(question: string, window: PulseWindow, found: Array<{ day: string; rec: PulseDayRecord }>): PulseAnswer {
+export function answerFromDays(question: string, window: PulseWindow, found: Array<{ day: string; rec: PulseDayRecord }>, unreadable: UnreadableDay[] = []): PulseAnswer {
   const subject = subjectOf(question);
   const cited = found.map((f) => ({ key: `pulse.day:${f.day}`, day: f.day }));
-  const head = { window: { from: window.from, to: window.to, words: window.words }, subject, cited };
+  const head = { window: { from: window.from, to: window.to, words: window.words }, subject, cited, ...(unreadable.length ? { unreadable } : {}) };
+  // UNREADABLE IS NOT ABSENT, and saying it is was this module breaking its own first rule.
+  //
+  // Found live 2026-10-12: the town wrote `pulse.day:2026-10-12` into this agent's vault and the vault
+  // took it (`ok: true`), and the Ask answered "I keep one record a day and I have none for the last 7
+  // days". The read goes through the agent's own InteractionsDO, which had no custodied DEL-001 session
+  // leaf, so every read failed closed — and a failure flattened to `null` is indistinguishable from an
+  // empty shelf. The whole point of this module is that an absent record is never filled in; a failed
+  // read reported as an absent record is the same lie wearing the opposite coat, and worse, because it
+  // sends the reader looking for a writer that is working perfectly.
+  if (!found.length && unreadable.length) {
+    const why = [...new Set(unreadable.map((u) => u.why))].join('; ');
+    return { ...head, read: false, answer: `I could not read my own records for ${window.words} — ${why}. That is not the same as having none: the records may be there and unreadable to me, so nothing is inferred either way. ${plural(unreadable.length, 'day')} ${unreadable.length === 1 ? 'was' : 'were'} asked for and could not be read.` };
+  }
   if (!found.length) {
     return { ...head, read: false, answer: `I keep one record a day and I have none for ${window.words}. Nothing is inferred from an absent record, so there is nothing I can tell you about it.` };
   }
@@ -479,8 +497,7 @@ export function answerFromDays(question: string, window: PulseWindow, found: Arr
   for (const sub of facts.subjects) parts.push(statedSubject(sub));
   for (const miss of facts.unknown) parts.push(`I have no record of anything called "${miss}" — it is not a service the town probes, a resource a platform reports to it, or an estate on this chain.`);
   if (facts.subjects.length || facts.unknown.length) {
-    const missing = window.days.filter((d) => !found.some((f) => f.day === d));
-    if (missing.length) parts.push(`${plural(missing.length, 'day')} in the window ${missing.length === 1 ? 'has' : 'have'} no record, so this is partial — never a smaller total.`);
+    parts.push(...partialNote(window, found, unreadable));
     return { ...head, read: true, answer: parts.join(' ') };
   }
 
@@ -555,9 +572,18 @@ export function answerFromDays(question: string, window: PulseWindow, found: Arr
     }
   }
 
-  const missing = window.days.filter((d) => !found.some((f) => f.day === d));
-  if (missing.length) parts.push(`${plural(missing.length, 'day')} in the window ${missing.length === 1 ? 'has' : 'have'} no record, so this is partial — never a smaller total.`);
+  parts.push(...partialNote(window, found, unreadable));
   return { ...head, read: true, answer: parts.join(' ') };
+}
+
+/** Why an answer is partial: days with NO record, and days whose record could not be READ — never merged. */
+function partialNote(window: PulseWindow, found: Array<{ day: string; rec: PulseDayRecord }>, unreadable: UnreadableDay[]): string[] {
+  const out: string[] = [];
+  const unread = new Set(unreadable.map((u) => u.day));
+  const missing = window.days.filter((d) => !found.some((f) => f.day === d) && !unread.has(d));
+  if (missing.length) out.push(`${plural(missing.length, 'day')} in the window ${missing.length === 1 ? 'has' : 'have'} no record, so this is partial — never a smaller total.`);
+  if (unreadable.length) out.push(`${plural(unreadable.length, 'day')} could not be READ (${[...new Set(unreadable.map((u) => u.why))].join('; ')}) — unreadable is not absent, so nothing is inferred for ${unreadable.length === 1 ? 'it' : 'them'} either.`);
+  return out;
 }
 
 /**
@@ -633,6 +659,12 @@ async function composed(
 export async function publicPulseAsk(
   deps: {
     readSubjectRecord: (subject: string, recordType: string) => Promise<unknown>;
+    /**
+     * THE SAME READ, WITH THE REASON IT FAILED. Preferred when the caller has it: a read that fails is a
+     * different fact from a shelf that is empty, and only this door can tell the two apart (`needsEnable`
+     * — storage was never enabled; an error — the vault refused or could not be reached).
+     */
+    readSubjectRecordStatus?: (subject: string, recordType: string) => Promise<{ ok: boolean; needsEnable?: boolean; data?: unknown; error?: string }>;
     /** The agent's composer, already carrying its playbook instructions as the system prompt. */
     compose?: (input: { intent: { goal: string }; observations: never[]; evidence: Array<{ tool: string; result: unknown }> }) => Promise<string>;
   },
@@ -643,11 +675,24 @@ export async function publicPulseAsk(
   const question = typeof args.question === 'string' ? args.question : typeof args.q === 'string' ? args.q : '';
   const window = windowOf(question, nowMs);
   const found: Array<{ day: string; rec: PulseDayRecord }> = [];
+  const unreadable: UnreadableDay[] = [];
   for (const day of window.days) {
-    const rec = (await deps.readSubjectRecord(owner, `pulse.day:${day}`).catch(() => null)) as PulseDayRecord | null;
+    const recordType = `pulse.day:${day}`;
+    if (deps.readSubjectRecordStatus) {
+      type ReadStatus = { ok: boolean; needsEnable?: boolean; data?: unknown; error?: string };
+      const r: ReadStatus = await deps.readSubjectRecordStatus(owner, recordType)
+        .catch((e: unknown): ReadStatus => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+      if (r.ok === false) {
+        unreadable.push({ day, why: r.needsEnable ? 'my interactions storage is not enabled, so I cannot reach my own vault' : (r.error ?? 'the read failed and the vault gave no reason') });
+        continue;
+      }
+      if (r.data && typeof r.data === 'object') found.push({ day, rec: r.data as PulseDayRecord });
+      continue;
+    }
+    const rec = (await deps.readSubjectRecord(owner, recordType).catch(() => null)) as PulseDayRecord | null;
     if (rec && typeof rec === 'object') found.push({ day, rec });
   }
-  const a = answerFromDays(question, window, found);
+  const a = answerFromDays(question, window, found, unreadable);
   const facts = factsFor(question, window, found);
   // Nothing was read ⇒ there is nothing to compose over, and the refusal is already the right answer.
   const words = found.length ? await composed(deps.compose, question, evidenceFor(facts, found, a.answer)) : null;

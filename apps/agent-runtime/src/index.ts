@@ -1526,8 +1526,14 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
         const pb = await loadPlaybook(deps.readSubjectRecord, who.toLowerCase(), console.log).catch(() => null);
         const systemPrompt = [pb?.instructions, COMPOSE_RULES].filter(Boolean).join('\n\n');
         const composer = pb ? selectComposer(c.env, { systemPrompt }) : null;
+        // THE REASON-CARRYING READ, because "I have none" and "I could not read mine" are different answers
+        // and only this door knows which (2026-10-12: the record was written and the Ask said it had none).
         return publicPulseAsk(
-          { readSubjectRecord: deps.readSubjectRecord!, ...(composer ? { compose: (i) => composer.compose(i as never) } : {}) },
+          {
+            readSubjectRecord: deps.readSubjectRecord!,
+            ...(deps.readSubjectRecordStatus ? { readSubjectRecordStatus: deps.readSubjectRecordStatus } : {}),
+            ...(composer ? { compose: (i) => composer.compose(i as never) } : {}),
+          },
           who.toLowerCase(), args,
         );
       },

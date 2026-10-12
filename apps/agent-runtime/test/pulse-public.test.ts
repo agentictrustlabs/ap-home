@@ -376,3 +376,66 @@ describe('the estates\' census, answered in counts (2026-10-12)', () => {
     expect((e!.result as { note: string }).note).toContain('not a count of people');
   });
 });
+
+describe('unreadable is not absent (found live 2026-10-12)', () => {
+  // The town wrote `pulse.day:2026-10-12` into this agent's vault and the vault TOOK it (`ok: true`). The
+  // Ask answered "I keep one record a day and I have none for the last 7 days", because the read goes
+  // through the agent's own InteractionsDO, which had no custodied DEL-001 session leaf — and a failure
+  // flattened to `null` is indistinguishable from an empty shelf. A failed read reported as an absent
+  // record is the same lie this module exists to prevent, wearing the opposite coat: it sends the reader
+  // hunting for a writer that is working perfectly.
+  const w = windowOf('this week', NOW);
+  const REC: PulseDayRecord = { type: 'ap.town-pulse.v1', day: '2026-10-11', estates: { faithnet: { agents: { person: 80 } } } };
+
+  it('says it could not READ, names the reason, and refuses to call it "none"', () => {
+    const a = answerFromDays('how many agents are in town', w, [], w.days.map((day) => ({ day, why: 'my interactions storage is not enabled, so I cannot reach my own vault' })));
+    expect(a.read).toBe(false);
+    expect(a.answer).toContain('I could not read my own records');
+    expect(a.answer).toContain('interactions storage is not enabled');
+    expect(a.answer).toContain('not the same as having none');
+    expect(a.answer).not.toContain('I have none');
+    expect(a.unreadable).toHaveLength(7);
+  });
+
+  it('a partial read keeps "no record" and "could not be read" apart', () => {
+    const a = answerFromDays('how many agents are in town', w, [{ day: '2026-10-11', rec: REC }], [{ day: '2026-10-09', why: 'the vault refused' }]);
+    expect(a.read).toBe(true);
+    expect(a.answer).toContain('agents in the town 80');
+    expect(a.answer).toContain('5 days in the window have no record');      // 7 − 1 read − 1 unreadable
+    expect(a.answer).toContain('1 day could not be READ (the vault refused)');
+    expect(a.answer).toContain('unreadable is not absent');
+  });
+
+  it('publicPulseAsk prefers the reason-carrying door and reports the refusal as one', async () => {
+    const out = await publicPulseAsk({
+      readSubjectRecord: async () => null,
+      readSubjectRecordStatus: async () => ({ ok: false, needsEnable: true }),
+    }, '0xabc', { question: 'how many agents are in town' }, NOW);
+    expect(out.read).toBe(false);
+    expect(String(out.answer)).toContain('I could not read my own records');
+    expect(out.unreadable).toHaveLength(7);
+  });
+
+  it('a door that throws is still a failed read, never an empty shelf', async () => {
+    const out = await publicPulseAsk({
+      readSubjectRecord: async () => null,
+      readSubjectRecordStatus: async () => { throw new Error('do unreachable'); },
+    }, '0xabc', { question: 'how is the town doing' }, NOW);
+    expect(String(out.answer)).toContain('do unreachable');
+    expect(String(out.answer)).not.toContain('I have none');
+  });
+
+  it('an empty shelf is still an empty shelf — the old refusal is unchanged when reads SUCCEED', async () => {
+    const out = await publicPulseAsk({
+      readSubjectRecord: async () => null,
+      readSubjectRecordStatus: async () => ({ ok: true, data: null }),
+    }, '0xabc', { question: 'how is the town doing' }, NOW);
+    expect(String(out.answer)).toContain('I keep one record a day and I have none');
+    expect(out.unreadable).toBeUndefined();
+  });
+
+  it('with no reason-carrying door at all, the old behaviour stands', async () => {
+    const out = await publicPulseAsk({ readSubjectRecord: async () => null }, '0xabc', { question: 'how is the town doing' }, NOW);
+    expect(String(out.answer)).toContain('I keep one record a day and I have none');
+  });
+});
