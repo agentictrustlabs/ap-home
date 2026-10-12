@@ -13,12 +13,20 @@
  * (`archetypeAssignmentPut`), which resolves the stewardship wire. This script holds no custody key; the
  * steward's Home session is the only authority here.
  */
-import { ARCHETYPE_CATALOG } from '../apps/home/src/lib/archetype-catalog';
-import { issueSiteDelegation, toWire } from '../apps/home/src/lib/delegation';
 import { definitionDigest, validateAgentHarnessDefinition } from '@agenticprimitives/capability-claims';
 import type { Address, Hex } from 'viem';
 
 const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
+// WHICH CHAIN'S CONTRACTS THIS WIRE NAMES. The Home's delegation library reads `NEXT_PUBLIC_CHAIN_ID` and
+// defaults to Base Sepolia, so a script run with no env minted a stewardship wire whose allowedTargets were
+// BASE SEPOLIA's governance registries and whose digest was hashed for 84532. Faithnet's runtime checks
+// faithchain's, found neither registry in the targets, and refused every assignment with "only the agent's
+// custodian may assign an archetype" — a custody error for what was a chain mismatch, and an hour of looking
+// at custodians that were all correct. Set BEFORE the library is imported; the sibling interactions scripts
+// carry the same line.
+if (/faithnet\.me$/.test(new URL(HOME).host)) process.env.NEXT_PUBLIC_CHAIN_ID ??= '34348';
+const { ARCHETYPE_CATALOG } = await import('../apps/home/src/lib/archetype-catalog');
+const { issueSiteDelegation, toWire } = await import('../apps/home/src/lib/delegation');
 const args = process.argv.slice(2);
 const target = (args.find((a) => !a.startsWith('--')) ?? '').toLowerCase();
 const key = args.filter((a) => !a.startsWith('--'))[1];

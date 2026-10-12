@@ -2775,6 +2775,10 @@ export interface AskEvidence {
   /** Why nothing came back, when the tool said. An answer built on a refusal must not read like an answer
    *  built on an empty result. */
   reason?: string;
+  /** What a non-empty result offered to be quoted — passage titles, matched names. The governor checks a
+   *  reply that claims emptiness against these: five retrieved passages and a reply saying only that a
+   *  name search matched nothing is a truncated answer, not a grounded one (spec 358 W3). */
+  citations?: string[];
 }
 
 /** Pull the trace out of what the steps observed. Only fields a tool deliberately returned for display —
@@ -2782,16 +2786,20 @@ export interface AskEvidence {
 export function askEvidence(steps: RunResult['steps']): AskEvidence[] {
   const out: AskEvidence[] = [];
   for (const o of steps) {
-    const r = o.result as { query?: unknown; interpretation?: unknown; count?: unknown; reason?: unknown; searchedNamesFor?: unknown; note?: unknown; looked?: unknown; recordsOf?: unknown } | null;
+    const r = o.result as { query?: unknown; interpretation?: unknown; count?: unknown; reason?: unknown; searchedNamesFor?: unknown; note?: unknown; looked?: unknown; recordsOf?: unknown; citations?: unknown } | null;
     if (!r || typeof r !== 'object') continue;
     const has = (v: unknown): boolean => typeof v === 'string' && v.length > 0;
-    if (!has(r.query) && !has(r.interpretation) && !has(r.reason) && !has(r.searchedNamesFor)) continue;
+    if (!has(r.query) && !has(r.interpretation) && !has(r.reason) && !has(r.searchedNamesFor) && !Array.isArray(r.citations)) continue;
     out.push({
       toolId: o.step.toolId,
       ...(has(r.interpretation) ? { interpretation: r.interpretation as string } : {}),
       ...(has(r.query) ? { query: r.query as string } : {}),
       ...(typeof r.count === 'number' ? { count: r.count } : {}),
       ...(has(r.searchedNamesFor) ? { searched: r.searchedNamesFor as string } : {}),
+      ...((): { citations?: string[] } => {
+        const c = Array.isArray(r.citations) ? (r.citations as unknown[]).map(String).map((x) => x.trim()).filter(Boolean).slice(0, 10) : [];
+        return c.length ? { citations: c } : {};
+      })(),
       // A tool's own explanation of an empty result beats anything reconstructed from the shape of it.
       ...(has(r.reason) ? { reason: r.reason as string } : has(r.note) ? { reason: r.note as string } : {}),
       ...((): { subjects?: string[] } => {
@@ -4491,14 +4499,22 @@ async function askReplyForInner(env: HarnessEnv, input: {
       // governor below judges the prose against what the model actually saw. Never a slice.
       const fitted = fitEvidence(stepsWithMemory, composer.evidenceBudget ?? 24_000);
       if (input.plannerTrace) input.plannerTrace.composerEvidence = { chars: fitted.chars, of: fitted.of, dropped: fitted.dropped };
+      // A result the fitting SUMMARIZED is one the composer never read, so its citations are not held
+      // against the prose — asking a model to quote titles it was not shown would spend a recompose and
+      // land on the floor. `dropped` already names those tools; the fact that they were dropped is on the
+      // trace above and in the floor's own lines.
+      const unseen = new Set(fitted.dropped.map((d) => d.tool));
+      const judged = unseen.size
+        ? evidenceWithMemory.map((e) => (unseen.has(e.toolId) && e.citations ? { ...e, citations: undefined } : e))
+        : evidenceWithMemory;
       let text = await composer.compose({ intent: input.intent, observations: stepsWithMemory, evidence: fitted.items });
-      let violations = checkGroundedComposition(text, evidenceWithMemory, input.intent.goal);
+      let violations = checkGroundedComposition(text, judged, input.intent.goal);
       if (violations.length) {
         text = await composer.compose({
           intent: input.intent, observations: stepsWithMemory, evidence: fitted.items,
           corrections: violations.map((v) => v.correction),
         });
-        violations = checkGroundedComposition(text, evidenceWithMemory, input.intent.goal);
+        violations = checkGroundedComposition(text, judged, input.intent.goal);
         if (violations.length) text = groundedFallback(evidence);
       }
       return withEvidence(text);
