@@ -8,7 +8,7 @@
   },
   "service": {
     "name": "people-groups.svc",
-    "sa": null,
+    "sa": "0xBa732Ef84Fd578D5CF6668824e2bA68f59CcECdC",
     "charteredUnder": "demo-admin",
     "custodian": "0x423B0749c1b85a12A8b463c01F697D9E0072544d",
     "host": "people-groups-svc.faithnet.ai",
@@ -23,12 +23,18 @@
       "mcpEndpoint": "https://demo-gc-pg.r-pedersen.workers.dev/mcp"
     },
     "registry": "urn:ap:registry:faithnet-agents",
-    "facetsAt": null
+    "facetsAt": null,
+    "named": false
   },
-  "charteredAt": null,
+  "charteredAt": "2026-10-12T12:22:10Z",
   "todo": [
-    "charter people-groups.svc under demo-admin (the ceremony sets sa, charteredAt): npx tsx scripts/charter-service.mts --persona demo-admin --label people-groups --note demo/people-groups.faithnet.json",
-    "set the name records above (set-typed-name-records: mcpEndpoint + a2aEndpoint), then facetsAt",
+    "BUY THE NAME \u2014 the agent is chartered and unnamed. `.svc` is PRICED (ap-town spec 431), so `service.create` registers nothing: it returned `name: \"\"`. The purchase is two more signed operations (`purchaseName`, apps/home/src/connect-client.ts): the TREASURY 0x479dfb6736cefc9f9be17a76de37dc0fd54aae4b pays 10 SHQ and claims against the ticket this Home's gate signs (/connect/naming-ticket), then the OWNER 0xBa732Ef8\u2026CdC declares its type, presents the name and writes its records. Same credential signs both.",
+    "set the name records above (atl:mcpEndpoint + atl:a2aEndpoint) \u2014 part of the presenting operation, or after it",
     "wrangler secret put GC_API_KEY on demo-gc-pg (richcanvas) \u2014 the key lives on the Worker, never in the agent or its playbook"
+  ],
+  "notes": [
+    "CHARTERING AND NAMING ARE TWO ACTS on a priced root. `scripts/charter-ligonier.mts` polls for the name right after `service.create` and would fail the same way today \u2014 ligonier.svc was chartered 2026-09-09, before spec 431 made `.svc` priced.",
+    "Nothing was spent getting here: the mandate approval and the genesis deploy are on chain, the name is still available, and the 10 SHQ is unpaid.",
+    "`service.create` is idempotent on the agent \u2014 the address derives from (custodian, parent, label), so a re-run returns 0xBa732Ef8\u2026CdC and does not deploy a second one."
   ]
 }

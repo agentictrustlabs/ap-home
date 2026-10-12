@@ -77,7 +77,7 @@ console.log(`  persona    ${PERSONA}`);
 console.log(`  parent     ${UNDER ? `${UNDER}.org (chartered under the persona)` : `${PERSONA} (the person — no organization)`}`);
 console.log(`  custodian  ${CUSTODIAN}`);
 console.log(`  note       ${NOTE}`);
-console.log(`  on chain   ${already ? `ALREADY ${already} — nothing to buy` : 'available — 10 SHQ from its own treasury, permanent, no undo'}`);
+console.log(`  on chain   ${already ? `ALREADY ${already} — nothing to buy` : 'available — the charter does NOT buy it (priced root); the agent is deployed unnamed'}`);
 if (DRY) { console.log('\n--dry-run: nothing was signed and nothing was bought.'); process.exit(0); }
 
 const who = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: PERSONA, client_id: 'demo-web' }) }));
@@ -89,10 +89,17 @@ const csrf = (await j(csrfRes)) as { token?: string };
 const H = { 'content-type': 'application/json', origin: HOME, cookie: (csrfRes.headers.get('set-cookie') ?? '').split(';')[0], 'x-csrf-token': csrf.token ?? '' };
 const post = async (path: string, body: unknown) => j(await fetch(`${HOME}/a2a${path}`, { method: 'POST', headers: H, body: JSON.stringify(body) }));
 const sign = async (digest: Hex): Promise<Hex> => { const b = await j(await fetch(`${HOME}/connect/persona-sign`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${who.homeSession}` }, body: JSON.stringify({ digest }) })); if (!b.signature) throw new Error(`persona-sign: ${JSON.stringify(b).slice(0, 160)}`); return b.signature; };
-type Reply = { kind?: string; error?: string; runRef?: string; resumeToken?: string; requirement?: MandateRequirementV1; delegator?: Address; delegate?: Address; alsoApprove?: Array<{ digest: Hex }>; prompt?: { kind?: string; digest?: Hex; prompt?: string; stepRef?: string; signer?: string; payload?: unknown; fields?: unknown } };
+type Reply = { kind?: string; error?: string; text?: string; runRef?: string; resumeToken?: string; requirement?: MandateRequirementV1; delegator?: Address; delegate?: Address; alsoApprove?: Array<{ digest: Hex }>; result?: unknown; receipts?: unknown[]; prompt?: { kind?: string; digest?: Hex; prompt?: string; stepRef?: string; signer?: string; payload?: unknown; fields?: unknown } };
 
-/** One act through the persona's agent: the plan supplied, the mandate they sign, the prompts they answer. */
-async function act(message: string, toolId: string, args: Record<string, unknown>): Promise<void> {
+/**
+ * One act through the persona's agent: the plan supplied, the mandate they sign, the prompts they answer.
+ *
+ * A `done` THAT DID NOTHING IS WHY THIS PRINTS ITS RESULT. The first charter of people-groups.svc reported
+ * `signed → done` and left no name and no agent in the owner's tree — and the reply that would have said
+ * why was discarded, so the only way to find out was to run the irreversible act again. The step's own
+ * receipts are the cheapest diagnostic there is; they cost a line.
+ */
+async function act(message: string, toolId: string, args: Record<string, unknown>): Promise<{ agent?: Address } | undefined> {
   let r = await post('/harness/ask', { session: who.homeSession, addressee: ME, message, plan: { steps: [{ toolId, args }] } });
   let rep = r.reply as Reply | undefined;
   console.log(`  ask → ${rep?.kind}${rep?.error ? ` ${rep.error}` : ''}`);
@@ -132,6 +139,12 @@ async function act(message: string, toolId: string, args: Record<string, unknown
     break;
   }
   if (rep?.kind !== 'done' && rep?.kind !== 'answer') fail(`${toolId} did not finish: ${JSON.stringify(r).slice(0, 700)}`);
+  if (rep.text) console.log(`  said: ${rep.text.slice(0, 300)}`);
+  const receipts = ((r.reply as { receipts?: Array<Record<string, unknown>> })?.receipts ?? (r as { receipts?: Array<Record<string, unknown>> }).receipts ?? []);
+  for (const rc of receipts) console.log(`  receipt: ${JSON.stringify(rc).slice(0, 400)}`);
+  if (rep.result !== undefined) console.log(`  result: ${JSON.stringify(rep.result).slice(0, 600)}`);
+  if (rep.runRef) console.log(`  runRef: ${rep.runRef}`);
+  return rep.result as { agent?: Address } | undefined;
 }
 
 /** Wait for a name to resolve — the charter is a transaction, so the registry lags the reply by a block or two. */
@@ -162,22 +175,29 @@ if (UNDER) {
 }
 
 let svc = already;
+let named = !!already;
 if (svc) console.log(`${svcName} already resolves → ${svc}`);
 else {
   console.log(`── ${svcName}: ${PERSONA} charters the service under ${parentName} ──`);
-  await act(`create a service agent called ${LABEL} under ${parentName}`, 'service.create', { parent, label: LABEL });
-  svc = await settle(svcName);
-  if (!svc) fail(`${svcName} does not resolve after the charter`);
-  console.log(`  ${svcName} → ${svc}`);
+  const chartered = await act(`create a service agent called ${LABEL} under ${parentName}`, 'service.create', { parent, label: LABEL });
+  // THE AGENT IS THE ACT'S RESULT, not the name lookup. Polling the registry and failing when nothing
+  // resolved reported a successful charter as a failure and printed no address at all — so the agent that
+  // HAD been deployed was invisible, and the only way to learn its address was to run the act again.
+  svc = (chartered?.agent ?? null) as Address | null;
+  if (!svc) fail(`service.create finished without naming an agent: ${JSON.stringify(chartered).slice(0, 400)}`);
+  console.log(`  ${svcName} agent → ${svc}`);
+  named = !!(await settle(svcName));
+  console.log(named ? `  ${svcName} resolves` : `  ${svcName} is NOT registered — a priced root names nothing at charter (see the header)`);
 }
 
 // ── the operator note: what is true now, merged over what was planned ──
 const note: Record<string, unknown> = existsSync(NOTE) ? JSON.parse(readFileSync(NOTE, 'utf8')) : { chainId: CHAIN };
 const prior = (note.service ?? {}) as Record<string, unknown>;
-note.service = { ...prior, name: svcName, sa: svc, charteredUnder: parentName, custodian: CUSTODIAN };
+note.service = { ...prior, name: svcName, sa: svc, charteredUnder: parentName, custodian: CUSTODIAN, named };
 if (UNDER) note.org = { name: parentName, sa: parent, steward: PERSONA };
 else { delete note.org; note.charteredBy = { persona: PERSONA, sa: ME }; }
 note.charteredAt = (note.charteredAt as string | null) ?? new Date().toISOString();
 writeFileSync(NOTE, JSON.stringify(note, null, 2) + '\n');
 console.log(`\n✓ ${svcName} ${svc} under ${parentName} — written to ${NOTE}`);
-console.log('  Next: set its name records (atl:mcpEndpoint + atl:a2aEndpoint) and its facets, then the indexer projects it.');
+if (named) console.log('  Next: set its name records (atl:mcpEndpoint + atl:a2aEndpoint) and its facets, then the indexer projects it.');
+else console.log(`  Next: BUY the name — 10 SHQ from the payer's treasury against a gate ticket, then present it and write its records (purchaseName). Until then the agent is real and anonymous, and nothing public lists it.`);
