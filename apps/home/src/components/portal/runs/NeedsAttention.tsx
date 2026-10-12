@@ -12,6 +12,12 @@
 //
 //   It does not go quiet when it cannot read something. An unreadable record is listed as a finding, because
 //   a missing row looks exactly like a clean one and nobody can see an absence.
+//
+// AND IT GROUPS. The first render of this panel on a real agent printed "waiting for a signature" twenty-six
+// times in a row, each with its own Inspect button — technically every finding, practically a wall nobody
+// reads, which is the same failure as saying nothing. Findings of one kind are collapsed to one line with a
+// count; the runs stay reachable underneath. Grouping changes how many sentences a person reads, never which
+// facts they are told.
 import { useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { fetchAttention, type AttentionFindingView } from '../../../home/ask';
@@ -56,26 +62,45 @@ export function NeedsAttention({ token, addressee, onOpenRun }: { token: string;
     return <p className="muted small">Nothing needs you across {state.considered} run(s) read.</p>;
   }
 
+  // One group per kind, in the order Ring 0 ranked them (severity first) — the grouping preserves that order
+  // by keying off first appearance rather than re-sorting.
+  const groups: Array<{ kind: AttentionFindingView['kind']; severity: AttentionFindingView['severity']; detail: string; runRefs: string[] }> = [];
+  for (const f of state.findings) {
+    const g = groups.find((x) => x.kind === f.kind);
+    if (g) { if (f.runRef) g.runRefs.push(f.runRef); }
+    else groups.push({ kind: f.kind, severity: f.severity, detail: f.detail, runRefs: f.runRef ? [f.runRef] : [] });
+  }
+
   return (
     <div>
       <p className="muted small" style={{ marginBottom: '.5rem' }}>
         {state.findings.length} finding(s) across {state.considered} run(s) read. Each says what was observed; what to do about it is yours.
       </p>
-      <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '.45rem' }}>
-        {state.findings.map((f, i) => (
-          <li key={`${f.kind}-${f.runRef ?? 'none'}-${i}`} style={{ display: 'flex', gap: '.6rem', alignItems: 'baseline', borderLeft: `3px solid ${SEVERITY[f.severity].color}`, paddingLeft: '.6rem' }}>
-            <span style={{ fontSize: '.7rem', textTransform: 'uppercase', letterSpacing: '.05em', color: SEVERITY[f.severity].color, minWidth: '3.2rem' }}>
-              {SEVERITY[f.severity].label}
-            </span>
-            <span style={{ minWidth: 0 }}>
-              <strong style={{ fontWeight: 600 }}>{KIND_LABEL[f.kind]}</strong>
-              <span style={{ opacity: 0.8 }}> — {f.detail}</span>
-              {f.runRef && onOpenRun && (
-                <button type="button" className="btn-ghost" style={{ marginLeft: '.5rem', padding: '.1rem .4rem', fontSize: '.78rem' }} onClick={() => onOpenRun(f.runRef!)}>
-                  Inspect
-                </button>
-              )}
-            </span>
+      <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '.55rem' }}>
+        {groups.map((g) => (
+          <li key={g.kind} style={{ borderLeft: `3px solid ${SEVERITY[g.severity].color}`, paddingLeft: '.6rem' }}>
+            <div style={{ display: 'flex', gap: '.6rem', alignItems: 'baseline' }}>
+              <span style={{ fontSize: '.7rem', textTransform: 'uppercase', letterSpacing: '.05em', color: SEVERITY[g.severity].color, minWidth: '3.2rem' }}>
+                {SEVERITY[g.severity].label}
+              </span>
+              <span style={{ minWidth: 0 }}>
+                <strong style={{ fontWeight: 600 }}>{KIND_LABEL[g.kind]}</strong>
+                {g.runRefs.length > 1 && <span style={{ opacity: 0.7 }}> · {g.runRefs.length} runs</span>}
+                <span style={{ opacity: 0.8 }}> — {g.detail}</span>
+              </span>
+            </div>
+            {onOpenRun && g.runRefs.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.3rem', margin: '.3rem 0 0 3.8rem' }}>
+                {/* The runs stay reachable: the group says how many, these open them. Capped so one noisy kind
+                    cannot push every other finding off the screen — the count above is the honest total. */}
+                {g.runRefs.slice(0, 8).map((rr) => (
+                  <button key={rr} type="button" className="btn-ghost" style={{ padding: '.1rem .4rem', fontSize: '.74rem' }} onClick={() => onOpenRun(rr)}>
+                    {rr.slice(-8)}
+                  </button>
+                ))}
+                {g.runRefs.length > 8 && <span className="muted small" style={{ alignSelf: 'center' }}>+{g.runRefs.length - 8} more in the log below</span>}
+              </div>
+            )}
           </li>
         ))}
       </ul>
