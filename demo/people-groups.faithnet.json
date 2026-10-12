@@ -1,20 +1,19 @@
 {
-  "purpose": "the Global Church people-groups service agent in the faithnet estate (an operator note, not a persona) \u2014 the ap-people-group-catalog/v1 twin of ligonier.faithnet.json; its name record atl:mcpEndpoint points at the demo-gc-pg Worker (ap-demos/apps/demo-gc-pg)",
+  "purpose": "the Global Church people-groups service agent in the faithnet estate (an operator note, not a persona) — the ap-people-group-catalog/v1 twin of ligonier.faithnet.json; its name record atl:mcpEndpoint points at the demo-gc-pg Worker (ap-demos/apps/demo-gc-pg)",
   "chainId": 34348,
   "charteredBy": {
     "persona": "demo-admin",
-    "sa": "0x6142b0fca982f6701cf2248bf368ab44a48c5725",
-    "why": "an operator fixture, not the Global Church organization's own service \u2014 so it is chartered under the demo admin who custodies the estate's other fixtures, and a demo person SA is never also an organization SA (ADR-0046)"
+    "sa": "0x6142b0fca982f6701cf2248bf368ab44a48c5725"
   },
   "service": {
     "name": "people-groups.svc",
-    "sa": "0xBa732Ef84Fd578D5CF6668824e2bA68f59CcECdC",
+    "sa": "0xba732ef84fd578d5cf6668824e2ba68f59ccecdc",
     "charteredUnder": "demo-admin",
-    "custodian": "0x423B0749c1b85a12A8b463c01F697D9E0072544d",
+    "custodian": "0x423b0749c1b85a12a8b463c01f697d9e0072544d",
     "host": "people-groups-svc.faithnet.ai",
     "facets": {
       "displayName": "Global Church people-group counts",
-      "description": "How many people groups there are, by list \u2014 Joshua Project, IMB and the UUPG+ Base List \u2014 for a country, religion and affinity bloc, read live from the Global Church graph. Counts with their source named; never raw SPARQL, never a write.",
+      "description": "How many people groups there are, by list — Joshua Project, IMB and the UUPG+ Base List — for a country, religion and affinity bloc, read live from the Global Church graph. Counts with their source named; never raw SPARQL, never a write.",
       "capabilities": "gc:CFnPeopleGroupIntelligence",
       "focusAreas": "people groups,unreached,frontier people groups,joshua project,imb,base list",
       "languages": "en",
@@ -24,17 +23,22 @@
     },
     "registry": "urn:ap:registry:faithnet-agents",
     "facetsAt": null,
-    "named": false
+    "named": true,
+    "namedAt": "2026-10-12T13:15:02.523Z",
+    "presented": true,
+    "recordsNotWritten": [
+      "siteUrl"
+    ]
   },
   "charteredAt": "2026-10-12T12:22:10Z",
   "todo": [
-    "BUY THE NAME \u2014 the agent is chartered and unnamed. `.svc` is PRICED (ap-town spec 431), so `service.create` registers nothing: it returned `name: \"\"`. The purchase is two more signed operations (`purchaseName`, apps/home/src/connect-client.ts): the TREASURY 0x479dfb6736cefc9f9be17a76de37dc0fd54aae4b pays 10 SHQ and claims against the ticket this Home's gate signs (/connect/naming-ticket), then the OWNER 0xBa732Ef8\u2026CdC declares its type, presents the name and writes its records. Same credential signs both.",
-    "set the name records above (atl:mcpEndpoint + atl:a2aEndpoint) \u2014 part of the presenting operation, or after it",
-    "wrangler secret put GC_API_KEY on demo-gc-pg (richcanvas) \u2014 the key lives on the Worker, never in the agent or its playbook"
+    "BUY THE NAME — the agent is chartered and unnamed. `.svc` is PRICED (ap-town spec 431), so `service.create` registers nothing: it returned `name: \"\"`. The purchase is two more signed operations (`purchaseName`, apps/home/src/connect-client.ts): the TREASURY 0x479dfb6736cefc9f9be17a76de37dc0fd54aae4b pays 10 SHQ and claims against the ticket this Home's gate signs (/connect/naming-ticket), then the OWNER 0xBa732Ef8…CdC declares its type, presents the name and writes its records. Same credential signs both.",
+    "set the name records above (atl:mcpEndpoint + atl:a2aEndpoint) — part of the presenting operation, or after it",
+    "wrangler secret put GC_API_KEY on demo-gc-pg (richcanvas) — the key lives on the Worker, never in the agent or its playbook"
   ],
   "notes": [
-    "CHARTERING AND NAMING ARE TWO ACTS on a priced root. `scripts/charter-ligonier.mts` polls for the name right after `service.create` and would fail the same way today \u2014 ligonier.svc was chartered 2026-09-09, before spec 431 made `.svc` priced.",
+    "CHARTERING AND NAMING ARE TWO ACTS on a priced root. `scripts/charter-ligonier.mts` polls for the name right after `service.create` and would fail the same way today — ligonier.svc was chartered 2026-09-09, before spec 431 made `.svc` priced.",
     "Nothing was spent getting here: the mandate approval and the genesis deploy are on chain, the name is still available, and the 10 SHQ is unpaid.",
-    "`service.create` is idempotent on the agent \u2014 the address derives from (custodian, parent, label), so a re-run returns 0xBa732Ef8\u2026CdC and does not deploy a second one."
+    "`service.create` is idempotent on the agent — the address derives from (custodian, parent, label), so a re-run returns 0xBa732Ef8…CdC and does not deploy a second one."
   ]
 }

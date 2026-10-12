@@ -36,6 +36,15 @@ const LABEL = arg('label');
 const UNDER = arg('under');                       // an org label, or absent ⇒ the person is the parent
 const NOTE = arg('note') ?? process.env.NOTE;
 const DRY = process.argv.includes('--dry-run');
+/**
+ * Re-run the (idempotent) charter even when the name already resolves, to recover the act's own result.
+ *
+ * The stewardship wire lives only in that result, and the Home's link is where it is cached — so an agent
+ * chartered before the link was written has no wire in its link, and the Home can list it but not act as
+ * it. `service.create` derives the same agent and deploys nothing; what it costs is the mandate the
+ * persona signs, which is one transaction and no new authority.
+ */
+const RELINK = process.argv.includes('--relink');
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 250), _status: r.status }; } };
 const fail = (m: string): never => { console.error(`\n✗ ${m}`); process.exit(1); };
 if (!LABEL) fail('--label <service-label> is required');
@@ -89,6 +98,8 @@ const csrf = (await j(csrfRes)) as { token?: string };
 const H = { 'content-type': 'application/json', origin: HOME, cookie: (csrfRes.headers.get('set-cookie') ?? '').split(';')[0], 'x-csrf-token': csrf.token ?? '' };
 const post = async (path: string, body: unknown) => j(await fetch(`${HOME}/a2a${path}`, { method: 'POST', headers: H, body: JSON.stringify(body) }));
 const sign = async (digest: Hex): Promise<Hex> => { const b = await j(await fetch(`${HOME}/connect/persona-sign`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${who.homeSession}` }, body: JSON.stringify({ digest }) })); if (!b.signature) throw new Error(`persona-sign: ${JSON.stringify(b).slice(0, 160)}`); return b.signature; };
+/** What a charter hands back: the agent it deployed, and the stewardship wire that makes the parent its steward. */
+interface CharterResult { agent?: Address; name?: string; kind?: string; parent?: Address; person?: Address; stewardshipDelegation?: unknown }
 type Reply = { kind?: string; error?: string; text?: string; runRef?: string; resumeToken?: string; requirement?: MandateRequirementV1; delegator?: Address; delegate?: Address; alsoApprove?: Array<{ digest: Hex }>; result?: unknown; receipts?: unknown[]; prompt?: { kind?: string; digest?: Hex; prompt?: string; stepRef?: string; signer?: string; payload?: unknown; fields?: unknown } };
 
 /**
@@ -99,7 +110,7 @@ type Reply = { kind?: string; error?: string; text?: string; runRef?: string; re
  * why was discarded, so the only way to find out was to run the irreversible act again. The step's own
  * receipts are the cheapest diagnostic there is; they cost a line.
  */
-async function act(message: string, toolId: string, args: Record<string, unknown>): Promise<{ agent?: Address } | undefined> {
+async function act(message: string, toolId: string, args: Record<string, unknown>): Promise<CharterResult | undefined> {
   let r = await post('/harness/ask', { session: who.homeSession, addressee: ME, message, plan: { steps: [{ toolId, args }] } });
   let rep = r.reply as Reply | undefined;
   console.log(`  ask → ${rep?.kind}${rep?.error ? ` ${rep.error}` : ''}`);
@@ -144,7 +155,7 @@ async function act(message: string, toolId: string, args: Record<string, unknown
   for (const rc of receipts) console.log(`  receipt: ${JSON.stringify(rc).slice(0, 400)}`);
   if (rep.result !== undefined) console.log(`  result: ${JSON.stringify(rep.result).slice(0, 600)}`);
   if (rep.runRef) console.log(`  runRef: ${rep.runRef}`);
-  return rep.result as { agent?: Address } | undefined;
+  return rep.result as CharterResult | undefined;
 }
 
 /** Wait for a name to resolve — the charter is a transaction, so the registry lags the reply by a block or two. */
@@ -176,10 +187,15 @@ if (UNDER) {
 
 let svc = already;
 let named = !!already;
-if (svc) console.log(`${svcName} already resolves → ${svc}`);
+let chartered: CharterResult | undefined;
+if (svc && RELINK) {
+  console.log(`${svcName} already resolves ${'\u2192'} ${svc} ${'\u2014'} re-running the charter to recover its stewardship wire (--relink)`);
+  chartered = await act(`create a service agent called ${LABEL} under ${parentName}`, 'service.create', { parent, label: LABEL });
+  if (chartered?.agent && chartered.agent.toLowerCase() !== svc.toLowerCase()) fail(`the charter returned ${chartered.agent}, not the agent ${svcName} resolves to (${svc}) ${'\u2014'} refusing to relink`);
+} else if (svc) console.log(`${svcName} already resolves → ${svc}`);
 else {
   console.log(`── ${svcName}: ${PERSONA} charters the service under ${parentName} ──`);
-  const chartered = await act(`create a service agent called ${LABEL} under ${parentName}`, 'service.create', { parent, label: LABEL });
+  chartered = await act(`create a service agent called ${LABEL} under ${parentName}`, 'service.create', { parent, label: LABEL });
   // THE AGENT IS THE ACT'S RESULT, not the name lookup. Polling the registry and failing when nothing
   // resolved reported a successful charter as a failure and printed no address at all — so the agent that
   // HAD been deployed was invisible, and the only way to learn its address was to run the act again.
@@ -188,6 +204,28 @@ else {
   console.log(`  ${svcName} agent → ${svc}`);
   named = !!(await settle(svcName));
   console.log(named ? `  ${svcName} resolves` : `  ${svcName} is NOT registered — a priced root names nothing at charter (see the header)`);
+}
+
+// ── THE HOME'S OWN TREE ──
+//
+// A charter deploys the agent on chain and the Home learns nothing. `createManagedAgent` (the path the
+// Managed Agents page uses) writes a `related-orgs` link as well as deploying — that link is what the
+// agent pulldown lists, and what `nameManagedAgent` needs to offer naming. `service.create` on its own
+// writes no link, so a service chartered this way is real, named, resolvable, and absent from its own
+// steward's Home (seen 2026-10-12: people-groups.svc was in the names app and nowhere in the pulldown).
+//
+// So the charter writes it. The link carries the stewardship wire the act itself returned — the route's
+// own comment says that field "is its cache and carries no authority of its own", which is exactly what
+// this is: a record of a relationship the chain already holds, never a grant of one.
+if (svc) {
+  const link: Record<string, unknown> = {
+    person: ME, orgAgent: svc, orgName: named ? svcName : '', kind: 'service', parent,
+    ...(chartered?.stewardshipDelegation ? { stewardshipDelegation: chartered.stewardshipDelegation } : {}),
+  };
+  const saved = await j(await fetch(`${HOME}/connect/related-orgs`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${who.homeSession}` }, body: JSON.stringify(link) }));
+  console.log(saved?.error
+    ? `  ✗ the Home would not list it: ${saved.error}`
+    : `  ✓ listed under ${PERSONA} (kind service${chartered?.stewardshipDelegation ? ', with its stewardship wire' : ', no stewardship wire in this run'})`);
 }
 
 // ── the operator note: what is true now, merged over what was planned ──
