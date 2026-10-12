@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { listRunRecords, type RunRecordRow } from '../../../home/ask';
 import { RunInspector } from './RunInspector';
+import { NeedsAttention } from './NeedsAttention';
 import { StatePill } from '../StatePill';
 import { List, Row, Panel, Stats, Stat, FilterChip, SearchInput, DayHeader, Drawer, Button, timeLabel, type PanelState } from '../../../ui';
 import { stateOf, stateTone, type RunStateSource } from '../../../home/run-state';
@@ -98,6 +99,16 @@ export function RunHistory({ token, addressee, limit = 60 }: { token: string; ad
           </label>
         ))}
       </div>
+      {/* Spec 438 §4 — WHAT NEEDS A PERSON, above the log. The list below says what happened; this says which
+          of it is waiting on somebody. It is its own read (the feed needs the full records, which the listing
+          does not carry) and it is deliberately first: a person opens this page to find the thing that is stuck. */}
+      <Panel title="Needs attention" icon={<ClockIcon />} state="ready" testId="run-attention"
+        aside={<span>what the evidence says is unfinished, uncertain or unread — never what to do about it</span>}>
+        <div style={{ padding: '0 var(--sp-4) var(--sp-3)' }}>
+          <NeedsAttention token={token} addressee={addressee} onOpenRun={(runRef) => { const row = (rows ?? []).find((r) => r.runRef === runRef); if (row) setOpen(row); }} />
+        </div>
+      </Panel>
+
       <Panel title="What this agent did" icon={<ClockIcon />} count={filtered.length} state={state} rows={5} testId="run-history"
         aside={<span>every run you asked of it — opened, each step, its authority, its provenance</span>}
         empty={{ icon: <ClockIcon />, ...emptyWords }}

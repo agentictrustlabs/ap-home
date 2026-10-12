@@ -529,6 +529,37 @@ export async function fetchRunInspector(session: { token: string }, addressee: A
   return out.ok && out.record ? out.record : { error: out.error ?? 'the run could not be read back' };
 }
 
+/** Spec 438 §4 — HOW COMPLETE IS WHAT A RUN LEFT BEHIND: five separate readings plus cost, computed by the
+ *  runtime from the FULL record (the listing drops the steps, so it cannot answer coverage honestly). */
+export interface EvidenceStatusView {
+  runRef: string;
+  coverage: { state: 'complete' | 'incomplete' | 'unknown'; plannedSteps: number; recordedSteps: number; missing: string[]; skipped: string[]; replayed: string[] };
+  consistency: { state: 'consistent' | 'conflicting' | 'unknown'; conflicts: string[] };
+  origin: { state: 'executor-observed' | 'mixed'; delegatedSteps: string[] };
+  integrity: { state: 'unchecked' | 'hash-validated' | 'signature-validated' | 'anchored'; anchorDigest?: string };
+  assessment: { state: 'unassessed' | 'assessed'; count: number };
+  cost: { state: 'reported' | 'partial' | 'unavailable'; tokensIn?: number; tokensOut?: number; modelCalls: number; callsMissingUsage: number };
+  effectUncertain: boolean;
+}
+export async function fetchRunEvidence(session: { token: string }, addressee: Address, runRef: string): Promise<EvidenceStatusView | { error: string }> {
+  const out = (await postA2a('/a2a/harness/evidence', { session: session.token, addressee, runRef })) as { ok?: boolean; error?: string; evidence?: EvidenceStatusView };
+  return out.ok && out.evidence ? out.evidence : { error: out.error ?? 'the run\u2019s evidence could not be read' };
+}
+
+/** Spec 438 §4 — WHAT NEEDS A PERSON, over everything this agent did. Data, never advice: a finding says what
+ *  was observed and what it means, and the decision stays with whoever holds the authority to act. */
+export interface AttentionFindingView {
+  kind: 'unreadable-record' | 'conflicting-sources' | 'tool-failure' | 'effect-uncertain' | 'export-missing' | 'mandate-not-presented' | 'commitment-past-deadline';
+  severity: 'act' | 'review' | 'note';
+  runRef?: string;
+  detail: string;
+  subjects?: string[];
+}
+export async function fetchAttention(session: { token: string }, addressee: Address): Promise<{ findings: AttentionFindingView[]; considered: number } | { error: string }> {
+  const out = (await postA2a('/a2a/harness/evidence', { session: session.token, addressee })) as { ok?: boolean; error?: string; findings?: AttentionFindingView[]; considered?: number };
+  return out.ok && out.findings ? { findings: out.findings, considered: out.considered ?? 0 } : { error: out.error ?? 'the attention feed could not be read' };
+}
+
 /** Spec 414 A2 — THE RUN'S MEASUREMENTS (W3C DQV, `run.measures:<runRef>`) from the acting agent's vault, as metric →
  *  value rows. Absent while the export has not landed — said, never guessed. */
 export interface RunMeasureRow { metric: string; value: number; unit?: string; step?: string }

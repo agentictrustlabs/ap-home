@@ -172,7 +172,7 @@ const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stat
 import { askVocabulary, commandFieldsFor, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY, HOUSEHOLD_READ_CAPABILITY, CAPABILITY_WORDS, type PlannerTraceV1 } from './harness-run.js';
 import { workersAiTranscriber, repairTranscript, hearingVocabulary, spokenFor } from './voice.js';
 import { DECISION_POINTS } from '@agenticprimitives/ontology';
-import { loadPlaybook, billed, chargeBill, memoRead, forgetMemo, projectRunState, draftRecipe } from '@agenticprimitives/harness';
+import { loadPlaybook, billed, chargeBill, memoRead, forgetMemo, projectRunState, draftRecipe, findingsOf } from '@agenticprimitives/harness';
 import { cardRoomActOf, cardRoomTurn, verifyStudyGrant, type CardRoomAct, type StudyAccess } from './card-room.js';
 import { enforcersFromEnv } from './org-wire.js';
 import { runUnderMandate, askReplyFor, readSubjectReply, type AskReplyEnvelopeV1, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
@@ -201,7 +201,7 @@ import { runMeasuresRecordKey } from '@agenticprimitives/evaluation';
 import { doorFromBody, modelCallsOf, variantOf, engagedFromTrace, operationalOf, parseVariantRequest, VARIANT_TOGGLES, type VariantRequestV1 , SELECTION_ARMS } from './run-trace.js';
 import { averageOutcomeChecks, judgeRepeatsOf } from './outcome-check-repeats.js';
 import { provenanceLinkHeader } from '@agenticprimitives/a2a';
-import { runProvenanceRecordKey } from '@agenticprimitives/orchestration';
+import { runProvenanceRecordKey, evidenceStatusOf } from '@agenticprimitives/orchestration';
 import { rootClassForDerivedType, type Address, type Hex } from '@agenticprimitives/types';
 import { SessionStoreDO, DurableObjectSessionStore } from './session-store-do';
 import { verifyBridgeCall, nonceStoreFromKv, type NonceStore } from './bridge-hmac';
@@ -3154,6 +3154,51 @@ app.post('/harness/records', async (c) => {
   const records = holds ? all : all.filter((r) => String(((r.intent as { context?: { asker?: string } } | undefined)?.context?.asker) ?? '').toLowerCase() === caller);
   // Spec 381 — the retention is part of the listing: how long the object keeps these, and where the durable half lives.
   return c.json({ ok: true, records, retention: recordRetention(c.env) });
+});
+
+// POST /harness/evidence { session, addressee, runRef? } — spec 438 §4. HOW COMPLETE IS WHAT THIS AGENT LEFT?
+//
+// Two answers from one route, both computed HERE because both need the FULL records and the listing does not
+// carry them (it drops steps[], receipts and events — by design, it is a list). A Home that tried to read
+// evidence from the listing would be reading coverage off a step COUNT, which cannot say which step is
+// missing, and that is the one thing coverage exists to say.
+//
+//   with `runRef`  → `evidenceStatusOf` for that run: coverage · consistency · origin · integrity · assessment,
+//                    plus cost (unreported is `unavailable`, never 0).
+//   without        → `findingsOf` over every record this caller may look back on: the needs-attention feed.
+//
+// The same claim as `/harness/records`: a run is looked back on by whoever asked it, or by the agent's
+// custodian. Nothing here is authority — an evidence reading is evidence about evidence.
+app.post('/harness/evidence', async (c) => {
+  const rawEv = await c.req.text();
+  const body = ((): { session?: string; addressee?: Address; runRef?: string } | null => { try { return JSON.parse(rawEv); } catch { return null; } })();
+  if (!body?.addressee) return c.json({ ok: false, error: 'session (or an app delegation) and addressee are required' }, 400);
+  const who = await askSurfacePrincipal(c, rawEv, body);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const addressee = body.addressee.toLowerCase() as Address;
+  { const fwd = await forwardToSelfHost(c.env, c.req.raw, addressee, rawEv, selfHostForwardAuth(c.env, String(who.sa).toLowerCase() as Address)); if (fwd) return fwd; }
+  const caller = String(who.sa).toLowerCase();
+  const holds = await mayOverseeAgent(c.env, caller as Address, addressee).catch(() => false);
+  const mine = (r: { intent?: { context?: { asker?: string } } }): boolean =>
+    holds || String(r.intent?.context?.asker ?? '').toLowerCase() === caller;
+
+  if (body.runRef) {
+    const rec = await getRecord(c.env as never, addressee, body.runRef);
+    if (!rec) return c.json({ ok: false, error: 'no such record' }, 404);
+    if (!mine(rec as never)) return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
+    return c.json({ ok: true, evidence: evidenceStatusOf(rec) });
+  }
+
+  // The feed. `listRecords` is a projection, so each record is re-read in full — an unreadable one is a
+  // FINDING (`unreadable`), never a silent gap, because nobody can see an absence in a list.
+  const listing = (await listRecords(c.env as never, addressee)).filter((r) => mine(r as never));
+  const full: unknown[] = [];
+  const unreadable: string[] = [];
+  for (const row of listing.slice(0, 200)) {
+    const rec = await getRecord(c.env as never, addressee, row.runRef).catch(() => null);
+    if (rec) full.push(rec); else unreadable.push(row.runRef);
+  }
+  return c.json({ ok: true, findings: findingsOf(full, { ...(unreadable.length ? { unreadable } : {}) }), considered: full.length });
 });
 
 // POST /harness/spans { session, addressee, runRef } — spec 381. The run as a firewalled trace: step names,

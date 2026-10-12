@@ -3,7 +3,8 @@
 // stood if it was stopped) → ARTIFACTS (391 — what the run left, by record and digest) → DECISIONS taken and pending
 // (393 approvals, rule decisions, each step's authority verdict) → PLAN AND PER-STEP AUTHORITY (the plan as admitted,
 // each step's verdict with the chain it read) → EXECUTION DETAIL (the spans: timings, models, routes — RunTimeline) →
-// PROVENANCE (the PROV graph, downloadable). Model reasoning is not shown and is not evidence. Read from the record
+// EVIDENCE (438 §4 — five readings of how complete the record is) → PROVENANCE (the PROV graph, downloadable).
+// Model reasoning is not shown and is not evidence. Read from the record
 // form of the run's provenance — digests, verdicts and names, never arguments or words.
 import { useEffect, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
@@ -15,6 +16,7 @@ import { RunTimeline } from './RunTimeline';
 import { RunTraceTree } from './RunTraceTree';
 import { TurnOperations } from './TurnOperations';
 import { DisputePanel } from './DisputePanel';
+import { EvidencePanel } from './EvidencePanel';
 import { SaveAsRecipe } from './SaveAsRecipe';
 import { canSaveAsRecipe } from '@agenticprimitives/harness/recipe';
 import { usePathname } from 'next/navigation';
@@ -135,6 +137,12 @@ export function RunInspector({ token, addressee, runRef, goal, open = true }: { 
             {...(rec.operational.turn?.recalledTurns !== undefined ? { recalledTurns: rec.operational.turn.recalledTurns } : {})} />
         : <div style={{ opacity: 0.6 }} data-testid="run-operations-absent">operations (stages, selection): not recorded for this run</div>}
       <RunTraceTree token={token} addressee={addressee} runRef={runRef} rec={rec} />
+
+      {/* 4b · EVIDENCE (spec 438 §4) — how complete what the run left behind actually is, in five separate
+          readings. It sits ABOVE the span timeline because it is what tells a person whether to trust the
+          detail below it: a run whose coverage is incomplete or whose parts disagree is not read the same way. */}
+      <H>evidence</H>
+      <EvidencePanel token={token} addressee={addressee} runRef={runRef} />
 
       {/* 5 · EXECUTION DETAIL + 6 · PROVENANCE — the span timeline and its downloads */}
       <H>execution detail · provenance</H>
