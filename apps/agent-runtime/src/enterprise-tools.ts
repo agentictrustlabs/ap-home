@@ -14,7 +14,9 @@ export const DISCOVERY_INSPECT_CAPABILITY = 'discovery.agent.inspect' as const;
 
 export const DISCOVERY_FIND_TOOL: ToolSpec = {
   id: DISCOVERY_FIND_CAPABILITY,
-  answers: ['who offers', 'find a ministry', 'find an agent that', 'who can', 'who teaches', 'find services', 'discover'],
+  // Every way a person asks for the LIST ITSELF. `foundIsNotAsked` (admission) reads these: a sentence carrying none of
+  // them is a question the found agent is to answer, and a plan that stops at the find continues into the engagement.
+  answers: ['who offers', 'find a ministry', 'find an agent that', 'who can', 'who teaches', 'find services', 'discover', 'is there an agent', 'which agents', 'list the agents', 'what agents'],
   verbs: ['find', 'discover'],
   description:
     'FINDS AGENTS IN THE PUBLIC REGISTRY BY WHAT THE PERSON WANTS — a ministry with a study on a doctrine, a service that '

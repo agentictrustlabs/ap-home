@@ -41,7 +41,7 @@
     "@agenticprimitives/model-client": "0.0.0-alpha.3",
     "@agenticprimitives/model-gateway": "0.0.0-alpha.3",
     "@agenticprimitives/ontology": "1.0.0-alpha.34",
-    "@agenticprimitives/orchestration": "0.0.0-alpha.14",
+    "@agenticprimitives/orchestration": "0.0.0-alpha.15",
     "@agenticprimitives/orchestration-anthropic": "0.0.0-alpha.14",
     "@agenticprimitives/orchestration-openai-compat": "0.0.0-alpha.13",
     "@agenticprimitives/rate-control": "0.0.0-alpha.5",

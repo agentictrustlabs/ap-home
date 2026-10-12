@@ -88,7 +88,7 @@ registerDefaultSubsetHandlers();
 import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunctionSelector, type Address, type Hex } from 'viem';
 import { type Plan, type Planner,
   runIntent, CONTINUE_STEP_ID, deriveArgs, type ArgDerivationV1, InputRequired, dataFor, signatureFor,
-  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, capabilitiesAvailable, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, partiesDistinct, actingPartyFromTheWords, kindNamedIsChartered, completePlan, transitionsHold, type FactsV1, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
+  type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, foundIsNotAsked, capabilitiesAvailable, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, partiesDistinct, actingPartyFromTheWords, kindNamedIsChartered, completePlan, transitionsHold, type FactsV1, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
 import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep, composeOfferedTools, mergeContractTool as composeMergeContractTool, loadPlaybook, declaredEffectSink, setBillStep, declaredCapabilities, type AskScopeV1 } from '@agenticprimitives/harness';
 // Spec 353 — the scope schema is Ring 0 now (spec 399 §4); this app keeps exporting it for its callers.
 export type { AskScopeV1 } from '@agenticprimitives/harness';
@@ -113,7 +113,7 @@ const kbModeOf = (env: { KB_RETRIEVAL?: string }, variant: HarnessRunInput['vari
 };
 import type { DefinitionToolV1 } from '@agenticprimitives/capability-claims';
 import { CATALOG_MCP_TOOL_NAMES, CATALOG_TOOLS, catalogBindingFor, catalogInvoker, isCatalogTool } from './catalog-tools.js';
-import { PEOPLE_GROUP_MCP_TOOL_NAMES, PEOPLE_GROUP_TOOLS, isPeopleGroupTool, peopleGroupInvoker, servesProfile, toolsServedAt } from './people-group-tools.js';
+import { PEOPLE_GROUP_MCP_TOOL_NAMES, isPeopleGroupTool, peopleGroupInvoker, peopleGroupToolsFrom, servesProfile, toolsServedAt, type McpToolDescriptor } from './people-group-tools.js';
 import { playbookProvenanceFromReceipts } from './skill-provenance.js';
 import { checkGroundedComposition, groundedFallback } from '@agenticprimitives/context';
 import { KB_QUESTION_TOOL, kbQuestionAvailable, KB_RETRIEVE_TOOL } from '@agenticprimitives/context';
@@ -4974,7 +4974,7 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
     : Promise.resolve(null);
   // WHICH PROFILE the record's endpoint serves (`tools/list`, remembered a minute per endpoint; a failed read is not
   // remembered and lists no profile's tools): the content catalog and the people-group catalog share the record key.
-  const servedOnce: Promise<string[] | null> = catalogOnce.then((b) => (b ? remembered(`mcp-served:${b.endpoint}`, async () => { const t = await toolsServedAt(b.endpoint); if (!t) throw new Error('tools/list unreadable'); return t; }) : null), () => null).catch(() => null);
+  const servedOnce: Promise<McpToolDescriptor[] | null> = catalogOnce.then((b) => (b ? remembered(`mcp-served:${b.endpoint}`, async () => { const t = await toolsServedAt(b.endpoint); if (!t) throw new Error('tools/list unreadable'); return t; }) : null), () => null).catch(() => null);
   // THE PERSON'S STUDY, STARTED NOW (`card-room.ts`): four reads of HER vault under the grant, independent of
   // everything the harness does before the answering step, so they run beside the playbook load rather than
   // after the gates — read later, where the tool is built. A consultation is on the table's clock.
@@ -5542,7 +5542,9 @@ step is then handed to that agent under authority the person grants; leave it ou
   mark('catalog');
   const catalogTools = catalog && servesProfile(served, CATALOG_MCP_TOOL_NAMES) ? CATALOG_TOOLS.map((t) => mergeContractTool(t, playbook?.tools?.[t.id])) : [];
   // The people-group catalog (ap-people-group-catalog/v1) on the same record — its own tools, never the content catalog's.
-  const peopleGroupTools = catalog && servesProfile(served, PEOPLE_GROUP_MCP_TOOL_NAMES) ? PEOPLE_GROUP_TOOLS.map((t) => mergeContractTool(t, playbook?.tools?.[t.id])) : [];
+  // ITS OWN READS, not a list compiled in here: whatever the bound catalog serves under `peoplegroup.*`,
+  // described in its own words. Two reads or twenty-three, no harness release either way.
+  const peopleGroupTools = catalog && servesProfile(served, PEOPLE_GROUP_MCP_TOOL_NAMES) ? peopleGroupToolsFrom(served).map((t) => mergeContractTool(t, playbook?.tools?.[t.id])) : [];
   // Spec 404 — the addressee's OWN external MCP connectors: compiled from its records, never narrowed by the playbook
   // (they are the holder's, not the archetype's); a read is her standing, an act her mandate at risk high.
   // Remembered a minute per holder (`run-memo.ts`): a survey and a read of the holder's vault, 1.2–2 s on every ask
@@ -6175,7 +6177,11 @@ step is then handed to that agent under authority the person grants; leave it ou
         // plan. A SUPPLIED plan was decided already — a Home button, or ONE step of another agent's plan routed here (spec
         // 366): the routed roster check of "invite nathan to missio nexus" arrived with the whole sentence as its goal and was
         // refused as "an instruction answered by a lookup" (live 2026-09-29, the invite e2e).
-        ...(input.plan ? [] : [instructionNeedsAct]),
+        ...(input.plan ? [] : [instructionNeedsAct,
+          // Spec 421 W1 applied to discovery — a question of the world planned as a find ALONE continues into the engagement
+          // of the agent the find returns: alice's Home found people-groups.svc and told her the count "could not be read"
+          // (2026-10-12). A sentence that asked to find is answered by the find.
+          foundIsNotAsked({ find: DISCOVERY_FIND_CAPABILITY, engage: ENGAGEMENT_INVOKE_CAPABILITY })]),
         noPlaceholders,
         // A plan naming a tool this agent does not offer is refused here (one re-plan, told which
         // tools it has) rather than hard-failing in the loop with `unknown_tool` — the model naming a

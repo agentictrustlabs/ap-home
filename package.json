@@ -57,7 +57,7 @@
     "@agenticprimitives/delegation": "1.0.0-alpha.34",
     "@agenticprimitives/fabric": "0.0.0-alpha.25",
     "@agenticprimitives/key-custody": "1.0.0-alpha.34",
-    "@agenticprimitives/orchestration": "0.0.0-alpha.14",
+    "@agenticprimitives/orchestration": "0.0.0-alpha.15",
     "@agenticprimitives/registry-kit": "0.0.0-alpha.20",
     "@agenticprimitives/runtime-member": "0.0.0-alpha.14",
     "@agenticprimitives/types": "1.0.0-alpha.34"
