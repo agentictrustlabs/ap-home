@@ -25,9 +25,14 @@ export interface PulseDayRecord {
   services?: Record<string, { samples?: number; up?: number }>;
   chain?: unknown;
   inference?: unknown;
-  estates?: Record<string, unknown>;
+  /**
+   * THE TOWN'S RECORD HOLDS ONE HEARTBEAT PER ESTATE, keyed by estate id — and each one carries that estate's
+   * own CENSUS (`agents: { person, org, service }`). Typed as `unknown` this was unreadable, so "how many
+   * agents are in town" was answered about runs while the answer sat in the record (seen 2026-10-12).
+   */
+  estates?: Record<string, EstateHeartbeat | unknown>;
   estate?: string;
-  heartbeat?: { runs?: { completed?: number; failed?: number; total?: number }; inferenceMicroUsd?: number | null } | null;
+  heartbeat?: EstateHeartbeat | null;
   /**
    * THE TOWN OF NAMES, in counts per root (spec 430, written by the town from `namesSampleOf`). A count, never a
    * person: no name and no owner is carried, so "how many people are named here?" is answerable and "who are they?"
@@ -54,7 +59,16 @@ export interface PulseDayRecord {
   };
 }
 
-export type PulseSubject = 'overall' | 'cost' | 'status' | 'runs' | 'names';
+/** As much of an estate's heartbeat as a reader of these records needs. Everything optional, as ever. */
+export interface EstateHeartbeat {
+  /** The estate's own census: how many agents of each kind it holds. A RUNNING TOTAL, never a day's flow. */
+  agents?: Record<string, number | null>;
+  homesActive24h?: number | null;
+  runs?: { completed?: number; failed?: number; total?: number };
+  inferenceMicroUsd?: number | null;
+}
+
+export type PulseSubject = 'overall' | 'cost' | 'status' | 'runs' | 'names' | 'agents';
 
 /** The window a question asks about, in whole UTC days ending today. */
 export interface PulseWindow { from: string; to: string; days: string[]; words: string }
@@ -86,6 +100,8 @@ export function subjectOf(question: string): PulseSubject {
   if (/\bdown|outage|up\b|uptime|status|healthy|available|broke|failing\b/.test(q)) return 'status';
   // NAMES BEFORE RUNS, because "how many names are there?" matches `how many` and is not a question about runs.
   if (/\bnames?\b|\bnamed\b|\bregistered\b|\broots?\b|\btlds?\b|\bendings?\b/.test(q)) return 'names';
+  // AND THE CENSUS BEFORE RUNS, for the same reason: "how many agents are in town" counts agents, not runs.
+  if (/\bagents?\b|\bcensus\b|\bpopulation\b|\bresidents?\b|\blives? here\b/.test(q)) return 'agents';
   if (/\brun|ask|request|throughput|latency|duration|how many\b/.test(q)) return 'runs';
   return 'overall';
 }
@@ -170,6 +186,13 @@ export function kindWords(kind: string | null): string[] {
 }
 
 /**
+ * A COUNTING PHRASE, and the few words a question may put between it and the thing counted: "how many
+ * people", "the number of active churches". One definition, used by the roots and by the census — the rule
+ * is the same in both places and two spellings of it would drift.
+ */
+const COUNTING = String.raw`\b(?:how many|how much|number of|count of|total)\b(?:\s+\w+){0,3}?\s+`;
+
+/**
  * The roots a question asks the COUNT of — "how many people do we have?", "the number of churches", ".me".
  *
  * A kind word only counts when a COUNTING PHRASE introduces it, because "the naming service" says `service`
@@ -182,10 +205,64 @@ export function rootsAsked(question: string, roots: PulseRoot[]): string[] {
   for (const r of roots) {
     if (q.includes(`.${r.tld}`)) { hit.push(r.tld); continue; }
     for (const w of kindWords(r.kind)) {
-      if (new RegExp(String.raw`\b(?:how many|how much|number of|count of|total)\b(?:\s+\w+){0,3}?\s+${w}\b`).test(q)) { hit.push(r.tld); break; }
+      if (new RegExp(`${COUNTING}${w}\\b`).test(q)) { hit.push(r.tld); break; }
     }
   }
   return hit;
+}
+
+/**
+ * ── THE CENSUS ─────────────────────────────────────────────────────────────────────────
+ * How many agents each estate holds, as the estate itself reported. Like a root's count this is a RUNNING
+ * TOTAL, so the latest day that recorded an estate is that estate's count — never a sum over days. Across
+ * ESTATES on one day it does add up: a different estate is a different set of Smart Agents.
+ *
+ * A count of AGENTS is not a count of NAMES and not a count of people. An estate reporting 80 person agents
+ * and a `.me` root holding 86 names are two different facts, and an answer that conflates them is wrong even
+ * when both numbers are right — so both are reported, each said for what it is.
+ */
+export interface PulseCensus { estate: string; day: string; agents: Record<string, number>; homesActive24h: number | null }
+export function censusIn(found: Array<{ day: string; rec: PulseDayRecord }>): PulseCensus[] {
+  const by = new Map<string, PulseCensus>();
+  const take = (estate: string, day: string, hb: EstateHeartbeat | null | undefined) => {
+    if (!hb || typeof hb !== 'object') return;
+    const agents: Record<string, number> = {};
+    for (const [kind, n] of Object.entries(hb.agents ?? {})) if (typeof n === 'number' && Number.isFinite(n)) agents[kind] = n;
+    if (!Object.keys(agents).length) return;
+    const prev = by.get(estate);
+    if (prev && prev.day > day) return;
+    by.set(estate, { estate, day, agents, homesActive24h: typeof hb.homesActive24h === 'number' ? hb.homesActive24h : null });
+  };
+  for (const { day, rec } of found) {
+    // The TOWN's record: one heartbeat per estate, keyed by id. An ESTATE's own: its slice, under `heartbeat`.
+    for (const [estate, hb] of Object.entries(rec.estates ?? {})) take(estate, day, hb as EstateHeartbeat);
+    if (rec.estate) take(rec.estate, day, rec.heartbeat);
+  }
+  return [...by.values()].sort((a, b) => a.estate.localeCompare(b.estate));
+}
+
+/** Every agent kind the census carries, across the estates — the only kinds a question may be matched against. */
+export const censusKinds = (census: PulseCensus[]): string[] =>
+  [...new Set(census.flatMap((c) => Object.keys(c.agents)))].sort();
+
+/**
+ * What the question asks the census for: `agents` (every kind) or `agents:<kind>`.
+ *
+ * The same counting-phrase rule the roots use, and for the same reason. The bare word "agents" is enough on
+ * its own — there is no other thing in these records called that — while a KIND word needs the phrase, so
+ * "the naming service" still asks about a service and not about the service agents.
+ */
+export function censusAsked(question: string, census: PulseCensus[]): string[] {
+  const q = question.toLowerCase();
+  const asked: string[] = [];
+  for (const kind of censusKinds(census)) {
+    for (const w of kindWords(kind)) {
+      if (new RegExp(`${COUNTING}${w}\\b`).test(q)) { asked.push(`agents:${kind}`); break; }
+    }
+  }
+  // "how many agents", "what is the census", "who lives here" — every kind, which is also the town's total.
+  if (census.length && /\bagents?\b|\bcensus\b|\bpopulation\b|\bresidents?\b|\blives? here\b/.test(q)) asked.unshift('agents');
+  return [...new Set(asked)];
 }
 
 /** Every name the records know, so a question can be matched against reality and nothing else. */
