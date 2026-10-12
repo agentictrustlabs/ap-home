@@ -8,7 +8,7 @@ import { bundleDigest, ZERO32 } from './receipt-anchor.js';
 import { intentDigest } from '@agenticprimitives/delegation';
 import type { Hex, Address } from 'viem';
 import { estateIdOf } from '@agenticprimitives/estate-projection';
-import { engagementsOf, assertFirewalled, assertMetricsFirewalled, metricsOf, provenanceOf, runProvenanceRecordKey, spansOf, summarizeOutput, type RunRecordV1, type RunExportReportV1, type RunMetricsV1, type SpanV1 } from '@agenticprimitives/orchestration';
+import { isArtifactRef, engagementsOf, assertFirewalled, assertMetricsFirewalled, metricsOf, provenanceOf, runProvenanceRecordKey, spansOf, summarizeOutput, type RunRecordV1, type RunExportReportV1, type RunMetricsV1, type SpanV1 } from '@agenticprimitives/orchestration';
 import { agentIri, projectHarnessRunProvenance, toJsonLd, toProvN, type ProvenanceRecordV1, projectPublicProvenance, type PublicProvenanceProjection } from '@agenticprimitives/provenance';
 import { RUN_PROVENANCE_CONTEXT, RUN_MEASURES_CONTEXT } from '@agenticprimitives/ontology';
 import { measureRun, measuresToJsonLd, runMeasuresRecordKey } from '@agenticprimitives/evaluation';
@@ -93,7 +93,7 @@ function boundedArgs(args: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-export async function provenanceViewOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, agent: string, record: RunRecordV1): Promise<Omit<Awaited<ReturnType<typeof provenanceOf>>, 'modelCalls'> & { modelCalls?: Array<NonNullable<Awaited<ReturnType<typeof provenanceOf>>['modelCalls']>[number] & { stepRef?: string; failed?: boolean }>; chainId?: number; bill?: RunRecordV1['bill']; canceled?: RunRecordV1['canceled']; plannedSteps?: number; operational?: RunRecordV1['operational']; work?: RunRecordV1['work'] }> {
+export async function provenanceViewOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, agent: string, record: RunRecordV1, opts: { full?: boolean } = {}): Promise<Omit<Awaited<ReturnType<typeof provenanceOf>>, 'modelCalls'> & { modelCalls?: Array<NonNullable<Awaited<ReturnType<typeof provenanceOf>>['modelCalls']>[number] & { stepRef?: string; failed?: boolean }>; chainId?: number; bill?: RunRecordV1['bill']; canceled?: RunRecordV1['canceled']; plannedSteps?: number; operational?: RunRecordV1['operational']; work?: RunRecordV1['work'] }> {
   const view = await provenanceOf(record, agent);
   const chainId = Number(env.CHAIN_ID);
   // Spec 418 §3 — the inspector nests a skill's model call under its STEP: the view's calls are the record's, in order,
@@ -110,6 +110,11 @@ export async function provenanceViewOf(env: Pick<RunExportEnv, 'CHAIN_ID'>, agen
       ...st,
       ...(Object.keys(s.args ?? {}).length ? { args: boundedArgs(s.args) } : {}),
       ...(output && Object.keys(output).length ? { output } : {}),
+      // THE WHOLE RESULT, on request, for the reader who already may see this run. A judge comparing a count
+      // to its source needs the rows, not the summary — the summary is for a person's eye. Still the asker's
+      // own view and nothing else: the durable provenance never carries this, and the route that serves this
+      // view already refused anyone who was not the asker or the custodian.
+      ...(opts.full && s.result !== undefined && !isArtifactRef(s.result) ? { result: s.result } : {}),
     };
   });
   return { ...view, steps, ...(calls ? { modelCalls: calls } : {}), ...(Number.isFinite(chainId) && chainId > 0 ? { chainId } : {}), ...(record.bill ? { bill: record.bill } : {}), ...(record.canceled ? { canceled: record.canceled } : {}), plannedSteps: record.plan.steps.length, ...(record.operational ? { operational: record.operational } : {}), ...(record.work ? { work: record.work } : {}) };

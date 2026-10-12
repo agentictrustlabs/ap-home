@@ -53,7 +53,7 @@ import {
   csrfTokenFor,
   verifyCsrf,
 } from '@agenticprimitives/connect-auth';
-import { createPublicClient, createWalletClient, http, parseEther, encodeFunctionData, toHex, keccak256, toBytes, stringToBytes, recoverAddress } from 'viem';
+import { createPublicClient, createWalletClient, http, parseEther, encodeFunctionData, toHex, keccak256, toBytes, stringToBytes, recoverAddress, hashMessage } from 'viem';
 import { buildCustodyDescriptor, type CustodyDescriptor } from '@agenticprimitives/related-agents';
 import {
   decodeGatewayAssertionToken,
@@ -165,7 +165,7 @@ import { verifiedGrants, grantAllows } from './resolution-invitation.js';
 import { actionLink } from './resolution-request.js';
 import { RELATIONSHIP_TYPE, ROLE, ROLE_IRI } from '@agenticprimitives/agent-relationships';
 import { admitInboundEmail, emailZones, emailSender, isEmailAddress, type EmailEnv } from './email-channel.js';
-import { VAULT_RECORD_SCOPE_ENFORCER } from '@agenticprimitives/delegation';
+import { VAULT_RECORD_SCOPE_ENFORCER, authorizeMethodDelegation } from '@agenticprimitives/delegation';
 import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-viem';
 // Spec 397 — the wire scheme on /harness/ask (a person through a client they authorized), verified as an agent's is.
 import { sessionWirePrincipal, parseSessionAuthorization, STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
@@ -178,7 +178,7 @@ import { cardRoomActOf, cardRoomTurn, verifyStudyGrant, type CardRoomAct, type S
 import { enforcersFromEnv } from './org-wire.js';
 import { runUnderMandate, askReplyFor, readSubjectReply, type AskReplyEnvelopeV1, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
-import { subjectAsk, subjectAnswer, validateSubjectAsk, handoff, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
+import { subjectAsk, subjectAnswer, validateSubjectAsk, handoff, skillSelector, delegationOfWire, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
 import { realtimeKitConfigured, verifyRealtimeKitWebhook, readRealtimeKitWebhook } from './realtimekit.js';
 import { sendSubjectAskOverWire, subjectAnswerMessage, subjectEnvelopeOf, handoffMessage, routedRunRefFor } from '@agenticprimitives/a2a';
 import { EXTERNAL_AGENT_TOOL, externalAgentInvoker } from './external-agent.js';
@@ -3383,6 +3383,14 @@ interface AssessRequestBody {
   /** A correction supersedes an earlier assessment by its digest; the earlier one stays readable (§5). */
   supersedes?: string;
   evaluatorKind?: 'human' | 'mechanical';
+  /** THE MECHANICAL PATH (§5): the evaluator is a service agent that signs with a SESSION KEY under this wire —
+   *  delegator = the evaluator's Smart Agent, delegate = the key, pinned to `assessment.issue` and to the
+   *  evaluator itself as target. The caller's session still decides whether the write may land in this
+   *  agent's vault; the wire decides WHO the judgment is from. Absent ⇒ the caller is the evaluator and signs
+   *  with their own account. */
+  wire?: { delegator: string; delegate: string; authority: string; salt: string; signature: string; caveats: Array<{ enforcer: string; terms: string; args?: string }> };
+  /** The mechanical evaluator's implementation digest, so J5 reproducibility can be claimed or honestly refused. */
+  implementation?: string;
 }
 
 /**
@@ -3429,17 +3437,22 @@ async function statedCriteriaFor(env: Env, agent: Address, endeavorId: string): 
  *
  * A playbook has no revision counter; its version rides in the outcome id and its digest is what pins it.
  */
-async function playbookCriteriaFor(env: Env, agent: Address): Promise<{ from: 'playbook'; criteria: AssessmentV1['criteria'] } | { error: string }> {
+async function playbookCriteriaFor(env: Env, agent: Address): Promise<{ from: 'playbook'; criteria: AssessmentV1['criteria']; stated: Array<{ id: string; statement: string; decidedBy: string }> } | { error: string }> {
   const survey = (await callInteractionsInternal(env, agent, 'internal.coordination.vaultSurvey', {}).catch(() => null)) as { records?: Array<{ recordType?: string; updatedAt?: string }> } | null;
   const row = survey?.records?.find((r) => r.recordType === 'archetype.assignment');
   if (!row) return { error: 'this run names no work and its agent has no playbook assigned, so there is nothing it was ever held to. Assign an archetype, or attach the run to an endeavour with stated criteria.' };
   const read = (await callInteractionsInternal(env, agent, 'internal.coordination.vaultQuery', { recordTypes: ['archetype.assignment'] }).catch(() => null)) as { records?: Record<string, unknown> } | null;
-  const a = read?.records?.['archetype.assignment'] as { archetypeId?: string; archetypeVersion?: string; definitionDigest?: string } | undefined;
+  const a = read?.records?.['archetype.assignment'] as { archetypeId?: string; archetypeVersion?: string; definitionDigest?: string; definition?: { tools?: Array<{ id: string; criteria?: Array<{ id: string; statement: string; decidedBy?: string }> }> } } | undefined;
   if (!a?.archetypeId || !a.definitionDigest) return { error: 'the playbook assignment could not be read back with its digest, so it cannot be cited as criteria' };
   if (!row.updatedAt) return { error: 'the playbook assignment carries no moment it was written, and J2 cannot be checked without one' };
+  // THE CRITERION IDS THE DEFINITION DECLARES, cited as `<toolId>:<id>` so two skills in one playbook cannot
+  // collide. An assessment may only name these. A definition that declares none leaves `stated` empty and the
+  // route says so: a judgment with a label invented at judging time is exactly what J2 refuses.
+  const stated = (a.definition?.tools ?? []).flatMap((t) => (t.criteria ?? []).map((c) => ({ id: `${t.id}:${c.id}`, statement: c.statement, decidedBy: c.decidedBy ?? 'mechanical' })));
   return {
     from: 'playbook',
     criteria: { outcomeId: `${a.archetypeId}@${a.archetypeVersion ?? '0'}`, revision: 1, digest: a.definitionDigest, statedAt: row.updatedAt },
+    stated,
   };
 }
 
@@ -3478,15 +3491,23 @@ app.post('/harness/assess', async (c) => {
   if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
   const addressee = String(body.addressee).toLowerCase() as Address;
   { const fwd = await forwardToSelfHost(c.env, c.req.raw, addressee, rawAs, selfHostForwardAuth(c.env, String(who.sa).toLowerCase() as Address)); if (fwd) return fwd; }
-  const evaluator = String(who.sa).toLowerCase();
+  const caller = String(who.sa).toLowerCase();
+  // WHO THE JUDGMENT IS FROM. With a wire, the evaluator is the wire's delegator — a service agent whose
+  // session key will sign — and `evaluatorKind` must say so; the wire is verified before the signature is.
+  // Without one, the caller judges in their own name with their own account.
+  const wireDelegator = body.wire?.delegator ? String(body.wire.delegator).toLowerCase() : null;
+  if (wireDelegator && body.evaluatorKind !== 'mechanical' && body.evaluatorKind !== 'model' as never) return c.json({ ok: false, error: 'a wire-signed assessment is a mechanical (or model) evaluator\u2019s; say which' }, 400);
+  if (wireDelegator && !/^0x[0-9a-f]{40}$/.test(wireDelegator)) return c.json({ ok: false, error: 'wire.delegator must be the evaluator\u2019s Smart Agent address' }, 400);
+  const evaluator = wireDelegator ?? caller;
 
-  // WHO MAY JUDGE A RUN OF THIS AGENT: whoever asked it, or whoever oversees the agent. Not because judging
-  // needs authority — it does not — but because the judgment is stored in THIS agent's vault, and writing
-  // into somebody's vault is always theirs to allow.
+  // WHO MAY WRITE A JUDGMENT INTO THIS AGENT'S VAULT: whoever asked the run, or whoever oversees the agent.
+  // Not because judging needs authority — it does not — but because the judgment is stored in THIS agent's
+  // vault, and writing into somebody's vault is always theirs to allow. This is the CALLER's claim, whoever
+  // the evaluator is.
   const rec = (await getRecord(c.env as never, addressee, body.runRef).catch(() => null)) as RunRecordV1 | null;
   if (!rec) return c.json({ ok: false, error: 'no such record' }, 404);
-  const holds = await mayOverseeAgent(c.env, evaluator as Address, addressee).catch(() => false);
-  if (!holds && String(rec.intent?.context?.asker ?? '').toLowerCase() !== evaluator) {
+  const holds = await mayOverseeAgent(c.env, caller as Address, addressee).catch(() => false);
+  if (!holds && String(rec.intent?.context?.asker ?? '').toLowerCase() !== caller) {
     return c.json({ ok: false, error: 'this run was not yours to judge' }, 403);
   }
 
@@ -3516,12 +3537,20 @@ app.post('/harness/assess', async (c) => {
     ? await statedCriteriaFor(c.env, addressee, rec.work.endeavorId)
     : await playbookCriteriaFor(c.env, addressee);
   if ('error' in criteria) return c.json({ ok: false, error: criteria.error }, 409);
+  // A VERDICT NAMES A STATED CRITERION. When the playbook declares criteria, a result naming anything else is
+  // refused with the list it may name. The first judgment ever stored here used a label typed on the command
+  // line, which is a verdict in search of premises wearing an id; this is the rule that ends that.
+  const statedIds = 'stated' in criteria ? new Set(criteria.stated.map((x) => x.id)) : null;
+  if (statedIds?.size) {
+    const unknown = results.map((r) => String(r.criterionId)).filter((id) => !statedIds.has(id));
+    if (unknown.length) return c.json({ ok: false, error: `not a stated criterion: ${unknown.join(', ')}. This playbook states: ${[...statedIds].join(', ')}`, stated: 'stated' in criteria ? criteria.stated : [] }, 400);
+  }
 
   const assessment: AssessmentV1 = {
     schema: 'apeval/AssessmentV1',
     subject: { runRef: rec.runRef, recordDigest: ev.integrity.anchorDigest, at: new Date(rec.at).toISOString() },
     criteria: criteria.criteria,
-    evaluator: { sa: evaluator, kind: body.evaluatorKind === 'mechanical' ? 'mechanical' : 'human' },
+    evaluator: { sa: evaluator, kind: body.evaluatorKind === 'mechanical' ? 'mechanical' : 'human', ...(wireDelegator && body.implementation ? { implementation: String(body.implementation) } : {}) },
     results: results.map((r) => ({ criterionId: String(r.criterionId), outcome: r.outcome, evidenceRefs: Array.isArray(r.evidenceRefs) ? r.evidenceRefs.map(String) : [] })),
     at: typeof body.at === 'string' && body.at ? body.at : new Date().toISOString(),
     ...(body.supersedes ? { supersedes: String(body.supersedes) } : {}),
@@ -3535,7 +3564,7 @@ app.post('/harness/assess', async (c) => {
   const signDigest = (`0x${digest.replace(/^sha256:/, '')}`) as Hex;
 
   // PHASE ONE — here is what would be stored, and the digest to sign. Nothing is written.
-  if (!body.signature) return c.json({ ok: true, prepared: true, assessment, digest, signDigest, criteriaFrom: criteria.from });
+  if (!body.signature) return c.json({ ok: true, prepared: true, assessment, digest, signDigest, criteriaFrom: criteria.from, ...('stated' in criteria ? { stated: criteria.stated } : {}) });
 
   // PHASE TWO — the evaluator's own signature over that digest, checked against their Smart Agent through the
   // UniversalSignatureValidator (ERC-1271 / 6492 / ECDSA). A human assessment is signed by the person's own
@@ -3546,8 +3575,32 @@ app.post('/harness/assess', async (c) => {
   const signed: SignedAssessmentV1 = { assessment, digest, signature: String(body.signature) };
   const verdict = await verifyAssessment(signed, async ({ digest: d, signature }) => {
     const bytes32 = (`0x${d.replace(/^sha256:/, '')}`) as Hex;
-    const ok = (await depsAs.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [evaluator as Address, bytes32, signature as Hex] }).catch(() => false)) === true;
-    return { ok, ...(ok ? { signer: evaluator } : {}) };
+    if (!body.wire) {
+      // A PERSON, with their own account: ERC-1271 / 6492 / ECDSA against the evaluator's Smart Agent.
+      const ok = (await depsAs.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [evaluator as Address, bytes32, signature as Hex] }).catch(() => false)) === true;
+      return { ok, ...(ok ? { signer: evaluator } : {}) };
+    }
+    // A MECHANICAL EVALUATOR: a session key signed the digest (EIP-191 over the 32 bytes), and the key acts
+    // under a wire from the evaluator pinned to `assessment.issue`. Three facts come out — who signed, who
+    // delegated, and what the wire permits — and `verifyAssessment` checks them against what the assessment
+    // claims. The wire is verified the way every delegation here is: the delegator's ERC-1271 over its
+    // EIP-712 digest, unrevoked, caveats evaluated by the substrate's own enforcers — never a hand-rolled read.
+    let signer: Address;
+    try { signer = (await recoverAddress({ hash: hashMessage({ raw: bytes32 }), signature: signature as Hex })).toLowerCase() as Address; }
+    catch { return { ok: false }; }
+    const d2 = delegationOfWire(body.wire as never);
+    const r = await authorizeMethodDelegation({
+      delegation: d2, delegate: signer, target: evaluator as Address, selector: skillSelector('assessment.issue'),
+      enforcers: enforcersFromEnv(c.env as unknown as Record<string, string | undefined>),
+      checks: {
+        delegationDigest: (dd) => hashDelegation(dd, Number(c.env.CHAIN_ID ?? 0), c.env.DELEGATION_MANAGER as Address),
+        isRevoked: async (dd) => (await depsAs.readContract({ address: c.env.DELEGATION_MANAGER as Address, abi: [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ name: 'h', type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const, functionName: 'isRevoked', args: [hashDelegation(dd, Number(c.env.CHAIN_ID ?? 0), c.env.DELEGATION_MANAGER as Address)] }).catch(() => true)) === true,
+        verifySignature: async ({ signer: s2, digest: dg, signature: sg }) => (await depsAs.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [s2, dg, sg] }).catch(() => false)) === true,
+      },
+      now: Math.floor(Date.now() / 1000),
+    });
+    if (!r.ok) { console.warn(`[harness/assess] wire refused for ${evaluator}: ${r.reason}`); return { ok: false }; }
+    return { ok: true, signer, delegator: evaluator, selector: 'assessment.issue' };
   });
   if (!verdict.ok) return c.json({ ok: false, error: verdict.problems.join('; ') }, 400);
 
@@ -3691,7 +3744,7 @@ app.post('/harness/provenance', async (c) => {
     return c.json({ ok: false, error: read.status === 'refused' ? `refused: ${read.reason}` : 'no measurements yet', status: read.status, export: rec.export?.measures ?? null }, read.status === 'refused' ? 403 : 404);
   }
   // Spec 398 §5.2 — the inspector's record form: what the run left (artifacts), decided, spent authority on, cost.
-  if (body.format === 'record') return c.json({ ok: true, hasProvenance: ref, record: await provenanceViewOf(c.env, addressee, rec), export: rec.export?.provenance ?? null });
+  if (body.format === 'record') return c.json({ ok: true, hasProvenance: ref, record: await provenanceViewOf(c.env, addressee, rec, { full: (body as { full?: unknown }).full === true }), export: rec.export?.provenance ?? null });
   return c.json({ ok: true, hasProvenance: ref, provenance: await provenanceGraphOf(c.env, addressee, rec), export: rec.export?.provenance ?? null });
 });
 
