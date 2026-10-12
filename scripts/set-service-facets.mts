@@ -24,13 +24,26 @@ const RPC = 'https://a2a.faithnet.io/rpc';
 const CHAIN_ID = 34348;
 const INDEXER = 'https://demo-discovery-indexer-faithnet.richardpedersen3.workers.dev';
 const REGISTRY_URN = 'urn:ap:registry:faithnet-agents' as RegistryId;
-const NOTE = 'demo/ligonier.faithnet.json';
-const note = JSON.parse(readFileSync(NOTE, 'utf8')) as { org: { name: string; sa: Address }; service: { name: string; sa: Address } };
+/**
+ * ANY FIXTURE SERVICE, not only Ligonier.
+ *
+ *   NOTE=demo/people-groups.faithnet.json BY=demo-admin npx tsx scripts/set-service-facets.mts
+ *
+ * The facets were a constant in this file and the persona was hard-coded to alice, so a second service
+ * could not use the ceremony that exists for exactly it. They come from the NOTE now — the operator note
+ * already carries `service.facets`, which is where the plan for a service is written down — and the signer
+ * is whoever CUSTODIES the agent, which for a service chartered under a person is that person.
+ */
+const NOTE = process.env.NOTE ?? 'demo/ligonier.faithnet.json';
+const BY = process.env.BY ?? 'alice';
+const note = JSON.parse(readFileSync(NOTE, 'utf8')) as { org?: { name: string; sa: Address }; service: { name: string; sa: Address; facets?: Record<string, string> } };
 const SA = note.service.sa.toLowerCase() as Address;
 const NAME = note.service.name;
 const HOST = `${NAME.replace(/\.(svc)$/, '-$1')}.faithnet.ai`; // ligonier.svc → ligonier-svc.faithnet.ai (spec 346 §5; the canonical zone's wildcard route)
+/** A record the note does not carry is not written — absent is a plan that says nothing, never an empty string. */
+const has = (k: string): boolean => typeof FACETS[k] === 'string' && FACETS[k]!.trim().length > 0;
 
-const FACETS = {
+const FACETS = (note.service.facets as Record<string, string> | undefined) ?? {
   displayName: 'Ligonier Ministries',
   description: 'Reformed teaching from Ligonier Ministries: series, messages, articles and study plans on justification, sanctification and the doctrines of grace, with discipleship curricula and Reformation Study Bible tools.',
   capabilities: 'gc:CFnDiscipleshipCurricula',
@@ -41,7 +54,7 @@ const FACETS = {
   // Spec 387 W2 — the content catalog beside the agent (AP content-catalog profile v1); the harness binds its
   // catalog.* reads to THIS record, never to a hostname convention.
   mcpEndpoint: 'https://gc-ligonier-catalog.r-pedersen.workers.dev/mcp',
-};
+} as Record<string, string>;
 
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 250), _status: r.status }; } };
 const pred = (name: string): Hex => keccak256(toBytes(name));
@@ -58,10 +71,11 @@ const skipped: string[] = [];
 const registered = (await pc.readContract({ address: profile, abi: agentProfileResolverAbi, functionName: 'isRegistered', args: [SA] })) as boolean;
 const current = async (name: string) => String(await pc.readContract({ address: profile, abi: agentProfileResolverAbi, functionName: 'getStringProperty', args: [SA, pred(name)] }).catch(() => ''));
 const calls = [] as Array<{ to: Address; value: bigint; data: Hex }>;
-if (!registered) calls.push(buildRegisterProfileCall({ profileResolver: profile, agent: SA, displayName: FACETS.displayName, description: FACETS.description }));
+if (!registered) calls.push(buildRegisterProfileCall({ profileResolver: profile, agent: SA, displayName: FACETS.displayName ?? NAME, description: FACETS.description ?? '' }));
 // atl:displayName on the PROFILE (SA-keyed) is what the KB projects as approf:displayName — the ARD entry's
 // displayName; the name record's displayName is the name's, a different fact (G8).
 for (const [name, value] of [['atl:displayName', FACETS.displayName], ['atl:capabilities', FACETS.capabilities], ['atl:focusAreas', FACETS.focusAreas], ['atl:languages', FACETS.languages], ['atl:description', FACETS.description]] as const) {
+  if (!value) continue;  // the note says nothing about this facet
   if (!(await active(name))) { skipped.push(name); continue; }
   if ((await current(name)) === value) { console.log(`  · ${name} already set`); continue; }
   const { encodeFunctionData } = await import('viem');
@@ -70,11 +84,11 @@ for (const [name, value] of [['atl:displayName', FACETS.displayName], ['atl:capa
 const naming = new AgentNamingClient({ rpcUrl: RPC, chainId: CHAIN_ID, registry: CONTRACTS.agentNameRegistry as Address, universalResolver: CONTRACTS.agentNameUniversalResolver as Address });
 const before = await naming.getRecords(NAME);
 const records: Record<string, string> = {};
-if (before.a2aEndpoint !== FACETS.a2aEndpoint) records.a2aEndpoint = FACETS.a2aEndpoint;
-if (before.mcpEndpoint !== FACETS.mcpEndpoint) records.mcpEndpoint = FACETS.mcpEndpoint;
-if (before.siteUrl !== FACETS.siteUrl) { if (await active('atl:siteUrl')) records.siteUrl = FACETS.siteUrl; else skipped.push('atl:siteUrl (name record)'); }
-if (before.description !== FACETS.description) records.description = FACETS.description;
-if (before.displayName !== FACETS.displayName) records.displayName = FACETS.displayName;
+if (has('a2aEndpoint') && before.a2aEndpoint !== FACETS.a2aEndpoint) records.a2aEndpoint = FACETS.a2aEndpoint!;
+if (has('mcpEndpoint') && before.mcpEndpoint !== FACETS.mcpEndpoint) records.mcpEndpoint = FACETS.mcpEndpoint!;
+if (has('siteUrl') && before.siteUrl !== FACETS.siteUrl) { if (await active('atl:siteUrl')) records.siteUrl = FACETS.siteUrl!; else skipped.push('atl:siteUrl (name record)'); }
+if (has('description') && before.description !== FACETS.description) records.description = FACETS.description!;
+if (has('displayName') && before.displayName !== FACETS.displayName) records.displayName = FACETS.displayName!;
 if (Object.keys(records).length) calls.push(...buildRecordCalls({ resolver: CONTRACTS.agentNameResolver as Address, node: namehash(NAME), records }).map((c) => ({ to: c.to, value: c.value, data: c.data })));
 else console.log('  · name records already set');
 // the registry entry — the subject registers itself (RB-01); an existing entry is left alone
@@ -91,7 +105,7 @@ if (REGISTERED) calls.push((({ to, value, data }) => ({ to, value, data }))(buil
 console.log(`${NAME} ${SA} · profile ${registered ? 'registered' : 'to register'} · ${calls.length} call(s)${skipped.length ? ` · NOT written (predicate inactive on this chain): ${skipped.join(', ')}` : ''}`);
 
 if (calls.length) {
-  const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'alice', client_id: 'demo-web' }) }));
+  const si = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: BY, client_id: 'demo-web' }) }));
   const sign = async (digest: Hex): Promise<Hex> => { const b = await j(await fetch(`${HOME}/connect/persona-sign`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${si.homeSession}` }, body: JSON.stringify({ digest }) })); if (!b.signature) throw new Error(`persona-sign: ${JSON.stringify(b).slice(0, 160)}`); return b.signature; };
   const csrfRes = await fetch(`${HOME}/a2a/auth/csrf`, { headers: { origin: HOME } });
   const csrf = (await j(csrfRes)) as { token?: string };
@@ -112,7 +126,7 @@ if (calls.length) {
 const after = await naming.getRecords(NAME);
 console.log(`  records: a2aEndpoint ${after.a2aEndpoint ?? '-'} · siteUrl ${after.siteUrl ?? '-'} · displayName ${after.displayName ?? '-'}`);
 console.log(`  profile: capabilities "${await current('atl:capabilities')}" · languages "${await current('atl:languages')}" · focusAreas "${await current('atl:focusAreas')}"`);
-const proj = await j(await fetch(`${INDEXER}/project`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agents: [SA, note.org.sa] }) }));
+const proj = await j(await fetch(`${INDEXER}/project`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agents: [SA, ...(note.org?.sa ? [note.org.sa] : [])] }) }));
 console.log(`  indexer: ${JSON.stringify(proj).slice(0, 200)}`);
 const n = JSON.parse(readFileSync(NOTE, 'utf8')); n.service = { ...n.service, host: HOST, facets: FACETS, registry: REGISTRY_URN, facetsAt: new Date().toISOString() }; writeFileSync(NOTE, JSON.stringify(n, null, 2) + '\n');
 console.log('✓ facets written and projected');

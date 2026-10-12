@@ -1,5 +1,5 @@
 {
-  "purpose": "the Global Church people-groups service agent in the faithnet estate (an operator note, not a persona) \u2014 the ap-people-group-catalog/v1 twin of ligonier.faithnet.json; its name record atl:mcpEndpoint points at the demo-gc-pg Worker (ap-demos/apps/demo-gc-pg)",
+  "purpose": "the Global Church people-groups service agent in the faithnet estate (an operator note, not a persona) — the ap-people-group-catalog/v1 twin of ligonier.faithnet.json; its name record atl:mcpEndpoint points at the demo-gc-pg Worker (ap-demos/apps/demo-gc-pg)",
   "chainId": 34348,
   "charteredBy": {
     "persona": "demo-admin",
@@ -13,7 +13,7 @@
     "host": "people-groups-svc.faithnet.ai",
     "facets": {
       "displayName": "Global Church people-group counts",
-      "description": "How many people groups there are, by list \u2014 Joshua Project, IMB and the UUPG+ Base List \u2014 for a country, religion and affinity bloc, read live from the Global Church graph. Counts with their source named; never raw SPARQL, never a write.",
+      "description": "How many people groups there are, by list — Joshua Project, IMB and the UUPG+ Base List — for a country, religion and affinity bloc, read live from the Global Church graph. Counts with their source named; never raw SPARQL, never a write.",
       "capabilities": "gc:CFnPeopleGroupIntelligence",
       "focusAreas": "people groups,unreached,frontier people groups,joshua project,imb,base list",
       "languages": "en",
@@ -22,7 +22,7 @@
       "mcpEndpoint": "https://demo-gc-pg.r-pedersen.workers.dev/mcp"
     },
     "registry": "urn:ap:registry:faithnet-agents",
-    "facetsAt": null,
+    "facetsAt": "2026-10-12T17:47:19.147Z",
     "named": true,
     "namedAt": "2026-10-12T13:15:02.523Z",
     "presented": true,
@@ -47,12 +47,12 @@
   },
   "charteredAt": "2026-10-12T12:22:10Z",
   "todo": [
-    "siteUrl (https://global.church) is the one name record not written. It reverted PredicateNotActive() \u2014 selector 0x898efc7c, confirmed \u2014 because this estate's ontology registry has not activated that predicate; same queue as atl:focusAreas / atl:languages / atl:regions. The governor runs packages/contracts/script/AddDiscoveryFacetPredicates.s.sol in agenticprimitives. It is INFORMATIONAL only: nothing resolves through siteUrl, and a2aEndpoint + mcpEndpoint both landed."
+    "siteUrl (https://global.church) is the one name record not written. It reverted PredicateNotActive() — selector 0x898efc7c, confirmed — because this estate's ontology registry has not activated that predicate; same queue as atl:focusAreas / atl:languages / atl:regions. The governor runs packages/contracts/script/AddDiscoveryFacetPredicates.s.sol in agenticprimitives. It is INFORMATIONAL only: nothing resolves through siteUrl, and a2aEndpoint + mcpEndpoint both landed."
   ],
   "notes": [
-    "CHARTERING LEAVES THREE THINGS UNDONE, and `charter-service.mts` now does two of them: the Home's `related-orgs` link (without it the agent is absent from its steward's pulldown) and the vault key bind (without it every record at the agent is `vault_key_unauthorized`, its archetype assignment and playbook included). The third \u2014 buying the name on a priced root \u2014 is `buy-name.mts`.",
+    "CHARTERING LEAVES THREE THINGS UNDONE, and `charter-service.mts` now does two of them: the Home's `related-orgs` link (without it the agent is absent from its steward's pulldown) and the vault key bind (without it every record at the agent is `vault_key_unauthorized`, its archetype assignment and playbook included). The third — buying the name on a priced root — is `buy-name.mts`.",
     "`service.create` is idempotent on the agent: the address derives from (custodian, parent, label). `--relink` re-runs it only to recover the stewardship wire, which lives in the act's result and nowhere else.",
-    "Ten SHQ, once: the treasury went 988 \u2192 978. `registry.owner(node)` is what says a name is bought \u2014 never `resolveName`, which reads the `addr` record an unpresented name does not have.",
-    "GC_API_KEY was ALREADY set on demo-gc-pg (richcanvas) and answering \u2014 the original todo was stale and I repeated it unchecked. Re-set 2026-10-12 with the owner's current key and verified: count_people_groups IN returns 6 rows (jp-entries 2263, jp-least-reached 2033, jp-frontier 1701), isError false. The richcanvas Cloudflare credential is named in demo-gc-pg/wrangler.toml's own header comment: ap-discovery/apps/demo-discovery-connector/.env.richcanvas.local \u2014 the default login reaches faithnet-town only."
+    "Ten SHQ, once: the treasury went 988 → 978. `registry.owner(node)` is what says a name is bought — never `resolveName`, which reads the `addr` record an unpresented name does not have.",
+    "GC_API_KEY was ALREADY set on demo-gc-pg (richcanvas) and answering — the original todo was stale and I repeated it unchecked. Re-set 2026-10-12 with the owner's current key and verified: count_people_groups IN returns 6 rows (jp-entries 2263, jp-least-reached 2033, jp-frontier 1701), isError false. The richcanvas Cloudflare credential is named in demo-gc-pg/wrangler.toml's own header comment: ap-discovery/apps/demo-discovery-connector/.env.richcanvas.local — the default login reaches faithnet-town only."
   ]
 }
