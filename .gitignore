@@ -15,3 +15,8 @@ live-gates-report.json
 # directories the build checkout lacks (ENOENT apps/agent-runtime/node_modules). The install resolves fresh there.
 pnpm-lock.yaml
 .estate-*.local
+
+# A per-estate demo roster holds its people's CUSTODIAN KEYS (scripts/provision-estate-personas.mts writes it
+# 0600). `*.local.json` above does not match `personas.<estate>.json`, and the one estate file that predates
+# this pattern is already tracked — the next one is not.
+demo/personas.*.json

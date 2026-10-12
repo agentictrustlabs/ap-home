@@ -13,16 +13,28 @@ import { definitionDigest, validateAgentHarnessDefinition, type AgentHarnessDefi
 import { assignDefaultArchetype, currentDefaultArchetype } from './default-archetype';
 import { reconcileRolePacks, recomposePlaybook, type ComposedAssignmentRecord } from './role-playbook';
 
+// ONCE PER SESSION PER AGENT — but only once it has LANDED. The latch used to close before the attempt, so
+// a single failure (the registry unreachable for a beat, a grant that could not be written yet, a page
+// loaded while the agent was still deploying) left the person on the bare harness for the whole session
+// with nothing but a console line, and every later load returned early without retrying. An agent whose
+// playbook could not be set is exactly the one to try again for: `imbrichgoogle.me` reached the Explorer
+// with no playbook at all and its agent refused `engagement.agent.invoke` as a tool it does not offer
+// (2026-10-12). A settled agent still costs one read per session, which is what this latch is for.
 const done = new Set<string>();
+/** In flight right now — a second render must not start the same work, latch or no latch. */
+const running = new Set<string>();
 
 export async function ensurePlaybook(agent: string, token: string): Promise<void> {
   const key = agent.toLowerCase();
-  if (done.has(key)) return;
-  done.add(key);
+  if (done.has(key) || running.has(key)) return;
+  running.add(key);
+  // Settled = this agent needs nothing further this session: assigned and current, left as the person's own
+  // choice, healed, or just now assigned. A refusal is NOT settled.
+  const settle = () => { done.add(key); };
   try {
     const r = await fetch('/connect/channels', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ action: 'archetypeAssignmentGet', communityId: key }) });
     const b = (await r.json().catch(() => ({}))) as { ok?: boolean; record?: { archetypeId?: string; definitionDigest?: string; definition?: AgentHarnessDefinitionV1; composedFrom?: ComposedAssignmentRecord['composedFrom'] } | null };
-    if (!r.ok) { console.warn('[playbook] assignment could not be read; not assigning a default over an unknown'); return; }
+    if (!r.ok) { console.warn('[playbook] assignment could not be read; not assigning a default over an unknown'); return; }  // unsettled: retried next load
     // THE RUNTIME'S OWN RULE (harness `loadPlaybook`): an assignment stands only when its embedded definition hashes to
     // the pinned digest AND validates. One that does not is IGNORED there — the agent runs bare with a record that
     // looks assigned (a definition compiled by an older corpus, before a field became required). Judged here the same
@@ -44,17 +56,19 @@ export async function ensurePlaybook(agent: string, token: string): Promise<void
     if (composed && rec?.archetypeId && rec.definitionDigest && rec.definition) {
       if (why) {
         const re = await recomposePlaybook({ agent: key, token, typeSlug: 'person', actor: key }).catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));
-        console.info('error' in re ? `[playbook] ${why}, and it could not be recomposed: ${re.error}` : `[playbook] ${why} — recomposed from the same base and role packs`);
+        if (!('error' in re)) settle();
+        console.info('error' in re ? `[playbook] ${why}, and it could not be recomposed: ${re.error} — retried on the next load` : `[playbook] ${why} — recomposed from the same base and role packs`);
         return;
       }
       const { dropped } = await reconcileRolePacks({ agent: key, token, typeSlug: 'person', record: rec as ComposedAssignmentRecord });
-      if (dropped.length) { console.info(`[playbook] dropped ${dropped.length} role pack(s) whose membership ended or whose role changed: ${dropped.map((p) => `${p.roleName} (${p.archetype})`).join(', ')}`); return; }
+      if (dropped.length) { settle(); console.info(`[playbook] dropped ${dropped.length} role pack(s) whose membership ended or whose role changed: ${dropped.map((p) => `${p.roleName} (${p.archetype})`).join(', ')}`); return; }
       const def = await currentDefaultArchetype('person');
       const baseIsDefault = composed.base.context === 'agentic-trust' && composed.base.archetype === 'person-steward';
       if (def && baseIsDefault && def.digest !== composed.base.digest) {
         const re = await recomposePlaybook({ agent: key, token, typeSlug: 'person', actor: key }).catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));
-        console.info('error' in re ? `[playbook] the default base has moved on but the playbook could not be recomposed: ${re.error}` : '[playbook] the default base has moved on — recomposed onto it, keeping the role packs');
-      }
+        if (!('error' in re)) settle();
+        console.info('error' in re ? `[playbook] the default base has moved on but the playbook could not be recomposed: ${re.error} — retried on the next load` : '[playbook] the default base has moved on — recomposed onto it, keeping the role packs');
+      } else settle();
       return;
     }
     // THE DEFAULT FOLLOWS THE CORPUS. An assignment is a digest-pinned SNAPSHOT of the definition as compiled when it was
@@ -66,12 +80,15 @@ export async function ensurePlaybook(agent: string, token: string): Promise<void
     if (!why && rec?.archetypeId && rec.definitionDigest) {
       const current = await currentDefaultArchetype('person');
       if (current && current.archetypeId === rec.archetypeId && current.digest !== rec.definitionDigest) why = `the default playbook has moved on (${rec.archetypeId} ${rec.definitionDigest.slice(0, 10)}… → ${current.digest.slice(0, 10)}…)`;
-      else if (current && current.archetypeId !== rec.archetypeId) { console.info(`[playbook] ${rec.archetypeId} is the person's own choice — left as pinned`); return; }
+      else if (current && current.archetypeId !== rec.archetypeId) { console.info(`[playbook] ${rec.archetypeId} is the person's own choice — left as pinned`); settle(); return; }
     }
-    if (!why) return; // assigned and current — nothing to do
+    if (!why) { settle(); return; } // assigned and current — nothing to do
     const a = await assignDefaultArchetype(key, 'person', token);
-    console.info(a.ok ? `[playbook] ${why} — assigned the estate's default (${a.archetypeId}); change it on Behaviour → Playbook` : `[playbook] ${why}, and the default could not be assigned: ${a.reason} — the bare harness stands`);
+    if (a.ok) settle();
+    console.info(a.ok ? `[playbook] ${why} — assigned the estate's default (${a.archetypeId}); change it on Behaviour → Playbook` : `[playbook] ${why}, and the default could not be assigned: ${a.reason} — the bare harness stands; this is retried on the next load`);
   } catch (e) {
-    console.warn('[playbook] self-heal skipped:', e instanceof Error ? e.message : String(e));
+    console.warn('[playbook] self-heal skipped (retried on the next load):', e instanceof Error ? e.message : String(e));
+  } finally {
+    running.delete(key);
   }
 }

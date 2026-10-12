@@ -639,10 +639,26 @@ DEMO_EDGE_URL = "https://imb-edge.richardpedersen3.workers.dev"
 BROKER_ISS = "https://imb-home.vercel.app"
 BROKER_JWKS_URL = "https://imb-home.vercel.app/jwks"
 DEMO_SSO_AUD = "demo-sso"
-ALLOWED_ORIGINS = "https://imb-home.vercel.app,http://localhost:5175,http://127.0.0.1:5175"
+ALLOWED_ORIGINS = "https://imb-home.vercel.app,https://explorer.faithnet.io,https://demo-bible-ontology-faithnet.richardpedersen3.workers.dev,http://localhost:5175,http://127.0.0.1:5175,http://localhost:8795"
 A2A_PUBLIC_BASE_DOMAIN = "imb-runtime.richardpedersen3.workers.dev"
 A2A_SERVES_UNPUBLISHED_NAMES = "true"
-A2A_KMS_BACKEND = "local-aes"
+# AKCS, tenant `imb` (adopted 2026-10-11) — the service MAC on the A2A→MCP hop is derived from the tenant
+# MAC root, which is what imb-vault verifies with. Declared here and not only on the deployment: a
+# `wrangler deploy --env imbnet` re-asserts this block, and the day the adoption lived only in a live
+# secret the next deploy reverted it and every interactions call threw (see the vault's note).
+A2A_KMS_BACKEND = "agentic-kms"
+AKCS_BASE_URL = "https://akcs-pilot.faithnet.io"
+AKCS_TENANT_ID = "imb"
+AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"
+# AKCS_TOKEN is a SECRET (wrangler secret put).
+# Custody and the relay stay local-aes BY DECISION: this estate's custody root is an in-Worker secret, and
+# moving it to the tenant would re-derive every custodian and orphan every person's home.
+#
+# Each of those two is PINNED, because neither follows from the decision — both default to
+# A2A_KMS_BACKEND. Unpinned, the relayer resolves to agentic-kms and demands AKCS_RELAY_KEY_ID, which
+# this tenant has no relay key for: every funded call (grant approval, a name purchase) then dies at
+# `buildCallUserOp failed — relayer on agentic-kms requires AKCS_RELAY_KEY_ID (no fallback)`.
+A2A_RELAYER_KMS_BACKEND = "local-aes"
 A2A_CUSTODY_KMS_BACKEND = "local-aes"
 A2A_ALLOW_LOCAL_MASTER_KEY = "true"
 # The estate's own service agents, deployed by scripts/bootstrap-estate.mts (salt 0 and salt 1 over its

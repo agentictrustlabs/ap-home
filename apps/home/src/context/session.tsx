@@ -5,7 +5,7 @@
 // every portal route shares one session via useSession().
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { AUD, cacheConnectionCustodian, fetchProfile, type BasicProfile } from '../connect-client';
+import { AUD, cacheConnectionCustodian, fetchProfile, type BasicProfile, declareEstate } from '../connect-client';
 import { loadImpactProfile } from '../profile-store';
 import { exchangeCode } from '../server-client';
 import { nameLabel, parseAgentSubdomain } from '../lib/domain';
@@ -58,7 +58,7 @@ import { activateInteractionsIfNeeded, resolveVia, signHashFor } from '../home/o
 import { isDemoCustodyHome } from '../lib/persona-custody';
 import { ensurePersonTreasury } from '../home/treasury-birthright';
 import { isPricedTld } from '../lib/naming-price';
-import { NEW_PERSON_TLD } from '../lib/domain';
+import { ESTATE_NAME, NEW_PERSON_TLD } from '../lib/domain';
 function epochStale(stored: string | undefined): boolean {
   if (!DEPLOYMENT_EPOCH) return false; // unknowable → don't gate
   return stored !== DEPLOYMENT_EPOCH; // stale (differs) OR unstamped (absent) → reconnect
@@ -190,6 +190,25 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     // prompt for a device credential; best-effort and said (the plane keeps serving reads without a live leaf).
     const via = resolveVia((profile as { credential?: string } | null)?.credential, session.via);
     void activateInteractionsIfNeeded(addr as Address, via, { token: session.token }).then((r) => { if (!r.ok) console.warn('[interactions] leaf/grant refresh skipped:', r.error); }).catch(() => undefined);
+    // WHOSE ESTATE THIS AGENT IS ON, said on chain (`atl:estate` = this Home's estate agent name). Every
+    // estate on the chain shares the name registry, so without it a relying app handed this person's name
+    // cannot tell which Home custodies them — and a wrong guess mints a second identity for the same
+    // credential rather than failing. Declared here, not only at onboarding, so the people who were
+    // enrolled before this existed are covered on their next visit; idempotent on chain, so a settled
+    // agent costs one read. PROMPTLESS CUSTODY ONLY, the same rule the birthright below follows: a
+    // passkey or wallet home is not surprised by a signature prompt on a page load — it declares at its
+    // next deliberate ceremony instead.
+    void (async () => {
+      if (!ESTATE_NAME) return;
+      const memo = `ap-estate-declared:${addr.toLowerCase()}:${ESTATE_NAME}`;
+      try { if (localStorage.getItem(memo) === '1') return; } catch { /* storage blocked */ }
+      const promptless = ['google', 'youversion', 'email', 'phone'].includes(via) || (await isDemoCustodyHome(session.token).catch(() => false));
+      if (!promptless) return;
+      const sign = await signHashFor(via, addr as Address, { token: session.token });
+      const r = await declareEstate(addr as Address, ESTATE_NAME, sign);
+      if (r.ok) { try { localStorage.setItem(memo, '1'); } catch { /* storage blocked */ } }
+      else console.warn('[estate] not declared on chain (readers cannot tell which home this person is on):', r.error);
+    })().catch((e) => console.warn('[estate] declaration skipped:', e));
     // ap-town spec 431 D2 — every person has a treasury with 1,000 SHQ. Made here, once per agent per browser, only
     // when the ceremony is PROMPTLESS (KMS / social / demo custody): a passkey or wallet home is asked at its first
     // purchase instead of being surprised by a prompt. Only once names are purchased on this chain.

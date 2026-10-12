@@ -3056,6 +3056,8 @@ export async function setConnectionInfo(
 const ATL_SKILLS: Hex = keccak256(toBytes('atl:skills'));
 /** The current rail: comma-joined capability ids. Mirrors AgentProfilePredicates.ATL_CAPABILITIES. */
 const ATL_CAPABILITIES: Hex = keccak256(toBytes('atl:capabilities'));
+/** The estate an agent belongs to, as its estate agent's NAME (`imbnet.estate`). */
+const ATL_ESTATE: Hex = keccak256(toBytes('atl:estate'));
 
 async function readProfileString(sa: Address, predicate: Hex): Promise<string> {
   const pc = createPublicClient({ chain: CHAIN, transport: http(DEFAULT_RPC_URL) });
@@ -3160,6 +3162,45 @@ export async function rotateCredential(
     }
   } catch (e) { return { ok: false, error: e instanceof Error ? e.message : String(e) }; }
   return executeCall(personAgent, signHash, buildExecuteBatchCallData(calls), { attempts: 5 });
+}
+
+/**
+ * DECLARE WHICH ESTATE THIS AGENT IS ON — the agent's own SA writes `atl:estate` (its estate agent's
+ * NAME) on the AgentProfileResolver, the same rail and the same gates as `setCapabilities`: `onlyAgent`
+ * via executeCall, `onlyRegistered` so an unregistered profile is registered in the SAME batch, gasless.
+ *
+ * WHY A NAME AND NOT A URL: the Home's address moves; the estate's name does not. A reader resolves the
+ * name to the estate agent and takes the URL from ITS `atl:homepage`. And why on chain at all: every
+ * estate on a chain shares the registry, so a relying app handed `maya.me` cannot tell whose Home it is —
+ * and a wrong guess does not fail, it creates a second identity for the same person.
+ *
+ * Idempotent: a value already equal to this one is not rewritten (no tx, no prompt). The predicate must
+ * be active in the OntologyTermRegistry (ap-town's AddEstateRoot registers it); until it is, the write
+ * reverts and the caller reports it rather than retrying — the agent simply declares nothing, which is
+ * the state every reader already handles.
+ */
+export async function declareEstate(
+  sa: Address,
+  estateName: string,
+  signHash: SignHash,
+  opts: { displayName?: string } = {},
+): Promise<{ ok: true; txHash?: Hex; already?: true } | { ok: false; error: string }> {
+  const value = (estateName ?? '').trim().toLowerCase();
+  if (!value) return { ok: false, error: 'no estate name configured for this Home' };
+  const resolver = CONTRACTS.agentProfileResolver;
+  let registered = false;
+  try {
+    const pc = createPublicClient({ chain: CHAIN, transport: http(DEFAULT_RPC_URL) });
+    registered = (await pc.readContract({ address: resolver, abi: agentProfileResolverAbi, functionName: 'isRegistered', args: [sa] })) as boolean;
+    if (registered) {
+      const current = (await pc.readContract({ address: resolver, abi: agentProfileResolverAbi, functionName: 'getStringProperty', args: [sa, ATL_ESTATE] })) as string;
+      if ((current ?? '').trim().toLowerCase() === value) return { ok: true, already: true };
+    }
+  } catch { /* unreadable → attempt the write; the chain is the judge, not this read */ }
+  const calls: ContractCall[] = [];
+  if (!registered) calls.push(buildRegisterProfileCall({ profileResolver: resolver, agent: sa, displayName: opts.displayName ?? '' }));
+  calls.push({ to: resolver, value: 0n, data: encodeFunctionData({ abi: agentProfileResolverAbi, functionName: 'setStringProperty', args: [sa, ATL_ESTATE, value] }) });
+  return executeCall(sa, signHash, buildExecuteBatchCallData(calls));
 }
 
 export async function setCapabilities(
