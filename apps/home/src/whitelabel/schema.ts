@@ -377,6 +377,10 @@ export interface ClientTheme {
   vars: Record<string, string>;
   /** An extra class on the scope, for a client that needs a hook of its own. */
   className?: string;
+  /** The sign-in buttons in this window wear GCID's own button (mark + "Continue with GCID"), so a window
+   *  dressed in the app's colours still says what the person signs in WITH. The variant matches the
+   *  window's ground: 'dark' on a dark theme, 'light' on a light one. */
+  gcidButtons?: 'dark' | 'light';
 }
 
 /** An agent kind the Portal lets the user manage. Person is live; others preview. */

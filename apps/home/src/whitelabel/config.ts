@@ -492,73 +492,76 @@ const faithImpact: WhiteLabelConfig = {
         // A host knows themselves by their email, never by an address or a `.impact` handle.
         hideIdentifiers: true,
       },
-      // Gather's OWN look for its sign-in window (2026-10-09): a host who clicked "Sign in" on Gather27
-      // should not land on a page that looks like another product. Values are Gather's brand tokens
-      // (engage apps/gather27-web/src/theme.ts HOUSE_CSS — Figma "Gather27 → Style Guide"): cream paper,
-      // near-black ink, Bright Blue pill buttons, 16px cards, Plus Jakarta Sans throughout
-      // (headings too). Scoped to this client's window only (ClientThemeScope); nothing else moves.
+      // Gather's OWN look for its sign-in window (2026-10-09; dark from 2026-10-12): a host who clicked "Sign in" on
+      // Gather27 lands on a page that looks like the next step of Gather's site — the Figma overhaul's Dark Blue ground,
+      // cream type, Plus Jakarta Sans Light headings, cream pill fields (engage apps/gather27-web/src/theme.ts, the
+      // [data-theme="dark"] set). The one thing NOT in Gather's colours is the sign-in button itself: it is GCID's own
+      // dark-variant button (gcidButtons), so it is clear what the person is signing in WITH (Ryan, 2026-10-12).
+      // Scoped to this client's window only (ClientThemeScope); nothing else moves.
       theme: {
-        fontHref: 'https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@1&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap',
+        fontHref: 'https://fonts.googleapis.com/css2?family=Inter:wght@600;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap',
+        gcidButtons: 'dark',
         vars: {
-          // Surfaces — Gather --paper (Neutral/100 92% + Neutral/500), --card (Neutral/100), --line (Neutral/500).
-          '--color-surface': '#FDF8EF',
-          '--color-surface-raised': '#FFFAF0',
-          '--color-surface-sunken': '#F4EFE6',
-          '--color-border': '#EBE7DE',
-          '--color-border-strong': '#D6D0C4',
-          // Ink — Neutral/900, Neutral/700, and Gather's --ink-faint (Neutral/700 72% on Neutral/100: 4.7:1 on the card).
-          '--color-text-primary': '#1B1B1B',
-          '--color-text-body': '#3B3A39',
-          '--color-text-muted': '#72706C',
-          '--color-text-faint': '#8C8984',
-          // The accent — Bright Blue with cream text (5.5:1), Dark Blue on hover (Gather .btn).
+          // Surfaces — Gather Dark Blue ground, the lifted card a step above it, hairlines in cream at low strength.
+          '--color-surface': '#12161D',
+          '--color-surface-raised': '#1A202A',
+          '--color-surface-sunken': '#0E1117',
+          '--color-border': '#2B313C',
+          '--color-border-strong': '#3A404B',
+          // Ink — cream (Neutral/100) and its softer steps on the dark ground.
+          '--color-text-primary': '#FFFAF0',
+          '--color-text-body': '#E3DED4',
+          '--color-text-muted': '#AEB2BA',
+          '--color-text-faint': '#8D929B',
+          // The accent (other primary actions, e.g. Verify) — Bright Blue with cream text; black on hover (Gather .btn).
           '--color-action': '#2A5ED8',
           '--color-action-fg': '#FFFAF0',
-          '--color-focus': '#2A5ED8',
+          '--color-focus': '#BDD8E7',
           '--c-primary-light': '#2A5ED8',
           '--color-accent': '#2A5ED8',
-          '--color-accent-soft': '#EEF3FC',
+          '--color-accent-soft': '#1C2A44',
           '--accent': '#2A5ED8',
-          '--accent-soft': '#EEF3FC',
-          // The Home's amber scale, re-pointed at Gather's blues (progress fill, logo badge, links).
-          '--color-amber-50': '#EEF3FC',
-          '--color-amber-100': '#DCE6F9',
+          '--accent-soft': '#1C2A44',
+          // The Home's amber scale, re-pointed at Gather's blues (progress fill, logo badge, links). Links read Light Blue.
+          '--color-amber-50': '#1C2A44',
+          '--color-amber-100': '#22345A',
           '--color-amber-400': '#6F93E6',
           '--color-amber-500': '#2A5ED8',
-          '--color-amber-600': '#2A5ED8',
-          '--color-amber-700': '#1F4BB3',
-          // The legacy aliases resolve at :root, so they are re-pointed here too (spinner, value steps).
+          '--color-amber-600': '#BDD8E7',
+          '--color-amber-700': '#BDD8E7',
           '--c-primary': '#2A5ED8',
-          '--c-primary-hover': '#12161D',
-          '--c-g900': '#1B1B1B',
-          '--c-g700': '#3B3A39',
-          '--c-g500': '#72706C',
-          '--c-g200': '#EBE7DE',
-          // "Done" is Dark Blue in Gather (the brand has no green): receipts and consent ticks.
-          '--color-sage-50': '#F1F5FB',
-          '--color-sage-100': '#DCE6F9',
-          '--color-sage-500': '#2A5ED8',
-          '--color-sage-700': '#12161D',
-          // The shield mark, tinted Bright Blue → Dark Blue.
-          '--shield-stop-a': '#5B86E5',
-          '--shield-stop-b': '#2A5ED8',
-          '--shield-stop-c': '#12161D',
-          // Type — Plus Jakarta Sans everywhere, headings included (Ryan, 2026-10-09: match the site's normal font).
+          '--c-primary-hover': '#000000',
+          '--c-g900': '#FFFAF0',
+          '--c-g700': '#E3DED4',
+          '--c-g500': '#AEB2BA',
+          '--c-g200': '#2B313C',
+          // "Done" is Light Blue on dark (the brand has no green): receipts and consent ticks.
+          '--color-sage-50': '#16202F',
+          '--color-sage-100': '#22345A',
+          '--color-sage-500': '#BDD8E7',
+          '--color-sage-700': '#BDD8E7',
+          // The shield mark, Bright Blue → Light Blue so it reads on the dark ground.
+          '--shield-stop-a': '#BDD8E7',
+          '--shield-stop-b': '#5B86E5',
+          '--shield-stop-c': '#2A5ED8',
+          // Type — Plus Jakarta Sans; headings Light, as the Gather27 site sets them.
           '--font-brand-stack': '"Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", sans-serif',
           '--theme-heading-font': '"Plus Jakarta Sans", system-ui, sans-serif',
           '--theme-heading-style': 'normal',
-          '--theme-heading-weight': '700',
-          '--theme-heading-tracking': '-0.01em',
-          '--theme-h1-size': '1.6rem',
-          '--theme-title-size': '1.5rem',
+          '--theme-heading-weight': '300',
+          '--theme-heading-tracking': '-0.015em',
+          '--theme-h1-size': '2rem',
+          '--theme-title-size': '1.6rem',
           // Shapes — Gather --r-pill (200px), --r-card (16px); no drop shadow on the card.
           '--theme-button-radius': '200px',
-          '--theme-button-hover': '#12161D',
+          '--theme-button-hover': '#000000',
           '--theme-input-radius': '200px',
           '--theme-input-pad-x': '1.1rem',
+          '--theme-input-bg': '#FFFAF0',
+          '--theme-input-fg': '#1B1B1B',
           '--theme-card-radius': '16px',
           '--theme-card-shadow': 'none',
-          '--theme-focus-ring': 'rgba(42, 94, 216, .18)',
+          '--theme-focus-ring': 'rgba(189, 216, 231, .28)',
         },
       },
     },

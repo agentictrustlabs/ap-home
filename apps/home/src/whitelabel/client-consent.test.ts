@@ -70,12 +70,14 @@ describe('gather-app — its own words', () => {
     expect(clientOrgName(gather, 'Grace Church')).toBe('Grace Church');
   });
 
-  it('has its own look: Gather’s cream, ink, Bright Blue pill and fonts — custom properties only', () => {
+  it('has its own look: Gather’s dark ground, cream type, pill shapes and fonts — custom properties only', () => {
     const t = clientTheme(gather)!;
     expect(t).toBeDefined();
-    expect(t.fontHref).toMatch(/^https:\/\/fonts\.googleapis\.com\/css2\?family=Instrument\+Serif.*Plus\+Jakarta\+Sans/);
-    expect(t.vars['--color-surface']).toBe('#FDF8EF');
-    expect(t.vars['--color-text-primary']).toBe('#1B1B1B');
+    expect(t.fontHref).toMatch(/^https:\/\/fonts\.googleapis\.com\/css2\?family=.*Plus\+Jakarta\+Sans/);
+    expect(t.vars['--color-surface']).toBe('#12161D');
+    expect(t.vars['--color-text-primary']).toBe('#FFFAF0');
+    // ...but the sign-in button is GCID's own, dark variant — what the host signs in WITH stays clear.
+    expect(t.gcidButtons).toBe('dark');
     expect(t.vars['--color-action']).toBe('#2A5ED8');
     expect(t.vars['--theme-button-radius']).toBe('200px');
     expect(t.vars['--font-brand-stack']).toMatch(/Plus Jakarta Sans/);

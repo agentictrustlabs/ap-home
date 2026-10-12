@@ -8,6 +8,7 @@
 // fetched only while a themed window is open. No theme → the children, untouched.
 import type { CSSProperties, ReactNode } from 'react';
 import type { ClientTheme } from '../../whitelabel/config';
+import { GcidButtonContext } from '../shared/GcidButton';
 
 export function ClientThemeScope({ theme, children }: { theme: ClientTheme | undefined; children: ReactNode }) {
   if (!theme) return <>{children}</>;
@@ -20,7 +21,7 @@ export function ClientThemeScope({ theme, children }: { theme: ClientTheme | und
           <link rel="stylesheet" href={theme.fontHref} />
         </>
       )}
-      {children}
+      <GcidButtonContext.Provider value={theme.gcidButtons ?? null}>{children}</GcidButtonContext.Provider>
     </div>
   );
 }

@@ -23,6 +23,7 @@
 import { useState } from 'react';
 import { useSession } from '../../context/session';
 import { WorkingBar } from '../onboarding/WorkingBar';
+import { GcidButton, useGcidButtons } from '../shared/GcidButton';
 import { secureHomeNoName, activateVault, signHashFor } from '../../home/onboarding';
 import { addPasskeyCredential, claimName, fetchProfile } from '../../connect-client';
 import { CENTRAL_AUTH_DOMAIN, nameLabel } from '../../lib/domain';
@@ -54,6 +55,9 @@ export function EmailAuthCard({ onLinked, busyNote = 'Securing your home…' }: 
    *  (whitelabel/client-consent.ts `clientCopy(…, 'portalStepBusy')`); everywhere else keeps the default. */
   busyNote?: string;
 }) {
+  // A relying app's window that asked for GCID's own button (whitelabel theme.gcidButtons): the sign-in step says
+  // "Continue with GCID" with the mark, so the app's colours never hide what the person signs in with.
+  const gcid = useGcidButtons();
   const { session, openSession } = useSession();
   const [step, setStep] = useState<'email' | 'code' | 'existing-home' | 'passkey-offer'>('email');
   const [email, setEmail] = useState('');
@@ -276,9 +280,13 @@ export function EmailAuthCard({ onLinked, busyNote = 'Securing your home…' }: 
             onKeyDown={(e) => { if (e.key === 'Enter' && email.trim()) void start(); }}
             style={{ flex: 1, minWidth: 200, padding: '.5rem var(--theme-input-pad-x, .7rem)', border: '1px solid var(--color-border-strong)', borderRadius: 'var(--theme-input-radius, 8px)' }}
           />
-          <button className="btn" data-testid="email-auth-continue" disabled={busy || !email.trim()} onClick={() => void start()}>
-            {busy ? <><span className="spinner" aria-hidden /> Sending…</> : session ? 'Add email' : 'Continue'}
-          </button>
+          {gcid && !session ? (
+            <GcidButton variant={gcid} label="Continue with GCID" busy={busy} busyLabel="Sending…" data-testid="email-auth-continue" disabled={busy || !email.trim()} onClick={() => void start()} />
+          ) : (
+            <button className="btn" data-testid="email-auth-continue" disabled={busy || !email.trim()} onClick={() => void start()}>
+              {busy ? <><span className="spinner" aria-hidden /> Sending…</> : session ? 'Add email' : 'Continue'}
+            </button>
+          )}
         </div>
       ) : (
         <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
