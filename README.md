@@ -8,9 +8,9 @@ the person's agent as the person, and the Home web app that makes the one rule l
 > being a participant does not authorize an action; the requested effect must be within the acting principal's
 > current, scoped delegation.
 
-Ring 0 — [`agenticprimitives`](https://github.com/agentictrustlabs/agenticprimitives) — keeps the packages, the
+Ring 0 — `agenticprimitives`, the private source monorepo, published as [`agentic-primitives`](https://github.com/agentictrustlabs/agentic-primitives) — keeps the packages, the
 contracts and the Developer Kit. This repository is a **product** on published `@agenticprimitives/*` packages
-(ADR-0063, [spec 399](https://github.com/agentictrustlabs/agenticprimitives/blob/master/specs/399-repository-split-program.md) W2),
+(ADR-0063, spec 399 W2),
 extracted with history from Ring 0 by `scripts/split/extract-ap-home.sh` (the commit is named in `git log`).
 
 ## Faithnet — the estate this repository deploys
@@ -30,6 +30,7 @@ any app. The Base Sepolia `production` estate (impact-agent) is not here. `DEPLO
 | `apps/edge` | `apps/edge` | the admission edge (ADR-0057): HTTPS required, mTLS optional, admission always |
 | `scripts/` | root `scripts/` (the Home subset) | secrets, local dev vars, provisioning, the live gates (`scripts/live-gates.json`), every `verify-*` gate, the census; each Worker deploys with `wrangler deploy --env faithnet` from its directory |
 | `demo/` | `demo/` | the estate roster and deployment placements (→ `@agenticprimitives-demo/estate`, 399 §2.6) |
+| `docs/runbooks/new-estate.md` | **stand up another estate** — every command, in order, with what bit the second one (build 4 of [five](https://github.com/agentictrustlabs/agentic-primitives/blob/main/docs/builds.md)) |
 | `docs/architecture/` | the product docs | harness architecture, outside-in flow, inbox UX synthesis, the UX product brief, **the Home census** |
 | `specs/398-…` | `specs/398-…` | the UX strategy this repository carries out: Home Work · Home Build · the Developer Kit |
 

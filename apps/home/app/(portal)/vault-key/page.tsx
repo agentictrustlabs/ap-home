@@ -8,16 +8,23 @@
 // from fail-closed to live. There is no global key — until you sign this, demo-mcp cannot
 // decrypt your data at all (VKB-D1).
 //
-// The person no longer hand-enters anything: on load we ask demo-mcp to provision (idempotent)
-// this person's KEK (`/custody/vault-key/provision` → kmsKeyRef) and to advertise the server's
-// delegate + authorized scope (`/custody/vault-key/server-info`). The home holds no key material —
-// it only signs the grant. So the ceremony is a single click: review + sign.
+// The person no longer hand-enters anything: on load we ask demo-mcp to advertise the server's
+// delegate + authorized scope (`/custody/vault-key/server-info`); the click runs `activateVault`,
+// which PROVES control of the owner (ERC-1271 over the freshness-bound provision challenge), provisions
+// this person's KEK (idempotent → kmsKeyRef) and binds the signed authorization. The home holds no key
+// material — it only signs. So the ceremony is a single click: review + sign.
+//
+// WHY THE PROOF IS SIGNED HERE AND NOT AT LOAD. This page once POSTed `{ owner }` alone at load and the
+// vault answered `issued_at_required`: provisioning wields the KMS admin credential and creates a real
+// per-owner key, so it is gated on an owner-control proof (NEW-C3), which only the ceremony's click can
+// sign (a passkey needs the gesture). On faithnet every demo person had been provisioned by the onboarding
+// path first, so the load-time call was idempotently answered and the defect stayed invisible; imbnet's
+// first person hit it (2026-10-11). `activateVault` is the one path every other entrance already uses.
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useSession } from '../../../src/context/session';
-import { bindVaultKey, activateInteractionsIfNeeded, resolveVia, type Via } from '../../../src/home/onboarding';
+import { activateVault, activateInteractionsIfNeeded, resolveVia, type Via } from '../../../src/home/onboarding';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
-import { VAULT_SERVER_ID } from '../../../src/lib/domain';
 
 const MCP_BIND = '/mcp-bind';
 
@@ -33,7 +40,6 @@ export default function VaultKeyPage() {
   const { agentAddress, agentName, session, profile } = useSession();
   const [prep, setPrep] = useState<'loading' | 'ready' | 'error'>('loading');
   const [prepError, setPrepError] = useState<string | null>(null);
-  const [kmsKeyRef, setKmsKeyRef] = useState('');
   const [info, setInfo] = useState<ServerInfo | null>(null);
   const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -44,7 +50,8 @@ export default function VaultKeyPage() {
   // (which defaults to passkey → a WebAuthn prompt that fails for a Google/social-custodied agent).
   const via = useMemo<Via>(() => resolveVia(profile?.credential, session?.via), [profile?.credential, session?.via]);
 
-  // Auto-prepare: provision the KEK (idempotent) + discover the server delegate/scope.
+  // Auto-prepare: discover the server delegate/scope so the person can review what they are about to sign.
+  // Provisioning happens on the click, under the owner-control proof (see the header comment).
   useEffect(() => {
     if (!agentAddress) return;
     let cancelled = false;
@@ -52,18 +59,12 @@ export default function VaultKeyPage() {
     setPrepError(null);
     (async () => {
       const infoRes = await fetch(`${MCP_BIND}/custody/vault-key/server-info`).then((r) => r.json());
-      const provRes = await fetch(`${MCP_BIND}/custody/vault-key/provision`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ owner: agentAddress }),
-      }).then((r) => r.json());
       if (cancelled) return;
-      if (!provRes?.ok || !provRes.kmsKeyRef) {
-        setPrepError(provRes?.error_description ?? provRes?.detail ?? 'could not provision your vault key');
+      if (!infoRes?.serverKey) {
+        setPrepError(infoRes?.error_description ?? infoRes?.detail ?? 'the vault did not describe its delegate');
         setPrep('error');
         return;
       }
-      setKmsKeyRef(provRes.kmsKeyRef);
       setInfo({
         serverKey: infoRes.serverKey,
         defaultResources: infoRes.defaultResources ?? ['person-pii', 'org-sensitive', 'profile', 'vault:impact-profile'],
@@ -88,19 +89,8 @@ export default function VaultKeyPage() {
     setError(null);
     setDone(null);
     try {
-      const out = await bindVaultKey(
-        agentAddress,
-        {
-          vaultId: info.serverId ?? VAULT_SERVER_ID,
-          kmsKeyRef: kmsKeyRef.trim(),
-          serverKey: info.serverKey as `0x${string}`,
-          allowedResources: info.defaultResources,
-          classificationCeiling: info.classificationCeiling,
-          ops: info.ops,
-        },
-        via,
-        session?.token ? { token: session.token } : undefined,
-      );
+      // Proof → provision → bind, one path (the same one onboarding, Ask and the social entrances use).
+      const out = await activateVault(agentAddress, via, session?.token ? { token: session.token } : undefined);
       if (!out.ok) { setError(out.error); return; }
       // The owner's own records (profile, capability record) live on their InteractionsDO (record.get/put), which
       // needs the INTERACTIONS grant — a distinct plane from the vault key. Users onboarded before the
@@ -145,7 +135,7 @@ export default function VaultKeyPage() {
             <code>{info?.classificationCeiling}</code>). Non-subdelegable. Until you do, your vault is fail-closed.
           </p>
           <p className="muted small">
-            Your key has been provisioned in your name. You don&apos;t need to enter anything — just review and sign.
+            Your key is provisioned in your name when you sign. You don&apos;t need to enter anything — just review and sign.
           </p>
           <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />

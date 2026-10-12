@@ -15,6 +15,9 @@ import type { Address } from 'viem';
 import type { Env } from './index.js';
 import { SpendWindow, type MeteredCandidate, type SpendReport } from './spend-window.js';
 import { internalHeaders, internalMarker, type InternalMarkerEnv } from './internal-marker.js';
+import { createModelClient, type ModelClient } from '@agenticprimitives/model-client';
+import { plannerFromModelsOpenAi, composerFromModelsOpenAi, type BridgeOpts } from '@agenticprimitives/model-client/orchestration';
+import type { ReceiptSummaryV1 } from '@agenticprimitives/model-gateway';
 
 /** The MCP tools this agent may COMPOSE to satisfy an intent. Ids are exactly the delegation-gated demo-mcp
  *  tools (`callMcpToolViaDelegation`). The web posts a GOAL; the planner picks among THESE. */
@@ -92,7 +95,7 @@ export const RULE_BASED_PLANNER: Planner = createRuleBasedPlanner([
 ]);
 
 /** The env subset the planner selection needs. */
-export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | 'ORCHESTRATION_MODEL' | 'GROQ_API_KEY' | 'ORCHESTRATION_GROQ_MODEL' | 'ORCHESTRATION_GROQ_BASE_URL' | 'ORCHESTRATION_GROQ_PROMPT_BUDGET' | 'OPENAI_API_KEY' | 'ORCHESTRATION_OPENAI_MODEL' | 'ORCHESTRATION_OPENAI_BASE_URL' | 'ORCHESTRATION_OPENAI_PROMPT_BUDGET' | 'XAI_API_KEY' | 'ORCHESTRATION_XAI_MODEL' | 'ORCHESTRATION_XAI_BASE_URL' | 'ORCHESTRATION_XAI_PROMPT_BUDGET'> & { GEMINI_API_KEY?: string; ORCHESTRATION_GEMINI_MODEL?: string; ORCHESTRATION_GEMINI_PLANNER_MODEL?: string; ORCHESTRATION_GEMINI_BASE_URL?: string; ORCHESTRATION_GEMINI_PROMPT_BUDGET?: string; ORCHESTRATION_GEMINI_TPM?: string } & { COMPOSER_MAX_TOKENS?: string; ORCHESTRATION_ROUTE?: string; ORCHESTRATION_GROQ_TPM?: string; ORCHESTRATION_OPENAI_TPM?: string; ORCHESTRATION_XAI_TPM?: string } & Partial<Pick<Env, 'PROVIDER_METER' | 'A2A_INTERNAL_MARKER'>>;
+export type PlannerEnv = Pick<Env, 'ORCHESTRATION_GATEWAY' | 'INFERENCE_URL' | 'INFERENCE_APP_KEY' | 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | 'ORCHESTRATION_MODEL' | 'GROQ_API_KEY' | 'ORCHESTRATION_GROQ_MODEL' | 'ORCHESTRATION_GROQ_BASE_URL' | 'ORCHESTRATION_GROQ_PROMPT_BUDGET' | 'OPENAI_API_KEY' | 'ORCHESTRATION_OPENAI_MODEL' | 'ORCHESTRATION_OPENAI_BASE_URL' | 'ORCHESTRATION_OPENAI_PROMPT_BUDGET' | 'XAI_API_KEY' | 'ORCHESTRATION_XAI_MODEL' | 'ORCHESTRATION_XAI_BASE_URL' | 'ORCHESTRATION_XAI_PROMPT_BUDGET'> & { GEMINI_API_KEY?: string; ORCHESTRATION_GEMINI_MODEL?: string; ORCHESTRATION_GEMINI_PLANNER_MODEL?: string; ORCHESTRATION_GEMINI_BASE_URL?: string; ORCHESTRATION_GEMINI_PROMPT_BUDGET?: string; ORCHESTRATION_GEMINI_TPM?: string } & { COMPOSER_MAX_TOKENS?: string; ORCHESTRATION_ROUTE?: string; ORCHESTRATION_GROQ_TPM?: string; ORCHESTRATION_OPENAI_TPM?: string; ORCHESTRATION_XAI_TPM?: string } & Partial<Pick<Env, 'PROVIDER_METER' | 'A2A_INTERNAL_MARKER'>>;
 
 // ── WHICH MODEL PROPOSES — spec 377 ──────────────────────────────────────────────────────────────────────
 //
@@ -105,7 +108,7 @@ export type PlannerEnv = Pick<Env, 'ORCHESTRATION_LLM' | 'ANTHROPIC_API_KEY' | '
 export type LlmProvider = 'anthropic' | 'groq' | 'openai' | 'xai' | 'gemini';
 export const LLM_PROVIDERS: readonly LlmProvider[] = ['anthropic', 'groq', 'openai', 'xai', 'gemini'];
 /** What `selectPlanner` reports having chosen. */
-export type PlannerKind = LlmProvider | 'rule-based';
+export type PlannerKind = LlmProvider | 'rule-based' | 'gateway';
 
 /** Groq is THIS APP's configuration of the vendor-neutral OpenAI-compatible adapter — the package names no
  *  host and no model (spec 377 §2). Override with ORCHESTRATION_GROQ_MODEL / ORCHESTRATION_GROQ_BASE_URL.
@@ -498,7 +501,30 @@ function providerFor(env: PlannerEnv, requested?: LlmProvider): LlmProvider | nu
   return p;
 }
 
-export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string; provider?: LlmProvider; /** Told what each composing call used, as the provider reported it. */ onUsage?: (u: ModelUsageV1) => void }): AnswerComposer | null {
+// ── THE GATEWAY — spec 434 W3. When the deployment says so, every model call goes to the town's model gateway by
+// PROFILE under this estate's app key: the planner's and composer's prompts are the adapter packages' own, run through
+// a structural client the gateway backs (`model-client/orchestration`), so nothing about the harness changes but who
+// carries the call and what comes back on the receipt. OFF by default: the comparison runner (spec 415) arms gateway vs
+// direct on the live pair before `ORCHESTRATION_LLM` goes (434 §12 W3's gate). Role → profile is THIS map; a model is
+// never named here. Receipts reach the trace through `onReceipt`.
+export const GATEWAY_PROFILE = { plan: 'planner-fast', compose: 'composer-default', stream: 'answer-stream', judge: 'judge-thorough', structured: 'selection-structured' } as const;
+export function gatewayOn(env: Pick<PlannerEnv, 'ORCHESTRATION_GATEWAY' | 'INFERENCE_URL' | 'INFERENCE_APP_KEY'>): boolean {
+  return (env.ORCHESTRATION_GATEWAY ?? '').trim() === 'on' && !!env.INFERENCE_URL?.trim() && !!env.INFERENCE_APP_KEY?.trim();
+}
+const gatewayClients = new WeakMap<object, ModelClient>();
+export function gatewayModels(env: Pick<PlannerEnv, 'INFERENCE_URL' | 'INFERENCE_APP_KEY'>): ModelClient {
+  let c = gatewayClients.get(env as object);
+  if (!c) { c = createModelClient({ baseUrl: env.INFERENCE_URL!.trim(), credential: { kind: 'app-key', key: env.INFERENCE_APP_KEY!.trim() } }); gatewayClients.set(env as object, c); }
+  return c;
+}
+export type OnReceipt = (r: ReceiptSummaryV1) => void;
+const bridgeOpts = (profile: string, purpose: string, onReceipt?: OnReceipt): BridgeOpts => ({ profile, purpose, ...(onReceipt ? { onReceipt } : {}) });
+
+export function selectComposer(env: PlannerEnv, opts?: { systemPrompt?: string; provider?: LlmProvider; /** Told what each composing call used, as the provider reported it. */ onUsage?: (u: ModelUsageV1) => void ; onReceipt?: OnReceipt}): AnswerComposer | null {
+  if (gatewayOn(env)) {
+    const cap = (env.COMPOSER_MAX_TOKENS ?? '').trim();
+    return composerFromModelsOpenAi(gatewayModels(env), { ...bridgeOpts(GATEWAY_PROFILE.compose, 'compose', opts?.onReceipt), maxEvidenceChars: 24_000, ...(cap && /^\d{2,5}$/.test(cap) ? { maxTokens: Number(cap) } : {}), ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}) });
+  }
   const p = providerFor(env, opts?.provider);
   if (p === null) return null;
   // THE REPLY'S LENGTH IS A DEPLOYMENT SETTING, not a per-ask guess. The composers' own default (700 tokens)
@@ -567,7 +593,11 @@ export async function selectComposerRouted(env: PlannerEnv, opts: { systemPrompt
  *  leaving no tool call and a `no_plan` that looks like the planner refusing. */
 export const OPENAI_REASONING_HEADROOM = 2048;
 
-export function selectPlanner(env: PlannerEnv, opts?: { systemPrompt?: string; maxTokens?: number; provider?: LlmProvider; /** Told what each planning call used, as the provider reported it. */ onUsage?: (u: ModelUsageV1) => void }): { planner: Planner; kind: PlannerKind; model?: string } {
+export function selectPlanner(env: PlannerEnv, opts?: { systemPrompt?: string; maxTokens?: number; provider?: LlmProvider; /** Told what each planning call used, as the provider reported it. */ onUsage?: (u: ModelUsageV1) => void; /** Spec 434 — the gateway receipt of each call, when the gateway carries it. */ onReceipt?: OnReceipt }): { planner: Planner; kind: PlannerKind; model?: string } {
+  if (gatewayOn(env)) {
+    const planner = plannerFromModelsOpenAi(gatewayModels(env), { ...bridgeOpts(GATEWAY_PROFILE.plan, 'plan', opts?.onReceipt), ...(opts?.systemPrompt ? { systemPrompt: opts.systemPrompt } : {}), maxTokens: opts?.maxTokens ?? 1024 });
+    return { planner, kind: 'gateway', model: GATEWAY_PROFILE.plan };
+  }
   const p = providerFor(env, opts?.provider);
   if (p === 'openai') {
     const planner = createOpenAiCompatPlanner({

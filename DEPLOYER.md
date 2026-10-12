@@ -43,3 +43,117 @@ faithchain, and it deploys from [`ap-town`](https://github.com/agentictrustlabs/
   the deployment was not.
 - **One deployer per estate.** Once faithnet deploys from here, nothing in Ring 0 deploys it again.
 - `wrangler deploy` deletes triggers created out of band — custom domains and crons are declarative in `wrangler.toml`.
+
+## imbnet — the town's second estate (2026-10-11)
+
+> The step-by-step for the NEXT estate is [`docs/runbooks/new-estate.md`](docs/runbooks/new-estate.md); this section is
+> the record of imbnet as deployed.
+
+Same chain (faithchain), same contracts, same town, same repository. Its own custody root, relay key,
+interactions key, service agents, vault, Workers and Home — an imbnet person is a different Smart Agent
+from a faithnet person of the same name, because a KMS-custodied home is a CREATE2 address over a derived
+custodian and the roots differ. It has no zone of its own, so the default hosts ARE its addresses.
+
+| Directory | Worker (`[env.imbnet]`) | Host |
+| --- | --- | --- |
+| `apps/home` | — (Next.js on Vercel, project `imb-home`) | `https://imb-home.vercel.app` |
+| `apps/agent-runtime` | `imb-runtime` | `imb-runtime.richardpedersen3.workers.dev` |
+| `apps/vault` | `imb-vault` | `imb-vault.richardpedersen3.workers.dev` |
+| `apps/edge` | `imb-edge` | `imb-edge.richardpedersen3.workers.dev` |
+| `apps/home-mcp` | `imb-home-mcp` | `imb-home-mcp.richardpedersen3.workers.dev` |
+
+Bring up a new estate (or rebuild this one's keys, which orphans every account the old ones custody):
+
+```
+npx tsx scripts/bootstrap-estate.mts --estate <name>   # keys + the two service agents, on chain
+scripts/set-estate-secrets.sh <name>                   # the secrets, each to only the Workers that share it
+wrangler deploy --env <name> -c apps/vault/wrangler.toml   # then agent-runtime, edge, home-mcp
+wrangler d1 migrations apply demo-mcp-<name> --remote -c apps/vault/wrangler.toml --env <name>
+```
+
+`.estate-<name>.local` (0600, gitignored) is the only copy of the custody root. Losing it loses every
+person's home on that estate; copying it elsewhere copies the authority to be every one of them.
+
+What imbnet deliberately does NOT have, each failing closed rather than quietly:
+- **AKCS custody** — imbnet is NOT on AKCS yet, so the vault KEK path does not work at all: `POST
+  /custody/vault-key/provision` answers 501 and every person's storage stays off. `DEMO_VAULT_LOCAL_KEK_SECRET`
+  cannot substitute, and GCP is not an option — **this org uses no Google KMS keys anywhere**; the
+  gcp-kms code paths stay in the tree and are never configured, so a 501 naming `GCP_SERVICE_ACCOUNT_JSON`
+  means "no KMS backend is configured here", never "add a GCP credential". The local KEK cannot substitute
+  because wrangler's esbuild constant-folds `process.env.NODE_ENV === 'production'` to `true`, so
+  `localKekEnabled` refuses in ANY deployed Worker — it is a `wrangler dev` path and nothing else.
+
+  **It needs its OWN tenant, `imb`.** An AKCS tenant is a derivation root — "MAC keys are derived from
+  the tenant root" (apps/vault/wrangler.toml) and the custody seed lives there too. A tenant is therefore
+  an ESTATE boundary. `faithnet-b` and `skills-a2a` share tenant `faithnet` because they are a second
+  deployment OF faithnet and a service WITHIN it; imbnet is neither. Its whole defining property is that
+  its persons are different Smart Agents from faithnet's, which comes from a separate custody root —
+  putting its keys under faithnet's seed would dissolve exactly that.
+
+### Putting imbnet on AKCS
+
+A NEW tenant, `imb`, with its own callers. On the Azure CVM (Bastion/JIT), as the AKCS pilot operator:
+
+```
+akcs operator --config /etc/akcs/config.toml create-tenant --tenant-id imb --name "IMB Net"
+akcs operator --config /etc/akcs/config.toml bind-caller --tenant-id imb --issuer https://akcs-pilot.faithnet.internal --subject imb-vault-2   --name "imb-vault"   --operations data-key-generate,data-key-unwrap,mac-generate,key-create --purposes "*" --audiences urn:mcp:server:person --protection-levels CVM_WRAPPED,CVM_DERIVED --signing-purposes none
+akcs operator --config /etc/akcs/config.toml bind-caller --tenant-id imb --issuer https://akcs-pilot.faithnet.internal --subject imb-runtime-2 --name "imb-runtime" --operations mac-generate                                              --purposes "*" --audiences urn:mcp:server:person --protection-levels CVM_WRAPPED,CVM_DERIVED --signing-purposes none
+akcs dev mint-token --signing-key /etc/akcs/issuer/issuer-signing-key.pem --kid akcs-pilot-1 --issuer https://akcs-pilot.faithnet.internal --audience akcs-pilot --subject imb-vault-2 --ttl-secs 31536000     # → vault AKCS_TOKEN
+akcs dev mint-token … --subject imb-runtime-2 --ttl-secs 31536000                                                                                                                                # → runtime AKCS_TOKEN
+```
+
+DONE 2026-10-11 (tenant `imb`, callers `imb-vault-2` / `imb-runtime-2`; the first pair, bound without the
+allowlists below, is DISABLED). Run on the pilot CVM with `az vm run-command invoke -g RG-AKCS-PILOT-WESTUS
+-n vm-akcs-pilot-0 --command-id RunShellScript` (set -a; . /etc/akcs/env) — no Bastion session needed.
+
+**The allowlists are EXACT MATCH or `*`** (`allows()` in akcs-auth): `--audiences` must name the MAC audience the
+Workers actually send, `urn:mcp:server:person` (`MCP_AUDIENCE`), or every A2A→vault MAC fails
+`AUDIENCE_NOT_ALLOWED` — which the Home surfaces as `interactions_not_enabled`/`vault_key_unauthorized` with nothing
+naming KMS until you curl `/connect/inbox` with a session. `--purposes` must be `*` because every person's KEK is
+its own purpose (`vault-kek:<owner>`), and the vault needs `key-create` to mint it (`provisionEnvelopeKey`).
+
+**NO `AZURE_HSM_DIRECT` ON EITHER CALLER — that is the one that costs money.** An HSM-direct key is a real
+Azure Key Vault HSM key and is billed per key; `CVM_WRAPPED` and `CVM_DERIVED` are derived inside the
+confidential VM from the ONE root and cost nothing per agent. Every per-person vault KEK and every service
+MAC here must be derived, never HSM-direct. Leaving the level off the caller is what makes an accidental
+billable key impossible rather than merely discouraged — a caller cannot ask for a protection level it was
+not bound for. (`skills-a2a`'s key is `CVM_WRAPPED`; its caller was bound permissively and did not have to be.)
+
+
+Each caller is scoped to what that Worker actually does, the way skills-a2a's is ("a leak of this worker's
+token can ask for one public key and one kind of signature"):
+
+| caller | needs | why |
+| --- | --- | --- |
+| `imb-vault` | `data-key-generate`, `data-key-unwrap` | the per-person KEK envelope — the thing that is 501 today |
+| both | `mac-generate` | the A2A→MCP service MAC; both halves of the hop must agree on the mechanism |
+| `imb-runtime` | nothing else | its relay signs locally and its custody root stays local-aes |
+
+Then `scripts/adopt-akcs.sh imbnet <vault-token-file> <runtime-token-file>` and follow what it prints. It
+sets `AKCS_ACCEPTED_PROTECTION_LEVELS=CVM_WRAPPED,CVM_DERIVED` on both Workers, so a key that came back
+HSM-direct would be REFUSED at the client as well — the cost guard holds at both ends.
+
+**`A2A_CUSTODY_KMS_BACKEND` stays `local-aes`.** A person's home is a CREATE2 address over their derived
+custodian; moving the custody root derives a different, empty Smart Agent and locks out everyone who
+already signed in. Only the vault KEK and the MAC move onto AKCS, under tenant `imb`. faithnet carries the
+same staged-cutover note for the same reason — and when imbnet's custody does move, it moves to `imb`,
+never to `faithnet`, or every imbnet person's address changes.
+
+### Signing out of a second estate
+
+`NEXT_PUBLIC_LOGOUT_RP_APPS` defaults to faithnet's relying apps (`commons-app,field-app`); their `/sso-logout`
+refuses any other Home's return and strands the person on their root. imb-home sets it to `none` (build-time var —
+redeploy after changing). When imbnet gets relying apps of its own, list their client ids there.
+
+### imbnet demo people (2026-10-11)
+
+Five people of their own — never faithnet's — in `demo/personas.imbnet.json` (0600; the same JSON is `DEMO_PERSONA_KEYS`
+on imb-home): **maya-fernandes.me** Maya Fernandes · **samuel-adeyemi.me** Samuel Adeyemi · **priyaraghavan.me** Priya
+Raghavan · **tomas-vargas.me** Tomás Vargas · **hannah-whitfield.me** Hannah Whitfield. Each has an AKCS vault key
+(tenant `imb`), the interactions plane, first/last name in the vault, and a paid `.me` name (8 SHQ from the 1000 SHQ
+treasury birthright) registered and presented. `provision-estate-personas.mts` makes the people; the ceremonies ran
+through the Home with Playwright (sign in via `/connect/demo-signin`, `/vault-key`, `/profile`, `/naming`);
+`present-estate-names.mts` finishes a name whose presenting step was interrupted.
+
+The domain rule bit: `maya`, `mayafernandes`, `samueladeyemi`… are all somebody's `.com`, so the gate asks for a
+verified email there (spec 431 §3). Hyphenated full names were free; `priyaraghavan` happened not to be a domain.

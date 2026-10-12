@@ -63,8 +63,18 @@ export function PersonalInfoPanel({
     if (!agentAddress) return false;
     const via = resolveVia(homeProfile?.credential, session?.via);
     const auth = session?.token ? { token: session.token } : undefined;
-    try { return (await activateInteractionsIfNeeded(agentAddress, via, auth)).ok; }
-    catch { return false; }
+    // SAY WHY IT FAILED. This swallowed its reason, so an estate where enabling cannot work looked
+    // identical to one where it simply had not been tried: the page sat on `interactions_not_enabled`
+    // and every record read 409'd with nothing anywhere naming the cause (imbnet, 2026-10-11).
+    // A `false` return still drives the same UI; the console line is for whoever is looking.
+    try {
+      const r = await activateInteractionsIfNeeded(agentAddress, via, auth);
+      if (!r.ok) console.error('[interactions] enable refused', { principal: agentAddress, via, error: r.error });
+      return r.ok;
+    } catch (e) {
+      console.error('[interactions] enable threw', { principal: agentAddress, via, error: e instanceof Error ? e.message : String(e) });
+      return false;
+    }
   }, [agentAddress, homeProfile?.credential, session?.via, session?.token]);
 
   const load = useCallback(async (autoEnable: boolean): Promise<void> => {
@@ -80,6 +90,17 @@ export function PersonalInfoPanel({
         // grant. On a KMS home we enable it SILENTLY (server-signed) and reload — no ceremony, no
         // wrong "activate vault key". Wallet/passkey need a user gesture → show the Enable button.
         const via = resolveVia(homeProfile?.credential, session?.via);
+        // WHY THE SELF-HEAL DID NOT RUN. Three things gate it, and when any is false the call never
+        // happens — so an estate where auto-enable is simply never attempted looked exactly like one
+        // where it was attempted and refused (imbnet, 2026-10-11: no log line at all was the finding).
+        // `via` is derived from the agent's ON-CHAIN credential first and the cookie second, so a brand
+        // new home whose profile has not landed yet resolves to `passkey` and is not KMS.
+        if (!(autoEnable && isKmsVia(via) && session?.token)) {
+          console.error('[interactions] self-heal skipped', {
+            autoEnable, via, isKms: isKmsVia(via), hasToken: !!session?.token,
+            credential: homeProfile?.credential ?? '(none)', cookieVia: session?.via ?? '(none)',
+          });
+        }
         if (autoEnable && isKmsVia(via) && session?.token && (await enableInteractions())) {
           const p = await loadImpactProfile(agentAddress);
           setStored(p); setContact(p.contact ?? {});

@@ -70,3 +70,28 @@ DEMO_CONNECT_ENABLED = "true"
 #          HOME_MCP_ACT_KEY (spec 397 §11 — the act-as-me key; a second secret; its address is the `home-mcp-act` delegate),
 #          ACT_REGISTRATION_SECRET (a registration presenting it may request scope act — the live gate's path),
 #          TOKEN_SECRET (HMAC for opaque tokens' lookup keys).
+
+# ── IMBNET — the town's second estate (see apps/vault/wrangler.toml) ──
+# The connector URL people paste into Claude is the workers.dev one: `imb-home-mcp.richardpedersen3.workers.dev/mcp`.
+# No custom domain, because imbnet has no zone of its own.
+[env.imbnet]
+name = "imb-home-mcp"
+account_id = "5da2feaa56593839672948e16c6e809d"
+
+[[env.imbnet.durable_objects.bindings]]
+name = "STORE"
+class_name = "HomeMcpStoreDO"
+
+[env.imbnet.vars]
+# imbnet's agents have no per-agent hostname (no zone), so every agent answers at the one runtime origin.
+AGENT_HOST_PATTERN = "https://imb-runtime.richardpedersen3.workers.dev"
+HOME_ORIGIN = "https://imb-home.vercel.app"
+BROKER_JWKS_URL = "https://imb-home.vercel.app/jwks"
+A2A_ORIGIN = "https://imb-runtime.richardpedersen3.workers.dev"
+CHAIN_ID = "34348"
+DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
+CLIENT_ID = "home-mcp"
+CLIENT_ID_ACT = "home-mcp-act"
+ACT_CLIENT_IDS = ""
+ACT_REDIRECT_URIS = "https://agent.meta.ai/api/hatch/oauth/callback"
+DEMO_CONNECT_ENABLED = "true"

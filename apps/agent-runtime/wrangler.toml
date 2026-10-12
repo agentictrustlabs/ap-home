@@ -135,6 +135,12 @@ EVAL_CAPTURE = "on"
 AP_RUNTIME_AGENT = "acp-stub-agent"
 # Spec 397 W2 — the ARD registry this deployment's agents find other agents in.
 ARD_REGISTRY_ORIGIN = "https://discovery-a2a.faithnet.io"
+# WHICH ESTATE THIS IS — said, never defaulted: the heartbeat the town pulls is signed with this name, and a
+# deployment that does not say refuses to publish one rather than answer as somebody else.
+ESTATE_ID = "faithnet"
+# The registry whose census IS this estate's census. True here (that index projects faithnet's own chain state
+# and faithnet is its serving deployment); set on no other estate that reads the same KB.
+ESTATE_CENSUS_REGISTRY_ORIGIN = "https://discovery-a2a.faithnet.io"
 # Spec 365 — the zones whose inbound mail this Worker routes (`<handle>@<zone>` → the naming service).
 EMAIL_ZONES = "faithnet.me"
 # Outbound mail goes out as this address (its zone is onboarded to Cloudflare Email Sending).
@@ -581,3 +587,190 @@ class_name = "HarnessApprovalWorkflow"
 name = "SEND_EMAIL"
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════
+# IMBNET — the town's SECOND estate on faithchain (spec 436 §5.5; towns/faithchain/town.yaml).
+#
+# Shares the chain, the contracts and the town. Its own: custody root, relay key, interactions key, service
+# agents, vault, Workers, Home. An imbnet person is a DIFFERENT Smart Agent from a faithnet person of the
+# same name — a KMS-custodied home is a CREATE2 address over a derived custodian, and the roots differ.
+#
+# No zone of its own (the owner's decision, 2026-10-11), so:
+#   · no custom domain and no per-agent host block — every agent answers at the one workers.dev origin;
+#   · `A2A_PUBLIC_BASE_DOMAIN` is that origin, and `A2A_SERVES_UNPUBLISHED_NAMES` is true because no imbnet
+#     name publishes an `atl:a2aEndpoint` of its own yet.
+#
+# Custody and key custody are local-aes, not AKCS: there is no `imb` tenant (it needs a caller token minted
+# on the Azure CVM). Those three lines are what changes when the tenant exists — nothing else.
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════
+[env.imbnet]
+name = "imb-runtime"
+workers_dev = true
+
+[env.imbnet.ai]
+binding = "AI"
+
+[env.imbnet.vars]
+CHAIN_ID = "34348"
+AGENT_NAME_PARENTS = "me,impact"
+CONTRACTS_GENERATION = "1"
+ADOPTED_ONTOLOGY_MANIFEST_DIGEST = "0xf64becd4c395e8b7f0d935ca97640a6d4b37fc087ee0073af48f3841ab3361c8"
+# Gemini only, as on faithnet (the live-test rule): a provider failure is an error the person sees, never a
+# quiet hand-off (ADR-0013). GEMINI_API_KEY is a secret.
+ORCHESTRATION_LLM = "gemini"
+ORCHESTRATION_ROUTE = "budget"
+COMPOSER_MAX_TOKENS = "2400"
+PLAN_REGRESSION_DEFAULT = "on"
+RESOLVE_CONTEXT_DEFAULT = "on"
+PLAN_CONTINUATION_DEFAULT = "on"
+SKILL_SELECTION_DEFAULT = "selective"
+SKILL_SELECTION_ASKER_CONTEXT = "full"
+SKILL_SELECTION_PLAN = "choice"
+ANSWER_STREAM_DEFAULT = "on"
+SKILL_ANSWER_MODEL_DEFAULT = "minimal"
+OPS_RECORDS_DEFAULT = "cached"
+ASSISTANT_RATE_MAX = "60"
+ASSISTANT_RATE_WINDOW_MS = "600000"
+SA_BUDGET_LIMIT_UNITS = "50000"
+# Nothing fronts imbnet yet — the Home talks to this Worker directly, so no gateway assertion is required.
+DEMO_REQUIRE_GATEWAY_ASSERTION = "false"
+MCP_URL = "https://imb-vault.richardpedersen3.workers.dev"
+DEMO_EDGE_URL = "https://imb-edge.richardpedersen3.workers.dev"
+BROKER_ISS = "https://imb-home.vercel.app"
+BROKER_JWKS_URL = "https://imb-home.vercel.app/jwks"
+DEMO_SSO_AUD = "demo-sso"
+ALLOWED_ORIGINS = "https://imb-home.vercel.app,http://localhost:5175,http://127.0.0.1:5175"
+A2A_PUBLIC_BASE_DOMAIN = "imb-runtime.richardpedersen3.workers.dev"
+A2A_SERVES_UNPUBLISHED_NAMES = "true"
+# The service MAC on AKCS, tenant `imb` (the vault verifies with the same tenant root — both halves of the
+# A2A→MCP hop must agree on the mechanism). Caller `imb-runtime` is bound to mac-generate/mac-verify only.
+A2A_KMS_BACKEND = "agentic-kms"
+AKCS_BASE_URL = "https://akcs-pilot.faithnet.io"
+AKCS_TENANT_ID = "imb"
+AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"
+# The RELAY signs locally (A2A_MASTER_PRIVATE_KEY; faithchain gas is free) — so no AKCS_RELAY_KEY_ID here.
+A2A_RELAYER_KMS_BACKEND = "local-aes"
+# CUSTODY STAYS LOCAL. A person's home is a CREATE2 address over their derived custodian; moving this root
+# derives a different, empty agent and locks out everyone already signed in. faithnet carries the same note.
+A2A_CUSTODY_KMS_BACKEND = "local-aes"
+A2A_ALLOW_LOCAL_MASTER_KEY = "true"
+# The estate's own service agents, deployed by scripts/bootstrap-estate.mts (salt 0 and salt 1 over its
+# interactions key). Never faithnet's: those are custodied by a key this Worker does not hold.
+INTERACTIONS_SERVICE_SA = "0xfBF61be3a4DE7921a4eb6B94dFFfbd183553aFEC"
+HARNESS_AGENT_SA = "0x193B496d366113B765c70BF9230687D685Cc7a92"
+# faithchain contracts — the same deployment every estate on this chain reads.
+PAYMASTER = "0xbd93fEC6910ffD74F14709188b5a9B6C6965b2a7"
+PAYMASTER_VERIFYING_SIGNER = "0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0"
+UNIVERSAL_SIGNATURE_VALIDATOR = "0xeDd56f500325D4701B9985A34e5Fa6EED6716137"
+ENTRY_POINT = "0xf7855250B3363AB7649B10957d8908A9AFcdD4B5"
+DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
+AGENT_ACCOUNT_FACTORY = "0x464eEe7518c3c97DA570592481329E0627E9a3B8"
+TIMESTAMP_ENFORCER = "0x73A7B878168b7DE48677617179A8bE894f0Dfe96"
+ALLOWED_TARGETS_ENFORCER = "0x2156311097A936de1916a878bF53Bfd43c7b5715"
+ALLOWED_METHODS_ENFORCER = "0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41"
+VALUE_ENFORCER = "0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975"
+CUSTODY_POLICY = "0xfb3662Ddc308FAc977A1F663948A447055722d3B"
+QUORUM_ENFORCER = "0x9bF556A36F3dF3972E355dE4215476Dc268bD0C7"
+APPROVED_HASH_REGISTRY = "0xC6a4983bC6649f7C46c9E7d83f1Cd7e9078AFc7b"
+AGENT_NAME_REGISTRY = "0x60E949D52660A9D4143ecB0fdA56c0457f20aED9"
+AGENT_NAME_UNIVERSAL_RESOLVER = "0xF343054e046A4145ccae499ECB28197394eE0798"
+PROFILE_RESOLVER = "0xB03F7C06ad3274F584AB72794406D639c02A45e1"
+PERMISSIONLESS_SUBREGISTRY = "0x9E803ac48b0F32BCE10BFC183b30f6d756DB11CC"
+AGENT_RELATIONSHIP = "0x5015bD7d422e003511246f848cDd798cb00BB968"
+DIGEST_BINDING_ENFORCER = "0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1"
+RECEIPT_ANCHOR_REGISTRY = "0x0e339334B4438F7546FD53837FDC8943cB3Cf54C"
+ONTOLOGY_TERM_REGISTRY = "0xA8Eaa2415EBF4250B041abD1561A3756CeEa0A6C"
+PAYMENT_ENFORCER = "0x07fA0aE59FdE4B7ce8962d6fE7a1d648ec3DD5CE"
+MOCK_USDC = "0xdaE09066A2cc32f6203605619137dcF01A9B49Ae"
+PERMISSIONLESS_SUBREGISTRIES = '{"me":"0x7fd5e2A3a49c321a4CEd39bE403eCde2Fc1CB823","org":"0x5eA2Bd3986f1924764d145515C3680fAbaaBbE6a","team":"0x57Db73fA77C19601f5dCdeB79de40aAE9C505892","svc":"0xeBe1247403fB8e82f0cBb70D158AE38f627174A2","workspace":"0x823D33D20F7a8F0dBe315aC67633804eEd21d56A","treasury":"0xf1df2D9b779C62a8BF5707C799d8E6842382892B","registry":"0x01a1008bF5b9690415BA9c2d108197B48339b393","church":"0x65bBf8Fe17c62E711d903Dd5318F2F3Ef8f19866","circle":"0x23ffbDADCC0255699d1CBF19244a98594777bDe5","household":"0x9c3373E8F28739Df3aA478C18209fD7eeD769F5b"}'
+PRICED_SUBREGISTRIES = '{"me":"0xFEe352298dD12554928c8de2bdA5cf7bbeD9C184","org":"0x2cf2eA7D2302b3390FA3596acbd8821193f296D4","team":"0x5D95fBb3a5B97fF4967aC5587c607B1d9D7DE216","svc":"0x7976bcE1BE0184A738BecF42AF7428065229a42F","workspace":"0x7e1639F35192aab59E1Bc349cD333139BFdA0C86","treasury":"0xb7b6E31D17bBbC7E71741DAbB7d062A26f776902","registry":"0x62e65f085aBEf2cdF9Cf63bf854a363aF75a3F28","church":"0x2404f292187faeCaeD7ceED9F0954Cc3311AB250","circle":"0x15D890374B5BD6D41ADF062Ec25953c7E236c463","household":"0x938eD1296Da9A092A55AEC4F478B667C5b14d09d"}'
+# The public KB is the TOWN's, shared by every estate on faithchain (ADR-0040: it holds only what any
+# stranger could reproduce from the chain, so sharing it discloses nothing).
+ARD_REGISTRY_ORIGIN = "https://discovery-a2a.faithnet.io"
+PUBLIC_GRAPH_URL = "https://graphdb.agentkg.io/repositories/gc-public"
+KB_RETRIEVAL = "playbook"
+# WHICH ESTATE THIS IS — said, never defaulted: the heartbeat the town pulls carries this name, and a
+# deployment that does not say refuses to publish one rather than answer as somebody else. No
+# ESTATE_CENSUS_REGISTRY_ORIGIN: the registry above is the TOWN's, shared with faithnet, so its agent
+# counts are not imbnet's — the heartbeat reports the census as absent instead of borrowing a sibling's.
+ESTATE_ID = "imbnet"
+# OUTBOUND MAIL ON A BORROWED SENDER. imbnet has no zone, so it has no address of its own to send from —
+# and the Home's OTP path needs a working rail or nobody can sign in at all (`DEV_OTP_ECHO` never fires,
+# because `emailSendingEnabled` reports from configuration present, not from the rail working). It sends on
+# `faithnet.ai`, which IS onboarded to Cloudflare Email Sending, with the display name saying who it really
+# is. The address is the one visible place imbnet is not yet its own thing; it changes the day imbnet has a
+# zone, and nothing else about this estate has to change with it.
+#
+# NO EMAIL_ZONES, deliberately: that names the zones this deployment answers INBOUND mail for, and
+# faithnet.ai's inbound belongs to faithnet. Sending as an address is not a claim to receive at it.
+EMAIL_FROM = "invites@faithnet.ai"
+EMAIL_FROM_NAME = "IMB Net"
+AP_RUNTIME_AGENT = "acp-stub-agent"
+
+[env.imbnet.durable_objects]
+bindings = [
+  { name = "SESSIONS", class_name = "SessionStoreDO" },
+  { name = "A2A_TASKS", class_name = "A2aTaskDO" },
+  { name = "INTERACTIONS", class_name = "InteractionsDO" },
+  { name = "HUDDLES", class_name = "HuddleRoomDO" },
+  { name = "PROVIDER_METER", class_name = "ProviderMeterDO" },
+  { name = "EXPERIMENTS", class_name = "ExperimentDO" },
+  { name = "SA_BUDGET", class_name = "SmartAgentBudgetDO", script_name = "imb-vault" },
+]
+
+[[env.imbnet.d1_databases]]
+binding = "OPS"
+database_name = "harness-ops-imb"
+database_id = "348f18a4-97a7-4d65-b9e9-66623e248c20"
+
+[[env.imbnet.queues.producers]]
+binding = "RUNTIME_WAKE"
+queue = "runtime-wake-imb"
+
+[[env.imbnet.queues.producers]]
+binding = "SHELF_INDEX"
+queue = "shelf-index-imb"
+
+[[env.imbnet.queues.consumers]]
+queue = "runtime-wake-imb"
+max_batch_size = 10
+max_batch_timeout = 2
+max_retries = 2
+max_concurrency = 2
+
+[[env.imbnet.kv_namespaces]]
+binding = "BRIDGE_NONCES"
+id = "73db6fcbc4074784800c1368be1177cf"
+[[env.imbnet.kv_namespaces]]
+binding = "SUBJECT_SA_MAP"
+id = "b9c83ef78de04cb2acfd2928147b62c4"
+[[env.imbnet.kv_namespaces]]
+binding = "FED_TOKENS"
+id = "4b8bc1f24b704f70ae9eb775b485bb0e"
+[[env.imbnet.kv_namespaces]]
+binding = "RELEASED_CARDS"
+id = "42452b087c0a4f4e851a9b57121264c3"
+
+[[env.imbnet.services]]
+binding = "MCP"
+service = "imb-vault"
+
+# The public agent directory is the town's, read-only (ADR-0040) — the same binding faithnet reads.
+[[env.imbnet.services]]
+binding = "DISCOVERY_MCP"
+service = "demo-discovery-mcp-faithnet"
+
+[[env.imbnet.services]]
+binding = "SKILLS_MCP"
+service = "skills-mcp"
+
+# spec 362 — the durable executor. Its own instance namespace, because a run ref is per estate.
+[[env.imbnet.workflows]]
+name = "imb-approval"
+binding = "HARNESS_WORKFLOW"
+class_name = "HarnessApprovalWorkflow"
+
+# Spec 365 — the outbound rail. Cloudflare Email Service sends to ANY address from a zone onboarded to
+# Email Sending; `faithnet.ai` is onboarded, and EMAIL_FROM above is the address it sends as.
+[[env.imbnet.send_email]]
+name = "SEND_EMAIL"

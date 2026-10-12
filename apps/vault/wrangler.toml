@@ -102,3 +102,61 @@ new_sqlite_classes = ["SmartAgentBudgetDO"]
 [[env.faithnet.routes]]
 pattern = "mcp.faithnet.io"
 custom_domain = true
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════
+# IMBNET — the town's SECOND estate on faithchain (spec 436 §5.5; towns/faithchain/town.yaml).
+#
+# Same chain, same contracts, same town. Everything else is its own: its own vault D1, its own custody
+# root, its own keys. An imbnet person is a DIFFERENT Smart Agent from a faithnet person of the same
+# name, because a KMS-custodied home is a CREATE2 address over a derived custodian and the roots differ.
+#
+# No zone of its own (the owner's decision, 2026-10-11: "just use default vercel and cloudflare names"),
+# so the workers.dev hosts ARE the estate's addresses and nothing here declares a custom domain.
+#
+# Custody is local-aes, not AKCS: there is no `imb` AKCS tenant yet (that needs a caller token minted on
+# the Azure CVM). The root is an in-Worker secret — honest for a second demo estate, and the one line to
+# change when the tenant exists.
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════
+[env.imbnet]
+name = "imb-vault"
+workers_dev = true
+
+[env.imbnet.vars]
+UNIVERSAL_SIGNATURE_VALIDATOR = "0xeDd56f500325D4701B9985A34e5Fa6EED6716137"
+DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
+TIMESTAMP_ENFORCER = "0x73A7B878168b7DE48677617179A8bE894f0Dfe96"
+ALLOWED_TARGETS_ENFORCER = "0x2156311097A936de1916a878bF53Bfd43c7b5715"
+ALLOWED_METHODS_ENFORCER = "0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41"
+VALUE_ENFORCER = "0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975"
+CHAIN_ID = "34348"
+MCP_AUDIENCE = "urn:mcp:server:person"
+DEMO_OAUTH_MINT_ENABLED = "false"
+DEMO_VAULT_PROVISION_ENABLED = "true"
+DEMO_VAULT_PROVISION_SKIP_PROOF = "false"
+DEMO_NATIVE_MCP_ENABLED = "true"
+SA_BUDGET_LIMIT_UNITS = "50000"
+STAGE2_VERIFIED_LIMIT = "600"
+DEMO_REQUIRE_GATEWAY_ASSERTION = "false"
+# AKCS, tenant `imb` — the estate's OWN tenant (a tenant is a derivation root, so it is an estate boundary).
+# Every per-person KEK is created CVM_WRAPPED from that root inside the confidential VM; the Azure HSM holds
+# only the platform root, so a person costs nothing. The caller `imb-vault` is bound to exactly the ops the
+# vault performs and to CVM_WRAPPED/CVM_DERIVED, so an HSM-direct (billable) key cannot be requested at all.
+A2A_KMS_BACKEND = "agentic-kms"
+AKCS_BASE_URL = "https://akcs-pilot.faithnet.io"
+AKCS_TENANT_ID = "imb"
+AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"
+# AKCS_TOKEN is a SECRET (the imb-vault caller token, minted on the pilot CVM).
+
+[[env.imbnet.d1_databases]]
+binding = "DB"
+database_name = "demo-mcp-imb"
+database_id = "491d4c46-8f7d-4ed2-82f5-6fe74f10459c"
+migrations_dir = "migrations"
+
+[[env.imbnet.durable_objects.bindings]]
+name = "SA_BUDGET"
+class_name = "SmartAgentBudgetDO"
+
+[[env.imbnet.migrations]]
+tag = "v1"
+new_sqlite_classes = ["SmartAgentBudgetDO"]

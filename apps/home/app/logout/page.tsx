@@ -22,6 +22,11 @@ import { disconnectWallet } from '../../src/lib/wallet';
 function rpFrontChannelLogouts(): string[] {
   const hereHttps = window.location.protocol === 'https:';
   const outs: string[] = [];
+  // THE DEFAULT IS FAITHNET'S LIST. Commons and Field are faithnet's relying apps, and each one's
+  // `/sso-logout` trusts only itself and ITS Home as a return — from any other Home it does the only safe
+  // thing and drops the person on its own root. A second estate's Home must therefore name its OWN
+  // relying apps here, or `none` when it has none yet (imbnet, 2026-10-11: signing out of imb-home landed
+  // on commons-production). An id that is not a registered client is skipped, which is what `none` does.
   const rpApps = (process.env.NEXT_PUBLIC_LOGOUT_RP_APPS ?? 'commons-app,field-app')
     .split(',').map((x) => x.trim()).filter(Boolean);
   for (const id of rpApps) {
