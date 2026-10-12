@@ -20,8 +20,9 @@
 //   npx tsx scripts/add-estate-agent.mts --estate imbnet --home https://imb-home.vercel.app [--dry-run]
 
 import { existsSync, readFileSync } from 'node:fs';
-import { AgentAccountClient } from '@agenticprimitives/agent-account';
-import { createPublicClient, encodeFunctionData, http, keccak256, toBytes, type Address, type Hex } from 'viem';
+import { AgentAccountClient, buildExecuteCallData } from '@agenticprimitives/agent-account';
+import { buildRegisterProfileCall } from '@agenticprimitives/agent-profile';
+import { createPublicClient, decodeEventLog, encodeFunctionData, http, keccak256, toBytes, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
 const arg = (k: string): string | undefined => {
@@ -90,24 +91,46 @@ const registered = deployed ? await pc.readContract({ address: PROFILE_RESOLVER,
 const current = registered ? await pc.readContract({ address: PROFILE_RESOLVER, abi: RESOLVER_ABI, functionName: 'getStringProperty', args: [agent, ATL_HOMEPAGE] }).catch(() => '') : '';
 if (String(current).trim() === home) { console.log(`atl:homepage already ${home} — nothing to write`); process.exit(0); }
 
-const calls = [
-  ...(registered ? [] : [{ to: PROFILE_RESOLVER, value: 0n, data: encodeFunctionData({ abi: RESOLVER_ABI, functionName: 'register', args: [agent, `${estate} estate`, `The ${estate} estate: its Home and the people under it.`, keccak256(toBytes('atl:Agent')), ''] }) }]),
-  { to: PROFILE_RESOLVER, value: 0n, data: encodeFunctionData({ abi: RESOLVER_ABI, functionName: 'setStringProperty', args: [agent, ATL_HOMEPAGE, home] }) },
-];
-console.log(`${dry ? 'would write' : 'writing'} atl:homepage = ${home}${registered ? '' : ' (registering the profile in the same batch)'}`);
+const register = registered ? null : buildRegisterProfileCall({ profileResolver: PROFILE_RESOLVER, agent, displayName: `${estate} estate`, description: `The ${estate} estate: its Home and the people under it.` });
+const setHomepage = { to: PROFILE_RESOLVER, value: 0n, data: encodeFunctionData({ abi: RESOLVER_ABI, functionName: 'setStringProperty', args: [agent, ATL_HOMEPAGE, home] }) };
+console.log(`${dry ? 'would write' : 'writing'} atl:homepage = ${home}${register ? ' (registering the profile first)' : ''}`);
 if (dry) process.exit(0);
 
-// The agent writes its own property (`onlyAgent`), as ONE userOp its custodian signs and the estate's
-// relay submits. Gas is the paymaster's, as for every other act here.
 const custodianAccount = privateKeyToAccount(interactions);
-try {
-  const built = await client.buildUserOp({ account: agent, calls: calls.map((c) => ({ to: c.to, data: c.data, value: c.value })), paymaster: PAYMASTER });
+const bundler = privateKeyToAccount(relay);
+const OP_EVENT = { type: 'event', name: 'UserOperationEvent', inputs: [
+  { name: 'userOpHash', type: 'bytes32', indexed: true }, { name: 'sender', type: 'address', indexed: true },
+  { name: 'paymaster', type: 'address', indexed: true }, { name: 'nonce', type: 'uint256' },
+  { name: 'success', type: 'bool' }, { name: 'actualGasCost', type: 'uint256' }, { name: 'actualGasUsed', type: 'uint256' }] } as const;
+
+/** ONE call as ONE userOp, and the ENTRYPOINT'S verdict read back.
+ *
+ *  Two reasons it is one call per op rather than a batch. A 4337 `handleOps` transaction SUCCEEDS when
+ *  the call inside the account reverted — the EntryPoint catches it and says so in
+ *  `UserOperationEvent.success` — so a script that reads only the tx status reports writes that never
+ *  happened (this one did, twice, before the check below). And `setStringProperty` is `onlyRegistered`:
+ *  batched behind `register` it reverted `NotRegistered()`, where sequenced ops each see the state the
+ *  one before them left. */
+async function send(call: { to: Address; value: bigint; data: Hex }, what: string): Promise<void> {
+  const built = await client.buildCallUserOp({ sender: agent, callData: buildExecuteCallData(call), paymaster: PAYMASTER });
   built.userOp.signature = await custodianAccount.signMessage({ message: { raw: built.userOpHash } });
-  await client.submitCallUserOp(built.userOp, privateKeyToAccount(relay));
+  const { receipt } = await client.submitCallUserOp(built.userOp, bundler);
+  if (receipt.status !== 'success') { console.error(`  ${what}: the transaction reverted (tx ${receipt.transactionHash})`); process.exit(1); }
+  let ok: boolean | null = null;
+  for (const log of receipt.logs) {
+    try { ok = decodeEventLog({ abi: [OP_EVENT], data: log.data, topics: log.topics }).args.success as boolean; } catch { /* another event */ }
+  }
+  if (ok === false) { console.error(`  ${what}: the userOp reverted inside the account (tx ${receipt.transactionHash})`); process.exit(1); }
+  console.log(`  ${what}: done`);
+}
+
+try {
+  if (register) await send({ to: register.to, value: register.value ?? 0n, data: register.data }, 'register the profile');
+  await send(setHomepage, 'set atl:homepage');
 } catch (e) {
   const msg = e instanceof Error ? e.message : String(e);
-  // A revert here most often means the predicate is not registered yet: `setStringProperty` is
-  // predicate-active-checked, and `atl:estate`/`atl:homepage` live in the OntologyTermRegistry.
+  // A revert here most often means the predicate is not an ACTIVE term: setStringProperty is
+  // predicate-active-checked against the OntologyTermRegistry.
   console.error('  the write failed:', msg.slice(0, 400));
   process.exit(1);
 }
