@@ -89,6 +89,7 @@ import { AgentNamingClient, buildSubregistryRegisterCall, buildSetPrimaryNameCal
 import {
   verifyCustodySession,
   verifyHomeSession,
+  verifyRelyingIdToken,
   deriveSubjectCustodian,
   timingSafeEqual,
   caip10,
@@ -1441,7 +1442,27 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
   const server = standardServerFor(agent, card, host, {
     env: c.env as never,
     appFetch: async (req, env) => app.fetch(req, env as Env, c.executionCtx),
-    verifySession: (token) => verifyHomeSession(token, c.env),
+    /**
+     * WHO IS ASKING, from either kind of token this Home issues.
+     *
+     * A Home SESSION carries `aud = DEMO_SSO_AUD`; a REGISTERED RELYING APP's id_token carries
+     * `aud = <client_id>`, so `verifyHomeSession` rejects it outright. `interactions-do` has tried both
+     * in this order for exactly this reason since the uupg tracker started driving ops over the standard
+     * a2a path, and the reasoning is unchanged here: the signature against this Home's JWKS and the
+     * issuer check are the proof of identity, `aud` only says which app relayed it, and the token can
+     * only ever act AS THAT PERSON. Authorization is not in the token and never was — it is the on-chain
+     * decision this harness re-runs per call.
+     *
+     * Without this an app like the town portal can sign a person in and then have every relayed question
+     * refused at the door, which reads as the person being unknown when they are merely holding the other
+     * one of this Home's two tokens.
+     */
+    verifySession: async (token) => {
+      const home = await verifyHomeSession(token, c.env);
+      if (home.ok) return home;
+      const relying = await verifyRelyingIdToken(token, c.env);
+      return relying.ok ? { ok: true, sa: relying.sa, caip: relying.caip } : home;
+    },
     ...(validator && c.env.TIMESTAMP_ENFORCER && c.env.ALLOWED_METHODS_ENFORCER ? {
       wire: {
         enforcers: { timestamp: c.env.TIMESTAMP_ENFORCER, allowedMethods: c.env.ALLOWED_METHODS_ENFORCER },

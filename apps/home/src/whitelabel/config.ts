@@ -166,6 +166,27 @@ const faithImpact: WhiteLabelConfig = {
       ask_delegate: (process.env.NEXT_PUBLIC_HOME_MCP_DELEGATE || '0x2D16473370b654D75FCf9cC37649BBd86B9Aff70') as `0x${string}`,
     },
     {
+      // THE TOWN PORTAL (ap-town) — a relying app like any other, and deliberately the thinnest one here.
+      //
+      // It signs a person in so a question they put to an agent arrives AS THEM rather than as a stranger:
+      // the portal relays the id_token to the agent's own A2A door, which resolves it to their Smart Agent
+      // and decides from their standing. The portal holds no key, mints nothing and keeps the token in the
+      // browser tab alone — the town grants nothing (ap-town spec 429 D2), and signing in here does not
+      // change that. `site-login` is the ONLY template it may request, which is the template that asserts
+      // who someone is and carries no authority to act for them.
+      client_id: 'town-app',
+      name: 'The town',
+      // EXACT MATCH (CN-1). The town's own host first; the workers.dev host is what a preview deploy serves.
+      redirect_uris: [
+        'https://town.faithnet.io/connected',
+        'https://faithchain-town-agent.richardpedersen3.workers.dev/connected',
+        'http://localhost:8792/connected',
+      ],
+      allowed_scopes: ['openid', 'agent'],
+      allowed_delegation_templates: ['site-login'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+    },
+    {
       client_id: 'skills-app',
       name: 'Skills',
       // EXACT MATCH (CN-1) — a redirect_uri that is not listed here is refused, so the app's own
