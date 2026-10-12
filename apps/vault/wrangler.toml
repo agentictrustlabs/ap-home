@@ -137,9 +137,22 @@ DEMO_NATIVE_MCP_ENABLED = "true"
 SA_BUDGET_LIMIT_UNITS = "50000"
 STAGE2_VERIFIED_LIMIT = "600"
 DEMO_REQUIRE_GATEWAY_ASSERTION = "false"
-# local-aes: the per-owner KEK is wrapped under DEMO_VAULT_LOCAL_KEK_SECRET (a wrangler secret), and the
-# service MAC under A2A_MAC_SECRET — the same value imb-runtime holds, or every hop reads "service-mac rejected".
-A2A_KMS_BACKEND = "local-aes"
+# AKCS, tenant `imb` (adopted 2026-10-11): the per-owner KEK is generated and unwrapped on the tenant, and
+# the service MAC is derived from the tenant MAC root — the same mechanism imb-runtime generates with, or
+# every hop reads "service-mac rejected". MAC keys derive from the tenant root, so no key id here.
+#
+# NOT local-aes, and the backend is DECLARED HERE rather than left to a live `wrangler secret put`: the
+# adoption was applied to the deployment only, so the next `wrangler deploy --env imbnet` re-asserted
+# local-aes from this block and took the estate down (2026-10-11). Under local-aes this vault also cannot
+# unwrap a KEK at all — esbuild folds `NODE_ENV === 'production'` to true — and the MAC path hex-decodes
+# A2A_MAC_SECRET, which bootstrap-estate wrote base64url: every interactions call threw
+# `Invalid byte sequence`, which the Home renders as "turn on storage".
+A2A_KMS_BACKEND = "agentic-kms"
+AKCS_BASE_URL = "https://akcs-pilot.faithnet.io"
+AKCS_TENANT_ID = "imb"
+# The callers are bound to the CVM levels only — a billable HSM-direct key is impossible, not discouraged.
+AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"
+# AKCS_TOKEN is a SECRET (wrangler secret put) — a bearer credential for the tenant, never a var.
 
 [[env.imbnet.d1_databases]]
 binding = "DB"
