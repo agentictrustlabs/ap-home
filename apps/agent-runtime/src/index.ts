@@ -153,7 +153,7 @@ import { PULSE_PUBLIC_ASK, publicPulseAsk, COMPOSE_RULES } from './pulse-public'
 import { internalHeaders, markInWorker, isInWorkerRequest } from './internal-marker.js';
 import { parseExperimentRequest, type ExperimentJobV1 } from './experiment-job.js';
 import { validateCaptureWindow } from '@agenticprimitives/evaluation';
-import { standardServerFor } from './standard-a2a.js';
+import { RECORD_PUBLIC_ASK, standardServerFor } from './standard-a2a.js';
 import { withStandardCardFields } from '@agenticprimitives/a2a/standard';
 import type { AgentCardV1 } from '@agenticprimitives/a2a/standard';
 import { chainStewardshipCheck, deriveStanding, governingSubjectOf, governorOf, WORKSPACE_GOVERNOR_RECORD } from '@agenticprimitives/context';
@@ -206,7 +206,7 @@ import { runProvenanceRecordKey, evidenceStatusOf, type RunRecordV1 } from '@age
 // Spec 438 §13 — the five stages joined per agent. The projection is Ring 0's; this app supplies the facts.
 import {
   agentRecordOf, agentRecordWords, assessmentDigest, outcomeCriteriaDigest, runAssessmentRecordKey,
-  validateAssessment, verifyAssessment,
+  standingAssessments, validateAssessment, verifyAssessment,
   type AgentRunFactsV1, type AssessmentOutcomeV1, type AssessmentV1, type SignedAssessmentV1,
 } from '@agenticprimitives/evaluation';
 /** A run's outcome as the ending vocabulary the record counts by. An outcome this build does not know is
@@ -1551,6 +1551,8 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
     // every record it used named. Dispatched by capability id: the lane's allowlist decides what may arrive here.
     ...(deps.readSubjectRecord ? {
       publicRead: async ({ agent: who, skill, args }) => {
+        // Spec 438 §13 — its record, as it reports it. Counts and signed judgments; nothing of any run.
+        if (skill === RECORD_PUBLIC_ASK) return publicRecordAsk(c.env, who);
         if (skill !== PULSE_PUBLIC_ASK) return publicLibraryRead({ readSubjectRecord: deps.readSubjectRecord! }, who.toLowerCase(), skill, args);
         // THE AGENT'S OWN PLAYBOOK WRITES THE ANSWER. An open-ended question is composed over the facts
         // retrieved from its records, under its archetype's instructions as the system prompt plus the
@@ -3272,11 +3274,23 @@ app.post('/harness/record', async (c) => {
   const mine = (r: { intent?: { context?: { asker?: string } } }): boolean =>
     holds || String(r.intent?.context?.asker ?? '').toLowerCase() === caller;
 
-  const listing = (await listRecords(c.env as never, addressee)).filter((r) => mine(r as never));
+  const { facts, unreadable, assessments, assessmentsRead } = await agentRecordInputs(c.env, addressee, mine);
+  const record = agentRecordOf(addressee, facts, assessments);
+  return c.json({ ok: true, record, words: agentRecordWords(record), read: facts.length, ...(unreadable.length ? { unreadable } : {}), assessmentsRead });
+});
+
+/**
+ * THE INPUTS TO AN AGENT'S RECORD — one function, so the steward's read and the stranger's read are the same
+ * join over the same facts and can never disagree about one agent. `mine` is the caller's claim on which
+ * runs it may look back on; the public lane passes one that admits every run, because counts over all of
+ * them is what a stranger is told and nothing of any run leaves with them.
+ */
+async function agentRecordInputs(env: Env, addressee: Address, mine: (r: { intent?: { context?: { asker?: string } } }) => boolean): Promise<{ facts: AgentRunFactsV1[]; unreadable: string[]; assessments: SignedAssessmentV1[]; assessmentsRead: boolean }> {
+  const listing = (await listRecords(env as never, addressee)).filter((r) => mine(r as never));
   const facts: AgentRunFactsV1[] = [];
   const unreadable: string[] = [];
   for (const row of listing.slice(0, 200)) {
-    const rec = (await getRecord(c.env as never, addressee, row.runRef).catch(() => null)) as RunRecordV1 | null;
+    const rec = (await getRecord(env as never, addressee, row.runRef).catch(() => null)) as RunRecordV1 | null;
     if (!rec) { unreadable.push(row.runRef); continue; }
     const ev = evidenceStatusOf(rec);
     facts.push({
@@ -3289,31 +3303,55 @@ app.post('/harness/record', async (c) => {
       ...(rec.work ? { work: rec.work } : {}),
     });
   }
-
   // THE ASSESSMENTS, from the agent's OWN vault. Surveyed then read, the two-phase shape every vault read
   // here uses. A survey that cannot be taken leaves `assessmentsRead: false` — which the surface says, because
   // "nobody has judged these" and "we could not look" are opposite facts that render identically.
   let assessments: SignedAssessmentV1[] = [];
   let assessmentsRead = false;
   try {
-    const survey = (await callInteractionsInternal(c.env, addressee, 'internal.coordination.vaultSurvey', {})) as { records?: Array<{ recordType?: string }> } | null;
+    const survey = (await callInteractionsInternal(env, addressee, 'internal.coordination.vaultSurvey', {})) as { records?: Array<{ recordType?: string }> } | null;
     const keys = (survey?.records ?? []).map((r) => String(r.recordType ?? '')).filter((k) => k.startsWith('run.assessment:'));
     assessmentsRead = true;
     if (keys.length) {
-      const read = (await callInteractionsInternal(c.env, addressee, 'internal.coordination.vaultQuery', { recordTypes: keys.slice(0, 200) })) as { records?: Record<string, unknown> } | null;
+      const read = (await callInteractionsInternal(env, addressee, 'internal.coordination.vaultQuery', { recordTypes: keys.slice(0, 200) })) as { records?: Record<string, unknown> } | null;
       assessments = Object.values(read?.records ?? {}).flatMap((v) => (Array.isArray(v) ? v : [v])).filter((x): x is SignedAssessmentV1 => !!x && typeof x === 'object' && 'assessment' in (x as object));
     }
   } catch { assessmentsRead = false; }
+  return { facts, unreadable, assessments, assessmentsRead };
+}
 
-  return c.json({
-    ok: true,
-    record: agentRecordOf(addressee, facts, assessments),
-    words: agentRecordWords(agentRecordOf(addressee, facts, assessments)),
-    read: facts.length,
-    ...(unreadable.length ? { unreadable } : {}),
-    assessmentsRead,
-  });
-});
+/**
+ * THE AGENT'S RECORD, TOLD TO A STRANGER (`record.public.ask`, spec 438 §13).
+ *
+ * What leaves: the counts `agentRecordOf` produces, and each STANDING assessment as the evaluator signed it —
+ * the evaluator's address, the criteria cited by id and digest, the verdicts, the subject's run ref and record
+ * digest, and the signature. That is enough for a reader to verify the evaluator against the chain and to see
+ * that the judgment is about a document, and not enough to learn anything a run contained: no arguments, no
+ * results, no asker, no name. Counts, never a score — a registry lists, it does not rank (ADR-0038).
+ *
+ * "Could not look" is said as itself. A stranger told "nobody has judged these" when the vault was simply
+ * unreachable would be told a falsehood with a true-sounding shape.
+ */
+async function publicRecordAsk(env: Env, agent: string): Promise<Record<string, unknown>> {
+  const addressee = agent.toLowerCase() as Address;
+  const { facts, unreadable, assessments, assessmentsRead } = await agentRecordInputs(env, addressee, () => true);
+  const record = agentRecordOf(addressee, facts, assessments);
+  const { standing } = standingAssessments(assessments);
+  const judgments = standing.map((s) => ({
+    digest: s.digest, signature: s.signature,
+    evaluator: s.assessment.evaluator.sa, evaluatorKind: s.assessment.evaluator.kind,
+    criteria: s.assessment.criteria,
+    subject: { runRef: s.assessment.subject.runRef, recordDigest: s.assessment.subject.recordDigest, at: s.assessment.subject.at },
+    results: s.assessment.results.map((r) => ({ criterionId: r.criterionId, outcome: r.outcome })),
+    at: s.assessment.at,
+  }));
+  return {
+    agent: addressee, record, judgments, read: facts.length, assessmentsRead,
+    ...(unreadable.length ? { unreadable: unreadable.length } : {}),
+    answer: agentRecordWords(record).join(' '),
+    note: 'counts and signed judgments only; verify each evaluator against the chain, and read nothing here as a score',
+  };
+}
 
 /** What a caller may say when judging a run. Everything that identifies WHAT was judged is the server's —
  *  a client that could name the subject digest could sign a judgment of a document that was never the run. */
@@ -3342,7 +3380,7 @@ interface AssessRequestBody {
  * Every failure is a REFUSAL WITH THE NEXT STEP IN IT rather than an empty result, because every one of them
  * is recoverable by somebody and none is recoverable by guessing.
  */
-async function statedCriteriaFor(env: Env, agent: Address, endeavorId: string): Promise<{ criteria: AssessmentV1['criteria'] } | { error: string }> {
+async function statedCriteriaFor(env: Env, agent: Address, endeavorId: string): Promise<{ from: 'work'; criteria: AssessmentV1['criteria'] } | { error: string }> {
   const out = (await callInteractionsInternal(env, agent, 'internal.endeavor.state', { endeavorId }).catch(() => null)) as
     | { ok?: boolean; outcomeSpec?: { spec?: { outcomeId?: string; revision?: number; criteria?: Array<{ criterionId: string; kind: string; statement: string }> }; statedAt?: string | null } }
     | null;
@@ -3354,12 +3392,38 @@ async function statedCriteriaFor(env: Env, agent: Address, endeavorId: string): 
   }
   if (!statedAt) return { error: `${endeavorId}'s criteria carry no moment they were stated, and J2 cannot be checked without one` };
   return {
+    from: 'work' as const,
     criteria: {
       outcomeId: spec.outcomeId,
       revision: spec.revision,
       digest: await outcomeCriteriaDigest({ outcomeId: spec.outcomeId, revision: spec.revision, criteria: spec.criteria }),
       statedAt,
     },
+  };
+}
+
+/**
+ * THE AGENT'S OWN PLAYBOOK AS CRITERIA (spec 438 §5, for a run that names no work).
+ *
+ * An archetype assignment is written into the agent's vault at charter: which definition it runs under,
+ * pinned by `definitionDigest`. That is a promise stated before every run — what this agent says it does —
+ * and the one thing a stranger wants judged is whether a run kept it. `statedAt` is when the assignment was
+ * last written, which J2 compares against the run's end: a playbook RE-ASSIGNED after a run cannot be the
+ * criteria that run was held to, and refusing that is correct rather than inconvenient.
+ *
+ * A playbook has no revision counter; its version rides in the outcome id and its digest is what pins it.
+ */
+async function playbookCriteriaFor(env: Env, agent: Address): Promise<{ from: 'playbook'; criteria: AssessmentV1['criteria'] } | { error: string }> {
+  const survey = (await callInteractionsInternal(env, agent, 'internal.coordination.vaultSurvey', {}).catch(() => null)) as { records?: Array<{ recordType?: string; updatedAt?: string }> } | null;
+  const row = survey?.records?.find((r) => r.recordType === 'archetype.assignment');
+  if (!row) return { error: 'this run names no work and its agent has no playbook assigned, so there is nothing it was ever held to. Assign an archetype, or attach the run to an endeavour with stated criteria.' };
+  const read = (await callInteractionsInternal(env, agent, 'internal.coordination.vaultQuery', { recordTypes: ['archetype.assignment'] }).catch(() => null)) as { records?: Record<string, unknown> } | null;
+  const a = read?.records?.['archetype.assignment'] as { archetypeId?: string; archetypeVersion?: string; definitionDigest?: string } | undefined;
+  if (!a?.archetypeId || !a.definitionDigest) return { error: 'the playbook assignment could not be read back with its digest, so it cannot be cited as criteria' };
+  if (!row.updatedAt) return { error: 'the playbook assignment carries no moment it was written, and J2 cannot be checked without one' };
+  return {
+    from: 'playbook',
+    criteria: { outcomeId: `${a.archetypeId}@${a.archetypeVersion ?? '0'}`, revision: 1, digest: a.definitionDigest, statedAt: row.updatedAt },
   };
 }
 
@@ -3421,11 +3485,20 @@ app.post('/harness/assess', async (c) => {
     return c.json({ ok: false, error: 'this run has no anchored digest yet, so a judgment of it could never be checked against the document it judged — it anchors when its provenance is exported' }, 409);
   }
 
-  // THE CRITERIA, from the work this run was attached to. Absent is a refusal with the next step in it.
-  if (!rec.work?.endeavorId) {
-    return c.json({ ok: false, error: 'this run names no work, so there are no stated criteria to judge it against. Attach it to an endeavour first (coordination.run.attach); criteria invented at judging time are exactly what J2 refuses.' }, 409);
-  }
-  const criteria = await statedCriteriaFor(c.env, addressee, rec.work.endeavorId);
+  // THE CRITERIA — two sources, both stated before the run and both pinned by a digest, tried in this order:
+  //
+  //   WORK      the endeavour's adopted outcome specification, when the run was attached to one. The precise
+  //             case: somebody said what this work had to achieve, and this run is judged against that.
+  //   PLAYBOOK  the agent's own archetype assignment — its definition, by digest, written into its vault at
+  //             charter. This is what a SERVICE AGENT promises the world it does, and "did this run keep that
+  //             promise" is the judgment a stranger actually wants. It is the criteria for every run that
+  //             names no work, which today is every run.
+  //
+  // Neither is invented at judging time. A run with no work AND no playbook has nothing it was ever held to,
+  // and the refusal says so with the next step in it.
+  const criteria = rec.work?.endeavorId
+    ? await statedCriteriaFor(c.env, addressee, rec.work.endeavorId)
+    : await playbookCriteriaFor(c.env, addressee);
   if ('error' in criteria) return c.json({ ok: false, error: criteria.error }, 409);
 
   const assessment: AssessmentV1 = {
@@ -3441,9 +3514,12 @@ app.post('/harness/assess', async (c) => {
   const structural = validateAssessment(assessment);
   if (!structural.ok) return c.json({ ok: false, error: structural.problems.join('; ') }, 400);
   const digest = await assessmentDigest(assessment);
+  // The assessment digest is `sha256:<hex>`; a signature validator wants the 32 bytes. One conversion, here,
+  // so the client signs exactly what the server will check — and is TOLD it, rather than left to guess.
+  const signDigest = (`0x${digest.replace(/^sha256:/, '')}`) as Hex;
 
   // PHASE ONE — here is what would be stored, and the digest to sign. Nothing is written.
-  if (!body.signature) return c.json({ ok: true, prepared: true, assessment, digest });
+  if (!body.signature) return c.json({ ok: true, prepared: true, assessment, digest, signDigest, criteriaFrom: criteria.from });
 
   // PHASE TWO — the evaluator's own signature over that digest, checked against their Smart Agent through the
   // UniversalSignatureValidator (ERC-1271 / 6492 / ECDSA). A human assessment is signed by the person's own
@@ -3453,7 +3529,8 @@ app.post('/harness/assess', async (c) => {
   const depsAs = harnessDeps(c.env, buildAuditSink(c.env));
   const signed: SignedAssessmentV1 = { assessment, digest, signature: String(body.signature) };
   const verdict = await verifyAssessment(signed, async ({ digest: d, signature }) => {
-    const ok = (await depsAs.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [evaluator as Address, d as Hex, signature as Hex] }).catch(() => false)) === true;
+    const bytes32 = (`0x${d.replace(/^sha256:/, '')}`) as Hex;
+    const ok = (await depsAs.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [evaluator as Address, bytes32, signature as Hex] }).catch(() => false)) === true;
     return { ok, ...(ok ? { signer: evaluator } : {}) };
   });
   if (!verdict.ok) return c.json({ ok: false, error: verdict.problems.join('; ') }, 400);

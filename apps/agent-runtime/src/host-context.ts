@@ -230,6 +230,12 @@ export const MOUNTED_PEER_SKILLS: A2aSkill[] = [
   // that is written no pulse record answers that it has none, which is the true answer and not an error.
   // What comes back is counts, never a person — the records are aggregate by construction.
   {
+    id: 'record.public.ask',
+    name: 'Its record',
+    description: 'How this agent’s runs have gone, as it reports it: how many ended each way, how complete what they left behind is, and who has judged them against which stated criteria — with every judgment carried as the evaluator’s own signed assessment, so a reader checks the evaluator rather than trusting the agent. Counts and signatures only: no run’s content, no asker, no name. Never a score — a registry lists, it does not rank. No credential: SendMessage with a data part { "skill": "record.public.ask" }.',
+    tags: ['record', 'evidence', 'assessment', 'public', 'a2a'],
+  },
+  {
     id: 'pulse.public.ask',
     name: 'How things are going',
     description: 'Ask this agent how things have been going, answered only from the daily pulse records it keeps and with every record it used named. No credential: SendMessage with a data part { "skill": "pulse.public.ask", "question": string }; the answer is a message whose data part carries `answer`, `cited` and the `window` it read. An agent with no record for the window says so rather than reporting zero.',

@@ -112,7 +112,9 @@ export interface StandardMountDeps {
 // read of what the owner has already made public — the shelf (spec 412) and, for a context agent, the day's pulse
 // it keeps (spec 436 §5.5 T3; `pulse.day:` is `apinf:TownPulse`, aggregate counts by construction). An allowlist,
 // never a prefix: a capability reaches this lane because it was named here, never because of what it is called.
-export const PUBLIC_LANE_SKILLS: ReadonlySet<string> = new Set(['library.public.list', 'library.public.read', PULSE_PUBLIC_ASK]);
+// Spec 438 §13 — `record.public.ask`: the agent's record as it reports it, counts and signed judgments only.
+export const RECORD_PUBLIC_ASK = 'record.public.ask';
+export const PUBLIC_LANE_SKILLS: ReadonlySet<string> = new Set(['library.public.list', 'library.public.read', PULSE_PUBLIC_ASK, RECORD_PUBLIC_ASK]);
 export function publicLaneSkillOf(message: { parts: MessageV1['parts'] }): { skill: string; args: Record<string, unknown> } | null {
   const data = partsData(message.parts);
   const skill = data && typeof data.skill === 'string' ? data.skill : null;
