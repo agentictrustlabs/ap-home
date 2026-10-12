@@ -3227,7 +3227,14 @@ app.post('/harness/evidence', async (c) => {
     const rec = await getRecord(c.env as never, addressee, body.runRef);
     if (!rec) return c.json({ ok: false, error: 'no such record' }, 404);
     if (!mine(rec as never)) return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
-    return c.json({ ok: true, evidence: evidenceStatusOf(rec) });
+    // THE FIFTH DIMENSION IS READ, NOT ASSUMED. `evidenceStatusOf` cannot see the vault, so without this the
+    // inspector said "unassessed" about a run that had a standing signed judgment beside it (seen live, the
+    // first assessment ever stored). The count is of STANDING assessments — a superseded one does not
+    // count twice — and only those about the run's current digest, the same rule the record applies.
+    const held = await readStandingAssessments(c.env, addressee, body.runRef);
+    const ev = evidenceStatusOf(rec);
+    const current = held.filter((s) => !ev.integrity.anchorDigest || s.assessment.subject.recordDigest === ev.integrity.anchorDigest);
+    return c.json({ ok: true, evidence: evidenceStatusOf(rec, { assessmentCount: current.length }), ...(held.length !== current.length ? { staleAssessments: held.length - current.length } : {}) });
   }
 
   // The feed. `listRecords` is a projection, so each record is re-read in full — an unreadable one is a
@@ -3351,6 +3358,15 @@ async function publicRecordAsk(env: Env, agent: string): Promise<Record<string, 
     answer: agentRecordWords(record).join(' '),
     note: 'counts and signed judgments only; verify each evaluator against the chain, and read nothing here as a score',
   };
+}
+
+/** The standing assessments held beside one run, from the agent's own vault. Empty when none, and empty when
+ *  the vault could not be read — the per-run read has no way to say "could not look", so a caller that needs
+ *  that distinction uses `/harness/record`, which carries `assessmentsRead`. */
+async function readStandingAssessments(env: Env, agent: Address, runRef: string): Promise<SignedAssessmentV1[]> {
+  const read = (await callInteractionsInternal(env, agent, 'internal.coordination.vaultQuery', { recordTypes: [runAssessmentRecordKey(runRef)] }).catch(() => null)) as { records?: Record<string, unknown> } | null;
+  const held = Object.values(read?.records ?? {}).flatMap((v) => (Array.isArray(v) ? v : [v])).filter((x): x is SignedAssessmentV1 => !!x && typeof x === 'object' && 'assessment' in (x as object));
+  return standingAssessments(held).standing;
 }
 
 /** What a caller may say when judging a run. Everything that identifies WHAT was judged is the server's —
