@@ -9,6 +9,8 @@
 //     refusal, never a guess — there is no model here and nothing is inferred.
 //   · It never reports a figure the record does not carry. A day with no cost is "not recorded", never $0.00.
 //   · Counts, never a person: the records are aggregate by construction and nothing here looks for a name.
+//     This holds for the town of names too — "86 names under .me" is what the record says, and "who are they"
+//     is a question it cannot be made to answer, because no name and no owner was ever written into it.
 //
 // The question is matched, not understood. That is a deliberate ceiling: a wrong match says "I can answer
 // these" and lists them, where a model would compose a confident sentence from the same uncertainty.
@@ -26,6 +28,13 @@ export interface PulseDayRecord {
   estates?: Record<string, unknown>;
   estate?: string;
   heartbeat?: { runs?: { completed?: number; failed?: number; total?: number }; inferenceMicroUsd?: number | null } | null;
+  /**
+   * THE TOWN OF NAMES, in counts per root (spec 430, written by the town from `namesSampleOf`). A count, never a
+   * person: no name and no owner is carried, so "how many people are named here?" is answerable and "who are they?"
+   * is not. Only the TOWN's record has this — a root is shared by every estate that names under it, so a
+   * town-wide count in one estate's record would read as that estate's own.
+   */
+  names?: { chainId?: number | null; block?: number | null; total?: number; roots?: Array<{ tld?: string; kind?: string | null; names?: string | null; count?: number }> } | null;
   pulse?: {
     /**
      * THE RECORDED SHAPE IS FLAT. `dayRollup` writes `{ platform, account, resource, kind, owner, status,
@@ -45,7 +54,7 @@ export interface PulseDayRecord {
   };
 }
 
-export type PulseSubject = 'overall' | 'cost' | 'status' | 'runs';
+export type PulseSubject = 'overall' | 'cost' | 'status' | 'runs' | 'names';
 
 /** The window a question asks about, in whole UTC days ending today. */
 export interface PulseWindow { from: string; to: string; days: string[]; words: string }
@@ -75,6 +84,8 @@ export function subjectOf(question: string): PulseSubject {
   const q = question.toLowerCase();
   if (/\bcost|spend|spent|token|bill|charge|price|\$|usd\b/.test(q)) return 'cost';
   if (/\bdown|outage|up\b|uptime|status|healthy|available|broke|failing\b/.test(q)) return 'status';
+  // NAMES BEFORE RUNS, because "how many names are there?" matches `how many` and is not a question about runs.
+  if (/\bnames?\b|\bnamed\b|\bregistered\b|\broots?\b|\btlds?\b|\bendings?\b/.test(q)) return 'names';
   if (/\brun|ask|request|throughput|latency|duration|how many\b/.test(q)) return 'runs';
   return 'overall';
 }
@@ -125,6 +136,58 @@ const METRIC_WORD: Record<string, string> = {
   statements: 'statements', heapUsedBytes: 'heap used', requestsPerMinute: 'requests/min',
 };
 
+/**
+ * ── THE TOWN OF NAMES ──────────────────────────────────────────────────────────────
+ * One row per root, as the record carries it. A COUNT IS NOT A SUM OVER DAYS: a root's count is the registry's
+ * running total, so the latest day that recorded it IS the count — adding yesterday's 85 to today's 86 would
+ * invent 171 names, which is the exact shape of error these records exist to prevent.
+ */
+export interface PulseRoot { tld: string; kind: string | null; names: string | null; count: number; day: string }
+export function rootsIn(found: Array<{ day: string; rec: PulseDayRecord }>): PulseRoot[] {
+  const by = new Map<string, PulseRoot>();
+  for (const { day, rec } of found) {
+    for (const r of rec.names?.roots ?? []) {
+      const tld = String(r.tld ?? '').toLowerCase();
+      if (!tld) continue;
+      const prev = by.get(tld);
+      if (prev && prev.day > day) continue;  // a later day already read it
+      by.set(tld, { tld, kind: r.kind ?? null, names: r.names ?? null, count: typeof r.count === 'number' ? r.count : 0, day });
+    }
+  }
+  return [...by.values()].sort((a, b) => b.count - a.count || a.tld.localeCompare(b.tld));
+}
+
+/**
+ * The words a question may use for a kind of name: the kind the record itself carries, and the plural a person
+ * actually types — `people` for `person`, `churches` for `church`, `treasuries` for `treasury`. Nothing is
+ * invented: a kind the records do not carry has no words here and is never matched.
+ */
+export function kindWords(kind: string | null): string[] {
+  const k = (kind ?? '').toLowerCase().trim();
+  if (!/^[a-z]+$/.test(k)) return [];
+  const plural = k === 'person' ? 'people' : /(?:ch|sh|s|x|z)$/.test(k) ? `${k}es` : /[^aeiou]y$/.test(k) ? `${k.slice(0, -1)}ies` : `${k}s`;
+  return [k, plural];
+}
+
+/**
+ * The roots a question asks the COUNT of — "how many people do we have?", "the number of churches", ".me".
+ *
+ * A kind word only counts when a COUNTING PHRASE introduces it, because "the naming service" says `service`
+ * while asking about a service and not about `.svc`. A root named outright with its dot needs no phrase: the
+ * dot is what makes `.me` a root rather than an English word.
+ */
+export function rootsAsked(question: string, roots: PulseRoot[]): string[] {
+  const q = question.toLowerCase();
+  const hit: string[] = [];
+  for (const r of roots) {
+    if (q.includes(`.${r.tld}`)) { hit.push(r.tld); continue; }
+    for (const w of kindWords(r.kind)) {
+      if (new RegExp(String.raw`\b(?:how many|how much|number of|count of|total)\b(?:\s+\w+){0,3}?\s+${w}\b`).test(q)) { hit.push(r.tld); break; }
+    }
+  }
+  return hit;
+}
+
 /** Every name the records know, so a question can be matched against reality and nothing else. */
 export function namesIn(found: Array<{ day: string; rec: PulseDayRecord }>): Set<string> {
   const names = new Set<string>();
@@ -134,6 +197,8 @@ export function namesIn(found: Array<{ day: string; rec: PulseDayRecord }>): Set
     for (const e of Object.keys(rec.estates ?? {})) names.add(e.toLowerCase());
     if (rec.estate) names.add(rec.estate.toLowerCase());
     for (const c of rec.pulse?.cost ?? []) if (c.platform) names.add(c.platform.toLowerCase());
+    // A root is named with its dot — `.me`, `.org`. Without it, `me` and `org` are English words in a sentence.
+    for (const r of rec.names?.roots ?? []) if (r.tld) names.add(`.${String(r.tld).toLowerCase()}`);
   }
   return names;
 }
@@ -171,6 +236,17 @@ export function factsAbout(name: string, found: Array<{ day: string; rec: PulseD
   const facts: Record<string, string | number> = {};
   const days: string[] = [];
   let what = '';
+  // A ROOT, BY ITS COUNT — taken from the latest day that recorded it, never summed across days (see `rootsIn`).
+  if (key.startsWith('.')) {
+    const root = rootsIn(found).find((r) => r.tld === key.slice(1));
+    if (!root) return null;
+    return {
+      name: `.${root.tld}`,
+      what: root.names ? `the root that names ${root.names}` : 'a root with no declared kind (legacy)',
+      facts: { names: root.count, 'counted on': root.day },
+      days: [root.day],
+    };
+  }
   for (const { day, rec } of found) {
     let touched = false;
     // A declared service, as the town's own probe saw it.
@@ -230,7 +306,9 @@ export interface PulseFacts {
 
 /** Everything an answer to this question may draw on. Pure: the caller does the reading. */
 export function factsFor(question: string, window: PulseWindow, found: Array<{ day: string; rec: PulseDayRecord }>): PulseFacts {
-  const named = subjectsNamed(question, found);
+  // What the question named outright, PLUS the roots it asked the count of by their kind ("how many people").
+  // A kind word is not a name in the records, so it could never be matched by `subjectsNamed` alone.
+  const named = [...new Set([...subjectsNamed(question, found), ...rootsAsked(question, rootsIn(found)).map((t) => `.${t}`)])];
   const subjects = named.map((n) => factsAbout(n, found)).filter((x): x is PulseNamedThing => x !== null);
   const known = new Set(subjects.map((s) => s.name));
   const knownNames = namesIn(found);
@@ -334,6 +412,22 @@ export function answerFromDays(question: string, window: PulseWindow, found: Arr
     if (per.length) parts.push(`Cost per completed run, last recorded: ${usd(per[per.length - 1]!.microUsd!)}${per[per.length - 1]!.infraBasis ? ` (infrastructure on the ${per[per.length - 1]!.infraBasis} basis)` : ''}.`);
   }
 
+  if (subject === 'names' || subject === 'overall') {
+    const rs = rootsIn(found);
+    const counted = rs.filter((r) => r.count > 0);
+    if (!rs.length) { if (subject === 'names') parts.push(`No name count is recorded for ${window.words}.`); }
+    else {
+      // The total is of the LATEST count per root, and the day each was read on is said: a root the town could
+      // not read today still reports the day it was last counted rather than dropping out of the total silently.
+      const total = rs.reduce((n, r) => n + r.count, 0);
+      const asOf = rs.reduce((a, b) => (a.day > b.day ? a : b)).day;
+      const head2 = `The town of names, counted on ${asOf}: ${total.toLocaleString('en-US')} names under ${plural(counted.length, 'ending')}`;
+      parts.push(subject === 'names'
+        ? `${head2} — ${counted.map((r) => `${r.count.toLocaleString('en-US')} .${r.tld}${r.names ? ` (${r.names})` : ''}`).join(', ')}. A count of names, never of people: no name and no owner is in these records.`
+        : `${head2}.`);
+    }
+  }
+
   const missing = window.days.filter((d) => !found.some((f) => f.day === d));
   if (missing.length) parts.push(`${plural(missing.length, 'day')} in the window ${missing.length === 1 ? 'has' : 'have'} no record, so this is partial — never a smaller total.`);
   return { ...head, read: true, answer: parts.join(' ') };
@@ -364,6 +458,8 @@ export function evidenceFor(facts: PulseFacts, found: Array<{ day: string; rec: 
     }
   }
   if (facts.unknown.length) items.push({ tool: 'pulse.record.unknown', result: { named: facts.unknown, note: 'the records know nothing by these names' } });
+  const roots = rootsIn(found);
+  if (roots.length) items.push({ tool: 'pulse.names.roots', result: { roots, total: roots.reduce((n, r) => n + r.count, 0), note: 'a count of NAMES under each root, as of the day given; counts are running totals and are never added across days, and no name or owner is recorded' } });
   if (facts.daysMissing.length) items.push({ tool: 'pulse.window.gaps', result: { missing: facts.daysMissing, note: 'days in the window with no record at all' } });
   return items;
 }

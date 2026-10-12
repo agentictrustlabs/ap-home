@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { answerFromDays, evidenceFor, factsFor, identifierish, publicPulseAsk, subjectOf, subjectsNamed, windowOf, type PulseDayRecord } from '../src/pulse-public';
+import { answerFromDays, evidenceFor, factsFor, identifierish, kindWords, publicPulseAsk, rootsAsked, rootsIn, subjectOf, subjectsNamed, windowOf, type PulseDayRecord } from '../src/pulse-public';
 
 const NOW = Date.parse('2026-10-11T12:00:00Z');
 const day = (d: string, rec: Partial<PulseDayRecord> = {}): { day: string; rec: PulseDayRecord } => ({ day: d, rec: { type: 'ap.town-pulse.v1', day: d, ...rec } });
@@ -247,5 +247,72 @@ describe('the record as the town actually writes it', () => {
 
   it('the status roll-up sees a flat not-up row too', () => {
     expect(answerFromDays('which services were down', w, found).answer).toContain('graphdb');
+  });
+});
+
+describe('the town of names, answered in counts (spec 430)', () => {
+  const NAMES = {
+    chainId: 34348, block: 89214, total: 297,
+    roots: [
+      { tld: 'me', kind: 'person', names: 'a person', count: 86 },
+      { tld: 'org', kind: 'org', names: 'an organization', count: 69 },
+      { tld: 'svc', kind: 'service', names: 'a service', count: 24 },
+      { tld: 'church', kind: 'church', names: 'a church', count: 2 },
+      { tld: 'impact', kind: null, names: null, count: 0 },
+    ],
+  };
+  const w = windowOf('this week', NOW);
+  const found = [day('2026-10-10', { names: { ...NAMES, roots: NAMES.roots.map((r) => (r.tld === 'me' ? { ...r, count: 85 } : r)) } }), day('2026-10-11', { names: NAMES })];
+
+  it('a count is the latest day\'s, never a sum across days', () => {
+    const me = rootsIn(found).find((r) => r.tld === 'me');
+    expect(me).toMatchObject({ count: 86, day: '2026-10-11' });  // 85 yesterday + 86 today is 171 names that do not exist
+  });
+
+  it('pluralises the kind the record itself carries, and invents none', () => {
+    expect(kindWords('person')).toEqual(['person', 'people']);
+    expect(kindWords('church')).toEqual(['church', 'churches']);
+    expect(kindWords('treasury')).toEqual(['treasury', 'treasuries']);
+    expect(kindWords(null)).toEqual([]);
+  });
+
+  it('"how many people do we have" is the .me root — and "the naming service" is not the .svc root', () => {
+    const roots = rootsIn(found);
+    expect(rootsAsked('how many people do we have in naming service', roots)).toEqual(['me']);
+    expect(rootsAsked('how many churches are there', roots)).toEqual(['church']);
+    expect(rootsAsked('is the naming service up', roots)).toEqual([]);
+    expect(rootsAsked('how many .org names', roots)).toEqual(['org']);
+  });
+
+  it('answers the question the owner actually asked, from the record, with the record named', () => {
+    const a = answerFromDays('how many people do we have in naming service', w, found);
+    expect(a.read).toBe(true);
+    expect(a.answer).toContain('.me is the root that names a person');
+    expect(a.answer).toContain('names 86');
+    expect(a.answer).toContain('counted on 2026-10-11');
+    expect(a.cited.map((c) => c.key)).toEqual(['pulse.day:2026-10-10', 'pulse.day:2026-10-11']);
+    // It is a count of NAMES. Nothing here describes a person, and no owner is in the record to describe.
+    expect(a.answer).not.toMatch(/0x[0-9a-f]{6}/i);
+  });
+
+  it('a question about names with no root named reports every ending, as of the day it was counted', () => {
+    expect(subjectOf('how many names are registered')).toBe('names');
+    const a = answerFromDays('how many names are registered', w, found);
+    expect(a.answer).toContain('counted on 2026-10-11: 181 names under 4 endings');
+    expect(a.answer).toContain('86 .me (a person)');
+    expect(a.answer).toContain('never of people');
+  });
+
+  it('the roots are evidence a composer may use, labelled as running totals', () => {
+    const items = evidenceFor(factsFor('how is the town doing', w, found), found, 'stated');
+    const e = items.find((x) => x.tool === 'pulse.names.roots');
+    expect(e).toBeTruthy();
+    expect((e!.result as { note: string }).note).toContain('never added across days');
+  });
+
+  it('a record written before names were sampled says nothing about them', () => {
+    const old = [day('2026-10-11', { services: { naming: { samples: 12, up: 12 } } })];
+    expect(rootsIn(old)).toEqual([]);
+    expect(answerFromDays('how many names are registered', w, old).answer).toContain('No name count is recorded');
   });
 });
