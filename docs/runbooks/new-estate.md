@@ -4,7 +4,7 @@
 (runtime, vault, edge, Home MCP) and an approval Workflow, with its own custody root, service agents, vault, KMS
 tenant, naming gate and demo people. Written from imbnet, the second estate on faithchain (2026-10-11); every step
 below was run, and the ones that bit are marked **⚠**. Read
-[What an estate is made of](https://github.com/agentictrustlabs/agenticprimitives/blob/master/docs/operators/estate.md)
+[What an estate is made of](https://github.com/agentictrustlabs/agentic-primitives/blob/main/docs/estate-anatomy.md)
 first — it says why each step exists. The town's half (the manifest row, lanes, gateway token, KMS tenant, naming
 gate allowance, heartbeat) is
 [ap-town's publish-an-estate runbook](https://github.com/agentictrustlabs/ap-town/blob/master/operations/runbooks/publish-an-estate.md);
