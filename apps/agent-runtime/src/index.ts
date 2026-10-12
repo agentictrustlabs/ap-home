@@ -95,7 +95,7 @@ import {
   caip10,
 } from './custody-oidc';
 import { originAllowed, hostnameAllowed } from './origins';
-import { resolveAgentHost, resolveAgentByLabel, buildA2aAgentCard, skillsFromLabels, withMountedSkills, hostForName, a2aBaseDomains, a2aCanonicalDomain, AGENT_NAME_PARENT, DEFAULT_PUBLIC_BASE_DOMAIN, type A2aSkill, type AgentHostContext } from './host-context';
+import { resolveAgentHost, resolveAgentByLabel, buildA2aAgentCard, skillsFromLabels, withMountedSkills, withRecordMountedSkills, hostForName, a2aBaseDomains, a2aCanonicalDomain, AGENT_NAME_PARENT, DEFAULT_PUBLIC_BASE_DOMAIN, type A2aSkill, type AgentHostContext } from './host-context';
 import { ardHostManifest, ARD_WELL_KNOWN_PATH } from './ard';
 import { cardContentDigest, jcsDigest as cardJcsDigest, readPlaybookBinding } from '@agenticprimitives/agent-profile/a2a';
 import { AgentIdentityClient } from '@agenticprimitives/agent-profile';
@@ -1341,6 +1341,19 @@ async function liveCardFor(env: Env, ctx: AgentHostContext): Promise<Record<stri
   // task runtime mounts them. Merged AFTER the label read, so a best-effort chain failure loses the
   // self-asserted labels and never the mounted ones.
   if (ctx.agent) skills = withMountedSkills(skills);
+  // …AND THE ONES MOUNTED FROM THE AGENT'S OWN RECORDS. A catalog profile is mounted only when the
+  // agent's `atl:mcpEndpoint` names an endpoint that serves it, so those tools do not exist until a
+  // `tools/list` at plan time — and this builder resolves no binding and does no such read. The result
+  // was a card that named none of them: `people-groups.svc` could answer twenty-four questions and
+  // advertised seven generic ones. The assigned playbook is the stable, verified statement of what the
+  // agent is equipped to do, so the card is built from that (`withRecordMountedSkills`).
+  //
+  // BEST-EFFORT, like the label read above: a playbook that cannot be read or does not verify leaves the
+  // card exactly as it was. A disclosure surface must not fail because an assignment is unreadable.
+  if (ctx.agent) {
+    const playbook = await loadPlaybook(harnessDeps(env, buildAuditSink(env)).readSubjectRecord, ctx.agent, console.log).catch(() => null);
+    skills = withRecordMountedSkills(skills, playbook);
+  }
   return buildA2aAgentCard(ctx, Number(env.CHAIN_ID), skills, env.DEMO_EDGE_URL?.trim() || undefined, !!env.SKILLS_CORPUS_URL?.trim());
 }
 

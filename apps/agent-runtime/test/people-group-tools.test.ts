@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { PEOPLE_GROUP_TOOLS, PEOPLE_GROUP_COUNT_CAPABILITY, PEOPLE_GROUP_MEASURES_CAPABILITY, PEOPLE_GROUP_MCP_TOOL_NAMES, isPeopleGroupTool, peopleGroupCapabilities, peopleGroupInvoker, peopleGroupToolsFrom, mcpToolFor, servesProfile, toolsServedAt } from '../src/people-group-tools.js';
 import { CATALOG_MCP_TOOL_NAMES, CATALOG_TOOLS, isCatalogTool } from '../src/catalog-tools.js';
+import { withRecordMountedSkills } from '../src/host-context.js';
 
 const NAME = 'people-groups.svc'; const ENDPOINT = 'https://demo-gc-pg.example/mcp';
 const fakeFetch = (result: unknown, status = 200) => {
@@ -169,5 +170,47 @@ describe('the catalog describes its own reads — the harness holds no list of t
     expect(n).toBe(2);                 // tools/list, then tools/call
     await invoke('peoplegroup.detail', { peopleNamePattern: 'y' }, {} as never);
     expect(n).toBe(3);                 // the list is read once per invoker, not once per call
+  });
+});
+
+describe('the card advertises what the agent is equipped to do', () => {
+  // `people-groups.svc` could answer 24 questions and its card named 7 generic ones: the catalog profile
+  // is mounted from the agent's own `atl:mcpEndpoint` record, so its tools do not exist until a
+  // `tools/list` at plan time — and the card builder resolves no binding and does no such read.
+  const playbook = (ids: string[], tools: Record<string, { id: string; description: string }> = {}) =>
+    ({ capabilityIds: new Set(ids), tools });
+  const LABELS = [{ id: 'gc:CFnPeopleGroupIntelligence', name: 'gc:CFnPeopleGroupIntelligence' }, { id: 'messaging.deliver', name: 'Deliver a message' }];
+
+  it('adds the record-mounted capabilities the playbook declares, with the contract\'s own words', () => {
+    const out = withRecordMountedSkills(LABELS, playbook(
+      ['peoplegroup.count', 'peoplegroup.engagement.overview'],
+      { 'peoplegroup.engagement.overview': { id: 'peoplegroup.engagement.overview', description: 'Engagement verdicts by measure. NOT for: counts.' } },
+    ));
+    expect(out.map((s) => s.id)).toEqual(['gc:CFnPeopleGroupIntelligence', 'messaging.deliver', 'peoplegroup.count', 'peoplegroup.engagement.overview']);
+    // The planner and the card quote the same sentence.
+    expect(out.find((s) => s.id === 'peoplegroup.engagement.overview')!.description).toContain('NOT for: counts');
+    // A readable name from the id, not the raw dotted string.
+    expect(out.find((s) => s.id === 'peoplegroup.engagement.overview')!.name).toBe('engagement overview');
+  });
+
+  it('leaves the card untouched when there is no playbook, and never duplicates a skill', () => {
+    expect(withRecordMountedSkills(LABELS, null)).toBe(LABELS);
+    expect(withRecordMountedSkills(LABELS, undefined)).toBe(LABELS);
+    const already = [...LABELS, { id: 'peoplegroup.count', name: 'count' }];
+    expect(withRecordMountedSkills(already, playbook(['peoplegroup.count'])).map((s) => s.id)).toEqual(already.map((s) => s.id));
+  });
+
+  it('advertises ONLY the record-mounted families — an archetype\'s other capabilities are not card entries', () => {
+    // A person-steward playbook declares ~78 capabilities. The card is not the place for all of them: these
+    // are the ones mounted from the AGENT'S OWN records, which is the gap being closed, and nothing wider.
+    const out = withRecordMountedSkills([], playbook(['peoplegroup.detail', 'catalog.resource.search', 'treasury.pay', 'messaging.send', 'registry.search']));
+    expect(out.map((s) => s.id)).toEqual(['catalog.resource.search', 'peoplegroup.detail']);
+  });
+
+  it('is sorted, so a released card\'s bytes do not depend on a Set\'s iteration order', () => {
+    const forward = withRecordMountedSkills([], playbook(['peoplegroup.detail', 'peoplegroup.count', 'peoplegroup.networks']));
+    const reverse = withRecordMountedSkills([], playbook(['peoplegroup.networks', 'peoplegroup.count', 'peoplegroup.detail']));
+    expect(forward.map((s) => s.id)).toEqual(reverse.map((s) => s.id));
+    expect(forward.map((s) => s.id)).toEqual(['peoplegroup.count', 'peoplegroup.detail', 'peoplegroup.networks']);
   });
 });

@@ -250,6 +250,58 @@ export function withMountedSkills(skills: A2aSkill[]): A2aSkill[] {
   return [...skills, ...MOUNTED_PEER_SKILLS.filter((s) => !have.has(s.id))];
 }
 
+/**
+ * CAPABILITY FAMILIES THE RUNTIME MOUNTS FROM THE AGENT'S OWN RECORDS, not from this Worker's code.
+ *
+ * `MOUNTED_PEER_SKILLS` above are unconditional — every bound host serves them. These are the other kind:
+ * a catalog profile is mounted only when the agent's name record publishes an `atl:mcpEndpoint` and that
+ * endpoint serves the profile, so the tools do not exist until a `tools/list` at plan time. That is why
+ * they were missing from the card: the card builder resolves no binding and performs no such read, so an
+ * agent whose entire job is catalog reads advertised none of them — `people-groups.svc` could answer
+ * twenty-four questions and its card named none (observed live 2026-10-12).
+ *
+ * A PREFIX SET, for the same reason dispatch is a prefix test (`isPeopleGroupTool`): the member of a family
+ * is known by its namespace, and a stateless Worker holds no registry of them.
+ */
+export const RECORD_MOUNTED_PREFIXES: readonly string[] = ['peoplegroup.', 'catalog.'];
+
+/**
+ * Advertise the record-mounted capabilities the agent's ASSIGNED PLAYBOOK declares.
+ *
+ * FROM THE PLAYBOOK, NOT FROM A LIVE `tools/list`, and that is the whole design decision here. The
+ * playbook is a verified, digest-bound record of what this agent is equipped to do; a `tools/list` is the
+ * liveness of one endpoint right now. Deriving a public card from the latter would make the card flicker
+ * — twenty-four skills one minute and none the next, because a catalog blipped — and would put a network
+ * read on the hot path of a public, cacheable surface. The card says what the agent is FOR; plan time
+ * still fails closed when the endpoint cannot be read, which is where that check belongs.
+ *
+ * The description is the contract's own, so the card and the planner quote the same sentence.
+ */
+export function withRecordMountedSkills(
+  skills: A2aSkill[],
+  playbook?: { capabilityIds: Set<string>; tools?: Record<string, { id: string; description: string }> } | null,
+): A2aSkill[] {
+  if (!playbook) return skills;
+  const have = new Set(skills.map((s) => s.id));
+  const add: A2aSkill[] = [];
+  for (const id of playbook.capabilityIds) {
+    if (have.has(id) || !RECORD_MOUNTED_PREFIXES.some((p) => id.startsWith(p))) continue;
+    have.add(id);
+    const contract = playbook.tools?.[id];
+    add.push({
+      id,
+      // The last dotted segment, spaced — `peoplegroup.engagement.overview` reads as "engagement overview".
+      name: id.split('.').slice(1).join(' ') || id,
+      ...(contract?.description ? { description: contract.description } : {}),
+      tags: ['read', id.split('.')[0]!],
+    });
+  }
+  // Sorted, so the card's bytes do not depend on a Set's insertion order: a released card is verified by
+  // digest, and a list that reorders between builds would read as a changed card.
+  add.sort((a, b) => a.id.localeCompare(b.id));
+  return [...skills, ...add];
+}
+
 // Whether a stored value is already an ID or a human LABEL. `capability-claims` owns the rule — it
 // owns the catalog, so it owns the vocabulary — and three apps each having their own copy is how two
 // of them ended up demanding a CURIE colon the dotted ids do not have.
