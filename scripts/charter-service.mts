@@ -22,6 +22,7 @@
 import { hashDelegation, buildDigestBindingCaveat, capabilityHandler, ROOT_AUTHORITY, type Delegation, type Caveat, type MandateRequirementV1 } from '@agenticprimitives/delegation';
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { resolve as resolvePath } from 'node:path';
 import type { Address, Hex } from 'viem';
 
@@ -45,6 +46,8 @@ const DRY = process.argv.includes('--dry-run');
  * persona signs, which is one transaction and no new authority.
  */
 const RELINK = process.argv.includes('--relink');
+/** A chartered agent's vault is fail-closed until its key is bound; `--no-bind-vault` leaves it that way. */
+const BIND_VAULT = !process.argv.includes('--no-bind-vault');
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 250), _status: r.status }; } };
 const fail = (m: string): never => { console.error(`\n✗ ${m}`); process.exit(1); };
 if (!LABEL) fail('--label <service-label> is required');
@@ -204,6 +207,25 @@ else {
   console.log(`  ${svcName} agent → ${svc}`);
   named = !!(await settle(svcName));
   console.log(named ? `  ${svcName} resolves` : `  ${svcName} is NOT registered — a priced root names nothing at charter (see the header)`);
+}
+
+// ── THE AGENT'S OWN VAULT ──
+//
+// A charter deploys the agent and binds no vault key, so every read and write at the agent fails closed
+// with `vault_key_unauthorized` — its archetype assignment and its playbook included. The Home's create
+// ceremony binds the key (spec 278 §3.3); a charter through the Ask does not, which is why the Playbook page
+// for a freshly chartered agent shows the refusal where the archetype list should be (seen 2026-10-12 on
+// people-groups.svc).
+//
+// `scripts/bind-vault-key.mts` already does this ceremony correctly, so it is RUN rather than reimplemented:
+// server-info, a custodian-signed provision, then the VaultKeyAuthorization the custodian signs. It is
+// idempotent (it checks `is-bound` first), so a re-charter costs nothing.
+if (svc && BIND_VAULT) {
+  console.log(`── ${svcName}'s vault key ──`);
+  const bound = spawnSync('npx', ['tsx', 'scripts/bind-vault-key.mts', PERSONA, svc], { encoding: 'utf8' });
+  const said = `${bound.stdout ?? ''}${bound.stderr ?? ''}`.split('\n').filter((l) => l.trim() && !l.startsWith('npm warn')).join('\n  ');
+  console.log(`  ${said || 'bind-vault-key said nothing'}`);
+  if (bound.status !== 0) console.log(`  ✗ the vault key is NOT bound — the agent's records stay fail-closed until it is`);
 }
 
 // ── THE HOME'S OWN TREE ──

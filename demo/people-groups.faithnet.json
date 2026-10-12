@@ -1,5 +1,5 @@
 {
-  "purpose": "the Global Church people-groups service agent in the faithnet estate (an operator note, not a persona) — the ap-people-group-catalog/v1 twin of ligonier.faithnet.json; its name record atl:mcpEndpoint points at the demo-gc-pg Worker (ap-demos/apps/demo-gc-pg)",
+  "purpose": "the Global Church people-groups service agent in the faithnet estate (an operator note, not a persona) \u2014 the ap-people-group-catalog/v1 twin of ligonier.faithnet.json; its name record atl:mcpEndpoint points at the demo-gc-pg Worker (ap-demos/apps/demo-gc-pg)",
   "chainId": 34348,
   "charteredBy": {
     "persona": "demo-admin",
@@ -13,7 +13,7 @@
     "host": "people-groups-svc.faithnet.ai",
     "facets": {
       "displayName": "Global Church people-group counts",
-      "description": "How many people groups there are, by list — Joshua Project, IMB and the UUPG+ Base List — for a country, religion and affinity bloc, read live from the Global Church graph. Counts with their source named; never raw SPARQL, never a write.",
+      "description": "How many people groups there are, by list \u2014 Joshua Project, IMB and the UUPG+ Base List \u2014 for a country, religion and affinity bloc, read live from the Global Church graph. Counts with their source named; never raw SPARQL, never a write.",
       "capabilities": "gc:CFnPeopleGroupIntelligence",
       "focusAreas": "people groups,unreached,frontier people groups,joshua project,imb,base list",
       "languages": "en",
@@ -28,17 +28,18 @@
     "presented": true,
     "recordsNotWritten": [
       "siteUrl"
-    ]
+    ],
+    "vaultKeyBound": true
   },
   "charteredAt": "2026-10-12T12:22:10Z",
   "todo": [
-    "BUY THE NAME — the agent is chartered and unnamed. `.svc` is PRICED (ap-town spec 431), so `service.create` registers nothing: it returned `name: \"\"`. The purchase is two more signed operations (`purchaseName`, apps/home/src/connect-client.ts): the TREASURY 0x479dfb6736cefc9f9be17a76de37dc0fd54aae4b pays 10 SHQ and claims against the ticket this Home's gate signs (/connect/naming-ticket), then the OWNER 0xBa732Ef8…CdC declares its type, presents the name and writes its records. Same credential signs both.",
-    "set the name records above (atl:mcpEndpoint + atl:a2aEndpoint) — part of the presenting operation, or after it",
-    "wrangler secret put GC_API_KEY on demo-gc-pg (richcanvas) — the key lives on the Worker, never in the agent or its playbook"
+    "siteUrl is the one name record not written: its predicate is not active on this estate's ontology registry (`PredicateNotActive`), the same queue atl:focusAreas / atl:languages / atl:regions are in. Nothing else is outstanding on the name.",
+    "assign an archetype on the Playbook page if this agent should run one (People-Group Catalog is the matching one); the bare harness is a valid state.",
+    "wrangler secret put GC_API_KEY on demo-gc-pg (richcanvas) \u2014 the key lives on the Worker, never in the agent or its playbook"
   ],
   "notes": [
-    "CHARTERING AND NAMING ARE TWO ACTS on a priced root. `scripts/charter-ligonier.mts` polls for the name right after `service.create` and would fail the same way today — ligonier.svc was chartered 2026-09-09, before spec 431 made `.svc` priced.",
-    "Nothing was spent getting here: the mandate approval and the genesis deploy are on chain, the name is still available, and the 10 SHQ is unpaid.",
-    "`service.create` is idempotent on the agent — the address derives from (custodian, parent, label), so a re-run returns 0xBa732Ef8…CdC and does not deploy a second one."
+    "CHARTERING LEAVES THREE THINGS UNDONE, and `charter-service.mts` now does two of them: the Home's `related-orgs` link (without it the agent is absent from its steward's pulldown) and the vault key bind (without it every record at the agent is `vault_key_unauthorized`, its archetype assignment and playbook included). The third \u2014 buying the name on a priced root \u2014 is `buy-name.mts`.",
+    "`service.create` is idempotent on the agent: the address derives from (custodian, parent, label). `--relink` re-runs it only to recover the stewardship wire, which lives in the act's result and nowhere else.",
+    "Ten SHQ, once: the treasury went 988 \u2192 978. `registry.owner(node)` is what says a name is bought \u2014 never `resolveName`, which reads the `addr` record an unpresented name does not have."
   ]
 }
