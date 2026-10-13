@@ -22,3 +22,10 @@ pnpm-lock.yaml
 # 0600). `*.local.json` above does not match `personas.<estate>.json`, and the one estate file that predates
 # this pattern is already tracked — the next one is not.
 demo/personas.*.json
+
+# The Playwright suite's own output (`tests/e2e-sso/playwright.config.ts` → `outputDir: 'artifacts'`): traces
+# and failure screenshots from a live run against production. The suite moved here 2026-10-13 and ap-demos
+# never ignored these, so a failing run left them staged for whoever committed next.
+tests/e2e-sso/artifacts/
+tests/e2e-sso/test-results/
+playwright-report/

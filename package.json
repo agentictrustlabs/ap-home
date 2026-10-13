@@ -12,6 +12,7 @@
     "doctor": "ap doctor",
     "doctor:rules": "ap doctor --rules",
     "test": "pnpm -r test",
+    "test:e2e": "playwright test -c tests/e2e-sso",
     "typecheck": "pnpm -r typecheck",
     "build": "pnpm -r build",
     "check:public-links": "node scripts/check-public-links.mjs",
