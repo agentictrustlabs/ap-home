@@ -508,6 +508,15 @@ function providerFor(env: PlannerEnv, requested?: LlmProvider): LlmProvider | nu
 // direct on the live pair before `ORCHESTRATION_LLM` goes (434 §12 W3's gate). Role → profile is THIS map; a model is
 // never named here. Receipts reach the trace through `onReceipt`.
 export const GATEWAY_PROFILE = { plan: 'planner-fast', compose: 'composer-default', stream: 'answer-stream', judge: 'judge-thorough', structured: 'selection-structured' } as const;
+/** Spec 434 §12 — THE ARM A RUN IS CARRIED UNDER. The W3 gate compares the gateway against this deployment's own
+ *  provider keys, and the only honest way to compare them is per run, in one window, on the same asks: so a variant
+ *  may say which carrier THIS run uses, and everything downstream reads it from the env it was handed. It changes
+ *  the carrier and nothing else — same prompts, same tools, same playbook, same ask. Absent ⇒ the deployment's
+ *  setting stands, which is how every ordinary run goes. */
+export function withGatewayVariant<E extends { ORCHESTRATION_GATEWAY?: string }>(env: E, want?: 'on' | 'off'): E {
+  return want === undefined ? env : { ...env, ORCHESTRATION_GATEWAY: want === 'on' ? 'on' : '' };
+}
+
 export function gatewayOn(env: Pick<PlannerEnv, 'ORCHESTRATION_GATEWAY' | 'INFERENCE_URL' | 'INFERENCE_APP_KEY'>): boolean {
   return (env.ORCHESTRATION_GATEWAY ?? '').trim() === 'on' && !!env.INFERENCE_URL?.trim() && !!env.INFERENCE_APP_KEY?.trim();
 }

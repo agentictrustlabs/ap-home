@@ -242,6 +242,18 @@ PLAN_CONTINUATION_DEFAULT = "on"
 # Spec 388 — the cheapest OFFERED provider that carries each call, decided before the request from the prompt estimate, the
 # per-request budget and this minute's spend; recorded on the trace with its reason. A route, never a fallback (ADR-0013).
 ORCHESTRATION_ROUTE = "budget"
+# Spec 434 W3 — THE TOWN'S MODEL GATEWAY. `INFERENCE_URL` says where it is and the secret `INFERENCE_APP_KEY` says
+# who this estate is to it; with both, `ORCHESTRATION_GATEWAY = "on"` carries every model call there BY PROFILE
+# (planner-fast · composer-default · answer-stream · judge-thorough · selection-structured) instead of reaching a
+# provider from this Worker's own keys. The arm is `variant.gateway` on /harness/ask, so the comparison runs against
+# this very deployment without flipping it.
+#
+# ON since 2026-10-13, on the W3 gate's verdict (`scripts/verify-gateway-arm.mts`, 3 asks × 2 arms, paired on the
+# same sentences against alice's own agent): both arms answered 3/3, median 14.0 s through the gateway against
+# 19.2 s direct, and the gateway's own counters moved only under the gateway arm. A thin sample — it says "no
+# regression on this pair", never "better" — and the provider keys stay on this Worker so `off` is one edit away.
+INFERENCE_URL = "https://inference.faithnet.io"
+ORCHESTRATION_GATEWAY = "on"
 ORCHESTRATION_GROQ_TPM = "8000"
 # 2026-09-10 — the cheaper Anthropic model, named here so a targeted deploy keeps it (the package default is the same).
 ORCHESTRATION_MODEL = "claude-haiku-4-5-20251001"
@@ -719,6 +731,11 @@ A2A_ALLOW_LOCAL_MASTER_KEY = "true"
 # interactions key). Never faithnet's: those are custodied by a key this Worker does not hold.
 INTERACTIONS_SERVICE_SA = "0xfBF61be3a4DE7921a4eb6B94dFFfbd183553aFEC"
 HARNESS_AGENT_SA = "0x193B496d366113B765c70BF9230687D685Cc7a92"
+# Spec 434 W3 — the town's model gateway carries this estate's model calls too, under ITS OWN app key and its own
+# entitlement (client `imbnet-runtime`, registered 2026-10-13 against this HARNESS_AGENT_SA: the same five profiles,
+# $5/day, attributed to imbnet). One gateway for the chain, a budget per estate — never faithnet's key.
+INFERENCE_URL = "https://inference.faithnet.io"
+ORCHESTRATION_GATEWAY = "on"
 # faithchain contracts — the same deployment every estate on this chain reads.
 PAYMASTER = "0xbd93fEC6910ffD74F14709188b5a9B6C6965b2a7"
 PAYMASTER_VERIFYING_SIGNER = "0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0"

@@ -138,7 +138,7 @@ import { ASK_DISCOVERY_TOOL_IDS, askDiscoveryInvoker, householdMembers, ownAgent
 import { KB_QUESTION_TOOL, kbQuestionInvoker, KB_RETRIEVE_TOOL, kbRetrieveInvoker } from '@agenticprimitives/context';
 import { discoveryFetchFor, structuredCallFor, type StructuredCallRecordV1 } from './context-wiring.js';
 import { VAULT_QUESTION_TOOL, vaultQuestionInvoker, type ReadableVault } from '@agenticprimitives/context';
-import { selectComposer, selectComposerRouted, resolveProvider, availableModels, plannerPromptBudget, defaultProvider, widestPromptBudget, type RouteNeed, type RouteDecision } from './orchestration.js';
+import { selectComposer, selectComposerRouted, withGatewayVariant, resolveProvider, availableModels, plannerPromptBudget, defaultProvider, widestPromptBudget, type RouteNeed, type RouteDecision } from './orchestration.js';
 import { homeSessionSeam, pickHomeOrigin } from './executor-invoke.js';
 import { runStoreFor, openRunOnThread, mergeTurn, type HarnessRunCheckpointV1, completedStepsOf, isExpired, AWAIT_WINDOW_MS, expiryFor, canceledRecord } from './harness-runs.js';
 import { buildGenesisPlanes, type GenesisPlaneWires } from './genesis-planes.js';
@@ -5301,7 +5301,7 @@ app.post('/harness/ask', async (c) => {
     if (structuredCalls.length) trace.structuredCalls = [...(trace.structuredCalls ?? []), ...structuredCalls.map((x) => ({ role: 'structured' as const, ...x }))].sort((a, b) => a.startMs - b.startMs);
     const reply = await marks.time('reply:compose', () => askReplyFor(c.env as unknown as HarnessEnv, {
       ...(memory ? { memory } : {}),
-      intent, result, addressee, composerFor: (need: RouteNeed) => selectComposerRouted(c.env, { ...(provider ? { provider } : {}), ...(answerLine ? { systemPrompt: answerLine } : {}), need, onUsage: (u) => { trace.composeUsage = addUsage(trace.composeUsage, u); } }), deps: askDeps, interactionFor, plannerTrace: trace, tools: offeredTools,
+      intent, result, addressee, composerFor: (need: RouteNeed) => selectComposerRouted(withGatewayVariant(c.env, variantReq?.gateway), { ...(provider ? { provider } : {}), ...(answerLine ? { systemPrompt: answerLine } : {}), need, onUsage: (u) => { trace.composeUsage = addUsage(trace.composeUsage, u); } }), deps: askDeps, interactionFor, plannerTrace: trace, tools: offeredTools,
       ...(runPlan ? { suppliedPlan: true } : {}),
       ...(runPlan && body.rowsOnly ? { rowsOnly: true } : {}),
       ...(body.surface ? { surface: body.surface } : {}),

@@ -101,7 +101,7 @@ import { RELATIONSHIP_TYPE, ROLE } from '@agenticprimitives/agent-relationships'
 import type { AuditSink } from '@agenticprimitives/audit';
 import { enforcersFromEnv } from './org-wire.js';
 import { wireToDelegation, type DelegationWireV1 } from '@agenticprimitives/a2a';
-import { routeProvider, routePolicy, meterFor, selectPlanner, selectComposer, defaultProvider, plannerPromptBudget, type LlmProvider, type RoutePolicy, type RouteDecision, type RouteNeed , RULE_BASED_PLANNER } from './orchestration.js';
+import { withGatewayVariant, routeProvider, routePolicy, meterFor, selectPlanner, selectComposer, defaultProvider, plannerPromptBudget, type LlmProvider, type RoutePolicy, type RouteDecision, type RouteNeed , RULE_BASED_PLANNER } from './orchestration.js';
 import { ASK_DISCOVERY_TOOLS } from '@agenticprimitives/context';
 import { recentToolsOf } from './ops-index.js';
 import { structuredCallFor, textStreamFor, logprobChoiceFor, kbRetrievalMode, type StructuredCallRecordV1 } from './context-wiring.js';
@@ -136,6 +136,10 @@ import { vaultServerId } from './vault-server-id.js';
 
 
 export interface HarnessEnv {
+  /** Spec 434 W3 — `on` carries every model call to the town's gateway by profile (`gatewayOn`). A comparison
+   *  may set it per run (`variant.gateway`); otherwise it is the deployment's. Declared here because the run's
+   *  env is what the planner and composer are chosen from. */
+  ORCHESTRATION_GATEWAY?: string;
   /** Spec 408 — the estate's contract generation ("1" pre-spec-408, "2" spec 408); absent ⇒ "1". */
   CONTRACTS_GENERATION?: string;
   /** Spec 426 — operator config for executor-invoke: a JSON map `executor-ref → { url, client }`. Absent ⇒ no
@@ -2639,6 +2643,8 @@ export interface HarnessRunInput {
    *  held (dry run). Set by the ask surface from the request itself, never inferred from which variant fields arrived. */
   comparison?: boolean;
   variant?: { plannerKind?: 'model' | 'rule-based'; selection?: 'model' | 'declared' | 'ontology' | 'judgment' | 'ontology+judgment' | 'propose+judgment' | 'ontology-first' | 'framed-judgment' | 'outcome' | 'outcome-selective'; toggles?: Record<string, string>;
+    /** Spec 434 §12 — which carrier takes this run's model calls (the W3 gate's arm). */
+    gateway?: 'on' | 'off';
     judgeProfile?: 'thorough' | 'fast' | 'logprob';
     askerContext?: { digest: string; recentSkills?: Array<{ id: string; times: number }>; memoryTags?: string[]; heldClasses?: string[] };
     /** Spec 416 W3 — conformal acceptance under a fitted map. */
@@ -4957,7 +4963,12 @@ export function subjectRecordReader(
  *  only — nothing reads it to decide anything. */
 export type ResolvedParties = Map<string, ResolvedParty>;
 
-export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input: HarnessRunInput): Promise<{ result: RunResult; plannerKind: string; resolved: ResolvedParties; interactionFor: Record<string, NonNullable<ToolSpec['interaction']>>; trace: PlannerTraceV1; tools: ToolSpec[]; events: RunEvent[]; presentedRefs: string[]; playbook: { digest: string; triggers?: TriggerV1[] } | null }> {
+export async function runUnderMandate(envIn: HarnessEnv, deps: HarnessDeps, input: HarnessRunInput): Promise<{ result: RunResult; plannerKind: string; resolved: ResolvedParties; interactionFor: Record<string, NonNullable<ToolSpec['interaction']>>; trace: PlannerTraceV1; tools: ToolSpec[]; events: RunEvent[]; presentedRefs: string[]; playbook: { digest: string; triggers?: TriggerV1[] } | null }> {
+  // Spec 434 §12 — WHO CARRIES THIS RUN'S MODEL CALLS. A comparison may name the arm (the town's gateway, or this
+  // deployment's own provider keys); applied once, here, so the planner, the selection judge and everything else
+  // the run reaches for are carried the same way. The reply's composer is chosen by the caller, which applies the
+  // same arm to the closure it passes in. Absent ⇒ the deployment's setting, which is every ordinary run.
+  const env = withGatewayVariant(envIn, input.variant?.gateway) as HarnessEnv;
   const resolved: ResolvedParties = new Map();
   const events: RunEvent[] = [];
   const chainId = Number(env.CHAIN_ID);

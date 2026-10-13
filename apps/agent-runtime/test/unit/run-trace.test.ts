@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import type { RunRecordV1 } from '@agenticprimitives/orchestration';
 import { a2aDoor, doorFromBody, modelCallsOf, plannerKindOf, variantOf, parseVariantRequest, operationalOf, VARIANT_TOGGLES } from '../../src/run-trace.js';
+import { withGatewayVariant } from '../../src/orchestration.js';
 import { provenanceGraphOf } from '../../src/run-export.js';
 
 const trace = {
@@ -75,6 +76,19 @@ describe('the variant knob is parsed, and anything unknown is refused by name', 
   it('accepts the five components with known values', () => {
     expect(parseVariantRequest({ plannerKind: 'rule-based', provider: 'groq', toggles: { 'retrieval/kb': 'off' }, playbook: '0x' + '33'.repeat(32), startingState: { domain: 'cil-commons', scenarioId: 'baseline', digest: 'sha256:' + 'ab'.repeat(32) } })).toEqual({ ok: true, variant: { plannerKind: 'rule-based', provider: 'groq', toggles: { 'retrieval/kb': 'off' }, playbook: '0x' + '33'.repeat(32), startingState: { domain: 'cil-commons', scenarioId: 'baseline', digest: 'sha256:' + 'ab'.repeat(32) } } });
     expect(parseVariantRequest({})).toEqual({ ok: true, variant: {} });
+  });
+  // Spec 434 §12 — the W3 gate's arm: which carrier takes the run's model calls. `withGatewayVariant` turns it
+  // into the env the whole run is carried under, so planner, judge and composer cannot disagree about it; absent
+  // leaves the deployment's own setting, which is every ordinary run.
+  it('spec 434 — the carrier is an arm: gateway on | off, and nothing else', () => {
+    expect(parseVariantRequest({ gateway: 'on' })).toEqual({ ok: true, variant: { gateway: 'on' } });
+    expect(parseVariantRequest({ gateway: 'off' })).toEqual({ ok: true, variant: { gateway: 'off' } });
+    expect(parseVariantRequest({ gateway: 'yes' })).toEqual({ ok: false, error: 'gateway must be on | off' });
+    const base = { ORCHESTRATION_GATEWAY: '', INFERENCE_URL: 'https://i', OTHER: 1 } as const;
+    expect(withGatewayVariant(base, 'on').ORCHESTRATION_GATEWAY).toBe('on');
+    expect(withGatewayVariant({ ...base, ORCHESTRATION_GATEWAY: 'on' }, 'off').ORCHESTRATION_GATEWAY).toBe('');
+    expect(withGatewayVariant(base, undefined)).toBe(base); // untouched: the deployment decides
+    expect(withGatewayVariant(base, 'on').OTHER).toBe(1); // it changes the carrier and nothing else
   });
   it('spec 416 — speed: a judge profile, a pick-only toggle, the ontology-first arm; each on the recorded variant', () => {
     expect(parseVariantRequest({ selection: 'ontology-first', judgeProfile: 'fast', toggles: { 'skill-selection/answer': 'off' } })).toEqual({ ok: true, variant: { selection: 'ontology-first', judgeProfile: 'fast', toggles: { 'skill-selection/answer': 'off' } } });

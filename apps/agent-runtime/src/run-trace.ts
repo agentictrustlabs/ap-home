@@ -156,6 +156,10 @@ export interface VariantRequestV1 {
   answerProvider?: string;
   judgeProvider?: string;
   toggles?: Record<string, string>;
+  /** Spec 434 §12 — WHO CARRIES THE MODEL CALL: the town's gateway by profile, or this deployment's own provider
+   *  keys. The arm the W3 gate compares, and the only variant component that changes nothing about WHAT is asked —
+   *  the same prompts, the same tools, the same playbook, a different carrier. */
+  gateway?: 'on' | 'off';
   playbook?: string;
   /** The seeded records the run begins from — identified by their DIGEST (what the record and the graph keep); the domain
    *  and scenario are the comparison's description of it. */
@@ -243,6 +247,7 @@ export function parseVariantRequest(raw: unknown): { ok: true; variant: VariantR
     if (k === 'plannerKind') { if (v[k] !== 'model' && v[k] !== 'rule-based') return { ok: false, error: 'plannerKind must be model | rule-based' }; out.plannerKind = v[k] as 'model' | 'rule-based'; }
     else if (k === 'selection') { if (!SELECTION_ARMS.includes(v[k] as SelectionArmV1)) return { ok: false, error: `selection must be ${SELECTION_ARMS.join(' | ')}` }; out.selection = v[k] as SelectionArmV1; }
     else if (k === 'provider' || k === 'selectionProvider' || k === 'answerProvider' || k === 'judgeProvider') { if (typeof v[k] !== 'string' || !/^[a-z][a-z0-9-]{1,30}$/.test(v[k] as string)) return { ok: false, error: `${k} must be a provider name` }; out[k] = v[k] as string; }
+    else if (k === 'gateway') { if (v[k] !== 'on' && v[k] !== 'off') return { ok: false, error: 'gateway must be on | off' }; out.gateway = v[k] as 'on' | 'off'; }
     else if (k === 'playbook') { if (typeof v[k] !== 'string' || !/^(0x[0-9a-fA-F]{64}|sha256:[0-9a-f]{64})$/.test(v[k] as string)) return { ok: false, error: 'playbook must be a definition digest' }; out.playbook = v[k] as string; }
     else if (k === 'toggles') {
       if (!v[k] || typeof v[k] !== 'object' || Array.isArray(v[k])) return { ok: false, error: 'toggles must map a capability notation to a value' };
