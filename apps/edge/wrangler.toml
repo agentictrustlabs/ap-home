@@ -93,13 +93,29 @@ service = "demo-a2a-faithnet"
 name = "imb-edge"
 workers_dev = true
 
+# ── REAL DNS FOR THIS ESTATE (2026-10-13) ─────────────────────────────────────────────────────────────
+# imbnet was stood up on `workers.dev` and `imb-home.vercel.app` (`docs/runbooks/new-estate.md` §0: "A zone
+# of its own? no"), and the runbook named the cost: without a wildcard zone there are no per-agent card
+# hosts. It now has the owner's own zones — `impact-agent.io` + `impact-agent.ai` on Cloudflare,
+# `impact-agent.me` on Vercel — in the same shape as faithnet (`.io` for service hosts, `.ai` wildcard for
+# per-agent cards, `.me` for the Home).
+#
+# ADDITIVE ON PURPOSE. `workers_dev` stays on and the old host stays LAST in `A2A_PUBLIC_BASE_DOMAIN`: the
+# list is "most-canonical FIRST" and `resolveAgentHost` parses a hostname against EVERY zone it serves,
+# because an agent card's URL is inside its SIGNED bytes and cannot be edited in place. Drop the old zone
+# and every card published before today stops naming its agent.
+[[env.imbnet.routes]]
+pattern = "edge.impact-agent.io"
+custom_domain = true
+
+
 [env.imbnet.vars]
 CHAIN_ID = "34348"
 ENTRY_POINT = "0xf7855250B3363AB7649B10957d8908A9AFcdD4B5"
 DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
 UNIVERSAL_SIGNATURE_VALIDATOR = "0xeDd56f500325D4701B9985A34e5Fa6EED6716137"
 SA_BUDGET_LIMIT_UNITS = "10"
-EDGE_ALLOWED_ORIGINS = "https://imb-home.vercel.app,https://explorer.faithnet.io,https://demo-bible-ontology-faithnet.richardpedersen3.workers.dev,http://localhost:5175,http://localhost:8795"
+EDGE_ALLOWED_ORIGINS = "https://impact-agent.me,https://www.impact-agent.me,https://*.impact-agent.me,https://imb-home.vercel.app,https://explorer.faithnet.io,https://demo-bible-ontology-faithnet.richardpedersen3.workers.dev,http://localhost:5175,http://localhost:8795"
 
 [[env.imbnet.durable_objects.bindings]]
 name = "SA_BUDGET"

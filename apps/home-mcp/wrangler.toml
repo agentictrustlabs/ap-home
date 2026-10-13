@@ -78,16 +78,33 @@ DEMO_CONNECT_ENABLED = "true"
 name = "imb-home-mcp"
 account_id = "5da2feaa56593839672948e16c6e809d"
 
+# ── REAL DNS FOR THIS ESTATE (2026-10-13) ─────────────────────────────────────────────────────────────
+# imbnet was stood up on `workers.dev` and `imb-home.vercel.app` (`docs/runbooks/new-estate.md` §0: "A zone
+# of its own? no"), and the runbook named the cost: without a wildcard zone there are no per-agent card
+# hosts. It now has the owner's own zones — `impact-agent.io` + `impact-agent.ai` on Cloudflare,
+# `impact-agent.me` on Vercel — in the same shape as faithnet (`.io` for service hosts, `.ai` wildcard for
+# per-agent cards, `.me` for the Home).
+#
+# ADDITIVE ON PURPOSE. `workers_dev` stays on and the old host stays LAST in `A2A_PUBLIC_BASE_DOMAIN`: the
+# list is "most-canonical FIRST" and `resolveAgentHost` parses a hostname against EVERY zone it serves,
+# because an agent card's URL is inside its SIGNED bytes and cannot be edited in place. Drop the old zone
+# and every card published before today stops naming its agent.
+[[env.imbnet.routes]]
+pattern = "home-mcp.impact-agent.io"
+custom_domain = true
+
+
 [[env.imbnet.durable_objects.bindings]]
 name = "STORE"
 class_name = "HomeMcpStoreDO"
 
 [env.imbnet.vars]
 # imbnet's agents have no per-agent hostname (no zone), so every agent answers at the one runtime origin.
-AGENT_HOST_PATTERN = "https://imb-runtime.richardpedersen3.workers.dev"
-HOME_ORIGIN = "https://imb-home.vercel.app"
-BROKER_JWKS_URL = "https://imb-home.vercel.app/jwks"
-A2A_ORIGIN = "https://imb-runtime.richardpedersen3.workers.dev"
+# The per-agent card host — the `.ai` wildcard, as faithnet does it (`https://{label}.faithnet.ai`).
+AGENT_HOST_PATTERN = "https://{label}.impact-agent.ai"
+HOME_ORIGIN = "https://www.impact-agent.me"
+BROKER_JWKS_URL = "https://www.impact-agent.me/jwks"
+A2A_ORIGIN = "https://a2a.impact-agent.io"
 CHAIN_ID = "34348"
 DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
 CLIENT_ID = "home-mcp"

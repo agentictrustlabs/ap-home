@@ -624,6 +624,29 @@ name = "SEND_EMAIL"
 name = "imb-runtime"
 workers_dev = true
 
+# ── REAL DNS FOR THIS ESTATE (2026-10-13) ─────────────────────────────────────────────────────────────
+# imbnet was stood up on `workers.dev` and `imb-home.vercel.app` (`docs/runbooks/new-estate.md` §0: "A zone
+# of its own? no"), and the runbook named the cost: without a wildcard zone there are no per-agent card
+# hosts. It now has the owner's own zones — `impact-agent.io` + `impact-agent.ai` on Cloudflare,
+# `impact-agent.me` on Vercel — in the same shape as faithnet (`.io` for service hosts, `.ai` wildcard for
+# per-agent cards, `.me` for the Home).
+#
+# ADDITIVE ON PURPOSE. `workers_dev` stays on and the old host stays LAST in `A2A_PUBLIC_BASE_DOMAIN`: the
+# list is "most-canonical FIRST" and `resolveAgentHost` parses a hostname against EVERY zone it serves,
+# because an agent card's URL is inside its SIGNED bytes and cannot be edited in place. Drop the old zone
+# and every card published before today stops naming its agent.
+[[env.imbnet.routes]]
+pattern = "a2a.impact-agent.io"
+custom_domain = true
+
+# THE PER-AGENT CARD HOSTS. One wildcard covers every agent (ADR-0061: one label, `<label>-<type>.<zone>`),
+# so no agent needs a custom domain of its own. A `zone_name` route does NOT create DNS — the zone needs a
+# PROXIED `*` record, which `*.faithnet.ai` has and is what makes that zone work.
+[[env.imbnet.routes]]
+pattern = "*.impact-agent.ai/*"
+zone_name = "impact-agent.ai"
+
+
 [env.imbnet.ai]
 binding = "AI"
 
@@ -651,13 +674,21 @@ ASSISTANT_RATE_WINDOW_MS = "600000"
 SA_BUDGET_LIMIT_UNITS = "50000"
 # Nothing fronts imbnet yet — the Home talks to this Worker directly, so no gateway assertion is required.
 DEMO_REQUIRE_GATEWAY_ASSERTION = "false"
-MCP_URL = "https://imb-vault.richardpedersen3.workers.dev"
-DEMO_EDGE_URL = "https://imb-edge.richardpedersen3.workers.dev"
-BROKER_ISS = "https://imb-home.vercel.app"
-BROKER_JWKS_URL = "https://imb-home.vercel.app/jwks"
+MCP_URL = "https://mcp.impact-agent.io"
+DEMO_EDGE_URL = "https://edge.impact-agent.io"
+# THE HOME'S ISSUER — the one value here that cannot be additive (2026-10-13). `ownConnectIssuer`
+# accepts the apex and any single-label subdomain of THIS issuer's registrable domain, so moving it to
+# impact-agent.me means a session minted on `imb-home.vercel.app` no longer verifies: everyone signed in
+# there signs in again once. That host still SERVES the Home (it is the same Vercel project) — it just
+# stops being the identity. Google's authorized redirect URIs must list the new origin too.
+BROKER_ISS = "https://www.impact-agent.me"
+BROKER_JWKS_URL = "https://www.impact-agent.me/jwks"
 DEMO_SSO_AUD = "demo-sso"
-ALLOWED_ORIGINS = "https://imb-home.vercel.app,https://explorer.faithnet.io,https://demo-bible-ontology-faithnet.richardpedersen3.workers.dev,http://localhost:5175,http://127.0.0.1:5175,http://localhost:8795"
-A2A_PUBLIC_BASE_DOMAIN = "imb-runtime.richardpedersen3.workers.dev"
+ALLOWED_ORIGINS = "https://impact-agent.me,https://www.impact-agent.me,https://*.impact-agent.me,https://imb-home.vercel.app,https://explorer.faithnet.io,https://demo-bible-ontology-faithnet.richardpedersen3.workers.dev,http://localhost:5175,http://127.0.0.1:5175,http://localhost:8795"
+# Most-canonical FIRST, and the workers.dev host kept LAST: `resolveAgentHost` parses a hostname against
+# EVERY zone here, and an agent card's URL is inside its SIGNED bytes. Removing the old host would stop
+# every card published before 2026-10-13 from naming its agent.
+A2A_PUBLIC_BASE_DOMAIN = "impact-agent.ai,impact-agent.io,imb-runtime.richardpedersen3.workers.dev"
 A2A_SERVES_UNPUBLISHED_NAMES = "true"
 # THE LANES THIS ESTATE REACHES BY BINDING (ap-town calls the same thing a lane, for the same reason): a
 # Worker's subrequest to a hostname served by another Worker on its OWN Cloudflare account does not come
