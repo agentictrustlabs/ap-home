@@ -49,6 +49,7 @@ import { joinOrganization } from '../../../home/join-organization';
 import { isSecurityCeremony, runSecurityCeremony, ceremonyButtonLabel, recordLinkedChannel, type SecurityCeremonySummary } from '../../../home/security-ceremonies';
 import { EmailAuthCard } from '../EmailAuthCard';
 import { PhoneAuthCard } from '../PhoneAuthCard';
+import { playbookSentence } from '../../../home/playbook-sentence';
 
 type Entry =
   | { role: 'you'; text: string }
@@ -1098,19 +1099,18 @@ function DiagnosticsPane({ entries, token, onClose }: { entries: DiagEntry[]; to
 function PlannerTraceView({ trace, totalMs }: { trace: PlannerTrace; /** the whole turn as this screen observed it */ totalMs?: number }) {
   const [open, setOpen] = useState(false);
   const short = (h: string) => (h.length > 14 ? `${h.slice(0, 10)}…${h.slice(-4)}` : h);
+  const playbookSaid = playbookSentence(trace);
   const refusals = trace.admission.filter((a) => a.refused.length);
   return (
     <div className="muted" style={{ marginTop: 6, fontSize: 11, lineHeight: 1.5 }}>
       <div>
         <strong>planner</strong> {trace.planner}{trace.model ? `(${trace.model})` : ''}
-        {' · '}<strong>playbook</strong> {trace.playbook
-          ? `${trace.playbook.archetypeId.replace(/^skill:archetypes\//, '')} v${trace.playbook.archetypeVersion} ${short(trace.playbook.digest)}`
-          // A READ THAT FAILED IS NOT A PLAYBOOK THAT IS ABSENT (2026-10-13). "none (bare harness)" read as a
-          // settled fact about the agent, so a cold vault refusal looked like an unassigned archetype and the
-          // narrowed offer set was missing for a reason nothing on this screen named.
-          : trace.playbookUnreadable
-            ? <span title={trace.playbookUnreadable}>none — its record could not be read ({trace.playbookUnreadable})</span>
-            : 'none (bare harness)'}
+        {/* THREE STATES, ONE SENTENCE, decided in `playbookSentence` and not here — a read that FAILED is not
+            a playbook that is ABSENT, and until 2026-10-13 both rendered as "none (bare harness)", which
+            reads as a settled fact about the agent. The testid lets the E2E suite assert WHICH of the three
+            it says (`tests/e2e-sso/playbook-on-first-ask.spec.ts`); the unit tests cover the choice itself. */}
+        {' · '}<strong>playbook</strong>{' '}
+        <span data-testid="ask-trace-playbook" {...(playbookSaid.title ? { title: playbookSaid.title } : {})}>{playbookSaid.text}</span>
         {' · '}<strong>examples</strong> {trace.examplesRendered}
         {' · '}<strong>tools</strong> {trace.toolsExposed.length}
         {trace.surface ? <> · <strong>surface</strong> {trace.surface.realm ?? '?'}{typeof trace.surface.capabilities === 'number' ? ` (${trace.surface.capabilities} caps)` : ''}</> : null}
