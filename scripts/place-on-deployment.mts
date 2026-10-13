@@ -16,11 +16,27 @@ import { CONTRACTS } from '@agenticprimitives/contracts/deployments/faithchain';
 import type { Address, Hex } from 'viem';
 
 const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
+/**
+ * WHICH SHAPE the endpoint record takes (2026-10-13). Two are in use on faithchain and they are not
+ * interchangeable:
+ *   `edge` (the default, what this script has always written) — `<EDGE>/api/a2a/<name>` plus a `cardUri`.
+ *     The deployment's ingress, by name. This is what a SECOND deployment needs (spec 366 R4): the host is
+ *     the edge's, so the name alone says which deployment answers for it.
+ *   `zone` — `https://<label>.<BASE>/api/a2a`, and no `cardUri`. The agent's OWN host on the estate's
+ *     wildcard zone, which is the shape faithnet's own agents carry (`alice.me` →
+ *     `https://alice.faithnet.ai/api/a2a`). Written when an estate HAS a zone of its own and its agents
+ *     should be reached at their own hosts.
+ * Named rather than inferred: an estate with both an edge and a zone can be written either way, and the
+ * two produce different records for the same agent — so the caller says which, and the read-back checks it.
+ */
+const SHAPE = (process.env.SHAPE ?? 'edge') as 'edge' | 'zone';
+if (SHAPE !== 'edge' && SHAPE !== 'zone') throw new Error(`SHAPE must be 'edge' or 'zone', not ${SHAPE}`);
 const EDGE = (process.env.EDGE ?? '').replace(/\/$/, '');
 const BASE = process.env.BASE ?? '';
 const PARENTS = (process.env.AGENT_NAME_PARENTS ?? 'me,impact').split(',');
 const [steward, ...names] = process.argv.slice(2);
-if (!EDGE || !BASE || !steward || names.length === 0) throw new Error('usage: EDGE=https://edge-b… BASE=b.faithnet.io place-on-deployment.mts <steward-handle> <name>…');
+// `zone` needs no EDGE: the record names the agent's own host, not an ingress.
+if ((SHAPE === 'edge' && !EDGE) || !BASE || !steward || names.length === 0) throw new Error('usage: [SHAPE=edge|zone] EDGE=https://edge-b… BASE=b.faithnet.io place-on-deployment.mts <steward-handle> <name>…');
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
 const naming = new AgentNamingClient({ rpcUrl: process.env.RPC_URL ?? 'https://rpc.faithnet.io', chainId: 34348, registry: CONTRACTS.agentNameRegistry as Address, universalResolver: CONTRACTS.agentNameUniversalResolver as Address });
 
@@ -37,10 +53,15 @@ for (const name of names) {
   if (!sa) { console.log('  the registry names no such agent'); continue; }
   const host = hostForName(name, BASE, PARENTS);
   if (!host) { console.log('  no host on that zone for this name shape'); continue; }
-  const records = { a2aEndpoint: `${EDGE}/api/a2a/${name}`, cardUri: `https://${host}/.well-known/agent-card.json` };
+  const records = SHAPE === 'zone'
+    ? { a2aEndpoint: `https://${host}/api/a2a` }
+    : { a2aEndpoint: `${EDGE}/api/a2a/${name}`, cardUri: `https://${host}/.well-known/agent-card.json` };
   const before = await naming.getRecords(name);
   console.log(`  ${sa}  now: a2aEndpoint ${before.a2aEndpoint ?? '-'} · cardUri ${before.cardUri ?? '-'}`);
-  if (before.a2aEndpoint === records.a2aEndpoint && before.cardUri === records.cardUri) { console.log('  already placed'); continue; }
+  console.log(`  ${SHAPE}: ${Object.entries(records).map(([k, v]) => `${k}=${v}`).join(' · ')}`);
+  // A `zone` write leaves `cardUri` ALONE rather than clearing it: the card is served at the agent's host
+  // either way, and a record this script was not asked to write is not a record it should erase.
+  if (Object.entries(records).every(([k, v]) => (before as Record<string, string | undefined>)[k] === v)) { console.log('  already placed'); continue; }
   const calls = buildRecordCalls({ resolver: CONTRACTS.agentNameResolver as Address, node: namehash(name), records });
   const callData = buildExecuteBatchCallData(calls.map((c) => ({ to: c.to, value: c.value, data: c.data })));
   let txHash: string | undefined; let lastErr = '';
@@ -55,5 +76,5 @@ for (const name of names) {
   if (!txHash) { console.log(`  ✗ the record write did not go through: ${lastErr}`); continue; }
   const after = await naming.getRecords(name);
   console.log(`  tx ${txHash}\n  now: a2aEndpoint ${after.a2aEndpoint ?? '-'} · cardUri ${after.cardUri ?? '-'}`);
-  console.log(after.a2aEndpoint === records.a2aEndpoint && after.cardUri === records.cardUri ? '  ✓ placed' : '  ✗ the records read back differently');
+  console.log(Object.entries(records).every(([k, v]) => (after as Record<string, string | undefined>)[k] === v) ? '  ✓ placed' : '  ✗ the records read back differently');
 }

@@ -25,18 +25,25 @@
  *   · an archetype and a digest  ⇒ pass. The playbook reached the planner.
  *   · "none — its record could not be read (…)" ⇒ FAIL, and the reason is in the message. This is the
  *     incident recurring, and the point of the 2026-10-13 change is that it now says so out loud.
- *   · "none (bare harness)" ⇒ FAIL. Alice is a provisioned persona on a mode-0 Home: the estate's default
+ *   · "none (bare harness)" ⇒ FAIL. The persona under test is a provisioned one on a mode-0 Home: the estate's default
  *     is assigned at onboarding and healed once per session, so bare is not a state she has.
  */
 import { test, expect } from '@playwright/test';
 
 const HOME = process.env.SSO_BASE_URL ?? 'https://www.faithnet.me';
+/** THE PERSONA IS THE ESTATE'S, not a constant. This spec hardcoded `alice` — a faithnet name — so pointing
+ *  it at another estate failed at sign-in with "alice signs in: false" and said nothing about why. Every
+ *  estate seeds its OWN demo people (imbnet: maya, samuel, priya, tomas, hannah), so the roster is per
+ *  deployment and the name belongs beside the URL that selects it. Same lesson as the brand assertions this
+ *  suite carried when it moved repositories: a constant that happens to be true of one deployment is a
+ *  coupling, not a default. */
+const PERSONA = process.env.PERSONA ?? 'alice';
 
 test('the first ask of a fresh session runs under a playbook, not the bare harness', async ({ page, request }) => {
   test.setTimeout(180_000);
 
-  const signin = await request.post(`${HOME}/connect/demo-signin`, { data: { handle: 'alice', client_id: 'demo-web' } });
-  expect(signin.ok(), 'alice signs in').toBeTruthy();
+  const signin = await request.post(`${HOME}/connect/demo-signin`, { data: { handle: PERSONA, client_id: 'demo-web' } });
+  expect(signin.ok(), `${PERSONA} signs in at ${HOME}`).toBeTruthy();
   const { homeSession } = (await signin.json()) as { homeSession: string };
 
   // A FRESH SESSION, and the ask is the FIRST thing it does — which is the condition under test. The
@@ -68,7 +75,7 @@ test('the first ask of a fresh session runs under a playbook, not the bare harne
   // CI log nothing about WHICH of the three states it hit — and the three have different fixes.
   expect(said, `the playbook record could not be READ — this is the 2026-10-13 incident recurring, not an unassigned agent. The runtime said: "${said}". Check the DO's own line (\`[334§6 vaultRead] archetype.assignment FAILED\`): needsEnable=true means storage is not enabled for this agent and a steward turns it on once; anything else is transient, and the reader now retries once and remembers no failure.`)
     .not.toMatch(/could not be read/i);
-  expect(said, `the agent ran the BARE HARNESS: no playbook reached the planner, so the Ask offered the full unnarrowed tool set and none of the contracts a domain author wrote. Alice is a provisioned persona — the estate's default is assigned at onboarding and healed once per session by \`ensurePlaybook\` — so this means the assignment is missing, does not hash to its pinned digest, or no longer validates. The screen said: "${said}".`)
+  expect(said, `the agent ran the BARE HARNESS: no playbook reached the planner, so the Ask offered the full unnarrowed tool set and none of the contracts a domain author wrote. The persona is a provisioned one — the estate's default is assigned at onboarding and healed once per session by \`ensurePlaybook\` — so this means the assignment is missing, does not hash to its pinned digest, or no longer validates. The screen said: "${said}".`)
     .not.toMatch(/bare harness/i);
 
   // What a healthy line looks like: an archetype, a version, and the digest the definition hashes to.
