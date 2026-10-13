@@ -11,7 +11,7 @@
 // is a navigation — the `fc` param walks the relying-app list (teardown above is idempotent).
 import { useEffect } from 'react';
 import { clearSsoCookie } from '../../src/lib/sso-cookie';
-import { setFedcmLoginStatus, SESSION_KEY } from '../../src/context/session';
+import { setFedcmLoginStatus, SESSION_KEY, forgetActingAsReturn } from '../../src/context/session';
 import { getClient, isAllowedRelyingOrigin } from '../../src/lib/oidc-clients';
 import { HOME_ORIGIN } from '../../src/lib/domain';
 import { disconnectWallet } from '../../src/lib/wallet';
@@ -49,6 +49,7 @@ export default function LogoutPage() {
     } catch {
       /* storage blocked — fine */
     }
+    forgetActingAsReturn(); // the acting-as stash is the ended connection's, not the next person's
     clearSsoCookie(); // end the cross-subdomain `.impact-agent.me` SSO session
     setFedcmLoginStatus('logged-out'); // FedCM: don't auto-recognize / show the chooser next time
     // This page tears the session down directly (not via session.signOut), so also drop the dApp

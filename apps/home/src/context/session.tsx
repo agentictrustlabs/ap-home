@@ -65,6 +65,13 @@ function epochStale(stored: string | undefined): boolean {
 }
 
 export const SESSION_KEY = 'agenticprimitives:demo-sso:session';
+/** Spec 425 — the session a person LEFT when they entered as another name of theirs (`AgentSwitcher.enterAs`).
+ *  It belongs to that person's connection and to nothing after it: a disconnect drops it, and a fresh connect
+ *  drops it, or the next person to connect in this browser finds "Return to your home" restoring someone else. */
+export const ACTING_AS_RETURN_KEY = 'agenticprimitives:acting-as-return';
+export function forgetActingAsReturn(): void {
+  try { localStorage.removeItem(ACTING_AS_RETURN_KEY); } catch { /* storage blocked */ }
+}
 const Ctx = createContext<SessionCtx | null>(null);
 
 /** Tell the browser's FedCM login-status API the user's IdP state (Chrome-only; feature-detected). With
@@ -123,6 +130,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const ran = useRef(false);
 
   const openSession = useCallback(async (token: string, via: string, fresh: boolean): Promise<BasicProfile | null> => {
+    // A FRESH connect is a person arriving, and they arrive as themselves: whatever name the previous
+    // connection in this browser was acting as is not theirs to return to.
+    if (fresh) forgetActingAsReturn();
     setSession({ token, via, fresh });
     try {
       localStorage.setItem(SESSION_KEY, JSON.stringify({ token, via, deploymentEpoch: DEPLOYMENT_EPOCH })); // survive refresh (this origin)
@@ -152,8 +162,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     // Full SSO teardown is `/logout`: it clears this origin AND front-channel-notifies
     // registered relying apps (Commons keeps its own cookie). In-place clear left those
     // apps signed in.
-    const here = window.location.href;
-    window.location.assign(`/logout?return=${encodeURIComponent(here)}`);
+    //
+    // RETURN TO THE ROOT, never to the page we were on. The workspace is derived from the URL (spec 315), so
+    // returning to `/service/<agent>/activities` after a disconnect left the NEXT person to connect scoped to an
+    // agent the previous one stewarded — the switcher showed that agent, and every read at it was refused or,
+    // worse, answered. A person connecting into the Home starts at their own agent.
+    forgetActingAsReturn();
+    window.location.assign(`/logout?return=${encodeURIComponent(`${window.location.origin}/`)}`);
   }, []);
 
   const refreshProfile = useCallback(async (): Promise<BasicProfile | null> => {

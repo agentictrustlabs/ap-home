@@ -131,5 +131,16 @@
     "sa": "0x6142b0fca982f6701cf2248bf368ab44a48c5725",
     "custodies": [],
     "eoaPrivateKey": "0xf31348ae2cad24bdeec2e1f517404281ed30ced66b656fd48a5990ab05dd9758"
+  },
+  "town-operator": {
+    "name": "Town Operator",
+    "sa": "0x840bb6480c7bb37910631db62f7212f0ba73f3a8",
+    "custodies": [
+      {
+        "sa": "0x2b0222BfB8635937a23939DDf1796Ad341Bc0bDc",
+        "name": "discovery.registry"
+      }
+    ],
+    "eoaPrivateKey": "0x886ed76f0398b7210d2180fc15949f8171dd86d5a4f49d0ab69d9de14820ca28"
   }
 }

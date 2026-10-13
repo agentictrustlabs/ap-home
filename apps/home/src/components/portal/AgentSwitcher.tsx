@@ -10,7 +10,7 @@
 // Connected apps are external grants with no custody — they stay in the person nav (/apps).
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { useSession } from '../../context/session';
+import { useSession, ACTING_AS_RETURN_KEY } from '../../context/session';
 import { useManagedAgents } from './ManagedAgents';
 import { parseWorkspacePath, orgHref, serviceHref } from '../../lib/workspace';
 import { agentClassOf, orgKindWordOf, kindWordOf, authorityLineage } from '../../lib/agent-class';
@@ -26,8 +26,10 @@ const lc = (s: string) => s.toLowerCase();
 // grants) read the ACTING agent's own data — so to be a persona you must ACT AS it, not view it under your session
 // (which would show YOUR data under its name). `demo-signin { sa, as }` mints a session acting as the persona
 // (steer-verified: the persona must be a `self` in your own tree), and we switch the whole Home to it. The return
-// stash keeps the session you left so "your home" brings you back without re-onboarding.
-const RETURN_KEY = 'agenticprimitives:acting-as-return';
+// stash keeps the session you left so "your home" brings you back without re-onboarding. It lives for ONE
+// connection: `signOut`, `/logout` and a fresh `openSession` all drop it (session.tsx), so the next person to
+// connect in this browser is never offered a return to someone else's session.
+const RETURN_KEY = ACTING_AS_RETURN_KEY;
 
 export function AgentSwitcher() {
   const { session, profile, agentAddress, agentName, personName, openSession } = useSession();

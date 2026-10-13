@@ -39,8 +39,14 @@ have to be recorded. `.gitleaks.toml` allowlists this directory for that reason.
 | elena | Elena Voss | — | ✅ |
 | nathan | Nathan | Accelerate | ✅ |
 | david | David | Accelerate | ✅ |
+| town-operator | Town Operator | discovery.registry | ✅ |
 
-All seven are signable. Nathan's and David's came from
+All seven people are signable. `town-operator` is the operator persona: its custodian EOA is the
+faithchain contracts deployer (`0x1fcd…03bF`, `deployments-faithchain.json#deployer`), the same key
+that custodies the town's `discovery.registry` service agent — so signing in as it lets you steward
+the town agents from a Home without rotating their custody (2026-10-13; see
+`discovery.registry.faithchain.local.json`). Testnet key, publicly disclosed; never reuse it for
+anything real. Nathan's and David's came from
 `uupg/apps/tracker/seed/demo-accounts.json`, which also carries the **Accelerate** org they share.
 
 ## Known gap — and the one that already works
