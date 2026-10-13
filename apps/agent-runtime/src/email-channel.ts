@@ -4,13 +4,17 @@
 // transport is a leaf binding that depends inward (ADR-0057) and the substrate must not know whether a
 // deployment sends through an HTTP API or a platform binding.
 //
-// TWO INTEGRATIONS, deliberately:
+// ONE INTEGRATION:
 //   · CLOUDFLARE EMAIL — the `send_email` binding, and the only rail that can also RECEIVE (Email
 //     Routing calls this Worker's `email()` handler). Its honest limitation: a Worker may only send to
-//     addresses verified in the account, so it is right for replies and estate mail and wrong for
-//     inviting a stranger.
-//   · SENDGRID — an HTTP API that will send to anyone, which is what an invitation needs.
-// Both behind one port, so a caller asks for "email" and the deployment decides which rail carries it.
+//     addresses verified in the account, so it is right for replies and estate mail, and an invitation to
+//     a stranger needs a rail this deployment does not currently have — which it should SAY, rather than
+//     carry a second provider nobody configured.
+//
+// SENDGRID WAS THE SECOND RAIL AND IS GONE (2026-10-13, the owner's decision). It was never provisioned:
+// no `SENDGRID_API_KEY` in any Worker environment on either estate, nor in any Vercel environment, so the
+// preferred rail in `emailSender` was unreachable in every deployment we run and every message went out
+// over Cloudflare anyway. A provider behind a port still has to exist somewhere to be a choice.
 import {
   firstAvailableSender, handleFromAddress, inboundEmailToMessage, isEmailAddress,
   type EmailSenderPort, type InboundEmailV1, type OutboundEmailV1,
@@ -24,7 +28,6 @@ export interface EmailEnv {
   SEND_EMAIL?: { send(msg: { to: string; from: { email: string; name?: string }; subject: string; text: string; html?: string; headers?: Record<string, string> }): Promise<{ messageId?: string } | void> };
   /** The display name mail goes out under. */
   EMAIL_FROM_NAME?: string;
-  SENDGRID_API_KEY?: string;
   /** The verified sender address mail goes out as. Required by both rails. */
   EMAIL_FROM?: string;
   /** The zones whose mail this deployment answers for, comma-separated (`faithnet.me`). */
@@ -61,41 +64,15 @@ export function cloudflareSender(env: EmailEnv): EmailSenderPort {
   };
 }
 
-export function sendgridSender(env: EmailEnv): EmailSenderPort {
-  return {
-    name: 'sendgrid',
-    available: () => !!env.SENDGRID_API_KEY?.trim() && !!env.EMAIL_FROM?.trim(),
-    async send(msg) {
-      try {
-        const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', authorization: `Bearer ${env.SENDGRID_API_KEY!.trim()}` },
-          body: JSON.stringify({
-            personalizations: [{ to: [{ email: msg.to }] }],
-            from: { email: env.EMAIL_FROM!.trim() },
-            subject: msg.subject,
-            content: [{ type: 'text/plain', value: msg.text }, ...(msg.html ? [{ type: 'text/html', value: msg.html }] : [])],
-          }),
-        });
-        if (!res.ok) return { ok: false, via: 'sendgrid', error: `sendgrid ${res.status}` };
-        return { ok: true, via: 'sendgrid', ...(res.headers.get('x-message-id') ? { messageId: res.headers.get('x-message-id')! } : {}) };
-      } catch (e) {
-        return { ok: false, via: 'sendgrid', error: e instanceof Error ? e.message : 'send failed' };
-      }
-    },
-  };
-}
-
 /**
  * The rail this deployment sends on, or null.
  *
- * ORDER IS A STATED PREFERENCE, not a fallback: SendGrid first because it reaches ANY address, which is
- * what an invitation needs; Cloudflare second because it is bound to verified destinations. A configured
- * provider that fails returns its error — nothing is re-sent down the other rail, because a message
- * delivered twice is worse than one that reports it did not go.
+ * One rail, so there is no order to state and nothing to fall back to: a configured provider that fails
+ * returns its error, because a message delivered twice is worse than one that reports it did not go. The
+ * list form stays because a deployment with a second provider is a list with two entries, not a rewrite.
  */
 export function emailSender(env: EmailEnv): EmailSenderPort | null {
-  return firstAvailableSender([sendgridSender(env), cloudflareSender(env)]);
+  return firstAvailableSender([cloudflareSender(env)]);
 }
 
 export function emailZones(env: EmailEnv): string[] {

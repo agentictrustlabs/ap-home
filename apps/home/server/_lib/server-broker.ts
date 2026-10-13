@@ -93,7 +93,6 @@ export interface Env {
 
   // ─── Email auth + invites (SendGrid) ───────────────────────────────
   /** SendGrid API key — its presence flips the email sender from log-only to live. Secret. */
-  SENDGRID_API_KEY?: string;
   /** ap-town spec 431 — the naming gate: the key this Home signs claim tickets with. Absent ⇒ the gate answers 503
    *  and nothing is bought. The priced subregistries come from NEXT_PUBLIC_CONTRACTS_JSON. */
   NAMING_GATE_PRIVATE_KEY?: string;

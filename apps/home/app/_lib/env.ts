@@ -43,7 +43,6 @@ export function makeEnv(): Env {
     A2A_VAULT_URL: t(process.env.A2A_VAULT_URL),
     DELIVERY_SERVICE_SA: t(process.env.DELIVERY_SERVICE_SA) ?? t(process.env.NEXT_PUBLIC_DELIVERY_SERVICE_SA),
     // Email auth + invites (SendGrid). Unset ⇒ the sender logs instead of sending (deploy-safe).
-    SENDGRID_API_KEY: t(process.env.SENDGRID_API_KEY),
     NAMING_GATE_PRIVATE_KEY: t(process.env.NAMING_GATE_PRIVATE_KEY),
     EMAIL_FROM: t(process.env.EMAIL_FROM),
     // Phone auth (Twilio Verify). Unset ⇒ a self-generated dev OTP is logged instead (deploy-safe).

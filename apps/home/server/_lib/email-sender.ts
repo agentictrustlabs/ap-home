@@ -1,7 +1,12 @@
-// Swappable email sender (email-auth OTP + org invite links). Gated + DEPLOY-SAFE: with no provider
-// key set, it LOGS the message and returns ok — the build/flows never break; set SENDGRID_API_KEY +
-// EMAIL_FROM (a verified sender) to send for real. Uses the SendGrid v3 REST API directly (no npm dep →
-// provider stays swappable, build stays lean).
+// The Home's outbound email (email-auth OTP + org invite links). ONE RAIL: the a2a Worker's Cloudflare Email
+// Service binding (spec 365). With it unconfigured the message is LOGGED and the call returns ok, so a local
+// developer can read the OTP out of the console and no flow breaks on a machine with no mail.
+//
+// SENDGRID IS GONE (2026-10-13, the owner's decision). It had been the "deployment without the binding" path
+// and was never provisioned anywhere: no `SENDGRID_API_KEY` existed in any Worker environment on either estate
+// or in any Vercel environment, so the branch was unreachable in every deployment we run. A second mechanism
+// that nobody configures is not a fallback, it is a thing to maintain and a place for a reader to think mail
+// might come from (ADR-0013: one mechanism per read, and one per write).
 import { signBridgeCall } from './bridge-hmac';
 
 export interface EmailEnv {
@@ -10,8 +15,7 @@ export interface EmailEnv {
    *  as system mail (a sign-in code) under the HMAC bridge envelope the custody routes already use. */
   A2A_CUSTODY_URL?: string;
   A2A_CUSTODY_BRIDGE_SECRET?: string;
-  SENDGRID_API_KEY?: string;
-  /** Verified sender, e.g. `no-reply@impact-agent.me` — REQUIRED by SendGrid (must be a verified sender/domain). */
+  /** The address mail goes out as, e.g. `invites@faithnet.ai` — a zone onboarded to Email Sending. */
   EMAIL_FROM?: string;
 }
 
@@ -22,22 +26,19 @@ export interface OutboundEmail {
   text?: string;
 }
 
-/** True once a provider is configured — the UI shows "email login/invite available" only when this is set. */
+/** True once the rail is configured — the UI shows "email login/invite available" only when this is set. */
 export function emailSendingEnabled(env: EmailEnv): boolean {
-  return !!(env.A2A_CUSTODY_URL?.trim() && env.A2A_CUSTODY_BRIDGE_SECRET?.trim()) || !!(env.SENDGRID_API_KEY && env.SENDGRID_API_KEY.trim() && env.EMAIL_FROM && env.EMAIL_FROM.trim());
+  return !!(env.A2A_CUSTODY_URL?.trim() && env.A2A_CUSTODY_BRIDGE_SECRET?.trim());
 }
 
 /** Who the mail goes out as, when a steward sends it for an organization through the Worker rail. */
 export interface SendAs { session: string; as: string }
 
 export async function sendEmail(env: EmailEnv, msg: OutboundEmail, sendAs?: SendAs): Promise<{ ok: boolean; error?: string }> {
-  const key = env.SENDGRID_API_KEY?.trim();
-  const from = env.EMAIL_FROM?.trim();
-  // THE WORKER RAIL (Cloudflare Email Service) — the ONE rail when the Worker is configured. This Home runs
-  // where no email binding exists; the a2a Worker holds one, sends from a zone onboarded to Email Sending,
-  // and threads a person's or organization's copy into their own inbox. A person's mail carries their
-  // session; system mail (a sign-in code, a verification) carries the HMAC bridge envelope. Chosen by
-  // configuration, never by a failed attempt (ADR-0013); SendGrid remains only for a deployment without it.
+  // THE WORKER RAIL (Cloudflare Email Service) — the one rail. This Home runs where no email binding exists;
+  // the a2a Worker holds one, sends from a zone onboarded to Email Sending, and threads a person's or
+  // organization's copy into their own inbox. A person's mail carries their session; system mail (a sign-in
+  // code, a verification) carries the HMAC bridge envelope.
   const a2a = env.A2A_CUSTODY_URL?.trim();
   if (a2a && env.A2A_CUSTODY_BRIDGE_SECRET?.trim()) {
     try {
@@ -56,31 +57,10 @@ export async function sendEmail(env: EmailEnv, msg: OutboundEmail, sendAs?: Send
       return { ok: false, error: e instanceof Error ? e.message : 'email send failed' };
     }
   }
-  if (!key || !from) {
-    // No provider → don't fail; log so a dev can grab the OTP/link locally (deploy-safe).
-    console.log(`[email-sender] (SENDGRID_API_KEY/EMAIL_FROM unset) would send to ${msg.to} — "${msg.subject}"`);
-    return { ok: true };
-  }
-  try {
-    const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        personalizations: [{ to: [{ email: msg.to }] }],
-        from: { email: from },
-        subject: msg.subject,
-        content: [
-          ...(msg.text ? [{ type: 'text/plain', value: msg.text }] : []),
-          { type: 'text/html', value: msg.html },
-        ],
-      }),
-    });
-    // SendGrid returns 202 Accepted on success.
-    if (!res.ok) return { ok: false, error: `sendgrid ${res.status}` };
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : 'email send failed' };
-  }
+  // No rail configured — a local machine. Log it so a developer can read the code out of the console, and
+  // return ok so the flow under test is the flow, not the mail.
+  console.log(`[email-sender] (A2A_CUSTODY_URL/BRIDGE_SECRET unset) would send to ${msg.to} — "${msg.subject}"`);
+  return { ok: true };
 }
 
 const wrap = (inner: string, brand: string): string =>

@@ -612,7 +612,8 @@ class_name = "HarnessApprovalWorkflow"
 #   · Cloudflare Email Service — the binding below + `EMAIL_FROM` on a zone onboarded to Email Sending
 #     (`wrangler email sending enable faithnet.ai`; `faithnet.ai` is enabled). Sends to ANY address, so it
 #     serves invitations. This is the faithnet rail.
-#   · SendGrid — `SENDGRID_API_KEY` + `EMAIL_FROM` secrets, for a deployment without the binding.
+#   (SendGrid was the second rail until 2026-10-13; it was never provisioned on any estate, so it is gone
+#    rather than dormant — a provider nobody configures is maintenance, not a choice.)
 [[env.faithnet.send_email]]
 name = "SEND_EMAIL"
 
