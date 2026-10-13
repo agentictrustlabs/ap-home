@@ -41,7 +41,16 @@ faithchain, and it deploys from [`ap-town`](https://github.com/agentictrustlabs/
 - **Worker names, Durable Object class names, DO bindings and migration tags are NEVER renamed** — that orphans
   storage. They are the names faithnet has always deployed under (`demo-a2a-faithnet`, …); the directories were renamed,
   the deployment was not.
-- **One deployer per estate.** Once faithnet deploys from here, nothing in Ring 0 deploys it again.
+- **One deployer per estate.** Once faithnet deploys from here, nothing in Ring 0 deploys it again. Nor does
+  ap-demos: its `apps/demo-a2a`, `apps/demo-mcp` and `apps/demo-edge` are copies of the pre-split config and
+  carried `[env.faithnet]` under the same Worker names until 2026-10-13, so a deploy from either tree landed on
+  the same live Worker. Those envs are removed there (ap-demos `DEPLOYER.md`); `faithnet-b` is gone outright —
+  `demo-a2a-faithnet-b` / `demo-edge-faithnet-b` no longer exist on the account. **A faithnet feature belongs in
+  `apps/agent-runtime` here**, not in the ap-demos copy: the people-group work was written into both trees in
+  October 2026 and the copies are still byte-identical, which is the warning and not the reassurance.
+- **Deploy from a tree that is up to date with `origin/master`.** On 2026-10-13 a deploy from a tree that
+  predated a merged PR put a retired `global-church` executor back into `EXECUTORS` in production. `git fetch`
+  and merge before `wrangler deploy`; the config is in the file, so a stale file is a stale deployment.
 - `wrangler deploy` deletes triggers created out of band — custom domains and crons are declarative in `wrangler.toml`.
 
 ## imbnet — the town's second estate (2026-10-11)
