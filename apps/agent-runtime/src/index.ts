@@ -424,6 +424,9 @@ export interface Env {
    * (a single deploy). The relayer verbs (`/session/*`, `/account/*`) are NOT gated — they stay open.
    */
   DEMO_REQUIRE_GATEWAY_ASSERTION?: string;
+  /** Spec 439 F3 — the federation doors this estate reads receipts from: JSON `{ "<boundaryId>": "https://<door>" }`.
+   *  Custom domains only (a Worker cannot fetch a same-account workers.dev host). Absent ⇒ door evidence is not read. */
+  FEDERATION_DOORS?: string;
   /**
    * KC-1 (2026-07-05): permits the SERVER-MINT delegation path (callMcpToolViaDelegation), which fabricates
    * the DEL-001 session binding for an unauthenticated `requester` body param. Fail-closed by default: unset
@@ -1488,6 +1491,31 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
       const relying = await verifyRelyingIdToken(token, c.env);
       return relying.ok ? { ok: true, sa: relying.sa, caip: relying.caip } : home;
     },
+    // Spec 439 F3 — the door's receipt, checked at the door the allow-list names. The boundary id comes from the
+    // request's header; the URL never does. A receipt that does not name THIS caller as admitted is no evidence.
+    ...(c.env.FEDERATION_DOORS ? {
+      verifyDoorReceipt: async ({ boundaryId, receiptRef, caller, standing }) => {
+        let doors: Record<string, string> = {};
+        try { doors = JSON.parse(c.env.FEDERATION_DOORS!) as Record<string, string>; } catch { return null; }
+        const door = doors[boundaryId];
+        if (!door || !/^https:\/\//.test(door) || /\.workers\.dev/.test(door) || !/^rcpt-[A-Za-z0-9-]+$/.test(receiptRef)) return null;
+        const r = await fetch(`${door.replace(/\/$/, '')}/federation/receipts/${encodeURIComponent(receiptRef)}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(5_000) }).catch(() => null);
+        if (!r?.ok) return null;
+        const body = (await r.json().catch(() => null)) as { receiptId?: string; recordHash?: string; record?: { kind?: string; effect?: string; reasonCodes?: string[]; actingAgentId?: string; boundaryId?: string } } | null;
+        const rec = body?.record;
+        if (!rec || body?.receiptId !== receiptRef || rec.kind !== 'admission.decision' || rec.boundaryId !== boundaryId) return null;
+        if (rec.effect !== 'ADMIT' && rec.effect !== 'ADMIT_CONSTRAINED') return null;
+        if (!String(rec.actingAgentId ?? '').toLowerCase().endsWith(caller.toLowerCase())) return null;
+        const m = /^(0x[0-9a-f]{64}):(live-grant|membership)@(\d+)$/i.exec(standing ?? '');
+        const codes = rec.reasonCodes ?? [];
+        const kindOk = !m || (m[2] === 'live-grant' ? codes.includes('FOREIGN_ESTATE_LIVE_GRANT') : codes.includes('FOREIGN_ESTATE_MEMBER'));
+        return {
+          type: 'ap.foreign-standing-evidence.v1', boundaryId, door, receiptRef, recordHash: String(body?.recordHash ?? ''), effect: rec.effect, reasonCodes: codes,
+          standing: m && kindOk ? { estateId: m[1]!.toLowerCase(), set: m[2]!, sequence: Number(m[3]) } : null,
+          verifiedAt: new Date().toISOString(),
+        };
+      },
+    } : {}),
     ...(validator && c.env.TIMESTAMP_ENFORCER && c.env.ALLOWED_METHODS_ENFORCER ? {
       wire: {
         enforcers: { timestamp: c.env.TIMESTAMP_ENFORCER, allowedMethods: c.env.ALLOWED_METHODS_ENFORCER },

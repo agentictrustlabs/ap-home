@@ -57,6 +57,20 @@ import { subjectAskOf, subjectAnswerOf, handoffOf, routedRunRefFor, subjectAnswe
 import { a2aDoor } from './run-trace.js';
 import { PULSE_PUBLIC_ASK } from './pulse-public';
 
+/** Spec 439 F3 — what a verified door receipt says, as recorded on a task. Evidence a reader weighs; never a grant. */
+export interface ForeignStandingEvidenceV1 {
+  type: 'ap.foreign-standing-evidence.v1';
+  boundaryId: string;
+  door: string;
+  receiptRef: string;
+  recordHash: string;
+  effect: string;
+  reasonCodes: string[];
+  /** `<estateId>:<set>@<sequence>` as the door said it; the receipt's codes corroborate the kind, not the numbers. */
+  standing: { estateId: string; set: string; sequence: number } | null;
+  verifiedAt: string;
+}
+
 export interface StandardMountDeps {
   env: InternalMarkerEnv & Record<string, unknown>;
   /** The Worker's own app, so the ask runs in-process (a Worker cannot fetch its own hostname). Called with
@@ -64,6 +78,14 @@ export interface StandardMountDeps {
   appFetch: (request: Request, env: unknown) => Promise<Response>;
   /** Verifies a Home session token → the person's SA. */
   verifySession: (token: string) => Promise<{ ok: true; sa: Address } | { ok: false; status: number; error: string }>;
+  /**
+   * Spec 439 F3 — THE DOOR'S WORD, CHECKED. A request that came through a federation door (ap-federation
+   * `apps/door`) carries the door's receipt reference and the standing it admitted on. This verifies the receipt
+   * AT THE DOOR named (an allow-listed boundary, never a URL the request supplied) and answers the evidence — or
+   * null when the door is unknown, unreachable, or its receipt does not name THIS caller as admitted. EVIDENCE,
+   * NEVER AUTHORITY: it lands on the task's metadata for a reader; nothing below reads it to decide anything.
+   */
+  verifyDoorReceipt?: (input: { boundaryId: string; receiptRef: string; caller: Address; standing: string | null }) => Promise<ForeignStandingEvidenceV1 | null>;
   /** Spec 372 S3c — the chain checks behind an AGENT's session wire. Absent ⇒ only people are admitted. */
   wire?: Pick<SessionWirePrincipalDeps, 'enforcers' | 'verifyDelegationSig' | 'isRevoked' | 'verifyAgentSignature'>;
   /** Spec 372 S3c — spend a caller's assertion once, at the addressed agent's own object. */
@@ -236,6 +258,18 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
           const referral = referralOf(ctx.message);
           // Whose conversation this is: a later GetTask or a continuation from anyone else is refused (spec 372 S4).
           ctx.task.metadata = { ...(ctx.task.metadata ?? {}), asker: caller };
+          // Spec 439 F3 — A CALLER THAT CAME THROUGH A FEDERATION DOOR says so in headers the door set (never the
+          // caller). The receipt is checked at the door named, and what it says rides on the task as EVIDENCE: a
+          // reader sees "admitted at <boundary> on standing in estate X at sequence N"; the run below is the same run
+          // any agent asking as itself gets — no mandate presented, reads bounded, acts parking AUTH_REQUIRED. A
+          // door that cannot be checked yields `foreignStanding: { verified: false }`, said, never assumed.
+          const boundaryId = ctx.headers.get('x-ap-admission-boundary');
+          const receiptRef = ctx.headers.get('x-ap-admission-receipt');
+          if (boundaryId && receiptRef && deps.verifyDoorReceipt) {
+            const evidence = await deps.verifyDoorReceipt({ boundaryId, receiptRef, caller, standing: ctx.headers.get('x-ap-foreign-standing') }).catch(() => null);
+            ctx.task.metadata = { ...(ctx.task.metadata ?? {}), foreignStanding: evidence ? { ...evidence, verified: true } : { boundaryId, receiptRef, verified: false } };
+            console.log(`[standard-a2a] federation door ${boundaryId} receipt ${receiptRef} for ${caller}: ${evidence ? `${evidence.effect} ${evidence.reasonCodes.filter((x) => x.startsWith('FOREIGN_ESTATE_')).join(',')}${evidence.standing ? ` standing ${evidence.standing.estateId.slice(0, 10)}…:${evidence.standing.set}@${evidence.standing.sequence}` : ''}` : 'NOT VERIFIED'}`);
+          }
           // Spec 387 W3 — A CONTINUATION: the same caller answers the prompt the run parked on. The task's own
           // metadata says which run; the checkpoint says which step and who may answer; the answer is the data part.
           const parkedRef = typeof ctx.task.metadata?.runRef === 'string' && ctx.task.metadata.openToStewards === true ? ctx.task.metadata.runRef : undefined;

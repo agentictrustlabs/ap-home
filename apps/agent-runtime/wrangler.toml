@@ -108,6 +108,7 @@ zone_name = "faithnet.ai"
 binding = "AI"
 
 [env.faithnet.vars]
+FEDERATION_DOORS = '{"ap-federation-door:imbnet":"https://door.ap-federation.faithnet.io","ap-federation-door:faithnet":"https://door-faithnet.ap-federation.faithnet.io"}'  # spec 439 F3 — the federation doors whose receipts this estate reads (custom domains only)
 # Spec 410 §10 — THE ESTATE'S ADOPTED ONTOLOGY MANIFEST. Pinned to the digest faithnet has bound mandates to since ontology
 # 1.0.0-alpha.30; the packages moved to alpha.31 (spec 427 W6, org.ttl 0.4.0) on 2026-10-09 WITHOUT adopting it: adoption is a
 # governance act (`apgov:AdoptedVersion`), not a dependency bump. Remove or move this line when the estate adopts the new one.
@@ -663,6 +664,7 @@ zone_name = "impact-agent.ai"
 binding = "AI"
 
 [env.imbnet.vars]
+FEDERATION_DOORS = '{"ap-federation-door:imbnet":"https://door.ap-federation.faithnet.io","ap-federation-door:faithnet":"https://door-faithnet.ap-federation.faithnet.io"}'  # spec 439 F3 — the federation doors whose receipts this estate reads (custom domains only)
 CHAIN_ID = "34348"
 AGENT_NAME_PARENTS = "me,impact"
 CONTRACTS_GENERATION = "1"
