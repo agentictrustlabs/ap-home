@@ -89,7 +89,7 @@ import { encodeAbiParameters, encodeFunctionData, keccak256, toBytes, toFunction
 import { type Plan, type Planner,
   runIntent, CONTINUE_STEP_ID, deriveArgs, type ArgDerivationV1, InputRequired, dataFor, signatureFor,
   type RunResult, type ToolSpec, type ToolInvoker, type ApprovalPort, type ReceiptSink, type StepReceipt, type MandatePresentation, type SuppliedInputV1, type InputFieldV1, type AnswerComposer, planAdmission, foundIsNotAsked, capabilitiesAvailable, instructionNeedsAct, noPlaceholders, subjectNamedInAsk, dependenciesProvided, branchesDecidable, questionAnsweredByRead, numbersFromTheWords, partiesDistinct, actingPartyFromTheWords, kindNamedIsChartered, completePlan, transitionsHold, type FactsV1, outcomeClassOf, type ExecutionBindingV1, type OutcomeClass, type ResolvedStep } from '@agenticprimitives/orchestration';
-import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep, composeOfferedTools, mergeContractTool as composeMergeContractTool, loadPlaybook, declaredEffectSink, setBillStep, declaredCapabilities, type AskScopeV1 } from '@agenticprimitives/harness';
+import { delegationMandateVerifier, riskLadderPolicy, mandateRequirementForStep, composeOfferedTools, mergeContractTool as composeMergeContractTool, loadPlaybook, declaredEffectSink, setBillStep, declaredCapabilities, forgetMemo, type AskScopeV1 } from '@agenticprimitives/harness';
 // Spec 353 — the scope schema is Ring 0 now (spec 399 §4); this app keeps exporting it for its callers.
 export type { AskScopeV1 } from '@agenticprimitives/harness';
 import {
@@ -2908,6 +2908,11 @@ export interface PlannerTraceV1 {
   toolsExposed: string[];
   /** The playbook this run was admitted under (digest-pinned), or null for the bare harness. */
   playbook: { archetypeId: string; archetypeVersion: string; digest: string } | null;
+  /** WHY there is no playbook, when the reason is that its record could not be READ (2026-10-13). A `playbook: null`
+   *  means four different things — none assigned, a digest that does not match, a definition that no longer
+   *  validates, and a read that failed — and the Home rendered all four as "none (bare harness)", which is the
+   *  sentence that sent a cold-start failure looking like a configuration one. Display only; nothing reads it. */
+  playbookUnreadable?: string;
   /** keccak256 of the exact system prompt the model was given (doctrine + rules + examples). */
   promptDigest: Hex;
   /** How many contract examples were rendered into that prompt. */
@@ -4867,6 +4872,86 @@ function selectByPayee(rs: { capability: { id: string }; args: Record<string, un
   return null;
 }
 
+/** A read that did not happen, kept distinct from a record that is not there. Never leaves this module:
+ *  `loadPlaybook` answers `null` either way, and the bare harness stands either way. */
+class RecordUnreadable extends Error {}
+/** A record that is genuinely absent. Thrown only so the memo does not keep it — see below. */
+class RecordAbsent extends Error {}
+
+/**
+ * A SUBJECT'S RECORD, READ SO THAT A FAILURE IS NOT MISTAKEN FOR AN ABSENCE (2026-10-13).
+ *
+ * Written for the playbook, which is where it bit, and used by every read that is REMEMBERED for a minute.
+ *
+ * `loadPlaybook` treats everything it cannot verify as ABSENT, which is the right safe direction twice over: a
+ * tampered assignment must not WIDEN behaviour, and a broken one must not strand an agent that could otherwise
+ * answer. But the port beneath it flattened a FAILED read to `null` as well, and this path remembers what the
+ * port returned for a minute, COLO-WIDE. So one cold read the owner's InteractionsDO refused before it ever
+ * reached the vault — no interactions grant, a grant stale since the last scope widening, a vault still spinning
+ * up — made the agent bare for the next sixty seconds, and said nothing: `loadPlaybook` logs a digest mismatch
+ * and an invalid definition, never a read that did not happen.
+ *
+ * The incident (2026-10-13, `ask-mv6jof27`): `prepare:playbook` answered in 8 ms. A vault read is 1.9-3.0 s
+ * cold (`run-memo.ts`), so that read never left the Worker. The Ask ran the bare harness — no playbook on the
+ * trace, no instruction skills to select among, 58 unnarrowed tools — chose `kb.question` over the steward's own
+ * people-group skills, and answered an interpretation of the question instead of the question. Every ask after
+ * it had its playbook, which is the signature of a remembered failure rather than a missing record.
+ *
+ * Three outcomes now, each said, and only ONE of them remembered:
+ *   · READ, and there is an assignment → remembered for the minute, exactly as before.
+ *   · READ, and there is none         → NOT remembered. This is precisely the agent the Home's self-heal is
+ *     writing an assignment for right now (`ensurePlaybook`), on the Home's own path, which cannot reach this
+ *     cache — so remembering the absence buys a minute of bare asks after a playbook has landed. One vault read
+ *     per ask is the price, paid only by the agent that has no playbook.
+ *   · COULD NOT BE READ               → said, and not remembered, so the next ask reads again.
+ *
+ * Not a fallback (ADR-0013): one mechanism, one read, with a cache in front of its ANSWERS only. A read that
+ * failed is not authority to do more, and the bare harness still stands for the ask that hit it.
+ */
+export function subjectRecordReader(
+  deps: HarnessDeps,
+  log: (line: string) => void = console.warn,
+  /** Told the record type and the reason when a read FAILED, so a run can say it on its own record rather than
+   *  leaving the reader's console line as the only trace of it. Never told about a record that is simply absent. */
+  onUnreadable?: (recordType: string, why: string) => void,
+): ((subject: string, recordType: string) => Promise<unknown>) | undefined {
+  const status = deps.readSubjectRecordStatus;
+  const plain = deps.readSubjectRecord;
+  if (!status && !plain) return undefined;
+  return async (subject: string, recordType: string): Promise<unknown> => {
+    try {
+      return await remembered(`record:${subject.toLowerCase()}:${recordType}`, async () => {
+        // No status port (a test's deps) ⇒ the read as it was: a null is an answer and is remembered.
+        if (!status) return plain!(subject, recordType);
+        let r = await status(subject, recordType);
+        // ONE MORE GO AT THE SAME CALL, and only at a TRANSIENT failure. The first ask of a session pays the
+        // cold start of the owner's InteractionsDO, its vault grant and the MCP hop behind it, and the only
+        // thing a cold refusal is evidence of is that nothing is warm yet — so the person who asked first
+        // should not be the one who gets the bare harness. A bounded retry of the SAME call is not a second
+        // mechanism (ADR-0013): there is no other way to read this record, and nothing weaker is accepted.
+        // `needsEnable` is NOT retried: a steward turns storage on once, and asking again costs a round trip
+        // to be told the same permanent thing.
+        if (!r.ok && !r.needsEnable) {
+          log(`[record] ${subject}: ${recordType} read failed cold (${r.error ?? 'no reason given'}) — reading once more before taking "absent" for an answer`);
+          forgetMemo(subject, recordType); // spec 396 W4 — the run's memo holds the failed answer; drop it or the retry is the same object
+          r = await status(subject, recordType);
+        }
+        if (!r.ok) throw new RecordUnreadable(r.needsEnable ? 'storage is not enabled for this agent' : (r.error ?? 'the read failed'));
+        if (r.data === null || r.data === undefined) throw new RecordAbsent();
+        return r.data;
+      });
+    } catch (e) {
+      if (e instanceof RecordAbsent) return null;
+      if (e instanceof RecordUnreadable) {
+        onUnreadable?.(recordType, e.message);
+        log(`[record] ${subject}: ${recordType} could NOT BE READ (${e.message}) — this ask proceeds as if the record were absent, but nothing is remembered, so the next ask reads again. A read that failed is NOT the same answer as a record that is not there.`);
+        return null;
+      }
+      throw e;
+    }
+  };
+}
+
 /** Run one ask under a mandate. Everything the loop decided is on the receipts; nothing here re-decides. */
 /** What the run's party words became, keyed so the same party resolved twice is recorded once. Display
  *  only — nothing reads it to decide anything. */
@@ -4938,9 +5023,10 @@ export async function runUnderMandate(env: HarnessEnv, deps: HarnessDeps, input:
   // Remembered for a minute per addressee (`run-memo.ts`): the vault read was 2–3 s of every ask.
   // The RECORD is what is remembered, not the playbook built from it: the playbook carries a Set, and
   // a Set does not survive the cache's JSON. `loadPlaybook` rebuilds from the record every time, cheaply.
-  const rememberedRecord = deps.readSubjectRecord
-    ? (subject: string, recordType: string) => remembered(`record:${subject.toLowerCase()}:${recordType}`, () => deps.readSubjectRecord!(subject, recordType))
-    : undefined;
+  // A read that FAILED is neither remembered nor silent — `subjectRecordReader` says why and lets the
+  // next ask try again, because a cold refusal once read as "this agent has no playbook" for a minute.
+  const unreadableRecords: Record<string, string> = {};
+  const rememberedRecord = subjectRecordReader(deps, console.warn, (rt, why) => { unreadableRecords[rt] = why; });
   // STARTED TOGETHER, AWAITED WHERE NEEDED. The playbook, the standing derivation and the catalog are three
   // independent reads of the addressee's vault, and each cold read is seconds; run one after another they
   // were most of a cold ask (playbook 4 s, then standing 4 s, then the model — seen live, 2026-09-11).
@@ -5514,6 +5600,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   const kind = input.plan ? 'supplied' : selected.kind;
   const trace: PlannerTraceV1 = {
     planner: plannerUsed, ...(selected.model ? { model: selected.model } : {}), toolsExposed: [], recalledTurns: input.conversation?.turns.length ?? 0, playbook: playbook ? { archetypeId: playbook.archetypeId, archetypeVersion: playbook.archetypeVersion, digest: playbook.digest } : null,
+    ...(!playbook && unreadableRecords['archetype.assignment'] ? { playbookUnreadable: unreadableRecords['archetype.assignment'] } : {}),
     promptDigest: keccak256(toBytes(withPlaybook)), examplesRendered: (examples.match(/^- /gm) ?? []).length,
     ...(doctrine ? { instructionsRendered: { chars: doctrine.chars, of: doctrine.of } } : {}),
     admission: [], plan: [], bindings: [],

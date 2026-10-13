@@ -1103,7 +1103,14 @@ function PlannerTraceView({ trace, totalMs }: { trace: PlannerTrace; /** the who
     <div className="muted" style={{ marginTop: 6, fontSize: 11, lineHeight: 1.5 }}>
       <div>
         <strong>planner</strong> {trace.planner}{trace.model ? `(${trace.model})` : ''}
-        {' · '}<strong>playbook</strong> {trace.playbook ? `${trace.playbook.archetypeId.replace(/^skill:archetypes\//, '')} v${trace.playbook.archetypeVersion} ${short(trace.playbook.digest)}` : 'none (bare harness)'}
+        {' · '}<strong>playbook</strong> {trace.playbook
+          ? `${trace.playbook.archetypeId.replace(/^skill:archetypes\//, '')} v${trace.playbook.archetypeVersion} ${short(trace.playbook.digest)}`
+          // A READ THAT FAILED IS NOT A PLAYBOOK THAT IS ABSENT (2026-10-13). "none (bare harness)" read as a
+          // settled fact about the agent, so a cold vault refusal looked like an unassigned archetype and the
+          // narrowed offer set was missing for a reason nothing on this screen named.
+          : trace.playbookUnreadable
+            ? <span title={trace.playbookUnreadable}>none — its record could not be read ({trace.playbookUnreadable})</span>
+            : 'none (bare harness)'}
         {' · '}<strong>examples</strong> {trace.examplesRendered}
         {' · '}<strong>tools</strong> {trace.toolsExposed.length}
         {trace.surface ? <> · <strong>surface</strong> {trace.surface.realm ?? '?'}{typeof trace.surface.capabilities === 'number' ? ` (${trace.surface.capabilities} caps)` : ''}</> : null}

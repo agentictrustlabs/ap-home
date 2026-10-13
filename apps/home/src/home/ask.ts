@@ -130,6 +130,9 @@ export interface PlannerTrace {
   model?: string;
   toolsExposed: string[];
   playbook: { archetypeId: string; archetypeVersion: string; digest: string } | null;
+  /** Why there is no playbook, when the reason is that its record could not be READ (runtime, 2026-10-13).
+   *  `playbook: null` has four causes and this screen used to render all four as "none (bare harness)". */
+  playbookUnreadable?: string;
   promptDigest: string;
   examplesRendered: number;
   admission: Array<{ refused: Array<{ code: string; message: string; stepIndex?: number; toolId?: string }>; replanned: boolean }>;

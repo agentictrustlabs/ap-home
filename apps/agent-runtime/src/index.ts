@@ -176,7 +176,7 @@ import { DECISION_POINTS } from '@agenticprimitives/ontology';
 import { loadPlaybook, billed, chargeBill, memoRead, forgetMemo, projectRunState, draftRecipe, findingsOf } from '@agenticprimitives/harness';
 import { cardRoomActOf, cardRoomTurn, verifyStudyGrant, type CardRoomAct, type StudyAccess } from './card-room.js';
 import { enforcersFromEnv } from './org-wire.js';
-import { runUnderMandate, askReplyFor, readSubjectReply, type AskReplyEnvelopeV1, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
+import { runUnderMandate, subjectRecordReader, askReplyFor, readSubjectReply, type AskReplyEnvelopeV1, type HarnessDeps, type HarnessEnv, type HarnessRunInput, type TeamGenesisDeps, type GenesisUserOpJson } from './harness-run.js';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { subjectAsk, subjectAnswer, validateSubjectAsk, handoff, skillSelector, delegationOfWire, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
 import { realtimeKitConfigured, verifyRealtimeKitWebhook, readRealtimeKitWebhook } from './realtimekit.js';
@@ -2280,7 +2280,9 @@ async function cardRoomAsk(env: Env, deps: ReturnType<typeof harnessDeps>, input
     resolveName: (n) => remembered(`resolve:${n.toLowerCase()}`, () => deps.resolveName?.(n) ?? Promise.resolve(null)),
     readRecord: (owner, recordType) => deps.readSubjectRecord ? deps.readSubjectRecord(owner, recordType) : Promise.resolve(null),
     writeRecord: (owner, recordType, record) => deps.writeSubjectRecord ? deps.writeSubjectRecord(owner, recordType, record) : Promise.resolve({ ok: false, error: 'no vault' }),
-    specialistsOf: async (agent) => (await loadPlaybook(deps.readSubjectRecord ? (subject, recordType) => remembered(`record:${subject.toLowerCase()}:${recordType}`, () => deps.readSubjectRecord!(subject, recordType)) : undefined, agent).catch(() => null))?.specialists ?? null,
+    // The same careful read the ask path makes (`subjectRecordReader`): a cold refusal is said and not
+    // remembered, so "this agent hands nothing to a specialist" never means "its vault could not be asked".
+    specialistsOf: async (agent) => (await loadPlaybook(subjectRecordReader(deps), agent).catch(() => null))?.specialists ?? null,
     // Remembered a minute, like the playbook: the stored wire does not change between two hands, and the
     // coach verifies it on chain at every consultation regardless — a local `studygrant.revoke` is felt
     // within the minute, an on-chain revoke at the next hand.
@@ -4901,7 +4903,12 @@ app.post('/harness/ask', async (c) => {
     ? (async () => {
         const bdeps = harnessDeps(c.env, buildAuditSink(c.env));
         const bsubject = String(body.addressee).toLowerCase();
-        const braw = bdeps.readSubjectRecord ? await marks.time('read:budget', () => remembered(`record:${bsubject}:${BUDGET_RECORD}`, () => bdeps.readSubjectRecord!(bsubject, BUDGET_RECORD).catch(() => null))) : null;
+        // Through the same reader as the playbook (2026-10-13): a budget read the DO refused used to be remembered
+        // as "this agent declared no budget" for the minute after, which is the one direction a budget must never
+        // drift in. The ask it happened on still proceeds — an unreadable record is not authority to refuse a
+        // person either — but it is SAID, and the next ask reads the budget again instead of the failure.
+        const breader = subjectRecordReader(bdeps);
+        const braw = breader ? await marks.time('read:budget', () => breader(bsubject, BUDGET_RECORD)) : null;
         if (braw) {
           const budget = budgetOf(braw);
           if (budget.asksPerDay !== null || budget.vaultCallsPerDay !== null) {
@@ -6373,6 +6380,23 @@ function anchorPortFor(env: Env, deps: Pick<HarnessDeps, 'executeAsServiceSa'>):
 
 export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: ExecutionContext } = {}): HarnessDeps {
   const pub = createPublicClient({ chain: chainFor(env), transport: http(env.RPC_URL) });
+  /**
+   * ONE READ OF A SUBJECT'S RECORD, WITH THE REASON IT DID NOT WORK — the read both record ports are built on.
+   *
+   * "Storage was never enabled for this agent" is a permanent, actionable state; "the DO refused it", "the vault
+   * is spinning up" are transient ones; and NEITHER is "there is nothing here". The owner's InteractionsDO already
+   * tells them apart (`internal.coordination.vaultRead` answers `{ok:false, needsEnable}` / `{ok:false, error}` /
+   * `{ok:true, data:null}`) and `callInteractionsInternal` throws on the first two, so the distinction survives
+   * exactly as far as the `catch` that discards it. Kept here instead: one DO round trip, one per-run memo
+   * (spec 396 W4) and one bill row for both ports.
+   */
+  const subjectRecordStatus = (subject: string, recordType: string): Promise<{ ok: boolean; needsEnable?: boolean; data: unknown; error?: string }> =>
+    memoRead(subject, recordType, async () => {
+      const out = await callInteractionsInternal(env, subject, 'internal.coordination.vaultRead', { recordType })
+        .catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+      const r = out as { ok?: boolean; needsEnable?: boolean; data?: unknown; error?: string };
+      return { ok: r.ok !== false, ...(r.needsEnable ? { needsEnable: true } : {}), data: r.data ?? null, ...(r.error ? { error: r.error } : {}) };
+    });
   const deps: HarnessDeps = {
     readContract: (a) => pub.readContract(a as never) as Promise<unknown>,
     audit,
@@ -6592,10 +6616,13 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     // The asker's PRIVATE tier: their own relationships, read through their own InteractionsDO under their
     // own interactions grant, in-Worker. No client-asserted list, and nothing about who they know leaves
     // their tier (ADR-0025).
-    readSubjectRecord: async (subject: string, recordType: string) => memoRead(subject, recordType, async () => {
-      const out = await callInteractionsInternal(env, subject, 'internal.coordination.vaultRead', { recordType }).catch(() => null);
-      return (out as { data?: unknown } | null)?.data ?? null;
-    }),
+    //
+    // THE DATA IS A PROJECTION OF THE STATUS, not a second read (2026-10-13). These were two ports over the
+    // same op, each with its own `catch`, its own memo entry and its own DO round trip for the same record —
+    // and the data-only one threw its REASON away at the door, which is how a read the DO refused became
+    // indistinguishable from "this agent has no such record" (see `subjectRecordReader`). One read now, one
+    // memo, one bill row; `readSubjectRecord` is `.data` of it and still never throws, exactly as before.
+    readSubjectRecord: async (subject: string, recordType: string) => (await subjectRecordStatus(subject, recordType)).data,
     // Spec 370 P4 — a PUBLIC op on a principal's InteractionsDO, exactly as the Home's `/connect/work`
     // route forwards it: the session (and a stewardship wire, when the act is a steward's) travel in the
     // body, and the DO derives standing, validates the command through the reducer, audits, then writes.
@@ -6738,12 +6765,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       const r = out as { ok?: boolean; error?: string };
       return r.ok === false ? { ok: false, ...(r.error ? { error: r.error } : {}) } : { ok: true };
     },
-    readSubjectRecordStatus: async (subject: string, recordType: string) => {
-      const out = await callInteractionsInternal(env, subject, 'internal.coordination.vaultRead', { recordType })
-        .catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
-      const r = out as { ok?: boolean; needsEnable?: boolean; data?: unknown; error?: string };
-      return { ok: r.ok !== false, ...(r.needsEnable ? { needsEnable: true } : {}), data: r.data ?? null, ...(r.error ? { error: r.error } : {}) };
-    },
+    readSubjectRecordStatus: subjectRecordStatus,
     // REVERSE name lookup for an address — the public directory's fact (ADR-0040), used to name roster
     // rows that only carry addresses. Best-effort; null is a fine answer.
     nameOf: async (address: string) => {
@@ -11325,8 +11347,10 @@ async function warmReadChain(env: Env, ctx: ExecutionContext): Promise<void> {
   const deps = harnessDeps(env, buildAuditSink(env), { executionCtx: ctx });
   await Promise.allSettled(
     agents.flatMap((sa) => [
-      // The playbook + derived type: the first reads of every ask.
-      loadPlaybook(deps.readSubjectRecord, sa as Address, () => undefined).catch(() => null),
+      // The playbook + derived type: the first reads of every ask. Through the ask path's OWN reader, so a warm
+      // run also fills the minute's memory the ask reads from — and so a warm read that FAILED is said here,
+      // on a schedule, instead of being discovered by the first person to ask (2026-10-13).
+      loadPlaybook(subjectRecordReader(deps), sa as Address, console.warn).catch(() => null),
       deps.agentTypeOf?.(sa as Address).catch(() => null) ?? Promise.resolve(null),
       // The library index (`content.catalog`): the Home's cold `/connect/library` read for an org vault is
       // the remaining cold-start cost on a first load (same rows each time), so keep that exact record — and

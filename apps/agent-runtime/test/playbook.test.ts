@@ -1,7 +1,7 @@
 // Spec 354 §4.3 — the playbook loads, verifies its digest, and narrows the offer (never the authority).
 import { describe, it, expect } from 'vitest';
 import { loadPlaybook } from '@agenticprimitives/harness';
-import { scopedActionTools } from '../src/harness-run.js';
+import { scopedActionTools, subjectRecordReader } from '../src/harness-run.js';
 import { definitionDigest, type AgentHarnessDefinitionV1 } from '@agenticprimitives/capability-claims';
 
 const TREASURY_DEF: AgentHarnessDefinitionV1 = {
@@ -201,5 +201,68 @@ describe('mergeContractTool — behaviour merges, authority does not', () => {
 
   it('no contract ⇒ the built-in stands unchanged', () => {
     expect(mergeContractTool(PAY_BUILTIN as never, undefined)).toBe(PAY_BUILTIN as never);
+  });
+});
+
+/**
+ * A READ THAT FAILED IS NOT A PLAYBOOK THAT IS ABSENT — 2026-10-13 (`ask-mv6jof27`).
+ *
+ * The ask path remembers the assignment record for a minute, colo-wide. When a cold read the owner's
+ * InteractionsDO refused was remembered too, the agent stayed bare for the whole minute and nothing said so.
+ */
+describe('subjectRecordReader — a failure is said, retried once, and never remembered', () => {
+  const ASSIGNMENT = 'archetype.assignment';
+  const ok = (data: unknown) => ({ ok: true, data });
+  const failed = (error: string) => ({ ok: false, data: null, error });
+  const unprovisioned = () => ({ ok: false, needsEnable: true, data: null, error: 'interactions storage not enabled' });
+
+  it('reads once more at a COLD failure, so the first ask of a session gets its playbook', async () => {
+    const said: string[] = [];
+    const answers = [failed('vault auth failed'), ok(record(TREASURY_DEF))];
+    let calls = 0;
+    const reader = subjectRecordReader({ readSubjectRecordStatus: async () => answers[calls++]! } as never, (l) => said.push(l));
+    const pb = await loadPlaybook(reader, '0xcold01', (l) => said.push(l));
+    expect(pb?.digest).toBe(definitionDigest(TREASURY_DEF));
+    expect(calls).toBe(2);
+    expect(said.join(' ')).toMatch(/read failed cold/);
+  });
+
+  it('does NOT remember a failure: the next ask reads again, and says why it stood bare', async () => {
+    const said: string[] = [];
+    let calls = 0;
+    const answers = [failed('boom'), failed('boom'), ok(record(TREASURY_DEF))];
+    const reader = subjectRecordReader({ readSubjectRecordStatus: async () => answers[Math.min(calls++, 2)]! } as never, (l) => said.push(l));
+    expect(await loadPlaybook(reader, '0xcold02', () => {})).toBeNull();          // both tries failed ⇒ bare
+    expect(said.some((l) => /could NOT BE READ/.test(l))).toBe(true);             // and said so
+    expect(await loadPlaybook(reader, '0xcold02', () => {})).not.toBeNull();      // nothing stuck: read again
+  });
+
+  it('does NOT retry an UNPROVISIONED vault — a steward turns storage on once', async () => {
+    let calls = 0;
+    const reader = subjectRecordReader({ readSubjectRecordStatus: async () => { calls++; return unprovisioned(); } } as never, () => {});
+    expect(await loadPlaybook(reader, '0xcold03', () => {})).toBeNull();
+    expect(calls).toBe(1);
+  });
+
+  it('does NOT remember an ABSENCE — the Home self-heal assigns one, and this cache cannot be told', async () => {
+    let calls = 0;
+    const answers = [ok(null), ok(record(TREASURY_DEF))];
+    const reader = subjectRecordReader({ readSubjectRecordStatus: async () => answers[Math.min(calls++, 1)]! } as never, () => {});
+    expect(await loadPlaybook(reader, '0xcold04', () => {})).toBeNull();
+    expect(await loadPlaybook(reader, '0xcold04', () => {})).not.toBeNull();      // assigned a moment later, seen at once
+  });
+
+  it('REMEMBERS a record that was read: one vault read per minute, as before', async () => {
+    let calls = 0;
+    const reader = subjectRecordReader({ readSubjectRecordStatus: async () => { calls++; return ok(record(TREASURY_DEF)); } } as never, () => {});
+    expect((await loadPlaybook(reader, '0xcold05', () => {}))?.digest).toBe(definitionDigest(TREASURY_DEF));
+    expect((await loadPlaybook(reader, '0xcold05', () => {}))?.digest).toBe(definitionDigest(TREASURY_DEF));
+    expect(calls).toBe(1);
+  });
+
+  it('with no status port (a plain reader) behaves exactly as it did', async () => {
+    const reader = subjectRecordReader({ readSubjectRecord: async (_s: string, rt: string) => (rt === ASSIGNMENT ? record(TREASURY_DEF) : null) } as never, () => {});
+    expect((await loadPlaybook(reader, '0xcold06', () => {}))?.digest).toBe(definitionDigest(TREASURY_DEF));
+    expect(subjectRecordReader({} as never)).toBeUndefined();
   });
 });
