@@ -2,8 +2,13 @@
 // records) — the AP Naming projection's write path, as an operator tool. One userOp, custodian-signed.
 //
 //   DEPLOY_NETWORK=faithchain RPC_URL=… HANDLE=discovery.registry CUSTODIAN_KEY=0x… \
-//   A2A_ENDPOINT=https://discovery-a2a.faithnet.io [SITE_URL=…] [CARD_URI=…] [CARD_DIGEST=0x…] [DESCRIPTION=…] \
-//   pnpm --filter agenticprimitives-demo-sso-next exec tsx scripts/set-typed-name-records.ts
+//   A2A_ENDPOINT=https://discovery-registry.faithnet.ai/api/a2a [SITE_URL=…] [CARD_URI=…] [CARD_DIGEST=0x…] [DESCRIPTION=…] \
+//   pnpm --filter @ap-home/home exec tsx scripts/set-typed-name-records.ts
+//
+// `A2A_ENDPOINT` IS WHERE THE AGENT IS ASKED, never where a capability it uses is served (spec 338 / ADR-0056).
+// The runtime routes a Home's `/harness/*` reads by this record: name a host that runs no harness and every read
+// forwards there and comes back 404 (discovery.registry pointed at the town's ARD surface until 2026-10-13).
+// Only the records given are written; the rest of the name's records are left alone.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createPublicClient, http, type Address, type Hex } from 'viem';
@@ -18,7 +23,11 @@ const RPC_URL = process.env.RPC_URL ?? 'http://127.0.0.1:8545';
 const HANDLE = (process.env.HANDLE ?? '').trim().toLowerCase();
 const CUSTODIAN_KEY = (process.env.CUSTODIAN_KEY ?? '') as Hex;
 if (!HANDLE || !CUSTODIAN_KEY) throw new Error('HANDLE + CUSTODIAN_KEY required');
-const d = JSON.parse(readFileSync(join(REPO_ROOT, 'packages', 'contracts', `deployments-${NETWORK}.json`), 'utf8')) as Record<string, Address> & { chainId: number };
+// The deployments file ships inside the published contracts package, never a workspace path (`gen-dev-vars.ts`
+// reads the same one). This said `packages/contracts/` until 2026-10-13 — a path that stopped existing when the
+// products left Ring 0 (ADR-0063), so the tool could not run in its own repository at all.
+const DEPLOYMENTS_PATH = join(REPO_ROOT, 'node_modules', '@agenticprimitives', 'contracts', `deployments-${NETWORK}.json`);
+const d = JSON.parse(readFileSync(DEPLOYMENTS_PATH, 'utf8')) as Record<string, Address> & { chainId: number };
 
 const records: AgentNameRecords = {
   ...(process.env.A2A_ENDPOINT ? { a2aEndpoint: process.env.A2A_ENDPOINT } : {}),
