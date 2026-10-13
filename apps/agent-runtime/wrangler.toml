@@ -129,8 +129,11 @@ ADOPTED_ONTOLOGY_MANIFEST_DIGEST = "0xf64becd4c395e8b7f0d935ca97640a6d4b37fc087e
 # (`engagement.agent.invoke`), the same way a person asks the scripture service for scripture. Its answer is
 # its own, attributed, with the publisher of every figure named.
 #
-# `global-church` stays: it is an A2A executor to a SERVICE, not a store — the shape this rule asks for.
-EXECUTORS = '{"field-circles":{"url":"https://field-a2a.faithnet.io","client":"field-app"},"global-church":{"url":"https://a2a.global.church","client":"gc-engage"}}'
+# `global-church` is gone (2026-10-12): Global.Church's reads are served by its own service agent `gc-gaps.svc`
+# (chartered under `global-church.org`, `atl:mcpEndpoint` → its MCP, `gc:CFnPeopleGroupResearch` on its profile),
+# discovered and engaged like `people-groups.svc`. Its `gc/gap-steward` playbook carries no `invoke`, so no run
+# reaches `a2a.global.church` any more; the executor is retired on the Global.Church side.
+EXECUTORS = '{"field-circles":{"url":"https://field-a2a.faithnet.io","client":"field-app"}}'
 # Spec 377 / provider-outage — the exact page for THIS estate's Gemini failure mode (a monthly spend cap,
 # not a rate limit): the error links here, and whoever runs the Home raises it here. Overrides the generic default.
 ORCHESTRATION_GEMINI_BILLING_URL = "https://ai.studio/spend"
