@@ -41,13 +41,20 @@ faithchain, and it deploys from [`ap-town`](https://github.com/agentictrustlabs/
 - **Worker names, Durable Object class names, DO bindings and migration tags are NEVER renamed** — that orphans
   storage. They are the names faithnet has always deployed under (`demo-a2a-faithnet`, …); the directories were renamed,
   the deployment was not.
-- **One deployer per estate.** Once faithnet deploys from here, nothing in Ring 0 deploys it again. Nor does
-  ap-demos: its `apps/demo-a2a`, `apps/demo-mcp` and `apps/demo-edge` are copies of the pre-split config and
-  carried `[env.faithnet]` under the same Worker names until 2026-10-13, so a deploy from either tree landed on
-  the same live Worker. Those envs are removed there (ap-demos `DEPLOYER.md`); `faithnet-b` is gone outright —
-  `demo-a2a-faithnet-b` / `demo-edge-faithnet-b` no longer exist on the account. **A faithnet feature belongs in
-  `apps/agent-runtime` here**, not in the ap-demos copy: the people-group work was written into both trees in
-  October 2026 and the copies are still byte-identical, which is the warning and not the reassurance.
+- **One deployer per estate, and now only one copy.** Once faithnet deploys from here, nothing in Ring 0
+  deploys it again. Nor does ap-demos: its `apps/demo-a2a`, `apps/demo-mcp` and `apps/demo-edge` were copies of
+  the pre-split config and carried `[env.faithnet]` under the same Worker names until 2026-10-13, so a deploy
+  from either tree landed on the same live Worker — which is how a retired `global-church` executor went back
+  into production that day. **Resolved at the root on 2026-10-13:** the Base Sepolia / Impact estate those
+  copies served was retired and all five duplicates deleted there (`apps/demo-a2a`, `-mcp`, `-edge`,
+  `-sso-next`, `home-shared`), so `apps/agent-runtime`, `apps/vault`, `apps/edge`, `apps/home` and
+  `apps/shared` here are the only copies that exist. `faithnet-b` is gone too — `demo-a2a-faithnet-b` /
+  `demo-edge-faithnet-b` no longer exist on the account. What ap-demos still deploys is two MCP services on the
+  richcanvas account (`demo-gc-pg`, `gc-ligonier-catalog`) that **faithnet agents read**, so its consumer is
+  this runtime; see ap-demos `DEPLOYER.md`.
+- **Faithnet's Playwright coverage lives in the wrong repository.** 17 files in ap-demos `tests/e2e-sso` test
+  faithnet; there is no `tests/` directory here. They were kept there when the estate around them was retired,
+  rather than deleted. Moving them is an open job.
 - **Deploy from a tree that is up to date with `origin/master`.** On 2026-10-13 a deploy from a tree that
   predated a merged PR put a retired `global-church` executor back into `EXECUTORS` in production. `git fetch`
   and merge before `wrangler deploy`; the config is in the file, so a stale file is a stale deployment.
