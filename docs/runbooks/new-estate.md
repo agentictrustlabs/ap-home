@@ -14,6 +14,31 @@ the two interleave and the order below says when to cross over.
 `imb-vault`, `imb-edge`, `imb-home-mcp`, `imb-approval`). Never reuse another estate's Worker names, DO class
 names, bindings or migration tags: they are storage.
 
+## 0a. Start with the builder (spec 441 W4)
+
+```
+pnpm estate:new --id <estate> --home-host www.<host> --zone <zone> --town <town>   # writes estates/<estate>.estate.json
+pnpm estate:new --id <estate> --plan                                              # the ten steps and their state
+pnpm estate:new --id <estate> --run                                               # do what is the tool's; stop at what is not
+```
+
+**Read this runbook, but let the tool drive.** It is a resumable plan over ten ordered idempotent steps, and
+**nine of them verify themselves** — the KMS tenant and callers from the operator's own status, the tokens by
+secret NAME, the harness SA's custody ON CHAIN, the session leaves by asking the Home, and
+`pnpm check:estate-shape` last. Run it again after every manual step; it never repeats work that is done.
+
+What it will stop at, and why those two cannot be automated:
+
+- an **operator** step runs on the KMS CVM as the operator of record (one holder today, deliberately — see
+  ap-federation 440 §A). The tool runs it when `az` is logged in as that operator and prints it otherwise.
+- a **signer** step charters an agent or rotates custody, which SPENDS AUTHORITY. A tool that charters
+  unattended can create an agent nobody decided to create.
+
+**The reason to use it rather than the steps below:** everything in §0 and the var tables is DERIVED from five
+inputs by `scripts/estate-shape.mts`, which is the only place those vars exist. Hand-typing them is how the two
+estates drifted into 30 differing variables, one of which left a private key in a Worker secret (spec 441 §1).
+The sections below remain the explanation of WHY each step exists, and the record of the ones that bit.
+
 ## 0. Decide what the estate has
 
 | Decision | imbnet's answer | Why it matters |
