@@ -177,7 +177,7 @@ the method, because a security claim nobody can reproduce is worse than no claim
 | --- | --- | --- |
 | **W1** ✅ | `estates/*.estate.json` for both estates; the derive function; `check:estate-shape` over vars, secret NAMES and (with `--kms`) the live callers | **landed 2026-10-14: 9 drifts named, the two Worker-secret keys at the top.** The gate also corrected this spec before anything deployed — §7.1 |
 | **W2** | faithkms: named profiles + a typed purpose for an EIP-155 transaction digest; the interactions leaf declares EIP-712 | `estate-runtime` binds with no raw-digest grant and faithnet's gates stay green |
-| **W3** | imbnet converges (D3, D5); faithnet narrows; the federation record corrected (§6) | `check:estate-shape` green on both; no `A2A_MASTER_PRIVATE_KEY` anywhere |
+| **W3** ✅ | **landed 2026-10-14.** W3a: faithnet declares the two settings it only had by default. W3b: imbnet's relay and interactions keys moved into its own tenant, its callers re-bound to the profiles, the edge assertion required, and both raw private keys DELETED from the Worker | **`check:estate-shape` GREEN on all three arms** — vars, secret names, live callers. `gate:pay-outward` green for maya with no key of imbnet's in a Worker. §7.2 |
 | **W4** | the builder: `estate new <id> --home-host … --zone … --town …` → declaration, tenant, callers, charters, secrets checklist, deploy | a third estate is built from the tool alone and passes the gate on its first run |
 
 W1 is deliberately read-only: it measures before it changes anything, because the only reason this spec exists is
@@ -196,6 +196,27 @@ spec's own mistake.
 Two smaller corrections from the same run: `ORCHESTRATION_*` is a product extra (which models an estate pays for),
 not a town baseline two estates must agree on; and a serving domain is not a browser origin, so imbnet's
 `workers.dev` host belongs beside its zones and not in `ALLOWED_ORIGINS`.
+
+### 7.2 What moving a key actually costs — the three steps W4 must take
+
+Swapping imbnet's two keys broke two things, both because **a key's ADDRESS is load-bearing somewhere a
+configuration variable does not mention**:
+
+1. **The playbook stopped reading** (`auth failed — mcp: auth failed`, visible only as
+   `plannerTrace.playbookUnreadable`). Every resident's DEL-001 session leaf names the interactions key as its
+   delegate, so each leaf pointed at an address that no longer signs. `scripts/reissue-interactions-grants.mts`
+   fixes it and needs no argument for the new key — it reads the live one from
+   `/a2a/agent/interactions-session-key`.
+2. **The payment reverted the whole transaction**, not the inner call — which is why the harness reported "inner
+   userOp reverted" with nothing behind it. **The harness agent SA's sole custodian IS the interactions-session
+   key** (`executeAsServiceSa`'s own comment says so), so changing the key orphaned the account that executes
+   every redemption. One `executeBatch` rotated `0x193B496d`'s custodian onto the AKCS address. faithnet's
+   harness SA was already custodied by its own AKCS key — the difference nobody had noticed.
+
+So **provisioning an estate's interactions key is three steps, not one**: create the key, rotate the harness
+agent SA's custody onto it, and re-issue every resident's session leaf. The builder does all three or it produces
+an estate that answers questions and cannot act. The relay key, by contrast, is one step — nothing references its
+address; its brand-new account holds no gas and the paymaster sponsors the op regardless.
 
 ## 8. What this spec does NOT do
 
