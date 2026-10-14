@@ -87,7 +87,10 @@ export const POSTURE: Record<string, { value: string; why: string }> = {
   },
   AKCS_ACCEPTED_PROTECTION_LEVELS: {
     value: 'CVM_WRAPPED,CVM_DERIVED',
-    why: 'the estate states which protection levels it will accept back, so an AZURE_HSM_DIRECT key cannot be handed to it silently. Unset is not a default, it is an estate that never said',
+    // Checked rather than assumed: `akcs.ts` already defaults to these two, so an estate that never said is not
+    // accepting AZURE_HSM_DIRECT today. The reason to declare it is that a code default is not an estate's
+    // statement — change the default and every estate that never said changes with it, silently.
+    why: 'the estate STATES which protection levels it accepts back. The code default is the same two, so unset is not a hole today; it is an undeclared posture that a future change to that default would move without anyone deciding',
   },
   DEMO_REQUIRE_GATEWAY_ASSERTION: {
     value: 'true',
