@@ -63,3 +63,35 @@ describe('skill.apply', () => {
     expect(structured).toBe(0); expect(firsts).toHaveLength(1); expect(drafts[drafts.length - 1]).toBe('Inventory first. ');
   });
 });
+
+// 2026-10-14 (W0, the harness half) — a run ends by producing its record: the closing instruction names the classes and
+// their required fields; the fenced block is parsed off the answer and returned as records; the prose stays the rendering.
+import { recordInstructionOf, splitRecordBlock } from '../../src/skill-apply.js';
+describe('skill.apply — records', () => {
+  const specs = [{ iri: 'https://skills.demo/cil-commons#GovernanceScorecard', label: 'Governance Scorecard', requiredFields: ['resultOf', 'scorecardDatum'], qualityFields: ['note'] }];
+  it('the instruction names each class with its IRI, required and optional fields', () => {
+    const t = recordInstructionOf(specs);
+    expect(t).toContain('END YOUR ANSWER WITH ITS RECORD');
+    expect(t).toContain('- Governance Scorecard — "@type": "https://skills.demo/cil-commons#GovernanceScorecard"; required: resultOf, scorecardDatum; optional: note');
+  });
+  it('splits the record block off the answer; keeps the prose; an unparsable block is an error, not a silent drop', () => {
+    const r = splitRecordBlock('The scorecard:\n\n- Oversight: 2\n\n```record\n[{"@type":"https://skills.demo/cil-commons#GovernanceScorecard","label":"Harbor scorecard","resultOf":"Harbor assessment","scorecardDatum":["Oversight: 2"]}]\n```\n');
+    expect(r.text).toBe('The scorecard:\n\n- Oversight: 2');
+    expect(r.records).toEqual([{ class: 'https://skills.demo/cil-commons#GovernanceScorecard', record: { label: 'Harbor scorecard', resultOf: 'Harbor assessment', scorecardDatum: ['Oversight: 2'] } }]);
+    expect(splitRecordBlock('plain answer').records).toEqual([]);
+    expect(splitRecordBlock('x\n```record\n{not json\n```').error).toContain('not JSON');
+  });
+  it('the invoker appends the instruction only when recordsFor names classes, and returns the records off the answer', async () => {
+    const seen: string[] = [];
+    const call2 = async (input: { system: string }) => { seen.push(input.system); return { answer: 'Prose.\n\n```record\n[{"@type":"https://skills.demo/cil-commons#GovernanceScorecard","label":"L","resultOf":"A","scorecardDatum":["S"]}]\n```' }; };
+    const readSkill2 = async (id: string) => (id === SRC.skillId ? { body: '# Assessor', commitment: SRC.contractDigest } : null);
+    const invoke = skillApplyInvoker({ call: call2 as never, sources: instructionSourcesOf({ tools }), readSkill: readSkill2, recordsFor: (id) => (id === 'cic.governance.assess' ? specs : undefined) });
+    const out = (await invoke('cic.governance.assess', { question: 'score us' }, { index: 0 } as never)) as { answer: string; records?: unknown };
+    expect(seen[0]).toContain('END YOUR ANSWER WITH ITS RECORD');
+    expect(out.answer).toBe('Prose.');
+    expect(out.records).toEqual([{ class: 'https://skills.demo/cil-commons#GovernanceScorecard', record: { label: 'L', resultOf: 'A', scorecardDatum: ['S'] } }]);
+    const plain = skillApplyInvoker({ call: call2 as never, sources: instructionSourcesOf({ tools }), readSkill: readSkill2 });
+    await plain('cic.governance.assess', { question: 'score us' }, { index: 0 } as never);
+    expect(seen[1]).not.toContain('END YOUR ANSWER');
+  });
+});

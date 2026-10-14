@@ -171,6 +171,9 @@ import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-v
 import { sessionWirePrincipal, parseSessionAuthorization, STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
 const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
 import { askVocabulary, commandFieldsFor, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY, HOUSEHOLD_READ_CAPABILITY, CAPABILITY_WORDS, type PlannerTraceV1 } from './harness-run.js';
+import { expectedDeliversOfGold } from './harness-run.js';
+import { judgeOutcomePerClass } from './outcome-per-class.js';
+import { stateCheckOf, recordTypeOfClass, fieldsOfShape, type DomainShapeV1 } from './state-check.js';
 import { workersAiTranscriber, repairTranscript, hearingVocabulary, spokenFor } from './voice.js';
 import { DECISION_POINTS } from '@agenticprimitives/ontology';
 import { loadPlaybook, billed, chargeBill, memoRead, forgetMemo, projectRunState, draftRecipe, findingsOf } from '@agenticprimitives/harness';
@@ -3691,7 +3694,7 @@ app.post('/harness/experiments', async (c) => {
   let window = null;
   if (body['window'] !== undefined && body['window'] !== null) { const v = validateCaptureWindow(body['window']); if (!v.ok) return c.json({ ok: false, error: `window: ${v.errors.join('; ')}` }, 400); window = v.window; }
   const job: ExperimentJobV1 = {
-    type: 'ap.lab-experiment-job.v1', planId: parsed.plan.id, plan: parsed.plan, set: parsed.request.set, criterion: parsed.request.criterion, ...(parsed.request.fixtures ? { fixtures: parsed.request.fixtures } : {}),
+    type: 'ap.lab-experiment-job.v1', planId: parsed.plan.id, plan: parsed.plan, set: parsed.request.set, criterion: parsed.request.criterion, ...(parsed.request.fixtures ? { fixtures: parsed.request.fixtures } : {}), ...(parsed.request.outcomeGold ? { outcomeGold: parsed.request.outcomeGold } : {}),
     asker: String(gate.sa).toLowerCase(), addressee: gate.addressee, session: body['session'] as string, origin: new URL(c.req.url).origin, submittedAt: new Date().toISOString(),
   };
   const r = await experimentOp(c.env, job.planId, { op: 'start', job, window });
@@ -4886,6 +4889,10 @@ app.post('/harness/ask', async (c) => {
     /** Spec 415 A4 — a COMPARISON's request to run one thing differently (`parseVariantRequest`); comparison estates,
      *  the agent's own steward, known components only — otherwise refused by name. */
     variant?: unknown;
+    /** 2026-10-14 (W2/W3) — the case's OUTCOME GOLD from a comparison (the Lab's experiment object sends it): the expert's
+     *  plan, the inputs to name missing, the behaviour. Read ONLY by the outcome check and the state check after the run
+     *  (what the answer is judged against); it changes nothing the run does. Honoured only beside a variant. */
+    outcomeGold?: unknown;
   } | null;
   // The addressee is an ADDRESS — the vault keys on the hex form. A CAIP-10 `eip155:<chain>:0x…` (what a session's
   // `sub` is) used to pass through untouched, so the playbook read missed and the agent went quietly bare while
@@ -5629,8 +5636,29 @@ app.post('/harness/ask', async (c) => {
     // Spec 416 §4h — ANSWER QUALITY, when a comparison asks for it: an instruction skill's answer scored by the rubric
     // (typed yes-no questions, the deployment's model), here where the answer's words are. Only numbers go on the trace;
     // its time and tokens are the instrument's, reported apart from the ask's.
+    // 2026-10-14 (W2) — THE EXPERT'S GOLD IS WHAT GETS SCORED. A comparison's ask may carry the case's outcome gold (the
+    // Lab's experiment object sends it); the expected classes are then the GOLD plan's — the agent's own plan stays on the
+    // trace as a second number. Only beside a variant: a plain ask never carries one.
+    const outcomeGold = variantReq && body.outcomeGold && typeof body.outcomeGold === 'object' && Array.isArray((body.outcomeGold as { plan?: unknown }).plan)
+      ? (body.outcomeGold as { plan: string[]; missing?: string[]; behaviour?: string }) : null;
+    // The playbook the run answered under, whole (the run returns a projection): its instruction tools with their
+    // `produces`, the lexicon, the record mappings — and (W3) the produced classes' SHAPES, which ride on the definition
+    // (`domainShapes`) and which the pinned loader's whitelist drops, so they are read off the assignment record itself.
+    // One vault read each, only under a comparison that carried the gold.
+    const goldPlaybook = outcomeGold ? await loadPlaybook(askDeps.readSubjectRecord, addressee, () => undefined).catch(() => null) : null;
+    const askedSkills = Object.values(goldPlaybook?.tools ?? {}).filter((t) => t.execution === 'instruction').map((t) => ({ id: t.id, ...(t.produces?.length ? { produces: t.produces } : {}) }));
+    const domainShapes: DomainShapeV1[] = outcomeGold && askDeps.readSubjectRecord
+      ? (((await askDeps.readSubjectRecord(addressee, 'archetype.assignment').catch(() => null)) as { definition?: { domainShapes?: DomainShapeV1[] } } | null)?.definition?.domainShapes ?? []) : [];
+    if (outcomeGold) {
+      trace.expectedDeliversGold = expectedDeliversOfGold(outcomeGold, askedSkills, goldPlaybook?.domainLexicon);
+      if (trace.expectedDeliversGold.unknown.length) console.warn(`[harness/ask] outcomeGold names ${trace.expectedDeliversGold.unknown.join(', ')} — not an instruction skill of this playbook`);
+    }
     // Spec 418 A2 — THE OUTCOME CHECK: did the answer DELIVER each class the plan was for (the ontology's `produces`)?
-    if (variantReq?.toggles?.['quality/judge'] === 'outcome' && reply?.kind === 'answer' && typeof (reply as { text?: unknown }).text === 'string' && trace.expectedDelivers?.length) {
+    // W4 (2026-10-14): ONE CALL PER CLASS (`quality/outcome-judge` = per-class, the default) — the question from the class's
+    // own comment and required fields, a verdict of delivered · missing · unknown (cantTell, out of the denominator);
+    // `pooled` keeps v3 (one call for every class) for a comparison that measures the judge change itself.
+    const goldExpected = trace.expectedDeliversGold?.expected ?? [];
+    if (variantReq?.toggles?.['quality/judge'] === 'outcome' && reply?.kind === 'answer' && typeof (reply as { text?: unknown }).text === 'string' && (goldExpected.length || trace.expectedDelivers?.length)) {
       // 2026-10-01 — `quality/judge-repeats` (env QUALITY_JUDGE_REPEATS_DEFAULT; 1 until the Lab measures 2): the same
       // answer judged N times, averaged, with the spread on the trace — the judge's own movement between repeats
       // (Haiku 0.025 mean on a fixed answer) is then a number on the record, not noise inside the score. The repeats run
@@ -5640,11 +5668,52 @@ app.post('/harness/ask', async (c) => {
       const ocall = structuredCallFor(c.env, judgeProvider, { onCall: (rec) => { if (rec.tokensIn !== undefined) usage = { tokensIn: (usage?.tokensIn ?? 0) + rec.tokensIn, tokensOut: (usage?.tokensOut ?? 0) + (rec.tokensOut ?? 0) }; } });
       if (ocall) {
         const repeats = judgeRepeatsOf(variantReq?.toggles?.['quality/judge-repeats'], (c.env as { QUALITY_JUDGE_REPEATS_DEFAULT?: string }).QUALITY_JUDGE_REPEATS_DEFAULT);
-        const once = () => judgeOutcomeDelivered({ request: String(body.message ?? ''), answer: (reply as { text: string }).text, expected: trace.expectedDelivers! }, ocall).catch((e: unknown) => ({ judge: OUTCOME_CHECK_JUDGE, classes: {}, score: 0, ms: 0, error: e instanceof Error ? e.message : String(e) }));
+        const perClass = (variantReq?.toggles?.['quality/outcome-judge'] ?? 'per-class') !== 'pooled';
+        const basis: 'gold-plan' | 'agent-plan' = goldExpected.length ? 'gold-plan' : 'agent-plan';
+        const primary = goldExpected.length ? goldExpected : trace.expectedDelivers!;
+        const withShape = (xs: typeof primary) => xs.map((x) => { const sh = domainShapes.find((d) => d.class === x.iri); const f = fieldsOfShape(sh); return { ...x, ...(sh?.comment ? { comment: sh.comment } : {}), ...(f.required.length ? { requiredFields: f.required } : {}), ...(f.quality.length ? { qualityFields: f.quality } : {}) }; });
+        const answerText = (reply as { text: string }).text;
+        const request = String(body.message ?? '');
+        const judgeOnce = (expected: typeof primary) => perClass
+          ? judgeOutcomePerClass({ request, answer: answerText, expected: withShape(expected) }, ocall).then((r) => ({ judge: r.judge, classes: r.classes, requested: r.requested, units: r.units, score: r.score, ms: r.ms, verdicts: r.verdicts, cantTell: r.cantTell, counted: r.counted, calls: r.calls, ...(r.error ? { error: r.error } : {}) }))
+          : judgeOutcomeDelivered({ request, answer: answerText, expected }, ocall).then((r) => ({ ...r, verdicts: undefined, cantTell: undefined, counted: undefined, calls: undefined }));
+        const once = () => judgeOnce(primary).catch((e: unknown) => ({ judge: perClass ? { name: 'ap.outcome-per-class-judge.v4', kind: 'model' as const } : OUTCOME_CHECK_JUDGE, classes: {}, score: 0, ms: 0, error: e instanceof Error ? e.message : String(e), verdicts: undefined, cantTell: undefined, counted: undefined, calls: undefined }));
         const results: Awaited<ReturnType<typeof once>>[] = [];
         for (let i = 0; i < repeats; i++) results.push(await once());
         const oc = averageOutcomeChecks(results);
-        (trace as { outcomeCheck?: unknown }).outcomeCheck = { judge: oc.judge.name, classes: oc.classes, ...(oc.requested ? { requested: oc.requested } : {}), ...(oc.units ? { units: oc.units } : {}), score: oc.score, ms: oc.ms, repeats: oc.repeats, spread: oc.spread, ...(oc.repeats > 1 ? { scores: oc.scores } : {}), ...(usage?.tokensIn !== undefined ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut ?? 0 } : {}), ...(oc.error ? { error: oc.error.slice(0, 200) } : {}) };
+        const last = results[results.length - 1]!;
+        (trace as { outcomeCheck?: unknown }).outcomeCheck = { judge: oc.judge.name, basis, classes: oc.classes, ...(oc.requested ? { requested: oc.requested } : {}), ...(oc.units ? { units: oc.units } : {}), score: oc.score, ms: oc.ms, repeats: oc.repeats, spread: oc.spread, ...(oc.repeats > 1 ? { scores: oc.scores } : {}),
+          // v4: the per-class verdicts of the LAST repeat (a verdict is not averaged), cantTell and the denominator, the calls made
+          ...(last.verdicts ? { verdicts: last.verdicts, cantTell: last.cantTell ?? 0, counted: last.counted ?? 0, calls: last.calls ?? 0 } : {}),
+          ...(usage?.tokensIn !== undefined ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut ?? 0 } : {}), ...(oc.error ? { error: oc.error.slice(0, 200) } : {}) };
+        // W2 — THE SECOND NUMBER: the same answer against the AGENT's plan when the gold plan scored it and the two differ
+        // (a gap says "wrong plan" vs "thin answer under the right plan"). One call set, no repeats, score only.
+        const agentExpected = trace.expectedDelivers ?? [];
+        if (basis === 'gold-plan' && agentExpected.length) {
+          const same = agentExpected.length === goldExpected.length && agentExpected.every((a) => goldExpected.some((g) => g.iri === a.iri && !g.kind));
+          if (same) trace.outcomeCheckAgentPlan = { judge: oc.judge.name, score: oc.score, classes: oc.classes, ms: 0 };
+          else {
+            const ap = await judgeOnce(agentExpected).catch((e: unknown) => ({ judge: OUTCOME_CHECK_JUDGE, classes: {}, score: 0, ms: 0, error: e instanceof Error ? e.message : String(e) }));
+            trace.outcomeCheckAgentPlan = { judge: ap.judge.name, score: ap.score, classes: ap.classes, ms: ap.ms, ...(ap.error ? { error: String(ap.error).slice(0, 200) } : {}) };
+          }
+        }
+      }
+    }
+    // W3 — THE OUTCOME IS STATE. Under a comparison that carried the gold, read back the record of each class the gold plan
+    // produces (where the skill's declared record effect put it: the ASKER's vault, by the one record-type rule) and
+    // validate it against its shape. Required fields decide; a score with no evidence edge is named (W5).
+    if (outcomeGold && reply?.kind === 'answer' && askDeps.readSubjectRecord) {
+      const classes = goldExpected.filter((x) => !x.kind || x.kind === 'delivered');
+      if (classes.length) {
+        const records: Record<string, unknown> = {}; const recordTypes: Record<string, string> = {};
+        const asker = String(who.sa).toLowerCase();
+        for (const x of classes) {
+          const rt = recordTypeOfClass(x.iri, goldPlaybook?.domainRecords);
+          recordTypes[x.iri] = rt;
+          records[x.iri] = await askDeps.readSubjectRecord(asker, rt).catch(() => null);
+        }
+        const sc = stateCheckOf(classes, records, domainShapes);
+        trace.stateCheck = { ...sc, recordTypes };
       }
     }
     if (variantReq?.toggles?.['quality/judge'] === 'on' && reply?.kind === 'answer' && typeof (reply as { text?: unknown }).text === 'string') {

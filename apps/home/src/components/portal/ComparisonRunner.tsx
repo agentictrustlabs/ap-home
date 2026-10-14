@@ -111,21 +111,22 @@ export function ComparisonRunner() {
     if (!token || !canRun || !draft) return;
     setBusy(true); setError(null);
     try {
-      let set: unknown, criterion: unknown, fixtures: unknown;
+      let set: unknown, criterion: unknown, fixtures: unknown, outcomeGold: unknown;
       if (source === 'named') {
         const r = await fetch(`/connect/eval-sets/${encodeURIComponent(draft.setId)}`);
-        const b = (await r.json()) as { replay?: unknown; gold?: unknown; fixtures?: unknown; error?: string };
+        const b = (await r.json()) as { replay?: unknown; gold?: unknown; fixtures?: unknown; outcomeGold?: unknown; error?: string };
         if (!r.ok || !b.replay || !b.gold) throw new Error(b.error ?? 'the test set could not be read');
-        set = b.replay; criterion = b.gold; fixtures = b.fixtures;
+        set = b.replay; criterion = b.gold; fixtures = b.fixtures; outcomeGold = b.outcomeGold;
       } else if (source === 'library') {
         if (!chosenLibrary) throw new Error('the library set is no longer listed — choose it again');
-        set = chosenLibrary.replay; criterion = chosenLibrary.gold; fixtures = chosenLibrary.fixtures;
+        set = chosenLibrary.replay; criterion = chosenLibrary.gold; fixtures = chosenLibrary.fixtures; outcomeGold = chosenLibrary.outcomeGold;
       } else {
         [set, criterion, fixtures] = await Promise.all([readJsonFile(setFile), readJsonFile(goldFile), readJsonFile(fixturesFile)]);
         if (fixtures && typeof fixtures === 'object' && 'fixtures' in (fixtures as object)) fixtures = (fixtures as { fixtures: unknown }).fixtures;
       }
       const variants = Object.fromEntries(rows.map((r) => [r.name, variantFromForm(r)]));
-      const r = await startExperiment(token, { addressee, set, criterion, ...(fixtures ? { fixtures } : {}), variants, split, repeats, ...(planId.trim() ? { planId: planId.trim() } : {}) });
+      // 2026-10-14 (W2) — the outcome gold rides along when the set has one: the Lab then scores the expert's plan.
+      const r = await startExperiment(token, { addressee, set, criterion, ...(fixtures ? { fixtures } : {}), ...(outcomeGold ? { outcomeGold } : {}), variants, split, repeats, ...(planId.trim() ? { planId: planId.trim() } : {}) });
       if (!r.ok) { setError(r.error); return; }
       setProgress(r.progress);
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }

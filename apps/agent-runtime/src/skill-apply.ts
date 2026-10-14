@@ -83,6 +83,34 @@ export interface SkillApplyDeps {
   /** Spec 416 — a comparison measuring the PICK alone: the step is stamped under the skill (so the selection is read
    *  exactly as in a full run) but the skill is not applied — no body read, no model call. Never set outside a variant. */
   pickOnly?: boolean;
+  /** 2026-10-14 (W0, the harness half) — A RUN ENDS BY PRODUCING ITS RECORD. For a tool id, the classes the skill
+   *  produces with the fields their shapes require: the answer is asked to END with a fenced ```record block holding one
+   *  JSON object per class (the prose before it is the rendering), the block is parsed off the answer and returned as
+   *  `records`, and the declared record effect writes each to the asker's vault. Absent ⇒ the answer as before (the
+   *  control arm). CIL's bodies will state the same closing section upstream; this instruction is the harness's until then. */
+  recordsFor?: (toolId: string) => Array<{ iri: string; label: string; requiredFields: string[]; qualityFields?: string[] }> | undefined;
+}
+
+/** The closing instruction, from the classes and their shapes. Pure, so a test can hold the words. */
+export function recordInstructionOf(specs: ReadonlyArray<{ iri: string; label: string; requiredFields: string[]; qualityFields?: string[] }>): string {
+  return [
+    'END YOUR ANSWER WITH ITS RECORD. After the prose, add one fenced block tagged `record` holding a JSON array with one object per artifact below — the typed record the answer renders. Each object has `"@type"` (the class IRI exactly as given), `"label"` (a short title), every REQUIRED field, and the optional fields where the answer has them. A field whose value is a controlled term uses the term exactly; a field that references another artifact gives that artifact\'s label as a string; a field for which the request gave no fact gets a clearly marked placeholder string (never an invented fact). The prose stays the person\'s rendering; the block is the record.',
+    ...specs.map((sp) => `- ${sp.label} — "@type": "${sp.iri}"; required: ${sp.requiredFields.length ? sp.requiredFields.join(', ') : '(label only)'}${sp.qualityFields?.length ? `; optional: ${sp.qualityFields.join(', ')}` : ''}`),
+  ].join('\n');
+}
+
+/** The record block off the end of an answer: the prose without it, and the records (one per `@type`). An unparsable
+ *  block is reported, never silently dropped — the answer keeps its text either way. */
+export function splitRecordBlock(answer: string): { text: string; records: Array<{ class: string; record: Record<string, unknown> }>; error?: string } {
+  const m = /\n?```record\s*\n([\s\S]*?)\n```\s*$/.exec(answer);
+  if (!m) return { text: answer, records: [] };
+  const text = answer.slice(0, m.index).trimEnd();
+  try {
+    const parsed = JSON.parse(m[1]!) as unknown;
+    const arr = Array.isArray(parsed) ? parsed : [parsed];
+    const records = arr.flatMap((r) => (r && typeof r === 'object' && typeof (r as { '@type'?: unknown })['@type'] === 'string' ? [{ class: (r as { '@type': string })['@type'], record: Object.fromEntries(Object.entries(r as Record<string, unknown>).filter(([k]) => k !== '@type')) }] : []));
+    return { text, records, ...(records.length !== arr.length ? { error: `${arr.length - records.length} record(s) without an @type` } : {}) };
+  } catch (e) { return { text, records: [], error: `the record block is not JSON: ${e instanceof Error ? e.message : String(e)}` }; }
 }
 
 /** The invoker: the skill's body by its pinned digest, the model once, the answer as written. */
@@ -104,10 +132,18 @@ export function skillApplyInvoker(deps: SkillApplyDeps): ToolInvoker {
     const material = !pieces.length ? '' : Array.isArray(args.material) ? `\n\nThe material, from earlier steps:\n${pieces.map((m, i) => `--- ${i + 1} ---\n${m}`).join('\n\n')}` : `\n\nThe situation, in the person's words:\n${pieces[0]}`;
     const stepRef = ctx?.step?.id ?? `s${ctx?.index ?? 0}`;
     const stream = deps.streamFor?.(stepRef);
+    // W0 — the record instruction, when the comparison (or the deployment) asked for records and the skill produces classes.
+    const specs = deps.recordsFor?.(toolId);
+    const recordAsk = specs?.length ? `\n\n---\n\n${recordInstructionOf(specs)}` : '';
+    const withRecords = (answer: string): { answer: string; records?: Array<{ class: string; record: Record<string, unknown> }>; recordError?: string } => {
+      if (!specs?.length) return { answer };
+      const r = splitRecordBlock(answer);
+      return { answer: r.text, ...(r.records.length ? { records: r.records } : {}), ...(r.error ? { recordError: r.error } : {}) };
+    };
     if (stream) {
       const t0 = Date.now(); let first = false; let lastEmit = 0;
       const text = await stream({
-        system: `${APPLY_SYSTEM}\n\n---\n\n${doc.body}\n\n---\n\nWrite the answer itself, as the person will read it — plain text or markdown, nothing around it.`,
+        system: `${APPLY_SYSTEM}\n\n---\n\n${doc.body}\n\n---\n\nWrite the answer itself, as the person will read it — plain text or markdown, nothing around it.${recordAsk}`,
         messages: [{ role: 'user', content: `${question}${material}` }],
         maxTokens: args.brief === true ? Math.min(deps.maxTokens ?? 1400, 600) : deps.maxTokens ?? 1400,
         onDelta: (_d, soFar) => {
@@ -117,10 +153,10 @@ export function skillApplyInvoker(deps: SkillApplyDeps): ToolInvoker {
         },
       }).catch((e: unknown) => { throw new Error(`the streamed answer under ${source.skillId} failed: ${e instanceof Error ? e.message : String(e)}`); });
       deps.onDraft?.(stepRef, text);
-      return { answer: text.trim(), skill: { id: source.skillId, version: source.version, digest: source.contractDigest }, source: `${deps.agentName ?? 'this agent'}, under ${source.skillId}` };
+      return { ...withRecords(text.trim()), skill: { id: source.skillId, version: source.version, digest: source.contractDigest }, source: `${deps.agentName ?? 'this agent'}, under ${source.skillId}` };
     }
     const out = await call({
-      system: `${APPLY_SYSTEM}\n\n---\n\n${doc.body}`,
+      system: `${APPLY_SYSTEM}\n\n---\n\n${doc.body}${recordAsk}`,
       messages: [{ role: 'user', content: `${question}${material}` }],
       tool: { name: 'skill_answer', description: `The answer under ${source.skillId}, as the person will read it.`, input_schema: { type: 'object', properties: { answer: { type: 'string', description: 'The answer, in the person\'s terms, under the skill\'s method' } }, required: ['answer'] } },
       // Spec 418 — an intermediate chain step (`brief`) produces only the artifact the next step consumes: a smaller budget.
@@ -128,7 +164,7 @@ export function skillApplyInvoker(deps: SkillApplyDeps): ToolInvoker {
     });
     const answer = typeof out['answer'] === 'string' ? out['answer'].trim() : '';
     if (!answer) return { refused: `the model returned no answer under ${source.skillId}` };
-    return { answer, skill: { id: source.skillId, version: source.version, digest: source.contractDigest }, source: `${deps.agentName ?? 'this agent'}, under ${source.skillId}` };
+    return { ...withRecords(answer), skill: { id: source.skillId, version: source.version, digest: source.contractDigest }, source: `${deps.agentName ?? 'this agent'}, under ${source.skillId}` };
   };
 }
 

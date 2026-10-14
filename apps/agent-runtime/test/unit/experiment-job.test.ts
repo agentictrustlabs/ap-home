@@ -57,3 +57,19 @@ describe('progressOf', () => {
     expect(JSON.stringify(p)).not.toContain('score our AI governance');
   });
 });
+
+// 2026-10-14 (W2) — the outcome gold on the submission: pinned to the set's digest, cases of the set only, each well-formed.
+import { validateOutcomeGold } from '../../src/experiment-job.js';
+describe('outcomeGold on the submission', () => {
+  it('accepts gold for this set and refuses gold for another digest, an unknown case, or a bad plan — each by name', async () => {
+    const dg = await replaySetDigest(set);
+    const ids = new Set(['i1', 'i2']);
+    expect(validateOutcomeGold({ type: 'ap.outcome-gold.v1', replaySetDigest: dg, cases: { i1: { plan: ['cic.governance.assess'] }, i2: { plan: [], missing: ['https://x#A'] } } }, dg, ids)).toMatchObject({ ok: true });
+    expect(validateOutcomeGold({ type: 'ap.outcome-gold.v1', replaySetDigest: `sha256:${'0'.repeat(64)}`, cases: {} }, dg, ids)).toMatchObject({ ok: false, error: expect.stringContaining('gold for sha256:0') });
+    expect(validateOutcomeGold({ type: 'ap.outcome-gold.v1', replaySetDigest: dg, cases: { zz: { plan: [] } } }, dg, ids)).toMatchObject({ ok: false, error: 'outcomeGold: zz is not a case of this set' });
+    expect(validateOutcomeGold({ type: 'ap.outcome-gold.v1', replaySetDigest: dg, cases: { i1: { plan: 'x' } } }, dg, ids)).toMatchObject({ ok: false, error: expect.stringContaining('plan must be a list') });
+    const criterion = await criterionFor(set);
+    const r = await parseExperimentRequest({ set, criterion, variants: { a: {} }, outcomeGold: { type: 'ap.outcome-gold.v1', replaySetDigest: dg, cases: { i1: { plan: ['cic.governance.assess'] } } } }, now);
+    expect(r.ok && r.request.outcomeGold?.cases['i1']).toEqual({ plan: ['cic.governance.assess'] });
+  });
+});

@@ -20,6 +20,7 @@ import {
 } from '@agenticprimitives/evaluation';
 import { isInternalCall, internalHeaders, markInWorker, type InternalMarkerEnv } from './internal-marker.js';
 import { progressOf, type ExperimentJobV1, type ExperimentStatusV1 } from './experiment-job.js';
+import { enrichRun, traceFactsOf, type TraceFactsV1 } from './experiment-run-facts.js';
 
 export type ExperimentEnv = InternalMarkerEnv & { EVAL_CAPTURE?: string };
 
@@ -29,7 +30,7 @@ type Op =
   | { op: 'record' }
   | { op: 'cancel' };
 
-const KEY = { job: 'job', state: 'state', runs: 'runs', cursor: 'cursor', status: 'status', record: 'record', error: 'error', salt: 'salt', window: 'window', finishedAt: 'finishedAt' } as const;
+const KEY = { job: 'job', state: 'state', runs: 'runs', cursor: 'cursor', status: 'status', record: 'record', error: 'error', salt: 'salt', window: 'window', finishedAt: 'finishedAt', seen: 'seenContexts' } as const;
 /** Between cases: long enough that an alarm never overlaps the previous one, short enough that the run is paced by
  *  the estate, not by the object. */
 const STEP_DELAY_MS = 250;
@@ -109,8 +110,13 @@ export class ExperimentDO {
     let run: ExperimentRunV1;
     try { run = await runOneCase(input, st, step); }
     catch (e) { run = { intentId: step.intent.id, variant: step.variantName, repeat: step.repeat, runRef: null, status: 'failed', selected: [], evidence: 'none', captureLevel: null, ms: 0, error: `the case threw: ${e instanceof Error ? e.message : String(e)}` }; }
+    // 2026-10-14 (W1–W4) — what the pinned runner did not record: the cause of a missing verdict, the gold-plan outcome
+    // with its per-class verdicts, the state check, and the ISOLATION refusal (a repeat that was not a fresh context is
+    // recorded, never scored). The trace of THIS case's ask is what the port kept aside (`input.lastTrace`).
+    const seen = (await this.state.storage.get<string[]>(KEY.seen)) ?? [];
+    run = enrichRun(run, (input as ComparisonInput & { lastTrace?: () => TraceFactsV1 }).lastTrace?.() ?? {}, seen);
     runs.push(run);
-    await this.state.storage.put({ [KEY.runs]: runs, [KEY.cursor]: cursor + 1, [KEY.state]: st });
+    await this.state.storage.put({ [KEY.runs]: runs, [KEY.cursor]: cursor + 1, [KEY.state]: st, [KEY.seen]: seen });
     await this.state.storage.setAlarm(Date.now() + STEP_DELAY_MS);
   }
 
@@ -141,15 +147,21 @@ export class ExperimentDO {
       const text = await res.text();
       try { return JSON.parse(text) as Record<string, unknown>; } catch { return { ok: false, error: `${path} answered ${res.status}: ${text.slice(0, 160)}` }; }
     };
+    // The trace of the LAST ask, kept aside for `enrichRun` (the runner consumes the trace and records only part of it).
+    let lastTrace: TraceFactsV1 = {};
     const ports: ComparisonPorts = {
-      // The same ask the CLI sends: the session, the addressee, the message, the variant and a run reference of its own.
+      // The same ask the CLI sends: the session, the addressee, the message, the variant and a run reference of its own —
+      // and (W2) the case's OUTCOME GOLD when the submission carried it, so the outcome check scores the expert's plan.
       async ask({ intentId, message, variant, variantName, repeat }) {
         const runRef = `lab-${job.planId}-${variantName}-${intentId}-${repeat}`.replace(/[^A-Za-z0-9._:-]/g, '-').slice(0, 180);
         const live = variant && typeof variant === 'object' && Object.keys(variant).length === 0;
-        const r = await post('/harness/ask', { session: job.session, addressee: job.addressee, message, ...(live ? {} : { variant }), runRef }) as { ok?: boolean; error?: string; refused?: string; reply?: { kind?: string; error?: string; text?: string; plannerTrace?: { selection?: unknown } }; hasProvenance?: { recordType?: string } };
+        const gold = job.outcomeGold?.cases[intentId];
+        lastTrace = {};
+        const r = await post('/harness/ask', { session: job.session, addressee: job.addressee, message, ...(live ? {} : { variant }), runRef, ...(gold ? { outcomeGold: gold } : {}) }) as { ok?: boolean; error?: string; refused?: string; reply?: { kind?: string; error?: string; text?: string; plannerTrace?: { selection?: unknown } }; hasProvenance?: { recordType?: string } };
         if (r.ok === false || r.error) return { ok: false, error: `${r.refused ? `${r.refused}: ` : ''}${r.error ?? 'the ask failed'}` };
         const said = String(r.reply?.error ?? r.reply?.text ?? '');
         if (r.reply?.kind === 'refused' && /planner_failed:.*HTTP (402|429|5\d\d)/.test(said)) return { ok: false, error: `provider: ${said.slice(0, 160)}` };
+        lastTrace = traceFactsOf(r.reply?.plannerTrace);
         const rt = r.hasProvenance?.recordType;
         return { ok: true, runRef: typeof rt === 'string' && rt.startsWith('run.provenance:') ? rt.slice('run.provenance:'.length) : runRef, ...(r.reply?.plannerTrace?.selection ? { selection: r.reply.plannerTrace.selection } : {}), ...(r.reply?.plannerTrace ? { trace: r.reply.plannerTrace } : {}) };
       },
@@ -177,6 +189,7 @@ export class ExperimentDO {
       window, estate: job.origin, estateCapture: String(env.EVAL_CAPTURE ?? '').trim().toLowerCase() === 'on' ? 'on' : 'off',
       asker: job.asker, addressee: job.addressee, store, pseudo: pseudonymiser(salt), ports,
       log: (line) => console.log(`[lab ${job.planId}] ${line}`),
-    };
+      lastTrace: () => lastTrace,
+    } as ComparisonInput & { lastTrace: () => TraceFactsV1 };
   }
 }

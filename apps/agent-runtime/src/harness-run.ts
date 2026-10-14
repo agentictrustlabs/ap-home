@@ -41,6 +41,7 @@ import { HOLDINGS_READ_TOOL, HOLDINGS_READ_CAPABILITY, holdingsReadInvoker } fro
 import { EXTERNAL_AGENT_TOOL } from './external-agent.js';
 import { PLAYBOOK_ANSWER_TOOL, playbookAnswerAvailable, playbookAnswerInvoker, type PlaybookMaterial } from './playbook-answer.js';
 import { instructionSkillTools, instructionSourcesOf, skillApplyInvoker, skillReaderFor } from './skill-apply.js';
+import { recordTypeOfClass, fieldsOfShape, type DomainShapeV1 } from './state-check.js';
 import { appendNote, dayRecordsFor, reviewDaysOf, studyFrom, studyRecords, type StudyAccess } from './card-room.js';
 import { memoryRecordFor } from './playbook-memory.js';
 import { remembered, forget } from './run-memo.js';
@@ -397,6 +398,69 @@ export function expectedDeliversOf(steps: ReadonlyArray<{ tool: string; for?: st
   // The intermediate artifacts are REQUIRED (the plan was built on them); the terminal skill's products are candidates —
   // the outcome check asks which of them the request wants (spec 418 A2 v2).
   return [...out].map(([iri, label]) => ({ iri, label, ...(required.has(iri) ? { required: true } : {}), ...(alternative.has(iri) ? { alternative: alternative.get(iri)! } : {}) }));
+}
+
+/** 2026-10-14 ("evals article gap" W2) — WHAT THE GOLD PLAN SHOULD DELIVER: the outcome check's expected classes built from
+ *  the EXPERT's pre-registered plan (capability ids in run order), not the agent's. Union over the plan's skills of their
+ *  `produces`, honouring `within` (a part of a whole the same skill produces is not asked for) and `alternative` (a group
+ *  scored once); every intermediate step's products are REQUIRED (the plan was built on them), the terminal step's are
+ *  candidates the request chooses among — the same rule as `expectedDeliversOf`. `missing` adds one expectation per class
+ *  the right plan must NAME AS MISSING (asked for, never invented); `behaviour: clarify` adds "asked which". A skill the
+ *  playbook does not hold contributes nothing and is named in `unknown`, never silently dropped. */
+export function expectedDeliversOfGold(
+  gold: { plan: string[]; missing?: string[]; behaviour?: string },
+  skills: ReadonlyArray<{ id: string; produces?: ReadonlyArray<{ iri: string; label: string; within?: string; alternative?: string }> }>,
+  lexicon?: ReadonlyArray<{ iri: string; label: string; terms: readonly string[] }>,
+): { expected: Array<{ iri: string; label: string; required?: boolean; alternative?: string; kind?: 'delivered' | 'named-missing' | 'asked-which' }>; unknown: string[] } {
+  const gloss = (iri: string, label: string) => { const e = lexicon?.find((x) => x.iri === iri); const also = (e?.terms ?? []).filter((t) => t.toLowerCase() !== label.toLowerCase()).slice(0, 3); return also.length ? `${label} (also: ${also.join(', ')})` : label; };
+  const out = new Map<string, { iri: string; label: string; required?: boolean; alternative?: string; kind?: 'delivered' | 'named-missing' | 'asked-which' }>();
+  const unknown: string[] = [];
+  gold.plan.forEach((cap, i) => {
+    const sk = skills.find((x) => x.id === cap);
+    if (!sk) { unknown.push(cap); return; }
+    const made = sk.produces ?? [];
+    const terminal = i === gold.plan.length - 1;
+    for (const k of made) {
+      if (k.within && made.some((w) => w.iri === k.within)) continue;
+      const prev = out.get(k.iri);
+      out.set(k.iri, { iri: k.iri, label: gloss(k.iri, k.label), ...(!terminal || prev?.required ? { required: true } : {}), ...(terminal && k.alternative && !prev?.required ? { alternative: k.alternative } : {}) });
+    }
+  });
+  for (const m of gold.missing ?? []) {
+    const label = lexicon?.find((x) => x.iri === m)?.label ?? skills.flatMap((x) => x.produces ?? []).find((k) => k.iri === m)?.label ?? m.split(/[#/]/).pop() ?? m;
+    out.set(`missing:${m}`, { iri: m, label, required: true, kind: 'named-missing' });
+  }
+  if (gold.behaviour === 'clarify') out.set('ask:which', { iri: 'urn:ap:outcome:asked-which', label: 'the question of which option is meant', required: true, kind: 'asked-which' });
+  return { expected: [...out.values()], unknown };
+}
+
+/** 2026-10-14 (W0) — A DOMAIN RECORD EFFECT: the compiler declares, per instruction skill, one RECORD effect per produced
+ *  class (`produces` = the class IRI — which is how it is told from a payment receipt's `PaymentReceipt`). The skill's
+ *  answer carried the record (`result.records[]`, by class); this sink writes it to the recipient's vault under the one
+ *  record-type rule, typed and stamped with the run. A class the answer emitted no record for is a FAILED effect, by name
+ *  (`receipts[].effects[].ok: false`) — what W0's acceptance reads. Every other effect goes to the base sink. */
+export function withDomainRecordEffects(base: { discharge(e: { runRef: string; stepRef: string; effect: unknown; step: unknown; result: unknown; receipt: unknown }): Promise<void> }, opts: {
+  recipient: string;
+  recordTypeOf: (classIri: string) => string;
+  write?: (subject: string, recordType: string, record: unknown) => Promise<{ ok: boolean; error?: string }>;
+  onWritten?: (classIri: string) => void;
+}): typeof base {
+  return {
+    discharge: async (e) => {
+      const effect = e.effect as { produces?: unknown; surface?: unknown } | null;
+      const cls = typeof effect?.produces === 'string' ? effect.produces : '';
+      if (!/^https?:\/\//.test(cls)) return base.discharge(e);
+      if (!opts.write) throw new Error(`no vault to write the ${cls.split(/[#/]/).pop()} record to`);
+      if (!/^0x[0-9a-f]{40}$/.test(opts.recipient)) throw new Error('the asker is not an agent address; the record has no vault to land in');
+      const result = e.result as { records?: Array<{ class: string; record: Record<string, unknown> }>; recordError?: string; skill?: { id?: string; digest?: string } } | null;
+      const hit = result?.records?.find((r) => r.class === cls);
+      if (!hit) throw new Error(`no ${cls.split(/[#/]/).pop()} record was emitted with the answer${result?.recordError ? ` (${result.recordError})` : ''}`);
+      const record = { type: 'ap.domain-record.v1', class: cls, runRef: e.runRef, stepRef: e.stepRef, ...(result?.skill?.id ? { skill: result.skill.id } : {}), ...(result?.skill?.digest ? { skillDigest: result.skill.digest } : {}), producedAt: new Date().toISOString(), ...hit.record };
+      const out = await opts.write(opts.recipient, opts.recordTypeOf(cls), record);
+      if (!out.ok) throw new Error(`the ${cls.split(/[#/]/).pop()} record could not be written: ${out.error ?? 'write failed'}`);
+      opts.onWritten?.(cls);
+    },
+  };
 }
 
 export const UNSUPPORTED_TOOL: ToolSpec = {
@@ -2957,6 +3021,16 @@ export interface PlannerTraceV1 {
   /** Spec 418 A2 — what the planned skills should DELIVER (each intermediate step's artifact + the final skill's
    *  products), glossed from the lexicon — the outcome check's expected classes. */
   expectedDelivers?: Array<{ iri: string; label: string; required?: boolean; alternative?: string }>;
+  /** 2026-10-14 (W2) — the GOLD plan's expectation, when the ask carried `outcomeGold`: what the expert said the run should
+   *  deliver (classes, inputs to name missing, the ask-which). The outcome check scores THIS; `expectedDelivers` (the
+   *  agent's own plan) becomes the second number. Capabilities the playbook does not hold are listed in `unknown`. */
+  expectedDeliversGold?: { expected: Array<{ iri: string; label: string; required?: boolean; alternative?: string; kind?: 'delivered' | 'named-missing' | 'asked-which' }>; unknown: string[] };
+  /** W2 — the same answer judged against the AGENT's plan when the gold plan scored it (score and classes only). */
+  outcomeCheckAgentPlan?: { judge: string; score: number; classes: Record<string, number>; ms: number; error?: string };
+  /** W3 — the state check: per gold-plan class, the record exists in the asker's vault and validates against its shape. */
+  stateCheck?: { pass: boolean; classes: Record<string, { exists: boolean; valid: boolean; errors: string[]; uncited?: number }>; unshaped: string[]; recordTypes: Record<string, string> };
+  /** W0 (harness half) — the records the instruction skills EMITTED this run, by class (counts only; the records are in the vault). */
+  recordsEmitted?: Record<string, number>;
   /** Spec 420 §2 — what goal regression did to the plan: the reads it inserted, the gaps (a standing the asker lacks) and
    *  violations (facts that contradict a step) it named, the submissions it marked. Present only under `plan/regression`. */
   regression?: { inserted: Array<{ before: number; toolId: string; because: string }>; gaps: Array<{ index: number; toolId: string; because: string }>; violations: Array<{ index: number; toolId: string; because: string }>; submissions: Array<{ index: number; toolId: string; establishes: string }>; facts: { standingAtRoom: string; situations: number; known: string[] }; /** Spec 420 §3 — acts the offer marked or left out for the asker's standing. */ offer?: Array<{ toolId: string; needs: string; has: string; mode: string }> };
@@ -5092,6 +5166,19 @@ export async function runUnderMandate(envIn: HarnessEnv, deps: HarnessDeps, inpu
       })()
     : null;
   const playbook = await timed('prepare:playbook', () => loadPlaybook(rememberedRecord, String(input.addressee ?? ''), console.log).catch(() => null));
+  // 2026-10-14 (W0, the harness half) — RECORDS ON: `skill/record` (a comparison's toggle, or the deployment's
+  // SKILL_RECORD_DEFAULT). An instruction skill's answer then ends with its typed record, which the declared record effect
+  // writes to the asker's vault. The produced classes' SHAPES ride on the definition (`domainShapes`, W3); the pinned
+  // playbook loader keeps a whitelist of fields, so they are read off the assignment record itself (memoised per ask).
+  const recordsOn = (input.variant?.toggles?.['skill/record'] ?? ((env as { SKILL_RECORD_DEFAULT?: string }).SKILL_RECORD_DEFAULT?.trim() || 'off')) === 'on';
+  const domainShapes: DomainShapeV1[] = recordsOn && playbook && rememberedRecord
+    ? (((await rememberedRecord(String(input.addressee ?? ''), 'archetype.assignment').catch(() => null)) as { definition?: { domainShapes?: DomainShapeV1[] } } | null)?.definition?.domainShapes ?? []) : [];
+  const recordSpecsFor = (toolId: string) => {
+    if (!recordsOn) return undefined;
+    const t = playbook?.tools?.[toolId];
+    const made = (t?.produces ?? []).filter((k) => !(k.within && t!.produces!.some((w) => w.iri === k.within)));
+    return made.length ? made.map((k) => { const f = fieldsOfShape(domainShapes.find((d) => d.class === k.iri)); return { iri: k.iri, label: k.label, requiredFields: f.required, ...(f.quality.length ? { qualityFields: f.quality } : {}) }; }) : undefined;
+  };
   mark('playbook');
   // Spec 410 §5 — stamp the intent with the versions it is acted under. The mandate a Home mints for this run
   // digests the whole intent (RFC 8785), so the versions are bound; a resume under a moved T-box or definition
@@ -5821,7 +5908,7 @@ step is then handed to that agent under authority the person grants; leave it ou
       streamFor: (stepRef: string) => textStreamFor(env as never, answerProvider, { onCall: recordStructured('structured', stepRef), ...(tier !== 'default' ? { tier } : {}) }),
       onDraft: (stepRef: string, draft: string) => input.onProgress?.({ type: 'AnswerDraft', stepRef, said: 'Writing the answer…', draft: draft.slice(-6000) }),
       onFirstWords: (_stepRef: string, ms: number) => { if (trace.answerFirstWordsMs === undefined) { trace.answerFirstWordsMs = ms; trace.answerFirstWordsAt = Date.now(); } },
-    } : {}), ...(input.variant?.toggles?.['skill-selection/answer'] === 'off' ? { pickOnly: true } : {}), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: agentNameForSkill });
+    } : {}), ...(input.variant?.toggles?.['skill-selection/answer'] === 'off' ? { pickOnly: true } : {}), sources: instructionSourcesOf(playbook), readSkill: skillReaderFor(env.SKILLS_MCP!), agentName: agentNameForSkill, ...(recordsOn ? { recordsFor: recordSpecsFor } : {}) });
   const pairwise = input.variant?.toggles?.['quality/judge'] === 'pairwise';
   const skillInvoke: ToolInvoker | null = !instructionTools.length ? null : !pairwise ? applyWith(ownTier, true) : async (toolId, args, ctx) => {
     const [own, other] = await Promise.all([applyWith(ownTier, true)(toolId, args, ctx), applyWith(otherTier, false)(toolId, args, ctx).catch(() => null)]);
@@ -6307,7 +6394,7 @@ step is then handed to that agent under authority the person grants; leave it ou
       // that cannot be delivered never fails the act that produced it.
       // R917-H-4 (spec 409 §8): a REPLAY re-derives verdicts and runs nothing — so nothing follows it either. A
       // replayed payment re-writing the payee's receipt and re-sending the DM was an effect with no act behind it.
-      ...(input.replayOf ? {} : { effectSink: declaredEffectSink(
+      ...(input.replayOf ? {} : { effectSink: withDomainRecordEffects(declaredEffectSink(
         {
           ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}),
           ...(deps.sendDirectMessage ? { sendDirectMessage: deps.sendDirectMessage } : {}),
@@ -6330,7 +6417,13 @@ step is then handed to that agent under authority the person grants; leave it ou
           },
         },
         { ...(input.session ? { session: input.session } : {}), ...(env.MOCK_USDC ? { usdc: env.MOCK_USDC } : {}), ...(input.person ? { person: input.person } : {}) },
-      ) }),
+      ), {
+        // W0 — the ASKER holds the artifact (the reply is its rendering); one record-type rule, shared with the state check.
+        recipient: String(input.person ?? '').toLowerCase(),
+        recordTypeOf: (cls) => recordTypeOfClass(cls, playbook?.domainRecords),
+        write: deps.writeSubjectRecord,
+        onWritten: (cls) => { trace.recordsEmitted = { ...(trace.recordsEmitted ?? {}), [cls]: (trace.recordsEmitted?.[cls] ?? 0) + 1 }; },
+      }) }),
     },
     // WHOSE PLAYBOOK DECLARES WHAT FOLLOWS — spec 360, resolved PER STEP.
     //

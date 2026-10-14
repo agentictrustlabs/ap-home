@@ -15,6 +15,13 @@ export type ExperimentStatusV1 = 'queued' | 'running' | 'done' | 'failed' | 'can
 
 /** The job as the object keeps it. The SESSION is the asker's Home session the ask route verifies per case — it is
  *  what the CLI sends too; it expires, and an expired one fails the remaining cases by name (never silently). */
+/** Spec 418 §2 / W2 (2026-10-14) — the OUTCOME GOLD per case: the plan (capability ids in run order; [] = none), the
+ *  inputs the right plan names missing, the behaviour (clarify · several) when no one skill is right. Digest-pinned to
+ *  the set like the criterion. THE EXPERT'S PLAN IS WHAT GETS SCORED: the ask route builds the outcome check's expected
+ *  classes from it, and keeps the agent's own plan as a second number. */
+export interface OutcomeGoldCaseV1 { plan: string[]; missing?: string[]; behaviour?: 'clarify' | 'several' }
+export interface OutcomeGoldV1 { type: 'ap.outcome-gold.v1'; replaySetDigest: string; note?: string; references?: string; cases: Record<string, OutcomeGoldCaseV1> }
+
 export interface ExperimentJobV1 {
   type: 'ap.lab-experiment-job.v1';
   planId: string;
@@ -22,6 +29,7 @@ export interface ExperimentJobV1 {
   set: ReplaySetV1;
   criterion: SelectionCriterionV1;
   fixtures?: Record<string, StartingStateFixtureV1>;
+  outcomeGold?: OutcomeGoldV1;
   /** The asker (the steward who submitted) and the agent asked, both addresses. */
   asker: string;
   addressee: string;
@@ -36,6 +44,24 @@ export interface ExperimentRequestV1 {
   set: ReplaySetV1; criterion: SelectionCriterionV1; variants: Record<string, VariantRequestV1>;
   split?: 'held-out' | 'development' | 'all'; repeats?: number; planId?: string; fixtures?: Record<string, StartingStateFixtureV1>;
   policy?: 'primary' | 'any-fire';
+  outcomeGold?: OutcomeGoldV1;
+}
+
+/** W2 — the outcome gold, checked: the record type, the digest (gold for THIS set), and each case's shape; a case the set
+ *  does not have is refused by name (gold for a case that never runs is a typo nobody would see). */
+export function validateOutcomeGold(raw: unknown, setDigest: string, intentIds: ReadonlySet<string>): { ok: true; gold: OutcomeGoldV1 } | { ok: false; error: string } {
+  if (!raw || typeof raw !== 'object') return { ok: false, error: 'outcomeGold: an ap.outcome-gold.v1 record is required' };
+  const g = raw as Partial<OutcomeGoldV1>;
+  if (g.type !== 'ap.outcome-gold.v1') return { ok: false, error: 'outcomeGold: type must be ap.outcome-gold.v1' };
+  if (g.replaySetDigest !== setDigest) return { ok: false, error: `outcomeGold: gold for ${String(g.replaySetDigest)}, not this set (${setDigest})` };
+  if (!g.cases || typeof g.cases !== 'object' || Array.isArray(g.cases)) return { ok: false, error: 'outcomeGold: cases must map a case id to { plan, missing?, behaviour? }' };
+  for (const [id, c] of Object.entries(g.cases)) {
+    if (!intentIds.has(id)) return { ok: false, error: `outcomeGold: ${id} is not a case of this set` };
+    if (!c || typeof c !== 'object' || !Array.isArray(c.plan) || c.plan.some((p) => typeof p !== 'string' || !p)) return { ok: false, error: `outcomeGold: ${id}: plan must be a list of capability ids` };
+    if (c.missing !== undefined && (!Array.isArray(c.missing) || c.missing.some((m) => typeof m !== 'string'))) return { ok: false, error: `outcomeGold: ${id}: missing must be class IRIs` };
+    if (c.behaviour !== undefined && c.behaviour !== 'clarify' && c.behaviour !== 'several') return { ok: false, error: `outcomeGold: ${id}: behaviour must be clarify or several` };
+  }
+  return { ok: true, gold: g as OutcomeGoldV1 };
 }
 
 /** The submission, checked the way the CLI checks it before it registers a plan: a valid replay set, a criterion that
@@ -63,10 +89,16 @@ export async function parseExperimentRequest(raw: unknown, now: Date): Promise<{
   if (!/^[A-Za-z0-9][A-Za-z0-9._@+-]{0,120}$/.test(planId)) return { ok: false, error: 'planId: letters, digits and . _ @ + - only' };
   const fixtures = b['fixtures'] === undefined ? undefined : (b['fixtures'] as Record<string, StartingStateFixtureV1>);
   if (fixtures !== undefined && (!fixtures || typeof fixtures !== 'object' || Array.isArray(fixtures))) return { ok: false, error: 'fixtures must map a scenario id to its starting state' };
+  let outcomeGold: OutcomeGoldV1 | undefined;
+  if (b['outcomeGold'] !== undefined && b['outcomeGold'] !== null) {
+    const og = validateOutcomeGold(b['outcomeGold'], setDigest, new Set(setR.set.intents.map((i) => i.id)));
+    if (!og.ok) return { ok: false, error: og.error };
+    outcomeGold = og.gold;
+  }
   const plan = experimentPlan({ id: planId, replaySetDigest: setDigest, criterionDigest: await criterionDigest(criterion), split: split!, repeats, variants: variants as Record<string, VariantRequestV1>, thresholds: DEFAULT_SELECTION_THRESHOLDS, registeredAt: now.toISOString(), ...(policy ? { policy } : {}) });
   const pv = validateExperimentPlan(plan);
   if (!pv.ok) return { ok: false, error: `plan: ${pv.errors.join('; ')}` };
-  return { ok: true, request: { set: setR.set, criterion, variants: variants as Record<string, VariantRequestV1>, split: split!, repeats, planId, ...(fixtures ? { fixtures } : {}), ...(policy ? { policy } : {}) }, plan };
+  return { ok: true, request: { set: setR.set, criterion, variants: variants as Record<string, VariantRequestV1>, split: split!, repeats, planId, ...(fixtures ? { fixtures } : {}), ...(policy ? { policy } : {}), ...(outcomeGold ? { outcomeGold } : {}) }, plan };
 }
 
 /** What a poller sees while the object runs: how far, what the runs so far said, and the record when it is done. */

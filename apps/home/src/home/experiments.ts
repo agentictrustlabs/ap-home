@@ -30,6 +30,8 @@ export interface ExperimentProgressV1 {
 
 export interface ExperimentSubmissionV1 {
   addressee: string; set: unknown; criterion: unknown; fixtures?: unknown;
+  /** 2026-10-14 (W2) — the set's outcome gold, when it has one. */
+  outcomeGold?: unknown;
   variants: Record<string, LabVariantV1>; split: 'held-out' | 'development' | 'all'; repeats: number; planId?: string;
 }
 
@@ -42,7 +44,7 @@ export async function readComparisonKnobs(): Promise<ComparisonKnobsV1 | null> {
 }
 
 export async function startExperiment(token: string, s: ExperimentSubmissionV1): Promise<{ ok: true; progress: ExperimentProgressV1 } | { ok: false; error: string; refused?: string }> {
-  const out = await postA2a('/a2a/harness/experiments', { session: token, addressee: s.addressee.toLowerCase(), set: s.set, criterion: s.criterion, ...(s.fixtures ? { fixtures: s.fixtures } : {}), variants: s.variants, split: s.split, repeats: s.repeats, ...(s.planId ? { planId: s.planId } : {}) });
+  const out = await postA2a('/a2a/harness/experiments', { session: token, addressee: s.addressee.toLowerCase(), set: s.set, criterion: s.criterion, ...(s.fixtures ? { fixtures: s.fixtures } : {}), ...(s.outcomeGold ? { outcomeGold: s.outcomeGold } : {}), variants: s.variants, split: s.split, repeats: s.repeats, ...(s.planId ? { planId: s.planId } : {}) });
   if (out['ok'] === true && out['progress']) return { ok: true, progress: out['progress'] as ExperimentProgressV1 };
   return { ok: false, error: String(out['error'] ?? 'the experiment could not be started'), ...(typeof out['refused'] === 'string' ? { refused: out['refused'] } : {}) };
 }

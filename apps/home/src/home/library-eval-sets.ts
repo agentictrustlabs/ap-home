@@ -15,6 +15,9 @@ export interface LibraryEvalSet {
   gold: unknown;
   /** The fixtures map (unwrapped from `{ fixtures }`), when the set has starting states. */
   fixtures?: unknown;
+  /** 2026-10-14 (W2) — the outcome gold (`ap.outcome-gold.v1`, whole), when the set has one: the Lab then scores the
+   *  expert's plan, checks the delivered records and judges one class per call. */
+  outcomeGold?: unknown;
 }
 
 /** base64 → UTF-8 text (an artifact's bytes). `atob` alone is latin-1 and corrupts an em dash. */
@@ -25,7 +28,7 @@ export function utf8FromB64(b64: string): string {
   return new TextDecoder().decode(bytes);
 }
 
-const SUFFIX = { replay: '.replay.json', gold: '.gold.json', fixtures: '.fixtures.json' } as const;
+const SUFFIX = { replay: '.replay.json', gold: '.gold.json', fixtures: '.fixtures.json', outcomeGold: '.outcome-gold.json' } as const;
 
 /** The sets a library folder read holds: every `<id>.replay.json` with its `<id>.gold.json` (a replay without gold is not
  *  runnable and is left out); fixtures ride along when present. Sorted by id. An unreadable file drops its set. */
@@ -43,11 +46,13 @@ export function parseLibraryEvalSets(artifacts: ReadonlyArray<LibraryArtifact>):
     const fx = read(`${id}${SUFFIX.fixtures}`) as { fixtures?: unknown } | undefined;
     const fixtures = fx && typeof fx === 'object' && 'fixtures' in fx ? fx.fixtures : fx;
     const hasFixtures = !!fixtures && typeof fixtures === 'object' && Object.keys(fixtures as object).length > 0;
+    const og = read(`${id}${SUFFIX.outcomeGold}`) as { type?: unknown; cases?: unknown } | undefined;
+    const hasGold = !!og && og.type === 'ap.outcome-gold.v1' && !!og.cases && typeof og.cases === 'object';
     out.push({
       id, title: typeof replay.title === 'string' && replay.title.trim() ? replay.title : id,
       cases: Array.isArray(replay.intents) ? replay.intents.length : 0,
       ...(typeof replay.version === 'string' || typeof replay.version === 'number' ? { version: String(replay.version) } : {}),
-      replay, gold, ...(hasFixtures ? { fixtures } : {}),
+      replay, gold, ...(hasFixtures ? { fixtures } : {}), ...(hasGold ? { outcomeGold: og } : {}),
     });
   }
   return out.sort((a, b) => a.id.localeCompare(b.id));
