@@ -21,7 +21,7 @@
  * perform it on its own behalf. So the principal here is the STEWARD, a person, who answers for the approval.
  *
  *   RPC_URL=… NEXT_PUBLIC_CHAIN_ID=34348 npx tsx scripts/release-service-card.mts <name> --by <steward handle> \
- *     --card-host <host> [--home https://www.faithnet.me] [--out bundle.json] [--dry-run]
+ *     --card-host <host> [--import-from <url>] [--home https://www.faithnet.me] [--out bundle.json] [--dry-run]
  *
  * `--out` writes the SERVING BUNDLE: the signed card, the public key set, and the binding. A SELF-HOSTED service
  * (its own Worker, its own origin — spec 433's shape B) serves those three files itself, and the Studio's publish
@@ -38,6 +38,12 @@ import { writeFileSync } from 'node:fs';
 import { createPublicClient, http, namehash, type Address, type Hex } from 'viem';
 
 const arg = (k: string): string | undefined => { const i = process.argv.indexOf(`--${k}`); return i >= 0 ? process.argv[i + 1] : undefined; };
+/** The LIVE-TRUTH card to release, when the service builds its own (spec 433 shape B). Without it the Studio
+ *  seeds the draft from the RUNTIME's profile, which for a self-hosted service is its generic surface — so the
+ *  release would be a correct signature over a card that misdescribes the agent. That is strictly worse than an
+ *  unsigned card, because it is authoritative misinformation. Found the hard way: the first release of
+ *  scripture-resolver.svc carried the runtime's eight generic skills and the edge's URL instead of the seven
+ *  scripture skills and its own endpoint. */
 const name = process.argv[2];
 const by = arg('by'); const cardHost = arg('card-host');
 const HOME = (arg('home') ?? process.env.HOME_URL ?? 'https://www.faithnet.me').replace(/\/$/, '');
@@ -55,6 +61,7 @@ if (!RPC) { console.error('RPC_URL is required — custody is checked on chain b
  *  Anything wider would make this a way to mint a full-vault self-delegation for a service, which is the thing the
  *  Home's own endpoint refuses. */
 const STUDIO_RESOURCES = ['vault:agent-cards:*', 'vault:projections:*', 'vault:bindings:*', 'vault:approvals:*'];
+const cardUriOf = () => `https://${cardHost}/.well-known/agent-card.json`;
 
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 300), _status: r.status }; } };
 const mutation = (extra: Record<string, unknown> = {}) => ({ idempotencyKey: crypto.randomUUID(), correlationId: crypto.randomUUID(), ...extra });
@@ -115,9 +122,42 @@ if (!cardId) {
   console.log(`  created card ${cardId} (seeded from the live profile)`);
 } else console.log(`  card ${cardId} exists (served release: ${cards[0]!.servedReleaseId ?? 'none'})`);
 
+const importFrom = arg('import-from');
+if (importFrom) {
+  const r = await fetch(importFrom, { headers: { accept: 'application/json' } });
+  if (!r.ok) { console.error(`  ${importFrom} answered ${r.status} — nothing imported`); process.exit(1); }
+  const source = await r.text();
+  const got = await studio<{ draft?: { revision?: number } }>('card.get', { cardResourceId: cardId });
+  // The import's EVIDENCE is append-only, keyed by the source digest. Re-importing the same bytes is therefore a
+  // conflict, not a failure: the draft already holds this card. Treat it as done and go on — the alternative is a
+  // ceremony that can only ever be run once.
+  try {
+    const imported = await studio<{ diagnostics?: Array<{ severity?: string; code?: string }> }>('card.import', { cardResourceId: cardId, source, uri: cardUriOf(), mutation: mutation({ expectedRevision: got.draft?.revision }) });
+    const errs = (imported.diagnostics ?? []).filter((d) => d.severity === 'error');
+    console.log(`  imported the live-truth card from ${importFrom}${errs.length ? ` — ${errs.length} error diagnostic(s)` : ''}`);
+  } catch (e) {
+    if (!String(e).includes('append_only')) throw e;
+    console.log('  the live-truth card was already imported (same bytes) — using the draft as it stands');
+  }
+}
+
 const v = await studio<{ errors: number; warnings?: number; diagnostics?: unknown }>('card.validate', { cardResourceId: cardId });
 console.log(`  validated: ${v.errors} error(s)${v.warnings !== undefined ? `, ${v.warnings} warning(s)` : ''}`);
-if (v.errors > 0) throw new Error(`the draft does not validate: ${JSON.stringify(v.diagnostics ?? v).slice(0, 400)}`);
+if (v.errors > 0) {
+  // GROUPED, because a wall of pointers hides the shape of the problem. One line per code tells you whether the
+  // card claims something it cannot prove, is missing a required field, or diverges from the catalog.
+  const ds = (v.diagnostics ?? []) as Array<{ code?: string; severity?: string; sourcePointer?: string; message?: string }>;
+  const by = new Map<string, { n: number; where: string[]; message: string }>();
+  for (const d of ds) {
+    const k = `${d.severity ?? '?'} ${d.code ?? '?'}`;
+    const e = by.get(k) ?? { n: 0, where: [], message: d.message ?? '' };
+    e.n++; if (e.where.length < 4) e.where.push(d.sourcePointer ?? '');
+    by.set(k, e);
+  }
+  console.error(`  the draft does not validate — ${ds.length} diagnostic(s):`);
+  for (const [k, e] of [...by].sort()) console.error(`    ${String(e.n).padStart(3)}  ${k}  ${e.where.join(' ')}${e.where.length < e.n ? ' …' : ''}\n         ${e.message.slice(0, 150)}`);
+  process.exit(1);
+}
 
 let release = (await studio<{ release: Release }>('card.createRelease', { cardResourceId: cardId, mutation: mutation() })).release;
 release = (await studio<{ release: Release }>('release.requestApproval', { cardResourceId: cardId, releaseId: release.releaseId, mutation: mutation() })).release;
@@ -128,7 +168,7 @@ console.log(`  release ${release.releaseId} approved`);
 // bytes were signed, one that THIS AGENT stands behind them (spec 347 §4.2).
 const key = await generateA2ACardSigningKey('ES256');
 const signed = await signA2ACard((release.signedCard ?? release.unsignedCard) as never, { privateKey: key.privateKey, kid: key.kid, alg: key.alg });
-const cardUri = `https://${cardHost}/.well-known/agent-card.json`;
+const cardUri = cardUriOf();
 const binding = {
   canonicalAgentId: `eip155:${CHAIN_ID}:${sa}`, cardResourceId: release.cardResourceId, cardReleaseId: release.releaseId, cardUri,
   unsignedCardDigest: release.unsignedContentDigest, signedCardDigest: signedCardContentDigest(signed.card as never),
