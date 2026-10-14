@@ -92,6 +92,18 @@ akcs dev mint-token … --subject <prefix>-runtime --ttl-secs 31536000
   whole Azure spend and every agent key derives from them for free. Leaving the level off the caller makes a
   billable key impossible, not discouraged.
 - A binding cannot be edited: `disable-caller --tenant-id <t> --caller-id <id>` and bind a `-2` subject.
+- **The two lines above are for an estate whose custody and relay stay `local-aes`** (imbnet's shape, and the last
+  line of this section). The moment an estate moves custody or the relay onto the tenant — faithnet's shape, where
+  residents are OIDC-custodied THROUGH it — those operations and `--signing-purposes none` are both wrong, and the
+  estate breaks in a way that names nothing. faithnet's two, for when that day comes:
+  `--operations status,data-key-generate,data-key-unwrap,derived-signer-resolve,derived-signer-sign,mac-generate,mac-verify,key-create,key-read,key-public-key,key-sign`
+  with `--signing-purposes EIP712,ERC4337_USER_OPERATION,EIP7702_AUTHORIZATION,PERSONAL_SIGN_DIGEST,RAW_32_BYTE_DIGEST`.
+- **`RAW_32_BYTE_DIGEST` must be listed EXPLICITLY** — it is off by default and a `*` does NOT enable it. The relayer
+  signs EIP-155 transaction digests and the interactions-session key signs a 32-byte DEL-001 leaf, so an estate using
+  either on AKCS needs it named. Omitting it cost a day: no Worker log line, no gate failure, only
+  `plannerTrace.playbookUnreadable` inside an ask reply, after which the harness asked "You have no treasury to be
+  paying from" — a credential error wearing a domain question's clothes. **If a KMS change breaks something, read
+  `playbookUnreadable` first.** Full account: `ap-federation/docs/runbooks/kms-tenant-for-an-estate.md` §2.
 
 Then `scripts/adopt-akcs.sh <estate> <vault-token> <runtime-token>` (sets `A2A_KMS_BACKEND=agentic-kms`,
 `AKCS_TENANT_ID`, `AKCS_ACCEPTED_PROTECTION_LEVELS=CVM_WRAPPED,CVM_DERIVED`, the two `AKCS_TOKEN` secrets) and
