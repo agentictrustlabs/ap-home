@@ -15,6 +15,7 @@
 import { useEffect, useState } from 'react';
 import { SectionShell } from '../portal/SectionShell';
 import { VAULT_SERVER_ID } from '../../lib/domain';
+import { CHAIN_ID } from '../../lib/chain';
 
 // ── Backend read shapes + helpers (impact's src/lib/backend.ts, trimmed to this page) ──
 interface Health {
@@ -101,7 +102,10 @@ export function NetworkPanel() {
     return () => { alive = false; clearInterval(t); };
   }, []);
 
-  const chainId = a2a?.chainId ?? deploy?.chainId ?? 84532;
+  // What the panel reports is what the agent and the deployment SAY, falling back to the chain this build
+  // targets — never to Base Sepolia, which would print a chain nobody here is standing on and send every
+  // explorer link to a scanner that has never heard of the address (2026-10-14).
+  const chainId = a2a?.chainId ?? deploy?.chainId ?? CHAIN_ID;
   const base = explorer(chainId);
   const registryRows = deploy
     ? Object.entries(deploy).filter(([, v]) => typeof v === 'string' && String(v).startsWith('0x'))

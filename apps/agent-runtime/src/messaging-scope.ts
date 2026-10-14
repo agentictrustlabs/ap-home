@@ -23,6 +23,7 @@
 import { AgentNamingClient } from '@agenticprimitives/agent-naming';
 import type { Address } from 'viem';
 import { internalHeaders } from './internal-marker.js';
+import { chainIdOf } from './chain';
 
 /** The skills whose `allowedTargets` admit scope classes. Everything else is exact-match only. */
 export const MESSAGING_SCOPE_SKILLS: ReadonlySet<string> = new Set([
@@ -104,7 +105,7 @@ export function messagingScopeDepsFromEnv(env: ScopeEnv): MessagingScopeDeps {
       if (!env.RPC_URL || !registry || !env.AGENT_NAME_UNIVERSAL_RESOLVER) return false;
       const name = await new AgentNamingClient({
         rpcUrl: env.RPC_URL,
-        chainId: Number(env.CHAIN_ID ?? 84532),
+        chainId: chainIdOf(env),
         registry: registry as Address,
         universalResolver: env.AGENT_NAME_UNIVERSAL_RESOLVER as Address,
       }).reverseResolve(agent);

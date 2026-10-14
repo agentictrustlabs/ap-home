@@ -16,7 +16,7 @@ import type { RunStorageOptions } from '@agenticprimitives/service-host';
 import { recordOf } from '@agenticprimitives/orchestration';
 import { putRecord } from './run-records.js';
 import { createPublicClient, http, keccak256, toBytes, type Address, type Hex } from 'viem';
-import { chainFor } from './chain';
+import { chainFor, chainIdOf } from './chain';
 import { hashDelegation, type Delegation } from '@agenticprimitives/delegation';
 import { checkSessionWireShape } from '@agenticprimitives/a2a';
 import { buildArchetypeCatalog, chooseArchetypeRoute, resolveArchetypeMethod, type ArchetypeHostGrant, type LibraryPackageMeta } from './archetype-skill.js';
@@ -477,7 +477,7 @@ function makeConsultSkill(env: Env, agentSA: Address, storage: DurableObjectStor
       }
       await storage.put(rateKey, rate.next);
 
-      const memberCaip = caip10(Number(env.CHAIN_ID ?? 84532), agentSA) as CanonicalAgentId;
+      const memberCaip = caip10(chainIdOf(env), agentSA) as CanonicalAgentId;
       try {
         const turn = await handleConsultRespond(env, { member: memberCaip, request }, {
           // Harness pre-read (spec 328 §4b record): the member's playbook + display name via the
@@ -547,7 +547,7 @@ function a2aChainReader(env: Env): ReturnType<typeof createChainAuthorityReader>
   const usv = env.UNIVERSAL_SIGNATURE_VALIDATOR?.trim();
   if (!env.RPC_URL || !usv) return undefined;
   _a2aChainReader = createChainAuthorityReader({
-    chainId: Number(env.CHAIN_ID ?? 84532),
+    chainId: chainIdOf(env),
     providers: [createViemChainProvider({
       source: 'base-sepolia-rpc',
       delegationManager: env.DELEGATION_MANAGER as Address,
@@ -601,7 +601,7 @@ export class A2aTaskDO extends HarnessRunDO<Env> {
   private build(agentSA: Address): A2aAgent {
     if (this.agent) return this.agent;
     const pub = createPublicClient({ chain: chainFor(this.env), transport: http(this.env.RPC_URL) });
-    const chainId = Number(this.env.CHAIN_ID ?? 84532);
+    const chainId = chainIdOf(this.env);
     const dm = this.env.DELEGATION_MANAGER as Address;
     // Inline ERC-1271 (direct SA isValidSignature) — the fallback when the resilient reader can't be built.
     const erc1271Inline = async (account: Address, digest: Hex, signature: Hex): Promise<boolean> => {
@@ -1652,7 +1652,7 @@ export class A2aTaskDO extends HarnessRunDO<Env> {
    *  authored (`actor` set) so it does not trigger the requester's own auto-reply. Fail-closed:
    *  a recipient without inbox delivery enabled simply can't receive (the caller drops the error). */
   private async deliverEndeavorOutcomeNotice(fromSa: string, recipient: string, goal: string, outcome: string): Promise<void> {
-    const chainId = Number(this.env.CHAIN_ID ?? 84532);
+    const chainId = chainIdOf(this.env);
     const fromCaip = caip10(chainId, fromSa.toLowerCase() as Address) as AnyMessageEnvelope['from'];
     const toCaip = caip10(chainId, recipient.toLowerCase() as Address) as AnyMessageEnvelope['from'];
     const now = new Date().toISOString();

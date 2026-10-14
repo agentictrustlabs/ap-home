@@ -1,9 +1,16 @@
-// The chain + contract table this Home build targets. Base Sepolia (84532) by default —
-// the deployed configuration — but selectable per build so the SAME app runs against a
-// local chain (anvil, or a private QBFT chain such as faithnet) for development and e2e.
+// The chain + contract table this Home build targets. Selectable per build so the SAME app runs against
+// faithnet, a second estate's chain, or a local chain (anvil) for development and e2e.
+//
+// THERE IS NO DEFAULT CHAIN (2026-10-14, owner's instruction; ADR-0013 — no silent fallbacks). This file
+// used to fall back to Base Sepolia when `NEXT_PUBLIC_CHAIN_ID` was unset, and a delegation digest is
+// signed over the chain id and THAT chain's DelegationManager — so an operator script run without the env
+// issued four wires for a chain the estate had left behind. They looked perfect and were refused at the
+// vault door as `invalid_invocation_proof`, which is that door's catch-all for any failure in the whole
+// authority chain. A chain id is not a preference with a sensible default; it is part of what a signature
+// MEANS. Unset is an error, said here, once, at module load.
 //
 // Selection (all build-time; NEXT_PUBLIC_* is inlined into the client bundle):
-//   NEXT_PUBLIC_CHAIN_ID        chain id (default 84532)
+//   NEXT_PUBLIC_CHAIN_ID        chain id — REQUIRED unless NEXT_PUBLIC_CONTRACTS_JSON carries chainId
 //   NEXT_PUBLIC_RPC_URL         browser-side RPC default (server code still prefers env.RPC_URL)
 //   NEXT_PUBLIC_CONTRACTS_JSON  a `deployments-<network>.json` document as ONE JSON string. Local
 //                               deployments are machine-specific and gitignored, so they are injected
@@ -34,11 +41,19 @@ function parseInjected(raw: string | undefined): DeploymentsDoc | null {
 
 const INJECTED = parseInjected(process.env.NEXT_PUBLIC_CONTRACTS_JSON);
 
-export const CHAIN_ID: number = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? INJECTED?.chainId ?? baseSepolia.id);
-if (!Number.isInteger(CHAIN_ID) || CHAIN_ID <= 0) throw new Error(`NEXT_PUBLIC_CHAIN_ID is not a positive integer`);
+const DECLARED_CHAIN_ID = process.env.NEXT_PUBLIC_CHAIN_ID?.trim() || (INJECTED?.chainId != null ? String(INJECTED.chainId) : '');
+if (!DECLARED_CHAIN_ID) {
+  throw new Error(
+    'NEXT_PUBLIC_CHAIN_ID is unset and NEXT_PUBLIC_CONTRACTS_JSON carries no chainId. There is no default: '
+    + 'a chain id is part of what a signature means, and a wrong one is refused with nothing useful to say. '
+    + 'Set NEXT_PUBLIC_CHAIN_ID for this build (faithchain is 34348).',
+  );
+}
+export const CHAIN_ID: number = Number(DECLARED_CHAIN_ID);
+if (!Number.isInteger(CHAIN_ID) || CHAIN_ID <= 0) throw new Error(`NEXT_PUBLIC_CHAIN_ID is not a positive integer: ${DECLARED_CHAIN_ID}`);
 
-/** RPC default. Public Base Sepolia on the deployed chain; a local node otherwise. Override with
- *  RPC_URL (server) / NEXT_PUBLIC_RPC_URL (browser). */
+/** RPC default. Per-chain and never a fallback: the Base Sepolia branch applies only when this build IS
+ *  on Base Sepolia. Override with RPC_URL (server) / NEXT_PUBLIC_RPC_URL (browser). */
 export const DEFAULT_RPC_URL: string =
   process.env.NEXT_PUBLIC_RPC_URL || (CHAIN_ID === baseSepolia.id ? 'https://sepolia.base.org' : 'http://127.0.0.1:8545');
 

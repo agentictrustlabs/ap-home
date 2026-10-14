@@ -19,7 +19,7 @@
 // Audit: D1 (spec 322 §7), before commit.
 import { CONTACT_FIELD_ARGS, contactField, precisionOf } from '@agenticprimitives/ontology';
 import { createPublicClient, http, decodeAbiParameters, type Address, type Hex } from 'viem';
-import { chainFor } from './chain';
+import { chainFor, chainIdOf } from './chain';
 import { kinTermFor, householdRoleFor } from '@agenticprimitives/ontology';
 import { hashDelegation, decodeTimestampTerms, decodeVaultRecordScopeTerms, vaultRecordScopeAllows, VAULT_RECORD_SCOPE_ENFORCER, SESSION_AUDIENCE_ENFORCER, decodeSessionAudienceTerms, type Delegation, type VaultRecordScopeGrant, currentWireOf, LINEAGE_RECORD_PREFIX, type DelegationLineageV1 } from '@agenticprimitives/delegation';
 import { PrincipalGatewayDO } from '@agenticprimitives/fabric/cloudflare';
@@ -598,7 +598,7 @@ export class InteractionsDO {
     const injected = this.deps?.resolveName;
     if (!injected && (!this.env.RPC_URL || !this.env.AGENT_NAME_REGISTRY || !this.env.AGENT_NAME_UNIVERSAL_RESOLVER)) return;
     const audit = buildAuditSink(this.env);
-    const chainId = Number(this.env.CHAIN_ID ?? 84532);
+    const chainId = chainIdOf(this.env);
     void (async () => {
       const naming = injected ? null : new AgentNamingClient({ rpcUrl: this.env.RPC_URL!, chainId, registry: this.env.AGENT_NAME_REGISTRY as Address, universalResolver: this.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address });
       const members = await resolveMentions(refs, {
@@ -742,7 +742,7 @@ export class InteractionsDO {
     /** Spec 382 — the PARTICIPANT whose finished run records its own step (in-Worker, marker-gated; the
      *  reducer still re-gates: only the managing principal or an active participant may satisfy a step). */
     actor?: string }): EndeavorOpDeps {
-    const chainId = Number(this.env.CHAIN_ID ?? 84532);
+    const chainId = chainIdOf(this.env);
     const doorAudit = buildAuditSink(this.env);
     const actor = (opts?.actor && /^0x[0-9a-fA-F]{40}$/.test(opts.actor) ? opts.actor : principal).toLowerCase();
     return {
@@ -1032,7 +1032,7 @@ export class InteractionsDO {
    * rebuild in code, and a test that wipes the DO and rebuilds it — and they are not met today.
    */
   private mountedGateway(grant: IncomingDelegation): PrincipalGatewayDO {
-    const chainId = Number(this.env.CHAIN_ID ?? 84532);
+    const chainId = chainIdOf(this.env);
     const manager = (this.env.DELEGATION_MANAGER ?? '') as Address;
     const vault = this.vaultFor(grant);
     const deps = buildMountedGatewayDeps({
@@ -1283,7 +1283,7 @@ export class InteractionsDO {
       expectedDelegate: sessionSa,
       enforcers: enforcersFromEnv(this.env as unknown as Record<string, string | undefined>),
       checks: {
-        digest: (d) => hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address),
+        digest: (d) => hashDelegation(d, chainIdOf(this.env), this.env.DELEGATION_MANAGER as Address),
         erc1271: (signer, digest, sig) => this.erc1271(signer, digest, sig),
         isRevoked: async (digest) =>
           (await this.pub().readContract({
@@ -1378,7 +1378,7 @@ export class InteractionsDO {
     const index = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
     const existing = index.find((c) => c.title.trim().toLowerCase() === 'welcome');
     if (existing) return existing;
-    const orgCaip = caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address) as ChannelV1['descriptor']['owner'];
+    const orgCaip = caip10(chainIdOf(this.env), principal as Address) as ChannelV1['descriptor']['owner'];
     const create = async () => {
       const fresh = await this.readDoc<ChannelV1[]>(grant, CONVERSATION_INDEX_RESOURCE, []);
       const again = fresh.find((c) => c.title.trim().toLowerCase() === 'welcome');
@@ -1400,7 +1400,7 @@ export class InteractionsDO {
       if (!topic) return;
       const names = await this.resolvePublicNames([principal]).catch(() => ({} as Record<string, string | null>));
       const orgName = names[principal.toLowerCase()] ?? 'the organization';
-      const orgCaip = caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address) as AnyMessageEnvelope['from'];
+      const orgCaip = caip10(chainIdOf(this.env), principal as Address) as AnyMessageEnvelope['from'];
       const post = async () => {
         const messages = await this.readDoc<ChannelMessageEntryV1[]>(grant, TOPIC_RESOURCE(topic.descriptor.id), []);
         const composed: ChannelV1[] = [{ ...topic, messages }];
@@ -1445,7 +1445,7 @@ export class InteractionsDO {
     this.serviceKind = (async () => {
       if (!this.env.RPC_URL || !this.env.AGENT_NAME_REGISTRY || !this.env.AGENT_NAME_UNIVERSAL_RESOLVER) return false;
       const naming = new AgentNamingClient({
-        rpcUrl: this.env.RPC_URL, chainId: Number(this.env.CHAIN_ID ?? 84532),
+        rpcUrl: this.env.RPC_URL, chainId: chainIdOf(this.env),
         registry: this.env.AGENT_NAME_REGISTRY as Address, universalResolver: this.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address,
         ...(this.env.PROFILE_RESOLVER ? { profileResolver: this.env.PROFILE_RESOLVER as Address } : {}),
       });
@@ -1466,7 +1466,7 @@ export class InteractionsDO {
     if (!this.env.RPC_URL || !this.env.AGENT_NAME_REGISTRY || !this.env.AGENT_NAME_UNIVERSAL_RESOLVER) return out;
     const naming = new AgentNamingClient({
       rpcUrl: this.env.RPC_URL,
-      chainId: Number(this.env.CHAIN_ID ?? 84532),
+      chainId: chainIdOf(this.env),
       registry: this.env.AGENT_NAME_REGISTRY as Address,
       universalResolver: this.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address,
     });
@@ -1587,7 +1587,7 @@ export class InteractionsDO {
     if (!wire || String(wire.delegator ?? '').toLowerCase() !== me || String(wire.delegate ?? '').toLowerCase() !== principal.toLowerCase()) return null;
     try {
       const d: Delegation = { ...wire, salt: BigInt(wire.salt), caveats: (wire.caveats ?? []).map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
-      const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+      const digest = hashDelegation(d, chainIdOf(this.env), this.env.DELEGATION_MANAGER as Address);
       if (!(await this.erc1271(me as Address, digest, wire.signature as Hex))) return null;
       const revoked = (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [digest] })) as boolean;
       if (revoked) return null;
@@ -2049,7 +2049,7 @@ export class InteractionsDO {
       // the delegation digest against the delegator (approved-hash 0x03 wires validate through the
       // SA's approved-hash branch). Fail-closed: an unverifiable grant is never stored.
       const d: Delegation = { ...wire, salt: BigInt(wire.salt), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
-      const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+      const digest = hashDelegation(d, chainIdOf(this.env), this.env.DELEGATION_MANAGER as Address);
       if (!(await this.erc1271(wire.delegator as Address, digest, wire.signature as Hex))) {
         return json({ error: 'grant signature failed verification against the delegator' }, 403);
       }
@@ -2079,7 +2079,7 @@ export class InteractionsDO {
             return json({ error: 'session leaf delegator must equal the grant delegator (the principal) — NEW-C1' }, 400);
           }
           const ld: Delegation = { ...lw, salt: BigInt(lw.salt), caveats: lw.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
-          const ldigest = hashDelegation(ld, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+          const ldigest = hashDelegation(ld, chainIdOf(this.env), this.env.DELEGATION_MANAGER as Address);
           if (!(await this.erc1271(lw.delegator as Address, ldigest, lw.signature as Hex))) {
             return json({ error: 'session leaf signature failed verification against the principal (NEW-C1)' }, 403);
           }
@@ -2104,7 +2104,7 @@ export class InteractionsDO {
       const wire = body.delegation as IncomingDelegation | undefined;
       if (!wire?.signature || wire.delegator.toLowerCase() !== principal) return json({ error: 'delivery delegation with delegator = principal required' }, 400);
       const d: Delegation = { ...wire, salt: BigInt(wire.salt), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
-      const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+      const digest = hashDelegation(d, chainIdOf(this.env), this.env.DELEGATION_MANAGER as Address);
       if (!(await this.erc1271(wire.delegator as Address, digest, wire.signature as Hex))) return json({ error: 'delivery grant signature failed verification against the delegator' }, 403);
       // NEW-H6 (Phase B): pin the delivery delegate to the configured delivery service SA (inert until provisioned).
       const expectedDeliverySa = (this.env.DELIVERY_SERVICE_SA ?? '').toLowerCase();
@@ -2481,7 +2481,7 @@ export class InteractionsDO {
             return json({ ok: false, error: 'claimedFrom, bodyText and gateway are required' }, 400);
           }
           if (!g) return json({ ok: false, needsEnable: true, error: 'interactions storage not enabled' });
-          const chainIdEmail = Number(this.env.CHAIN_ID ?? 84532);
+          const chainIdEmail = chainIdOf(this.env);
           const digestOf = async (v: string): Promise<string> => {
             const bytes = new TextEncoder().encode(v);
             const hash = await crypto.subtle.digest('SHA-256', bytes);
@@ -2682,7 +2682,7 @@ export class InteractionsDO {
             try { return (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [digest as Hex] })) as boolean; } catch { return true; }
           };
           const signedOf = (w: { signature?: string } | undefined): 'approved-digest' | 'key' => (String(w?.signature ?? '').toLowerCase() === '0x03' ? 'approved-digest' : 'key');
-          const hashOf = (w: IncomingDelegation): string => hashDelegation({ ...w, salt: BigInt(String(w.salt)), caveats: w.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+          const hashOf = (w: IncomingDelegation): string => hashDelegation({ ...w, salt: BigInt(String(w.salt)), caveats: w.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation, chainIdOf(this.env), this.env.DELEGATION_MANAGER as Address);
           for (const [, v] of await this.state.storage.list({ prefix: READ_GRANT_KEY('') })) {
             const rec = v as ReadGrantRecord;
             rows.push({ kind: 'app', holder: rec.clientId, what: 'reads the records the grant scopes', digest: rec.hash, issuedAt: rec.storedAt, revoked: await revokedOf(rec.hash), source: 'read.grant', signed: signedOf(rec.wire) });
@@ -2720,7 +2720,7 @@ export class InteractionsDO {
             for (const [k, v] of Object.entries(got.records ?? {})) {
               const rec = v as { delegation?: IncomingDelegation; grantDigest?: string; status?: string; role?: string; createdAt?: number; contact?: string };
               const wire = rec.delegation; if (!wire) continue;
-              const digest = rec.grantDigest ?? hashDelegation({ ...wire, salt: BigInt(String(wire.salt)), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+              const digest = rec.grantDigest ?? hashDelegation({ ...wire, salt: BigInt(String(wire.salt)), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation, chainIdOf(this.env), this.env.DELEGATION_MANAGER as Address);
               const member = k.startsWith('org.invite:agent:');
               if (member && rec.status === 'removed') continue;
               rows.push({ kind: member ? 'member' : 'contact', holder: (member ? k.slice('org.invite:agent:'.length) : String(rec.contact ?? wire.delegate)).toLowerCase(), what: member ? `member access${rec.role ? ` (${rec.role})` : ''}${rec.status ? ` · ${rec.status}` : ''}` : `contact (${rec.role ?? 'contact'})${rec.status === 'removed' ? ' · removed' : ''}`, digest, ...(rec.createdAt ? { issuedAt: new Date(rec.createdAt).toISOString() } : {}), revoked: rec.status === 'removed' ? true : await revokedOf(digest), source: k, signed: signedOf(wire) });
@@ -2777,7 +2777,7 @@ export class InteractionsDO {
             for (const [k, v] of Object.entries(got.records ?? {})) {
               const rec = v as { delegation?: IncomingDelegation; grantDigest?: string };
               if (!rec.delegation) continue;
-              const digest = (rec.grantDigest ?? hashDelegation({ ...rec.delegation, salt: BigInt(String(rec.delegation.salt)), caveats: rec.delegation.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address)).toLowerCase();
+              const digest = (rec.grantDigest ?? hashDelegation({ ...rec.delegation, salt: BigInt(String(rec.delegation.salt)), caveats: rec.delegation.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation, chainIdOf(this.env), this.env.DELEGATION_MANAGER as Address)).toLowerCase();
               if (digest === want) return json({ ok: true, wire: rec.delegation, hash: digest, source: k });
             }
           }
@@ -2920,7 +2920,7 @@ export class InteractionsDO {
             const index = await this.readDoc<ChannelV1[]>(g, CONVERSATION_INDEX_RESOURCE, []);
             const existing = index.find((ch) => ch.title.toLowerCase() === title.toLowerCase());
             if (existing) return json({ ok: true, channelId: existing.descriptor.id, title: existing.title, created: false });
-            const ownerCaip = caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address) as ChannelV1['descriptor']['owner'];
+            const ownerCaip = caip10(chainIdOf(this.env), principal as Address) as ChannelV1['descriptor']['owner'];
             const r = createBoardChannel(index, { contextId: principal, owner: ownerCaip, title, createdBy: await this.boardNameFor(g, principal), participationPolicy: 'open', creatorSa: principal });
             if (!r.ok) return json({ error: r.error }, 400);
             await buildAuditSink(this.env).write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.channels.create', outcome: 'success', actor: { type: 'service', id: principal }, subject: { type: 'channel', id: r.channel.descriptor.id } });
@@ -2960,7 +2960,7 @@ export class InteractionsDO {
             const assistant = entry.assistant;
             if (!member && !assistant) return json({ error: 'assistant is not enabled on this topic' }, 409);
             const authorAddr = member && member !== principal ? member : principal;
-            const authorCaip = caip10(Number(this.env.CHAIN_ID ?? 84532), authorAddr as Address) as AnyMessageEnvelope['from'];
+            const authorCaip = caip10(chainIdOf(this.env), authorAddr as Address) as AnyMessageEnvelope['from'];
             const authorName = member && member !== principal ? (memberName || member.slice(0, 10)) : (assistant?.displayName || memberName || principal.slice(0, 10));
             const composed: ChannelV1[] = [{ ...entry, messages }];
             const r = await appendBoardPost(composed, { channelId, from: authorCaip, authorName, bodyText, actor: authorCaip, ...(extraRefs.length ? { contextRefs: extraRefs } : {}), ...(prov ? { prov } : {}) });
@@ -3018,7 +3018,7 @@ export class InteractionsDO {
             const dg = st0.deliveryGrant;
             if (!dg) return json({ error: 'no delivery grant — enable inbox delivery for this agent first' }, 409);
             const doc = (await this.readDoc<Record<string, unknown>>(g, INBOX_RESOURCE, null as never)) ?? { version: 1, envelopes: [], events: [], draftCases: [], caseEvents: [], cards: {} };
-            const personCaip = caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address) as AnyMessageEnvelope['from'];
+            const personCaip = caip10(chainIdOf(this.env), principal as Address) as AnyMessageEnvelope['from'];
             // spec 340 — a V2 reply MUST name what it answers (§R.4); `INFORM` alone cannot say
             // "this is a response". The antecedent is the newest message in this conversation that
             // did NOT come from the principal — which is precisely what the assistant is replying to.
@@ -3361,7 +3361,7 @@ export class InteractionsDO {
           if (!/^0x[0-9a-f]{40}$/.test(member)) return json({ error: 'member (address) required' }, 400);
           const name =
             (await this.recordedMemberName(g, principal, member as Address))
-            ?? (await this.memberName(g, principal, `eip155:${Number(this.env.CHAIN_ID ?? 84532)}:${member}`));
+            ?? (await this.memberName(g, principal, `eip155:${chainIdOf(this.env)}:${member}`));
           return json({ ok: true, name });
         }
         if (op === 'internal.member.role') {
@@ -3452,7 +3452,7 @@ export class InteractionsDO {
         if (op === 'internal.endeavor.request') {
           const requester = String(body.requester ?? '').toLowerCase();
           if (!/^0x[0-9a-f]{40}$/.test(requester)) return json({ error: 'requester (the verified task sender) required' }, 400);
-          const chainId = Number(this.env.CHAIN_ID ?? 84532);
+          const chainId = chainIdOf(this.env);
           const doorAudit = buildAuditSink(this.env);
           const res = await handleEndeavorOp({
             principal,
@@ -3488,7 +3488,7 @@ export class InteractionsDO {
         // gate admits it); the internal marker is the authorization — this is the org's own
         // substrate posting its own draft, never a caller-supplied actor. ──
         if (op === 'internal.endeavor.proposePlan') {
-          const chainId = Number(this.env.CHAIN_ID ?? 84532);
+          const chainId = chainIdOf(this.env);
           const doorAudit = buildAuditSink(this.env);
           return handleEndeavorOp({
             principal,
@@ -3936,7 +3936,7 @@ export class InteractionsDO {
     if (asSelfInternal && !isInternalCall(request, this.env)) return json({ error: 'internal op — not authorized' }, 403);
     if (asSelfInternal) op = 'messaging.send';
     let gate = asSelfInternal
-      ? { ok: true as const, sa: principal as Address, caip: caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address) }
+      ? { ok: true as const, sa: principal as Address, caip: caip10(chainIdOf(this.env), principal as Address) }
       : await verifyHomeSession(String(body.session ?? ''), this.env);
     /** The relying app that called, when one did. Null for the person's own Home (spec 341 §4.3b). */
     let skillsClientId: string | null = null;
@@ -4552,7 +4552,7 @@ export class InteractionsDO {
           principal,
           // Spec 375 — the events a commit appends fire the participants' triggers, off the mutex.
           onCommitted: (endeavorId, events, state) => { this.state.waitUntil(afterEndeavorCommit(this.env, principal as Address, endeavorId, events as never, state).catch(() => undefined)); },
-          principalCaip: caip10(Number(this.env.CHAIN_ID ?? 84532), principal as Address),
+          principalCaip: caip10(chainIdOf(this.env), principal as Address),
           sessionSa,
           sessionCaip,
           readDoc: <T,>(resource: string, empty: T): Promise<T> => this.readDoc<T>(grant, resource, empty),
@@ -4739,7 +4739,7 @@ export class InteractionsDO {
         const wire = body.wire as IncomingDelegation | undefined;
         if (!wire || wire.delegator.toLowerCase() !== principal) return json({ error: 'a standing grant is this agent\'s own delegation' }, 400);
         const d: Delegation = { ...wire, salt: BigInt(String(wire.salt)), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
-        const hash = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+        const hash = hashDelegation(d, chainIdOf(this.env), this.env.DELEGATION_MANAGER as Address);
         if (!(await this.erc1271(principal as Address, hash, wire.signature as Hex))) return json({ error: 'the standing grant\'s signature does not verify against this agent' }, 403);
         const rec: StandingGrantRecord = { wire, hash, capabilities: Array.isArray(body.capabilities) ? (body.capabilities as string[]).map(String) : [], locations: Array.isArray(body.locations) ? (body.locations as string[]).map(String) : [], holder: String(wire.delegate).toLowerCase(), ...(typeof body.holderName === 'string' ? { holderName: body.holderName } : {}), validUntil: Number(body.validUntil ?? 0), storedAt: new Date().toISOString() };
         await this.state.storage.put(STANDING_GRANT_KEY(hash), rec);
@@ -4834,7 +4834,7 @@ export class InteractionsDO {
           try {
             primaryName = await new AgentNamingClient({
               rpcUrl: this.env.RPC_URL,
-              chainId: Number(this.env.CHAIN_ID ?? 84532),
+              chainId: chainIdOf(this.env),
               registry: this.env.AGENT_NAME_REGISTRY as Address,
               universalResolver: this.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address,
             }).reverseResolve(principal as Address);
@@ -4915,7 +4915,7 @@ export class InteractionsDO {
           const shapeErr = checkSessionWireShape(incoming, { timestamp: tsEnf, allowedMethods: amEnf }, Math.floor(Date.now() / 1000), { skill: CONSULT_SKILL_ID });
           if (shapeErr) return json({ error: shapeErr }, 400);
           const d: Delegation = { ...incoming, salt: BigInt(incoming.salt), caveats: incoming.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
-          const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+          const digest = hashDelegation(d, chainIdOf(this.env), this.env.DELEGATION_MANAGER as Address);
           if (!(await this.erc1271(incoming.delegator as Address, digest, incoming.signature as Hex))) {
             return json({ error: 'org consult wire signature failed verification against the organization' }, 403);
           }
@@ -5065,7 +5065,7 @@ export class InteractionsDO {
         if (delegate === (this.env.INTERACTIONS_SERVICE_SA ?? '').toLowerCase()) return json({ error: 'a study grant delegates to the coach service, not to this Home’s own service' }, 400);
         // The delegate IS the named service: resolved here, so the grant and the name cannot disagree.
         if (this.env.RPC_URL && this.env.AGENT_NAME_REGISTRY && this.env.AGENT_NAME_UNIVERSAL_RESOLVER) {
-          const naming = new AgentNamingClient({ rpcUrl: this.env.RPC_URL, chainId: Number(this.env.CHAIN_ID ?? 84532), registry: this.env.AGENT_NAME_REGISTRY as Address, universalResolver: this.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address });
+          const naming = new AgentNamingClient({ rpcUrl: this.env.RPC_URL, chainId: chainIdOf(this.env), registry: this.env.AGENT_NAME_REGISTRY as Address, universalResolver: this.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address });
           const resolved = await naming.resolveName(coach).catch(() => null);
           if (!resolved) return json({ error: `"${coach}" does not resolve to an agent` }, 400);
           if (resolved.toLowerCase() !== delegate) return json({ error: `"${coach}" is ${resolved}, not the grant’s delegate` }, 400);
@@ -5086,7 +5086,7 @@ export class InteractionsDO {
         if (!scopes.some((gr) => gr.ops.includes('read') && gr.resources.some((r) => STUDY_HAND.test(r)))) return json({ error: 'the study grant must read a hand record (vault:cardroom.hand, or vault:cardroom.<game>.hand)' }, 400);
         if (scopes.some((gr) => (gr.ops.includes('write') || gr.ops.includes('delete')) && gr.resources.some((r) => !STUDY_NOTE.test(r)))) return json({ error: 'a study grant may write nothing but the coach’s notes (vault:cardroom.note, or vault:cardroom.<game>.note)' }, 400);
         const d: Delegation = { ...incoming, salt: BigInt(incoming.salt), caveats: incoming.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
-        const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+        const digest = hashDelegation(d, chainIdOf(this.env), this.env.DELEGATION_MANAGER as Address);
         if (!(await this.erc1271(incoming.delegator as Address, digest, incoming.signature as Hex))) return json({ error: 'study grant signature failed verification against this agent' }, 403);
         try {
           const revoked = (await this.pub().readContract({ address: this.env.DELEGATION_MANAGER as Address, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [digest] })) as boolean;
@@ -5164,7 +5164,7 @@ export class InteractionsDO {
         const tooBroad = resources.filter((r) => r === 'vault:*' || r === 'vault:');
         if (tooBroad.length > 0) return json({ error: 'a read grant must scope to record families, never the whole vault' }, 400);
         const d: Delegation = { ...incoming, salt: BigInt(incoming.salt), caveats: incoming.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
-        const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+        const digest = hashDelegation(d, chainIdOf(this.env), this.env.DELEGATION_MANAGER as Address);
         if (!(await this.erc1271(incoming.delegator as Address, digest, incoming.signature as Hex))) {
           return json({ error: 'read grant signature failed verification against this agent' }, 403);
         }
@@ -5239,7 +5239,7 @@ export class InteractionsDO {
           if (![tsEnf, amEnf, atEnf].every((a) => /^0x[0-9a-f]{40}$/.test(a))) {
             return json({ error: 'messaging enforcers not configured — cannot verify the shapes' }, 503);
           }
-          const chainIdForWire = Number(this.env.CHAIN_ID ?? 84532);
+          const chainIdForWire = chainIdOf(this.env);
           const dm = this.env.DELEGATION_MANAGER as Address;
           const toD = (w: IncomingDelegation): Delegation =>
             ({ ...w, salt: BigInt(w.salt), caveats: w.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) }) as Delegation;
@@ -5310,7 +5310,7 @@ export class InteractionsDO {
         // that can resolve it. Answering "no wire" without the recipient made the client mint one
         // covering whatever it could guess — which was the sender themselves (caught by the e2e, and a
         // silent fallback of exactly the kind ADR-0013 forbids).
-        const chainId = Number(this.env.CHAIN_ID ?? 84532);
+        const chainId = chainIdOf(this.env);
 
         // WHO IS THIS FOR. Three CALLER-SELECTED ways to name the recipient, not a fallback chain
         // (ADR-0013): the caller picks one and it either answers or fails. `conversationId` alone is
@@ -5708,7 +5708,7 @@ export class InteractionsDO {
           try {
             primaryName = await new AgentNamingClient({
               rpcUrl: this.env.RPC_URL,
-              chainId: Number(this.env.CHAIN_ID ?? 84532),
+              chainId: chainIdOf(this.env),
               registry: this.env.AGENT_NAME_REGISTRY as Address,
               universalResolver: this.env.AGENT_NAME_UNIVERSAL_RESOLVER as Address,
             }).reverseResolve(principal as Address);
@@ -5929,7 +5929,7 @@ export class InteractionsDO {
         const named = expect.filter((slug) => selectors.includes(skillSelector(`archetype.${slug}`).toLowerCase()));
 
         const d: Delegation = { ...wire, salt: BigInt(wire.salt), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
-        const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+        const digest = hashDelegation(d, chainIdOf(this.env), this.env.DELEGATION_MANAGER as Address);
         if (!(await this.erc1271(wire.delegator as Address, digest, wire.signature as Hex))) {
           return json({ error: 'archetype grant signature failed verification against the host organization' }, 403);
         }
@@ -5978,7 +5978,7 @@ export class InteractionsDO {
           }
           // ERC-1271 against the member + unrevoked on-chain (fail-closed junk-overwrite guard).
           const d: Delegation = { ...wire, salt: BigInt(wire.salt), caveats: wire.caveats.map((c) => ({ enforcer: c.enforcer, terms: c.terms, args: (c.args ?? '0x') as Hex })) } as Delegation;
-          const digest = hashDelegation(d, Number(this.env.CHAIN_ID ?? 84532), this.env.DELEGATION_MANAGER as Address);
+          const digest = hashDelegation(d, chainIdOf(this.env), this.env.DELEGATION_MANAGER as Address);
           if (!(await this.erc1271(wire.delegator as Address, digest, wire.signature as Hex))) {
             return json({ error: 'consult grant signature failed verification against the member' }, 403);
           }

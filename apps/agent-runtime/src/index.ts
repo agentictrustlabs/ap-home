@@ -73,7 +73,7 @@ import {
   parseUint256Decimal,
   parseUint48,
 } from './validate';
-import { chainFor } from './chain';
+import { chainFor, chainIdOf } from './chain';
 import {
   AgentAccountClient,
   buildExecuteBatchCallData,
@@ -6118,7 +6118,7 @@ app.post('/peer-attest', async (c) => {
 
   try {
     const acct = await interactionsSessionAccount(c.env);
-    const chainId = Number(c.env.CHAIN_ID ?? 84532);
+    const chainId = chainIdOf(c.env);
     const now = new Date();
     const core = {
       specVersion: 'ap.peer-attestation/1' as const,
@@ -9781,7 +9781,7 @@ async function verifyDelegation(
       salt: BigInt(delegation.salt),
       signature: delegation.signature,
     },
-    Number(env.CHAIN_ID ?? 84532),
+    chainIdOf(env),
     env.DELEGATION_MANAGER as Address,
   );
   // spec 316 §3a — a fresh POSITIVE verdict for this exact digest skips the two eth_calls below

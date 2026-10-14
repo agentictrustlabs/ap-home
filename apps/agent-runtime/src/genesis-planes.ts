@@ -33,6 +33,7 @@ const APPROVED = '0x03' as Hex;
 
 import { vaultServerId } from './vault-server-id.js';
 import { INTERACTIONS_APP_SCOPES } from '@ap-home/shared';
+import { chainIdOf } from './chain';
 
 /** The interactions grant's record scopes: the package CORE (`@agenticprimitives/fabric/interactions`) plus this
  *  product's own namespaces — the ONE list the Home's enable ceremony appends too (`@ap-home/shared`,
@@ -68,7 +69,7 @@ export function buildGenesisPlanes(
   sessionKeyAddress: Address,
   stewardship: { salt: bigint; validUntil: number },
 ): GenesisPlaneWires {
-  const chainId = Number(env.CHAIN_ID ?? 84532);
+  const chainId = chainIdOf(env);
   const dm = env.DELEGATION_MANAGER as Address;
   const ts = env.TIMESTAMP_ENFORCER as Address;
   const val = env.VALUE_ENFORCER as Address;
