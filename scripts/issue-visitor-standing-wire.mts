@@ -25,9 +25,13 @@ const by = flag('by'); const treasuryArg = flag('treasury'); const payee = (flag
 // harness refuses an asker naming itself as its own counterparty, so the two are different accounts — the visitor's
 // agent and the visitor's treasury-shaped payee.
 const delegate = (flag('delegate') ?? payee).toLowerCase() as Address;
-const asset = ((flag('asset') ?? '0xa14E4a9447607c1233DcE34dB6Ead47C094f6141') as Address); // SHQ, 6 decimals (Ring 0 deployments-faithchain.json#namingCoin)
+const asset = ((flag('asset') ?? '0xdaE09066A2cc32f6203605619137dcF01A9B49Ae') as Address); // the treasury's payment rail on faithchain (mock USDC, 6 decimals; Ring 0 deployments-faithchain.json#mockUsdc)
+// The wire's bounds beyond the per-payment cap: the aggregate over the window and how many redemptions the window
+// admits (the package's defaults are the cap itself and ONE per day — right for a person's wire, too tight for a gate
+// that runs nightly). Said on the command line, never silently widened.
+const aggregate = flag('aggregate'); const redemptions = Number(flag('redemptions') ?? 1); const windowSeconds = Number(flag('window') ?? 86_400);
 const HOME = process.env.HOME_URL ?? 'https://www.faithnet.me';
-if (!by || !treasuryArg || !/^0x[0-9a-f]{40}$/.test(payee) || !/^0x[0-9a-f]{40}$/.test(delegate) || !cap || !out) { console.error('usage: issue-visitor-standing-wire.mts --by <steward> --treasury <name|0x…> --delegate 0x… --payee 0x… --cap <units> --out <file> [--asset 0x…]'); process.exit(1); }
+if (!by || !treasuryArg || !/^0x[0-9a-f]{40}$/.test(payee) || !/^0x[0-9a-f]{40}$/.test(delegate) || !cap || !out) { console.error('usage: issue-visitor-standing-wire.mts --by <steward> --treasury <name|0x…> --delegate 0x… --payee 0x… --cap <units> --out <file> [--asset 0x…] [--aggregate <units>] [--redemptions <n>] [--window <seconds>]'); process.exit(1); }
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 200) }; } };
 
 // the treasury: a name resolved at the town's naming service, or an address
@@ -49,11 +53,11 @@ const sign = async (_delegator: Address, digest: Hex): Promise<Hex> => {
 };
 const maxAmount = parseUnits(cap, 6);
 const enforcers = { delegationManager: CONTRACTS.delegationManager, timestamp: CONTRACTS.timestampEnforcer, allowedTargets: CONTRACTS.allowedTargetsEnforcer, allowedMethods: CONTRACTS.allowedMethodsEnforcer, value: CONTRACTS.valueEnforcer, payment: CONTRACTS.paymentEnforcer, digestBinding: CONTRACTS.digestBindingEnforcer } as const;
-const { standing: unsigned } = buildStandingWire({ template: 'act-as-me', delegator: treasury, delegate, capability: PAYMENT_CAPABILITY, payment: { payee, asset, maxAmount }, validForSeconds: 60 * 60 * 24 * 30, enforcers: enforcers as never, chainId: CHAIN_ID, delegationManager: CONTRACTS.delegationManager as Address });
+const { standing: unsigned } = buildStandingWire({ template: 'act-as-me', delegator: treasury, delegate, capability: PAYMENT_CAPABILITY, payment: { payee, asset, maxAmount, maxAggregate: aggregate ? parseUnits(aggregate, 6) : maxAmount, maxRedemptionsPerWindow: redemptions, windowSeconds }, validForSeconds: 60 * 60 * 24 * 30, enforcers: enforcers as never, chainId: CHAIN_ID, delegationManager: CONTRACTS.delegationManager as Address });
 const wire = signedStandingWire(unsigned, await sign(treasury, unsigned.ref));
 void person;
 const VALIDATOR_ABI = [{ type: 'function', name: 'isValidSig', stateMutability: 'view', inputs: [{ name: 'signer', type: 'address' }, { name: 'hash', type: 'bytes32' }, { name: 'sig', type: 'bytes' }], outputs: [{ type: 'bool' }] }] as const;
 const ok = await pc.readContract({ address: CONTRACTS.universalSignatureValidator as Address, abi: VALIDATOR_ABI, functionName: 'isValidSig', args: [treasury, wire.ref, String(wire.wire.signature) as Hex] }).catch(() => false);
 if (!ok) { console.error(`the wire's signature does not verify for the treasury ${treasury} — ${by} is not its custodian? nothing written`); process.exit(1); }
 writeFileSync(out, JSON.stringify({ ...wire, issuedBy: by, treasuryName: treasuryArg, capShq: cap, issuedAt: new Date().toISOString() }, null, 2), { mode: 0o600 });
-console.log(`standing wire ${wire.ref}\n  ${treasuryArg} (${treasury}) → delegate ${delegate}: ${PAYMENT_CAPABILITY}, payee ${payee}, up to ${cap} units of the asset per payment, 30 days\n  signed by ${by} as the treasury's custodian; signature verified on chain\n  written ${out} (the visitor's copy — revoke on chain like any delegation of the treasury's)`);
+console.log(`standing wire ${wire.ref}\n  ${treasuryArg} (${treasury}) → delegate ${delegate}: ${PAYMENT_CAPABILITY}, payee ${payee}, up to ${cap} per payment${aggregate ? `, ${aggregate} in aggregate` : ''}, ${redemptions}/${windowSeconds}s, 30 days\n  signed by ${by} as the treasury's custodian; signature verified on chain\n  written ${out} (the visitor's copy — revoke on chain like any delegation of the treasury's)`);
