@@ -45,9 +45,45 @@ if (!cardId) {
   console.log(`  created card ${cardId} (seeded from the live profile)`);
 } else console.log(`  card ${cardId} exists (served release: ${cards[0]!.servedReleaseId ?? 'none'})`);
 
-const v = await studio<{ errors: number; warnings?: number; findings?: Array<{ severity: string; message: string }> }>('card.validate', { cardResourceId: cardId });
+type Validation = { errors: number; warnings?: number; findings?: Array<{ severity: string; message: string }>; diagnostics?: Array<{ code?: string; severity?: string; message?: string }> };
+const validate = () => studio<Validation>('card.validate', { cardResourceId: cardId });
+let v = await validate();
 console.log(`  validated: ${v.errors} error(s)${v.warnings !== undefined ? `, ${v.warnings} warning(s)` : ''}`);
-if (v.errors > 0) throw new Error(`the draft does not validate: ${JSON.stringify(v.findings ?? v).slice(0, 400)}`);
+
+// A DRAFT GOES STALE WHEN ITS SOURCES MOVE (spec 347 §4.3). The agent's catalog gains a capability, the card
+// does not mention it, and validation refuses with CATALOG_DIVERGENCE — correctly, because a published card that
+// quietly omits a live skill is a card that misdescribes its agent. The Studio has no "accept the inherited
+// change" operation: the editor shows old/new/effective and a person decides. A script has to make that decision
+// explicitly, and this is it — ADD every candidate the agent's own claims and its own live catalog name, which is
+// the same choice the editor's "accept" would record. It is not a way around the check: an id that neither source
+// explains is reported as `unsourced` and left alone, because nothing here knows what it is.
+const divergence = (d: Validation) => (d.diagnostics ?? []).filter((x) => x.code === 'CATALOG_DIVERGENCE' && x.severity === 'error');
+if (v.errors > 0 && divergence(v).length === v.errors) {
+  console.log(`  the draft is stale against the catalog (${v.errors} divergence(s)) — adding what the agent's own sources name`);
+  const cand = await studio<{ candidates: Array<{ id: string; name: string; description?: string; tags?: string[]; onCard: boolean }>; unsourced: string[] }>('card.capabilityCandidates', { cardResourceId: cardId });
+  if (cand.unsourced.length) console.log(`  NOT touching ${cand.unsourced.length} unsourced id(s) on the card: ${cand.unsourced.join(', ')}`);
+  const got = await studio<{ draft?: { revision?: number; card?: { skills?: Array<Record<string, unknown>> } } }>('card.get', { cardResourceId: cardId });
+  const revision = got.draft?.revision;
+  if (revision === undefined) throw new Error(`card.get returned no draft revision: ${JSON.stringify(got).slice(0, 200)}`);
+  // MERGE, never replace. The skills already on the draft carry descriptions a person wrote; overwriting them
+  // with bare candidate data loses that and then fails the schema on every one of them. Only the ids the card is
+  // MISSING get appended.
+  const existing = got.draft?.card?.skills ?? [];
+  const have = new Set(existing.map((sk) => String((sk as { id?: unknown }).id)));
+  const missing = cand.candidates.filter((x) => !have.has(x.id));
+  // A capability with no description cannot go on a card: the schema requires one and nothing here may invent it.
+  // Name them and stop — the gap is in the capability's own definition, not in this release.
+  const undescribed = missing.filter((x) => !x.description?.trim());
+  if (undescribed.length) {
+    throw new Error(`${undescribed.length} capability/ies the catalog declares have NO description, and a card requires one:\n    ${undescribed.map((x) => x.id).join('\n    ')}\n  Give them a description where they are DEFINED (the skill contract / capability claim). Nothing here may write one: a card is what the agent says about itself.`);
+  }
+  const skills = [...existing, ...missing.map((x) => ({ id: x.id, name: x.name, description: x.description, ...(x.tags?.length ? { tags: x.tags } : {}) }))];
+  await studio('card.patchDraft', { cardResourceId: cardId, patch: [{ op: 'replace', path: '/skills', value: skills }], mutation: mutation({ expectedRevision: revision }) });
+  console.log(`  added ${missing.length} capability/ies the card was missing (${skills.length} total)`);
+  v = await validate();
+  console.log(`  re-validated: ${v.errors} error(s)`);
+}
+if (v.errors > 0) throw new Error(`the draft does not validate: ${JSON.stringify(v.diagnostics ?? v.findings ?? v).slice(0, 400)}`);
 
 let release = (await studio<{ release: Release }>('card.createRelease', { cardResourceId: cardId, mutation: mutation() })).release;
 console.log(`  release ${release.releaseId} (${release.state})`);
