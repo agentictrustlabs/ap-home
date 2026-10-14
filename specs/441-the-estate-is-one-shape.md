@@ -178,7 +178,8 @@ the method, because a security claim nobody can reproduce is worse than no claim
 | **W1** ✅ | `estates/*.estate.json` for both estates; the derive function; `check:estate-shape` over vars, secret NAMES and (with `--kms`) the live callers | **landed 2026-10-14: 9 drifts named, the two Worker-secret keys at the top.** The gate also corrected this spec before anything deployed — §7.1 |
 | **W2** | faithkms: named profiles + a typed purpose for an EIP-155 transaction digest; the interactions leaf declares EIP-712 | `estate-runtime` binds with no raw-digest grant and faithnet's gates stay green |
 | **W3** ✅ | **landed 2026-10-14.** W3a: faithnet declares the two settings it only had by default. W3b: imbnet's relay and interactions keys moved into its own tenant, its callers re-bound to the profiles, the edge assertion required, and both raw private keys DELETED from the Worker | **`check:estate-shape` GREEN on all three arms** — vars, secret names, live callers. `gate:pay-outward` green for maya with no key of imbnet's in a Worker. §7.2 |
-| **W4** | the builder: `estate new <id> --home-host … --zone … --town …` → declaration, tenant, callers, charters, secrets checklist, deploy | a third estate is built from the tool alone and passes the gate on its first run |
+| **W4** | the builder: `estate new <id> --home-host … --zone … --town …` → declaration, tenant, callers (by profile), the three-step interactions-key provisioning of §7.2, charters, secrets checklist, deploy | a third estate is built from the tool alone and passes the gate on its first run |
+| **W5** | one `VAULT_SERVER_ID` per estate, with the grant and vault-key-binding migration it needs (§7.3) | a grant naming one estate's vault is refused by the other's |
 
 W1 is deliberately read-only: it measures before it changes anything, because the only reason this spec exists is
 that nothing was measuring.
@@ -217,6 +218,21 @@ So **provisioning an estate's interactions key is three steps, not one**: create
 agent SA's custody onto it, and re-issue every resident's session leaf. The builder does all three or it produces
 an estate that answers questions and cannot act. The relay key, by contrast, is one step — nothing references its
 address; its brand-new account holds no gas and the paymaster sponsors the op regardless.
+
+## 7.3 A gap the shape found and has not closed: both vaults answer to one name
+
+`VAULT_SERVER_ID` is the id every record-scope grant names and the `vaultId` a person signs in the vault-key
+ceremony, and `domain.ts` says of it: *"a second deployment on the same chain names its own, so a grant made to
+one estate's vault never satisfies another's."* **It is unset on both estates**, so both answer to the default
+`demo-mcp` — and that sentence is not true today. A grant a resident of one estate signed names a server id the
+other estate's vault also answers to.
+
+What saves it right now is that the grant also names the delegate (each estate's own `INTERACTIONS_SERVICE_SA`,
+and those do differ) and the vault re-verifies the chain per record. So this is a missing layer, not an open door.
+But it is exactly the kind of accidental sharing the shape exists to find, and a per-estate id is one derived var
+(`VAULT_SERVER_ID = <id>`) plus a migration: every existing grant and every vault-key binding names the old id, so
+flipping it without re-issuing them strands both estates. **W5**, and not before the builder, because the builder
+is what makes a fresh estate get its own id for free.
 
 ## 8. What this spec does NOT do
 
