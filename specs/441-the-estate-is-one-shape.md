@@ -154,13 +154,22 @@ of either estate sees anything.
 
 ## 6. The correction this spec owes the federation record
 
-ap-federation `federation.yaml#kms` caveat A4 says an estate whose residents are OIDC-custodied has their seed in
-the tenant, "so the operator custodies them", and the 2026-10-14 condition-1 work repeated that as the reason
-faithnet needed a wider caller than imbnet. **Both halves were wrong**: `A2A_CUSTODY_KMS_BACKEND = "local-aes"` on
-both estates, so no resident's custody seed is in any tenant, and what faithnet actually holds in AKCS is its
-relayer key and its interactions session key. The caveat must be rewritten to describe the configuration that
-exists, and D4 restated as the standing decision rather than an accident. A security claim nobody can reproduce is
-worse than no claim.
+ap-federation spec 440 caveat A4 says residents who sign in with Google, email or phone have their custody seed in
+their estate's tenant, "so the operator custodies some residents of every town that opts in", and the 2026-10-14
+condition-1 work repeated that as the reason faithnet needed a wider caller than imbnet.
+
+Checked against both the running configuration and the operator's own key list:
+
+- `A2A_CUSTODY_KMS_BACKEND = "local-aes"` on **both** estates, so custody derives from `A2A_CUSTODY_ROOT_KEY`, a
+  Worker secret of the estate. **No resident's custody seed is in any tenant.**
+- faithnet's tenant does hold exactly **one `oidc-custodian` envelope key** — provisioned, and never selected by
+  the configuration that runs. imbnet's holds none.
+- What faithnet actually keeps in its tenant beyond its 413 vault KEKs is its `relay` and `interactions-session`
+  signing keys, which is precisely why it needed the wider caller — not custody at all.
+
+So A4 is a **conditional** caveat: true the day an estate flips custody to its tenant, and D4 says no estate does
+until that cost is decided. Corrected in `federation.yaml#kms.custodyToday` and in 440's A4 row, with the date and
+the method, because a security claim nobody can reproduce is worse than no claim.
 
 ## 7. Waves
 
