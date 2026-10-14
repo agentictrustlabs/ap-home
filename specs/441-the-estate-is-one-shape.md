@@ -176,10 +176,11 @@ the method, because a security claim nobody can reproduce is worse than no claim
 | wave | what lands | the gate that proves it |
 | --- | --- | --- |
 | **W1** ✅ | `estates/*.estate.json` for both estates; the derive function; `check:estate-shape` over vars, secret NAMES and (with `--kms`) the live callers | **landed 2026-10-14: 9 drifts named, the two Worker-secret keys at the top.** The gate also corrected this spec before anything deployed — §7.1 |
-| **W2** | faithkms: named profiles + a typed purpose for an EIP-155 transaction digest; the interactions leaf declares EIP-712 | `estate-runtime` binds with no raw-digest grant and faithnet's gates stay green |
+| **W2** ◐ | **landed 2026-10-14, and it landed HALF of what D6 promised** — faithkms gained `EIP155_TRANSACTION` and the two named profiles; key-custody gained a per-ACT signing purpose; the relayer no longer needs the raw grant. The interactions-session key still does, and §7.4 says why that is the honest answer rather than a shortfall to hide | the profiles' own test refuses any profile that can rotate, disable or destroy a key; faithnet and imbnet both green |
 | **W3** ✅ | **landed 2026-10-14.** W3a: faithnet declares the two settings it only had by default. W3b: imbnet's relay and interactions keys moved into its own tenant, its callers re-bound to the profiles, the edge assertion required, and both raw private keys DELETED from the Worker | **`check:estate-shape` GREEN on all three arms** — vars, secret names, live callers. `gate:pay-outward` green for maya with no key of imbnet's in a Worker. §7.2 |
 | **W4** | the builder: `estate new <id> --home-host … --zone … --town …` → declaration, tenant, callers (by profile), the three-step interactions-key provisioning of §7.2, charters, secrets checklist, deploy | a third estate is built from the tool alone and passes the gate on its first run |
 | **W5** | one `VAULT_SERVER_ID` per estate, with the grant and vault-key-binding migration it needs (§7.3) | a grant naming one estate's vault is refused by the other's |
+| **W6** | the runtime's credential SPLIT PER KEY ROLE, so the binding that may sign app-defined digests cannot also sign transactions (§7.4) | no estate profile carries `RAW_32_BYTE_DIGEST` |
 
 W1 is deliberately read-only: it measures before it changes anything, because the only reason this spec exists is
 that nothing was measuring.
@@ -233,6 +234,58 @@ But it is exactly the kind of accidental sharing the shape exists to find, and a
 (`VAULT_SERVER_ID = <id>`) plus a migration: every existing grant and every vault-key binding names the old id, so
 flipping it without re-issuing them strands both estates. **W5**, and not before the builder, because the builder
 is what makes a fresh estate get its own id for free.
+
+## 7.4 Why `RAW_32_BYTE_DIGEST` survives W2, and what actually removes it
+
+D6 said the grant would be closed before the profile was stamped a hundred times. Half of it closed, and the
+other half turned out to be the wrong shape of problem.
+
+**A signing purpose is a policy label and an audit statement, never part of the computation** — faithkms signs
+`sign_digest` over the 32 bytes it was handed whatever the purpose says. So its whole value is that the operator's
+audit row says what the signature was *for*, and that a caller allowed to sign one kind cannot sign another.
+
+**The relayer is closed.** It signs exactly two things and both now have names: the EIP-155 transaction it
+broadcasts (the new `EIP155_TRANSACTION`, which `kms-viem-account`'s `signTransaction` declares *itself* — a
+serialized unsigned transaction is the one digest an adapter can identify without being told), and the paymaster's
+sponsorship digest, which it signs as a message and which `SmartAgentPaymaster` recovers over
+`toEthSignedMessageHash`, making `PERSONAL_SIGN_DIGEST` exactly what that act is.
+
+**The interactions-session key is not, and relabeling it would be a lie.** That one key signs genuinely different
+32-byte digests through a single raw-digest path: peer attestations, harness digests (`signAsHarness`), DEL-001
+bound tokens, invocation proofs, and the service SA's userOp hashes. Declaring all of them `EIP712` or
+`ERC4337_USER_OPERATION` would put a false statement in the operator's audit row, which is worse than a wide
+grant that is honestly labelled. `RAW_32_BYTE_DIGEST` says what is true: a digest whose meaning lives in this
+application.
+
+**What removes it is W6, and it is a different change.** Name the purpose at each act — the per-call
+`signingPurpose` that `signA2AAction` now accepts — and then split the runtime's credential per key role, so the
+binding that may sign application-defined digests cannot also sign a transaction. Two tokens on one Worker, not
+one. Until then the grant is carried by one caller, for one key, with the reason written where the caller is
+bound.
+
+## 7.5 The builder (W4)
+
+`pnpm estate:new --id <id> --home-host <host> --zone <zone> --town <town>` writes the declaration; after that
+every run is `--plan` (say the state) or `--run` (do what is mine). Ten steps, ordered, idempotent, and **nine of
+them verify themselves** — which matters more than the automation:
+
+| step | kind | how it knows it is done |
+| --- | --- | --- |
+| declaration | auto | the file exists and the five inputs are sane (and no sibling shares a Home host, zone or tenant) |
+| wrangler-env | auto | `[env.<id>.vars]` present in both tomls, generated from `estate-shape.mts` |
+| kms-tenant | operator | the operator's own status lists the tenant |
+| kms-callers | operator | the status lists this estate's two subjects, EXACTLY matched |
+| kms-keys | operator | both key ids are in the runtime's env |
+| kms-tokens | operator | `AKCS_TOKEN` present on both Workers **by name** — a value is never read |
+| charter-agents | signer | the declaration records both SA addresses |
+| custody-of-the-harness-sa | signer | **on chain**: `isCustodian(harnessSA, <the key the live Home reports>)` |
+| session-leaves | auto | the Home says the first declared resident's grant is `current` |
+| shape | auto | `check:estate-shape` passes |
+
+Both existing estates return 10/10, which is the real test: the plan describes the estates we have rather than the
+one it would have been convenient to imagine. Three things it caught about itself on the way — a substring match
+that reported a caller which did not exist, a TOML value full of double quotes that produced a file wrangler could
+not parse, and a wish to rename both estates' legacy callers (now recorded in the declaration instead).
 
 ## 8. What this spec does NOT do
 
