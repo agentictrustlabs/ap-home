@@ -1,0 +1,28 @@
+{
+  "_": "spec 441 \u2014 THE ESTATE'S DECLARATION. See faithnet.estate.json for what each field means.",
+  "id": "imbnet",
+  "homeHost": "www.impact-agent.me",
+  "zone": "impact-agent.io",
+  "town": "faithchain",
+  "_kmsTenant": "`imb`, not `imbnet`: the tenant was named before the rule that a tenant is named for its estate. Renaming a tenant re-roots every derivation under it, so the name stays and this field says why.",
+  "kmsTenant": "imb",
+  "altZones": [
+    "impact-agent.ai",
+    "imb-runtime.richardpedersen3.workers.dev"
+  ],
+  "extraOrigins": [
+    "https://imb-home.vercel.app",
+    "https://explorer.faithnet.io",
+    "https://demo-bible-ontology-faithnet.richardpedersen3.workers.dev"
+  ],
+  "agents": {
+    "harness": "0x193B496d366113B765c70BF9230687D685Cc7a92",
+    "interactions": "0xfBF61be3a4DE7921a4eb6B94dFFfbd183553aFEC"
+  },
+  "extras": {
+    "REACH_LANES": "{\"scripture.faithnet.io\":\"LANE_SCRIPTURE\"}",
+    "ORCHESTRATION_LLM": "gemini"
+  },
+  "_altZones": "the workers.dev host is a real domain this runtime answers on, so it belongs beside the zones rather than appearing only in A2A_PUBLIC_BASE_DOMAIN where nothing explains it.",
+  "_extraOrigins": "BROWSER origins the Home admits \u2014 not the same list as the serving domains in altZones. The workers.dev host serves the runtime and is not an origin a browser posts from, which is why it is above and not here."
+}

@@ -1,0 +1,41 @@
+{
+  "_": "spec 441 \u2014 THE ESTATE'S DECLARATION. Five inputs, the agents the build charters, and this estate's own extras. Everything else about the deployment is DERIVED from these (scripts/estate-shape.mts) or is the town's baseline, and `pnpm check:estate-shape` fails when the deployment disagrees. Edit this file, never a derived var in wrangler.toml.",
+  "id": "faithnet",
+  "homeHost": "www.faithnet.me",
+  "zone": "faithnet.io",
+  "town": "faithchain",
+  "kmsTenant": "faithnet",
+  "altZones": [
+    "faithnet.ai"
+  ],
+  "extraOrigins": [
+    "https://gather27-web-faithnet.richardpedersen3.workers.dev",
+    "https://gather27-web-churchglobal.richardpedersen3.workers.dev",
+    "https://gamenight.faithnet.io",
+    "https://poker.faithnet.io",
+    "https://explorer.faithnet.io",
+    "https://demo-bible-ontology-faithnet.richardpedersen3.workers.dev"
+  ],
+  "_agents": "OUTPUTS of the build, not inputs: this estate chartered its own. An estate that reuses another estate's interactions SA is not a second estate (439 \u00a77.13).",
+  "agents": {
+    "harness": "0xD34c3Fbc89706dd57d426546DCEBD3bA926eDE35",
+    "interactions": "0x39508624387fed3b9d6dd15ba86d3ace8a3f0a6a"
+  },
+  "_extras": "PRODUCT and TOWN settings. Real, kept, and deliberately NOT part of being an estate \u2014 the 101st estate needs none of them to be an estate (spec 441 D1). Declared here so they stop reading as estate shape.",
+  "extras": {
+    "EMAIL_FROM": "invites@faithnet.ai",
+    "EMAIL_FROM_NAME": "faithnet",
+    "EMAIL_ZONES": "faithnet.me",
+    "ESTATE_CENSUS_REGISTRY_ORIGIN": "https://discovery-a2a.faithnet.io",
+    "EVAL_CAPTURE": "on",
+    "EXECUTORS": "{\"field-circles\":{\"url\":\"https://field-a2a.faithnet.io\",\"client\":\"field-app\"}}",
+    "GATHER_DIGEST_MAX": "120000",
+    "GATHER_RECORD_CLIP": "60000",
+    "ORCHESTRATION_GEMINI_BILLING_URL": "https://ai.studio/spend",
+    "ORCHESTRATION_GEMINI_STRONG_MODEL": "gemini-3.1-pro-preview",
+    "ORCHESTRATION_GROQ_TPM": "8000",
+    "ORCHESTRATION_MODEL": "claude-haiku-4-5-20251001",
+    "WARM_AGENTS": "0x1dba4a27c53d7babda99513080223fb3bfc4bad1,0x8e32c713f44c7747d97a589522806a8e1dd810fb",
+    "ORCHESTRATION_LLM": "gemini,anthropic"
+  }
+}
