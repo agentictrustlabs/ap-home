@@ -970,7 +970,14 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
 
   // A client with ONE loader (consent.loader) shows it for the whole wait — the grant and the hand-back
   // alike — instead of the stepped narration and the "Permission granted" receipt.
-  const oneLoader = clientLoader(relyingApp, 'signIn', { app: appName });
+  // An org-create (Gather's Publish) is not a sign-in: it says what it is doing — "Setting up Grace Church…"
+  // (Chelsea, 2026-10-14: "Signing you in to Gather27…" after Publish read as being sent back to the start).
+  const loaderOrg = enroll?.template === 'org-create'
+    ? clientOrgName(relyingApp, (orgSel?.orgName ?? enroll.orgBase ?? '').trim()) || 'your organization'
+    : undefined;
+  const oneLoader = loaderOrg
+    ? clientLoader(relyingApp, 'org', { app: appName, org: loaderOrg })
+    : clientLoader(relyingApp, 'signIn', { app: appName });
   if (oneLoader && (phase === 'granting' || phase === 'connected')) {
     return (
       <Shell>

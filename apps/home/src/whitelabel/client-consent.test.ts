@@ -23,9 +23,9 @@ describe('gather-app — its own words', () => {
   });
 
   for (const id of ['site-login', 'org-create']) {
-    it(`${id}: the three plain lines and no "cannot" block`, () => {
+    it(`${id}: the two short lines (Clayton, 2026-10-14) and no "cannot" block`, () => {
       const t = withClientConsent(shared[id]!, gather, id);
-      expect(t.canDo).toEqual(['Sign you in to Gather27', 'See your name and email', 'Create and manage your listing, for you or an organization you set up']);
+      expect(t.canDo).toEqual(['Sign you in and see your name and email', 'Create and manage your listing']);
       expect(t.hideCannotDo).toBe(true);
       expect(t.cannotDo).toEqual([]);
       expect(t.expiryDays).toBe(shared[id]!.expiryDays);

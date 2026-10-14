@@ -528,7 +528,7 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
   }} />;
 }
 
-function Shell({ children, compact }: { children: React.ReactNode; compact?: boolean }) {
+function Shell({ children, compact, intro }: { children: React.ReactNode; compact?: boolean; intro?: { title: string; body: string } | null }) {
   // A client that asked not to name the substrate (`consent.hideSubstrate`) doesn't, on its own sign-in
   // card. Read off THIS page's authorize URL only — never the sessionStorage stash, which can outlive the
   // request and would hide the line on a later, unrelated visit. This tree is client-only (ssr:false).
@@ -539,6 +539,12 @@ function Shell({ children, compact }: { children: React.ReactNode; compact?: boo
   });
   return (
     <div className="onboarding-screen">
+      {intro && (
+        <div className="signin-intro" data-testid="signin-intro">
+          <h2>{intro.title}</h2>
+          <p>{intro.body}</p>
+        </div>
+      )}
       <div className={compact ? 'onboarding-card enroll-compact' : 'onboarding-card'}>{children}</div>
       <HomeFooter compact hideSubstrate={hideSubstrate} />
     </div>
@@ -833,8 +839,11 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
   const offers = (m: 'social' | 'email' | 'phone' | 'passkey' | 'name') => !curated || curated.includes(m);
   // Exactly one method, and it is email: skip the reveal button and show the field itself.
   const soleMethod = curated?.length === 1 && curated[0] === 'email';
+  // The app's own words ABOVE the card, on the email step only (consent.signInIntro).
+  const introCfg = enroll && gcidHosted && emailStep === 'email' ? knownRelyingClient(parseEnrollReq()?.aud)?.consent?.signInIntro : undefined;
+  const intro = introCfg ? { title: introCfg.title.split('{app}').join(appName ?? ''), body: introCfg.body.split('{app}').join(appName ?? '') } : null;
   return (
-    <Shell compact={enroll}>
+    <Shell compact={enroll} intro={intro}>
       <BrandShield size={enroll ? 40 : 56} />
       <h1 className="onboarding-h1">
         {enroll && gcidHosted && emailStep === 'code'

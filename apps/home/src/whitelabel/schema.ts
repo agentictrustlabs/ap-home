@@ -365,6 +365,10 @@ export interface ClientConsentCopy {
    *  from — for an app that wants its one public address named whichever of its hostnames opened the window.
    *  Display only: where the person is sent back is still the registered redirect URI, checked as always. */
   displayDomain?: string;
+  /** A heading and a short paragraph ABOVE the sign-in card, on the email step only: what this sign-in is and
+   *  why the app uses it, for people who have never heard of it (Gather27, Chelsea/Clayton 2026-10-14). The
+   *  card itself is unchanged. `{app}` is filled in. */
+  signInIntro?: { title: string; body: string };
   /** ONE loader for the whole wait, in place of the ceremony's step-by-step narration and its "Step 2 of 5"
    *  counter (Gather27, Clayton's design 2026-10-12: "one component, one line of copy, no step counters").
    *  `signIn` covers the wait after the code and after Allow; `org` the one-time organization set-up.

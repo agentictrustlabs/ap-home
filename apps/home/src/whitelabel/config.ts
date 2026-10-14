@@ -469,11 +469,12 @@ const faithImpact: WhiteLabelConfig = {
       consent: {
         templates: {
           'site-login': {
-            canDo: ['Sign you in to Gather27', 'See your name and email', 'Create and manage your listing, for you or an organization you set up'],
+            // Clayton, 2026-10-14: "a lot of words on that page" — two short lines, same meaning.
+            canDo: ['Sign you in and see your name and email', 'Create and manage your listing'],
             hideCannotDo: true,
           },
           'org-create': {
-            canDo: ['Sign you in to Gather27', 'See your name and email', 'Create and manage your listing, for you or an organization you set up'],
+            canDo: ['Sign you in and see your name and email', 'Create and manage your listing'],
             hideCannotDo: true,
           },
         },
@@ -492,6 +493,12 @@ const faithImpact: WhiteLabelConfig = {
         // Under the Allow list. The design also says "You'll only see this once"; that is not true (the sheet shows
         // at each sign-in), so it is left out (Ryan, 2026-10-13). Add it back if Allow is ever remembered.
         note: 'Remove {app} anytime from your GCID.',
+        // Clayton's draft (2026-10-14), above the card on the email step. The middle sentence ("There's no password
+        // to set…") is left out because the card already says "No password, ever." — as his note suggests.
+        signInIntro: {
+          title: 'Sign in with GCID to list your gathering',
+          body: '{app} uses GCID, a secure sign-in stewarded by Global.Church, so you can create and manage your listing with just your email. Your email is used only to sign you in and to reach you about your listing.',
+        },
         // The one address Gather27 is known by, whichever hostname opened the window (per deployment).
         ...(process.env.NEXT_PUBLIC_GATHER_DISPLAY_DOMAIN?.trim() ? { displayDomain: process.env.NEXT_PUBLIC_GATHER_DISPLAY_DOMAIN.trim() } : {}),
         // ONE loader for every wait (Clayton's design, 2026-10-12): no step counters, none of the narration.
