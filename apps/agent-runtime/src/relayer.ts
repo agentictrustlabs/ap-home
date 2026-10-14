@@ -95,9 +95,18 @@ function resolveBackend(env: RelayerEnv): KmsBackend | undefined {
 }
 
 /**
- * Build opts for the relayer signer. `agentic-kms` needs the typed AKCS config plus the SIGNING key id;
- * the relayer signs raw transaction / EIP-712 digests, so its signing purpose is RAW_32_BYTE_DIGEST —
- * the AKCS caller binding must allowlist it explicitly.
+ * Build opts for the relayer signer. `agentic-kms` needs the typed AKCS config plus the SIGNING key id.
+ *
+ * THE RELAYER NO LONGER NEEDS `RAW_32_BYTE_DIGEST` (spec 441 W2). It signs exactly two things, and both
+ * now have names: the EIP-155 transaction it broadcasts — which `kms-viem-account`'s `signTransaction`
+ * declares itself as `EIP155_TRANSACTION`, because a serialized unsigned transaction is the one digest an
+ * adapter can identify without being told — and the paymaster's sponsorship digest, which it signs as a
+ * MESSAGE and which `SmartAgentPaymaster` recovers over `toEthSignedMessageHash`. So the purpose named
+ * here is `PERSONAL_SIGN_DIGEST`, which is what that second act actually is.
+ *
+ * Why this matters beyond tidiness: a caller holding `RAW_32_BYTE_DIGEST` may sign ANY 32 bytes, and the
+ * audit row then says only that something was signed. Naming the two acts means the relay credential can
+ * be bound without the blanket grant, and every row says which act it was.
  */
 function relayerSignerOpts(env: RelayerEnv, auditSink: AuditSink): BuildOpts {
   const backend = resolveBackend(env);
@@ -106,7 +115,7 @@ function relayerSignerOpts(env: RelayerEnv, auditSink: AuditSink): BuildOpts {
     return {
       backend,
       auditSink,
-      agenticKms: agenticKmsConfig(env, { signingPurpose: 'RAW_32_BYTE_DIGEST' }),
+      agenticKms: agenticKmsConfig(env, { signingPurpose: 'PERSONAL_SIGN_DIGEST' }),
       config: { agenticKeyId: env.AKCS_RELAY_KEY_ID },
     };
   }

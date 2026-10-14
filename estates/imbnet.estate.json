@@ -6,6 +6,19 @@
   "town": "faithchain",
   "_kmsTenant": "`imb`, not `imbnet`: the tenant was named before the rule that a tenant is named for its estate. Renaming a tenant re-roots every derivation under it, so the name stays and this field says why.",
   "kmsTenant": "imb",
+  "_callerSubjects": "The two KMS caller subjects this estate actually holds. A new estate gets `<id>-vault` / `<id>-runtime` from the builder; these two predate the convention, and renaming a caller means re-binding and re-minting its token for no gain. Recorded so the builder verifies what exists instead of demanding a rename.",
+  "callerSubjects": {
+    "vault": "imb-vault-3",
+    "runtime": "imb-runtime-3"
+  },
+  "_residents": "The DEMO personas whose custodian keys this Home holds, so the builder can re-issue their DEL-001 session leaves server-side after the interactions key changes (441 \u00a77.2 step 3). A real resident re-issues by clicking through their own Home; this list is never a roster of who lives here.",
+  "residents": [
+    "maya",
+    "hannah",
+    "priya",
+    "samuel",
+    "tomas"
+  ],
   "altZones": [
     "impact-agent.ai",
     "imb-runtime.richardpedersen3.workers.dev"

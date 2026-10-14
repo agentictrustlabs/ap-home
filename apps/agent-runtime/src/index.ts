@@ -10136,7 +10136,19 @@ export async function interactionsSessionAccount(env: Env): Promise<Awaited<Retu
       backend: 'agentic-kms',
       // The signing purpose is the PAYLOAD TYPE, not the key's business purpose — AKCS rejects anything
       // outside its enum, which is how `'interactions-session'` (a key attribute) surfaced as an
-      // INVALID_REQUEST here. This account signs 32-byte digests, same as the relayer.
+      // INVALID_REQUEST here.
+      //
+      // THIS KEY KEEPS `RAW_32_BYTE_DIGEST`, AND THAT IS THE HONEST LABEL (spec 441 W2). Unlike the
+      // relayer, whose two acts both have names now, this one key signs genuinely different 32-byte
+      // digests through a single raw-digest path: peer attestations, harness digests (`signAsHarness`),
+      // DEL-001 bound tokens, invocation proofs, and the service SA's userOp hashes. Calling all of those
+      // `ERC4337_USER_OPERATION` or `EIP712` would put a FALSE statement in the operator's audit row, and
+      // the point of a purpose is that the row is true. `RAW_32_BYTE_DIGEST` says what is so: a digest
+      // whose meaning lives in this application.
+      //
+      // The way to drop it is NOT to relabel: it is to name the purpose at each act (the per-call
+      // `signingPurpose` that `signA2AAction` now takes) and then split the runtime's credential per key
+      // role, so the binding that may sign app-defined digests cannot also sign transactions. Spec 441 W6.
       agenticKms: agenticKmsConfig(env, { signingPurpose: 'RAW_32_BYTE_DIGEST' }),
       config: { agenticKeyId: akcsKeyId },
       auditSink: buildAuditSink(env),

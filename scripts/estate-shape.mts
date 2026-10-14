@@ -24,6 +24,10 @@ export type EstateDeclaration = {
   zone: string;
   town: string;
   kmsTenant?: string;
+  /** The caller subjects this estate actually holds; the builder's convention is `<id>-vault` / `<id>-runtime`. */
+  callerSubjects?: { vault?: string; runtime?: string };
+  /** DEMO personas whose keys this Home holds — never a roster of residents. */
+  residents?: string[];
   altZones?: string[];
   extraOrigins?: string[];
   agents?: { harness?: string; interactions?: string };

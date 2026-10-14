@@ -9,6 +9,7 @@
     "pnpm": ">=9"
   },
   "scripts": {
+    "estate:new": "tsx scripts/estate-new.mts",
     "check:estate-shape": "tsx scripts/check-estate-shape.mts",
     "doctor": "ap doctor",
     "doctor:rules": "ap doctor --rules",
