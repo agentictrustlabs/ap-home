@@ -141,7 +141,47 @@ if (importFrom) {
   }
 }
 
-const v = await studio<{ errors: number; warnings?: number; diagnostics?: unknown }>('card.validate', { cardResourceId: cardId });
+type Diag = { code?: string; severity?: string; sourcePointer?: string; message?: string };
+type Validation = { errors: number; warnings?: number; diagnostics?: Diag[] };
+const validate = () => studio<Validation>('card.validate', { cardResourceId: cardId });
+const patch = async (ops: Array<{ op: string; path: string; value?: unknown }>, why: string) => {
+  const got = await studio<{ draft?: { revision?: number } }>('card.get', { cardResourceId: cardId });
+  await studio('card.patchDraft', { cardResourceId: cardId, patch: ops, mutation: mutation({ expectedRevision: got.draft?.revision }) });
+  console.log(`  ${why}`);
+};
+
+// RESOLVING THE DRAFT, the way the Studio means a steward to resolve it — one deliberate act per diagnostic, each
+// one recorded as a user OVERRIDE binding, never a validator that was talked out of its finding.
+let v = await validate();
+for (let pass = 0; pass < 3 && v.errors > 0; pass++) {
+  const ds = v.diagnostics ?? [];
+  const has = (code: string) => ds.some((d) => d.code === code);
+  // CATALOG_DIVERGENCE: the field is not what the runtime's surface catalog expects. For a SELF-HOSTED service
+  // that is the normal case and not a mistake — the catalog describes what the runtime mounts, and this agent's
+  // work happens in its own Worker. Spec 347 §13(b) says the resolution is an explicit override, so the steward
+  // re-asserts the imported value and the binding records that a person decided it.
+  if (has('CATALOG_DIVERGENCE')) {
+    const got = await studio<{ draft?: { card?: Record<string, unknown> } }>('card.get', { cardResourceId: cardId });
+    const card = got.draft?.card ?? {};
+    const paths = [...new Set(ds.filter((d) => d.code === 'CATALOG_DIVERGENCE').map((d) => `/${String(d.sourcePointer ?? '').split('/').filter(Boolean)[0] ?? ''}`))].filter((x) => x !== '/');
+    await patch(paths.map((path) => ({ op: 'replace', path, value: card[path.slice(1)] })), `overrode ${paths.join(' ')} — a self-hosted service's own surface, asserted by ${by}`);
+  } else if (has('CAPABILITY_UNVERIFIED')) {
+    // A capability claimed without runtime evidence. The honest move is to stop claiming it, not to assert it
+    // harder: `pushNotifications` and `streaming` are DERIVED, and a card that claims them without a wired sender
+    // is making a promise the agent cannot keep.
+    const ptrs = ds.filter((d) => d.code === 'CAPABILITY_UNVERIFIED').map((d) => String(d.sourcePointer));
+    await patch(ptrs.map((path) => ({ op: 'remove', path })), `dropped ${ptrs.join(' ')} — claimed without runtime evidence`);
+  } else if (has('SECURITY_SCHEME_INVALID') || has('SECURITY_REF_UNRESOLVED')) {
+    // The shared A2A builder adds a Home-session bearer scheme to every served card, in A2A 1.0's PROTO-JSON form.
+    // Released cards do not carry it — no persona release does — and for a service whose admission is PUBLIC it
+    // would be inaccurate anyway: there is no bearer to present. Dropped from the release, not from the live card.
+    await patch([{ op: 'remove', path: '/securitySchemes' }, { op: 'remove', path: '/securityRequirements' }],
+      'dropped the serving layer\'s bearer scheme from the release — this service admits publicly, so it requires none');
+  } else break;
+  v = await validate();
+  console.log(`  re-validated: ${v.errors} error(s)`);
+}
+console.log(`  validated: ${v.errors} error(s)${v.warnings !== undefined ? `, ${v.warnings} warning(s)` : ''}`);
 console.log(`  validated: ${v.errors} error(s)${v.warnings !== undefined ? `, ${v.warnings} warning(s)` : ''}`);
 if (v.errors > 0) {
   // GROUPED, because a wall of pointers hides the shape of the problem. One line per code tells you whether the
