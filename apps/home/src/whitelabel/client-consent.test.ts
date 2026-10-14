@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { whitelabel } from './config';
-import { PLAIN_PROGRESS, clientCopy, clientOrgName, clientProgressText, clientTheme, hidesIdentifiers, orgCreateText, signedInLabel, switchAccountLabel, withClientConsent } from './client-consent';
+import { PLAIN_PROGRESS, clientCopy, clientLoader, clientOrgName, clientProgressText, clientTheme, hidesIdentifiers, orgCreateText, signedInLabel, switchAccountLabel, withClientConsent } from './client-consent';
 import { sharesEmailClaim } from './provisioning';
 
 const gather = whitelabel.relyingApps.find((a) => a.client_id === 'gather-app')!;
@@ -25,7 +25,7 @@ describe('gather-app — its own words', () => {
   for (const id of ['site-login', 'org-create']) {
     it(`${id}: the three plain lines and no "cannot" block`, () => {
       const t = withClientConsent(shared[id]!, gather, id);
-      expect(t.canDo).toEqual(['Sign you in to Gather27', 'See your name and email', 'Set up your church’s listing']);
+      expect(t.canDo).toEqual(['Sign you in to Gather27', 'See your name and email', 'Create and manage your listing, for you or an organization you set up']);
       expect(t.hideCannotDo).toBe(true);
       expect(t.cannotDo).toEqual([]);
       expect(t.expiryDays).toBe(shared[id]!.expiryDays);
@@ -106,7 +106,11 @@ describe('gather-app — its own words', () => {
   });
 
   it('busy note and chain narration are plain', () => {
-    expect(clientCopy(gather, 'portalStepBusy')).toBe('Signing you in…');
+    expect(clientCopy(gather, 'portalStepBusy')).toBe('Signing you in to Gather27…');
+    // ONE loader for every wait, and no other client has one (Clayton's design, 2026-10-12).
+    expect(clientLoader(gather, 'signIn', { app: 'Gather27' })).toEqual({ label: 'Signing you in to Gather27…', hint: 'This usually takes a few seconds.' });
+    expect(clientLoader(gather, 'org', { app: 'Gather27', org: 'Grace Church' })?.label).toBe('Setting up Grace Church…');
+    for (const app of others) expect(clientLoader(app, 'signIn', { app: app.name ?? app.client_id }), app.client_id).toBeNull();
     expect(clientProgressText(gather, 'Confirming it on the chain…')).toBe('Confirming…');
     expect(clientProgressText(gather, 'Signing your permission…')).toBe('Signing your permission…');
   });

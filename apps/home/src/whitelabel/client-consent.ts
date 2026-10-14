@@ -68,6 +68,22 @@ export function clientProgressText(app: ConsentClient, text: string | undefined)
 }
 
 /**
+ * This client's ONE loader for a wait (`consent.loader`), or null — the caller then shows the ceremony's
+ * own stepped progress, as every other client does.
+ */
+export function clientLoader(
+  app: ConsentClient,
+  kind: 'signIn' | 'org',
+  vars: { app: string; org?: string },
+): { label: string; hint?: string } | null {
+  const own = app?.consent?.loader;
+  if (!own) return null;
+  const pick = kind === 'org' && own.org && vars.org ? own.org : own.signIn;
+  const fill = { app: vars.app, org: vars.org ?? '' };
+  return { label: fmt(pick.label, fill), ...(pick.hint ? { hint: fmt(pick.hint, fill) } : {}) };
+}
+
+/**
  * Who "Signed in as" names. A client that asked for `'email'` gets the member's verified email when one
  * was read; otherwise (and for every other client) the existing rule: name, then the short address.
  *

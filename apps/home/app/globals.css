@@ -1351,6 +1351,7 @@
       .home-footer-brand { flex: 1 1 100%; }
       .home-footer-compact { margin-top: 0; padding-top: 0; border-top: 0; max-width: 460px; justify-content: center; text-align: center; }
       .home-footer-compact .home-footer-links { justify-content: center; }
+      .home-footer-line { font: 400 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 1.6px; text-transform: uppercase; color: var(--color-text-faint); margin-top: .5rem; }
       .onboarding-card { width: 100%; max-width: 460px; background: var(--color-surface-raised); border: 1px solid var(--color-border); border-radius: var(--radius-24); padding: 2.25rem 1.75rem; box-shadow: var(--shadow-card); display: flex; flex-direction: column; align-items: center; text-align: center; gap: .85rem; }
       .onboarding-card.enroll-compact { padding: 1.35rem 1.2rem 1.2rem; gap: .5rem; }
       .onboarding-card.enroll-compact .onboarding-h1 { font-size: 1.28rem; margin: 0; }
@@ -1947,3 +1948,37 @@ input:not([type=checkbox]):not([type=radio]), select, textarea { border-color: v
 .gcid-button.gcid-light:hover:not(:disabled) { box-shadow: 0 0 0 3px rgba(29,78,216,.2); }
 .gcid-button:disabled { opacity: .6; cursor: not-allowed; }
 .gcid-button:focus-visible { outline: 2px solid #60A5FA; outline-offset: 2px; }
+.gcid-button.gcid-wide { display: flex; width: 100%; min-height: 56px; border-radius: 12px; font-size: 17px; }
+
+/* ── GCID's hosted sign-in page: the email and code steps (components/portal/EmailAuthCard.tsx, `hosted`). */
+.gcid-signin { display: flex; flex-direction: column; gap: 10px; width: 100%; text-align: left; margin-top: 6px; }
+.gcid-signin label { font-size: 14px; font-weight: 600; color: var(--color-text-muted); }
+.gcid-signin input[type="email"] {
+  width: 100%; height: 58px; box-sizing: border-box; font: inherit; font-size: 19px;
+  padding: 0 var(--theme-input-pad-x, 1rem); border: 2px solid var(--color-action); border-radius: var(--theme-input-radius, 8px);
+  background: var(--theme-input-bg, var(--color-surface)); color: var(--theme-input-fg, var(--color-text-primary));
+}
+.gcid-hint, .gcid-from { margin: 0; font-size: 14px; color: var(--color-text-muted); text-align: center; }
+.gcid-from { color: var(--color-text-faint); }
+.gcid-from strong { color: var(--color-text-muted); font-weight: 600; }
+.gcid-sent { margin: 0 0 6px; font-size: 17px; line-height: 1.45; color: var(--color-text-body); text-align: center; }
+.gcid-sent strong { color: var(--color-text-primary); font-weight: 600; overflow-wrap: anywhere; }
+.gcid-resend { margin: 6px 0 0; font-size: 15px; color: var(--color-text-body); text-align: center; }
+.gcid-resend span { color: var(--color-text-faint); font-variant-numeric: tabular-nums; }
+.gcid-link { background: none; border: 0; padding: 0; font: inherit; font-size: 15px; color: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.gcid-link:disabled { opacity: .6; cursor: default; }
+.gcid-switch { align-self: center; margin: .9rem auto 0; display: block; color: var(--color-text-body); }
+.client-theme .consent-group { letter-spacing: .14em; font-weight: 600; }
+.gcid-code { position: relative; display: flex; gap: 10px; justify-content: center; }
+.gcid-code-box {
+  width: 64px; max-width: calc((100% - 50px) / 6); height: 72px; border-radius: 14px; border: 2px solid var(--color-border-strong);
+  background: var(--theme-input-bg, var(--color-surface)); color: var(--theme-input-fg, var(--color-text-primary));
+  display: grid; place-items: center; font-size: 30px; font-weight: 600; transition: border-color .15s ease, transform .15s ease;
+}
+.gcid-code-box.filled { border-color: var(--color-action); }
+.gcid-code:focus-within .gcid-code-box.next { border-color: var(--color-action); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-action) 30%, transparent); }
+.gcid-code-box.filled { animation: gcid-digit .16s ease-out; }
+@keyframes gcid-digit { from { transform: scale(.9); } to { transform: none; } }
+/* The one real input, over the boxes: it takes the typing, the paste and the keyboard's code suggestion. */
+.gcid-code-input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border: 0; padding: 0; font-size: 16px; cursor: text; }
+@media (prefers-reduced-motion: reduce) { .gcid-code-box.filled { animation: none; } }

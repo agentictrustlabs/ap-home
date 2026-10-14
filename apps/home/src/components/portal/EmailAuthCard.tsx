@@ -20,7 +20,7 @@
 // broken one in the authenticator (stable userHandle per (rpId, label)). Subdomain-gated because
 // passkeys are RP-scoped (spec 229 P5): a key created here is only findable on THIS host, so the
 // offer shows only where the member will return.
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSession } from '../../context/session';
 import { WorkingBar } from '../onboarding/WorkingBar';
 import { GcidButton, useGcidButtons } from '../shared/GcidButton';
@@ -48,7 +48,49 @@ function passkeyOfferHost(homeName: string | null | undefined): boolean {
   return !home || home === label;
 }
 
-export function EmailAuthCard({ onLinked, busyNote = 'Securing your home…' }: {
+/** How long before the code can be sent again (A4: "Resend in 0:27"). */
+const RESEND_AFTER_SECONDS = 30;
+/** The address sign-in mail comes from, said on the code screen so a person can find it. Per deployment. */
+const SIGN_IN_SENDER = (process.env.NEXT_PUBLIC_SIGN_IN_SENDER ?? '').trim();
+/** ...and the name it comes under, when that is not the brand name as this deployment spells it (a staging
+ *  deployment calls itself "GCID (staging)"; the line is kept the same as production's). */
+const SIGN_IN_SENDER_NAME = (process.env.NEXT_PUBLIC_SIGN_IN_SENDER_NAME ?? '').trim();
+
+export type EmailAuthStep = 'email' | 'code' | 'existing-home' | 'passkey-offer';
+
+/**
+ * The six-digit code as six boxes. ONE real input lies over them, so paste, the keyboard's one-time-code
+ * suggestion and backspace all behave as the browser already makes them; the boxes only draw what it holds.
+ */
+function CodeBoxes({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled: boolean }) {
+  return (
+    <div className="gcid-code">
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <span key={i} className={`gcid-code-box${value[i] ? ' filled' : ''}${i === Math.min(value.length, 5) ? ' next' : ''}`} aria-hidden="true">
+          {value[i] ?? ''}
+        </span>
+      ))}
+      <input
+        id="gcid-code"
+        className="gcid-code-input"
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        pattern="[0-9]*"
+        maxLength={6}
+        data-testid="email-auth-code"
+        aria-label="6-digit code"
+        value={value}
+        disabled={disabled}
+        autoFocus
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 6))}
+      />
+    </div>
+  );
+}
+
+export function EmailAuthCard({ onLinked, busyNote = 'Securing your home…', onStep }: {
+  /** Told which step is showing, so the window around the card can title it ("Check your email"). */
+  onStep?: (step: EmailAuthStep) => void;
   /** Called with the verified address/number once it is LINKED to this home (spec 422 §3.3 records it as a channel). */
   onLinked?: (value: string) => void;
   /** The note while a new email home is made. A relying app's sign-in passes its own words
@@ -59,7 +101,22 @@ export function EmailAuthCard({ onLinked, busyNote = 'Securing your home…' }: 
   // "Continue with GCID" with the mark, so the app's colours never hide what the person signs in with.
   const gcid = useGcidButtons();
   const { session, openSession } = useSession();
-  const [step, setStep] = useState<'email' | 'code' | 'existing-home' | 'passkey-offer'>('email');
+  const [step, setStep] = useState<EmailAuthStep>('email');
+  // GCID's hosted sign-in page (Paul's spec; Clayton's design 2026-10-12): a relying app's window that asked
+  // for GCID's own button, with nobody signed in yet. Everywhere else this card is exactly as it was.
+  const hosted = Boolean(gcid) && !session;
+  useEffect(() => { onStep?.(step); }, [step, onStep]);
+  // The resend countdown: seconds left before "Resend code" is offered.
+  const [sentAt, setSentAt] = useState(0);
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (step !== 'code' || !sentAt) return;
+    const t = window.setInterval(() => tick((n) => n + 1), 1000);
+    return () => window.clearInterval(t);
+  }, [step, sentAt]);
+  const resendIn = sentAt ? Math.max(0, RESEND_AFTER_SECONDS - Math.floor((Date.now() - sentAt) / 1000)) : 0;
+  /** The code last submitted by itself — the sixth digit signs in once, not on every re-render. */
+  const autoTried = useRef('');
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [busy, setBusy] = useState(false);
@@ -86,6 +143,9 @@ export function EmailAuthCard({ onLinked, busyNote = 'Securing your home…' }: 
       const d = (await r.json().catch(() => ({}))) as { ok?: boolean; delivery?: string; error?: string; devCode?: string };
       if (!r.ok || !d.ok) throw new Error(d.error ?? 'could not send the code');
       setStep('code');
+      setSentAt(Date.now());
+      setOtp('');
+      autoTried.current = '';
       setNote(d.delivery === 'logged'
         ? (d.devCode ? `Email isn’t configured (dev) — your code is ${d.devCode}.` : 'Email sending isn’t configured yet — the code was logged server-side (dev).')
         : `We sent a 6-digit code to ${email.trim()}.`);
@@ -205,8 +265,19 @@ export function EmailAuthCard({ onLinked, busyNote = 'Securing your home…' }: 
       } else if (d.status === 'bootstrap') {
         setErr('We couldn’t set up a home for this email automatically — sign up with a passkey or Google, then add email.');
       }
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      if (hosted) setOtp('');
+    } finally { setBusy(false); }
   };
+
+  // A4: no Verify button on the hosted page — the sixth digit signs in.
+  useEffect(() => {
+    if (!hosted || step !== 'code' || busy || otp.length !== 6 || autoTried.current === otp) return;
+    autoTried.current = otp;
+    void verify();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hosted, step, busy, otp]);
 
   /** Interstitial action — continue into the existing home as-is (drop the chosen name). */
   const continueExisting = async () => {
@@ -235,7 +306,7 @@ export function EmailAuthCard({ onLinked, busyNote = 'Securing your home…' }: 
   };
 
   return (
-    <div style={{ maxWidth: 380 }}>
+    <div style={hosted ? { width: '100%' } : { maxWidth: 380 }}>
       {step === 'passkey-offer' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '.6rem' }}>
           <p style={{ fontSize: '.85rem', margin: 0, lineHeight: 1.5 }}>
@@ -268,6 +339,52 @@ export function EmailAuthCard({ onLinked, busyNote = 'Securing your home…' }: 
           <button className="btn-ghost" disabled={busy} onClick={() => { setStep('email'); setEmail(''); setOtp(''); setPendingToken(null); setErr(null); setNote(null); }}>
             Use a different email for {chosenName}
           </button>
+        </div>
+      ) : hosted && step === 'email' ? (
+        <div className="gcid-signin">
+          <label htmlFor="gcid-email">Email</label>
+          <input
+            id="gcid-email"
+            type="email"
+            autoComplete="email"
+            data-testid="email-auth-input"
+            placeholder="you@example.org"
+            value={email}
+            autoFocus
+            onChange={(e) => setEmail(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && email.trim()) void start(); }}
+          />
+          <GcidButton variant={gcid!} label="Continue with GCID" busy={busy} busyLabel="Sending…" className="gcid-wide" data-testid="email-auth-continue" disabled={busy || !email.trim()} onClick={() => void start()} />
+          <p className="gcid-hint">We&rsquo;ll email you a 6-digit code. No password, ever.</p>
+        </div>
+      ) : hosted && step === 'code' ? (
+        <div className="gcid-signin">
+          <p className="gcid-sent" data-testid="email-auth-sent">
+            We sent a 6-digit code to <strong>{email.trim()}</strong>
+            <br />
+            <button type="button" className="gcid-link" data-testid="email-auth-change" disabled={busy} onClick={() => { setStep('email'); setOtp(''); setErr(null); setNote(null); }}>
+              Wrong email? Change it
+            </button>
+          </p>
+          <label htmlFor="gcid-code">Code</label>
+          <CodeBoxes value={otp} onChange={(v) => { setErr(null); setOtp(v); }} disabled={busy} />
+          <p className="gcid-hint">Signs you in as soon as the sixth digit is in. The code is good for 10 minutes.</p>
+          {!busy && (
+            <p className="gcid-resend">
+              Didn&rsquo;t get it?{' '}
+              {resendIn > 0 ? (
+                <span data-testid="email-auth-resend-wait">Resend in 0:{String(resendIn).padStart(2, '0')}</span>
+              ) : (
+                <button type="button" className="gcid-link" data-testid="email-auth-resend" onClick={() => void start()}>
+                  Resend code
+                </button>
+              )}
+            </p>
+          )}
+          <p className="gcid-from">
+            From <strong>{SIGN_IN_SENDER_NAME || whitelabel.brand.name}</strong>
+            {SIGN_IN_SENDER ? ` · ${SIGN_IN_SENDER}` : ''} · check spam if it&rsquo;s slow
+          </p>
         </div>
       ) : step === 'email' ? (
         <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
@@ -307,7 +424,7 @@ export function EmailAuthCard({ onLinked, busyNote = 'Securing your home…' }: 
         </div>
       )}
       {busy && <WorkingBar label={step === 'code' ? (note ?? 'Checking your code and opening your home…') : step === 'email' ? 'Sending your code…' : (note ?? 'Working…')} />}
-      {!busy && note && <p data-testid="email-auth-note" style={{ fontSize: '.78rem', color: 'var(--color-text-muted)', margin: '.5rem 0 0' }}>{note}</p>}
+      {!busy && note && !(hosted && step === 'code' && note.startsWith('We sent')) && <p data-testid="email-auth-note" style={{ fontSize: '.78rem', color: 'var(--color-text-muted)', margin: '.5rem 0 0' }}>{note}</p>}
       {err && <p data-testid="email-auth-error" style={{ fontSize: '.78rem', color: 'var(--color-danger)', margin: '.5rem 0 0' }}>{err}</p>}
     </div>
   );

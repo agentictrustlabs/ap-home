@@ -114,6 +114,10 @@ const faithImpact: WhiteLabelConfig = {
   // out to a stranger. `NEXT_PUBLIC_FOOTER_LINKS='[{"label":"…","href":"https://…"}]'` replaces the set.
   footer: {
     credit: process.env.NEXT_PUBLIC_FOOTER_CREDIT || 'Built on Agentic Primitives — authority for agents that the agent cannot exceed.',
+    // ONE line under the sign-in card, in place of the credit and links there (GCID: "GCID · Great Commission ID ·
+    // Stewarded by Global.Church" — Clayton's design, 2026-10-12). Unset = the credit and links, as before. The
+    // portal's own footer is never affected: it keeps the links a person and a search engine look for.
+    ...(process.env.NEXT_PUBLIC_FOOTER_SIGN_IN_LINE?.trim() ? { signInLine: process.env.NEXT_PUBLIC_FOOTER_SIGN_IN_LINE.trim() } : {}),
     links: footerLinks(process.env.NEXT_PUBLIC_FOOTER_LINKS, [
       { label: 'Agentic Primitives', href: 'https://agenticprimitives.dev' },
       { label: 'Ontology & namespaces', href: 'https://agenticprimitives.dev/ontology' },
@@ -441,7 +445,10 @@ const faithImpact: WhiteLabelConfig = {
       // of which ~18 s was the community-messaging wire provisioned once per managed org and ~11 s
       // the related-orgs read that only feeds it. Gather registers no messaging capability, so it
       // gets neither. Gated HERE, per client: every other app is untouched (whitelabel/provisioning.test.ts).
-      provisioning: { communityMessaging: false },
+      // 2026-10-13, measured again on a publish (73 s): the default discussion channel made for a new
+      // organization (12 s) and the agent-playbook self-heal in the sign-in window (3–7 s) are also things
+      // Gather never uses. Same gate, same scope.
+      provisioning: { communityMessaging: false, agentPlaybook: false },
       // ...and 4.4 s was an on-chain approval of two digests that never change between sign-ins
       // (site grant + self-vault grant). Reuse the standing grant instead; a refused reuse still
       // falls back to a fresh mint (RecognizedEnroll).
@@ -462,11 +469,11 @@ const faithImpact: WhiteLabelConfig = {
       consent: {
         templates: {
           'site-login': {
-            canDo: ['Sign you in to Gather27', 'See your name and email', 'Set up your church’s listing'],
+            canDo: ['Sign you in to Gather27', 'See your name and email', 'Create and manage your listing, for you or an organization you set up'],
             hideCannotDo: true,
           },
           'org-create': {
-            canDo: ['Sign you in to Gather27', 'See your name and email', 'Set up your church’s listing'],
+            canDo: ['Sign you in to Gather27', 'See your name and email', 'Create and manage your listing, for you or an organization you set up'],
             hideCannotDo: true,
           },
         },
@@ -481,7 +488,17 @@ const faithImpact: WhiteLabelConfig = {
           receipt: 'Your church is set up.',
         },
         hideSubstrate: true,
-        copy: { portalStepBusy: 'Signing you in…' },
+        copy: { portalStepBusy: 'Signing you in to Gather27…' },
+        // Under the Allow list. The design also says "You'll only see this once"; that is not true (the sheet shows
+        // at each sign-in), so it is left out (Ryan, 2026-10-13). Add it back if Allow is ever remembered.
+        note: 'Remove {app} anytime from your GCID.',
+        // The one address Gather27 is known by, whichever hostname opened the window (per deployment).
+        ...(process.env.NEXT_PUBLIC_GATHER_DISPLAY_DOMAIN?.trim() ? { displayDomain: process.env.NEXT_PUBLIC_GATHER_DISPLAY_DOMAIN.trim() } : {}),
+        // ONE loader for every wait (Clayton's design, 2026-10-12): no step counters, none of the narration.
+        loader: {
+          signIn: { label: 'Signing you in to {app}…', hint: 'This usually takes a few seconds.' },
+          org: { label: 'Setting up {org}…', hint: 'This takes about 20 seconds. Keep this tab open.' },
+        },
         // The shared ceremony narration says "chain", "custody" and "keys"; a host should read none of it.
         progressText: {
           'Confirming it on the chain…': 'Confirming…',

@@ -235,13 +235,34 @@ export async function writePersonRecord(principal: Address, recordType: PersonRe
 /** Read the member's encrypted community profile from their vault. Returns an empty profile if the
  *  member has never saved one. Throws `VaultKeyUnauthorizedError` if they haven't activated their
  *  vault key (run the /vault-key ceremony) yet. */
+/**
+ * A short-lived memo of the profile read, per address. Measured on a Gather27 publish (2026-10-13): this one
+ * record was read EIGHT times in a row, 2–3 s each — the session shell re-read it on every profile refresh,
+ * and the sign-in sheet read it twice more. Callers asking while a read is in flight share it; a result is
+ * reused for a few seconds; a write drops it. Failures are never kept (a vault key that is not bound yet
+ * must be retried, which is what seedImpactProfileFields does).
+ */
+const PROFILE_MEMO_MS = 15_000;
+const profileMemo = new Map<string, { at: number; value: Promise<ImpactStoredProfile> }>();
+function forgetProfile(addr: Address): void {
+  profileMemo.delete(addr.toLowerCase());
+}
+
 export async function loadImpactProfile(addr: Address): Promise<ImpactStoredProfile> {
-  const out = await postProfile('get', addr);
-  const record = out.record as ImpactStoredProfile | null | undefined;
-  if (record && record.v === 1) {
-    return { ...record, contact: hydrateContact(record.contact ?? {}) };
-  }
-  return { v: 1 };
+  const key = addr.toLowerCase();
+  const hit = profileMemo.get(key);
+  if (hit && Date.now() - hit.at < PROFILE_MEMO_MS) return hit.value;
+  const value = (async (): Promise<ImpactStoredProfile> => {
+    const out = await postProfile('get', addr);
+    const record = out.record as ImpactStoredProfile | null | undefined;
+    if (record && record.v === 1) {
+      return { ...record, contact: hydrateContact(record.contact ?? {}) };
+    }
+    return { v: 1 };
+  })();
+  profileMemo.set(key, { at: Date.now(), value });
+  value.catch(() => { if (profileMemo.get(key)?.value === value) profileMemo.delete(key); });
+  return value;
 }
 
 /** Seal the member's community profile into their vault under their own KEK. Throws
@@ -251,7 +272,9 @@ export async function saveImpactProfile(addr: Address, profile: ImpactStoredProf
     ...profile,
     contact: profile.contact ? persistContact(profile.contact) : profile.contact,
   };
+  forgetProfile(addr);
   const out = await postProfile('set', addr, next);
+  forgetProfile(addr);
   if (out.ok !== true) throw new Error(`save failed: ${String(out.error ?? 'unknown')}`);
 }
 

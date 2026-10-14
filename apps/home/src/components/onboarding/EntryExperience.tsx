@@ -14,7 +14,8 @@ import { initRemoteSigner } from '../../lib/remote-signer';
 import { whitelabel } from '../../whitelabel/config';
 import { knownRelyingClient } from '../../lib/relying-clients';
 import { hasSessionHandoff, useSession } from '../../context/session';
-import { EmailAuthCard } from '../portal/EmailAuthCard';
+import { EmailAuthCard, type EmailAuthStep } from '../portal/EmailAuthCard';
+import { useGcidButtons } from '../shared/GcidButton';
 import { PhoneAuthCard } from '../portal/PhoneAuthCard';
 import { readSsoCookie } from '../../lib/sso-cookie';
 import { CENTRAL_AUTH_DOMAIN, nameLabel, personalAuthOrigin, toAgentName, parseAgentSubdomain } from '../../lib/domain';
@@ -42,7 +43,7 @@ import { NewMemberSetup } from './NewMemberSetup';
 import { isNewHomeMoment, newMemberPlan, planIsEmpty, type NewMemberPlan } from '../../lib/new-member';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
 import { parseEnrollReq } from './useEnrollReq';
-import { clientCopy, clientOrgName, clientProgressText, hidesIdentifiers, orgCreateText, withClientConsent } from '../../whitelabel/client-consent';
+import { clientCopy, clientLoader, clientOrgName, clientProgressText, hidesIdentifiers, orgCreateText, withClientConsent } from '../../whitelabel/client-consent';
 
 interface NameInfo { exists?: boolean; agent?: Address; deployed?: boolean; hasEoa?: boolean; hasPasskey?: boolean; connectionKind?: string | null; connectionAddress?: string | null; passkeySigningAvailable?: boolean | null }
 /** Human label for the owner-published connection kind (spec 280) — guides which button to use. */
@@ -692,6 +693,10 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
   // What the email card says while it makes a new home — the client's own words when it has them
   // (Gather27: "Signing you in…"), the shared `copy.portalStepBusy` otherwise.
   const emailBusyNote = clientCopy(enrollApi?.enroll ? knownRelyingClient(enrollApi.enroll.aud) : undefined, 'portalStepBusy');
+  // GCID's hosted sign-in page (a window that asked for GCID's own button): the heading is the APP's name and
+  // the line under it is fixed ("Sign in with GCID to continue."); on the code step it is "Check your email".
+  const gcidHosted = useGcidButtons() !== null;
+  const [emailStep, setEmailStep] = useState<EmailAuthStep>('email');
   const [busy, setBusy] = useState<'passkey' | 'wallet' | null>(null);
   const [err, setErr] = useState('');
   // Email / phone sign-in / bootstrap: reveal an inline EmailAuthCard / PhoneAuthCard. Both call the SAME
@@ -831,12 +836,20 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
   return (
     <Shell compact={enroll}>
       <BrandShield size={enroll ? 40 : 56} />
-      <h1 className="onboarding-h1">{enroll && appName ? `Continue to ${appName}` : whitelabel.copy.arrivalTitle}</h1>
-      <p className="onboarding-sub">
-        {enroll
-          ? whitelabel.copy.enrollSub
-          : `Sign in or get started. Your ${whitelabel.brand.name} name is how others find your agent — not something you need to remember to get back in.`}
-      </p>
+      <h1 className="onboarding-h1">
+        {enroll && gcidHosted && emailStep === 'code'
+          ? 'Check your email'
+          : enroll && appName
+            ? gcidHosted ? appName : `Continue to ${appName}`
+            : whitelabel.copy.arrivalTitle}
+      </h1>
+      {!(enroll && gcidHosted && emailStep === 'code') && (
+        <p className="onboarding-sub">
+          {enroll
+            ? whitelabel.copy.enrollSub
+            : `Sign in or get started. Your ${whitelabel.brand.name} name is how others find your agent — not something you need to remember to get back in.`}
+        </p>
+      )}
       {offers('social') && <SocialConnect onGoogle={onGoogle} onYouVersion={onYouVersion} primary />}
       {enrollApi ? (
         <>
@@ -856,7 +869,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
           )}
           {offers('email') && emailEnabled && (showEmail || soleMethod) && (
             <div style={{ margin: '.4rem 0 .2rem' }}>
-              <EmailAuthCard busyNote={emailBusyNote} />
+              <EmailAuthCard busyNote={emailBusyNote} onStep={setEmailStep} />
             </div>
           )}
           {offers('phone') && phoneEnabled && (
@@ -1357,6 +1370,14 @@ function OrgConsent({ personAgent, api }: { personAgent: Address; api: ReturnTyp
           onChoose={(c) => { setChoice(c); setPhase('consent'); }}
           onDecline={api.denyEnroll}
         />
+      </Shell>
+    );
+  }
+  const oneLoader = clientLoader(orgClient, 'org', { app: orgAppName, org: orgShown });
+  if (oneLoader && (phase === 'busy' || phase === 'connected')) {
+    return (
+      <Shell>
+        <CeremonyProgress label={oneLoader.label} hint={oneLoader.hint} step={0} total={0} indeterminate />
       </Shell>
     );
   }

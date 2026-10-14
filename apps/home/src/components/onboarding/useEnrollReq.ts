@@ -301,7 +301,16 @@ function deliverEnrollCodeNow(enroll: EnrollReq, popupMode: boolean, code: strin
   // exchange itself. Marker is only set for popupMode, so the plain full-page redirect (popup
   // blocked / mobile, greenfield 11) is unchanged, and apps that don't handle it just ignore it.
   if (popupMode) url.searchParams.set('ac_relay', '1');
-  window.location.href = url.toString();
+  leaveForApp(url);
+}
+
+/** Hand the person back to the relying app by REPLACING this page in the browser's history, never by adding
+ *  to it. With a plain navigation, Back from the app landed on this window again — restored from the
+ *  back/forward cache exactly as it was left, "Returning you to <app>…" over a bar that never finishes,
+ *  because the script that would move it on has already run (Global.Church, 2026-10-12). Replaced, Back
+ *  from the app goes to wherever the person was before they started signing in. */
+function leaveForApp(url: URL): void {
+  window.location.replace(url.toString());
 }
 
 /** spec 272 recurring — deliver a subscription-collection RESULT back to the owner app (no OIDC code).
@@ -318,7 +327,7 @@ export function deliverCollectResult(enroll: EnrollReq, popupMode: boolean, resu
   url.searchParams.set('attempted', String(result.attempted));
   if (kind) url.searchParams.set('collect_kind', kind);
   url.searchParams.set('state', enroll.state);
-  window.location.href = url.toString();
+  leaveForApp(url);
 }
 
 /** OIDC error bounce (spec 230 §4.3 / prompt=none silent SSO): deliver `?error&state` back to the
@@ -335,7 +344,7 @@ export function deliverEnrollError(enroll: EnrollReq, popupMode: boolean, error:
   const url = new URL(enroll.redirectUri);
   url.searchParams.set('error', error);
   url.searchParams.set('state', enroll.state);
-  window.location.href = url.toString();
+  leaveForApp(url);
 }
 
 export interface EnrollApi {
@@ -449,7 +458,7 @@ export function useEnrollReq(): EnrollApi {
     const url = new URL(enroll.redirectUri);
     url.searchParams.set('enroll_error', 'denied');
     url.searchParams.set('state', enroll.state);
-    window.location.href = url.toString();
+    leaveForApp(url);
   }, [enroll, popupMode, postToOpener]);
 
   const deliverError = useCallback(

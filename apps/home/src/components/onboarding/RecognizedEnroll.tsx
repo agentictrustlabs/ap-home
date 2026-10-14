@@ -49,11 +49,13 @@ import { CeremonyProgress } from './CeremonyProgress';
 import { coinMandateLeg, grantsCoinAtConnect, withCurrencyConsent, withEmailClaimConsent, withProfileNameConsent } from '../../lib/new-member';
 import { OrgChooser, type OrgChoice } from './OrgChooser';
 import { displayAppDomain, displayAppName } from './org-chooser-label';
+import { HomeFooter } from '../shared/HomeFooter';
+import { useGcidButtons } from '../shared/GcidButton';
 import { knownRelyingClient } from '../../lib/relying-clients';
 import { agentClassOf } from '../../lib/agent-class';
 import { withMissionRegistry } from '../../lib/mission-registry';
 import { profileForConnect } from '../../lib/connect-profile-name';
-import { clientOrgName, clientProgressText, hidesIdentifiers, signedInLabel, switchAccountLabel, withClientConsent } from '../../whitelabel/client-consent';
+import { clientLoader, clientOrgName, clientProgressText, hidesIdentifiers, signedInLabel, switchAccountLabel, withClientConsent } from '../../whitelabel/client-consent';
 import { verifiedEmailFor } from '../../lib/verified-email';
 
 /** The kinds of agent that ARE an organization holding its own members — where a team-scoped role can be offered. A
@@ -92,6 +94,8 @@ function idTokenSub(jwt: string | undefined): string | undefined {
 export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUnrecognized: () => void }) {
   const c = whitelabel.copy;
   const ran = useRef(false);
+  // GCID's hosted sign-in page (a window that asked for GCID's own button): its Allow sheet follows that design.
+  const gcidHosted = useGcidButtons() !== null;
   const [phase, setPhase] = useState<Phase>('resolving');
   const [grantProgress, setGrantProgress] = useState<{
     step: number;
@@ -964,6 +968,17 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
     );
   }
 
+  // A client with ONE loader (consent.loader) shows it for the whole wait — the grant and the hand-back
+  // alike — instead of the stepped narration and the "Permission granted" receipt.
+  const oneLoader = clientLoader(relyingApp, 'signIn', { app: appName });
+  if (oneLoader && (phase === 'granting' || phase === 'connected')) {
+    return (
+      <Shell>
+        <CeremonyProgress label={oneLoader.label} hint={oneLoader.hint} step={0} total={0} indeterminate />
+      </Shell>
+    );
+  }
+
   if (phase === 'granting') {
     return (
       <Shell>
@@ -1041,18 +1056,21 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           signedInAs={signedInAs}
           signedInBare={hideIds && !!home}
           appName={appName}
-          appDomain={enroll.viaHost ? `through ${registeredName} · ${appDomain}` : appDomain}
+          appDomain={enroll.viaHost ? `through ${registeredName} · ${appDomain}` : relyingApp?.consent?.displayDomain || appDomain}
+          oneLineApp={gcidHosted}
           appLogo={relyingApp?.logo}
           appDescription={relyingApp?.description}
           template={tpl}
           authorizeLabel={fmt(c.authorizeStepCta, { app: appName })}
+          footnote={relyingApp?.consent?.note ? fmt(relyingApp.consent.note, { app: appName }) : undefined}
           onAuthorize={onAuthorize}
           onDecline={onDecline}
         />
-        <button className="btn-ghost onboarding-secondary" onClick={() => { clearSsoCookie(); onUnrecognized(); }}>
+        <button className={gcidHosted ? 'gcid-link gcid-switch' : 'btn-ghost onboarding-secondary'} onClick={() => { clearSsoCookie(); onUnrecognized(); }}>
           {switchAccountLabel(relyingApp, home?.name)}
         </button>
       </div>
+      {whitelabel.footer.signInLine && <HomeFooter compact hideSubstrate />}
     </div>
   );
 }
@@ -1061,6 +1079,8 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="onboarding-screen">
       <div className="onboarding-card">{children}</div>
+      {/* A deployment's one line under the sign-in card (whitelabel.footer.signInLine) follows it through these screens too. */}
+      {whitelabel.footer.signInLine && <HomeFooter compact hideSubstrate />}
     </div>
   );
 }

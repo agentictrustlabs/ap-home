@@ -53,7 +53,12 @@ export interface RelyingApp {
    *  means everything, which is exactly what every client gets today; a client may only turn a leg
    *  OFF, never widen one. `communityMessaging: false` skips the community-messaging wire (and the
    *  related-orgs read that only feeds it) for an app that registers no messaging capability. */
-  provisioning?: { communityMessaging?: false };
+  provisioning?: {
+    communityMessaging?: false;
+    /** `false` skips the agent-playbook self-heal in THIS client's sign-in window (it still runs in the
+     *  portal). For an app whose people never use the agent features and only want to get back to the app. */
+    agentPlaybook?: false;
+  };
   /** OPTIONAL — `'with-self-vault'` lets the plain sign-in REUSE its standing grant even though the
    *  client declares a self_vault_grant. Both approved digests (site + self-vault) are fixed for a
    *  given client, so the on-chain approval userOp is identical every time; reusing skips it. Absent
@@ -352,6 +357,22 @@ export interface ClientConsentCopy {
   /** Exact-string replacements for ceremony progress labels and hints (`CeremonyProgress`), e.g. a
    *  shared "Confirming it on the chain…" an app's people should never see. Unlisted text is unchanged. */
   progressText?: Record<string, string>;
+  /** The line under the can-do list on the Allow sheet, in place of the shared "Ongoing until you revoke
+   *  it from Connected Apps." — for a client whose people do not know that page by that name. `{app}` is
+   *  filled in. It must still say the permission can be taken back. */
+  note?: string;
+  /** The address shown under the app's name on the Allow sheet, in place of the host the request came
+   *  from — for an app that wants its one public address named whichever of its hostnames opened the window.
+   *  Display only: where the person is sent back is still the registered redirect URI, checked as always. */
+  displayDomain?: string;
+  /** ONE loader for the whole wait, in place of the ceremony's step-by-step narration and its "Step 2 of 5"
+   *  counter (Gather27, Clayton's design 2026-10-12: "one component, one line of copy, no step counters").
+   *  `signIn` covers the wait after the code and after Allow; `org` the one-time organization set-up.
+   *  `{app}` and `{org}` are filled in. A client without it keeps the stepped progress exactly as before. */
+  loader?: {
+    signIn: { label: string; hint?: string };
+    org?: { label: string; hint?: string };
+  };
   /** Never show the person an address, a handle or a `.impact` name on this client's screens: "Signed
    *  in as" names only the verified email (or just says "Signed in"), progress lines that would name a
    *  handle are replaced with a plain one, and org handles are humanized. For an app whose people only
@@ -452,6 +473,8 @@ export interface WhiteLabelConfig {
     /** The one-line credit before the links, e.g. "Built on Agentic Primitives". */
     credit: string;
     links: ReadonlyArray<{ label: string; href: string; /** rel for an outbound link; defaults to noopener. */ rel?: string }>;
+    /** ONE line under the sign-in card, in place of the credit and links there (NEXT_PUBLIC_FOOTER_SIGN_IN_LINE). */
+    signInLine?: string;
   };
   onboarding: {
     credentialMethods: Array<'passkey' | 'wallet' | 'google' | 'youversion' | 'email' | 'phone'>;

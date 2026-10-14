@@ -15,6 +15,12 @@ export function provisionsCommunityMessaging(aud: string | undefined): boolean {
   return client(aud)?.provisioning?.communityMessaging !== false;
 }
 
+/** Whether this client's sign-in window runs the agent-playbook self-heal. True unless the client set
+ *  `provisioning.agentPlaybook` to false; no client (the portal itself) and unknown clients get the default. */
+export function provisionsAgentPlaybook(aud: string | undefined): boolean {
+  return client(aud)?.provisioning?.agentPlaybook !== false;
+}
+
 /** Whether the plain sign-in may reuse a standing grant even though the client declares a self-vault
  *  grant. False unless the client set `standingGrant: 'with-self-vault'`. */
 export function reusesStandingGrantWithSelfVault(aud: string | undefined): boolean {

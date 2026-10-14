@@ -1,6 +1,7 @@
 // The link-preview image (Open Graph / Twitter card) for every page of the Home: the brand shield, the brand name
 // and its tagline on the warm ground, drawn by next/og at build time from the white-label config (ADR-0021).
 import { ImageResponse } from 'next/og';
+import { BRAND_MARK, GCID_MARK, GLOBE_BLUE, GlobeLines } from '../src/components/shared/BrandShield';
 import { whitelabel } from '../src/whitelabel/config';
 
 export const alt = `${whitelabel.brand.name} — ${whitelabel.brand.tagline}`;
@@ -12,6 +13,14 @@ export default function OpenGraphImage() {
   return new ImageResponse(
     (
       <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(160deg, #fffbeb 0%, #fef3c7 100%)', color: '#1c1917', fontFamily: 'sans-serif' }}>
+        {BRAND_MARK === 'gcid' ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={GCID_MARK} width={150} height={150} alt="" />
+        ) : BRAND_MARK === 'globe' ? (
+        <svg width="150" height="150" viewBox="0 0 100 100" fill="none">
+          {GlobeLines({ stroke: GLOBE_BLUE })}
+        </svg>
+        ) : (
         <svg width="140" height="161" viewBox="0 0 40 46" fill="none">
           <defs>
             <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
@@ -23,6 +32,7 @@ export default function OpenGraphImage() {
           <path d="M20 1.5 3 8.2v13.4C3 32.4 11 39.8 20 44.5c9-4.7 17-12.1 17-22.9V8.2L20 1.5Z" fill="url(#g)" />
           <path d="M13.5 22.5 18 27l9-9" stroke="#fff" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
         </svg>
+        )}
         <div style={{ fontSize: 84, fontWeight: 700, marginTop: 28, letterSpacing: -2 }}>{name}</div>
         <div style={{ fontSize: 36, color: '#78716c', marginTop: 12 }}>{tagline}</div>
         <div style={{ fontSize: 24, color: '#b45309', marginTop: 40 }}>a Home on the Agentic Primitives substrate</div>

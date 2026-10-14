@@ -10,7 +10,15 @@ import { whitelabel } from '../../whitelabel/config';
 // relying app's sign-in card when that app asked (RelyingApp.consent.hideSubstrate). The credit and links
 // are env-driven (NEXT_PUBLIC_FOOTER_*) and are a deployment's call, so they are left alone.
 export function HomeFooter({ compact, hideSubstrate }: { compact?: boolean; hideSubstrate?: boolean }) {
-  const { credit, links } = whitelabel.footer;
+  const { credit, links, signInLine } = whitelabel.footer;
+  // Under the sign-in card, a deployment may say who it is in ONE line and nothing else (whitelabel.footer.signInLine).
+  if (compact && signInLine) {
+    return (
+      <footer className="home-footer home-footer-compact home-footer-line" data-testid="home-footer">
+        {signInLine}
+      </footer>
+    );
+  }
   return (
     <footer className={compact ? 'home-footer home-footer-compact' : 'home-footer'} data-testid="home-footer">
       <span className="home-footer-credit">{credit}</span>

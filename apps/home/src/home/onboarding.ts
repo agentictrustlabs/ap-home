@@ -55,6 +55,7 @@ import { readSsoCookie } from '../lib/sso-cookie';
 import { SESSION_KEY } from '../context/session';
 import type { Home } from './types';
 import { homeLabel } from './types';
+import { provisionsCommunityMessaging } from '../whitelabel/provisioning';
 
 /** The person's Home session Bearer, from wherever it lives (explicit auth → this-origin localStorage →
  *  parent-domain SSO cookie) — session-gated /connect endpoints (e.g. the naming + membership stores)
@@ -733,11 +734,15 @@ export async function createOrganization(
       const ixp = activateInteractionsIfNeeded(home.address, via, auth).then((r) => {
         if (!r.ok) console.warn('[org-create] creator interactions plane not enabled:', r.error);
       });
-      const channel = fetch('/connect/channels', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` },
-        body: JSON.stringify({ action: 'create', communityId: x.childAgent.toLowerCase(), title: 'general' }),
-      }).catch((e) => console.warn('[org-create] default channel failed:', e));
+      // The default "general" discussion channel is community messaging: a client that opted out of that
+      // (whitelabel `provisioning.communityMessaging: false`) gets none. The channels page can still make one.
+      const channel = provisionsCommunityMessaging(opts.requestedBy)
+        ? fetch('/connect/channels', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}` },
+            body: JSON.stringify({ action: 'create', communityId: x.childAgent.toLowerCase(), title: 'general' }),
+          }).catch((e) => console.warn('[org-create] default channel failed:', e))
+        : Promise.resolve();
       await ixp;
       const founderMembership = await writeOrganizationMembership({
         member: home.address,

@@ -13,11 +13,14 @@ export function CeremonyProgress({
   hint,
   step,
   total,
+  indeterminate = false,
 }: {
   label: string;
   hint?: string;
   step: number;
   total: number;
+  /** ONE loader for the whole wait (whitelabel `consent.loader`): a moving bar, and never a step counter. */
+  indeterminate?: boolean;
 }) {
   const pct = total > 0 ? Math.min(100, Math.round((Math.max(step, 1) / total) * 100)) : 0;
   return (
@@ -25,7 +28,8 @@ export function CeremonyProgress({
       <span className="spinner spinner-lg" aria-hidden="true" />
       <p className="onboarding-busy-msg">{label}</p>
       {hint && <p className="onboarding-busy-sub">{hint}</p>}
-      {total > 0 && (
+      {indeterminate && <div className="onboarding-working" aria-hidden />}
+      {!indeterminate && total > 0 && (
         <>
           <div className="ceremony-progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
             <div className="ceremony-progress-fill" style={{ width: `${pct}%` }} />

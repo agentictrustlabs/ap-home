@@ -7,6 +7,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import type { Address } from '@agenticprimitives/types';
 import { AUD, cacheConnectionCustodian, fetchProfile, type BasicProfile } from '../connect-client';
 import { loadImpactProfile } from '../profile-store';
+import { provisionsAgentPlaybook } from '../whitelabel/provisioning';
 import { exchangeCode } from '../server-client';
 import { nameLabel, parseAgentSubdomain } from '../lib/domain';
 import { setSsoCookie, readSsoCookie, clearSsoCookie } from '../lib/sso-cookie';
@@ -175,12 +176,18 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
   const refreshPersonName = useCallback(async () => { await readPersonName(profile); }, [profile, readPersonName]);
-  useEffect(() => { if (phase === 'authed') void readPersonName(profile); }, [phase, profile, readPersonName]);
+  // Keyed on WHO the profile is (address + deployed), not on the profile object: every `refreshProfile`
+  // makes a new object, and re-reading the vault record each time was eight slow reads in one publish.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (phase === 'authed') void readPersonName(profile); }, [phase, profile?.agent, profile?.deployed, readPersonName]);
   // Spec 354 §3 self-heal — a deployed person agent with no playbook gets the estate's default, once per session.
   useEffect(() => {
     const addr = profile?.agent ? (profile.agent.split(':').pop() ?? '') : '';
     if (phase !== 'authed' || !session?.token || !profile?.deployed || !/^0x[0-9a-fA-F]{40}$/.test(addr)) return;
-    void ensurePlaybook(addr, session.token);
+    // A relying app's sign-in window may skip this (whitelabel `provisioning.agentPlaybook: false`): it is a
+    // steward-gated write the portal wants, not something a person waiting to get back to an app should pay for.
+    const askedBy = typeof window === 'undefined' ? undefined : (new URL(window.location.href).searchParams.get('client_id') ?? undefined);
+    if (provisionsAgentPlaybook(askedBy)) void ensurePlaybook(addr, session.token);
     // Spec 412 W5 — the interactions plane's SESSION LEAF (12 h by issue) is re-issued here when the DO reports it
     // expired: without it the agent cannot sign as the person. Once per session; silent for KMS / demo custody, one
     // prompt for a device credential; best-effort and said (the plane keeps serving reads without a live leaf).

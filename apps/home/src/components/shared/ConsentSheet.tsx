@@ -26,9 +26,15 @@ export function ConsentSheet({
   busy = false,
   authorizeLabel,
   declineLabel = 'Not now',
+  footnote,
+  oneLineApp = false,
   onAuthorize,
   onDecline,
 }: {
+  /** The app's address and description on ONE line ("gather27.gccommons.app · Find and list Gather groups"). */
+  oneLineApp?: boolean;
+  /** A client's own line under the list (whitelabel `consent.note`), in place of the expiry sentence. */
+  footnote?: string;
   title: string;
   /** Who is authorizing — never "your home" when we have a name or address. */
   signedInAs?: string;
@@ -78,8 +84,18 @@ export function ConsentSheet({
         )}
         <div>
           <div className="consent-app-name">{politeName}</div>
-          {showDomain && <div className="consent-app-domain">{politeDomain}</div>}
-          {appDescription && <div className="consent-app-domain">{appDescription}</div>}
+          {oneLineApp ? (
+            (showDomain || appDescription) && (
+              <div className="consent-app-domain">
+                {[showDomain ? politeDomain : '', (appDescription ?? '').replace(/\.$/, '')].filter(Boolean).join(' · ')}
+              </div>
+            )
+          ) : (
+            <>
+              {showDomain && <div className="consent-app-domain">{politeDomain}</div>}
+              {appDescription && <div className="consent-app-domain">{appDescription}</div>}
+            </>
+          )}
         </div>
       </div>
 
@@ -107,7 +123,9 @@ export function ConsentSheet({
       )}
 
       <p className="consent-expiry">
-        {template.expiryDays
+        {footnote
+          ? footnote
+          : template.expiryDays
           ? `Expires in ${template.expiryDays} days. Revoke anytime from Connected Apps.`
           : 'Ongoing until you revoke it from Connected Apps.'}
       </p>
