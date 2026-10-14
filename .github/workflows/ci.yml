@@ -29,6 +29,12 @@ jobs:
         run: pnpm census
       - name: the gates read their roster from the fixture
         run: pnpm check:gate-fixture
+      # Spec 441 D8 — every estate is one shape, and drift is a FAILURE. The vars arm needs no credentials
+      # (it reads the declarations and both wrangler.toml files), so it belongs here rather than in a nightly:
+      # the two estates drifted into 30 differing variables precisely because nothing was measuring on the way in.
+      # The secret-name and live-caller arms need wrangler and az, so they stay for an operator to run.
+      - name: every estate is one shape (spec 441)
+        run: pnpm check:estate-shape -- --no-secrets
       - uses: actions/upload-artifact@v4
         if: always()
         with:
