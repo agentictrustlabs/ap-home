@@ -45,7 +45,8 @@ if (!/^0x[0-9a-f]{40}$/.test(treasury)) {
 const signin = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: by, client_id: 'demo-jp' }) }));
 const token: string = signin.homeSession; const person = String(signin.agent ?? signin.smartAgent ?? '').toLowerCase() as Address;
 if (!token || !/^0x[0-9a-f]{40}$/.test(person)) { console.error(`no session for ${by} at ${HOME}`); process.exit(1); }
-const pc = createPublicClient({ chain: { id: CHAIN_ID, name: 'c', nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 }, rpcUrls: { default: { http: [process.env.RPC_URL ?? 'https://rpc.faithnet.io'] } } }, transport: http(process.env.RPC_URL ?? 'https://rpc.faithnet.io') });
+const RPC = process.env.RPC_URL ?? process.env.FEDERATION_RPC_URL ?? 'https://rpc.faithnet.io';
+const pc = createPublicClient({ chain: { id: CHAIN_ID, name: 'c', nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 }, rpcUrls: { default: { http: [RPC] } } }, transport: http(RPC) });
 const sign = async (_delegator: Address, digest: Hex): Promise<Hex> => {
   const b = await j(await fetch(`${HOME}/connect/persona-sign`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ digest }) }));
   if (!b.signature) throw new Error(b.error ?? 'persona-sign refused');
@@ -57,7 +58,14 @@ const { standing: unsigned } = buildStandingWire({ template: 'act-as-me', delega
 const wire = signedStandingWire(unsigned, await sign(treasury, unsigned.ref));
 void person;
 const VALIDATOR_ABI = [{ type: 'function', name: 'isValidSig', stateMutability: 'view', inputs: [{ name: 'signer', type: 'address' }, { name: 'hash', type: 'bytes32' }, { name: 'sig', type: 'bytes' }], outputs: [{ type: 'bool' }] }] as const;
-const ok = await pc.readContract({ address: CONTRACTS.universalSignatureValidator as Address, abi: VALIDATOR_ABI, functionName: 'isValidSig', args: [treasury, wire.ref, String(wire.wire.signature) as Hex] }).catch(() => false);
-if (!ok) { console.error(`the wire's signature does not verify for the treasury ${treasury} — ${by} is not its custodian? nothing written`); process.exit(1); }
+// A FAILED READ IS NOT A FAILED SIGNATURE. Catching the read into `false` once reported "alice is not its custodian"
+// when the only thing wrong was an unkeyed RPC URL (`https://rpc.faithnet.io` without its `?k=`), and the key she had
+// signed with was the right one all along. The two outcomes are now said separately.
+const verdict = await pc
+  .readContract({ address: CONTRACTS.universalSignatureValidator as Address, abi: VALIDATOR_ABI, functionName: 'isValidSig', args: [treasury, wire.ref, String(wire.wire.signature) as Hex] })
+  .then((ok) => ({ read: true as const, ok: ok as boolean }))
+  .catch((e: unknown) => ({ read: false as const, why: String(e).split('\n')[0].slice(0, 200) }));
+if (!verdict.read) { console.error(`the signature could not be CHECKED — the validator read failed at ${RPC}: ${verdict.why}\n  this says nothing about ${by}'s key; set RPC_URL to a reachable, keyed endpoint and run again. nothing written`); process.exit(1); }
+if (!verdict.ok) { console.error(`the wire's signature does not verify for the treasury ${treasury} — ${by} is not its custodian? nothing written`); process.exit(1); }
 writeFileSync(out, JSON.stringify({ ...wire, issuedBy: by, treasuryName: treasuryArg, capShq: cap, issuedAt: new Date().toISOString() }, null, 2), { mode: 0o600 });
 console.log(`standing wire ${wire.ref}\n  ${treasuryArg} (${treasury}) → delegate ${delegate}: ${PAYMENT_CAPABILITY}, payee ${payee}, up to ${cap} per payment${aggregate ? `, ${aggregate} in aggregate` : ''}, ${redemptions}/${windowSeconds}s, 30 days\n  signed by ${by} as the treasury's custodian; signature verified on chain\n  written ${out} (the visitor's copy — revoke on chain like any delegation of the treasury's)`);
