@@ -1400,7 +1400,9 @@ export async function createChildAgentForSite(
   // learned this on 2026-10-06; this is the passkey / wallet / demo-custody path. The caller deploys nameless and
   // buys the name next (`home/charter-name.ts`), exactly as the portal's "Add an organization" does.
   const claim: { ok: true; callData: Hex; calls: ContractCall[]; name: string } | { ok: false; error: string } = cOpts.nameLater
-    ? { ok: true, callData: '0x', calls: [], name: '' }
+    // NAMELESS IS NOT TYPELESS (spec 346 §3.6 step 1b): the name is bought next, the TYPE is declared now, in the
+    // same genesis — the harness reads `atl:agentType`, and an agent born without it is one nobody can tell apart.
+    ? { ok: true, callData: '0x', calls: await declareTypeCalls(childAgent, typedTldForKind('org')!.tld, typedTldForKind('org')!.serviceRole), name: '' }
     : await buildClaimCallData(base, childAgent, onStep, false, childDiscoveryRecords(base, cOpts), typedTldForKind('org') ?? {});
   if (!claim.ok) return { ok: false, error: claim.error };
 

@@ -338,7 +338,10 @@ export function standardServerFor(agent: Address, card: AgentCardV1, host: strin
             const need = asked.reply as { requirement?: unknown; delegator?: string; delegate?: string; alsoApprove?: unknown };
             await ctx.authRequired([{ text: words || 'This needs a mandate no one has granted.' }, { data: { runRef, openToStewards: true, ...(need.requirement ? { requirement: need.requirement } : {}), ...(need.delegator ? { delegator: need.delegator } : {}), ...(need.delegate ? { delegate: need.delegate } : {}), ...(need.alsoApprove ? { alsoApprove: need.alsoApprove } : {}) } }]); return;
           }
-          await ctx.reject([{ text: words || asked.reply.error || 'Refused.' }]);
+          // A REFUSAL IS WRITTEN, NOT SPOKEN. `words` prefers the spoken rendering when the reply carries no text, and a
+          // plan refusal carries its reason in `error` — so a peer read "needs a steward at alice dot me" (2026-10-14).
+          // The written reason first; the spoken form is for a voice, never for a wire.
+          await ctx.reject([{ text: asked.reply.text || asked.reply.error || words || 'Refused.' }]);
           return;
         }
         // A SUBJECT-ASK FROM ANOTHER DEPLOYMENT (spec 366 R4). Another agent's harness routed one step here,

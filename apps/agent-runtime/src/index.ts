@@ -8129,6 +8129,12 @@ app.post('/custody/oidc/bootstrap-and-claim', async (c) => {
       const register = buildSubregistryRegisterCall({ subregistry: root.subregistry, label, newOwner: sa });
       const setPrimary = buildSetPrimaryNameCall({ registry: c.env.AGENT_NAME_REGISTRY as Address, node: body.node! });
       nameCalls = [...declare, register, setPrimary];
+    } else if (body.tld && isAgentTld(body.tld)) {
+      // NAMELESS IS NOT TYPELESS (spec 346 §3.6 step 1b). A birth that defers its name (a priced root — the Home buys
+      // the name next) still declares what it IS on its own profile, because the type record is what the harness
+      // reads: a person's treasury born this way carried no `atl:agentType`, and money moves only between accounts
+      // the harness can tell are treasuries — so it could not PAY until the record was written by hand (2026-10-14).
+      nameCalls = await declareTypeCallsFor(c.env, sa, body.tld);
     }
 
     // Idempotent: if already deployed, the atomic deploy(+claim) already ran.
