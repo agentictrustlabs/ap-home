@@ -714,6 +714,25 @@ export async function createOrganization(
     say?.({ step: 3, total: 5, label: 'Opening its private records…', hint: 'The listing will live here — Gather27 only gets a read grant.' });
     const bound = await activateVaultIfNeeded(x.childAgent, via, auth);
     if (!bound.ok) throw new Error(bound.error);
+    const bearer = homeBearerToken(auth);
+    // The PERSON's side starts now, beside the organization's (GC, 2026-10-14: it ran after it, 3.5 s of a
+    // first publish): the steward relationship in the person's own impact-relationships record reads nothing
+    // the organization's setup writes, and the person's interactions plane is theirs, not the org's.
+    // Best-effort as before — a failure is logged, never fatal.
+    const projection = bearer
+      ? projectStewardRelationshipToVault(home.address, via, auth, {
+          agent: x.childAgent as Address,
+          name: (x.childName as string | null) ?? null,
+          purpose: opts.purpose,
+          stewardship: (x.stewardshipDelegation as DelegationWire | null) ?? null,
+          membership: (x.membershipDelegation as DelegationWire | null) ?? null,
+        }).catch((e: unknown) => console.warn('[org-create] steward relationship projection failed:', e))
+      : Promise.resolve();
+    const ixp = bearer
+      ? activateInteractionsIfNeeded(home.address, via, auth).then((r) => {
+          if (!r.ok) console.warn('[org-create] creator interactions plane not enabled:', r.error);
+        })
+      : Promise.resolve();
     // After the vault is bound, the rest is independent — run it together instead of a long queue.
     await Promise.all([
       activateInboxDeliveryIfNeeded(x.childAgent, via, auth).then((g) => {
@@ -728,12 +747,8 @@ export async function createOrganization(
           )
         : Promise.resolve(),
     ]);
-    const bearer = homeBearerToken(auth);
     if (bearer) {
       say?.({ step: 4, total: 5, label: 'Recording that you oversee it…' });
-      const ixp = activateInteractionsIfNeeded(home.address, via, auth).then((r) => {
-        if (!r.ok) console.warn('[org-create] creator interactions plane not enabled:', r.error);
-      });
       // The default "general" discussion channel is community messaging: a client that opted out of that
       // (whitelabel `provisioning.communityMessaging: false`) gets none. The channels page can still make one.
       const channel = provisionsCommunityMessaging(opts.requestedBy)
@@ -774,13 +789,7 @@ export async function createOrganization(
             },
           }),
         }).catch((e) => console.warn('[org-create] steward relationship write failed:', e)),
-        projectStewardRelationshipToVault(home.address, via, auth, {
-          agent: x.childAgent as Address,
-          name: (x.childName as string | null) ?? null,
-          purpose: opts.purpose,
-          stewardship: (x.stewardshipDelegation as DelegationWire | null) ?? null,
-          membership: (x.membershipDelegation as DelegationWire | null) ?? null,
-        }),
+        projection,
       ]);
     }
   } catch (e) {

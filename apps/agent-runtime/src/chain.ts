@@ -9,8 +9,20 @@ import { baseSepolia } from 'viem/chains';
 
 const KNOWN: Record<number, Chain> = { [baseSepolia.id]: baseSepolia };
 
-/** Chain for `env.CHAIN_ID` (default Base Sepolia). Unknown ids get a minimal definition whose only
- *  load-bearing field is `id`; `RPC_URL` is what the transport actually uses. */
+/** The private QBFT chains this runtime is deployed against (Faithnet, gcchain 28190/28191) seal a block every
+ *  2 s (faithchain `blockperiodseconds`). Told nothing, viem assumes 12 s and checks for a receipt only every
+ *  4 s, so every write waited up to two blocks longer than it took (measured 2026-10-14: a 2-block userOp
+ *  answered in 3.8–5.4 s). */
+const PRIVATE_CHAIN_BLOCK_MS = 2_000;
+
+/** How often to ask whether a transaction has landed: half a block, as viem itself derives from `blockTime`. */
+export function receiptPollMs(env: { CHAIN_ID?: string; RPC_URL?: string }): number {
+  const block = chainFor(env).blockTime ?? PRIVATE_CHAIN_BLOCK_MS;
+  return Math.min(Math.max(Math.floor(block / 2), 500), 4_000);
+}
+
+/** Chain for `env.CHAIN_ID` (default Base Sepolia). Unknown ids get a minimal definition whose
+ *  load-bearing fields are `id` and `blockTime`; `RPC_URL` is what the transport actually uses. */
 export function chainFor(env: { CHAIN_ID?: string; RPC_URL?: string }): Chain {
   const id = Number(env.CHAIN_ID ?? baseSepolia.id);
   if (!Number.isInteger(id) || id <= 0) throw new Error(`CHAIN_ID is not a positive integer: ${env.CHAIN_ID}`);
@@ -21,6 +33,7 @@ export function chainFor(env: { CHAIN_ID?: string; RPC_URL?: string }): Chain {
       name: `chain-${id}`,
       nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
       rpcUrls: { default: { http: env.RPC_URL ? [env.RPC_URL] : [] } },
+      blockTime: PRIVATE_CHAIN_BLOCK_MS,
     })
   );
 }

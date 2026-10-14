@@ -70,9 +70,10 @@ import {
   parseUint256Decimal,
   parseUint48,
 } from './validate';
-import { chainFor } from './chain';
+import { chainFor, receiptPollMs } from './chain';
 import {
   AgentAccountClient,
+  BundlerClient,
   buildExecuteBatchCallData,
   SaMismatchError,
   entryPointAbi,
@@ -5539,12 +5540,26 @@ app.get('/paymaster/status', async (c) => {
 });
 
 function accountClient(env: Env): AgentAccountClient {
-  return new AgentAccountClient({
+  const client = new AgentAccountClient({
     rpcUrl: env.RPC_URL,
     chainId: Number(env.CHAIN_ID),
     entryPoint: env.ENTRY_POINT as Address,
     factory: env.AGENT_ACCOUNT_FACTORY as Address,
   });
+  // The two submits wait for the receipt at the package's cadence, which is 4 s on any chain but a local one
+  // (agent-account `localPollingIntervalMs`) - on a 2 s chain, up to two blocks of nothing per write. These
+  // are the package's own bodies with the chain's cadence (receiptPollMs) passed to the BundlerClient it
+  // already accepts. GC, 2026-10-14; the clean fix is an option on AgentAccountClient upstream.
+  const bundler = () =>
+    new BundlerClient({ rpcUrl: env.RPC_URL, entryPoint: env.ENTRY_POINT as Address, pollingIntervalMs: receiptPollMs(env) });
+  client.submitDeployUserOp = async (userOp, bundlerAccount) => ({
+    deployedAddress: userOp.sender,
+    receipt: await bundler().sendUserOps([userOp], bundlerAccount.address, bundlerAccount),
+  });
+  client.submitCallUserOp = async (userOp, bundlerAccount) => ({
+    receipt: await bundler().sendUserOps([userOp], bundlerAccount.address, bundlerAccount),
+  });
+  return client;
 }
 
 /**
