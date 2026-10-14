@@ -1095,7 +1095,41 @@ app.post('/mcp/native', async (c) => {
       return c.json(result as Record<string, unknown>);
     } catch (e) {
       if (e instanceof McpAuthError) {
-        console.error('[demo-mcp native] McpAuthError:', e.code, e.correlationId);
+        // The MAC routes log the message and the reason; this door logged only the code, which made every failure in
+        // the whole delegation pipeline look like a bad proof. Log what the other door logs.
+        console.error('[demo-mcp native] McpAuthError:', e.code, e.message, (e as { reason?: unknown }).reason, e.correlationId);
+        if (e.code === 'auth-failed') return buildInvalidInvocationProofResponse();
+        return c.json({ error: 'auth failed', code: e.code, correlationId: e.correlationId }, 401);
+      }
+      return c.json({ error: 'internal error', detail: String(e) }, 500);
+    }
+  }
+  // THE READ HALF OF THE SAME DOOR (2026-10-14; spec 433 W2 / ap-federation 439 §7.13). A self-hosted agent could
+  // WRITE its own records here and not read them back, which quietly meant the vault could not be the record for
+  // any service that rebuilds from its own records — it had to keep a second, authoritative copy somewhere the
+  // owner does not control, and that is exactly what ADR-0055 forbids. Same pipeline as the write above: the
+  // DEL-001 binding ENFORCED (`vaultConfig(env, true)`), the per-call invocation proof, and the grant's record
+  // scope deciding what may be read. A write-only grant reads nothing and lists nothing, so adding this widens no
+  // existing credential — `recordScopeAllows(..., 'read')` is the same check the MAC routes make.
+  if (reqBody.tool === 'get_vault_record' || reqBody.tool === 'list_vault_record') {
+    const isGet = reqBody.tool === 'get_vault_record';
+    const readHandler = withDelegation<{ args?: { recordType?: string } }>(
+      withProof(c.env, vaultConfig(c.env, true), reqBody.invocationProof),
+      async ({ principal, args, recordScopes }) => enforceBudget(c.env, principal, reqBody.tool!, reqBody.invocationProof!.requestId, () => (
+        isGet
+          ? getVaultRecordRun(c.env, principal, args, recordScopes, 'demo-mcp:get_vault_record (native)')
+          : listVaultRecordRun(c.env, principal, recordScopes, 'demo-mcp:list_vault_record (native)')
+      )),
+      { toolName: reqBody.tool, classification: isGet ? GET_VAULT_RECORD_CLASSIFICATION : LIST_VAULT_RECORD_CLASSIFICATION, auditSink, correlationId, environment },
+    );
+    try {
+      const result = await readHandler({ token: reqBody.token, invocationProof: reqBody.invocationProof, args: (reqBody as { args?: { recordType?: string } }).args ?? {} } as never);
+      return c.json(result as Record<string, unknown>);
+    } catch (e) {
+      if (e instanceof McpAuthError) {
+        // The MAC routes log the message and the reason; this door logged only the code, which made every failure in
+        // the whole delegation pipeline look like a bad proof. Log what the other door logs.
+        console.error('[demo-mcp native] McpAuthError:', e.code, e.message, (e as { reason?: unknown }).reason, e.correlationId);
         if (e.code === 'auth-failed') return buildInvalidInvocationProofResponse();
         return c.json({ error: 'auth failed', code: e.code, correlationId: e.correlationId }, 401);
       }
@@ -1284,19 +1318,7 @@ app.post('/tools/get_vault_record', async (c) => {
   try {
     const handler = withDelegation<Args>(
       withProof(c.env, vaultConfig(c.env, body.enforceBinding), body.invocationProof),
-      async ({ principal, args, recordScopes }) => {
-        const recordType = args?.recordType;
-        if (!recordType) return { ok: false, error: 'recordType required' };
-        const resource = `${VAULT_RECORD_PREFIX}${recordType}`;
-        // spec 317 §3.2: per-delegation record scope FIRST (narrows the binding), then the binding gate.
-        if (!recordScopeAllows(c.env, recordScopes, resource, 'read')) {
-          return { ok: false, error: 'record_scope_denied', served_by: 'demo-mcp:get_vault_record' };
-        }
-        const gate = await authorizePersonVaultOp(c.env, principal, resource, 'read', 'internal');
-        if (!gate.ok) return { ok: false, error: gate.error, served_by: 'demo-mcp:get_vault_record' };
-        const obj = await gate.pv.vault.read({ owner: principal, resource });
-        return { ok: true, owner: principal, recordType, data: obj?.data ?? null, served_by: 'demo-mcp:get_vault_record' };
-      },
+      async ({ principal, args, recordScopes }) => getVaultRecordRun(c.env, principal, args, recordScopes, 'demo-mcp:get_vault_record'),
       {
         toolName: 'get_vault_record',
         classification: GET_VAULT_RECORD_CLASSIFICATION,
@@ -1397,6 +1419,35 @@ async function setVaultRecordRun(env: Env, principal: Address, args: SetVaultRec
   return { ok: true, owner: principal, recordType, served_by: servedBy };
 }
 
+/** READ one of the owner's records. spec 317 §3.2: the per-delegation record scope FIRST (it narrows the binding),
+ *  then the vault-key binding gate. Extracted so the MAC route and the PUBLIC native door run the same two gates
+ *  rather than two copies of them — a read door whose checks drift from the write door's is the bug this prevents. */
+async function getVaultRecordRun(env: Env, principal: Address, args: { recordType?: string } | undefined, recordScopes: Parameters<typeof recordScopeAllows>[1], servedBy: string): Promise<Record<string, unknown>> {
+  const recordType = args?.recordType;
+  if (!recordType) return { ok: false, error: 'recordType required' };
+  const resource = `${VAULT_RECORD_PREFIX}${recordType}`;
+  if (!recordScopeAllows(env, recordScopes, resource, 'read')) {
+    return { ok: false, error: 'record_scope_denied', served_by: servedBy };
+  }
+  const gate = await authorizePersonVaultOp(env, principal, resource, 'read', 'internal');
+  if (!gate.ok) return { ok: false, error: gate.error, served_by: servedBy };
+  const obj = await gate.pv.vault.read({ owner: principal, resource });
+  return { ok: true, owner: principal, recordType, data: obj?.data ?? null, served_by: servedBy };
+}
+
+/** ENUMERATE the owner's record types. A record-scoped delegation lists only what it may READ, so a write-only
+ *  delegate lists nothing rather than leaking which records exist (spec 317 §3.2). */
+async function listVaultRecordRun(env: Env, principal: Address, recordScopes: Parameters<typeof recordScopeAllows>[1], servedBy: string): Promise<Record<string, unknown>> {
+  const gate = await authorizePersonVaultOp(env, principal, VAULT_RECORD_PREFIX, 'read', 'internal');
+  if (!gate.ok) return { ok: false, error: gate.error, served_by: servedBy };
+  const refs = await gate.pv.vault.list(principal);
+  const records = refs
+    .filter((r) => r.resource.startsWith(VAULT_RECORD_PREFIX))
+    .filter((r) => recordScopeAllows(env, recordScopes, r.resource, 'read'))
+    .map((r) => ({ record_type: r.resource.slice(VAULT_RECORD_PREFIX.length), updated_at: r.updatedAt }));
+  return { ok: true, owner: principal, records, served_by: servedBy };
+}
+
 app.post('/tools/set_vault_record', async (c) => {
   const body = c.get('parsedBody');
   if (!body?.token) return c.json({ error: 'token required' }, 400);
@@ -1438,22 +1489,9 @@ app.post('/tools/list_vault_record', async (c) => {
   try {
     const handler = withDelegation<Args>(
       withProof(c.env, vaultConfig(c.env, body.enforceBinding), body.invocationProof),
-      async ({ principal, recordScopes }) => {
-        // spec 278: listing the owner's own records still requires the vault-key binding
-        // (the listing comes from the per-person-KEK vault). `vault:` prefix → 'internal'.
-        const gate = await authorizePersonVaultOp(c.env, principal, VAULT_RECORD_PREFIX, 'read', 'internal');
-        if (!gate.ok) return { ok: false, error: gate.error, served_by: 'demo-mcp:list_vault_record' };
-        // Map the vault refs back to the established { record_type, updated_at } shape.
-        const refs = await gate.pv.vault.list(principal);
-        const records = refs
-          .filter((r) => r.resource.startsWith(VAULT_RECORD_PREFIX))
-          // spec 317 §3.2: a record-scoped delegation only ENUMERATES record types it may READ, so a
-          // write-only delivery delegate lists nothing (no leakage of which records exist). No caveat ⇒
-          // unchanged (recordScopeAllows returns true).
-          .filter((r) => recordScopeAllows(c.env, recordScopes, r.resource, 'read'))
-          .map((r) => ({ record_type: r.resource.slice(VAULT_RECORD_PREFIX.length), updated_at: r.updatedAt }));
-        return { ok: true, owner: principal, records, served_by: 'demo-mcp:list_vault_record' };
-      },
+      // spec 278: listing the owner's own records still requires the vault-key binding (the listing comes from the
+      // per-person-KEK vault). `vault:` prefix → 'internal'.
+      async ({ principal, recordScopes }) => listVaultRecordRun(c.env, principal, recordScopes, 'demo-mcp:list_vault_record'),
       {
         toolName: 'list_vault_record',
         classification: LIST_VAULT_RECORD_CLASSIFICATION,
