@@ -667,6 +667,8 @@ zone_name = "impact-agent.ai"
 binding = "AI"
 
 [env.imbnet.vars]
+AKCS_RELAY_KEY_ID = "01a13c7d-c613-78d2-97ba-483497f7a04b"               # spec 441 D3 — imb-relay, SIGNING/secp256k1 in the imb tenant, created 2026-10-14
+AKCS_INTERACTIONS_KEY_ID = "01a13c7d-c866-7c51-b56c-a933f5a563c3"        # spec 441 D3 — imb-interactions-session, same tenant; replaces A2A_INTERACTIONS_SESSION_PRIVATE_KEY
 FEDERATION_DOORS = '{"ap-federation-door:imbnet":"https://door.ap-federation.faithnet.io","ap-federation-door:faithnet":"https://door-faithnet.ap-federation.faithnet.io"}'  # spec 439 F3 — the federation doors whose receipts this estate reads (custom domains only)
 CHAIN_ID = "34348"
 AGENT_NAME_PARENTS = "me,impact"
@@ -690,7 +692,7 @@ ASSISTANT_RATE_MAX = "60"
 ASSISTANT_RATE_WINDOW_MS = "600000"
 SA_BUDGET_LIMIT_UNITS = "50000"
 # Nothing fronts imbnet yet — the Home talks to this Worker directly, so no gateway assertion is required.
-DEMO_REQUIRE_GATEWAY_ASSERTION = "false"
+DEMO_REQUIRE_GATEWAY_ASSERTION = "true"   # spec 441 posture — an estate requires the edge's assertion, as faithnet does
 MCP_URL = "https://mcp.impact-agent.io"
 DEMO_EDGE_URL = "https://edge.impact-agent.io"
 # THE HOME'S ISSUER — the one value here that cannot be additive (2026-10-13). `ownConnectIssuer`
@@ -729,7 +731,7 @@ AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"
 # A2A_KMS_BACKEND. Unpinned, the relayer resolves to agentic-kms and demands AKCS_RELAY_KEY_ID, which
 # this tenant has no relay key for: every funded call (grant approval, a name purchase) then dies at
 # `buildCallUserOp failed — relayer on agentic-kms requires AKCS_RELAY_KEY_ID (no fallback)`.
-A2A_RELAYER_KMS_BACKEND = "local-aes"
+A2A_RELAYER_KMS_BACKEND = "agentic-kms"  # spec 441 D3 — the relayer signs with an AKCS key, not a Worker secret
 A2A_CUSTODY_KMS_BACKEND = "local-aes"
 A2A_ALLOW_LOCAL_MASTER_KEY = "true"
 # The estate's own service agents, deployed by scripts/bootstrap-estate.mts (salt 0 and salt 1 over its
