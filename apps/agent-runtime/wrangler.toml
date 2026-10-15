@@ -259,7 +259,8 @@ INFERENCE_URL = "https://inference.faithnet.io"
 ORCHESTRATION_GATEWAY = "on"
 ORCHESTRATION_GROQ_TPM = "8000"
 # 2026-09-10 — the cheaper Anthropic model, named here so a targeted deploy keeps it (the package default is the same).
-ORCHESTRATION_MODEL = "claude-haiku-4-5-20251001"
+ORCHESTRATION_MODEL = "claude-haiku-5-5"
+ORCHESTRATION_ANTHROPIC_STRONG_MODEL = "claude-sonnet-5-5"
 # Spec 387 W2 — a composition over evidence (a six-week study with a link per item) needs more than the composers' 700-token default.
 COMPOSER_MAX_TOKENS = "2400"
 ASSISTANT_RATE_MAX = "60"

@@ -5701,7 +5701,8 @@ app.post('/harness/ask', async (c) => {
       // judge runs after the run, so without this a result read as "judged by Haiku" could have been Flash Lite. The model
       // of the (last) judge call rides on `outcomeCheck.judgeModel`; a calibration against a person is keyed to it.
       let judgeModel: { provider: string; model: string } | undefined;
-      const ocall = structuredCallFor(withGatewayVariant(c.env, variantReq?.gateway), judgeProvider, { onCall: (rec) => { judgeModel = { provider: String(rec.provider), model: rec.model }; if (rec.tokensIn !== undefined) usage = { tokensIn: (usage?.tokensIn ?? 0) + rec.tokensIn, tokensOut: (usage?.tokensOut ?? 0) + (rec.tokensOut ?? 0) }; } });
+      const judgeTier = variantReq?.toggles?.['quality/judge-tier'] === 'strong' ? { tier: 'strong' as const } : {};
+      const ocall = structuredCallFor(withGatewayVariant(c.env, variantReq?.gateway), judgeProvider, { ...judgeTier, onCall: (rec) => { judgeModel = { provider: String(rec.provider), model: rec.model }; if (rec.tokensIn !== undefined) usage = { tokensIn: (usage?.tokensIn ?? 0) + rec.tokensIn, tokensOut: (usage?.tokensOut ?? 0) + (rec.tokensOut ?? 0) }; } });
       if (ocall) {
         const repeats = judgeRepeatsOf(variantReq?.toggles?.['quality/judge-repeats'], (c.env as { QUALITY_JUDGE_REPEATS_DEFAULT?: string }).QUALITY_JUDGE_REPEATS_DEFAULT);
         const perClass = (variantReq?.toggles?.['quality/outcome-judge'] ?? 'per-class') !== 'pooled';

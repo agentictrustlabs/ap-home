@@ -98,8 +98,17 @@ const CACHEABLE_SYSTEM_CHARS = 16_000;
 /** Spec 418 — the provider's STRONGER model, for a comparison of long answers (Gemini: ORCHESTRATION_GEMINI_STRONG_MODEL,
  *  default gemini-3.5-pro); a provider that names none uses its default model. */
 export function strongModelFor(env: ModelEnv, p: LlmProvider): string {
-  return p === 'gemini' ? ((env as { ORCHESTRATION_GEMINI_STRONG_MODEL?: string }).ORCHESTRATION_GEMINI_STRONG_MODEL?.trim() || 'gemini-3.5-pro') : modelFor(env, p);
+  if (p === 'gemini') return (env as { ORCHESTRATION_GEMINI_STRONG_MODEL?: string }).ORCHESTRATION_GEMINI_STRONG_MODEL?.trim() || 'gemini-3.5-pro';
+  // 2026-10-15 — THE STRONGER JUDGE: Anthropic's current Sonnet (ORCHESTRATION_ANTHROPIC_STRONG_MODEL), for the outcome judge
+  // under `quality/judge-tier: strong`; the default stays the cheap model so smoke runs cost what they should.
+  if (p === 'anthropic') return (env as { ORCHESTRATION_ANTHROPIC_STRONG_MODEL?: string }).ORCHESTRATION_ANTHROPIC_STRONG_MODEL?.trim() || 'claude-sonnet-5-5';
+  return modelFor(env, p);
 }
+
+/** Models that REFUSE a forced tool choice (`tool_choice: tool|any` → 400): Claude Sonnet 5.5, Opus 5.5, Fable, Mythos. The
+ *  call then runs under `auto` with a strict schema and a one-line instruction naming the tool; a reply with no call is
+ *  still an error, said with the stop reason (ADR-0013). */
+const FORCED_TOOL_CHOICE_REFUSED = /^claude-(sonnet-5-5|opus-5-5|fable|mythos)/;
 
 export function providerStructuredCall(env: ModelEnv, p: LlmProvider, onUsage?: (u: ModelUsageV1) => void, tier?: 'light' | 'strong' | 'minimal'): StructuredCall {
   if (!providerConfigured(env, p)) throw new Error(`structured call on ${p}: this deployment does not offer ${p} (ORCHESTRATION_LLM) — no other provider carries it (ADR-0013)`);
@@ -132,18 +141,24 @@ export function providerStructuredCall(env: ModelEnv, p: LlmProvider, onUsage?: 
   }
   if (p !== 'anthropic') { const never: never = p; throw new Error(`structured call: no adapter for provider ${String(never)} (ADR-0013)`); }
   const client = createFetchAnthropicClient({ apiKey: env.ANTHROPIC_API_KEY! });
-  const model = modelFor(env, 'anthropic');
+  const model = tier === 'strong' ? strongModelFor(env, 'anthropic') : modelFor(env, 'anthropic');
+  const autoChoice = FORCED_TOOL_CHOICE_REFUSED.test(model);
   return async ({ system, messages, tool, maxTokens }) => {
     // A LONG SYSTEM PROMPT IS CACHED AT THE PROVIDER. A playbook's compiled doctrine is the same text on
     // every call for the same agent and act (a coach's is ~40k characters), and the vendor's prompt cache
     // keys on the exact prefix: marking it once turns the input pass from seconds into a cache read for
     // the next five minutes. Below the cache's own minimum the marker is ignored, so it is only set where
     // it can take. Nothing about the answer changes.
-    const cached = system.length >= CACHEABLE_SYSTEM_CHARS ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] : system;
+    const sys = autoChoice ? `${system}\n\nAnswer ONLY by calling the tool "${tool.name}" with its arguments. Write no prose.` : system;
+    const cached = sys.length >= CACHEABLE_SYSTEM_CHARS ? [{ type: 'text', text: sys, cache_control: { type: 'ephemeral' } }] : sys;
+    // (not `strict`: strict mode wants `additionalProperties: false` on EVERY object node of the schema, and a judge's
+    // per-class schema is nested; the instruction in the system line is what makes the call reliable, measured 2026-10-15.)
     const res = await client.messages.create({
       model, max_tokens: maxTokens ?? 1500, system: cached as never, messages,
-      tools: [tool as never], tool_choice: { type: 'tool', name: tool.name },
-    });
+      tools: [tool as never], tool_choice: autoChoice ? { type: 'auto' } : { type: 'tool', name: tool.name },
+      // The strong tier thinks by default (Sonnet 5.5 adaptive, effort high): a judge needs a verdict, not an essay.
+      ...(tier === 'strong' ? { output_config: { effort: 'low' } } : {}),
+    } as never);
     const block = res.content.find((b) => b.type === 'tool_use' && b.name === tool.name);
     // No call is not an empty answer (ADR-0013): say so, with why the model stopped.
     { const u = usageOfAnthropic(res.usage); if (u) onUsage?.(u); }

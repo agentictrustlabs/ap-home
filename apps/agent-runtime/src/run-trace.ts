@@ -198,6 +198,9 @@ export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/k
   /** 2026-10-14 ("evals article gap" W0) — an instruction skill's answer ends with its typed record block, written to the
    *  asker's vault by the record effect (`off`, the control arm; `on`; env `SKILL_RECORD_DEFAULT`). */
   'skill/record': ['off', 'on'],
+  // 2026-10-15 — the outcome judge's MODEL TIER: `default` (the provider's cheap model) or `strong` (its stronger one —
+  // Anthropic's current Sonnet, Gemini's Pro). A smoke run keeps the default; a measurement that will be quoted takes strong.
+  'quality/judge-tier': ['default', 'strong'],
   /** Spec 418 — the fast judge's independent samples: `2` ⇒ agreement is the confidence; disagreement asks which. */
   'skill-selection/samples': ['1', '2'],
   /** Spec 418 — a chain's intermediate step: a full answer (default) or only the typed artifact the next step consumes. */

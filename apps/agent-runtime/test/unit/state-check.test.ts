@@ -25,10 +25,13 @@ describe('validateRecord', () => {
     expect(validateRecord({ label: 'Harbor Table scorecard', resultOf: 'urn:assess:1' }, scorecard)).toEqual({ valid: false, errors: ['missing "scorecardDatum"'], uncited: 0 });
     expect(validateRecord({ label: 'x', resultOf: 'urn:assess:1', scorecardDatum: ['urn:score:1'] }, scorecard).valid).toBe(true);
   });
-  it('W5 — a score that cites nothing is uncited; a value outside the vocabulary and a bare token where a reference is required are named', () => {
+  it('W5 — a score that cites nothing is uncited; a value outside the vocabulary is named; a label is a reference, a blank is not', () => {
     const r = validateRecord({ label: 'Incident readiness', scoredDimension: 'incident-readiness', scoredLevel: '7', supportedBy: 'staff said so' }, score);
     expect(r.valid).toBe(false);
-    expect(r.errors).toEqual(['"scoredLevel"="7" is not one of 0, 1, 2, 3, 4', '"supportedBy"="staff said so" must reference a CitedEvidence']);
+    // 2026-10-15 — a LABEL is a reference (the record contract names parts by label), so "staff said so" passes as the cited
+    // evidence's label; only a blank reference fails. The vocabulary rule still holds.
+    expect(r.errors).toEqual(['"scoredLevel"="7" is not one of 0, 1, 2, 3, 4']);
+    expect(validateRecord({ label: 'x', scoredDimension: 'human-oversight', scoredLevel: '2', supportedBy: '  ' }, score).errors).toEqual(['"supportedBy" must reference a CitedEvidence (an IRI or its label)']);
     const un = validateRecord({ label: 'Incident readiness', scoredDimension: 'incident-readiness', scoredLevel: '1' }, score);
     expect(un).toEqual({ valid: false, errors: ['missing "supportedBy"'], uncited: 1 });
     expect(validateRecord({ label: 'x', scoredDimension: 'human-oversight', scoredLevel: '2', supportedBy: { label: 'interview, August' } }, score).valid).toBe(true);
