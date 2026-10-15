@@ -15,8 +15,16 @@ import { buildStandingWire, signedStandingWire } from '@agenticprimitives/delega
 // The Home's chain.ts resolves enforcers from the app's config, which is empty under a script; these are faithchain's
 // (Ring 0 deployments-faithchain.json), the same addresses the Home's act-as-me consent uses when it runs in the app.
 const CHAIN_ID = Number(process.env.CHAIN_ID ?? 34348);
+// --deployment-file <deployments-<chain>.json>: the enforcer set and chain id of ANOTHER chain (W4: a treasury on hopechain
+// is bound by hopechain's enforcers, several of which share faithchain's hex and several of which do not). Read by key,
+// never copied; without it the constants below are faithchain's, as before.
 const PAYMENT_CAPABILITY = 'treasury.payment.execute';
 const CONTRACTS = { delegationManager: '0x710cb1bF08C234Df397e0910331e0A29710EF4F7', timestampEnforcer: '0x73A7B878168b7DE48677617179A8bE894f0Dfe96', allowedTargetsEnforcer: '0x2156311097A936de1916a878bF53Bfd43c7b5715', allowedMethodsEnforcer: '0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41', valueEnforcer: '0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975', paymentEnforcer: '0x07fA0aE59FdE4B7ce8962d6fE7a1d648ec3DD5CE', digestBindingEnforcer: '0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1', universalSignatureValidator: '0xeDd56f500325D4701B9985A34e5Fa6EED6716137' } as const;
+const depFile = (process.argv.includes('--deployment-file') ? process.argv[process.argv.indexOf('--deployment-file') + 1] : '') ?? '';
+const DEP = depFile ? (JSON.parse((await import('node:fs')).readFileSync(depFile, 'utf8')) as Record<string, string | number>) : null;
+const EFFECTIVE_CHAIN_ID = DEP ? Number(DEP.chainId) : CHAIN_ID;
+const C = DEP ? (Object.fromEntries(Object.keys(CONTRACTS).map((k) => [k, String(DEP[k] ?? '')])) as typeof CONTRACTS) : CONTRACTS;
+if (DEP) for (const [k, v] of Object.entries(C)) if (!/^0x[0-9a-fA-F]{40}$/.test(String(v))) { console.error(`${depFile} has no ${k}`); process.exit(1); }
 
 const args = process.argv.slice(2);
 const flag = (n: string) => (args.includes(`--${n}`) ? args[args.indexOf(`--${n}`) + 1] : undefined);
@@ -46,15 +54,15 @@ const signin = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POS
 const token: string = signin.homeSession; const person = String(signin.agent ?? signin.smartAgent ?? '').toLowerCase() as Address;
 if (!token || !/^0x[0-9a-f]{40}$/.test(person)) { console.error(`no session for ${by} at ${HOME}`); process.exit(1); }
 const RPC = process.env.RPC_URL ?? process.env.FEDERATION_RPC_URL ?? 'https://rpc.faithnet.io';
-const pc = createPublicClient({ chain: { id: CHAIN_ID, name: 'c', nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 }, rpcUrls: { default: { http: [RPC] } } }, transport: http(RPC) });
+const pc = createPublicClient({ chain: { id: EFFECTIVE_CHAIN_ID, name: 'c', nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 }, rpcUrls: { default: { http: [RPC] } } }, transport: http(RPC) });
 const sign = async (_delegator: Address, digest: Hex): Promise<Hex> => {
   const b = await j(await fetch(`${HOME}/connect/persona-sign`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ digest }) }));
   if (!b.signature) throw new Error(b.error ?? 'persona-sign refused');
   return b.signature as Hex;
 };
 const maxAmount = parseUnits(cap, 6);
-const enforcers = { delegationManager: CONTRACTS.delegationManager, timestamp: CONTRACTS.timestampEnforcer, allowedTargets: CONTRACTS.allowedTargetsEnforcer, allowedMethods: CONTRACTS.allowedMethodsEnforcer, value: CONTRACTS.valueEnforcer, payment: CONTRACTS.paymentEnforcer, digestBinding: CONTRACTS.digestBindingEnforcer } as const;
-const { standing: unsigned } = buildStandingWire({ template: 'act-as-me', delegator: treasury, delegate, capability: PAYMENT_CAPABILITY, payment: { payee, asset, maxAmount, maxAggregate: aggregate ? parseUnits(aggregate, 6) : maxAmount, maxRedemptionsPerWindow: redemptions, windowSeconds }, validForSeconds: 60 * 60 * 24 * 30, enforcers: enforcers as never, chainId: CHAIN_ID, delegationManager: CONTRACTS.delegationManager as Address });
+const enforcers = { delegationManager: C.delegationManager, timestamp: C.timestampEnforcer, allowedTargets: C.allowedTargetsEnforcer, allowedMethods: C.allowedMethodsEnforcer, value: C.valueEnforcer, payment: C.paymentEnforcer, digestBinding: C.digestBindingEnforcer } as const;
+const { standing: unsigned } = buildStandingWire({ template: 'act-as-me', delegator: treasury, delegate, capability: PAYMENT_CAPABILITY, payment: { payee, asset, maxAmount, maxAggregate: aggregate ? parseUnits(aggregate, 6) : maxAmount, maxRedemptionsPerWindow: redemptions, windowSeconds }, validForSeconds: 60 * 60 * 24 * 30, enforcers: enforcers as never, chainId: EFFECTIVE_CHAIN_ID, delegationManager: C.delegationManager as Address });
 const wire = signedStandingWire(unsigned, await sign(treasury, unsigned.ref));
 void person;
 const VALIDATOR_ABI = [{ type: 'function', name: 'isValidSig', stateMutability: 'view', inputs: [{ name: 'signer', type: 'address' }, { name: 'hash', type: 'bytes32' }, { name: 'sig', type: 'bytes' }], outputs: [{ type: 'bool' }] }] as const;
@@ -62,7 +70,7 @@ const VALIDATOR_ABI = [{ type: 'function', name: 'isValidSig', stateMutability: 
 // when the only thing wrong was an unkeyed RPC URL (`https://rpc.faithnet.io` without its `?k=`), and the key she had
 // signed with was the right one all along. The two outcomes are now said separately.
 const verdict = await pc
-  .readContract({ address: CONTRACTS.universalSignatureValidator as Address, abi: VALIDATOR_ABI, functionName: 'isValidSig', args: [treasury, wire.ref, String(wire.wire.signature) as Hex] })
+  .readContract({ address: C.universalSignatureValidator as Address, abi: VALIDATOR_ABI, functionName: 'isValidSig', args: [treasury, wire.ref, String(wire.wire.signature) as Hex] })
   .then((ok) => ({ read: true as const, ok: ok as boolean }))
   .catch((e: unknown) => ({ read: false as const, why: String(e).split('\n')[0].slice(0, 200) }));
 if (!verdict.read) { console.error(`the signature could not be CHECKED — the validator read failed at ${RPC}: ${verdict.why}\n  this says nothing about ${by}'s key; set RPC_URL to a reachable, keyed endpoint and run again. nothing written`); process.exit(1); }
