@@ -559,7 +559,7 @@ export interface Env {
    * idea and the same reason). A Worker's subrequest to a hostname served by another Worker on its OWN
    * Cloudflare account does not come back: it hangs and the edge answers 522. A deployment that sits on
    * the same zone as its neighbours never meets this (its in-zone fetch is routed in-process), which is
-   * why faithnet reaches `scripture.faithnet.io` and imbnet — on `workers.dev`, with no zone of its own —
+   * why faithnet reaches `scripture.faithnet.io` and impact-agent — on `workers.dev`, with no zone of its own —
    * could not, and said so as "its card answered 522".
    *
    * A host named here is called through the binding instead of the network. Unset ⇒ every fetch is a
@@ -916,7 +916,7 @@ export function hostOf(u: RequestInfo | URL): string {
  * come back — the edge answers 522 — so an account-mate is called through a service binding instead of
  * over the network. ap-town's manifest calls the same thing a `lane`, for the same reason. A deployment
  * that shares a zone with its neighbours never meets this, because an in-zone fetch is routed in-process:
- * that is why faithnet reaches `scripture.faithnet.io` and imbnet, on `workers.dev` with no zone of its
+ * that is why faithnet reaches `scripture.faithnet.io` and impact-agent, on `workers.dev` with no zone of its
  * own, reported "its card answered 522" (2026-10-12).
  *
  * Returns null when no lane names the host, when the binding is not bound here, or when `REACH_LANES`
@@ -5658,6 +5658,11 @@ app.post('/harness/ask', async (c) => {
     // own comment and required fields, a verdict of delivered · missing · unknown (cantTell, out of the denominator);
     // `pooled` keeps v3 (one call for every class) for a comparison that measures the judge change itself.
     const goldExpected = trace.expectedDeliversGold?.expected ?? [];
+    // 2026-10-15 — AN OUTCOME CHECK THAT DID NOT RUN SAYS WHY. Three held-out runs came back with no outcome and no error
+    // (fh7-record-live-6) and nothing on the record could say whether the judge, the reply or the gold was the reason.
+    if (variantReq?.toggles?.['quality/judge'] === 'outcome' && !(reply?.kind === 'answer' && typeof (reply as { text?: unknown }).text === 'string' && (goldExpected.length || trace.expectedDelivers?.length))) {
+      (trace as { outcomeCheck?: unknown }).outcomeCheck = { skipped: reply?.kind !== 'answer' ? `the reply was ${String(reply?.kind ?? 'nothing')}, not an answer` : typeof (reply as { text?: unknown }).text !== 'string' ? 'the answer had no text' : 'no expected classes (neither the gold plan nor the agent plan produces any)' };
+    }
     if (variantReq?.toggles?.['quality/judge'] === 'outcome' && reply?.kind === 'answer' && typeof (reply as { text?: unknown }).text === 'string' && (goldExpected.length || trace.expectedDelivers?.length)) {
       // 2026-10-01 — `quality/judge-repeats` (env QUALITY_JUDGE_REPEATS_DEFAULT; 1 until the Lab measures 2): the same
       // answer judged N times, averaged, with the spread on the trace — the judge's own movement between repeats

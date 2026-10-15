@@ -21,6 +21,8 @@ export { failureCauseOf };
 
 /** The run as this runtime records it: the pinned package's record plus the fields above (a superset, never a change). */
 export type RunRecordPlusV1 = ExperimentRunV1 & {
+  /** W1 — the outcome check was asked for and did not run: the reason, on the record (a question is not a missing judge). */
+  outcomeSkipped?: string;
   failureCause?: FailureCauseV1;
   graderError?: string;
   isolation?: { refused: true; recalledTurns?: number; contextId?: string; because: string };
@@ -36,7 +38,7 @@ export type RunRecordPlusV1 = ExperimentRunV1 & {
 export interface TraceFactsV1 {
   recalledTurns?: number;
   contextId?: string;
-  outcomeCheck?: { score?: number; classes?: Record<string, number>; error?: string; basis?: string; judge?: string; verdicts?: Record<string, string>; cantTell?: number; counted?: number };
+  outcomeCheck?: { score?: number; classes?: Record<string, number>; error?: string; basis?: string; judge?: string; verdicts?: Record<string, string>; cantTell?: number; counted?: number; skipped?: string };
   outcomeCheckAgentPlan?: { score?: number; classes?: Record<string, number>; error?: string };
   stateCheck?: { pass?: boolean; classes?: Record<string, { exists?: boolean; valid?: boolean; errors?: string[] }> };
 }
@@ -75,7 +77,8 @@ export function enrichRun(run: ExperimentRunV1, facts: TraceFactsV1, seen: strin
   }
   const oc = facts.outcomeCheck;
   if (oc) {
-    if (oc.error) { r.failureCause ??= 'grader'; r.graderError ??= `outcome judge: ${String(oc.error).slice(0, 200)}`; }
+    if (typeof oc.skipped === 'string' && oc.skipped) r.outcomeSkipped ??= oc.skipped;
+    else if (oc.error) { r.failureCause ??= 'grader'; r.graderError ??= `outcome judge: ${String(oc.error).slice(0, 200)}`; }
     else if (typeof oc.score === 'number') {
       const verdicts = oc.verdicts ? Object.fromEntries(Object.entries(oc.verdicts).filter(([, v]) => VERDICTS.has(v as OutcomeVerdictV1))) as Record<string, OutcomeVerdictV1> : undefined;
       r.outcome = { ...(r.outcome ?? { score: oc.score, classes: numbers(oc.classes) }),
