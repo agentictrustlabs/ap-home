@@ -38,7 +38,7 @@ export type RunRecordPlusV1 = ExperimentRunV1 & {
 export interface TraceFactsV1 {
   recalledTurns?: number;
   contextId?: string;
-  outcomeCheck?: { score?: number; classes?: Record<string, number>; error?: string; basis?: string; judge?: string; verdicts?: Record<string, string>; cantTell?: number; counted?: number; skipped?: string };
+  outcomeCheck?: { score?: number; classes?: Record<string, number>; error?: string; basis?: string; judge?: string; judgeModel?: string; verdicts?: Record<string, string>; cantTell?: number; counted?: number; skipped?: string };
   outcomeCheckAgentPlan?: { score?: number; classes?: Record<string, number>; error?: string };
   stateCheck?: { pass?: boolean; classes?: Record<string, { exists?: boolean; valid?: boolean; errors?: string[] }> };
 }
@@ -82,7 +82,7 @@ export function enrichRun(run: ExperimentRunV1, facts: TraceFactsV1, seen: strin
     else if (typeof oc.score === 'number') {
       const verdicts = oc.verdicts ? Object.fromEntries(Object.entries(oc.verdicts).filter(([, v]) => VERDICTS.has(v as OutcomeVerdictV1))) as Record<string, OutcomeVerdictV1> : undefined;
       r.outcome = { ...(r.outcome ?? { score: oc.score, classes: numbers(oc.classes) }),
-        ...(oc.basis === 'gold-plan' || oc.basis === 'agent-plan' ? { basis: oc.basis } : {}), ...(typeof oc.judge === 'string' ? { judge: oc.judge } : {}),
+        ...(oc.basis === 'gold-plan' || oc.basis === 'agent-plan' ? { basis: oc.basis } : {}), ...(typeof oc.judge === 'string' ? { judge: oc.judge } : {}), ...(typeof oc.judgeModel === 'string' ? { judgeModel: oc.judgeModel } : {}),
         ...(verdicts && Object.keys(verdicts).length ? { verdicts } : {}), ...(typeof oc.cantTell === 'number' ? { cantTell: oc.cantTell } : {}), ...(typeof oc.counted === 'number' ? { counted: oc.counted } : {}) };
     }
   }

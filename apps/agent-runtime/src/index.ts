@@ -5673,7 +5673,11 @@ app.post('/harness/ask', async (c) => {
       // ONE AFTER ANOTHER: `outcomeCheck.ms` is subtracted from the post-run phase below, so it must be the wall time the
       // check took, which the sum of sequential calls is and the sum of parallel ones is not. Tokens are summed over them.
       let usage: { tokensIn?: number; tokensOut?: number } | undefined;
-      const ocall = structuredCallFor(withGatewayVariant(c.env, variantReq?.gateway), judgeProvider, { onCall: (rec) => { if (rec.tokensIn !== undefined) usage = { tokensIn: (usage?.tokensIn ?? 0) + rec.tokensIn, tokensOut: (usage?.tokensOut ?? 0) + (rec.tokensOut ?? 0) }; } });
+      // 2026-10-15 — WHICH JUDGE SCORED IT is on the record: a run's `models` line lists the run's own calls, and the outcome
+      // judge runs after the run, so without this a result read as "judged by Haiku" could have been Flash Lite. The model
+      // of the (last) judge call rides on `outcomeCheck.judgeModel`; a calibration against a person is keyed to it.
+      let judgeModel: { provider: string; model: string } | undefined;
+      const ocall = structuredCallFor(withGatewayVariant(c.env, variantReq?.gateway), judgeProvider, { onCall: (rec) => { judgeModel = { provider: String(rec.provider), model: rec.model }; if (rec.tokensIn !== undefined) usage = { tokensIn: (usage?.tokensIn ?? 0) + rec.tokensIn, tokensOut: (usage?.tokensOut ?? 0) + (rec.tokensOut ?? 0) }; } });
       if (ocall) {
         const repeats = judgeRepeatsOf(variantReq?.toggles?.['quality/judge-repeats'], (c.env as { QUALITY_JUDGE_REPEATS_DEFAULT?: string }).QUALITY_JUDGE_REPEATS_DEFAULT);
         const perClass = (variantReq?.toggles?.['quality/outcome-judge'] ?? 'per-class') !== 'pooled';
@@ -5693,7 +5697,7 @@ app.post('/harness/ask', async (c) => {
         (trace as { outcomeCheck?: unknown }).outcomeCheck = { judge: oc.judge.name, basis, classes: oc.classes, ...(oc.requested ? { requested: oc.requested } : {}), ...(oc.units ? { units: oc.units } : {}), score: oc.score, ms: oc.ms, repeats: oc.repeats, spread: oc.spread, ...(oc.repeats > 1 ? { scores: oc.scores } : {}),
           // v4: the per-class verdicts of the LAST repeat (a verdict is not averaged), cantTell and the denominator, the calls made
           ...(last.verdicts ? { verdicts: last.verdicts, cantTell: last.cantTell ?? 0, counted: last.counted ?? 0, calls: last.calls ?? 0 } : {}),
-          ...(usage?.tokensIn !== undefined ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut ?? 0 } : {}), ...(oc.error ? { error: oc.error.slice(0, 200) } : {}) };
+          ...(usage?.tokensIn !== undefined ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut ?? 0 } : {}), ...(judgeModel ? { judgeModel: `${judgeModel.provider}/${judgeModel.model}` } : {}), ...(oc.error ? { error: oc.error.slice(0, 200) } : {}) };
         // W2 — THE SECOND NUMBER: the same answer against the AGENT's plan when the gold plan scored it and the two differ
         // (a gap says "wrong plan" vs "thin answer under the right plan"). One call set, no repeats, score only.
         const agentExpected = trace.expectedDelivers ?? [];
