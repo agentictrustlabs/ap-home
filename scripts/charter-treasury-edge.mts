@@ -43,8 +43,8 @@ const relayKey = (process.env.RELAY_PRIVATE_KEY ?? (relayFile ? readFileSync(rel
 if (!/^0x[0-9a-fA-F]{64}$/.test(relayKey)) { console.error('RELAY_PRIVATE_KEY(_FILE) is required'); process.exit(2); }
 
 const RELATIONSHIPS = (process.env.AGENT_RELATIONSHIP ?? '0x5015bD7d422e003511246f848cDd798cb00BB968') as Address;
-const ENTRY_POINT = '0xf7855250B3363AB7649B10957d8908A9AFcdD4B5' as Address;
-const FACTORY = '0x464eEe7518c3c97DA570592481329E0627E9a3B8' as Address;
+const ENTRY_POINT = (process.env.ENTRY_POINT ?? '0xf7855250B3363AB7649B10957d8908A9AFcdD4B5') as Address; // overridable: a second chain has its own (W4)
+const FACTORY = (process.env.FACTORY ?? '0x464eEe7518c3c97DA570592481329E0627E9a3B8') as Address;
 const PAYMASTER = (process.env.PAYMASTER ?? '0xbd93fEC6910ffD74F14709188b5a9B6C6965b2a7') as Address;
 const REL_ABI = [
   { type: 'function', name: 'proposeEdge', stateMutability: 'nonpayable', inputs: [{ name: 'subject', type: 'address' }, { name: 'object_', type: 'address' }, { name: 'relationshipType', type: 'bytes32' }, { name: 'initialRoles', type: 'bytes32[]' }, { name: 'metadataURI', type: 'string' }, { name: 'metadataHash', type: 'bytes32' }], outputs: [{ type: 'bytes32' }] },
