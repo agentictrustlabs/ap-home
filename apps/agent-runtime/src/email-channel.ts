@@ -57,7 +57,19 @@ export function cloudflareSender(env: EmailEnv): EmailSenderPort {
         return { ok: true, via: 'cloudflare', ...(messageId ? { messageId } : {}) };
       } catch (e) {
         const why = e instanceof Error ? e.message : String(e);
-        return { ok: false, via: 'cloudflare', error: /onboard|not enabled|domain/i.test(why) ? `${from}'s domain is not onboarded to Email Sending (wrangler email sending enable): ${why}` : why };
+        // "Invalid email address: Invalid email domain" is about the RECIPIENT (an address that cannot receive mail);
+        // only an onboarding/enablement refusal is about the sender. They used to share one message (2026-10-15).
+        const recipient = /invalid email (address|domain)|recipient/i.test(why);
+        const sender = !recipient && /onboard|not enabled|sending.*(disabled|not allowed)/i.test(why);
+        return {
+          ok: false,
+          via: 'cloudflare',
+          error: recipient
+            ? `that address can't receive email — check it for a typo (${why})`
+            : sender
+              ? `${from}'s domain is not onboarded to Email Sending (wrangler email sending enable): ${why}`
+              : why,
+        };
       }
     },
   };

@@ -45,21 +45,24 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     return json({ ok: true, delivery: emailSendingEnabled(env) ? 'sent' : 'logged', repeated: true });
   }
   const code = reuse?.code ?? newOtp();
-  await env.AUTH_CODES.put(
-    key,
+  // A reused code keeps its ORIGINAL ten minutes — resending does not extend a code's life.
+  const ttl = { expirationTtl: reuse?.issuedAt ? Math.max(60, 600 - Math.floor((now - reuse.issuedAt) / 1000)) : 600 };
+  const record = (sentAt: number) =>
     JSON.stringify({
       code,
       aud: body?.aud ?? env.DEMO_SSO_AUD ?? 'demo-sso',
       attempts: reuse?.attempts ?? 0,
       issuedAt: reuse?.issuedAt ?? now,
-      sentAt: now,
-    }),
-    // A reused code keeps its ORIGINAL ten minutes — resending does not extend a code's life.
-    { expirationTtl: reuse?.issuedAt ? Math.max(60, 600 - Math.floor((now - reuse.issuedAt) / 1000)) : 600 },
-  );
+      sentAt,
+    });
+  // The code is stored BEFORE the send (the email must never carry a code verify does not know), but "sent" is
+  // recorded only AFTER the email was accepted (Ryan, 2026-10-15: a failed send was remembered as sent, so the
+  // retry inside RESEND_GAP_MS sent nothing and said nothing).
+  await env.AUTH_CODES.put(key, record(reuse?.sentAt ?? 0), ttl);
 
   const sent = await sendEmail(env, otpEmail(email, code, whitelabel.brand.name));
   if (!sent.ok) return json({ error: `could not send the code: ${sent.error}` }, 502);
+  await env.AUTH_CODES.put(key, record(now), ttl);
   // `delivery:'logged'` tells the client (dev) the code was console-logged, not emailed (no provider key).
   // Testing convenience: echo the code when UNCONFIGURED + DEV_OTP_ECHO=true (a real SendGrid key never echoes).
   const echo = !emailSendingEnabled(env) && env.DEV_OTP_ECHO === 'true';

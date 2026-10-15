@@ -2,10 +2,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const sent: Array<{ to: string; code: string }> = [];
+let failNext = false;
 vi.mock('../_lib/email-sender', () => ({
   emailSendingEnabled: () => true,
   otpEmail: (to: string, code: string) => ({ to, code }),
   sendEmail: async (_env: unknown, msg: { to: string; code: string }) => {
+    if (failNext) {
+      failNext = false;
+      return { ok: false, error: 'Invalid email address: Invalid email domain' };
+    }
     sent.push(msg);
     return { ok: true };
   },
@@ -33,6 +38,7 @@ describe('POST /connect/email/start', () => {
   let env: { AUTH_CODES: ReturnType<typeof kv> };
   beforeEach(() => {
     sent.length = 0;
+    failNext = false;
     env = { AUTH_CODES: kv() };
     vi.useRealTimers();
   });
@@ -64,5 +70,14 @@ describe('POST /connect/email/start', () => {
     await ask(env, 'a@example.org');
     await ask(env, 'b@example.org');
     expect(sent).toHaveLength(2);
+  });
+
+  it('a send that FAILED is not remembered as sent: retrying straight away sends (Ryan, 2026-10-15)', async () => {
+    failNext = true;
+    const first = await ask(env);
+    expect(first.status).toBe(502);
+    expect(sent).toHaveLength(0);
+    await ask(env);
+    expect(sent).toHaveLength(1);
   });
 });
