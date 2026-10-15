@@ -31,7 +31,7 @@
     "@agenticprimitives/home": "0.0.0-alpha.25",
     "@agenticprimitives/identity-directory": "1.0.0-alpha.34",
     "@agenticprimitives/identity-directory-adapters": "1.0.0-alpha.34",
-    "@agenticprimitives/ontology": "1.0.0-alpha.34",
+    "@agenticprimitives/ontology": "1.0.0-alpha.35",
     "@agenticprimitives/organization": "0.0.0-alpha.18",
     "@agenticprimitives/payments": "0.0.0-alpha.30",
     "@agenticprimitives/registry-kit": "0.0.0-alpha.20",

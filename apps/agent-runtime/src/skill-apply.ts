@@ -103,7 +103,12 @@ export function recordInstructionOf(specs: ReadonlyArray<{ iri: string; label: s
  *  block is reported, never silently dropped — the answer keeps its text either way. */
 export function splitRecordBlock(answer: string): { text: string; records: Array<{ class: string; record: Record<string, unknown> }>; error?: string } {
   const m = /\n?```record\s*\n([\s\S]*?)\n```\s*$/.exec(answer);
-  if (!m) return { text: answer, records: [] };
+  if (!m) {
+    // 2026-10-15 — an opened fence with no close is an answer that hit its token cap (or a gateway's) before the record
+    // landed: say so, so the state check's "no record" has a cause and the run's failure reads `environment`, not `agent`.
+    const open = /\n?```record\s*\n/.exec(answer);
+    return open ? { text: answer.slice(0, open.index).trimEnd(), records: [], error: 'the record block was cut off before it closed — the answer hit its output cap' } : { text: answer, records: [] };
+  }
   const text = answer.slice(0, m.index).trimEnd();
   try {
     const parsed = JSON.parse(m[1]!) as unknown;

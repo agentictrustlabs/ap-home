@@ -15,8 +15,9 @@
 // leaves them alone.
 import type { ExperimentRunV1 } from '@agenticprimitives/evaluation';
 
-export type FailureCauseV1 = 'agent' | 'grader' | 'environment';
-export type OutcomeVerdictV1 = 'delivered' | 'missing' | 'unknown';
+export type { FailureCauseV1, OutcomeVerdictV1 } from '@agenticprimitives/evaluation';
+import { failureCauseOf, type FailureCauseV1, type OutcomeVerdictV1 } from '@agenticprimitives/evaluation';
+export { failureCauseOf };
 
 /** The run as this runtime records it: the pinned package's record plus the fields above (a superset, never a change). */
 export type RunRecordPlusV1 = ExperimentRunV1 & {
@@ -30,15 +31,6 @@ export type RunRecordPlusV1 = ExperimentRunV1 & {
 
 /** The declared rule from an error's words to its cause (the package's rule, restated): the grader's own failures first,
  *  then the environment's signatures, else the agent — an unexplained failure must not leave the agent's denominator. */
-export function failureCauseOf(error: string | undefined | null): FailureCauseV1 {
-  const e = String(error ?? '').toLowerCase();
-  if (!e) return 'agent';
-  if (/\b(judge|grader|outcome check|quality check|state check)\b/.test(e)) return 'grader';
-  if (/isolation:/.test(e)) return 'environment';
-  if (/\b(timeout|timed out|etimedout|econn\w*|enotfound|fetch failed|network|socket hang up|rate.?limit|overloaded|store refused|durable object|graphdb|\bkv\b|vault|provenance could not be read|unreadable|the ask threw|the case threw|was lost|not among the fixtures|does not match its pinned digest|no model is available)\b/.test(e)) return 'environment';
-  if (/\b(provider|http)\b.*\b(402|429|5\d\d)\b|\b(402|429|5\d\d)\b.*\b(provider|http|answered)\b|answered 5\d\d/.test(e)) return 'environment';
-  return 'agent';
-}
 
 /** What the ask route left on the reply's trace that the record reads (names and numbers only). */
 export interface TraceFactsV1 {

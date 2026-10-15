@@ -74,6 +74,13 @@ describe('skill.apply — records', () => {
     expect(t).toContain('END YOUR ANSWER WITH ITS RECORD');
     expect(t).toContain('- Governance Scorecard — "@type": "https://skills.demo/cil-commons#GovernanceScorecard"; required: resultOf, scorecardDatum; optional: note');
   });
+  it('names a record block that was cut off before it closed (the answer hit its cap)', () => {
+    const r = splitRecordBlock('The playbook.\n\n```record\n[{"@type": "https://skills.demo/cil-commons#IncidentPlaybook", "label": "Pl');
+    expect(r.records).toEqual([]);
+    expect(r.text).toBe('The playbook.');
+    expect(r.error).toMatch(/cut off/);
+  });
+
   it('splits the record block off the answer; keeps the prose; an unparsable block is an error, not a silent drop', () => {
     const r = splitRecordBlock('The scorecard:\n\n- Oversight: 2\n\n```record\n[{"@type":"https://skills.demo/cil-commons#GovernanceScorecard","label":"Harbor scorecard","resultOf":"Harbor assessment","scorecardDatum":["Oversight: 2"]}]\n```\n');
     expect(r.text).toBe('The scorecard:\n\n- Oversight: 2');
