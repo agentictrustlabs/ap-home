@@ -55,7 +55,11 @@ export function structuredCallFor(env: ModelEnv, provider?: LlmProvider, opts: {
   if (gatewayOn(env)) {
     const startMs = Date.now();
     const profile = opts.purpose === 'answer' ? GATEWAY_PROFILE.answer : GATEWAY_PROFILE.structured;
-    return structuredCallFromModels(gatewayModels(env), { profile, purpose: opts.purpose === 'answer' ? 'answer' : 'selection', label: 'gateway', onReceipt: (r) => opts.onCall?.({ provider: 'gateway', model: r.model, because: opts.purpose === 'answer' ? 'answer' : 'structured', startMs, endMs: Date.now(), receiptRef: r.id, profile: r.profile, profileVersion: r.profileVersion, costMicroUsd: r.costMicroUsd, attempt: r.attempt, ...(r.fallbackOf ? { fallbackOf: r.fallbackOf } : {}) }) });
+    // THE GATEWAY CARRIES NO EFFORT CONTROL (its contract has no reasoning field), so a Gemini model thinks at its default
+    // inside the same bound the direct path sizes for the answer alone — the direct path asks `low` effort plus
+    // OPENAI_REASONING_HEADROOM. Through the gateway an ANSWER asks for the headroom on top; the profile's ceiling caps it.
+    const viaGateway = structuredCallFromModels(gatewayModels(env), { profile, purpose: opts.purpose === 'answer' ? 'answer' : 'selection', label: 'gateway', onReceipt: (r) => opts.onCall?.({ provider: 'gateway', model: r.model, because: opts.purpose === 'answer' ? 'answer' : 'structured', startMs, endMs: Date.now(), receiptRef: r.id, profile: r.profile, profileVersion: r.profileVersion, costMicroUsd: r.costMicroUsd, attempt: r.attempt, ...(r.fallbackOf ? { fallbackOf: r.fallbackOf } : {}) }) });
+    return opts.purpose === 'answer' ? (input) => viaGateway({ ...input, maxTokens: (input.maxTokens ?? DEFAULT_GATEWAY_ANSWER_TOKENS) + OPENAI_REASONING_HEADROOM }) : viaGateway;
   }
   const build = (p: LlmProvider, onUsage?: (u: ModelUsageV1) => void): StructuredCall => (opts.make ? opts.make(p) : providerStructuredCall(env, p, onUsage, opts.tier));
   const modelOf = (p: LlmProvider) => (opts.tier === 'strong' ? strongModelFor(env, p) : modelFor(env, p, opts.tier === 'light' ? 'planner' : undefined));
@@ -109,6 +113,8 @@ export function strongModelFor(env: ModelEnv, p: LlmProvider): string {
 /** Models that REFUSE a forced tool choice (`tool_choice: tool|any` → 400): Claude Sonnet 5.5, Opus 5.5, Fable, Mythos. The
  *  call then runs under `auto` with a strict schema and a one-line instruction naming the tool; a reply with no call is
  *  still an error, said with the stop reason (ADR-0013). */
+/** A gateway answer call that names no bound: the runtime's instruction answer (DEFAULT_ANSWER_TOKENS, skill-apply.ts). */
+const DEFAULT_GATEWAY_ANSWER_TOKENS = 4000;
 const FORCED_TOOL_CHOICE_REFUSED = /^claude-(sonnet-5-5|opus-5-5|fable|mythos)/;
 
 export function providerStructuredCall(env: ModelEnv, p: LlmProvider, onUsage?: (u: ModelUsageV1) => void, tier?: 'light' | 'strong' | 'minimal'): StructuredCall {
