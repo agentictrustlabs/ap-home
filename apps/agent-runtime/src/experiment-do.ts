@@ -20,7 +20,7 @@ import {
 } from '@agenticprimitives/evaluation';
 import { isInternalCall, internalHeaders, markInWorker, type InternalMarkerEnv } from './internal-marker.js';
 import { progressOf, type ExperimentJobV1, type ExperimentStatusV1 } from './experiment-job.js';
-import { enrichRun, traceFactsOf, type TraceFactsV1 } from './experiment-run-facts.js';
+import { enrichRun, traceFactsOf, type TraceFactsV1, type RunRecordPlusV1 } from './experiment-run-facts.js';
 
 export type ExperimentEnv = InternalMarkerEnv & { EVAL_CAPTURE?: string };
 
@@ -101,6 +101,13 @@ export class ExperimentDO {
     if (cursor >= steps.length) {
       try {
         const record = await finishComparison(input, st, runs);
+        // 2026-10-15 — THE RUBRIC SURVIVES THE FINISH. `finishComparison` (the pinned evaluation package) rebuilds each run
+        // from the fields it knows, and the per-case rubric is a field it does not know yet (it reaches the package on the
+        // next publish). Until then the runtime re-attaches it from the runs it enriched, by (case, arm, repeat) — the same
+        // "what the pinned runner did not record" rule enrichRun follows. A row the finish dropped altogether stays dropped.
+        const keyOf = (r: { intentId: string; variant: string; repeat: number }) => `${r.intentId}\u0000${r.variant}\u0000${r.repeat}`;
+        const rubricOf = new Map(runs.filter((r) => (r as RunRecordPlusV1).rubric).map((r) => [keyOf(r), (r as RunRecordPlusV1).rubric]));
+        if (rubricOf.size) record.runs = record.runs.map((r) => { const rb = rubricOf.get(keyOf(r)); return rb && !(r as RunRecordPlusV1).rubric ? { ...r, rubric: rb } as typeof r : r; });
         await this.state.storage.put({ [KEY.record]: record, [KEY.status]: 'done', [KEY.finishedAt]: record.finishedAt });
       } catch (e) { await this.state.storage.put({ [KEY.status]: 'failed', [KEY.error]: `scoring failed: ${e instanceof Error ? e.message : String(e)}` }); }
       return;
