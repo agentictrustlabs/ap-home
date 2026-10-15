@@ -5,10 +5,10 @@
   "zone": "faithnet.io",
   "town": "faithchain",
   "kmsTenant": "faithnet",
-  "_callerSubjects": "The two KMS caller subjects this estate actually holds. A new estate gets `<id>-vault` / `<id>-runtime` from the builder; these two predate the convention, and renaming a caller means re-binding and re-minting its token for no gain. Recorded so the builder verifies what exists instead of demanding a rename.",
+  "_callerSubjects": "The two KMS caller subjects this estate holds. Re-bound 2026-10-14 through `bind-caller --profile estate-vault|estate-runtime`, so these are the shape every estate gets rather than a hand-derived set \u2014 8 operations and 6, down from 11 each. The superseded `demo-mcp-faithnet-vault-5` / `demo-a2a-faithnet-runtime-6` are disabled on the CVM.",
   "callerSubjects": {
-    "vault": "demo-mcp-faithnet-vault-5",
-    "runtime": "demo-a2a-faithnet-runtime-6"
+    "vault": "faithnet-vault",
+    "runtime": "faithnet-runtime"
   },
   "_residents": "The DEMO personas whose custodian keys this Home holds, so the builder can re-issue their DEL-001 session leaves server-side after the interactions key changes (441 \u00a77.2 step 3). A real resident re-issues by clicking through their own Home; this list is never a roster of who lives here.",
   "residents": [

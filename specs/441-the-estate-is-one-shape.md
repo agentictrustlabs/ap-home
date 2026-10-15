@@ -176,7 +176,7 @@ the method, because a security claim nobody can reproduce is worse than no claim
 | wave | what lands | the gate that proves it |
 | --- | --- | --- |
 | **W1** ✅ | `estates/*.estate.json` for both estates; the derive function; `check:estate-shape` over vars, secret NAMES and (with `--kms`) the live callers | **landed 2026-10-14: 9 drifts named, the two Worker-secret keys at the top.** The gate also corrected this spec before anything deployed — §7.1 |
-| **W2** ◐ | **landed 2026-10-14, and it landed HALF of what D6 promised** — faithkms gained `EIP155_TRANSACTION` and the two named profiles; key-custody gained a per-ACT signing purpose; the relayer no longer needs the raw grant. The interactions-session key still does, and §7.4 says why that is the honest answer rather than a shortfall to hide | the profiles' own test refuses any profile that can rotate, disable or destroy a key; faithnet and imbnet both green |
+| **W2** ✅◐ | **landed AND LIVE 2026-10-14 — half of what D6 promised, by design (§7.4)** — faithkms gained `EIP155_TRANSACTION` and the two named profiles; key-custody gained a per-ACT signing purpose; the relayer no longer needs the raw grant. The interactions-session key still does, and §7.4 says why that is the honest answer rather than a shortfall to hide | **the binary is installed on the CVM** (sha verified before replacement, `healthz=200`, and the live operator's own `--help` names both profiles), **both estates' callers are bound FROM the profiles** — faithnet 8 and 6 operations, down from 11 each — and **all seven live gates are green** |
 | **W3** ✅ | **landed 2026-10-14.** W3a: faithnet declares the two settings it only had by default. W3b: imbnet's relay and interactions keys moved into its own tenant, its callers re-bound to the profiles, the edge assertion required, and both raw private keys DELETED from the Worker | **`check:estate-shape` GREEN on all three arms** — vars, secret names, live callers. `gate:pay-outward` green for maya with no key of imbnet's in a Worker. §7.2 |
 | **W4** | the builder: `estate new <id> --home-host … --zone … --town …` → declaration, tenant, callers (by profile), the three-step interactions-key provisioning of §7.2, charters, secrets checklist, deploy | a third estate is built from the tool alone and passes the gate on its first run |
 | **W5** | one `VAULT_SERVER_ID` per estate, with the grant and vault-key-binding migration it needs (§7.3) | a grant naming one estate's vault is refused by the other's |
@@ -256,6 +256,11 @@ bound tokens, invocation proofs, and the service SA's userOp hashes. Declaring a
 `ERC4337_USER_OPERATION` would put a false statement in the operator's audit row, which is worse than a wide
 grant that is honestly labelled. `RAW_32_BYTE_DIGEST` says what is true: a digest whose meaning lives in this
 application.
+
+**One more thing an auditor would otherwise be misled by: the audit PRECISION lags the capability.** ap-home pins
+`key-custody` at a published version, so until a release carries the per-act purpose, its `signTransaction`
+declares whatever purpose its signer was constructed with — `EIP155_TRANSACTION` is enforceable today and appears
+in no audit row yet. A changeset records it.
 
 **What removes it is W6, and it is a different change.** Name the purpose at each act — the per-call
 `signingPurpose` that `signA2AAction` now accepts — and then split the runtime's credential per key role, so the
