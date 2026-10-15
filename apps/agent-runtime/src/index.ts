@@ -3246,15 +3246,17 @@ app.post('/harness/records', async (c) => {
       const deps = harnessDeps(c.env, buildAuditSink(c.env));
       const store = artifactStoreFor({ readSubjectRecord: deps.readSubjectRecord });
       if (!store) return c.json({ ok: true, record: shown, hydrated: false });
-      let failed = 0;
-      const steps = await Promise.all((shown.steps as Array<{ result?: unknown }>).map(async (st) => {
-        const r = st.result as { $artifact?: unknown } | null;
+      const failed: Array<{ stepRef: string; error: string }> = [];
+      const steps = await Promise.all((shown.steps as Array<{ stepRef: string; result?: unknown }>).map(async (st) => {
+        const r = st.result as { $artifact?: unknown; recordType?: string } | null;
         if (!r || typeof r !== 'object' || r.$artifact !== 'ap.artifact-ref.v1') return st;
-        const got = await store.get(r as never).catch(() => null);
-        if (!got) { failed++; return st; }
-        return { ...st, result: got.result };
+        try {
+          const got = await store.get(r as never);
+          if (!got) { failed.push({ stepRef: st.stepRef, error: `${r.recordType ?? 'the artifact'} is not in the vault` }); return st; }
+          return { ...st, result: got.result };
+        } catch (e) { failed.push({ stepRef: st.stepRef, error: (e instanceof Error ? e.message : String(e)).slice(0, 200) }); return st; }
       }));
-      return c.json({ ok: true, record: { ...shown, steps }, hydrated: failed === 0, ...(failed ? { notHydrated: failed } : {}) });
+      return c.json({ ok: true, record: { ...shown, steps }, hydrated: failed.length === 0, ...(failed.length ? { notHydrated: failed } : {}) });
     }
     return c.json({ ok: true, record: shown });
   }
