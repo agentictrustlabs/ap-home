@@ -13,7 +13,7 @@
 //
 //   RPC_URL=… npx tsx scripts/issue-anchoring-wire.mts --agent 0x… --delegate 0x… --registry 0x… \
 //     --persona demo-admin [--days 90] [--out …/anchoring-wire-<estate>.json]
-//   … or CUSTODIAN_KEY_ENV_FILE=…/.estate-imbnet.local CUSTODIAN_KEY_VAR=A2A_INTERACTIONS_SESSION_PRIVATE_KEY
+//   … or CUSTODIAN_KEY_ENV_FILE=…/.estate-impact-agent.local CUSTODIAN_KEY_VAR=A2A_INTERACTIONS_SESSION_PRIVATE_KEY
 import { readFileSync, writeFileSync } from 'node:fs';
 import { buildCaveat, encodeAllowedMethodsTerms, encodeAllowedTargetsTerms, encodeTimestampTerms, hashDelegation, ROOT_AUTHORITY, type Delegation } from '@agenticprimitives/delegation';
 import { createPublicClient, hashMessage, http, toFunctionSelector, type Address, type Hex } from 'viem';

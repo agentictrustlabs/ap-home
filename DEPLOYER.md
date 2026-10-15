@@ -60,14 +60,14 @@ faithchain, and it deploys from [`ap-town`](https://github.com/agentictrustlabs/
   and merge before `wrangler deploy`; the config is in the file, so a stale file is a stale deployment.
 - `wrangler deploy` deletes triggers created out of band — custom domains and crons are declarative in `wrangler.toml`.
 
-## imbnet — the town's second estate (2026-10-11)
+## impact-agent — the town's second estate (2026-10-11)
 
 Same chain (faithchain), same contracts, same town, same repository. Its own custody root, relay key,
-interactions key, service agents, vault, Workers and Home — an imbnet person is a different Smart Agent
+interactions key, service agents, vault, Workers and Home — an impact-agent person is a different Smart Agent
 from a faithnet person of the same name, because a KMS-custodied home is a CREATE2 address over a derived
 custodian and the roots differ. It has no zone of its own, so the default hosts ARE its addresses.
 
-| Directory | Worker (`[env.imbnet]`) | Host |
+| Directory | Worker (`[env.impact-agent]`) | Host |
 | --- | --- | --- |
 | `apps/home` | — (Next.js on Vercel, project `imb-home`) | `https://imb-home.vercel.app` |
 | `apps/agent-runtime` | `imb-runtime` | `imb-runtime.richardpedersen3.workers.dev` |
@@ -87,10 +87,10 @@ wrangler d1 migrations apply demo-mcp-<name> --remote -c apps/vault/wrangler.tom
 `.estate-<name>.local` (0600, gitignored) is the only copy of the custody root. Losing it loses every
 person's home on that estate; copying it elsewhere copies the authority to be every one of them.
 
-What imbnet deliberately does NOT have, each failing closed rather than quietly:
+What impact-agent deliberately does NOT have, each failing closed rather than quietly:
 - **AKCS custody** — no `imb` tenant (that needs a caller token minted on the Azure CVM), so custody,
   the vault KEK and the service MAC are local-aes with the root an in-Worker secret.
 - **A paid-name gate key** — `NAMING_GATE_PRIVATE_KEY` is the town clerk's, not an estate's, so registering
-  a priced name from this Home refuses until the town issues imbnet a gate credential.
+  a priced name from this Home refuses until the town issues impact-agent a gate credential.
 - **Mail** — no zone, so no inbound routing and no sending rail: an email invitation is refused, not dropped.
 - **Google sign-in** — no OAuth client for this redirect URI; the demo and credential paths are the way in.

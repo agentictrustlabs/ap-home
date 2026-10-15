@@ -110,7 +110,7 @@ binding = "AI"
 [env.faithnet.vars]
 AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"  # spec 441 posture — the same two akcs.ts defaults to; declared because a code default is not an estate's statement
 A2A_RELAYER_KMS_BACKEND = "agentic-kms"  # spec 441 D3 — already true by inheriting A2A_KMS_BACKEND; said outright so the relayer's backend is not a consequence
-FEDERATION_DOORS = '{"ap-federation-door:imbnet":"https://door.ap-federation.faithnet.io","ap-federation-door:faithnet":"https://door-faithnet.ap-federation.faithnet.io"}'  # spec 439 F3 — the federation doors whose receipts this estate reads (custom domains only)
+FEDERATION_DOORS = '{"ap-federation-door:impact-agent":"https://door.ap-federation.faithnet.io","ap-federation-door:faithnet":"https://door-faithnet.ap-federation.faithnet.io"}'  # spec 439 F3 — the federation doors whose receipts this estate reads (custom domains only)
 # Spec 410 §10 — THE ESTATE'S ADOPTED ONTOLOGY MANIFEST. Pinned to the digest faithnet has bound mandates to since ontology
 # 1.0.0-alpha.30; the packages moved to alpha.31 (spec 427 W6, org.ttl 0.4.0) on 2026-10-09 WITHOUT adopting it: adoption is a
 # governance act (`apgov:AdoptedVersion`), not a dependency bump. Remove or move this line when the estate adopts the new one.
@@ -622,26 +622,26 @@ name = "SEND_EMAIL"
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
-# IMBNET — the town's SECOND estate on faithchain (spec 436 §5.5; towns/faithchain/town.yaml).
+# IMPACT_AGENT — the town's SECOND estate on faithchain (spec 436 §5.5; towns/faithchain/town.yaml).
 #
 # Shares the chain, the contracts and the town. Its own: custody root, relay key, interactions key, service
-# agents, vault, Workers, Home. An imbnet person is a DIFFERENT Smart Agent from a faithnet person of the
+# agents, vault, Workers, Home. An impact-agent person is a DIFFERENT Smart Agent from a faithnet person of the
 # same name — a KMS-custodied home is a CREATE2 address over a derived custodian, and the roots differ.
 #
 # No zone of its own (the owner's decision, 2026-10-11), so:
 #   · no custom domain and no per-agent host block — every agent answers at the one workers.dev origin;
-#   · `A2A_PUBLIC_BASE_DOMAIN` is that origin, and `A2A_SERVES_UNPUBLISHED_NAMES` is true because no imbnet
+#   · `A2A_PUBLIC_BASE_DOMAIN` is that origin, and `A2A_SERVES_UNPUBLISHED_NAMES` is true because no impact-agent
 #     name publishes an `atl:a2aEndpoint` of its own yet.
 #
 # Custody and key custody are local-aes, not AKCS: there is no `imb` tenant (it needs a caller token minted
 # on the Azure CVM). Those three lines are what changes when the tenant exists — nothing else.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
-[env.imbnet]
+[env.impact-agent]
 name = "imb-runtime"
 workers_dev = true
 
 # ── REAL DNS FOR THIS ESTATE (2026-10-13) ─────────────────────────────────────────────────────────────
-# imbnet was stood up on `workers.dev` and `imb-home.vercel.app` (`docs/runbooks/new-estate.md` §0: "A zone
+# impact-agent was stood up on `workers.dev` and `imb-home.vercel.app` (`docs/runbooks/new-estate.md` §0: "A zone
 # of its own? no"), and the runbook named the cost: without a wildcard zone there are no per-agent card
 # hosts. It now has the owner's own zones — `impact-agent.io` + `impact-agent.ai` on Cloudflare,
 # `impact-agent.me` on Vercel — in the same shape as faithnet (`.io` for service hosts, `.ai` wildcard for
@@ -651,25 +651,25 @@ workers_dev = true
 # list is "most-canonical FIRST" and `resolveAgentHost` parses a hostname against EVERY zone it serves,
 # because an agent card's URL is inside its SIGNED bytes and cannot be edited in place. Drop the old zone
 # and every card published before today stops naming its agent.
-[[env.imbnet.routes]]
+[[env.impact-agent.routes]]
 pattern = "a2a.impact-agent.io"
 custom_domain = true
 
 # THE PER-AGENT CARD HOSTS. One wildcard covers every agent (ADR-0061: one label, `<label>-<type>.<zone>`),
 # so no agent needs a custom domain of its own. A `zone_name` route does NOT create DNS — the zone needs a
 # PROXIED `*` record, which `*.faithnet.ai` has and is what makes that zone work.
-[[env.imbnet.routes]]
+[[env.impact-agent.routes]]
 pattern = "*.impact-agent.ai/*"
 zone_name = "impact-agent.ai"
 
 
-[env.imbnet.ai]
+[env.impact-agent.ai]
 binding = "AI"
 
-[env.imbnet.vars]
+[env.impact-agent.vars]
 AKCS_RELAY_KEY_ID = "01a13c7d-c613-78d2-97ba-483497f7a04b"               # spec 441 D3 — imb-relay, SIGNING/secp256k1 in the imb tenant, created 2026-10-14
 AKCS_INTERACTIONS_KEY_ID = "01a13c7d-c866-7c51-b56c-a933f5a563c3"        # spec 441 D3 — imb-interactions-session, same tenant; replaces A2A_INTERACTIONS_SESSION_PRIVATE_KEY
-FEDERATION_DOORS = '{"ap-federation-door:imbnet":"https://door.ap-federation.faithnet.io","ap-federation-door:faithnet":"https://door-faithnet.ap-federation.faithnet.io"}'  # spec 439 F3 — the federation doors whose receipts this estate reads (custom domains only)
+FEDERATION_DOORS = '{"ap-federation-door:impact-agent":"https://door.ap-federation.faithnet.io","ap-federation-door:faithnet":"https://door-faithnet.ap-federation.faithnet.io"}'  # spec 439 F3 — the federation doors whose receipts this estate reads (custom domains only)
 CHAIN_ID = "34349"
 AGENT_NAME_PARENTS = "me,impact"
 CONTRACTS_GENERATION = "1"
@@ -691,7 +691,7 @@ OPS_RECORDS_DEFAULT = "cached"
 ASSISTANT_RATE_MAX = "60"
 ASSISTANT_RATE_WINDOW_MS = "600000"
 SA_BUDGET_LIMIT_UNITS = "50000"
-# Nothing fronts imbnet yet — the Home talks to this Worker directly, so no gateway assertion is required.
+# Nothing fronts impact-agent yet — the Home talks to this Worker directly, so no gateway assertion is required.
 DEMO_REQUIRE_GATEWAY_ASSERTION = "true"   # spec 441 posture — an estate requires the edge's assertion, as faithnet does
 MCP_URL = "https://mcp.impact-agent.io"
 DEMO_EDGE_URL = "https://edge.impact-agent.io"
@@ -712,12 +712,12 @@ A2A_SERVES_UNPUBLISHED_NAMES = "true"
 # THE LANES THIS ESTATE REACHES BY BINDING (ap-town calls the same thing a lane, for the same reason): a
 # Worker's subrequest to a hostname served by another Worker on its OWN Cloudflare account does not come
 # back, and the edge answers 522. faithnet never meets this because it shares a zone with its neighbours
-# and an in-zone fetch is routed in-process; imbnet has no zone, so an imbnet person engaging
+# and an in-zone fetch is routed in-process; impact-agent has no zone, so an impact-agent person engaging
 # scripture-resolver.svc read "its card answered 522" until this line existed (2026-10-12).
 REACH_LANES = '{"scripture.faithnet.io":"LANE_SCRIPTURE"}'
 # AKCS, tenant `imb` (adopted 2026-10-11) — the service MAC on the A2A→MCP hop is derived from the tenant
 # MAC root, which is what imb-vault verifies with. Declared here and not only on the deployment: a
-# `wrangler deploy --env imbnet` re-asserts this block, and the day the adoption lived only in a live
+# `wrangler deploy --env impact-agent` re-asserts this block, and the day the adoption lived only in a live
 # secret the next deploy reverted it and every interactions call threw (see the vault's note).
 A2A_KMS_BACKEND = "agentic-kms"
 AKCS_BASE_URL = "https://kms.faithnet.io"
@@ -739,8 +739,8 @@ A2A_ALLOW_LOCAL_MASTER_KEY = "true"
 INTERACTIONS_SERVICE_SA = "0x23C5B5EcA36A8eB8CfB10822399dA588c02cB0F4"
 HARNESS_AGENT_SA = "0xF49bF93975fb1d1D53126Ee4e900fC7C0472C405"
 # Spec 434 W3 — the town's model gateway carries this estate's model calls too, under ITS OWN app key and its own
-# entitlement (client `imbnet-runtime`, registered 2026-10-13 against this HARNESS_AGENT_SA: the same five profiles,
-# $5/day, attributed to imbnet). One gateway for the chain, a budget per estate — never faithnet's key.
+# entitlement (client `impact-agent-runtime`, registered 2026-10-13 against this HARNESS_AGENT_SA: the same five profiles,
+# $5/day, attributed to impact-agent). One gateway for the chain, a budget per estate — never faithnet's key.
 INFERENCE_URL = "https://inference.faithnet.io"
 ORCHESTRATION_GATEWAY = "on"
 # faithchain contracts — the same deployment every estate on this chain reads.
@@ -777,12 +777,12 @@ KB_RETRIEVAL = "playbook"
 # WHICH ESTATE THIS IS — said, never defaulted: the heartbeat the town pulls carries this name, and a
 # deployment that does not say refuses to publish one rather than answer as somebody else. No
 # ESTATE_CENSUS_REGISTRY_ORIGIN: the registry above is the TOWN's, shared with faithnet, so its agent
-# counts are not imbnet's — the heartbeat reports the census as absent instead of borrowing a sibling's.
-ESTATE_ID = "imbnet"
+# counts are not impact-agent's — the heartbeat reports the census as absent instead of borrowing a sibling's.
+ESTATE_ID = "impact-agent"
 # No zone, so no inbound mail and no outbound rail: an invitation by email is refused here, not sent quietly.
 AP_RUNTIME_AGENT = "acp-stub-agent"
 
-[env.imbnet.durable_objects]
+[env.impact-agent.durable_objects]
 bindings = [
   { name = "SESSIONS", class_name = "SessionStoreDO" },
   { name = "A2A_TASKS", class_name = "A2aTaskDO" },
@@ -793,60 +793,60 @@ bindings = [
   { name = "SA_BUDGET", class_name = "SmartAgentBudgetDO", script_name = "imb-vault" },
 ]
 
-[[env.imbnet.d1_databases]]
+[[env.impact-agent.d1_databases]]
 binding = "OPS"
 database_name = "harness-ops-imb"
 database_id = "348f18a4-97a7-4d65-b9e9-66623e248c20"
 
-[[env.imbnet.queues.producers]]
+[[env.impact-agent.queues.producers]]
 binding = "RUNTIME_WAKE"
 queue = "runtime-wake-imb"
 
-[[env.imbnet.queues.producers]]
+[[env.impact-agent.queues.producers]]
 binding = "SHELF_INDEX"
 queue = "shelf-index-imb"
 
-[[env.imbnet.queues.consumers]]
+[[env.impact-agent.queues.consumers]]
 queue = "runtime-wake-imb"
 max_batch_size = 10
 max_batch_timeout = 2
 max_retries = 2
 max_concurrency = 2
 
-[[env.imbnet.kv_namespaces]]
+[[env.impact-agent.kv_namespaces]]
 binding = "BRIDGE_NONCES"
 id = "73db6fcbc4074784800c1368be1177cf"
-[[env.imbnet.kv_namespaces]]
+[[env.impact-agent.kv_namespaces]]
 binding = "SUBJECT_SA_MAP"
 id = "b9c83ef78de04cb2acfd2928147b62c4"
-[[env.imbnet.kv_namespaces]]
+[[env.impact-agent.kv_namespaces]]
 binding = "FED_TOKENS"
 id = "4b8bc1f24b704f70ae9eb775b485bb0e"
-[[env.imbnet.kv_namespaces]]
+[[env.impact-agent.kv_namespaces]]
 binding = "RELEASED_CARDS"
 id = "42452b087c0a4f4e851a9b57121264c3"
 
-[[env.imbnet.services]]
+[[env.impact-agent.services]]
 binding = "MCP"
 service = "imb-vault"
 
 # The lane above. The Scripture Agent is not this estate's Worker — it is a service on the chain that
-# imbnet's people engage by name, and it answers on an account-mate's custom domain.
-[[env.imbnet.services]]
+# impact-agent's people engage by name, and it answers on an account-mate's custom domain.
+[[env.impact-agent.services]]
 binding = "LANE_SCRIPTURE"
 service = "demo-bible-a2a-faithnet"
 
 # The public agent directory is the town's, read-only (ADR-0040) — the same binding faithnet reads.
-[[env.imbnet.services]]
+[[env.impact-agent.services]]
 binding = "DISCOVERY_MCP"
 service = "demo-discovery-mcp-faithnet"
 
-[[env.imbnet.services]]
+[[env.impact-agent.services]]
 binding = "SKILLS_MCP"
 service = "skills-mcp"
 
 # spec 362 — the durable executor. Its own instance namespace, because a run ref is per estate.
-[[env.imbnet.workflows]]
+[[env.impact-agent.workflows]]
 name = "imb-approval"
 binding = "HARNESS_WORKFLOW"
 class_name = "HarnessApprovalWorkflow"

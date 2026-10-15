@@ -9,8 +9,8 @@
 // holding the estate agent's NAME (`imbnet.estate`). The name is stable; the Home URL it leads to lives
 // on that estate agent's `atl:homepage`.
 //
-//   npx tsx scripts/declare-estate.mts --estate imbnet --estate-name imbnet.estate --persona maya [--dry-run]
-//   npx tsx scripts/declare-estate.mts --estate imbnet --estate-name imbnet.estate --all
+//   npx tsx scripts/declare-estate.mts --estate impact-agent --estate-name imbnet.estate --persona maya [--dry-run]
+//   npx tsx scripts/declare-estate.mts --estate impact-agent --estate-name imbnet.estate --all
 //
 // Personas come from `demo/personas.<estate>.json` (0600, their custodian keys — never printed). An agent
 // whose key is NOT here cannot be declared for: the record is the agent's own statement, and nothing here

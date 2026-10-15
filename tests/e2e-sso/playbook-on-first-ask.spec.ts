@@ -33,7 +33,7 @@ import { test, expect } from '@playwright/test';
 const HOME = process.env.SSO_BASE_URL ?? 'https://www.faithnet.me';
 /** THE PERSONA IS THE ESTATE'S, not a constant. This spec hardcoded `alice` — a faithnet name — so pointing
  *  it at another estate failed at sign-in with "alice signs in: false" and said nothing about why. Every
- *  estate seeds its OWN demo people (imbnet: maya, samuel, priya, tomas, hannah), so the roster is per
+ *  estate seeds its OWN demo people ('impact-agent': maya, samuel, priya, tomas, hannah), so the roster is per
  *  deployment and the name belongs beside the URL that selects it. Same lesson as the brand assertions this
  *  suite carried when it moved repositories: a constant that happens to be true of one deployment is a
  *  coupling, not a default. */

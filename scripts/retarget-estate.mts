@@ -16,7 +16,7 @@
 // (`scripts/reissue-interactions-grants.mts`), and the estate's service agents must already be chartered on
 // the new chain (`scripts/bootstrap-estate.mts --agents-only`). Both are printed at the end.
 //
-//   npx tsx scripts/retarget-estate.mts --id imbnet --deployment-file …/deployments-hopechain.json [--dry-run]
+//   npx tsx scripts/retarget-estate.mts --id impact-agent --deployment-file …/deployments-hopechain.json [--dry-run]
 import { readFileSync, writeFileSync } from 'node:fs';
 import { readDeclarations, townVarsFromDeployment, wranglerVars } from './estate-shape.mts';
 

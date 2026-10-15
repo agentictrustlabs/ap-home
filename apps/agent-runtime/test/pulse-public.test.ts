@@ -323,14 +323,14 @@ describe('the estates\' census, answered in counts (2026-10-12)', () => {
   const NAMES = { total: 297, roots: [{ tld: 'me', kind: 'person', names: 'a person', count: 86 }, { tld: 'svc', kind: 'service', names: 'a service', count: 24 }] };
   const w = windowOf('this week', NOW);
   const found = [
-    day('2026-10-10', { estates: { faithnet: HB(78, 80, 50), imbnet: HB(0, 0, 0) }, names: NAMES }),
+    day('2026-10-10', { estates: { faithnet: HB(78, 80, 50), 'impact-agent': HB(0, 0, 0) }, names: NAMES }),
     day('2026-10-11', { estates: { faithnet: HB(80, 82, 50) }, names: NAMES }),
   ];
 
   it('a census is the latest day PER ESTATE, summed across estates and never across days', () => {
     expect(censusIn(found)).toEqual([
       { estate: 'faithnet', day: '2026-10-11', agents: { person: 80, org: 82, service: 50 }, homesActive24h: 4 },
-      { estate: 'imbnet', day: '2026-10-10', agents: { person: 0, org: 0, service: 0 }, homesActive24h: 4 },
+      { estate: 'impact-agent', day: '2026-10-10', agents: { person: 0, org: 0, service: 0 }, homesActive24h: 4 },
     ]);
     expect(censusKinds(censusIn(found))).toEqual(['org', 'person', 'service']);
   });
@@ -341,7 +341,7 @@ describe('the estates\' census, answered in counts (2026-10-12)', () => {
     expect(a.read).toBe(true);
     expect(a.answer).toContain('agents in the town 212');            // 80 + 82 + 50 + 0 + 0 + 0
     expect(a.answer).toContain('faithnet person 80');
-    expect(a.answer).toContain('imbnet last counted 2026-10-10');    // not carried as if it were today's
+    expect(a.answer).toContain('impact-agent last counted 2026-10-10');    // not carried as if it were today's
     expect(a.answer).not.toMatch(/completed run/);
   });
 

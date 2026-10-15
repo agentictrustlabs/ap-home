@@ -1,7 +1,7 @@
 // AN ESTATE AGENT CUSTODIED BY A DEMO PERSONA — the owner's shape for faithnet (2026-10-14): "use a demo user for that
 // agent … a type of .estate for each". The runtime-custodied shape (add-estate-agent.mts: salt 2 over the estate's
 // interactions key) needs a key that is a Cloudflare secret; this one needs a persona's key from
-// demo/personas.local.json and a relay key that pays gas. Everything else is the same as imbnet's estate agent: a
+// demo/personas.local.json and a relay key that pays gas. Everything else is the same as impact-agent's estate agent: a
 // Smart Agent whose only duties are to BE the estate's stable identity (`<estate>.estate` points at it; the estate
 // id on neutral ground derives from it), to carry the Home URL in `atl:homepage`, and to declare the key that
 // anchors its roots in `atl:projectionSigner`. It is NOT the Pulse context agent (`faith-estate.workspace`), which

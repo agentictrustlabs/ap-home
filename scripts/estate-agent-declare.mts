@@ -2,7 +2,7 @@
 // CUSTODIAN the operator holds (spec 439 F2.5; the estate half of federation).
 //
 // Two custody shapes exist for an estate agent and this script serves both:
-//   · the runtime-custodied shape (imbnet): the agent is salt 2 over the estate's interactions key — use
+//   · the runtime-custodied shape (impact-agent): the agent is salt 2 over the estate's interactions key — use
 //     add-estate-agent.mts / set-projection-signer.mts with `.estate-<estate>.local`;
 //   · the PERSONA-custodied shape (faithnet, owner's decision 2026-10-14): the estate agent is an existing agent
 //     custodied by a demo persona (`faith-estate.workspace`, custodian demo-admin) — this script, with the

@@ -9,7 +9,7 @@
 #   GATEWAY_ASSERTION_SECRET  runtime + vault + edge
 #   A2A_CUSTODY_BRIDGE_SECRET runtime           (the Home holds the other half, as a Vercel env var)
 #
-# Usage: scripts/set-estate-secrets.sh <estate>        e.g. scripts/set-estate-secrets.sh imbnet
+# Usage: scripts/set-estate-secrets.sh <estate>        e.g. scripts/set-estate-secrets.sh impact-agent
 set -euo pipefail
 cd "$(dirname "$0")/.."
 EST="${1:?usage: set-estate-secrets.sh <estate>}"

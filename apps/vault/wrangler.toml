@@ -105,10 +105,10 @@ pattern = "mcp.faithnet.io"
 custom_domain = true
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
-# IMBNET — the town's SECOND estate on faithchain (spec 436 §5.5; towns/faithchain/town.yaml).
+# IMPACT_AGENT — the town's SECOND estate on faithchain (spec 436 §5.5; towns/faithchain/town.yaml).
 #
 # Same chain, same contracts, same town. Everything else is its own: its own vault D1, its own custody
-# root, its own keys. An imbnet person is a DIFFERENT Smart Agent from a faithnet person of the same
+# root, its own keys. An impact-agent person is a DIFFERENT Smart Agent from a faithnet person of the same
 # name, because a KMS-custodied home is a CREATE2 address over a derived custodian and the roots differ.
 #
 # No zone of its own (the owner's decision, 2026-10-11: "just use default vercel and cloudflare names"),
@@ -118,12 +118,12 @@ custom_domain = true
 # the Azure CVM). The root is an in-Worker secret — honest for a second demo estate, and the one line to
 # change when the tenant exists.
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════
-[env.imbnet]
+[env.impact-agent]
 name = "imb-vault"
 workers_dev = true
 
 # ── REAL DNS FOR THIS ESTATE (2026-10-13) ─────────────────────────────────────────────────────────────
-# imbnet was stood up on `workers.dev` and `imb-home.vercel.app` (`docs/runbooks/new-estate.md` §0: "A zone
+# impact-agent was stood up on `workers.dev` and `imb-home.vercel.app` (`docs/runbooks/new-estate.md` §0: "A zone
 # of its own? no"), and the runbook named the cost: without a wildcard zone there are no per-agent card
 # hosts. It now has the owner's own zones — `impact-agent.io` + `impact-agent.ai` on Cloudflare,
 # `impact-agent.me` on Vercel — in the same shape as faithnet (`.io` for service hosts, `.ai` wildcard for
@@ -133,12 +133,12 @@ workers_dev = true
 # list is "most-canonical FIRST" and `resolveAgentHost` parses a hostname against EVERY zone it serves,
 # because an agent card's URL is inside its SIGNED bytes and cannot be edited in place. Drop the old zone
 # and every card published before today stops naming its agent.
-[[env.imbnet.routes]]
+[[env.impact-agent.routes]]
 pattern = "mcp.impact-agent.io"
 custom_domain = true
 
 
-[env.imbnet.vars]
+[env.impact-agent.vars]
 UNIVERSAL_SIGNATURE_VALIDATOR = "0xa5855906C0De3813E74BEe201973071e0c844115"
 DELEGATION_MANAGER = "0x710cb1bF08C234Df397e0910331e0A29710EF4F7"
 TIMESTAMP_ENFORCER = "0x2156311097A936de1916a878bF53Bfd43c7b5715"
@@ -159,7 +159,7 @@ DEMO_REQUIRE_GATEWAY_ASSERTION = "false"
 # every hop reads "service-mac rejected". MAC keys derive from the tenant root, so no key id here.
 #
 # NOT local-aes, and the backend is DECLARED HERE rather than left to a live `wrangler secret put`: the
-# adoption was applied to the deployment only, so the next `wrangler deploy --env imbnet` re-asserted
+# adoption was applied to the deployment only, so the next `wrangler deploy --env impact-agent` re-asserted
 # local-aes from this block and took the estate down (2026-10-11). Under local-aes this vault also cannot
 # unwrap a KEK at all — esbuild folds `NODE_ENV === 'production'` to true — and the MAC path hex-decodes
 # A2A_MAC_SECRET, which bootstrap-estate wrote base64url: every interactions call threw
@@ -171,16 +171,16 @@ AKCS_TENANT_ID = "imb"
 AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"
 # AKCS_TOKEN is a SECRET (wrangler secret put) — a bearer credential for the tenant, never a var.
 
-[[env.imbnet.d1_databases]]
+[[env.impact-agent.d1_databases]]
 binding = "DB"
 database_name = "demo-mcp-imb"
 database_id = "491d4c46-8f7d-4ed2-82f5-6fe74f10459c"
 migrations_dir = "migrations"
 
-[[env.imbnet.durable_objects.bindings]]
+[[env.impact-agent.durable_objects.bindings]]
 name = "SA_BUDGET"
 class_name = "SmartAgentBudgetDO"
 
-[[env.imbnet.migrations]]
+[[env.impact-agent.migrations]]
 tag = "v1"
 new_sqlite_classes = ["SmartAgentBudgetDO"]

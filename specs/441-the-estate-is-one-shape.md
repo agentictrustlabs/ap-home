@@ -18,7 +18,7 @@ apart by accident — not by any decision either one recorded.
 
 Measured 2026-10-14 from `apps/agent-runtime/wrangler.toml` and `wrangler secret list` on both:
 
-| | faithnet | imbnet |
+| | faithnet | impact-agent |
 | --- | --- | --- |
 | runtime vars | 83 declared | 71 declared; **30 of the union differ** |
 | vault vars | 19 declared | 2 differ (both AKCS) |
@@ -32,7 +32,7 @@ Measured 2026-10-14 from `apps/agent-runtime/wrangler.toml` and `wrangler secret
 
 Two of those rows are not cosmetic:
 
-- **imbnet keeps two raw private keys in Worker secrets and faithnet does not.** A Worker secret is readable by
+- **impact-agent keeps two raw private keys in Worker secrets and faithnet does not.** A Worker secret is readable by
   anyone who can deploy that Worker; an AKCS key id is a pointer to material that never leaves the CVM. Same
   software, same owner, two different answers to "where do this estate's keys live" — and nobody chose that.
 - **faithnet leaves `AKCS_ACCEPTED_PROTECTION_LEVELS` unset,** so the one estate that holds keys in the KMS is the
@@ -44,7 +44,7 @@ custody is `local-aes` on both, and what faithnet actually holds in AKCS is its 
 A security claim in a record an auditor reads was describing a configuration that does not exist (§6).
 
 And the shape of the drift is the real problem, not its contents. Of the 30 differing vars: 15 are faithnet's own
-product extras, 3 are imbnet's, and 12 are settings both estates have and answer differently. Underneath them sit
+product extras, 3 are impact-agent's, and 12 are settings both estates have and answer differently. Underneath them sit
 **53 vars that are identical on both** — the chain's contracts, the shared services, the harness defaults — which
 belong to the TOWN, not to either estate. Nothing in the repo distinguished the three kinds, so a 101st estate was
 a copy-paste of whichever file you happened to open.
@@ -67,7 +67,7 @@ estate?* If no, it is an extra and lives outside the shape.
 A setting that is none of the three is a bug in this spec, not a fourth category.
 
 **D3 — No estate keeps a private key in a Worker secret.** The relayer's key and the interactions session key are
-AKCS key ids on every estate. imbnet converges onto faithnet's answer, not the reverse — this is the one divergence
+AKCS key ids on every estate. impact-agent converges onto faithnet's answer, not the reverse — this is the one divergence
 where one side is simply better, and `A2A_MASTER_PRIVATE_KEY` / `A2A_INTERACTIONS_SESSION_PRIVATE_KEY` leave the
 shape entirely. (Person custody is a separate decision: D4.)
 
@@ -102,13 +102,13 @@ decoration.
 
 Five, and the builder asks for nothing else:
 
-| input | example (imbnet) | why a human must say it |
+| input | example (impact-agent) | why a human must say it |
 | --- | --- | --- |
-| `id` | `imbnet` | the estate's name in the town, the federation and its tenant |
+| `id` | `impact-agent` | the estate's name in the town, the federation and its tenant |
 | `homeHost` | `www.impact-agent.me` | the rpId of every passkey; cannot be derived or changed later |
 | `zone` | `impact-agent.io` | where the estate's own hosts live (`mcp.`, `edge.`, `a2a.`) |
 | `town` | `faithchain` | which town's chain, naming and Pulse it stands in |
-| `kmsTenant` | `imb` | defaults to `id`; separate only because imbnet's tenant was named before the rule |
+| `kmsTenant` | `imb` | defaults to `id`; separate only because impact-agent's tenant was named before the rule |
 
 `HARNESS_AGENT_SA` and `INTERACTIONS_SERVICE_SA` are **outputs of the build**, not inputs: each estate charters its
 own, and the builder writes them back into the declaration after it charters them. An estate that reuses another
@@ -137,11 +137,11 @@ grants a Worker, and the floor ap-federation condition 1 asserts. Neither carrie
 custody-in-tenant estate would need and D4 says no estate is.
 
 The profiles are **narrower than what faithnet holds today** (11 operations each, granted as a superset while
-hunting). Converging onto them is a reduction for faithnet and an expansion for imbnet.
+hunting). Converging onto them is a reduction for faithnet and an expansion for impact-agent.
 
 ## 5. Convergence (what each estate owes)
 
-**imbnet** — create its relay and interactions keys in its tenant, move both off Worker secrets, set
+**impact-agent** — create its relay and interactions keys in its tenant, move both off Worker secrets, set
 `AKCS_ACCEPTED_PROTECTION_LEVELS`, re-bind its two callers to the profiles, set
 `DEMO_REQUIRE_GATEWAY_ASSERTION = true`, and adopt the estate's model baseline.
 
@@ -156,14 +156,14 @@ of either estate sees anything.
 
 ap-federation spec 440 caveat A4 says residents who sign in with Google, email or phone have their custody seed in
 their estate's tenant, "so the operator custodies some residents of every town that opts in", and the 2026-10-14
-condition-1 work repeated that as the reason faithnet needed a wider caller than imbnet.
+condition-1 work repeated that as the reason faithnet needed a wider caller than impact-agent.
 
 Checked against both the running configuration and the operator's own key list:
 
 - `A2A_CUSTODY_KMS_BACKEND = "local-aes"` on **both** estates, so custody derives from `A2A_CUSTODY_ROOT_KEY`, a
   Worker secret of the estate. **No resident's custody seed is in any tenant.**
 - faithnet's tenant does hold exactly **one `oidc-custodian` envelope key** — provisioned, and never selected by
-  the configuration that runs. imbnet's holds none.
+  the configuration that runs. impact-agent's holds none.
 - What faithnet actually keeps in its tenant beyond its 413 vault KEKs is its `relay` and `interactions-session`
   signing keys, which is precisely why it needed the wider caller — not custody at all.
 
@@ -177,7 +177,7 @@ the method, because a security claim nobody can reproduce is worse than no claim
 | --- | --- | --- |
 | **W1** ✅ | `estates/*.estate.json` for both estates; the derive function; `check:estate-shape` over vars, secret NAMES and (with `--kms`) the live callers | **landed 2026-10-14: 9 drifts named, the two Worker-secret keys at the top.** The gate also corrected this spec before anything deployed — §7.1 |
 | **W2** ✅◐ | **landed AND LIVE 2026-10-14 — half of what D6 promised, by design (§7.4)** — faithkms gained `EIP155_TRANSACTION` and the two named profiles; key-custody gained a per-ACT signing purpose; the relayer no longer needs the raw grant. The interactions-session key still does, and §7.4 says why that is the honest answer rather than a shortfall to hide | **the binary is installed on the CVM** (sha verified before replacement, `healthz=200`, and the live operator's own `--help` names both profiles), **both estates' callers are bound FROM the profiles** — faithnet 8 and 6 operations, down from 11 each — and **all seven live gates are green** |
-| **W3** ✅ | **landed 2026-10-14.** W3a: faithnet declares the two settings it only had by default. W3b: imbnet's relay and interactions keys moved into its own tenant, its callers re-bound to the profiles, the edge assertion required, and both raw private keys DELETED from the Worker | **`check:estate-shape` GREEN on all three arms** — vars, secret names, live callers. `gate:pay-outward` green for maya with no key of imbnet's in a Worker. §7.2 |
+| **W3** ✅ | **landed 2026-10-14.** W3a: faithnet declares the two settings it only had by default. W3b: impact-agent's relay and interactions keys moved into its own tenant, its callers re-bound to the profiles, the edge assertion required, and both raw private keys DELETED from the Worker | **`check:estate-shape` GREEN on all three arms** — vars, secret names, live callers. `gate:pay-outward` green for maya with no key of impact-agent's in a Worker. §7.2 |
 | **W4** | the builder: `estate new <id> --home-host … --zone … --town …` → declaration, tenant, callers (by profile), the three-step interactions-key provisioning of §7.2, charters, secrets checklist, deploy | a third estate is built from the tool alone and passes the gate on its first run |
 | **W5** | one `VAULT_SERVER_ID` per estate, with the grant and vault-key-binding migration it needs (§7.3) | a grant naming one estate's vault is refused by the other's |
 | **W6** | the runtime's credential SPLIT PER KEY ROLE, so the binding that may sign app-defined digests cannot also sign transactions (§7.4) | no estate profile carries `RAW_32_BYTE_DIGEST` |
@@ -196,12 +196,12 @@ tenant.** This is the argument for a gate that measures before it converges: the
 spec's own mistake.
 
 Two smaller corrections from the same run: `ORCHESTRATION_*` is a product extra (which models an estate pays for),
-not a town baseline two estates must agree on; and a serving domain is not a browser origin, so imbnet's
+not a town baseline two estates must agree on; and a serving domain is not a browser origin, so impact-agent's
 `workers.dev` host belongs beside its zones and not in `ALLOWED_ORIGINS`.
 
 ### 7.2 What moving a key actually costs — the three steps W4 must take
 
-Swapping imbnet's two keys broke two things, both because **a key's ADDRESS is load-bearing somewhere a
+Swapping impact-agent's two keys broke two things, both because **a key's ADDRESS is load-bearing somewhere a
 configuration variable does not mention**:
 
 1. **The playbook stopped reading** (`auth failed — mcp: auth failed`, visible only as

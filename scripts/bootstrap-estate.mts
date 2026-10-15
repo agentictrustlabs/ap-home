@@ -2,7 +2,7 @@
  * BOOTSTRAP A NEW ESTATE'S OWN KEYS AND SERVICE AGENTS — the step between "the town declares an estate"
  * and "the estate's Workers can be deployed".
  *
- *   CHAIN_APP_TOKEN=<token> npx tsx scripts/bootstrap-estate.mts --estate imbnet [--dry-run]
+ *   CHAIN_APP_TOKEN=<token> npx tsx scripts/bootstrap-estate.mts --estate impact-agent [--dry-run]
  *
  * An estate shares the chain and the contracts with its siblings and shares NOTHING else. Its persons are
  * different Smart Agents from a sibling's persons of the same name, because a KMS-custodied home is a CREATE2
@@ -31,7 +31,7 @@ import type { Address, Hex } from 'viem';
 import { AgentAccountClient } from '@agenticprimitives/agent-account';
 
 const arg = (n: string): string | undefined => { const i = process.argv.indexOf(n); return i > 0 ? process.argv[i + 1] : undefined; };
-const estate = arg('--estate') ?? 'imbnet';
+const estate = arg('--estate') ?? 'impact-agent';
 const dry = process.argv.includes('--dry-run');
 const token = process.env.CHAIN_APP_TOKEN;
 
@@ -126,7 +126,7 @@ const lines = [
   `# shared by exactly the Workers that must agree: runtime+vault (MAC), runtime+vault+edge (assertion), runtime+Home (bridge)`,
   `# HEX, not base64url: the local-aes MAC provider takes this as \`sessionSecretHex\` and hex-decodes it, so a
   # base64url value throws \`Invalid byte sequence\` on the first interactions call — which the Home renders as
-  # "turn on storage", naming nothing. imbnet carried that for a day behind AKCS, which never reads this value
+  # "turn on storage", naming nothing. impact-agent carried that for a day behind AKCS, which never reads this value
   # (2026-10-11). Prefixing \`0x\` to a base64url secret does not make it hex; the bytes must be hex.`,
   `A2A_MAC_SECRET=${hex32()}`,
   `GATEWAY_ASSERTION_SECRET=${b64(32)}`,

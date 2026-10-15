@@ -16,7 +16,7 @@ export interface HeartbeatEnv extends OpsEnv {
    *
    * `ARD_REGISTRY_ORIGIN` is the registry this deployment DISCOVERS other agents in, and on a chain with
    * more than one estate it is shared: every estate on faithchain reads the same public KB (ADR-0040), so
-   * counting its agents as the estate's own makes each estate claim every other estate's people. imbnet's
+   * counting its agents as the estate's own makes each estate claim every other estate's people. impact-agent's
    * first heartbeat reported 74 persons and 82 organizations on an estate that had none, which is the
    * knowledge plane telling a plausible falsehood (spec 358) — the authority plane was never involved.
    *

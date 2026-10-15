@@ -7,7 +7,7 @@
 // Idempotent: a declaration already equal to this one writes nothing. The value is PUBLIC by construction (the
 // registry stores the same address); the key behind it stays the federation operator's.
 //
-//   npx tsx scripts/set-projection-signer.mts --estate imbnet --signer 0xAdcd7257De9686061C0838154cA77790C79a9EfD [--dry-run]
+//   npx tsx scripts/set-projection-signer.mts --estate impact-agent --signer 0xAdcd7257De9686061C0838154cA77790C79a9EfD [--dry-run]
 import { existsSync, readFileSync } from 'node:fs';
 import { AgentAccountClient, buildExecuteCallData } from '@agenticprimitives/agent-account';
 import { createPublicClient, decodeEventLog, encodeFunctionData, http, keccak256, toBytes, type Address, type Hex } from 'viem';

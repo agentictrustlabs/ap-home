@@ -17,7 +17,7 @@
 // Idempotent throughout: an already-deployed agent is reused, and a homepage already equal to this one is
 // not rewritten. Reads the estate's keys from `.estate-<estate>.local` — never prints them.
 //
-//   npx tsx scripts/add-estate-agent.mts --estate imbnet --home https://imb-home.vercel.app [--dry-run]
+//   npx tsx scripts/add-estate-agent.mts --estate impact-agent --home https://imb-home.vercel.app [--dry-run]
 
 import { existsSync, readFileSync } from 'node:fs';
 import { AgentAccountClient, buildExecuteCallData } from '@agenticprimitives/agent-account';

@@ -2,7 +2,7 @@
 
 **What this stands up:** one more estate on a chain that already has a town: a Home (Vercel), four Workers
 (runtime, vault, edge, Home MCP) and an approval Workflow, with its own custody root, service agents, vault, KMS
-tenant, naming gate and demo people. Written from imbnet, the second estate on faithchain (2026-10-11); every step
+tenant, naming gate and demo people. Written from impact-agent, the second estate on faithchain (2026-10-11); every step
 below was run, and the ones that bit are marked **⚠**. Read
 [What an estate is made of](https://github.com/agentictrustlabs/agentic-primitives/blob/main/docs/estate-anatomy.md)
 first — it says why each step exists. The town's half (the manifest row, lanes, gateway token, KMS tenant, naming
@@ -10,7 +10,7 @@ gate allowance, heartbeat) is
 [ap-town's publish-an-estate runbook](https://github.com/agentictrustlabs/ap-town/blob/master/operations/runbooks/publish-an-estate.md);
 the two interleave and the order below says when to cross over.
 
-`<estate>` throughout is the wrangler env name (`imbnet`); Workers are `<prefix>-<job>` (`imb-runtime`,
+`<estate>` throughout is the wrangler env name (`impact-agent`); Workers are `<prefix>-<job>` (`imb-runtime`,
 `imb-vault`, `imb-edge`, `imb-home-mcp`, `imb-approval`). Never reuse another estate's Worker names, DO class
 names, bindings or migration tags: they are storage.
 
@@ -41,7 +41,7 @@ The sections below remain the explanation of WHY each step exists, and the recor
 
 ## 0. Decide what the estate has
 
-| Decision | imbnet's answer | Why it matters |
+| Decision | impact-agent's answer | Why it matters |
 | --- | --- | --- |
 | A zone of its own? | no — Vercel's and `workers.dev` default hosts | without a wildcard zone there are no per-agent card hosts; agents are reached through the edge by name (the routing rule anyway). The town must declare every host it reaches as a **lane** |
 | Chain + contracts | faithchain, the town's | shared by every estate on the chain |
@@ -79,7 +79,7 @@ fault. Never build a secret with `node -e '…${var}…'`; write a script file.
 
 Add `[env.<estate>]` to each of the four `apps/*/wrangler.toml` (copy faithnet's block; rename every Worker,
 D1 database, KV namespace and queue; `ESTATE_ID = "<estate>"` on runtime and vault — **⚠ the heartbeat once
-defaulted to the first estate's id and imbnet answered as faithnet**; `ESTATE_CENSUS_REGISTRY_ORIGIN` only where
+defaulted to the first estate's id and impact-agent answered as faithnet**; `ESTATE_CENSUS_REGISTRY_ORIGIN` only where
 that registry is the estate's own). `SA_BUDGET` is bound across Workers with `script_name = "<prefix>-vault"`.
 
 ```
@@ -117,7 +117,7 @@ akcs dev mint-token … --subject <prefix>-runtime --ttl-secs 31536000
   whole Azure spend and every agent key derives from them for free. Leaving the level off the caller makes a
   billable key impossible, not discouraged.
 - A binding cannot be edited: `disable-caller --tenant-id <t> --caller-id <id>` and bind a `-2` subject.
-- **The two lines above are for an estate whose custody and relay stay `local-aes`** (imbnet's shape, and the last
+- **The two lines above are for an estate whose custody and relay stay `local-aes`** (impact-agent's shape, and the last
   line of this section). The moment an estate moves custody or the relay onto the tenant — faithnet's shape, where
   residents are OIDC-custodied THROUGH it — those operations and `--signing-purposes none` are both wrong, and the
   estate breaks in a way that names nothing. faithnet's two, for when that day comes:

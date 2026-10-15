@@ -1,17 +1,17 @@
 {
-  "_": "spec 441 \u2014 THE ESTATE'S DECLARATION. See faithnet.estate.json for what each field means.",
-  "id": "imbnet",
+  "_": "spec 441 — THE ESTATE'S DECLARATION. See faithnet.estate.json for what each field means.",
+  "id": "impact-agent",
   "homeHost": "www.impact-agent.me",
   "zone": "impact-agent.io",
-  "town": "hopechain",
-  "_kmsTenant": "`imb`, not `imbnet`: the tenant was named before the rule that a tenant is named for its estate. Renaming a tenant re-roots every derivation under it, so the name stays and this field says why.",
+  "town": "hopenet",
+  "_kmsTenant": "`imb`, not `impact-agent`: the tenant was named before the rule that a tenant is named for its estate. Renaming a tenant re-roots every derivation under it, so the name stays and this field says why.",
   "kmsTenant": "imb",
   "_callerSubjects": "The two KMS caller subjects this estate actually holds. A new estate gets `<id>-vault` / `<id>-runtime` from the builder; these two predate the convention, and renaming a caller means re-binding and re-minting its token for no gain. Recorded so the builder verifies what exists instead of demanding a rename.",
   "callerSubjects": {
     "vault": "imb-vault-3",
     "runtime": "imb-runtime-3"
   },
-  "_residents": "The DEMO personas whose custodian keys this Home holds, so the builder can re-issue their DEL-001 session leaves server-side after the interactions key changes (441 \u00a77.2 step 3). A real resident re-issues by clicking through their own Home; this list is never a roster of who lives here.",
+  "_residents": "The DEMO personas whose custodian keys this Home holds, so the builder can re-issue their DEL-001 session leaves server-side after the interactions key changes (441 §7.2 step 3). A real resident re-issues by clicking through their own Home; this list is never a roster of who lives here.",
   "residents": [
     "maya",
     "hannah",
@@ -37,6 +37,7 @@
     "ORCHESTRATION_LLM": "gemini"
   },
   "_altZones": "the workers.dev host is a real domain this runtime answers on, so it belongs beside the zones rather than appearing only in A2A_PUBLIC_BASE_DOMAIN where nothing explains it.",
-  "_extraOrigins": "BROWSER origins the Home admits \u2014 not the same list as the serving domains in altZones. The workers.dev host serves the runtime and is not an origin a browser posts from, which is why it is above and not here.",
-  "_town": "Moved from faithchain 2026-10-14 so the federation twin runs across two CHAINS. Its SECRETS did not move \u2014 custody root, MAC and session secrets are chain-agnostic and every vault binding depends on them \u2014 and neither did its AKCS keys, which is why its agents on the new chain are chartered under the same custodian."
+  "_extraOrigins": "BROWSER origins the Home admits — not the same list as the serving domains in altZones. The workers.dev host serves the runtime and is not an origin a browser posts from, which is why it is above and not here.",
+  "_town": "Moved from faithchain 2026-10-14 so the federation twin runs across two CHAINS. Its SECRETS did not move — custody root, MAC and session secrets are chain-agnostic and every vault binding depends on them — and neither did its AKCS keys, which is why its agents on the new chain are chartered under the same custodian.",
+  "_id": "RENAMED 2026-10-14: `imbnet` → `impact-agent`, so the estate's id matches the zones and the Home it already presents on (impact-agent.io / .ai / .me). What did NOT move: the `imb-*` Worker names (Durable Object storage and KV are bound to a Worker's NAME), the `imb` AKCS tenant (a tenant is a derivation root), and the on-chain `imbnet.estate` name, which is a registered pointer and is changed by a naming ceremony rather than an edit."
 }
