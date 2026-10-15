@@ -71,6 +71,72 @@ export const deriveVars = (d: EstateDeclaration): Record<string, string> => {
   return vars;
 };
 
+
+/**
+ * THE TOWN'S CHAIN ADDRESSES, read from that chain's deployment file rather than copied from a sibling
+ * estate. This is what makes a town's FIRST estate possible — there is no sibling to copy from — and what
+ * makes moving an estate between towns a declaration edit instead of 22 hand-edited addresses.
+ *
+ * The map was DERIVED, not typed: every address-valued var in the live estate was matched against the
+ * deployment file by value, so it reflects what the deployment actually wires rather than what someone
+ * believed it wired. Three address-valued vars are deliberately absent — PAYMASTER_VERIFYING_SIGNER is an
+ * EOA the town operates, and the two service agents are OUTPUTS of the estate's own build (D2).
+ */
+export const CHAIN_VAR_BY_DEPLOYMENT_KEY: Record<string, string> = {
+  agentAccountFactory: 'AGENT_ACCOUNT_FACTORY',
+  agentNameRegistry: 'AGENT_NAME_REGISTRY',
+  agentNameUniversalResolver: 'AGENT_NAME_UNIVERSAL_RESOLVER',
+  agentProfileResolver: 'PROFILE_RESOLVER',
+  agentRelationship: 'AGENT_RELATIONSHIP',
+  allowedMethodsEnforcer: 'ALLOWED_METHODS_ENFORCER',
+  allowedTargetsEnforcer: 'ALLOWED_TARGETS_ENFORCER',
+  approvedHashRegistry: 'APPROVED_HASH_REGISTRY',
+  custodyPolicy: 'CUSTODY_POLICY',
+  delegationManager: 'DELEGATION_MANAGER',
+  digestBindingEnforcer: 'DIGEST_BINDING_ENFORCER',
+  entryPoint: 'ENTRY_POINT',
+  mockUsdc: 'MOCK_USDC',
+  ontologyTermRegistry: 'ONTOLOGY_TERM_REGISTRY',
+  paymentEnforcer: 'PAYMENT_ENFORCER',
+  permissionlessSubregistry: 'PERMISSIONLESS_SUBREGISTRY',
+  quorumEnforcer: 'QUORUM_ENFORCER',
+  receiptAnchorRegistry: 'RECEIPT_ANCHOR_REGISTRY',
+  smartAgentPaymaster: 'PAYMASTER',
+  timestampEnforcer: 'TIMESTAMP_ENFORCER',
+  universalSignatureValidator: 'UNIVERSAL_SIGNATURE_VALIDATOR',
+  valueEnforcer: 'VALUE_ENFORCER',
+};
+
+/** The two maps that are objects rather than addresses. */
+const CHAIN_JSON_VARS: Record<string, string> = {
+  permissionlessSubregistries: 'PERMISSIONLESS_SUBREGISTRIES',
+  pricedSubregistries: 'PRICED_SUBREGISTRIES',
+};
+
+export type Deployment = Record<string, unknown>;
+
+/**
+ * The chain vars an estate on this deployment must carry. A key the deployment does not have is SKIPPED and
+ * reported, never emitted empty: a contract address that is present but blank is worse than one that is
+ * absent, because the absent one fails at boot and the blank one fails at the first call.
+ */
+export const townVarsFromDeployment = (dep: Deployment): { vars: Record<string, string>; missing: string[] } => {
+  const vars: Record<string, string> = {};
+  const missing: string[] = [];
+  if (typeof dep.chainId === 'number') vars.CHAIN_ID = String(dep.chainId);
+  for (const [key, name] of Object.entries(CHAIN_VAR_BY_DEPLOYMENT_KEY)) {
+    const v = dep[key];
+    if (typeof v === 'string' && /^0x[0-9a-fA-F]{40}$/.test(v)) vars[name] = v;
+    else missing.push(`${name} (${key})`);
+  }
+  for (const [key, name] of Object.entries(CHAIN_JSON_VARS)) {
+    const v = dep[key];
+    if (v && typeof v === 'object') vars[name] = JSON.stringify(v);
+    else missing.push(`${name} (${key})`);
+  }
+  return { vars, missing };
+};
+
 /**
  * THE POSTURE (441 D3/D4). Identical on every estate, and the half of the shape that is a security claim rather
  * than a convenience. Each entry says WHY, because a flag whose reason is unwritten is a flag the next estate

@@ -23,7 +23,8 @@
  * The output is written to `.estate-<name>.local` (0600, gitignored) — the file scripts/set-estate-secrets.sh
  * reads. Nothing is printed but addresses: a key value never reaches this process's stdout.
  */
-import { writeFileSync, chmodSync, existsSync } from 'node:fs';
+import { writeFileSync, chmodSync, existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { randomBytes } from 'node:crypto';
 import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts';
 import type { Address, Hex } from 'viem';
@@ -33,25 +34,57 @@ const arg = (n: string): string | undefined => { const i = process.argv.indexOf(
 const estate = arg('--estate') ?? 'imbnet';
 const dry = process.argv.includes('--dry-run');
 const token = process.env.CHAIN_APP_TOKEN;
-if (!token) { console.error('CHAIN_APP_TOKEN is required (a faithchain gateway app token with writes allowed)'); process.exit(1); }
 
-const RPC = `https://rpc.faithnet.io?k=${token}`;
-const CHAIN_ID = 34348;
-const ENTRY_POINT = '0xf7855250B3363AB7649B10957d8908A9AFcdD4B5' as Address;
-const FACTORY = '0x464eEe7518c3c97DA570592481329E0627E9a3B8' as Address;
+// WHICH CHAIN. An estate belongs to a town, and a town is a chain (ap-town second-town runbook), so the
+// addresses come from that chain's deployment file rather than from constants — the factory in particular,
+// because a service agent's address is CREATE2 over it and the two chains' factories differ.
+const RPC = arg('--rpc') ?? (token ? `https://rpc.faithnet.io?k=${token}` : '');
+if (!RPC) { console.error('CHAIN_APP_TOKEN (faithchain) or --rpc <url> is required'); process.exit(1); }
+// `--deployment <name>` reads the PUBLISHED package, which is what a product repo should normally do.
+// `--deployment-file <path>` is for a chain whose addresses have not shipped in a release yet — a new town's
+// file exists in Ring 0 before the next publish, and waiting for a release to charter an estate would be the
+// tail wagging the dog. Said as a separate flag rather than a silent fallback, so the log shows which it was.
+const deploymentFile = arg('--deployment-file');
+const deploymentName = arg('--deployment') ?? 'faithchain';
+const resolveFrom = createRequire(import.meta.url);
+const deploymentPath = deploymentFile
+  ? deploymentFile.replace(/^~/, process.env.HOME ?? '')
+  : resolveFrom.resolve(`@agenticprimitives/contracts/deployments-${deploymentName}.json`);
+const deployment = JSON.parse(readFileSync(deploymentPath, 'utf8')) as {
+  chainId: number; entryPoint: Address; agentAccountFactory: Address;
+};
+const CHAIN_ID = deployment.chainId;
+const ENTRY_POINT = deployment.entryPoint;
+const FACTORY = deployment.agentAccountFactory;
 
+// REUSE A KEY THAT ALREADY EXISTS, when one does. An AKCS key is CHAIN-AGNOSTIC: the same interactions-session
+// key signs on every chain, so an estate moving towns keeps it — and because the new chain's service agents are
+// chartered with it as custodian from the start, there is no custody rotation to forget (spec 441 §7.2 step 2
+// exists precisely because that rotation is invisible when missed). Minting a fresh local key here would also
+// undo spec 441 D3: no estate keeps a private key in a Worker secret.
+const reuseInteractions = arg('--interactions-address') as Address | undefined;
+// Whoever pays for the two creation transactions. On a fresh chain the deployer is funded at genesis; the AKCS
+// relay key cannot sign here because its private half never leaves the CVM, which is the point of it.
+const deployKeyFile = arg('--deploy-key-file');
+
+// AN ESTATE MOVING CHAINS IS NOT A RE-MINT. Its custody root, MAC and session secrets are chain-agnostic and
+// every vault binding depends on them, so minting fresh ones would orphan the estate's own records — while its
+// SERVICE AGENTS are CREATE2 over a factory that differs per chain and must be chartered again. `--agents-only`
+// is that operation: compute and deploy the two agents on this chain, print them, write nothing.
+const agentsOnly = process.argv.includes('--agents-only');
 const out = `.estate-${estate}.local`;
-if (existsSync(out) && !dry) { console.error(`${out} already exists — this estate is bootstrapped; delete the file to re-mint (which orphans every account the old keys custody)`); process.exit(1); }
+if (existsSync(out) && !dry && !agentsOnly) { console.error(`${out} already exists — this estate is bootstrapped; delete the file to re-mint (which orphans every account the old keys custody), or pass --agents-only to charter its agents on another chain`); process.exit(1); }
 
 const hex32 = (): Hex => `0x${randomBytes(32).toString('hex')}`;
 const b64 = (n: number): string => randomBytes(n).toString('base64url');
 
-const relay = generatePrivateKey();
+const relay = deployKeyFile ? (readFileSync(deployKeyFile.replace(/^~/, process.env.HOME ?? ''), 'utf8').trim() as Hex) : generatePrivateKey();
 const interactions = generatePrivateKey();
 const homeMcp = generatePrivateKey();
 const homeMcpAct = generatePrivateKey();
-const interactionsAddr = privateKeyToAccount(interactions).address;
+const interactionsAddr = reuseInteractions ?? privateKeyToAccount(interactions).address;
 
+console.log(`chain ${CHAIN_ID} from ${deploymentPath}\n  entryPoint ${ENTRY_POINT}\n  factory    ${FACTORY}${reuseInteractions ? `\n  interactions key REUSED: ${reuseInteractions} (chain-agnostic — no custody rotation to do)` : ''}`);
 const client = new AgentAccountClient({ rpcUrl: RPC, chainId: CHAIN_ID, entryPoint: ENTRY_POINT, factory: FACTORY });
 
 const specs = [
@@ -115,6 +148,12 @@ const lines = [
   '',
 ].join('\n');
 
+if (agentsOnly) {
+  console.log(`\n--agents-only: nothing written. Put these two in [env.${estate}.vars] and in the estate's declaration:`);
+  for (const [k, v] of Object.entries(agents)) console.log(`  ${k}=${v}`);
+  console.log('  Every secret in the estate\'s .local file is chain-agnostic and stays as it is.');
+  process.exit(0);
+}
 if (dry) { console.log(`\n--dry-run: would write ${out} (${lines.split('\n').length} lines)`); process.exit(0); }
 writeFileSync(out, lines, { mode: 0o600 });
 chmodSync(out, 0o600);

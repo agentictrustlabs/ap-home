@@ -3,7 +3,7 @@
   "id": "imbnet",
   "homeHost": "www.impact-agent.me",
   "zone": "impact-agent.io",
-  "town": "faithchain",
+  "town": "hopechain",
   "_kmsTenant": "`imb`, not `imbnet`: the tenant was named before the rule that a tenant is named for its estate. Renaming a tenant re-roots every derivation under it, so the name stays and this field says why.",
   "kmsTenant": "imb",
   "_callerSubjects": "The two KMS caller subjects this estate actually holds. A new estate gets `<id>-vault` / `<id>-runtime` from the builder; these two predate the convention, and renaming a caller means re-binding and re-minting its token for no gain. Recorded so the builder verifies what exists instead of demanding a rename.",
@@ -29,13 +29,14 @@
     "https://demo-bible-ontology-faithnet.richardpedersen3.workers.dev"
   ],
   "agents": {
-    "harness": "0x193B496d366113B765c70BF9230687D685Cc7a92",
-    "interactions": "0xfBF61be3a4DE7921a4eb6B94dFFfbd183553aFEC"
+    "harness": "0xF49bF93975fb1d1D53126Ee4e900fC7C0472C405",
+    "interactions": "0x23C5B5EcA36A8eB8CfB10822399dA588c02cB0F4"
   },
   "extras": {
     "REACH_LANES": "{\"scripture.faithnet.io\":\"LANE_SCRIPTURE\"}",
     "ORCHESTRATION_LLM": "gemini"
   },
   "_altZones": "the workers.dev host is a real domain this runtime answers on, so it belongs beside the zones rather than appearing only in A2A_PUBLIC_BASE_DOMAIN where nothing explains it.",
-  "_extraOrigins": "BROWSER origins the Home admits \u2014 not the same list as the serving domains in altZones. The workers.dev host serves the runtime and is not an origin a browser posts from, which is why it is above and not here."
+  "_extraOrigins": "BROWSER origins the Home admits \u2014 not the same list as the serving domains in altZones. The workers.dev host serves the runtime and is not an origin a browser posts from, which is why it is above and not here.",
+  "_town": "Moved from faithchain 2026-10-14 so the federation twin runs across two CHAINS. Its SECRETS did not move \u2014 custody root, MAC and session secrets are chain-agnostic and every vault binding depends on them \u2014 and neither did its AKCS keys, which is why its agents on the new chain are chartered under the same custodian."
 }
