@@ -386,6 +386,9 @@ const PRIMARY_NAME_ABI = [
 const RESOLVER_NAMEOF_ABI = [
   { type: 'function', name: 'nameOf', stateMutability: 'view', inputs: [{ name: '', type: 'bytes32' }], outputs: [{ type: 'string' }] },
 ] as const;
+const REGISTRY_EXISTS_ABI = [
+  { type: 'function', name: 'recordExists', stateMutability: 'view', inputs: [{ name: 'node', type: 'bytes32' }], outputs: [{ type: 'bool' }] },
+] as const;
 
 /** spec 346 — the subregistry a claim goes through: the legacy parent's (default) or the typed suffix's
  *  (from the deployment's `permissionlessSubregistries` map). A typed suffix this deployment cannot claim
@@ -407,7 +410,7 @@ function subregistryForTld(tld: string | undefined): { ok: true; subregistry: Ad
  */
 export async function readClaimedRoots(
   agent: Address,
-): Promise<Array<{ tld: string; node: Hex; name: string | null; typed: boolean }>> {
+): Promise<Array<{ tld: string; node: Hex; name: string | null; typed: boolean; expired?: boolean; viaRoot?: boolean }>> {
   const roots: Array<{ tld: string; subregistry: Address; typed: boolean }> = [
     { tld: AGENT_NAME_PARENT, subregistry: CONTRACTS.permissionlessSubregistry, typed: false },
     ...Object.entries(PERMISSIONLESS_SUBREGISTRIES)
@@ -415,7 +418,11 @@ export async function readClaimedRoots(
       .map(([tld, subregistry]) => ({ tld, subregistry, typed: true })),
   ];
   const pc = createPublicClient({ chain: CHAIN, transport: http(DEFAULT_RPC_URL) });
-  const out: Array<{ tld: string; node: Hex; name: string | null; typed: boolean }> = [];
+  const out: Array<{ tld: string; node: Hex; name: string | null; typed: boolean; expired?: boolean; viaRoot?: boolean }> = [];
+  const nameOf = async (node: Hex): Promise<string | null> => {
+    try { return ((await pc.readContract({ address: CONTRACTS.agentNameUniversalResolver, abi: RESOLVER_NAMEOF_ABI, functionName: 'nameOf', args: [node] })) as string) || null; }
+    catch { return null; /* the claim is the fact; the label is a nicety */ }
+  };
   await Promise.all(roots.map(async (r) => {
     let node: Hex;
     try {
@@ -424,12 +431,21 @@ export async function readClaimedRoots(
       return; // a root this deployment lists but cannot read is reported as unclaimed, never as claimed
     }
     if (!node || BigInt(node) === 0n) return;
-    let name: string | null = null;
-    try {
-      name = (await pc.readContract({ address: CONTRACTS.agentNameUniversalResolver, abi: RESOLVER_NAMEOF_ABI, functionName: 'nameOf', args: [node] })) as string;
-    } catch { /* the claim is the fact; the label is a nicety */ }
-    out.push({ tld: r.tld, node, name: name || null, typed: r.typed });
+    // A claim whose record no longer EXISTS (expired — the registry's one release, the parent's act) still blocks this
+    // root for the agent (`claimedBy` is write-once) but is not a name it holds: it resolves nobody. Say so, never
+    // "(unreadable label)".
+    const exists = await pc.readContract({ address: CONTRACTS.agentNameRegistry, abi: REGISTRY_EXISTS_ABI, functionName: 'recordExists', args: [node] }).catch(() => true);
+    out.push({ tld: r.tld, node, name: exists ? await nameOf(node) : null, typed: r.typed, ...(exists ? {} : { expired: true }) });
   }));
+  // A name REGISTERED to this agent by the root's owner (never claimed through a subregistry) is held all the same —
+  // the one it presents is the case that matters, so that name is listed when no claim accounts for it.
+  try {
+    const primary = (await pc.readContract({ address: CONTRACTS.agentNameRegistry, abi: PRIMARY_NAME_ABI, functionName: 'primaryName', args: [agent] })) as Hex;
+    if (primary && BigInt(primary) !== 0n && !out.some((o) => o.node.toLowerCase() === primary.toLowerCase())) {
+      const name = await nameOf(primary);
+      if (name) out.push({ tld: name.split('.').pop() ?? '', node: primary, name, typed: true, viaRoot: true });
+    }
+  } catch { /* the presented name is read again by readPrimaryNameNode; nothing is lost */ }
   return out.sort((a, b) => a.tld.localeCompare(b.tld));
 }
 

@@ -120,7 +120,17 @@ export function ChangeNameCard({
             return (
               <div key={r.node} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '.6rem', flexWrap: 'wrap', padding: '.4rem 0', borderTop: '1px solid var(--color-border, #e2e8f0)' }}>
                 <div>
-                  <span style={mono as React.CSSProperties}>{r.name ?? `(unreadable label) .${r.tld}`}</span>
+                  <span style={mono as React.CSSProperties}>{r.name ?? (r.expired ? `an earlier .${r.tld} claim` : `(unreadable label) .${r.tld}`)}</span>
+                  {r.expired && (
+                    <span style={{ ...mutedText, fontSize: '.72rem', marginLeft: '.45rem' }}>
+                      expired — it resolves nobody and cannot be presented; the root still counts it as this agent’s one claim
+                    </span>
+                  )}
+                  {r.viaRoot && (
+                    <span style={{ ...mutedText, fontSize: '.72rem', marginLeft: '.45rem' }}>
+                      registered to this agent by the root’s owner
+                    </span>
+                  )}
                   {!r.typed && (
                     <span style={{ ...mutedText, fontSize: '.72rem', marginLeft: '.45rem' }}>
                       legacy suffix — carries no agent type
@@ -129,7 +139,7 @@ export function ChangeNameCard({
                 </div>
                 {isPrimary ? (
                   <span style={{ fontSize: '.75rem', color: 'var(--color-sage-600, #047857)' }}>● presented now</span>
-                ) : (
+                ) : r.expired ? null : (
                   <BusyButton busy={busy === `present:${r.node}`} busyLabel="Switching…" style={btnSty} onClick={() => void present(r.node)}>
                     Present this one
                   </BusyButton>

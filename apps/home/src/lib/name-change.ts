@@ -17,6 +17,10 @@ export interface HeldRoot {
   name: string | null;
   /** false = the legacy untyped parent, which states no agent type (spec 346). */
   typed: boolean;
+  /** The claim's record has expired: it resolves nobody and cannot be presented, but the root stays claimed. */
+  expired?: boolean;
+  /** Registered to the agent by the root's owner rather than claimed through the subregistry. */
+  viaRoot?: boolean;
 }
 
 /** The suffix this agent may still claim: the one its TYPE entitles it to, if unused. `null` otherwise.
@@ -42,5 +46,5 @@ export function isPresented(node: `0x${string}`, primary: `0x${string}` | null):
 /** Whether clearing the public name would take away a name the agent could not get back by presenting
  *  something else — i.e. it holds exactly this one. Used to word the confirmation honestly. */
 export function clearingLeavesNoName(held: readonly HeldRoot[]): boolean {
-  return held.length <= 1;
+  return held.filter((h) => !h.expired).length <= 1;
 }
