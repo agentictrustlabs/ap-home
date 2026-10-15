@@ -14,16 +14,24 @@ export interface AppWorkspace {
   readonly listingHref: string;
 }
 
-export const APP_WORKSPACES: readonly AppWorkspace[] = [
-  {
-    id: 'gather27',
-    name: 'Gather27',
-    clientId: 'gather-app',
-    blurb: 'Membership organizations that host a gathering. Invite → Home connect → host org → event in that org’s vault.',
-    appHref: 'https://gather27-web.richardpedersen3.workers.dev/',
-    listingHref: 'https://gather27-a2a-production.richardpedersen3.workers.dev',
-  },
-];
+// Gather27's addresses come from the deployment (the same variables the gather-app client reads);
+// the workers.dev defaults were deleted 2026-10-15. A deployment that names neither lists nothing.
+const GATHER_APP = (process.env.NEXT_PUBLIC_GATHER_ORIGINS ?? process.env.NEXT_PUBLIC_GATHER_ORIGIN ?? '').split(',')[0]?.trim() ?? '';
+const GATHER_A2A = process.env.NEXT_PUBLIC_GATHER_A2A_BASE ?? '';
+
+export const APP_WORKSPACES: readonly AppWorkspace[] =
+  GATHER_APP && GATHER_A2A
+    ? [
+        {
+          id: 'gather27',
+          name: 'Gather27',
+          clientId: 'gather-app',
+          blurb: 'Membership organizations that host a gathering. Invite → Home connect → host org → event in that org’s vault.',
+          appHref: GATHER_APP,
+          listingHref: GATHER_A2A,
+        },
+      ]
+    : [];
 
 export function workspaceById(id: string): AppWorkspace | undefined {
   return APP_WORKSPACES.find((w) => w.id === id);

@@ -401,22 +401,19 @@ const faithImpact: WhiteLabelConfig = {
         // FIRST on purpose, and the HOST surface first within the list: several consumers take the
         // first https URI as the app's canonical address — the org-invite return URL
         // (server/connect/org-invite-lookup.ts) and the front-channel sign-out hop. Those must reach
-        // the faithnet host surface, not the workers.dev deployment below and not the ops console.
-        // Same reasoning as field-app above.
+        // the host surface, not the ops console. Same reasoning as field-app above.
+        // The workers.dev and churchglobal deployments were deleted 2026-10-15; Gather runs on
+        // gccommons.app and reaches this list only through the variables above.
         ...gatherSurfaceOrigins(process.env.NEXT_PUBLIC_GATHER_ORIGINS, process.env.NEXT_PUBLIC_GATHER_ORIGIN),
-        'https://gather27-web.richardpedersen3.workers.dev/',
         'http://localhost:5175/',
         'http://127.0.0.1:5175/',
-        // churchglobalgather27 — sibling fork of gather27-web/gather27-a2a sharing this same Home
-        // (faithnet.me) for its connect flow. Fixed, known URL; present on every deploy, same as the
-        // two production defaults above.
-        'https://gather27-web-churchglobal.richardpedersen3.workers.dev/',
       ],
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create', 'service-agent-wire'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
-      // Where the service-agent-wire ceremony talks to gather27-a2a.
-      serviceAgentConfig: { a2aBase: process.env.NEXT_PUBLIC_GATHER_A2A_BASE || 'https://gather27-a2a-production.richardpedersen3.workers.dev' },
+      // Where the service-agent-wire ceremony talks to gather27-a2a. Only when the deployment names
+      // one — the old workers.dev default was deleted 2026-10-15, and an unset base refuses honestly.
+      ...(process.env.NEXT_PUBLIC_GATHER_A2A_BASE ? { serviceAgentConfig: { a2aBase: process.env.NEXT_PUBLIC_GATHER_A2A_BASE } } : {}),
       // Each host org grants the WORKSPACE a read of its own listing record at connect time: the
       // workspace roster reads listings in place, never copies them (org_read_grant — see schema).
       org_read_grant: {

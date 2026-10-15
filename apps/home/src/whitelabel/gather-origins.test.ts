@@ -99,12 +99,7 @@ describe('the gather-app registry', () => {
 
   it('BLAST RADIUS: with neither variable set, production gains no origin', async () => {
     const { gather, isAllowedRelyingOrigin } = await registryWith({});
-    expect(gather.redirect_uris).toEqual([
-      'https://gather27-web.richardpedersen3.workers.dev/',
-      'http://localhost:5175/',
-      'http://127.0.0.1:5175/',
-      'https://gather27-web-churchglobal.richardpedersen3.workers.dev/',
-    ]);
+    expect(gather.redirect_uris).toEqual(['http://localhost:5175/', 'http://127.0.0.1:5175/']);
     for (const uri of [HOST, OPS, FIND]) {
       expect(isAllowedRelyingOrigin(uri), `${uri} must NOT be allowed`).toBe(false);
     }
