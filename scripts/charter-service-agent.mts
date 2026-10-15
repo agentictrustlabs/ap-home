@@ -63,7 +63,9 @@ if (home && by) {
 }
 if (!/^0x[0-9a-fA-F]{64}$/.test(relayKey) || (!homeSign && !/^0x[0-9a-fA-F]{64}$/.test(custodianKey))) { console.error('RELAY_PRIVATE_KEY(_FILE) and a custodian (--home <url> --by <handle>, or --persona <handle>, or CUSTODIAN_PRIVATE_KEY, or CUSTODIAN_KEY_ENV_FILE + CUSTODIAN_KEY_VAR) are required'); process.exit(1); }
 const CHAIN_ID = Number(process.env.CHAIN_ID ?? 34348);
-const ENTRY_POINT = '0xf7855250B3363AB7649B10957d8908A9AFcdD4B5' as Address; const FACTORY = '0x464eEe7518c3c97DA570592481329E0627E9a3B8' as Address;
+// ENTRY_POINT / FACTORY are overridable like the rest: a second chain has its own factory (hopechain 0x73A7B878…), and a
+// charter against faithchain's factory there reverts at getAddressForAgentAccount before it can say why.
+const ENTRY_POINT = (process.env.ENTRY_POINT ?? '0xf7855250B3363AB7649B10957d8908A9AFcdD4B5') as Address; const FACTORY = (process.env.FACTORY ?? '0x464eEe7518c3c97DA570592481329E0627E9a3B8') as Address;
 const PROFILE_RESOLVER = (process.env.PROFILE_RESOLVER ?? '0xB03F7C06ad3274F584AB72794406D639c02A45e1') as Address; const PAYMASTER = (process.env.PAYMASTER ?? '0xbd93fEC6910ffD74F14709188b5a9B6C6965b2a7') as Address;
 const localCustodian = /^0x[0-9a-fA-F]{64}$/.test(custodianKey) ? privateKeyToAccount(custodianKey) : null;
 const custodianAddress = (homeCustodian ?? localCustodian!.address.toLowerCase()) as Address;

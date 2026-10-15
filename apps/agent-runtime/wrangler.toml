@@ -672,7 +672,14 @@ AKCS_INTERACTIONS_KEY_ID = "01a13c7d-c866-7c51-b56c-a933f5a563c3"        # spec 
 FEDERATION_DOORS = '{"ap-federation-door:impact-agent":"https://door.ap-federation.faithnet.io","ap-federation-door:faithnet":"https://door-faithnet.ap-federation.faithnet.io"}'  # spec 439 F3 — the federation doors whose receipts this estate reads (custom domains only)
 CHAIN_ID = "34349"
 AGENT_NAME_PARENTS = "me,impact"
-CONTRACTS_GENERATION = "1"
+# GENERATION 3 (W4, 2026-10-15): hopechain was deployed from the current Deploy.s.sol, so its DigestBindingEnforcer takes
+# (digest, stepNonce) — 64 bytes — and a runtime still speaking generation 1 (32 bytes) sees `BadArgsLength` at
+# redemption and nothing names the cause. The chain's deployment record says `contractsGeneration: 3`; this says so too.
+CONTRACTS_GENERATION = "3"
+# The generation-3 contracts on this chain (deployments-hopechain.json), read by key — several hopechain addresses equal
+# faithchain's for a DIFFERENT contract (its quorumEnforcer is faithchain's mock USDC), so no value here is copied by sight.
+PAYLOAD_CLASSES_ENFORCER = "0x07fA0aE59FdE4B7ce8962d6fE7a1d648ec3DD5CE"
+TREASURY_SPEND_POLICY = "0xC6a4983bC6649f7C46c9E7d83f1Cd7e9078AFc7b"
 ADOPTED_ONTOLOGY_MANIFEST_DIGEST = "0xf64becd4c395e8b7f0d935ca97640a6d4b37fc087ee0073af48f3841ab3361c8"
 # Gemini only, as on faithnet (the live-test rule): a provider failure is an error the person sees, never a
 # quiet hand-off (ADR-0013). GEMINI_API_KEY is a secret.
