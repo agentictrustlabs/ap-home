@@ -13,7 +13,7 @@ import {
   buildSetBytes32AttributeCall,
   buildSetAddressAttributeCall,
   buildSetStringAttributeCall,
-  agentNameAttributeResolverAbi,
+  buildSetStringArrayAttributeCall,
   namehash,
   PREDICATE_ID,
   CONNECTION_KIND_ID,
@@ -1050,19 +1050,8 @@ function buildNameRecordCalls(node: Hex, sa: Address, records: NameClaimRecords)
   // hopechain (Ring 0 AddAccountsPredicate); an unregistered chain reverts the claim loudly (`PredicateNotActive`).
   const caip10 = `eip155:${CHAIN_ID}:${sa.toLowerCase()}`;
   calls.push(buildSetStringAttributeCall({ resolver: CONTRACTS.agentNameResolver, node, predicate: PREDICATE_ID.nativeId, value: caip10 }));
-  calls.push(buildSetAccountsCall(node, [caip10]));
+  calls.push(buildSetStringArrayAttributeCall({ resolver: CONTRACTS.agentNameResolver, node, predicate: PREDICATE_ID.accounts, values: [caip10] }));
   return calls;
-}
-
-/** `atl:accounts` write — the pinned agent-naming encodes the record (`encodeRecords`) but its `buildRecordCalls` does not emit
- *  the array call until the release after 1.0.0-alpha.35 (`buildSetStringArrayAttributeCall`); this is that call, by the
- *  package's own resolver ABI. Delete it and import the builder when the pin moves. */
-function buildSetAccountsCall(node: Hex, accounts: readonly string[]): ContractCall {
-  return {
-    to: CONTRACTS.agentNameResolver,
-    value: 0n,
-    data: encodeFunctionData({ abi: agentNameAttributeResolverAbi, functionName: 'setStringArrayAttribute', args: [node, PREDICATE_ID.accounts, [...accounts]] }),
-  };
 }
 
 function childDiscoveryRecords(base: string, cOpts: CreateChildOpts): NameClaimRecords {
