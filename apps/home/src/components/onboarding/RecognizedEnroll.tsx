@@ -245,7 +245,11 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       // no eligible existing org it auto-creates under that name (no screen); with eligible
       // orgs it offers them — the app naming a new org must not silently mint a duplicate of
       // one the person already stewards. Everything else goes straight to consent.
-      setPhase(enroll.template === 'org-create' && !enroll.existingOrg ? 'choose-org' : 'consent');
+      // An app that decided new-vs-existing on its own screen and named the org (Gather27: skipConsent + org_base)
+      // skips the chooser too — it read the person's organizations again (2 × ~2 s) only to offer the choice the
+      // app already made (2026-10-15 probe).
+      const appDecided = relyingApp?.consent?.orgCreate?.skipConsent === true && Boolean(enroll.orgBase);
+      setPhase(enroll.template === 'org-create' && !enroll.existingOrg && !appDecided ? 'choose-org' : 'consent');
     })();
   }, [enroll, onUnrecognized]);
 

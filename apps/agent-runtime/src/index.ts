@@ -8194,6 +8194,33 @@ app.post('/custody/oidc/name-agent', async (c) => {
  * actions (e.g. givePermission's EIP-712 delegation, future userOps), with no
  * device gesture. Only ever signs for the SA the session proves.
  */
+// Every /custody/oidc/sign asked the chain twice before signing (2026-10-15 probe: ten signs in a Publish, 0.2 s to
+// 2.9 s each). The person SA is a CREATE2 address - factory + custodian + salt fix it forever - so it is
+// remembered for the isolate's life. A YES from isCustodian is remembered for CUSTODY_YES_MS only (a NO never
+// is): a custodian removed on-chain can still be signed for by this isolate for at most that long.
+const personSaMemo = new Map<string, Promise<Address>>();
+function personSaFor(env: Env, cSub: Address): Promise<Address> {
+  const key = `${env.CHAIN_ID}|${env.AGENT_ACCOUNT_FACTORY}|${cSub.toLowerCase()}`;
+  let hit = personSaMemo.get(key);
+  if (!hit) {
+    hit = accountClient(env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n }) as Promise<Address>;
+    hit.catch(() => personSaMemo.delete(key));
+    personSaMemo.set(key, hit);
+  }
+  return hit;
+}
+const CUSTODY_YES_MS = 60_000;
+const custodyYes = new Map<string, number>();
+async function custodiesRecently(env: Env, sender: Address, cSub: Address): Promise<boolean> {
+  const key = `${env.CHAIN_ID}|${sender.toLowerCase()}|${cSub.toLowerCase()}`;
+  const at = custodyYes.get(key);
+  if (at && Date.now() - at < CUSTODY_YES_MS) return true;
+  const yes = await accountClient(env).isCustodian(sender, cSub);
+  if (yes) custodyYes.set(key, Date.now());
+  else custodyYes.delete(key);
+  return yes;
+}
+
 app.post('/custody/oidc/sign', async (c) => {
   const gateCfg = custodyGateConfig(c.env);
   if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
@@ -8214,7 +8241,7 @@ app.post('/custody/oidc/sign', async (c) => {
       auditSink: buildAuditSink(c.env), // G-2: C_sub signatures emit key-custody.sign
       rotation: gate.rotation, // spec 235 §5b: derive the rotation the broker minted
     });
-    const sa = await accountClient(c.env).getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
+    const sa = await personSaFor(c.env, cSub);
     // The session proves control of the person SA (salt 0) — confirm that binding first.
     if (gate.sessionSub.toLowerCase() !== caip10(Number(c.env.CHAIN_ID), sa).toLowerCase()) {
       return c.json({ ok: false, error: 'sa_mismatch' }, 403);
@@ -8224,7 +8251,7 @@ app.post('/custody/oidc/sign', async (c) => {
     // lbsb-treasury, for owner-side subscription collection). The isCustodian check (same gate used by
     // /name-agent-as-the-agent) means a session still can't sign for SAs it doesn't control.
     const isPersonSa = (body.sender as string).toLowerCase() === sa.toLowerCase();
-    if (!isPersonSa && !(await accountClient(c.env).isCustodian(body.sender as Address, cSub))) {
+    if (!isPersonSa && !(await custodiesRecently(c.env, body.sender as Address, cSub))) {
       return c.json({ ok: false, error: 'sender_mismatch', detail: 'requested sender is neither the session SA nor an SA custodied by this session' }, 403);
     }
     const signature = await sign(body.hash);

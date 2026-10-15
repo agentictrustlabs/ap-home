@@ -738,6 +738,46 @@ export async function createOrganization(
           if (!r.ok) console.warn('[org-create] creator interactions plane not enabled:', r.error);
         })
       : Promise.resolve();
+    // The person's OWN records — the founder OrganizationMembership, then the steward relationship that cites its
+    // ids — live on the person's interactions plane and name the organization only by address. They start as soon
+    // as that plane is ready, beside the organization's vault setup below (GC, 2026-10-15: they ran after it, 3.7 s
+    // of a Publish). Best-effort as before: a failure is logged, never fatal.
+    const personRecords = bearer
+      ? ixp
+          .then(() =>
+            writeOrganizationMembership({
+              member: home.address,
+              org: x.childAgent as Address,
+              enrollmentSource: { kind: 'open-enrollment', enrollmentPolicyId: `org-create:${x.childAgent.toLowerCase()}` },
+              memberAcceptanceRef: `org-create:${home.address.toLowerCase()}`,
+              organizationDecisionRef: `org-create-decision:${x.childAgent.toLowerCase()}`,
+              bearer,
+            }),
+          )
+          .then((founderMembership) =>
+            fetch(`/a2a/interactions/${home.address.toLowerCase()}/relationships.merge`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                session: bearer,
+                entry: {
+                  org: x.childAgent.toLowerCase(),
+                  relationship: 'steward',
+                  orgName: x.childName,
+                  ...(x.stewardshipDelegation ? { delegations: [x.stewardshipDelegation] } : {}),
+                  ...(founderMembership
+                    ? {
+                        membershipId: founderMembership.membershipId,
+                        membershipSituationHash: founderMembership.membershipSituationHash,
+                        enrollmentDecisionRef: founderMembership.enrollmentDecisionRef,
+                      }
+                    : {}),
+                },
+              }),
+            }),
+          )
+          .catch((e) => console.warn('[org-create] steward membership/relationship write failed:', e))
+      : Promise.resolve();
     // After the vault is bound, the rest is independent — run it together instead of a long queue.
     await Promise.all([
       activateInboxDeliveryIfNeeded(x.childAgent, via, auth).then((g) => {
@@ -763,39 +803,7 @@ export async function createOrganization(
             body: JSON.stringify({ action: 'create', communityId: x.childAgent.toLowerCase(), title: 'general' }),
           }).catch((e) => console.warn('[org-create] default channel failed:', e))
         : Promise.resolve();
-      await ixp;
-      const founderMembership = await writeOrganizationMembership({
-        member: home.address,
-        org: x.childAgent as Address,
-        enrollmentSource: { kind: 'open-enrollment', enrollmentPolicyId: `org-create:${x.childAgent.toLowerCase()}` },
-        memberAcceptanceRef: `org-create:${home.address.toLowerCase()}`,
-        organizationDecisionRef: `org-create-decision:${x.childAgent.toLowerCase()}`,
-        bearer,
-      });
-      await Promise.all([
-        channel,
-        fetch(`/a2a/interactions/${home.address.toLowerCase()}/relationships.merge`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            session: bearer,
-            entry: {
-              org: x.childAgent.toLowerCase(),
-              relationship: 'steward',
-              orgName: x.childName,
-              ...(x.stewardshipDelegation ? { delegations: [x.stewardshipDelegation] } : {}),
-              ...(founderMembership
-                ? {
-                    membershipId: founderMembership.membershipId,
-                    membershipSituationHash: founderMembership.membershipSituationHash,
-                    enrollmentDecisionRef: founderMembership.enrollmentDecisionRef,
-                  }
-                : {}),
-            },
-          }),
-        }).catch((e) => console.warn('[org-create] steward relationship write failed:', e)),
-        projection,
-      ]);
+      await Promise.all([channel, personRecords, projection]);
     }
   } catch (e) {
     console.warn('[org-create] channel storage not auto-enabled (use Enable on the channels page):', e);
