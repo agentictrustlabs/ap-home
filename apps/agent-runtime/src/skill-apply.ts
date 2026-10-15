@@ -147,16 +147,19 @@ export function skillApplyInvoker(deps: SkillApplyDeps): ToolInvoker {
     // W0 — the record instruction, when the comparison (or the deployment) asked for records and the skill produces classes.
     const specs = deps.recordsFor?.(toolId);
     const recordAsk = specs?.length ? `\n\n---\n\n${recordInstructionOf(specs)}` : '';
-    const withRecords = (answer: string): { answer: string; records?: Array<{ class: string; record: Record<string, unknown> }>; recordError?: string } => {
+    // The ask rides in the USER turn too: placed only after the skill body in the system prompt, Gemini followed it on
+    // some asks and not others (2026-10-15, two of four). The last line of the request is the one a model answers to.
+    const recordNudge = specs?.length ? `\n\n(End with the \`record\` block: ${specs.map((s) => s.label).join(', ')}.)` : '';
+    const withRecords = (answer: string): { answer: string; recordsAsked?: string[]; records?: Array<{ class: string; record: Record<string, unknown> }>; recordError?: string } => {
       if (!specs?.length) return { answer };
       const r = splitRecordBlock(answer);
-      return { answer: r.text, ...(r.records.length ? { records: r.records } : {}), ...(r.error ? { recordError: r.error } : {}) };
+      return { answer: r.text, recordsAsked: specs.map((s) => s.iri), ...(r.records.length ? { records: r.records } : {}), ...(r.error ? { recordError: r.error } : { ...(r.records.length ? {} : { recordError: 'the answer carried no record block' }) }) };
     };
     if (stream) {
       const t0 = Date.now(); let first = false; let lastEmit = 0;
       const text = await stream({
         system: `${APPLY_SYSTEM}\n\n---\n\n${doc.body}\n\n---\n\nWrite the answer itself, as the person will read it — plain text or markdown, nothing around it.${recordAsk}`,
-        messages: [{ role: 'user', content: `${question}${material}` }],
+        messages: [{ role: 'user', content: `${question}${material}${recordNudge}` }],
         maxTokens: args.brief === true ? Math.min(deps.maxTokens ?? DEFAULT_ANSWER_TOKENS, 600) : deps.maxTokens ?? DEFAULT_ANSWER_TOKENS,
         onDelta: (_d, soFar) => {
           const now = Date.now();
@@ -169,7 +172,7 @@ export function skillApplyInvoker(deps: SkillApplyDeps): ToolInvoker {
     }
     const out = await call({
       system: `${APPLY_SYSTEM}\n\n---\n\n${doc.body}${recordAsk}`,
-      messages: [{ role: 'user', content: `${question}${material}` }],
+      messages: [{ role: 'user', content: `${question}${material}${recordNudge}` }],
       tool: { name: 'skill_answer', description: `The answer under ${source.skillId}, as the person will read it.`, input_schema: { type: 'object', properties: { answer: { type: 'string', description: 'The answer, in the person\'s terms, under the skill\'s method' } }, required: ['answer'] } },
       // Spec 418 — an intermediate chain step (`brief`) produces only the artifact the next step consumes: a smaller budget.
       maxTokens: args.brief === true ? Math.min(deps.maxTokens ?? DEFAULT_ANSWER_TOKENS, 600) : deps.maxTokens ?? DEFAULT_ANSWER_TOKENS,
