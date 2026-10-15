@@ -124,6 +124,7 @@ describe('the variant knob is parsed, and anything unknown is refused by name', 
   });
   it('2026-10-02 — chain-proceed is an advertised toggle, on the recorded variant, and a run that took it says so', () => {
     expect(VARIANT_TOGGLES['plan/chain-proceed']).toEqual(['off', 'on']);
+    expect(VARIANT_TOGGLES['skill/record']).toEqual(['off', 'on']);
     const toggles = { 'plan/chain-proceed': 'on' };
     expect(parseVariantRequest({ toggles })).toEqual({ ok: true, variant: { toggles } });
     expect(parseVariantRequest({ toggles: { 'plan/chain-proceed': 'yes' } })).toMatchObject({ ok: false, error: expect.stringMatching(/one of off \| on/) });

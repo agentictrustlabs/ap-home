@@ -154,10 +154,14 @@ export class ExperimentDO {
       // and (W2) the case's OUTCOME GOLD when the submission carried it, so the outcome check scores the expert's plan.
       async ask({ intentId, message, variant, variantName, repeat }) {
         const runRef = `lab-${job.planId}-${variantName}-${intentId}-${repeat}`.replace(/[^A-Za-z0-9._:-]/g, '-').slice(0, 180);
-        const live = variant && typeof variant === 'object' && Object.keys(variant).length === 0;
+        // 2026-10-15 (W4, isolation) — THE EMPTY VARIANT IS STILL SENT. A `{}` arm used to go out with no `variant` at all, so
+        // the ask route ran it as a real turn: it READ the steward's rolling conversation (recalledTurns climbed 3 → 12 across
+        // held-out 7, every case seeing the ones before it) and WROTE the test asks into the steward's own history. Under a
+        // variant — even an empty one, the deployed behaviour with no knob turned — the route neither reads nor keeps the
+        // conversation (`isolatedTurn`), which is what makes a case a fresh context and what the isolation refusal checks.
         const gold = job.outcomeGold?.cases[intentId];
         lastTrace = {};
-        const r = await post('/harness/ask', { session: job.session, addressee: job.addressee, message, ...(live ? {} : { variant }), runRef, ...(gold ? { outcomeGold: gold } : {}) }) as { ok?: boolean; error?: string; refused?: string; reply?: { kind?: string; error?: string; text?: string; plannerTrace?: { selection?: unknown } }; hasProvenance?: { recordType?: string } };
+        const r = await post('/harness/ask', { session: job.session, addressee: job.addressee, message, variant: variant ?? {}, runRef, ...(gold ? { outcomeGold: gold } : {}) }) as { ok?: boolean; error?: string; refused?: string; reply?: { kind?: string; error?: string; text?: string; plannerTrace?: { selection?: unknown } }; hasProvenance?: { recordType?: string } };
         if (r.ok === false || r.error) return { ok: false, error: `${r.refused ? `${r.refused}: ` : ''}${r.error ?? 'the ask failed'}` };
         const said = String(r.reply?.error ?? r.reply?.text ?? '');
         if (r.reply?.kind === 'refused' && /planner_failed:.*HTTP (402|429|5\d\d)/.test(said)) return { ok: false, error: `provider: ${said.slice(0, 160)}` };

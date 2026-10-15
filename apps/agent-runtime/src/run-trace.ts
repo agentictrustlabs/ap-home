@@ -195,6 +195,9 @@ export const VARIANT_TOGGLES: Record<string, readonly string[]> = { 'retrieval/k
   /** Spec 418 D5 — the asker's own records: read from the vault and written before the reply (`vault`, default), or
    *  served from the colo cache with the conversation write landing after the reply (`cached`). */
   'ops/records': ['vault', 'cached'],
+  /** 2026-10-14 ("evals article gap" W0) — an instruction skill's answer ends with its typed record block, written to the
+   *  asker's vault by the record effect (`off`, the control arm; `on`; env `SKILL_RECORD_DEFAULT`). */
+  'skill/record': ['off', 'on'],
   /** Spec 418 — the fast judge's independent samples: `2` ⇒ agreement is the confidence; disagreement asks which. */
   'skill-selection/samples': ['1', '2'],
   /** Spec 418 — a chain's intermediate step: a full answer (default) or only the typed artifact the next step consumes. */
