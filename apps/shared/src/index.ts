@@ -58,7 +58,7 @@ export const APP_ASSESSMENT_SCOPES = ['vault:run.assessment:*'] as const;
  *  (the household precedent): a grant issued before this denies the write `record_scope_denied` until re-issued — found
  *  live, with the answer complete and every class reading absent. A domain whose skills produce records registers its
  *  family HERE and on the runtime's `EFFECT_WRITABLE_RECORDS` (interactions-do.ts); the two lists must agree. */
-export const APP_DOMAIN_RECORD_SCOPES = ['vault:cil-commons.*'] as const;
+export const APP_DOMAIN_RECORD_SCOPES = ['vault:cil-commons.*', 'vault:cil-commons:*'] as const; // both spellings of the rule: the dotted default and the data graph's mapsRecordType form
 
 /** The extension both apps append to the core, as the grant builder takes it — the ONE list. */
 export const INTERACTIONS_APP_SCOPES: ReadonlyArray<RecordScopeSpec> = [

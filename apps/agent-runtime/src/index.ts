@@ -14,7 +14,7 @@ import { rememberTurn, CONVERSATION_RECORD, rememberConfirmation, forgetConfirma
 import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
 import { addUsage, judgeAnswerQuality, judgeOutcomeDelivered, OUTCOME_CHECK_JUDGE, ANSWER_QUALITY_JUDGE, recordOf, runMarks, replayingInvoker, planDigest, traceContextOf, type RunDoorV1, type ModelCallV1, type VariantV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent, type RunBillV1 } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
-import { recordFormOf, rehydrateExecuted } from './artifact-store.js';
+import { recordFormOf, rehydrateExecuted, artifactStoreFor } from './artifact-store.js';
 import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken, advanceTrigger, withPause, withBudget, advanced, declareTrigger, removeTrigger, rebuildDeclaredTriggers } from './triggers.js';
 import { parseRoutineSentence } from './routine-sentence.js';
 import { nudge, emailOf } from './nudges.js';
@@ -3240,11 +3240,21 @@ app.post('/harness/records', async (c) => {
     // read back by the one person entitled to read them. `hydrate: true` returns the steps with their results re-read
     // from the vault (the same doors the resume takes) — the answer, the records it emitted, the skill it ran under —
     // for the asker or the custodian, and nobody else. Words still never enter the evaluation store: this is a read.
-    if ((body as { hydrate?: unknown }).hydrate === true && Array.isArray(shown.steps) && shown.plan) {
+    // EVERY offloaded step, not only the ones a later step's `$ref` reaches (that is the resume's rule, `rehydrateObservations`,
+    // and a transcript wants the chain's first answer as much as its last).
+    if ((body as { hydrate?: unknown }).hydrate === true && Array.isArray(shown.steps)) {
       const deps = harnessDeps(c.env, buildAuditSink(c.env));
-      const hydrated = await rehydrateExecuted({ readSubjectRecord: deps.readSubjectRecord }, { plan: shown.plan as never, completed: shown.steps as never }).catch(() => null);
-      if (hydrated) return c.json({ ok: true, record: { ...shown, steps: hydrated.completed }, hydrated: true });
-      return c.json({ ok: true, record: shown, hydrated: false });
+      const store = artifactStoreFor({ readSubjectRecord: deps.readSubjectRecord });
+      if (!store) return c.json({ ok: true, record: shown, hydrated: false });
+      let failed = 0;
+      const steps = await Promise.all((shown.steps as Array<{ result?: unknown }>).map(async (st) => {
+        const r = st.result as { $artifact?: unknown } | null;
+        if (!r || typeof r !== 'object' || r.$artifact !== 'ap.artifact-ref.v1') return st;
+        const got = await store.get(r as never).catch(() => null);
+        if (!got) { failed++; return st; }
+        return { ...st, result: got.result };
+      }));
+      return c.json({ ok: true, record: { ...shown, steps }, hydrated: failed === 0, ...(failed ? { notHydrated: failed } : {}) });
     }
     return c.json({ ok: true, record: shown });
   }

@@ -420,7 +420,10 @@ const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run
   // as `cardroom.` — a service's output filed in the person's cabinet, never the service's. A domain whose skills produce
   // records registers its family here; without the line the effect fails `declared-effect artifacts only` and the state
   // check reads every class as absent while the answer looked complete (found live, 2026-10-15).
-  'cil-commons.'] as const; // spec 438 §5 — a judgment of a run, signed by its evaluator and verified before it is written, stored BESIDE the run and never as an edit to it // spec 412 W5 — the owner's Library, written by the owner's own agent (library.file.save / visibility / publish) // spec 410 §8 — each party's copy, in its own vault // spec 410 §1.2 — a wire re-issued for a rotation, in the delegator's own vault
+  // …in BOTH spellings the one record-type rule can produce: the dotted default (`cil-commons.incident-playbook`) and the
+  // domain's own `skills:mapsRecordType` for a class the data graph already holds examples of (`cil-commons:deploymentinventory`,
+  // the loader's form) — the first chain run wrote its scores and lost its inventory on the colon (2026-10-15).
+  'cil-commons.', 'cil-commons:'] as const; // spec 438 §5 — a judgment of a run, signed by its evaluator and verified before it is written, stored BESIDE the run and never as an edit to it // spec 412 W5 — the owner's Library, written by the owner's own agent (library.file.save / visibility / publish) // spec 410 §8 — each party's copy, in its own vault // spec 410 §1.2 — a wire re-issued for a rotation, in the delegator's own vault
 
 const CAPABILITY_RECORDS = new Set(['impact-profile', 'capabilities.data', 'skills.data', 'home.manifest', 'control-events.data', 'archetype.assignment',
   // spec 422 §9.3 — the person's Security section: credential labels + the channels that open the home. Hers to write.
