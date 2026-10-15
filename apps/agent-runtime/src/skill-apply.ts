@@ -102,7 +102,9 @@ export function recordInstructionOf(specs: ReadonlyArray<{ iri: string; label: s
 /** The record block off the end of an answer: the prose without it, and the records (one per `@type`). An unparsable
  *  block is reported, never silently dropped — the answer keeps its text either way. */
 export function splitRecordBlock(answer: string): { text: string; records: Array<{ class: string; record: Record<string, unknown> }>; error?: string } {
-  const m = /\n?```record\s*\n([\s\S]*?)\n```\s*$/.exec(answer);
+  // The fenced block the instruction asks for — or, as a structured (tool-call) answer tends to come back (Gemini,
+  // 2026-10-15), the same JSON array BARE at the end of the answer after a rule or a blank line: the record is the record.
+  const m = /\n?```record\s*\n([\s\S]*?)\n```\s*$/.exec(answer) ?? /\n(?:---\n)?(\[\s*\{\s*"@type"[\s\S]*\])\s*$/.exec(answer);
   if (!m) {
     // 2026-10-15 — an opened fence with no close is an answer that hit its token cap (or a gateway's) before the record
     // landed: say so, so the state check's "no record" has a cause and the run's failure reads `environment`, not `agent`.

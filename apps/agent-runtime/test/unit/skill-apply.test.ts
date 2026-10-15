@@ -74,6 +74,12 @@ describe('skill.apply — records', () => {
     expect(t).toContain('END YOUR ANSWER WITH ITS RECORD');
     expect(t).toContain('- Governance Scorecard — "@type": "https://skills.demo/cil-commons#GovernanceScorecard"; required: resultOf, scorecardDatum; optional: note');
   });
+  it('takes a bare JSON array of typed records at the end of the answer (a structured answer drops the fence)', () => {
+    const r = splitRecordBlock('## 7. Statement\nSelf-assessed.\n\n---\n[{"@type": "https://skills.demo/cil-commons#NistCrosswalk", "crosswalkfrom": "Intake eligibility scorer"}]');
+    expect(r.records.map((x) => x.class)).toEqual(['https://skills.demo/cil-commons#NistCrosswalk']);
+    expect(r.text).toBe('## 7. Statement\nSelf-assessed.');
+    expect(r.error).toBeUndefined();
+  });
   it('names a record block that was cut off before it closed (the answer hit its cap)', () => {
     const r = splitRecordBlock('The playbook.\n\n```record\n[{"@type": "https://skills.demo/cil-commons#IncidentPlaybook", "label": "Pl');
     expect(r.records).toEqual([]);
