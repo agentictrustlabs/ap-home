@@ -8152,7 +8152,12 @@ function custodyGateConfig(env: Env): { jwksUrl: string; expectedIss: (iss: stri
 async function assertSubjectSaStable(env: Env, iss: string, sub: string, agent: string): Promise<string | null> {
   if (!env.SUBJECT_SA_MAP) return null; // inert until the KV namespace is provisioned
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${iss} ${sub}`));
-  const key = `oidc-sa:${[...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+  // KEYED BY CHAIN (W4, 2026-10-15). A Smart Agent is CREATE2 over the chain's factory and the custodian, so the same
+  // custodian derives a DIFFERENT account on another chain. When impact-agent moved to hopechain, every social-login
+  // resident's recorded account (from faithchain) stopped matching the derived one, and this check called it a rotated
+  // root — "signing in again cannot fix it" — for people whose root never changed. The record is per chain now: a move
+  // records a new account on the new chain; a rotated root on the SAME chain is still refused, which is what D-P0-1 guards.
+  const key = `oidc-sa:${env.CHAIN_ID}:${[...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
   const prior = await env.SUBJECT_SA_MAP.get(key);
   if (prior && prior.toLowerCase() !== agent.toLowerCase()) {
     return `this identity previously resolved to Smart Agent ${prior} but now derives ${agent}: the custody-derivation root (A2A_CUSTODY_ROOT_KEY) changed. It must NEVER rotate (D-P0-1) — refusing to route to a new, empty account.`;
