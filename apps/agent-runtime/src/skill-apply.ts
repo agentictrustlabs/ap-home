@@ -109,7 +109,9 @@ export const DEFAULT_ANSWER_TOKENS = 4000;
 export function splitRecordBlock(answer: string): { text: string; records: Array<{ class: string; record: Record<string, unknown> }>; error?: string } {
   // The fenced block the instruction asks for — or, as a structured (tool-call) answer tends to come back (Gemini,
   // 2026-10-15), the same JSON array BARE at the end of the answer after a rule or a blank line: the record is the record.
-  const m = /\n?```record\s*\n([\s\S]*?)\n```\s*$/.exec(answer) ?? /\n(?:---\n)?(\[\s*\{\s*"@type"[\s\S]*\])\s*$/.exec(answer);
+  // …or fenced under any tag (`json`, none): Gemini wrote ```json around the array one ask in two (2026-10-15). The content
+  // decides — a JSON array of `@type` objects at the end of the answer is the record block whatever the fence says.
+  const m = /\n?```(?:record|json|jsonc|)\s*\n(\s*\[[\s\S]*?\])\s*\n```\s*$/.exec(answer) ?? /\n(?:---\n)?(\[\s*\{\s*"@type"[\s\S]*\])\s*$/.exec(answer);
   if (!m) {
     // 2026-10-15 — an opened fence with no close is an answer that hit its token cap (or a gateway's) before the record
     // landed: say so, so the state check's "no record" has a cause and the run's failure reads `environment`, not `agent`.

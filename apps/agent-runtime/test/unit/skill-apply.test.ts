@@ -74,6 +74,11 @@ describe('skill.apply — records', () => {
     expect(t).toContain('END YOUR ANSWER WITH ITS RECORD');
     expect(t).toContain('- Governance Scorecard — "@type": "https://skills.demo/cil-commons#GovernanceScorecard"; required: resultOf, scorecardDatum; optional: note');
   });
+  it('takes the array under a ```json fence too — the content is the record, not the tag', () => {
+    const r = splitRecordBlock('Prose.\n\n---\n\n```json\n[\n  {\n    "@type": "https://skills.demo/cil-commons#NistCrosswalk",\n    "crosswalkFrom": "Intake Eligibility Scorer"\n  }\n]\n```');
+    expect(r.records.map((x) => x.class)).toEqual(['https://skills.demo/cil-commons#NistCrosswalk']);
+    expect(r.text).toBe('Prose.\n\n---');
+  });
   it('takes a bare JSON array of typed records at the end of the answer (a structured answer drops the fence)', () => {
     const r = splitRecordBlock('## 7. Statement\nSelf-assessed.\n\n---\n[{"@type": "https://skills.demo/cil-commons#NistCrosswalk", "crosswalkfrom": "Intake eligibility scorer"}]');
     expect(r.records.map((x) => x.class)).toEqual(['https://skills.demo/cil-commons#NistCrosswalk']);
