@@ -14,7 +14,7 @@
 export interface ShapeFieldV1 { name: string; path: string; minCount?: number; maxCount?: number; datatype?: string; class?: string; vocabulary?: string; allowed?: string[]; pattern?: string; minLength?: number }
 export interface DomainShapeV1 { class: string; label: string; comment?: string; fields: ShapeFieldV1[] }
 
-export interface ClassCheckV1 { exists: boolean; valid: boolean; errors: string[]; /** W5 — the required evidence edges this record lacks (`supportedBy` / `optionCites`). */ uncited?: number }
+export interface ClassCheckV1 { exists: boolean; valid: boolean; errors: string[]; /** W5 — the required evidence edges this record lacks (`supportedBy` / `optionCites`). */ uncited?: number; /** An alternative output this class's group was satisfied by instead (the record of THAT class exists and validates). */ satisfiedBy?: string }
 export interface StateCheckV1 { pass: boolean; classes: Record<string, ClassCheckV1>; /** Expected classes the definition has no shape for — checked for existence only, and said. */ unshaped: string[] }
 
 /** THE RECORD TYPE OF A PRODUCED CLASS — one rule, used by the effect sink that writes it and the check that reads it.
@@ -52,7 +52,9 @@ export function validateRecord(record: unknown, shape: DomainShapeV1): { valid: 
     for (const v of vals) {
       const s = typeof v === 'string' ? v : typeof v === 'number' || typeof v === 'boolean' ? String(v) : null;
       if (f.allowed?.length && s !== null && !f.allowed.includes(s)) errors.push(`"${f.name}"=${JSON.stringify(s)} is not one of ${f.allowed.join(', ')}`);
-      if (f.class && s !== null && !IRIISH.test(s) && !(typeof v === 'object')) errors.push(`"${f.name}"=${JSON.stringify(s)} must reference a ${f.class.split(/[#/]/).pop()}`);
+      // A reference is an IRI, an object, or the referenced artifact's LABEL — the flat record names its parts by label
+      // (the record instruction and the bodies' record section both say so, 2026-10-15); only a blank fails.
+      if (f.class && s !== null && typeof v !== 'object' && !s.trim()) errors.push(`"${f.name}" must reference a ${f.class.split(/[#/]/).pop()} (an IRI or its label)`);
       if (f.pattern && s !== null && !new RegExp(f.pattern).test(s)) errors.push(`"${f.name}" does not match ${f.pattern}`);
       if (f.minLength !== undefined && s !== null && s.length < f.minLength) errors.push(`"${f.name}" is shorter than ${f.minLength}`);
     }
@@ -61,7 +63,7 @@ export function validateRecord(record: unknown, shape: DomainShapeV1): { valid: 
 }
 
 /** The whole check: for each expected class, the record read (or null), validated against its shape when there is one. */
-export function stateCheckOf(expected: ReadonlyArray<{ iri: string }>, records: Record<string, unknown>, shapes: ReadonlyArray<DomainShapeV1>): StateCheckV1 {
+export function stateCheckOf(expected: ReadonlyArray<{ iri: string; alternative?: string }>, records: Record<string, unknown>, shapes: ReadonlyArray<DomainShapeV1>): StateCheckV1 {
   const classes: Record<string, ClassCheckV1> = {};
   const unshaped: string[] = [];
   for (const e of expected) {
@@ -73,7 +75,18 @@ export function stateCheckOf(expected: ReadonlyArray<{ iri: string }>, records: 
     const v = validateRecord(rec, shape);
     classes[e.iri] = { exists: true, valid: v.valid, errors: v.errors, ...(v.uncited ? { uncited: v.uncited } : {}) };
   }
-  return { pass: Object.values(classes).every((c) => c.exists && c.valid), classes, unshaped };
+  // ALTERNATIVE OUTPUTS (spec 418, `skills:alternativeGroup`): a drafter delivers a Letter of Inquiry OR a Grant Proposal. A
+  // group is satisfied by any one member that exists and validates; the others are then not failures — they are said
+  // (`satisfiedBy`), and the group fails only when no member is there. Found live 2026-10-15: every grant case read
+  // "GrantProposal absent" beside a valid LOI.
+  const groups = new Map<string, string[]>();
+  for (const e of expected) if (e.alternative) groups.set(e.alternative, [...(groups.get(e.alternative) ?? []), e.iri]);
+  for (const members of groups.values()) {
+    const winner = members.find((m) => classes[m]?.exists && classes[m]?.valid);
+    if (!winner) continue;
+    for (const m of members) if (m !== winner && classes[m] && !(classes[m]!.exists && classes[m]!.valid)) classes[m] = { ...classes[m]!, valid: true, errors: [], satisfiedBy: winner };
+  }
+  return { pass: Object.values(classes).every((c) => (c.exists && c.valid) || c.satisfiedBy), classes, unshaped };
 }
 
 /** The shape's fields split the way the judge wants them: required (`minCount ≥ 1`, label excepted) and the rest. */
