@@ -5903,9 +5903,9 @@ step is then handed to that agent under authority the person grants; leave it ou
   // Spec 418 A1 — stream the answer (`answer/stream` on, or the deployment's ANSWER_STREAM_DEFAULT); never for the
   // side-by-side's second answer. Drafts go to the progress stream; the first words' time goes on the trace.
   const streamOn = ((input.variant?.toggles?.['answer/stream'] ?? ((env as { ANSWER_STREAM_DEFAULT?: string }).ANSWER_STREAM_DEFAULT?.trim() || 'off')) === 'on');
-  // 2026-10-15 — THE RECORD NEEDS ROOM. The answer's default cap (1400 tokens) is what a CIL document already fills; with
-  // `skill/record: on` the record block comes LAST and was the first thing cut. The record arm gets a larger cap.
-  const applyWith = (tier: AnswerTier, recorded: boolean) => skillApplyInvoker({ call: undefined, ...(recordsOn ? { maxTokens: 2400 } : {}), callFor: (stepRef) => structuredCallFor(env as never, answerProvider, { ...(recorded ? { onCall: recordStructured('structured', stepRef) } : {}), ...(tier !== 'default' ? { tier } : {}) }),
+  // 2026-10-15 — THE RECORD NEEDS ROOM. The answer's default cap (DEFAULT_ANSWER_TOKENS) is what a CIL document fills; with
+  // `skill/record: on` the record block comes LAST and was the first thing cut. The record arm gets 800 tokens more.
+  const applyWith = (tier: AnswerTier, recorded: boolean) => skillApplyInvoker({ call: undefined, ...(recordsOn ? { maxTokens: 4800 } : {}), callFor: (stepRef) => structuredCallFor(env as never, answerProvider, { ...(recorded ? { onCall: recordStructured('structured', stepRef) } : {}), ...(tier !== 'default' ? { tier } : {}) }),
     ...(streamOn && recorded ? {
       streamFor: (stepRef: string) => textStreamFor(env as never, answerProvider, { onCall: recordStructured('structured', stepRef), ...(tier !== 'default' ? { tier } : {}) }),
       onDraft: (stepRef: string, draft: string) => input.onProgress?.({ type: 'AnswerDraft', stepRef, said: 'Writing the answer…', draft: draft.slice(-6000) }),

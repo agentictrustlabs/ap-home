@@ -101,6 +101,11 @@ export function recordInstructionOf(specs: ReadonlyArray<{ iri: string; label: s
 
 /** The record block off the end of an answer: the prose without it, and the records (one per `@type`). An unparsable
  *  block is reported, never silently dropped — the answer keeps its text either way. */
+/** The instruction answer's output budget. 1400 ended a CIL document mid-sentence (`finish_reason: length`, 2026-10-15 —
+ *  on Gemini 3.5 the model's thinking spends the same budget, so 1400 bought 2.6k characters); a complete crosswalk or
+ *  playbook is 4–5k characters, and the record block rides after it. `brief` (an intermediate chain step) stays at 600. */
+export const DEFAULT_ANSWER_TOKENS = 4000;
+
 export function splitRecordBlock(answer: string): { text: string; records: Array<{ class: string; record: Record<string, unknown> }>; error?: string } {
   // The fenced block the instruction asks for — or, as a structured (tool-call) answer tends to come back (Gemini,
   // 2026-10-15), the same JSON array BARE at the end of the answer after a rule or a blank line: the record is the record.
@@ -152,7 +157,7 @@ export function skillApplyInvoker(deps: SkillApplyDeps): ToolInvoker {
       const text = await stream({
         system: `${APPLY_SYSTEM}\n\n---\n\n${doc.body}\n\n---\n\nWrite the answer itself, as the person will read it — plain text or markdown, nothing around it.${recordAsk}`,
         messages: [{ role: 'user', content: `${question}${material}` }],
-        maxTokens: args.brief === true ? Math.min(deps.maxTokens ?? 1400, 600) : deps.maxTokens ?? 1400,
+        maxTokens: args.brief === true ? Math.min(deps.maxTokens ?? DEFAULT_ANSWER_TOKENS, 600) : deps.maxTokens ?? DEFAULT_ANSWER_TOKENS,
         onDelta: (_d, soFar) => {
           const now = Date.now();
           if (!first) { first = true; deps.onFirstWords?.(stepRef, now - t0); }
@@ -167,7 +172,7 @@ export function skillApplyInvoker(deps: SkillApplyDeps): ToolInvoker {
       messages: [{ role: 'user', content: `${question}${material}` }],
       tool: { name: 'skill_answer', description: `The answer under ${source.skillId}, as the person will read it.`, input_schema: { type: 'object', properties: { answer: { type: 'string', description: 'The answer, in the person\'s terms, under the skill\'s method' } }, required: ['answer'] } },
       // Spec 418 — an intermediate chain step (`brief`) produces only the artifact the next step consumes: a smaller budget.
-      maxTokens: args.brief === true ? Math.min(deps.maxTokens ?? 1400, 600) : deps.maxTokens ?? 1400,
+      maxTokens: args.brief === true ? Math.min(deps.maxTokens ?? DEFAULT_ANSWER_TOKENS, 600) : deps.maxTokens ?? DEFAULT_ANSWER_TOKENS,
     });
     const answer = typeof out['answer'] === 'string' ? out['answer'].trim() : '';
     if (!answer) return { refused: `the model returned no answer under ${source.skillId}` };
