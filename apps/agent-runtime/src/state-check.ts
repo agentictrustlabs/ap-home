@@ -14,7 +14,7 @@
 export interface ShapeFieldV1 { name: string; path: string; minCount?: number; maxCount?: number; datatype?: string; class?: string; vocabulary?: string; allowed?: string[]; pattern?: string; minLength?: number }
 export interface DomainShapeV1 { class: string; label: string; comment?: string; fields: ShapeFieldV1[] }
 
-export interface ClassCheckV1 { exists: boolean; valid: boolean; errors: string[]; /** W5 — the required evidence edges this record lacks (`supportedBy` / `optionCites`). */ uncited?: number; /** An alternative output this class's group was satisfied by instead (the record of THAT class exists and validates). */ satisfiedBy?: string }
+export interface ClassCheckV1 { exists: boolean; valid: boolean; errors: string[]; /** W5 — the required evidence edges this record lacks (`supportedBy` / `optionCites`). */ uncited?: number; /** An alternative output this class's group was satisfied by instead (the record of THAT class exists and validates). */ satisfiedBy?: string; /** The record read back was written by an EARLIER run (its runRef) — read as absent. */ stale?: string }
 export interface StateCheckV1 { pass: boolean; classes: Record<string, ClassCheckV1>; /** Expected classes the definition has no shape for — checked for existence only, and said. */ unshaped: string[] }
 
 /** THE RECORD TYPE OF A PRODUCED CLASS — one rule, used by the effect sink that writes it and the check that reads it.

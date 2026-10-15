@@ -5741,14 +5741,21 @@ app.post('/harness/ask', async (c) => {
     if (outcomeGold && reply?.kind === 'answer' && askDeps.readSubjectRecord) {
       const classes = goldExpected.filter((x) => !x.kind || x.kind === 'delivered');
       if (classes.length) {
-        const records: Record<string, unknown> = {}; const recordTypes: Record<string, string> = {};
+        const records: Record<string, unknown> = {}; const recordTypes: Record<string, string> = {}; const stale: Record<string, string> = {};
         const asker = String(who.sa).toLowerCase();
         for (const x of classes) {
           const rt = recordTypeOfClass(x.iri, goldPlaybook?.domainRecords);
           recordTypes[x.iri] = rt;
-          records[x.iri] = await askDeps.readSubjectRecord(asker, rt).catch(() => null);
+          const rec = await askDeps.readSubjectRecord(asker, rt).catch(() => null) as { runRef?: unknown } | null;
+          // THIS RUN'S record, not the last run's. The vault holds one record per type per asker, so the record a case left
+          // on an earlier run is still there when the next run of the same case leaves none — and the check read it as this
+          // run's (ol-smoke-records-1: an intake question "passed" on the LOI a previous run had written). A record stamped
+          // with another runRef is stale: read as absent, and said.
+          if (rec && typeof rec.runRef === 'string' && rec.runRef !== runRef) { stale[x.iri] = rec.runRef; records[x.iri] = null; }
+          else records[x.iri] = rec;
         }
         const sc = stateCheckOf(classes, records, domainShapes);
+        for (const [iri, from] of Object.entries(stale)) if (sc.classes[iri]) sc.classes[iri] = { ...sc.classes[iri]!, errors: [`the record in the vault is from an earlier run (${from})`], stale: from };
         trace.stateCheck = { ...sc, recordTypes };
       }
     }

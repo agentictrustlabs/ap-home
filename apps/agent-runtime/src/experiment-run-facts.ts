@@ -28,7 +28,7 @@ export type RunRecordPlusV1 = ExperimentRunV1 & {
   isolation?: { refused: true; recalledTurns?: number; contextId?: string; because: string };
   outcome?: { score: number; classes: Record<string, number>; basis?: 'gold-plan' | 'agent-plan'; judge?: string; verdicts?: Record<string, OutcomeVerdictV1>; cantTell?: number; counted?: number };
   outcomeAgentPlan?: { score: number; classes: Record<string, number> };
-  stateCheck?: { pass: boolean; classes: Record<string, { exists: boolean; valid: boolean; errors: string[] }> };
+  stateCheck?: { pass: boolean; classes: Record<string, { exists: boolean; valid: boolean; errors: string[]; /** An alternative output stood in for this class. */ satisfiedBy?: string; /** The record read back belongs to an EARLIER run (its runRef differs) — read as absent. */ stale?: string }> };
 };
 
 /** The declared rule from an error's words to its cause (the package's rule, restated): the grader's own failures first,
@@ -40,7 +40,7 @@ export interface TraceFactsV1 {
   contextId?: string;
   outcomeCheck?: { score?: number; classes?: Record<string, number>; error?: string; basis?: string; judge?: string; judgeModel?: string; verdicts?: Record<string, string>; cantTell?: number; counted?: number; skipped?: string };
   outcomeCheckAgentPlan?: { score?: number; classes?: Record<string, number>; error?: string };
-  stateCheck?: { pass?: boolean; classes?: Record<string, { exists?: boolean; valid?: boolean; errors?: string[] }> };
+  stateCheck?: { pass?: boolean; classes?: Record<string, { exists?: boolean; valid?: boolean; errors?: string[]; satisfiedBy?: string; stale?: string }> };
 }
 
 /** The facts off a planner trace, tolerant of absence (an older build's trace carries none). */
@@ -90,7 +90,7 @@ export function enrichRun(run: ExperimentRunV1, facts: TraceFactsV1, seen: strin
   if (oa && typeof oa.score === 'number' && !oa.error) r.outcomeAgentPlan ??= { score: oa.score, classes: numbers(oa.classes) };
   const sc = facts.stateCheck;
   if (sc && typeof sc.pass === 'boolean' && sc.classes && typeof sc.classes === 'object') {
-    r.stateCheck ??= { pass: sc.pass, classes: Object.fromEntries(Object.entries(sc.classes).map(([k, v]) => [k, { exists: v?.exists === true, valid: v?.valid === true, errors: Array.isArray(v?.errors) ? v.errors.map(String).slice(0, 20) : [] }])) };
+    r.stateCheck ??= { pass: sc.pass, classes: Object.fromEntries(Object.entries(sc.classes).map(([k, v]) => [k, { exists: v?.exists === true, valid: v?.valid === true, errors: Array.isArray(v?.errors) ? v.errors.map(String).slice(0, 20) : [], ...(typeof v?.satisfiedBy === 'string' ? { satisfiedBy: v.satisfiedBy } : {}), ...(typeof v?.stale === 'string' ? { stale: v.stale } : {}) }])) };
   }
   return r;
 }
