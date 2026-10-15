@@ -55,7 +55,7 @@ import { knownRelyingClient } from '../../lib/relying-clients';
 import { agentClassOf } from '../../lib/agent-class';
 import { withMissionRegistry } from '../../lib/mission-registry';
 import { profileForConnect } from '../../lib/connect-profile-name';
-import { clientLoader, clientOrgName, clientProgressText, hidesIdentifiers, signedInLabel, switchAccountLabel, withClientConsent } from '../../whitelabel/client-consent';
+import { clientErrorText, clientLoader, clientOrgName, clientProgressText, hidesIdentifiers, signedInLabel, switchAccountLabel, withClientConsent } from '../../whitelabel/client-consent';
 import { verifiedEmailFor } from '../../lib/verified-email';
 
 /** The kinds of agent that ARE an organization holding its own members — where a team-scoped role can be offered. A
@@ -248,6 +248,17 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       setPhase(enroll.template === 'org-create' && !enroll.existingOrg ? 'choose-org' : 'consent');
     })();
   }, [enroll, onUnrecognized]);
+
+  // Gather27's Publish (consent.orgCreate.skipConsent): no second "Allow", start the org-create as soon as the
+  // consent step is reached — once.
+  const skipOrgConsent = enroll?.template === 'org-create' && relyingApp?.consent?.orgCreate?.skipConsent === true;
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!skipOrgConsent || phase !== 'consent' || autoStarted.current) return;
+    autoStarted.current = true;
+    void onAuthorize();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skipOrgConsent, phase]);
 
   async function onAuthorize() {
     if (!enroll || !home) return;
@@ -1017,8 +1028,10 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
     return (
       <Shell>
         <h1 className="onboarding-h1">Couldn&apos;t finish</h1>
-        <div className="onboarding-error">{error}</div>
-        <button className="btn-primary" onClick={onDecline}>Return to {appName}</button>
+        <div className="onboarding-error">{clientErrorText(relyingApp, error ?? '')}</div>
+        {/* The request is still in the address bar, so a reload runs it again from the Allow screen. */}
+        <button className="btn-primary" data-testid="enroll-retry" onClick={() => window.location.reload()}>Try again</button>
+        <button className={gcidHosted ? 'gcid-link gcid-switch' : 'btn-ghost onboarding-secondary'} onClick={onDecline}>Return to {appName}</button>
       </Shell>
     );
   }
@@ -1041,6 +1054,15 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
   // The coin's consent lines belong to the plain sign-in, where the coin is granted (see the mandate leg).
   // Last: the client's OWN wording for this template, when it registered one (no-op for every other app).
   const tpl = withClientConsent(plainSignIn ? withCurrencyConsent(baseTpl, relyingApp, appName) : baseTpl, relyingApp, enroll.template);
+  // An org-create the client asked to run without a second Allow (consent.orgCreate.skipConsent): the effect
+  // above has already started it; until `granting` paints, show the same loader rather than flash the sheet.
+  if (skipOrgConsent && phase === 'consent' && oneLoader) {
+    return (
+      <Shell>
+        <CeremonyProgress label={oneLoader.label} hint={oneLoader.hint} step={0} total={0} indeterminate />
+      </Shell>
+    );
+  }
   return (
     <div className="onboarding-screen">
       <div className="onboarding-card wide">

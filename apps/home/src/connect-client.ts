@@ -122,7 +122,7 @@ export async function bootstrapWithWallet(
   if (buildRes.status === 409) {
     return { ok: false, error: 'Gas sponsorship is not enabled on the backend (paymaster).' };
   }
-  const built = (await buildRes.json()) as {
+  const built = (await buildRes.json().catch(() => ({}))) as {
     ok?: boolean;
     sender?: Address;
     userOpHash?: Hex;
@@ -141,7 +141,7 @@ export async function bootstrapWithWallet(
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
     body: JSON.stringify({ userOp: { ...built.userOp, signature } }),
   });
-  const submitted = (await submitRes.json()) as {
+  const submitted = (await submitRes.json().catch(() => ({}))) as {
     ok?: boolean;
     deployedAddress?: Address;
     error?: string;
@@ -189,7 +189,7 @@ async function executeCall(
       headers: { 'content-type': 'application/json', ...csrfHeaders() },
       body: JSON.stringify({ sender, callData }),
     });
-    const b = (await buildRes.json()) as {
+    const b = (await buildRes.json().catch(() => ({}))) as {
       ok?: boolean;
       userOpHash?: Hex;
       userOp?: (Record<string, unknown> & { nonce?: string });
@@ -215,7 +215,7 @@ async function executeCall(
       headers: { 'content-type': 'application/json', ...csrfHeaders() },
       body: JSON.stringify({ userOp: { ...b.userOp, signature } }),
     });
-    const submitted = (await submitRes.json()) as { ok?: boolean; transactionHash?: Hex; error?: string; detail?: string };
+    const submitted = (await submitRes.json().catch(() => ({}))) as { ok?: boolean; transactionHash?: Hex; error?: string; detail?: string };
     if (submitRes.ok && submitted.ok) return { ok: true, txHash: submitted.transactionHash };
     lastErr =
       [submitted.error, submitted.detail].filter(Boolean).join(' — ') || `submit-call failed (HTTP ${submitRes.status})`;
@@ -1077,7 +1077,7 @@ export async function bootstrapWithPasskey(
     }),
   });
   if (buildRes.status === 409) return { ok: false, error: 'Gas sponsorship is not enabled on the backend (paymaster).' };
-  const built = (await buildRes.json()) as { ok?: boolean; userOpHash?: Hex; userOp?: Record<string, unknown>; error?: string };
+  const built = (await buildRes.json().catch(() => ({}))) as { ok?: boolean; userOpHash?: Hex; userOp?: Record<string, unknown>; error?: string };
   if (!buildRes.ok || !built.ok || !built.userOpHash || !built.userOp) {
     return { ok: false, error: built.error ?? `deploy build failed (HTTP ${buildRes.status})` };
   }
@@ -1092,7 +1092,7 @@ export async function bootstrapWithPasskey(
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
     body: JSON.stringify({ userOp: { ...built.userOp, signature } }),
   });
-  const submitted = (await submitRes.json()) as {
+  const submitted = (await submitRes.json().catch(() => ({}))) as {
     ok?: boolean;
     deployedAddress?: Address;
     error?: string;
@@ -1125,7 +1125,7 @@ async function deployAgent(
     body: JSON.stringify(deployBody),
   });
   if (buildRes.status === 409) return { ok: false, error: 'paymaster not enabled' };
-  const built = (await buildRes.json()) as { ok?: boolean; userOpHash?: Hex; userOp?: Record<string, unknown>; error?: string };
+  const built = (await buildRes.json().catch(() => ({}))) as { ok?: boolean; userOpHash?: Hex; userOp?: Record<string, unknown>; error?: string };
   if (!buildRes.ok || !built.ok || !built.userOpHash || !built.userOp) {
     return { ok: false, error: built.error ?? `deploy build failed (HTTP ${buildRes.status})` };
   }
@@ -1136,7 +1136,7 @@ async function deployAgent(
     headers: { 'content-type': 'application/json', ...csrfHeaders() },
     body: JSON.stringify({ userOp: { ...built.userOp, signature } }),
   });
-  const submitted = (await submitRes.json()) as {
+  const submitted = (await submitRes.json().catch(() => ({}))) as {
     ok?: boolean;
     deployedAddress?: Address;
     error?: string;

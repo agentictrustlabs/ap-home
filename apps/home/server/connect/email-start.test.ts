@@ -1,0 +1,68 @@
+// One code per email while it is valid (Paul, 2026-10-15: "two emails with different codes").
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const sent: Array<{ to: string; code: string }> = [];
+vi.mock('../_lib/email-sender', () => ({
+  emailSendingEnabled: () => true,
+  otpEmail: (to: string, code: string) => ({ to, code }),
+  sendEmail: async (_env: unknown, msg: { to: string; code: string }) => {
+    sent.push(msg);
+    return { ok: true };
+  },
+}));
+
+import { onRequestPost } from './email-start';
+
+function kv() {
+  const m = new Map<string, string>();
+  return {
+    get: async (k: string) => m.get(k) ?? null,
+    put: async (k: string, v: string) => void m.set(k, v),
+    delete: async (k: string) => void m.delete(k),
+    m,
+  };
+}
+
+const ask = (env: unknown, email = 'new.host@example.org') =>
+  onRequestPost({
+    request: new Request('https://gcid.test/connect/email/start', { method: 'POST', body: JSON.stringify({ email }) }),
+    env,
+  } as never);
+
+describe('POST /connect/email/start', () => {
+  let env: { AUTH_CODES: ReturnType<typeof kv> };
+  beforeEach(() => {
+    sent.length = 0;
+    env = { AUTH_CODES: kv() };
+    vi.useRealTimers();
+  });
+
+  it('a double click sends ONE email', async () => {
+    const [a, b] = await Promise.all([ask(env), ask(env)].map((p) => p.then((r) => r.json())));
+    expect(a.ok && b.ok).toBe(true);
+    // Both may race past the read, but they can only ever carry the same code.
+    expect(new Set(sent.map((s) => s.code)).size).toBe(1);
+  });
+
+  it('a repeat within 30 seconds sends nothing more', async () => {
+    await ask(env);
+    await ask(env);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('Resend after 30 seconds sends the SAME code, so the first email still works', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-15T18:00:00Z'));
+    await ask(env);
+    vi.setSystemTime(new Date('2026-10-15T18:00:45Z'));
+    await ask(env);
+    expect(sent).toHaveLength(2);
+    expect(sent[0]!.code).toBe(sent[1]!.code);
+  });
+
+  it('a different email gets its own code', async () => {
+    await ask(env, 'a@example.org');
+    await ask(env, 'b@example.org');
+    expect(sent).toHaveLength(2);
+  });
+});

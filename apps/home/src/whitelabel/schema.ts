@@ -348,6 +348,11 @@ export interface ClientConsentCopy {
     disconnect?: string;
     /** The "is ready" receipt body for a NEW org. */
     receipt?: string;
+    /** No Allow sheet for an org-create: the person already allowed this app at sign-in, and an email account
+     *  signs without a prompt, so a second "Allow {app}?" only read as "why am I seeing this again?" (Paul and
+     *  Ryan, 2026-10-15). The ceremony starts at once behind the client's `org` loader. The organization's grants
+     *  are minted exactly as before; only the click is gone. */
+    skipConsent?: boolean;
   };
   /** Hide the hard-coded "<Home> · a Home on the Agentic Primitives substrate" line in the sign-in
    *  card's footer. The credit and links are env-driven (NEXT_PUBLIC_FOOTER_*) and are NOT touched. */
@@ -368,7 +373,13 @@ export interface ClientConsentCopy {
   /** A heading and a short paragraph ABOVE the sign-in card, on the email step only: what this sign-in is and
    *  why the app uses it, for people who have never heard of it (Gather27, Chelsea/Clayton 2026-10-14). The
    *  card itself is unchanged. `{app}` is filled in. */
-  signInIntro?: { title: string; body: string };
+  signInIntro?: {
+    title: string;
+    body: string;
+    /** Return-address host prefixes it does NOT apply to — an app's staff sign-in (Gather27's Admin at
+     *  `ops-…` / `admin-…`) is not someone listing a gathering (Clayton, 2026-10-15). */
+    exceptHostPrefixes?: readonly string[];
+  };
   /** ONE loader for the whole wait, in place of the ceremony's step-by-step narration and its "Step 2 of 5"
    *  counter (Gather27, Clayton's design 2026-10-12: "one component, one line of copy, no step counters").
    *  `signIn` covers the wait after the code and after Allow; `org` the one-time organization set-up.

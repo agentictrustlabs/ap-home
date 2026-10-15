@@ -138,3 +138,14 @@ export function orgCreateText(
   const own = app?.consent?.orgCreate?.[key];
   return own ? fmt(own, vars) : fallback;
 }
+
+/**
+ * What a "Couldn't finish" screen says for a client that hides identifiers (Gather27). The raw message is for
+ * engineers — "Unexpected token 'A', \"An error o\"… is not valid JSON" (Paul, 2026-10-15) — so such a client's
+ * people read one plain sentence instead, and the raw text stays in the console. Everyone else sees it as before.
+ */
+export function clientErrorText(app: ConsentClient, raw: string): string {
+  if (!hidesIdentifiers(app)) return raw;
+  console.warn('[ceremony] failed:', raw);
+  return 'Something went wrong while finishing your sign-in. Please try again — it usually works the second time.';
+}

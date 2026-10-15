@@ -14,6 +14,9 @@ const json = (b: unknown, s = 200): Response =>
 
 export const onRequestOptions = async (): Promise<Response> => new Response(null, { status: 204, headers: cors });
 
+/** A second request for the same email inside this window sends nothing (the first email is on its way). */
+const RESEND_GAP_MS = 30_000;
+
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 /** 6-digit cryptographically-random code. */
@@ -27,12 +30,32 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const email = (body?.email ?? '').trim().toLowerCase();
   if (!EMAIL_RE.test(email)) return json({ error: 'a valid email is required' }, 400);
 
-  const code = newOtp();
+  // ONE code per email while it is valid (Paul, 2026-10-15: "two emails with different codes"). A second
+  // request — a double click, Enter then click, or Resend — used to mint a NEW code over the first, so the
+  // email that arrived first no longer worked. Now an unexpired code is sent again, and a repeat within
+  // RESEND_GAP_MS sends nothing at all (the first email is already on its way). Attempts are kept, so a
+  // resend is not a way around the guess limit.
   const key = `emailotp:${await emailHash(email)}`;
+  const prev = await env.AUTH_CODES.get(key)
+    .then((raw) => (raw ? (JSON.parse(raw) as { code?: string; aud?: string; attempts?: number; issuedAt?: number; sentAt?: number }) : null))
+    .catch(() => null);
+  const now = Date.now();
+  const reuse = prev?.code && /^\d{6}$/.test(prev.code) ? prev : null;
+  if (reuse && reuse.sentAt && now - reuse.sentAt < RESEND_GAP_MS) {
+    return json({ ok: true, delivery: emailSendingEnabled(env) ? 'sent' : 'logged', repeated: true });
+  }
+  const code = reuse?.code ?? newOtp();
   await env.AUTH_CODES.put(
     key,
-    JSON.stringify({ code, aud: body?.aud ?? env.DEMO_SSO_AUD ?? 'demo-sso', attempts: 0 }),
-    { expirationTtl: 600 }, // 10 minutes
+    JSON.stringify({
+      code,
+      aud: body?.aud ?? env.DEMO_SSO_AUD ?? 'demo-sso',
+      attempts: reuse?.attempts ?? 0,
+      issuedAt: reuse?.issuedAt ?? now,
+      sentAt: now,
+    }),
+    // A reused code keeps its ORIGINAL ten minutes — resending does not extend a code's life.
+    { expirationTtl: reuse?.issuedAt ? Math.max(60, 600 - Math.floor((now - reuse.issuedAt) / 1000)) : 600 },
   );
 
   const sent = await sendEmail(env, otpEmail(email, code, whitelabel.brand.name));

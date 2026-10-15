@@ -9,6 +9,10 @@
 // later sign-in as somebody else in the same tab never shows the previous person's email. Display only:
 // it is never sent anywhere and authorizes nothing.
 const KEY = 'verifiedEmail';
+// Paul, 2026-10-15: the Allow screen said only "Signed in" when it opened in ANOTHER tab or window than the code
+// step (sessionStorage is per tab), and a new account's vault profile has no email yet to fall back on. So the
+// email is also kept on this device, per account, in localStorage — still display only, still keyed by address.
+const DEVICE_KEY = 'verifiedEmailByAddress';
 
 export function rememberVerifiedEmail(address: string | null | undefined, email: string): void {
   if (!address || !email.includes('@')) return;
@@ -17,15 +21,28 @@ export function rememberVerifiedEmail(address: string | null | undefined, email:
   } catch {
     /* storage unavailable — the profile read still runs */
   }
+  try {
+    const all = JSON.parse(localStorage.getItem(DEVICE_KEY) ?? '{}') as Record<string, string>;
+    all[address.toLowerCase()] = email.trim().toLowerCase();
+    localStorage.setItem(DEVICE_KEY, JSON.stringify(all));
+  } catch {
+    /* storage unavailable */
+  }
 }
 
 export function verifiedEmailFor(address: string | null | undefined): string {
   if (!address) return '';
   try {
     const raw = sessionStorage.getItem(KEY);
-    if (!raw) return '';
-    const v = JSON.parse(raw) as { address?: unknown; email?: unknown };
-    return typeof v.address === 'string' && typeof v.email === 'string' && v.address === address.toLowerCase() ? v.email : '';
+    const v = raw ? (JSON.parse(raw) as { address?: unknown; email?: unknown }) : null;
+    if (v && typeof v.address === 'string' && typeof v.email === 'string' && v.address === address.toLowerCase()) return v.email;
+  } catch {
+    /* fall through to the device copy */
+  }
+  try {
+    const all = JSON.parse(localStorage.getItem(DEVICE_KEY) ?? '{}') as Record<string, unknown>;
+    const e = all[address.toLowerCase()];
+    return typeof e === 'string' && e.includes('@') ? e : '';
   } catch {
     return '';
   }

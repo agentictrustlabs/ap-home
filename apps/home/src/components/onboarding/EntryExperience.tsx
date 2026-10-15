@@ -840,7 +840,12 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
   // Exactly one method, and it is email: skip the reveal button and show the field itself.
   const soleMethod = curated?.length === 1 && curated[0] === 'email';
   // The app's own words ABOVE the card, on the email step only (consent.signInIntro).
-  const introCfg = enroll && gcidHosted && emailStep === 'email' ? knownRelyingClient(parseEnrollReq()?.aud)?.consent?.signInIntro : undefined;
+  const introReq = enroll && gcidHosted && emailStep === 'email' ? parseEnrollReq() : null;
+  const introAll = introReq ? knownRelyingClient(introReq.aud)?.consent?.signInIntro : undefined;
+  const introHost = (() => {
+    try { return introReq?.redirectUri ? new URL(introReq.redirectUri).hostname : ''; } catch { return ''; }
+  })();
+  const introCfg = introAll && !(introAll.exceptHostPrefixes ?? []).some((p) => introHost.startsWith(p)) ? introAll : undefined;
   const intro = introCfg ? { title: introCfg.title.split('{app}').join(appName ?? ''), body: introCfg.body.split('{app}').join(appName ?? '') } : null;
   return (
     <Shell compact={enroll} intro={intro}>

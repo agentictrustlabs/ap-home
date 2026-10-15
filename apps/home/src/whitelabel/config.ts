@@ -487,6 +487,8 @@ const faithImpact: WhiteLabelConfig = {
           explainer: 'This single approval sets up {org}. Your church gets its own listing page on {app}. Nothing beyond that.',
           disconnect: 'You can disconnect {app} any time from your Great Commission ID.',
           receipt: 'Your church is set up.',
+          // Publish does not ask "Allow Gather27?" a second time (Ryan, 2026-10-15): the host allowed it at sign-in.
+          skipConsent: true,
         },
         hideSubstrate: true,
         copy: { portalStepBusy: 'Signing you in to Gather27…' },
@@ -498,6 +500,8 @@ const faithImpact: WhiteLabelConfig = {
         signInIntro: {
           title: 'Sign in with GCID to list your gathering',
           body: '{app} uses GCID, a secure sign-in stewarded by Global.Church, so you can create and manage your listing with just your email. Your email is used only to sign you in and to reach you about your listing.',
+          // Not on Admin's sign-in: Gather staff are not listing a gathering.
+          exceptHostPrefixes: ['ops-', 'admin-'],
         },
         // The one address Gather27 is known by, whichever hostname opened the window (per deployment).
         ...(process.env.NEXT_PUBLIC_GATHER_DISPLAY_DOMAIN?.trim() ? { displayDomain: process.env.NEXT_PUBLIC_GATHER_DISPLAY_DOMAIN.trim() } : {}),

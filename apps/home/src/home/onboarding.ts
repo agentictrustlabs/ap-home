@@ -55,7 +55,7 @@ import { readSsoCookie } from '../lib/sso-cookie';
 import { SESSION_KEY } from '../context/session';
 import type { Home } from './types';
 import { homeLabel } from './types';
-import { provisionsCommunityMessaging } from '../whitelabel/provisioning';
+import { provisionsAgentPlaybook, provisionsCommunityMessaging } from '../whitelabel/provisioning';
 
 /** The person's Home session Bearer, from wherever it lives (explicit auth → this-origin localStorage →
  *  parent-domain SSO cookie) — session-gated /connect endpoints (e.g. the naming + membership stores)
@@ -335,6 +335,11 @@ export async function publishSocialConnectionKindIfNeeded(agent: Address, name: 
  *  Best-effort and last: an unassigned agent runs the bare harness, which works; failing an enrolment because a
  *  BEHAVIOUR could not be attached would be the tail wagging the dog, and behaviour grants nothing. */
 async function bornWithPlaybook(agent: string, auth?: Auth): Promise<void> {
+  // A client that opted out of the playbook (Gather27, provisioning.agentPlaybook: false) does not get one at
+  // birth either (Paul, 2026-10-15: the first sign-in fetched it from a skills registry GC does not run, and the
+  // console filled with its CORS error). Same rule, same source, as the self-heal in context/session.tsx.
+  const askedBy = typeof window === 'undefined' ? undefined : (new URL(window.location.href).searchParams.get('client_id') ?? undefined);
+  if (!provisionsAgentPlaybook(askedBy)) return;
   try {
     const token = homeBearerToken(auth);
     if (!token) { console.warn('[home-create] default archetype deferred: no session yet (assign from Behaviour → Playbook)'); return; }

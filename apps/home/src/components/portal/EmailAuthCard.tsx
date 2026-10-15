@@ -88,6 +88,9 @@ function CodeBoxes({ value, onChange, disabled }: { value: string; onChange: (v:
   );
 }
 
+/** How long a sign-in may take before the screen says a first sign-in is slower (a returning one is ~3 s). */
+const SLOW_AFTER_MS = 6_000;
+
 export function EmailAuthCard({ onLinked, busyNote = 'Securing your home…', onStep }: {
   /** Told which step is showing, so the window around the card can title it ("Check your email"). */
   onStep?: (step: EmailAuthStep) => void;
@@ -133,7 +136,20 @@ export function EmailAuthCard({ onLinked, busyNote = 'Securing your home…', on
   const [pkToken, setPkToken] = useState<string | null>(null);
   const [pkAgent, setPkAgent] = useState<string>('');
 
+  // Paul, 2026-10-15: a FIRST sign-in creates the person's GCID (deployed and secured on the chain), which took
+  // about a minute with nothing on screen but "Signing you in". A returning person is through in a few seconds,
+  // so a wait past SLOW_AFTER_MS is said out loud — and said to be a first-time thing.
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!busy || step !== 'code') { setSlow(false); return; }
+    const t = window.setTimeout(() => setSlow(true), SLOW_AFTER_MS);
+    return () => window.clearTimeout(t);
+  }, [busy, step]);
+  /** A send in flight: Enter and the button can both fire before `busy` re-renders (Paul, 2026-10-15). */
+  const sending = useRef(false);
   const start = async () => {
+    if (sending.current) return;
+    sending.current = true;
     setBusy(true); setErr(null); setNote(null);
     try {
       const r = await fetch('/connect/email/start', {
@@ -149,7 +165,7 @@ export function EmailAuthCard({ onLinked, busyNote = 'Securing your home…', on
       setNote(d.delivery === 'logged'
         ? (d.devCode ? `Email isn’t configured (dev) — your code is ${d.devCode}.` : 'Email sending isn’t configured yet — the code was logged server-side (dev).')
         : `We sent a 6-digit code to ${email.trim()}.`);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { sending.current = false; setBusy(false); }
   };
 
   /** Open the session + seed the verified email (the shared tail of every issued path). */
@@ -424,6 +440,11 @@ export function EmailAuthCard({ onLinked, busyNote = 'Securing your home…', on
         </div>
       )}
       {busy && <WorkingBar label={step === 'code' ? (note ?? 'Checking your code and opening your home…') : step === 'email' ? 'Sending your code…' : (note ?? 'Working…')} />}
+      {busy && slow && (
+        <p data-testid="email-auth-first-time" style={{ fontSize: '.85rem', color: 'var(--color-text-muted)', margin: '.6rem 0 0', textAlign: 'center' }}>
+          First time with GCID? We&apos;re setting up your account, which can take up to a minute. After this, signing in takes a few seconds.
+        </p>
+      )}
       {!busy && note && !(hosted && step === 'code' && note.startsWith('We sent')) && <p data-testid="email-auth-note" style={{ fontSize: '.78rem', color: 'var(--color-text-muted)', margin: '.5rem 0 0' }}>{note}</p>}
       {err && <p data-testid="email-auth-error" style={{ fontSize: '.78rem', color: 'var(--color-danger)', margin: '.5rem 0 0' }}>{err}</p>}
     </div>
