@@ -5905,7 +5905,10 @@ step is then handed to that agent under authority the person grants; leave it ou
   const streamOn = ((input.variant?.toggles?.['answer/stream'] ?? ((env as { ANSWER_STREAM_DEFAULT?: string }).ANSWER_STREAM_DEFAULT?.trim() || 'off')) === 'on');
   // 2026-10-15 — THE RECORD NEEDS ROOM. The answer's default cap (DEFAULT_ANSWER_TOKENS) is what a CIL document fills; with
   // `skill/record: on` the record block comes LAST and was the first thing cut. The record arm gets 800 tokens more.
-  const applyWith = (tier: AnswerTier, recorded: boolean) => skillApplyInvoker({ call: undefined, ...(recordsOn ? { maxTokens: 4800 } : {}), callFor: (stepRef) => structuredCallFor(env as never, answerProvider, { ...(recorded ? { onCall: recordStructured('structured', stepRef) } : {}), ...(tier !== 'default' ? { tier } : {}) }),
+  // …and a BODY that states its record (the -ol set since 2026-10-15) needs the same room with the toggle off, so the room
+  // follows the playbook: any instruction tool that produces a class gets it.
+  const recordBodies = Object.values(playbook?.tools ?? {}).some((t) => !!(t as { produces?: unknown[] }).produces?.length);
+  const applyWith = (tier: AnswerTier, recorded: boolean) => skillApplyInvoker({ call: undefined, ...(recordsOn || recordBodies ? { maxTokens: 4800 } : {}), callFor: (stepRef) => structuredCallFor(env as never, answerProvider, { ...(recorded ? { onCall: recordStructured('structured', stepRef) } : {}), ...(tier !== 'default' ? { tier } : {}) }),
     ...(streamOn && recorded ? {
       streamFor: (stepRef: string) => textStreamFor(env as never, answerProvider, { onCall: recordStructured('structured', stepRef), ...(tier !== 'default' ? { tier } : {}) }),
       onDraft: (stepRef: string, draft: string) => input.onProgress?.({ type: 'AnswerDraft', stepRef, said: 'Writing the answer…', draft: draft.slice(-6000) }),

@@ -154,10 +154,14 @@ export function skillApplyInvoker(deps: SkillApplyDeps): ToolInvoker {
     // The ask rides in the USER turn too: placed only after the skill body in the system prompt, Gemini followed it on
     // some asks and not others (2026-10-15, two of four). The last line of the request is the one a model answers to.
     const recordNudge = specs?.length ? `\n\n(End with the \`record\` block: ${specs.map((s) => s.label).join(', ')}.)` : '';
+    // 2026-10-15 — THE BODY IS THE PRODUCT (docs/cil-commons/record-first-2026-10-14.md): a skill whose body states its
+    // record ends every answer with the block whether or not the harness appended the ask — `skill/record` only adds the
+    // instruction. So the block is read off EVERY answer and handed to the record effect; "asked" and "no block" are said
+    // only when the harness asked, and an answer with neither ask nor block is returned untouched.
     const withRecords = (answer: string): { answer: string; recordsAsked?: string[]; records?: Array<{ class: string; record: Record<string, unknown> }>; recordError?: string } => {
-      if (!specs?.length) return { answer };
       const r = splitRecordBlock(answer);
-      return { answer: r.text, recordsAsked: specs.map((s) => s.iri), ...(r.records.length ? { records: r.records } : {}), ...(r.error ? { recordError: r.error } : { ...(r.records.length ? {} : { recordError: 'the answer carried no record block' }) }) };
+      if (!specs?.length && !r.records.length && !r.error) return { answer };
+      return { answer: r.text, ...(specs?.length ? { recordsAsked: specs.map((s) => s.iri) } : {}), ...(r.records.length ? { records: r.records } : {}), ...(r.error ? { recordError: r.error } : specs?.length && !r.records.length ? { recordError: 'the answer carried no record block' } : {}) };
     };
     if (stream) {
       const t0 = Date.now(); let first = false; let lastEmit = 0;
