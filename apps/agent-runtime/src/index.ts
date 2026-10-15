@@ -5661,7 +5661,7 @@ app.post('/harness/ask', async (c) => {
     // 2026-10-15 — AN OUTCOME CHECK THAT DID NOT RUN SAYS WHY. Three held-out runs came back with no outcome and no error
     // (fh7-record-live-6) and nothing on the record could say whether the judge, the reply or the gold was the reason.
     if (variantReq?.toggles?.['quality/judge'] === 'outcome' && !(reply?.kind === 'answer' && typeof (reply as { text?: unknown }).text === 'string' && (goldExpected.length || trace.expectedDelivers?.length))) {
-      (trace as { outcomeCheck?: unknown }).outcomeCheck = { skipped: reply?.kind !== 'answer' ? `the reply was ${String(reply?.kind ?? 'nothing')}, not an answer` : typeof (reply as { text?: unknown }).text !== 'string' ? 'the answer had no text' : 'no expected classes (neither the gold plan nor the agent plan produces any)' };
+      (trace as { outcomeCheck?: unknown }).outcomeCheck = { skipped: reply?.kind !== 'answer' ? `the reply was ${String(reply?.kind ?? 'nothing')}, not an answer${typeof (reply as { error?: unknown })?.error === 'string' ? `: ${String((reply as { error: string }).error).slice(0, 160)}` : ''}` : typeof (reply as { text?: unknown }).text !== 'string' ? 'the answer had no text' : 'no expected classes (neither the gold plan nor the agent plan produces any)' };
     }
     if (variantReq?.toggles?.['quality/judge'] === 'outcome' && reply?.kind === 'answer' && typeof (reply as { text?: unknown }).text === 'string' && (goldExpected.length || trace.expectedDelivers?.length)) {
       // 2026-10-01 — `quality/judge-repeats` (env QUALITY_JUDGE_REPEATS_DEFAULT; 1 until the Lab measures 2): the same
