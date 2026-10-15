@@ -23,6 +23,10 @@ export type EstateDeclaration = {
   homeHost: string;
   zone: string;
   town: string;
+  /** The chain's deployment record in the pinned `@agenticprimitives/contracts` (`deployments-<deployment>.json`) when it is
+   *  not named like the town (hopenet's chain is `hopechain`). The record is where CHAIN_ID, CONTRACTS_GENERATION and every
+   *  contract address come from — a generation somebody remembered cost a day of `BadArgsLength` (one-click trap 10). */
+  deployment?: string;
   kmsTenant?: string;
   /** The caller subjects this estate actually holds; the builder's convention is `<id>-vault` / `<id>-runtime`. */
   callerSubjects?: { vault?: string; runtime?: string };
@@ -35,6 +39,17 @@ export type EstateDeclaration = {
 };
 
 export const ESTATES_DIR = 'estates';
+
+/**
+ * The chain's deployment record for an estate, from the pinned contracts release — or null when that release does not
+ * carry it yet (a NEW chain's record ships in the release after its deployment; 1.0.0-alpha.35 was cut twenty minutes
+ * before hopechain's landed). Null is "unverified", never "fine": the caller says so.
+ */
+export const deploymentRecord = (d: EstateDeclaration): { file: string; record: Deployment | null } => {
+  const name = d.deployment ?? d.town;
+  const file = join('node_modules', '@agenticprimitives', 'contracts', `deployments-${name}.json`);
+  try { return { file, record: JSON.parse(readFileSync(file, 'utf8')) as Deployment }; } catch { return { file, record: null }; }
+};
 
 export const readDeclarations = (dir = ESTATES_DIR): EstateDeclaration[] =>
   readdirSync(dir)
@@ -98,11 +113,14 @@ export const CHAIN_VAR_BY_DEPLOYMENT_KEY: Record<string, string> = {
   mockUsdc: 'MOCK_USDC',
   ontologyTermRegistry: 'ONTOLOGY_TERM_REGISTRY',
   paymentEnforcer: 'PAYMENT_ENFORCER',
+  // Generation 3 (spec 410; hopechain) — absent from a generation-1 record and then SKIPPED, never emitted empty.
+  payloadClassesEnforcer: 'PAYLOAD_CLASSES_ENFORCER',
   permissionlessSubregistry: 'PERMISSIONLESS_SUBREGISTRY',
   quorumEnforcer: 'QUORUM_ENFORCER',
   receiptAnchorRegistry: 'RECEIPT_ANCHOR_REGISTRY',
   smartAgentPaymaster: 'PAYMASTER',
   timestampEnforcer: 'TIMESTAMP_ENFORCER',
+  treasurySpendPolicy: 'TREASURY_SPEND_POLICY',
   universalSignatureValidator: 'UNIVERSAL_SIGNATURE_VALIDATOR',
   valueEnforcer: 'VALUE_ENFORCER',
 };
@@ -124,6 +142,8 @@ export const townVarsFromDeployment = (dep: Deployment): { vars: Record<string, 
   const vars: Record<string, string> = {};
   const missing: string[] = [];
   if (typeof dep.chainId === 'number') vars.CHAIN_ID = String(dep.chainId);
+  // The record's generation, or 1 for a record written before the field existed (faithchain, base-sepolia).
+  vars.CONTRACTS_GENERATION = String(dep.contractsGeneration ?? 1);
   for (const [key, name] of Object.entries(CHAIN_VAR_BY_DEPLOYMENT_KEY)) {
     const v = dep[key];
     if (typeof v === 'string' && /^0x[0-9a-fA-F]{40}$/.test(v)) vars[name] = v;
@@ -220,7 +240,7 @@ const TOWN_EXACT = new Set([
   'ADOPTED_ONTOLOGY_MANIFEST_DIGEST', 'AKCS_BASE_URL', 'ANSWER_STREAM_DEFAULT', 'APPROVED_HASH_REGISTRY',
   'AP_RUNTIME_AGENT', 'ARD_REGISTRY_ORIGIN', 'CHAIN_ID', 'COMPOSER_MAX_TOKENS', 'CONTRACTS_GENERATION',
   'CUSTODY_POLICY', 'DELEGATION_MANAGER', 'DEMO_SSO_AUD', 'DIGEST_BINDING_ENFORCER', 'ENTRY_POINT',
-  'FEDERATION_DOORS', 'INFERENCE_URL', 'KB_RETRIEVAL', 'MOCK_USDC', 'ONTOLOGY_TERM_REGISTRY',
+  'FEDERATION_DOORS', 'INFERENCE_URL', 'KB_RETRIEVAL', 'MOCK_USDC', 'ONTOLOGY_TERM_REGISTRY', 'PAYLOAD_CLASSES_ENFORCER', 'TREASURY_SPEND_POLICY',
   'OPS_RECORDS_DEFAULT', 'PAYMASTER', 'PAYMASTER_VERIFYING_SIGNER', 'PAYMENT_ENFORCER',
   'PERMISSIONLESS_SUBREGISTRIES', 'PERMISSIONLESS_SUBREGISTRY', 'PRICED_SUBREGISTRIES', 'PROFILE_RESOLVER',
   'PUBLIC_GRAPH_URL', 'QUORUM_ENFORCER', 'RECEIPT_ANCHOR_REGISTRY', 'RESOLVE_CONTEXT_DEFAULT',

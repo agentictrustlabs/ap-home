@@ -83,6 +83,12 @@ const decl = JSON.parse(readFileSync(DECL(ID), 'utf8')) as EstateDeclaration;
 const tenant = decl.kmsTenant ?? decl.id;
 const derived = deriveVars(decl);
 
+// WHAT THE RUNTIME'S CALLER MAY SIGN — named EXPLICITLY (one-click trap 11). A caller bound before a purpose existed does not
+// have it: imb-runtime-3 was bound before faithkms added EIP155_TRANSACTION, the relay's transaction send was refused, and
+// viem reported "unknown error". The profile carries the operations; the purposes are said here so a later purpose is a
+// visible edit, not a silent absence.
+const RUNTIME_SIGNING_PURPOSES = 'EIP712,ERC4337_USER_OPERATION,EIP7702_AUTHORIZATION,PERSONAL_SIGN_DIGEST,RAW_32_BYTE_DIGEST,EIP155_TRANSACTION';
+
 // ── the plan ──────────────────────────────────────────────────────────────────────────────────────────
 type Step = {
   id: string;
@@ -185,12 +191,12 @@ const steps: Step[] = [
     title: `two callers by PROFILE — ${decl.callerSubjects?.vault ?? `${ID}-vault`} (estate-vault) and ${decl.callerSubjects?.runtime ?? `${ID}-runtime`} (estate-runtime)`,
     why: 'the profile is the whole point: the hundredth estate\'s callers are the first estate\'s callers, not a fresh guess. Deriving the sets by hand once cost a day (441 D5), because a missing entry fails where nothing names it',
     command: `${OPERATOR} bind-caller --tenant-id ${tenant} --issuer ${ISSUER} --subject ${ID}-vault --name "${ID} vault" --profile estate-vault\n` +
-      `  ${OPERATOR} bind-caller --tenant-id ${tenant} --issuer ${ISSUER} --subject ${ID}-runtime --name "${ID} agent-runtime" --profile estate-runtime`,
+      `  ${OPERATOR} bind-caller --tenant-id ${tenant} --issuer ${ISSUER} --subject ${ID}-runtime --name "${ID} agent-runtime" --profile estate-runtime --signing-purposes ${RUNTIME_SIGNING_PURPOSES}`,
     // The declaration's recorded subjects when it has them (an estate bound before the convention keeps its
     // names — renaming a caller means re-binding and re-minting for no gain), the convention otherwise.
     done: () => hasCaller(decl.callerSubjects?.vault ?? `${ID}-vault`) && hasCaller(decl.callerSubjects?.runtime ?? `${ID}-runtime`),
     run: () => {
-      azRun(`set -a; . /etc/akcs/env 2>/dev/null; set +a\n${OPERATOR} bind-caller --tenant-id ${tenant} --issuer ${ISSUER} --subject ${ID}-vault --name "${ID} vault" --profile estate-vault 2>&1 | tail -1\n${OPERATOR} bind-caller --tenant-id ${tenant} --issuer ${ISSUER} --subject ${ID}-runtime --name "${ID} agent-runtime" --profile estate-runtime 2>&1 | tail -1`);
+      azRun(`set -a; . /etc/akcs/env 2>/dev/null; set +a\n${OPERATOR} bind-caller --tenant-id ${tenant} --issuer ${ISSUER} --subject ${ID}-vault --name "${ID} vault" --profile estate-vault 2>&1 | tail -1\n${OPERATOR} bind-caller --tenant-id ${tenant} --issuer ${ISSUER} --subject ${ID}-runtime --name "${ID} agent-runtime" --profile estate-runtime --signing-purposes ${RUNTIME_SIGNING_PURPOSES} 2>&1 | tail -1`);
       kmsCache = undefined;
     },
   },
@@ -236,6 +242,21 @@ const steps: Step[] = [
       } catch { return false; }
     }),
     run: undefined, // deliberately manual: a token is handed over out of band, never printed into a log
+  },
+  {
+    id: 'gateway-token',
+    kind: 'operator',
+    title: `a WRITE-capable app token on the town's chain gateway for ${ID}-runtime (RPC_URL secret)`,
+    why: 'a runtime that relays userOps needs writeRps > 0 on its gateway token (one-click trap 12); a read-only row fails exactly like a missing signing purpose, in front of it, and nothing names the cause',
+    command: `cd ../ap-town/apps/chain-gateway && TOKEN=$(openssl rand -base64 32 | tr -d '=/+') && npx wrangler kv key put --binding TOKENS --env ${decl.town === 'faithchain' ? 'faithnet' : decl.town} "t:$(printf '%s' "$TOKEN" | sha256sum | cut -d' ' -f1)" '{"app":"${ID}-runtime","readRps":20,"writeRps":20}'\n` +
+      `  (then: cd apps/agent-runtime && npx wrangler secret put RPC_URL --env ${ID}   # <gateway host>/?k=$TOKEN)`,
+    done: () => {
+      try {
+        const out = execFileSync('npx', ['wrangler', 'secret', 'list', '--env', ID!], { cwd: 'apps/agent-runtime', encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+        return (JSON.parse(out) as { name: string }[]).some((x) => x.name === 'RPC_URL');
+      } catch { return false; }
+    },
+    run: undefined, // the token's writeRps is in the gateway's KV, which this repository cannot read; the operator mints it
   },
   {
     id: 'charter-agents',

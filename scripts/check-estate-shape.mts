@@ -14,7 +14,7 @@
 import { execFileSync } from 'node:child_process';
 import {
   FORBIDDEN_SECRETS, POSTURE, REQUIRED_KEY_IDS, REQUIRED_SECRETS,
-  deriveVars, isTownBaseline, readDeclarations, sameList, wranglerVars,
+  deploymentRecord, deriveVars, isTownBaseline, readDeclarations, sameList, townVarsFromDeployment, wranglerVars,
 } from './estate-shape.mts';
 
 const argv = process.argv.slice(2);
@@ -74,6 +74,24 @@ for (const d of decls) {
       add(d.id, 'derived', k, [missing.length ? `deployment is MISSING ${missing.join(' ')}` : '', extra.length ? `deployment has UNDECLARED ${extra.join(' ')}` : ''].filter(Boolean).join(' · '));
     } else {
       add(d.id, 'derived', k, `want ${want.slice(0, 90)}${want.length > 90 ? '…' : ''} · got ${got ?? '<unset>'}`);
+    }
+  }
+
+  // the chain record — CHAIN_ID, CONTRACTS_GENERATION and every contract address are the deployment record's, never a
+  // number somebody remembered (one-click trap 10: generation 1 declared on a generation-3 chain fails every redemption
+  // with `BadArgsLength`). A pin that does not carry the chain's record yet is SAID, not passed.
+  const { file, record } = deploymentRecord(d);
+  if (!record) {
+    console.warn(`! ${d.id}: ${file} is not in the pinned @agenticprimitives/contracts — CHAIN_ID ${runtime.CHAIN_ID ?? '<unset>'} / CONTRACTS_GENERATION ${runtime.CONTRACTS_GENERATION ?? '<unset>'} are UNVERIFIED (bump the pin to a release that carries the record)`);
+  } else {
+    const { vars: fromRecord } = townVarsFromDeployment(record);
+    for (const k of ['CHAIN_ID', 'CONTRACTS_GENERATION'] as const) {
+      if (runtime[k] !== fromRecord[k]) add(d.id, 'chain-record', k, `record says ${fromRecord[k]} · deployed ${runtime[k] ?? '<unset>'} (${file})`);
+    }
+    for (const [k, want] of Object.entries(fromRecord)) {
+      if (k === 'CHAIN_ID' || k === 'CONTRACTS_GENERATION' || k === 'PERMISSIONLESS_SUBREGISTRIES' || k === 'PRICED_SUBREGISTRIES') continue;
+      const got = runtime[k];
+      if (got !== undefined && got.toLowerCase() !== want.toLowerCase()) add(d.id, 'chain-record', k, `record says ${want} · deployed ${got} (${file})`);
     }
   }
 
@@ -166,7 +184,7 @@ if (!findings.length) {
   process.exit(0);
 }
 console.log(`\n${findings.length} drift(s) — spec 441 §5 is this list:\n`);
-const order = ['FORBIDDEN-SECRET', 'posture', 'vault', 'derived', 'town-baseline', 'secret-missing', 'unclassified', 'extra'];
+const order = ['FORBIDDEN-SECRET', 'chain-record', 'posture', 'vault', 'derived', 'town-baseline', 'secret-missing', 'unclassified', 'extra'];
 for (const f of [...findings].sort((a, b) => (order.indexOf(a.kind) + 99 * +(order.indexOf(a.kind) < 0)) - (order.indexOf(b.kind) + 99 * +(order.indexOf(b.kind) < 0)))) {
   console.log(`✗ [${f.estate}] ${f.kind} ${f.what}\n    ${f.detail}`);
 }
