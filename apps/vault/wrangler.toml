@@ -82,7 +82,7 @@ DEMO_REQUIRE_GATEWAY_ASSERTION = "false"
 # rejected every call ("service-mac rejected"). MAC keys are derived from the tenant root, so there is
 # no key id here — only the tenant.
 A2A_KMS_BACKEND = "agentic-kms"
-AKCS_BASE_URL = "https://akcs-pilot.faithnet.io"
+AKCS_BASE_URL = "https://kms.faithnet.io"
 AKCS_TENANT_ID = "faithnet"
 # AKCS_TOKEN is a SECRET (wrangler secret put).
 
@@ -165,7 +165,7 @@ DEMO_REQUIRE_GATEWAY_ASSERTION = "false"
 # A2A_MAC_SECRET, which bootstrap-estate wrote base64url: every interactions call threw
 # `Invalid byte sequence`, which the Home renders as "turn on storage".
 A2A_KMS_BACKEND = "agentic-kms"
-AKCS_BASE_URL = "https://akcs-pilot.faithnet.io"
+AKCS_BASE_URL = "https://kms.faithnet.io"
 AKCS_TENANT_ID = "imb"
 # The callers are bound to the CVM levels only — a billable HSM-direct key is impossible, not discouraged.
 AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"

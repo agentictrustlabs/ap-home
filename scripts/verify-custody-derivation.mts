@@ -30,7 +30,7 @@ import { deriveSubjectSigner } from '@agenticprimitives/key-custody';
 
 const RPC = process.env.RPC_URL ?? 'https://rpc.faithnet.io/';
 const FACTORY = (process.env.AGENT_ACCOUNT_FACTORY ?? '0x464eEe7518c3c97DA570592481329E0627E9a3B8') as Address;
-const AKCS_BASE = process.env.AKCS_BASE_URL ?? 'https://akcs-pilot.faithnet.io';
+const AKCS_BASE = process.env.AKCS_BASE_URL ?? 'https://kms.faithnet.io';
 const AKCS_TENANT = process.env.AKCS_TENANT_ID ?? 'faithnet';
 
 const [iss, sub, rotationRaw] = [process.argv[2], process.argv[3], process.argv[4]];

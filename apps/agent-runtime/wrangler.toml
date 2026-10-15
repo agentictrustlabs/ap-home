@@ -302,7 +302,7 @@ A2A_KMS_BACKEND = "agentic-kms"
 # on a mismatched seed locks out every member again.
 A2A_CUSTODY_KMS_BACKEND = "local-aes"
 A2A_ALLOW_LOCAL_MASTER_KEY = "true"
-AKCS_BASE_URL = "https://akcs-pilot.faithnet.io"
+AKCS_BASE_URL = "https://kms.faithnet.io"
 AKCS_TENANT_ID = "faithnet"
 # The SIGNING key the relayer signs userOps with. Its address is 0xf9a98b25…f2c5 — new, and never used
 # by the paymaster: faithnet's paymaster is in ALLOWLIST mode (verifyingSigner == address(0)), so a
@@ -720,7 +720,7 @@ REACH_LANES = '{"scripture.faithnet.io":"LANE_SCRIPTURE"}'
 # `wrangler deploy --env imbnet` re-asserts this block, and the day the adoption lived only in a live
 # secret the next deploy reverted it and every interactions call threw (see the vault's note).
 A2A_KMS_BACKEND = "agentic-kms"
-AKCS_BASE_URL = "https://akcs-pilot.faithnet.io"
+AKCS_BASE_URL = "https://kms.faithnet.io"
 AKCS_TENANT_ID = "imb"
 AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"
 # AKCS_TOKEN is a SECRET (wrangler secret put).
