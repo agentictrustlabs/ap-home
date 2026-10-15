@@ -3244,7 +3244,8 @@ app.post('/harness/records', async (c) => {
     // and a transcript wants the chain's first answer as much as its last).
     if ((body as { hydrate?: unknown }).hydrate === true && Array.isArray(shown.steps)) {
       const deps = harnessDeps(c.env, buildAuditSink(c.env));
-      const store = artifactStoreFor({ readSubjectRecord: deps.readSubjectRecord });
+      // (the store needs both doors to exist, though a read uses one.)
+      const store = artifactStoreFor({ readSubjectRecord: deps.readSubjectRecord, ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}) });
       if (!store) return c.json({ ok: true, record: shown, hydrated: false });
       const failed: Array<{ stepRef: string; error: string }> = [];
       const steps = await Promise.all((shown.steps as Array<{ stepRef: string; result?: unknown }>).map(async (st) => {
