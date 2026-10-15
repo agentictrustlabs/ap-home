@@ -213,9 +213,14 @@ export function EntryExperience({ mode }: { mode: 'entry' | 'enroll' }) {
   // credential-first entry would otherwise stall signed-in with no grant. When a session appears
   // while we're on the enroll entry, re-enter the RECOGNIZED path — the one-tap authorize runs the
   // grant on the fresh home session and returns the code (same machinery the owner-op resume uses).
+  const promotedFor = useRef<string | null>(null);
   useEffect(() => {
     if (mode !== 'enroll' || !api.enroll || !session) return;
     if (view.k !== 'enroll-entry' && view.k !== 'checking') return;
+    // ONCE per session token: when the recognized view hands back (a switched account, a home that does not
+    // read as deployed) the entry view must stay, or the two take turns forever (2026-10-15).
+    if (promotedFor.current === session.token) return;
+    promotedFor.current = session.token;
     void (async () => {
       markEnrollChooserDone(api.enroll);
       if (requiresNamedAgent) {

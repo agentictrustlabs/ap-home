@@ -112,6 +112,9 @@ function Gate({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (nameHealRef.current) return;
     if (phase !== 'authed' || !agentDeployed || agentName || !session?.token) return;
+    // A relying app's sign-in window (Gather27's hosts are nameless by design): nothing to heal, and these five
+    // reads ran beside every ceremony (2026-10-15).
+    if (hasEnrollParams()) return;
     nameHealRef.current = true;
     void (async () => {
       for (let i = 0; i < 5; i++) {

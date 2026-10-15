@@ -252,7 +252,8 @@ export function EmailAuthCard({ onLinked, busyNote = 'Securing your home…', on
           setNote(busyNote);
           const res = await secureHomeNoName({ token: d.token }, { claimPendingNameVia: 'email' });
           if (!res.ok) throw new Error(res.error);
-          void activateVault(res.home.address, 'email', { token: d.token }); // spec 278 — best-effort vault
+          // (The vault is activated inside secureHomeNoName — activatePersonPlanes. A second `activateVault` here
+          // ran the whole ceremony again on every email sign-in; removed 2026-10-15.)
           await routeAfterIssued(d.token, { name: res.home.name || null, addr: res.home.address });
           return;
         }

@@ -6,6 +6,7 @@
 //
 // SEC-005: the relying-origin allowlist is no longer hardcoded here. It's derived from
 // `whitelabel.relyingApps[].redirect_uris` so the two sources cannot drift.
+import { verifiedEmailFor } from '../../lib/verified-email';
 import { parseRoleOffer, type RoleOfferV1 } from '../../lib/org-role';
 
 /** `role_offer` — base64url of the offer's JSON. An offer that does not parse is DROPPED WITH A WARNING here and the
@@ -176,6 +177,8 @@ export function postEnrollToOpener(enroll: EnrollReq, msg: Record<string, unknow
 export async function beginEnrollmentGrant(
   enroll: EnrollReq,
   resolvedName: string,
+  /** The home's address: the email verified in this window is keyed by it (lib/verified-email). */
+  homeAddress?: string,
 ): Promise<{ grant_id: string; delegate: Address }> {
   // The member's HUMAN name, for a client the REGISTRY scopes for `profile`. This is the one place
   // every grant path passes through — the journey, the recognized fast path, the social resume and
@@ -191,7 +194,10 @@ export async function beginEnrollmentGrant(
   const wantsEmail = sharesEmailClaim(relying);
   const profile = wantsName || wantsEmail ? await profileForConnect() : { name: '', email: '' };
   const profileName = wantsName ? profile.name : '';
-  const profileEmail = wantsEmail ? profile.email : '';
+  // The vault profile is seeded AFTER a first sign-in, in the background (EmailAuthCard); a host who presses
+  // Allow within a few seconds found it empty and got a token with no email — on the one sign-in Gather27's
+  // listing form needs it. The email verified by code a moment ago is the same address (2026-10-15).
+  const profileEmail = wantsEmail ? profile.email || (homeAddress ? verifiedEmailFor(homeAddress) : '') : '';
   const r = await fetch('/oidc/authorize-grant', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

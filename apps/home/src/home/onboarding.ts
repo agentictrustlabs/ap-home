@@ -535,7 +535,15 @@ async function projectStewardRelationshipToVault(
   try {
     const signHash = await signHashFor(via, person, auth);
     const self = toWire(await issueSiteDelegation(person, person, signHash, 12 * 3600));
-    const rec = await vaultReadWithDelegation<{ v?: number; relationships?: Record<string, unknown>[] }>(self, 'impact-relationships').catch(() => null);
+    // A FAILED read is not an empty record (2026-10-15): writing `[entry]` over it would drop every other
+    // organization this person stewards. No record (null) is empty; a throw skips the projection this time.
+    let rec: { v?: number; relationships?: Record<string, unknown>[] } | null;
+    try {
+      rec = await vaultReadWithDelegation<{ v?: number; relationships?: Record<string, unknown>[] }>(self, 'impact-relationships');
+    } catch (e) {
+      console.warn('[org-create] impact-relationships not read — projection skipped rather than clobbered:', e);
+      return;
+    }
     const list = Array.isArray(rec?.relationships) ? rec!.relationships! : [];
     const key = org.agent.toLowerCase();
     const prev = list.find((r) => String(r.agent ?? '').toLowerCase() === key);
@@ -715,10 +723,13 @@ export async function createOrganization(
   // spec 321 — enable channel storage AT CREATE (vault-key bind + standing delivery grant, signed as
   // the org): zero prompts on the KMS family; best-effort — the steward-gated Enable button on the
   // channels page remains the recovery path.
+  say?.({ step: 3, total: 5, label: 'Opening its private records…', hint: 'The listing will live here — Gather27 only gets a read grant.' });
+  // The vault bind is NOT best-effort (2026-10-15): without it the org has no key, every listing write fails
+  // `vault_key_unauthorized`, and the only recovery is a steward-only button the host never sees. It used to be
+  // caught below and the host told the organization was set up.
+  const bound = await activateVaultIfNeeded(x.childAgent, via, auth);
+  if (!bound.ok) return { ok: false, error: `the organization's private records could not be set up: ${bound.error}` };
   try {
-    say?.({ step: 3, total: 5, label: 'Opening its private records…', hint: 'The listing will live here — Gather27 only gets a read grant.' });
-    const bound = await activateVaultIfNeeded(x.childAgent, via, auth);
-    if (!bound.ok) throw new Error(bound.error);
     const bearer = homeBearerToken(auth);
     // The PERSON's side starts now, beside the organization's (GC, 2026-10-14: it ran after it, 3.5 s of a
     // first publish): the steward relationship in the person's own impact-relationships record reads nothing

@@ -338,7 +338,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         if (!askDelegate) return fail('This client has no ask key registered — it cannot hold an act set.');
         const n = choices.length;
         setGrantProgress({ step: 1, total: 3, label: 'Authorizing this assistant to ask your agent as you…' });
-        const { grant_id: actGrantId, delegate: actDelegate } = await beginEnrollmentGrant(enroll, home.name);
+        const { grant_id: actGrantId, delegate: actDelegate } = await beginEnrollmentGrant(enroll, home.name, home.address);
         const auth: Auth | undefined = token ? { token } : undefined;
         const signPerson = await signHashFor(viaLower as Via, home.address, auth);
         const askWire = await issueAskAsMeDelegation(home.address, askDelegate, signPerson);
@@ -357,7 +357,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       }
       if (enroll.template === 'ask-as-me') {
         setGrantProgress({ step: 1, total: 2, label: 'Authorizing this assistant to ask your agent as you…' });
-        const { grant_id: askGrantId, delegate: askDelegate } = await beginEnrollmentGrant(enroll, home.name);
+        const { grant_id: askGrantId, delegate: askDelegate } = await beginEnrollmentGrant(enroll, home.name, home.address);
         const askAuth: Auth | undefined = token ? { token } : undefined;
         const signHash = await signHashFor(viaLower as Via, home.address, askAuth);
         const wire = await issueAskAsMeDelegation(home.address, askDelegate, signHash);
@@ -373,7 +373,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
       // SEC-001: server-mint the grant FIRST; use the registry-derived delegate (anti-spoof).
       const tCeremony = Date.now();
       const lapCeremony = (what: string) => console.info(`[connect ${enroll.template}] ${what} +${Date.now() - tCeremony}ms`);
-      const { grant_id, delegate } = await beginEnrollmentGrant(enroll, home.name);
+      const { grant_id, delegate } = await beginEnrollmentGrant(enroll, home.name, home.address);
       lapCeremony('grant begun');
       /*
         PASS THE SESSION TOKEN FOR EVERY CREDENTIAL, not only the KMS ones.
