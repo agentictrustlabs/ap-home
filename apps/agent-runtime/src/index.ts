@@ -3235,6 +3235,17 @@ app.post('/harness/records', async (c) => {
     const asked = String((rec.intent.context as { asker?: string } | undefined)?.asker ?? '').toLowerCase() === caller;
     if (!asked && !holds) return c.json({ ok: false, error: 'this run was not yours to look back on' }, 403);
     const { presented: _p, ...shown } = rec;
+    // 2026-10-15 — READ THE TRANSCRIPT. A step's result past the offload threshold sits in the agent's vault as a
+    // `run.artifact:` record and the record carries only its ref and a summary, so the words of an answer could not be
+    // read back by the one person entitled to read them. `hydrate: true` returns the steps with their results re-read
+    // from the vault (the same doors the resume takes) — the answer, the records it emitted, the skill it ran under —
+    // for the asker or the custodian, and nobody else. Words still never enter the evaluation store: this is a read.
+    if ((body as { hydrate?: unknown }).hydrate === true && Array.isArray(shown.steps) && shown.plan) {
+      const deps = harnessDeps(c.env, buildAuditSink(c.env));
+      const hydrated = await rehydrateExecuted({ readSubjectRecord: deps.readSubjectRecord }, { plan: shown.plan as never, completed: shown.steps as never }).catch(() => null);
+      if (hydrated) return c.json({ ok: true, record: { ...shown, steps: hydrated.completed }, hydrated: true });
+      return c.json({ ok: true, record: shown, hydrated: false });
+    }
     return c.json({ ok: true, record: shown });
   }
   const all = await listRecords(c.env as never, addressee);
