@@ -5887,7 +5887,7 @@ step is then handed to that agent under authority the person grants; leave it ou
       })()
     : undefined;
   const answerInvoke = playbookAnswer.length
-    ? playbookAnswerInvoker({ call: structuredCallFor(env as never, input.provider, { onCall: recordStructured('structured') }), instructions: playbook?.instructions ?? null, material, advertised, agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null, ...(memory ? { memory } : {}), ...(study ? { study } : {}) })
+    ? playbookAnswerInvoker({ call: structuredCallFor(env as never, input.provider, { purpose: 'answer', onCall: recordStructured('structured') }), instructions: playbook?.instructions ?? null, material, advertised, agentName: deps.nameOf && input.addressee ? await deps.nameOf(String(input.addressee)).catch(() => null) : null, ...(memory ? { memory } : {}), ...(study ? { study } : {}) })
     : null;
   // Spec 416 §4h — the model an instruction skill answers with (`skill-selection/answer-model`), and, under
   // `quality/judge: pairwise`, BOTH answers in parallel judged side by side (both orders, neutral labels): the run returns
@@ -5908,7 +5908,7 @@ step is then handed to that agent under authority the person grants; leave it ou
   // …and a BODY that states its record (the -ol set since 2026-10-15) needs the same room with the toggle off, so the room
   // follows the playbook: any instruction tool that produces a class gets it.
   const recordBodies = Object.values(playbook?.tools ?? {}).some((t) => !!(t as { produces?: unknown[] }).produces?.length);
-  const applyWith = (tier: AnswerTier, recorded: boolean) => skillApplyInvoker({ call: undefined, ...(recordsOn || recordBodies ? { maxTokens: 4800 } : {}), callFor: (stepRef) => structuredCallFor(env as never, answerProvider, { ...(recorded ? { onCall: recordStructured('structured', stepRef) } : {}), ...(tier !== 'default' ? { tier } : {}) }),
+  const applyWith = (tier: AnswerTier, recorded: boolean) => skillApplyInvoker({ call: undefined, ...(recordsOn || recordBodies ? { maxTokens: 4800 } : {}), callFor: (stepRef) => structuredCallFor(env as never, answerProvider, { purpose: 'answer', ...(recorded ? { onCall: recordStructured('structured', stepRef) } : {}), ...(tier !== 'default' ? { tier } : {}) }),
     ...(streamOn && recorded ? {
       streamFor: (stepRef: string) => textStreamFor(env as never, answerProvider, { onCall: recordStructured('structured', stepRef), ...(tier !== 'default' ? { tier } : {}) }),
       onDraft: (stepRef: string, draft: string) => input.onProgress?.({ type: 'AnswerDraft', stepRef, said: 'Writing the answer…', draft: draft.slice(-6000) }),

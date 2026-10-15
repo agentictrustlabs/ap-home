@@ -45,6 +45,16 @@ describe('spec 434 W3 — the gateway switch', () => {
     expect(records.map((r) => [r.provider, r.receiptRef])).toEqual([['gateway', 'rcpt-9'], ['gateway', 'rcpt-9']]);
     expect(deltas).toEqual(['hi']);
   });
+  it('a structured call whose purpose is the ANSWER takes the answer profile, not the selection one (2026-10-15)', async () => {
+    const seen: string[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => { const b = JSON.parse(String(init.body)); seen.push(b.profile); return new Response(JSON.stringify({ content: '', toolCalls: [{ name: b.tools[0].name, arguments: { answer: 'long' } }], stopReason: 'tool', usage: { tokensIn: 1, tokensOut: 1 }, receipt: { id: 'rcpt-10', profile: b.profile, profileVersion: 'v', model: 'm', costMicroUsd: 1, attempt: 1 } }), { headers: { 'content-type': 'application/json' } }); });
+    const answer = structuredCallFor({ ...env }, undefined, { purpose: 'answer' });
+    await answer!({ system: 's', messages: [{ role: 'user', content: 'u' }], tool: { name: 'skill_answer', description: 'd', input_schema: { type: 'object' } }, maxTokens: 4800 } as never);
+    const pick = structuredCallFor({ ...env }, undefined, {});
+    await pick!({ system: 's', messages: [{ role: 'user', content: 'u' }], tool: { name: 'pick', description: 'd', input_schema: { type: 'object' } } } as never);
+    expect(seen).toEqual([GATEWAY_PROFILE.answer, GATEWAY_PROFILE.structured]);
+    expect(GATEWAY_PROFILE.answer).toBe('answer-structured');
+  });
   it('with the flag off nothing changes: the direct provider is selected', () => {
     const sel = selectPlanner({ ...env, ORCHESTRATION_GATEWAY: 'off' } as never, {});
     expect(sel.kind).toBe('gemini');

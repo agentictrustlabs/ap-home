@@ -507,7 +507,12 @@ function providerFor(env: PlannerEnv, requested?: LlmProvider): LlmProvider | nu
 // carries the call and what comes back on the receipt. OFF by default: the comparison runner (spec 415) arms gateway vs
 // direct on the live pair before `ORCHESTRATION_LLM` goes (434 §12 W3's gate). Role → profile is THIS map; a model is
 // never named here. Receipts reach the trace through `onReceipt`.
-export const GATEWAY_PROFILE = { plan: 'planner-fast', compose: 'composer-default', stream: 'answer-stream', judge: 'judge-thorough', structured: 'selection-structured' } as const;
+export const GATEWAY_PROFILE = { plan: 'planner-fast', compose: 'composer-default', stream: 'answer-stream', judge: 'judge-thorough', structured: 'selection-structured',
+  // 2026-10-15 — A LONG STRUCTURED ANSWER IS NOT A SELECTION. An instruction skill applied under its body (4000 tokens,
+  // 4800 with its record) went through `selection-structured`, whose ceiling is 1500; the gateway clamps to the ceiling
+  // and Gemini spends it thinking, so the call comes back with no tool call — "answered in prose", three of five cases.
+  // The answer has its own profile, sized for it (ap-town apps/inference seeds/profiles.json `answer-structured`).
+  answer: 'answer-structured' } as const;
 /** Spec 434 §12 — THE ARM A RUN IS CARRIED UNDER. The W3 gate compares the gateway against this deployment's own
  *  provider keys, and the only honest way to compare them is per run, in one window, on the same asks: so a variant
  *  may say which carrier THIS run uses, and everything downstream reads it from the env it was handed. It changes
