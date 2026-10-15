@@ -43,7 +43,7 @@
     "@agenticprimitives/ontology": "1.0.0-alpha.35",
     "@agenticprimitives/orchestration": "0.0.0-alpha.16",
     "@agenticprimitives/orchestration-anthropic": "0.0.0-alpha.14",
-    "@agenticprimitives/orchestration-openai-compat": "0.0.0-alpha.13",
+    "@agenticprimitives/orchestration-openai-compat": "0.0.0-alpha.14",
     "@agenticprimitives/rate-control": "0.0.0-alpha.5",
     "@agenticprimitives/rate-control-cloudflare": "0.0.0-alpha.5",
     "@agenticprimitives/registry-kit": "0.0.0-alpha.20",
