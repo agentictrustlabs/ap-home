@@ -51,8 +51,17 @@ export const APP_OWN_NAMESPACE_SEED_SCOPES = ['vault:family:*', 'vault:field:*',
  *  canonical home is Ring 0's `interactionsGrantScopes` (fabric); this is the extension that ships today. */
 export const APP_ASSESSMENT_SCOPES = ['vault:run.assessment:*'] as const;
 
+/** 2026-10-15 (skills W0/W3 — THE OUTCOME IS STATE) — a DOMAIN RECORD FAMILY: the typed record an instruction skill's run
+ *  produces (`ap.domain-record.v1`, class → `<domain>.<kebab-class>`), written by the org agent's DECLARED record effect
+ *  into the ASKER's own vault, where the Lab's state check reads it back and validates it against the class's shape.
+ *  The same shape as the card-room study records above: a service's output filed in the person's own cabinet. ADDITIVE
+ *  (the household precedent): a grant issued before this denies the write `record_scope_denied` until re-issued — found
+ *  live, with the answer complete and every class reading absent. A domain whose skills produce records registers its
+ *  family HERE and on the runtime's `EFFECT_WRITABLE_RECORDS` (interactions-do.ts); the two lists must agree. */
+export const APP_DOMAIN_RECORD_SCOPES = ['vault:cil-commons.*'] as const;
+
 /** The extension both apps append to the core, as the grant builder takes it — the ONE list. */
 export const INTERACTIONS_APP_SCOPES: ReadonlyArray<RecordScopeSpec> = [
   { resources: [...APP_COORDINATION_READ_SCOPES, ...APP_OWN_NAMESPACE_READ_SCOPES], ops: ['read'] },
-  { resources: [...APP_OWN_NAMESPACE_SEED_SCOPES, ...APP_ASSESSMENT_SCOPES], ops: ['read', 'write'] },
+  { resources: [...APP_OWN_NAMESPACE_SEED_SCOPES, ...APP_ASSESSMENT_SCOPES, ...APP_DOMAIN_RECORD_SCOPES], ops: ['read', 'write'] },
 ];
