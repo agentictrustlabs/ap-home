@@ -13,6 +13,7 @@ import {
   buildSetBytes32AttributeCall,
   buildSetAddressAttributeCall,
   buildSetStringAttributeCall,
+  agentNameAttributeResolverAbi,
   namehash,
   PREDICATE_ID,
   CONNECTION_KIND_ID,
@@ -1041,7 +1042,27 @@ function buildNameRecordCalls(node: Hex, sa: Address, records: NameClaimRecords)
       calls.push(buildSetStringAttributeCall({ resolver: CONTRACTS.agentNameResolver, node, predicate: NAME_RECORD_STRING_PREDICATE[key], value }));
     }
   }
+  // WHICH ACCOUNT THIS NAME IS (ap-federation spec 440 §C3 / Ring 0 spec 346 §3.8). A person is a DIFFERENT Smart Agent on
+  // each chain (one custodian key, one factory per chain), so a name that carried only `addr` said nothing about the
+  // chain it was claimed on: `atl:nativeId` is this agent's CAIP-10 id on THIS chain — the canonical id the name projects —
+  // and `atl:accounts` is the per-chain list it starts with (one entry; a second chain's Home appends its own). Written
+  // in the claim's own userOp, so no name is ever born without them. Both predicates are registered on faithchain and
+  // hopechain (Ring 0 AddAccountsPredicate); an unregistered chain reverts the claim loudly (`PredicateNotActive`).
+  const caip10 = `eip155:${CHAIN_ID}:${sa.toLowerCase()}`;
+  calls.push(buildSetStringAttributeCall({ resolver: CONTRACTS.agentNameResolver, node, predicate: PREDICATE_ID.nativeId, value: caip10 }));
+  calls.push(buildSetAccountsCall(node, [caip10]));
   return calls;
+}
+
+/** `atl:accounts` write — the pinned agent-naming encodes the record (`encodeRecords`) but its `buildRecordCalls` does not emit
+ *  the array call until the release after 1.0.0-alpha.35 (`buildSetStringArrayAttributeCall`); this is that call, by the
+ *  package's own resolver ABI. Delete it and import the builder when the pin moves. */
+function buildSetAccountsCall(node: Hex, accounts: readonly string[]): ContractCall {
+  return {
+    to: CONTRACTS.agentNameResolver,
+    value: 0n,
+    data: encodeFunctionData({ abi: agentNameAttributeResolverAbi, functionName: 'setStringArrayAttribute', args: [node, PREDICATE_ID.accounts, [...accounts]] }),
+  };
 }
 
 function childDiscoveryRecords(base: string, cOpts: CreateChildOpts): NameClaimRecords {
