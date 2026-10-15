@@ -5189,7 +5189,10 @@ app.post('/harness/ask', async (c) => {
       ...(provider ? { provider } : {}), ...roleProviders,
       // Spec 418 §12 — any variant makes this a comparison run: its self-acting writes are held, even a provider-only variant.
       ...(variantReq ? { comparison: true } : {}),
-      ...(variantReq && (variantReq.plannerKind || variantReq.selection || variantReq.toggles || variantReq.acceptance || variantReq.judgeProfile || variantReq.askerContext) ? { variant: { ...(variantReq.plannerKind ? { plannerKind: variantReq.plannerKind } : {}), ...(variantReq.selection ? { selection: variantReq.selection } : {}), ...(variantReq.toggles ? { toggles: variantReq.toggles } : {}), ...(variantReq.acceptance ? { acceptance: variantReq.acceptance } : {}), ...(variantReq.judgeProfile ? { judgeProfile: variantReq.judgeProfile } : {}), ...(variantReq.askerContext ? { askerContext: variantReq.askerContext } : {}) } } : {}),
+      // 2026-10-15 — THE GATEWAY KNOB REACHES THE RUN. It was applied to the reply's composer only; the run's own calls (the
+      // skill answer's structured call, the selection judge) never saw it, so `gateway: off` still answered through the gateway
+      // — which refused the incident-playbook cases ("answered in prose instead of calling skill_answer") and cut the rest.
+      ...(variantReq && (variantReq.plannerKind || variantReq.selection || variantReq.toggles || variantReq.acceptance || variantReq.judgeProfile || variantReq.askerContext || variantReq.gateway) ? { variant: { ...(variantReq.plannerKind ? { plannerKind: variantReq.plannerKind } : {}), ...(variantReq.gateway ? { gateway: variantReq.gateway } : {}), ...(variantReq.selection ? { selection: variantReq.selection } : {}), ...(variantReq.toggles ? { toggles: variantReq.toggles } : {}), ...(variantReq.acceptance ? { acceptance: variantReq.acceptance } : {}), ...(variantReq.judgeProfile ? { judgeProfile: variantReq.judgeProfile } : {}), ...(variantReq.askerContext ? { askerContext: variantReq.askerContext } : {}) } } : {}),
       ...(runPlan ? { plan: runPlan } : {}),
       ...(runPlan && body.rowsOnly ? { rowsOnly: true } : {}),
       // Spec 384 W3 — a campaign selected a provider for this step: the plan is bound to it and to its offer.
@@ -5670,7 +5673,7 @@ app.post('/harness/ask', async (c) => {
       // ONE AFTER ANOTHER: `outcomeCheck.ms` is subtracted from the post-run phase below, so it must be the wall time the
       // check took, which the sum of sequential calls is and the sum of parallel ones is not. Tokens are summed over them.
       let usage: { tokensIn?: number; tokensOut?: number } | undefined;
-      const ocall = structuredCallFor(c.env, judgeProvider, { onCall: (rec) => { if (rec.tokensIn !== undefined) usage = { tokensIn: (usage?.tokensIn ?? 0) + rec.tokensIn, tokensOut: (usage?.tokensOut ?? 0) + (rec.tokensOut ?? 0) }; } });
+      const ocall = structuredCallFor(withGatewayVariant(c.env, variantReq?.gateway), judgeProvider, { onCall: (rec) => { if (rec.tokensIn !== undefined) usage = { tokensIn: (usage?.tokensIn ?? 0) + rec.tokensIn, tokensOut: (usage?.tokensOut ?? 0) + (rec.tokensOut ?? 0) }; } });
       if (ocall) {
         const repeats = judgeRepeatsOf(variantReq?.toggles?.['quality/judge-repeats'], (c.env as { QUALITY_JUDGE_REPEATS_DEFAULT?: string }).QUALITY_JUDGE_REPEATS_DEFAULT);
         const perClass = (variantReq?.toggles?.['quality/outcome-judge'] ?? 'per-class') !== 'pooled';
@@ -5727,7 +5730,7 @@ app.post('/harness/ask', async (c) => {
       const tool = planned.length ? offeredTools.find((t) => t.id === planned[planned.length - 1] && t.answer) : undefined;
       if (tool) {
         let usage: { tokensIn?: number; tokensOut?: number } | undefined;
-        const qcall = structuredCallFor(c.env, judgeProvider, { onCall: (rec) => { usage = { tokensIn: rec.tokensIn, tokensOut: rec.tokensOut }; } });
+        const qcall = structuredCallFor(withGatewayVariant(c.env, variantReq?.gateway), judgeProvider, { onCall: (rec) => { usage = { tokensIn: rec.tokensIn, tokensOut: rec.tokensOut }; } });
         if (qcall) {
           const q = await judgeAnswerQuality({ request: String(body.message ?? ''), skillCard: tool.description, answer: (reply as { text: string }).text }, qcall).catch((e: unknown) => ({ judge: ANSWER_QUALITY_JUDGE, scores: {}, score: 0, ms: 0, error: e instanceof Error ? e.message : String(e) }));
           trace.quality = { judge: q.judge.name, scores: q.scores, score: q.score, ms: q.ms, ...(usage?.tokensIn !== undefined ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut ?? 0 } : {}), ...(q.error ? { error: q.error.slice(0, 200) } : {}) };
