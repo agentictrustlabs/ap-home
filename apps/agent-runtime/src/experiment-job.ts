@@ -10,6 +10,7 @@ import {
   validateReplaySet, replaySetDigest, criterionDigest, experimentPlan, validateExperimentPlan, DEFAULT_SELECTION_THRESHOLDS,
   type ReplaySetV1, type SelectionCriterionV1, type ExperimentPlanV1, type VariantRequestV1, type ExperimentRunV1, type StartingStateFixtureV1,
 } from '@agenticprimitives/evaluation';
+import { validateRubricV1, type RubricV1 } from './rubric-judge.js';
 
 export type ExperimentStatusV1 = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -30,6 +31,8 @@ export interface ExperimentJobV1 {
   criterion: SelectionCriterionV1;
   fixtures?: Record<string, StartingStateFixtureV1>;
   outcomeGold?: OutcomeGoldV1;
+  /** 2026-10-15 — the per-case rubrics (`ap.rubrics.v1`, pinned to the set): each case's answer is judged against its own. */
+  rubrics?: RubricsV1;
   /** The asker (the steward who submitted) and the agent asked, both addresses. */
   asker: string;
   addressee: string;
@@ -45,6 +48,23 @@ export interface ExperimentRequestV1 {
   split?: 'held-out' | 'development' | 'all'; repeats?: number; planId?: string; fixtures?: Record<string, StartingStateFixtureV1>;
   policy?: 'primary' | 'any-fire';
   outcomeGold?: OutcomeGoldV1;
+  rubrics?: RubricsV1;
+}
+export interface RubricsV1 { type: 'ap.rubrics.v1'; replaySetDigest: string; cases: Record<string, RubricV1> }
+/** The rubrics, checked: the record type, the digest (rubrics for THIS set), each case a case of the set, each rubric sound. */
+export function validateRubrics(raw: unknown, setDigest: string, intentIds: ReadonlySet<string>): { ok: true; rubrics: RubricsV1 } | { ok: false; error: string } {
+  if (!raw || typeof raw !== 'object') return { ok: false, error: 'rubrics: an ap.rubrics.v1 record is required' };
+  const g = raw as Partial<RubricsV1>;
+  if (g.type !== 'ap.rubrics.v1') return { ok: false, error: 'rubrics: type must be ap.rubrics.v1' };
+  if (g.replaySetDigest !== setDigest) return { ok: false, error: `rubrics: rubrics for ${String(g.replaySetDigest)}, not this set (${setDigest})` };
+  if (!g.cases || typeof g.cases !== 'object' || Array.isArray(g.cases)) return { ok: false, error: 'rubrics: cases must map a case id to its rubric' };
+  const cases: Record<string, RubricV1> = {};
+  for (const [id, r] of Object.entries(g.cases)) {
+    if (!intentIds.has(id)) return { ok: false, error: `rubrics: ${id} is not a case of this set` };
+    const v = validateRubricV1(r); if (!v.ok) return { ok: false, error: `rubrics: ${id}: ${v.error}` };
+    cases[id] = v.rubric;
+  }
+  return { ok: true, rubrics: { type: 'ap.rubrics.v1', replaySetDigest: setDigest, cases } };
 }
 
 /** W2 — the outcome gold, checked: the record type, the digest (gold for THIS set), and each case's shape; a case the set
@@ -95,10 +115,16 @@ export async function parseExperimentRequest(raw: unknown, now: Date): Promise<{
     if (!og.ok) return { ok: false, error: og.error };
     outcomeGold = og.gold;
   }
+  let rubrics: RubricsV1 | undefined;
+  if (b['rubrics'] !== undefined && b['rubrics'] !== null) {
+    const rb = validateRubrics(b['rubrics'], setDigest, new Set(setR.set.intents.map((i) => i.id)));
+    if (!rb.ok) return { ok: false, error: rb.error };
+    rubrics = rb.rubrics;
+  }
   const plan = experimentPlan({ id: planId, replaySetDigest: setDigest, criterionDigest: await criterionDigest(criterion), split: split!, repeats, variants: variants as Record<string, VariantRequestV1>, thresholds: DEFAULT_SELECTION_THRESHOLDS, registeredAt: now.toISOString(), ...(policy ? { policy } : {}) });
   const pv = validateExperimentPlan(plan);
   if (!pv.ok) return { ok: false, error: `plan: ${pv.errors.join('; ')}` };
-  return { ok: true, request: { set: setR.set, criterion, variants: variants as Record<string, VariantRequestV1>, split: split!, repeats, planId, ...(fixtures ? { fixtures } : {}), ...(policy ? { policy } : {}), ...(outcomeGold ? { outcomeGold } : {}) }, plan };
+  return { ok: true, request: { set: setR.set, criterion, variants: variants as Record<string, VariantRequestV1>, split: split!, repeats, planId, ...(fixtures ? { fixtures } : {}), ...(policy ? { policy } : {}), ...(rubrics ? { rubrics } : {}), ...(outcomeGold ? { outcomeGold } : {}) }, plan };
 }
 
 /** What a poller sees while the object runs: how far, what the runs so far said, and the record when it is done. */

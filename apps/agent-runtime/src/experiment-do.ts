@@ -160,8 +160,9 @@ export class ExperimentDO {
         // variant — even an empty one, the deployed behaviour with no knob turned — the route neither reads nor keeps the
         // conversation (`isolatedTurn`), which is what makes a case a fresh context and what the isolation refusal checks.
         const gold = job.outcomeGold?.cases[intentId];
+        const rubric = job.rubrics?.cases[intentId];
         lastTrace = {};
-        const r = await post('/harness/ask', { session: job.session, addressee: job.addressee, message, variant: variant ?? {}, runRef, ...(gold ? { outcomeGold: gold } : {}) }) as { ok?: boolean; error?: string; refused?: string; reply?: { kind?: string; error?: string; text?: string; plannerTrace?: { selection?: unknown } }; hasProvenance?: { recordType?: string } };
+        const r = await post('/harness/ask', { session: job.session, addressee: job.addressee, message, variant: variant ?? {}, runRef, ...(gold ? { outcomeGold: gold } : {}), ...(rubric ? { rubric } : {}) }) as { ok?: boolean; error?: string; refused?: string; reply?: { kind?: string; error?: string; text?: string; plannerTrace?: { selection?: unknown } }; hasProvenance?: { recordType?: string } };
         if (r.ok === false || r.error) return { ok: false, error: `${r.refused ? `${r.refused}: ` : ''}${r.error ?? 'the ask failed'}` };
         const said = String(r.reply?.error ?? r.reply?.text ?? '');
         if (r.reply?.kind === 'refused' && /planner_failed:.*HTTP (402|429|5\d\d)/.test(said)) return { ok: false, error: `provider: ${said.slice(0, 160)}` };

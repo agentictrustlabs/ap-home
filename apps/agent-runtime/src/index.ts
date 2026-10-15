@@ -15,6 +15,7 @@ import { CONTACT_FIELDS } from '@agenticprimitives/ontology';
 import { addUsage, judgeAnswerQuality, judgeOutcomeDelivered, OUTCOME_CHECK_JUDGE, ANSWER_QUALITY_JUDGE, recordOf, runMarks, replayingInvoker, planDigest, traceContextOf, type RunDoorV1, type ModelCallV1, type VariantV1, traceIdOf, spanIdOf, formatTraceparent, withTracestateMember, type TraceContextV1, type Plan, type SuppliedInputV1, type RunEvent, type RunBillV1 } from '@agenticprimitives/orchestration';
 import { putRecord, getRecord, listRecords } from './run-records.js';
 import { recordFormOf, rehydrateExecuted, artifactStoreFor } from './artifact-store.js';
+import { judgeRubric, validateRubricV1 } from './rubric-judge.js';
 import { syncTriggers, listTriggers, type TriggerScheduleV1, fireTriggers, type TriggerSource, rotateTriggerToken, advanceTrigger, withPause, withBudget, advanced, declareTrigger, removeTrigger, rebuildDeclaredTriggers } from './triggers.js';
 import { parseRoutineSentence } from './routine-sentence.js';
 import { nudge, emailOf } from './nudges.js';
@@ -3718,7 +3719,7 @@ app.post('/harness/experiments', async (c) => {
   let window = null;
   if (body['window'] !== undefined && body['window'] !== null) { const v = validateCaptureWindow(body['window']); if (!v.ok) return c.json({ ok: false, error: `window: ${v.errors.join('; ')}` }, 400); window = v.window; }
   const job: ExperimentJobV1 = {
-    type: 'ap.lab-experiment-job.v1', planId: parsed.plan.id, plan: parsed.plan, set: parsed.request.set, criterion: parsed.request.criterion, ...(parsed.request.fixtures ? { fixtures: parsed.request.fixtures } : {}), ...(parsed.request.outcomeGold ? { outcomeGold: parsed.request.outcomeGold } : {}),
+    type: 'ap.lab-experiment-job.v1', planId: parsed.plan.id, plan: parsed.plan, set: parsed.request.set, criterion: parsed.request.criterion, ...(parsed.request.fixtures ? { fixtures: parsed.request.fixtures } : {}), ...(parsed.request.outcomeGold ? { outcomeGold: parsed.request.outcomeGold } : {}), ...(parsed.request.rubrics ? { rubrics: parsed.request.rubrics } : {}),
     asker: String(gate.sa).toLowerCase(), addressee: gate.addressee, session: body['session'] as string, origin: new URL(c.req.url).origin, submittedAt: new Date().toISOString(),
   };
   const r = await experimentOp(c.env, job.planId, { op: 'start', job, window });
@@ -4917,6 +4918,9 @@ app.post('/harness/ask', async (c) => {
      *  plan, the inputs to name missing, the behaviour. Read ONLY by the outcome check and the state check after the run
      *  (what the answer is judged against); it changes nothing the run does. Honoured only beside a variant. */
     outcomeGold?: unknown;
+    /** 2026-10-15 — the case's RUBRIC from a comparison: the author's instructions and scored criteria for the grader.
+     *  Read ONLY by the rubric judge after the run; honoured only beside a variant. */
+    rubric?: unknown;
   } | null;
   // The addressee is an ADDRESS — the vault keys on the hex form. A CAIP-10 `eip155:<chain>:0x…` (what a session's
   // `sub` is) used to pass through untouched, so the playbook read missed and the agent went quietly bare while
@@ -5758,6 +5762,21 @@ app.post('/harness/ask', async (c) => {
         const sc = stateCheckOf(classes, records, domainShapes);
         for (const [iri, from] of Object.entries(stale)) if (sc.classes[iri]) sc.classes[iri] = { ...sc.classes[iri]!, errors: [`the record in the vault is from an earlier run (${from})`], stale: from };
         trace.stateCheck = { ...sc, recordTypes };
+      }
+    }
+    // 2026-10-15 — THE CASE'S RUBRIC, judged: one call, every criterion, a reason each; the score beside the outcome judge's,
+    // never pooled with it. The judge is the comparison's (provider and tier), so its model is on the record.
+    if (variantReq && body.rubric && reply?.kind === 'answer' && typeof (reply as { text?: unknown }).text === 'string') {
+      const rv = validateRubricV1(body.rubric);
+      if (!rv.ok) (trace as { rubricCheck?: unknown }).rubricCheck = { error: rv.error, judge: 'ap.rubric-judge.v1', ms: 0 };
+      else {
+        let rubricModel: string | undefined;
+        const judgeTier = variantReq?.toggles?.['quality/judge-tier'] === 'strong' ? { tier: 'strong' as const } : {};
+        const rcall = structuredCallFor(withGatewayVariant(c.env, variantReq?.gateway), judgeProvider, { ...judgeTier, onCall: (rec) => { rubricModel = `${String(rec.provider)}/${rec.model}`; } });
+        if (rcall) {
+          (trace as { rubricCheck?: unknown }).rubricCheck = await judgeRubric({ request: String(body.message ?? ''), answer: (reply as { text: string }).text, rubric: rv.rubric }, rcall as never, () => rubricModel)
+            .catch((e: unknown) => ({ error: (e instanceof Error ? e.message : String(e)).slice(0, 200), judge: 'ap.rubric-judge.v1', ms: 0 }));
+        }
       }
     }
     if (variantReq?.toggles?.['quality/judge'] === 'on' && reply?.kind === 'answer' && typeof (reply as { text?: unknown }).text === 'string') {

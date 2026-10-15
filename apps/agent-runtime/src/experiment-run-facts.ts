@@ -21,6 +21,8 @@ export { failureCauseOf };
 
 /** The run as this runtime records it: the pinned package's record plus the fields above (a superset, never a change). */
 export type RunRecordPlusV1 = ExperimentRunV1 & {
+  /** 2026-10-15 — the case's rubric, judged: the score beside the outcome judge's, never pooled. */
+  rubric?: { error: string } | { score: number | null; pass: boolean | null; passAt: number; awardable: number; awarded: number; deducted: number; cannotTell: number; requiredFailed: string[]; criteria: Record<string, { verdict: string; because?: string; points: number; kind: 'award' | 'deduct'; required?: boolean }>; judge?: string; judgeModel?: string };
   /** W1 — the outcome check was asked for and did not run: the reason, on the record (a question is not a missing judge). */
   outcomeSkipped?: string;
   failureCause?: FailureCauseV1;
@@ -41,6 +43,7 @@ export interface TraceFactsV1 {
   outcomeCheck?: { score?: number; classes?: Record<string, number>; error?: string; basis?: string; judge?: string; judgeModel?: string; verdicts?: Record<string, string>; cantTell?: number; counted?: number; skipped?: string };
   outcomeCheckAgentPlan?: { score?: number; classes?: Record<string, number>; error?: string };
   stateCheck?: { pass?: boolean; classes?: Record<string, { exists?: boolean; valid?: boolean; errors?: string[]; satisfiedBy?: string; stale?: string }> };
+  rubricCheck?: { score?: number | null; pass?: boolean | null; passAt?: number; awardable?: number; awarded?: number; deducted?: number; cannotTell?: number; requiredFailed?: string[]; criteria?: Record<string, { verdict?: string; because?: string; points?: number; kind?: string; required?: boolean }>; judge?: string; judgeModel?: string; error?: string };
 }
 
 /** The facts off a planner trace, tolerant of absence (an older build's trace carries none). */
@@ -56,6 +59,7 @@ export function traceFactsOf(trace: unknown): TraceFactsV1 {
     ...(oc && typeof oc === 'object' ? { outcomeCheck: oc } : {}),
     ...(oa && typeof oa === 'object' ? { outcomeCheckAgentPlan: oa } : {}),
     ...(sc && typeof sc === 'object' ? { stateCheck: sc } : {}),
+    ...(t['rubricCheck'] && typeof t['rubricCheck'] === 'object' ? { rubricCheck: t['rubricCheck'] as TraceFactsV1['rubricCheck'] } : {}),
   };
 }
 
@@ -88,6 +92,13 @@ export function enrichRun(run: ExperimentRunV1, facts: TraceFactsV1, seen: strin
   }
   const oa = facts.outcomeCheckAgentPlan;
   if (oa && typeof oa.score === 'number' && !oa.error) r.outcomeAgentPlan ??= { score: oa.score, classes: numbers(oa.classes) };
+  const rc = facts.rubricCheck;
+  if (rc && typeof rc === 'object') {
+    if (rc.error) r.rubric ??= { error: String(rc.error).slice(0, 200) };
+    else if (typeof rc.score === 'number' || rc.score === null) r.rubric ??= { score: rc.score ?? null, pass: typeof rc.pass === 'boolean' ? rc.pass : null, passAt: rc.passAt ?? 0.7, awardable: rc.awardable ?? 0, awarded: rc.awarded ?? 0, deducted: rc.deducted ?? 0, cannotTell: rc.cannotTell ?? 0, requiredFailed: rc.requiredFailed ?? [],
+      criteria: Object.fromEntries(Object.entries(rc.criteria ?? {}).map(([k, v]) => [k, { verdict: String(v?.verdict ?? 'cannot-tell'), ...(v?.because ? { because: String(v.because).slice(0, 300) } : {}), points: Number(v?.points ?? 0), kind: v?.kind === 'deduct' ? 'deduct' : 'award', ...(v?.required ? { required: true } : {}) }])),
+      ...(rc.judge ? { judge: rc.judge } : {}), ...(rc.judgeModel ? { judgeModel: rc.judgeModel } : {}) };
+  }
   const sc = facts.stateCheck;
   if (sc && typeof sc.pass === 'boolean' && sc.classes && typeof sc.classes === 'object') {
     r.stateCheck ??= { pass: sc.pass, classes: Object.fromEntries(Object.entries(sc.classes).map(([k, v]) => [k, { exists: v?.exists === true, valid: v?.valid === true, errors: Array.isArray(v?.errors) ? v.errors.map(String).slice(0, 20) : [], ...(typeof v?.satisfiedBy === 'string' ? { satisfiedBy: v.satisfiedBy } : {}), ...(typeof v?.stale === 'string' ? { stale: v.stale } : {}) }])) };
