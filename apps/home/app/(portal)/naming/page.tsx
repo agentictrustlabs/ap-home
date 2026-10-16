@@ -12,6 +12,7 @@ import { useSession } from '../../../src/context/session';
 import { SectionShell } from '../../../src/components/portal/SectionShell';
 import { AgentNamingEditor } from '../../../src/components/portal/discovery/AgentNamingEditor';
 import { ChangeNameCard } from '../../../src/components/portal/naming/ChangeNameCard';
+import { DeclareHomeAccountCard } from '../../../src/components/portal/naming/DeclareHomeAccountCard';
 import { TownDoneNote, TownHandoffNote, finishTownHandoff, useTownHandoff, useTownReturn } from '../../../src/components/portal/naming/TownHandoff';
 import { PurchaseNameCard } from '../../../src/components/portal/naming/PurchaseNameCard';
 import { isPricedTld } from '../../../src/lib/naming-price';
@@ -179,6 +180,12 @@ function NamingPageInner() {
           initialLabel={handoff?.label}
           onChanged={(n) => { if (n) { setHandoffClaimed(n); if (handoff) finishTownHandoff(handoff, { name: n, agent: agentAddress }); else if (ret.popup) finishTownHandoff(ret, { name: n, agent: agentAddress, changed: true }); } void (async () => { await refreshProfile(); await load(); notifyAgentsChanged(); })(); }}
         />
+      )}
+
+      {/* One-time catch-up for names claimed before 2026-10-15 (ap-federation spec 440 §C3): declare THIS
+          account as the home the name is a name of. Renders nothing once every held name says so. */}
+      {!isNameless && agentAddress && (
+        <DeclareHomeAccountCard agent={agentAddress} via={memberVia} token={session?.token ?? null} />
       )}
 
       {/* The records published under this name (including the A2A endpoint), the card projection that

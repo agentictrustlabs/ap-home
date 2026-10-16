@@ -11,6 +11,7 @@ import { AgentNamingEditor } from '../../../../../src/components/portal/discover
 import { useSession } from '../../../../../src/context/session';
 import { resolveVia } from '../../../../../src/home/onboarding';
 import { ChangeNameCard } from '../../../../../src/components/portal/naming/ChangeNameCard';
+import { DeclareHomeAccountCard } from '../../../../../src/components/portal/naming/DeclareHomeAccountCard';
 import { TownDoneNote, TownHandoffNote, finishTownHandoff, useTownHandoff, useTownReturn } from '../../../../../src/components/portal/naming/TownHandoff';
 
 export default function OrgNamingPage({ params }: { params: Promise<{ org: string }> }) {
@@ -36,6 +37,7 @@ function OrgNamingPageInner({ params }: { params: Promise<{ org: string }> }) {
           <AgentNamingPanel agent={a} name={name} />
           <ChangeNameCard agent={a} kind={kind} via={via} token={session?.token ?? null} initialLabel={handoff?.label}
             onChanged={(n) => { if (n && (handoff || ret.popup)) { setClaimed(n); finishTownHandoff(ret, { name: n, agent: a, changed: !handoff }); } else window.location.reload(); }} />
+          <DeclareHomeAccountCard agent={a} via={via} token={session?.token ?? null} />
           <AgentNamingEditor kind="org" agent={org} />
         </>
       )}
