@@ -1854,6 +1854,22 @@ export function accessRevokeInvoker(deps: HarnessDeps, env: HarnessEnv, presente
     if (!deps.readGrantWire) throw new Error('this agent cannot read the grant to revoke (no read-grant seam wired)');
     const app = String(args.app ?? '').trim().toLowerCase();
     const digestArg = String(args.digest ?? '').trim().toLowerCase();
+    // Spec 442 §8 — AN ACCOUNT AT A COMPANY (the Security section's row, keyed `identity.external-account-link:<issuer digest>`)
+    // is revoked the way every credential is: the record is RETIRED here under the person's mandate, never quietly deleted,
+    // and the row says the company was not told — the personal-agent service revokes the Account Token at the company's
+    // revocation endpoint when it next acts for her (one mechanism per side; nothing is forwarded from here).
+    if (digestArg.startsWith('identity.external-account-link:')) {
+      if (!deps.readSubjectRecord || !deps.writeSubjectRecord) throw new Error('this agent cannot retire an account link (no record seams wired)');
+      const me = wire.delegator.toLowerCase() as Address;
+      if (person && me !== person.toLowerCase()) throw new Error(`an account at a company is retired by the person who holds it (${person}); the mandate is from ${wire.delegator}`);
+      const rec = (await deps.readSubjectRecord(me, digestArg)) as { type?: string; issuer?: string; status?: string; revocation?: unknown } | null;
+      if (!rec || rec.type !== 'ap.external-account-link.v1') return { revoked: false, digest: digestArg, note: 'no account at a company is recorded under that key — nothing to retire' };
+      if (rec.status === 'revoked') return { revoked: true, digest: digestArg, note: 'already retired', alreadyRevoked: true };
+      const next = { ...rec, status: 'revoked', revocation: { at: Math.floor(Date.now() / 1000), companyNotified: false, reason: 'retired from the Security section under the person\'s mandate' } };
+      const wrote = await deps.writeSubjectRecord(me, digestArg, next, ctx.operationId);
+      if (!wrote.ok) throw new Error(`the account link could not be retired: ${wrote.error ?? 'the vault refused the write'}`);
+      return { revoked: true, digest: digestArg, issuer: rec.issuer ?? null, companyNotified: false, note: `the account at ${rec.issuer ?? 'the company'} is retired; the personal-agent service revokes the token at the company's endpoint` };
+    }
     if (!app && !/^0x[0-9a-f]{64}$/.test(digestArg)) {
       throw new InputRequired({
         kind: 'data', stepRef, toolId: _toolId,

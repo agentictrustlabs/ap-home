@@ -1,0 +1,38 @@
+{
+  "purpose": "faithnet's personal-agent SERVICE (spec 443 §1.1 / Ring 0 spec 442 §7.1) — the ONE client at every company's door for people of this estate: it presents with a service-scoped ClientKeyBindingV1 the Smart Agent signed, its JWKS and key directory are served at pap.faithnet.io, and each person is only a pairwise sub derived from her vault secret. Never a person's client_id. An operator note, not a persona.",
+  "chainId": 34348,
+  "service": {
+    "displayName": "faithnet personal-agent service",
+    "description": "Presents at companies' doors (Personal Agent Protocol, ACP, UCP, Visa TAP) for the people of faithnet. Holds no identity: one service-scoped client key binding, one JWKS; approval of any act is the person's mandate signature at her Home.",
+    "facets": {
+      "displayName": "faithnet personal-agent service",
+      "description": "Presents at companies' doors for the people of faithnet; the person is only a pairwise subject.",
+      "capabilities": "ap:cap:personal-agent.present",
+      "a2aEndpoint": "https://pap.faithnet.io",
+      "siteUrl": "https://pap.faithnet.io"
+    },
+    "name": "pap.svc",
+    "sa": "0xf29038602367e1645fE09f180fC326f7Cd2634B0",
+    "charteredUnder": "demo-admin",
+    "custodian": "0x423b0749c1b85a12a8b463c01f697d9e0072544d",
+    "named": true,
+    "namedAt": "2026-10-16T00:08:08.968Z",
+    "presented": true,
+    "recordsNotWritten": [
+      "siteUrl"
+    ]
+  },
+  "protocols": {
+    "clientId": "https://pap.faithnet.io/client.json",
+    "jwks": "https://pap.faithnet.io/jwks.json",
+    "keyDirectory": "https://pap.faithnet.io/.well-known/http-message-signatures-directory",
+    "redirectUris": [
+      "https://www.faithnet.me/oauth/return"
+    ]
+  },
+  "charteredBy": {
+    "persona": "demo-admin",
+    "sa": "0x6142b0fca982f6701cf2248bf368ab44a48c5725"
+  },
+  "charteredAt": "2026-10-16T00:05:40.164Z"
+}

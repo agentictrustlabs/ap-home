@@ -2722,8 +2722,30 @@ export class InteractionsDO {
             const digest = hashOf(w);
             rows.push({ kind: 'plane', holder: w.delegate.toLowerCase(), what, digest, revoked: await revokedOf(digest), source, signed: signedOf(w) });
           }
-          // Vault-resident families (the survey names them; the records decode): members and contacts.
+          // Vault-resident families (the survey names them; the records decode): members and contacts — and, spec 442 §8
+          // (the Security section's "an account at a company" row), the person's ACCOUNTS AT COMPANIES: the Account Token
+          // her personal-agent service holds, sealed in her vault, listed per issuer and never by subject.
           const survey = await this.mcpVaultTool(g, 'list_vault_record', {}).then((r) => r.json()).catch(() => ({})) as { records?: Array<{ record_type: string }> };
+          const ACCOUNT_LINK = 'identity.external-account-link:';
+          const linkKeys = (survey.records ?? []).map((r) => r.record_type).filter((k) => k.startsWith(ACCOUNT_LINK));
+          if (linkKeys.length) {
+            const got = await this.mcpVaultTool(g, 'get_vault_records', { recordTypes: linkKeys.slice(0, 100) }).then((r) => r.json()).catch(() => ({})) as { records?: Record<string, unknown> };
+            const nowSec = Math.floor(Date.now() / 1000);
+            for (const [k, v] of Object.entries(got.records ?? {})) {
+              const rec = v as { type?: string; issuer?: string; signInKind?: string; accountToken?: { scopes?: string[] }; grantedAt?: number; expiresAt?: number; lastUsedAt?: number; consents?: Array<{ fieldClass?: string }>; status?: string; revocation?: { at?: number; companyNotified?: boolean } };
+              if (rec.type !== 'ap.external-account-link.v1' || !rec.issuer) continue;
+              const host = (() => { try { return new URL(rec.issuer!).host; } catch { return rec.issuer!; } })();
+              const scopes = rec.accountToken?.scopes ?? [];
+              const expired = typeof rec.expiresAt === 'number' && rec.expiresAt <= nowSec;
+              const consented = [...new Set((rec.consents ?? []).map((c) => c.fieldClass).filter(Boolean))];
+              rows.push({
+                kind: 'account-at-company', holder: rec.issuer, holderName: host,
+                what: `an account at ${host} (${rec.signInKind ?? 'direct'} sign-in): ${scopes.length ? scopes.join(' ') : 'no scopes'}${consented.length ? ` · consented ${consented.join(', ')}` : ''}${expired && rec.status !== 'revoked' ? ' · token expired (signed out until she signs in again)' : ''}`,
+                digest: k, ...(typeof rec.grantedAt === 'number' ? { issuedAt: new Date(rec.grantedAt * 1000).toISOString() } : {}),
+                revoked: rec.status === 'revoked', source: rec.status === 'revoked' ? `account.link (revoked${rec.revocation?.companyNotified ? ', the company was told' : ', the company was NOT told — the service revokes at its endpoint'})` : 'account.link', signed: 'key',
+              });
+            }
+          }
           const keys = (survey.records ?? []).map((r) => r.record_type).filter((k) => k.startsWith('org.invite:agent:') || k.startsWith('contact:'));
           if (keys.length) {
             const got = await this.mcpVaultTool(g, 'get_vault_records', { recordTypes: keys.slice(0, 200) }).then((r) => r.json()).catch(() => ({})) as { records?: Record<string, unknown> };
