@@ -1,0 +1,16 @@
+{
+  "purpose": "spec 444 W3 — the organization that issues its members' credentials (an operator note, not a persona)",
+  "home": "https://www.impact-agent.me",
+  "chainId": 34349,
+  "org": {
+    "label": "imbnet",
+    "sa": "0x2Ce397435e126e513856D27286248F5497108713",
+    "name": "",
+    "nameLater": true,
+    "steward": "maya",
+    "custodian": "0x2589ca6b91bfdaec4cc6399bff9b8ce84d16ded4",
+    "txHash": "0x92442241d9eab192de708b5be07d657da613d13ddeaf366e44cf812065052db7",
+    "kind": "organization"
+  },
+  "createdAt": "2026-10-16T15:21:23.196Z"
+}
