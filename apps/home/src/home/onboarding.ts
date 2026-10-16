@@ -51,6 +51,7 @@ import { buildApprovedSiteDelegation, buildApprovedOperationalIntentDelegation, 
 import { vaultWriteWithDelegation, vaultReadWithDelegation } from '../lib/vault-client';
 import { saveStandingGrant, loadStandingGrant, saveStandingGrantWithSelfVault, loadStandingGrantWithSelfVault } from '../lib/grant-cache';
 import { DELIVERY_SERVICE_SA, INTERACTIONS_SERVICE_SA, MCP_SERVER_ID } from '../lib/inbox-delivery';
+import { interactionsGrantResources, missingGrantScopes } from '../lib/grant-coverage';
 import { ensureCsrfToken, csrfHeaders } from '../csrf';
 import type { DemoPasskey } from '../lib/passkey';
 import { readSsoCookie } from '../lib/sso-cookie';
@@ -1602,11 +1603,14 @@ export async function activateInteractionsIfNeeded(
     : ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS);
   if (!force) {
     try {
-      const st = (await fetch(`/a2a/interactions/${principal.toLowerCase()}/status`).then((r) => r.json())) as { granted?: boolean; current?: boolean; leafLive?: boolean | null };
+      const st = (await fetch(`/a2a/interactions/${principal.toLowerCase()}/status`).then((r) => r.json())) as { granted?: boolean; current?: boolean; leafLive?: boolean | null; recordScopes?: string[] };
       // Stale grants re-issue (scope widened — spec 322 W3); so does an EXPIRED SESSION LEAF (spec 412 W5): the leaf is
       // 12 h by issue and nothing else re-issues it, and an agent signing under an expired leaf mints releases that
       // verify nowhere. `leafLive === false` is the DO saying so; null (no leaf, unreadable) is not a reason to prompt.
-      if (st?.granted && st?.current !== false && st?.leafLive !== false) return { ok: true, skipped: true };
+      // And a grant that is current but lacks an ADDITIVE scope this Home now issues (`grant-coverage.ts`): `current`
+      // cannot say so by design, and the write it lacks is refused `record_scope_denied` until someone re-issues.
+      const missing = missingGrantScopes(interactionsGrantResources(MCP_SERVER_ID), st?.recordScopes);
+      if (st?.granted && st?.current !== false && st?.leafLive !== false && !missing?.length) return { ok: true, skipped: true };
     } catch { /* status hiccup — fall through to (re)issue; the DO upsert is idempotent */ }
   }
   try {
