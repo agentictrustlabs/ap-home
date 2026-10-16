@@ -16,6 +16,7 @@
 import { InputRequired, type ToolSpec, type ToolInvoker } from '@agenticprimitives/orchestration';
 import { issueOpenAcCredential, OpenAcIssueRefusal } from '@agenticprimitives/privacy-credentials-openac/issuer';
 import { ADAPTER, CARRIES } from './adapter-declarations.js';
+import { REQUEST_PREFIX, type CredentialRequestV1 } from './credential-request.js';
 
 export const CREDENTIAL_ISSUE_CAPABILITY = 'credential.issue' as const;
 /** The organization's issuer facet record (spec 444 W3), keyed by the facet's key id. */
@@ -52,7 +53,7 @@ export const CREDENTIAL_ISSUE_TOOL: ToolSpec = {
     + 'saying who she is. Requires a mandate from the organization. Only to a member the organization\'s own records name — '
     + 'it never makes anybody a member (that is an invitation). Args: org (the organization, as the ask names it — whose '
     + 'authority this needs), member (the member\'s agent, as the ask names them), deviceKey (the member\'s P-256 device '
-    + 'key JWK, supplied by her agent), claims (claim name → 7-digit value for any claim besides membership the steward '
+    + 'key JWK — omit it when she asked through her own agent, whose request names it), claims (claim name → 7-digit value for any claim besides membership the steward '
     + 'vouches for, e.g. { age: "0000021" }).',
   inputSchema: {
     type: 'object',
@@ -62,7 +63,8 @@ export const CREDENTIAL_ISSUE_TOOL: ToolSpec = {
       deviceKey: { type: 'object', description: 'The member\'s device key, a P-256 JWK { kty, crv, x, y }' },
       claims: { type: 'object', description: 'Claim name → 7-digit value the steward vouches for (besides membership)' },
     },
-    required: ['org', 'member', 'deviceKey'],
+    // deviceKey is NOT required: a member's open request (`credential.request`) names it, and the act asks when neither does.
+    required: ['org', 'member'],
   },
   capability: { id: CREDENTIAL_ISSUE_CAPABILITY, action: 'issue', resourceArg: 'org', authorityArg: 'org' },
   risk: 'high',
@@ -100,6 +102,10 @@ export function credentialIssueInvoker(deps: CredentialIssueDeps, mandateDelegat
     if (org !== mandateDelegator.toLowerCase()) throw new Error(`a credential is issued by the mandate's delegator (${mandateDelegator}); the plan named ${org || 'no organization'}`);
     if (!steward) return { refused: 'issuing a credential is a steward\'s act, and there is no signed-in person on this run' };
     if (!ADDR.test(member)) throw new InputRequired({ kind: 'data', stepRef, toolId, prompt: 'Issue to whom? Give the member\'s agent address.', fields: [{ name: 'member', label: 'Member', type: 'address', required: true }] } as never);
+    // HER REQUEST, when she made one (`credential.request`): the device key she asked for it to be bound to. A key in the
+    // args wins — the steward may be issuing from a request made some other way — and one of the two is required.
+    const request = (await deps.readRecord(org, `${REQUEST_PREFIX}${member}`).catch(() => null)) as CredentialRequestV1 | null;
+    if (!isP256(args.deviceKey) && request?.type === 'ap.credential-request.v1' && request.status === 'open' && isP256(request.deviceKey)) args = { ...args, deviceKey: request.deviceKey };
     if (!isP256(args.deviceKey)) throw new InputRequired({ kind: 'data', stepRef, toolId, prompt: 'The member\'s device key (a P-256 JWK) — her agent supplies it.', fields: [{ name: 'deviceKey', label: 'Device key', type: 'json', required: true }] } as never);
 
     // 1. STANDING — the roster is the organization's own record.
@@ -170,6 +176,10 @@ export function credentialIssueInvoker(deps: CredentialIssueDeps, mandateDelegat
         issued: true, delivered: false, org, member, digest, issuerKeyId: facet.keyId, credentialType: facet.credentialType, credential,
         answer: `${who}'s credential was issued and vouched for, but her vault did not take it (${kept.error ?? 'refused'}) — she enables storage at her Home; until then it is here for you to pass on.`,
       };
+    }
+    // Her request, if she made one, is answered: marked issued with the digest (never the claims).
+    if (request?.type === 'ap.credential-request.v1' && request.status === 'open') {
+      await deps.writeRecord(org, `${REQUEST_PREFIX}${member}`, { ...request, status: 'issued', issued: { digest, at: new Date().toISOString(), by: steward.toLowerCase() } }).catch(() => undefined);
     }
     return {
       issued: true, delivered: true, org, member, digest, issuerKeyId: facet.keyId, credentialType: facet.credentialType,

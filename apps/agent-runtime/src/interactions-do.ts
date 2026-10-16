@@ -432,7 +432,9 @@ const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run
   'federation.projection-submission:live-credential:',
   // …and the member's copy of the credential, in HER vault by HER grant (the payee's-receipt pattern): what an organization
   // issued her, delivered without any authority over her vault.
-  'credential.anonymous:'] as const; // spec 438 §5 — a judgment of a run, signed by its evaluator and verified before it is written, stored BESIDE the run and never as an edit to it // spec 412 W5 — the owner's Library, written by the owner's own agent (library.file.save / visibility / publish) // spec 410 §8 — each party's copy, in its own vault // spec 410 §1.2 — a wire re-issued for a rotation, in the delegator's own vault
+  'credential.anonymous:',
+  // …and a member's ASK for one, in the organization's vault by the organization's grant (spec 444 W4): one per member.
+  'credential.request:'] as const; // spec 438 §5 — a judgment of a run, signed by its evaluator and verified before it is written, stored BESIDE the run and never as an edit to it // spec 412 W5 — the owner's Library, written by the owner's own agent (library.file.save / visibility / publish) // spec 410 §8 — each party's copy, in its own vault // spec 410 §1.2 — a wire re-issued for a rotation, in the delegator's own vault
 
 const CAPABILITY_RECORDS = new Set(['impact-profile', 'capabilities.data', 'skills.data', 'home.manifest', 'control-events.data', 'archetype.assignment',
   // spec 422 §9.3 — the person's Security section: credential labels + the channels that open the home. Hers to write.

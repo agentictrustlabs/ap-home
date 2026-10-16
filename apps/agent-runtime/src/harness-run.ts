@@ -51,6 +51,7 @@ import { INVITATIONS_RECEIVED_TOOL, MEMBERSHIP_ACCEPT_TOOL, MEMBERSHIP_ACCEPT_CA
 import { PERSON_ROLES_TOOL, type OrgMembershipAnswer } from './member-roles.js';
 import { MEMBER_ROLE_SET_TOOL, MEMBER_ROLE_SET_CAPABILITY, memberRoleSetInvoker } from './member-role-set.js';
 import { CREDENTIAL_ISSUE_TOOL, CREDENTIAL_ISSUE_CAPABILITY, credentialIssueInvoker, type CredentialIssueDeps } from './credential-issue.js';
+import { CREDENTIAL_REQUEST_TOOL, CREDENTIAL_REQUEST_CAPABILITY, credentialRequestInvoker } from './credential-request.js';
 import type { RoleOfferV1 } from './org-role.js';
 import { SECURITY_READ_TOOLS, SECURITY_ACT_TOOLS, isSecurityTool, securityInvoker, securityChainDeps } from './security-tools.js';
 import { INBOX_LIST_TOOL, inboxListInvoker } from './inbox-list.js';
@@ -496,6 +497,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   // Spec 427 — a steward sets what a member does in the organization: the organization's act, under its mandate.
   MEMBER_ROLE_SET_TOOL,
   CREDENTIAL_ISSUE_TOOL,
+  CREDENTIAL_REQUEST_TOOL,
   // Spec 422 §9.1 — the Security section's acts: add a credential (a ceremony her Home runs under her credential), rename one,
   // link / unlink an email or phone. Self-acting: her own account, her own vault; her Home runs the ceremony, her records say.
   ...SECURITY_ACT_TOOLS,
@@ -2428,6 +2430,11 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
       if (!deps.credentialIssuer || !deps.readSubjectRecord || !deps.writeSubjectRecord) throw new Error('issuing credentials is not configured on this estate');
       return credentialIssueInvoker({ ...deps.credentialIssuer, readRecord: deps.readSubjectRecord, writeRecord: deps.writeSubjectRecord, ...(deps.survey ? { survey: deps.survey } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, (presented!.wire as Delegation).delegator, person)(toolId, args, ctx);
     }
+    // Spec 444 W4 — the member asks her organization for a credential (her own act; the steward issues).
+    if (toolId === CREDENTIAL_REQUEST_CAPABILITY) {
+      if (!deps.memberRoleAt || !deps.survey || !deps.readSubjectRecord || !deps.writeSubjectRecord) throw new Error('asking for a credential is not configured on this estate');
+      return credentialRequestInvoker({ memberRoleAt: deps.memberRoleAt, survey: deps.survey, readRecord: deps.readSubjectRecord, writeRecord: deps.writeSubjectRecord, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, person)(toolId, args, ctx);
+    }
     if (toolId === MEMBERSHIP_ACCEPT_CAPABILITY) return membershipAcceptInvoker({ ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, person)(toolId, args, ctx);
     if (MEMORY_TOOLS.some((t) => t.id === toolId)) return memoryFactsInvoker(deps, person, (ctx as { runRef?: string }).runRef ?? (ctx.idempotencyKey ? ctx.idempotencyKey.split(':').slice(0, -1).join(':') : undefined), addressee)(toolId, args, ctx);
     // Spec 387 W2 — the addressee's own catalog: bound by ITS name's records at call time (cached by the reader),
@@ -2818,6 +2825,7 @@ export const CAPABILITY_WORDS: Record<string, string> = {
   'organization.membership.invite': 'invite members',
   'organization.member.role.set': 'set what a member does here',
   'credential.issue': 'issue members credentials',
+  'credential.request': 'ask an organization for a credential',
   'coordination.endeavor.list': 'see what the organization is working on',
   'treasury.balance.read': 'read a balance',
   'coordination.endeavor.get': 'read one endeavor',

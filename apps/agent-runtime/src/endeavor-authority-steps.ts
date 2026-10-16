@@ -137,6 +137,9 @@ export const NOT_PLAN_STEPS: readonly string[] = [
   // Spec 412 W5 — her own Library, written by her own agent: self-acting, no mandate, never work anyone is
   // allocated (a release is signed AS her under her agent's session leaf, not authorized by a plan).
   'library.file.save',
+  // Spec 444 W4 — a member ASKING her organization for a credential is her own act under her session; it grants nothing
+  // and is never work a plan hands somebody (the issuing is the organization's, under its steward's mandate).
+  'credential.request',
   'library.file.visibility',
   'library.file.publish',
 ];

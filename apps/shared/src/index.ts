@@ -64,7 +64,7 @@ export const APP_DOMAIN_RECORD_SCOPES = ['vault:cil-commons.*', 'vault:cil-commo
  *  credential type and claim layout) and what it keeps of each issuance (the digest, never the claims); and a member keeps
  *  the credential she was issued (`credential.anonymous:<digest>`) in her own vault. ADDITIVE, never REQUIRED_SCOPES (that
  *  would stale every grant in the estate): a grant issued before this is refused these records until its steward re-enables. */
-export const APP_CREDENTIAL_SCOPES = ['vault:credential.issuer-facet:*', 'vault:credential.issued:*', 'vault:credential.anonymous:*', 'vault:federation.projection-submission:live-credential:*'] as const;
+export const APP_CREDENTIAL_SCOPES = ['vault:credential.issuer-facet:*', 'vault:credential.issued:*', 'vault:credential.anonymous:*', 'vault:federation.projection-submission:live-credential:*', 'vault:credential.request:*', 'vault:credential.device-key:*'] as const;
 
 /** The extension both apps append to the core, as the grant builder takes it — the ONE list. */
 export const INTERACTIONS_APP_SCOPES: ReadonlyArray<RecordScopeSpec> = [

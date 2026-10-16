@@ -111,4 +111,13 @@ describe('credential.issue', () => {
     expect(out.credential.jwt).toBeTruthy();
     expect(out.answer).toMatch(/did not take it/);
   });
+
+  it('binds to the device key her open request names, and marks the request issued', async () => {
+    const w = world();
+    w.records.set(`credential.request:${MEMBER}`, { type: 'ap.credential-request.v1', member: MEMBER, credentialType: 'membership', deviceKey: { kty: 'EC', crv: 'P-256', x: w.device.x, y: w.device.y }, deviceKeyThumbprint: w.device.kid, requestedAt: 'x', status: 'open' });
+    const out = await credentialIssueInvoker(w.deps, ORG, STEWARD)('credential.issue', { org: ORG, member: MEMBER, claims: { age: '0000021' } }, ctx) as Record<string, any>;
+    expect(out.delivered).toBe(true);
+    expect((w.records.get(`credential.anonymous:${out.digest}`) as Record<string, any>).deviceKeyThumbprint).toBe(p256JwkThumbprint(w.device));
+    expect(w.records.get(`credential.request:${MEMBER}`)).toMatchObject({ status: 'issued', issued: { digest: out.digest } });
+  });
 });

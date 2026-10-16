@@ -450,7 +450,8 @@ describe('ceremony negotiation (spec 353 S4)', () => {
     // other action here binds authority a person signs, and none of them is offered.
     // Spec 422 §9.1 — a label and a channel (link / unlink) are hers under her session too; adding a CREDENTIAL is not
     // (a credential that already signs for her authorizes it), so `person.credential.add` is rightly absent here.
-    expect(ids.sort()).toEqual(['context.instruction.declare', 'household.member.record', 'library.file.publish', 'library.file.save', 'library.file.visibility', 'person.channel.link', 'person.channel.unlink', 'person.credential.label', 'person.memory.forget', 'person.memory.remember', 'person.preferences.set', 'person.routine.declare', 'person.routine.remove', 'profile.contact.update']);
+    // Spec 444 W4 — asking one's organization for a credential is hers too: it grants nothing and the steward issues.
+    expect(ids.sort()).toEqual(['context.instruction.declare', 'credential.request', 'household.member.record', 'library.file.publish', 'library.file.save', 'library.file.visibility', 'person.channel.link', 'person.channel.unlink', 'person.credential.label', 'person.memory.forget', 'person.memory.remember', 'person.preferences.set', 'person.routine.declare', 'person.routine.remove', 'profile.contact.update']);
     expect(scopedActionTools({ ceremonies: ['data', 'confirmation', 'signature'] }).length).toBeGreaterThan(0);
   });
 
