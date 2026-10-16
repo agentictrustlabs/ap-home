@@ -22,6 +22,10 @@ export const CREDENTIAL_ISSUE_CAPABILITY = 'credential.issue' as const;
 export const ISSUER_FACET_PREFIX = 'credential.issuer-facet:' as const;
 /** What the organization keeps of an issuance (`appc:Issuance`): the digest, never the claim values. */
 export const ISSUED_PREFIX = 'credential.issued:' as const;
+/** The organization's vouch for a credential on its live-credential row (ap-federation's projection submission record). */
+export const SUBMISSION_PREFIX = 'federation.projection-submission:' as const;
+/** The credential as its holder keeps it (`appc:AnonymousCredential`), in her own vault. */
+export const HOLDER_CREDENTIAL_PREFIX = 'credential.anonymous:' as const;
 const ADDR = /^0x[0-9a-f]{40}$/;
 
 /** The organization's issuer record (`credential.issuer-facet:<keyId>`), as the issuer ceremony writes it. */
@@ -73,6 +77,8 @@ export interface CredentialIssueDeps {
   writeRecord: (subject: string, recordType: string, record: unknown) => Promise<{ ok: boolean; error?: string }>;
   /** The issuing key's signer (the key service, `ES256_ISSUE_SHA256`), given the evidence for THIS signature. */
   issuingSign: (akcsKeyId: string, message: Uint8Array, evidence: { evidenceToken: string; audience: string }) => Promise<Uint8Array>;
+  /** The issuing key's public JWK, as the key service publishes it — what a holder's prover verifies the signature with. */
+  issuerPublicJwk: (akcsKeyId: string) => Promise<Record<string, unknown>>;
   /** The runtime's attestation key: a statement naming the digest, the facet and the type. */
   mintIssuanceEvidence: (subject: string, claims: { digest: string; issuer_key_id: string; credential_type: string }) => Promise<string>;
   credentialDigestOf: (jwt: string) => Promise<string>;
@@ -138,11 +144,36 @@ export function credentialIssueInvoker(deps: CredentialIssueDeps, mandateDelegat
     });
     if (!w.ok) return { refused: `the credential was signed but the organization could not record it (${w.error ?? 'vault refused'}) — it is not delivered`, code: 'record_failed' };
 
-    // 5. DELIVER — to the member's agent, which keeps it in HER vault.
+    // 4b. VOUCH — the organization's submission to its live-credential row (spec 444 W3 §4), in ITS vault, the record the
+    //     federation projector reads and anchors from (ap-federation `vault-ledger.ts`, `apest:ProjectionSubmission`). The
+    //     blind is random and held here and by the holder's status presentation only; the leaf names no subject.
+    const blind = `0x${[...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+    const vouch = await deps.writeRecord(org, `${SUBMISSION_PREFIX}live-credential:${digest.toLowerCase()}`, {
+      type: 'ap.federation-submission.v1', estate: org, set: 'live-credential', digest: digest.toLowerCase(), blind,
+      subject: `0x${'00'.repeat(20)}`, submittedBy: steward.toLowerCase(), source: CREDENTIAL_ISSUE_CAPABILITY, submittedAt: new Date().toISOString(),
+    });
+    if (!vouch.ok) return { refused: `the credential was issued and recorded, but the organization could not vouch for it on its live-credential row (${vouch.error ?? 'vault refused'}) — it is not delivered, because a door would refuse its status`, code: 'vouch_failed' };
+
+    // 5. DELIVER — into the MEMBER's vault, written by HER OWN grant in her own object (the payee's-receipt pattern, spec 360
+    //    E5): the organization holds no authority over her vault and needs none to hand her what is hers. Delivered, the
+    //    act's result carries the digest and not the credential, so the steward's transcript never holds her claims.
+    const credential = {
+      type: 'ap.anonymous-credential.v1', issuerKeyId: facet.keyId, jwt: issued.jwt, disclosures: issued.disclosures,
+      issuerPublicKeyJwk: await deps.issuerPublicJwk(facet.akcsKeyId), digest, claimSchema: facet.claimSchema,
+      deviceKeyThumbprint: deps.thumbprintOf(args.deviceKey as { x: string; y: string }), issuedAt: new Date().toISOString(),
+    };
+    const kept = await deps.writeRecord(member, `${HOLDER_CREDENTIAL_PREFIX}${digest.toLowerCase()}`, credential);
+    if (!kept.ok) {
+      // NOT a fallback: the credential is issued and vouched for, and it must reach her by some hand, so the steward gets it
+      // to pass on — said in words, with the reason her vault refused.
+      return {
+        issued: true, delivered: false, org, member, digest, issuerKeyId: facet.keyId, credentialType: facet.credentialType, credential,
+        answer: `${who}'s credential was issued and vouched for, but her vault did not take it (${kept.error ?? 'refused'}) — she enables storage at her Home; until then it is here for you to pass on.`,
+      };
+    }
     return {
-      issued: true, org, member, digest, issuerKeyId: facet.keyId, credentialType: facet.credentialType,
-      credential: { type: 'ap.anonymous-credential.v1', issuerKeyId: facet.keyId, jwt: issued.jwt, disclosures: issued.disclosures, digest, claimSchema: facet.claimSchema },
-      answer: `${who} has a ${facet.credentialType} credential from this organization, issued under ${facet.keyId}. The organization keeps the record; the claims are hers.`,
+      issued: true, delivered: true, org, member, digest, issuerKeyId: facet.keyId, credentialType: facet.credentialType,
+      answer: `${who} has a ${facet.credentialType} credential from this organization, issued under ${facet.keyId}, now in her own vault. The organization keeps the record and the vouch; the claims are hers.`,
     };
   };
 }

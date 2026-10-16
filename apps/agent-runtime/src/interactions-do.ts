@@ -426,7 +426,13 @@ const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run
   'cil-commons.', 'cil-commons:',
   // Spec 444 W3 — what an organization keeps of a credential it issued (`appc:Issuance`): the digest and the facet, never
   // the claim values. Written by the organization's own grant when its `credential.issue` act completes.
-  'credential.issued:'] as const; // spec 438 §5 — a judgment of a run, signed by its evaluator and verified before it is written, stored BESIDE the run and never as an edit to it // spec 412 W5 — the owner's Library, written by the owner's own agent (library.file.save / visibility / publish) // spec 410 §8 — each party's copy, in its own vault // spec 410 §1.2 — a wire re-issued for a rotation, in the delegator's own vault
+  'credential.issued:',
+  // …and the organization's vouch for it on its live-credential row, which the federation projector anchors from. Only that
+  // set: a live-grant or membership submission is an estate's act, never an in-Worker effect.
+  'federation.projection-submission:live-credential:',
+  // …and the member's copy of the credential, in HER vault by HER grant (the payee's-receipt pattern): what an organization
+  // issued her, delivered without any authority over her vault.
+  'credential.anonymous:'] as const; // spec 438 §5 — a judgment of a run, signed by its evaluator and verified before it is written, stored BESIDE the run and never as an edit to it // spec 412 W5 — the owner's Library, written by the owner's own agent (library.file.save / visibility / publish) // spec 410 §8 — each party's copy, in its own vault // spec 410 §1.2 — a wire re-issued for a rotation, in the delegator's own vault
 
 const CAPABILITY_RECORDS = new Set(['impact-profile', 'capabilities.data', 'skills.data', 'home.manifest', 'control-events.data', 'archetype.assignment',
   // spec 422 §9.3 — the person's Security section: credential labels + the channels that open the home. Hers to write.

@@ -19,7 +19,7 @@ export interface CredentialIssuerEnv extends AkcsEnv {
   ISSUANCE_EVIDENCE_AUDIENCE?: string;
 }
 
-export function credentialIssuerDeps(env: CredentialIssuerEnv): Pick<CredentialIssueDeps, 'issuingSign' | 'mintIssuanceEvidence' | 'credentialDigestOf' | 'thumbprintOf' | 'sha256Hex'> | null {
+export function credentialIssuerDeps(env: CredentialIssuerEnv): Pick<CredentialIssueDeps, 'issuingSign' | 'issuerPublicJwk' | 'mintIssuanceEvidence' | 'credentialDigestOf' | 'thumbprintOf' | 'sha256Hex'> | null {
   if (!isAgenticKms(env) || !env.ISSUANCE_EVIDENCE_ES256_KEY || !env.ISSUANCE_EVIDENCE_ISSUER || !env.ISSUANCE_EVIDENCE_AUDIENCE) return null;
   // BUILT ON FIRST USE, never with the deps: these deps are assembled for EVERY ask, and a malformed key here once made every
   // ask on the estate answer 500 (2026-10-16, the key id uploaded in the key's place). A bad key now fails the issuing act
@@ -40,6 +40,7 @@ export function credentialIssuerDeps(env: CredentialIssuerEnv): Pick<CredentialI
   };
   return {
     issuingSign: async (akcsKeyId, message, evidence) => (await signerFor(akcsKeyId)).sign(message, evidence),
+    issuerPublicJwk: async (akcsKeyId) => (await signerFor(akcsKeyId)).publicJwk() as unknown as Record<string, unknown>,
     mintIssuanceEvidence: async (subject, claims) => minterOf().mint(subject, claims),
     credentialDigestOf: async (jwt) => credentialDigestOf(jwt),
     thumbprintOf: (jwk) => p256JwkThumbprint(jwk),

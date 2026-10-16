@@ -1031,7 +1031,7 @@ export interface HarnessDeps {
   setMemberRoleAt?: (org: string, input: { member: string; orgRole: RoleOfferV1 | null; by: string }) => Promise<{ status: number; body: Record<string, unknown> }>;
   /** Spec 444 W3 — the organization issues a member's credential: the key service's issuing key, the runtime's issuance
    *  evidence and the digests. Absent on an estate whose key service holds no issuing key ⇒ the act is not configured. */
-  credentialIssuer?: Pick<CredentialIssueDeps, 'issuingSign' | 'mintIssuanceEvidence' | 'credentialDigestOf' | 'thumbprintOf' | 'sha256Hex'>;
+  credentialIssuer?: Pick<CredentialIssueDeps, 'issuingSign' | 'issuerPublicJwk' | 'mintIssuanceEvidence' | 'credentialDigestOf' | 'thumbprintOf' | 'sha256Hex'>;
   /** Build, sign (with the service SA's custodian) and submit a sponsored userOp from `sender`. */
   executeAsServiceSa: (sender: Address, callData: Hex) => Promise<{ txHash: Hex }>;
   audit: AuditSink;
