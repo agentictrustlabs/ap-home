@@ -32,6 +32,8 @@ export const CARRIES = {
   membership: { kin: [T.MembershipTerms], role: [T.MembershipTerms] },
   /** A member's role in an organization (spec 427): the role offer — a definition id, words, registry references. */
   memberRole: { role: [T.MembershipTerms] },
+  /** An issuance (spec 444 W3): the claims the organization vouches for — classed as credential claims, never free text. */
+  credential: { claims: [T.CredentialClaims] },
   /** A contact invitation's role word. */
   contact: { role: [T.MembershipTerms] },
   /** A standing instruction: the default an argument will take from now on. */

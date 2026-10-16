@@ -60,8 +60,14 @@ export const APP_ASSESSMENT_SCOPES = ['vault:run.assessment:*'] as const;
  *  family HERE and on the runtime's `EFFECT_WRITABLE_RECORDS` (interactions-do.ts); the two lists must agree. */
 export const APP_DOMAIN_RECORD_SCOPES = ['vault:cil-commons.*', 'vault:cil-commons:*'] as const; // both spellings of the rule: the dotted default and the data graph's mapsRecordType form
 
+/** Spec 444 W3 — an organization ISSUES its members' credentials: its issuer facet (which key-service key signs, for which
+ *  credential type and claim layout) and what it keeps of each issuance (the digest, never the claims); and a member keeps
+ *  the credential she was issued (`credential.anonymous:<digest>`) in her own vault. ADDITIVE, never REQUIRED_SCOPES (that
+ *  would stale every grant in the estate): a grant issued before this is refused these records until its steward re-enables. */
+export const APP_CREDENTIAL_SCOPES = ['vault:credential.issuer-facet:*', 'vault:credential.issued:*', 'vault:credential.anonymous:*'] as const;
+
 /** The extension both apps append to the core, as the grant builder takes it — the ONE list. */
 export const INTERACTIONS_APP_SCOPES: ReadonlyArray<RecordScopeSpec> = [
   { resources: [...APP_COORDINATION_READ_SCOPES, ...APP_OWN_NAMESPACE_READ_SCOPES], ops: ['read'] },
-  { resources: [...APP_OWN_NAMESPACE_SEED_SCOPES, ...APP_ASSESSMENT_SCOPES, ...APP_DOMAIN_RECORD_SCOPES], ops: ['read', 'write'] },
+  { resources: [...APP_OWN_NAMESPACE_SEED_SCOPES, ...APP_ASSESSMENT_SCOPES, ...APP_DOMAIN_RECORD_SCOPES, ...APP_CREDENTIAL_SCOPES], ops: ['read', 'write'] },
 ];

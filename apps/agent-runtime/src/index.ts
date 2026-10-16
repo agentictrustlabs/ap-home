@@ -1,4 +1,5 @@
 import { forwardToSelfHost , type SelfHostForwardAuth } from './self-hosted-read.js';
+import { credentialIssuerDeps } from './credential-issuer-deps.js';
 import { estateHeartbeat, heartbeatAuthorized } from './ops-heartbeat.js';
 import { getSelfHostWire, putSelfHostWire, verifySelfHostReadWire, isDelegationWire, type SelfHostWireChain } from './self-host-wire.js';
 import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
@@ -6572,6 +6573,8 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       if (resp.status === 409 && /no interactions grant/i.test(String(out?.error ?? ''))) return { membership: null };
       return resp.ok && out?.ok === true ? out : null;
     },
+    // Spec 444 W3 — an organization issues its member's credential: the issuing key and the issuance evidence, when configured.
+    ...((): Record<string, unknown> => { const ci = credentialIssuerDeps(env as never); return ci ? { credentialIssuer: ci } : {}; })(),
     setMemberRoleAt: async (org, input) => {
       const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(org.toLowerCase()));
       const resp = await stub.fetch(new Request(`https://do/interactions/${org.toLowerCase()}/internal.member.setRole`, { method: 'POST', headers: internalHeaders(env as never, { 'content-type': 'application/json' }), body: JSON.stringify(input) }));

@@ -50,6 +50,7 @@ import { WAITING_LIST_TOOL } from './waiting-on-me.js';
 import { INVITATIONS_RECEIVED_TOOL, MEMBERSHIP_ACCEPT_TOOL, MEMBERSHIP_ACCEPT_CAPABILITY, membershipAcceptInvoker } from './invitations-received.js';
 import { PERSON_ROLES_TOOL, type OrgMembershipAnswer } from './member-roles.js';
 import { MEMBER_ROLE_SET_TOOL, MEMBER_ROLE_SET_CAPABILITY, memberRoleSetInvoker } from './member-role-set.js';
+import { CREDENTIAL_ISSUE_TOOL, CREDENTIAL_ISSUE_CAPABILITY, credentialIssueInvoker, type CredentialIssueDeps } from './credential-issue.js';
 import type { RoleOfferV1 } from './org-role.js';
 import { SECURITY_READ_TOOLS, SECURITY_ACT_TOOLS, isSecurityTool, securityInvoker, securityChainDeps } from './security-tools.js';
 import { INBOX_LIST_TOOL, inboxListInvoker } from './inbox-list.js';
@@ -494,6 +495,7 @@ export const HARNESS_ACTION_TOOLS: ToolSpec[] = [
   MEMBERSHIP_ACCEPT_TOOL,
   // Spec 427 — a steward sets what a member does in the organization: the organization's act, under its mandate.
   MEMBER_ROLE_SET_TOOL,
+  CREDENTIAL_ISSUE_TOOL,
   // Spec 422 §9.1 — the Security section's acts: add a credential (a ceremony her Home runs under her credential), rename one,
   // link / unlink an email or phone. Self-acting: her own account, her own vault; her Home runs the ceremony, her records say.
   ...SECURITY_ACT_TOOLS,
@@ -1027,6 +1029,9 @@ export interface HarnessDeps {
   /** Spec 427 — the organization's own object writes the role on a member's record, in-Worker, for a run that
    *  presented the organization's mandate (`organization.member.role.set`). */
   setMemberRoleAt?: (org: string, input: { member: string; orgRole: RoleOfferV1 | null; by: string }) => Promise<{ status: number; body: Record<string, unknown> }>;
+  /** Spec 444 W3 — the organization issues a member's credential: the key service's issuing key, the runtime's issuance
+   *  evidence and the digests. Absent on an estate whose key service holds no issuing key ⇒ the act is not configured. */
+  credentialIssuer?: Pick<CredentialIssueDeps, 'issuingSign' | 'mintIssuanceEvidence' | 'credentialDigestOf' | 'thumbprintOf' | 'sha256Hex'>;
   /** Build, sign (with the service SA's custodian) and submit a sponsored userOp from `sender`. */
   executeAsServiceSa: (sender: Address, callData: Hex) => Promise<{ txHash: Hex }>;
   audit: AuditSink;
@@ -2291,7 +2296,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     setBillStep(ctx.step.id ?? `s${ctx.index}`);
     // Unreachable for a capability tool (the loop refuses or reports before invoking one without a
     // mandate); explicit so a future caller cannot make it reachable quietly.
-    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === 'messaging.topic.post' || GITHUB_ACTS.has(toolId) || BUILD_ACTS.has(toolId) || CALENDAR_ACTS.has(toolId) || MAIL_DRIVE_ACTS.has(toolId) || toolId === ORG_INVITE_CAPABILITY || toolId === MEMBER_ROLE_SET_CAPABILITY || toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
+    if (!presented && (CHILD_AGENT_TLD[toolId] || toolId === 'treasury.payment.execute' || toolId === 'treasury.fund' || toolId === 'messaging.direct.send' || toolId === 'messaging.topic.post' || GITHUB_ACTS.has(toolId) || BUILD_ACTS.has(toolId) || CALENDAR_ACTS.has(toolId) || MAIL_DRIVE_ACTS.has(toolId) || toolId === ORG_INVITE_CAPABILITY || toolId === MEMBER_ROLE_SET_CAPABILITY || toolId === CREDENTIAL_ISSUE_CAPABILITY || toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id || toolId === PRIMARY_PAYEE_CAPABILITY || toolId === ACCESS_REVOKE_CAPABILITY)) throw new Error(`${toolId} requires a mandate and none was presented`);
     if (toolId === ASK_CLARIFY_TOOL.id) {
       const ids = Array.isArray(args.options) ? (args.options as unknown[]).map(String).slice(0, 2) : [];
       const purposes = Array.isArray(args.purposes) ? (args.purposes as unknown[]).map(String) : [];
@@ -2417,6 +2422,11 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (toolId === MEMBER_ROLE_SET_CAPABILITY) {
       if (!deps.setMemberRoleAt) throw new Error('setting a member\u2019s role is not configured on this estate');
       return memberRoleSetInvoker({ setRoleAt: deps.setMemberRoleAt, ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, (presented!.wire as Delegation).delegator, person)(toolId, args, ctx);
+    }
+    // Spec 444 W3 — the organization issues its member a credential, under the mandate this run presented.
+    if (toolId === CREDENTIAL_ISSUE_CAPABILITY) {
+      if (!deps.credentialIssuer || !deps.readSubjectRecord || !deps.writeSubjectRecord) throw new Error('issuing credentials is not configured on this estate');
+      return credentialIssueInvoker({ ...deps.credentialIssuer, readRecord: deps.readSubjectRecord, writeRecord: deps.writeSubjectRecord, ...(deps.survey ? { survey: deps.survey } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, (presented!.wire as Delegation).delegator, person)(toolId, args, ctx);
     }
     if (toolId === MEMBERSHIP_ACCEPT_CAPABILITY) return membershipAcceptInvoker({ ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.nameOf ? { nameOf: deps.nameOf } : {}) }, person)(toolId, args, ctx);
     if (MEMORY_TOOLS.some((t) => t.id === toolId)) return memoryFactsInvoker(deps, person, (ctx as { runRef?: string }).runRef ?? (ctx.idempotencyKey ? ctx.idempotencyKey.split(':').slice(0, -1).join(':') : undefined), addressee)(toolId, args, ctx);
@@ -2807,6 +2817,7 @@ export const CAPABILITY_WORDS: Record<string, string> = {
   'treasury.create': 'create treasuries',
   'organization.membership.invite': 'invite members',
   'organization.member.role.set': 'set what a member does here',
+  'credential.issue': 'issue members credentials',
   'coordination.endeavor.list': 'see what the organization is working on',
   'treasury.balance.read': 'read a balance',
   'coordination.endeavor.get': 'read one endeavor',
@@ -3098,6 +3109,7 @@ const RESOURCE_ARG_FOR: Record<string, string> = {
   'treasury.fund': 'asset',
   'organization.membership.invite': 'org',
   'organization.member.role.set': 'org',
+  'credential.issue': 'org',
   'messaging.direct.send': 'recipient',
   'messaging.topic.post': 'org',
   'github.pr.open': 'holder',
@@ -4672,6 +4684,7 @@ export const CAPABILITY_CEREMONIES: Record<string, string[]> = {
   'treasury.create': ['signature'],
   'organization.membership.invite': ['signature'],  // the org signs the invitation grant
   'organization.member.role.set': ['signature'],    // spec 427 — the organization's mandate for the change
+  'credential.issue': ['signature'],                // spec 444 W3 — the organization's mandate to vouch
   'coordination.endeavor.request': ['signature'],   // the mandate — asking as you is an act of yours
   'coordination.contribution.propose': ['signature'],
   'coordination.contribution.allocate': ['signature'],  // the org's decision, under a steward's signature

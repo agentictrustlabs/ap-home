@@ -14,17 +14,21 @@
  * session. Same artifact the ceremony would have written; the DO and the Home re-verify it on every use.
  */
 import { hashDelegation, buildCaveat, encodeTimestampTerms, encodeValueTerms, encodeAllowedTargetsTerms, ROOT_AUTHORITY, type Delegation } from '@agenticprimitives/delegation';
-import { CONTRACTS } from '@agenticprimitives/contracts/deployments/faithchain';
+import { getDeployments } from '@agenticprimitives/contracts/deployments';
 import { toHex, type Address, type Hex } from 'viem';
 import { readFileSync } from 'node:fs';
 
-const HOME = 'https://www.faithnet.me';
-const CHAIN = 34348;
+// The Home and the chain are SETTINGS (spec 444 W3: imbnet's organization lives on hopechain behind www.impact-agent.me);
+// the defaults are faithnet's, so every earlier invocation runs exactly as before. A digest is signed over the chain id.
+const HOME = (process.env.HOME_URL ?? 'https://www.faithnet.me').replace(/\/$/, '');
+const DEPLOYMENT = process.env.DEPLOYMENT ?? 'faithchain';
+const CONTRACTS = getDeployments(DEPLOYMENT as never) as unknown as Record<string, string> & { chainId: number };
+const CHAIN = Number(CONTRACTS.chainId);
 const DAYS = Number(process.env.DAYS ?? 3650);
 const j = async (r: Response) => { const t = await r.text(); try { return JSON.parse(t); } catch { return { _raw: t.slice(0, 250), _status: r.status }; } };
 const NOTE = process.env.NOTE ?? 'demo/ligonier.faithnet.json';
 const BY = process.env.BY ?? 'alice';
-const note = JSON.parse(readFileSync(NOTE, 'utf8')) as { org?: { name: string; sa: Address }; service: { name: string; sa: Address } };
+const note = JSON.parse(readFileSync(NOTE, 'utf8')) as { org?: { name?: string; label?: string; sa: Address }; service?: { name: string; sa: Address } };
 const alice = await j(await fetch(`${HOME}/connect/demo-signin`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: BY, client_id: 'demo-web' }) }));
 if (!alice.homeSession) throw new Error('no alice session');
 const ME = String(alice.agent).toLowerCase() as Address;
@@ -62,9 +66,12 @@ const has = (sa: string) => orgs.some((o) => o.orgAgent.toLowerCase() === sa.toL
  */
 const FORCE = process.env.FORCE === '1';
 // An org and the service under it (ligonier), or a service chartered straight under the person (the coach).
-const agents: Array<[Address, string, string, Address]> = note.org
-  ? [[note.org.sa, note.org.name, 'org', ME], [note.service.sa, note.service.name, 'service', note.org.sa]]
-  : [[note.service.sa, note.service.name, 'service', ME]];
+const orgName = note.org ? (note.org.name ?? note.org.label ?? 'organization') : '';
+const agents: Array<[Address, string, string, Address]> = note.org && note.service
+  ? [[note.org.sa, orgName, 'org', ME], [note.service.sa, note.service.name, 'service', note.org.sa]]
+  : note.org
+    ? [[note.org.sa, orgName, 'org', ME]]                            // an organization alone (spec 444: the org that issues)
+    : [[note.service!.sa, note.service!.name, 'service', ME]];
 for (const [agent, name, kind, parent] of agents) {
   const sa = agent.toLowerCase() as Address;
   if (has(sa) && !FORCE) { console.log(`· ${name} ${sa}: already a steward link (FORCE=1 to re-mint the wire)`); continue; }

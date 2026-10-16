@@ -96,7 +96,7 @@ export function enrichRun(run: ExperimentRunV1, facts: TraceFactsV1, seen: strin
   if (rc && typeof rc === 'object') {
     if (rc.error) r.rubric ??= { error: String(rc.error).slice(0, 200) };
     else if (typeof rc.score === 'number' || rc.score === null) r.rubric ??= { score: rc.score ?? null, pass: typeof rc.pass === 'boolean' ? rc.pass : null, passAt: rc.passAt ?? 0.7, awardable: rc.awardable ?? 0, awarded: rc.awarded ?? 0, deducted: rc.deducted ?? 0, cannotTell: rc.cannotTell ?? 0, requiredFailed: rc.requiredFailed ?? [],
-      criteria: Object.fromEntries(Object.entries(rc.criteria ?? {}).map(([k, v]) => [k, { verdict: String(v?.verdict ?? 'cannot-tell'), ...(v?.because ? { because: String(v.because).slice(0, 300) } : {}), points: Number(v?.points ?? 0), kind: v?.kind === 'deduct' ? 'deduct' : 'award', ...(v?.required ? { required: true } : {}) }])),
+      criteria: Object.fromEntries(Object.entries(rc.criteria ?? {}).map(([k, v]) => [k, { verdict: (v?.verdict === 'met' || v?.verdict === 'not-met' ? v.verdict : 'cannot-tell') as 'met' | 'not-met' | 'cannot-tell', ...(v?.because ? { because: String(v.because).slice(0, 300) } : {}), points: Number(v?.points ?? 0), kind: v?.kind === 'deduct' ? 'deduct' : 'award', ...(v?.required ? { required: true } : {}) }])),
       ...(rc.judge ? { judge: rc.judge } : {}), ...(rc.judgeModel ? { judgeModel: rc.judgeModel } : {}) };
   }
   const sc = facts.stateCheck;

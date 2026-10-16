@@ -423,7 +423,10 @@ const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run
   // …in BOTH spellings the one record-type rule can produce: the dotted default (`cil-commons.incident-playbook`) and the
   // domain's own `skills:mapsRecordType` for a class the data graph already holds examples of (`cil-commons:deploymentinventory`,
   // the loader's form) — the first chain run wrote its scores and lost its inventory on the colon (2026-10-15).
-  'cil-commons.', 'cil-commons:'] as const; // spec 438 §5 — a judgment of a run, signed by its evaluator and verified before it is written, stored BESIDE the run and never as an edit to it // spec 412 W5 — the owner's Library, written by the owner's own agent (library.file.save / visibility / publish) // spec 410 §8 — each party's copy, in its own vault // spec 410 §1.2 — a wire re-issued for a rotation, in the delegator's own vault
+  'cil-commons.', 'cil-commons:',
+  // Spec 444 W3 — what an organization keeps of a credential it issued (`appc:Issuance`): the digest and the facet, never
+  // the claim values. Written by the organization's own grant when its `credential.issue` act completes.
+  'credential.issued:'] as const; // spec 438 §5 — a judgment of a run, signed by its evaluator and verified before it is written, stored BESIDE the run and never as an edit to it // spec 412 W5 — the owner's Library, written by the owner's own agent (library.file.save / visibility / publish) // spec 410 §8 — each party's copy, in its own vault // spec 410 §1.2 — a wire re-issued for a rotation, in the delegator's own vault
 
 const CAPABILITY_RECORDS = new Set(['impact-profile', 'capabilities.data', 'skills.data', 'home.manifest', 'control-events.data', 'archetype.assignment',
   // spec 422 §9.3 — the person's Security section: credential labels + the channels that open the home. Hers to write.
@@ -2203,7 +2206,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'inbox.body.getMany' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.channels.create' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.member.recorded' || op === 'internal.member.role' || op === 'internal.member.setRole' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'internal.wire.current' || op === 'internal.op.lookup' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.getMany' || op === 'content.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'inbox.body.getMany' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.channels.create' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.member.recorded' || op === 'internal.member.role' || op === 'internal.member.setRole' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'internal.wire.current' || op === 'internal.op.lookup' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.getMany' || op === 'content.put' || op === 'issuer.facet.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -2222,7 +2225,9 @@ export class InteractionsDO {
         // spec 341 §5.5b — ISSUING an invite is the org acting, so it takes the steward's proof like
         // every other org act. CLAIMING one is not here: it is the invitee's own op (`invite.claim`),
         // and they hold no stewardship by definition.
-        || op === 'invite.put';
+        || op === 'invite.put'
+        // Spec 444 W3 — the organization's issuer facet is the steward's to publish, like its invitations.
+        || op === 'issuer.facet.put';
       if (op.startsWith('internal.')) {
         // ARCH-H2 — the public router refuses internal.*, but the DO must NOT trust that alone.
         // Require the in-Worker marker, which only co-resident DOs can supply. Any other path
@@ -3748,6 +3753,28 @@ export class InteractionsDO {
           // A batch that failed is an error, never an empty answer: "no bytes" would read as "nothing stored".
           if (!resp.ok || got.ok === false || !got.records) return json({ error: `content.getMany: ${got.error ?? `the vault answered ${resp.status}`}` }, 502);
           return json({ ok: true, records: got.records });
+        }
+        // SPEC 444 W3 — THE ORGANIZATION'S ISSUER FACET, put by its steward. The record `credential.issue` reads to know
+        // which key-service key signs, for which credential type, in which claim layout. Steward-gated above (the
+        // stewardship wire, verified on chain); written by the organization's own interactions grant, whose scope carries
+        // `vault:credential.issuer-facet:*` (additive — a grant that predates it is refused here with "re-enable").
+        // The facet's signature and its attestation are the ceremony's (ap-federation `publish-issuer-facet`); this op
+        // stores what the steward publishes and checks only its shape.
+        if (op === 'issuer.facet.put') {
+          const rec = body.record as Record<string, unknown> | undefined;
+          const keyId = String(rec?.keyId ?? '');
+          if (!rec || rec.type !== 'ap.issuer-facet.v1' || !/^issuer-key:[A-Za-z0-9_.:-]{1,190}$/.test(keyId) || typeof rec.akcsKeyId !== 'string' || !rec.akcsKeyId
+            || typeof rec.credentialType !== 'string' || !Array.isArray(rec.claimSchema) || !rec.claimSchema.every((c) => typeof c === 'string') || typeof rec.issuer !== 'string') {
+            return json({ error: 'an issuer facet is { type: ap.issuer-facet.v1, keyId: issuer-key:…, akcsKeyId, credentialType, claimSchema: string[], issuer }' }, 400);
+          }
+          try {
+            await this.writeDoc(g, `credential.issuer-facet:${keyId}`, rec);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            return json({ ok: false, ...(/record_scope_denied|scope/i.test(msg) ? { needsEnable: true } : {}), error: msg }, 409);
+          }
+          await buildAuditSink(this.env).write({ id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'interactions.issuer-facet.put', outcome: 'success', actor: { type: 'service', id: principal }, subject: { type: 'record', id: `credential.issuer-facet:${keyId}` } });
+          return json({ ok: true, recordType: `credential.issuer-facet:${keyId}` });
         }
         if (op === 'content.get' || op === 'content.put') {
           // ADR-0055 — the ORG's own Content Artifacts (`content.*`), read/written via the DO-held delivery

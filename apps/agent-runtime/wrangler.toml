@@ -673,6 +673,10 @@ AKCS_INTERACTIONS_KEY_ID = "01a13c7d-c866-7c51-b56c-a933f5a563c3"        # spec 
 FEDERATION_DOORS = '{"ap-federation-door:impact-agent":"https://door.ap-federation.faithnet.io","ap-federation-door:faithnet":"https://door-faithnet.ap-federation.faithnet.io"}'  # spec 439 F3 — the federation doors whose receipts this estate reads (custom domains only)
 CHAIN_ID = "34349"
 AGENT_NAME_PARENTS = "me,impact"
+# Spec 444 W3 — the runtime's ISSUANCE EVIDENCE (an organization issuing its members' credentials): the iss/aud the key
+# service's [authority_evidence] pins; the key itself is the secret ISSUANCE_EVIDENCE_ES256_KEY (its JWK is in the CVM's JWKS).
+ISSUANCE_EVIDENCE_ISSUER = "https://presentation-release.faithnet.internal"
+ISSUANCE_EVIDENCE_AUDIENCE = "akcs-pilot-evidence"
 # GENERATION 3 (W4, 2026-10-15): hopechain was deployed from the current Deploy.s.sol, so its DigestBindingEnforcer takes
 # (digest, stepNonce) — 64 bytes — and a runtime still speaking generation 1 (32 bytes) sees `BadArgsLength` at
 # redemption and nothing names the cause. The chain's deployment record says `contractsGeneration: 3`; this says so too.
