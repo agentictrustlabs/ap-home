@@ -56,6 +56,7 @@ import { agentClassOf } from '../../lib/agent-class';
 import { withMissionRegistry } from '../../lib/mission-registry';
 import { profileForConnect } from '../../lib/connect-profile-name';
 import { clientErrorText, clientLoader, clientOrgName, clientProgressText, hidesIdentifiers, signedInLabel, switchAccountLabel, withClientConsent } from '../../whitelabel/client-consent';
+import { forgetDeployedOrg, recallDeployedOrg, rememberDeployedOrg } from '../../lib/org-deploy-stash';
 import { verifiedEmailFor } from '../../lib/verified-email';
 
 /** The kinds of agent that ARE an organization holding its own members — where a team-scoped role can be offered. A
@@ -743,8 +744,17 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         // a chooser-mode request carries no org_base — the choose-org step above resolved `orgSel`.
         // The person's chooser pick wins over the URL: choosing an EXISTING org while the app
         // suggested a new name must grant from that org, not deploy the suggestion anyway.
-        const orgBase = orgSel?.orgName ?? enroll.orgBase;
-        const existingOrg = orgSel?.existingOrg ?? enroll.existingOrg;
+        const askedBase = orgSel?.orgName ?? enroll.orgBase;
+        const askedExisting = orgSel?.existingOrg ?? enroll.existingOrg;
+        // A RETRY REUSES THE ORGANIZATION THE LAST ATTEMPT DEPLOYED (2026-10-16). A failure after the deploy —
+        // a grant mint, the hand-back — used to leave the org standing while "Try again" (a reload of this same
+        // request) and the app's own next attempt both deployed a second one under the same name. The deployed
+        // org is remembered per app + name + person once its vault is bound (org-deploy-stash.ts), and a retry
+        // connects it as an EXISTING organization: one approval, no second deploy, the same grants minted.
+        const stashKey = { app: enroll.aud, orgBase: askedBase ?? '', person: home.address };
+        const remembered = !askedExisting && askedBase ? recallDeployedOrg(sessionStorage, stashKey) : null;
+        const orgBase = remembered?.orgName ?? askedBase;
+        const existingOrg = (remembered?.orgAgent as Address | undefined) ?? askedExisting;
         // SELECT-EXISTING CARRIES NO NAME. `existing_org` names the organization by ADDRESS and
         // deploys nothing — there is no name to claim, which is the whole point — so requiring
         // `orgBase` refused every select-existing request from the recognized path with "No
@@ -763,6 +773,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
             grantOrg: enroll.grantOrg,
             existingOrg,
             signAsOrg: orgSel?.asSteward,
+            onDeployed: (o) => rememberDeployedOrg(sessionStorage, stashKey, o),
             onProgress: setGrantProgress,
           },
         );
@@ -795,6 +806,8 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         const proved = await personGrantForOrgCreate(home, delegate, viaLower, auth, created, enroll.sessionKey);
         if (!proved.ok) return fail(proved.error);
         code = await submitEnrollGrant(grant_id, proved.grant, proved.org, proved.sessionDelegation);
+        // Handed back: the next request for this name is a new organization again.
+        forgetDeployedOrg(sessionStorage, stashKey);
       } else {
         // SITE-LOGIN — spec 270 v4 W2: sign + carry the DEL-001 leaf for the relying app's session key.
         // spec 272/243 — x402-pay: a recognized member already has a home session `token` in hand, so

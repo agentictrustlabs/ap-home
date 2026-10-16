@@ -588,6 +588,9 @@ export async function createOrganization(
     existingOrg?: Address;
     signAsOrg?: boolean;
     onProgress?: (p: { step: number; total: number; label: string; hint?: string }) => void;
+    /** The organization is deployed and its vault bound — the point past which a retry must REUSE it rather
+     *  than deploy another (src/lib/org-deploy-stash.ts). Not called on the existing-org path. */
+    onDeployed?: (org: { orgAgent: Address; orgName: string }) => void;
   } = {},
 ): Promise<Result<{ org: Record<string, unknown>; grant: unknown }>> {
   // Normalize via: the session stores the display form ('Google'/'YouVersion' from the OAuth callback), but
@@ -729,6 +732,7 @@ export async function createOrganization(
   // caught below and the host told the organization was set up.
   const bound = await activateVaultIfNeeded(x.childAgent, via, auth);
   if (!bound.ok) return { ok: false, error: `the organization's private records could not be set up: ${bound.error}` };
+  opts.onDeployed?.({ orgAgent: x.childAgent as Address, orgName: String(x.childName ?? base) });
   try {
     const bearer = homeBearerToken(auth);
     // The PERSON's side starts now, beside the organization's (GC, 2026-10-14: it ran after it, 3.5 s of a
