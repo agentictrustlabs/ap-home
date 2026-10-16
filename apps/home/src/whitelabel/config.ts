@@ -705,11 +705,11 @@ const faithImpact: WhiteLabelConfig = {
       // their own vault — nothing personal leaves the Explorer page). The wire names `ask_delegate`.
       allowed_delegation_templates: ['site-login', 'org-create', 'x402-pay', 'ask-as-me'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
-      // The key the Scripture Agent worker (demo-bible-a2a, the Explorer's backend) signs `A2A-Session`
-      // assertions with: scripture-resolver.svc's AKCS delegate key on faithchain (the Explorer is that
-      // service's registered site, atl:siteUrl). A dedicated Explorer ask key is an operator ceremony
-      // (`akcs operator create-key` + bind-caller) — set NEXT_PUBLIC_BIBLE_EXPLORER_ASK_DELEGATE to swap it.
-      ask_delegate: (process.env.NEXT_PUBLIC_BIBLE_EXPLORER_ASK_DELEGATE || '0x43a07B8c5F96FfD62B2c5Bc0f58bd21DACa6E881') as `0x${string}`,
+      // The Explorer's OWN ask key (AKCS faithnet key 01a145be-…, caller demo-bible-ontology-faithnet): the
+      // explorer Worker signs `A2A-Session` assertions with it, so scripture-resolver.svc — the service the
+      // person's agent engages — never holds the person's wire. Wires to the earlier key (the service's own
+      // 0x43a07B8c…) are refused by the Explorer with `reauthorize`.
+      ask_delegate: (process.env.NEXT_PUBLIC_BIBLE_EXPLORER_ASK_DELEGATE || '0x8E86f2e30c67e28ACEA6831354Dd58E484ef359d') as `0x${string}`,
       // The one connect gives the Explorer everything it needs: the ask wire is minted in the plain sign-in.
       ask_with_login: true,
       // x402 push: USDC lands at the lbsb-treasury SA; the reader redeems at access time (OPEN delegate).
