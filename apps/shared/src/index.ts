@@ -66,8 +66,11 @@ export const APP_DOMAIN_RECORD_SCOPES = ['vault:cil-commons.*', 'vault:cil-commo
  *  would stale every grant in the estate): a grant issued before this is refused these records until its steward re-enables. */
 export const APP_CREDENTIAL_SCOPES = ['vault:credential.issuer-facet:*', 'vault:credential.issued:*', 'vault:credential.anonymous:*', 'vault:federation.projection-submission:live-credential:*', 'vault:credential.request:*', 'vault:credential.device-key:*'] as const;
 
+/** Spec 442 §4.1 — the pairwise secret her agent derives a per-service pseudonym from. ADDITIVE, like the credential scopes. */
+export const APP_IDENTITY_SCOPES = ['vault:identity.pairwise-secret'] as const;
+
 /** The extension both apps append to the core, as the grant builder takes it — the ONE list. */
 export const INTERACTIONS_APP_SCOPES: ReadonlyArray<RecordScopeSpec> = [
   { resources: [...APP_COORDINATION_READ_SCOPES, ...APP_OWN_NAMESPACE_READ_SCOPES], ops: ['read'] },
-  { resources: [...APP_OWN_NAMESPACE_SEED_SCOPES, ...APP_ASSESSMENT_SCOPES, ...APP_DOMAIN_RECORD_SCOPES, ...APP_CREDENTIAL_SCOPES], ops: ['read', 'write'] },
+  { resources: [...APP_OWN_NAMESPACE_SEED_SCOPES, ...APP_ASSESSMENT_SCOPES, ...APP_DOMAIN_RECORD_SCOPES, ...APP_CREDENTIAL_SCOPES, ...APP_IDENTITY_SCOPES], ops: ['read', 'write'] },
 ];
