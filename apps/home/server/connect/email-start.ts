@@ -60,7 +60,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   // retry inside RESEND_GAP_MS sent nothing and said nothing).
   await env.AUTH_CODES.put(key, record(reuse?.sentAt ?? 0), ttl);
 
-  const sent = await sendEmail(env, otpEmail(email, code, whitelabel.brand.name));
+  // The relying app this sign-in is for (its client_id, sent by an enroll window): its support inbox goes on the
+  // code email as Reply-To and a help line (Gather, 2026-10-16). Unknown or absent → the plain email as before.
+  const app = body?.aud ? whitelabel.relyingApps.find((a) => a.client_id === body.aud) : undefined;
+  const sent = await sendEmail(env, otpEmail(email, code, whitelabel.brand.name, app ? { name: app.name, replyTo: app.replyTo } : undefined));
   if (!sent.ok) return json({ error: `could not send the code: ${sent.error}` }, 502);
   await env.AUTH_CODES.put(key, record(now), ttl);
   // `delivery:'logged'` tells the client (dev) the code was console-logged, not emailed (no provider key).

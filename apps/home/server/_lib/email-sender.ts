@@ -92,14 +92,19 @@ const wrap = (inner: string, brand: string): string =>
      <p style="font-size:12px;color:#9ca3af;margin-top:24px">If you didn't request this, you can ignore this email.</p>
    </div>`;
 
-export function otpEmail(to: string, otp: string, brand: string): OutboundEmail {
+/** `app`: the relying app this sign-in is for, when known — its support inbox becomes Reply-To and a help line
+ *  (Gather, 2026-10-16: "I never got my code" is the first support email they expect; replies must reach them). */
+export function otpEmail(to: string, otp: string, brand: string, app?: { name?: string; replyTo?: string }): OutboundEmail {
+  const help = app?.replyTo ? `Need help? Reply to this email or write to ${app.replyTo}.` : '';
   return {
     to,
     subject: `${otp} is your ${brand} sign-in code`,
-    text: `Your ${brand} sign-in code is ${otp}. It expires in 10 minutes.`,
+    text: `Your ${brand} sign-in code is ${otp}. It expires in 10 minutes.${help ? `\n\n${help}` : ''}`,
     html: wrap(`<p style="font-size:15px">Your sign-in code:</p>
       <p style="font-size:30px;font-weight:700;letter-spacing:4px;margin:8px 0">${otp}</p>
-      <p style="font-size:13px;color:#6b7280">Expires in 10 minutes.</p>`, brand),
+      <p style="font-size:13px;color:#6b7280">Expires in 10 minutes.</p>${help ? `
+      <p style="font-size:13px;color:#6b7280;margin-top:18px">Need help? Reply to this email or write to <a href="mailto:${app!.replyTo}" style="color:#6b7280">${app!.replyTo}</a>.</p>` : ''}`, brand),
+    ...(app?.replyTo ? { replyTo: app.replyTo } : {}),
   };
 }
 

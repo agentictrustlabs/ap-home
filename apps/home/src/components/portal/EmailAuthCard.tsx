@@ -29,6 +29,7 @@ import { addPasskeyCredential, claimName, fetchProfile } from '../../connect-cli
 import { CENTRAL_AUTH_DOMAIN, nameLabel } from '../../lib/domain';
 import { seedImpactProfileFields } from '../../profile-store';
 import { rememberVerifiedEmail } from '../../lib/verified-email';
+import { parseEnrollReq } from '../onboarding/useEnrollReq';
 import type { Address } from '@agenticprimitives/types';
 import { whitelabel } from '../../whitelabel/config';
 
@@ -151,10 +152,13 @@ export function EmailAuthCard({ onLinked, busyNote = 'Securing your home…', on
     if (sending.current) return;
     sending.current = true;
     setBusy(true); setErr(null); setNote(null);
+    const enrollAud = typeof window !== 'undefined' ? (parseEnrollReq()?.aud ?? null) : null;
     try {
       const r = await fetch('/connect/email/start', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+        // Which app this sign-in is for (an enroll window's client_id), so the code email can carry that app's
+        // support inbox as Reply-To (Gather, 2026-10-16). Absent on the portal's own sign-in.
+        body: JSON.stringify({ email: email.trim().toLowerCase(), ...(enrollAud ? { aud: enrollAud } : {}) }),
       });
       const d = (await r.json().catch(() => ({}))) as { ok?: boolean; delivery?: string; error?: string; devCode?: string };
       if (!r.ok || !d.ok) throw new Error(d.error ?? 'could not send the code');

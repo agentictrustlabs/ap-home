@@ -1,11 +1,15 @@
 // One code per email while it is valid (Paul, 2026-10-15: "two emails with different codes").
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const sent: Array<{ to: string; code: string }> = [];
+const sent: Array<{ to: string; code: string; replyTo?: string }> = [];
+let lastApp: { name?: string; replyTo?: string } | undefined;
 let failNext = false;
 vi.mock('../_lib/email-sender', () => ({
   emailSendingEnabled: () => true,
-  otpEmail: (to: string, code: string) => ({ to, code }),
+  otpEmail: (to: string, code: string, _brand: string, app?: { name?: string; replyTo?: string }) => {
+    lastApp = app;
+    return { to, code, ...(app?.replyTo ? { replyTo: app.replyTo } : {}) };
+  },
   sendEmail: async (_env: unknown, msg: { to: string; code: string }) => {
     if (failNext) {
       failNext = false;
@@ -28,9 +32,9 @@ function kv() {
   };
 }
 
-const ask = (env: unknown, email = 'new.host@example.org') =>
+const ask = (env: unknown, email = 'new.host@example.org', aud?: string) =>
   onRequestPost({
-    request: new Request('https://gcid.test/connect/email/start', { method: 'POST', body: JSON.stringify({ email }) }),
+    request: new Request('https://gcid.test/connect/email/start', { method: 'POST', body: JSON.stringify({ email, ...(aud ? { aud } : {}) }) }),
     env,
   } as never);
 
@@ -79,5 +83,14 @@ describe('POST /connect/email/start', () => {
     expect(sent).toHaveLength(0);
     await ask(env);
     expect(sent).toHaveLength(1);
+  });
+
+  it('the code email for a known relying app carries that app (its support inbox is the Reply-To); none for the portal', async () => {
+    await ask(env, 'a@example.org', 'gather-app');
+    expect(lastApp, 'gather-app is in the registry').toBeTruthy();
+    expect(lastApp?.name).toBeTruthy();
+    lastApp = undefined;
+    await ask(env, 'b@example.org');
+    expect(lastApp).toBeUndefined();
   });
 });
