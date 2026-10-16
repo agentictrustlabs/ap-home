@@ -1,4 +1,5 @@
 import { forwardToSelfHost , type SelfHostForwardAuth } from './self-hosted-read.js';
+import { wireCredentialFor } from './subject-hop-credential.js';
 import { credentialIssuerDeps } from './credential-issuer-deps.js';
 import { estateHeartbeat, heartbeatAuthorized } from './ops-heartbeat.js';
 import { getSelfHostWire, putSelfHostWire, verifySelfHostReadWire, isDelegationWire, type SelfHostWireChain } from './self-host-wire.js';
@@ -7115,10 +7116,13 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
         console.log(`[subject-ask] ${asker} shares ${ENGAGEMENT_PROFILE_RECORD} (${Object.keys(context).join(', ')}) with ${name ?? subject}`);
       }
     }
+    // Spec 397 §11.5 — over the wire, never the Home session (except to a peer deployment this one names).
+    const wireCred = inProcess ? null : wireCredentialFor({ cardUrl: (at as { cardUrl: string }).cardUrl, session, appCredential: appCredential as Record<string, unknown> | undefined, trustedOrigins: env.A2A_TRUSTED_ORIGINS, name: name ?? subject });
+    if (wireCred && !wireCred.ok) return { ok: false, via: { agent: subject, name, host, observedVia: 'network' }, refused: wireCred.refused };
     const profile = subjectAsk({
       request: { capability: toolId, args: requestArgs, goal },
       // Spec 397 — through a client, no session: the admission evidence travels instead, for the receiver to verify.
-      asker: { agent: (asker ?? subject) as Address, credential: session ? { kind: 'home-session', token: session } : { kind: 'app-delegation', ...appCredential! }, ...(presented.length ? { presented } : {}) },
+      asker: { agent: (asker ?? subject) as Address, credential: (wireCred?.ok ? wireCred.credential : session ? { kind: 'home-session', token: session } : { kind: 'app-delegation', ...appCredential! }) as never, ...(presented.length ? { presented } : {}) },
       correlation,
       // Spec 397 — the agent routing this step when the asker asked AT it (a room): the forwarded credential is bound to that ask.
       ...(routeVia ? { route: { agent: routeVia } } : {}),
@@ -7148,7 +7152,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       // card ⇒ said so, in the receiver's words where it has any — never read locally instead (R3).
       // Spec 397 W4 — an app-admitted run has no session: the profile carries the forwarded app credential, and the
       // receiver accepts it when it names this deployment as a peer (`A2A_TRUSTED_ORIGINS` there) — refused in its words otherwise.
-      const hop = await sendSubjectAskOverWire({ ...(trace ? { traceparent: trace.traceparent, ...(trace.tracestate ? { tracestate: trace.tracestate } : {}) } : {}), cardUrl: (at as { cardUrl: string }).cardUrl, ...((at as { pinnedDigest?: string }).pinnedDigest ? { pinnedDigest: (at as { pinnedDigest?: string }).pinnedDigest! } : {}), profile, ...(session ? { session } : {}), fetch: (u, init) => (laneFor(env, hostOf(u)) ?? fetch)(u, init) });
+      const hop = await sendSubjectAskOverWire({ ...(trace ? { traceparent: trace.traceparent, ...(trace.tracestate ? { tracestate: trace.tracestate } : {}) } : {}), cardUrl: (at as { cardUrl: string }).cardUrl, ...((at as { pinnedDigest?: string }).pinnedDigest ? { pinnedDigest: (at as { pinnedDigest?: string }).pinnedDigest! } : {}), profile, ...(wireCred?.ok && wireCred.session ? { session: wireCred.session } : {}), fetch: (u, init) => (laneFor(env, hostOf(u)) ?? fetch)(u, init) });
       if (!hop.ok) return { ok: false, via, refused: `${name ?? subject} could not be asked over the wire — ${hop.refused}` };
       envelope = hop.envelope as unknown as AskReplyEnvelopeV1;
       status = 200;
