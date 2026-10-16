@@ -1,47 +1,38 @@
-# demo-a2a
+# agent-runtime
 
-**The agent boundary: where a browser session becomes bounded machine authority.**
+**The estate's agent runtime: where a Home session or an agent's wire becomes bounded authority.**
 
-Every agentic stack has a moment where a human's intent crosses into autonomous execution. Most stacks cross it with an API key. This Cloudflare Worker is the [agenticprimitives](../../README.md) answer: the A2A boundary where sessions are verified, Smart Agent calls are relayed gas-free, and downstream MCP access is minted as **delegation tokens — scoped, replay-protected, revocable — never keys**.
+A Cloudflare Worker, deployed once per estate (`demo-a2a-faithnet` for faithnet at `a2a.faithnet.io`, `imb-runtime` for
+imbnet at `a2a.impact-agent.io`). Every person, organization and service agent of the estate is served here, each under
+its own host and its own Durable Objects.
 
-## The chain it proves
+## What it does
 
-> Browser sign-in (SIWE or passkey) → verified session → gasless Smart Agent deploys and UserOps via the relayer → delegation-token minting → proxied MCP tool calls under the same delegation the user signed.
-
-Concretely, this Worker:
-
-- **Verifies authentication** — SIWE (including on-chain ERC-1271/ERC-6492 signature verification for smart accounts) and custody-grade sessions, with CSRF and origin enforcement.
-- **Relays on-chain actions** — builds and submits Smart Agent deploys, batched executes, and paymaster-sponsored UserOps so demo users never need gas.
-- **Holds session state in a Durable Object** — per-user sessions live in `SessionStoreDO`; signing keys are handled through the KMS abstraction, not ambient environment access.
-- **Mints `DelegationToken` envelopes** — the bridge from a user-signed EIP-712 delegation to a bounded, JTI-tracked token a downstream MCP server can verify independently.
-- **Proxies MCP vault and tool calls** — the same Worker fronts [`demo-mcp`](../demo-mcp) for the browser apps, so every tool call arrives delegation-first.
-
-Every browser demo in this repo — [`demo-web`](../demo-web), [`demo-web-pro`](../demo-web-pro), [`demo-sso`](../demo-sso), [`demo-org`](../demo-org), [`demo-gs`](../demo-gs) — routes its `/a2a/*` traffic here. One boundary, one authority model.
-
-## Packages composed
-
-- [`@agenticprimitives/a2a`](../../packages/a2a) — agent-to-agent primitives, agent cards
-- [`@agenticprimitives/connect-auth`](../../packages/connect-auth) — SIWE verify, session mint/verify, CSRF
-- [`@agenticprimitives/agent-account`](../../packages/agent-account) — account client, batched execute calldata
-- [`@agenticprimitives/delegation`](../../packages/delegation) — delegation verification + token envelopes
-- [`@agenticprimitives/key-custody`](../../packages/key-custody) — KMS-backed signers, envelope encryption, MAC providers
-- [`@agenticprimitives/agent-naming`](../../packages/agent-naming) — name registration calls, host resolution
-- [`@agenticprimitives/connect`](../../packages/connect) / [`audit`](../../packages/audit) / [`mcp-runtime`](../../packages/mcp-runtime) / [`types`](../../packages/types)
+- **The harness.** `POST /harness/ask` turns words into an intent, resolves parties in the asker's private tier, plans,
+  and answers with one of `answer` · `authority_required` · `prompt` · `done`. An act runs only under a mandate the
+  acting principal signed, bound to the intent's digest and verified per step on chain; reads run no gate.
+- **The A2A door.** `POST /api/a2a` serves A2A 1.0: a conversation is answered by the harness, a delegated task by the
+  agent's own task object under the sender's verified grant. A message is never authority.
+- **The agent's serving plane.** Per agent: a task object (runs, triggers, progress) and an interactions object
+  (inbox, topics, applications, invitations). The records live in the owner's vault; Durable Object storage is
+  ordering, cursors and caches.
+- **Treasuries and payments.** Payments redeem a mandate from the payer's treasury; standing wires derive a child
+  mandate per payment; both parties receive a receipt.
+- **Anonymous credentials.** `credential.request` (a member asks her organization, through her own agent, naming the
+  public half of her device key) and `credential.issue` (the organization's act under its steward's mandate: roster →
+  issuer facet → the key service's issuing key → a record without the claims → a vouch on its live-credential row →
+  delivery into the member's vault by her own grant).
+- **Routed asks.** An ask carried to another host carries the app delegation it was admitted under, or a pairwise
+  asker when the target's card declares one — never the person's Home session.
+- **Runtimes of its own.** A member's runtime is woken when a message is admitted, paired by a single-use code, and
+  continues its own parked run under a chain derived from a standing grant.
 
 ## Run it
 
 ```bash
-# Everything at once, from the repo root:
-pnpm dev
-
-# Or just this Worker:
-pnpm dev:a2a    # wrangler dev on http://127.0.0.1:8787
+pnpm --filter @ap-home/agent-runtime typecheck && pnpm --filter @ap-home/agent-runtime test
+wrangler deploy --env <estate>      # faithnet | impact-agent, from this directory
 ```
 
-Local secrets and contract addresses come from `.dev.vars` (wrangler convention). Deploy with `pnpm --filter @ap-home/agent-runtime deploy`.
-
-## Status
-
-Reference implementation, not a product. Runs live against Base Sepolia (chain 84532) and local Anvil. The relayer and demo session secrets are development-grade by design — production custody is the job of [`key-custody`](../../packages/key-custody)'s KMS backends. Production launch of the substrate is gated on the public checklist in the [root README](../../README.md); findings are tracked live in [`docs/audits/findings.yaml`](../../docs/audits/findings.yaml).
-
-Validate: `pnpm check:demo-a2a`.
+Vars are under `[env.<estate>.vars]` in `wrangler.toml`; secrets are set once per estate (`scripts/set-estate-secrets.sh`).
+`CLAUDE.md` is the map of the source; `docs/architecture/harness-architecture-diagrams.md` explains the run.

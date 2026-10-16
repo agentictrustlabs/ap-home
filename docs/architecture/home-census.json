@@ -1,6 +1,6 @@
 {
   "$comment": "Spec 398 §1 / §12 G0 — THE HOME CENSUS as data. One row per capability family the Home ships (or the review asked for): its review ids (H-rows, APUX items, M-rows from the 2026-09-10 workbook), what is TRUE about it today (shipped | partial | absent), and every binding a row claims — Home routes, Home components, capability ids the runtime offers, harness endpoints, unit tests, nightly live gates. scripts/check-home-census.mts verifies every claimed binding against the tree and reports what the tree has that no row claims (the census diff). A P0 row that is `shipped` must bind every kind it claims; a `partial` row names what is absent in `gaps`; an `absent` row binds nothing and names the 398 section that builds it. This file moves to ap-home at 399 W2 with `roots` re-pointed (apps/home, apps/agent-runtime).",
-  "version": "2026-09-11.1",
+  "version": "2026-10-16.1",
   "roots": {
     "home": "apps/home",
     "homeApp": "apps/home/app",
@@ -1398,6 +1398,33 @@
         398
       ],
       "section": "398 §4.5 — deliberately not before the roster is right"
+    },
+    {
+      "id": "home.credentials",
+      "title": "Anonymous credentials — a member requests through her own agent; the organization's agent issues under its steward's mandate and delivers into her vault",
+      "priority": "P1",
+      "status": "partial",
+      "specs": [
+        444,
+        442
+      ],
+      "section": "spec 444 §2.2",
+      "capabilities": [
+        "credential.issue",
+        "credential.request"
+      ],
+      "endpoints": [
+        "/harness/ask"
+      ],
+      "tests": [
+        "apps/agent-runtime/test/credential-issue.test.ts",
+        "apps/agent-runtime/test/credential-request.test.ts",
+        "apps/agent-runtime/test/subject-hop-credential.test.ts"
+      ],
+      "gaps": [
+        "no Home page lists a member's credentials or an organization's issuances; both acts are reached through the Ask (and the org-issuer playbook)",
+        "the steward publishes the issuer facet by script (scripts/put-issuer-facet.mts), not from the Home"
+      ]
     }
   ]
 }

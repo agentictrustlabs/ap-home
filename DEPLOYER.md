@@ -60,18 +60,19 @@ faithchain, and it deploys from [`ap-town`](https://github.com/agentictrustlabs/
   and merge before `wrangler deploy`; the config is in the file, so a stale file is a stale deployment.
 - `wrangler deploy` deletes triggers created out of band — custom domains and crons are declarative in `wrangler.toml`.
 
-## impact-agent — the town's second estate (2026-10-11)
+## imbnet (impact-agent) — the second estate
 
-Same chain (faithchain), same contracts, same town, same repository. Its own custody root, relay key,
-interactions key, service agents, vault, Workers and Home — an impact-agent person is a different Smart Agent
-from a faithnet person of the same name, because a KMS-custodied home is a CREATE2 address over a derived
-custodian and the roots differ. It has no zone of its own, so the default hosts ARE its addresses.
+Its own chain (hopechain, 34349 — a generation-3 deployment with the payload-classes enforcer and the treasury spend
+policy), its own custody root, relay key, interactions key, service agents, vault, Workers and Home. An imbnet person is
+a different Smart Agent from a faithnet person of the same name: a KMS-custodied home is a CREATE2 address over a derived
+custodian and the roots differ. Its Home is `www.impact-agent.me` (the passkey rpId is that hostname; never the Vercel
+alias); its A2A zone is `impact-agent.io`.
 
 | Directory | Worker (`[env.impact-agent]`) | Host |
 | --- | --- | --- |
-| `apps/home` | — (Next.js on Vercel, project `imb-home`) | `https://imb-home.vercel.app` |
-| `apps/agent-runtime` | `imb-runtime` | `imb-runtime.richardpedersen3.workers.dev` |
-| `apps/vault` | `imb-vault` | `imb-vault.richardpedersen3.workers.dev` |
+| `apps/home` | — (Next.js on Vercel) | `https://www.impact-agent.me` |
+| `apps/agent-runtime` | `imb-runtime` | `a2a.impact-agent.io` |
+| `apps/vault` | `imb-vault` | `mcp.impact-agent.io` |
 | `apps/edge` | `imb-edge` | `imb-edge.richardpedersen3.workers.dev` |
 | `apps/home-mcp` | `imb-home-mcp` | `imb-home-mcp.richardpedersen3.workers.dev` |
 
@@ -84,13 +85,23 @@ wrangler deploy --env <name> -c apps/vault/wrangler.toml   # then agent-runtime,
 wrangler d1 migrations apply demo-mcp-<name> --remote -c apps/vault/wrangler.toml --env <name>
 ```
 
-`.estate-<name>.local` (0600, gitignored) is the only copy of the custody root. Losing it loses every
-person's home on that estate; copying it elsewhere copies the authority to be every one of them.
+`.estate-<name>.local` (0600, gitignored) is the only copy of the custody root. Losing it loses every person's home on
+that estate; copying it elsewhere copies the authority to be every one of them.
 
-What impact-agent deliberately does NOT have, each failing closed rather than quietly:
-- **AKCS custody** — no `imb` tenant (that needs a caller token minted on the Azure CVM), so custody,
-  the vault KEK and the service MAC are local-aes with the root an in-Worker secret.
-- **A paid-name gate key** — `NAMING_GATE_PRIVATE_KEY` is the town clerk's, not an estate's, so registering
-  a priced name from this Home refuses until the town issues impact-agent a gate credential.
-- **Mail** — no zone, so no inbound routing and no sending rail: an email invitation is refused, not dropped.
+**Key service.** imbnet has its own tenant (`imb`) on the shared key service (`AKCS_BASE_URL`, `AKCS_TENANT_ID` in
+`[env.impact-agent.vars]`): the relay and interactions-session keys (`AKCS_RELAY_KEY_ID`, `AKCS_INTERACTIONS_KEY_ID`),
+a caller per Worker bound by profile (`estate-runtime`, `estate-vault`), and the organization's ISSUING key
+(P-256, purpose `issuer-key:<org>`), which signs credentials only under issuance evidence the runtime mints with the secret
+`ISSUANCE_EVIDENCE_ES256_KEY` under the pinned `ISSUANCE_EVIDENCE_ISSUER` / `ISSUANCE_EVIDENCE_AUDIENCE` (the key's JWK is in
+the key service's evidence JWKS). A tenant is an estate boundary: one per estate, allowlists exact.
+
+**What the federation takes from this estate.** The projector anchors an organization's live-credential row from the
+organization's own vault: `scripts/issue-self-host-vault-credentials.mts <org> --by <steward> --delegate <projector key>
+--interactions <this estate's interactions SA> --scope 'vault:federation.projection-submission:*' --ops read,write`
+writes the credential the projector holds as `VAULT_CREDENTIALS_ISSUER_<ID>`.
+
+What imbnet deliberately does NOT have, each failing closed rather than quietly:
+- **A paid-name gate key** — `NAMING_GATE_PRIVATE_KEY` is the town clerk's, not an estate's; registering a priced name
+  from this Home refuses until the town issues it a gate credential.
+- **Mail** — no inbound routing and no sending rail: an email invitation is refused, not dropped.
 - **Google sign-in** — no OAuth client for this redirect URI; the demo and credential paths are the way in.

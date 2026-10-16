@@ -1,4 +1,4 @@
-# demo-mcp — Claude guide
+# vault — Claude guide
 
 ## What this app is
 
@@ -22,6 +22,12 @@ events while consuming `@agenticprimitives/mcp-runtime`, `delegation`,
   is verified per op (ERC-1271 via the `UniversalSignatureValidator`). NO global vault
   master key — no binding ⇒ `vault_key_unauthorized` (fail-closed, VKB-D1). Bindings are
   created by the connected-custodian ceremony (P5); `GCP_SERVICE_ACCOUNT_JSON` is required.
+- The record families the credential and identity acts keep here, each bound to an ontology class and gated by
+  the owner's grant scope: `credential.issuer-facet:*` · `credential.issued:*` · `credential.request:*` (the
+  organization's), `credential.anonymous:*` · `credential.device-key:*` · `credential.holder-secret:*` ·
+  `credential.presentation-mandate:*` · `identity.pairwise-secret` (the person's), and the organization's vouch
+  `federation.projection-submission:live-credential:*` (read by the federation projector). Scopes are additive
+  (`apps/shared/src/index.ts`); a grant that predates one is refused per record until re-enabled.
 - D1-backed demo data and local migrations.
 - Delegation/JTI replay checks as app wiring around package primitives.
 - Audit demo guide in `docs/audit/guide.md`.

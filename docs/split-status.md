@@ -44,7 +44,12 @@ gate recognising an ACT's `routedSubjectFor` beside a READ's `subjectOfRead`.
 2. ~~`APP_*_SCOPES` twin across apps~~ — DONE 2026-09-13: `apps/shared` (`@ap-home/shared`, a workspace package of
    this product — vertical namespaces belong in an app module, never a package, ADR-0021) is the ONE list both the
    Home's enable ceremony and the runtime's genesis planes append (`INTERACTIONS_APP_SCOPES`); the Home re-exports the
-   three names, Next transpiles the module, `genesis-planes.test.ts` guards the fold only.
+   names, Next transpiles the module, `genesis-planes.test.ts` guards the fold only. The list composes
+   `APP_COORDINATION_READ_SCOPES`, `APP_OWN_NAMESPACE_READ_SCOPES`, `APP_OWN_NAMESPACE_SEED_SCOPES`,
+   `APP_ASSESSMENT_SCOPES`, `APP_DOMAIN_RECORD_SCOPES`, `APP_CREDENTIAL_SCOPES` (issuer facet, issuances, the
+   member's credential, her request, her device key, the live-credential vouch) and `APP_IDENTITY_SCOPES` (the
+   pairwise secret) — every one ADDITIVE, never in the runtime's `REQUIRED_SCOPES`: a grant that predates a scope is
+   refused that record until its steward re-enables, and no estate-wide re-sign is ever forced.
 3. ~~`deploy-cloudflare.ts` / `gen-dev-vars.ts`~~ — DONE 2026-09-12: the Base Sepolia deploy script, `check-production-deploy.ts`
    and `provision-skills-sandbox.mts` are not carried; `gen-dev-vars.ts` writes only this repository's apps and reads
    deployments from the published contracts package; `set-cloudflare-secrets.sh` defaults to `production` and takes

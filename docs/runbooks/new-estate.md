@@ -199,6 +199,42 @@ A purchase is two signed operations (claim + pay from the treasury, then `setPri
 owner). A client closed between them leaves a registered, unpresented name: `scripts/present-estate-names.mts
 --estate <estate> --home <home> <handle>=<name>.me` finishes it.
 
+## 8a. An organization that issues its members' credentials (spec 444)
+
+Each step is an agent acting under a signature a person gives at her Home. The persona roster and chain come from §8;
+`--deployment` names the chain's `deployments-<chain>.json` in Ring 0's contracts package.
+
+1. **The organization.** A person creates it at her own Home; she is its steward:
+   `npx tsx scripts/create-organization-via-home.mts --home <home> --by <steward> --roster demo/personas.<estate>.json
+   --deployment <chain> --label <org> --note demo/org.<estate>.json`. Then turn on its storage and delivery planes:
+   `HOME_URL=<home> A2A_URL=<runtime> npx tsx scripts/enable-interactions-at.mts <steward> <org-address>`.
+2. **Its issuing key and facet.** The key service creates one P-256 key in the estate's tenant with purpose
+   `issuer-key:<org>`, and the runtime caller carries `ES256_ISSUE_SHA256` by its `estate-runtime` profile. The
+   steward signs the organization's issuer facet over that key's public JWK, and the facet is attested on the
+   estate's chain — ap-federation's `scripts/publish-issuer-facet.mts`. The organization keeps the facet as a vault
+   record: `HOME_URL=<home> A2A_URL=<runtime> npx tsx scripts/put-issuer-facet.mts <steward> <org> <facet.json>`
+   (`{ type: 'ap.issuer-facet.v1', keyId, akcsKeyId, credentialType, claimSchema, vcSize, issuer, attestation }`).
+   The runtime needs the secret `ISSUANCE_EVIDENCE_ES256_KEY`, whose public JWK is in the key service's evidence JWKS.
+3. **Its playbook.** `ARCHETYPE=org-issuer HOME_URL=<home> npx tsx scripts/assign-org-archetype.mts <steward> <org>` —
+   the organization steward's set plus issuing.
+4. **A member.** The steward invites (`scripts/run-act-via-home.mts --by <steward> --addressee <org> --tool
+   organization.membership.invite --args '{"org":"<org>","invitee":"<member>"}'`); the member's delivery plane must be
+   on (`enable-interactions-at.mts <member>`) for the invitation to reach her inbox. She joins:
+   `HOME_URL=<home> npx tsx scripts/join-org-via-home.mts <member> <org>` (the Join chip, headless; `OFFER_JSON` carries
+   the organization's side of the membership credential to countersign).
+5. **Her request.** Her agent asks for the credential, naming the public half of her device key:
+   `scripts/run-act-via-home.mts --by <member> --tool credential.request --args '{"org":"<org>"}'`. Her device key is a
+   P-256 key the key service holds for her (purpose `device-key:<handle>`), recorded in her vault as
+   `credential.device-key:<thumbprint>` with its `publicJwk`.
+6. **The issuance.** `scripts/run-act-via-home.mts --by <steward> --addressee <org> --tool credential.issue --args
+   '{"org":"<org>","member":"<member>","claims":{"age":"0000021"}}'`. The steward signs the organization's mandate;
+   the credential lands in her vault, the organization's vouch lands in its own vault, and the federation's scheduled
+   projector anchors the organization's live-credential row once it holds the organization's vault credential
+   (`issue-self-host-vault-credentials.mts`, see `DEPLOYER.md`).
+
+A person's own treasury that she pays dues from is linked to her in her own records, unnamed:
+`HOME_URL=<home> npx tsx scripts/link-own-agent.mts <handle> <treasury-address>`.
+
 ## 9. What to check before calling it done
 
 | Check | Expect |
@@ -208,6 +244,7 @@ owner). A client closed between them leaves a registered, unpresented name: `scr
 | town Pulse | the estate's heartbeat under ITS id, its own census |
 | sign out from the Home | ends on the Home's own origin |
 | `ap-town pnpm check` | `check:town`, `check:no-estate-binding` green with the new row |
+| an issuing organization (§8a) | `credential.issue` answers `issued: true, delivered: true`; the member's vault lists `credential.anonymous:<digest>` |
 
 ## Where things are recorded
 
