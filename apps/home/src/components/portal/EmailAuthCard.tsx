@@ -158,7 +158,7 @@ export function EmailAuthCard({ onLinked, busyNote = 'Securing your home…', on
         method: 'POST', headers: { 'content-type': 'application/json' },
         // Which app this sign-in is for (an enroll window's client_id), so the code email can carry that app's
         // support inbox as Reply-To (Gather, 2026-10-16). Absent on the portal's own sign-in.
-        body: JSON.stringify({ email: email.trim().toLowerCase(), ...(enrollAud ? { aud: enrollAud } : {}) }),
+        body: JSON.stringify({ email: email.trim().toLowerCase(), ...(enrollAud ? { app: enrollAud } : {}) }),
       });
       const d = (await r.json().catch(() => ({}))) as { ok?: boolean; delivery?: string; error?: string; devCode?: string };
       if (!r.ok || !d.ok) throw new Error(d.error ?? 'could not send the code');

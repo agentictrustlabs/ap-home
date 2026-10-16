@@ -32,9 +32,9 @@ function kv() {
   };
 }
 
-const ask = (env: unknown, email = 'new.host@example.org', aud?: string) =>
+const ask = (env: unknown, email = 'new.host@example.org', app?: string) =>
   onRequestPost({
-    request: new Request('https://gcid.test/connect/email/start', { method: 'POST', body: JSON.stringify({ email, ...(aud ? { aud } : {}) }) }),
+    request: new Request('https://gcid.test/connect/email/start', { method: 'POST', body: JSON.stringify({ email, ...(app ? { app } : {}) }) }),
     env,
   } as never);
 
@@ -85,10 +85,12 @@ describe('POST /connect/email/start', () => {
     expect(sent).toHaveLength(1);
   });
 
-  it('the code email for a known relying app carries that app (its support inbox is the Reply-To); none for the portal', async () => {
+  it('the code email for a known relying app carries that app (its support inbox is the Reply-To); none for the portal — and the app NEVER becomes the code audience', async () => {
     await ask(env, 'a@example.org', 'gather-app');
     expect(lastApp, 'gather-app is in the registry').toBeTruthy();
     expect(lastApp?.name).toBeTruthy();
+    const stored = JSON.parse(env.AUTH_CODES.m.values().next().value as string) as { aud: string };
+    expect(stored.aud, 'custody eligibility at verify reads this').not.toBe('gather-app');
     lastApp = undefined;
     await ask(env, 'b@example.org');
     expect(lastApp).toBeUndefined();

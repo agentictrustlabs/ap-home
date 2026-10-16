@@ -26,7 +26,7 @@ function newOtp(): string {
 }
 
 export const onRequestPost = async ({ request, env }: FnContext): Promise<Response> => {
-  const body = (await request.json().catch(() => null)) as { email?: string; aud?: string } | null;
+  const body = (await request.json().catch(() => null)) as { email?: string; aud?: string; app?: string } | null;
   const email = (body?.email ?? '').trim().toLowerCase();
   if (!EMAIL_RE.test(email)) return json({ error: 'a valid email is required' }, 400);
 
@@ -62,7 +62,10 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
 
   // The relying app this sign-in is for (its client_id, sent by an enroll window): its support inbox goes on the
   // code email as Reply-To and a help line (Gather, 2026-10-16). Unknown or absent → the plain email as before.
-  const app = body?.aud ? whitelabel.relyingApps.find((a) => a.client_id === body.aud) : undefined;
+  // `app`, NOT `aud`: the audience decides whether a NEW account may be created at verify (custody is for the
+  // Home's own audience), so a relying app's client_id must never ride there — it did for an hour on
+  // 2026-10-16 and new hosts were told "we couldn't set up a home for this email".
+  const app = body?.app ? whitelabel.relyingApps.find((a) => a.client_id === body.app) : undefined;
   const sent = await sendEmail(env, otpEmail(email, code, whitelabel.brand.name, app ? { name: app.name, replyTo: app.replyTo } : undefined));
   if (!sent.ok) return json({ error: `could not send the code: ${sent.error}` }, 502);
   await env.AUTH_CODES.put(key, record(now), ttl);
