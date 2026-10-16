@@ -21,7 +21,7 @@
  * perform it on its own behalf. So the principal here is the STEWARD, a person, who answers for the approval.
  *
  *   RPC_URL=… NEXT_PUBLIC_CHAIN_ID=34348 npx tsx scripts/release-service-card.mts <name> --by <steward handle> \
- *     --card-host <host> [--import-from <url>] [--home https://www.faithnet.me] [--out bundle.json] [--dry-run]
+ *     --card-host <host> [--import-from <url>] [--public] [--home https://www.faithnet.me] [--out bundle.json] [--dry-run]
  *
  * `--out` writes the SERVING BUNDLE: the signed card, the public key set, and the binding. A SELF-HOSTED service
  * (its own Worker, its own origin — spec 433's shape B) serves those three files itself, and the Studio's publish
@@ -152,6 +152,13 @@ const patch = async (ops: Array<{ op: string; path: string; value?: unknown }>, 
 
 // RESOLVING THE DRAFT, the way the Studio means a steward to resolve it — one deliberate act per diagnostic, each
 // one recorded as a user OVERRIDE binding, never a validator that was talked out of its finding.
+// `--public`: the service admits every asker publicly, so the serving layer's Home-session bearer scheme is not a
+// thing it requires. Dropped up front — the validator accepts the scheme's form, which says nothing about whether
+// this service honours it.
+if (process.argv.includes('--public')) {
+  await patch([{ op: 'remove', path: '/securitySchemes' }, { op: 'remove', path: '/securityRequirements' }],
+    'dropped the serving layer\'s bearer scheme from the release — this service admits publicly, so it requires none');
+}
 let v = await validate();
 for (let pass = 0; pass < 3 && v.errors > 0; pass++) {
   const ds = v.diagnostics ?? [];
