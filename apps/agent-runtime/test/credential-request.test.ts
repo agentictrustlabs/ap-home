@@ -47,4 +47,18 @@ describe('credential.request', () => {
     const out = await credentialRequestInvoker(world({ publicJwk: false }).deps, ME)('credential.request', { org: ORG }, ctx) as Record<string, any>;
     expect(out.code).toBe('no_device_key');
   });
+
+  it('prefers a managed key over a local stand-in, whatever the record order', async () => {
+    const w = world();
+    const store = (w.deps as unknown as { _store?: Map<string, unknown> });
+    void store;
+    const vault = new Map<string, unknown>([
+      ['credential.device-key:zzz-local', { type: 'ap.device-key.v1', thumbprint: 'zzz-local', privateKeyHex: '0xsecret', publicJwk: JWK, createdAt: '2026-10-17T00:00:00Z' }],
+      ['credential.device-key:aaa-managed', { type: 'ap.device-key.v1', thumbprint: 'aaa-managed', managed: { backend: 'akcs', keyId: 'k1', baseUrl: 'https://kms.example', tenantId: 'imb' }, publicJwk: { ...JWK, x: 'managed-x' }, createdAt: '2026-10-16T00:00:00Z' }],
+    ]);
+    const deps = { ...w.deps, survey: async () => [...vault.keys()].map((recordType) => ({ recordType })), readRecord: async (_s: string, rt: string) => vault.get(rt) ?? null };
+    const out = await credentialRequestInvoker(deps, ME)('credential.request', { org: ORG }, ctx) as Record<string, any>;
+    expect(out.deviceKeyThumbprint).toBe('aaa-managed');
+    expect((w.writes.get(`${ORG}|credential.request:${ME}`) as Record<string, any>).deviceKey.x).toBe('managed-x');
+  });
 });

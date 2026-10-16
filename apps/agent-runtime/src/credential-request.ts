@@ -70,12 +70,16 @@ export function credentialRequestInvoker(deps: CredentialRequestDeps, person: st
     if (!standing) return { refused: `${name} could not be asked whether you belong to it just now — nothing was sent`, code: 'org_unreadable' };
     if (!standing.membership || standing.ended) return { refused: `${name} does not record you as a member — ask to join it first; a credential is only for its members`, code: 'not_a_member' };
     // 2. HER KEY — the public half, from her own vault.
+    // WHICH KEY: a MANAGED key (held by the estate's key service) over a local one standing in for it — the design over
+    // the stand-in, stated as a rule rather than left to record order. Among several of one kind, the newest.
     const keys = (await deps.survey(me)).map((r) => r.recordType).filter((t) => t.startsWith(DEVICE_KEY_PREFIX)).sort();
-    let device: { jwk: { kty: 'EC'; crv: 'P-256'; x: string; y: string }; thumbprint: string } | null = null;
+    const candidates: Array<{ jwk: { kty: 'EC'; crv: 'P-256'; x: string; y: string }; thumbprint: string; managed: boolean; createdAt: string }> = [];
     for (const t of keys) {
-      const rec = (await deps.readRecord(me, t).catch(() => null)) as { thumbprint?: string; publicJwk?: unknown } | null;
-      if (rec && isPublicJwk(rec.publicJwk)) { device = { jwk: { kty: 'EC', crv: 'P-256', x: rec.publicJwk.x, y: rec.publicJwk.y }, thumbprint: String(rec.thumbprint ?? t.slice(DEVICE_KEY_PREFIX.length)) }; break; }
+      const rec = (await deps.readRecord(me, t).catch(() => null)) as { thumbprint?: string; publicJwk?: unknown; managed?: unknown; createdAt?: string } | null;
+      if (rec && isPublicJwk(rec.publicJwk)) candidates.push({ jwk: { kty: 'EC', crv: 'P-256', x: rec.publicJwk.x, y: rec.publicJwk.y }, thumbprint: String(rec.thumbprint ?? t.slice(DEVICE_KEY_PREFIX.length)), managed: !!rec.managed, createdAt: String(rec.createdAt ?? '') });
     }
+    candidates.sort((a, b) => Number(b.managed) - Number(a.managed) || b.createdAt.localeCompare(a.createdAt));
+    const device = candidates[0] ?? null;
     if (!device) return { refused: 'your vault holds no device key whose public half is recorded — a credential is bound to one, so set up a device key first', code: 'no_device_key' };
     // 3. ASK — her request, in the organization's vault, by the organization's own grant.
     const request: CredentialRequestV1 = {
