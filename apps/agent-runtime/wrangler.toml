@@ -108,6 +108,10 @@ zone_name = "faithnet.ai"
 binding = "AI"
 
 [env.faithnet.vars]
+# Spec 444 on faithnet (the private-scripture build) — lbsb.svc issues its readers' OpenAC credentials. The pins are the key
+# service's [authority_evidence]; the key is the secret ISSUANCE_EVIDENCE_ES256_KEY (kid N-bSQ1uR…, in the CVM's JWKS).
+ISSUANCE_EVIDENCE_ISSUER = "https://presentation-release.faithnet.internal"
+ISSUANCE_EVIDENCE_AUDIENCE = "akcs-pilot-evidence"
 AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"  # spec 441 posture — the same two akcs.ts defaults to; declared because a code default is not an estate's statement
 A2A_RELAYER_KMS_BACKEND = "agentic-kms"  # spec 441 D3 — already true by inheriting A2A_KMS_BACKEND; said outright so the relayer's backend is not a consequence
 FEDERATION_DOORS = '{"ap-federation-door:impact-agent":"https://door.ap-federation.faithnet.io","ap-federation-door:faithnet":"https://door-faithnet.ap-federation.faithnet.io"}'  # spec 439 F3 — the federation doors whose receipts this estate reads (custom domains only)
