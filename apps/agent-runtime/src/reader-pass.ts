@@ -188,3 +188,91 @@ export async function vendReaderCredential(deps: VendDeps, cfg: VendConfig, inpu
 
 /** The holder keeps it in her own vault, by her own grant. */
 export const holderCredentialRecordType = (digest: string): string => `${HOLDER_CREDENTIAL_PREFIX}${digest.toLowerCase()}`;
+
+// ── presenting it (W4) ────────────────────────────────────────────────────────────────────────────────────────────
+//
+// The reader's proof: "a reader's card from this issuer, still valid today" — `reader ≥ 1 ∧ valid_until ≥ <today>`. The
+// predicate names TODAY, so its program changes each day; her standing `credential.present` wire therefore names the
+// program of every day her pass covers (no more, no less), signed once at purchase. Each presentation is then a child of
+// that wire for ONE statement — one audience, one day's program, one issuer facet, one presentation, minutes.
+import { compileOpenAcPredicates, OPENAC_SUITE } from '@agenticprimitives/privacy-credentials';
+import { buildStandingWire, deriveFromStanding, intentDigest, presentationIntent, signedStandingWire, PRESENTATION_CAPABILITY, PRESENTATION_RAR_TYPE, type EnforcerAddresses, type StandingWireV1 } from '@agenticprimitives/delegation';
+
+export const READER_CLAIM_SCHEMA = ['reader', 'valid_until'] as const;
+/** openac-sdk 5.0.0's bundle version — the one the 1k keys are bound to. */
+export const OPENAC_ACCEPTED_VERSIONS = ['0.1.0'] as const;
+export const readerPredicates = (day: number) => [{ claim: 'reader', op: 'gte', value: 1 }, { claim: 'valid_until', op: 'gte', value: day }] as const;
+
+/** The proof request a verifier builds from its challenge — and the holder reproduces from the same three values. */
+export function readerProofRequest(i: { nonce: string; audience: string; day: number }): Record<string, unknown> {
+  return {
+    type: 'ProofRequestV1', suite: OPENAC_SUITE, verifierId: new URL(i.audience).host, requestedClaims: [], predicates: readerPredicates(i.day),
+    nonce: i.nonce, audience: i.audience, openac: { claimSchema: [...READER_CLAIM_SCHEMA], vcSize: '1k', acceptedVersions: [...OPENAC_ACCEPTED_VERSIONS] },
+  };
+}
+
+/** The digest of one day's predicate PROGRAM — what the standing wire lists and the child names. */
+export function readerPredicateDigest(day: number): Hex {
+  const c = compileOpenAcPredicates(readerPredicates(day) as never);
+  if (!c.ok) throw new Error(`the reader predicate does not compile: ${c.detail}`);
+  return intentDigest(c.expression);
+}
+
+/** Her standing wire for a pass valid through `toDay`: the verifier's audience, every day's program from `fromDay`, the issuer
+ *  facet — unsigned; the caller signs `ref` with her custodian. */
+export function buildReaderStanding(i: { person: Address; delegate: Address; audience: string; issuerKeyId: string; fromDay: number; toDay: number; enforcers: EnforcerAddresses; chainId: number; delegationManager: Address; nowSeconds?: number }): StandingWireV1 {
+  const days: number[] = [];
+  for (let d = i.fromDay; d <= i.toDay; d++) days.push(d);
+  const now = i.nowSeconds ?? Math.floor(Date.now() / 1000);
+  const { standing } = buildStandingWire({
+    template: 'present-reader-pass', delegator: i.person, delegate: i.delegate, capability: PRESENTATION_CAPABILITY,
+    presentation: { audiences: [i.audience], predicateDigests: days.map(readerPredicateDigest), issuerKeyIds: [i.issuerKeyId] },
+    validForSeconds: Math.max(60, (i.toDay + 1) * 86_400 - now), enforcers: i.enforcers, chainId: i.chainId, delegationManager: i.delegationManager,
+  });
+  return standing;
+}
+export { signedStandingWire };
+
+/** The child for ONE statement, derived from her standing wire and signed by its delegate (the runtime's own key). */
+export async function readerChildMandate(standing: StandingWireV1, i: { actor: Address; audience: string; day: number; issuerKeyId: string }, sign: (digest: Hex) => Promise<Hex>): Promise<Record<string, unknown>> {
+  const predicateDigest = readerPredicateDigest(i.day);
+  const statement = { audience: i.audience, predicateDigest, issuerKeyId: i.issuerKeyId };
+  const now = Math.floor(Date.now() / 1000);
+  const derived = await deriveFromStanding(standing, {
+    delegator: standing.wire.delegator as Address, delegate: i.actor,
+    requirement: { type: PRESENTATION_RAR_TYPE, actions: ['present'], limits: { audience: i.audience, predicateDigest, issuerKeyId: i.issuerKeyId, maxPresentations: 1 }, intentDigest: intentDigest(presentationIntent(statement)), validUntil: now + 600 },
+  } as never, sign);
+  if (!derived.ok) throw new Error(`your reader pass's standing permission does not cover this: ${derived.reason}`);
+  return derived.presented[0] as Record<string, unknown>;
+}
+
+/** The card extension a verifier declares when it accepts a reader's proof (scripture-resolver.svc). */
+export const READER_PROOF_EXTENSION_URI = 'https://faithnet.io/a2a/reader-proof/v1' as const;
+export interface ReaderProofDeclaration { challengeUrl: string; audience: string; credentialType: string; issuerKeyIds: string[]; editions: string[] }
+export function readerProofDeclaration(card: unknown): ReaderProofDeclaration | null {
+  const exts = ((card as { capabilities?: { extensions?: Array<{ uri?: string; params?: Record<string, unknown> }> } } | null)?.capabilities?.extensions) ?? [];
+  const p = exts.find((e) => e?.uri === READER_PROOF_EXTENSION_URI)?.params;
+  if (!p || typeof p.challengeUrl !== 'string' || typeof p.audience !== 'string' || typeof p.credentialType !== 'string' || !Array.isArray(p.issuerKeyIds) || !Array.isArray(p.editions)) return null;
+  try { if (new URL(p.challengeUrl).origin !== new URL(p.audience).origin) return null; } catch { return null; }
+  return { challengeUrl: p.challengeUrl, audience: p.audience, credentialType: p.credentialType, issuerKeyIds: p.issuerKeyIds.map(String), editions: p.editions.map(String) };
+}
+
+/** Her newest still-valid credential the declaration accepts, with the standing wire it presents under. */
+export async function findReaderCredential(
+  read: { survey: (s: string) => Promise<Array<{ recordType: string }>>; readRecord: (s: string, rt: string) => Promise<unknown> },
+  person: string, decl: ReaderProofDeclaration, today: number,
+): Promise<{ credential: Record<string, unknown>; device: DeviceKeyRecordV1; standing: StandingWireV1 } | null> {
+  const types = (await read.survey(person)).map((r) => r.recordType).filter((t) => t.startsWith(HOLDER_CREDENTIAL_PREFIX));
+  let best: { credential: Record<string, unknown>; standing: StandingWireV1; validUntil: number } | null = null;
+  for (const t of types) {
+    const c = (await read.readRecord(person, t).catch(() => null)) as Record<string, unknown> | null;
+    if (!c || c.credentialType !== decl.credentialType || !decl.issuerKeyIds.includes(String(c.issuerKeyId)) || !c.standing) continue;
+    const vu = Number(c.validUntil ?? 0);
+    if (vu < today) continue;
+    if (!best || vu > best.validUntil) best = { credential: c, standing: c.standing as StandingWireV1, validUntil: vu };
+  }
+  if (!best) return null;
+  const device = (await read.readRecord(person, `${DEVICE_KEY_PREFIX}${String(best.credential.deviceKeyThumbprint)}`).catch(() => null)) as DeviceKeyRecordV1 | null;
+  if (!device?.managed?.keyId) return null;
+  return { credential: best.credential, device, standing: best.standing };
+}

@@ -6129,7 +6129,7 @@ step is then handed to that agent under authority the person grants; leave it ou
       // Spec 397 W2 — ENGAGE: one message to another agent, sent by this agent AS THE ASKER (session or app credential),
       // the target planning for itself under its own playbook (`harness.ask` names the whole ask, not one step). The same
       // routed hop as spec 366; the answer is the target's own, an observation here.
-      let engaged: { target: Address; said: string } | null = null;
+      let engaged: { target: Address; said: string; skill?: string; skillArgs?: Record<string, unknown>; proof?: boolean } | null = null;
       if (toolId === ENGAGEMENT_INVOKE_CAPABILITY) {
         const namedAgent = String(args.agent ?? '').trim();
         const message = String(args.message ?? '').trim();
@@ -6138,7 +6138,9 @@ step is then handed to that agent under authority the person grants; leave it ou
         const target = /^0x[0-9a-fA-F]{40}$/.test(namedAgent) ? (namedAgent.toLowerCase() as Address) : ((await deps.resolveName?.(namedAgent.toLowerCase()).catch(() => null)) ?? null) as Address | null;
         if (!target) return { refused: `the registry names no agent called “${namedAgent}”`, interpretation: `looked “${namedAgent}” up in the registry` };
         if (input.addressee && target === String(input.addressee).toLowerCase()) return { refused: 'that is this agent — engage another one, or just ask' };
-        engaged = { target, said: message };
+        const skill = typeof args.skill === 'string' && /^[a-z0-9][a-z0-9.-]{0,63}$/.test(args.skill) ? args.skill : undefined;
+        const skillArgs = skill && args.args && typeof args.args === 'object' && !Array.isArray(args.args) ? (args.args as Record<string, unknown>) : undefined;
+        engaged = { target, said: message, ...(skill ? { skill } : {}), ...(skillArgs ? { skillArgs } : {}), ...(args.proof === true ? { proof: true } : {}) };
       }
       const subject = engaged ? engaged.target : routedSubjectFor(tool, args, input.addressee);
       if (!subject) return localInvoke(toolId, args, ctx);
@@ -6201,7 +6203,7 @@ step is then handed to that agent under authority the person grants; leave it ou
       // the run reference — the same rule `traceIdFor` applies to the record) with the routed step as parent.
       const hopTrace = { traceparent: formatTraceparent(input.traceContext?.traceId ?? await traceIdOf(correlation.runRef), await spanIdOf(correlation.runRef, correlation.stepRef)), ...(input.traceContext?.tracestate ? { tracestate: input.traceContext.tracestate } : {}) };
       const answer = await deps.askSubjectAgent({
-        subject, toolId: engaged ? STANDARD_SURFACE_SKILL : toolId, args: engaged ? {} : args, goal: engaged ? engaged.said : input.intent.goal, ...(input.person ? { asker: input.person } : {}), ...(input.session ? { session: input.session } : {}), ...(input.appCredential ? { appCredential: input.appCredential } : {}), ...(input.addressee && input.person && String(input.addressee).toLowerCase() !== String(input.person).toLowerCase() ? { via: String(input.addressee).toLowerCase() as Address } : {}),
+        subject, toolId: engaged ? (engaged.skill ?? STANDARD_SURFACE_SKILL) : toolId, args: engaged ? { ...(engaged.skillArgs ?? {}), ...(engaged.proof ? { proof: true } : {}) } : args, goal: engaged ? engaged.said : input.intent.goal, ...(input.person ? { asker: input.person } : {}), ...(input.session ? { session: input.session } : {}), ...(input.appCredential ? { appCredential: input.appCredential } : {}), ...(input.addressee && input.person && String(input.addressee).toLowerCase() !== String(input.person).toLowerCase() ? { via: String(input.addressee).toLowerCase() as Address } : {}),
         trace: hopTrace,
         ...(cont ? {} : { runRef: receiverRunRef }),
         // R: this step's stable operation identity, for the receiver to name in S (spec 367 §8).

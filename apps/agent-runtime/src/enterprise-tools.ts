@@ -58,6 +58,11 @@ export const ENGAGEMENT_INVOKE_TOOL: ToolSpec = {
     properties: {
       agent: { type: 'string', description: 'The other agent\'s name (ligonier.svc) or 0x address' },
       message: { type: 'string', description: 'The ask, complete and in the person\'s words' },
+      // Private-scripture W4 — a planned engagement (an app's plan, never the planner's guess) may name the other agent's
+      // SKILL and its arguments, and ask this agent to present the person's matching credential with them (`proof`).
+      skill: { type: 'string', description: 'Optional: the other agent\'s skill id to run (as its card lists it)' },
+      args: { type: 'object', description: 'Optional: that skill\'s arguments' },
+      proof: { type: 'boolean', description: 'Optional: present the person\'s credential the other agent\'s card asks for' },
     },
     required: ['agent', 'message'],
   },

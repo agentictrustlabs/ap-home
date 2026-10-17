@@ -96,3 +96,44 @@ describe('the reader-pass vend', () => {
     expect(() => purseSubject('x', 0)).toThrow();
   });
 });
+
+import { buildReaderStanding, readerChildMandate, readerPredicateDigest, readerProofDeclaration, readerProofRequest, READER_PROOF_EXTENSION_URI } from '../src/reader-pass.js';
+describe('presenting a reader pass (W4)', () => {
+  const ENF = { delegationManager: '0x710cb1bF08C234Df397e0910331e0A29710EF4F7', timestamp: '0x73A7B878168b7DE48677617179A8bE894f0Dfe96', value: '0x8759c1a6cEBF1D5069e9434EF46327Bf2ef69975', allowedTargets: '0x2156311097A936de1916a878bF53Bfd43c7b5715', allowedMethods: '0xdBb2E47793393C499efB0f3fcbf6Ca8669791a41', digestBinding: '0xA3bb9BCC9b2F6F2419E1aBe5ED6Fd5399b9E68e1', payment: '0x07fA0aE59FdE4B7ce8962d6fE7a1d648ec3DD5CE' } as never;
+  const PERSON = '0x4f562955b31451d671d64c5d3f2f2aa2412df39b' as Address;
+  const RUNTIME = '0x3333333333333333333333333333333333333333' as Address;
+  const AUD = 'https://scripture.faithnet.io';
+  const today = dayNumber(new Date());
+  const standing = buildReaderStanding({ person: PERSON, delegate: RUNTIME, audience: AUD, issuerKeyId: 'issuer-key:sd-jwt:lbsb-1', fromDay: today, toDay: today + 30, enforcers: ENF, chainId: 34348, delegationManager: '0x710cb1bF08C234Df397e0910331e0A29710EF4F7' as Address });
+  const sign = async () => `0x${'11'.repeat(65)}` as Hex;
+
+  it('each day has its own predicate program; the request is the one a verifier rebuilds', () => {
+    expect(readerPredicateDigest(today)).not.toBe(readerPredicateDigest(today + 1));
+    const r = readerProofRequest({ nonce: 'ab'.repeat(16), audience: AUD, day: today }) as { predicates: unknown[]; verifierId: string; openac: { claimSchema: string[] } };
+    expect(r.verifierId).toBe('scripture.faithnet.io');
+    expect(r.openac.claimSchema).toEqual(['reader', 'valid_until']);
+    expect(r.predicates).toEqual([{ claim: 'reader', op: 'gte', value: 1 }, { claim: 'valid_until', op: 'gte', value: today }]);
+  });
+
+  it('the standing wire names exactly the days of the pass, one audience, one facet', () => {
+    const limits = standing.requirement.limits as Record<string, string>;
+    expect(JSON.parse(limits.predicateDigests!)).toHaveLength(31);
+    expect(JSON.parse(limits.audiences!)).toEqual([AUD]);
+    expect(JSON.parse(limits.issuerKeyIds!)).toEqual(['issuer-key:sd-jwt:lbsb-1']);
+    expect(String(standing.wire.delegator).toLowerCase()).toBe(PERSON);
+  });
+
+  it('a child is derived for a covered day — and refused for a day the pass does not cover, or another verifier', async () => {
+    const child = await readerChildMandate(standing, { actor: RUNTIME, audience: AUD, day: today, issuerKeyId: 'issuer-key:sd-jwt:lbsb-1' }, sign);
+    expect(String(child.delegate).toLowerCase()).toBe(RUNTIME);
+    await expect(readerChildMandate(standing, { actor: RUNTIME, audience: AUD, day: today + 40, issuerKeyId: 'issuer-key:sd-jwt:lbsb-1' }, sign)).rejects.toThrow(/does not cover/);
+    await expect(readerChildMandate(standing, { actor: RUNTIME, audience: 'https://other.example', day: today, issuerKeyId: 'issuer-key:sd-jwt:lbsb-1' }, sign)).rejects.toThrow(/does not cover/);
+  });
+
+  it('a card declares what it accepts; a challenge URL off the audience\'s origin is no declaration', () => {
+    const ext = (challengeUrl: string) => ({ capabilities: { extensions: [{ uri: READER_PROOF_EXTENSION_URI, params: { challengeUrl, audience: AUD, credentialType: 'lbsb-reader', issuerKeyIds: ['issuer-key:sd-jwt:lbsb-1'], editions: ['lbsb'] } }] } });
+    expect(readerProofDeclaration(ext(`${AUD}/credential/challenge`))?.editions).toEqual(['lbsb']);
+    expect(readerProofDeclaration(ext('https://evil.example/challenge'))).toBeNull();
+    expect(readerProofDeclaration({})).toBeNull();
+  });
+});

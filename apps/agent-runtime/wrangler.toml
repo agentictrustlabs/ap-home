@@ -72,6 +72,11 @@ new_sqlite_classes = ["RuntimeContainer"]
 tag = "v7"
 new_sqlite_classes = ["ExperimentDO"]
 
+# Private-scripture W4 — the holder's OpenAC prover (holder-prover-container.ts).
+[[migrations]]
+tag = "v8"
+new_sqlite_classes = ["HolderProverContainer"]
+
 # ── FAITHNET (Azure faithchain 34348) — gcp-kms custody, Home on faithnet.me, backend on faithnet.io ──
 [env.faithnet]
 name = "demo-a2a-faithnet"
@@ -112,14 +117,11 @@ binding = "AI"
 # service's [authority_evidence]; the key is the secret ISSUANCE_EVIDENCE_ES256_KEY (kid N-bSQ1uR…, in the CVM's JWKS).
 ISSUANCE_EVIDENCE_ISSUER = "https://presentation-release.faithnet.internal"
 ISSUANCE_EVIDENCE_AUDIENCE = "akcs-pilot-evidence"
-# Private-scripture W3 — the reader pass (POST /reader-pass/buy): lbsb.svc issues it, paid into lbsb-treasury.treasury,
-# 1 mock USDC for 30 days. DEMO_FUND: on faithchain the purse mints its own mock USDC in the same op, so no transfer
-# from a named account ever funds it. A real asset would need its own answer to how the purse is filled.
-READER_PASS_ISSUER = "0x00ff8ccc7c7145289c8a42fe8870ec5d8cd68774"
-READER_PASS_TREASURY = "0xdc3ef3d91ceb006099646e7cbb25cf74d747dcc6"
-READER_PASS_PRICE_UNITS = "1000000"
-READER_PASS_DAYS = "30"
-READER_PASS_DEMO_FUND = "true"
+# Private-scripture W3/W4 — the reader pass (POST /reader-pass/buy), ONE var because this Worker sits at the 128-text-binding
+# limit: lbsb.svc issues it, paid into lbsb-treasury.treasury, 1 mock USDC for 30 days, presented to scripture.faithnet.io.
+# demoFund: on faithchain the purse mints its own mock USDC in the same op, so no transfer from a named account ever funds
+# it — a real asset would need its own answer to how the purse is filled.
+READER_PASS = '{"issuer":"0x00ff8ccc7c7145289c8a42fe8870ec5d8cd68774","treasury":"0xdc3ef3d91ceb006099646e7cbb25cf74d747dcc6","priceUnits":"1000000","days":30,"demoFund":true,"audience":"https://scripture.faithnet.io"}'
 AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"  # spec 441 posture — the same two akcs.ts defaults to; declared because a code default is not an estate's statement
 A2A_RELAYER_KMS_BACKEND = "agentic-kms"  # spec 441 D3 — already true by inheriting A2A_KMS_BACKEND; said outright so the relayer's backend is not a consequence
 FEDERATION_DOORS = '{"ap-federation-door:impact-agent":"https://door.ap-federation.faithnet.io","ap-federation-door:faithnet":"https://door-faithnet.ap-federation.faithnet.io"}'  # spec 439 F3 — the federation doors whose receipts this estate reads (custom domains only)
@@ -391,6 +393,8 @@ bindings = [
   { name = "SA_BUDGET", class_name = "SmartAgentBudgetDO", script_name = "demo-mcp-faithnet" },
   # Spec 400 W1c — one runtime Container per member, named by the member's agent address.
   { name = "RUNTIME", class_name = "RuntimeContainer" },
+  # Private-scripture W4 — the holder's OpenAC prover (one instance, `holder-prover`).
+  { name = "PROVER", class_name = "HolderProverContainer" },
 ]
 
 # Spec 400 W1c — the runtime member's Container: Node + `ap runtime serve` + the ACP agent, next to the Worker.
@@ -402,6 +406,17 @@ class_name = "RuntimeContainer"
 image = "./runtime-container/Dockerfile"
 max_instances = 3
 instance_type = "basic"
+
+# Private-scripture W4 — the holder's prover: the 1k proving + verifying keys (≈560 MB) and the Prepare pool (≈45 MB each).
+# Image built by wrangler from ../holder-prover (copy ~/.cache/openac-5.0.0/1k_*.key into ../holder-prover/keys first).
+# Secrets beside the Worker's: PROVER_SECRET (its bearer); it reuses AKCS_HOLDER_TOKEN and the issuance-evidence key.
+[[env.faithnet.containers]]
+class_name = "HolderProverContainer"
+image = "../holder-prover/Dockerfile"
+max_instances = 1
+# Show peaks at ≈3.7 GB (measured, openac-sdk 5.0.0, 1k): `standard` (4 GiB) was killed mid-proof. Show is CPU-bound
+# (≈7 s on a laptop, ≈25 s on standard-3's vCPU), so the largest shape: 4 vCPU, 12 GiB.
+instance_type = "standard-4"
 
 # Spec 400 W1c — the wake queue: produced after a message is ADMITTED into a member that declared a host; consumed
 # by this same Worker, which POSTs /wake to the member's Container (or URL). No content, no authority in a message.

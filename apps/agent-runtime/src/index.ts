@@ -1,7 +1,7 @@
 import { forwardToSelfHost , type SelfHostForwardAuth } from './self-hosted-read.js';
 import { wireCredentialFor, pairwiseSubjectPort } from './subject-hop-credential.js';
 import { credentialIssuerDeps } from './credential-issuer-deps.js';
-import { createHolderDeviceKey, holderCredentialRecordType, purseSubject, readerClaimDigest, vendReaderCredential, type VendConfig } from './reader-pass.js';
+import { buildReaderStanding, createHolderDeviceKey, dayNumber, findReaderCredential, holderCredentialRecordType, purseSubject, readerChildMandate, readerClaimDigest, readerProofDeclaration, readerProofRequest, signedStandingWire, vendReaderCredential, type VendConfig } from './reader-pass.js';
 import { estateHeartbeat, heartbeatAuthorized } from './ops-heartbeat.js';
 import { getSelfHostWire, putSelfHostWire, verifySelfHostReadWire, isDelegationWire, type SelfHostWireChain } from './self-host-wire.js';
 import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
@@ -175,7 +175,7 @@ import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-v
 import { sessionWirePrincipal, parseSessionAuthorization, STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
 const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
 import { askVocabulary, commandFieldsFor, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY, HOUSEHOLD_READ_CAPABILITY, CAPABILITY_WORDS, type PlannerTraceV1 } from './harness-run.js';
-import { expectedDeliversOfGold } from './harness-run.js';
+import { expectedDeliversOfGold, harnessEnforcers } from './harness-run.js';
 import { judgeOutcomePerClass } from '@agenticprimitives/orchestration';
 import { stateCheckOf, recordTypeOfClass, fieldsOfShape, type DomainShapeV1 } from './state-check.js';
 import { workersAiTranscriber, repairTranscript, hearingVocabulary, spokenFor } from './voice.js';
@@ -303,13 +303,13 @@ export { ExperimentDO } from './experiment-do.js';
 export interface Env {
   /** Private-scripture W3 — the key-service token of the HOLDER caller (key-create + ES256_SHA256 only): her device keys. */
   AKCS_HOLDER_TOKEN?: string;
-  /** The reader pass: who issues it, where it is paid, in what, how much (smallest units), for how many days. */
-  READER_PASS_ISSUER?: string;
-  READER_PASS_TREASURY?: string;
-  READER_PASS_PRICE_UNITS?: string;
-  READER_PASS_DAYS?: string;
-  /** 'true' only on a demo chain: the purse mints its own mock USDC, so no transfer from a named account funds it. */
-  READER_PASS_DEMO_FUND?: string;
+  /** The reader pass (private-scripture W3/W4), ONE JSON var — a Worker has 128 text bindings and this estate is at the
+   *  limit: { issuer, treasury, priceUnits, days, demoFund, audience }. `demoFund` only on a demo chain: the purse mints its
+   *  own mock USDC, so no transfer from a named account funds it. `audience` is the verifier a pass is presented to. */
+  READER_PASS?: string;
+  /** W4 — the holder's prover Container, and the bearer the Worker hands it. */
+  PROVER?: DurableObjectNamespace;
+  PROVER_SECRET?: string;
   /** Perf (2026-10-02) — agents whose cold read path the `scheduled` cron keeps warm (comma-separated SAs).
    *  Each tick reads each agent's playbook + derived type through the SAME internal vault path an ask starts
    *  with, so the owner's InteractionsDO, the demo-mcp vault and the RPC are resident when a real user
@@ -7112,7 +7112,8 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     // Spec 442 §4.1 — THE TARGET'S CARD DECIDES THE ASKER'S FORM. A card that declares the pairwise-asker extension gets a
     // pairwise asker (her pseudonym for that audience, no credential, no session); a card that declares nothing gets the
     // credentialed form under the rule below. Read once here so the rule is applied only where it applies.
-    const pairwiseTarget = inProcess ? null : await (async () => { try { const r = await (laneFor(env, hostOf((at as { cardUrl: string }).cardUrl)) ?? fetch)((at as { cardUrl: string }).cardUrl, { method: 'GET', headers: { accept: 'application/json' } }); return r.ok ? pairwiseAskerDeclaration(await r.json()) : null; } catch { return null; } })();
+    const targetCard = inProcess ? null : await (async () => { try { const r = await (laneFor(env, hostOf((at as { cardUrl: string }).cardUrl)) ?? fetch)((at as { cardUrl: string }).cardUrl, { method: 'GET', headers: { accept: 'application/json' } }); return r.ok ? ((await r.json()) as unknown) : null; } catch { return null; } })();
+    const pairwiseTarget = targetCard ? pairwiseAskerDeclaration(targetCard) : null;
     // WHAT THE PERSON SHARES WHEN THEIR AGENT ENGAGES A SERVICE FOR THEM — `vault:playbook.memory:engagement`
     // (ap.engagement-profile.v1: who they are, their situation; edited or cleared by them, e.g. in the Bible
     // Explorer's Profile; in the interactions grant's core scope, so their own agent reads it as itself). Read from
@@ -7131,6 +7132,35 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
         requestArgs = { ...args, context };
         console.log(`[subject-ask] ${asker} shares ${ENGAGEMENT_PROFILE_RECORD} (${Object.keys(context).join(', ')}) with ${name ?? subject}`);
       }
+    }
+    // PRIVATE-SCRIPTURE W4 — A READER'S PROOF, when the plan asked for one (`proof`) and the target's card says what it accepts.
+    // Only beside a pairwise asker: a proof under her name would hand the verifier the link it exists to withhold. Her agent
+    // takes the verifier's challenge, derives the child of her standing `credential.present` wire for exactly this statement
+    // (its own key signs the child), and the prover presents with her device key under that child — the key signs only
+    // what the child covers. What travels: the presentation and the challenge it answers. Never the card, never her.
+    if ((requestArgs as Record<string, unknown>).proof === true) {
+      const decl = targetCard ? readerProofDeclaration(targetCard) : null;
+      if (!pairwiseTarget || !decl) return { ok: false, via: { agent: subject, name, host, observedVia: 'network' }, refused: `${name ?? subject} does not accept a reader's proof from a pseudonymous asker, so none is sent` };
+      if (!asker || !deps.readSubjectRecord || !deps.survey) return { ok: false, via: { agent: subject, name, host, observedVia: 'network' }, refused: 'a reader\'s proof is presented for a person, and this run has none' };
+      const today = dayNumber(new Date());
+      const held = await findReaderCredential({ survey: async (s0) => (await deps.survey!(s0)).map((r) => ({ recordType: (r as { recordType: string }).recordType })), readRecord: (s0, rt) => deps.readSubjectRecord!(s0, rt) }, asker.toLowerCase(), decl, today);
+      if (!held) return { ok: false, via: { agent: subject, name, host, observedVia: 'network' }, refused: `you hold no valid reader's pass ${name ?? subject} accepts — buy one at your Home (it is private: the publisher never learns who you are)` };
+      const ch = await (laneFor(env, hostOf(decl.challengeUrl)) ?? fetch)(decl.challengeUrl, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: '{}' }).then((r) => r.json() as Promise<{ nonce?: string; audience?: string; day?: number; ticket?: string; exp?: number }>).catch(() => null);
+      if (!ch?.nonce || !ch.ticket || typeof ch.day !== 'number' || ch.audience !== decl.audience) return { ok: false, via: { agent: subject, name, host, observedVia: 'network' }, refused: `${name ?? subject} gave no usable challenge for a reader's proof` };
+      const runtimeKey = await interactionsSessionAccount(env);
+      const issuerKeyId = String(held.credential.issuerKeyId);
+      let mandate: Record<string, unknown>;
+      try { mandate = await readerChildMandate(held.standing, { actor: runtimeKey.address as Address, audience: decl.audience, day: ch.day, issuerKeyId }, async (digest) => (await runtimeKey.signMessage({ message: { raw: digest } })) as Hex); }
+      catch (e) { return { ok: false, via: { agent: subject, name, host, observedVia: 'network' }, refused: e instanceof Error ? e.message : String(e) }; }
+      const request = readerProofRequest({ nonce: ch.nonce, audience: decl.audience, day: ch.day });
+      const proved = await proverCall(env, '/present', { credential: held.credential, device: held.device.managed, request, standing: held.standing, mandate, actor: runtimeKey.address });
+      if (proved.status !== 200 || !proved.body.presentation) {
+        // Said as HER agent's failure, never the service's: nothing reached it.
+        const why = proved.body.error ? `${String(proved.body.error)}${proved.body.detail ? ` — ${String(proved.body.detail)}` : ''}` : `the prover answered ${proved.status} without a presentation (${Object.keys(proved.body).join(', ') || 'empty'})`;
+        return { ok: false, via: { agent: subject, name, host, observedVia: 'network' }, refused: `your own agent could not make your reader's proof, so nothing was sent to ${name ?? subject}: ${why}` };
+      }
+      console.log(`[reader-proof] presented to ${decl.audience} (prepare ${String((proved.body.ms as { prepare?: number } | undefined)?.prepare ?? '?')} ms, total ${String((proved.body.ms as { total?: number } | undefined)?.total ?? '?')} ms)`);
+      requestArgs = { ...(requestArgs as Record<string, unknown>), proof: { presentation: proved.body.presentation, challenge: { nonce: ch.nonce, day: ch.day, ticket: ch.ticket, exp: ch.exp } } };
     }
     // Spec 397 §11.5 — over the wire, never the Home session (except to a peer deployment this one names).
     const wireCred = inProcess || pairwiseTarget ? null : wireCredentialFor({ cardUrl: (at as { cardUrl: string }).cardUrl, session, appCredential: appCredential as Record<string, unknown> | undefined, trustedOrigins: env.A2A_TRUSTED_ORIGINS, name: name ?? subject });
@@ -9126,6 +9156,27 @@ app.post('/custody/oidc/sign', async (c) => {
   }
 });
 
+interface ReaderPassConfig { issuer: Address; treasury: Address; priceUnits: bigint; days: number; demoFund: boolean; audience: string }
+/** READER_PASS, parsed and checked — null names what is missing. */
+function readerPassConfig(env: Env): ReaderPassConfig | { missing: string } {
+  let raw: Record<string, unknown>;
+  try { raw = JSON.parse(env.READER_PASS ?? '') as Record<string, unknown>; } catch { return { missing: 'READER_PASS (JSON)' }; }
+  const addr = (v: unknown) => (typeof v === 'string' && /^0x[0-9a-fA-F]{40}$/.test(v) ? (v as Address) : null);
+  const issuer = addr(raw.issuer), treasury = addr(raw.treasury);
+  const audience = typeof raw.audience === 'string' && /^https:\/\//.test(raw.audience) ? raw.audience.replace(/\/$/, '') : null;
+  const missing = [!issuer && 'issuer', !treasury && 'treasury', !/^\d+$/.test(String(raw.priceUnits ?? '')) && 'priceUnits', !audience && 'audience'].filter(Boolean);
+  if (missing.length) return { missing: `READER_PASS.${missing.join(', READER_PASS.')}` };
+  return { issuer: issuer!, treasury: treasury!, priceUnits: BigInt(String(raw.priceUnits)), days: Number(raw.days ?? 30) || 30, demoFund: raw.demoFund === true, audience: audience! };
+}
+
+/** The holder's prover Container (W4): one instance, reached only here, under the bearer the Container was started with. */
+async function proverCall(env: Env, path: '/present' | '/warm', body: unknown): Promise<{ status: number; body: Record<string, unknown> }> {
+  if (!env.PROVER || !env.PROVER_SECRET) return { status: 503, body: { error: 'the holder prover is not configured on this deployment (PROVER, PROVER_SECRET)' } };
+  const stub = env.PROVER.get(env.PROVER.idFromName('holder-prover'));
+  const r = await stub.fetch(new Request(`http://prover${path}`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${env.PROVER_SECRET}` }, body: JSON.stringify(body) }));
+  return { status: r.status, body: (await r.json().catch(() => ({}))) as Record<string, unknown> };
+}
+
 /**
  * POST /reader-pass/buy  (her Home → a2a, CUSTODY session — social custody)
  * Body: { session, purse? }  → { ok, purse, settlementHash, digest, validUntil }
@@ -9144,8 +9195,10 @@ app.post('/reader-pass/buy', async (c) => {
   const env = c.env;
   const gateCfg = custodyGateConfig(env);
   if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
-  const missing = (['PAYMASTER', 'MOCK_USDC', 'RPC_URL', 'UNIVERSAL_SIGNATURE_VALIDATOR', 'AKCS_HOLDER_TOKEN', 'READER_PASS_ISSUER', 'READER_PASS_TREASURY', 'READER_PASS_PRICE_UNITS'] as const).filter((k) => !String(env[k] ?? '').trim());
+  const missing = (['PAYMASTER', 'MOCK_USDC', 'RPC_URL', 'UNIVERSAL_SIGNATURE_VALIDATOR', 'AKCS_HOLDER_TOKEN'] as const).filter((k) => !String(env[k] ?? '').trim());
   if (missing.length) return c.json({ ok: false, error: 'reader_pass_not_configured', detail: `missing ${missing.join(', ')}` }, 503);
+  const pass = readerPassConfig(env);
+  if ('missing' in pass) return c.json({ ok: false, error: 'reader_pass_not_configured', detail: `missing ${pass.missing}` }, 503);
   const issuerDeps = credentialIssuerDeps(env);
   if (!issuerDeps) return c.json({ ok: false, error: 'issuer_not_configured' }, 503);
 
@@ -9159,18 +9212,18 @@ app.post('/reader-pass/buy', async (c) => {
 
   try {
     // Her person account — whose vault keeps the key and the credential. Proven by the session, as /custody/oidc/sign does.
-    const { cSub } = await deriveSubjectCustodian(gate.subject, env.A2A_CUSTODY_ROOT_KEY, { ...custodyDerivationOpts(env), auditSink: audit, rotation: gate.rotation });
+    const { cSub, sign: personSign } = await deriveSubjectCustodian(gate.subject, env.A2A_CUSTODY_ROOT_KEY, { ...custodyDerivationOpts(env), auditSink: audit, rotation: gate.rotation });
     const person = await acct.getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
     if (gate.sessionSub.toLowerCase() !== caip10(Number(env.CHAIN_ID), person).toLowerCase()) return c.json({ ok: false, error: 'sa_mismatch' }, 403);
 
     // 1. THE PURSE — its own custodian, its own address.
     const pc = await deriveSubjectCustodian({ iss: gate.subject.iss, sub: purseSubject(gate.subject.sub, n) }, env.A2A_CUSTODY_ROOT_KEY, { ...custodyDerivationOpts(env), auditSink: audit, rotation: gate.rotation });
     const purse = await acct.getAddressForAgentAccount({ custodians: [pc.cSub], salt: 0n });
-    const price = BigInt(env.READER_PASS_PRICE_UNITS!);
+    const price = pass.priceUnits;
     const usdc = env.MOCK_USDC as Address;
     const calls: Array<{ to: Address; value: bigint; data: Hex }> = [];
-    if (env.READER_PASS_DEMO_FUND === 'true') calls.push({ to: usdc, value: 0n, data: encodeFunctionData({ abi: [{ type: 'function', name: 'mint', stateMutability: 'nonpayable', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [] }], functionName: 'mint', args: [purse, price] }) });
-    calls.push({ to: usdc, value: 0n, data: encodeFunctionData({ abi: [{ type: 'function', name: 'transfer', stateMutability: 'nonpayable', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ type: 'bool' }] }], functionName: 'transfer', args: [env.READER_PASS_TREASURY as Address, price] }) });
+    if (pass.demoFund) calls.push({ to: usdc, value: 0n, data: encodeFunctionData({ abi: [{ type: 'function', name: 'mint', stateMutability: 'nonpayable', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [] }], functionName: 'mint', args: [purse, price] }) });
+    calls.push({ to: usdc, value: 0n, data: encodeFunctionData({ abi: [{ type: 'function', name: 'transfer', stateMutability: 'nonpayable', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ type: 'bool' }] }], functionName: 'transfer', args: [pass.treasury, price] }) });
     const callData = buildExecuteBatchCallData(calls);
     let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
     if (env.PAYMASTER_VERIFYING_SIGNER) {
@@ -9202,7 +9255,7 @@ app.post('/reader-pass/buy', async (c) => {
     const device = await createHolderDeviceKey(holderCfg, (rt, rec) => deps.writeSubjectRecord!(me, rt, rec));
 
     // 3. THE CLAIM — signed by the purse that paid.
-    const vendCfg: VendConfig = { issuerAgent: env.READER_PASS_ISSUER as Address, treasury: env.READER_PASS_TREASURY as Address, asset: usdc, priceUnits: price, passDays: Number(env.READER_PASS_DAYS ?? '30') || 30, audience: `eip155:${env.CHAIN_ID}:${env.READER_PASS_ISSUER!.toLowerCase()}` };
+    const vendCfg: VendConfig = { issuerAgent: pass.issuer, treasury: pass.treasury, asset: usdc, priceUnits: price, passDays: pass.days, audience: `eip155:${env.CHAIN_ID}:${pass.issuer.toLowerCase()}` };
     const claimSig = await pc.sign(readerClaimDigest(settlementHash, device.thumbprint, vendCfg.audience));
 
     // 4. THE VEND — as the issuer, with no asker.
@@ -9217,9 +9270,17 @@ app.post('/reader-pass/buy', async (c) => {
     }, vendCfg, { settlementHash, payer: purse, deviceKey: device.publicJwk, claimSig });
     if (!vended.ok) return c.json({ ok: false, error: vended.code, detail: vended.refused, purse, settlementHash }, 409);
 
-    // 5. HER VAULT keeps it.
-    const kept = await deps.writeSubjectRecord(me, holderCredentialRecordType(vended.digest), vended.credential);
+    // 5. HER STANDING PERMISSION to present it — to this verifier, for each day the pass covers, under this facet — signed once
+    //    by her own custodian; every presentation is a child of it for one statement, judged before her device key signs.
+    const runtimeKey = await interactionsSessionAccount(env);
+    const today = dayNumber(new Date());
+    const standing = buildReaderStanding({ person, delegate: runtimeKey.address as Address, audience: pass.audience, issuerKeyId: String(vended.credential.issuerKeyId), fromDay: today, toDay: vended.validUntil, enforcers: harnessEnforcers(env as never), chainId: Number(env.CHAIN_ID), delegationManager: env.DELEGATION_MANAGER as Address });
+    const credential = { ...vended.credential, standing: signedStandingWire(standing, await personSign(standing.ref)) };
+
+    // 6. HER VAULT keeps it — and the prover starts today's first Prepare, so her first question does not wait for it.
+    const kept = await deps.writeSubjectRecord(me, holderCredentialRecordType(vended.digest), credential);
     if (!kept.ok) return c.json({ ok: false, error: 'holder_storage', detail: `the pass was issued but her vault did not keep it (${kept.error ?? 'refused'})`, purse, settlementHash, digest: vended.digest }, 502);
+    c.executionCtx.waitUntil(proverCall(env, '/warm', { credential, request: readerProofRequest({ nonce: '0'.repeat(32), audience: pass.audience, day: today }) }).catch(() => undefined));
     return c.json({ ok: true, purse, settlementHash, digest: vended.digest, validUntil: vended.validUntil, deviceKeyThumbprint: device.thumbprint });
   } catch (e) {
     console.error('[reader-pass] buy failed:', e);
@@ -11679,6 +11740,7 @@ export default {
   scheduled: (_controller: ScheduledController, env: Env, ctx: ExecutionContext) => ctx.waitUntil(warmReadChain(env, ctx)),
 };
 export { RuntimeContainer } from './runtime-container.js';
+export { HolderProverContainer } from './holder-prover-container.js';
 
 // ── spec 362 — the Worker-side ATTEMPT the workflow drives. One whole attempt = load the run's CURRENT
 //    inputs from its checkpoint (approvals a custodian delivered while the engine slept arrive as
