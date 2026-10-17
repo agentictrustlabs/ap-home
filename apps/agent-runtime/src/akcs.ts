@@ -86,3 +86,11 @@ export function custodyDerivationOpts(
       : {}),
   };
 }
+
+/** The HOLDER caller's config (private-scripture W3): the same key service and tenant, under `AKCS_HOLDER_TOKEN` — a caller
+ *  that may create keys and sign `ES256_SHA256` presentations and nothing else, so the runtime's main caller never creates keys. */
+export function holderKmsConfig(env: AkcsEnv & { AKCS_HOLDER_TOKEN?: string }): AgenticKmsConfig {
+  const token = env.AKCS_HOLDER_TOKEN?.trim();
+  if (!token) throw new Error('[demo-a2a] the reader pass needs AKCS_HOLDER_TOKEN, the holder caller (no fallback to the runtime caller)');
+  return agenticKmsConfig({ ...env, AKCS_TOKEN: token });
+}

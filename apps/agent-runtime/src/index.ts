@@ -1,6 +1,7 @@
 import { forwardToSelfHost , type SelfHostForwardAuth } from './self-hosted-read.js';
 import { wireCredentialFor, pairwiseSubjectPort } from './subject-hop-credential.js';
 import { credentialIssuerDeps } from './credential-issuer-deps.js';
+import { createHolderDeviceKey, holderCredentialRecordType, purseSubject, readerClaimDigest, vendReaderCredential, type VendConfig } from './reader-pass.js';
 import { estateHeartbeat, heartbeatAuthorized } from './ops-heartbeat.js';
 import { getSelfHostWire, putSelfHostWire, verifySelfHostReadWire, isDelegationWire, type SelfHostWireChain } from './self-host-wire.js';
 import { peerAttestationDigest } from '@agenticprimitives/agent-resolution';
@@ -127,7 +128,7 @@ import {
   type Caveat,
 } from '@agenticprimitives/delegation';
 import { generateServiceMac, bodyDigestHex } from '@agenticprimitives/mcp-runtime';
-import { isAgenticKms, agenticKmsConfig, custodyDerivationOpts } from './akcs';
+import { isAgenticKms, agenticKmsConfig, custodyDerivationOpts, holderKmsConfig } from './akcs';
 import type { BudgetDoNamespace } from '@agenticprimitives/rate-control-cloudflare';
 import {
   composeSinks,
@@ -300,6 +301,15 @@ export { ProviderMeterDO } from './provider-meter-do.js';
 export { ExperimentDO } from './experiment-do.js';
 
 export interface Env {
+  /** Private-scripture W3 — the key-service token of the HOLDER caller (key-create + ES256_SHA256 only): her device keys. */
+  AKCS_HOLDER_TOKEN?: string;
+  /** The reader pass: who issues it, where it is paid, in what, how much (smallest units), for how many days. */
+  READER_PASS_ISSUER?: string;
+  READER_PASS_TREASURY?: string;
+  READER_PASS_PRICE_UNITS?: string;
+  READER_PASS_DAYS?: string;
+  /** 'true' only on a demo chain: the purse mints its own mock USDC, so no transfer from a named account funds it. */
+  READER_PASS_DEMO_FUND?: string;
   /** Perf (2026-10-02) — agents whose cold read path the `scheduled` cron keeps warm (comma-separated SAs).
    *  Each tick reads each agent's playbook + derived type through the SAME internal vault path an ask starts
    *  with, so the owner's InteractionsDO, the demo-mcp vault and the RPC are resident when a real user
@@ -9113,6 +9123,107 @@ app.post('/custody/oidc/sign', async (c) => {
   } catch (e) {
     console.error('[demo-a2a] custody/google/sign failed:', e);
     return c.json({ ok: false, error: 'sign_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+/**
+ * POST /reader-pass/buy  (her Home → a2a, CUSTODY session — social custody)
+ * Body: { session, purse? }  → { ok, purse, settlementHash, digest, validUntil }
+ *
+ * The private-scripture W3 purchase, in one act under her own login (verifiable-content-demo `docs/private-scripture-spec.md`):
+ *   1. HER PURSE pays — a treasury whose custodian is her login on its own derivation path (`sub#purse:<n>`), deployed on
+ *      first use with that custodian alone: no shared custodian with her person account, no stewardship hash, no name.
+ *      On a demo chain it mints its own mock USDC in the same op, so nothing funds it from a named account.
+ *   2. HER DEVICE KEY is made by the holder caller and kept in her vault.
+ *   3. THE PURSE signs the claim — this settlement, for this key, at this issuer.
+ *   4. THE ISSUER vends — `vendReaderCredential` runs as the issuer and is handed no asker: it checks the transfer, spends the
+ *      settlement once, issues the credential bound to the key, and records nothing that names her.
+ *   5. HER VAULT keeps the credential, by her own grant.
+ */
+app.post('/reader-pass/buy', async (c) => {
+  const env = c.env;
+  const gateCfg = custodyGateConfig(env);
+  if (!gateCfg) return c.json({ ok: false, error: 'custody_gate_not_configured' }, 503);
+  const missing = (['PAYMASTER', 'MOCK_USDC', 'RPC_URL', 'UNIVERSAL_SIGNATURE_VALIDATOR', 'AKCS_HOLDER_TOKEN', 'READER_PASS_ISSUER', 'READER_PASS_TREASURY', 'READER_PASS_PRICE_UNITS'] as const).filter((k) => !String(env[k] ?? '').trim());
+  if (missing.length) return c.json({ ok: false, error: 'reader_pass_not_configured', detail: `missing ${missing.join(', ')}` }, 503);
+  const issuerDeps = credentialIssuerDeps(env);
+  if (!issuerDeps) return c.json({ ok: false, error: 'issuer_not_configured' }, 503);
+
+  const body = (await c.req.json().catch(() => null)) as { session?: string; purse?: number } | null;
+  if (!body?.session) return c.json({ ok: false, error: 'session required' }, 400);
+  const n = body.purse ?? 1;
+  const gate = await verifyCustodySession(body.session, gateCfg);
+  if (!gate.ok) return c.json({ ok: false, error: gate.error }, gate.status as 400);
+  const audit = buildAuditSink(env);
+  const acct = accountClient(env);
+
+  try {
+    // Her person account — whose vault keeps the key and the credential. Proven by the session, as /custody/oidc/sign does.
+    const { cSub } = await deriveSubjectCustodian(gate.subject, env.A2A_CUSTODY_ROOT_KEY, { ...custodyDerivationOpts(env), auditSink: audit, rotation: gate.rotation });
+    const person = await acct.getAddressForAgentAccount({ custodians: [cSub], salt: 0n });
+    if (gate.sessionSub.toLowerCase() !== caip10(Number(env.CHAIN_ID), person).toLowerCase()) return c.json({ ok: false, error: 'sa_mismatch' }, 403);
+
+    // 1. THE PURSE — its own custodian, its own address.
+    const pc = await deriveSubjectCustodian({ iss: gate.subject.iss, sub: purseSubject(gate.subject.sub, n) }, env.A2A_CUSTODY_ROOT_KEY, { ...custodyDerivationOpts(env), auditSink: audit, rotation: gate.rotation });
+    const purse = await acct.getAddressForAgentAccount({ custodians: [pc.cSub], salt: 0n });
+    const price = BigInt(env.READER_PASS_PRICE_UNITS!);
+    const usdc = env.MOCK_USDC as Address;
+    const calls: Array<{ to: Address; value: bigint; data: Hex }> = [];
+    if (env.READER_PASS_DEMO_FUND === 'true') calls.push({ to: usdc, value: 0n, data: encodeFunctionData({ abi: [{ type: 'function', name: 'mint', stateMutability: 'nonpayable', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [] }], functionName: 'mint', args: [purse, price] }) });
+    calls.push({ to: usdc, value: 0n, data: encodeFunctionData({ abi: [{ type: 'function', name: 'transfer', stateMutability: 'nonpayable', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ type: 'bool' }] }], functionName: 'transfer', args: [env.READER_PASS_TREASURY as Address, price] }) });
+    const callData = buildExecuteBatchCallData(calls);
+    let verifyingPaymaster: { signFn: (hash: Hex) => Promise<Hex> } | undefined;
+    if (env.PAYMASTER_VERIFYING_SIGNER) {
+      const kmsAccount = await getRelayerAccount(env, 'direct-deploy', audit);
+      verifyingPaymaster = { signFn: async (hash) => (await kmsAccount.signMessage({ message: { raw: hash } })) as Hex };
+    }
+    const pub = createPublicClient({ chain: chainFor(env), transport: http(env.RPC_URL) });
+    const deployed = ((await pub.getCode({ address: purse })) ?? '0x') !== '0x';
+    const relayer = await getRelayerAccount(env, 'direct-deploy', audit);
+    let receipt: { transactionHash: Hex };
+    if (deployed) {
+      const { callGasLimit } = await sizeCallGas(env, purse, callData);
+      const { userOp, userOpHash } = await acct.buildCallUserOp({ sender: purse, callData, paymaster: env.PAYMASTER as Address, verifyingPaymaster, ...(callGasLimit ? { callGasLimit } : {}) });
+      ({ receipt } = await acct.submitCallUserOp({ ...userOp, signature: await pc.sign(userOpHash) }, relayer));
+    } else {
+      const built = await acct.buildDeployUserOpForAgentAccount({ spec: { custodians: [pc.cSub], salt: 0n }, callData, paymaster: env.PAYMASTER as Address, verifyingPaymaster });
+      if (built.sender.toLowerCase() !== purse.toLowerCase()) return c.json({ ok: false, error: 'sender_mismatch' }, 500);
+      ({ receipt } = await acct.submitDeployUserOp({ ...built.userOp, signature: await pc.sign(built.userOpHash) }, relayer));
+    }
+    const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0], { sender: purse });
+    if (!inner.ok) return c.json({ ok: false, error: 'payment_reverted', detail: inner.revertReason ?? 'inner userOp reverted', transactionHash: receipt.transactionHash }, 502);
+    const settlementHash = receipt.transactionHash as Hex;
+
+    // 2. HER DEVICE KEY — the holder caller; kept in her vault.
+    const deps = harnessDeps(env, audit);
+    if (!deps.writeSubjectRecord || !deps.readSubjectRecord || !deps.survey) return c.json({ ok: false, error: 'the private tier is not configured' }, 503);
+    const holderCfg = holderKmsConfig(env);
+    const me = person.toLowerCase();
+    const device = await createHolderDeviceKey(holderCfg, (rt, rec) => deps.writeSubjectRecord!(me, rt, rec));
+
+    // 3. THE CLAIM — signed by the purse that paid.
+    const vendCfg: VendConfig = { issuerAgent: env.READER_PASS_ISSUER as Address, treasury: env.READER_PASS_TREASURY as Address, asset: usdc, priceUnits: price, passDays: Number(env.READER_PASS_DAYS ?? '30') || 30, audience: `eip155:${env.CHAIN_ID}:${env.READER_PASS_ISSUER!.toLowerCase()}` };
+    const claimSig = await pc.sign(readerClaimDigest(settlementHash, device.thumbprint, vendCfg.audience));
+
+    // 4. THE VEND — as the issuer, with no asker.
+    const usv = env.UNIVERSAL_SIGNATURE_VALIDATOR as Address;
+    const vended = await vendReaderCredential({
+      receiptOf: async (h) => { const r = await pub.getTransactionReceipt({ hash: h }).catch(() => null); return r ? { status: r.status, logs: r.logs.map((l) => ({ address: l.address, topics: l.topics as Hex[], data: l.data })) } : null; },
+      isValidSig: async (signer, digest, signature) => Boolean(await pub.readContract({ address: usv, abi: [{ type: 'function', name: 'isValidSig', stateMutability: 'nonpayable', inputs: [{ name: 'signer', type: 'address' }, { name: 'hash', type: 'bytes32' }, { name: 'sig', type: 'bytes' }], outputs: [{ type: 'bool' }] }], functionName: 'isValidSig', args: [signer, digest, signature] }).catch(() => false)),
+      readRecord: (s, rt) => deps.readSubjectRecord!(s, rt),
+      writeRecord: (s, rt, r) => deps.writeSubjectRecord!(s, rt, r),
+      survey: async (s) => (await deps.survey!(s)).map((r) => ({ recordType: (r as { recordType: string }).recordType })),
+      issuer: issuerDeps,
+    }, vendCfg, { settlementHash, payer: purse, deviceKey: device.publicJwk, claimSig });
+    if (!vended.ok) return c.json({ ok: false, error: vended.code, detail: vended.refused, purse, settlementHash }, 409);
+
+    // 5. HER VAULT keeps it.
+    const kept = await deps.writeSubjectRecord(me, holderCredentialRecordType(vended.digest), vended.credential);
+    if (!kept.ok) return c.json({ ok: false, error: 'holder_storage', detail: `the pass was issued but her vault did not keep it (${kept.error ?? 'refused'})`, purse, settlementHash, digest: vended.digest }, 502);
+    return c.json({ ok: true, purse, settlementHash, digest: vended.digest, validUntil: vended.validUntil, deviceKeyThumbprint: device.thumbprint });
+  } catch (e) {
+    console.error('[reader-pass] buy failed:', e);
+    return c.json({ ok: false, error: 'reader_pass_failed', detail: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
 

@@ -112,6 +112,14 @@ binding = "AI"
 # service's [authority_evidence]; the key is the secret ISSUANCE_EVIDENCE_ES256_KEY (kid N-bSQ1uR…, in the CVM's JWKS).
 ISSUANCE_EVIDENCE_ISSUER = "https://presentation-release.faithnet.internal"
 ISSUANCE_EVIDENCE_AUDIENCE = "akcs-pilot-evidence"
+# Private-scripture W3 — the reader pass (POST /reader-pass/buy): lbsb.svc issues it, paid into lbsb-treasury.treasury,
+# 1 mock USDC for 30 days. DEMO_FUND: on faithchain the purse mints its own mock USDC in the same op, so no transfer
+# from a named account ever funds it. A real asset would need its own answer to how the purse is filled.
+READER_PASS_ISSUER = "0x00ff8ccc7c7145289c8a42fe8870ec5d8cd68774"
+READER_PASS_TREASURY = "0xdc3ef3d91ceb006099646e7cbb25cf74d747dcc6"
+READER_PASS_PRICE_UNITS = "1000000"
+READER_PASS_DAYS = "30"
+READER_PASS_DEMO_FUND = "true"
 AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"  # spec 441 posture — the same two akcs.ts defaults to; declared because a code default is not an estate's statement
 A2A_RELAYER_KMS_BACKEND = "agentic-kms"  # spec 441 D3 — already true by inheriting A2A_KMS_BACKEND; said outright so the relayer's backend is not a consequence
 FEDERATION_DOORS = '{"ap-federation-door:impact-agent":"https://door.ap-federation.faithnet.io","ap-federation-door:faithnet":"https://door-faithnet.ap-federation.faithnet.io"}'  # spec 439 F3 — the federation doors whose receipts this estate reads (custom domains only)
