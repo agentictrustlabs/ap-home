@@ -698,12 +698,10 @@ const faithImpact: WhiteLabelConfig = {
         'http://localhost:5673/',
       ],
       allowed_scopes: ['openid', 'agent'],
-      // spec 272/243 — `x402-pay`: the member authorizes (once) a capped payment delegation from
-      // their person-treasury to the lbsb licensed-scripture treasury, redeemed per paid read (x402).
       // Spec 397 — `ask-as-me`: the Explorer's Ask puts the question to the PERSON'S OWN agent as them
       // (their agent then engages scripture-resolver.svc under their standing and reads their context from
       // their own vault — nothing personal leaves the Explorer page). The wire names `ask_delegate`.
-      allowed_delegation_templates: ['site-login', 'org-create', 'x402-pay', 'ask-as-me'],
+      allowed_delegation_templates: ['site-login', 'org-create', 'ask-as-me'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
       // The Explorer's OWN ask key (AKCS faithnet key 01a145be-…, caller demo-bible-ontology-faithnet): the
       // explorer Worker signs `A2A-Session` assertions with it, so scripture-resolver.svc — the service the
@@ -712,19 +710,6 @@ const faithImpact: WhiteLabelConfig = {
       ask_delegate: (process.env.NEXT_PUBLIC_BIBLE_EXPLORER_ASK_DELEGATE || '0x8E86f2e30c67e28ACEA6831354Dd58E484ef359d') as `0x${string}`,
       // The one connect gives the Explorer everything it needs: the ask wire is minted in the plain sign-in.
       ask_with_login: true,
-      // x402 push: USDC lands at the lbsb-treasury SA; the reader redeems at access time (OPEN delegate).
-      // 0.001 USDC/read (1000 atomic, 6-dp mock USDC), 1.0 USDC aggregate cap per delegation.
-      paymentConfig: {
-        // A DIFFERENT treasury + USDC PER IDENTITY UNIVERSE: the faithnet deploy sets these to
-        // lbsb-treasury.impact on faithchain + faithchain's mock USDC; unset = base-sepolia's.
-        payee: (process.env.NEXT_PUBLIC_LBSB_TREASURY || '0x17320bF2DAe8820157530c634B9bB76f6Eb72004') as `0x${string}`,
-        asset: (process.env.NEXT_PUBLIC_LBSB_USDC || '0x6cfF706bA1461a9ef9F5aaf8f1581301805FbF92') as `0x${string}`,
-        maxAmountPerCharge: '60000', // 0.06 USDC — covers the largest tier (Plus); the UI picks the amount
-        maxAggregate: '6000000',     // 6 USDC across the delegation's life
-        maxRedemptionsPerWindow: 1000,
-        windowSeconds: 3600,
-        mode: 'push',
-      },
     },
     // demo-corpus relying app — connects via Global.Church identity; site-login + org-create
     // (no PII held by the broker). aud = client_id; the allowed origin is derived from the
@@ -738,10 +723,8 @@ const faithImpact: WhiteLabelConfig = {
         'https://demo-corpus-production.richardpedersen3.workers.dev/',
       ],
       allowed_scopes: ['openid', 'agent'],
-      // spec 272 recurring — `subscription-collect`: the corpus OWNER redeems DUE subscribers' standing
-      // pull mandates (owner-online, no held key), signed as the collection treasury they custody.
       // spec 266 — `content-signer`: the owner authorizes each content issuer's Cloud-KMS signing key.
-      allowed_delegation_templates: ['site-login', 'org-create', 'subscription-collect', 'content-signer'],
+      allowed_delegation_templates: ['site-login', 'org-create', 'content-signer'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
       // The owner-custodied lbsb collection treasury (= lbsb-treasury.impact, the pull mandates' delegate)
       // and the content service exposing the owner-gated due/collected endpoints.
@@ -1054,20 +1037,6 @@ const faithImpact: WhiteLabelConfig = {
         'Take more than the total you approved, or keep taking it after tonight’s window closes',
         'Send it anywhere but the card room',
         'Touch your sign-in methods or recovery',
-      ],
-      expiryDays: 1,
-    },
-    // spec 272 recurring — the corpus OWNER collects due subscriptions: signs, with their own credential,
-    // the redemption of each due subscriber's standing pull mandate as the collection treasury they custody.
-    'subscription-collect': {
-      canDo: [
-        'Charge subscribers whose period is due, using the standing mandate each one already authorized',
-        'Send each charge only to your content treasury, capped by that mandate',
-      ],
-      cannotDo: [
-        'Charge more than a subscriber authorized, or charge a non-subscriber',
-        'Move funds anywhere other than your content treasury',
-        'Touch sign-in methods or recovery',
       ],
       expiryDays: 1,
     },

@@ -142,10 +142,10 @@ export interface RelyingApp {
      *  address is granted to every entry that names it (same rule as `operational_delegate`). */
     redeemer?: `0x${string}`;
   };
-  /** spec 272 recurring — for an OWNER app (e.g. demo-corpus) with the `subscription-collect` template:
-   *  where the owner-online collection ceremony redeems DUE subscribers' pull mandates. `treasury` is the
-   *  owner-custodied collection treasury (= the pull mandates' delegate/payee, e.g. lbsb-treasury.impact);
-   *  `a2aBase` is the content service exposing the owner-gated /admin/subscriptions/{due,collected}. */
+  /** For an OWNER app (e.g. demo-corpus): `a2aBase` is the content service the owner-run `content-signer` ceremony
+   *  (spec 266) reads keys from and stores leaves at. The subscription-collection ceremony that also used it (spec 272
+   *  recurring) was retired with the identified scripture lanes (private-scripture W5); `treasury`/`asset`/`edition`
+   *  remain only as that app's descriptive config. */
   collectionConfig?: {
     treasury: `0x${string}`;
     asset: `0x${string}`;
