@@ -1,0 +1,18 @@
+{
+  "name": "@ap-home/holder-prover",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The holder's OpenAC prover (private-scripture W4): a Node service beside the agent runtime, because the 1k Prepare proving key is 274 MB and no Worker holds it. It turns a person's anonymous credential and a verifier's challenge into a presentation, signing with her device key in the key service only under bound evidence, and only under the child mandate the runtime derived from her standing credential.present wire.",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@agenticprimitives/delegation": "1.0.0-alpha.44",
+    "@agenticprimitives/key-custody": "1.0.0-alpha.44",
+    "@agenticprimitives/privacy-credentials": "0.0.0-alpha.20",
+    "@agenticprimitives/privacy-credentials-openac": "0.0.0-alpha.9",
+    "viem": "2.52.2",
+    "openac-sdk": "5.0.0"
+  }
+}

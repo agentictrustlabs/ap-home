@@ -72,6 +72,11 @@ new_sqlite_classes = ["RuntimeContainer"]
 tag = "v7"
 new_sqlite_classes = ["ExperimentDO"]
 
+# Private-scripture W4 — the holder's OpenAC prover (holder-prover-container.ts).
+[[migrations]]
+tag = "v8"
+new_sqlite_classes = ["HolderProverContainer"]
+
 # ── FAITHNET (Azure faithchain 34348) — gcp-kms custody, Home on faithnet.me, backend on faithnet.io ──
 [env.faithnet]
 name = "demo-a2a-faithnet"
@@ -120,6 +125,8 @@ READER_PASS_TREASURY = "0xdc3ef3d91ceb006099646e7cbb25cf74d747dcc6"
 READER_PASS_PRICE_UNITS = "1000000"
 READER_PASS_DAYS = "30"
 READER_PASS_DEMO_FUND = "true"
+# W4 — the verifier a reader presents to; its card declares the reader-proof extension (challenge URL, issuers, editions).
+READER_PASS_AUDIENCE = "https://scripture.faithnet.io"
 AKCS_ACCEPTED_PROTECTION_LEVELS = "CVM_WRAPPED,CVM_DERIVED"  # spec 441 posture — the same two akcs.ts defaults to; declared because a code default is not an estate's statement
 A2A_RELAYER_KMS_BACKEND = "agentic-kms"  # spec 441 D3 — already true by inheriting A2A_KMS_BACKEND; said outright so the relayer's backend is not a consequence
 FEDERATION_DOORS = '{"ap-federation-door:impact-agent":"https://door.ap-federation.faithnet.io","ap-federation-door:faithnet":"https://door-faithnet.ap-federation.faithnet.io"}'  # spec 439 F3 — the federation doors whose receipts this estate reads (custom domains only)
@@ -391,6 +398,8 @@ bindings = [
   { name = "SA_BUDGET", class_name = "SmartAgentBudgetDO", script_name = "demo-mcp-faithnet" },
   # Spec 400 W1c — one runtime Container per member, named by the member's agent address.
   { name = "RUNTIME", class_name = "RuntimeContainer" },
+  # Private-scripture W4 — the holder's OpenAC prover (one instance, `holder-prover`).
+  { name = "PROVER", class_name = "HolderProverContainer" },
 ]
 
 # Spec 400 W1c — the runtime member's Container: Node + `ap runtime serve` + the ACP agent, next to the Worker.
@@ -402,6 +411,15 @@ class_name = "RuntimeContainer"
 image = "./runtime-container/Dockerfile"
 max_instances = 3
 instance_type = "basic"
+
+# Private-scripture W4 — the holder's prover: the 1k proving + verifying keys (≈560 MB) and the Prepare pool (≈45 MB each).
+# Image built by wrangler from ../holder-prover (copy ~/.cache/openac-5.0.0/1k_*.key into ../holder-prover/keys first).
+# Secrets beside the Worker's: PROVER_SECRET (its bearer); it reuses AKCS_HOLDER_TOKEN and the issuance-evidence key.
+[[env.faithnet.containers]]
+class_name = "HolderProverContainer"
+image = "../holder-prover/Dockerfile"
+max_instances = 1
+instance_type = "standard"
 
 # Spec 400 W1c — the wake queue: produced after a message is ADMITTED into a member that declared a host; consumed
 # by this same Worker, which POSTs /wake to the member's Container (or URL). No content, no authority in a message.

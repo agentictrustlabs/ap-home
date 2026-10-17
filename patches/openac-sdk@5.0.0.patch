@@ -1,0 +1,43 @@
+diff --git a/dist/index.js b/dist/index.js
+index a4454a07b4dd5aff1d23d34371ed9129bb3f7c61..aa14b0cd8e0c35ce9f62b6b3f6e22b446e98cb47 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -2115,7 +2115,21 @@ var Prover = class {
+     const startTime = performance.now();
+     const timing = {};
+     const { precomputed, verifierNonce, devicePrivateKey, keys } = request;
+-    const deviceSignature = signDeviceNonce(verifierNonce, devicePrivateKey);
++    // agenticprimitives patch (zkID alignment Z2, upstream PR candidate): the device-binding signature may come from a
++    // SIGNER CALLBACK instead of a private key in this process — ES256 over the UTF-8 challenge bytes (SHA-256 inside),
++    // raw 64-byte r || s, low-S — so a custodied device key (KMS, secure element) can present without ever leaving custody.
++    // Exactly one of `deviceSign` / `devicePrivateKey` is used; a request with neither is an error, never a default key.
++    let deviceSignature;
++    if (typeof request.deviceSign === "function") {
++      const sig = await request.deviceSign(new TextEncoder().encode(verifierNonce));
++      if (!(sig instanceof Uint8Array) || sig.length !== 64) throw new InputError("INVALID_SIGNATURE", `deviceSign must return a raw 64-byte r||s signature (got ${sig instanceof Uint8Array ? sig.length : typeof sig} bytes)`);
++      const sVal = bytesToBigInt(sig.slice(32));
++      if (sVal > P256_SCALAR_ORDER / 2n) throw new InputError("INVALID_SIGNATURE", "deviceSign returned a high-S signature; the SD-JWT-P256 profile requires low-S");
++      deviceSignature = bytesToBase64url(sig);
++    } else {
++      if (devicePrivateKey === void 0 || devicePrivateKey === null) throw new InputError("INVALID_KEY", "present() needs deviceSign or devicePrivateKey");
++      deviceSignature = signDeviceNonce(verifierNonce, devicePrivateKey);
++    }
+     const parsed = Credential.parse(
+       precomputed.credential.jwt,
+       precomputed.credential.disclosures,
+diff --git a/dist/sizing-DlkFNmXz.d.ts b/dist/sizing-DlkFNmXz.d.ts
+index 3c441bf9b675c13f9da2ca4f5cb649e9758e5d94..8051e86982cb95ca171eb9130982a4bc24e3a71e 100644
+--- a/dist/sizing-DlkFNmXz.d.ts
++++ b/dist/sizing-DlkFNmXz.d.ts
+@@ -448,7 +448,10 @@ interface SerializedPrecomputedCredentialJSON {
+ interface PresentRequest {
+     precomputed: PrecomputedCredential;
+     verifierNonce: string;
+-    devicePrivateKey: EcdsaPrivateKey;
++    /** The device private key, in process. Omit it and pass `deviceSign` to keep the key in custody. */
++    devicePrivateKey?: EcdsaPrivateKey;
++    /** agenticprimitives patch (Z2): a signer callback — ES256 over the UTF-8 challenge bytes (SHA-256 inside), raw 64-byte r||s, low-S. */
++    deviceSign?: (challengeBytes: Uint8Array) => Promise<Uint8Array>;
+     keys: KeySet;
+     /** Predicates to evaluate against the precomputed credential. */
+     predicates: PredicateExpression;
