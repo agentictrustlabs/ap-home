@@ -12,7 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@agenticprimitives/a2a": "0.0.0-alpha.45",
+    "@agenticprimitives/a2a": "0.0.0-alpha.46",
     "@agenticprimitives/agent-account": "1.0.0-alpha.43",
     "@agenticprimitives/agent-naming": "1.0.0-alpha.43",
     "@agenticprimitives/agent-profile": "1.0.0-alpha.42",
@@ -36,7 +36,7 @@
     "@agenticprimitives/harness": "0.0.0-alpha.27",
     "@agenticprimitives/home": "0.0.0-alpha.36",
     "@agenticprimitives/intent-engagement": "0.0.0-alpha.22",
-    "@agenticprimitives/key-custody": "1.0.0-alpha.43",
+    "@agenticprimitives/key-custody": "1.0.0-alpha.44",
     "@agenticprimitives/mcp-runtime": "1.0.0-alpha.43",
     "@agenticprimitives/model-client": "0.0.0-alpha.15",
     "@agenticprimitives/model-gateway": "0.0.0-alpha.15",

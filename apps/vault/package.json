@@ -22,7 +22,7 @@
     "@agenticprimitives/edge-runtime": "0.0.0-alpha.21",
     "@agenticprimitives/entitlements": "0.0.0-alpha.5",
     "@agenticprimitives/key-authorization": "0.0.0-alpha.23",
-    "@agenticprimitives/key-custody": "1.0.0-alpha.43",
+    "@agenticprimitives/key-custody": "1.0.0-alpha.44",
     "@agenticprimitives/mcp-oauth": "0.0.0-alpha.21",
     "@agenticprimitives/mcp-protocol": "0.0.0-alpha.4",
     "@agenticprimitives/mcp-runtime": "1.0.0-alpha.43",
