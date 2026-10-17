@@ -433,6 +433,8 @@ const EFFECT_WRITABLE_RECORDS = ['payment.receipt:', 'conversation.recent', 'run
   // …and the member's copy of the credential, in HER vault by HER grant (the payee's-receipt pattern): what an organization
   // issued her, delivered without any authority over her vault.
   'credential.anonymous:',
+  // …and her device keys (private-scripture W3): the public half of a key the key service keeps for her, in her vault by her grant.
+  'credential.device-key:',
   // …and a member's ASK for one, in the organization's vault by the organization's grant (spec 444 W4): one per member.
   'credential.request:',
   // Spec 442 §4.1 — her pairwise secret, minted by her own agent on first need and kept in her own vault.
