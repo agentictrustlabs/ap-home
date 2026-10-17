@@ -32,11 +32,11 @@ describe('pairwiseSubjectPort', () => {
     const writes: string[] = [];
     return { store, writes, deps: { readSubjectRecord: async (_s: string, rt: string) => store.get(rt) ?? null, writeSubjectRecord: async (_s: string, rt: string, r: unknown) => { store.set(rt, r); writes.push(rt); return { ok: true }; } } };
   }
-  it('mints her secret once, keeps it in her vault, and derives a stable pseudonym per audience', async () => {
+  it('mints her secret once, keeps it in her vault, and derives a fresh pseudonym for every ask', async () => {
     const v = vault();
     const port = pairwiseSubjectPort(v.deps, ME);
     const a1 = await port('https://scripture.example'); const a2 = await port('https://scripture.example'); const b = await port('https://other.example');
-    expect(a1).toMatch(/^usr_[A-Za-z0-9_-]{22}$/); expect(a1).toBe(a2); expect(b).not.toBe(a1);
+    expect(a1).toMatch(/^usr_[A-Za-z0-9_-]{22}$/); expect(a2).not.toBe(a1); expect(b).not.toBe(a1);
     expect(v.writes).toEqual([PAIRWISE_SECRET_RECORD]);
     expect(JSON.stringify(v.store.get(PAIRWISE_SECRET_RECORD))).not.toContain(ME.slice(2));
   });

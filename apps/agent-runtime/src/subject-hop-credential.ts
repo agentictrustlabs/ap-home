@@ -6,15 +6,17 @@
 // a forwarded session is a bearer credential for the person's whole Home at a host that does not need one (2026-10-16:
 // scripture-resolver.svc received Home sessions on every routed ask). The pairwise asker (spec 442 §4.1) replaces this
 // refusal for services that declare it, once that release is pinned.
-import { derivePairwiseSubject } from '@agenticprimitives/key-custody';
+import { derivePerAskSubject, generateAskNonce } from '@agenticprimitives/key-custody';
 
 /** Spec 442 §4.1 — the person's pairwise secret, her own vault record (`identity.pairwise-secret`, `ap:PairwiseSubject`). */
 export const PAIRWISE_SECRET_RECORD = 'identity.pairwise-secret';
 export interface PairwiseSecretRecordV1 { type: 'ap.pairwise-secret.v1'; secret: string; rotation: number; createdAt: string }
 
-/** THE PAIRWISE SUBJECT this person is known by at ONE audience: derived from her secret, never from her address. The
- *  secret is minted on first need and kept in HER vault by her own grant — initialising her own key material, not a
- *  fallback between mechanisms: a vault that will not keep it refuses the hop in words. No person on the run ⇒ no subject. */
+/** THE PAIRWISE SUBJECT for ONE ask: derived from her secret and a fresh nonce, never from her address — so the service
+ *  cannot tell two of her asks apart (2026-10-16: a stable per-service subject let scripture-resolver.svc join every ask
+ *  she made). The secret is minted on first need and kept in HER vault by her own grant — initialising her own key
+ *  material, not a fallback between mechanisms: a vault that will not keep it refuses the hop in words. No person on the
+ *  run ⇒ no subject. */
 export function pairwiseSubjectPort(deps: { readSubjectRecord?: (s: string, rt: string) => Promise<unknown>; writeSubjectRecord?: (s: string, rt: string, r: unknown) => Promise<{ ok: boolean; error?: string }> }, person: string | undefined, random: () => Uint8Array = () => crypto.getRandomValues(new Uint8Array(32))): (audience: string) => Promise<string> {
   return async (audience) => {
     if (!person) throw new Error('a pairwise asker is a person\'s pseudonym, and there is no person on this run');
@@ -28,7 +30,7 @@ export function pairwiseSubjectPort(deps: { readSubjectRecord?: (s: string, rt: 
       if (!w.ok) throw new Error(`her vault would not keep a pairwise secret (${w.error ?? 'refused'}) — re-enable storage at her Home`);
     }
     const bytes = new Uint8Array(rec.secret.slice(2).match(/.{2}/g)!.map((h) => parseInt(h, 16)));
-    return derivePairwiseSubject({ personSecret: bytes, issuer: audience, rotation: rec.rotation ?? 0 });
+    return derivePerAskSubject({ personSecret: bytes, issuer: audience, nonce: generateAskNonce() });
   };
 }
 
