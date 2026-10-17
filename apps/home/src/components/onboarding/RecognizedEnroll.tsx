@@ -20,7 +20,7 @@ import { WorkingBar } from './WorkingBar';
 // fallback, never a silent second mechanism).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
-import { givePermission, createOrganization, createGovernedWorkspace, personGrantForOrgCreate, collectDueSubscriptions, authorizeContentSigningForOwner,
+import { givePermission, createOrganization, createGovernedWorkspace, personGrantForOrgCreate, authorizeContentSigningForOwner,
   authorizeServiceAgentWire, activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded,
   isKmsVia, resolveVia, publishSocialConnectionKindIfNeeded, signHashFor, type Via, type Auth } from '../../home/onboarding';
 import { issueAskAsMeDelegation, issueOrganizationResourceAccessDelegation, issueSiteDelegation, issueWorkspaceMembershipAccessDelegation, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, toWire, type DelegationWire } from '../../lib/delegation';
@@ -229,25 +229,6 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
     if (!enroll || !home) return;
     setPhase('granting');
     try {
-      // spec 272 recurring — OWNER subscription collection. No grant/delegation: the owner signs the
-      // redemption of every DUE subscriber's standing pull mandate AS the collection treasury they custody,
-      // then we deliver the result back to the owner app. Reuses the recognized-owner auth resolved above.
-      if (enroll.template === 'subscription-collect') {
-        const cfg = relyingApp?.collectionConfig;
-        if (!cfg) return fail('this app is not configured for subscription collection');
-        if (!enroll.collectToken) return fail('missing owner token for collection');
-        // Same reason as the grant path: the demo-custody probe needs the token on the wallet via.
-        const collectAuth: Auth | undefined = token ? { token } : undefined;
-        const res = await collectDueSubscriptions(
-          cfg.treasury as Address, viaLower, collectAuth,
-          { asset: cfg.asset as Address, edition: cfg.edition, a2aBase: cfg.a2aBase, idToken: enroll.collectToken },
-        );
-        if (!res.ok) return fail(res.error);
-        setSsoCookie(token, viaLower);
-        setPhase('connected');
-        setTimeout(() => deliverCollectResult(enroll, api.popupMode, { collected: res.collected, attempted: res.attempted }), 900);
-        return;
-      }
       // spec 266 delegated content trust — OWNER authorizes each content issuer's Cloud-KMS signing key.
       // No grant: the owner signs, per issuer they custody, the issuer SA → KMS-key delegation; the content
       // service stores it. Reuses the recognized-owner auth + the relying app's collectionConfig.a2aBase.
