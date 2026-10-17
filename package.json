@@ -57,7 +57,7 @@
     "@agenticprimitives/agent-relationships": "1.0.0-alpha.43",
     "@agenticprimitives/capability-claims": "0.0.0-alpha.43",
     "@agenticprimitives/contracts": "1.0.0-alpha.42",
-    "@agenticprimitives/delegation": "1.0.0-alpha.43",
+    "@agenticprimitives/delegation": "1.0.0-alpha.44",
     "@agenticprimitives/fabric": "0.0.0-alpha.36",
     "@agenticprimitives/key-custody": "1.0.0-alpha.44",
     "@agenticprimitives/orchestration": "0.0.0-alpha.24",

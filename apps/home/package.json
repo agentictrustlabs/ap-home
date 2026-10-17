@@ -24,7 +24,7 @@
     "@agenticprimitives/connect": "1.0.0-alpha.43",
     "@agenticprimitives/connect-auth": "1.0.0-alpha.43",
     "@agenticprimitives/contracts": "1.0.0-alpha.42",
-    "@agenticprimitives/delegation": "1.0.0-alpha.43",
+    "@agenticprimitives/delegation": "1.0.0-alpha.44",
     "@agenticprimitives/fabric": "0.0.0-alpha.36",
     "@agenticprimitives/fedcm-idp": "1.0.0-alpha.9",
     "@agenticprimitives/harness": "0.0.0-alpha.27",

@@ -13,7 +13,7 @@
   "dependencies": {
     "@agenticprimitives/a2a": "0.0.0-alpha.46",
     "@agenticprimitives/connect": "1.0.0-alpha.43",
-    "@agenticprimitives/delegation": "1.0.0-alpha.43",
+    "@agenticprimitives/delegation": "1.0.0-alpha.44",
     "@agenticprimitives/mcp-oauth": "0.0.0-alpha.21",
     "@agenticprimitives/mcp-protocol": "0.0.0-alpha.4",
     "hono": "4.13.0",
