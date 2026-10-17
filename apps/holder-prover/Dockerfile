@@ -12,6 +12,6 @@ COPY openac-sdk@5.0.0.patch /tmp/
 RUN cd node_modules/openac-sdk && patch -p1 < /tmp/openac-sdk@5.0.0.patch
 COPY keys/1k_prepare_proving.key keys/1k_prepare_verifying.key keys/1k_show_proving.key keys/1k_show_verifying.key /keys/
 COPY server.mjs ./
-ENV NODE_ENV=production PORT=8080 OPENAC_KEYS_DIR=/keys NODE_OPTIONS=--max-old-space-size=3584
+ENV NODE_ENV=production PORT=8080 OPENAC_KEYS_DIR=/keys NODE_OPTIONS=--max-old-space-size=6656
 EXPOSE 8080
 CMD ["node", "server.mjs"]
