@@ -198,6 +198,11 @@ const faithImpact: WhiteLabelConfig = {
         'https://skills.faithnet.io/',
         'https://skills-web-7ar.pages.dev/',
         'http://localhost:5190/',
+        // Translation workbench (skills repo) signs in as this same client. Without the exact
+        // URI, Create <team>.org from workbench.faithnet.io fail-closes as "Request blocked /
+        // Only start setup from a site you trust." Local vite is :5192 (5190/5191 are skill-web).
+        'https://workbench.faithnet.io/',
+        'http://localhost:5192/',
       ],
       allowed_scopes: ['openid', 'agent'],
       allowed_delegation_templates: ['site-login', 'org-create', 'service-agent-wire'],
