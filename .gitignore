@@ -29,3 +29,5 @@ demo/personas.*.json
 tests/e2e-sso/artifacts/
 tests/e2e-sso/test-results/
 playwright-report/
+.vercel
+.env*

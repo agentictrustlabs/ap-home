@@ -143,6 +143,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       pullDelegation?: unknown;
       settlementHash?: string;
       treasury?: string | null;
+      /** spec 272 — why nothing was charged, when this was a payment connect (see /oidc/grant). */
+      charge?: 'charged' | 'no-account' | 'refused' | null;
       selfVaultGrant?: unknown;
       /** The ask-as-me wire minted in a plain sign-in (`ask_with_login`). */
       askDelegation?: unknown;
@@ -170,6 +172,11 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
         paymentDelegation: grant.paymentDelegation ?? undefined, // spec 272/243 — x402 payment delegation
         pullDelegation: grant.pullDelegation ?? undefined, // spec 272 recurring — standing subscription pull mandate
         settlementHash: grant.settlementHash ?? undefined, // spec 272 — first-charge settlement (ceremony)
+        // spec 272 — the charge OUTCOME for a payment connect: `charged` | `no-account` | `refused`.
+        // The status, never the address (see the privacy note below): it is what lets an app say the
+        // true thing to a member whose purchase did not go through, instead of guessing which of the
+        // two reasons it was. Absent for every non-payment template.
+        ...(grant.charge ? { charge: grant.charge } : {}),
         selfVaultGrant: grant.selfVaultGrant ?? undefined, // spec 345 — the person's own scoped vault grant
         askDelegation: grant.askDelegation ?? undefined, // ask_with_login — the ask-as-me wire minted in this sign-in
         ...(Array.isArray(grant.delegations) && grant.delegations.length ? { delegations: grant.delegations } : {}), // spec 397 §11 — the act set

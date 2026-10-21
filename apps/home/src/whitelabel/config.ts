@@ -699,8 +699,10 @@ const faithImpact: WhiteLabelConfig = {
         // (same env-gating as field-app). FIRST on purpose: the front-channel sign-out takes the first
         // https URI per client.
         ...(process.env.NEXT_PUBLIC_BIBLE_EXPLORER_ORIGIN ? [process.env.NEXT_PUBLIC_BIBLE_EXPLORER_ORIGIN] : []),
+        'https://bible.faithnet.io/',
         'https://demo-bible-ontology-production.richardpedersen3.workers.dev/',
         'http://localhost:5673/',
+        'http://localhost:5173/',
       ],
       allowed_scopes: ['openid', 'agent'],
       // spec 272/243 — `x402-pay`: the member authorizes (once) a capped payment delegation from
@@ -717,13 +719,12 @@ const faithImpact: WhiteLabelConfig = {
       ask_delegate: (process.env.NEXT_PUBLIC_BIBLE_EXPLORER_ASK_DELEGATE || '0x8E86f2e30c67e28ACEA6831354Dd58E484ef359d') as `0x${string}`,
       // The one connect gives the Explorer everything it needs: the ask wire is minted in the plain sign-in.
       ask_with_login: true,
-      // x402 push: USDC lands at the lbsb-treasury SA; the reader redeems at access time (OPEN delegate).
-      // 0.001 USDC/read (1000 atomic, 6-dp mock USDC), 1.0 USDC aggregate cap per delegation.
+      // x402 push: the connected person's person-treasury pays lbsb-treasury.treasury (the Bible
+      // service treasury, custodied by lbsb.svc). The reader redeems at access time (OPEN delegate).
       paymentConfig: {
-        // A DIFFERENT treasury + USDC PER IDENTITY UNIVERSE: the faithnet deploy sets these to
-        // lbsb-treasury.treasury on faithchain + faithchain's mock USDC; unset = base-sepolia's.
-        payee: (process.env.NEXT_PUBLIC_LBSB_TREASURY || '0x17320bF2DAe8820157530c634B9bB76f6Eb72004') as `0x${string}`,
-        asset: (process.env.NEXT_PUBLIC_LBSB_USDC || '0x6cfF706bA1461a9ef9F5aaf8f1581301805FbF92') as `0x${string}`,
+        // Faithchain defaults. NEXT_PUBLIC_* overrides only if a deploy names the same treasury.
+        payee: (process.env.NEXT_PUBLIC_LBSB_TREASURY || '0xdc3ef3d91ceb006099646e7cbb25cf74d747dcc6') as `0x${string}`,
+        asset: (process.env.NEXT_PUBLIC_LBSB_USDC || '0xdaE09066A2cc32f6203605619137dcF01A9B49Ae') as `0x${string}`,
         maxAmountPerCharge: '60000', // 0.06 USDC — covers the largest tier (Plus); the UI picks the amount
         maxAggregate: '6000000',     // 6 USDC across the delegation's life
         maxRedemptionsPerWindow: 1000,
@@ -748,13 +749,10 @@ const faithImpact: WhiteLabelConfig = {
       // spec 266 — `content-signer`: the owner authorizes each content issuer's Cloud-KMS signing key.
       allowed_delegation_templates: ['site-login', 'org-create', 'subscription-collect', 'content-signer'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
-      // The owner-custodied lbsb collection treasury (= lbsb-treasury.impact, the pull mandates' delegate)
-      // and the content service exposing the owner-gated due/collected endpoints.
+      // Same Bible service treasury as the Explorer charge: lbsb-treasury.treasury.
       collectionConfig: {
-        // Per identity universe, same as the explorer's paymentConfig: the faithnet deploy names
-        // lbsb-treasury.impact on faithchain, faithchain's mock USDC and scripture.faithnet.io.
-        treasury: (process.env.NEXT_PUBLIC_LBSB_TREASURY || '0x17320bF2DAe8820157530c634B9bB76f6Eb72004') as `0x${string}`,
-        asset: (process.env.NEXT_PUBLIC_LBSB_USDC || '0x6cfF706bA1461a9ef9F5aaf8f1581301805FbF92') as `0x${string}`,
+        treasury: (process.env.NEXT_PUBLIC_LBSB_TREASURY || '0xdc3ef3d91ceb006099646e7cbb25cf74d747dcc6') as `0x${string}`,
+        asset: (process.env.NEXT_PUBLIC_LBSB_USDC || '0xdaE09066A2cc32f6203605619137dcF01A9B49Ae') as `0x${string}`,
         edition: 'lbsb',
         a2aBase: process.env.NEXT_PUBLIC_SCRIPTURE_A2A_BASE || 'https://demo-bible-a2a-production.richardpedersen3.workers.dev',
       },
