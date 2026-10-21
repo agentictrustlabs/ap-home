@@ -688,6 +688,17 @@ const faithImpact: WhiteLabelConfig = {
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
       requireNamedAgent: true,
     },
+    // Seed Bible reader (seed-bible-global-church, packages/seed-bible-ap) — the hello-world reader triad on the
+    // faithnet estate: seed-reader.faithnet.io → seed-reader-a2a.faithnet.io (the reader workspace agent). Site-login
+    // only; `profile` so the greeting can use the member's name. Same shared relying delegate as the other demo apps.
+    {
+      client_id: 'seed-bible-reader',
+      name: 'Seed Bible Reader',
+      redirect_uris: ['https://seed-reader.faithnet.io/', 'http://localhost:5185/'],
+      allowed_scopes: ['openid', 'profile', 'agent'],
+      allowed_delegation_templates: ['site-login'],
+      delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+    },
     // specs 266/267 — "Bible Explorer" relying app: the Verifiable Content Substrate +
     // scripture vertical demo (demo-bible-ontology Worker). Connects via Global.Church
     // identity; site-login + org-create only (no PII held by the broker).
