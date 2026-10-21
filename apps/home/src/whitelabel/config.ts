@@ -696,8 +696,15 @@ const faithImpact: WhiteLabelConfig = {
       name: 'Seed Bible Reader',
       redirect_uris: ['https://seed-reader.faithnet.io/', 'http://localhost:5185/'],
       allowed_scopes: ['openid', 'profile', 'agent'],
-      allowed_delegation_templates: ['site-login'],
+      // Spec 412 W5 — `ask-as-me`: a reader's highlights, notes and bookmarks are written into THEIR OWN Library
+      // (`seed-bible/…`) by THEIR agent, asked as them under this wire by the reader workspace (reader-a2a). The app
+      // never holds a write grant on their vault; the one connect mints the wire beside the id_token (ask_with_login).
+      allowed_delegation_templates: ['site-login', 'ask-as-me'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      // reader-a2a's asking key (`READER_ASK_PRIVATE_KEY` on seed-bible-reader-a2a-faithnet) — a revocable delegate.
+      ask_delegate: (process.env.NEXT_PUBLIC_SEED_BIBLE_READER_ASK_DELEGATE || '0xb77a627a4ad23af518f9626186F7bE4D2cC4BFf1') as `0x${string}`,
+      ask_with_login: true,
+      libraryFolders: ['seed-bible'],
     },
     // specs 266/267 — "Bible Explorer" relying app: the Verifiable Content Substrate +
     // scripture vertical demo (demo-bible-ontology Worker). Connects via Global.Church
