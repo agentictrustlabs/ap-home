@@ -144,7 +144,9 @@ for (const key of ['displayName', 'description', 'siteUrl', 'a2aEndpoint', 'mcpE
 // whether it landed. `set-service-facets.mts` solves the same problem by asking `isActive` per predicate;
 // splitting the ops needs no registry read and tells you which group failed.
 console.log(`── the owner presents ${LABEL}.${TLD} ──`);
-const declare = buildDeclareAgentTypeCalls({ profileResolver: CONTRACTS.agentProfileResolver as Address, agent: OWNER, agentType: derived, serviceRole: TLD === 'svc' ? 'service' : undefined, registered }) as never as Array<{ to: Address; value: bigint; data: Hex }>;
+// ADR-0061: `registry` and `workspace` are role-typed — the builder refuses them without `serviceRole = <type>`
+// (seen 2026-10-21 presenting seed-reader.workspace: paid, claimed, then thrown before presentation).
+const declare = buildDeclareAgentTypeCalls({ profileResolver: CONTRACTS.agentProfileResolver as Address, agent: OWNER, agentType: derived, serviceRole: TLD === 'svc' ? 'service' : TLD === 'registry' || TLD === 'workspace' ? TLD : undefined, registered }) as never as Array<{ to: Address; value: bigint; data: Hex }>;
 const landed: Record<string, boolean> = {};
 landed.presented = !!(await executeAs(OWNER, [buildSetPrimaryNameCall({ registry: CONTRACTS.agentNameRegistry as Address, node })], 'presented', true));
 landed.typed = declare.length ? !!(await executeAs(OWNER, declare, 'declared its type', true)) : true;
