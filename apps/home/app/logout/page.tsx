@@ -22,7 +22,7 @@ import { disconnectWallet } from '../../src/lib/wallet';
 function rpFrontChannelLogouts(): string[] {
   const hereHttps = window.location.protocol === 'https:';
   const outs: string[] = [];
-  const rpApps = (process.env.NEXT_PUBLIC_LOGOUT_RP_APPS ?? 'commons-app,field-app')
+  const rpApps = (process.env.NEXT_PUBLIC_LOGOUT_RP_APPS ?? 'commons-app,field-app,bible-explorer')
     .split(',').map((x) => x.trim()).filter(Boolean);
   for (const id of rpApps) {
     const client = getClient(id);
@@ -38,6 +38,13 @@ function rpFrontChannelLogouts(): string[] {
         /* skip a malformed registered URI */
       }
     }
+  }
+  // bible.faithnet.io is a second origin of bible-explorer. The client's first redirect is
+  // explorer.faithnet.io, which does not answer /sso-logout, so the reader is named here and
+  // the chain still returns. A sign-out reaches the reader even when bible-explorer is not
+  // the client whose first origin we walk.
+  if (hereHttps && !outs.includes('https://bible.faithnet.io/sso-logout')) {
+    outs.push('https://bible.faithnet.io/sso-logout');
   }
   return outs;
 }

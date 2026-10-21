@@ -29,6 +29,7 @@ import type { StoredEnrollmentGrant } from './authorize-grant';
 import { idTokenTtl } from '../_lib/session-ttl';
 import { nameClaimForIdToken } from '../../src/lib/new-member';
 import { orgCommonNameFields, sanitizeOrgProfileProjection } from '../../src/lib/org-profile';
+import { isPaymentTemplate } from '../../src/whitelabel/config';
 
 const CODE_TTL_MS = 300_000; // 5 min PKCE exchange window
 
@@ -300,6 +301,25 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     await env.AUTH_CODES.put(key, JSON.stringify(next.slice(0, 50)));
   }
 
+  // spec 272 — WHY NOTHING WAS CHARGED, said out loud.
+  //
+  // A payment-template connect either charged or it did not, and the relying app had no way to tell
+  // the two REASONS apart: /token withholds the treasury ADDRESS on purpose (privacy, see token.ts),
+  // so "this member holds no money account" and "the charge itself did not land" both reached the app
+  // as the same absent `settlementHash`. The app then has to guess, and the Explorer guessed the same
+  // way every time — it told readers who already have an account to go make one (2026-10-20).
+  //
+  // This is the STATUS and nothing more: no address, no balance, nothing personal. It is derived from
+  // what the ceremony already reported here, and it is ABSENT for every non-payment template, so no
+  // other app's token response moves.
+  //   charged     a settlement tx came back
+  //   no-account  no person-treasury, so there was nothing to charge FROM and no mandate was minted —
+  //               the app sends the member to /choose-treasury and tries the purchase again
+  //   refused     an account was there; the charge did not land (underfunded, enforcer, relayer)
+  const charge = isPaymentTemplate(grant.delegation_template)
+    ? body.settlementHash ? 'charged' : body.treasury ? 'refused' : 'no-account'
+    : null;
+
   // Stash the grant under a single-use code, BOUND to the PKCE challenge + client + redirect.
   const code = newAuthCode();
   await env.AUTH_CODES.put(
@@ -312,6 +332,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       pullDelegation: body.pullDelegation ?? null,
       settlementHash: body.settlementHash ?? null,
       treasury: body.treasury ?? null,
+      charge,
       selfVaultGrant: body.selfVaultGrant ?? null,
       askDelegation: body.askDelegation ?? null,
       delegations: actTemplate ? body.delegations : null,
