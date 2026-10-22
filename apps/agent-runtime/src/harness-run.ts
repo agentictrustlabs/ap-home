@@ -44,7 +44,7 @@ import { instructionSkillTools, instructionSourcesOf, skillApplyInvoker, skillRe
 import { recordTypeOfClass, fieldsOfShape, type DomainShapeV1 } from './state-check.js';
 import { appendNote, dayRecordsFor, reviewDaysOf, studyFrom, studyRecords, type StudyAccess } from './card-room.js';
 import { memoryRecordFor } from './playbook-memory.js';
-import { remembered, forget } from './run-memo.js';
+import { remembered, forget, recall, rememberValue } from './run-memo.js';
 import { DISCOVERY_FIND_TOOL, ENGAGEMENT_INVOKE_TOOL, DISCOVERY_INSPECT_TOOL, DISCOVERY_FIND_CAPABILITY, ENGAGEMENT_INVOKE_CAPABILITY, discoveryFindInvoker } from './enterprise-tools.js';
 import { WAITING_LIST_TOOL } from './waiting-on-me.js';
 import { INVITATIONS_RECEIVED_TOOL, MEMBERSHIP_ACCEPT_TOOL, MEMBERSHIP_ACCEPT_CAPABILITY, membershipAcceptInvoker } from './invitations-received.js';
@@ -1016,6 +1016,28 @@ export function chainProofRemembered(key: string): boolean {
 export function rememberChainProof(key: string): void {
   chainProofs.set(key, Date.now() + CHAIN_PROOF_MS);
   if (chainProofs.size > 2000) for (const [k, v] of chainProofs) if (v <= Date.now()) chainProofs.delete(k);
+}
+
+/** How long "this person keeps no standing instructions" is remembered (their own write clears it at once). */
+const STANDING_ABSENT_MS = 30_000;
+export const standingAbsentKey = (person: string) => `standing-absent:${person.toLowerCase()}`;
+
+/**
+ * THE PERSON'S STANDING INSTRUCTIONS, read for an act's unspoken acting party. Most people keep none, and learning that
+ * again was a vault round trip (~0.9 s) before every act — every save an app makes. An ABSENT record is remembered for
+ * 30 s; a present one is read as before; a read that FAILED is remembered by nobody.
+ */
+export async function standingRecordOf(deps: HarnessDeps, person: string): Promise<unknown> {
+  if ((await recall<boolean>(standingAbsentKey(person), STANDING_ABSENT_MS)) === true) return null;
+  if (deps.readSubjectRecordStatus) {
+    const r = await deps.readSubjectRecordStatus(person, STANDING_RECORD).catch(() => null);
+    if (r?.ok && (r.data === null || r.data === undefined)) {
+      await rememberValue(standingAbsentKey(person), true, STANDING_ABSENT_MS);
+      return null;
+    }
+    return r?.ok ? r.data : null;
+  }
+  return deps.readSubjectRecord ? deps.readSubjectRecord(person, STANDING_RECORD).catch(() => null) : null;
 }
 
 const IS_REVOKED_ABI = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ name: 'delegationHash', type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
@@ -6382,7 +6404,7 @@ step is then handed to that agent under authority the person grants; leave it ou
       // Spec 394 — the person's STANDING INSTRUCTIONS (their own vault): a declared default for an act's argument,
       // read for the room the ask is in then `any`. Fills an unspoken acting party; revalidated by the resolver.
       ...(deps.readSubjectRecord && input.person ? { standingInstruction: async (scope: { capability: string; arg: string; context?: string }) => {
-        const rec = (await deps.readSubjectRecord!(String(input.person).toLowerCase(), STANDING_RECORD).catch(() => null)) as StandingInstructionsV1 | null;
+        const rec = (await standingRecordOf(deps, String(input.person).toLowerCase())) as StandingInstructionsV1 | null;
         const hit = standingFor(rec, scope);
         return hit ? { value: hit.value, ...(hit.label ? { label: hit.label } : {}), ...(hit.saidAs ? { saidAs: hit.saidAs } : {}) } : null;
       } } : {}),

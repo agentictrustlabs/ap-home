@@ -176,7 +176,7 @@ import { sessionWirePrincipal, parseSessionAuthorization, STANDARD_SURFACE_SKILL
 const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
 import { askVocabulary, commandFieldsFor, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY, HOUSEHOLD_READ_CAPABILITY, CAPABILITY_WORDS, type PlannerTraceV1 } from './harness-run.js';
 import { beatEntry, friendsPresence, livePresence, presencePort } from './presence.js';
-import { expectedDeliversOfGold, harnessEnforcers } from './harness-run.js';
+import { expectedDeliversOfGold, harnessEnforcers, standingAbsentKey } from './harness-run.js';
 import { judgeOutcomePerClass } from '@agenticprimitives/orchestration';
 import { stateCheckOf, recordTypeOfClass, fieldsOfShape, type DomainShapeV1 } from './state-check.js';
 import { workersAiTranscriber, repairTranscript, hearingVocabulary, spokenFor } from './voice.js';
@@ -6851,6 +6851,7 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       forgetMemo(subject, recordType); // spec 396 W4 — the run's own write drops its read memo
       void forget(`record:${subject.toLowerCase()}:${recordType}`); // and the minute's memory of it
       if (recordType === BUDGET_RECORD) void forget(`budget-absent:${subject.toLowerCase()}`);
+      if (recordType === STANDING_RECORD) void forget(standingAbsentKey(subject));
       try {
         const out = await callInteractionsInternal(env, subject, 'internal.coordination.vaultWrite', { recordType, record, ...(operationId ? { operationId } : {}) });
         return { ok: (out as { ok?: boolean }).ok === true, ...(((out as { error?: string }).error) ? { error: (out as { error?: string }).error! } : {}) };

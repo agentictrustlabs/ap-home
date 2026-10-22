@@ -529,6 +529,10 @@ export interface InteractionsDeps {
   resolveName?(name: string): Promise<Address | null>;
 }
 
+/** The records `libraryDocs` keeps: the Library's index and its documents' records. */
+const LIBRARY_DOC = /^content\.(catalog|artifact\.[A-Za-z0-9_-]+)$/;
+const LIBRARY_DOC_MS = 60_000;
+
 export class InteractionsDO {
   constructor(private state: DurableObjectState, private env: Env, private deps?: InteractionsDeps) {}
 
@@ -538,6 +542,14 @@ export class InteractionsDO {
    *  doc across DISTINCT writers — channel posts (many members), deliveries (many senders), timeline
    *  appends (many server flows). Reads never take it; self-only single-writer ops don't need it. */
   private mutating: Promise<unknown> = Promise.resolve();
+  /**
+   * THE LIBRARY'S RECORDS, AS LAST WRITTEN OR READ HERE. The catalog and each document's record were read from the vault
+   * (~1 s a round trip) at every Library act — twice a save. This object is the principal's one instance and every write
+   * of these records passes through `writeDoc` (the runtime's `vaultWrite`, the Home's `record.put`), so what it last
+   * wrote is what the vault holds. Served ONLY to the runtime's internal read (`internal.coordination.vaultRead`) — an
+   * app reading under its own grant still meets the vault's gate — for a minute; a failed write drops the entry.
+   */
+  private libraryDocs = new Map<string, { data: unknown; until: number }>();
   /** Leases a Worker holds across its own read→write of one record (`internal.coordination.lease`). */
   private leases = new Map<string, { holder: string; until: number }>();
 
@@ -1254,7 +1266,15 @@ export class InteractionsDO {
   }
 
   private async writeDoc(grant: IncomingDelegation, resource: string, data: unknown): Promise<void> {
-    await this.vaultFor(grant).write({ owner: '', resource, data, classification: 'internal' } as never);
+    try {
+      await this.vaultFor(grant).write({ owner: '', resource, data, classification: 'internal' } as never);
+    } catch (e) {
+      this.libraryDocs.delete(resource); // what the vault holds now is not known here
+      throw e;
+    }
+    // Every write of a Library record passes here (the runtime's `vaultWrite`, the Home's `record.put`): what was
+    // written is what the next internal read of it answers, for a minute.
+    if (LIBRARY_DOC.test(resource)) this.libraryDocs.set(resource, { data: structuredClone(data), until: Date.now() + LIBRARY_DOC_MS });
     // What admission and naming are derived from changed: the remembered admissions are dropped, never served stale.
     if (resource === DIRECTORY_RESOURCE || resource === LOCAL_NAMES_RESOURCE || resource.startsWith('org.membership:')) this.presenceMemo.clear();
   }
@@ -2895,8 +2915,11 @@ export class InteractionsDO {
           if (!recordType) return json({ error: 'recordType required' }, 400);
           if (!g) return json({ ok: false, needsEnable: true, error: 'interactions storage not enabled' });
           try {
+            const held = this.libraryDocs.get(recordType);
+            if (held && held.until > Date.now()) return json({ ok: true, recordType, data: held.data });
             const data = await this.readDoc<unknown>(g, recordType, null);
             console.log(`[334§6 vaultRead] ${recordType} ok hasData=${data !== null && data !== undefined}`);
+            if (LIBRARY_DOC.test(recordType)) this.libraryDocs.set(recordType, { data, until: Date.now() + LIBRARY_DOC_MS });
             return json({ ok: true, recordType, data });
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
@@ -3848,10 +3871,14 @@ export class InteractionsDO {
                 op: 'write',
               });
             const merged = [...stored.filter((e) => !mine(e)), ...(body.data as Array<{ id?: string }>).filter(mine)];
+            this.libraryDocs.delete(resource); // written here, not through writeDoc: the next internal read goes to the vault
             await this.vaultFor(dg).write({ owner: '', resource, data: merged, classification: 'internal' } as never);
+            this.libraryDocs.delete(resource);
             return json({ ok: true, merged: merged.length });
           }
+          this.libraryDocs.delete(resource); // written here, not through writeDoc: the next internal read goes to the vault
           await this.vaultFor(dg).write({ owner: '', resource, data: body.data, classification: 'internal' } as never);
+          this.libraryDocs.delete(resource);
           return json({ ok: true });
         }
         if (op === 'internal.library.skillMd') {
