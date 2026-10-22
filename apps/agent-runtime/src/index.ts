@@ -6819,6 +6819,20 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     // spec 360 E5 — deposit a declared-effect artifact in a principal's OWN vault, written by that
     // principal's own grant inside their own DO. Allowlisted by record type there: this cannot be
     // pointed at an arbitrary record, which is the whole reason it is safe to call for a counterparty.
+    // The Library index is read, merged and written back by the Worker: overlapping saves wait for one another here
+    // (a lease on the owner's DO), and the read after the wait is fresh, not this run's memo of an older index.
+    holdCatalog: async (owner: string) => {
+      const holder = crypto.randomUUID();
+      const lease = (extra: Record<string, unknown>) => callInteractionsInternal(env, owner, 'internal.coordination.lease', { key: 'content.catalog', holder, ms: 15_000, ...extra });
+      const deadline = Date.now() + 20_000;
+      for (;;) {
+        const out = await lease({}).catch(() => ({ granted: true })); // a lease that cannot be asked for never blocks a save
+        if ((out as { granted?: boolean }).granted !== false || Date.now() > deadline) break;
+        await new Promise((r) => setTimeout(r, Number((out as { retryInMs?: number }).retryInMs) || 200));
+      }
+      forgetMemo(owner, 'content.catalog');
+      return async () => { await lease({ release: true }).catch(() => undefined); };
+    },
     writeSubjectRecord: async (subject: string, recordType: string, record: unknown, operationId?: string) => {
       forgetMemo(subject, recordType); // spec 396 W4 — the run's own write drops its read memo
       try {

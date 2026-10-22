@@ -111,6 +111,9 @@ export interface LibraryToolDeps {
    *  public identifiers, no content). The indexer re-reads it over the anonymous lane and verifies before projecting.
    *  Absent ⇒ no hint; the shelf is served exactly as before and simply not searchable. */
   announce?: (owner: string, entryId: string) => Promise<void>;
+  /** Hold the owner's Library index for one read→write, so overlapping saves queue instead of each writing back an
+   *  index without the other's entry. Resolves to a release; absent ⇒ unguarded (as before). */
+  holdCatalog?: (owner: string) => Promise<() => Promise<void>>;
 }
 
 const TEXT_KINDS = new Set(['md', 'ttl', 'json-ld', 'skill']);
@@ -300,6 +303,15 @@ async function announceAfter(deps: LibraryToolDeps, owner: string, entry: Librar
 }
 
 export async function libraryWrite(deps: LibraryToolDeps, owner: string, toolId: string, args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2]): Promise<Record<string, unknown>> {
+  const release = deps.holdCatalog ? await deps.holdCatalog(owner) : null;
+  try {
+    return await libraryWriteHeld(deps, owner, toolId, args, ctx);
+  } finally {
+    await release?.().catch(() => undefined);
+  }
+}
+
+async function libraryWriteHeld(deps: LibraryToolDeps, owner: string, toolId: string, args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2]): Promise<Record<string, unknown>> {
   if (!deps.writeSubjectRecord) throw new Error('this agent cannot write its Library (the private tier is not configured)');
   const list = await rawCatalogOf(deps, owner);
   const write = async (next: LibraryEntry[], entry?: LibraryEntry) => {
