@@ -108,7 +108,7 @@
         },
         {
           "file": "apps/home-mcp/src/act.ts",
-          "why": "home-mcp-raw-act-key (findings.yaml, accepted-risk): the act-as-me key is the delegate of the person's capped, per-wire-revocable standing wires (spec 397 \u00a711); KMS signer + re-issued wires scheduled with the ask key"
+          "why": "home-mcp-raw-act-key (findings.yaml, accepted-risk): the act-as-me key is the delegate of the person's capped, per-wire-revocable standing wires (spec 397 §11); KMS signer + re-issued wires scheduled with the ask key"
         },
         {
           "file": "apps/home-mcp/src/index.ts",
@@ -152,7 +152,7 @@
         },
         {
           "file": "apps/home/server/connect/naming-ticket.ts",
-          "why": "ap-town spec 431 \u2014 the naming gate signs claim tickets (EIP-712) with NAMING_GATE_PRIVATE_KEY after the domain rule; a ticket moves no value and confers no authority (the chain checks it; the treasury pays). Posture item: move the gate signer to KMS and rotate via PricedSubregistry.setGate."
+          "why": "ap-town spec 431 — the naming gate signs claim tickets (EIP-712) with NAMING_GATE_PRIVATE_KEY after the domain rule; a ticket moves no value and confers no authority (the chain checks it; the treasury pays). Posture item: move the gate signer to KMS and rotate via PricedSubregistry.setGate."
         }
       ],
       "toleratedEnvNames": [
@@ -166,7 +166,7 @@
         },
         {
           "name": "NAMING_GATE_PRIVATE_KEY",
-          "why": "ap-town spec 431 \u2014 the Home's naming gate signs claim tickets (EIP-712) with this key; it vouches for the domain rule, moves no value and holds no identity; rotatable by the subregistry governor (setGate). Posture item: move to KMS."
+          "why": "ap-town spec 431 — the Home's naming gate signs claim tickets (EIP-712) with this key; it vouches for the domain rule, moves no value and holds no identity; rotatable by the subregistry governor (setGate). Posture item: move to KMS."
         }
       ]
     },
@@ -178,7 +178,7 @@
         "hmac": 0,
         "total": 53
       },
-      "note": "2026-10-04 (owner): raised 47 \u2192 53 to the count inherited at the faithnet cut-over; it only goes down from here \u2014 each Work/membership/channel bridge converted to the Ask (spec 341) lowers it."
+      "note": "2026-10-04 (owner): raised 47 → 53 to the count inherited at the faithnet cut-over; it only goes down from here — each Work/membership/channel bridge converted to the Ask (spec 341) lowers it."
     },
     "noCrossSubjectVaultReads": {
       "roots": [
@@ -265,7 +265,7 @@
         "apps/demo-gs",
         "apps/demo-jp"
       ],
-      "skip": "the relying-app half names demo-web \u2014 enable when examples/ lands (split-status item 6)"
+      "skip": "the relying-app half names demo-web — enable when examples/ lands (split-status item 6)"
     },
     "archetypeCatalog": {
       "module": "apps/home/src/lib/archetype-catalog.ts",
@@ -565,7 +565,7 @@
       "registry": "https://skills-a2a-production.richardpedersen3.workers.dev",
       "context": "agentic-trust",
       "archetype": "person-steward",
-      "digest": "0x62275fa58e11038686e0d0f1f9e31d301bb84a5ad26825fcb0ad9075d500a817",
+      "digest": "0xb0a907c448b73868f1c77e4c09317c64ebf7386fcc299922f6bb882a46cd668d",
       "version": "1.0.0",
       "authority": {
         "access.grant.revoke": {
@@ -614,6 +614,9 @@
           "resourceArg": "record",
           "authorityArg": "holder",
           "idempotency": "one-per-resource-version"
+        },
+        "credential.request": {
+          "idempotency": "replay-safe"
         },
         "discovery.agent.inspect": {
           "idempotency": "replay-safe"
@@ -799,6 +802,9 @@
         "person.credentials.list": {
           "idempotency": "replay-safe"
         },
+        "person.friend.list": {
+          "idempotency": "replay-safe"
+        },
         "person.invitations.list": {
           "idempotency": "replay-safe"
         },
@@ -821,6 +827,9 @@
         "person.preferences.set": {
           "risk": "low",
           "action": "execute",
+          "idempotency": "replay-safe"
+        },
+        "person.presence.list": {
           "idempotency": "replay-safe"
         },
         "person.roles.list": {
@@ -911,7 +920,7 @@
           "idempotency": "replay-safe"
         }
       },
-      "pinnedAt": "2026-10-09T01:16:48.022Z"
+      "pinnedAt": "2026-10-22T13:01:16.148Z"
     },
     "agentic-trust/coordinator": {
       "registry": "https://skills-a2a-production.richardpedersen3.workers.dev",
