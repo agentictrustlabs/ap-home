@@ -190,7 +190,9 @@ import { subjectAsk, subjectAnswer, validateSubjectAsk, handoff, skillSelector, 
 import { realtimeKitConfigured, verifyRealtimeKitWebhook, readRealtimeKitWebhook } from './realtimekit.js';
 import { sendSubjectAskOverWire, subjectAnswerMessage, subjectEnvelopeOf, handoffMessage, routedRunRefFor, pairwiseAskerDeclaration } from '@agenticprimitives/a2a';
 import { EXTERNAL_AGENT_TOOL, externalAgentInvoker } from './external-agent.js';
-import { remembered, forget, rememberValue } from './run-memo.js';
+import { remembered, forget, rememberValue, recall } from './run-memo.js';
+/** How long "this agent declares no budget" is remembered — a budget declared at the Home applies within this. */
+const BUDGET_ABSENT_MS = 30_000;
 import { DISCOVERY_INSPECT_CAPABILITY, discoveryInspectInvoker } from './enterprise-tools.js';
 import { INVITATIONS_RECEIVED_CAPABILITY, invitationsReceivedInvoker } from './invitations-received.js';
 import { PERSON_ROLES_CAPABILITY, personRolesInvoker, type OrgMembershipAnswer } from './member-roles.js';
@@ -4989,8 +4991,16 @@ app.post('/harness/ask', async (c) => {
         // as "this agent declared no budget" for the minute after, which is the one direction a budget must never
         // drift in. The ask it happened on still proceeds — an unreadable record is not authority to refuse a
         // person either — but it is SAID, and the next ask reads the budget again instead of the failure.
-        const breader = subjectRecordReader(bdeps);
-        const braw = breader ? await marks.time('read:budget', () => breader(bsubject, BUDGET_RECORD)) : null;
+        // MOST AGENTS DECLARE NO BUDGET, and learning that again cost a vault round trip (~1 s) on every ask — the reader
+        // app's highlight saves paid it on each of their two asks. An ABSENT budget is remembered for half a minute (so a
+        // budget declared at the Home applies within 30 s); a budget that is there is the reader's usual minute; a read
+        // that FAILED is remembered by nobody.
+        let unreadable = false;
+        const breader = subjectRecordReader(bdeps, console.warn, () => { unreadable = true; });
+        const absentKey = `budget-absent:${bsubject}`;
+        const knownAbsent = (await recall<boolean>(absentKey, BUDGET_ABSENT_MS)) === true;
+        const braw = breader && !knownAbsent ? await marks.time('read:budget', () => breader(bsubject, BUDGET_RECORD)) : null;
+        if (breader && !knownAbsent && braw === null && !unreadable) await rememberValue(absentKey, true, BUDGET_ABSENT_MS);
         if (braw) {
           const budget = budgetOf(braw);
           if (budget.asksPerDay !== null || budget.vaultCallsPerDay !== null) {
@@ -6835,6 +6845,8 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
     },
     writeSubjectRecord: async (subject: string, recordType: string, record: unknown, operationId?: string) => {
       forgetMemo(subject, recordType); // spec 396 W4 — the run's own write drops its read memo
+      void forget(`record:${subject.toLowerCase()}:${recordType}`); // and the minute's memory of it
+      if (recordType === BUDGET_RECORD) void forget(`budget-absent:${subject.toLowerCase()}`);
       try {
         const out = await callInteractionsInternal(env, subject, 'internal.coordination.vaultWrite', { recordType, record, ...(operationId ? { operationId } : {}) });
         return { ok: (out as { ok?: boolean }).ok === true, ...(((out as { error?: string }).error) ? { error: (out as { error?: string }).error! } : {}) };

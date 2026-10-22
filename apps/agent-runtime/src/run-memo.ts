@@ -53,6 +53,20 @@ export async function remembered<T>(key: string, fn: () => Promise<T>, ttlMs = T
   return value;
 }
 
+/** What is remembered under `key` right now, or undefined — a lookup that never runs anything. */
+export async function recall<T>(key: string, ttlMs = TTL_MS): Promise<T | undefined> {
+  const hit = local.get(key);
+  if (hit && Date.now() - hit.at < ttlMs) return hit.value as T;
+  const cache = shared();
+  if (!cache) return undefined;
+  try {
+    const res = await cache.match(urlOf(key));
+    return res ? ((await res.json()) as T) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Forget one agent's memory — after a write this Worker itself made to what it remembers. */
 export async function forget(key: string): Promise<void> {
   local.delete(key);
