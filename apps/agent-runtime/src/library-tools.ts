@@ -310,33 +310,54 @@ export const indexOnly = (list: LibraryEntry[]): LibraryEntry[] =>
   list.map((e) => (e.bytesB64 === undefined ? e : (({ bytesB64: _drop, ...rest }) => rest)(e)));
 
 export async function libraryWrite(deps: LibraryToolDeps, owner: string, toolId: string, args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2]): Promise<Record<string, unknown>> {
+  const t0 = Date.now();
   const release = deps.holdCatalog ? await deps.holdCatalog(owner) : null;
+  const held = Date.now();
   try {
     return await libraryWriteHeld(deps, owner, toolId, args, ctx);
   } finally {
+    const done = Date.now();
     await release?.().catch(() => undefined);
+    console.log(`[library-timing] ${toolId} hold=${held - t0}ms write=${done - held}ms release=${Date.now() - done}ms`);
   }
 }
 
 async function libraryWriteHeld(deps: LibraryToolDeps, owner: string, toolId: string, args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2]): Promise<Record<string, unknown>> {
   if (!deps.writeSubjectRecord) throw new Error('this agent cannot write its Library (the private tier is not configured)');
+  const r0 = Date.now();
   const list = await rawCatalogOf(deps, owner);
+  console.log(`[library-timing] catalog-read=${Date.now() - r0}ms entries=${list.length} bytes=${JSON.stringify(list).length}`);
   // THE INDEX IS AN INDEX (the Home's rule, server/connect/library.ts `persistIndexOnly`): a document's bytes live in
   // its own record, `content.artifact.<id>`, and the catalog carries only what a listing needs. This writer used to put
   // every document's bytes back into the catalog, so each read and save of ANY document moved the whole Library through
   // the vault (seconds, growing with the Library). Records first, strictly — the saved document's, and any older entry
   // still carrying its bytes inline (a catalog from before the rule migrates on its next save) — then the index.
   const recordOf = (e: LibraryEntry) => ({ id: e.id, kind: e.kind, name: e.name, source: e.source, contentType: e.contentType, bytesB64: e.bytesB64, commitment: e.contentCommitment, version: e.version, ...(e.accessPolicy ? { accessPolicy: e.accessPolicy } : {}) });
-  const write = async (next: LibraryEntry[], entry?: LibraryEntry) => {
+  const write = async (next: LibraryEntry[], entry?: LibraryEntry, opts: { resave?: boolean } = {}) => {
     if (next.length > CATALOG_MAX) throw new Error(`your Library holds ${list.length} documents, the most it indexes (${CATALOG_MAX}) — remove some before saving more`);
     const carrying = next.filter((e) => !e.isFolder && (e === entry || typeof e.bytesB64 === 'string'));
+    // A RE-SAVE of a document the index already names, with nothing older to migrate, writes its record and the index
+    // side by side: if the record is refused the index's newer version reads as the previous text (never as nothing),
+    // and the save still fails, so the caller tries again. A NEW document keeps records-first strictly.
+    if (entry && opts.resave && carrying.length === 1 && carrying[0] === entry) {
+      const [rec, idx] = await Promise.all([
+        deps.writeSubjectRecord!(owner, `content.artifact.${entry.id}`, recordOf(entry), ctx.operationId),
+        deps.writeSubjectRecord!(owner, 'content.catalog', indexOnly(next), ctx.operationId),
+      ]);
+      if (!rec.ok) throw new Error(rec.error ?? `the record of ${pathOf(entry)} could not be written`);
+      if (!idx.ok) throw new Error(idx.error ?? 'the Library index could not be written');
+      return;
+    }
+    const w0 = Date.now();
     for (let i = 0; i < carrying.length; i += RECORD_WRITE_CONCURRENCY) {
       await Promise.all(carrying.slice(i, i + RECORD_WRITE_CONCURRENCY).map(async (e) => {
         const rec = await deps.writeSubjectRecord!(owner, `content.artifact.${e.id}`, recordOf(e), ctx.operationId);
         if (!rec.ok) throw new Error(rec.error ?? `the record of ${pathOf(e)} could not be written`);
       }));
     }
+    const w1 = Date.now();
     const wrote = await deps.writeSubjectRecord!(owner, 'content.catalog', indexOnly(next), ctx.operationId);
+    console.log(`[library-timing] records=${carrying.length} in ${w1 - w0}ms, index-write=${Date.now() - w1}ms`);
     if (!wrote.ok) throw new Error(wrote.error ?? 'the Library index could not be written');
   };
   const find = (): LibraryEntry => {
@@ -347,8 +368,9 @@ async function libraryWriteHeld(deps: LibraryToolDeps, owner: string, toolId: st
   };
   if (toolId === LIBRARY_FILE_SAVE) {
     requirePersonsTurn({ ctx, toolId, what: `save ${String(args.name ?? 'a document')} to the Library` });
+    const existed = typeof args.id === 'string' && list.some((e) => e.id === args.id && !e.isFolder);
     const entry = await upsertEntry(list, args);
-    await write(list, entry);
+    await write(list, entry, { resave: existed });
     // A re-save changes the text a release vouched for; a save may also change the declared policy. Either way the
     // indexer re-reads and decides (a public re-save with no new release is withdrawn from the tier, not re-projected).
     if (effectiveAccessPolicy(list, entry) === 'public' || args.accessPolicy !== undefined) await announceAfter(deps, owner, entry, list);
@@ -436,6 +458,10 @@ export function libraryInvoker(deps: LibraryToolDeps, addressee: string | undefi
       }
       return libraryWrite(deps, owner, toolId, args, ctx);
     }
+    // A read that names the document's id fetches its record BESIDE the index rather than after it (each is a vault
+    // round trip, ~1 s); the record is used only if the index confirms the id is this owner's document.
+    const byId = toolId === LIBRARY_FILE_READ && typeof args.id === 'string' && args.id ? args.id : null;
+    const early = byId ? deps.readSubjectRecord(owner, `content.artifact.${byId}`).catch(() => null) : null;
     const entries = await catalogOf(deps, owner);
     if (toolId === LIBRARY_FILES_LIST) {
       const folder = typeof args.folder === 'string' ? args.folder.replace(/^\/|\/$/g, '') : '';
@@ -452,7 +478,7 @@ export function libraryInvoker(deps: LibraryToolDeps, addressee: string | undefi
     const entry = matches[0]!;
     const meta = view(entry);
     // The body is on the artifact record (the catalog may carry it too; the record is the addressable one).
-    const rec = (await deps.readSubjectRecord(owner, `content.artifact.${entry.id}`).catch(() => null)) as LibraryEntry | null;
+    const rec = (await (early && entry.id === byId ? early : deps.readSubjectRecord(owner, `content.artifact.${entry.id}`).catch(() => null))) as LibraryEntry | null;
     const body = rec?.bytesB64 ?? entry.bytesB64;
     if (!isText(entry)) return { read: false, named: true, owner, file: meta, untrusted: true, note: `${entry.name} is ${entry.kind === 'image' ? 'an image' : `a ${entry.contentType ?? entry.kind} file`} — named, not read: no extractor for it is on this deployment`, answer: `${pathOf(entry)} is ${entry.kind === 'image' ? 'an image' : `a ${entry.contentType ?? entry.kind} file`} (${entry.size ?? '?'} bytes, version ${entry.version ?? 1}) in the Library. I can name it, not read it — there is no extractor for it here.` };
     if (!body) return { read: false, named: true, owner, file: meta, untrusted: true, note: entry.pointer ? `the document lives at ${entry.pointer}, outside this vault — not read from here` : 'the record carries no body', answer: `${pathOf(entry)} is in the Library but its body is not here${entry.pointer ? ` (it points at ${entry.pointer})` : ''}.` };

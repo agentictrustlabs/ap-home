@@ -42,3 +42,26 @@ describe('the Library index', () => {
     expect(records.get('content.catalog')).toEqual([]);
   });
 });
+
+describe('a re-save and a read by id', () => {
+  it('re-saves a document as a new version and reads it back by id', async () => {
+    const { records, deps } = vault();
+    records.set('content.catalog', []);
+    const first = (await libraryWrite(deps, OWNER, 'library.file.save', { name: 'b.jsonld', folder: 'x', text: 'v1', kind: 'json-ld' }, ctx(3))) as { file: { id: string } };
+    const again = (await libraryWrite(deps, OWNER, 'library.file.save', { name: 'b.jsonld', folder: 'x', text: 'v2', kind: 'json-ld', id: first.file.id }, ctx(4))) as { file: { id: string; version: number } };
+    expect(again.file).toMatchObject({ id: first.file.id, version: 2 });
+    expect((records.get(`content.artifact.${first.file.id}`) as { bytesB64: string }).bytesB64).toBe(btoa('v2'));
+    const index = records.get('content.catalog') as LibraryEntry[];
+    expect(index).toHaveLength(1);
+    expect(index[0]!.bytesB64).toBeUndefined();
+  });
+
+  it('a re-save whose record is refused fails, and the document still reads as its previous text', async () => {
+    const { records, deps } = vault();
+    records.set('content.catalog', []);
+    const first = (await libraryWrite(deps, OWNER, 'library.file.save', { name: 'c.md', folder: 'x', text: 'kept', kind: 'md' }, ctx(5))) as { file: { id: string } };
+    const refusing = { ...deps, writeSubjectRecord: async (s: string, t: string, r: unknown) => (t.startsWith('content.artifact.') ? { ok: false, error: 'vault refused' } : deps.writeSubjectRecord(s, t, r)) };
+    await expect(libraryWrite(refusing, OWNER, 'library.file.save', { name: 'c.md', folder: 'x', text: 'lost', kind: 'md', id: first.file.id }, ctx(6))).rejects.toThrow(/vault refused/);
+    expect((records.get(`content.artifact.${first.file.id}`) as { bytesB64: string }).bytesB64).toBe(btoa('kept'));
+  });
+});

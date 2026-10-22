@@ -5208,7 +5208,11 @@ app.post('/harness/ask', async (c) => {
   // read in a comparison, each case began from whatever the previous cases left (a payer named two cases earlier filled
   // an unnamed one); written, test asks landed in the person's own history. A run under a variant neither reads nor
   // keeps it — the Home never sends a variant (it sends `model`), so no person's conversation changes.
-  const isolatedTurn = !!variantReq;
+  // An APP'S SCREEN PLAN (a supplied plan with `rowsOnly`: the reader saving a highlight, the bell reading invitations)
+  // is not something the person said either: kept as a turn it cost a vault write (~1 s) before every such reply and
+  // filled the person's conversation with lines like "merge my highlights for PSA.79" for the next "him" to resolve in.
+  const screenTurn = !!body.plan && body.rowsOnly === true;
+  const isolatedTurn = !!variantReq || screenTurn;
   const conversationRaw = isolatedTurn ? null : askerRecords[CONVERSATION_RECORD] ?? null;
   const memoryRaw = ownAgent ? askerRecords[FACTS_RECORD] ?? null : null;
   const prefsRaw = ownAgent ? askerRecords[PREFERENCES_RECORD] ?? null : null;
