@@ -28,3 +28,24 @@ export async function readContactsThroughHarness(input: { person: Address; sessi
   }
   return { ok: false, error: out.detail ?? out.error ?? (reply?.kind === 'refused' ? reply.error : 'your contacts could not be read') };
 }
+
+export interface FriendRow { agent: string; name: string | null; since: string }
+export interface FriendRequestRow { agent: string; name: string | null; at: string | null }
+export interface FriendsView { friends: FriendRow[]; requests: FriendRequestRow[]; requested: FriendRow[] }
+
+/** The person's friends and who is waiting on whom (`person.friend.list` — a view over their contacts and inbox). */
+export async function readFriendsThroughHarness(input: { person: Address; session: { token: string } }): Promise<{ ok: true } & FriendsView | { ok: false; error: string }> {
+  await ensureCsrfToken();
+  const out = await j(await fetch('/a2a/harness/ask', {
+    method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ session: input.session.token, addressee: input.person.toLowerCase(), message: 'who are my friends', rowsOnly: true, plan: { steps: [{ toolId: 'person.friend.list', args: {} }] } }),
+  }));
+  const reply = out.reply;
+  if (reply?.kind === 'answer') {
+    const rows = (reply as { results?: Array<{ toolId: string; result: unknown }> }).results ?? [];
+    const found = rows.find((x) => x.toolId === 'person.friend.list')?.result as Partial<FriendsView> & { refused?: string } | undefined;
+    if (found?.refused) return { ok: false, error: found.refused };
+    return { ok: true, friends: found?.friends ?? [], requests: found?.requests ?? [], requested: found?.requested ?? [] };
+  }
+  return { ok: false, error: out.detail ?? out.error ?? (reply?.kind === 'refused' ? reply.error : 'your friends could not be read') };
+}

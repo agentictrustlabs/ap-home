@@ -99,3 +99,19 @@ export function inviteEmail(to: string, joinUrl: string, orgName: string, brand:
       <p style="font-size:11px;color:#9ca3af;margin-top:28px"><a href="${declineUrl}" style="color:#9ca3af;text-decoration:underline">Not interested</a></p>` : ''}`, brand),
   };
 }
+
+/** A person invites a friend who has no Home yet: the link lands them where they sign in and add the inviter back. */
+export function friendInviteEmail(to: string, fromName: string, joinUrl: string, brand: string, note?: string | null): OutboundEmail {
+  const subject = `${fromName} wants to be friends on ${brand}`;
+  const lead = `${fromName} invited you to be friends on ${brand}.`;
+  const detail = `Click below to accept — sign in or set up your home, and you two are connected: what ${fromName} shares reaches you, and what you share reaches ${fromName}.`;
+  const said = (note ?? '').trim().slice(0, 500);
+  return {
+    to,
+    subject,
+    text: `${lead}${said ? `\n\n"${said}"` : ''}\n\n${detail} Accept here: ${joinUrl}`,
+    html: wrap(`<p style="font-size:15px"><b>${lead}</b></p>${said ? `<blockquote style="font-size:13px;color:#4b5563;margin:8px 0 16px;padding-left:12px;border-left:3px solid #e5e7eb">${said.replace(/</g, '&lt;')}</blockquote>` : ''}
+      <p style="font-size:13px;color:#6b7280;margin:8px 0 16px">${detail}</p>
+      <a href="${joinUrl}" style="display:inline-block;background:#4338ca;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600">Accept the invitation</a>`, brand),
+  };
+}

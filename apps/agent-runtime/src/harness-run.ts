@@ -72,6 +72,7 @@ import { PREFERENCES_TOOLS, PREFERENCES_ACTS, PREFERENCES_GET, preferencesInvoke
 import type { TriggerScheduleV1 } from './triggers.js';
 import { factsForPrompt, factsOf, type RememberedFactsV1 } from '@agenticprimitives/context';
 import { CONTACT_INVITE_TOOL, CONTACT_LIST_TOOL, CONTACT_REMOVE_TOOL, contactInviteInvoker, contactListInvoker, contactRemoveInvoker, type ContactDeps } from './contacts.js';
+import { FRIEND_LIST_TOOL, friendListInvoker } from './friends.js';
 import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
 import { MEMBER_CONSULT_TOOL, consultAskOf } from './member-consult.js';
 import { ENGAGEMENT_PROBE_TOOL } from './engagement-probe.js';
@@ -2358,7 +2359,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
       return workSearchInvoker({ ...(deps.readableVaults ? { readableVaults: deps.readableVaults } : {}), ...(deps.searchSubject ? { searchSubject: deps.searchSubject } : {}) }, person)(toolId, args, ctx);
     }
     // Spec 401 C1 — CONTACTS: membership on the person agent. The organization's mechanism with the person as principal.
-    if (toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_LIST_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id) {
+    if (toolId === CONTACT_INVITE_TOOL.id || toolId === CONTACT_LIST_TOOL.id || toolId === CONTACT_REMOVE_TOOL.id || toolId === FRIEND_LIST_TOOL.id) {
       const cdeps: ContactDeps = {
         env, enforcers: harnessEnforcers(env), vaultServerId: vaultServerId(env),
         ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}),
@@ -2372,6 +2373,8 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
         digestBindingArgsFor, stepDigests,
       };
       if (toolId === CONTACT_LIST_TOOL.id) return contactListInvoker(cdeps, person)(toolId, args, ctx);
+      // Friends: a view over the same records (spec 401) — mutual friend-role contacts, and who is waiting on whom.
+      if (toolId === FRIEND_LIST_TOOL.id) return friendListInvoker(cdeps, person)(toolId, args, ctx);
       if (toolId === CONTACT_INVITE_TOOL.id) return contactInviteInvoker(cdeps, presented!, person, session)(toolId, args, ctx);
       return contactRemoveInvoker(cdeps, presented!, person)(toolId, args, ctx);
     }
@@ -5834,6 +5837,9 @@ step is then handed to that agent under authority the person grants; leave it ou
     // Spec 401 C1 — contacts (the person-steward playbook offers them).
     ...(playbook?.tools?.[CONTACT_INVITE_TOOL.id] ? [mergeContractTool(CONTACT_INVITE_TOOL, playbook.tools[CONTACT_INVITE_TOOL.id])] : []),
     ...(playbook?.tools?.[CONTACT_LIST_TOOL.id] ? [mergeContractTool(CONTACT_LIST_TOOL, playbook.tools[CONTACT_LIST_TOOL.id])] : []),
+    // Friends ride the contacts read: a playbook that offers the contact list offers the friends view (the same records,
+    // no act); a playbook that pins `person.friend.list` itself carries its contract.
+    ...(playbook?.tools?.[FRIEND_LIST_TOOL.id] ? [mergeContractTool(FRIEND_LIST_TOOL, playbook.tools[FRIEND_LIST_TOOL.id])] : playbook?.tools?.[CONTACT_LIST_TOOL.id] ? [FRIEND_LIST_TOOL] : []),
     ...(playbook?.tools?.[CONTACT_REMOVE_TOOL.id] ? [mergeContractTool(CONTACT_REMOVE_TOOL, playbook.tools[CONTACT_REMOVE_TOOL.id])] : []),
     // Spec 380 — one member of an organization, asked through their own agent (fan-out over the roster).
     MEMBER_CONSULT_TOOL,

@@ -17,13 +17,13 @@ import { Section, List, Row, Empty, ErrorNote, Note, Button, Chip, Mono, Meta, F
 const kindWords = (name: string | null): string => { const k = kindOfName(name); return k ? KIND_WORDS[k].one : 'unnamed'; };
 import { AgentName } from '../shared/AgentName';
 import { askCommand } from '../../home/ask-command';
-import { readContactsThroughHarness, CONTACT_ROLES, type ContactRole, type ContactRow } from '../../home/contacts-harness';
+import { readContactsThroughHarness, readFriendsThroughHarness, CONTACT_ROLES, type ContactRole, type ContactRow, type FriendsView } from '../../home/contacts-harness';
 import { searchAgentsKb } from '../../lib/agent-search';
 
 const ROLE_WORDS: Record<string, string> = { friend: 'friend', family: 'family', coach: 'coach', assistant: 'assistant', runtime: 'runtime', other: 'contact' };
 
 export function ContactsPanel() {
-  const { session, agentAddress } = useSession();
+  const { session, agentAddress, agentName } = useSession();
   const [rows, setRows] = useState<ContactRow[]>([]);
   const [removedCount, setRemovedCount] = useState(0);
   const [loaded, setLoaded] = useState(false);
@@ -33,6 +33,13 @@ export function ContactsPanel() {
   const [role, setRole] = useState<ContactRole>('friend');
   const [hits, setHits] = useState<Array<{ name?: string | null; smartAgent?: string; displayName?: string | null }>>([]);
   const [picked, setPicked] = useState<{ agent: string; label: string } | null>(null);
+  // FRIENDS — the view over contacts (`person.friend.list`): who added me back, who is waiting on whom.
+  const [friends, setFriends] = useState<FriendsView | null>(null);
+  const [friendsErr, setFriendsErr] = useState('');
+  // INVITE BY EMAIL — a friend with no home yet; the mail goes out as the person through the Worker's rail.
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteNote, setInviteNote] = useState('');
+  const [inviteState, setInviteState] = useState<{ busy: boolean; done?: string; error?: string }>({ busy: false });
 
   const load = useCallback(async () => {
     if (!session || !agentAddress) return;
@@ -41,9 +48,23 @@ export function ContactsPanel() {
     setLoaded(true);
   }, [session, agentAddress]);
   useEffect(() => { void load(); }, [load]);
+  const loadFriends = useCallback(async () => {
+    if (!session || !agentAddress) return;
+    const r = await readFriendsThroughHarness({ person: agentAddress as Address, session: { token: session.token } });
+    if (r.ok) { setFriends({ friends: r.friends, requests: r.requests, requested: r.requested }); setFriendsErr(''); } else setFriendsErr(r.error);
+  }, [session, agentAddress]);
+  useEffect(() => { void loadFriends(); }, [loadFriends]);
+  // A link from an app can name whom to add (`/contacts?add=bob.me`) or open the email invitation (`?invite=1`).
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const add = (q.get('add') ?? '').trim();
+    if (add) { setWho(add); setRole('friend'); }
+    const em = (q.get('invite') ?? '').trim();
+    if (em && em !== '1') setInviteEmail(em);
+  }, []);
   // The flyout's run finishes elsewhere; re-read when it says something happened (`ap:ask-done`).
   useEffect(() => {
-    const on = () => { void load(); };
+    const on = () => { void load(); void loadFriends(); };
     window.addEventListener('ap:ask-done', on);
     return () => window.removeEventListener('ap:ask-done', on);
   }, [load]);
@@ -69,9 +90,70 @@ export function ContactsPanel() {
     askCommand({ toolId: 'person.contact.remove', args: { contact: c.contact }, message: `remove ${c.name ?? c.contact} as a contact` });
   };
 
+  const sendInvite = async () => {
+    if (!session) return;
+    const email = inviteEmail.trim();
+    if (!email) return;
+    setInviteState({ busy: true });
+    try {
+      const r = await fetch('/connect/friend-invite/email', {
+        method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
+        body: JSON.stringify({ email, note: inviteNote.trim() || undefined, fromName: agentName ?? undefined }),
+      });
+      const d = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; delivery?: string };
+      if (!r.ok || !d.ok) throw new Error(d.error ?? `could not send (${r.status})`);
+      setInviteState({ busy: false, done: d.delivery === 'sent' ? `Sent to ${email}. When they accept and you add them back, you are friends.` : `Logged (this deployment sends no mail): ${email}.` });
+      setInviteEmail(''); setInviteNote('');
+    } catch (e) { setInviteState({ busy: false, error: e instanceof Error ? e.message : String(e) }); }
+  };
+  const addBack = (agent: string, name: string | null) => {
+    askCommand({ toolId: 'person.contact.invite', args: { contact: agent, role: 'friend' }, message: `add ${name ?? agent} as a contact (friend)` });
+  };
+
   if (!session || !agentAddress) return null;
   return (
     <>
+      <Section title="Friends" count={friends?.friends.length || undefined} testId="friends">
+        {friendsErr && <ErrorNote>{friendsErr}</ErrorNote>}
+        {!friends && !friendsErr && <Meta>Reading your friends…</Meta>}
+        {friends && friends.requests.length > 0 && (
+          <>
+            <Meta>Waiting on you — they added you:</Meta>
+            <List>
+              {friends.requests.map((r) => (
+                <Row key={r.agent}
+                  title={r.name ? <span title={r.agent}>{r.name}</span> : <AgentName address={r.agent} />}
+                  meta={r.at ? `added you ${new Date(r.at).toLocaleDateString()}` : undefined}
+                  side={<Button size="sm" variant="primary" onClick={() => addBack(r.agent, r.name)}>Add back</Button>} />
+              ))}
+            </List>
+          </>
+        )}
+        {friends && friends.friends.length === 0 && friends.requests.length === 0 && (
+          <Empty title="No friends yet.">Add a person as a contact (role friend) below, or invite one by email. You are friends once they add you back.</Empty>
+        )}
+        {friends && friends.friends.length > 0 && (
+          <List>
+            {friends.friends.map((f) => (
+              <Row key={f.agent}
+                title={f.name ? <span title={f.agent}>{f.name}</span> : <AgentName address={f.agent} />}
+                meta={`friends since ${new Date(f.since).toLocaleDateString()}`}
+                side={<Chip tone="ok">mutual</Chip>} />
+            ))}
+          </List>
+        )}
+        {friends && friends.requested.length > 0 && (
+          <Note>Not yet added you back: {friends.requested.map((r) => r.name ?? r.agent).join(', ')}.</Note>
+        )}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start', marginTop: 'var(--sp-2)' }}>
+          <input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="invite a friend by email" aria-label="Friend's email" style={{ flex: '1 1 220px', minWidth: 0 }} />
+          <input value={inviteNote} onChange={(e) => setInviteNote(e.target.value)} placeholder="a note (optional)" aria-label="Note" style={{ flex: '2 1 240px', minWidth: 0 }} />
+          <Button variant="primary" onClick={() => void sendInvite()} disabled={inviteState.busy || !inviteEmail.trim()}>{inviteState.busy ? 'Sending…' : 'Invite'}</Button>
+        </div>
+        {inviteState.done && <Note>{inviteState.done}</Note>}
+        {inviteState.error && <ErrorNote>{inviteState.error}</ErrorNote>}
+        <Note>The mail goes out as you. The link lets them sign in or set up a home and add you as a friend; you then add them back. Nothing in the link grants anything.</Note>
+      </Section>
       <Section title="Add a contact">
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
           <div style={{ flex: '1 1 260px', minWidth: 0 }}>
