@@ -222,7 +222,15 @@ export function findEntries(entries: LibraryEntry[], q: { id?: string; name?: st
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/i;
 const KINDS = new Set(['skill', 'ttl', 'md', 'json-ld', 'image']);
 const PUBLISHABLE = new Set(['skill', 'md', 'json-ld']);
-const CATALOG_MAX = 200;
+/**
+ * HOW MANY DOCUMENTS A PERSON'S LIBRARY INDEXES. Was 200 with a bare `.slice(0, CATALOG_MAX)` on every write: a save
+ * past it was answered `saved` and then cut off the index, so the next step naming it found "no document named …"
+ * (the Seed Bible reader's theme publish, 2026-10-22). Now the Home's number (server/connect/library.ts
+ * MAX_ARTIFACTS_DEFAULT), and a write past it is REFUSED in words — never acknowledged and dropped. The catalog still
+ * carries bytes inline for a person, so a very full Library can also meet the record's size ceiling; that write then
+ * fails loudly too (writeSubjectRecord answers not ok).
+ */
+export const CATALOG_MAX = 2000;
 const BYTES_MAX = 2_000_000;
 const defaultMime = (kind: string): string => ({ skill: 'text/markdown', md: 'text/markdown', ttl: 'text/turtle', 'json-ld': 'application/ld+json', image: 'image/png' } as Record<string, string>)[kind] ?? 'application/octet-stream';
 const encodeText = (s: string): string => btoa(unescape(encodeURIComponent(s)));
@@ -295,7 +303,8 @@ export async function libraryWrite(deps: LibraryToolDeps, owner: string, toolId:
   if (!deps.writeSubjectRecord) throw new Error('this agent cannot write its Library (the private tier is not configured)');
   const list = await rawCatalogOf(deps, owner);
   const write = async (next: LibraryEntry[], entry?: LibraryEntry) => {
-    const wrote = await deps.writeSubjectRecord!(owner, 'content.catalog', next.slice(0, CATALOG_MAX), ctx.operationId);
+    if (next.length > CATALOG_MAX) throw new Error(`your Library holds ${list.length} documents, the most it indexes (${CATALOG_MAX}) — remove some before saving more`);
+    const wrote = await deps.writeSubjectRecord!(owner, 'content.catalog', next, ctx.operationId);
     if (!wrote.ok) throw new Error(wrote.error ?? 'the Library index could not be written');
     if (entry && !entry.isFolder) {
       const rec = await deps.writeSubjectRecord!(owner, `content.artifact.${entry.id}`, { id: entry.id, kind: entry.kind, name: entry.name, source: entry.source, contentType: entry.contentType, bytesB64: entry.bytesB64, commitment: entry.contentCommitment, version: entry.version, ...(entry.accessPolicy ? { accessPolicy: entry.accessPolicy } : {}) }, ctx.operationId);
