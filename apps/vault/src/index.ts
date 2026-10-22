@@ -572,6 +572,43 @@ function rememberSigVerdict(key: string): void {
   sigVerdictMemo.set(key, Date.now() + SIG_VERDICT_MEMO_MS);
 }
 
+/** How long a clean revocation/acceptance answer is trusted without asking the chain again. */
+const AUTHORITY_MEMO_MS = 15_000;
+const authorityMemo = new Map<string, { until: number; value: unknown }>();
+function rememberAuthority(key: string, value: unknown) {
+  authorityMemo.set(key, { until: Date.now() + AUTHORITY_MEMO_MS, value });
+  if (authorityMemo.size > 2000) for (const [k, v] of authorityMemo) if (v.until <= Date.now()) authorityMemo.delete(k);
+}
+
+/**
+ * A POSITIVE CHAIN ANSWER, REMEMBERED BRIEFLY. Every vault call re-proved the same delegation on chain — "not
+ * revoked" for the root and the leaf, "accepted" for the session — a few hundred ms of RPC on each of the reads and
+ * writes one save makes (the reader app's highlights paid it a dozen times a save). A clean answer is remembered for
+ * AUTHORITY_MEMO_MS in this isolate, which bounds how long a revocation can go unnoticed (the runtime's own wire memo
+ * is 20 s); a revoked, unaccepted or unconfirmable answer is never remembered, so a refusal is always read fresh.
+ */
+export function withAuthorityMemo(base: ChainAuthorityReader): ChainAuthorityReader {
+  return {
+    async isDelegationRevoked(hash, risk) {
+      const k = `revoked:${hash}`;
+      const hit = authorityMemo.get(k);
+      if (hit && hit.until > Date.now()) return hit.value as Awaited<ReturnType<ChainAuthorityReader['isDelegationRevoked']>>;
+      const r = await base.isDelegationRevoked(hash, risk);
+      if (r.revoked === false && !String(r.evidence?.source ?? '').startsWith('fail-closed')) rememberAuthority(k, r);
+      return r;
+    },
+    async isSessionDelegationAccepted(principal, hash, risk) {
+      const k = `accepted:${principal.toLowerCase()}:${hash}`;
+      const hit = authorityMemo.get(k);
+      if (hit && hit.until > Date.now()) return hit.value as Awaited<ReturnType<ChainAuthorityReader['isSessionDelegationAccepted']>>;
+      const r = await base.isSessionDelegationAccepted(principal, hash, risk);
+      if (r.accepted === true && !String(r.evidence?.source ?? '').startsWith('fail-closed')) rememberAuthority(k, r);
+      return r;
+    },
+    verifySmartAgentSignature: (input, risk) => base.verifySmartAgentSignature(input, risk),
+  };
+}
+
 function withDurableSigCache(env: Env, base: ChainAuthorityReader): ChainAuthorityReader {
   const chainId = Number(env.CHAIN_ID);
   const remembered = (source: string) => ({
@@ -615,7 +652,7 @@ function chainAuthorityReader(env: Env): ChainAuthorityReader | undefined {
     universalSignatureValidator: usv as Address,
     rpcUrl: env.RPC_URL,
   });
-  _chainReader = withDurableSigCache(env, createChainAuthorityReader({ chainId: Number(env.CHAIN_ID), providers: [provider] }));
+  _chainReader = withDurableSigCache(env, withAuthorityMemo(createChainAuthorityReader({ chainId: Number(env.CHAIN_ID), providers: [provider] })));
   return _chainReader;
 }
 
