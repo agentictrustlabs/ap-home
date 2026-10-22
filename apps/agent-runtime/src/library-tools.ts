@@ -302,6 +302,13 @@ async function announceAfter(deps: LibraryToolDeps, owner: string, entry: Librar
   await Promise.all(ids.map((id) => deps.announce!(owner, id).catch(() => undefined)));
 }
 
+/** How many document records a migrating save writes at once. */
+const RECORD_WRITE_CONCURRENCY = 8;
+
+/** The catalog as written: every entry without its inline bytes (size and commitment stay). */
+export const indexOnly = (list: LibraryEntry[]): LibraryEntry[] =>
+  list.map((e) => (e.bytesB64 === undefined ? e : (({ bytesB64: _drop, ...rest }) => rest)(e)));
+
 export async function libraryWrite(deps: LibraryToolDeps, owner: string, toolId: string, args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2]): Promise<Record<string, unknown>> {
   const release = deps.holdCatalog ? await deps.holdCatalog(owner) : null;
   try {
@@ -314,14 +321,23 @@ export async function libraryWrite(deps: LibraryToolDeps, owner: string, toolId:
 async function libraryWriteHeld(deps: LibraryToolDeps, owner: string, toolId: string, args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2]): Promise<Record<string, unknown>> {
   if (!deps.writeSubjectRecord) throw new Error('this agent cannot write its Library (the private tier is not configured)');
   const list = await rawCatalogOf(deps, owner);
+  // THE INDEX IS AN INDEX (the Home's rule, server/connect/library.ts `persistIndexOnly`): a document's bytes live in
+  // its own record, `content.artifact.<id>`, and the catalog carries only what a listing needs. This writer used to put
+  // every document's bytes back into the catalog, so each read and save of ANY document moved the whole Library through
+  // the vault (seconds, growing with the Library). Records first, strictly — the saved document's, and any older entry
+  // still carrying its bytes inline (a catalog from before the rule migrates on its next save) — then the index.
+  const recordOf = (e: LibraryEntry) => ({ id: e.id, kind: e.kind, name: e.name, source: e.source, contentType: e.contentType, bytesB64: e.bytesB64, commitment: e.contentCommitment, version: e.version, ...(e.accessPolicy ? { accessPolicy: e.accessPolicy } : {}) });
   const write = async (next: LibraryEntry[], entry?: LibraryEntry) => {
     if (next.length > CATALOG_MAX) throw new Error(`your Library holds ${list.length} documents, the most it indexes (${CATALOG_MAX}) — remove some before saving more`);
-    const wrote = await deps.writeSubjectRecord!(owner, 'content.catalog', next, ctx.operationId);
-    if (!wrote.ok) throw new Error(wrote.error ?? 'the Library index could not be written');
-    if (entry && !entry.isFolder) {
-      const rec = await deps.writeSubjectRecord!(owner, `content.artifact.${entry.id}`, { id: entry.id, kind: entry.kind, name: entry.name, source: entry.source, contentType: entry.contentType, bytesB64: entry.bytesB64, commitment: entry.contentCommitment, version: entry.version, ...(entry.accessPolicy ? { accessPolicy: entry.accessPolicy } : {}) }, ctx.operationId);
-      if (!rec.ok) throw new Error(rec.error ?? 'the document\'s record could not be written');
+    const carrying = next.filter((e) => !e.isFolder && (e === entry || typeof e.bytesB64 === 'string'));
+    for (let i = 0; i < carrying.length; i += RECORD_WRITE_CONCURRENCY) {
+      await Promise.all(carrying.slice(i, i + RECORD_WRITE_CONCURRENCY).map(async (e) => {
+        const rec = await deps.writeSubjectRecord!(owner, `content.artifact.${e.id}`, recordOf(e), ctx.operationId);
+        if (!rec.ok) throw new Error(rec.error ?? `the record of ${pathOf(e)} could not be written`);
+      }));
     }
+    const wrote = await deps.writeSubjectRecord!(owner, 'content.catalog', indexOnly(next), ctx.operationId);
+    if (!wrote.ok) throw new Error(wrote.error ?? 'the Library index could not be written');
   };
   const find = (): LibraryEntry => {
     const matches = findEntries(list, { ...(typeof args.id === 'string' ? { id: args.id } : {}), ...(typeof args.name === 'string' ? { name: args.name } : {}), ...(typeof args.folder === 'string' ? { folder: args.folder } : {}) });
