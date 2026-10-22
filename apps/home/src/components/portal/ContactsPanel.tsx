@@ -36,6 +36,9 @@ export function ContactsPanel() {
   // FRIENDS — the view over contacts (`person.friend.list`): who added me back, who is waiting on whom.
   const [friends, setFriends] = useState<FriendsView | null>(null);
   const [friendsErr, setFriendsErr] = useState('');
+  // PRESENCE — where each friend is right now (the runtime's /presence/friends under the Home session; the Home
+  // itself beats while this page is open, so friends see "at their Home").
+  const [presence, setPresence] = useState<Record<string, Array<{ app: string; label?: string; at: number }>>>({});
   // INVITE BY EMAIL — a friend with no home yet; the mail goes out as the person through the Worker's rail.
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteNote, setInviteNote] = useState('');
@@ -54,6 +57,21 @@ export function ContactsPanel() {
     if (r.ok) { setFriends({ friends: r.friends, requests: r.requests, requested: r.requested }); setFriendsErr(''); } else setFriendsErr(r.error);
   }, [session, agentAddress]);
   useEffect(() => { void loadFriends(); }, [loadFriends]);
+  useEffect(() => {
+    if (!session) return;
+    const auth = { authorization: `Bearer ${session.token}` };
+    const beat = () => { void fetch('/a2a/presence/beat', { method: 'POST', headers: { 'content-type': 'application/json', ...auth }, body: JSON.stringify({ label: 'at their Home' }) }).catch(() => {}); };
+    const read = () => {
+      void fetch('/a2a/presence/friends', { headers: auth }).then((r) => r.json()).then((d: { ok?: boolean; friends?: Array<{ agent: string; presence: Array<{ app: string; label?: string; at: number }> }> }) => {
+        if (d.ok) setPresence(Object.fromEntries((d.friends ?? []).map((f) => [f.agent.toLowerCase(), f.presence])));
+      }).catch(() => {});
+    };
+    beat(); read();
+    const t = setInterval(() => { beat(); read(); }, 30_000);
+    const gone = () => { void fetch('/a2a/presence/beat', { method: 'POST', headers: { 'content-type': 'application/json', ...auth }, body: JSON.stringify({ gone: true }), keepalive: true }).catch(() => {}); };
+    window.addEventListener('pagehide', gone);
+    return () => { clearInterval(t); window.removeEventListener('pagehide', gone); gone(); };
+  }, [session]);
   // A link from an app can name whom to add (`/contacts?add=bob.me`) or open the email invitation (`?invite=1`).
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
@@ -137,7 +155,7 @@ export function ContactsPanel() {
             {friends.friends.map((f) => (
               <Row key={f.agent}
                 title={f.name ? <span title={f.agent}>{f.name}</span> : <AgentName address={f.agent} />}
-                meta={`friends since ${new Date(f.since).toLocaleDateString()}`}
+                meta={<>{`friends since ${new Date(f.since).toLocaleDateString()}`}{presence[f.agent.toLowerCase()]?.length ? <> · <span style={{ color: 'var(--color-sage-700)' }}>● {presence[f.agent.toLowerCase()]!.map((p) => p.label ?? p.app).join(', ')}</span></> : null}</>}
                 side={<Chip tone="ok">mutual</Chip>} />
             ))}
           </List>

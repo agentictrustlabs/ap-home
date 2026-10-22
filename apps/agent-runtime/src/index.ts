@@ -175,6 +175,7 @@ import { universalSignatureValidatorAbi } from '@agenticprimitives/chain-state-v
 import { sessionWirePrincipal, parseSessionAuthorization, STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
 const IS_REVOKED_ABI_FOR_STANDING = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
 import { askVocabulary, commandFieldsFor, waitingOn, ACCESS_LIST_CAPABILITY, PROFILE_READ_CAPABILITY, HOUSEHOLD_READ_CAPABILITY, CAPABILITY_WORDS, type PlannerTraceV1 } from './harness-run.js';
+import { beatEntry, friendsPresence, livePresence, presencePort } from './presence.js';
 import { expectedDeliversOfGold, harnessEnforcers } from './harness-run.js';
 import { judgeOutcomePerClass } from '@agenticprimitives/orchestration';
 import { stateCheckOf, recordTypeOfClass, fieldsOfShape, type DomainShapeV1 } from './state-check.js';
@@ -297,6 +298,7 @@ export { SessionStoreDO };
 export { A2aTaskDO } from './a2a-task-do.js';
 export { InteractionsDO } from './interactions-do.js';
 export { HuddleRoomDO } from './huddle-room-do.js';
+export { PresenceDO } from './presence-do.js';
 export { ProviderMeterDO } from './provider-meter-do.js';
 export { ExperimentDO } from './experiment-do.js';
 
@@ -339,6 +341,8 @@ export interface Env {
   INTERACTIONS: DurableObjectNamespace;
   /** Spec 378 — one huddle room per scope key. */
   HUDDLES?: DurableObjectNamespace;
+  /** Presence (presence-do.ts): one object per person, where they are now, read by their mutual friends. */
+  PRESENCE?: DurableObjectNamespace;
   /** Spec 388 W3 — the deployment's shared per-minute token meter (one object). Unbound ⇒ each isolate
    *  counts its own minute, which is W1's behaviour and is said so on the trace. */
   PROVIDER_METER?: DurableObjectNamespace;
@@ -1096,6 +1100,9 @@ app.use('*', async (c, next) => {
   // same rationale as /interactions/*. This is what lets the Home's SERVER send an invitation through the
   // Worker's email binding (caught live 2026-09-07: the invite ran, the mail never left — "csrf required").
   if (c.req.path === '/email/send') return next();
+  // /presence/* — authorization is the bearer (a Home session or a relying app's id_token), body-carried like
+  // /email/send; a beat changes nothing of record and a read is gated by the person's own friends view.
+  if (c.req.path.startsWith('/presence/')) return next();
   // Peer attestation (spec 338 §6) — deliberately public and CSRF-exempt.
   //
   // CSRF defends state-changing actions taken WITH THE USER'S CREDENTIALS. This endpoint takes no
@@ -11569,6 +11576,53 @@ app.get('/discovery/agent', async (c) => {
 //
 // It sends AS THE DEPLOYMENT'S ADDRESS, not as the person's own mailbox — we hold no credential for
 // their mail, and pretending otherwise would forge a From: header. The body says who it is from.
+/**
+ * PRESENCE (presence.ts) — where a person is right now, for their mutual friends. A person's device beats under
+ * their own token: a Home session (the Home itself, app `home`) or a relying app's id_token (the app is its verified
+ * `aud`). Nothing here is a record or an act; the beat lapses on its own. The read returns the person's mutual
+ * friends (friends.ts — the person's own contacts and inbox decide who is a friend) with each one's live entries.
+ */
+async function presenceCaller(c: { req: { header: (n: string) => string | undefined }; env: Env }): Promise<{ ok: true; sa: Address; app: string } | { ok: false; status: number; error: string }> {
+  const bearer = c.req.header('authorization')?.replace(/^Bearer /, '') ?? '';
+  if (!bearer) return { ok: false, status: 401, error: 'a session is required' };
+  const home = await verifyHomeSession(bearer, c.env);
+  if (home.ok) return { ok: true, sa: home.sa, app: 'home' };
+  const app = await verifyRelyingIdToken(bearer, c.env);
+  if (app.ok) return { ok: true, sa: app.sa, app: app.clientId };
+  return { ok: false, status: app.status, error: app.error };
+}
+app.post('/presence/beat', async (c) => {
+  const who = await presenceCaller(c);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const port = presencePort(c.env);
+  if (!port) return c.json({ ok: false, error: 'this deployment keeps no presence' }, 503);
+  const body = (await c.req.json().catch(() => ({}))) as { scope?: unknown; label?: unknown; ttlMs?: unknown; gone?: unknown };
+  if (body.gone === true) {
+    await port.gone(who.sa, who.app);
+    return c.json({ ok: true, gone: true });
+  }
+  const entry = beatEntry({ app: who.app, scope: body.scope, label: body.label, ttlMs: body.ttlMs }, Date.now());
+  await port.beat(who.sa, entry);
+  return c.json({ ok: true, until: new Date(entry.until).toISOString() });
+});
+app.get('/presence/friends', async (c) => {
+  const who = await presenceCaller(c);
+  if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
+  const port = presencePort(c.env);
+  if (!port) return c.json({ ok: false, error: 'this deployment keeps no presence' }, 503);
+  const d = harnessDeps(c.env, buildAuditSink(c.env));
+  const cdeps = {
+    ...(d.readSubjectRecord ? { readSubjectRecord: d.readSubjectRecord } : {}),
+    ...(d.survey ? { survey: d.survey } : {}),
+    ...(d.readRecords ? { readRecords: d.readRecords } : {}),
+    ...(d.nameOf ? { nameOf: d.nameOf } : {}),
+  };
+  const now = Date.now();
+  const rows = await friendsPresence(cdeps, port, who.sa, now);
+  const me = livePresence(await port.read(who.sa), now);
+  return c.json({ ok: true, me, friends: rows, here: rows.filter((r) => r.presence.length).length, at: new Date(now).toISOString() });
+});
+
 app.post('/email/send', async (c) => {
   const rawBody = await c.req.text();
   const body = (() => { try { return JSON.parse(rawBody); } catch { return null; } })() as { session?: string; to?: string; subject?: string; text?: string; html?: string; as?: string } | null;

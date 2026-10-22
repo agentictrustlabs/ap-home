@@ -24,6 +24,7 @@ bindings = [
   { name = "A2A_TASKS", class_name = "A2aTaskDO" },
   { name = "INTERACTIONS", class_name = "InteractionsDO" },
   { name = "HUDDLES", class_name = "HuddleRoomDO" },
+  { name = "PRESENCE", class_name = "PresenceDO" },
   { name = "PROVIDER_METER", class_name = "ProviderMeterDO" },
   # Spec 415 A5 — the Lab's experiments, one object per plan id (experiment-do.ts).
   { name = "EXPERIMENTS", class_name = "ExperimentDO" },
@@ -76,6 +77,11 @@ new_sqlite_classes = ["ExperimentDO"]
 [[migrations]]
 tag = "v8"
 new_sqlite_classes = ["HolderProverContainer"]
+
+# Presence (presence-do.ts) — one object per person, where they are now, read by their mutual friends.
+[[migrations]]
+tag = "v9"
+new_sqlite_classes = ["PresenceDO"]
 
 # ── FAITHNET (Azure faithchain 34348) — gcp-kms custody, Home on faithnet.me, backend on faithnet.io ──
 [env.faithnet]
@@ -387,6 +393,7 @@ bindings = [
   { name = "A2A_TASKS", class_name = "A2aTaskDO" },
   { name = "INTERACTIONS", class_name = "InteractionsDO" },
   { name = "HUDDLES", class_name = "HuddleRoomDO" },
+  { name = "PRESENCE", class_name = "PresenceDO" },
   { name = "PROVIDER_METER", class_name = "ProviderMeterDO" },
   # Spec 415 A5 — the Lab's experiments, one object per plan id (experiment-do.ts).
   { name = "EXPERIMENTS", class_name = "ExperimentDO" },
@@ -827,6 +834,7 @@ bindings = [
   { name = "A2A_TASKS", class_name = "A2aTaskDO" },
   { name = "INTERACTIONS", class_name = "InteractionsDO" },
   { name = "HUDDLES", class_name = "HuddleRoomDO" },
+  { name = "PRESENCE", class_name = "PresenceDO" },
   { name = "PROVIDER_METER", class_name = "ProviderMeterDO" },
   { name = "EXPERIMENTS", class_name = "ExperimentDO" },
   { name = "SA_BUDGET", class_name = "SmartAgentBudgetDO", script_name = "imb-vault" },
