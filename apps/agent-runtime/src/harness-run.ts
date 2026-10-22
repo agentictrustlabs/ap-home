@@ -1001,6 +1001,23 @@ export function childAgentCreateInvoker(genesis: TeamGenesisDeps, env: HarnessEn
   };
 }
 
+/**
+ * A CHAIN PROOF, REMEMBERED BRIEFLY. Every act re-proved the same presented wire on chain — "not revoked" and its
+ * signature — two RPC round trips before each save an app makes (the reader's highlights paid them on every mark). A
+ * POSITIVE answer is remembered in this isolate for CHAIN_PROOF_MS — the InteractionsDO's own wire memo is the same 20 s —
+ * which bounds how long a revocation can go unnoticed; a revoked wire or a failed signature is never remembered.
+ */
+const CHAIN_PROOF_MS = 20_000;
+const chainProofs = new Map<string, number>();
+export function chainProofRemembered(key: string): boolean {
+  const until = chainProofs.get(key);
+  return until !== undefined && until > Date.now();
+}
+export function rememberChainProof(key: string): void {
+  chainProofs.set(key, Date.now() + CHAIN_PROOF_MS);
+  if (chainProofs.size > 2000) for (const [k, v] of chainProofs) if (v <= Date.now()) chainProofs.delete(k);
+}
+
 const IS_REVOKED_ABI = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ name: 'delegationHash', type: 'bytes32' }], outputs: [{ type: 'bool' }] }] as const;
 const EXECUTE_ABI = [{ type: 'function', name: 'execute', stateMutability: 'nonpayable', inputs: [{ name: 'target', type: 'address' }, { name: 'value', type: 'uint256' }, { name: 'data', type: 'bytes' }], outputs: [] }] as const;
 const TRANSFER_ABI = [{ type: 'function', name: 'transfer', stateMutability: 'nonpayable', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ type: 'bool' }] }] as const;
@@ -5118,10 +5135,20 @@ export async function runUnderMandate(envIn: HarnessEnv, deps: HarnessDeps, inpu
     presentedAll: () => (input.presented == null ? [] : Array.isArray(input.presented) ? input.presented : [input.presented]).map((w) => w as unknown as Delegation),
     checks: {
       delegationDigest: (d) => hashDelegation(d, chainId, dm),
-      isRevoked: async (d) => (await deps.readContract({ address: dm, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [hashDelegation(d, chainId, dm)] })) as boolean,
+      isRevoked: async (d) => {
+        const h = hashDelegation(d, chainId, dm);
+        if (chainProofRemembered(`live:${h}`)) return false;
+        const revoked = (await deps.readContract({ address: dm, abi: IS_REVOKED_ABI, functionName: 'isRevoked', args: [h] })) as boolean;
+        if (revoked === false) rememberChainProof(`live:${h}`);
+        return revoked;
+      },
       verifySignature: async ({ signer, digest, signature }) => {
         if (!validator) return false;
-        return (await deps.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [signer, digest, signature] })) === true;
+        const k = `sig:${String(signer).toLowerCase()}:${digest}:${signature}`;
+        if (chainProofRemembered(k)) return true;
+        const ok = (await deps.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [signer, digest, signature] })) === true;
+        if (ok) rememberChainProof(k);
+        return ok;
       },
     },
     now,
