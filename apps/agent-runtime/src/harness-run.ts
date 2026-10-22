@@ -59,6 +59,7 @@ import { WORK_SEARCH_TOOL, workSearchInvoker } from './work-search-tool.js';
 import { GITHUB_TOOLS, GITHUB_ACTS, githubInvoker } from './connectors/github-tools.js';
 import { CALENDAR_TOOLS, CALENDAR_ACTS, calendarInvoker } from './connectors/calendar-tools.js';
 import { MAIL_DRIVE_TOOLS, MAIL_DRIVE_ACTS, mailDriveInvoker } from './connectors/mail-drive-tools.js';
+import { CONTACTS_GOOGLE_TOOLS, contactsGoogleInvoker } from './connectors/contacts-google-tools.js';
 import { connectorStatus } from './connectors/google-token.js';
 import { MEMORY_TOOLS, MEMORY_ACTS, MEMORY_LIST_TOOL, MEMORY_REMEMBER, memoryFactsInvoker, memoryProposalFor, connectorMemoryProposal } from './memory-facts-tools.js';
 import { ROUTINE_TOOLS, ROUTINE_ACTS, ROUTINE_LIST, routineInvoker, compiledRoutine } from './routine-tools.js';
@@ -2415,6 +2416,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
     if (WEB_SEARCH_TOOLS.some((t) => t.id === toolId)) return webSearchInvoker(env as never)(toolId, args, ctx);
     if (PREFERENCES_TOOLS.some((t) => t.id === toolId)) return preferencesInvoker({ ...(deps.readSubjectRecord ? { readSubjectRecord: deps.readSubjectRecord } : {}), ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}) }, person, addressee)(toolId, args, ctx);
     if (MAIL_DRIVE_TOOLS.some((t) => t.id === toolId)) return mailDriveInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
+    if (CONTACTS_GOOGLE_TOOLS.some((t) => t.id === toolId)) return contactsGoogleInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, person)(toolId, args, ctx);
     if (CALENDAR_TOOLS.some((t) => t.id === toolId)) return calendarInvoker({ env: env as never, ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, person)(toolId, args, ctx);
     if (LIBRARY_TOOLS.some((t) => t.id === toolId)) { if (!deps.readSubjectRecord) throw new Error('the private tier is not configured'); return libraryInvoker({ readSubjectRecord: deps.readSubjectRecord, ...(deps.writeSubjectRecord ? { writeSubjectRecord: deps.writeSubjectRecord } : {}), ...(deps.signAsAgent ? { signAsOwner: deps.signAsAgent } : {}), ...(deps.announceShelf ? { announce: deps.announceShelf } : {}), stewardOf: (who, owner) => stewardshipOver({ readSubjectRecord: deps.readSubjectRecord!, ...(deps.verifyStewardship ? { verifyStewardship: deps.verifyStewardship } : {}), ...(deps.standingContext ? { context: deps.standingContext } : {}) }, who, owner) }, addressee, person)(toolId, args, ctx); }
     if (isMcpTool(toolId) || toolId === MCP_CONNECTORS_LIST) return mcpConnectorInvoker({ env: env as never, readConnectors: (h) => mcpConnectorsOf(deps, h), ...(deps.resolveName ? { resolveName: deps.resolveName } : {}) }, (presented ?? null) as never, addressee)(toolId, args, ctx);
@@ -5798,15 +5800,15 @@ step is then handed to that agent under authority the person grants; leave it ou
   // read leaves the tools as they are (the invoker still says "not connected" if it is not).
   const person = input.person ? String(input.person).toLowerCase() : '';
   const atOwnAgent = !!person && person === String(input.addressee ?? '').toLowerCase();
-  const googleConnected = atOwnAgent && screenNames((id) => /^(gmail|drive|calendar)\./.test(id)) ? await remembered(`google-connected:${person}`, async () => {
-    const [mail, drive, cal] = await Promise.all((['google-gmail', 'google-drive', 'google-calendar'] as const).map((p) => connectorStatus(env as never, person as Address, p).then((x) => x.connected).catch(() => null)));
-    return { 'google-gmail': mail, 'google-drive': drive, 'google-calendar': cal } as Record<string, boolean | null>;
+  const googleConnected = atOwnAgent && screenNames((id) => /^(gmail|drive|calendar|contacts)\./.test(id)) ? await remembered(`google-connected:${person}`, async () => {
+    const [mail, drive, cal, book] = await Promise.all((['google-gmail', 'google-drive', 'google-calendar', 'google-contacts'] as const).map((p) => connectorStatus(env as never, person as Address, p).then((x) => x.connected).catch(() => null)));
+    return { 'google-gmail': mail, 'google-drive': drive, 'google-calendar': cal, 'google-contacts': book } as Record<string, boolean | null>;
   }).catch(() => null) : null;
-  const providerOf = (id: string): string | null => id.startsWith('gmail.') ? 'google-gmail' : id.startsWith('drive.') ? 'google-drive' : id.startsWith('calendar.') ? 'google-calendar' : null;
+  const providerOf = (id: string): string | null => id.startsWith('gmail.') ? 'google-gmail' : id.startsWith('drive.') ? 'google-drive' : id.startsWith('calendar.') ? 'google-calendar' : id.startsWith('contacts.') ? 'google-contacts' : null;
   const unlessConnected = (t: ToolSpec): ToolSpec => {
     const pv = providerOf(t.id);
     if (!pv || !googleConnected || googleConnected[pv] !== false) return t;
-    const name = pv === 'google-gmail' ? 'Gmail' : pv === 'google-drive' ? 'Google Drive' : 'Google Calendar';
+    const name = pv === 'google-gmail' ? 'Gmail' : pv === 'google-drive' ? 'Google Drive' : pv === 'google-contacts' ? 'Google Contacts' : 'Google Calendar';
     return { ...t, description: `NOT CONNECTED — ${name} is not connected for this person, so it holds nothing to find: never search it for what she refers to (her messages are in her Home inbox). Use it only if she names ${name}, to tell her to connect it. ${t.description}` };
   };
   const tools = [
@@ -5844,6 +5846,9 @@ step is then handed to that agent under authority the person grants; leave it ou
     // no act); a playbook that pins `person.friend.list` itself carries its contract.
     ...(playbook?.tools?.[FRIEND_LIST_TOOL.id] ? [mergeContractTool(FRIEND_LIST_TOOL, playbook.tools[FRIEND_LIST_TOOL.id])] : playbook?.tools?.[CONTACT_LIST_TOOL.id] ? [FRIEND_LIST_TOOL] : []),
     ...(playbook?.tools?.[PRESENCE_LIST_TOOL.id] ? [mergeContractTool(PRESENCE_LIST_TOOL, playbook.tools[PRESENCE_LIST_TOOL.id])] : playbook?.tools?.[CONTACT_LIST_TOOL.id] ? [PRESENCE_LIST_TOOL] : []),
+    // Google Contacts ride the friends invite: a playbook that offers contacts offers the address-book read
+    // (an observation for inviting; never stored as a friend).
+    ...CONTACTS_GOOGLE_TOOLS.flatMap((t) => (playbook?.tools?.[t.id] ? [unlessConnected(mergeContractTool(t, playbook.tools[t.id]!))] : playbook?.tools?.[CONTACT_LIST_TOOL.id] || playbook?.tools?.[FRIEND_LIST_TOOL.id] ? [unlessConnected(t)] : [])),
     ...(playbook?.tools?.[CONTACT_REMOVE_TOOL.id] ? [mergeContractTool(CONTACT_REMOVE_TOOL, playbook.tools[CONTACT_REMOVE_TOOL.id])] : []),
     // Spec 380 — one member of an organization, asked through their own agent (fan-out over the roster).
     MEMBER_CONSULT_TOOL,

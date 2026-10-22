@@ -17,8 +17,9 @@ import { Section, List, Row, Empty, ErrorNote, Note, Button, Chip, Mono, Meta, F
 const kindWords = (name: string | null): string => { const k = kindOfName(name); return k ? KIND_WORDS[k].one : 'unnamed'; };
 import { AgentName } from '../shared/AgentName';
 import { askCommand } from '../../home/ask-command';
-import { readContactsThroughHarness, readFriendsThroughHarness, CONTACT_ROLES, type ContactRole, type ContactRow, type FriendsView } from '../../home/contacts-harness';
+import { readContactsThroughHarness, readFriendsThroughHarness, readGoogleContactsThroughHarness, CONTACT_ROLES, type ContactRole, type ContactRow, type FriendsView, type GoogleContactRow } from '../../home/contacts-harness';
 import { searchAgentsKb } from '../../lib/agent-search';
+import { connectorClient } from './CalendarConnectCard';
 
 const ROLE_WORDS: Record<string, string> = { friend: 'friend', family: 'family', coach: 'coach', assistant: 'assistant', runtime: 'runtime', other: 'contact' };
 
@@ -43,6 +44,8 @@ export function ContactsPanel() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteNote, setInviteNote] = useState('');
   const [inviteState, setInviteState] = useState<{ busy: boolean; done?: string; error?: string }>({ busy: false });
+  const [book, setBook] = useState<{ connected: boolean; people: GoogleContactRow[]; error?: string; open?: boolean; q?: string }>({ connected: false, people: [] });
+  const [bookBusy, setBookBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!session || !agentAddress) return;
@@ -57,6 +60,25 @@ export function ContactsPanel() {
     if (r.ok) { setFriends({ friends: r.friends, requests: r.requests, requested: r.requested }); setFriendsErr(''); } else setFriendsErr(r.error);
   }, [session, agentAddress]);
   useEffect(() => { void loadFriends(); }, [loadFriends]);
+  const loadBook = useCallback(async (q?: string) => {
+    if (!session || !agentAddress) return;
+    setBookBusy(true);
+    const r = await readGoogleContactsThroughHarness({ person: agentAddress as Address, session: { token: session.token }, ...(q ? { query: q } : {}) });
+    if (r.ok) setBook((p) => ({ ...p, connected: true, people: r.people, error: undefined }));
+    else setBook((p) => ({ ...p, connected: r.connected === true, people: [], error: r.error }));
+    setBookBusy(false);
+  }, [session, agentAddress]);
+  useEffect(() => {
+    try {
+      const u = new URL(window.location.href);
+      if (u.searchParams.get('connector') !== 'contacts') return;
+      const e = u.searchParams.get('error');
+      if (e) setBook((p) => ({ ...p, error: `Google Contacts was not connected: ${e}` }));
+      else { setBook((p) => ({ ...p, open: true })); void loadBook(); }
+      u.searchParams.delete('connector'); u.searchParams.delete('error'); u.searchParams.delete('connected');
+      window.history.replaceState(null, '', u.toString());
+    } catch { /* ignore */ }
+  }, [loadBook]);
   useEffect(() => {
     if (!session) return;
     const auth = { authorization: `Bearer ${session.token}` };
@@ -168,6 +190,40 @@ export function ContactsPanel() {
           <input value={inviteNote} onChange={(e) => setInviteNote(e.target.value)} placeholder="a note (optional)" aria-label="Note" style={{ flex: '2 1 240px', minWidth: 0 }} />
           <Button variant="primary" onClick={() => void sendInvite()} disabled={inviteState.busy || !inviteEmail.trim()}>{inviteState.busy ? 'Sending…' : 'Invite'}</Button>
         </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 'var(--sp-2)' }}>
+          <Button size="sm" disabled={bookBusy || !session} onClick={() => {
+            if (book.connected || book.open) {
+              setBook((p) => ({ ...p, open: !p.open }));
+              if (!book.open && !book.people.length) void loadBook();
+              return;
+            }
+            void (async () => {
+              if (!session) return;
+              setBookBusy(true);
+              try {
+                const st = await connectorClient(session.token, 'contacts').status();
+                if (st.connected) { setBook((p) => ({ ...p, connected: true, open: true })); await loadBook(); }
+                else window.location.assign(await connectorClient(session.token, 'contacts').start(false, '/contacts'));
+              } catch (e) { setBook((p) => ({ ...p, error: e instanceof Error ? e.message : String(e) })); setBookBusy(false); }
+            })();
+          }}>{bookBusy ? 'Reading…' : book.open ? 'Hide Google contacts' : 'From Google contacts'}</Button>
+          <Meta>Picks an email for Invite. The book is not stored as friends.</Meta>
+        </div>
+        {book.open && (
+          <div style={{ marginTop: 'var(--sp-2)' }}>
+            <input value={book.q ?? ''} onChange={(e) => setBook((p) => ({ ...p, q: e.target.value }))} onKeyDown={(e) => { if (e.key === 'Enter') void loadBook(book.q); }} placeholder="filter by name or email" aria-label="Filter Google contacts" style={{ width: '100%', maxWidth: 360, marginBottom: 8 }} />
+            {book.error && <ErrorNote>{book.error}</ErrorNote>}
+            {!book.error && book.people.length === 0 && !bookBusy && <Empty title="No emails in that book.">Saved Google contacts with an address appear here.</Empty>}
+            {book.people.length > 0 && (
+              <List>
+                {book.people.filter((p) => { const q = (book.q ?? '').trim().toLowerCase(); return !q || p.email.includes(q) || (p.name ?? '').toLowerCase().includes(q); }).slice(0, 40).map((p) => (
+                  <Row key={p.email} title={p.name ?? p.email} meta={p.name ? p.email : undefined}
+                    side={<Button size="sm" onClick={() => { setInviteEmail(p.email); setInviteNote(p.name ? `for ${p.name}` : ''); }}>Use</Button>} />
+                ))}
+              </List>
+            )}
+          </div>
+        )}
         {inviteState.done && <Note>{inviteState.done}</Note>}
         {inviteState.error && <ErrorNote>{inviteState.error}</ErrorNote>}
         <Note>The mail goes out as you. The link lets them sign in or set up a home and add you as a friend; you then add them back. Nothing in the link grants anything.</Note>

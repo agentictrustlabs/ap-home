@@ -1,4 +1,4 @@
-// THE PERSON'S GOOGLE CREDENTIAL, READ ONLY HERE — shared by every Google connector (Calendar, Gmail, Drive; spec 400
+// THE PERSON'S GOOGLE CREDENTIAL, READ ONLY HERE — shared by every Google connector (Calendar, Gmail, Drive, Contacts; spec 400
 // §5.8 / 402 W2). One token per (provider, person) in `FED_TOKENS`, envelope-encrypted under her SA; refreshed with the
 // deployment's own client when near expiry; never returned to a caller — the connectors call the API and return data.
 import type { Address } from 'viem';

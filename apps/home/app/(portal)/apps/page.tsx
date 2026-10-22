@@ -17,7 +17,7 @@ import { List, Row, Chip, Note } from '../../../src/ui';
 import { Panel } from '../../../src/ui/panel';
 
 type Counts = { accounts: number | null; tools: number | null; signedIn: number | null; assistants: number | null; readers: number | null };
-const NAMES: ConnectorName[] = ['calendar', 'gmail', 'drive'];
+const NAMES: ConnectorName[] = ['calendar', 'gmail', 'drive', 'contacts'];
 
 export default function ConnectedOverviewPage() {
   const { session, agentAddress } = useSession();
@@ -43,7 +43,7 @@ export default function ConnectedOverviewPage() {
     <SectionShell title="Connected" description="What is connected to you — the accounts and tools your agent can use, and the apps and assistants you have let act as you.">
       <Panel title="What is connected to you" icon={<LinkIcon size={18} />} state="ready" testId="connected-overview">
         <List>
-          <Row href="/apps/accounts" title="Your accounts" meta="Google Calendar, Gmail, Google Drive, YouVersion — accounts of yours your agent may read through, and the one or two things each lets it do for you." side={<><UserIcon size={16} />{count(c.accounts, 'connected', 'connected')}</>} />
+          <Row href="/apps/accounts" title="Your accounts" meta="Google Calendar, Gmail, Google Drive, Google Contacts, YouVersion — accounts of yours your agent may read through, and the one or two things each lets it do for you." side={<><UserIcon size={16} />{count(c.accounts, 'connected', 'connected')}</>} />
           <Row href="/apps/tools" title="Tools" meta="Tool servers you attached — each tool becomes something your agent can do. Reads it does on its own; anything that changes something waits for your signature." side={<><CodeIcon size={16} />{count(c.tools, 'server', 'servers')}</>} />
           <Row href="/apps/signed-in" title="Apps you signed into" meta="Apps that used this home to sign you in. Signing in proves who you are to them; it gives them no standing access to your records." side={<><GlobeIcon size={16} />{count(c.signedIn, 'app', 'apps')}</>} />
           <Row href="/apps/assistants" title="Assistants" meta="Assistants (Claude, for one) you let put questions to your agent as you. They can ask; they can never sign." side={<><BotIcon size={16} />{count(c.assistants, 'assistant', 'assistants')}</>} />

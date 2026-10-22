@@ -49,3 +49,22 @@ export async function readFriendsThroughHarness(input: { person: Address; sessio
   }
   return { ok: false, error: out.detail ?? out.error ?? (reply?.kind === 'refused' ? reply.error : 'your friends could not be read') };
 }
+
+export interface GoogleContactRow { name: string | null; email: string }
+
+/** The person's Google address book (`contacts.connections.list`) — names and emails, never stored as friends. */
+export async function readGoogleContactsThroughHarness(input: { person: Address; session: { token: string }; query?: string }): Promise<{ ok: true; people: GoogleContactRow[]; connected: boolean } | { ok: false; error: string; connected?: boolean }> {
+  await ensureCsrfToken();
+  const out = await j(await fetch('/a2a/harness/ask', {
+    method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json', ...csrfHeaders() },
+    body: JSON.stringify({ session: input.session.token, addressee: input.person.toLowerCase(), message: 'who is in my google contacts', rowsOnly: true, plan: { steps: [{ toolId: 'contacts.connections.list', args: { ...(input.query ? { query: input.query } : {}), max: 200 } }] } }),
+  }));
+  const reply = out.reply;
+  if (reply?.kind === 'answer') {
+    const rows = (reply as { results?: Array<{ toolId: string; result: unknown }> }).results ?? [];
+    const found = rows.find((x) => x.toolId === 'contacts.connections.list')?.result as { people?: GoogleContactRow[]; refused?: string; connected?: boolean } | undefined;
+    if (found?.refused) return { ok: false, error: found.refused, connected: false };
+    return { ok: true, people: found?.people ?? [], connected: found?.connected !== false };
+  }
+  return { ok: false, error: out.detail ?? out.error ?? (reply?.kind === 'refused' ? reply.error : 'your Google contacts could not be read') };
+}
