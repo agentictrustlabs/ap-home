@@ -310,23 +310,17 @@ export const indexOnly = (list: LibraryEntry[]): LibraryEntry[] =>
   list.map((e) => (e.bytesB64 === undefined ? e : (({ bytesB64: _drop, ...rest }) => rest)(e)));
 
 export async function libraryWrite(deps: LibraryToolDeps, owner: string, toolId: string, args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2]): Promise<Record<string, unknown>> {
-  const t0 = Date.now();
   const release = deps.holdCatalog ? await deps.holdCatalog(owner) : null;
-  const held = Date.now();
   try {
     return await libraryWriteHeld(deps, owner, toolId, args, ctx);
   } finally {
-    const done = Date.now();
     await release?.().catch(() => undefined);
-    console.log(`[library-timing] ${toolId} hold=${held - t0}ms write=${done - held}ms release=${Date.now() - done}ms`);
   }
 }
 
 async function libraryWriteHeld(deps: LibraryToolDeps, owner: string, toolId: string, args: Record<string, unknown>, ctx: Parameters<ToolInvoker>[2]): Promise<Record<string, unknown>> {
   if (!deps.writeSubjectRecord) throw new Error('this agent cannot write its Library (the private tier is not configured)');
-  const r0 = Date.now();
   const list = await rawCatalogOf(deps, owner);
-  console.log(`[library-timing] catalog-read=${Date.now() - r0}ms entries=${list.length} bytes=${JSON.stringify(list).length}`);
   // THE INDEX IS AN INDEX (the Home's rule, server/connect/library.ts `persistIndexOnly`): a document's bytes live in
   // its own record, `content.artifact.<id>`, and the catalog carries only what a listing needs. This writer used to put
   // every document's bytes back into the catalog, so each read and save of ANY document moved the whole Library through
@@ -348,16 +342,13 @@ async function libraryWriteHeld(deps: LibraryToolDeps, owner: string, toolId: st
       if (!idx.ok) throw new Error(idx.error ?? 'the Library index could not be written');
       return;
     }
-    const w0 = Date.now();
     for (let i = 0; i < carrying.length; i += RECORD_WRITE_CONCURRENCY) {
       await Promise.all(carrying.slice(i, i + RECORD_WRITE_CONCURRENCY).map(async (e) => {
         const rec = await deps.writeSubjectRecord!(owner, `content.artifact.${e.id}`, recordOf(e), ctx.operationId);
         if (!rec.ok) throw new Error(rec.error ?? `the record of ${pathOf(e)} could not be written`);
       }));
     }
-    const w1 = Date.now();
     const wrote = await deps.writeSubjectRecord!(owner, 'content.catalog', indexOnly(next), ctx.operationId);
-    console.log(`[library-timing] records=${carrying.length} in ${w1 - w0}ms, index-write=${Date.now() - w1}ms`);
     if (!wrote.ok) throw new Error(wrote.error ?? 'the Library index could not be written');
   };
   const find = (): LibraryEntry => {
