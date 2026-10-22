@@ -22,7 +22,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { givePermission, createOrganization, createGovernedWorkspace, personGrantForOrgCreate, authorizeContentSigningForOwner,
   authorizeServiceAgentWire, activateVaultIfNeeded, activateInboxDeliveryIfNeeded, activateInteractionsIfNeeded,
-  isKmsVia, resolveVia, publishSocialConnectionKindIfNeeded, signHashFor, type Via, type Auth } from '../../home/onboarding';
+  isKmsVia, resolveVia, publishSocialConnectionKindIfNeeded, signHashFor, type Via, type Auth, homeBearerToken } from '../../home/onboarding';
+import { ensurePlaybook } from '../../home/ensure-playbook';
 import { issueAskAsMeDelegation, issueOrganizationResourceAccessDelegation, issueSiteDelegation, issueWorkspaceMembershipAccessDelegation, ORG_INTERACTIONS_SESSION_LEAF_TTL_SECONDS, toWire, type DelegationWire } from '../../lib/delegation';
 import { offerRelationshipCredential, relationshipOfferOf, resolveWorkspaceGovernor, type RelationshipOfferV1 } from '../../lib/workspace-governor';
 import { roleSlugOf } from '../../lib/org-role';
@@ -821,6 +822,18 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           const signAsk = await signHashFor(viaLower as Via, home.address, auth);
           askWire = toWire(await issueAskAsMeDelegation(home.address, relyingApp.ask_delegate, signAsk));
           lapCeremony('ask-as-me wire minted in the sign-in');
+          // ONE STEP, NOT TWO (hard-problems §5 of the reader): an app that will ask this person's agent as them
+          // needs the agent to OFFER the domain's contracts — a Home born before playbooks, or one whose assignment
+          // went stale, runs bare and refuses the app's first ask as `unknown_tool` with nothing to explain it.
+          // The same self-heal the portal runs on open runs here, under the person's own session, before the app
+          // gets its code. Best-effort and bounded: behaviour grants nothing, and a registry that cannot be
+          // reached must not fail a sign-in.
+          const healToken = homeBearerToken(auth);
+          if (healToken) {
+            setGrantProgress({ step: 2, total: 3, label: 'Making sure your agent knows this app\'s behaviour…' });
+            await Promise.race([ensurePlaybook(home.address, healToken), new Promise<void>((r) => setTimeout(r, 12_000))]).catch((e: unknown) => console.warn('[enroll] playbook heal skipped:', e));
+            lapCeremony('playbook ensured');
+          }
         }
         setGrantProgress({ step: 2, total: 3, label: 'Confirming it on the chain…' });
         try {

@@ -70,7 +70,7 @@ function storedSessionToken(auth?: Auth): string | null {
  *  session gate verify. NEVER the custody-session `auth.token`: for the phone/email family that is
  *  a demo-a2a custody token with a different audience, and home-gated endpoints 401 on it (the
  *  org-create #general + relationships writes failed exactly this way for phone homes). */
-function homeBearerToken(auth?: Auth): string | null {
+export function homeBearerToken(auth?: Auth): string | null {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
     const t = raw ? (JSON.parse(raw) as { token?: string }).token : undefined;
