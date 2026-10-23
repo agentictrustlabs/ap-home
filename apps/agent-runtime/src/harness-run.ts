@@ -1090,6 +1090,8 @@ export interface HarnessDeps {
   declareTrigger?: (agent: string, row: TriggerScheduleV1) => Promise<TriggerScheduleV1>;
   removeTrigger?: (agent: string, triggerId: string) => Promise<void>;
   /** Send a direct message through the sender's own interactions plane. */
+  /** Spec 401 — a contact notice in the contact's own vault (contacts.ts `deliverContactNotice`). */
+  deliverContactNotice?: (input: { sender: Address; recipient: Address; grantDigest: string }) => Promise<{ ok: boolean; error?: string }>;
   sendDirectMessage?: (input: {
     sender: Address; recipient: Address; bodyText: string; session: string;
     /** Spec 400 W1 / 375 W2 — the sender is an agent the session's person STEWARDS (an outside runtime's reply, an
@@ -2412,6 +2414,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
         ...(deps.nameOf ? { nameOf: deps.nameOf } : {}),
         ...(deps.agentTypeOf ? { agentTypeOf: deps.agentTypeOf } : {}),
         ...(deps.sendDirectMessage ? { sendDirectMessage: deps.sendDirectMessage } : {}),
+        ...(deps.deliverContactNotice ? { deliverContactNotice: deps.deliverContactNotice } : {}),
         ...(deps.executeAsServiceSa ? { executeAsServiceSa: deps.executeAsServiceSa } : {}),
         digestBindingArgsFor, stepDigests,
       };

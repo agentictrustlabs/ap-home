@@ -75,3 +75,27 @@ describe('person.contact.list / remove', () => {
     expect(CONTACT_RESOURCE_SCOPE).toBe('vault:profile.contact');
   });
 });
+
+describe('the friend notice (spec 401) — not a message, so no messaging wire is needed', () => {
+  it('a new person contact gets a notice even when the message cannot go; adding them again re-sends it', async () => {
+    const CARA = '0x00000000000000000000000000000000000000c3' as Address;
+    const notices: Array<{ sender: string; recipient: string; grantDigest: string }> = [];
+    const d = deps({
+      agentTypeOf: async (a) => (a === CARA ? 'person' : null),
+      sendDirectMessage: async () => ({ ok: false, error: 'messaging is not enabled on your home yet' }),
+      deliverContactNotice: async (n) => { notices.push(n); return { ok: true }; },
+    });
+    const inv = contactInviteInvoker(d, wire(ALICE), ALICE, 'sess');
+    const asked = await inv('person.contact.invite', { contact: CARA }, ctx()).catch((e: unknown) => e);
+    const digest = String((asked as { request?: { digest?: string }; digest?: string }).request?.digest ?? (asked as { digest?: string }).digest);
+    const out = (await inv('person.contact.invite', { contact: CARA }, ctx([{ stepRef: 's0', signature: { digest, signature: '0xgrant' } }]))) as { added: boolean; told: { ok: boolean }; noticed?: { ok: boolean }; grantDigest: string };
+    expect(out.added).toBe(true);
+    expect(out.told.ok).toBe(false);
+    expect(out.noticed).toEqual({ ok: true });
+    expect(notices).toEqual([{ sender: ALICE, recipient: CARA, grantDigest: out.grantDigest }]);
+    const again = (await inv('person.contact.invite', { contact: CARA }, ctx())) as { alreadyContact: boolean; noticed?: { ok: boolean } };
+    expect(again.alreadyContact).toBe(true);
+    expect(again.noticed).toEqual({ ok: true });
+    expect(notices).toHaveLength(2);
+  });
+});

@@ -98,6 +98,7 @@ import { handleEndeavorOp, reduceEventLog, coordinationEventsResource, COORDINAT
 import type { CoordinationEventV1 } from '@agenticprimitives/coordination';
 import { ERC1271_MAGIC_VALUE as ERC1271_MAGIC } from '@agenticprimitives/types';
 import { vaultServerId } from './vault-server-id.js';
+import { CONTACT_NOTICES_CAP, type ContactNoticeV1 } from './contacts.js';
 
 const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'bytes4' }] }] as const;
 const IS_REVOKED_ABI = [{ type: 'function', name: 'isRevoked', stateMutability: 'view', inputs: [{ name: 'delegationHash', type: 'bytes32' }], outputs: [{ name: 'revoked', type: 'bool' }] }] as const;
@@ -367,6 +368,8 @@ export const REQUIRED_SCOPES = ['vault:conversation.index', 'vault:conversation.
 // 1-1 inbox residency (spec 322 W3f): the DELIVERY grant is WRITE-ONLY — every inbox.data READ and
 // dm-body READ rides the interactions grant THROUGH this DO (single writer, single reader path).
 const INBOX_RESOURCE = 'inbox.data';
+/** The object's copy of the inbox record's contact notices, put back when a whole-doc write leaves them out. */
+const CONTACT_NOTICES_KEY = 'contact-notices';
 /** The token handed to the mounted gateway's cold path. The gateway is constructed around ONE grant, so
  *  there is no second delegation this could select and nothing for it to carry — it exists because
  *  `verifyToken(token)` is the gateway's cold-path shape, and naming it is better than passing `''`. */
@@ -2240,7 +2243,7 @@ export class InteractionsDO {
     // envelope as the custody bridge); the a2a messaging skills merge deliveries here in-Worker
     // (`internal.deliver` — the public route refuses `internal.*`, so only Worker code reaches it).
     // The standing DELIVERY grant is write-only: it can no longer read anyone's mail.
-    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'inbox.body.getMany' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.channels.create' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.coordination.lease' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.member.recorded' || op === 'internal.member.role' || op === 'internal.member.setRole' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'internal.wire.current' || op === 'internal.op.lookup' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.getMany' || op === 'content.put' || op === 'issuer.facet.put') {
+    if (op === 'inbox.get' || op === 'gateway.inbox.get' || op === 'inbox.put' || op === 'inbox.body.get' || op === 'inbox.body.getMany' || op === 'internal.deliver' || op === 'internal.dm.body.put' || op === 'internal.channels.read' || op === 'internal.channels.post' || op === 'internal.channels.create' || op === 'internal.assistantSkill.get' || op === 'internal.invite.decline' || op === 'internal.library.skillMd' || op === 'internal.coordination.vaultRead' || op === 'internal.coordination.vaultWrite' || op === 'internal.coordination.lease' || op === 'internal.readgrant.list' || op === 'internal.readgrant.wire' || op === 'internal.studygrant.wire' || op === 'internal.profile.merge' || op === 'internal.household.record' || op === 'internal.contact.notice' || op === 'internal.email.admit' || op === 'internal.coordination.vaultSurvey' || op === 'internal.coordination.vaultQuery' || op === 'internal.inbox.read' || op === 'internal.inbox.post' || op === 'internal.consult.context' || op === 'internal.consult.eligible' || op === 'internal.consult.orgWire' || op === 'internal.session.leaf' || op === 'internal.consult.grant' || op === 'internal.member.current' || op === 'internal.member.recorded' || op === 'internal.member.role' || op === 'internal.member.setRole' || op === 'internal.archetype.grant' || op === 'internal.archetype.hosts' || op === 'internal.library.packages' || op === 'internal.endeavor.request' || op === 'internal.endeavor.proposePlan' || op === 'internal.endeavor.state' || op === 'internal.endeavor.create' || op === 'internal.endeavor.adoptPlan' || op === 'internal.endeavor.satisfyStep' || op === 'internal.endeavor.satisfy' || op === 'internal.endeavor.post' || op === 'internal.applications.append' || op === 'internal.resolution.request' || op === 'internal.resolution.settle' || op === 'internal.resolution.grant' || op === 'internal.resolution.approve' || op === 'internal.resolution.revoke' || op === 'internal.resolution.status' || op === 'internal.resolution.project' || op === 'internal.runtime.wake.put' || op === 'internal.runtime.pairing.claim' || op === 'internal.runtime.pairing.take' || op === 'internal.search.query' || op === 'internal.grants.audit' || op === 'internal.grant.byDigest' || op === 'internal.wire.current' || op === 'internal.op.lookup' || op === 'controlevents.append' || op === 'dm.body.put' || op === 'invite.get' || op === 'invite.put' || op === 'applications.get' || op === 'applications.put' || op === 'content.get' || op === 'content.getMany' || op === 'content.put' || op === 'issuer.facet.put') {
       // Owner-facing residency ops accept the OWNER's session OR the bridge (spec 323 W4 — a portable
       // Home needs no secret). invite.* are substrate steward/redeem flows → bridge only. internal.*
       // are in-Worker (a2a deliver skill / spec 327 assistant pipeline) → no external gate.
@@ -2380,6 +2383,16 @@ export class InteractionsDO {
         }
         if (op === 'inbox.put') {
           if (body.doc === undefined) return json({ error: 'doc required' }, 400);
+          // The contact notices ride in this record but are not the messaging library's: a whole-doc write that
+          // never knew them must not drop them, so the object's own copy (internal.contact.notice) goes back in.
+          const putDoc = body.doc as Record<string, unknown> | null;
+          if (putDoc && typeof putDoc === 'object') {
+            if (Array.isArray(putDoc.contactNotices)) await this.state.storage.put(CONTACT_NOTICES_KEY, putDoc.contactNotices);
+            else {
+              const kept = (await this.state.storage.get(CONTACT_NOTICES_KEY)) as ContactNoticeV1[] | undefined;
+              if (kept?.length) putDoc.contactNotices = kept;
+            }
+          }
           await this.writeDoc(g, INBOX_RESOURCE, body.doc);
           // spec 328 §3 — post-commit assistant scan (the HOME ingress: the two-party send/deliver
           // orchestration lands here as a whole-doc write). Fire-and-forget; the seen-ledger diff
@@ -2609,6 +2622,25 @@ export class InteractionsDO {
         //
         // IT GRANTS NOTHING. A `guardian` role here does not let anyone act for a dependent; that is a
         // delegation the dependent's custodian issues. No gate reads this record.
+        if (op === 'internal.contact.notice') {
+          // spec 401 — someone added this person as a contact: the notice beside their signed grant (contacts.ts).
+          // In-Worker only (the marker above); it holds who and the grant's digest, never words — so it cannot carry a
+          // message past the messaging wire. One per sender, the newest; a cap on the whole.
+          const from = String(body.from ?? '').trim().toLowerCase();
+          const grantDigest = String(body.grantDigest ?? '').trim();
+          if (!/^0x[0-9a-f]{40}$/.test(from) || from === principal) return json({ ok: false, error: 'from must be another agent address' }, 400);
+          if (!/^0x[0-9a-fA-F]{64}$/.test(grantDigest)) return json({ ok: false, error: 'a contact notice names the grant it announces' }, 400);
+          if (!g) return json({ ok: false, needsEnable: true, error: 'interactions storage not enabled' });
+          return this.serialize(async () => { // the inbox's single-writer merge (ARCH-H1)
+            const doc = (await this.readDoc<Record<string, unknown>>(g, INBOX_RESOURCE, null as never)) ?? { version: 1, envelopes: [], events: [], draftCases: [], caseEvents: [], cards: {} };
+            const prior = Array.isArray(doc.contactNotices) ? (doc.contactNotices as ContactNoticeV1[]) : [];
+            const notices = [...prior.filter((n) => n.from !== from), { from, at: new Date().toISOString(), grantDigest }].slice(-CONTACT_NOTICES_CAP);
+            doc.contactNotices = notices;
+            await this.writeDoc(g, INBOX_RESOURCE, doc);
+            await this.state.storage.put(CONTACT_NOTICES_KEY, notices);
+            return json({ ok: true });
+          });
+        }
         if (op === 'internal.household.record') {
           const member = String(body.member ?? '').trim().toLowerCase();
           if (!/^0x[0-9a-f]{40}$/.test(member)) return json({ ok: false, error: 'member must be an agent address' }, 400);

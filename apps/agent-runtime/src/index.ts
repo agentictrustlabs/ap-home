@@ -6650,6 +6650,10 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       if (res.ok && out.ok !== false) return { ok: true as const, ...(out.messageId ? { messageId: out.messageId } : {}) };
       return { ok: false as const, error: out.error ?? `the post could not be made (${res.status})` };
     },
+    deliverContactNotice: async ({ sender, recipient, grantDigest }) => {
+      const out = (await callInteractionsInternal(env, recipient, 'internal.contact.notice', { from: sender.toLowerCase(), grantDigest }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))) as { ok?: boolean; error?: string };
+      return out.ok ? { ok: true } : { ok: false, error: out.error ?? 'the notice was not delivered' };
+    },
     sendDirectMessage: async ({ sender, recipient, bodyText, session, contextRefs, stewardship, asSelf, operationId }) => {
       const stub = env.INTERACTIONS.get(env.INTERACTIONS.idFromName(sender.toLowerCase()));
       // Spec 400 W2a — the agent's OWN rail driven in-Worker after the harness verified a chain rooted at it: the

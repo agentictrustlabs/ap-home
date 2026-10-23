@@ -63,3 +63,24 @@ describe('person.friend.list', () => {
     expect((await friendListInvoker(deps(), undefined)('person.friend.list', {}, ctx())) as { refused?: string }).toHaveProperty('refused');
   });
 });
+
+describe('contact notices (no messaging wire needed)', () => {
+  it('a notice is a request, and makes a friend of someone I added; one per sender, the newest', async () => {
+    const ZED = '0x00000000000000000000000000000000000000a9' as Address;
+    const local = new Map(store);
+    local.set('inbox.data', {
+      ...(store.get('inbox.data') as object),
+      contactNotices: [
+        { from: DAN, at: '2026-10-23T08:00:00.000Z', grantDigest: '0x' + '1'.repeat(64) }, // Dan added me back
+        { from: ZED, at: '2026-10-23T09:00:00.000Z', grantDigest: '0x' + '2'.repeat(64) }, // a stranger asks
+      ],
+    });
+    const d = { ...deps(), readSubjectRecord: async (s: string, t: string) => (s === ALICE ? local.get(t) ?? null : null) };
+    const out = (await friendListInvoker(d, ALICE)('person.friend.list', {}, ctx())) as {
+      friends: Array<{ agent: string }>; requests: Array<{ agent: string }>; requested: Array<{ agent: string }>;
+    };
+    expect(out.friends.map((f) => f.agent)).toContain(DAN);
+    expect(out.requested).toEqual([]);
+    expect(out.requests.map((r) => r.agent)).toEqual([ZED, '0x00000000000000000000000000000000000000f1']);
+  });
+});

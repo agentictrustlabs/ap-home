@@ -98,6 +98,30 @@ export interface ContactRecordV1 {
 }
 
 export const CONTACT_RECORD_PREFIX = 'contact:';
+/** Who added this person as a contact, told in their own vault (spec 401) — a notice the Home delivers beside the
+ *  signed contact grant, so a friend request reaches someone the sender has no messaging wire to. Kept in the inbox
+ *  record (`contactNotices`, beside the envelopes — never one of them), which every interactions grant already covers:
+ *  a new record type would mark every grant stale. Not a message: no text, no conversation; one per sender, capped. */
+export const CONTACT_NOTICES_CAP = 200;
+export interface ContactNoticeV1 { from: string; at: string; grantDigest: string }
+
+/** Everyone who added `me` back (or first), newest time per sender: the inbox's `contact` references and the
+ *  contact notices — both the person's own evidence; nobody's roster is read but theirs. */
+export async function whoAddedMe(deps: Pick<ContactDeps, 'readSubjectRecord'>, me: string): Promise<Map<string, string | null>> {
+  const addedMe = new Map<string, string | null>();
+  const note = (who: string, at: string | null) => {
+    if (!who || who === me) return;
+    const prev = addedMe.get(who);
+    if (prev === undefined || (at && (!prev || prev < at))) addedMe.set(who, at);
+  };
+  const inbox = (await deps.readSubjectRecord?.(me, 'inbox.data').catch(() => null)) as { envelopes?: Array<{ from?: string; createdAt?: string; contextRefs?: Array<{ kind: string; id: string }> }>; contactNotices?: ContactNoticeV1[] } | null;
+  for (const e of inbox?.envelopes ?? []) {
+    if (!(e.contextRefs ?? []).some((r) => r.kind === 'contact' && r.id.toLowerCase() === me)) continue;
+    note((String(e.from ?? '').match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase(), typeof e.createdAt === 'string' ? e.createdAt : null);
+  }
+  for (const n of inbox?.contactNotices ?? []) note(String(n.from ?? '').toLowerCase(), typeof n.at === 'string' ? n.at : null);
+  return addedMe;
+}
 export const contactRecordType = (contact: string): string => `${CONTACT_RECORD_PREFIX}${contact.toLowerCase()}`;
 
 export interface ContactDeps {
@@ -111,6 +135,8 @@ export interface ContactDeps {
   nameOf?: (address: string) => Promise<string | null>;
   agentTypeOf?: (address: string) => Promise<string | null>;
   sendDirectMessage?: (input: { sender: Address; recipient: Address; bodyText: string; session: string; contextRefs?: Array<{ kind: string; id: string; label?: string }> }) => Promise<{ ok: boolean; error?: string; messageId?: string }>;
+  /** Put a contact notice in the contact's own vault (their DO, in-Worker): who added them, and the grant that did. */
+  deliverContactNotice?: (input: { sender: Address; recipient: Address; grantDigest: string }) => Promise<{ ok: boolean; error?: string }>;
   /** The person's SA executes a call under their redeemed mandate (the revoke) — the same path access.grant.revoke uses. */
   executeAsServiceSa?: (serviceSa: Address, callData: Hex) => Promise<{ txHash: string }>;
   /** The mandate's digest-binding caveat argued for THIS step (the harness's own helper, injected). */
@@ -153,7 +179,11 @@ export function contactInviteInvoker(deps: ContactDeps, presented: MandatePresen
     const me = person.toLowerCase();
     const existing = (await deps.readSubjectRecord(me, contactRecordType(contact)).catch(() => null)) as ContactRecordV1 | null;
     if (existing?.type === 'ap.contact.v1' && existing.status === 'contact') {
-      return { added: false, contact, role: existing.role, alreadyContact: true, grantDigest: existing.grantDigest, note: 'already among your contacts — nothing changed' };
+      // Telling them again is harmless and heals a request that never reached them (added before notices existed).
+      const noticed = kind === 'person' && deps.deliverContactNotice && existing.grantDigest
+        ? await deps.deliverContactNotice({ sender: person, recipient: contact, grantDigest: existing.grantDigest }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
+        : undefined;
+      return { added: false, contact, role: existing.role, alreadyContact: true, grantDigest: existing.grantDigest, ...(noticed ? { noticed } : {}), note: 'already among your contacts — nothing changed' };
     }
     // the grant, signed by the person (the second prompt of a two-prompt path in C1; the one-prompt fold is C2's)
     const digest = intentDigest(ctx.intent);
@@ -169,10 +199,7 @@ export function contactInviteInvoker(deps: ContactDeps, presented: MandatePresen
     }
     const delegation: DelegationWireV1 = { ...grant, salt: salt.toString(), signature: signed.signature as Hex };
     let mutual: boolean | undefined;
-    if (kind === 'person') {
-      const inbox = (await deps.readSubjectRecord(me, 'inbox.data').catch(() => null)) as { envelopes?: Array<{ from?: string; contextRefs?: Array<{ kind: string; id: string }> }> } | null;
-      mutual = (inbox?.envelopes ?? []).some((e) => (String(e.from ?? '').match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase() === contact && (e.contextRefs ?? []).some((r) => r.kind === 'contact' && r.id.toLowerCase() === me));
-    }
+    if (kind === 'person') mutual = (await whoAddedMe(deps, me)).has(contact);
     const record: ContactRecordV1 = { type: 'ap.contact.v1', contact, role, delegation, grantDigest, status: 'contact', createdAt: Date.now(), ...(mutual !== undefined ? { mutual } : {}) };
     const wrote = await deps.writeSubjectRecord(me, contactRecordType(contact), record, ctx.operationId);
     if (!wrote.ok) throw new Error(`the contact could not be recorded: ${wrote.error ?? 'write refused'}`);
@@ -182,7 +209,12 @@ export function contactInviteInvoker(deps: ContactDeps, presented: MandatePresen
     if (session && deps.sendDirectMessage) {
       told = await deps.sendDirectMessage({ sender: person, recipient: contact, bodyText: kind === 'person' ? `I've added you to my contacts as ${role}. Add me back and we're mutual.` : `You're now in my contacts as ${role}.`, session, contextRefs: [{ kind: 'contact', id: me, label: 'Add back' }] }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
     }
-    return { added: true, contact, role, grantDigest, delegation, told, kind: kind ?? 'unknown', ...(mutual !== undefined ? { mutual } : {}), note: kind === 'person' ? (mutual ? 'recorded in your contacts — mutual: they had already added you' : 'recorded in your contacts; mutual once they add you back') : 'recorded in your contacts' };
+    // THE NOTICE (spec 401): the friend request itself — delivered whether or not the message could be; the message
+    // needs a messaging wire to this contact, which a new friend never has.
+    const noticed = kind === 'person' && deps.deliverContactNotice
+      ? await deps.deliverContactNotice({ sender: person, recipient: contact, grantDigest }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
+      : undefined;
+    return { added: true, contact, role, grantDigest, delegation, told, ...(noticed ? { noticed } : {}), kind: kind ?? 'unknown', ...(mutual !== undefined ? { mutual } : {}), note: kind === 'person' ? (mutual ? 'recorded in your contacts — mutual: they had already added you' : 'recorded in your contacts; mutual once they add you back') : 'recorded in your contacts' };
   };
 }
 
@@ -202,8 +234,7 @@ export function contactListInvoker(deps: ContactDeps, person: Address | undefine
     }
     // MUTUAL, from evidence in the person's OWN vault: a person contact who added them back sent a message carrying a
     // `contact` reference (the invoker below tells the contact that way). Nobody reads another's contact list.
-    const inbox = (await deps.readSubjectRecord?.(me, 'inbox.data').catch(() => null)) as { envelopes?: Array<{ from?: string; contextRefs?: Array<{ kind: string; id: string }> }> } | null;
-    const addedMeBack = new Set((inbox?.envelopes ?? []).filter((e) => (e.contextRefs ?? []).some((r) => r.kind === 'contact' && r.id.toLowerCase() === me)).map((e) => (String(e.from ?? '').match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase()));
+    const addedMeBack = await whoAddedMe(deps, me);
     for (const c of contacts) if (c.mutual === false && addedMeBack.has(c.contact.toLowerCase())) c.mutual = true;
     const current = contacts.filter((c) => c.status === 'contact');
     return { count: current.length, contacts: current, removed: contacts.length - current.length, interpretation: `read the person's own contacts (${contacts.length} record(s))`, note: current.length ? 'Your contacts, from your own records; the role is declarative — the grant is what each may read.' : 'No contacts yet — "add bob.me as a contact".' };

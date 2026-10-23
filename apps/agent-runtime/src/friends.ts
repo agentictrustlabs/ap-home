@@ -5,7 +5,7 @@
 // were not added back; `requested` are people the person added who have not added them back. A state, not an act:
 // accepting is `person.contact.invite` back, declining is doing nothing. No grant, no record, no public listing.
 import type { ToolInvoker, ToolSpec } from '@agenticprimitives/orchestration';
-import { CONTACT_RECORD_PREFIX, type ContactDeps, type ContactRecordV1 } from './contacts.js';
+import { CONTACT_RECORD_PREFIX, whoAddedMe, type ContactDeps, type ContactRecordV1 } from './contacts.js';
 
 /** What the friends view reads: the person's own records and names — a route can build this without the act deps. */
 export type FriendsDeps = Pick<ContactDeps, 'survey' | 'readRecords' | 'readSubjectRecord' | 'nameOf'>;
@@ -27,12 +27,10 @@ export const FRIEND_LIST_TOOL: ToolSpec = {
   establishes: 'lookup',
 };
 
-interface Envelope { from?: string; createdAt?: string; contextRefs?: Array<{ kind: string; id: string }> }
 
 export interface FriendRow { agent: string; name: string | null; since: string }
 export interface FriendRequestRow { agent: string; name: string | null; at: string | null }
 
-const addressOf = (from: unknown): string => (String(from ?? '').match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? '').toLowerCase();
 
 /** The friends view itself — shared with presence (presence.ts), which is what friends see of each other. */
 export async function friendsOf(deps: FriendsDeps, person: string): Promise<{ friends: FriendRow[]; requests: FriendRequestRow[]; requested: FriendRow[]; records: number }> {
@@ -40,17 +38,8 @@ export async function friendsOf(deps: FriendsDeps, person: string): Promise<{ fr
   const me = person.toLowerCase();
   const keys = (await deps.survey(me).catch(() => [])).map((r) => r.recordType).filter((rt) => rt.startsWith(CONTACT_RECORD_PREFIX)).slice(0, 200);
   const bodies: Record<string, unknown> = keys.length ? await deps.readRecords(me, keys).catch(() => ({} as Record<string, unknown>)) : {};
-  // THE OTHER HALF: who added me, from my own inbox — the newest `contact` reference naming me, per sender.
-  const inbox = (await deps.readSubjectRecord?.(me, 'inbox.data').catch(() => null)) as { envelopes?: Envelope[] } | null;
-  const addedMe = new Map<string, string | null>();
-  for (const e of inbox?.envelopes ?? []) {
-    if (!(e.contextRefs ?? []).some((r) => r.kind === 'contact' && r.id.toLowerCase() === me)) continue;
-    const who = addressOf(e.from);
-    if (!who || who === me) continue;
-    const at = typeof e.createdAt === 'string' ? e.createdAt : null;
-    const prev = addedMe.get(who);
-    if (prev === undefined || (at && (!prev || prev < at))) addedMe.set(who, at);
-  }
+  // THE OTHER HALF: who added me — my inbox's `contact` references and the contact notices, both in my own vault.
+  const addedMe = await whoAddedMe(deps, me);
   const nameOf = async (a: string) => (deps.nameOf ? await deps.nameOf(a as `0x${string}`).catch(() => null) : null);
   const friends: FriendRow[] = [];
   const requested: FriendRow[] = [];
