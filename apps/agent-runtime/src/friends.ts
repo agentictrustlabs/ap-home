@@ -5,12 +5,15 @@
 // were not added back; `requested` are people the person added who have not added them back. A state, not an act:
 // accepting is `person.contact.invite` back, declining is doing nothing. No grant, no record, no public listing.
 import type { ToolInvoker, ToolSpec } from '@agenticprimitives/orchestration';
-import { CONTACT_RECORD_PREFIX, whoAddedMe, type ContactDeps, type ContactRecordV1 } from './contacts.js';
+import { CONTACT_RECORD_PREFIX, contactRecordType, whoAddedMe, type ContactDeps, type ContactRecordV1 } from './contacts.js';
 
 /** What the friends view reads: the person's own records and names — a route can build this without the act deps. */
 export type FriendsDeps = Pick<ContactDeps, 'survey' | 'readRecords' | 'readSubjectRecord' | 'nameOf'>;
 
 export const FRIEND_LIST_CAPABILITY = 'person.friend.list' as const;
+
+/** How many waiting contacts a friends read checks for the other half (one record read each). */
+const REQUESTED_CHECK_MAX = 50;
 
 /** The roles that make a mutual contact a friend — the rest (coach, runtime, assistant, other) are one-way by nature. */
 const FRIEND_ROLES: ReadonlySet<string> = new Set(['friend', 'family']);
@@ -53,6 +56,16 @@ export async function friendsOf(deps: FriendsDeps, person: string): Promise<{ fr
     const row: FriendRow = { agent: contact, name: await nameOf(contact), since: new Date(rec.createdAt).toISOString() };
     if (rec.mutual === true || addedMe.has(contact)) friends.push(row);
     else requested.push(row);
+  }
+  // THE OTHER HALF, ALREADY SIGNED: someone I added who added me too — their own contact record naming me — is a
+  // friend even when their notice never reached me (added before notices existed, or lost). One record of theirs per
+  // waiting contact, the one that answers "did they add me"; bounded.
+  if (requested.length) {
+    const back = await Promise.all(requested.slice(0, REQUESTED_CHECK_MAX).map(async (r) => {
+      const theirs = (await deps.readSubjectRecord?.(r.agent, contactRecordType(me)).catch(() => null)) as ContactRecordV1 | null;
+      return theirs?.type === 'ap.contact.v1' && theirs.status === 'contact';
+    }));
+    for (let i = back.length - 1; i >= 0; i--) if (back[i]) friends.push(...requested.splice(i, 1));
   }
   const requests: FriendRequestRow[] = [];
   for (const [agent, at] of addedMe) if (!known.has(agent)) requests.push({ agent, name: await nameOf(agent), at });

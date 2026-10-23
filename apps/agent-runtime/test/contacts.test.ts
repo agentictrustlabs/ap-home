@@ -112,3 +112,21 @@ describe('the friend notice (spec 401) — not a message, so no messaging wire i
     expect(notices).toEqual([DEE]);
   });
 });
+
+describe('the other half, already signed', () => {
+  it('adding someone who had added you first brings their notice too', async () => {
+    const FAY = '0x00000000000000000000000000000000000000f7' as Address;
+    const notices: Array<{ sender: string; recipient: string }> = [];
+    const faysRecord = { type: 'ap.contact.v1', contact: ALICE, role: 'friend', status: 'contact', grantDigest: '0x' + '9'.repeat(64), createdAt: 1 };
+    const d = deps({
+      agentTypeOf: async () => null,
+      readSubjectRecord: async (s, t) => (s === ALICE ? store.get(t) ?? null : s === FAY && t === contactRecordType(ALICE) ? faysRecord : null),
+      deliverContactNotice: async (n) => { notices.push({ sender: n.sender, recipient: n.recipient }); return { ok: true }; },
+    });
+    const inv = contactInviteInvoker(d, wire(ALICE), ALICE, 'sess');
+    const asked = await inv('person.contact.invite', { contact: FAY }, ctx()).catch((e: unknown) => e);
+    const digest = String((asked as { request?: { digest?: string }; digest?: string }).request?.digest ?? (asked as { digest?: string }).digest);
+    await inv('person.contact.invite', { contact: FAY }, ctx([{ stepRef: 's0', signature: { digest, signature: '0xgrant' } }]));
+    expect(notices).toEqual([{ sender: ALICE, recipient: FAY }, { sender: FAY, recipient: ALICE }]);
+  });
+});

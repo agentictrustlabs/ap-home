@@ -109,6 +109,17 @@ export interface ContactNoticeV1 { from: string; at: string; grantDigest: string
  *  an organization or a service never reads is harmless, a request a person never gets is the bug. */
 const mayBePerson = (kind: string | null): boolean => kind === null || kind === 'person';
 
+/** THE OTHER HALF, ALREADY SIGNED: when the person just added had added this person first (their own contact record
+ *  naming them, under their own signed grant), their notice is delivered now too. It heals pairs who added each other
+ *  before notices existed, and a notice lost on the way. One record of theirs is read — the one that answers "did
+ *  they add me", which their own add already meant to tell. */
+async function noticeBack(deps: ContactDeps, person: Address, contact: Address): Promise<void> {
+  if (!deps.readSubjectRecord || !deps.deliverContactNotice) return;
+  const theirs = (await deps.readSubjectRecord(contact.toLowerCase(), contactRecordType(person)).catch(() => null)) as ContactRecordV1 | null;
+  if (theirs?.type !== 'ap.contact.v1' || theirs.status !== 'contact' || !theirs.grantDigest) return;
+  await deps.deliverContactNotice({ sender: contact, recipient: person, grantDigest: theirs.grantDigest }).catch(() => undefined);
+}
+
 /** Everyone who added `me` back (or first), newest time per sender: the inbox's `contact` references and the
  *  contact notices — both the person's own evidence; nobody's roster is read but theirs. */
 export async function whoAddedMe(deps: Pick<ContactDeps, 'readSubjectRecord'>, me: string): Promise<Map<string, string | null>> {
@@ -187,6 +198,7 @@ export function contactInviteInvoker(deps: ContactDeps, presented: MandatePresen
       const noticed = mayBePerson(kind) && deps.deliverContactNotice && existing.grantDigest
         ? await deps.deliverContactNotice({ sender: person, recipient: contact, grantDigest: existing.grantDigest }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
         : undefined;
+      if (mayBePerson(kind)) await noticeBack(deps, person, contact);
       return { added: false, contact, role: existing.role, alreadyContact: true, grantDigest: existing.grantDigest, ...(noticed ? { noticed } : {}), note: 'already among your contacts — nothing changed' };
     }
     // the grant, signed by the person (the second prompt of a two-prompt path in C1; the one-prompt fold is C2's)
@@ -218,6 +230,7 @@ export function contactInviteInvoker(deps: ContactDeps, presented: MandatePresen
     const noticed = mayBePerson(kind) && deps.deliverContactNotice
       ? await deps.deliverContactNotice({ sender: person, recipient: contact, grantDigest }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
       : undefined;
+    if (mayBePerson(kind)) await noticeBack(deps, person, contact);
     return { added: true, contact, role, grantDigest, delegation, told, ...(noticed ? { noticed } : {}), kind: kind ?? 'unknown', ...(mutual !== undefined ? { mutual } : {}), note: kind === 'person' ? (mutual ? 'recorded in your contacts — mutual: they had already added you' : 'recorded in your contacts; mutual once they add you back') : 'recorded in your contacts' };
   };
 }
