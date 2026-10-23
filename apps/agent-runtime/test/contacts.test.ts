@@ -98,4 +98,17 @@ describe('the friend notice (spec 401) — not a message, so no messaging wire i
     expect(again.noticed).toEqual({ ok: true });
     expect(notices).toHaveLength(2);
   });
+
+  it('notifies an agent whose type is not known (most people), never an organization or a service', async () => {
+    const DEE = '0x00000000000000000000000000000000000000d4' as Address;
+    const notices: string[] = [];
+    const d = deps({ agentTypeOf: async (a) => (a === GOOSE ? 'service' : null), deliverContactNotice: async (n) => { notices.push(n.recipient); return { ok: true }; } });
+    for (const who of [DEE, GOOSE]) {
+      const inv = contactInviteInvoker(d, wire(ALICE), ALICE, 'sess');
+      const asked = await inv('person.contact.invite', { contact: who }, ctx()).catch((e: unknown) => e);
+      const digest = String((asked as { request?: { digest?: string }; digest?: string }).request?.digest ?? (asked as { digest?: string }).digest);
+      await inv('person.contact.invite', { contact: who }, ctx([{ stepRef: 's0', signature: { digest, signature: '0xgrant' } }]));
+    }
+    expect(notices).toEqual([DEE]);
+  });
 });

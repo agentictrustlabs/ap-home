@@ -105,6 +105,10 @@ export const CONTACT_RECORD_PREFIX = 'contact:';
 export const CONTACT_NOTICES_CAP = 200;
 export interface ContactNoticeV1 { from: string; at: string; grantDigest: string }
 
+/** A notice goes to a person — and to an agent whose type the naming service does not say (most people's): a notice
+ *  an organization or a service never reads is harmless, a request a person never gets is the bug. */
+const mayBePerson = (kind: string | null): boolean => kind === null || kind === 'person';
+
 /** Everyone who added `me` back (or first), newest time per sender: the inbox's `contact` references and the
  *  contact notices — both the person's own evidence; nobody's roster is read but theirs. */
 export async function whoAddedMe(deps: Pick<ContactDeps, 'readSubjectRecord'>, me: string): Promise<Map<string, string | null>> {
@@ -180,7 +184,7 @@ export function contactInviteInvoker(deps: ContactDeps, presented: MandatePresen
     const existing = (await deps.readSubjectRecord(me, contactRecordType(contact)).catch(() => null)) as ContactRecordV1 | null;
     if (existing?.type === 'ap.contact.v1' && existing.status === 'contact') {
       // Telling them again is harmless and heals a request that never reached them (added before notices existed).
-      const noticed = kind === 'person' && deps.deliverContactNotice && existing.grantDigest
+      const noticed = mayBePerson(kind) && deps.deliverContactNotice && existing.grantDigest
         ? await deps.deliverContactNotice({ sender: person, recipient: contact, grantDigest: existing.grantDigest }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
         : undefined;
       return { added: false, contact, role: existing.role, alreadyContact: true, grantDigest: existing.grantDigest, ...(noticed ? { noticed } : {}), note: 'already among your contacts — nothing changed' };
@@ -211,7 +215,7 @@ export function contactInviteInvoker(deps: ContactDeps, presented: MandatePresen
     }
     // THE NOTICE (spec 401): the friend request itself — delivered whether or not the message could be; the message
     // needs a messaging wire to this contact, which a new friend never has.
-    const noticed = kind === 'person' && deps.deliverContactNotice
+    const noticed = mayBePerson(kind) && deps.deliverContactNotice
       ? await deps.deliverContactNotice({ sender: person, recipient: contact, grantDigest }).catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }))
       : undefined;
     return { added: true, contact, role, grantDigest, delegation, told, ...(noticed ? { noticed } : {}), kind: kind ?? 'unknown', ...(mutual !== undefined ? { mutual } : {}), note: kind === 'person' ? (mutual ? 'recorded in your contacts — mutual: they had already added you' : 'recorded in your contacts; mutual once they add you back') : 'recorded in your contacts' };
