@@ -59,4 +59,15 @@ describe('overlapping Library saves', () => {
     const ok = { ...deps, writeSubjectRecord: v.writeSubjectRecord };
     await expect(libraryWrite(ok, OWNER, 'library.file.save', { name: 'b.md', folder: 'x', text: 'b', kind: 'md' }, ctx(4))).resolves.toMatchObject({ saved: true });
   });
+
+  it('two first saves of one path that cross make one document, not twins', async () => {
+    const v = slowVault();
+    const deps = { readSubjectRecord: v.readSubjectRecord, writeSubjectRecord: v.writeSubjectRecord, holdCatalog: holder() };
+    const save = (i: number) => libraryWrite(deps, OWNER, 'library.file.save', { name: 'profile.jsonld', folder: 'seed-bible/public/profile', text: `{"v":${i}}`, kind: 'json-ld' }, ctx(10 + i));
+    const [a, b] = (await Promise.all([save(1), save(2)])) as Array<{ file: { id: string } }>;
+    const at = (v.records.get('content.catalog') as LibraryEntry[]).filter((e) => e.name === 'profile.jsonld');
+    expect(at.length).toBe(1);
+    expect(a!.file.id).toBe(b!.file.id);
+    expect(at[0]!.version).toBe(2);
+  });
 });

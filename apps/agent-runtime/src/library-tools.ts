@@ -253,9 +253,12 @@ export async function upsertEntry(list: LibraryEntry[], a: Record<string, unknow
   const name = String(a.name ?? '').trim().slice(0, 120);
   if (!name) throw new Error('a document needs a name');
   const kind = KINDS.has(String(a.kind)) ? String(a.kind) : 'md';
-  const id = typeof a.id === 'string' && ID_RE.test(a.id) ? a.id : `art-${Math.abs(hash32(`${name}${Date.now()}${Math.random()}`)).toString(36)}`;
   const folder = typeof a.folder === 'string' ? a.folder.replace(/^\/+|\/+$/g, '').slice(0, 256) : '';
   const isFolder = a.isFolder === true;
+  // A save that names no id lands on the document already at that path (the newest, if twins exist from before):
+  // a path names one document, and two first saves that crossed used to leave twins every later read refused.
+  const atPath = list.filter((x) => x.name === name && (x.folder ?? '') === folder && !!x.isFolder === isFolder).sort((x, y) => (y.createdAt ?? 0) - (x.createdAt ?? 0))[0];
+  const id = typeof a.id === 'string' && ID_RE.test(a.id) ? a.id : atPath?.id ?? `art-${Math.abs(hash32(`${name}${Date.now()}${Math.random()}`)).toString(36)}`;
   const bytesB64 = isFolder ? undefined : typeof a.bytesB64 === 'string' && a.bytesB64 ? a.bytesB64.slice(0, BYTES_MAX) : typeof a.text === 'string' ? encodeText(a.text).slice(0, BYTES_MAX) : undefined;
   const idx = list.findIndex((x) => x.id === id);
   const prev = idx >= 0 ? list[idx]! : null;
