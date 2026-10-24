@@ -295,6 +295,10 @@ ALLOWED_ORIGINS = "http://localhost:5175,http://127.0.0.1:5175,https://faithnet.
 # CLUB_ROSTER_SECRET --env faithnet`, the same value on the card room) and reads a club workspace's roster under it;
 # the standing itself is derived here from this Home's own records of the workspace, never asked of the card room.
 MCP_URL = "https://mcp.faithnet.io"
+# A READING SESSION's huddle — the seed reader's server names a signed-in reader under its paired secret
+# (`wrangler secret put READER_HUDDLE_SECRET --env faithnet`, the same value on seed-bible-reader-a2a-faithnet),
+# only for a `conversation` scope under its workspace agent with a `reading-session:<id>` id.
+READER_HUDDLE_PRINCIPAL = "0x5dd5f3db5085604b0f6a907bbb35ae645afd307f"
 # AKCS (Agentic Key Custody Service) — faithchain runs entirely on it; Base Sepolia stays on gcp-kms.
 # Every key role moves together: the relayer signer, envelope wrap/unwrap, and — the one that would
 # otherwise have been missed — per-subject OIDC custody (C_sub), which used to derive in-process from

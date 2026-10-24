@@ -2890,7 +2890,17 @@ app.post('/huddles/webhook', async (c) => {
 });
 /** The paired secret a card room presents (spec 378 club scope) — constant-time, and never a fallback. */
 function clubRosterSecretOk(env: Env, authorization: string): boolean {
-  const secret = String((env as { CLUB_ROSTER_SECRET?: string }).CLUB_ROSTER_SECRET ?? '');
+  return secretMatches(String((env as { CLUB_ROSTER_SECRET?: string }).CLUB_ROSTER_SECRET ?? ''), authorization);
+}
+/** The seed reader's paired secret (`READER_HUDDLE_SECRET`, `READER_HUDDLE_PRINCIPAL` = its workspace agent): good only
+ *  for a `conversation` scope under that agent whose id is one of its reading sessions. */
+function readerHuddleOk(env: Env, scope: NonNullable<ReturnType<typeof huddleScopeOf>>, authorization: string): boolean {
+  const e = env as { READER_HUDDLE_SECRET?: string; READER_HUDDLE_PRINCIPAL?: string };
+  const principal = String(e.READER_HUDDLE_PRINCIPAL ?? '').toLowerCase();
+  return !!principal && scope.kind === 'conversation' && scope.principal === principal && /^reading-session:[A-Za-z0-9_-]{1,100}$/.test(scope.id ?? '')
+    && secretMatches(String(e.READER_HUDDLE_SECRET ?? ''), authorization);
+}
+function secretMatches(secret: string, authorization: string): boolean {
   const given = authorization.replace(/^Bearer\s+/i, '');
   if (!secret || !given || secret.length !== given.length) return false;
   let diff = 0;
@@ -3020,7 +3030,7 @@ app.post('/huddles/:op', async (c) => {
   const op = String(c.req.param('op') ?? '');
   if (!['start', 'join', 'get', 'leave', 'end', 'invite', 'removeParticipant'].includes(op)) return c.json({ ok: false, error: 'unknown huddle operation' }, 404);
   if (!realtimeKitConfigured(c.env) || !c.env.HUDDLES) return c.json({ ok: false, error: 'huddles_not_configured' }, 503);
-  const body = (await c.req.json().catch(() => null)) as { session?: string; actor?: string; scope?: HuddleScopeIn; represented?: string; displayName?: string; invitee?: string; target?: string; key?: string } | null;
+  const body = (await c.req.json().catch(() => null)) as { session?: string; actor?: string; standing?: string; scope?: HuddleScopeIn; represented?: string; displayName?: string; invitee?: string; target?: string; key?: string } | null;
   const scope = huddleScopeOf(body?.scope);
   if (!scope) return c.json({ ok: false, error: 'scope { kind: conversation|org|team|workspace|club, principal, id? } required' }, 400);
   // WHO. A person's own Home session as ever — or, for a CLUB scope only, the card room's server-to-server call
@@ -3029,17 +3039,24 @@ app.post('/huddles/:op', async (c) => {
   // bearer in that browser, so this is their one road to the club's huddle. The secret names WHO is asking and
   // nothing more: their standing at the club is derived here, from this Home's own records of the workspace.
   let actor: Address;
+  // A READING SESSION's huddle: the seed reader's server names a signed-in reader it verified and their place in
+  // ITS session (the host stewards it; anyone it let in is a party). The session lives in the reader, not here,
+  // so its word is the standing — but only for a conversation scope under the reader's own workspace agent.
+  let readerStanding: 'steward' | 'party' | undefined;
   if (body?.session) {
     const who = await verifyHomeSession(body.session, c.env);
     if (!who.ok) return c.json({ ok: false, error: who.error }, who.status as 401);
     actor = String(who.sa).toLowerCase() as Address;
   } else if (scope.kind === 'club' && clubRosterSecretOk(c.env, c.req.header('authorization') ?? '') && /^0x[0-9a-fA-F]{40}$/.test(String(body?.actor ?? ''))) {
     actor = String(body!.actor).toLowerCase() as Address;
+  } else if (readerHuddleOk(c.env, scope, c.req.header('authorization') ?? '') && /^0x[0-9a-fA-F]{40}$/.test(String(body?.actor ?? ''))) {
+    actor = String(body!.actor).toLowerCase() as Address;
+    readerStanding = body?.standing === 'steward' ? 'steward' : 'party';
   } else {
     return c.json({ ok: false, error: 'session required' }, 400);
   }
   if (!body) return c.json({ ok: false, error: 'a body is required' }, 400);
-  const standing = await huddleStandingFor(c.env, actor, scope);
+  const standing = readerStanding ?? await huddleStandingFor(c.env, actor, scope);
   // A represented principal is a CLAIM the caller makes; it is honoured only when the caller stewards it.
   let represented: Address | undefined;
   if (body.represented && /^0x[0-9a-fA-F]{40}$/.test(body.represented) && body.represented.toLowerCase() !== actor) {
