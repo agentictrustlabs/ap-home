@@ -190,9 +190,9 @@ describe('profile-name sharing is registry-gated', () => {
     expect(sharesProfileName({ allowed_scopes: ['openid', 'profile', 'agent'] })).toBe(true);
   });
 
-  it('is declared by pokernight, gc-engage (#554 — "profile so the member\'s human name can label the account"), gc-platform (the same, for platform.global.church), source-publishing (87c8b4d4 — its one-time About-you step) and openbook-reader (e537b759 — "Signed in as <name>" on the reader\'s own record) and by no one else in the live registry', () => {
+  it('is declared by pokernight, gc-engage (#554 — "profile so the member\'s human name can label the account"), gc-platform (the same, for platform.global.church), source-publishing (87c8b4d4 — its one-time About-you step) openbook-reader (e537b759 — "Signed in as <name>" on the reader\'s own record) and seed-bible-reader (c02ca7bc — its Profile shows your name) and by no one else in the live registry', () => {
     const scoped = whitelabel.relyingApps.filter(sharesProfileName).map((a) => a.client_id);
-    expect(scoped).toEqual(['pokernight', 'gc-engage', 'gc-platform', 'source-publishing', 'openbook-reader']);
+    expect(scoped).toEqual(['pokernight', 'gc-engage', 'gc-platform', 'source-publishing', 'openbook-reader', 'seed-bible-reader']);
   });
 
   it('leaves consent copy untouched for every app without the scope', () => {
