@@ -6,7 +6,7 @@
 // This surface adds NO invoker and NO vocabulary of its own: it reads `person.contact.list` and hands
 // `person.contact.invite` / `person.contact.remove` to the Ask as commands — the flyout runs the ceremony (your
 // mandate; for adding, the grant you sign), and the receipt lands where every receipt lands.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Address } from '@agenticprimitives/types';
 import { useSession } from '../../context/session';
 import { kindOfName, KIND_WORDS } from '@agenticprimitives/ontology/participant-vocabulary';
@@ -102,6 +102,16 @@ export function ContactsPanel() {
     const em = (q.get('invite') ?? '').trim();
     if (em && em !== '1') setInviteEmail(em);
   }, []);
+  // …or whom to remove (`?remove=0x…`, the seed reader's Remove a friend / Cancel a request): the same ceremony as the
+  // row's Remove, run once the session is here — the flyout still asks before anything is revoked.
+  const removeAsked = useRef(false);
+  useEffect(() => {
+    if (!session || removeAsked.current) return;
+    const rm = (new URLSearchParams(window.location.search).get('remove') ?? '').trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(rm) && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(rm)) return;
+    removeAsked.current = true;
+    askCommand({ toolId: 'person.contact.remove', args: { contact: rm }, message: `remove ${rm} as a contact` });
+  }, [session]);
   // The flyout's run finishes elsewhere; re-read when it says something happened (`ap:ask-done`).
   useEffect(() => {
     const on = () => { void load(); void loadFriends(); };
