@@ -1126,6 +1126,8 @@ app.use('*', async (c, next) => {
   // Spec 378 club scope — the CARD ROOM's server-to-server call for one of its club members, under the paired
   // roster secret (checked in the route): no browser, no cookie, nothing for CSRF to defend.
   if (c.req.path.startsWith('/huddles/') && clubRosterSecretOk(c.env, c.req.header('authorization') ?? '')) return next();
+  // The same for the seed reader's server naming a reader in one of its reading sessions (scope checked in the route).
+  if (c.req.path.startsWith('/huddles/') && secretMatches(String((c.env as { READER_HUDDLE_SECRET?: string }).READER_HUDDLE_SECRET ?? ''), c.req.header('authorization') ?? '')) return next();
   // Federated-token custody (spec 265) — server-to-server from the Connect broker / MCP, bridge-HMAC
   // authenticated (no browser cookie).
   if (c.req.path === '/custody/youversion/store-token') return next();
