@@ -54,6 +54,9 @@ export interface EnrollReq {
   /** workspace-member-invite: where the invited person picks the invitation up IN THE APP — the page the
    *  message the host's agent sends them points at. Accepted only on the relying app's own origin. */
   appLink?: string;
+  /** What this same window does once the sign-in is delivered: ONE friend act on this Home's Contacts
+   *  (`/contacts?add|remove=…&from=<app>`), so an invited person signs in and adds who invited them in one window. */
+  then?: string;
   existingOrg?: Address; // org_create: reuse an EXISTING org the person stewards — grant from it instead of deploying a new one
   sessionKey?: Address; // spec 270 v4 W2 — the relying app's session-key address; the home signs the DEL-001 leaf for it
   payAmount?: string; // spec 272 — x402 charge amount (atomic units) the relying app requested (tier price); capped by the client's paymentConfig
@@ -73,6 +76,14 @@ export interface EnrollReq {
 // SEC-005: ALLOWED_RELYING_ORIGINS is now derived from whitelabel.relyingApps[].redirect_uris
 // via `isAllowedRelyingOrigin` (imported above). The previously-hardcoded array is removed
 // to prevent drift between the OIDC client registry and the cross-origin postMessage gate.
+
+/** A next step this window may take after the sign-in: only a friend act an app names on this Home's own Contacts. */
+export function thenStep(raw: string | null): string | undefined {
+  if (!raw || !raw.startsWith('/contacts?')) return undefined;
+  const q = new URLSearchParams(raw.slice('/contacts?'.length));
+  const target = q.get('add') ?? q.get('remove') ?? '';
+  return q.get('from') && /^0x[0-9a-fA-F]{40}$/.test(target) ? raw : undefined;
+}
 
 export function parseEnrollReq(): EnrollReq | null {
   try {
@@ -113,6 +124,7 @@ export function parseEnrollReq(): EnrollReq | null {
       member: (p.get('member') as Address) ?? undefined,
       ...roleOfferFromParam(p.get('role_offer')),
       appLink: sameOriginLink(p.get('app_link'), redirectUri),
+      then: thenStep(p.get('then')),
       existingOrg: (p.get('existing_org') as Address) ?? undefined,
       sessionKey: (p.get('session_key') as Address) ?? undefined,
       payAmount: /^\d+$/.test(p.get('pay_amount') ?? '') ? (p.get('pay_amount') as string) : undefined,
@@ -282,11 +294,15 @@ export function deliverEnrollCode(enroll: EnrollReq, popupMode: boolean, code: s
 function deliverEnrollCodeNow(enroll: EnrollReq, popupMode: boolean, code: string, defaultsError?: string): void {
   if (popupMode && typeof window !== 'undefined' && window.opener && relyingAllowed(enroll.redirectUri)) {
     postEnrollToOpener(enroll, { type: 'AC_SUCCESS', state: enroll.state, code });
-    window.close();
+    // Signed in; the same window goes on to the one friend act the app named, instead of closing.
+    if (enroll.then) window.location.replace(enroll.then);
+    else window.close();
     return;
   }
   const url = new URL(enroll.redirectUri);
   url.searchParams.set('code', code);
+  // The app's relay page hands the code on, then sends this window to the next step instead of closing it.
+  if (popupMode && enroll.then && typeof window !== 'undefined') url.searchParams.set('ac_then', window.location.origin + enroll.then);
   url.searchParams.set('state', enroll.state);
   // Carry the MINTING origin (this Home — possibly a `<label>` subdomain we hopped to from a nameless apex
   // enroll) so the relying app exchanges the code + verifies the id_token `iss` HERE, not at the apex it
