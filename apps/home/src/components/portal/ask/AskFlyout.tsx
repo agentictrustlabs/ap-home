@@ -1345,6 +1345,39 @@ function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest
       </div>
     );
   }
+  // A FRIEND, IN PLAIN WORDS. Adding or removing a friend is the act most people take here, often sent over from an app
+  // by someone who has never heard of a mandate: the question is the friendship, the answer is yes or not now. What is
+  // signed is unchanged (one prompt, this request only); the machine-readable account is one tap away under Details.
+  const friendAct = reply.capability === 'person.contact.invite' ? 'add' : reply.capability === 'person.contact.remove' ? 'remove' : null;
+  const friend = reply.parties?.find((p) => p.arg === 'contact');
+  if (friendAct && friend) {
+    const who = friend.label ?? chosen[friend.agent.toLowerCase()] ?? <AgentName address={friend.agent} />;
+    return (
+      <div className="ask-card" data-testid="ask-authority" data-friend-act={friendAct}>
+        <div style={{ fontWeight: 600, fontSize: 16 }}>
+          {friendAct === 'add' ? <>Add {who} as a friend?</> : <>Remove {who} as a friend?</>}
+        </div>
+        <p style={{ fontSize: 13.5, margin: '8px 0 0', lineHeight: 1.5 }}>
+          {friendAct === 'add'
+            ? <>You&rsquo;ll be friends once they add you too. Friends see each other&rsquo;s name and what each other shares.</>
+            : <>You&rsquo;ll stop seeing what each other shares. You can add them again later.</>}
+        </p>
+        <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+          <BusyButton busy={busy === 'Granting authority…'} busyLabel={friendAct === 'add' ? 'Adding…' : 'Removing…'} onClick={onGrant} className="btn primary" data-testid="ask-grant" style={{ fontSize: 15, padding: '10px 18px' }}>
+            {friendAct === 'add' ? <>Yes, add them</> : <>Yes, remove them</>}
+          </BusyButton>
+          <button type="button" className="btn ghost" onClick={onCancel} disabled={!!busy}>Not now</button>
+        </div>
+        <details style={{ marginTop: 10 }}>
+          <summary className="muted" style={{ fontSize: 11.5, cursor: 'pointer' }}>Details</summary>
+          <p className="muted" style={{ fontSize: 11.5, margin: '6px 0 0', lineHeight: 1.5 }}>
+            Your Home signs {capabilityWords(reply.capability)} as <AgentName address={d.delegator} /> for this request only, expiring in {d.expiresInMinutes} minutes.
+            {friendAct === 'add' ? ' The same signature lets them read your contact profile.' : ' It revokes the grant you gave them, on chain.'} You can undo it at any time.
+          </p>
+        </details>
+      </div>
+    );
+  }
   return (
     <div className="ask-card" data-testid="ask-authority">
       <div style={{ fontWeight: 600, fontSize: 13 }}>This needs your authority</div>

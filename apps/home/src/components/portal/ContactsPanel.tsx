@@ -190,6 +190,14 @@ export function ContactsPanel() {
   };
 
   if (!session || !agentAddress) return null;
+  // Opened by an app for one friend act: that act is the whole page — the card that asks it, and nothing to read past.
+  const forApp = typeof window !== 'undefined' && !!window.opener && /[?&](add|remove)=/.test(window.location.search);
+  if (forApp)
+    return (
+      <Section title={closing ? 'Done' : /[?&]add=/.test(window.location.search) ? 'Adding a friend' : 'Removing a friend'} testId="friends-for-app">
+        <Meta>{closing ? 'Done — taking you back.' : 'Answer the question that opened beside this. This window closes by itself when you have.'}</Meta>
+      </Section>
+    );
   return (
     <>
       {closing && <Meta>Done — taking you back.</Meta>}
