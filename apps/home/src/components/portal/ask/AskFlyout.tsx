@@ -735,6 +735,21 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
         {focused && !pending && !busy && (() => {
           const last = [...thread].reverse().find((e) => 'reply' in e);
           if (!last || !('reply' in last) || ['done', 'authority_required', 'prompt'].includes(last.reply.kind)) return null;
+          // A failure in an app's window, said plainly: nothing changed, try again (the window asks afresh); the
+          // machine's reason is there for whoever needs it, folded away.
+          if (last.reply.kind === 'refused' && last.reply.outcome !== 'denied')
+            return (
+              <div data-testid="ask-focused-failed">
+                <p style={{ fontSize: 16, fontWeight: 600 }}>We couldn’t save that just now.</p>
+                <p className="muted" style={{ fontSize: 14 }}>Nothing was changed. Please try again.</p>
+                <button type="button" className="btn primary" onClick={() => window.location.reload()}>Try again</button>{' '}
+                <button type="button" className="btn" onClick={() => window.close()}>Close</button>
+                <details style={{ marginTop: 12, fontSize: 11.5 }} className="muted">
+                  <summary>Details</summary>
+                  {plainReason(last.reply.error)}
+                </details>
+              </div>
+            );
           return (
             <div data-testid="ask-focused-answer">
               <div className="ask-msg agent"><ReplyView reply={last.reply} realm={realm} addressee={addressee} onNext={() => undefined} /></div>
