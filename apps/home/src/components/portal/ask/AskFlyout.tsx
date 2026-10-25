@@ -731,6 +731,20 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
         {focused && !pending && !busy && thread.some((e) => 'reply' in e && e.reply.kind === 'done') && (
           <p data-testid="ask-focused-done" style={{ fontSize: 16, fontWeight: 600 }}>Done — taking you back.</p>
         )}
+        {/* Any other answer (already friends, refused, failed) is said here too — the window is never left empty. */}
+        {focused && !pending && !busy && (() => {
+          const last = [...thread].reverse().find((e) => 'reply' in e);
+          if (!last || !('reply' in last) || ['done', 'authority_required', 'prompt'].includes(last.reply.kind)) return null;
+          return (
+            <div data-testid="ask-focused-answer">
+              <div className="ask-msg agent"><ReplyView reply={last.reply} realm={realm} addressee={addressee} onNext={() => undefined} /></div>
+              <button type="button" className="btn" style={{ marginTop: 12 }} onClick={() => window.close()}>Close</button>
+            </div>
+          );
+        })()}
+        {focused && err && !busy && (
+          <button type="button" className="btn" style={{ marginTop: 12 }} onClick={() => window.close()}>Close</button>
+        )}
         {!focused && thread.length === 0 && !pending && (
           <p className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>
             Ask {addresseeLabel} a question, or ask it to do something — “create a team called outreach”.

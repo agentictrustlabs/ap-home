@@ -157,6 +157,16 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
             onClose={() => window.close()}
           />
         )}
+        {!canAsk && (
+          <div className="ask-flyout ask-flyout--focused" data-testid="ask-focused-unavailable">
+            <div className="ask-flyout-body">
+              <p style={{ fontSize: 15 }}>Your Home isn’t ready to do this here yet.</p>
+              <p className="muted" style={{ fontSize: 13 }}>Open it in full to finish setting up, then try again.</p>
+              <a className="btn" href={pathname ?? '/contacts'} target="_blank" rel="noreferrer">Open my Home</a>{' '}
+              <button type="button" className="btn ghost" onClick={() => window.close()}>Close</button>
+            </div>
+          </div>
+        )}
       </div>
     );
   return (
