@@ -141,6 +141,37 @@ export async function unlinkEmailFacet(kv: KvLike, email: string, agent: Canonic
   return tombstoneLink(kv, emailFacetKey(await emailHash(email)), agent, 'kv-email');
 }
 
+// ── Email OWNERS — who a verified address belongs to, so people can find their friends by email ─────────────────
+// Separate from the login facet on purpose: the facet decides which home an email-code sign-in opens (and a
+// Google-verified address must not change that), while this index only answers "is someone with this address
+// here". Written from every verified sign-in (Google's verified email, an email code), keyed by the address's
+// SHA-256 like the facet. A person can stop being found this way (`setFindableByEmail`); they are findable by
+// default — the friend you invited by email is the friend you meant.
+const emailOwnerKey = (hash: string): string => `owner:email:${hash}`;
+const findableKey = (agent: string): string => `findable:email:${(agent.match(/0x[0-9a-fA-F]{40}$/)?.[0] ?? agent).toLowerCase()}`;
+
+export async function recordEmailOwner(kv: KvLike, email: string, agent: CanonicalAgentId): Promise<void> {
+  if (!email.trim()) return;
+  await appendLink(kv, emailOwnerKey(await emailHash(email)), { agent, assurance: 'asserted', ref: 'verified-email' });
+}
+
+export async function isFindableByEmail(kv: KvLike, agent: string): Promise<boolean> {
+  return (await kv.get(findableKey(agent))) !== 'off';
+}
+
+export async function setFindableByEmail(kv: KvLike, agent: string, on: boolean): Promise<void> {
+  await kv.put(findableKey(agent), on ? 'on' : 'off');
+}
+
+/** The people a verified address belongs to who let themselves be found by it (usually one). An email sign-in
+ *  facet proves the address as well, so homes made before this index existed are found too. */
+export async function ownersOfEmailHash(kv: KvLike, hash: string): Promise<CanonicalAgentId[]> {
+  const links = [...(await readLinks(kv, emailOwnerKey(hash))), ...(await readLinks(kv, `facet:email:${hash}`))];
+  const agents = [...new Set(links.map((l) => l.agent))];
+  const findable = await Promise.all(agents.map((a) => isFindableByEmail(kv, a)));
+  return agents.filter((_, i) => findable[i]);
+}
+
 /** Hash-keyed variants for the invite magic-link path — the redeeming server holds only the invited
  *  email's SHA-256 (blast-zone: the raw address was never stored), so it reads/writes the facet by hash.
  *  Identical to `readEmailFacet`/`recordEmailFacet` otherwise (the hash IS the facet key). */

@@ -1,7 +1,7 @@
 // Spec 422 §3.3 — unlinking a channel is a TOMBSTONE over an append-only facet (SEC-009), never a delete.
 import { describe, it, expect } from 'vitest';
 import type { CanonicalAgentId } from '@agenticprimitives/types';
-import { liveLinks, readEmailFacet, recordEmailFacet, unlinkEmailFacet, readPhoneFacet, recordPhoneFacet, unlinkPhoneFacet, type KvLike } from './kv-indexer';
+import { liveLinks, recordEmailOwner, ownersOfEmailHash, setFindableByEmail, emailHash, readEmailFacet, recordEmailFacet, unlinkEmailFacet, readPhoneFacet, recordPhoneFacet, unlinkPhoneFacet, type KvLike } from './kv-indexer';
 
 const A = 'eip155:84532:0x1111111111111111111111111111111111111111' as CanonicalAgentId;
 const B = 'eip155:84532:0x2222222222222222222222222222222222222222' as CanonicalAgentId;
@@ -45,5 +45,25 @@ describe('unlinkEmailFacet / unlinkPhoneFacet', () => {
     await recordPhoneFacet(kv, '+13035551234', B);
     expect(await unlinkPhoneFacet(kv, '+13035551234', A)).toBe(true);
     expect(await readPhoneFacet(kv, '+13035551234')).toBe(B);
+  });
+});
+
+describe('email owners', () => {
+  it('a verified address finds its person without touching the login facet, and not once they turn it off', async () => {
+    const kv = memKv();
+    await recordEmailOwner(kv, ' Ruth@Example.org', A);
+    await recordEmailOwner(kv, 'ruth@example.org', A);
+    const hash = await emailHash('ruth@example.org');
+    expect(await ownersOfEmailHash(kv, hash)).toEqual([A]);
+    expect(await readEmailFacet(kv, 'ruth@example.org')).toBeNull();
+    await setFindableByEmail(kv, A, false);
+    expect(await ownersOfEmailHash(kv, hash)).toEqual([]);
+    await setFindableByEmail(kv, A, true);
+    expect(await ownersOfEmailHash(kv, hash)).toEqual([A]);
+  });
+  it('a home made with an email code before the index is found by that address', async () => {
+    const kv = memKv();
+    await recordEmailFacet(kv, 'boaz@example.org', B);
+    expect(await ownersOfEmailHash(kv, await emailHash('boaz@example.org'))).toEqual([B]);
   });
 });

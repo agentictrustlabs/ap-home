@@ -6,7 +6,7 @@
 // The OTP record is keyed by SHA-256(email); the code is checked with bounded attempts (anti-brute-force).
 import { getServer, resolveOrigin, ownIssuer, type FnContext } from '../_lib/server-broker';
 import { mintAgentSession, importJwks, verifyAgentSession } from '@agenticprimitives/connect';
-import { readEmailFacet, recordEmailFacet, emailHash, readRotation } from '../../src/lib/kv-indexer';
+import { readEmailFacet, recordEmailFacet, recordEmailOwner, emailHash, readRotation } from '../../src/lib/kv-indexer';
 import { resolveKmsAgent } from '../_lib/kms-resolve';
 import { isSocialCustodyAud } from '../../src/lib/oidc-clients';
 import { oidcFacetId } from '@agenticprimitives/connect-auth/google';
@@ -65,6 +65,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
   const signedIn = await sessionAgent(request, env);
   if (signedIn) {
     await recordEmailFacet(env.AUTH_CODES, email, signedIn);
+    await recordEmailOwner(env.AUTH_CODES, email, signedIn);
     return json({ status: 'linked', via: 'email' });
   }
 
@@ -118,6 +119,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     // No home + custody ineligible/unreachable → the client onboards with a passkey/Google first.
     return json({ status: 'bootstrap', via: 'email', email });
   }
+
+  await recordEmailOwner(env.AUTH_CODES, email, agent);
 
   const sessionPrincipal: CredentialPrincipal = custodyGrade
     // Custody sessions are OIDC-subject-shaped (`kind:'oidc'`, id='email#<hash>') so demo-a2a's provider-

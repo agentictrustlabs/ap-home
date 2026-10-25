@@ -11,7 +11,7 @@
 import { completeLogin, oidcFacetId } from '@agenticprimitives/connect-auth/google';
 import { newAuthCode, validateRedirectUri, importJwks, verifyAgentSession, mintAgentSession } from '@agenticprimitives/connect';
 import type { CanonicalAgentId, CredentialPrincipal } from '@agenticprimitives/types';
-import { recordOidcFacet, readOidcFacet, readRotation } from '../../../src/lib/kv-indexer';
+import { recordOidcFacet, readOidcFacet, readRotation, recordEmailOwner } from '../../../src/lib/kv-indexer';
 import { resolveKmsAgent } from '../../_lib/kms-resolve';
 import { CONNECT_DOMAIN } from '../../../src/lib/domain';
 import { isSocialCustodyAud, isAllowedRelyingOrigin } from '../../../src/lib/oidc-clients';
@@ -144,6 +144,7 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       return back('link_failed', { reason: 'a custody-grade session is required to link Google' });
     }
     await recordOidcFacet(env.AUTH_CODES, result.principal.iss, result.principal.sub, v.session.sub);
+    if (result.principal.email) await recordEmailOwner(env.AUTH_CODES, result.principal.email, v.session.sub);
     return back('linked', { email: result.principal.email ?? '' });
   }
 
@@ -223,6 +224,10 @@ export const onRequestGet = async ({ request, env }: FnContext): Promise<Respons
       return json({ status: 'bootstrap', oidcSubject: principal.id, email: result.principal.email });
     }
   }
+
+  // Google only answers with an address it verified (connect-auth refuses `email_verified !== true`): the person can be
+  // found by it, so a friend who invited that address reaches them.
+  if (agent && result.principal.email) await recordEmailOwner(env.AUTH_CODES, result.principal.email, agent);
 
   // Mint the session. Custody-grade (onchain-confirmed) for a KMS-custodied SA;
   // login-grade (asserted) otherwise (ADR-0017 / spec 227 §5).
