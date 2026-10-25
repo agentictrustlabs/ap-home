@@ -91,13 +91,6 @@ export interface RelyingApp {
    *  `ask_delegate` and `ask-as-me` among the allowed templates; the wire rides the token exchange as
    *  `askDelegation` beside the site `delegation`, verified on its own (ERC-1271, the connecting person, the ask key). */
   ask_with_login?: boolean;
-  /** Spec 397 §11 — the key an `act-as-me` standing wire names for THIS client when it is not `delegate`: an app whose
-   *  `delegate` is the shared site delegate for sign-in but whose server derives mandates from the person's standing
-   *  wires with a key of its own. Absent ⇒ `delegate`, as the Home MCP's entry has it. */
-  act_delegate?: `0x${string}`;
-  /** Spec 397 §11 — the ONLY acts this client asks to run without a second signature. The consent offers just these
-   *  (already checked, each still uncheckable); absent ⇒ every act on the person's playbook is offered, unchecked. */
-  act_capabilities?: readonly string[];
   /** Spec 412 — the top-level Library folders THIS app writes into a person's vault (`publishing/…`, `field/…`), so the
    *  Library can say which app a folder belongs to instead of leaving a bare word. Declared by the app's registration —
    *  the app knows where it writes — never inferred from a name. */

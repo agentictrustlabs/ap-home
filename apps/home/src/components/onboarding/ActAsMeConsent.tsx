@@ -13,7 +13,7 @@ import { Loading } from '../shared/Loading';
 
 const isAddress = (s: string) => /^0x[0-9a-fA-F]{40}$/.test(s.trim());
 
-export function ActAsMeConsent({ token, agent, onChange, only }: { token: string; agent: Address; onChange: (choices: ActChoice[], problem: string | null) => void; /** The client's registered acts: offered alone, already checked. */ only?: readonly string[] }) {
+export function ActAsMeConsent({ token, agent, onChange }: { token: string; agent: Address; onChange: (choices: ActChoice[], problem: string | null) => void }) {
   const [caps, setCaps] = useState<Array<{ id: string; description: string; risk: string }> | null>(null);
   const [treasuries, setTreasuries] = useState<Array<{ agent: Address; name: string }>>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -30,12 +30,10 @@ export function ActAsMeConsent({ token, agent, onChange, only }: { token: string
         const r = await fetch('/connect/channels', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ action: 'archetypeAssignmentGet', communityId: agent.toLowerCase() }) });
         const b = (await r.json().catch(() => ({}))) as { ok?: boolean; record?: { definition?: AgentHarnessDefinitionV1 } | null };
         if (!r.ok) throw new Error('your playbook could not be read');
-        const all = actCapabilitiesOf(b.record?.definition);
-        const list = only ? all.filter((c) => only.includes(c.id)) : all;
+        const list = actCapabilitiesOf(b.record?.definition);
         const mine = (await listManagedAgents(token).catch(() => { throw new Error('your treasuries could not be read'); })).filter((a) => a.kind === 'person-treasury' && (a.relationship ?? 'steward') === 'steward').map((a) => ({ agent: a.agent, name: a.name }));
         if (!live) return;
         setCaps(list);
-        if (only) setChecked(new Set(list.map((c) => c.id)));
         setTreasuries(mine);
         if (mine[0]) setTreasury(mine[0].agent);
       } catch (e) { if (live) { setErr(e instanceof Error ? e.message : 'the acts could not be listed'); setCaps([]); } }

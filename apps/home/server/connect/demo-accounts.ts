@@ -168,9 +168,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       ? { capability: c, payment: { treasury: String(pay?.treasury ?? '') as Address, payee: String(pay?.payee ?? '') as Address, asset: String(pay?.asset ?? CONTRACTS.mockUsdc) as Address, maxAmount: BigInt(String(pay?.maxAmount ?? '0')) } }
       : { capability: c }));
     try {
-      const notAllowed = client.act_capabilities ? caps.find((c) => !client.act_capabilities!.includes(c)) : undefined;
-      if (notAllowed) return json({ error: `${clientId} may not hold an act wire for ${notAllowed}` }, 403);
-      const set = buildActAsMeSet(sa, (client.act_delegate ?? client.delegate) as Address, choices);
+      const set = buildActAsMeSet(sa, client.delegate as Address, choices);
       actSet = await signActAsMeSet(set, { mode: 'each', sign: (_delegator, d) => signHash(d) });
     } catch (e) { return json({ error: e instanceof Error ? e.message : 'the act set could not be built' }, 400); }
   }
@@ -180,7 +178,7 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
     const key = `app-grants:${sa.toLowerCase()}`;
     const rows = JSON.parse((await env.AUTH_CODES.get(key)) ?? '[]') as Array<{ clientId: string }>;
     const next = rows.filter((r) => r.clientId !== clientId);
-    next.unshift({ clientId, template, delegate: template === 'act-as-me' ? (client.act_delegate ?? client.delegate) : askDelegate, delegation: toWire(delegation), issuedAt: Date.now(), ...(actSet ? { wires: actSet } : {}) } as never);
+    next.unshift({ clientId, template, delegate: template === 'act-as-me' ? client.delegate : askDelegate, delegation: toWire(delegation), issuedAt: Date.now(), ...(actSet ? { wires: actSet } : {}) } as never);
     await env.AUTH_CODES.put(key, JSON.stringify(next.slice(0, 50)));
   }
 
