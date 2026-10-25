@@ -834,12 +834,18 @@ export async function mintApprovedMandate(
   const j = async (r: Response) => (await r.json().catch(() => ({}))) as Record<string, unknown>;
   await ensureCsrfToken();
   const H = { 'content-type': 'application/json', ...csrfHeaders() };
-  const a = (await j(await fetch('/a2a/harness/authorize', { method: 'POST', credentials: 'include', headers: H, body: JSON.stringify({ session: session.token, delegator: reply.delegator, digests }) }))) as { ok?: boolean; userOpHash?: `0x${string}`; userOp?: Record<string, string>; error?: string };
-  if (a.ok !== true || !a.userOpHash) throw new Error(String(a.error ?? 'the approval batch could not be built'));
-  // THE prompt. One signature, every authority this act needs.
-  const signature = await signHash(a.userOpHash as Hex);
-  const b = await j(await fetch('/a2a/harness/authorize', { method: 'POST', credentials: 'include', headers: H, body: JSON.stringify({ session: session.token, delegator: reply.delegator, userOp: a.userOp, signature }) }));
-  if (b.ok !== true) throw new Error(String(b.error ?? 'the approval batch was not accepted on chain'));
+  // A batch built while this account's previous operation is still landing (a sign-in's own grant, a moment ago) is
+  // refused on chain; built again a few seconds later, it goes through. Twice more at most, then the refusal stands.
+  for (let attempt = 0; ; attempt++) {
+    const a = (await j(await fetch('/a2a/harness/authorize', { method: 'POST', credentials: 'include', headers: H, body: JSON.stringify({ session: session.token, delegator: reply.delegator, digests }) }))) as { ok?: boolean; userOpHash?: `0x${string}`; userOp?: Record<string, string>; error?: string };
+    if (a.ok !== true || !a.userOpHash) throw new Error(String(a.error ?? 'the approval batch could not be built'));
+    // THE prompt. One signature, every authority this act needs.
+    const signature = await signHash(a.userOpHash as Hex);
+    const b = await j(await fetch('/a2a/harness/authorize', { method: 'POST', credentials: 'include', headers: H, body: JSON.stringify({ session: session.token, delegator: reply.delegator, userOp: a.userOp, signature }) }));
+    if (b.ok === true) break;
+    if (attempt >= 2) throw new Error(String(b.error ?? 'the approval batch was not accepted on chain'));
+    await new Promise((r) => setTimeout(r, 4000 * (attempt + 1)));
+  }
   mandate.signature = '0x03';
   return toWire(mandate);
 }
