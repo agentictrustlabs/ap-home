@@ -854,7 +854,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
         )}
         {busy && !pending && (
           <div className="muted" data-testid="ask-busy" style={{ fontSize: 12 }}>
-            <span className="spinner" /> {focused ? 'One moment…' : steps.length && !steps[steps.length - 1]!.terminal ? steps[steps.length - 1]!.said : busy}
+            <span className="spinner" /> {focused ? 'Saving it — this can take up to a minute or two. You can leave this window open.' : steps.length && !steps[steps.length - 1]!.terminal ? steps[steps.length - 1]!.said : busy}
             {!focused && steps.length > 1 && (
               <div data-testid="ask-progress" style={{ marginTop: 4, opacity: 0.7, fontSize: 11 }}>
                 {steps.filter((l) => !l.terminal).slice(0, -1).map((l) => <div key={l.seq}>· {l.said}</div>)}
@@ -1373,7 +1373,7 @@ function AuthorityCard({ reply, busy, onGrant, onCancel, checkCustody, onRequest
             : <>You&rsquo;ll stop seeing what each other shares. You can add them again later.</>}
         </p>
         <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-          <BusyButton busy={busy === 'Granting authority…'} busyLabel={friendAct === 'add' ? 'Adding…' : 'Removing…'} onClick={onGrant} className="btn primary" data-testid="ask-grant" style={{ fontSize: 15, padding: '10px 18px' }}>
+          <BusyButton busy={busy === 'Granting authority…'} busyLabel={friendAct === 'add' ? 'Adding… (up to a minute or two)' : 'Removing… (up to a minute or two)'} onClick={onGrant} className="btn primary" data-testid="ask-grant" style={{ fontSize: 15, padding: '10px 18px' }}>
             {friendAct === 'add' ? <>Yes, add them</> : <>Yes, remove them</>}
           </BusyButton>
           <button type="button" className="btn ghost" onClick={onCancel} disabled={!!busy}>Not now</button>
