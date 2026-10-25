@@ -58,7 +58,7 @@ type Entry =
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
-export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose, seed, onSeedUsed, resumeRun, onResumeUsed, command: screenCommand, onCommandUsed }: {
+export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose, seed, onSeedUsed, resumeRun, onResumeUsed, command: screenCommand, onCommandUsed, focused }: {
   /** Spec 397 §6 — a parked run to pick up on open (`/you?run=`): resumed at once, every gate re-run; the person signs here. */
   resumeRun?: string | null;
   onResumeUsed?: () => void;
@@ -75,6 +75,9 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   /** Spec 361 I4 — a screen's command: the one act it knows, with the person's choices as arguments. */
   command?: AskCommand | null;
   onCommandUsed?: () => void;
+  /** An app opened this window for ONE act (`/contacts?add=…&from=<app>`): only that act's question, its progress and
+   *  "Done" — no conversation, composer, controls or memory lines. Nothing about what is signed changes. */
+  focused?: boolean;
 }) {
   const { session, profile, agentAddress, agentName, personName } = useSession();
   const router = useRouter();
@@ -689,8 +692,8 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
   };
 
   return (
-    <div className="ask-flyout" data-testid="ask-flyout" role="dialog" aria-label={`Asking ${addresseeLabel}`}>
-      <div className="ask-flyout-h">
+    <div className={`ask-flyout${focused ? ' ask-flyout--focused' : ''}`} data-testid="ask-flyout" role="dialog" aria-label={`Asking ${addresseeLabel}`}>
+      {!focused && <div className="ask-flyout-h">
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Asking {addresseeLabel}</div>
           <div className="muted" style={{ fontSize: 11.5 }}>
@@ -719,10 +722,16 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
           {showDiag ? 'Hide' : 'How'}{diag.length ? ` (${diag.length})` : ''}
         </button>
         <button type="button" className="btn ghost" data-testid="ask-close" aria-label="Close Ask" onClick={onClose}><XIcon size={16} /></button>
-      </div>
+      </div>}
 
       <div className="ask-flyout-body">
-        {thread.length === 0 && !pending && (
+        {focused && !pending && !busy && !thread.some((e) => 'reply' in e) && (
+          <p className="muted" style={{ fontSize: 14 }}><span className="spinner" /> Getting it ready…</p>
+        )}
+        {focused && !pending && !busy && thread.some((e) => 'reply' in e && e.reply.kind === 'done') && (
+          <p data-testid="ask-focused-done" style={{ fontSize: 16, fontWeight: 600 }}>Done — taking you back.</p>
+        )}
+        {!focused && thread.length === 0 && !pending && (
           <p className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>
             Ask {addresseeLabel} a question, or ask it to do something — “create a team called outreach”.
             Anything that changes the world will ask you to grant the authority for it first, and you will
@@ -730,14 +739,14 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
             {voice.canListen && <> Tap the microphone to talk instead: it answers aloud and listens for your reply until you switch Voice off. When it needs your authority or a signature, say “approve” — your credential signs, and a device that asks will still ask.</>}
           </p>
         )}
-        {thread.map((e, i) => ('reply' in e && (e.reply.kind === 'authority_required' || e.reply.kind === 'prompt')) ? null : (   /* those render as the pending card, not as an empty bubble */
+        {!focused && thread.map((e, i) => ('reply' in e && (e.reply.kind === 'authority_required' || e.reply.kind === 'prompt')) ? null : (   /* those render as the pending card, not as an empty bubble */
           <div key={i} className={e.role === 'you' ? 'ask-msg you' : 'ask-msg agent'}>
             {'text' in e ? <span>{e.text}</span> : <ReplyView reply={e.reply} realm={realm} addressee={addressee} onNext={(n) => void doCommand({ id: n.capability, label: n.words } as AskVocabularyEntry, n.args)} />}
           </div>
         ))}
         {/* Somebody is waiting on a decision only they can make. A line, with the place to make it — not
             a card in the way of what they came here to do. */}
-        {waiting && (
+        {!focused && waiting && (
           <div className="ask-msg agent" data-testid="ask-waiting" style={{ fontSize: 12, opacity: 0.9 }}>
             {waiting.split(/(https?:\/\/\S+)/).map((part, i) => (
               /^https?:\/\//.test(part)
@@ -749,7 +758,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
         {/* spec 350 W3 — an ask you left unfinished. It lives on the agent, not in this tab, so it is
             still there after a reload; picking it up re-runs it through every gate exactly as the first
             turn did. One line each, and only ones this person may resume. */}
-        {unfinished.length > 0 && (
+        {!focused && unfinished.length > 0 && (
           <div className="ask-msg agent" data-testid="ask-unfinished" style={{ fontSize: 12, opacity: 0.9 }}>
             {/* ONE LINE, COLLAPSED. Listing every unfinished ask inline put 167 of them between a person
                 and the answer they had just asked for. The COUNT is the notification; the list is
@@ -787,7 +796,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
         {/* Spec 385 W2 — remembered choices. A memory nobody can see is a memory nobody can say "no" to:
             each line names the word, the place it was decided in, and whom it settled on, with a way to
             clear it. Clearing grants and revokes nothing — the mandate was asked and signed regardless. */}
-        {(remembered.length > 0 || instructions.length > 0) && (
+        {!focused && (remembered.length > 0 || instructions.length > 0) && (
           <div className="ask-msg agent" data-testid="ask-remembered" style={{ fontSize: 12, opacity: 0.9 }}>
             <button
               type="button"
@@ -821,7 +830,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
         )}
         {pending?.reply.kind === 'authority_required' && (
           <AuthorityCard
-            reply={pending.reply} busy={busy} onGrant={() => grant(pending.reply as never, pending.state)} onCancel={() => setPending(null)}
+            reply={pending.reply} busy={busy} onGrant={() => grant(pending.reply as never, pending.state)} onCancel={() => { setPending(null); if (focused) window.close(); }}
             chosen={chosen}
             checkCustody={async (delegator) => canGrantAs(delegator, await connectedCredential(via, agentAddress as Address, session!.token))}
             onRequest={(text) => { setPending(null); setQ(text); }}
@@ -845,8 +854,8 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
         )}
         {busy && !pending && (
           <div className="muted" data-testid="ask-busy" style={{ fontSize: 12 }}>
-            <span className="spinner" /> {steps.length && !steps[steps.length - 1]!.terminal ? steps[steps.length - 1]!.said : busy}
-            {steps.length > 1 && (
+            <span className="spinner" /> {focused ? 'One moment…' : steps.length && !steps[steps.length - 1]!.terminal ? steps[steps.length - 1]!.said : busy}
+            {!focused && steps.length > 1 && (
               <div data-testid="ask-progress" style={{ marginTop: 4, opacity: 0.7, fontSize: 11 }}>
                 {steps.filter((l) => !l.terminal).slice(0, -1).map((l) => <div key={l.seq}>· {l.said}</div>)}
               </div>
@@ -860,11 +869,11 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
         <div ref={endRef} />
       </div>
 
-      {showDiag && <DiagnosticsPane entries={diag} token={session?.token ?? ""} onClose={() => setShowDiag(false)} />}
+      {!focused && showDiag && <DiagnosticsPane entries={diag} token={session?.token ?? ""} onClose={() => setShowDiag(false)} />}
 
-      {command && <CommandForm command={command} realm={realm} addressee={addressee} addresseeLabel={addresseeLabel} selection={selection ?? undefined} initial={draftRun?.initial} draftOf={draftRun?.message} onSubmit={(args) => void doCommand(command, args)} onCancel={() => { setCommand(null); setDraftRun(null); }} />}
+      {!focused && command && <CommandForm command={command} realm={realm} addressee={addressee} addresseeLabel={addresseeLabel} selection={selection ?? undefined} initial={draftRun?.initial} draftOf={draftRun?.message} onSubmit={(args) => void doCommand(command, args)} onCancel={() => { setCommand(null); setDraftRun(null); }} />}
       {/* One control strip: what to do (a generated form) and which model proposes — small, in one row above the input. */}
-      {(commands.length > 0 || models.length > 1) && !command && !pending && (
+      {!focused && (commands.length > 0 || models.length > 1) && !command && !pending && (
         <div className="ask-flyout-strip">
           {commands.length > 0 && (
             <label className="ask-flyout-strip__ctl">
@@ -891,7 +900,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
           {voice.listening ? `Listening… ${'▮'.repeat(Math.round(voice.level * 6))}` : voice.speaking ? 'Speaking…' : voiceNote}
         </div>
       )}
-      <div className="ask-flyout-f">
+      {!focused && <div className="ask-flyout-f">
         {voice.canListen && (
           <button
             type="button" className={`ui-btn ${voice.listening ? 'ui-btn--primary' : 'ui-btn--secondary'}`} data-testid="ask-mic"
@@ -921,7 +930,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
           disabled={!!busy || !!pending}
         />
         <BusyButton busy={busy === 'Thinking…'} busyLabel="Thinking…" disabled={!q.trim() || !!pending} onClick={() => void send()} className="ui-btn ui-btn--primary">Ask</BusyButton>
-      </div>
+      </div>}
     </div>
   );
 }

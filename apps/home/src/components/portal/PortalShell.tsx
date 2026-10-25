@@ -57,6 +57,12 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
     return () => window.removeEventListener('ap:ask', onAsk);
   }, []);
   const pathname = usePathname();
+  // Read after mount: the server never sees the query, and the first paint must match it.
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    const q = window.location.search;
+    setFocused(pathname === '/contacts' && /[?&]from=/.test(q) && /[?&](add|remove)=/.test(q));
+  }, [pathname]);
   const searchParams = useSearchParams();
   // Spec 397 §6 — `/you?run=<runRef>`: the run an assistant parked for this person's signature. Read HERE, by the shell
   // that owns the flyout: a page's event fired on mount arrives before this shell's listener exists on a direct link.
@@ -134,6 +140,25 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
     if (agentAddress && a.toLowerCase() === agentAddress.toLowerCase()) return agentName ? nameLabel(agentName) : 'you';
     return undefined;
   };
+  // AN APP'S ONE QUESTION (`/contacts?add=…&from=<app>`): the window shows that act alone — no topbar, sidebar or
+  // footer. The page itself still runs (it names the act), out of sight.
+  if (focused)
+    return (
+      <div className="portal-root portal-root--focused">
+        <div hidden><ReadyProvider key={pathname}>{children}</ReadyProvider></div>
+        {canAsk && (
+          <AskFlyout
+            focused
+            command={askCommandState}
+            onCommandUsed={() => setAskCommand(null)}
+            addressee={askAddressee!} addresseeLabel={askLabel}
+            realm={{ kind: 'person' }}
+            selection={askSelection}
+            onClose={() => window.close()}
+          />
+        )}
+      </div>
+    );
   return (
     <HuddleProvider>
     <div className="portal-root">

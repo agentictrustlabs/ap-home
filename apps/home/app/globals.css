@@ -1037,6 +1037,10 @@
       .ask-card { border: 1px solid var(--color-border-strong); border-radius: 12px; padding: .7rem .8rem; background: var(--color-surface-raised); }
       .ask-err { font-size: .8rem; color: #b42318; background: #fef3f2; border: 1px solid #fecdca; border-radius: 8px; padding: .5rem .65rem; }
       @media (max-width: 640px) { .ask-flyout { width: 100vw; } }
+      /* An app's one question: the card alone, centred in its small window. */
+      .portal-root--focused { min-height: 100vh; display: flex; justify-content: center; background: var(--color-surface); }
+      .ask-flyout.ask-flyout--focused { position: static; width: min(480px, 100vw); border: none; box-shadow: none; }
+      .ask-flyout--focused .ask-flyout-body { padding: 1.5rem 1.25rem; justify-content: center; }
 
       .portal-brand { display: inline-flex; align-items: center; gap: .5rem; font-weight: 800; color: var(--color-text-primary); text-decoration: none; font-size: 1.05rem; letter-spacing: -.02em; }
       .portal-body { flex: 1; display: flex; align-items: stretch; }
