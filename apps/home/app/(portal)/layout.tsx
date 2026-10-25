@@ -8,6 +8,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { SessionProvider, useSession } from '../../src/context/session';
 import { activateVaultIfNeeded } from '../../src/home/onboarding';
 import { EntryExperience } from '../../src/components/onboarding/EntryExperience';
+import { takeAppRequestReturn } from '../../src/lib/app-request';
 import { GoogleSecureHome } from '../../src/components/onboarding/GoogleSecureHome';
 import { GoogleEnrollResume, readPendingEnroll } from '../../src/components/onboarding/GoogleEnrollResume';
 import { HomeResolvedView } from '../../src/components/onboarding/HomeResolvedView';
@@ -122,6 +123,13 @@ function Gate({ children }: { children: ReactNode }) {
 
   const connectPopup = mounted && isConnectPopup();
   const resumedEnroll = useRef(false);
+
+  // Back to the app's one request after a sign-in that came home to `/` (Google): once, then it runs as usual.
+  useEffect(() => {
+    if (phase !== 'authed') return;
+    const to = takeAppRequestReturn();
+    if (to && to !== window.location.pathname + window.location.search) window.location.replace(to);
+  }, [phase]);
 
   let content: ReactNode;
   if (!mounted) content = <FullBleedSpinner />; // stable SSR/first-paint (no authed content server-side)

@@ -14,6 +14,7 @@ import { initRemoteSigner } from '../../lib/remote-signer';
 import { whitelabel } from '../../whitelabel/config';
 import { knownRelyingClient } from '../../lib/relying-clients';
 import { hasSessionHandoff, useSession } from '../../context/session';
+import { appRequestOf, rememberAppRequest } from '../../lib/app-request';
 import { EmailAuthCard } from '../portal/EmailAuthCard';
 import { PhoneAuthCard } from '../portal/PhoneAuthCard';
 import { readSsoCookie } from '../../lib/sso-cookie';
@@ -571,6 +572,7 @@ function NameStart({ onStart, enrollApi, reason }: { onStart: (name: string, exi
       : undefined;
     // Heading to Google — warn a popup opener (COOP severs it) so it waits for the relay, not close.
     enrollApi?.postToOpener({ type: 'AC_PROGRESS', msg: 'Continuing with Google…', idp: true });
+    rememberAppRequest();
     continueWithGoogle(label ? toAgentName(label) : undefined, stash);
   };
   const onYouVersion = () => {
@@ -709,6 +711,7 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
     // Tell a popup opener we're leaving for Google BEFORE we navigate (COOP will sever the opener):
     // it must stop trusting `popup.closed` and wait for the relay channel instead. No-op otherwise.
     enrollApi?.postToOpener({ type: 'AC_PROGRESS', msg: 'Continuing with Google…', idp: true });
+    rememberAppRequest();
     continueWithGoogle(undefined, stash);
   };
   const onYouVersion = () => {
@@ -808,6 +811,8 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
   }
 
   const enroll = Boolean(enrollApi);
+  // An app's one friend act (`/contacts?add=…&from=<app>`): the sign-in says what it is for, briefly.
+  const appRequest = typeof window !== 'undefined' ? appRequestOf() : null;
   // Curation applies to the ENROLL screen only — the one a relying app sends people to. The
   // self-serve lane below has no app asking on anyone's behalf, so it keeps every method, and
   // `SocialConnect` is shared by both branches which is why this guard is on `enrollApi` rather
@@ -817,11 +822,13 @@ function CredentialFirstStart({ onUseName, onSession, enrollApi, appName, signIn
   // Exactly one method, and it is email: skip the reveal button and show the field itself.
   const soleMethod = curated?.length === 1 && curated[0] === 'email';
   return (
-    <Shell compact={enroll}>
-      <BrandShield size={enroll ? 40 : 56} />
-      <h1 className="onboarding-h1">{enroll && appName ? `Continue to ${appName}` : whitelabel.copy.arrivalTitle}</h1>
+    <Shell compact={enroll || !!appRequest}>
+      <BrandShield size={enroll || appRequest ? 40 : 56} />
+      <h1 className="onboarding-h1">{appRequest ? 'Confirm it’s you' : enroll && appName ? `Continue to ${appName}` : whitelabel.copy.arrivalTitle}</h1>
       <p className="onboarding-sub">
-        {enroll
+        {appRequest
+          ? `Sign in the way you usually do to ${appRequest.act} ${appRequest.name ?? 'your friend'}${appRequest.act === 'add' ? ' as a friend' : ''}. Then this window closes by itself.`
+          : enroll
           ? 'Sign in, then you’ll return.'
           : `Sign in or get started. Your ${whitelabel.brand.name} name is how others find your agent — not something you need to remember to get back in.`}
       </p>
