@@ -13,7 +13,7 @@ import { parseWorkspacePath, orgHref } from '../../lib/workspace';
 import { orgStatusOf, STATUS_LABEL } from '../../lib/org-lifecycle';
 import { buildNav, buildSettingsPane, paneGroups, bottomNav } from './nav';
 import { useAskSelection, setAskSelection } from '../../home/ask-selection';
-import type { AskCommand } from '../../home/ask-command';
+import { takePendingCommand, type AskCommand } from '../../home/ask-command';
 import { useRegisteredName } from '../../lib/reverse-name';
 import { PortalTopbar } from './PortalTopbar';
 import { AskFlyout } from './ask/AskFlyout';
@@ -44,13 +44,16 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
     const onAsk = (e: Event) => {
       const detail = (e as CustomEvent<{ message?: string; resumeRun?: string; command?: AskCommand }>).detail;
       if (detail?.resumeRun) { setAskResume(detail.resumeRun); openAsk(true); return; }
-      if (detail?.command) { setAskCommand(detail.command); openAsk(true); return; }
+      if (detail?.command) { takePendingCommand(); setAskCommand(detail.command); openAsk(true); return; }
       const message = detail?.message;
       if (!message) return;
       setAskSeed(message);
       openAsk(true);
     };
     window.addEventListener('ap:ask', onAsk);
+    // A screen that asked before this listener was here.
+    const early = takePendingCommand();
+    if (early) { setAskCommand(early); openAsk(true); }
     return () => window.removeEventListener('ap:ask', onAsk);
   }, []);
   const pathname = usePathname();

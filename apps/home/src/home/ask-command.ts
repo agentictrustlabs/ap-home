@@ -24,7 +24,19 @@ export interface AskCommand {
   labels?: Record<string, string>;
 }
 
+/** A command no shell has taken yet. A screen's effect can run before the shell's listener is attached (a child's
+ *  effects run first), and an event nobody hears is a command lost: the shell takes it when it attaches. */
+let pending: AskCommand | null = null;
+
 export function askCommand(cmd: AskCommand): void {
   if (typeof window === 'undefined') return;
+  pending = cmd;
   window.dispatchEvent(new CustomEvent('ap:ask', { detail: { command: cmd } }));
+}
+
+/** The command waiting for a shell, once — the listener and the shell's first mount both take it. */
+export function takePendingCommand(): AskCommand | null {
+  const cmd = pending;
+  pending = null;
+  return cmd;
 }
