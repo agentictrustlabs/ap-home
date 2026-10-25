@@ -152,6 +152,8 @@ export interface ContactDeps {
   sendDirectMessage?: (input: { sender: Address; recipient: Address; bodyText: string; session: string; contextRefs?: Array<{ kind: string; id: string; label?: string }> }) => Promise<{ ok: boolean; error?: string; messageId?: string }>;
   /** Put a contact notice in the contact's own vault (their DO, in-Worker): who added them, and the grant that did. */
   deliverContactNotice?: (input: { sender: Address; recipient: Address; grantDigest: string }) => Promise<{ ok: boolean; error?: string }>;
+  /** A view call on chain — whether the person's account already approved the contact grant (the one-prompt path). */
+  readContract?: (args: { address: Address; abi: readonly unknown[]; functionName: string; args: readonly unknown[] }) => Promise<unknown>;
   /** The person's SA executes a call under their redeemed mandate (the revoke) — the same path access.grant.revoke uses. */
   executeAsServiceSa?: (serviceSa: Address, callData: Hex) => Promise<{ txHash: string }>;
   /** The mandate's digest-binding caveat argued for THIS step (the harness's own helper, injected). */
@@ -174,6 +176,27 @@ function buildContactGrant(deps: ContactDeps, person: Address, contact: Address,
   ];
   return { delegator: person, delegate: contact, authority: ROOT_AUTHORITY, caveats, salt, signature: '0x' };
 }
+
+/**
+ * THE CONTACT GRANT FOR A MANDATE — fixed by the mandate's intent and window, the step and the contact, so the step that
+ * parks and the step that acts derive the SAME grant. That is what lets the Home approve the grant in the one prompt
+ * that approves the mandate (spec 361 I4, as an organization's invitation does): the reply names this digest beside
+ * the mandate's, and the act finds it already approved instead of asking for a second signature.
+ */
+export function contactGrantFor(
+  deps: Pick<ContactDeps, 'env' | 'enforcers' | 'vaultServerId'>,
+  person: Address,
+  contact: Address,
+  mandate: { intentDigest: string; validAfter: number },
+  stepRef: string,
+): { grant: Delegation; digest: Hex; salt: bigint; validUntil: number } {
+  const validUntil = mandate.validAfter + 365 * 24 * 3600;
+  const salt = BigInt(keccak256(toBytes(`${mandate.intentDigest}:${stepRef}:contact:${contact.toLowerCase()}`)));
+  const grant = buildContactGrant(deps as ContactDeps, person, contact.toLowerCase() as Address, salt, validUntil);
+  return { grant, digest: hashDelegation(grant, Number(deps.env.CHAIN_ID), deps.env.DELEGATION_MANAGER as Address), salt, validUntil };
+}
+
+const ERC1271_ABI = [{ type: 'function', name: 'isValidSignature', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'bytes4' }] }] as const;
 
 /** `person.contact.invite` — the person's own act, on their own records. */
 export function contactInviteInvoker(deps: ContactDeps, presented: MandatePresentation, person: Address | undefined, session: string | undefined): ToolInvoker {
@@ -205,11 +228,14 @@ export function contactInviteInvoker(deps: ContactDeps, presented: MandatePresen
     const digest = intentDigest(ctx.intent);
     const ts = wire.caveats.find((c) => c.enforcer.toLowerCase() === deps.enforcers.timestamp.toLowerCase());
     if (!ts) throw new Error('the mandate carries no timestamp caveat');
-    const validUntil = Number(decodeTimestampTerms(ts.terms as Hex).validAfter) + 365 * 24 * 3600;
-    const salt = BigInt(keccak256(toBytes(`${digest}:${stepRef}:contact:${contact}`)));
-    const grant = buildContactGrant(deps, person, contact, salt, validUntil);
-    const grantDigest = hashDelegation(grant, Number(deps.env.CHAIN_ID), deps.env.DELEGATION_MANAGER as Address);
-    const signed = signatureFor(ctx.supplied as readonly SuppliedInputV1[] | undefined, stepRef, grantDigest);
+    const { grant, digest: grantDigest, salt, validUntil } = contactGrantFor(deps, person, contact, { intentDigest: digest, validAfter: Number(decodeTimestampTerms(ts.terms as Hex).validAfter) }, stepRef);
+    let signed: { signature: string } | undefined = signatureFor(ctx.supplied as readonly SuppliedInputV1[] | undefined, stepRef, grantDigest);
+    // ONE PROMPT: the Home may already have approved this exact grant in the same batch as the mandate. The person's
+    // account answers for the 0x03 approved-hash sentinel; the chain is asked, never a cache.
+    if (!signed && deps.readContract) {
+      const ok = await deps.readContract({ address: person, abi: ERC1271_ABI, functionName: 'isValidSignature', args: [grantDigest, '0x03'] }).catch(() => null);
+      if (ok === '0x1626ba7e') signed = { signature: '0x03' };
+    }
     if (!signed) {
       throw new InputRequired({ kind: 'signature', stepRef, toolId, prompt: `Sign the contact grant from you to ${contact} — it lets them read your contact profile.`, digest: grantDigest, signer: person, payload: { contact, role, scope: CONTACT_RESOURCE_SCOPE, validUntil } });
     }

@@ -102,6 +102,35 @@ export function ContactsPanel() {
     const em = (q.get('invite') ?? '').trim();
     if (em && em !== '1') setInviteEmail(em);
   }, []);
+  // An app's Add a friend (`?add=<address or name>`, the seed reader's) starts the add once the session is here, so the
+  // one tap left is the approval itself — which also approves the contact grant (one prompt). A name is looked up
+  // first, the same public lookup the search uses; one that resolves to nobody stays in the field, as before.
+  const addAsked = useRef(false);
+  useEffect(() => {
+    if (!session || addAsked.current) return;
+    const add = (new URLSearchParams(window.location.search).get('add') ?? '').trim();
+    if (!add) return;
+    addAsked.current = true;
+    void (async () => {
+      const agent = /^0x[0-9a-fA-F]{40}$/.test(add)
+        ? add.toLowerCase()
+        : await fetch(`/connect/name-info?name=${encodeURIComponent(add.toLowerCase())}`)
+            .then((r) => r.json())
+            .then((b: { exists?: boolean; agent?: string }) => (b.exists && b.agent ? b.agent.toLowerCase() : null))
+            .catch(() => null);
+      if (!agent) return;
+      askCommand({ toolId: 'person.contact.invite', args: { contact: agent, role: 'friend' }, message: `add ${add} as a contact (friend)` });
+    })();
+  }, [session]);
+  // Opened by an app for one add or remove: once it is done, say so and close, back to the app that asked.
+  const [closing, setClosing] = useState(false);
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    if (!window.opener || !(q.get('add') || q.get('remove'))) return;
+    const done = () => { setClosing(true); setTimeout(() => window.close(), 1500); };
+    window.addEventListener('ap:ask-done', done);
+    return () => window.removeEventListener('ap:ask-done', done);
+  }, []);
   // …or whom to remove (`?remove=0x…`, the seed reader's Remove a friend / Cancel a request): the same ceremony as the
   // row's Remove, run once the session is here — the flyout still asks before anything is revoked.
   const removeAsked = useRef(false);
@@ -163,6 +192,7 @@ export function ContactsPanel() {
   if (!session || !agentAddress) return null;
   return (
     <>
+      {closing && <Meta>Done — taking you back.</Meta>}
       <Section title="Friends" count={friends?.friends.length || undefined} testId="friends">
         {friendsErr && <ErrorNote>{friendsErr}</ErrorNote>}
         {!friends && !friendsErr && <Meta>Reading your friends…</Meta>}

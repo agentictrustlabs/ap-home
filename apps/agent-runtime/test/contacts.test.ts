@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { encodeAbiParameters, type Address, type Hex } from 'viem';
 import { InputRequired } from '@agenticprimitives/orchestration';
-import { contactInviteInvoker, contactListInvoker, contactRemoveInvoker, contactRecordType, CONTACT_RESOURCE_SCOPE, type ContactDeps, type ContactRecordV1 } from '../src/contacts.js';
+import { contactGrantFor, contactInviteInvoker, contactListInvoker, contactRemoveInvoker, contactRecordType, CONTACT_RESOURCE_SCOPE, type ContactDeps, type ContactRecordV1 } from '../src/contacts.js';
 
 const ALICE = '0x00000000000000000000000000000000000000a1' as Address;
 const BOB = '0x00000000000000000000000000000000000000b1' as Address;
@@ -128,5 +128,26 @@ describe('the other half, already signed', () => {
     const digest = String((asked as { request?: { digest?: string }; digest?: string }).request?.digest ?? (asked as { digest?: string }).digest);
     await inv('person.contact.invite', { contact: FAY }, ctx([{ stepRef: 's0', signature: { digest, signature: '0xgrant' } }]));
     expect(notices).toEqual([{ sender: ALICE, recipient: FAY }, { sender: FAY, recipient: ALICE }]);
+  });
+});
+
+describe('one prompt (spec 361 I4) — the contact grant approved with the mandate', () => {
+  const EVE = '0x00000000000000000000000000000000000000e5' as Address;
+  it('the grant the step builds is the one named at park time; already approved on chain, nothing more is asked', async () => {
+    const { intentDigest } = await import('@agenticprimitives/delegation');
+    const c = ctx();
+    const expected = contactGrantFor(deps(), ALICE, EVE, { intentDigest: intentDigest((c as { intent: never }).intent), validAfter: 1000 }, 's0');
+    const asked: unknown[] = [];
+    const d = deps({ readContract: async (a) => { asked.push(a.args[0]); return a.args[0] === expected.digest ? '0x1626ba7e' : '0xffffffff'; } });
+    const out = (await contactInviteInvoker(d, wire(ALICE), ALICE, 'sess')('person.contact.invite', { contact: EVE, role: 'friend' }, c)) as { added: boolean; grantDigest: string; delegation: { signature: string } };
+    expect(out.added).toBe(true);
+    expect(out.grantDigest).toBe(expected.digest);
+    expect(out.delegation.signature).toBe('0x03');
+    expect(asked).toEqual([expected.digest]);
+  });
+  it('not approved on chain: it asks for the signature as before', async () => {
+    const d = deps({ readContract: async () => '0xffffffff' });
+    const r = await contactInviteInvoker(d, wire(ALICE), ALICE, 'sess')('person.contact.invite', { contact: '0x00000000000000000000000000000000000000e6' }, ctx()).catch((e: unknown) => e);
+    expect(r).toBeInstanceOf(InputRequired);
   });
 });

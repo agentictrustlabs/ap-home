@@ -72,7 +72,7 @@ import { MCP_CONNECTOR_PREFIX, MCP_CONNECTORS_LIST, MCP_CONNECTORS_LIST_TOOL, is
 import { PREFERENCES_TOOLS, PREFERENCES_ACTS, PREFERENCES_GET, preferencesInvoker } from './preferences-tools.js';
 import type { TriggerScheduleV1 } from './triggers.js';
 import { factsForPrompt, factsOf, type RememberedFactsV1 } from '@agenticprimitives/context';
-import { CONTACT_INVITE_TOOL, CONTACT_LIST_TOOL, CONTACT_REMOVE_TOOL, contactInviteInvoker, contactListInvoker, contactRemoveInvoker, type ContactDeps } from './contacts.js';
+import { CONTACT_INVITE_TOOL, CONTACT_LIST_TOOL, CONTACT_REMOVE_TOOL, contactGrantFor, contactInviteInvoker, contactListInvoker, contactRemoveInvoker, type ContactDeps } from './contacts.js';
 import { FRIEND_LIST_TOOL, friendListInvoker } from './friends.js';
 import { PRESENCE_LIST_TOOL, presenceListInvoker, presencePort } from './presence.js';
 import { STANDARD_SURFACE_SKILL } from '@agenticprimitives/a2a/standard';
@@ -2416,6 +2416,7 @@ export function harnessInvoker(deps: HarnessDeps, env: HarnessEnv, presentedInpu
         ...(deps.sendDirectMessage ? { sendDirectMessage: deps.sendDirectMessage } : {}),
         ...(deps.deliverContactNotice ? { deliverContactNotice: deps.deliverContactNotice } : {}),
         ...(deps.executeAsServiceSa ? { executeAsServiceSa: deps.executeAsServiceSa } : {}),
+        ...(deps.readContract ? { readContract: deps.readContract } : {}),
         digestBindingArgsFor, stepDigests,
       };
       if (toolId === CONTACT_LIST_TOOL.id) return contactListInvoker(cdeps, person)(toolId, args, ctx);
@@ -4378,6 +4379,16 @@ async function askReplyForInner(env: HarnessEnv, input: {
     // one custodian signature for the mandate AND the grant, and the invoker's run finds the grant
     // already approved on chain instead of prompting again.
     const alsoApprove: Array<{ purpose: string; digest: Hex }> = [];
+    // The same for adding a contact: the person→contact grant is approved in the mandate's own prompt.
+    if (r.required.capability.id === CONTACT_INVITE_TOOL.id) {
+      const person = String(input.addressee ?? '').toLowerCase();
+      const contact = String(args.contact ?? '').toLowerCase();
+      if (/^0x[0-9a-f]{40}$/.test(person) && /^0x[0-9a-f]{40}$/.test(contact) && person !== contact) {
+        requirement.validAfter ??= Math.floor(Date.now() / 1000) - 60;
+        const g = contactGrantFor({ env, enforcers: harnessEnforcers(env), vaultServerId: vaultServerId(env) }, person as Address, contact as Address, { intentDigest: requirement.intentDigest, validAfter: requirement.validAfter }, r.required.stepRef);
+        alsoApprove.push({ purpose: `the contact grant ${person.slice(0, 10)}… → ${contact.slice(0, 10)}… (they may read your contact profile)`, digest: g.digest });
+      }
+    }
     if (r.required.capability.id === ORG_INVITE_CAPABILITY) {
       const org = String(args.org ?? '').toLowerCase();
       const invitee = String(args.invitee ?? '').toLowerCase();
