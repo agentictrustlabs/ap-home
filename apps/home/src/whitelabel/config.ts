@@ -699,8 +699,13 @@ const faithImpact: WhiteLabelConfig = {
       // Spec 412 W5 — `ask-as-me`: a reader's highlights, notes and bookmarks are written into THEIR OWN Library
       // (`seed-bible/…`) by THEIR agent, asked as them under this wire by the reader workspace (reader-a2a). The app
       // never holds a write grant on their vault; the one connect mints the wire beside the id_token (ask_with_login).
-      allowed_delegation_templates: ['site-login', 'ask-as-me'],
+      // `act-as-me` (spec 397 §11): one consent lets the reader's server add and remove friends as the person, without
+      // the Home's window each time — only those two acts, 30 days, revocable under Connected assistants.
+      allowed_delegation_templates: ['site-login', 'ask-as-me', 'act-as-me'],
       delegate: '0x89D13c596c45E4eE80Af5ae06C727FE9A820ffD0',
+      // reader-a2a's act key (`READER_ACT_PRIVATE_KEY` on seed-bible-reader-a2a-faithnet) — what its standing wires name.
+      act_delegate: (process.env.NEXT_PUBLIC_SEED_BIBLE_READER_ACT_DELEGATE || '0xDEEA7174Bdc21BDABa8cC3c9AD5089f54B3a4500') as `0x${string}`,
+      act_capabilities: ['person.contact.invite', 'person.contact.remove'],
       // reader-a2a's asking key (`READER_ASK_PRIVATE_KEY` on seed-bible-reader-a2a-faithnet) — a revocable delegate.
       ask_delegate: (process.env.NEXT_PUBLIC_SEED_BIBLE_READER_ASK_DELEGATE || '0xb77a627a4ad23af518f9626186F7bE4D2cC4BFf1') as `0x${string}`,
       ask_with_login: true,

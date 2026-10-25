@@ -111,7 +111,8 @@ export const onRequestPost = async ({ request, env }: FnContext): Promise<Respon
       if (!w || w.v !== 1 || w.template !== 'act-as-me' || typeof w.capability !== 'string' || !w.wire || typeof w.ref !== 'string' || !w.requirement) return json({ error: 'an act wire is malformed' }, 400);
       if (caps.has(w.capability)) return json({ error: `two act wires for ${w.capability} — one wire per capability` }, 400);
       caps.add(w.capability);
-      if (String(w.wire.delegate).toLowerCase() !== grant.delegate.toLowerCase()) return json({ error: `the act wire for ${w.capability} does not name the registered act key` }, 401);
+      if (String(w.wire.delegate).toLowerCase() !== (actClient?.act_delegate ?? grant.delegate).toLowerCase()) return json({ error: `the act wire for ${w.capability} does not name the registered act key` }, 401);
+      if (actClient?.act_capabilities && !actClient.act_capabilities.includes(w.capability)) return json({ error: `this client may not hold an act wire for ${w.capability}` }, 403);
       const isPayment = w.capability === 'treasury.payment.execute';
       if (!isPayment && String(w.wire.delegator).toLowerCase() !== body.delegation.delegator.toLowerCase()) return json({ error: `the act wire for ${w.capability} is not the connecting person's` }, 401);
       const wv = await verifyDelegation(env, w.wire);

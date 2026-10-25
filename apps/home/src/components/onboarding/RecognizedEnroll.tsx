@@ -286,7 +286,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
         const signPerson = await signHashFor(viaLower as Via, home.address, auth);
         const askWire = await issueAskAsMeDelegation(home.address, askDelegate, signPerson);
         setGrantProgress({ step: 2, total: 3, label: `Signing ${n} standing wire${n === 1 ? '' : 's'} for the acts you checked…` });
-        const set = buildActAsMeSet(home.address, actDelegate, choices);
+        const set = buildActAsMeSet(home.address, (relyingApp?.act_delegate ?? actDelegate) as Address, choices);
         const promptFree = await signsWithoutPrompt(viaLower, token);
         const signed = await signActAsMeSet(set, promptFree
           ? { mode: 'each', sign: async (delegator, digest) => (await signHashFor(viaLower as Via, delegator, auth))(digest) }
@@ -1016,7 +1016,7 @@ export function RecognizedEnroll({ api, onUnrecognized }: { api: EnrollApi; onUn
           </p>
         )}
         {enroll.template === 'act-as-me' && home?.address && token && (
-          <ActAsMeConsent token={token} agent={home.address} onChange={onActChoices} />
+          <ActAsMeConsent token={token} agent={home.address} onChange={onActChoices} {...(relyingApp?.act_capabilities ? { only: relyingApp.act_capabilities } : {})} />
         )}
         <ConsentSheet
           title={fmt(c.authorizeStepTitle, { app: appName })}
