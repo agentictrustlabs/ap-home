@@ -19,6 +19,9 @@ export interface AskCommand {
   args: Record<string, unknown>;
   /** What the thread shows as the person's turn: the act in words, with the choices. */
   message: string;
+  /** How the screen showed the agents it names (address → the words the person knows them by), so the card that
+   *  asks shows "alice", not 0x… — the same memory a choice in the Ask keeps. */
+  labels?: Record<string, string>;
 }
 
 export function askCommand(cmd: AskCommand): void {

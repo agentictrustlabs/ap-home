@@ -135,6 +135,7 @@ export function AskFlyout({ addressee, addresseeLabel, realm, selection, onClose
     if (!screenCommand || !session) return;
     onCommandUsed?.();
     const cmd = screenCommand;
+    if (cmd.labels) setChosen((m) => ({ ...m, ...Object.fromEntries(Object.entries(cmd.labels!).map(([a, l]) => [a.toLowerCase(), l])) }));
     void (async () => {
       setThread((t) => [...t, { role: 'you', text: cmd.message }]);
       const surface = await homeScope(realm, addressee, selection ?? undefined);

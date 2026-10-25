@@ -119,14 +119,16 @@ export function ContactsPanel() {
             .then((b: { exists?: boolean; agent?: string }) => (b.exists && b.agent ? b.agent.toLowerCase() : null))
             .catch(() => null);
       if (!agent) return;
-      askCommand({ toolId: 'person.contact.invite', args: { contact: agent, role: 'friend' }, message: `add ${add} as a contact (friend)` });
+      const label = (new URLSearchParams(window.location.search).get('name') ?? '').trim() || add;
+      askCommand({ toolId: 'person.contact.invite', args: { contact: agent, role: 'friend' }, message: `add ${label} as a friend`, ...(/^0x/i.test(label) ? {} : { labels: { [agent]: label } }) });
     })();
   }, [session]);
-  // Opened by an app for one add or remove: once it is done, say so and close, back to the app that asked.
+  // Opened by an app for one add or remove (`&from=<app>`): once it is done, say so and close, back to the app.
   const [closing, setClosing] = useState(false);
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
-    if (!window.opener || !(q.get('add') || q.get('remove'))) return;
+    // `from` names the app that opened this window — the Home's opener policy hides the opener itself.
+    if (!q.get('from') || !(q.get('add') || q.get('remove'))) return;
     const done = () => { setClosing(true); setTimeout(() => window.close(), 1500); };
     window.addEventListener('ap:ask-done', done);
     return () => window.removeEventListener('ap:ask-done', done);
@@ -139,7 +141,8 @@ export function ContactsPanel() {
     const rm = (new URLSearchParams(window.location.search).get('remove') ?? '').trim();
     if (!/^0x[0-9a-fA-F]{40}$/.test(rm) && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(rm)) return;
     removeAsked.current = true;
-    askCommand({ toolId: 'person.contact.remove', args: { contact: rm }, message: `remove ${rm} as a contact` });
+    const label = (new URLSearchParams(window.location.search).get('name') ?? '').trim();
+    askCommand({ toolId: 'person.contact.remove', args: { contact: rm }, message: `remove ${label || rm} as a friend`, ...(label && /^0x[0-9a-fA-F]{40}$/.test(rm) ? { labels: { [rm.toLowerCase()]: label } } : {}) });
   }, [session]);
   // The flyout's run finishes elsewhere; re-read when it says something happened (`ap:ask-done`).
   useEffect(() => {
@@ -191,7 +194,7 @@ export function ContactsPanel() {
 
   if (!session || !agentAddress) return null;
   // Opened by an app for one friend act: that act is the whole page — the card that asks it, and nothing to read past.
-  const forApp = typeof window !== 'undefined' && !!window.opener && /[?&](add|remove)=/.test(window.location.search);
+  const forApp = typeof window !== 'undefined' && /[?&]from=/.test(window.location.search) && /[?&](add|remove)=/.test(window.location.search);
   if (forApp)
     return (
       <Section title={closing ? 'Done' : /[?&]add=/.test(window.location.search) ? 'Adding a friend' : 'Removing a friend'} testId="friends-for-app">
