@@ -11,8 +11,10 @@ export const FRIEND_TYPES = ['friend', 'family', 'coach', 'other'] as const;
 export type FriendType = typeof FRIEND_TYPES[number];
 export const FRIEND_TYPE_WORDS: Record<FriendType, string> = { friend: 'Friend', family: 'Family', coach: 'Coach', other: 'Other' };
 
-export interface FriendRow { agent: string; name: string | null; since: string; type: FriendType }
-export interface FriendRequestRow { agent: string; name: string | null; at: string | null }
+/** Their own profile's name and photo — read by the agent under the grant their standing offer gave (friends.ts). */
+interface Profiled { profileName?: string; photo?: string }
+export interface FriendRow extends Profiled { agent: string; name: string | null; since: string; type: FriendType }
+export interface FriendRequestRow extends Profiled { agent: string; name: string | null; at: string | null }
 /** A friend who removed you: their half is gone, yours still stands until you remove it. */
 export interface EndedRow { agent: string; name: string | null; type: FriendType; endedAt: string | null }
 export interface FriendsView {
@@ -37,7 +39,9 @@ export async function readFriendsThroughHarness(input: { person: Address; sessio
     const found = rows.find((x) => x.toolId === 'person.friend.list')?.result as Partial<FriendsView> & { refused?: string; storageNeedsEnabling?: boolean } | undefined;
     if (found?.refused) return { ok: false, error: found.refused };
     const typed = <T extends { type?: unknown }>(r: T): T & { type: FriendType } => ({ ...r, type: (FRIEND_TYPES as readonly string[]).includes(String(r.type)) ? r.type as FriendType : 'friend' });
-    return { ok: true, friends: (found?.friends ?? []).map(typed), requests: found?.requests ?? [], requested: (found?.requested ?? []).map(typed), ended: (found?.ended ?? []).map(typed), ...(found?.storageNeedsEnabling ? { storageNeedsEnabling: true } : {}) };
+    // A person is shown by the name they gave their Home — a nameless agent has no other, and its address is no name.
+    const named = <T extends { name: string | null; profileName?: string }>(r: T): T => (r.profileName ? { ...r, name: r.profileName } : r);
+    return { ok: true, friends: (found?.friends ?? []).map(typed).map(named), requests: (found?.requests ?? []).map(named), requested: (found?.requested ?? []).map(typed), ended: (found?.ended ?? []).map(typed), ...(found?.storageNeedsEnabling ? { storageNeedsEnabling: true } : {}) };
   }
   return { ok: false, error: out.detail ?? out.error ?? (reply?.kind === 'refused' ? reply.error : 'your friends could not be read') };
 }

@@ -142,3 +142,32 @@ describe('two-way: their half decides (owner, 2026-10-26)', () => {
     expect(out.requests.map((r) => r.agent)).toEqual([EVE]);
   });
 });
+
+describe("a friend's own name and photo (their grant to me: vault:profile.contact)", () => {
+  const PHOTO = 'data:image/jpeg;base64,AAAA';
+  const profile = { contact: { firstName: 'Dan', lastName: 'Okafor', photo: PHOTO, email: 'dan@example.org', phone: '555' } };
+  it('a nameless friend is known by their profile name and photo — and nothing else of the record travels', async () => {
+    const read: string[] = [];
+    const d = { ...deps(), nameOf: async () => null, readSubjectRecord: async (s: string, t: string) => {
+      if (s === ALICE) return store.get(t) ?? null;
+      if (s === DAN) { read.push(t); return t === contactRecordType(ALICE) ? offer(ALICE, 'friend') : t === 'impact-profile' ? profile : null; }
+      return null;
+    } };
+    const out = (await friendListInvoker(d, ALICE)('person.friend.list', {}, ctx())) as { friends: Array<Record<string, unknown>> };
+    const dan = out.friends.find((f) => f.agent === DAN)!;
+    expect(dan).toMatchObject({ profileName: 'Dan Okafor', photo: PHOTO });
+    expect(JSON.stringify(out)).not.toMatch(/dan@example|555/);
+    expect(read).toContain('impact-profile');
+  });
+  it('someone whose offer to me is withdrawn is not read', async () => {
+    const read: string[] = [];
+    const removed = { ...offer(ALICE, 'friend', 'withdrawn'), withdrawnAt: 1_800_000_000_000 };
+    const d = { ...deps(), readSubjectRecord: async (s: string, t: string) => {
+      if (s === ALICE) return store.get(t) ?? null;
+      if (s === DAN) { read.push(t); return t === contactRecordType(ALICE) ? removed : t === 'impact-profile' ? profile : null; }
+      return null;
+    } };
+    await friendListInvoker(d, ALICE)('person.friend.list', {}, ctx());
+    expect(read).not.toContain('impact-profile');
+  });
+});

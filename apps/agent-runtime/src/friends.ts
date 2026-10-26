@@ -41,11 +41,28 @@ export const FRIEND_LIST_TOOL: ToolSpec = {
   establishes: 'lookup',
 };
 
-export interface FriendRow { agent: string; name: string | null; since: string; type: FriendType }
-export interface FriendRequestRow { agent: string; name: string | null; at: string | null }
+/** What a person's own profile says of them (their Home's `impact-profile` contact): read for a friend, or someone asking
+ *  to be one, under the grant THEIR standing offer gave me — `vault:profile.contact`, the friend's profile. Their name
+ *  and photo only; nothing else of the record leaves their vault. A nameless agent is known by this, not its address. */
+export interface FriendProfile { profileName?: string; photo?: string }
+export interface FriendRow extends FriendProfile { agent: string; name: string | null; since: string; type: FriendType }
+export interface FriendRequestRow extends FriendProfile { agent: string; name: string | null; at: string | null }
 export interface EndedRow { agent: string; name: string | null; type: FriendType; endedAt: string | null }
 
 const isPersonName = (name: string | null): boolean => { const k = kindOfName(name); return k === null || k === 'person'; };
+
+/** A profile photo small enough to travel in a friends list (the Home keeps photos up to 200 KB). */
+const LIST_PHOTO_MAX = 120_000;
+const PHOTO_RE = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/;
+/** Their profile's name and photo — only ever called for someone whose standing offer names me (their grant). */
+async function profileOf(deps: FriendsDeps, them: string): Promise<FriendProfile> {
+  const rec = (await deps.readSubjectRecord?.(them, 'impact-profile').catch(() => null)) as { contact?: { firstName?: unknown; lastName?: unknown; photo?: unknown } } | null;
+  const c = rec?.contact;
+  if (!c) return {};
+  const profileName = [c.firstName, c.lastName].map((x) => (typeof x === 'string' ? x.trim() : '')).filter(Boolean).join(' ').slice(0, 120);
+  const photo = typeof c.photo === 'string' && c.photo.length <= LIST_PHOTO_MAX && PHOTO_RE.test(c.photo) ? c.photo : undefined;
+  return { ...(profileName ? { profileName } : {}), ...(photo ? { photo } : {}) };
+}
 
 /** The friends view itself — shared with presence (presence.ts), which is what friends see of each other. */
 export async function friendsOf(deps: FriendsDeps, person: string): Promise<{ friends: FriendRow[]; requests: FriendRequestRow[]; requested: FriendRow[]; ended: EndedRow[]; records: number; moved?: number; moveError?: string }> {
@@ -62,9 +79,13 @@ export async function friendsOf(deps: FriendsDeps, person: string): Promise<{ fr
   const requested: FriendRow[] = [];
   const ended: EndedRow[] = [];
   let checked = 0;
+  /** Whether their offer naming me stands, as read for the friends above (true only on their own record). */
+  const standingRead = new Map<string, boolean>();
+  const theirStanding = async (them: string) => standingRead.get(them) ?? false;
   const theirHalf = async (them: string) => {
     if (checked++ >= OTHER_HALF_CHECK_MAX) return null;
     const o = await readOffer(deps, them, me);
+    standingRead.set(them, o?.status === 'standing');
     return o ? { status: o.status, at: o.status === 'withdrawn' ? (o.withdrawnAt ?? null) : o.offeredAt } : null;
   };
   for (const [agent, { offer }] of mine) {
@@ -96,6 +117,13 @@ export async function friendsOf(deps: FriendsDeps, person: string): Promise<{ fr
     requests.push({ agent, name: await nameOf(agent), at });
   }
   requests.sort((a, b) => String(b.at ?? '').localeCompare(String(a.at ?? '')));
+  // Their own name and photo, for friends and for requests — each only when their offer naming me was READ standing
+  // (their grant, not my inbox's evidence of it); ended rows (they withdrew) are not read.
+  const granted = new Set<string>();
+  for (const f of friends) if ((await theirStanding(f.agent)) === true) granted.add(f.agent);
+  for (const r of requests) if ((await theirStanding(r.agent)) === true) granted.add(r.agent);
+  const profiles = new Map(await Promise.all([...granted].map(async (a) => [a, await profileOf(deps, a)] as const)));
+  for (const row of [...friends, ...requests]) Object.assign(row, profiles.get(row.agent) ?? {});
   return { friends, requests, requested, ended, records: mine.size, ...(move.moved ? { moved: move.moved } : {}), ...(move.error ? { moveError: move.error } : {}) };
 }
 
