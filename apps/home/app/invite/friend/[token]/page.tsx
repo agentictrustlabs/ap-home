@@ -7,7 +7,6 @@
 import { use, useEffect, useState } from 'react';
 import { useSession } from '../../../../src/context/session';
 import { EmailAuthCard } from '../../../../src/components/portal/EmailAuthCard';
-import { askCommand } from '../../../../src/home/ask-command';
 import { BrandShield } from '../../../../src/components/shared/BrandShield';
 import { AgentName } from '../../../../src/components/shared/AgentName';
 
@@ -30,15 +29,18 @@ export default function FriendInvitePage({ params }: { params: Promise<{ token: 
   const who = invite?.fromName ?? null;
   const self = !!invite && !!agentAddress && invite.from.toLowerCase() === agentAddress.toLowerCase();
 
-  const addBack = () => {
+  const addBack = async () => {
     if (!invite || !session) return;
-    askCommand({ toolId: 'person.friend.add', args: { friend: invite.from, type: 'friend', invitation: token }, message: `add ${who ?? invite.from} as a friend` });
     setAdded(true);
-    // The stash is spent once the invitee acted on it; the contact grant is what makes the friendship, not this.
-    void fetch('/connect/friend-invite/email', {
+    // The stash is spent once the invitee acted on it; the friendship grant is what makes the friendship, not this.
+    await fetch('/connect/friend-invite/email', {
       method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${session.token}` },
       body: JSON.stringify({ token, claim: true }),
     }).catch(() => {});
+    // The add runs in the Ask, which lives in the portal — this page is outside it, so a command fired here was heard by
+    // no one. Friends takes `?add=` and starts it there, with the invitation, so the inviter's half completes too.
+    const q = new URLSearchParams({ add: invite.from, invitation: token, ...(who ? { name: who } : {}) });
+    window.location.href = `/friends?${q}`;
   };
 
   return (
@@ -63,13 +65,12 @@ export default function FriendInvitePage({ params }: { params: Promise<{ token: 
             ) : session && agentAddress ? (
               added ? (
                 <p className="onboarding-sub">
-                  Sign the contact grant in the panel that opened, and {who ?? 'your friend'} is told. Once they add you back you are friends.
-                  {' '}<a href="/friends">Your friends →</a>
+                  Taking you to your friends to finish…
                 </p>
               ) : (
                 <>
                   <p className="onboarding-sub">You are signed in as <b>{agentName ?? agentAddress}</b>.</p>
-                  <button type="button" className="onboarding-btn" onClick={addBack}>Add {who ?? 'them'} as a friend</button>
+                  <button type="button" className="onboarding-btn" onClick={() => void addBack()}>Add {who ?? 'them'} as a friend</button>
                 </>
               )
             ) : (
