@@ -31,3 +31,29 @@ describe('any other signature', () => {
     expect(c.reads()).toBe(1);
   });
 });
+
+import { submitUntilRun } from '../src/chain-settle.js';
+
+describe('a userOp that is not in its receipt', () => {
+  const OURS = { ok: true }; const NOT_IN_IT = { ok: false, matched: false };
+  it('is sent again while the account nonce says it never ran — and is ours once it does', async () => {
+    let sends = 0;
+    const out = await submitUntilRun({ submit: async () => ++sends, judge: (n) => (n < 2 ? NOT_IN_IT : OURS), nonceNow: async () => 7n, opNonce: 7n });
+    expect(out.ran).toBe('here'); expect(sends).toBe(2);
+  });
+  it('ran in another transaction (the nonce moved): success, not sent twice', async () => {
+    let sends = 0;
+    const out = await submitUntilRun({ submit: async () => ++sends, judge: () => NOT_IN_IT, nonceNow: async () => 8n, opNonce: 7n });
+    expect(out.ran).toBe('elsewhere'); expect(sends).toBe(1);
+  });
+  it('never runs: said so after a bounded number of sends — never reported as done', async () => {
+    let sends = 0;
+    const out = await submitUntilRun({ submit: async () => ++sends, judge: () => NOT_IN_IT, nonceNow: async () => 7n, opNonce: 7n, tries: 3 });
+    expect(out.ran).toBe('not-run'); expect(sends).toBe(3);
+  });
+  it('a receipt that names our op (ok or reverted) is judged by the caller, not sent again', async () => {
+    let sends = 0;
+    const out = await submitUntilRun({ submit: async () => ++sends, judge: () => ({ ok: false, matched: true }), nonceNow: async () => 7n, opNonce: 7n });
+    expect(out.ran).toBe('here'); expect(sends).toBe(1);
+  });
+});

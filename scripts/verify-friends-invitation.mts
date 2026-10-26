@@ -51,6 +51,7 @@ async function act(who: Person, message: string, toolId: string, args: Record<st
       if (a.ok !== true) fail(`authorize build: ${JSON.stringify(a).slice(0, 300)}`);
       const b2 = await post(who, '/harness/authorize', { delegator: rep.delegator, userOp: a.userOp, signature: await who.signDigest(a.userOpHash as Hex) });
       if (b2.ok !== true) fail(`authorize submit: ${JSON.stringify(b2).slice(0, 300)}`);
+      if (process.env.TIMING === '1') console.log(`    approved mandate ${hashDelegation(mandate, C.chainId, DM).slice(0, 12)}… → ${JSON.stringify(b2).slice(0, 400)}`);
       mandate.signature = '0x03';
       r = await post(who, '/harness/ask', { addressee: who.agent, runRef: rep.runRef, presented: { ...mandate, salt: salt.toString() } });
       rep = (r.reply ?? {}) as Reply; continue;

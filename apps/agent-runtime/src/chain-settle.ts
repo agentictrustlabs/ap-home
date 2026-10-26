@@ -24,3 +24,33 @@ export async function verifyAllowingSettle(
   }
   return false;
 }
+
+/**
+ * A USEROP THAT IS NOT IN ITS RECEIPT MAY NOT HAVE RUN AT ALL (found live, 2026-10-26). The relayer key is shared, so a
+ * handleOps send can be replaced by another path's transaction with the same nonce; the receipt handed back then holds
+ * no UserOperationEvent of ours — and the approval it carried never ran (the next ask read "delegation signature did
+ * not verify", and kept reading it: waiting does not land an op that was dropped). The account's own nonce says which:
+ * unmoved ⇒ it did not run, and the same signed op (still valid — its nonce is the account's) is sent again; moved ⇒
+ * it ran in some other transaction, and that is success.
+ */
+export interface Judged { ok: boolean; matched?: boolean }
+export async function submitUntilRun<R>(input: {
+  submit: () => Promise<R>;
+  judge: (receipt: R) => Judged;
+  /** The account's nonce for the op's key, read now. */
+  nonceNow: () => Promise<bigint>;
+  opNonce: bigint;
+  tries?: number;
+}): Promise<{ receipt: R; inner: Judged; ran: 'here' | 'elsewhere' | 'not-run'; attempts: number }> {
+  const tries = input.tries ?? 3;
+  let receipt = await input.submit();
+  let inner = input.judge(receipt);
+  for (let attempt = 1; ; attempt++) {
+    if (inner.ok || inner.matched !== false) return { receipt, inner, ran: 'here', attempts: attempt };
+    const now = await input.nonceNow().catch(() => null);
+    if (now !== null && now > input.opNonce) return { receipt, inner, ran: 'elsewhere', attempts: attempt };
+    if (attempt >= tries) return { receipt, inner, ran: 'not-run', attempts: attempt };
+    receipt = await input.submit();
+    inner = input.judge(receipt);
+  }
+}

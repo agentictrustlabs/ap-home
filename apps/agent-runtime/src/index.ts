@@ -179,6 +179,9 @@ import { askVocabulary, commandFieldsFor, waitingOn, ACCESS_LIST_CAPABILITY, PRO
 import { beatEntry, friendsPresence, livePresence, presencePort } from './presence.js';
 import { expectedDeliversOfGold, harnessEnforcers, standingAbsentKey } from './harness-run.js';
 import { prepareInvitationOffer, storeInvitationOffer } from './friend-invitations.js';
+import { submitUntilRun } from './chain-settle.js';
+/** EntryPoint v0.7 `getNonce(sender, key)` — whether a userOp's nonce has been used. */
+const ENTRY_POINT_NONCE_ABI = [{ type: 'function', name: 'getNonce', stateMutability: 'view', inputs: [{ name: 'sender', type: 'address' }, { name: 'key', type: 'uint192' }], outputs: [{ type: 'uint256' }] }] as const;
 import { judgeOutcomePerClass } from '@agenticprimitives/orchestration';
 import { stateCheckOf, recordTypeOfClass, fieldsOfShape, type DomainShapeV1 } from './state-check.js';
 import { workersAiTranscriber, repairTranscript, hearingVocabulary, spokenFor } from './voice.js';
@@ -4285,8 +4288,19 @@ app.post('/harness/authorize', async (c) => {
   if (body.userOp && body.signature) {
     const op = { ...body.userOp, nonce: BigInt(body.userOp.nonce!), preVerificationGas: BigInt(body.userOp.preVerificationGas!), signature: body.signature } as never;
     const relayerAccount = await getRelayerAccount(c.env, 'direct-deploy', buildAuditSink(c.env));
-    const { receipt } = await accountClient(c.env).submitCallUserOp(op, relayerAccount);
-    const inner = detectInnerOpFailure(receipt as never, { sender: delegator });
+    // Sent until it has RUN: a receipt without our op may be a replaced send whose approval never ran (chain-settle.ts).
+    const opNonce = BigInt(body.userOp.nonce!);
+    const pubN = createPublicClient({ transport: http(c.env.RPC_URL!) });
+    const sent = await submitUntilRun({
+      submit: async () => (await accountClient(c.env).submitCallUserOp(op, relayerAccount)).receipt,
+      judge: (r) => detectInnerOpFailure(r as never, { sender: delegator }),
+      nonceNow: async () => (await pubN.readContract({ address: c.env.ENTRY_POINT as Address, abi: ENTRY_POINT_NONCE_ABI, functionName: 'getNonce', args: [delegator, opNonce >> 64n] })) as bigint,
+      opNonce,
+    });
+    const receipt = sent.receipt as { transactionHash: Hex };
+    const inner = sent.inner as ReturnType<typeof detectInnerOpFailure>;
+    if (sent.ran === 'not-run') return c.json({ ok: false, error: `your approval did not reach the chain (sent ${sent.attempts} times; tx ${receipt.transactionHash}) — nothing was approved, so try again` }, 503);
+    if (sent.ran === 'elsewhere') return c.json({ ok: true, txHash: receipt.transactionHash, ranElsewhere: true });
     /**
      * A RECEIPT WITH NOBODY'S EVENT IN IT IS NOT A REVERT (2026-09-17). A shared bundler batches, and the
      * receipt handed back for our submission can carry ANOTHER sender's UserOperationEvent and none of ours —
@@ -7033,8 +7047,19 @@ export function harnessDeps(env: Env, audit: AuditSink, opts: { executionCtx?: E
       const signer = await interactionsSessionAccount(env);
       const signature = (await signer.signMessage({ message: { raw: userOpHash } })) as Hex;
       const relayerAccount = await getRelayerAccount(env, 'direct-deploy', audit);
-      const { receipt } = await accountClient(env).submitCallUserOp({ ...userOp, signature }, relayerAccount);
-      const inner = detectInnerOpFailure(receipt as unknown as Parameters<typeof detectInnerOpFailure>[0], { sender });
+      // Sent until it has RUN — a receipt without our op may be a replaced send (chain-settle.ts).
+      const opNonce = BigInt((userOp as { nonce: bigint | string }).nonce);
+      const pubN = createPublicClient({ transport: http(env.RPC_URL!) });
+      const sent = await submitUntilRun({
+        submit: async () => (await accountClient(env).submitCallUserOp({ ...userOp, signature }, relayerAccount)).receipt,
+        judge: (r) => detectInnerOpFailure(r as unknown as Parameters<typeof detectInnerOpFailure>[0], { sender }),
+        nonceNow: async () => (await pubN.readContract({ address: env.ENTRY_POINT as Address, abi: ENTRY_POINT_NONCE_ABI, functionName: 'getNonce', args: [sender, opNonce >> 64n] })) as bigint,
+        opNonce,
+      });
+      const receipt = sent.receipt as { transactionHash: Hex };
+      if (sent.ran === 'elsewhere') return { txHash: receipt.transactionHash as Hex };
+      if (sent.ran === 'not-run') throw new Error(`the redemption did not reach the chain (sent ${sent.attempts} times; tx ${receipt.transactionHash}) — nothing changed`);
+      const inner = sent.inner as ReturnType<typeof detectInnerOpFailure>;
       // An inner revert is a FAILED step, thrown so the loop records it — never a silent success with a tx hash.
       if (!inner.ok) throw new Error(`redemption reverted on chain: ${inner.revertReason ?? 'inner userOp reverted'} (tx ${receipt.transactionHash})`);
       return { txHash: receipt.transactionHash as Hex };
