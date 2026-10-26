@@ -4,6 +4,7 @@
 // records your half — you are friends without a second step.
 import type { Hex } from '@agenticprimitives/types';
 import type { SignHash } from '../connect-client';
+import { ensureCsrfToken, csrfHeaders } from '../csrf';
 
 export interface SentInvitation { token: string; email: string; expiresAt: number; acceptedBy?: string | null }
 
@@ -16,9 +17,13 @@ export async function sentInvitation(session: { token: string }, token: string):
 
 /** Ask your agent for the grant, sign it, and have your agent keep it beside the invitation. */
 export async function signInvitationHalf(input: { session: { token: string }; token: string; expiresAt: number; signHash: SignHash }): Promise<{ ok: true } | { ok: false; error: string }> {
-  const auth = { 'content-type': 'application/json', authorization: `Bearer ${input.session.token}` };
+  await ensureCsrfToken();
   const call = async (step: 'prepare' | 'offer', body: Record<string, unknown>) => {
-    const r = await fetch(`/a2a/friend-invitation/${step}`, { method: 'POST', headers: auth, body: JSON.stringify(body) });
+    const r = await fetch(`/a2a/friend-invitation/${step}`, {
+      method: 'POST', credentials: 'include',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${input.session.token}`, ...csrfHeaders() },
+      body: JSON.stringify(body),
+    });
     return (await r.json().catch(() => ({ ok: false, error: `your agent did not answer (${r.status})` }))) as { ok?: boolean; error?: string; digest?: Hex };
   };
   const prepared = await call('prepare', { token: input.token, expiresAt: input.expiresAt });
