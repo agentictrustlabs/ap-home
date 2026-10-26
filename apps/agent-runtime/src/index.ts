@@ -153,6 +153,7 @@ export { HarnessApprovalWorkflow };
 import { claimableBy, receiptEvidence, checkpointForCommittedStep, committedStepNote } from './endeavor-authority-steps.js';
 import { parkableCommittedSteps } from './endeavor-committed-steps.js';
 import { publicLibraryRead } from './library-tools.js';
+import { isPublisherSkill, publisherRead } from './publisher-contract.js';
 import { PULSE_PUBLIC_ASK, publicPulseAsk, COMPOSE_RULES } from './pulse-public';
 import { internalHeaders, markInWorker, isInWorkerRequest } from './internal-marker.js';
 import { parseExperimentRequest, type ExperimentJobV1 } from './experiment-job.js';
@@ -1622,6 +1623,8 @@ async function serveStandardA2a(c: Context<{ Bindings: Env }>, ctx: AgentHostCon
       publicRead: async ({ agent: who, skill, args }) => {
         // Spec 438 §13 — its record, as it reports it. Counts and signed judgments; nothing of any run.
         if (skill === RECORD_PUBLIC_ASK) return publicRecordAsk(c.env, who);
+        // The publisher contract over the public shelf: only what the owner marked public leaves (publisher-contract.ts).
+        if (isPublisherSkill(skill)) return publisherRead({ readSubjectRecord: deps.readSubjectRecord! }, who.toLowerCase(), 'public', skill, args);
         if (skill !== PULSE_PUBLIC_ASK) return publicLibraryRead({ readSubjectRecord: deps.readSubjectRecord! }, who.toLowerCase(), skill, args);
         // THE AGENT'S OWN PLAYBOOK WRITES THE ANSWER. An open-ended question is composed over the facts
         // retrieved from its records, under its archetype's instructions as the system prompt plus the

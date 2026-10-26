@@ -56,6 +56,7 @@ import { internalHeaders, markInWorker, isInWorkerRequest, type InternalMarkerEn
 import { subjectAskOf, subjectAnswerOf, handoffOf, routedRunRefFor, subjectAnswerArtifact, type HandoffV1, type SubjectAnswerV1 } from '@agenticprimitives/a2a';
 import { a2aDoor } from './run-trace.js';
 import { PULSE_PUBLIC_ASK } from './pulse-public';
+import { PUBLISHER_READ_SKILLS } from './publisher-contract.js';
 
 /** Spec 439 F3 — what a verified door receipt says, as recorded on a task. Evidence a reader weighs; never a grant. */
 export interface ForeignStandingEvidenceV1 {
@@ -136,7 +137,9 @@ export interface StandardMountDeps {
 // never a prefix: a capability reaches this lane because it was named here, never because of what it is called.
 // Spec 438 §13 — `record.public.ask`: the agent's record as it reports it, counts and signed judgments only.
 export const RECORD_PUBLIC_ASK = 'record.public.ask';
-export const PUBLIC_LANE_SKILLS: ReadonlySet<string> = new Set(['library.public.list', 'library.public.read', PULSE_PUBLIC_ASK, RECORD_PUBLIC_ASK]);
+// The publisher contract's reads (publisher-contract.ts) — what the owner marked public, in the envelope every publisher
+// answers with, so a reader merges a person's public shelf with the scripture publisher and the content publishers.
+export const PUBLIC_LANE_SKILLS: ReadonlySet<string> = new Set(['library.public.list', 'library.public.read', PULSE_PUBLIC_ASK, RECORD_PUBLIC_ASK, ...PUBLISHER_READ_SKILLS]);
 export function publicLaneSkillOf(message: { parts: MessageV1['parts'] }): { skill: string; args: Record<string, unknown> } | null {
   const data = partsData(message.parts);
   const skill = data && typeof data.skill === 'string' ? data.skill : null;

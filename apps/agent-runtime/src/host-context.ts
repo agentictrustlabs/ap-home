@@ -241,6 +241,18 @@ export const MOUNTED_PEER_SKILLS: A2aSkill[] = [
     description: 'Ask this agent how things have been going, answered only from the daily pulse records it keeps and with every record it used named. No credential: SendMessage with a data part { "skill": "pulse.public.ask", "question": string }; the answer is a message whose data part carries `answer`, `cited` and the `window` it read. An agent with no record for the window says so rather than reporting zero.',
     tags: ['pulse', 'public', 'a2a'],
   },
+  // THE PERSON AS A PUBLISHER (publisher-contract.ts) — the publisher contract every content publisher answers
+  // (publisher.describe · works · items · at-verse · near · changes), served over the owner's PUBLIC shelf to anyone
+  // with no credential: what the owner marked public that carries scripture references or a location, in the same
+  // envelope the scripture publisher and the publishing servers answer with. Her private marks never leave this way.
+  ...([
+    ['publisher.describe', 'Describe as a publisher', 'What this agent’s owner publishes under the publisher contract: the kinds of public works with scripture references or a location, their relations and bounds. No credential: SendMessage with a data part { "skill": "publisher.describe" }.'],
+    ['publisher.works', 'Public works', 'The owner’s public works under the publisher contract — each with kind, item count and release. No credential: data part { "skill": "publisher.works", "kind"?: string }.'],
+    ['publisher.items', 'A work’s items', 'One public work’s items in the publisher envelope (item, scripture references, location, release, licence), paged. No credential: data part { "skill": "publisher.items", "work": string, "cursor"?: string, "limit"?: number }.'],
+    ['publisher.at-verse', 'At a verse', 'What the owner published at a verse (`verse`: John.3.16) or across a chapter (`span`: John.3), each with its scripture reference; `relation` and `kind` narrow. No credential: data part { "skill": "publisher.at-verse", "verse"?: string, "span"?: string, "relation"?: string, "kind"?: string }.'],
+    ['publisher.near', 'Near a place', 'The owner’s public located items inside `bbox` [west, south, east, north] or within `radiusKm` of `point` [lon, lat]. No credential: data part { "skill": "publisher.near", "bbox"?: number[], "point"?: number[], "radiusKm"?: number }.'],
+    ['publisher.changes', 'What changed', 'The owner’s public works saved or released since `since` (ms), oldest first, with the next cursor — for a registry that follows this publisher. No credential: data part { "skill": "publisher.changes", "since"?: number }.'],
+  ] as const).map(([id, name, description]) => ({ id, name, description, tags: ['publisher', 'scripture', 'public', 'a2a'] })),
 ];
 
 /** Merge the mounted peer skills into an agent's advertised set, dedup by id. Self-asserted labels win

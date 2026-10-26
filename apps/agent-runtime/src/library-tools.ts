@@ -119,6 +119,8 @@ export interface LibraryToolDeps {
 const TEXT_KINDS = new Set(['md', 'ttl', 'json-ld', 'skill']);
 const isText = (e: LibraryEntry): boolean => TEXT_KINDS.has(e.kind) || /^text\/|^application\/(json|ld\+json|x-yaml|yaml|xml)/.test(e.contentType ?? '');
 const decode = (b64: string): string => { try { return new TextDecoder('utf-8', { fatal: false }).decode(Uint8Array.from(atob(b64.replace(/\s/g, '')), (c) => c.charCodeAt(0))); } catch { return ''; } };
+/** A Library body's text, as the reads decode it (shared with the publisher contract's index). */
+export const decodeLibraryText = decode;
 const pathOf = (e: LibraryEntry): string => (e.folder ? `${e.folder}/${e.name}` : e.name);
 // The owner's view of an entry: never the body; the declared policy, the commitment and the release chain (ids,
 // versions, signed-or-not) ride along so an app acting as the owner can verify what it saved without a second read.
@@ -127,7 +129,7 @@ const view = (e: LibraryEntry) => ({ id: e.id, name: e.name, kind: e.kind, folde
 const isEntry = (e: unknown): e is LibraryEntry => !!e && typeof e === 'object' && typeof (e as LibraryEntry).id === 'string' && typeof (e as LibraryEntry).name === 'string';
 
 /** The whole catalog (folders included), as the Home wrote it. */
-async function rawCatalogOf(deps: LibraryToolDeps, owner: string): Promise<LibraryEntry[]> {
+export async function rawCatalogOf(deps: LibraryToolDeps, owner: string): Promise<LibraryEntry[]> {
   const raw = await deps.readSubjectRecord(owner, 'content.catalog').catch(() => null);
   return (Array.isArray(raw) ? raw : []).filter(isEntry);
 }
