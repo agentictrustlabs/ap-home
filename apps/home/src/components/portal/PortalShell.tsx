@@ -59,9 +59,13 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
   const pathname = usePathname();
   // Read after mount: the server never sees the query, and the first paint must match it.
   const [focused, setFocused] = useState(false);
+  // An app's one PAGE (`/profile-update?…&from=<app>`): that page alone, no portal chrome — the change it shows is
+  // the whole of what the window is for.
+  const [focusedPage, setFocusedPage] = useState(false);
   useEffect(() => {
     const q = window.location.search;
     setFocused((pathname === '/friends' || pathname === '/contacts') && /[?&]from=/.test(q) && /[?&](add|remove)=/.test(q));
+    setFocusedPage(pathname === '/profile-update' && /[?&]from=/.test(q));
   }, [pathname]);
   const searchParams = useSearchParams();
   // Spec 397 §6 — `/you?run=<runRef>`: the run an assistant parked for this person's signature. Read HERE, by the shell
@@ -142,6 +146,12 @@ export function PortalShell({ children, appsBadge }: { children: ReactNode; apps
   };
   // AN APP'S ONE QUESTION (`/friends?add=…&from=<app>`): the window shows that act alone — no topbar, sidebar or
   // footer. The page itself still runs (it names the act), out of sight.
+  if (focusedPage)
+    return (
+      <div className="portal-root portal-root--focused">
+        <ReadyProvider key={pathname}>{children}</ReadyProvider>
+      </div>
+    );
   if (focused)
     return (
       <div className="portal-root portal-root--focused">

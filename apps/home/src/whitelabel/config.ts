@@ -705,6 +705,10 @@ const faithImpact: WhiteLabelConfig = {
       ask_delegate: (process.env.NEXT_PUBLIC_SEED_BIBLE_READER_ASK_DELEGATE || '0xb77a627a4ad23af518f9626186F7bE4D2cC4BFf1') as `0x${string}`,
       ask_with_login: true,
       libraryFolders: ['seed-bible'],
+      // Spec 412 W6 — the reader shows the person's HOME profile (first and last name, photo) as theirs: a read-only,
+      // revocable grant for the vault profile alone, minted in the same sign-in. A change made in the reader is
+      // proposed (/connect/profile-proposal) and saved by the person at their Home — the app never writes it.
+      read_grant: { resources: ['vault:impact-profile'] },
     },
     // specs 266/267 — "Bible Explorer" relying app: the Verifiable Content Substrate +
     // scripture vertical demo (demo-bible-ontology Worker). Connects via Global.Church
