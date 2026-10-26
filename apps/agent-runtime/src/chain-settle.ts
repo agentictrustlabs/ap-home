@@ -33,6 +33,8 @@ export async function verifyAllowingSettle(
  * unmoved ⇒ it did not run, and the same signed op (still valid — its nonce is the account's) is sent again; moved ⇒
  * it ran in some other transaction, and that is success.
  */
+/** Three sends of this fit inside the Home proxy's 120 s with room for the reads around them. */
+export const SEND_TIMEOUT_MS = 25_000;
 export interface Judged { ok: boolean; matched?: boolean }
 export async function submitUntilRun<R>(input: {
   submit: () => Promise<R>;
@@ -41,14 +43,21 @@ export async function submitUntilRun<R>(input: {
   nonceNow: () => Promise<bigint>;
   opNonce: bigint;
   tries?: number;
+  /** How long one send may wait for its receipt. A replaced transaction is never mined, and the receipt wait would sit
+   *  out its own default (3 minutes, seen live) — past the Home proxy's 2 minutes, a 502 to the person. */
+  sendTimeoutMs?: number;
 }): Promise<{ receipt: R | null; inner: Judged; ran: 'here' | 'elsewhere' | 'not-run'; attempts: number; error?: string }> {
   const tries = input.tries ?? 3;
   // A send that THROWS (the shared relayer's nonce taken under it: "nonce too low", a replaced transaction) is the
   // same unknown as a receipt without our op — the nonce decides — never a bare 500 to the person.
   let error: string | undefined;
   const send = async (): Promise<{ receipt: R | null; inner: Judged }> => {
-    try { const r = await input.submit(); return { receipt: r, inner: input.judge(r) }; }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const limit = input.sendTimeoutMs ?? SEND_TIMEOUT_MS;
+    const timedOut = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`no receipt in ${Math.round(limit / 1000)} s`)), limit); });
+    try { const r = await Promise.race([input.submit(), timedOut]); return { receipt: r, inner: input.judge(r) }; }
     catch (e) { error = e instanceof Error ? e.message : String(e); return { receipt: null, inner: { ok: false, matched: false } }; }
+    finally { clearTimeout(timer); }
   };
   let { receipt, inner } = await send();
   for (let attempt = 1; ; attempt++) {

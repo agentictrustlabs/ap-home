@@ -69,3 +69,16 @@ describe('a send that throws', () => {
     expect(out).toMatchObject({ ran: 'not-run', attempts: 2, error: 'nonce too low' });
   });
 });
+
+describe('a send that never confirms (a replaced transaction is never mined)', () => {
+  it('is given up on after its limit, and the nonce decides — here it ran elsewhere', async () => {
+    const out = await submitUntilRun({ submit: () => new Promise<number>(() => {}), judge: () => ({ ok: true }), nonceNow: async () => 8n, opNonce: 7n, sendTimeoutMs: 10 });
+    expect(out).toMatchObject({ ran: 'elsewhere', attempts: 1 });
+  });
+  it('never confirming and never running is said, in bounded time', async () => {
+    const t0 = Date.now();
+    const out = await submitUntilRun({ submit: () => new Promise<number>(() => {}), judge: () => ({ ok: true }), nonceNow: async () => 7n, opNonce: 7n, sendTimeoutMs: 10, tries: 3 });
+    expect(out).toMatchObject({ ran: 'not-run', attempts: 3, error: 'no receipt in 0 s' });
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+});
