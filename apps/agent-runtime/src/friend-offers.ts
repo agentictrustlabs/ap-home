@@ -20,6 +20,7 @@ import { InputRequired, signatureFor, type ToolInvoker, type ToolSpec, type Mand
 import { buildCaveat, buildVaultRecordScopeCaveat, encodeTimestampTerms, encodeValueTerms, decodeTimestampTerms, hashDelegation, intentDigest, ROOT_AUTHORITY, type Caveat, type Delegation } from '@agenticprimitives/delegation';
 import type { DelegationWireV1 } from '@agenticprimitives/a2a';
 import { isInvitationToken, redeemInvitation, revocableGrantOf, type RedeemResult } from './friend-invitations.js';
+import { verifyAllowingSettle } from './chain-settle.js';
 
 export const FRIEND_ADD_CAPABILITY = 'person.friend.add' as const;
 export const FRIEND_REMOVE_CAPABILITY = 'person.friend.remove' as const;
@@ -150,6 +151,8 @@ export interface FriendDeps {
   executeAsServiceSa?: (serviceSa: Address, callData: Hex) => Promise<{ txHash: string }>;
   /** The harness SA signs a raw delegation digest — how an invitation's grant is handed on (friend-invitations.ts). */
   signAsHarness?: (digest: Hex) => Promise<Hex>;
+  /** How long a just-approved grant is waited for on chain (chain-settle.ts); tests pass a no-op sleep. */
+  settle?: { tries?: number; everyMs?: number; sleep?: (ms: number) => Promise<void> };
   /** The mandate's digest-binding caveat argued for THIS step (the harness's own helper, injected). */
   digestBindingArgsFor: (caveat: Caveat, digests: { intent: Hex; offer?: Hex; projection?: Hex; plan?: Hex; stepNonce: Hex; generation?: 1 | 2 | 3 }) => Hex;
   /** Spec 408 §1.4/§2.3 — the digests a step presents at redemption. */
@@ -312,8 +315,10 @@ export function friendAddInvoker(deps: FriendDeps, presented: MandatePresentatio
     let signed: { signature: string } | undefined = signatureFor(ctx.supplied as readonly SuppliedInputV1[] | undefined, stepRef, grantDigest);
     // ONE PROMPT: the person's account answers for the 0x03 approved-hash sentinel; the chain is asked, never a cache.
     if (!signed && deps.readContract) {
-      const ok = await deps.readContract({ address: person, abi: ERC1271_ABI, functionName: 'isValidSignature', args: [grantDigest, '0x03'] }).catch(() => null);
-      if (ok === '0x1626ba7e') signed = { signature: '0x03' };
+      // approved in the mandate's own batch a moment ago: given the seconds it takes to reach the node read (chain-settle.ts)
+      const read = deps.readContract;
+      const ok = await verifyAllowingSettle(async () => (await read({ address: person, abi: ERC1271_ABI, functionName: 'isValidSignature', args: [grantDigest, '0x03'] }).catch(() => null)) === '0x1626ba7e', '0x03', deps.settle);
+      if (ok) signed = { signature: '0x03' };
     }
     if (!signed) {
       throw new InputRequired({ kind: 'signature', stepRef, toolId, prompt: `Sign your friendship grant to ${friend} — it lets them see your profile.`, digest: grantDigest, signer: person, payload: { friend, type, scope: FRIEND_GRANT_SCOPE, validUntil } });

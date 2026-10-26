@@ -34,6 +34,7 @@ const deps = (over: Partial<FriendDeps & { signAsHarness: (d: Hex) => Promise<He
   signAsHarness: async () => '0xee01' as Hex,
   executeAsServiceSa: async () => ({ txHash: '0xtx' }),
   digestBindingArgsFor: () => '0x' as Hex, stepDigests: (_a: unknown, intent: Hex) => ({ intent }),
+  settle: { sleep: async () => {} }, // the chain read is a fake: nothing to wait for
   ...over,
 }) as FriendDeps & { signAsHarness: (d: Hex) => Promise<Hex> };
 

@@ -140,6 +140,7 @@ import { preconditionRefusal } from './capability-preconditions.js';
 import { AUTHORITY_BEARING_CAPABILITIES } from './endeavor-authority-steps.js';
 import { deriveStanding, standingNote, type Standing, type StandingDeps } from '@agenticprimitives/context';
 import { vaultServerId } from './vault-server-id.js';
+import { verifyAllowingSettle } from './chain-settle.js';
 
 
 export interface HarnessEnv {
@@ -5193,7 +5194,8 @@ export async function runUnderMandate(envIn: HarnessEnv, deps: HarnessDeps, inpu
         if (!validator) return false;
         const k = `sig:${String(signer).toLowerCase()}:${digest}:${signature}`;
         if (chainProofRemembered(k)) return true;
-        const ok = (await deps.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [signer, digest, signature] })) === true;
+        // an approval made a moment ago may not have reached the node this read lands on (chain-settle.ts)
+        const ok = await verifyAllowingSettle(async () => (await deps.readContract({ address: validator, abi: universalSignatureValidatorAbi, functionName: 'isValidSig', args: [signer, digest, signature] })) === true, signature);
         if (ok) rememberChainProof(k);
         return ok;
       },

@@ -26,6 +26,7 @@ const deps = (over: Partial<FriendDeps> = {}): FriendDeps => ({
   sendDirectMessage: async () => ({ ok: true, messageId: 'm1' }),
   executeAsServiceSa: async () => ({ txHash: '0xtx' }),
   digestBindingArgsFor: () => '0x' as Hex, stepDigests: (_a, intent) => ({ intent }),
+  settle: { sleep: async () => {} }, // the chain read is a fake: nothing to wait for
   ...over,
 });
 const wire = (delegator: Address) => ({ ref: '0xref', wire: { delegator, delegate: '0x00000000000000000000000000000000000000ee', authority: `0x${'0'.repeat(64)}`, caveats: [{ enforcer: TS, terms: encodeAbiParameters([{ type: 'uint256' }, { type: 'uint256' }], [1000n, 2000n]), args: '0x' }], salt: 1n, signature: '0xsig' } });

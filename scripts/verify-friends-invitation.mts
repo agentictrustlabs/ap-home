@@ -29,7 +29,13 @@ const RT = process.env.VIA_RUNTIME === '1' ? fx.a2a : `${HOME}/a2a`;
 const csrfRes = await fetch(`${RT}/auth/csrf`, { headers: { origin: HOME } });
 const csrf = (await j(csrfRes)) as { token?: string };
 const H = { 'content-type': 'application/json', origin: HOME, cookie: (csrfRes.headers.get('set-cookie') ?? '').split(';')[0] ?? '', 'x-csrf-token': csrf.token ?? '' };
-const post = async (who: Person, path: string, body: unknown) => j(await fetch(`${RT}${path}`, { method: 'POST', headers: H, body: JSON.stringify({ session: who.bearer, ...(body as object) }) }));
+const post = async (who: Person, path: string, body: unknown) => {
+  const t0 = Date.now();
+  const r = await fetch(`${RT}${path}`, { method: 'POST', headers: H, body: JSON.stringify({ session: who.bearer, ...(body as object) }) });
+  // TIMING=1: how long each runtime call takes — a proxy in front of it gives up at its own limit.
+  if (process.env.TIMING === '1') console.log(`    ${path} ${(body as { userOp?: unknown }).userOp ? '(submit) ' : ''}→ ${r.status} in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  return j(r);
+};
 /** A call under the person's own bearer — the Home's routes and the runtime's session-gated ones. */
 const asPerson = async (who: Person, url: string, body: unknown) => j(await fetch(url, { method: 'POST', headers: { ...H, authorization: `Bearer ${who.bearer}` }, body: JSON.stringify(body) }));
 
@@ -118,7 +124,7 @@ console.log(`  ${fx.people.steward} removes him → ${removed.kind}: removed=${r
 if (!ok(removed) || rr.removed !== true || !rr.txHash) fail(`her removal did not revoke on chain: ${JSON.stringify(removed).slice(0, 400)}`);
 if (!has((await friendsOf(him)).ended, sheSa)) fail('he is not shown that she removed him');
 const his = await act(him, `remove ${fx.people.steward} as a friend`, 'person.friend.remove', { friend: sheSa });
-if (!ok(his)) fail('he could not withdraw his half');
+if (!ok(his)) fail(`he could not withdraw his half: ${JSON.stringify(his).slice(0, 900)}`);
 await asPerson(her, `${HOME}/connect/friend-invite/email`, { token, cancel: true }).catch(() => undefined);
 
 console.log(`\n✓ spec 401 C1: ${fx.people.steward} invited by email and signed her half at once (a forged half refused); ${fx.people.member} accepted with the token and both were friends from his one act (single-use); her removal revoked her root grant on chain and he saw it ENDED.`);
